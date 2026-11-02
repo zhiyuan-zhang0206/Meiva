@@ -122,6 +122,23 @@ def test_a_new_top_level_test_is_refused_with_the_fix(
     assert "Unknown inputs must be resolved" in err
 
 
+# meiva:note
+# The refusal is one handover: the fact and the next step stay first, and the reason the rule exists
+# and the document that states it follow — on the line and in the closing guide alike, so neither
+# face teaches a move without saying what it buys.
+def test_a_placement_refusal_carries_the_reason_and_the_rule_document(
+    repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _track(repo, "tests/components/base/test_new.py")
+    status, out, err = _run(repo, capsys)
+    assert status == 1
+    assert out.splitlines()[0].startswith("tests/components/base/test_new.py:1: a top-level test")
+    assert "Why: a test belongs beside the subject it proves" in out
+    assert "tests/README.md (where to put tests)" in out
+    assert "Why: a test belongs beside the subject it proves" in err
+    assert "tests/README.md (where to put tests)" in err
+
+
 def test_the_same_test_inside_a_package_is_not_this_lints_business(
     repo: pathlib.Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -388,10 +405,25 @@ def test_suggest_says_why_no_package_can_hold_a_test_across_peer_units(
     assert "agent.own.hosted, ops.wake.spawn" in message
 
 
+# meiva:note
+# A suggestion that refuses says why the rule exists too: `--suggest` is the channel an author asks
+# for after the gate, so the reason belongs with the answer, on both refusal branches.
 def test_suggest_a_test_with_no_first_party_reference(repo: pathlib.Path) -> None:
     message = _suggest_repo(repo, "def test_a():\n    assert True\n")
     assert "references no first-party package" in message
     assert "no subject proves placement" in message
+    assert "Why: a test belongs beside the subject it proves" in message
+    assert "tests/README.md (where to put tests)" in message
+
+
+def test_suggest_refuses_incomplete_evidence_with_the_reason(repo: pathlib.Path) -> None:
+    message = _suggest_repo(
+        repo,
+        "from agent.own import hosted\nfrom base.net import retry\n"
+        "import importlib\nimportlib.import_module(unknown)\n",
+    )
+    assert "incomplete subject evidence" in message
+    assert "Why: a test belongs beside the subject it proves" in message
 
 
 def test_suggest_a_by_design_test_is_told_it_stays(repo: pathlib.Path) -> None:

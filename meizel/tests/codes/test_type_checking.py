@@ -169,6 +169,23 @@ def test_the_guard_is_hard_and_cannot_be_recorded(
     assert "debt.type-checking" not in (root / "meizel.toml").read_text()
 
 
+# meiva:note
+# The diagnostic carries the rule's whole handover: the ban, the repair, why a guarded import costs
+# the annotations here, what the site now owns, and the document that states it. Asserted on
+# fragments, not sentences.
+def test_a_guard_diagnostic_carries_the_reason_and_the_rule_document(
+    make_repo: RepoFactory,
+) -> None:
+    root = make_repo({**HOSTS, "meizel.toml": ROLES, "pkg/a.py": GUARD})
+
+    [site] = [d for d in analyze(seat(root), jobs=1).diagnostics if d.code is Code.TYPE_CHECKING]
+
+    assert site.message.startswith("`if TYPE_CHECKING:` is banned — import the real type")
+    assert "this is an application, not a library" in site.message
+    assert "owns a type nothing outside the checker can produce" in site.message
+    assert "docs/conventions/python-conventions.md" in site.message
+
+
 def test_guard_records_do_not_skip_body_or_else_facts(tmp_path: Path) -> None:
     source = "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import pkg.a\nelse:\n    import pkg.b\n"
     scan = scan_source(

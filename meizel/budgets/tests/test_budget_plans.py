@@ -33,10 +33,16 @@ def test_a_file_is_counted_in_the_lines_it_has_not_the_newline_it_ends_with() ->
     assert budget_plans.ceiling_violations({_PACKAGE / "a.py": _text(801)}, _ROOT, {}) != []
 
 
+# meiva:note
+# The line names the file, the count and the repair; the reason the ceiling exists, what the author
+# now owns and the document that states it follow, so the number arrives with its argument.
 def test_a_file_violation_names_the_path_the_count_and_the_guidance() -> None:
     [error] = budget_plans.ceiling_violations({_PACKAGE / "big.py": _text(801)}, _ROOT, {})
     assert error.startswith("app/big.py:801: file is 801 lines, over the 800-line hard ceiling — ")
     assert "cohesive subpackage" in error
+    assert "one reader, one diff and one test run have to hold" in error
+    assert "owns finding that boundary" in error
+    assert "docs/conventions/python-conventions.md" in error
 
 
 @pytest.mark.parametrize(("entries", "flagged"), [(20, False), (21, True)])
@@ -45,10 +51,16 @@ def test_a_directory_is_flagged_only_over_the_entry_cap(entries: int, flagged: b
     assert bool(report) is flagged
 
 
+# meiva:note
+# The same handover for the entry cap: the repair, why a directory has a working set at all, and who
+# owns regrouping it rather than one more sibling.
 def test_a_directory_violation_names_the_path_the_count_and_the_guidance() -> None:
     [error] = budget_plans.ceiling_violations({}, _ROOT, {"app/pkg": 21})
     assert error.startswith("app/pkg: directory has 21 direct entries, over the 20-entry cap — ")
     assert "directory depth is unrestricted" in error
+    assert "names someone must already know to find anything in it" in error
+    assert "owns regrouping the behavior into a subpackage" in error
+    assert "docs/conventions/python-conventions.md" in error
 
 
 def test_the_report_orders_files_by_path_parts_then_directories_by_name() -> None:

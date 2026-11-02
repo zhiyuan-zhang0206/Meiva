@@ -6,6 +6,7 @@ import ast
 from pathlib import Path
 
 from scripts.structure import placement, placement_evidence, tests_location_allowed
+from scripts.structure.tests_location_allowed import DOC, WHY
 
 
 def suggest(rel: str, repo_root: Path) -> str:
@@ -16,11 +17,15 @@ def suggest(rel: str, repo_root: Path) -> str:
     result = placement_evidence.subject_lca(tree, rel, placement.ModuleIndex(repo_root))
     if result.unknown:
         details = "; ".join(f"{u.path}:{u.line}: {u.reason}" for u in result.unknown)
-        return f"{rel}: incomplete subject evidence; placement is not certified: {details}."
+        return (
+            f"{rel}: incomplete subject evidence; placement is not certified: {details}. "
+            f"Why: {WHY}. See {DOC}."
+        )
     if result.directory is None:
         return (
             f"{rel}: references no first-party package subject; no subject proves placement. "
-            "Existing repository-artifact or harness contracts remain separately registered."
+            "Existing repository-artifact or harness contracts remain separately registered. "
+            f"Why: {WHY}. See {DOC}."
         )
     shown = ", ".join(result.modules)
     if result.directory == "":

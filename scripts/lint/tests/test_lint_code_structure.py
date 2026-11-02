@@ -465,6 +465,8 @@ def test_ast_rules_retain_the_eight_package_scope(
     output = capsys.readouterr().out
     assert f"{scope}/example.py:2:" in output
     assert "`if TYPE_CHECKING:` is banned" in output
+    assert "this is an application, not a library" in output
+    assert "docs/conventions/python-conventions.md" in output
     if governed:
         assert f"{scope}/example.py:4:" in output
         assert "machine_role() is retired" in output
