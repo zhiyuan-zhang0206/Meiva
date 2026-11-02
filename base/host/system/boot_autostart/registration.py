@@ -146,16 +146,26 @@ def register_autostart(
     )
 
 
-def unregister_autostart(*, host: Host, roots: JobRoots) -> None:
+def unregister_autostart(
+    *,
+    host: Host,
+    roots: JobRoots,
+    unit_dir: Path = SYSTEM_UNIT_DIR,
+    runtime_dir: Path = SYSTEMD_RUNTIME_DIR,
+) -> None:
     # meiva:note
     # Remove the host's boot job (systemd / launchd).
     #
     # Safe when none is registered, and a no-op when ``roots.home`` is not the default
     # home of ``roots.user_home`` (``owns_os_job_home``).
+    #
+    # The system unit's locations are parameters, not facts read from whichever machine runs this:
+    # a caller that must not consult the host it is retiring (a destroy, a test of one) names its
+    # own. A real one is still the default, so nothing else changes.
     if not owns_os_job_home("autostart", roots=roots):
         return
     unregister_platform_job(
         macos=lambda: _unregister_macos(host=host, user_home=roots.user_home),
-        linux=lambda: unregister_linux(host=host),
+        linux=lambda: unregister_linux(host=host, unit_dir=unit_dir, runtime_dir=runtime_dir),
         host=host,
     )
