@@ -10,6 +10,3 @@ exports = ["data_plane.py", "walg.py"]
 
 [debt.impure-call]
 "data_plane.py#os.environ" = { count = 1, owner = "#7240", until = "permanently: self_machine_host() is a pydantic default_factory that runs while the sub-model is constructed, before the settings singleton exists, and base.cluster.machine imports settings (circular) — [roots] kinds=[environ] grants exactly this one read" }
-
-[debt.impure-edge]
-"data_plane.py#base/host/net/url_secret.py" = { count = 1, owner = "#7240", until = "waits for the URL helpers to be declared strict: base/host/net/url_secret.py is pure string work (re, urllib.parse, is_loopback_host) but it defines 11 public functions against the 6-symbol cap, so the module splits before data_plane can take a strict door instead of a none one" }

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from base.host.net.url_secret import names_foreign_host
+from base.host.net.url_text import names_foreign_host
 
 
 @pytest.mark.parametrize(

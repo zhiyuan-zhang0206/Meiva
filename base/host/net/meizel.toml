@@ -3,12 +3,15 @@ exports = ["auth.py", "http_dial.py", "ports.py", "predicates.py", "resilience.p
 [uses]
 "auth.py" = ["__init__.py"]
 "http_dial.py" = ["predicates.py"]
-"tests" = ["__init__.py", "auth.py", "http_dial.py", "ports.py", "predicates.py", "resilience.py", "url_secret.py"]
-"url_secret.py" = ["predicates.py"]
+"tests" = ["__init__.py", "auth.py", "http_dial.py", "ports.py", "predicates.py", "resilience.py", "url_text.py"]
+"url_secret.py" = ["url_text.py"]
+"url_text.py" = ["predicates.py"]
 
 [purity]
 "__init__.py" = "strict"
 "predicates.py" = "strict"
+"url_secret.py" = "strict"
+"url_text.py" = "strict"
 
 [debt.ambient-read]
 "auth.py#random secrets.token_bytes" = { count = 1, owner = "#5816", until = "permanently: random_bytes() is the module's single entropy door, and a caller-supplied source would break the token guarantee it exists to make" }
