@@ -52,14 +52,17 @@ def test_a_directory_is_flagged_only_over_the_entry_cap(entries: int, flagged: b
 
 
 # meiva:note
-# The same handover for the entry cap: the repair, why a directory has a working set at all, and who
-# owns regrouping it rather than one more sibling.
+# The same handover for the entry cap: the repair the guidance states, then what the directory owes —
+# the names each addition buries and the regrouping whoever stays over the cap owns.
 def test_a_directory_violation_names_the_path_the_count_and_the_guidance() -> None:
     [error] = budget_plans.ceiling_violations({}, _ROOT, {"app/pkg": 21})
     assert error.startswith("app/pkg: directory has 21 direct entries, over the 20-entry cap — ")
     assert "directory depth is unrestricted" in error
-    assert "names someone must already know to find anything in it" in error
-    assert "owns regrouping the behavior into a subpackage" in error
+    assert "each addition buries another name a reader needs to find anything here" in error
+    assert (
+        "owns regrouping the behavior into a subpackage rather than adding one more sibling"
+        in error
+    )
     assert "docs/conventions/python-conventions.md" in error
 
 

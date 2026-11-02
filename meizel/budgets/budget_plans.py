@@ -64,14 +64,12 @@ _FILE_CEILING_WHY = (
 )
 
 # meiva:note
-# Why the entry cap exists and what a directory over it owes: its direct entries are the names a
-# reader must already know to find anything in it, and depth costs nothing, so the answer is a
-# cohesive subpackage rather than one more sibling.
+# What a directory over the cap owes, kept to what the guidance does not already say — the guidance
+# states the purpose and the repair, so the reason carries only the consequence and the ownership.
 _DIRECTORY_CEILING_WHY = (
-    "a directory's direct entries are the names someone must already know to find anything in it, "
-    "so past the cap the node stops stating what lives in it and each addition buries another one "
-    "— depth is free, so whoever stays over the cap owns regrouping the behavior into a "
-    "subpackage instead of adding one more sibling"
+    "past the cap each addition buries another name a reader needs to find anything here, so "
+    "whoever stays over it owns regrouping the behavior into a subpackage rather than adding one "
+    "more sibling"
 )
 
 
