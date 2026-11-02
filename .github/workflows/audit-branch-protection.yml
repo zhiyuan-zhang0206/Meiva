@@ -50,6 +50,12 @@ jobs:
           set -o pipefail
           uv run python scripts/audit/branch_protection.py --json 2>&1 | tee /tmp/audit.out
 
+      # `if:` stays `steps.audit.outcome == 'failure'` with no status function on purpose.
+      # The audit step carries `continue-on-error: true`, so the job is still `success()`
+      # and the implicit `success()` GHA adds does not skip this step. Writing
+      # `failure() && ...` here would skip it instead: a continue-on-error step never fails
+      # the job, so `failure()` is always false at this point.
+      #
       # An audit that could not measure is as urgent as one that measured drift. Until
       # this step covered `AUDIT_RESULT=error`, an unset token made the audit report
       # "error" every week while the only signal was a red scheduled run nobody reads
