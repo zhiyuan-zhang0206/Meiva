@@ -105,7 +105,12 @@ def completion_during_stall(schedule_id: int) -> None:
     clients = ClientSet(
         database=lambda: database,
         pipeline_factory=partial(
-            build_pipeline, database=lambda: database, machine=machine, home=meiva_home()
+            build_pipeline,
+            database=lambda: database,
+            machine=machine,
+            home=meiva_home(),
+            otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
+            otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
         ),
     )
 

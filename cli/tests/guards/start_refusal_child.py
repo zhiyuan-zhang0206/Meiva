@@ -28,7 +28,13 @@ def main(home: Path, checkout: Path) -> None:
     database = operator_database_factory(
         local_host=command.machine.host, home=command.home, open_database=open_operator_database
     )
-    producer = operator_event_pipeline(database, machine=command.machine, home=home)
+    producer = operator_event_pipeline(
+        database,
+        machine=command.machine,
+        home=home,
+        otlp_enabled=command.otlp_enabled,
+        otlp_endpoint=command.otlp_endpoint,
+    )
     args = build_parser().parse_args(["start", "--all-services"])
     args.runtime = command
     try:

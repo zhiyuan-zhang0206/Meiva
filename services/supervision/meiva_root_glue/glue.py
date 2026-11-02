@@ -362,7 +362,13 @@ def build_wiring(
 
     clients = ClientSet(
         database=database,
-        pipeline_factory=lambda: build_pipeline(database=database, machine=machine, home=home),
+        pipeline_factory=lambda: build_pipeline(
+            database=database,
+            machine=machine,
+            home=home,
+            otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
+            otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
+        ),
     )
     registry = ProbeRegistry()
     requested = {unit.id for unit in context.registry.units}

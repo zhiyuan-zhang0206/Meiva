@@ -146,7 +146,13 @@ def main() -> None:
             direct_url=ClusterDirectUrl(machine.host, home=process_home),
         )
 
-    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
+    pipeline = build_pipeline(
+        database=database,
+        machine=machine,
+        home=process_home,
+        otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
+        otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
+    )
     init_gateway_process(
         name="insights",
         producer=lambda: pipeline,

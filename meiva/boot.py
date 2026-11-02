@@ -173,7 +173,13 @@ def process_clients(
         from base.paths.home import resolve_meiva_home
         from base.telemetry import build_pipeline
 
-        return build_pipeline(database=database, machine=machine, home=resolve_meiva_home())
+        return build_pipeline(
+            database=database,
+            machine=machine,
+            home=resolve_meiva_home(),
+            otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
+            otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
+        )
 
     # meiva:note
     # The MCP client set reads its request timeout once, when the first MCP call builds it.

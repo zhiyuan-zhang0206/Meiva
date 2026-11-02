@@ -36,7 +36,13 @@ def main() -> None:
     database = operator_database_factory(
         local_host=machine.host, home=home, open_database=open_operator_database
     )
-    pipeline = operator_event_pipeline(database, machine=machine, home=home)
+    pipeline = operator_event_pipeline(
+        database,
+        machine=machine,
+        home=home,
+        otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
+        otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
+    )
     context = ConvergeCtx(
         secure_rng=random.SystemRandom(),
         repo=Path(__file__).resolve().parents[4],

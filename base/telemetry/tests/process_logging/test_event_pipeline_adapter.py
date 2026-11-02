@@ -27,7 +27,11 @@ def logging_pipeline(
 ) -> Iterator[None]:
     """The adapter test explicitly owns its native writer for its whole record."""
     pipeline = telemetry.build_pipeline(
-        database=lambda: database, machine=machine_identity, home=unit_home
+        database=lambda: database,
+        machine=machine_identity,
+        home=unit_home,
+        otlp_enabled=lambda: False,
+        otlp_endpoint=lambda: "http://127.0.0.1:4318",
     )
     try:
         telemetry.init_telemetry(home=meiva_home(), process="test-proc", pipeline=pipeline)
@@ -81,7 +85,11 @@ def test_add_event_sink_registers_at_most_once(
     from base.log import logger as _g
 
     pipeline = telemetry.build_pipeline(
-        database=lambda: database, machine=machine_identity, home=unit_home
+        database=lambda: database,
+        machine=machine_identity,
+        home=unit_home,
+        otlp_enabled=lambda: False,
+        otlp_endpoint=lambda: "http://127.0.0.1:4318",
     )
     first = slog.add_event_sink(
         home=meiva_home(),

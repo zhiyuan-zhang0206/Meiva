@@ -228,15 +228,6 @@ def _emit_backend_event(event_name: str, **attributes: object) -> None:
         emit("telemetry", event_name, attributes=attributes)
 
 
-def _observability_settings() -> tuple[bool, str]:
-    from base.config import settings
-
-    return (
-        bool(settings.observability.telemetry_otlp_enabled),
-        settings.observability.telemetry_otlp_endpoint,
-    )
-
-
 class _Instrument(Protocol):
     add: Callable[..., Any]
     record: Callable[..., Any]
@@ -257,15 +248,15 @@ class OtlpBackend:
         export_allowed: Callable[[], bool],
         providers: tuple[Any, Any] | None = None,
         queue_maxsize: int = _QUEUE_MAXSIZE,
-        enabled: Callable[[], bool] | None = None,
-        endpoint: str | None = None,
+        enabled: Callable[[], bool],
+        endpoint: Callable[[], str],
         retry_interval_s: float = COLLECTOR_RETRY_INTERVAL_S,
         mirror_dir: Path,
         home: Path,
     ) -> None:
         self._export_allowed = export_allowed
         self._enabled_flag = enabled
-        self._endpoint_override = endpoint
+        self._endpoint = endpoint
         self._retry_interval_s = retry_interval_s
         self._mirror_dir = mirror_dir
         self._home = home
@@ -479,14 +470,7 @@ class OtlpBackend:
             return self._export_decision
 
     def _kill_switch(self) -> bool:
-        if self._enabled_flag is not None:
-            return self._enabled_flag()
-        try:
-            enabled, _endpoint = _observability_settings()
-            return enabled
-        except Exception as exc:
-            report_sink_failure("otlp enabled-flag read", exc)
-            return False
+        return self._enabled_flag()
 
     def warmup(self) -> None:
         """Resolve eligibility before isolating lazy SDK and network preparation."""
@@ -555,14 +539,12 @@ class OtlpBackend:
 
     def _initialize_worker(self, worker: OtlpWorker) -> bool:
         """Keep the existing named SDK init isolation and every partial resource."""
-        endpoint: str | None = self._endpoint_override
+        endpoint = self._endpoint()
         disabled_at = self._init_failed_at
         try:
             if self._providers is not None:
                 worker.logs, worker.metrics = self._providers
             else:
-                if endpoint is None:
-                    _enabled, endpoint = _observability_settings()
                 if not self._endpoint_reachable(endpoint):
                     self._init_failed_at = time.monotonic()
                     self._report(
@@ -762,12 +744,23 @@ def bind_exporter(exporter: OtlpBackend) -> Generator[None]:
 # meiva:note
 # Return the bound exporter override if active, otherwise construct ``OtlpBackend``.
 def default_exporter(
-    *, export_allowed: Callable[[], bool], mirror_dir: Path, home: Path
+    *,
+    export_allowed: Callable[[], bool],
+    enabled: Callable[[], bool],
+    endpoint: Callable[[], str],
+    mirror_dir: Path,
+    home: Path,
 ) -> OtlpBackend:
     bound = OtlpBackend._bound_default
     if bound is not None:
         return bound
-    return OtlpBackend(export_allowed=export_allowed, mirror_dir=mirror_dir, home=home)
+    return OtlpBackend(
+        export_allowed=export_allowed,
+        enabled=enabled,
+        endpoint=endpoint,
+        mirror_dir=mirror_dir,
+        home=home,
+    )
 
 
 # meiva:note

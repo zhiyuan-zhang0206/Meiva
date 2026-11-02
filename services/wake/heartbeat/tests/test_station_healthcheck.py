@@ -281,7 +281,13 @@ def test_main_shares_one_captured_gate_with_the_probe_and_log_factory(
             direct_url=ClusterDirectUrl(machine_identity.host, home=meiva_home()),
         )
 
-    pipeline = build_pipeline(database=database, machine=machine_identity, home=unit_home)
+    pipeline = build_pipeline(
+        database=database,
+        machine=machine_identity,
+        home=unit_home,
+        otlp_enabled=lambda: False,
+        otlp_endpoint=lambda: "http://127.0.0.1:4318",
+    )
     try:
         assert _application_name(database()) == database_gate.application_name()
         opener = FakeUrlOpener()

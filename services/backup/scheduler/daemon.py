@@ -266,6 +266,8 @@ def main() -> None:
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="pg_backup", end_process=hard_exit)
     pipeline = build_pipeline(
+        otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
+        otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
         database=lambda: scheduler_database(config, machine, gate, home=process_home),
         machine=machine,
         home=process_home,

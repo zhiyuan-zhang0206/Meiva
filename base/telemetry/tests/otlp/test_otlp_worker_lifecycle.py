@@ -46,6 +46,7 @@ def _backend(
         queue_maxsize=queue_maxsize,
         mirror_dir=mirror_dir,
         home=mirror_dir,
+        endpoint=lambda: "http://127.0.0.1:4318",
     )
     return backend, resolved_logs, resolved_metrics
 
@@ -189,6 +190,7 @@ def test_failed_sdk_build_keeps_partial_resources_until_owned_cleanup(tmp_path: 
         providers=(logs, metrics),
         mirror_dir=tmp_path,
         home=tmp_path,
+        endpoint=lambda: "http://127.0.0.1:4318",
     )
     try:
         assert backend._ensure() is False
@@ -405,7 +407,7 @@ def test_real_sdk_partial_build_threads_are_owned_and_closed(tmp_path: Path) -> 
         backend = telemetry_otlp.OtlpBackend(
             export_allowed=lambda: True,
             enabled=lambda: True,
-            endpoint=f"http://127.0.0.1:{port}",
+            endpoint=lambda: f"http://127.0.0.1:{port}",
             home=tmp_path / "missing-home",
             mirror_dir=tmp_path,
         )
@@ -443,6 +445,7 @@ def test_failed_teardown_owner_is_not_overwritten_at_retry_deadline(tmp_path: Pa
         providers=(logs, metrics),
         mirror_dir=tmp_path,
         home=tmp_path,
+        endpoint=lambda: "http://127.0.0.1:4318",
     )
     assert backend._ensure() is False
     worker = backend._worker
@@ -487,7 +490,13 @@ def test_empty_exporting_pipeline_stops_without_reading_identity(tmp_path: Path)
 
     pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
         writer=lambda _events, _exporter: None,
-        exporter=default_exporter(export_allowed=reject, mirror_dir=tmp_path, home=tmp_path),
+        exporter=default_exporter(
+            export_allowed=reject,
+            mirror_dir=tmp_path,
+            home=tmp_path,
+            enabled=lambda: True,
+            endpoint=lambda: "http://127.0.0.1:4318",
+        ),
     )
     assert pipeline.stop(timeout=1).status is DrainStatus.COMPLETED
     assert pipeline.stopped
@@ -501,7 +510,13 @@ def test_stop_refuses_non_finite_and_negative_timeout(tmp_path: Path) -> None:
 
     pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
         writer=lambda _events, _exporter: None,
-        exporter=default_exporter(export_allowed=reject, mirror_dir=tmp_path, home=tmp_path),
+        exporter=default_exporter(
+            export_allowed=reject,
+            mirror_dir=tmp_path,
+            home=tmp_path,
+            enabled=lambda: True,
+            endpoint=lambda: "http://127.0.0.1:4318",
+        ),
     )
     for bad in (float("nan"), -1.0):
         with pytest.raises(ValueError, match="finite and non-negative"):
@@ -604,7 +619,13 @@ def test_zero_timeout_stage_one_leaves_the_exporter_untouched(tmp_path: Path) ->
 
     pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
         writer=write,
-        exporter=default_exporter(export_allowed=lambda: True, mirror_dir=tmp_path, home=tmp_path),
+        exporter=default_exporter(
+            export_allowed=lambda: True,
+            mirror_dir=tmp_path,
+            home=tmp_path,
+            enabled=lambda: True,
+            endpoint=lambda: "http://127.0.0.1:4318",
+        ),
     )
     backend = pipeline._exporter
     pipeline.enqueue(otlp_test_event())
@@ -655,7 +676,13 @@ def test_stop_from_the_writer_thread_is_refused(tmp_path: Path) -> None:
 
     pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
         writer=write,
-        exporter=default_exporter(export_allowed=lambda: True, mirror_dir=tmp_path, home=tmp_path),
+        exporter=default_exporter(
+            export_allowed=lambda: True,
+            mirror_dir=tmp_path,
+            home=tmp_path,
+            enabled=lambda: True,
+            endpoint=lambda: "http://127.0.0.1:4318",
+        ),
     )
     pipeline.enqueue(otlp_test_event())
     assert pipeline.stop(timeout=2).status is DrainStatus.COMPLETED

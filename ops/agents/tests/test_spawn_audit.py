@@ -172,6 +172,8 @@ def fork_events(
         database=lambda: Database.from_settings(gate=database_gate),
         machine=machine_identity,
         home=unit_home,
+        otlp_enabled=lambda: False,
+        otlp_endpoint=lambda: "http://127.0.0.1:4318",
     )
     try:
         telemetry.init_telemetry(

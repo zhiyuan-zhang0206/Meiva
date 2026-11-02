@@ -195,7 +195,13 @@ def main() -> None:
             direct_url=ClusterDirectUrl(machine.host, home=process_home),
         )
 
-    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
+    pipeline = build_pipeline(
+        database=database,
+        machine=machine,
+        home=process_home,
+        otlp_enabled=lambda: machine_config.view.observability.telemetry_otlp_enabled,
+        otlp_endpoint=lambda: machine_config.view.observability.telemetry_otlp_endpoint,
+    )
     init_gateway_process(
         name="ttl_reaper",
         producer=lambda: pipeline,

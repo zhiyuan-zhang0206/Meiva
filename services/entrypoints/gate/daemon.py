@@ -511,6 +511,8 @@ def main(argv: Sequence[str], *, process_config: ConfigBoot) -> None:
     machine = ConfiguredMachineIdentity(process_config)
     home = meiva_home()
     pipeline = build_pipeline(
+        otlp_enabled=lambda: process_config.view.observability.telemetry_otlp_enabled,
+        otlp_endpoint=lambda: process_config.view.observability.telemetry_otlp_endpoint,
         database=gate_database(
             image=image, machine=machine, config=process_config, home=home.resolve()
         ),

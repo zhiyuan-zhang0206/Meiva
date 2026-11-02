@@ -175,7 +175,11 @@ def test_request_envelope_transfers_emit_size_and_serialize_time(
 
     events_before = len(_exec_envelope_events())
     pipeline = telemetry.build_pipeline(
-        database=lambda: database, machine=machine_identity, home=meiva_home()
+        database=lambda: database,
+        machine=machine_identity,
+        home=meiva_home(),
+        otlp_enabled=lambda: False,
+        otlp_endpoint=lambda: "http://127.0.0.1:4318",
     )
     sink_id = add_event_sink(
         home=meiva_home(),

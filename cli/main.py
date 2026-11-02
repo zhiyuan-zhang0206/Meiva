@@ -52,6 +52,7 @@ from cli.startup.settings_failure import settings_failure_text
 if TYPE_CHECKING:
     from base.cluster.machine import MachineIdentityReader
     from cli.database import OpenDatabase, OperatorDatabaseFactory, OperatorEventPipeline
+    from cli.database.runtime import CommandRuntime
 
 __all__ = [
     "ProducerFactory",
@@ -62,6 +63,7 @@ __all__ = [
     "entry",
     "main",
     "normalize_process_profile",
+    "operator_producer",
     "opt_into_lite_config",
     "parse_command_args",
     "print_settings_load_failure",
@@ -69,9 +71,10 @@ __all__ = [
 ]
 
 # meiva:note
-# Builds the command's telemetry producer from its database factory, machine identity and home.
+# Builds the command's telemetry producer from its database factory, machine identity, home and
+# command runtime (the owner the OTLP posture is asked of).
 type ProducerFactory = Callable[
-    [OperatorDatabaseFactory, MachineIdentityReader, Path], OperatorEventPipeline
+    [OperatorDatabaseFactory, MachineIdentityReader, Path, CommandRuntime], OperatorEventPipeline
 ]
 
 _LITE_VERBS = LITE_VERBS
@@ -305,7 +308,7 @@ def dispatch_parsed(
         open_database=open_database,
     )
     args.database_factory = database_factory
-    producer = producer_factory(database_factory, command.machine, command.home)
+    producer = producer_factory(database_factory, command.machine, command.home, command)
     args.producer = producer
     try:
         sink = pre_dispatch_log_sink(args_in)
@@ -358,17 +361,26 @@ def main(
     return run_command(
         argv,
         retained_children=retained_children,
-        producer_factory=_operator_producer,
+        producer_factory=operator_producer,
         open_database=open_operator_database,
     )
 
 
-def _operator_producer(
-    database_factory: OperatorDatabaseFactory, machine: MachineIdentityReader, home: Path
+def operator_producer(
+    database_factory: OperatorDatabaseFactory,
+    machine: MachineIdentityReader,
+    home: Path,
+    command: CommandRuntime,
 ) -> OperatorEventPipeline:
     from cli.database import operator_event_pipeline
 
-    return operator_event_pipeline(database_factory, machine=machine, home=home)
+    return operator_event_pipeline(
+        database_factory,
+        machine=machine,
+        home=home,
+        otlp_enabled=command.otlp_enabled,
+        otlp_endpoint=command.otlp_endpoint,
+    )
 
 
 # meiva:note

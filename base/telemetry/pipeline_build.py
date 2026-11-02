@@ -64,6 +64,8 @@ def build_pipeline(
     database: Callable[[], Any],
     machine: MachineIdentityReader,
     home: Path,
+    otlp_enabled: Callable[[], bool],
+    otlp_endpoint: Callable[[], str],
     flush_interval_s: float = 0.5,
 ) -> EventPipeline:
     if not home.is_absolute():
@@ -82,6 +84,8 @@ def build_pipeline(
         export_allowed=lambda: observability_export_allowed(
             machine, home=home, endpoint_explicit=explicit
         ),
+        enabled=otlp_enabled,
+        endpoint=otlp_endpoint,
         mirror_dir=mirror_dir,
         home=home,
     )

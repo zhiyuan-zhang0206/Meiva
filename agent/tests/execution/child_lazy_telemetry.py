@@ -52,7 +52,11 @@ def identity_child_record() -> dict[str, Any]:
         pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
             writer=writer,
             exporter=default_exporter(
-                export_allowed=lambda: True, mirror_dir=Path(home), home=Path(home)
+                export_allowed=lambda: True,
+                mirror_dir=Path(home),
+                home=Path(home),
+                enabled=lambda: True,
+                endpoint=lambda: "http://127.0.0.1:4318",
             ),
         )
         clients = ClientSet(pipeline_factory=lambda: pipeline)

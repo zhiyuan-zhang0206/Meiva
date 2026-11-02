@@ -73,7 +73,11 @@ def _mirror_last(event_name: str, agent: int | None = None) -> dict[str, Any]:
 def bind_telemetry(database: Database, unit_home: Path) -> Iterator[None]:
     """Bind a stable identity to this test's explicit native writer owner."""
     pipeline = telemetry.build_pipeline(
-        database=lambda: database, machine=machine_identity(), home=unit_home
+        database=lambda: database,
+        machine=machine_identity(),
+        home=unit_home,
+        otlp_enabled=lambda: False,
+        otlp_endpoint=lambda: "http://127.0.0.1:4318",
     )
     try:
         telemetry.init_telemetry(home=meiva_home(), process="test-proc", pipeline=pipeline)

@@ -58,7 +58,11 @@ class GatewayProcess:
         self.clients = ClientSet(
             database=self.database,
             pipeline_factory=lambda: build_pipeline(
-                database=self.database, machine=self.machine, home=self.home.resolve()
+                otlp_enabled=lambda: self.config.view.observability.telemetry_otlp_enabled,
+                otlp_endpoint=lambda: self.config.view.observability.telemetry_otlp_endpoint,
+                database=self.database,
+                machine=self.machine,
+                home=self.home.resolve(),
             ),
         )
 

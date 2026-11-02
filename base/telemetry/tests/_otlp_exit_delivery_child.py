@@ -28,6 +28,8 @@ def main() -> None:
         database=partial(Database.from_settings, gate=gate),
         machine=ConfiguredMachineIdentity(config),
         home=meiva_home(),
+        otlp_enabled=lambda: config.view.observability.telemetry_otlp_enabled,
+        otlp_endpoint=lambda: config.view.observability.telemetry_otlp_endpoint,
     )
     telemetry.init_telemetry(home=meiva_home(), process="exit-seam-probe", pipeline=pipeline)
     telemetry.emit("log", "log", attributes={"seq": "early", "marker": marker})
