@@ -19,7 +19,7 @@ from base.host.resource.reading import (
     assemble_sample,
     parse_battery,
 )
-from base.native_process.os_platform import is_macos, primary_disk_path
+from base.native_process.os_platform import primary_disk_path
 
 
 # meiva:note
@@ -29,11 +29,10 @@ from base.native_process.os_platform import is_macos, primary_disk_path
 # not fail the probe (unlike the psutil reads, which propagate).
 def battery_sample(
     *,
-    platform: str | None = None,
+    platform: str,
     run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> BatteryFields:
-    on_macos = is_macos() if platform is None else platform == "darwin"
-    if not on_macos:
+    if platform != "darwin":
         return {}
     try:
         out = run(
@@ -58,8 +57,8 @@ def battery_sample(
 def resource_sample(
     *,
     now: float,
+    battery: BatteryFields,
     cpu_percent: Callable[[float], float] | None = None,
-    battery_fn: Callable[[], BatteryFields] = battery_sample,
 ) -> ResourceSample:
     import psutil
 
@@ -71,5 +70,5 @@ def resource_sample(
         cpu_pct=read_cpu(CPU_INTERVAL_S),
         memory=MemoryFigures(mem.total, mem.available, mem.percent),
         disk=DiskFigures(disk.used, disk.free, disk.percent),
-        battery=battery_fn(),
+        battery=battery,
     )

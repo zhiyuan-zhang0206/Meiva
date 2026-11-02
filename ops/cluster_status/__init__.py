@@ -32,7 +32,7 @@ from base.deploy.git.cluster_drift import checkout_head_sha
 from base.deploy.lifecycle import start_serving
 from base.host.proc import process_alive
 from base.host.resource.reading import ResourceSample
-from base.host.resource.sample import resource_sample
+from base.host.resource.sample import battery_sample, resource_sample
 from base.host.system.hostport import Host
 from base.native_process.loaded_commit import LoadedCommit
 from base.sessions.backend import get_backend, get_shell_backend
@@ -149,9 +149,9 @@ def read_db_snapshot(
 
 # meiva:note
 # One live resource sample, degraded to None on any psutil failure.
-def read_resource_sample(*, now: float) -> ResourceSample | None:
+def read_resource_sample(*, now: float, platform: str) -> ResourceSample | None:
     try:
-        return resource_sample(now=now)
+        return resource_sample(now=now, battery=battery_sample(platform=platform))
     except Exception:  # psutil may not be installed; degrade gracefully
         _log.warning("resource_sample failed (psutil missing?)", exc_info=True)
         return None
@@ -205,7 +205,9 @@ def status_snapshot(
     # the central-DB reads so snapshot latency pays the slower of those independent
     # operations, not their sum.
     with ThreadPoolExecutor(max_workers=1) as executor:
-        resource_future = executor.submit(read_resource_sample, now=now.timestamp())
+        resource_future = executor.submit(
+            read_resource_sample, now=now.timestamp(), platform=host.platform.system
+        )
         db_snapshot = read_db_snapshot(db, pool, machine_name=machine_name, count_agents=runner)
         resource = resource_future.result()
     return assemble_status(
