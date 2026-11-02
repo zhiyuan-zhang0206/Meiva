@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -26,9 +27,15 @@ from cli.commands.observability.plans.lgtm.urls import (
 )
 from cli.commands.observability.url_split import split_url
 
+_REPO = Path(__file__).resolve().parents[5]
+
 # meiva:note
-# S104-flagged literal reused by the warning cases: a config value under test, not a bind.
+# Literals under test: the wildcard is a bind value the warning cases feed, and the two tokens prove
+# the renderer takes the webhook credential from its caller rather than from the template. Each is
+# flagged by a secrets rule that cannot tell a test value from a shipped one, so each says so here.
 WILDCARD = "0.0.0.0"  # noqa: S104
+WEBHOOK_TOKEN = "token-from-settings"  # noqa: S105
+ROTATED_WEBHOOK_TOKEN = "rotated"  # noqa: S105
 
 
 def values(**changes: str | int) -> NativeRenderValues:
@@ -43,6 +50,7 @@ def values(**changes: str | int) -> NativeRenderValues:
             prometheus_url="http://127.0.0.1:9090",
             pg_url="127.0.0.1:5433",
             alerts_webhook_url="http://127.0.0.1:8000/api/alerts",
+            alerts_webhook_token=WEBHOOK_TOKEN,
             telemetry_loki_url="http://127.0.0.1:3100",
             telemetry_prometheus_url="http://127.0.0.1:9090",
             telemetry_grafana_url="http://127.0.0.1:3003",
@@ -334,3 +342,43 @@ def test_consistent_undeclared_and_slash_only_differences_stay_quiet() -> None:
         )
         == ()
     )
+
+
+# meiva:note
+# The alert webhook credential reaches Grafana through the rendered environment file, and it comes
+# from the caller's settings rather than from the template: a converge after a rotation must carry
+# the new value, and a template that spelled a literal would keep every home on one token.
+def test_the_rendered_environment_carries_the_alert_webhook_token() -> None:
+    template = (_REPO / "deploy/lgtm/native/config/runtime.env").read_text(encoding="utf-8")
+    rendered = render_config("runtime.env", template, values())
+
+    assert f"MEIVA_ALERTS_WEBHOOK_TOKEN={WEBHOOK_TOKEN}\n" in rendered
+    assert "{{ALERTS_WEBHOOK_TOKEN}}" not in rendered
+
+
+def test_a_rotated_webhook_token_changes_the_rendered_environment() -> None:
+    template = (_REPO / "deploy/lgtm/native/config/runtime.env").read_text(encoding="utf-8")
+    rendered = render_config(
+        "runtime.env", template, values(alerts_webhook_token=ROTATED_WEBHOOK_TOKEN)
+    )
+
+    assert f"MEIVA_ALERTS_WEBHOOK_TOKEN={ROTATED_WEBHOOK_TOKEN}\n" in rendered
+    assert WEBHOOK_TOKEN not in rendered
+
+
+# meiva:note
+# Every placeholder a shipped template spells must be one the renderer substitutes, and every
+# substitution must be spelled somewhere: a template that gains a placeholder without a renderer
+# key ships the literal `{{NAME}}` to the host, which is how a contact point ends up sending an
+# empty credential while its configuration looks complete.
+def test_shipped_templates_and_renderer_keys_name_the_same_placeholders() -> None:
+    rendered = {
+        name: render_config(
+            name, (_REPO / "deploy/lgtm/native/config" / name).read_text(encoding="utf-8"), values()
+        )
+        for name in ("loki.yaml", "prometheus.yml", "grafana.ini", "runtime.env")
+    }
+    for name, content in rendered.items():
+        live = [line for line in content.splitlines() if not line.lstrip().startswith("#")]
+        kept = [line for line in live if "{{" in line]
+        assert not kept, f"{name} kept a placeholder the renderer does not substitute: {kept[0]}"

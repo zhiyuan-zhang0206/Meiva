@@ -455,6 +455,7 @@ def render_configs(
         prometheus_url=prometheus_url,
         pg_url=pg_url,
         alerts_webhook_url=webhook_url,
+        alerts_webhook_token=settings.credentials.webhook_token,
         telemetry_loki_url=obs.telemetry_loki_url,
         telemetry_prometheus_url=obs.telemetry_prometheus_url,
         telemetry_grafana_url=obs.telemetry_grafana_url,
