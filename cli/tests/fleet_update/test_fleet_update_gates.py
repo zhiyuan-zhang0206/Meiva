@@ -128,6 +128,17 @@ def test_a_check_that_could_not_run_refuses_like_a_red(
     assert {k for k, _ in cluster.effects} & {"stop", "switch"} == set()
 
 
+def test_a_verdict_reused_from_the_earlier_pass_is_said_and_the_down_goes_on(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    note = "REUSED: the stored schedules cannot be read now; using the verdict recorded earlier"
+    cluster.stored_schedules = (0, [note])
+    assert run("down") == 0
+    assert note in capsys.readouterr().out
+    assert "stop" in {kind for kind, _ in cluster.effects}
+
+
 def test_the_dry_run_of_down_reports_a_red_without_changing_anything(
     env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
 ) -> None:

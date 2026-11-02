@@ -21,6 +21,14 @@ def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict)
 
 
+# meiva:note
+# Why a runner's start was not tried: runners join through the gateway, so with the gateway down
+# the attempt could only fail on the connection.
+NOT_ATTEMPTED_WITHOUT_GATEWAY = (
+    "not attempted: the gateway did not start, and runners join through it"
+)
+
+
 @dataclass(frozen=True)
 class HostFailure:
     alias: str

@@ -65,6 +65,23 @@ def test_a_failed_gateway_stop_restarts_the_gateway_before_the_runners(
     assert "recovered: gw, mac, lin" in out
 
 
+# meiva:note
+# Runners join the cluster through the gateway: when the gateway cannot be brought back, starting
+# them would only fail on the connection, so the recovery stops at the gateway and names them.
+def test_a_gateway_that_cannot_be_recovered_leaves_the_runners_alone(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    cluster.stop_fails["gw"] = 1
+    cluster.recover_fails.add("gw")
+    assert run("down") == 1
+    out = capsys.readouterr().out
+    assert _started(cluster) == ["gw"]
+    assert "recovered: none" in out
+    assert "runners not started: not attempted: the gateway did not start" in out
+    assert "needs manual: gw, mac, lin" in out
+
+
 def test_switch_never_runs_after_a_failed_stop(
     env: tuple[Cluster, Callable[..., int]],
 ) -> None:

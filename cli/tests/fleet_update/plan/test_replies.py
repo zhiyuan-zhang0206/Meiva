@@ -35,6 +35,12 @@ def test_a_clean_check_says_nothing() -> None:
     assert schedule_check(reply, allow_red=False, new=_NEW) == ScheduleCheck((), None)
 
 
+def test_a_verdict_reused_from_the_earlier_pass_is_said_and_does_not_refuse() -> None:
+    reused = f"REUSED: the stored schedules cannot be read now; using the verdict for {_NEW}"
+    check = schedule_check(f"{reused}\nVERIFY_RC=0", allow_red=False, new=_NEW)
+    assert check == ScheduleCheck((reused,), None)
+
+
 def test_a_host_that_could_not_ask_is_not_a_verdict() -> None:
     reply = "SKIPPED: abc is not fetched on this host (a dry run does not fetch)"
     assert schedule_check(reply, allow_red=False, new=_NEW) == ScheduleCheck(

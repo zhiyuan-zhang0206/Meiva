@@ -96,10 +96,12 @@ def test_the_machine_name_is_what_the_host_itself_boots_into() -> None:
 
 
 def test_the_pre_update_check_quotes_both_programs_into_the_gateways_script() -> None:
-    template = "{home}\nread: {read_rows}\ncheck: {check_rows}\nnew: {new}"
+    template = "{home}\nread: {read_rows}\ncheck: {check_rows}\nnew: {new}\nage: {max_age_min}"
     program = "print('a b')\n"
-    script = pre_verify_script(template, new=_NEW, read_rows=program, check_rows="x")
-    assert script == f"{HOME}\nread: {shlex.quote(program)}\ncheck: x\nnew: {_NEW}"
+    script = pre_verify_script(
+        template, new=_NEW, read_rows=program, check_rows="x", max_age_min=90
+    )
+    assert script == f"{HOME}\nread: {shlex.quote(program)}\ncheck: x\nnew: {_NEW}\nage: 90"
 
 
 def test_a_linux_host_starts_over_ssh_and_a_macos_host_through_a_one_shot_job() -> None:

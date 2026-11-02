@@ -139,6 +139,30 @@ def test_a_host_that_fails_to_start_does_not_stop_the_others(
     assert not cluster.silence_open
 
 
+# meiva:note
+# A runner joins the cluster through the gateway: when the gateway did not start, the runners are
+# not tried (each would only fail on the unreachable gateway) and the matrix says why.
+def test_a_gateway_that_fails_to_start_leaves_the_runners_untried(
+    env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    cluster, run = env
+    assert run("down") == 0
+    cluster.fail[("start", "gw")] = 1
+
+    assert run("up") == PARTIAL_FAILURE_EXIT
+
+    starts = [a for k, a in cluster.effects if k in ("start", "oneshot")]
+    assert starts == ["gw"]
+    output = capsys.readouterr().out
+    for runner in ("mac", "lin"):
+        assert (
+            f"matrix: {runner} failed at 'start': not attempted: the gateway did not start"
+            in output
+        )
+    assert "up incomplete:" in output
+    assert not cluster.silence_open
+
+
 def test_run_dry_run_plans_both_halves_without_mutation(
     env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
 ) -> None:

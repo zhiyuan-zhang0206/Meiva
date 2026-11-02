@@ -39,6 +39,13 @@ own OLD checkout, and the check being NEW's, offline, under a throwaway home;
 both steps are real files whose text ships to the host, so their imports stay
 visible.
 
+A pass leaves a receipt on the gateway (`updates/schedules-verified`, naming NEW).
+A `down` rerun after a failed stop finds the gateway's database already stopped,
+so the table cannot be read: for the same NEW, and only while the receipt is
+younger than `--silence-hours`, the receipt stands in for the verdict and the log
+says so (`REUSED`). Without a matching, fresh receipt the table is still
+unevaluable and refuses.
+
 ## The silence
 
 `down` opens one Grafana silence on the gateway host before the first stop
@@ -60,13 +67,13 @@ reporting its label and log path; its label is its own
 
 down refuses before touching anything — exit 2, no effects — when a listed host has uncommitted changes, a post-checkout hook, an active update marker, when the hosts disagree on HEAD, and when .python-version changes without --allow-python-change; the probe reads its facts through the host's own shell, among them whether the host is already stopped: its last lifecycle operation (`run/lifecycle-op.json`) is a completed stop with rc 0 and no meiva-root is running. A stop counts only when `meiva stop` exits 0 and that journal then records it complete with rc 0; a start counts when `meiva start` exits 0, which it does only after readiness.
 
-Before anything stops — under --dry-run too — down runs NEW's offline verify over the gateway's stored schedule table from a throwaway worktree: the read step runs on the home's OLD checkout by signature dispatch, the check goes through NEW's schedules CLI under a throwaway home, VERIFY_RC separates a crashed check from a red, a host that has not fetched NEW is reported as not checked, and a red or unevaluable table refuses with the rows listed unless --allow-red-schedules.
+Before anything stops — under --dry-run too — down runs NEW's offline verify over the gateway's stored schedule table from a throwaway worktree: the read step runs on the home's OLD checkout by signature dispatch, the check goes through NEW's schedules CLI under a throwaway home, VERIFY_RC separates a crashed check from a red, a host that has not fetched NEW is reported as not checked, and a red or unevaluable table refuses with the rows listed unless --allow-red-schedules; when the rows cannot be read, a receipt of an earlier pass of the same NEW younger than --silence-hours is reused and reported instead.
 
 Before anything stops — under --dry-run too — down names the active impersonation leases and, after a failed stop, recovers the hosts that stop took down: [[cli/docs/fleet-update-window/lease-announcement.meiva.okf.md]], [[cli/docs/fleet-update-window/failed-stop-recovery.meiva.okf.md]].
 
 down opens one Grafana silence on the gateway host before the first stop, its comment naming NEW and its expiry the required --silence-hours; up expires it after the drift checks; a silence that cannot open only warns and the half goes on; a failed up leaves the silence to its expiry; --dry-run prints the command without opening.
 
-up starts every listed host even when one fails: a host whose start or converge aborts is reported with the step and reason recorded by that host's incomplete-converge marker ([[cli/commands/converge/docs/converge-incomplete.meiva.okf.md]]), the remaining hosts still start, and the run exits 3 (partial) after listing each failure — distinct from 2 (refused before any effect) and 1 (a failure before any host started). Verification is per host and does not stop at the first red: a red smoke, a red drift check and a failed package refresh are each that host's failure, the other hosts are still verified, and a host the window could not verify at all — a roster that never agrees, or a host that never started — is a failure naming why, never a silent skip. Every listed host ends with one matrix line: `serving`, `failed at <step>`, or `skipped: <why>`. A roster that cannot agree on the window's hosts is itself the failure, reported once per host. The silence is expired at the end of up even on a partial one: hosts that came back healthy must not spend the rest of the window with their alerts suppressed, while each failed host is already named in the report.
+up starts every listed host even when one fails — except that runners are not tried when the gateway did not start, since they join through it: each is reported as a failed start saying so — a host whose start or converge aborts is reported with the step and reason recorded by that host's incomplete-converge marker ([[cli/commands/converge/docs/converge-incomplete.meiva.okf.md]]), the remaining hosts still start, and the run exits 3 (partial) after listing each failure — distinct from 2 (refused before any effect) and 1 (a failure before any host started). Verification is per host and does not stop at the first red: a red smoke, a red drift check and a failed package refresh are each that host's failure, the other hosts are still verified, and a host the window could not verify at all — a roster that never agrees, or a host that never started — is a failure naming why, never a silent skip. Every listed host ends with one matrix line: `serving`, `failed at <step>`, or `skipped: <why>`. A roster that cannot agree on the window's hosts is itself the failure, reported once per host. The silence is expired at the end of up even on a partial one: hosts that came back healthy must not spend the rest of the window with their alerts suppressed, while each failed host is already named in the report.
 
 ## The helper gate
 

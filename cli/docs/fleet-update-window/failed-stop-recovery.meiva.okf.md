@@ -34,6 +34,10 @@ that budget exits `0` — launchd retries every nonzero exit with no attempt lim
 success and never reach `needs manual:`. The silence stays open to its expiry or
 the next `up`.
 
+When the gateway is among the hosts to bring back and its start fails, the runners are
+not started: they join the cluster through it, so each attempt could only fail on the
+unreachable gateway. The log says so, and they are listed under `needs manual:`.
+
 The half still fails with its usual exit code, and the failure output names both
 lists: `recovered:` for the hosts serving again, `needs manual:` for every host
 that is down and was not brought back — a start that failed, or a host this run
