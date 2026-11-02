@@ -77,6 +77,7 @@ def test_notes_render_in_the_documented_rank_order(memory_plugin: Any) -> None:
     assert by_rank == [
         "exec_timeout_note",
         "timezone_note",
+        "sdk_expand_note",
         "memory_index_note",
         "agent_id_note",
         "per_agent_memory_note",
