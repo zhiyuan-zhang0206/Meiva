@@ -11,6 +11,6 @@ exports = ["auth.py", "http_dial.py", "ports.py", "predicates.py", "resilience.p
 "predicates.py" = "strict"
 
 [debt.ambient-read]
-"auth.py#random secrets.token_bytes" = 1
-"resilience.py#pid os.getpid" = 1
-"resilience.py#random random.uniform" = 1
+"auth.py#random secrets.token_bytes" = { count = 1, owner = "#5816", until = "waits for nothing: random_bytes() is the module's single entropy door, and a caller-supplied source would break the token guarantee it exists to make" }
+"resilience.py#pid os.getpid" = { count = 1, owner = "#5816", until = "waits for nothing: agent_phase() staggers agents by the pid of the process doing the retrying, and a caller-supplied pid would stagger by a process that is not running" }
+"resilience.py#random random.uniform" = { count = 1, owner = "#5816", until = "waits for nothing: jittered() draws noise from the module-level random to spread retries, and a shared seeded source is what makes retries collide" }

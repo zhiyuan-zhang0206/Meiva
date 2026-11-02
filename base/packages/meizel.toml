@@ -24,4 +24,4 @@ exports = ["composer_commands.py", "dashboard_supply.py", "docs", "extensions", 
 "plugin_config_contracts.py" = "strict"
 
 [debt.ambient-read]
-"composer_commands.py#settings base.packages.plugins.flags.read_declared_flag" = 1
+"composer_commands.py#settings base.packages.plugins.flags.read_declared_flag" = { count = 1, owner = "#5816", until = "waits for read_declared_flag() to take the config view: composer_commands only calls the flag reader, which reads settings itself, so this entry disappears when the reader gains a required config argument" }

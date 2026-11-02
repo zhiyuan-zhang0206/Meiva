@@ -11,4 +11,4 @@ exports = ["client.py", "grants", "wire.py"]
 "wire.py" = "strict"
 
 [debt.ambient-read]
-"client.py#clock time.monotonic" = 1
+"client.py#clock time.monotonic" = { count = 1, owner = "#5816", until = "waits for nothing: _ping_within() defaults to time.monotonic for a deadline against the helper's socket, the same duration source its callers cannot improve on" }

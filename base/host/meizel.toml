@@ -17,4 +17,4 @@ exports = ["atomic_io.py", "brew_pin.py", "config_validators.py", "converge", "d
 "exit_codes.py" = "strict"
 
 [debt.ambient-read]
-"proc.py#clock time.monotonic" = 1
+"proc.py#clock time.monotonic" = { count = 1, owner = "#5816", until = "waits for nothing: wait_owned() takes a clock and defaults it to time.monotonic for a wait on a real process; a monotonic duration source has no better value to hand in" }

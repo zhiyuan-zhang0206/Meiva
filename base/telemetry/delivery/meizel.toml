@@ -12,6 +12,6 @@ exports = ["defer_plan.py", "loss.py", "mirror.py", "pipeline.py", "receipts.py"
 "reporting.py" = "strict"
 
 [debt.ambient-read]
-"loss.py#clock datetime.datetime.now" = 1
-"mirror.py#clock datetime.datetime.now" = 1
-"state.py#platform socket.gethostname" = 1
+"loss.py#clock datetime.datetime.now" = { count = 1, owner = "#5816", until = "waits for nothing: a loss report carries the instant the loss happened, stamped where the loss is observed" }
+"mirror.py#clock datetime.datetime.now" = { count = 1, owner = "#5816", until = "waits for nothing: the mirror's retention cutoff is the wall clock at prune time, the same fact as the trace mirror's" }
+"state.py#platform socket.gethostname" = { count = 1, owner = "#5816", until = "waits for nothing a caller can improve: process_state names the mirror's owner by this host's kernel name, and the configured cluster name is a different fact that would mislabel two units on one host" }

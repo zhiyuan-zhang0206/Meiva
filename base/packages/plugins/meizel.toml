@@ -35,8 +35,8 @@ exports = ["activation.py", "config_face.py", "config_registration.py", "config_
 # which has 305 call sites across production and tests. Requiring `env` there would move 305
 # construction sites to repay one entry. Reopen when a production caller needs an environment
 # different from the one `build_model_catalog()` runs under.
-"config_view.py#environ base.host.env.registry.process_environment" = 1
-"flags.py#settings base.config.settings" = 1
+"config_view.py#environ base.host.env.registry.process_environment" = { count = 1, owner = "#5816", until = "waits for a second caller that holds the environment: with_cluster_policy(env=None) has two callers and both pass nothing, so the fallback is the only path in use - the TODO in the file names the same trigger" }
+"flags.py#settings base.config.settings" = { count = 1, owner = "#5816", until = "waits for its three callers to hand a config: read_declared_flag() serves composer_commands, the task-maintenance daemon and surface/stats, none of which holds a ConfigBoot today, so a required argument would move the read rather than remove it" }
 
 [debt.any-collaborator]
 "extensions.py#any GraphHook.__call__.config" = { count = 1, owner = "#7302", until = "waits for the hook argument types to live below base/packages/plugins: the runner passes langchain_core.runnables.RunnableConfig here (with agent.state.AgentState and langgraph.runtime.Runtime[MeivaContext] for the other two), and base imports none of the three; declaring object in the Protocol would make every framework hook's concrete parameter a contravariance error instead of typing it" }

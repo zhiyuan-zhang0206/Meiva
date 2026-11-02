@@ -14,7 +14,7 @@ exports = ["configuration.py", "ids.py", "tests"]
 "__init__.py" = { kinds = ["clock"], why = "the wall clock's owner: every component that needs the time asks this module (Clock, Timers, SYSTEM_TIMERS), so the one read of the host clock happens here and nowhere below it. A caller can still hand in its own `Clock` — the constructor takes the `now` callable — but the default that other modules must not re-derive lives at this door" }
 
 [debt.ambient-read]
-"__init__.py#settings base.config.settings" = 1
+"__init__.py#settings base.config.settings" = { count = 1, owner = "#5816", until = "waits for nothing: clock_config_from_settings() is the door Clock.from_settings() uses for code that was handed no clock, and it is the fallback construction the clock lattice names (clock_lattice_cli.py); the read is the door itself, not a shortcut around it" }
 
 [debt.impure-call]
 "__init__.py#datetime.now" = { count = 1, owner = "#7240", until = "permanently: the clock door owns the host clock — [roots] kinds=[clock] grants the read here and SYSTEM_TIMERS is the one place the process sleeps or reads monotonic time; a caller can still pass its own Clock, and every other module asks this door instead of re-deriving the read" }

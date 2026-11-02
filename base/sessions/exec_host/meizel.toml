@@ -8,4 +8,4 @@ exports = ["child_environment.py", "paths.py", "protocol.py", "tests"]
 "child_environment.py" = "strict"
 
 [debt.ambient-read]
-"paths.py#pid os.getuid" = 1
+"paths.py#pid os.getuid" = { count = 1, owner = "#5816", until = "waits for nothing: the fallback directory is /tmp/meiva-exec-<uid> and every process of the user must compute the same path; a caller-supplied uid would let two processes of one user disagree" }

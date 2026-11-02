@@ -11,4 +11,4 @@ exports = ["inspector.py", "notification_contributions.py", "schedules.py", "sta
 "ui_contributions.py" = "strict"
 
 [debt.ambient-read]
-"stats.py#settings base.packages.plugins.flags.read_declared_flag" = 1
+"stats.py#settings base.packages.plugins.flags.read_declared_flag" = { count = 1, owner = "#5816", until = "waits for read_declared_flag() to take the config view, the same entry as the reader itself: this function only calls the reader" }
