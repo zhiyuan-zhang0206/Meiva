@@ -215,6 +215,15 @@ batch whose member list cannot be read, or that spans both sides of the
 frontend/backend contract, must keep the full suite rather than select from a
 list it cannot check.
 
+That guard is keyed to the branch shape, not to queues in general, and the
+difference is worth stating: a future queue that runs as another event type
+never reaches this selector at all — GitHub's own merge queue arrives as
+`merge_group`, the step is gated to `pull_request`, and a run with no selection
+keeps the full eight-shard fan-out, which is rule 1's decision made one layer
+up. A queue that instead reused `pull_request` under a new branch prefix would
+select like an ordinary pull request until that prefix joined `_QUEUE_PREFIXES`;
+adding it there is the whole fix, and the tests pin the behavior behind it.
+
 | Order | Changed-path or event condition | Result |
 | --- | --- | --- |
 | 1 | Not a pull_request | FULL (non-pr-event) |
