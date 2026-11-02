@@ -270,12 +270,16 @@ def test_the_read_script_imports_nothing_from_cli_database_unconditionally() -> 
     ]
 
 
+_RECEIPT_MAX_AGE_MIN = 240
+
+
 def _render(new: str = "deadbeef") -> str:
     return pre_verify_script(
         program_text(VERIFY_SCRIPTS / "fleet_pre_verify.sh"),
         new=new,
         read_rows=program_text(VERIFY_SCRIPTS / "schedules_verify_read_rows.py"),
         check_rows=program_text(CHECK_ROWS_SCRIPT),
+        max_age_min=_RECEIPT_MAX_AGE_MIN,
     )
 
 
@@ -382,10 +386,17 @@ def host(tmp_path: Path) -> tuple[Path, str]:
     return tmp_path, new
 
 
-def _run_script(home: Path, new: str, *, red: bool) -> subprocess.CompletedProcess[str]:
+def _run_script(
+    home: Path, new: str, *, red: bool, unreadable: bool = False
+) -> subprocess.CompletedProcess[str]:
     rows = [(1, "digest", "RED" if red else "import os\n")]
     old_py = home / ".meiva/source/cli/commands/management/schedules_verify.py"
-    old_py.write_text(f"def _read_schedule_rows():\n    return {rows!r}\n")
+    if unreadable:
+        old_py.write_text(
+            "def _read_schedule_rows():\n    raise ConnectionError('the database is stopped')\n"
+        )
+    else:
+        old_py.write_text(f"def _read_schedule_rows():\n    return {rows!r}\n")
     tmp = home / "tmp"
     tmp.mkdir(exist_ok=True)
     env = {**os.environ, "HOME": str(home), "TMPDIR": str(tmp), "REAL_HOME": str(home / ".meiva")}
@@ -415,6 +426,58 @@ def test_the_script_checks_the_table_through_new_and_cleans_up(host: tuple[Path,
 def test_a_clean_table_gives_rc_zero(host: tuple[Path, str]) -> None:
     home, new = host
     assert "VERIFY_RC=0" in _run_script(home, new, red=False).stdout.splitlines()
+
+
+# meiva:note
+# A `down` rerun after a failed stop finds the gateway's database already stopped, so the rows
+# cannot be read. The earlier pass of the same NEW, recorded as a receipt, stands in for the verdict
+# for the length of the window; anything else stays unevaluable.
+def test_a_passing_check_leaves_a_receipt_naming_new(host: tuple[Path, str]) -> None:
+    home, new = host
+    assert "VERIFY_RC=0" in _run_script(home, new, red=False).stdout.splitlines()
+    assert (home / ".meiva/updates/schedules-verified").read_text() == f"{new}\n"
+
+
+def test_a_red_check_leaves_no_receipt(host: tuple[Path, str]) -> None:
+    home, new = host
+    assert "VERIFY_RC=1" in _run_script(home, new, red=True).stdout.splitlines()
+    assert not (home / ".meiva/updates/schedules-verified").exists()
+
+
+def test_unreadable_rows_reuse_the_receipt_of_the_same_new(host: tuple[Path, str]) -> None:
+    home, new = host
+    _run_script(home, new, red=False)
+    proc = _run_script(home, new, red=False, unreadable=True)
+    lines = proc.stdout.splitlines()
+    assert "VERIFY_RC=0" in lines
+    assert any(line.startswith("REUSED:") and new in line for line in lines)
+
+
+def test_unreadable_rows_without_a_receipt_stay_unevaluable(host: tuple[Path, str]) -> None:
+    home, new = host
+    assert _run_script(home, new, red=False, unreadable=True).stdout.splitlines()[-1] == (
+        "VERIFY_RC=2"
+    )
+
+
+def test_a_receipt_of_another_new_is_not_reused(host: tuple[Path, str]) -> None:
+    home, new = host
+    receipt = home / ".meiva/updates/schedules-verified"
+    receipt.parent.mkdir(parents=True)
+    receipt.write_text("0" * 40 + "\n")
+    assert _run_script(home, new, red=False, unreadable=True).stdout.splitlines()[-1] == (
+        "VERIFY_RC=2"
+    )
+
+
+def test_a_receipt_older_than_the_window_is_not_reused(host: tuple[Path, str]) -> None:
+    home, new = host
+    _run_script(home, new, red=False)
+    receipt = home / ".meiva/updates/schedules-verified"
+    os.utime(receipt, (0, 0))
+    assert _run_script(home, new, red=False, unreadable=True).stdout.splitlines()[-1] == (
+        "VERIFY_RC=2"
+    )
 
 
 def test_a_host_that_has_not_fetched_new_is_reported_not_checked(host: tuple[Path, str]) -> None:

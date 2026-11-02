@@ -21,6 +21,7 @@ from .plan.host_commands import (
     stop_command,
     switch_command,
 )
+from .plan.host_failures import NOT_ATTEMPTED_WITHOUT_GATEWAY
 from .plan.host_probe import host_refusals, supports_stop_message
 from .plan.journal import HostEvidence, parse_evidence, stop_completed
 from .plan.old_target import (
@@ -151,6 +152,7 @@ def _stored_schedules(s: Session, args: argparse.Namespace, new: str) -> None:
             new=new,
             read_rows=program_text(VERIFY_SCRIPTS / "schedules_verify_read_rows.py"),
             check_rows=program_text(CHECK_ROWS_SCRIPT),
+            max_age_min=int(args.silence_hours * 60),
         ),
         effect=False,
     )
@@ -182,6 +184,8 @@ def _restart_wave(
             recovered.add(args.gateway)
         except FailedError as exc:
             s.say(f"recovery: {exc}")
+            s.say(f"recovery: runners not started: {NOT_ATTEMPTED_WITHOUT_GATEWAY}")
+            return frozenset(recovered)
     runners = [alias for alias in to_restart if alias != args.gateway]
     for alias, outcome in zip(
         runners, s.gather(runners, lambda alias: _restart(s, args, alias)), strict=True

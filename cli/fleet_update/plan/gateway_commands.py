@@ -42,10 +42,17 @@ def drift_command(verb: str) -> str:
 # NEW's offline check of the stored schedule table: the rows are read under the host's OLD
 # checkout and checked under a throwaway worktree of NEW, from a template the gateway runs. The
 # rows file holds every stored script, so the template quotes both programs into the command.
-def pre_verify_script(template: str, *, new: str, read_rows: str, check_rows: str) -> str:
+#
+# A passing check leaves a receipt naming NEW. When the rows cannot be read later (a `down` rerun
+# after a failed stop finds the gateway's database already stopped) the receipt stands in for the
+# verdict, but only for the same NEW and only while it is younger than `max_age_min` minutes.
+def pre_verify_script(
+    template: str, *, new: str, read_rows: str, check_rows: str, max_age_min: int
+) -> str:
     return template.format(
         home=HOME,
         new=new,
         read_rows=shlex.quote(read_rows),
         check_rows=shlex.quote(check_rows),
+        max_age_min=max_age_min,
     )

@@ -24,7 +24,7 @@ def schedule_check(output: str, *, allow_red: bool, new: str) -> ScheduleCheck:
         return ScheduleCheck(("stored schedule scripts: not checked (see above)",), None)
     code = next((line.partition("=")[2] for line in lines if line.startswith("VERIFY_RC=")), "?")
     if code == "0":
-        return ScheduleCheck((), None)
+        return ScheduleCheck(tuple(line for line in lines if line.startswith("REUSED")), None)
     reds = [line for line in lines if line.startswith(("RED ", "TOOL-ERROR"))]
     what = "red" if code == "1" else f"unevaluable (check exited {code})"
     detail = "\n  ".join(reds) or "no RED line: see the output above"

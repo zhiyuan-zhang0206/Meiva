@@ -3,7 +3,9 @@
 # start selection, prove the cluster, and end the window's silence. One host's converge failure
 # must not stop the rest: each start is attempted, the failures are collected with their step and
 # reason, and the caller reports them and exits 3. A half-up cluster is reported, never hidden
-# behind a single abort that leaves the remaining hosts untouched.
+# behind a single abort that leaves the remaining hosts untouched. The one dependency is the
+# gateway: a runner joins the cluster through it, so when it did not start the runners are not
+# attempted (each would only fail on the unreachable gateway) and the matrix says so.
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 
 from __future__ import annotations
@@ -15,7 +17,12 @@ from .choices import start_flags
 from .fleet_verify import verify
 from .oneshot import start_script
 from .plan.host_commands import INCOMPLETE
-from .plan.host_failures import HostFailure, outcome, start_failure
+from .plan.host_failures import (
+    NOT_ATTEMPTED_WITHOUT_GATEWAY,
+    HostFailure,
+    outcome,
+    start_failure,
+)
 from .plan.wave_order import start_order
 from .programs import VERIFY_SCRIPTS, program_text, run_silence
 from .session import FailedError, Session
@@ -74,7 +81,12 @@ def up(s: Session, args: argparse.Namespace) -> list[HostFailure]:
     else:
         started.add(args.gateway)
     runners = tuple(args.runner)
-    runner_outcomes = s.run_all(runners, lambda alias: _start_one(s, args, alias, window))
+    if gateway_failure is not None:
+        runner_outcomes = [
+            HostFailure(alias, "start", NOT_ATTEMPTED_WITHOUT_GATEWAY) for alias in runners
+        ]
+    else:
+        runner_outcomes = s.run_all(runners, lambda alias: _start_one(s, args, alias, window))
     for alias, failure in zip(runners, runner_outcomes, strict=True):
         if failure is not None:
             failures.append(failure)
