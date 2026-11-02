@@ -48,9 +48,10 @@ export function takeTicketFromLocation(runtime: LoginTicketRuntime): string | nu
   return ticket;
 }
 
+// meiva:note
 // A ticket the gateway refuses (spent, expired, unknown, locked out) or never
 // answers leaves the browser signed out; the session check that follows decides,
-// and the cluster password still works. This module loads only for a URL that
+// and the web login password still works. This module loads only for a URL that
 // carries a ticket, so the request is made here rather than as a method of the
 // `api` object every page ships.
 async function redeem(

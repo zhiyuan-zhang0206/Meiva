@@ -7,19 +7,18 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from base.host.net.predicates import is_loopback_host
 
 __all__ = ["gateway_hint_lines"]
 
 
 # meiva:note
-# The lines a ready gateway prints: the web login password's place, then its address.
-def gateway_hint_lines(*, host: str, port: int, home: Path) -> tuple[str, ...]:
+# The lines a ready gateway prints: how the web login password is set, then its address.
+def gateway_hint_lines(*, host: str, port: int) -> tuple[str, ...]:
     login = (
-        f"\n→ web login password: the MEIVA_CLUSTER_SECRET value in {home / '.env'} "
-        "(the CLI, SDK and local services present their own credentials)"
+        "\n→ web login password: set it with `meiva auth set-password --prompt` "
+        "(MEIVA_CLUSTER_SECRET is not a login password; the CLI, SDK and local services "
+        "present their own credentials)"
     )
     if is_loopback_host(host):
         return (

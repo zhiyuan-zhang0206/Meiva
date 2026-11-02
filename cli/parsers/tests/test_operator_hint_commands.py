@@ -24,6 +24,7 @@ from cli.parsers import build_parser
             "300",
         ],
         ["restart", "--only", "agent-host", "--mode", "smooth", "--timeout", "120"],
+        ["auth", "set-password", "--prompt"],
     ],
 )
 def test_hint_commands_parse(command: list[str]) -> None:

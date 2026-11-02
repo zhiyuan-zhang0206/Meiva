@@ -14,6 +14,7 @@ from base.packages.plugin_providers import build_model_catalog
 from gateway.app import create_app
 from gateway.http.middleware.error_handlers import cors_headers
 from gateway.http.model_catalog import load_model_catalog
+from gateway.tests.auth.gateway_auth import LOGIN_PASSWORD
 from gateway.tests.auth.gateway_config import (
     anonymous_gateway_client,
     gateway_test_app,
@@ -517,15 +518,13 @@ def _assert_preflight_and_bearer_isolation(
 def _assert_session_cookie_isolation(
     client: TestClient,
     *,
-    own_secret: str,
-    other_secret: str,
     own_origin: str,
     other_origin: str,
     max_age: int,
     secure: bool,
 ) -> None:
-    wrong_login = client.post("/api/auth/login", json={"password": other_secret})
-    login_resp = client.post("/api/auth/login", json={"password": own_secret})
+    wrong_login = client.post("/api/auth/login", json={"password": "not-the-login-password"})
+    login_resp = client.post("/api/auth/login", json={"password": LOGIN_PASSWORD})
     set_cookie = login_resp.headers["Set-Cookie"]
     cookie = login_resp.cookies[cookie_name()]
     assert (
@@ -603,8 +602,6 @@ def test_two_apps_isolate_gateway_config_across_auth_cors_mcp_and_webhooks(
             _assert_preflight_and_bearer_isolation(client_alpha, client_beta)
             _assert_session_cookie_isolation(
                 client_alpha,
-                own_secret="secret-alpha",  # noqa: S106
-                other_secret="secret-beta",  # noqa: S106
                 own_origin="https://alpha.example",
                 other_origin="http://beta.example:3000",
                 max_age=120,
@@ -612,8 +609,6 @@ def test_two_apps_isolate_gateway_config_across_auth_cors_mcp_and_webhooks(
             )
             _assert_session_cookie_isolation(
                 client_beta,
-                own_secret="secret-beta",  # noqa: S106
-                other_secret="secret-alpha",  # noqa: S106
                 own_origin="http://beta.example:3000",
                 other_origin="https://alpha.example",
                 max_age=300,

@@ -2,9 +2,11 @@
 //! without exposing the long-lived secret to remote web code.
 //!
 //! Desktop reads its local cluster secret from `$MEIVA_HOME/.env`; Android passes
-//! a secret held by its Keystore plugin. In both cases Rust sends the password
-//! directly to the gateway, installs only the returned HTTP-only cookie in the
-//! webview store, and loads the console after a successful exchange.
+//! a secret held by its Keystore plugin. In both cases Rust presents the secret
+//! to the gateway only as the bearer of a one-time login-ticket request (the
+//! secret is a bearer, not the web login password), redeems the ticket for the
+//! session cookie, installs only that HTTP-only cookie in the webview store, and
+//! loads the console after a successful exchange.
 
 #[cfg(desktop)]
 use std::env;
@@ -15,6 +17,7 @@ use std::time::Duration;
 use reqwest::blocking::Client;
 use reqwest::header::SET_COOKIE;
 use reqwest::redirect::Policy;
+use serde::Deserialize;
 use tauri::webview::{cookie, Cookie};
 #[cfg(target_os = "android")]
 use tauri::AppHandle;
@@ -32,7 +35,7 @@ const LOGIN_TIMEOUT: Duration = Duration::from_secs(10);
 /// A login failure that is safe to report without exposing the secret.
 #[derive(Debug)]
 pub enum LoginError {
-    /// The gateway received the secret and explicitly rejected it.
+    /// The gateway received the secret as a bearer and explicitly rejected it.
     Rejected,
     /// Transport, protocol, or cookie-installation failure.
     Unavailable(String),
@@ -43,7 +46,7 @@ impl LoginError {
     /// User-safe command error text; no variant carries the submitted secret.
     pub fn message(&self) -> String {
         match self {
-            Self::Rejected => "AUTH_FAILED: cluster secret was rejected".to_string(),
+            Self::Rejected => "AUTH_FAILED: the gateway rejected the cluster secret".to_string(),
             Self::Unavailable(message) => message.clone(),
         }
     }
@@ -124,22 +127,36 @@ pub async fn login(app: &AppHandle, endpoints: &Endpoints, secret: &str) -> Resu
     .map_err(LoginError::Unavailable)
 }
 
-/// Exchange the secret for a cookie. The response body is intentionally
-/// ignored; the status and cookie header are the complete login contract.
-fn login_cookie(gateway: &Url, secret: &str) -> Result<Cookie<'static>, LoginError> {
-    let login_url = gateway
-        .join("/api/auth/login")
-        .map_err(|err| LoginError::Unavailable(format!("invalid gateway login URL: {err}")))?;
-    let client = Client::builder()
-        .timeout(LOGIN_TIMEOUT)
-        // Never follow a redirect with the cluster secret in the POST body.
-        // The configured gateway endpoint itself must answer the login.
-        .redirect(Policy::none())
-        .build()
-        .map_err(|err| LoginError::Unavailable(format!("could not build login client: {err}")))?;
+/// The login-ticket answer. The gateway also reports the ticket's lifetime,
+/// which this one-shot exchange has no use for.
+#[derive(Deserialize)]
+struct TicketResponse {
+    ticket: String,
+}
+
+/// The gateway URL of `path`.
+fn endpoint(gateway: &Url, path: &str) -> Result<Url, LoginError> {
+    gateway
+        .join(path)
+        .map_err(|err| LoginError::Unavailable(format!("invalid gateway login URL: {err}")))
+}
+
+/// Read the ticket out of the gateway's login-ticket answer.
+fn ticket_from_body(body: &str) -> Result<String, LoginError> {
+    serde_json::from_str::<TicketResponse>(body)
+        .map(|answer| answer.ticket)
+        .map_err(|err| {
+            LoginError::Unavailable(format!("gateway login returned no login ticket: {err}"))
+        })
+}
+
+/// Ask the gateway for a one-time login ticket, presenting the secret as the
+/// bearer. Only this request carries the secret, and only as a header.
+fn issue_ticket(client: &Client, gateway: &Url, secret: &str) -> Result<String, LoginError> {
+    let url = endpoint(gateway, "/api/auth/login-ticket")?;
     let response = client
-        .post(login_url.as_str())
-        .json(&serde_json::json!({ "password": secret }))
+        .post(url.as_str())
+        .bearer_auth(secret)
         .send()
         .map_err(|err| LoginError::Unavailable(format!("gateway login request failed: {err}")))?;
     if matches!(response.status().as_u16(), 401 | 403) {
@@ -148,6 +165,32 @@ fn login_cookie(gateway: &Url, secret: &str) -> Result<Cookie<'static>, LoginErr
     if !response.status().is_success() {
         return Err(LoginError::Unavailable(format!(
             "gateway rejected login ({})",
+            response.status()
+        )));
+    }
+    let body = response.text().map_err(|err| {
+        LoginError::Unavailable(format!("gateway login answer unreadable: {err}"))
+    })?;
+    ticket_from_body(&body)
+}
+
+/// Exchange the ticket for the session cookie. The ticket is the credential
+/// here, so this request carries no bearer. The response body is intentionally
+/// ignored; the status and cookie header are the complete contract.
+fn redeem_ticket(
+    client: &Client,
+    gateway: &Url,
+    ticket: &str,
+) -> Result<Cookie<'static>, LoginError> {
+    let url = endpoint(gateway, "/api/auth/login-ticket/redeem")?;
+    let response = client
+        .post(url.as_str())
+        .json(&serde_json::json!({ "ticket": ticket }))
+        .send()
+        .map_err(|err| LoginError::Unavailable(format!("gateway login request failed: {err}")))?;
+    if !response.status().is_success() {
+        return Err(LoginError::Unavailable(format!(
+            "gateway rejected the login ticket ({})",
             response.status()
         )));
     }
@@ -162,6 +205,21 @@ fn login_cookie(gateway: &Url, secret: &str) -> Result<Cookie<'static>, LoginErr
             LoginError::Unavailable("gateway login returned a non-text cookie".to_string())
         })?;
     cookie_for_gateway(header, gateway)
+}
+
+/// Exchange the secret for a session cookie: a one-time login ticket asked for
+/// with the secret as the bearer, then redeemed. This is the exchange `meiva
+/// start`'s one-time browser link makes; the secret is not a login password.
+fn login_cookie(gateway: &Url, secret: &str) -> Result<Cookie<'static>, LoginError> {
+    let client = Client::builder()
+        .timeout(LOGIN_TIMEOUT)
+        // Never follow a redirect with the cluster secret in a request header.
+        // The configured gateway endpoint itself must answer the login.
+        .redirect(Policy::none())
+        .build()
+        .map_err(|err| LoginError::Unavailable(format!("could not build login client: {err}")))?;
+    let ticket = issue_ticket(&client, gateway, secret)?;
+    redeem_ticket(&client, gateway, &ticket)
 }
 
 /// Attach the response cookie to the gateway's exact host before handing it to
@@ -246,9 +304,9 @@ fn parse_secret(text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::cookie_for_gateway;
     #[cfg(desktop)]
     use super::parse_secret;
+    use super::{cookie_for_gateway, endpoint, ticket_from_body, LoginError};
     use tauri::webview::cookie::SameSite;
     use tauri::Url;
 
@@ -287,6 +345,39 @@ mod tests {
     #[test]
     fn absent_key_yields_nothing() {
         assert!(parse_secret("MEIVA_DB_URL=postgresql://x\n").is_none());
+    }
+
+    #[test]
+    fn the_ticket_is_read_from_the_gateway_answer() {
+        let body = r#"{"ticket":"ticket.human-ab.cd","expires_in_seconds":120}"#;
+        assert_eq!(ticket_from_body(body).unwrap(), "ticket.human-ab.cd");
+    }
+
+    #[test]
+    fn an_answer_without_a_ticket_is_unavailable_not_rejected() {
+        for body in [r#"{"ok":true}"#, "not json", r#"{"ticket":7}"#] {
+            assert!(matches!(
+                ticket_from_body(body),
+                Err(LoginError::Unavailable(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn the_login_endpoints_hang_off_the_gateway_origin() {
+        let gateway = Url::parse("https://meiva.example.com:8000/").unwrap();
+        assert_eq!(
+            endpoint(&gateway, "/api/auth/login-ticket")
+                .unwrap()
+                .as_str(),
+            "https://meiva.example.com:8000/api/auth/login-ticket"
+        );
+        assert_eq!(
+            endpoint(&gateway, "/api/auth/login-ticket/redeem")
+                .unwrap()
+                .as_str(),
+            "https://meiva.example.com:8000/api/auth/login-ticket/redeem"
+        );
     }
 
     #[test]

@@ -47,8 +47,9 @@ Group-membership and hidden-field tables remain disjoint, as the grouping test
 asserts.
 
 The hidden list expresses which fields belong outside routine panel editing.
-`MEIVA_CLUSTER_SECRET` is a read-only human/control-plane bearer; its dedicated
-rotation requires issuing fresh capability bundles to remote units afterwards.
+`MEIVA_CLUSTER_SECRET` is a read-only human/control-plane bearer (not the web login
+password, which `meiva auth set-password` sets); its dedicated
+rotation touches no remote unit (the telemetry token is an independent random value).
 The two hidden gateway retry fields tune the SDK transport and remain available
 through ordinary config tools.
 The panel preserves their existing overrides rather than choosing new values.

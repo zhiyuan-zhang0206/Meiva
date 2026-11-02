@@ -17,7 +17,7 @@ gateway-class machine API token, the ops daemon and the agent host the runner-cl
 token (agent children inherit it), so the gateway's authenticated `/ops` dials are
 accepted. The test process reaches the gateway with the human secret as a Bearer header
 (the autouse `gateway_client_credentials` fixture, scoped to the gateway's origin) and
-every browser context the suite creates logs in through `/api/auth/login` (`install_browser_login`), as a user's browser does. No product admission rule is
+every browser context the suite creates logs in through a one-time login ticket the same bearer asks for (`install_browser_login`), as the link `meiva start` prints does. No product admission rule is
 bypassed.
 
 

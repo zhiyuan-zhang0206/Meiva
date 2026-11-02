@@ -107,6 +107,6 @@ def link_lines(base: str, ticket: str) -> tuple[str, ...]:
 
 
 # meiva:note
-# A gateway failure is reported and never fails the start: the web password still works.
+# A gateway failure is reported and never fails the start: the web login password (`meiva auth set-password`), once set, still works.
 def mint_failure_line(reason: str) -> str:
     return f"\n  ! could not mint a one-time UI login link: {reason}"

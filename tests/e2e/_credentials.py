@@ -163,21 +163,28 @@ def _gateway_serving() -> bool:
         return False
 
 
+# meiva:note
+# Make every context this browser creates start logged in, as a user's browser is.
+#
+# The login is the link `meiva start` prints: the operator secret asks for a one-time ticket
+# and the context redeems it. The gateway sets its session cookie on the redemption; it lives
+# in the context's cookie jar and rides with the page's API calls. A context created while
+# no gateway serves (a test that stubs the API and never starts one) has nothing to
+# log in to and is left alone; once the gateway serves, a refused login fails loudly.
 def install_browser_login(browser: Browser) -> None:
-    """Make every context this browser creates start logged in, as a user's browser is.
-
-    The gateway sets its session cookie on the login response; it lives in the
-    context's cookie jar and rides with the page's API calls. A context created while
-    no gateway serves (a test that stubs the API and never starts one) has nothing to
-    log in to and is left alone; once the gateway serves, a refused login fails loudly.
-    """
     create = browser.new_context
 
     def new_context(*args: Any, **kwargs: Any) -> BrowserContext:
         context = create(*args, **kwargs)
         if _gateway_serving():
+            issued = context.request.post(
+                f"{GATEWAY_URL}/api/auth/login-ticket",
+                headers=bearer_header(current_credentials().secret),
+            )
+            assert issued.ok, f"e2e login ticket refused: {issued.status}"
             login = context.request.post(
-                f"{GATEWAY_URL}/api/auth/login", data={"password": current_credentials().secret}
+                f"{GATEWAY_URL}/api/auth/login-ticket/redeem",
+                data={"ticket": issued.json()["ticket"]},
             )
             assert login.ok, f"e2e browser login refused: {login.status}"
         return context

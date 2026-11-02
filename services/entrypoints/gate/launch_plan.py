@@ -45,7 +45,7 @@ def app_port_of(configured: int | None, *, entry_port: int) -> int:
 # meiva:note
 # The gateway API base the gate probes and the login page posts to.
 #
-# The host must be one the user's browser can dial: the login page posts the cluster secret
+# The host must be one the user's browser can dial: the login page posts the web login password
 # to this origin, and a remote browser resolving `127.0.0.1` would hit itself. The host is the
 # machine's declared owner host (`MEIVA_MACHINE_HOST`, else `localhost`), the same operator
 # address `meiva.ui.show` hands the user for direct page URLs. The server-side auth probe

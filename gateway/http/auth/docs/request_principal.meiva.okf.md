@@ -14,23 +14,26 @@ credential validation. A cluster bearer is one shared cluster principal, not a
 different principal per tool label. Validated browser sessions authenticate that
 same stable cluster administrator, but only while the credential that minted
 them is current ([[web-sessions.meiva.okf.md]]); rotating a cookie does not
-change principal.
+change principal. A browser session is minted by the web login password (its own
+credential, stored only as a salted hash), by a one-time login ticket issued to the
+cluster secret, or by a unit's runner token; the cluster secret itself is never a
+login password.
 The API always authenticates, so a verified principal exists on every request that passes the middleware. Caller/source JSON cannot bind one.
 
 Alongside that authorization principal, the middleware stores the narrower
 credential fact used for inbound audit rows: `cluster_bearer` (the human
 secret), `machine_token:<class>` (the active write generation's machine API
-token, `cluster_credential`), `user_session` (a browser session the human secret
-minted) or `machine_session:runner` (one a runner token minted, a unit's managed
+token, `cluster_credential`), `user_session` (a browser session the web login
+password or a ticket issued to the human secret minted) or `machine_session:runner` (one a runner token minted, a unit's managed
 browser). Both bearers authenticate the
 same cluster administrator; a pending generation's token never matches. Scoped webhook boundaries establish their own
 `webhook:<provider>` fact after authenticating outside the
 cluster middleware; `/mcp` is not one of them, it authenticates in the cluster
 middleware like any API route. The fact is never copied from request JSON, and it grants
-authority in one place only: the login-ticket route mints a credential bound to
-no write generation, so `require_human_credential` admits only the human facts
-(`cluster_bearer`, `user_session`, `trusted_network`) there and answers 403 to a generation-bound
-one.
+authority in two places only: the login-ticket route mints, and `PUT /api/auth/password`
+sets, a credential bound to no write generation, so `require_human_credential` admits only
+the human facts (`cluster_bearer`, `user_session`, `trusted_network`) on both and answers
+403 to a generation-bound one.
 
 Supplied keys must contain 1 to 128 characters, and every key arrives with
 `Idempotency-Scope: principal-v1`: a key without the header, or with another

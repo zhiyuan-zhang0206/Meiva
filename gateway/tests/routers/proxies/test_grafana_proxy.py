@@ -29,6 +29,7 @@ import pytest
 
 from gateway.routers.proxies import grafana as grafana_router
 from gateway.tests.agents.gateway_auth import without_credentials
+from gateway.tests.auth.gateway_auth import login_with_ticket
 from gateway.tests.auth.gateway_config import gateway_config_fields, gateway_test_client
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
@@ -219,7 +220,7 @@ def test_proxy_cookie_post_from_gateway_origin_passes(grafana_server: int) -> No
         ),
         gateway_test_client() as client,
     ):
-        login = client.post("/api/auth/login", json={"password": _SECRET})
+        login = login_with_ticket(client, _SECRET)
         assert login.status_code == 200
         resp = client.post(
             "/grafana/api/ds/query",

@@ -14,6 +14,7 @@
 # - ``host`` — init/start/stop/restart/status/converge/firewall
 # - ``observability`` — lgtm/trace
 # - ``cluster`` — the whole-cluster verbs
+# - ``auth`` — the web login password
 # - ``cli.commands.agents.parsers`` — agents + notices, beside their implementations
 # - ``cli.commands.agents.impersonation_parsers`` — external sessions and relays
 # - ``backup`` — WAL-G physical backups
@@ -31,6 +32,7 @@ from cli.commands.agents.parsers import add_agents_parser
 from cli.commands.extensions.parsers.mcp import add_mcp_parser, add_memory_parser
 from cli.commands.extensions.parsers.packages import add_packages_parser
 from cli.commands.extensions.parsers.plugins import add_plugins_parser, add_skill_parser
+from cli.parsers.auth import add_auth_parser
 from cli.parsers.backup import add_backup_parser
 from cli.parsers.cluster import add_cluster_parser
 from cli.parsers.computer import add_computer_parser
@@ -79,6 +81,7 @@ def build_parser(
     add_converge_parser(sub)
     add_firewall_parser(sub)
     add_permissions_parser(sub)
+    add_auth_parser(sub)
     add_lgtm_parser(sub, retained_children=retained_children)
     add_cluster_parser(sub)
     add_computer_parser(sub)

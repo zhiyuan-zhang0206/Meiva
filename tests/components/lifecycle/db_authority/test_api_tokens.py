@@ -45,8 +45,10 @@ from base.paths.tests.homes import point_home
 from cli.commands.data_plane import bringup
 from cli.commands.data_plane.instance.launch_delivery import LaunchDelivery
 from gateway.http.auth import request_principal
+from gateway.http.auth.login_password_store import LoginPasswords, login_password_path
 from gateway.http.auth.request_principal import cluster_credential
 from gateway.http.auth.webhook import authenticate_webhook
+from gateway.tests.auth.gateway_auth import LOGIN_PASSWORD, login_with_ticket
 from services.agent_runner.agent_ops import boot as ops_boot
 from services.supervision.roster.service_spec import ServiceSpec, api_access
 from tests.fixtures.gateway_config import anonymous_gateway_client, gateway_test_app
@@ -207,6 +209,9 @@ def test_login_admits_the_active_runner_token_for_the_managed_browser(
     tokens = _tokens(gateway).api
     with anonymous_gateway_client(machine=machine_identity) as client:
         assert _login(client, tokens.gateway) == 401
+        # meiva:note
+        # The human cluster secret is a bearer, never a login password.
+        assert _login(client, _HUMAN) == 401
         response = client.post("/api/auth/login", json={"password": tokens.runner})
         assert response.status_code == 200 and response.cookies[cookie_name()]
         _unadmit(gateway)
@@ -233,6 +238,29 @@ def test_only_the_human_secret_issues_a_login_ticket(
         assert client.post(ticket_path, headers=bearer_header(_HUMAN)).status_code == 200
 
 
+# meiva:note
+# A write generation's tokens, and a managed-browser session one of them minted,
+# cannot choose what a browser logs in with: the password outlives every generation.
+def test_only_a_human_credential_sets_the_login_password(
+    gateway_data_plane: None, gateway: Path, machine_identity: MachineIdentityReader
+) -> None:
+    tokens = _tokens(gateway).api
+    path = "/api/auth/password"
+    body = {"password": LOGIN_PASSWORD}
+    with anonymous_gateway_client(machine=machine_identity) as client:
+        for machine in (tokens.runner, tokens.gateway):
+            assert client.put(path, json=body, headers=bearer_header(machine)).status_code == 403
+        runner_cookie = client.post("/api/auth/login", json={"password": tokens.runner}).cookies[
+            cookie_name()
+        ]
+        client.cookies.clear()
+        cookie_headers = {"Cookie": f"{cookie_name()}={runner_cookie}"}
+        assert client.put(path, json=body, headers=cookie_headers).status_code == 403
+        assert not login_password_path(gateway).exists()
+        assert client.put(path, json=body, headers=bearer_header(_HUMAN)).status_code == 200
+        assert _login(client, LOGIN_PASSWORD) == 200
+
+
 def _cookie_authenticates(client: TestClient, cookie: str) -> tuple[int, bool]:
     """(`GET /api/agents` status, `/api/auth/check` verdict) presenting only `cookie`."""
     client.cookies.clear()
@@ -242,17 +270,18 @@ def _cookie_authenticates(client: TestClient, cookie: str) -> tuple[int, bool]:
     return agents, check
 
 
+# meiva:note
+# A browser a ticket logged in as the human secret stays authenticated while the secret
+# holds, but not past a rotation of the secret itself: the restarted gateway admits
+# only sessions its current secret minted.
 def test_a_human_minted_session_dies_with_the_rotated_secret(
     gateway_data_plane: None,
     gateway: Path,
     machine_identity: MachineIdentityReader,
 ) -> None:
-    """A browser logged in with the human secret stays authenticated while the secret
-    holds, but not past a rotation of the secret itself: the restarted gateway admits
-    only sessions its current secret minted."""
     del gateway
     with anonymous_gateway_client(machine=machine_identity) as client:
-        cookie = client.post("/api/auth/login", json={"password": _HUMAN}).cookies[cookie_name()]
+        cookie = login_with_ticket(client, _HUMAN).cookies[cookie_name()]
         assert _cookie_authenticates(client, cookie) == (200, True)
     with anonymous_gateway_client(
         machine=machine_identity, cluster_secret="rotated-" + "r" * 40
@@ -267,7 +296,7 @@ def test_a_session_cookie_names_its_credential_only_through_a_keyed_mac(
     holder brute-force the human secret offline: it is an HMAC under the
     gateway's private session key, never a plain digest of the credential."""
     with anonymous_gateway_client(machine=machine_identity) as client:
-        cookie = client.post("/api/auth/login", json={"password": _HUMAN}).cookies[cookie_name()]
+        cookie = login_with_ticket(client, _HUMAN).cookies[cookie_name()]
         mint, _, _random = cookie.partition(".")
         assert mint.startswith("human-")
         digest = api.token_digest(_HUMAN)
@@ -279,7 +308,7 @@ def test_a_session_cookie_names_its_credential_only_through_a_keyed_mac(
         # The mint depends on the key: a new key mints the same credential
         # differently and ends every session the old key bound.
         key.unlink()
-        renewed = client.post("/api/auth/login", json={"password": _HUMAN}).cookies[cookie_name()]
+        renewed = login_with_ticket(client, _HUMAN).cookies[cookie_name()]
         assert renewed.partition(".")[0] not in (mint, "")
         assert _cookie_authenticates(client, cookie) == (401, False)
         assert _cookie_authenticates(client, renewed) == (200, True)
@@ -291,23 +320,30 @@ def test_a_session_records_which_credential_minted_it(
     """Inbound provenance tells a machine-minted browser session from a human one."""
     runner = _tokens(gateway).api.runner
     with anonymous_gateway_client(machine=machine_identity) as client:
-        human = client.post("/api/auth/login", json={"password": _HUMAN}).cookies[cookie_name()]
+        human = login_with_ticket(client, _HUMAN).cookies[cookie_name()]
+        client.cookies.clear()
+        assert client.put(
+            "/api/auth/password", json={"password": LOGIN_PASSWORD}, headers=bearer_header(_HUMAN)
+        ).is_success
+        password = client.post("/api/auth/login", json={"password": LOGIN_PASSWORD}).cookies[
+            cookie_name()
+        ]
         client.cookies.clear()
         machine = client.post("/api/auth/login", json={"password": runner}).cookies[cookie_name()]
         sessions = client.app.state.sessions
         keys: request_principal.SessionKeys = client.app.state.session_keys
-        assert (
-            request_principal.current_session_fact(
-                sessions, keys, human, _HUMAN, home=gateway, now=datetime.now(UTC)
+        passwords: LoginPasswords = client.app.state.login_passwords
+        facts = {
+            name: request_principal.current_session_fact(
+                sessions, keys, passwords, cookie, _HUMAN, home=gateway, now=datetime.now(UTC)
             )
-            == "user_session"
-        )
-        assert (
-            request_principal.current_session_fact(
-                sessions, keys, machine, _HUMAN, home=gateway, now=datetime.now(UTC)
-            )
-            == "machine_session:runner"
-        )
+            for name, cookie in (("human", human), ("password", password), ("machine", machine))
+        }
+        assert facts == {
+            "human": "user_session",
+            "password": "user_session",
+            "machine": "machine_session:runner",
+        }
 
 
 def test_the_sessions_list_shows_only_sessions_that_authenticate(
@@ -321,7 +357,7 @@ def test_the_sessions_list_shows_only_sessions_that_authenticate(
     with anonymous_gateway_client(machine=machine_identity) as client:
         machine = client.post("/api/auth/login", json={"password": runner}).cookies[cookie_name()]
         client.cookies.clear()
-        human = client.post("/api/auth/login", json={"password": _HUMAN}).cookies[cookie_name()]
+        human = login_with_ticket(client, _HUMAN).cookies[cookie_name()]
         client.cookies.clear()
         client.app.state.sessions.create(new_session_id(), 3600, "legacy-browser", "10.0.0.9")
 

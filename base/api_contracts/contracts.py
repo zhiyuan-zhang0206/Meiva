@@ -50,6 +50,10 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="Grafana Alertmanager webhook — upsert per (fingerprint, starts_at)",
     ),
     ("POST", "/api/auth/login"): RouteContract(note="login — repeats just mint a fresh cookie"),
+    ("PUT", "/api/auth/password"): RouteContract(
+        note="set the web login password — a repeat stores the same password under a fresh salt "
+        "and ends the same password sessions"
+    ),
     ("POST", "/api/auth/login-ticket"): RouteContract(
         note="issue a one-time login ticket — every repeat is a distinct short-lived row"
     ),

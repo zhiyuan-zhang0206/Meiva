@@ -2,12 +2,12 @@
 # meiva:note
 # Rotate the gateway's human cluster secret (the control-plane bearer).
 #
-# ``MEIVA_CLUSTER_SECRET`` authenticates human and operator callers of the gateway
-# API and the frontend login. Remote units never hold it: they authenticate with
-# their write generation's machine API token and relay telemetry with a token of
-# their own. The rotation replaces only the operator bearer and ends the browser
-# sessions bound to it; it changes neither the telemetry token nor any remote
-# unit's capability, and never Postgres, Redis, their ACLs or PgBouncer.
+# ``MEIVA_CLUSTER_SECRET`` is the operator bearer of the gateway API and issues the one-time login
+# tickets, never the web login password. Remote units never hold it: they authenticate with
+# their write generation's machine API token and relay telemetry with a token of their own.
+# The rotation replaces only the operator bearer and ends the browser sessions a login ticket
+# opened; it changes neither the telemetry token, any remote unit's capability nor the web login
+# password, and never Postgres, Redis, their ACLs or PgBouncer.
 #
 # The script drives ``advance``, which journals every step before its effect and
 # never records a secret (only fingerprints):
@@ -239,8 +239,9 @@ def main(argv: list[str] | None = None) -> int:
     print("✓ the gateway .env holds the new bearer; the logical-backup passphrase is pinned")
     print(f"  ({passphrase.pin_path(home)} is backup-critical: keep it with the backup keys).")
     print("NEXT: restart the gateway (`meiva start`). No remote unit is affected: its capability")
-    print("holds no human secret and its telemetry token is independent. New browser logins use")
-    print("the new secret.")
+    print("holds no human secret and its telemetry token is independent. Browser sessions a")
+    print("`meiva start` link opened end with the old secret; the web login password")
+    print("(`meiva auth set-password`) is unaffected.")
     return 0
 
 

@@ -1,10 +1,11 @@
-"""Server-bound credential identity and principal-scoped idempotency keys.
-
-Caller labels are deliberately absent. A shared bearer authenticates exactly
-one cluster administrator, not separate tools. Browser sessions minted from the
-same cluster login authenticate that administrator too, but only while the
-credential that minted them is still current (`session_mints`).
-"""
+# meiva:note
+# Server-bound credential identity and principal-scoped idempotency keys.
+#
+# Caller labels are deliberately absent. A shared bearer authenticates exactly
+# one cluster administrator, not separate tools. Browser sessions authenticate that
+# administrator too (a web login password, or a one-time ticket the cluster secret
+# issued), but only while the credential that minted them is still current
+# (`session_mints`).
 
 from __future__ import annotations
 
@@ -24,6 +25,8 @@ from base.api_contracts.idempotency import PRINCIPAL_SCOPE as PRINCIPAL_SCOPE
 from base.api_contracts.idempotency import SCOPE_HEADER as SCOPE_HEADER
 from base.api_contracts.idempotency import stored_key
 from base.host.db_authority.api import AcceptanceCache
+from gateway.http.auth.login_password import verify_password
+from gateway.http.auth.login_password_store import LoginPasswords
 from gateway.http.auth.session_store import SessionStore, session_mint
 
 
@@ -66,18 +69,26 @@ def cluster_credential(
 # ── browser sessions bound to their minting credential ─────────────────────
 #
 # A session id is `<mint>.<random>`. The mint names the credential that logged
-# the browser in: `human-<mac>` (the human cluster secret) or `runner-<mac>` (a
+# meiva:note
+# the browser in: `password-<mac>` (the web login password), `human-<mac>` (the
+# human cluster secret, which only a login ticket binds to) or `runner-<mac>` (a
 # write generation's runner API token, which a unit's managed browser
 # presents). `<mac>` is HMAC-SHA256 under this gateway's private session key
-# over the credential's SHA-256 digest, so a cookie carries no form of the
-# credential that can be brute-forced offline. A session authenticates only
-# while its mint is one of the CURRENT credentials' mints: a rotated human
-# secret ends every session that credential minted at once, with no revocation
+# meiva:note
+# over the credential's SHA-256 digest (for the password, the digest of its
+# stored record), so a cookie carries no form of the credential that can be
+# brute-forced offline. A session authenticates only while its mint is one of
+# the CURRENT credentials' mints: a rotated human secret or a password set
+# again ends every session that credential minted at once, with no revocation
 # step.
 
 SESSION_KEY_NAME = "web-session.key"
 _SESSION_KEY = re.compile(r"^[0-9a-f]{64}$")
-_MINT_FACTS = {"human": "user_session", "runner": "machine_session:runner"}
+_MINT_FACTS = {
+    "password": "user_session",
+    "human": "user_session",
+    "runner": "machine_session:runner",
+}
 
 
 def session_key_path(home: Path) -> Path:
@@ -138,45 +149,78 @@ def _mint(key: bytes, kind: str, credential_digest: str) -> str:
     return f"{kind}-{mac.hexdigest()[:32]}"
 
 
+# meiva:note
+# The mint of the human cluster secret: the one a login ticket binds to.
+#
+# The secret is never a login password; a session bound to this mint opens only by redeeming
+# a ticket issued to a caller that already presents the secret. Mints this gateway's session
+# key on first use.
+def human_mint(keys: SessionKeys, secret: str, *, home: Path) -> str:
+    from base.host.db_authority.api import token_digest
+
+    root = home.resolve()
+    if not secret:
+        raise RuntimeError("the gateway has no cluster secret to bind a login ticket to")
+    key = keys.key(root, create=True)
+    if key is None:
+        raise RuntimeError(f"{session_key_path(root)} vanished while minting a session")
+    return _mint(key, "human", token_digest(secret))
+
+
+# meiva:note
+# The mint of the credential a login `password` presents, else None.
+#
+# The web login password, or the ACTIVE generation's runner API token (a unit's managed
+# browser holds no human password). The cluster secret and the gateway-class token never log
+# a browser in. A gateway with no password set refuses every password. The runner token is
+# tried first: it costs one digest, and a managed browser's login never pays for the
+# password's key derivation. Mints this gateway's session key on first use.
+#
+# Raises:
+#     PasswordRecordError: the password record on disk is damaged.
 def login_mint(
     keys: SessionKeys,
+    passwords: LoginPasswords,
     password: str,
-    secret: str,
     *,
     home: Path,
     cache: AcceptanceCache | None = None,
 ) -> str | None:
-    """The mint of the credential a login `password` presents, else None.
-
-    The human secret, or the ACTIVE generation's runner API token (a unit's
-    managed browser holds no human secret). The gateway-class token never logs
-    a browser in. Mints this gateway's session key on first use.
-    """
-    from base.host.db_authority.api import acceptance, bearer_class, token_digest
+    from base.host.db_authority.api import acceptance, bearer_class
 
     root = home.resolve()
-    if secret and hmac.compare_digest(password, secret):
-        kind, digest = "human", token_digest(secret)
-    else:
-        accepted = acceptance(root, cache=cache)
-        if bearer_class(f"Bearer {password}", accepted) != "runner":
-            return None
+    accepted = acceptance(root, cache=cache)
+    if bearer_class(f"Bearer {password}", accepted) == "runner":
         kind, digest = "runner", accepted["runner"]
+    else:
+        stored = passwords.current(root)
+        if stored is None or not verify_password(stored.record, password):
+            return None
+        kind, digest = "password", stored.digest
     key = keys.key(root, create=True)
     if key is None:
         raise RuntimeError(f"{session_key_path(root)} vanished while minting a session")
     return _mint(key, kind, digest)
 
 
+# meiva:note
+# {mint: credential fact} of the credentials that may back a session now.
+#
+# The fact is `user_session` for the web login password and for the human secret (a ticket's
+# session) and `machine_session:runner` for the active generation's runner token. Empty while
+# no session key exists; the password mint is absent while no password is set and the runner
+# mint while no generation is active (a fence).
+#
+# Raises:
+#     PasswordRecordError: the password record on disk is damaged.
 def session_mints(
-    keys: SessionKeys, secret: str, *, home: Path, cache: AcceptanceCache | None = None
+    keys: SessionKeys,
+    passwords: LoginPasswords,
+    secret: str,
+    *,
+    home: Path,
+    cache: AcceptanceCache | None = None,
 ) -> dict[str, str]:
-    """{mint: credential fact} of the credentials that may back a session now.
-
-    The fact is `user_session` for the human secret and `machine_session:runner`
-    for the active generation's runner token. Empty while no session key
-    exists; the runner mint is absent while no generation is active (a fence).
-    """
     from base.host.db_authority.api import acceptance, token_digest
 
     root = home.resolve()
@@ -184,6 +228,9 @@ def session_mints(
     if key is None:
         return {}
     mints: dict[str, str] = {}
+    stored = passwords.current(root)
+    if stored is not None:
+        mints[_mint(key, "password", stored.digest)] = _MINT_FACTS["password"]
     if secret:
         mints[_mint(key, "human", token_digest(secret))] = _MINT_FACTS["human"]
     runner = acceptance(root, cache=cache).get("runner")
@@ -195,23 +242,23 @@ def session_mints(
 TRUSTED_NETWORK_FACT = "trusted_network"
 
 # meiva:note
-# The facts of a human caller: the human cluster secret's bearer and the sessions it
-# minted, and a request admitted without a credential on a trusted network. Every other
-# fact (`machine_token:<class>`, `machine_session:runner`) is bound to a write generation
-# and dies with it.
+# The facts of a human caller: the human cluster secret's bearer, the sessions a login
+# password or a ticket minted, and a request admitted without a credential on a trusted
+# network. Every other fact (`machine_token:<class>`, `machine_session:runner`) is bound to a
+# write generation and dies with it.
 HUMAN_CREDENTIAL_FACTS = frozenset({"cluster_bearer", _MINT_FACTS["human"], TRUSTED_NETWORK_FACT})
 
 
 # meiva:note
 # Route dependency: 403 unless a human credential authenticated the request. It guards routes
-# that mint a credential outliving any write generation (login tickets).
+# that mint or set a credential outliving any write generation (login tickets, the login password).
 def require_human_credential(request: Request) -> None:
     from fastapi import HTTPException
 
     if getattr(request.state, "source_verified_by", None) not in HUMAN_CREDENTIAL_FACTS:
         raise HTTPException(
             status_code=403,
-            detail="requires the human cluster secret, a session it minted or a trusted network; "
+            detail="requires the human cluster secret, a human login session or a trusted network; "
             "a write generation's credential cannot manage credentials that outlive it",
         )
 
@@ -219,6 +266,7 @@ def require_human_credential(request: Request) -> None:
 def current_session_fact(
     sessions: SessionStore,
     keys: SessionKeys,
+    passwords: LoginPasswords,
     session_id: str | None,
     secret: str,
     *,
@@ -232,7 +280,7 @@ def current_session_fact(
     mint = None if session_id is None else session_mint(session_id)
     if mint is None:
         return None
-    mints = session_mints(keys, secret, home=home, cache=cache)
+    mints = session_mints(keys, passwords, secret, home=home, cache=cache)
     if not sessions.is_valid(session_id, admitted=mints, now=now):
         return None
     return mints[mint]

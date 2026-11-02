@@ -79,7 +79,8 @@ starts reconcile the running cluster against the edited file.
 
 > Every cluster authenticates its API with the cluster secret that `meiva init` mints into
 > `~/.meiva/.env` (`MEIVA_CLUSTER_SECRET`); the CLI, SDK and local services present their own
-> credentials automatically. It is also the password of the web UI login. Whether other machines
+> credentials automatically. It is not the password of the web UI login: that is a separate
+> password you set with `meiva auth set-password --prompt`. Whether other machines
 > can reach the cluster is a separate setting: a single box listens on loopback only until you
 > declare a private-network address (`--machine-host` / `MEIVA_MACHINE_HOST`). To replace the secret
 > of a running cluster use
@@ -103,8 +104,8 @@ meiva status
 Open the one-time login link that `meiva start` printed in its ready output (it looks like
 `http://localhost:3000/#ticket=...`, is valid for two minutes and works once), and chat with
 your agent in the Web UI. If the link expired, or `meiva start` ran without a terminal and
-printed none, open **http://localhost:3000** and log in with the `MEIVA_CLUSTER_SECRET` value
-from `~/.meiva/.env` instead.
+printed none, run `meiva auth set-password --prompt` once, open **http://localhost:3000** and
+log in with that password instead.
 
 Or use the command line:
 

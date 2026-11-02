@@ -20,6 +20,7 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from gateway.agents import router as agent_router
 from gateway.app import lifespan
 from gateway.tests.agents.gateway_auth import without_credentials
+from gateway.tests.auth.gateway_auth import login_with_ticket
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from gateway.tests.auth.sdk_transport import AppTransport, wired_sdk
 from gateway.tests.lifecycle.creation.test_guarded_creation import PATH, SECRET
@@ -142,7 +143,7 @@ def test_bearer_and_cookie_share_principal_but_revocation_blocks_replay(
     client: GatewayTestClient, db_conn: psycopg.Connection, wire: AppTransport
 ) -> None:
     original = sdk()
-    login = client.post("/api/auth/login", json={"password": SECRET})
+    login = login_with_ticket(client, SECRET)
     assert login.status_code == 200
     client.headers.pop("Authorization")
     assert sdk() == original

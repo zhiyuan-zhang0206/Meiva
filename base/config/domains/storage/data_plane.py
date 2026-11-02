@@ -344,7 +344,7 @@ class DataPlaneSettings(EnvSettings):
         alias="MEIVA_CLUSTER_SECRET",
         repr=False,
         description=(
-            "The gateway's human/control-plane bearer (gateway API, frontend login). "
+            "The gateway's human/control-plane bearer (gateway API, one-time login tickets; never the web login password). "
             "It stays on the gateway: machine callers present their write "
             "generation's API token (an agent or runner process without one fails "
             "instead of presenting this secret), and remote units never receive or "

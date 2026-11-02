@@ -6,7 +6,7 @@ internal data plane always authenticates, whatever the bearer
 
 | Authority | Holder | Purpose |
 |---|---|---|
-| `MEIVA_CLUSTER_SECRET` | Gateway only | Human/operator bearer for the gateway API and frontend login (never served by bootstrap, never held by a remote unit); required on every gateway home, so the user-facing API and `/ops` always authenticate (listener reach follows `MEIVA_MACHINE_HOST`: loopback-only unless a private-network address is declared) |
+| `MEIVA_CLUSTER_SECRET` | Gateway only | Human/operator bearer for the gateway API and for issuing one-time login tickets, never the web login password (never served by bootstrap, never held by a remote unit); required on every gateway home, so the user-facing API and `/ops` always authenticate (listener reach follows `MEIVA_MACHINE_HOST`: loopback-only unless a private-network address is declared) |
 | `MEIVA_API_TOKEN` (launch environment; also `$MEIVA_HOME/run/meiva-root/manifests.json`, 0600) | Each launched service, admitted operator processes | The write generation's machine API token of the process's class: the gateway admits the active generation's tokens, a unit's `/ops` its generation's two; delivered to every launched service. The manifest copy is root's own record of what it launched — it persists until the next start rewrites it, and is inert once a release fence revokes the generation |
 | `$MEIVA_HOME/backups/logical-backup.passphrase` (0600) | Gateway home | The logical-backup passphrase: minted and pinned at birth (a home born earlier carries `sha256(secret)`, pinned once), never derived and never changed by a secret rotation ([decision](../../decisions/data/backup/2026-09-28-backup-passphrase-minted-at-birth.md)); **backup-critical**: it is the only key to every logical backup |
 | OS user over the owner-only socket (`peer`) | Gateway host | Postgres administrator: provisioning, migrations (acting as the NOLOGIN schema owner), grants, the authority invariant |
@@ -121,4 +121,4 @@ a home without a pin pins `sha256(secret)` here), and only then writes the new
 secret into the gateway `.env`; a re-run
 resumes an interrupted rotation from its journal. Restart the gateway. No remote
 unit needs a new capability bundle: its machine API token and its telemetry relay
-token do not derive from the secret. New browser logins use the new secret.
+token do not derive from the secret. Sessions a login ticket opened end with the old secret; password sessions are unaffected.

@@ -21,7 +21,7 @@ Meiva's **key environment variables** and their propagation chain. These variabl
 ### Cluster & Data Plane
 | Variable | Set at | Purpose |
 |------|--------|------|
-| `MEIVA_CLUSTER_SECRET` | gateway `meiva init` | The gateway's human bearer (API, frontend login); never served by bootstrap, never held by a remote unit, never a Postgres or Redis password |
+| `MEIVA_CLUSTER_SECRET` | gateway `meiva init` | The gateway's human bearer (API, one-time login tickets; not the web login password); never served by bootstrap, never held by a remote unit, never a Postgres or Redis password |
 | `MEIVA_API_TOKEN` | launch environment | The write generation's machine API token of the process's class (runner class for agents; exec children inherit it); the bearer SDK and service clients present first, and a process launched with the agent or runner profile that lacks one raises instead of presenting `MEIVA_CLUSTER_SECRET`; delivered only while the API is authenticated. Also persisted at 0600 in `$MEIVA_HOME/run/meiva-root/manifests.json` (root's own record of what it launched) until the next start rewrites it; inert once a release fence revokes the generation |
 | `MEIVA_DB_URL` | launch environment / bootstrap | The write generation's class login delivered by the launcher (runner class for agents; a remote agent-runner's installed unit capability); `.env` and bootstrap carry only the credential-free endpoint. Same `manifests.json` persistence as `MEIVA_API_TOKEN` above |
 | `MEIVA_REDIS_URL` | gateway `.env` / bootstrap | Redis runtime ACL URL; its password remains embedded and is never separately forwarded to agents |

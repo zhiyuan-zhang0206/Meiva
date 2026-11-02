@@ -6,6 +6,7 @@ import hmac
 import time
 from collections.abc import Iterator
 from dataclasses import replace
+from pathlib import Path
 
 import psycopg
 import pytest
@@ -19,6 +20,7 @@ from base.host.net.auth import (
 )
 from gateway.http.config import placeholder_config
 from gateway.http.middleware.cors import cors_allowed_origins
+from gateway.tests.auth.gateway_auth import LOGIN_PASSWORD, seed_login_password
 from gateway.tests.auth.gateway_config import anonymous_gateway_client, gateway_config_fields
 
 SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
@@ -53,7 +55,7 @@ def request_with_origin(
 def login(client: TestClient, *, user_agent: str = "test-browser") -> str:
     response = client.post(
         "/api/auth/login",
-        json={"password": SECRET},
+        json={"password": LOGIN_PASSWORD},
         headers={"User-Agent": user_agent},
     )
     assert response.status_code == 200
@@ -68,12 +70,14 @@ def legacy_hmac_cookie() -> str:
 
 
 @pytest.fixture(autouse=True)
-def patch_secret() -> Iterator[None]:
-    """Run every test in this module against a known secret.
+def patch_secret(unit_home: Path) -> Iterator[None]:
+    """Run every test in this module against a known secret and a web login password.
 
     This module tests authentication itself, so its clients are anonymous: they
     do not carry the suite's default bearer and present only what a test gives them.
+    The password is stored in the test's own home, which the gateway of each test serves.
     """
+    seed_login_password(unit_home)
     with gateway_config_fields(cluster_secret=SECRET):
         yield
 
@@ -225,7 +229,7 @@ def test_auth_login_no_auth_allowed() -> None:
     """Login endpoint must be accessible without auth so the browser can
     obtain a session cookie."""
     with anonymous_gateway_client() as client:
-        resp = client.post("/api/auth/login", json={"password": SECRET})
+        resp = client.post("/api/auth/login", json={"password": LOGIN_PASSWORD})
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
 
@@ -404,7 +408,7 @@ def test_revoke_endpoint_rejects_longer_than_masked_suffix(
 
 def test_login_sets_cookie_flags_and_configured_ttl() -> None:
     with anonymous_gateway_client(fields={"session_ttl_seconds": 123}) as client:
-        resp = client.post("/api/auth/login", json={"password": SECRET})
+        resp = client.post("/api/auth/login", json={"password": LOGIN_PASSWORD})
 
     set_cookie = resp.headers["Set-Cookie"]
     assert set_cookie.startswith(f"{cookie_name()}=")
@@ -416,7 +420,7 @@ def test_login_sets_cookie_flags_and_configured_ttl() -> None:
 
 def test_login_cookie_secure_derives_from_gateway_url() -> None:
     with anonymous_gateway_client(fields={"gateway_url": "https://gateway.example:8000"}) as client:
-        resp = client.post("/api/auth/login", json={"password": SECRET})
+        resp = client.post("/api/auth/login", json={"password": LOGIN_PASSWORD})
 
     assert "; Secure" in resp.headers["Set-Cookie"]
 
@@ -433,7 +437,7 @@ def test_https_browser_entry_login_preserves_authenticated_cookie() -> None:
     ) as client:
         response = client.post(
             "/api/auth/login",
-            json={"password": SECRET},
+            json={"password": LOGIN_PASSWORD},
             headers={"Origin": "https://console.example"},
         )
         assert response.status_code == 200
@@ -448,7 +452,7 @@ def test_login_cookie_not_secure_for_http_gateway() -> None:
             "gateway_url": "http://gateway.example:8000",
         }
     ) as client:
-        resp = client.post("/api/auth/login", json={"password": SECRET})
+        resp = client.post("/api/auth/login", json={"password": LOGIN_PASSWORD})
 
     assert "; Secure" not in resp.headers["Set-Cookie"]
 
@@ -460,7 +464,7 @@ def test_login_cookie_secure_when_policy_explicitly_enabled() -> None:
             "gateway_url": "http://gateway.example:8000",
         }
     ) as client:
-        resp = client.post("/api/auth/login", json={"password": SECRET})
+        resp = client.post("/api/auth/login", json={"password": LOGIN_PASSWORD})
 
     assert "; Secure" in resp.headers["Set-Cookie"]
 
@@ -472,7 +476,7 @@ def test_login_cookie_secure_for_https_gateway() -> None:
             "gateway_url": "https://gateway.example:8000",
         }
     ) as client:
-        resp = client.post("/api/auth/login", json={"password": SECRET})
+        resp = client.post("/api/auth/login", json={"password": LOGIN_PASSWORD})
 
     assert "; Secure" in resp.headers["Set-Cookie"]
 
@@ -482,7 +486,7 @@ def test_login_with_username_succeeds() -> None:
     with anonymous_gateway_client() as client:
         resp = client.post(
             "/api/auth/login",
-            json={"username": "admin", "password": SECRET},
+            json={"username": "admin", "password": LOGIN_PASSWORD},
         )
     assert resp.status_code == 200
     assert resp.json()["ok"] is True

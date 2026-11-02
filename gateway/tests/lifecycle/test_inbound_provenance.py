@@ -15,6 +15,7 @@ from base.agents.messages.inbound_provenance import InboundProvenance, source_as
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from gateway.agents.inbound_provenance import request_inbound_provenance
+from gateway.tests.auth.gateway_auth import login_with_ticket
 from gateway.tests.auth.gateway_config import gateway_test_client
 
 _SECRET = "inbound-provenance-secret"  # noqa: S105 -- isolated test credential
@@ -64,7 +65,7 @@ def test_browser_message_records_user_session(db_conn: psycopg.Connection) -> No
     agent_id = _seed_live_agent(db_conn)
 
     with gateway_test_client(cluster_secret=_SECRET) as client:
-        login = client.post("/api/auth/login", json={"password": _SECRET})
+        login = login_with_ticket(client, _SECRET)
         assert login.status_code == 200
         response = client.post(
             f"/api/agents/{agent_id}/messages",

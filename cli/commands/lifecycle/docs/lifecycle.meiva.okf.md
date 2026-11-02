@@ -75,7 +75,9 @@ After a ready gateway, start prints the gateway hint and, through
 `cli/commands/lifecycle/start/login_link.py:print_login_link`, a one-time UI login link
 (`<ui>/#ticket=<ticket>`). The ticket is minted with the home's human secret and
 only when output is a terminal and a UI service was launched; a failed mint is
-reported on stderr and never fails the start. Gateway side:
+reported on stderr and never fails the start. The link works whether or not a web
+login password is set; the gateway hint names `meiva auth set-password --prompt`
+as how to set one (the cluster secret is not a login password). Gateway side:
 [[gateway/http/auth/docs/web-sessions.meiva.okf.md]].
 
 ## Status

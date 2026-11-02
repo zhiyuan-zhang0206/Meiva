@@ -1,4 +1,4 @@
-exports = ["agents", "cluster", "converge", "data_plane", "duration.py", "extensions", "harness.py", "lifecycle", "management", "observability", "permissions.py", "probe.py", "tests"]
+exports = ["agents", "auth.py", "cluster", "converge", "data_plane", "duration.py", "extensions", "harness.py", "lifecycle", "management", "observability", "permissions.py", "probe.py", "tests"]
 
 [uses]
 "_repo.py" = ["_setup.py"]
