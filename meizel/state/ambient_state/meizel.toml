@@ -20,4 +20,4 @@ exports = ["tests"]
 "module.py" = "strict"
 
 [debt.impure-call]
-"allowlist.py#Path.resolve" = 1
+"allowlist.py#Path.resolve" = { count = 1, owner = "#5921", until = "waits for the rule to take the policy as a value: the module resolves its own installation once, at import, to read meizel.policy.toml into the closed lists it exposes, and every caller is a non-root module with no better copy of where this installation sits" }
