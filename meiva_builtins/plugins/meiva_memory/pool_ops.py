@@ -192,24 +192,10 @@ def generate_directory_indexes(pool: Path) -> list[str]:
     return written
 
 
-def _top_dir_detail(top: str, children: list[str], files: list[str]) -> str:
-    n = sum(1 for f in files if f.startswith(top + "/"))
-    if children == [top]:
-        return f"{n} notes"
-    counts = [
-        f"{c.split('/')[-1]}({sum(1 for f in files if f.startswith(c + '/'))})"
-        for c in children
-        if c != top
-    ]
-    return f"{n} notes: {', '.join(counts)}"
-
-
 def rebuild_root_memory_index(pool: Path) -> None:
     files = collect(pool)
     root_files = [f for f in files if "/" not in f]
-    sub: dict[str, list[str]] = {}
-    for d in sorted({str(Path(rel).parent) for rel in files if "/" in rel}):
-        sub.setdefault(d.split("/")[0], []).append(d)
+    tops = {rel.split("/")[0] for rel in files if "/" in rel}
 
     lines: list[str] = []
     for rel in root_files:
@@ -217,8 +203,9 @@ def rebuild_root_memory_index(pool: Path) -> None:
         title = str(fm.get("title") or Path(rel).name[:-3])
         desc = str(fm.get("description") or "").replace("\n", " ")
         lines.append(f"- [{title}]({rel}) \u2014 {desc}")
-    for top in sorted(sub):
-        lines.append(f"- [{top}/]({top}/index.md) \u2014 {_top_dir_detail(top, sub[top], files)}")
+    for top in sorted(tops):
+        n = sum(1 for f in files if f.startswith(top + "/"))
+        lines.append(f"- [{top}/]({top}/index.md) \u2014 {n} notes")
 
     memory_path = pool / "MEMORY.md"
     content = ""
@@ -228,7 +215,7 @@ def rebuild_root_memory_index(pool: Path) -> None:
     heading = re.search(r"^## Pointers[ \t]*$", content, re.M)
     head = content[: heading.start()] if heading else (content.rstrip("\n") + "\n\n").lstrip("\n")
     new = head + "## Pointers\n\n\n" + "\n".join(lines) + "\n"
-    print("root:", len(root_files), "dirs:", len(sub), "| chars:", len(new))
+    print("root:", len(root_files), "dirs:", len(tops), "| chars:", len(new))
     with memory_path.open("w", encoding="utf-8") as f:
         f.write(new)
 
