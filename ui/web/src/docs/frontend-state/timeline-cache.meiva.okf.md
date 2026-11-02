@@ -35,6 +35,10 @@ and `compactReplaceAgent` trigger reattachment through the same cancellable
 history-page read, walking every available older page serially (`unlimited`
 retention, user ruling 2026-11-01). A completed page with `has_more=false` ends
 the walk; an unready window before the post-compact tail read settles does not.
+Once `compactBuffer` has released and a following reader trims the canonical
+window to `display.timeline_retained_items_max`, `retentionCappedSeq` retires
+that compact's background walk so evicted pages are not re-fetched in a loop,
+while parked readers continue walking until `has_more=false`.
 Both the SSE reset-window snapshot and a reconnect GET that crosses an unseen
 compact capture the previously displayed rows in `compactBuffer` while canonical
 `items` takes the new current window. The buffer owns a thread/epoch, each row's
@@ -63,9 +67,13 @@ and a fresh composed reconcile merges into the retained rows. Inactive windows
 own no SSE subscriptions, DOM, timers or live reducer buckets. Durable records
 are untouched.
 While the reader follows the bottom, `TimelineView` asks the store to trim the
-oldest canonical rows to `display.timeline_retained_items_max` (250 by default),
-sets `hasMoreOlder` so evicted rows can be reloaded, and resets the next older
-page to its base size. The compact transition buffer keeps its anchor until
+oldest canonical rows to `display.timeline_retained_items_max` (250 by default)
+while preserving rank-0 standing context (`0.0` prompt, contiguous head
+`system_marker` notes, and rank-0 `inbound_compact_summary` — matching backend
+`_missing_standing_context`) within that cap so mid-turn snapshots do not
+misread re-attached summaries as an unseen compact reset and scroll-up keeps its
+oldest non-standing cursor, sets `hasMoreOlder` so evicted rows can be reloaded,
+and resets the next older page to its base size. The compact transition buffer keeps its anchor until
 release; trimming resumes afterward. A reader parked mid-history retains every
 loaded row, so deliberate deep-history reading can still grow memory and DOM.
 

@@ -1,4 +1,4 @@
-import { useMemo, type RefObject } from "react";
+import { useMemo, useState, type RefObject } from "react";
 
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 import { canonicalBufferCoordinate, type CompactTransitionBuffer } from "@/lib/layout/compact-transition";
@@ -18,6 +18,118 @@ export interface GroupEntry {
   virtualKey: string;
   isLiveTurn: boolean;
   runExpanded: boolean;
+}
+
+interface TurnKeySnapshot {
+  threadKey: string | undefined;
+  groups: RankedTimelineGroup[];
+  bufferEpoch: number | undefined;
+  nextSeq: number;
+  virtualKeys: readonly string[];
+  turnOverrideKeys: readonly string[];
+  memberToVirtualKey: ReadonlyMap<string, string>;
+  memberToOverrideKey: ReadonlyMap<string, string>;
+}
+
+function memberTurnIdentity(
+  member: { source: "buffer" | "canonical"; rank: number; item: BackendTimelineItem },
+  bufferEpoch: number | undefined,
+): string {
+  return `${member.source}:${member.source === "buffer" ? (bufferEpoch ?? "") : ""}:${member.rank}:${member.item.item_id}`;
+}
+
+// meiva:note
+// Preserve TurnBlock React identity (virtualKey) and manual override key across
+// front-of-turn mutations (follower 250-item trimming and older-page prepends).
+// Walking groups and members from newest to oldest keeps an active trailing
+// TurnBlock mounted with its measured inner row heights and scrollport intact
+// even when its oldest item is trimmed or an adjacent head run merges in.
+// meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
+function computeTurnKeySnapshot(
+  groups: RankedTimelineGroup[],
+  threadKey: string | undefined,
+  bufferEpoch: number | undefined,
+  prev: TurnKeySnapshot | null,
+): TurnKeySnapshot {
+  const sameThread = prev !== null && prev.threadKey === threadKey;
+  const prevVirtualMap = sameThread ? prev.memberToVirtualKey : null;
+  const prevOverrideMap = sameThread ? prev.memberToOverrideKey : null;
+  let nextSeq = sameThread ? prev.nextSeq : 0;
+
+  const virtualKeys = new Array<string>(groups.length);
+  const turnOverrideKeys = new Array<string>(groups.length);
+  const claimedVirtual = new Set<string>();
+  const claimedOverride = new Set<string>();
+  const nextVirtualMap = new Map<string, string>();
+  const nextOverrideMap = new Map<string, string>();
+
+  for (let g = groups.length - 1; g >= 0; g--) {
+    const group = groups[g];
+    if (group.kind === "single") {
+      const m = group.member;
+      virtualKeys[g] = `${threadKey ?? ""}:${memberTurnIdentity(m, bufferEpoch)}`;
+      turnOverrideKeys[g] = m.item.item_id;
+      continue;
+    }
+
+    let resolvedVirtual: string | undefined;
+    let resolvedOverride: string | undefined;
+    if (prevVirtualMap && prevOverrideMap) {
+      for (let i = group.members.length - 1; i >= 0; i--) {
+        const memberId = memberTurnIdentity(group.members[i], bufferEpoch);
+        const vCandidate = prevVirtualMap.get(memberId);
+        const oCandidate = prevOverrideMap.get(memberId);
+        if (
+          vCandidate !== undefined &&
+          oCandidate !== undefined &&
+          !claimedVirtual.has(vCandidate) &&
+          !claimedOverride.has(oCandidate)
+        ) {
+          resolvedVirtual = vCandidate;
+          resolvedOverride = oCandidate;
+          break;
+        }
+      }
+    }
+
+    const first = group.members[0];
+    const firstIdentity = memberTurnIdentity(first, bufferEpoch);
+    if (resolvedVirtual === undefined || resolvedOverride === undefined) {
+      const baseVirtual = `${threadKey ?? ""}:turn:${firstIdentity}`;
+      const baseOverride = first.source === "canonical" && first.rank === 0
+        ? first.item.item_id
+        : `turn:${firstIdentity}`;
+      if (claimedVirtual.has(baseVirtual) || claimedOverride.has(baseOverride)) {
+        const suffix = nextSeq++;
+        resolvedVirtual = `${baseVirtual}:${suffix}`;
+        resolvedOverride = `${baseOverride}:${suffix}`;
+      } else {
+        resolvedVirtual = baseVirtual;
+        resolvedOverride = baseOverride;
+      }
+    }
+
+    claimedVirtual.add(resolvedVirtual);
+    claimedOverride.add(resolvedOverride);
+    virtualKeys[g] = resolvedVirtual;
+    turnOverrideKeys[g] = resolvedOverride;
+    for (const m of group.members) {
+      const memberId = memberTurnIdentity(m, bufferEpoch);
+      nextVirtualMap.set(memberId, resolvedVirtual);
+      nextOverrideMap.set(memberId, resolvedOverride);
+    }
+  }
+
+  return {
+    threadKey,
+    groups,
+    bufferEpoch,
+    nextSeq,
+    virtualKeys,
+    turnOverrideKeys,
+    memberToVirtualKey: nextVirtualMap,
+    memberToOverrideKey: nextOverrideMap,
+  };
 }
 
 export function useTimelineGroupWindow({
@@ -57,10 +169,23 @@ export function useTimelineGroupWindow({
     [canonicalItems, compactBuffer, currentItems],
   );
 
-  const groupEntries = useMemo<GroupEntry[]>(() => groups.map((group) => {
-    const first = group.kind === "single" ? group.member : group.members[0];
-    const groupKey = first.item.item_id;
-    const virtualKey = `${threadKey ?? ""}:${first.source}:${first.source === "buffer" ? compactBuffer?.epoch : ""}:${first.rank}:${groupKey}`;
+  const bufferEpoch = compactBuffer?.epoch;
+  const [turnKeySnapshot, setTurnKeySnapshot] = useState<TurnKeySnapshot>(() =>
+    computeTurnKeySnapshot(groups, threadKey, bufferEpoch, null),
+  );
+  let activeTurnKeys = turnKeySnapshot;
+  if (
+    turnKeySnapshot.groups !== groups ||
+    turnKeySnapshot.threadKey !== threadKey ||
+    turnKeySnapshot.bufferEpoch !== bufferEpoch
+  ) {
+    activeTurnKeys = computeTurnKeySnapshot(groups, threadKey, bufferEpoch, turnKeySnapshot);
+    setTurnKeySnapshot(activeTurnKeys);
+  }
+
+  const groupEntries = useMemo<GroupEntry[]>(() => groups.map((group, index) => {
+    const groupKey = activeTurnKeys.turnOverrideKeys[index];
+    const virtualKey = activeTurnKeys.virtualKeys[index];
     const isLastTurn = group === groups[groups.length - 1];
     // meiva:note
     // While turnActive is true, the trailing TurnBlock defaults open unless manually
@@ -72,7 +197,7 @@ export function useTimelineGroupWindow({
       ? (turnOverrides.get(groupKey) ?? false)
       : isLiveTurn);
     return { group, groupKey, virtualKey, isLiveTurn, runExpanded };
-  }), [groups, compactBuffer?.epoch, turnOverrides, turnActive, threadKey]);
+  }), [groups, activeTurnKeys, turnOverrides, turnActive]);
 
   const renderedRows = groupEntries.reduce(
     (total, { group, runExpanded }) =>
@@ -233,7 +358,7 @@ export function TimelineGroupList({
         <div data-timeline-spacer="before" style={{ height: virtualRange.before }} aria-hidden="true" />
       ) : null}
       <LiveClockGate value={turnActive}>
-        {groupEntries.slice(virtualRange.start, virtualRange.end).map(({ group, virtualKey, isLiveTurn, runExpanded }) => {
+        {groupEntries.slice(virtualRange.start, virtualRange.end).map(({ group, groupKey, virtualKey, isLiveTurn, runExpanded }) => {
           const renderedGroup = (() => {
             if (group.kind === "single") {
               const { item, index, source, rank } = group.member;
@@ -248,6 +373,7 @@ export function TimelineGroupList({
             return (
               <TurnBlock
                 id={turnId}
+                toggleKey={groupKey}
                 memberIds={group.members.map((m) => m.item.item_id)}
                 memberRanks={group.members.map((m) => `${m.rank}:${m.item.item_id}`)}
                 memberSources={group.members.map((m) => `${m.source}:${m.rank}:${m.item.item_id}`)}

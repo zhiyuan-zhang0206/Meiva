@@ -119,4 +119,73 @@ describe("TurnBlock inner row windowing", () => {
     expect(mountedIndexes()).toEqual([117, 118, 119]);
     vi.unstubAllGlobals();
   });
+
+  it("keeps follow mode across transient scrollHeight growth and exits only when scrolling upward", () => {
+    const observers: { callback: ResizeObserverCallback; targets: Set<Element> }[] = [];
+    vi.stubGlobal("ResizeObserver", class {
+      readonly record: { callback: ResizeObserverCallback; targets: Set<Element> };
+      constructor(callback: ResizeObserverCallback) {
+        this.record = { callback, targets: new Set() };
+        observers.push(this.record);
+      }
+      observe(target: Element) { this.record.targets.add(target); }
+      unobserve(target: Element) { this.record.targets.delete(target); }
+      disconnect() { this.record.targets.clear(); }
+    });
+    const reportRowHeights = (blockSize: number) => {
+      for (const { callback, targets } of observers) {
+        const rows = [...targets].filter((target) => target.hasAttribute("data-turn-row"));
+        if (rows.length === 0) continue;
+        callback(
+          rows.map((target) => ({ target, borderBoxSize: [{ blockSize, inlineSize: 600 }] }) as unknown as ResizeObserverEntry),
+          {} as ResizeObserver,
+        );
+      }
+    };
+
+    const memberIds = Array.from({ length: 120 }, (_, i) => `${i + 1}.0`);
+    const onAtBottom = vi.fn();
+    render(
+      <TurnBlock
+        id="1.0"
+        memberIds={memberIds}
+        summary={baseSummary}
+        expanded
+        onToggle={vi.fn()}
+        turnActive
+        liveWindow
+        onActivityAtBottomChange={onAtBottom}
+        windowedCount={120}
+        turnRows={20}
+        renderWindowedRow={(index) => (
+          <div data-testid="windowed-row" data-row-index={index}>
+            {`Row ${index}`}
+          </div>
+        )}
+      />,
+    );
+    const mountedIndexes = () =>
+      screen.getAllByTestId("windowed-row").map((row) => Number(row.getAttribute("data-row-index")));
+
+    const innerViewport = screen.getByTestId("activity-scroll-viewport");
+    let scrollHeight = 120 * 304;
+    Object.defineProperty(innerViewport, "clientHeight", { value: 390, configurable: true });
+    Object.defineProperty(innerViewport, "scrollHeight", { get: () => scrollHeight, configurable: true });
+    act(() => reportRowHeights(300));
+
+    const pinnedTop = scrollHeight - 390;
+    innerViewport.scrollTop = pinnedTop;
+    fireEvent.scroll(innerViewport);
+    expect(mountedIndexes()).toEqual([117, 118, 119]);
+
+    scrollHeight += 120;
+    fireEvent.scroll(innerViewport);
+    expect(mountedIndexes()).toEqual([117, 118, 119]);
+
+    innerViewport.scrollTop = 1200;
+    fireEvent.scroll(innerViewport);
+    expect(onAtBottom).toHaveBeenLastCalledWith(false);
+    expect(mountedIndexes()[mountedIndexes().length - 1]).toBeLessThan(100);
+    vi.unstubAllGlobals();
+  });
 });

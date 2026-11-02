@@ -111,6 +111,54 @@ describe("useTimeline compact history retention", () => {
     expect(beforeCalls()).toHaveLength(5);
   });
 
+  it("retires background compact-history retention once follower trimOldestWhileFollowing caps the window", async () => {
+    wireReplies.set("/api/agents/42/timeline?before=2.0", [
+      resolves(tlResp([
+        snapshotItem({ item_id: "s1.a.1.0", kind: "agent_chat", payload: "page 1a" }),
+        snapshotItem({ item_id: "s1.a.2.0", kind: "agent_chat", payload: "page 1b" }),
+      ], true)),
+    ]);
+    wireReplies.set("/api/agents/42/timeline?before=s1.a.1.0", [
+      resolves(tlResp([
+        snapshotItem({ item_id: "s2.b.1.0", kind: "agent_chat", payload: "should not refetch after trim" }),
+      ], true)),
+    ]);
+    wireReplies.set("/api/agents/42/timeline?before=s1.a.2.0", [
+      resolves(tlResp([
+        snapshotItem({ item_id: "s1.a.1.0", kind: "agent_chat", payload: "evicted page loop" }),
+      ], true)),
+    ]);
+    timeline.always(resolves(tlResp(postWindow(), true)));
+
+    const { result } = renderHook(() => useTimeline(42, vi.fn()), { wrapper });
+    await waitFor(() => expect(result.current.items).toHaveLength(3));
+
+    act(() => {
+      useTimelineStore.getState().switchThread(
+        42,
+        [snapshotItem({ item_id: "2.0", kind: "agent_chat", payload: "page 1a" })],
+        true,
+      );
+    });
+    pushEvent({ role: "compact_done", agent_id: 42 });
+    pushEvent({ role: "timeline_snapshot", agent_id: 42, msg_count: 3, items: postWindow() });
+
+    await waitFor(() => {
+      expect(result.current.items.some((item) => item.item_id === "s1.a.1.0")).toBe(true);
+    });
+    expect(result.current.compactBuffer).toBeNull();
+
+    act(() => {
+      useTimelineStore.getState().trimOldestWhileFollowing(4);
+    });
+    expect(result.current.items.map((item) => item.item_id)).toEqual(["s1.a.2.0", "0.0", "1.0", "2.0"]);
+
+    const countAfterTrim = timelineReads.filter((read) => read.before !== undefined).length;
+    await ctx.delay(30);
+    expect(timelineReads.filter((read) => read.before !== undefined)).toHaveLength(countAfterTrim);
+    expect(result.current.items.some((item) => item.payload === "evicted page loop")).toBe(false);
+  });
+
   it("waits for the post-compact tail read before deciding whether older history exists", async () => {
     let postTailResolve: ((value: TimelineResponse) => void) | null = null;
     timeline.always(resolves(tlResp([

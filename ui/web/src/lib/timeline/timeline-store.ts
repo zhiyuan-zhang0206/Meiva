@@ -25,6 +25,7 @@ import {
 import {
   applySseEvent,
   crossedUnseenCompact,
+  retainStandingContextOnTrim,
   retireLiveCompact,
   type TimelineState,
 } from "./timeline-store-events";
@@ -73,6 +74,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
   resetPending: false,
   compactReplaceSeq: 0,
   compactReplaceAgent: null,
+  retentionCappedSeq: null,
   liveCompact: null,
   hasMoreOlder: false,
   loadingOlder: false,
@@ -224,6 +226,7 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
       items: cached ?? [],
       compactBuffer: buffer ? { ...buffer, epoch: s.compactEpoch + 1 } : null,
       compactEpoch: s.compactEpoch + 1,
+      retentionCappedSeq: null,
       streamingIds: new Set(),
       streamingCode: false,
       turnActive: false,
@@ -279,16 +282,19 @@ export const useTimelineStore = create<TimelineState>()((set, get) => ({
     });
   },
 
+  // meiva:note
+  // The compact transition buffer owns a reader anchor across re-keying; trim
+  // once it releases. Follower trimming also sets `retentionCappedSeq` so any
+  // active post-compact retention walk stops instead of re-fetching evicted pages.
+  // meiva:link ui/web/src/docs/frontend-state/timeline-cache.meiva.okf.md
   trimOldestWhileFollowing: (maxItems) => {
     const state = get();
-    // The compact transition buffer owns a reader anchor across re-keying.
-    // Leave that short transition intact; trim once it is released.
     if (state.compactBuffer || state.items.length <= maxItems) return;
     set({
-      items: state.items.slice(-maxItems),
+      items: retainStandingContextOnTrim(state.items, maxItems),
       hasMoreOlder: true,
-      // A later scroll-up re-reads the evicted tail in small pages.
       olderFetchCount: 0,
+      retentionCappedSeq: state.compactReplaceSeq,
     });
   },
 

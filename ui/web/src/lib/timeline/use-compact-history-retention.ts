@@ -47,7 +47,7 @@ export function useCompactHistoryRetention(options: {
   const compactReplaceSeq = useTimelineStore((s) => s.compactReplaceSeq);
   const compactReplaceAgent = useTimelineStore((s) => s.compactReplaceAgent);
 
-  const retentionRef = useRef<{ thread: number; epoch: number; attempts: number } | null>(
+  const retentionRef = useRef<{ thread: number; epoch: number; seq: number; attempts: number } | null>(
     null,
   );
   const retentionInFlightRef = useRef<{ pending: object } | null>(null);
@@ -73,6 +73,10 @@ export function useCompactHistoryRetention(options: {
     }
     const st = useTimelineStore.getState();
     if (st.activeThreadId !== agentId || st.compactEpoch !== pending.epoch) return;
+    if (st.retentionCappedSeq === pending.seq) {
+      retentionRef.current = null;
+      return;
+    }
     if (!st.hasMoreOlder) {
       // meiva:note
       // False before the tail GET is unready; false after it is terminal.
@@ -88,7 +92,12 @@ export function useCompactHistoryRetention(options: {
     void (async () => {
       try {
         while (ownerRef.current === owner && retentionRef.current === pending) {
-          if (useTimelineStore.getState().activeThreadId !== agentId) return;
+          const live = useTimelineStore.getState();
+          if (live.activeThreadId !== agentId) return;
+          if (live.retentionCappedSeq === pending.seq) {
+            retentionRef.current = null;
+            return;
+          }
           const result = await loadOlderSegment("background");
           if (ownerRef.current !== owner || retentionRef.current !== pending) return;
           const current = pending;
@@ -121,6 +130,7 @@ export function useCompactHistoryRetention(options: {
     retentionRef.current = {
       thread: agentId,
       epoch: useTimelineStore.getState().compactEpoch,
+      seq: compactReplaceSeq,
       attempts: 0,
     };
     runRetention();

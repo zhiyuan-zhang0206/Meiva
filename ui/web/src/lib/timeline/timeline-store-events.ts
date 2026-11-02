@@ -5,7 +5,12 @@ import {
   captureCompactTransition,
   type CompactTransitionBuffer,
 } from "../layout/compact-transition";
-import { isEventForThread } from "../fold";
+import {
+  isEventForThread,
+  isReattachedTimelineContext,
+  parseItemIdParts,
+  standingHeadNoteIds,
+} from "../fold";
 import { foldEvent } from "../fold/timeline";
 import type { BackendTimelineItem, ConnectionState, SystemEvent } from "../contracts/types";
 
@@ -48,6 +53,7 @@ export interface TimelineState {
 
   compactReplaceSeq: number;
   compactReplaceAgent: number | null;
+  retentionCappedSeq: number | null;
 
   liveCompact: LiveCompact | null;
 
@@ -110,6 +116,45 @@ export function crossedUnseenCompact(
     if (localEnv === undefined) return true;
     return localEnv.kind !== env.kind || localEnv.created_at !== env.created_at;
   });
+}
+
+// meiva:note
+// Mirrors gateway/agents/history/paging.py (_missing_standing_context): rank-0
+// system prompt, contiguous head system_marker notes, and rank-0 compact
+// summaries are re-attached at the head of every GET /timeline response.
+// Retaining them when follower trimming caps the 250-item window keeps
+// `crossedUnseenCompact` from misreading re-attached summaries as an unseen
+// compact reset and keeps the oldest non-standing cursor intact.
+// meiva:link ui/web/src/docs/frontend-state/timeline-cache.meiva.okf.md
+export function retainStandingContextOnTrim(
+  items: readonly BackendTimelineItem[],
+  maxItems: number,
+): BackendTimelineItem[] {
+  if (maxItems <= 0) return [];
+  if (items.length <= maxItems) return [...items];
+  const headNoteIds = standingHeadNoteIds(items);
+  const standingIds = new Set<string>();
+  for (const it of items) {
+    if (parseItemIdParts(it.item_id)?.rank !== 0) continue;
+    if (isReattachedTimelineContext(it) || headNoteIds.has(it.item_id)) {
+      standingIds.add(it.item_id);
+    }
+  }
+  if (standingIds.size === 0 || standingIds.size >= maxItems) {
+    return items.slice(-maxItems);
+  }
+  let dropRemaining = items.length - maxItems;
+  const retained: BackendTimelineItem[] = [];
+  for (const it of items) {
+    if (standingIds.has(it.item_id)) {
+      retained.push(it);
+    } else if (dropRemaining > 0) {
+      dropRemaining -= 1;
+    } else {
+      retained.push(it);
+    }
+  }
+  return retained;
 }
 
 /**

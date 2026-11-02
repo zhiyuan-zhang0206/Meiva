@@ -51,6 +51,7 @@ function resetStore(): void {
     liveCompact: null,
     compactReplaceSeq: 0,
     compactReplaceAgent: null,
+    retentionCappedSeq: null,
   });
 }
 
@@ -471,5 +472,66 @@ describe("create() initial defaults (fresh module)", () => {
     expect(s.hasMoreOlder).toBe(false);
     expect(s.loadingOlder).toBe(false);
     expect(s.olderFetchCount).toBe(0);
+    expect(s.retentionCappedSeq).toBeNull();
+  });
+});
+
+describe("trimOldestWhileFollowing", () => {
+  it("preserves rank-0 standing head context within maxItems without triggering false unseen-compact resets", () => {
+    const standing = [
+      item({ item_id: "0.0", kind: "system_prompt", payload: "PROMPT" }),
+      item({ item_id: "1.0", kind: "system_marker", source: "memory", payload: "mem" }),
+      item({ item_id: "2.0", kind: "system_marker", source: "timezone", payload: "tz" }),
+      item({ item_id: "3.0", kind: "inbound_compact_summary", payload: "SUMMARY", created_at: "2026-01-01T00:00:00Z" }),
+    ];
+    const body = Array.from({ length: 10 }, (_, idx) =>
+      item({ item_id: `${idx + 10}.0`, kind: "agent_reasoning", payload: `step-${idx}` }),
+    );
+    act(() => {
+      useTimelineStore.getState().switchThread(42, [...standing, ...body], false);
+      useTimelineStore.getState().trimOldestWhileFollowing(8);
+    });
+
+    const trimmed = useTimelineStore.getState();
+    expect(trimmed.items.map((it) => it.item_id)).toEqual([
+      "0.0",
+      "1.0",
+      "2.0",
+      "3.0",
+      "16.0",
+      "17.0",
+      "18.0",
+      "19.0",
+    ]);
+    expect(trimmed.hasMoreOlder).toBe(true);
+    expect(trimmed.retentionCappedSeq).toBe(0);
+
+    act(() => {
+      useTimelineStore.getState().reloadSnapshot(
+        [
+          ...standing,
+          item({ item_id: "18.0", kind: "agent_reasoning", payload: "step-8" }),
+          item({ item_id: "19.0", kind: "agent_reasoning", payload: "step-9" }),
+          item({ item_id: "20.0", kind: "inbound_chat", source: "agent:7", payload: "subagent ping" }),
+        ],
+        21,
+        true,
+      );
+    });
+
+    const afterReload = useTimelineStore.getState();
+    expect(afterReload.compactBuffer).toBeNull();
+    expect(afterReload.compactReplaceSeq).toBe(0);
+    expect(afterReload.items.map((it) => it.item_id)).toEqual([
+      "0.0",
+      "1.0",
+      "2.0",
+      "3.0",
+      "16.0",
+      "17.0",
+      "18.0",
+      "19.0",
+      "20.0",
+    ]);
   });
 });
