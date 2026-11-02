@@ -330,7 +330,6 @@ jobs:
         if: ${{ github.event_name == 'pull_request' && (steps.decide.outputs.frontend == 'true' || steps.decide.outputs.backend == 'true') }}
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_REF: ${{ github.head_ref }}
           BACKEND: ${{ steps.decide.outputs.backend }}
           MODE: ${{ steps.selector.outputs.mode }}
           DECISION: ${{ steps.selector.outputs.decision }}
@@ -347,9 +346,7 @@ jobs:
           fi
           python3 scripts/ci/e2e_scope.py \
             --changed-files "$SCOPE_TMP/changed.txt" \
-            --base-ref "$BASE_MERGE" \
             --event pull_request \
-            --head-ref "$HEAD_REF" \
             --mode "$effective_mode" \
             --decision "$effective_decision" | tee -a "$GITHUB_OUTPUT"
 

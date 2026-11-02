@@ -1,31 +1,22 @@
 #!/usr/bin/env python3
-"""Whether a pull request can skip the e2e jobs: the rule is written here, not decided per run.
-
-e2e is the integration net for product behavior, so it runs whenever either side changed. A
-change that only edits unit tests inside packages (`<package>/**/tests/**/*.py`) cannot change
-product behavior, and the backend selection already ran every test that can observe the edited
-tests. The rule skips e2e exactly when all of these hold, with no further judgment:
-
-- the event is a pull request, and not a Trunk queue branch (the queue always runs everything);
-- test selection is enforced and its decision is SELECTED;
-- every changed path is a Python file in a package-internal `tests` directory;
-- none of those paths is one the e2e suite reaches by import (`e2e_reached_unit_tests`); a walk
-  that cannot understand a file or an import form fails closed and never skips.
-
-Top-level `tests/` is out of scope on purpose: e2e imports `tests.fixtures`, `tests.components`
-and its own helpers, so a change there can reach e2e. A few test helpers live beside the
-package that owns them and are shared with e2e (a polling helper, a login seeder); the rule
-computes that set from e2e's own imports instead of assuming it is empty, so editing one of
-them still runs e2e.
-
-Standalone and stdlib-only: the classify job runs it without an environment.
-"""
-
 # meiva:note
-# The rule widened past the list above: a changed path also qualifies when it is tooling, an
-# application module whose interface the diff leaves unchanged, a locality manifest, or prose
-# under `docs/` that is not an OKF bundle. `docs/conventions/engineering/test-selection.md` is the
-# statement to read; the list above predates it.
+# The rule behind `skip_e2e`: whether a pull request can skip the e2e jobs is written here, not
+# decided per run.
+#
+# e2e is the integration net for product behavior, and an incremental pull request does not run
+# it: the full Playwright matrix runs on every Release Train (`release-gate.yml`) and on a manual
+# `workflow_dispatch` run of CI. The jobs are skipped, which counts as satisfied for the required
+# checks, exactly when the event is a pull request with test selection enforced and a non-empty
+# decision, at least one path changed, no changed path is an e2e input (`is_e2e_direct_input`), and
+# no changed path is one the e2e suite reaches by import (`e2e_reached_unit_tests`); that walk
+# fails closed and never skips.
+#
+# What the change *is* does not enter the decision: a unit-test-only diff, a manifest, a document
+# and a product module all skip alike, because none of them reaches the pull request's e2e jobs.
+# The narrower reading that used to sit here - "product code whose public interface changed keeps
+# e2e", decided from an AST interface fingerprint - is gone: #8250 removed that fingerprint from
+# test selection, and #8091 had already stopped consulting it here. The net for a pull request's
+# behavior is the scheduled full matrix, not a per-diff judgment.
 
 from __future__ import annotations
 
@@ -52,7 +43,6 @@ TOOLING_PACKAGES = select_packages(ROLES, "tooling")
 PACKAGES = (*APPLICATION_PACKAGES, *TOOLING_PACKAGES)
 _PACKAGE_UNIT_TEST = re.compile(rf"(?:{'|'.join(PACKAGES)})/(?:[^/]+/)*tests/(?:[^/]+/)*[^/]+\.py")
 _TOOLING_PYTHON = re.compile(rf"(?:{'|'.join(TOOLING_PACKAGES)})/(?:[^/]+/)*[^/]+\.py")
-_APPLICATION_PYTHON = re.compile(rf"(?:{'|'.join(APPLICATION_PACKAGES)})/(?:[^/]+/)*[^/]+\.py")
 _E2E_DIRECT_PREFIXES = ("tests/e2e/", ".github/ci-image/")
 _E2E_DIRECT_PATHS = frozenset(
     {
@@ -62,10 +52,6 @@ _E2E_DIRECT_PATHS = frozenset(
         "tests/harness/test_home_isolation.py",
     }
 )
-_MANIFEST_NAME = "meizel.toml"
-_DOCUMENT_SUFFIX = ".md"
-_DOCUMENTS_DIRECTORY = "docs"
-_OKF_DOCUMENT = ".meiva.okf.md"
 
 
 def is_package_unit_test(path: str) -> bool:
@@ -75,26 +61,6 @@ def is_package_unit_test(path: str) -> bool:
 
 def is_tooling_python(path: str) -> bool:
     return _TOOLING_PYTHON.fullmatch(path) is not None
-
-
-# meiva:note
-# A manifest carries the directory's exports, declared edges and recorded debt; no runtime reads
-# it. Selected by file kind rather than by directory, so every `meizel.toml` in the tree counts.
-def is_locality_manifest(path: str) -> bool:
-    return path.rsplit("/", 1)[-1] == _MANIFEST_NAME
-
-
-# meiva:note
-# Prose is a `.md` inside a `docs` directory, and never an OKF bundle file: the gateway rebuilds
-# `GET /api/okf/graph` from the live `.meiva.okf.md` tree on every request, so a bundle edit can
-# break that page. Every other `.md` stays out too - a skill file is read into the model's prompt
-# by the runtime skill loader, so editing one changes what ships.
-def is_documentation(path: str) -> bool:
-    return (
-        path.endswith(_DOCUMENT_SUFFIX)
-        and not path.endswith(_OKF_DOCUMENT)
-        and _DOCUMENTS_DIRECTORY in path.split("/")[:-1]
-    )
 
 
 # Calls that import by name or by path. A literal module name is resolved like an import
@@ -230,56 +196,6 @@ def e2e_reached_unit_tests(root: Path) -> frozenset[str] | None:
     return frozenset(reached)
 
 
-def interface_unchanged_paths(
-    changed: list[str], *, repo_root: Path, base_ref: str | None = None
-) -> frozenset[str]:
-    if base_ref is None or not changed:
-        return frozenset()
-    candidates = [
-        path for path in changed if not is_package_unit_test(path) and not is_tooling_python(path)
-    ]
-    if not candidates or not all(_APPLICATION_PYTHON.fullmatch(path) for path in candidates):
-        return frozenset()
-    from scripts.ci.test_impact import (
-        base_checkout,
-        build_impact,
-        qualifies_for_interface_cutoff,
-    )
-    from scripts.ci.test_selector import PathClass, classify_path, load_checkout
-
-    head = load_checkout(repo_root)
-    head_impact = build_impact(head.repo_root, head.collectable)
-    with base_checkout(head.repo_root, base_ref) as base_root:
-        base = load_checkout(base_root)
-        base_impact = build_impact(base_root, base.collectable & head.collectable)
-        return frozenset(
-            path
-            for path in candidates
-            if classify_path(path, head) is PathClass.PACKAGE
-            and classify_path(path, base) is PathClass.PACKAGE
-            and qualifies_for_interface_cutoff(
-                path,
-                base=base,
-                head=head,
-                base_impact=base_impact,
-                head_impact=head_impact,
-            )
-        )
-
-
-# meiva:note
-# One changed path the e2e suite cannot observe a difference through: a test module, tooling, an
-# application module whose interface the diff leaves unchanged, a locality manifest, or prose.
-def _cannot_change_behavior(path: str, interface_unchanged: frozenset[str]) -> bool:
-    return (
-        is_package_unit_test(path)
-        or is_tooling_python(path)
-        or path in interface_unchanged
-        or is_locality_manifest(path)
-        or is_documentation(path)
-    )
-
-
 # meiva:note
 # Full Playwright E2E runs on every Release Train (`release-gate.yml`) and manual `workflow_dispatch`
 # CI run. Incremental pull requests run `e2e-*` only when the diff touches `tests/e2e/`, the E2E
@@ -292,14 +208,11 @@ def is_e2e_direct_input(path: str) -> bool:
 def skips_e2e(
     *,
     event: str,
-    head_ref: str = "",
     mode: str = "enforce",
     decision: str = "SELECTED",
     changed: list[str],
     reached: frozenset[str] | None = frozenset(),
-    interface_unchanged: frozenset[str] = frozenset(),
 ) -> bool:
-    del head_ref, interface_unchanged
     return (
         event == "pull_request"
         and mode == "enforce"
@@ -313,27 +226,21 @@ def skips_e2e(
 
 def main(argv: list[str] | None = None) -> int:
     """Print `skip=true` or `skip=false` for the workflow's step output."""
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description="Whether a pull request can skip the e2e jobs.")
     parser.add_argument("--changed-files", type=Path, required=True)
     parser.add_argument("--event", required=True)
-    parser.add_argument("--head-ref", default="")
     parser.add_argument("--mode", default="")
     parser.add_argument("--decision", default="")
-    parser.add_argument("--base-ref", default=None)
     parser.add_argument("--repo-root", type=Path, default=_REPOSITORY_ROOT)
     args = parser.parse_args(argv)
     changed = [line.strip() for line in args.changed_files.read_text().splitlines() if line.strip()]
     repo_root = args.repo_root.resolve()
     skip = skips_e2e(
         event=args.event,
-        head_ref=args.head_ref,
         mode=args.mode,
         decision=args.decision,
         changed=changed,
         reached=e2e_reached_unit_tests(repo_root),
-        interface_unchanged=interface_unchanged_paths(
-            changed, repo_root=repo_root, base_ref=args.base_ref
-        ),
     )
     print(f"skip={str(skip).lower()}")
     return 0

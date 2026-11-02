@@ -397,44 +397,37 @@ input consumers from the same impact graph, using these functions for estimated
 minutes. Census estimates describe static coupling; they are not measured CI
 execution times or proof that a selected subset is faster.
 
-## Skipping e2e for changes that carry no runtime behavior
+## Skipping e2e for changes outside the e2e inputs
 
-e2e is the integration net for product behavior and normally runs whenever either side
-changed. `classify change` sets `skip_e2e` from `scripts/ci/e2e_scope.py`, and the four e2e
-checks (`e2e shard`, `e2e hosted`, `e2e env guard (serial)`, `e2e (Playwright happy path)`) are
-skipped, which counts as satisfied for the required checks, only when all of these hold:
+e2e is the integration net for product behavior, and an incremental pull request does not run
+it: the full Playwright matrix runs on every Release Train (`release-gate.yml`) and on a manual
+`workflow_dispatch` run of CI. `classify change` sets `skip_e2e` from `scripts/ci/e2e_scope.py`,
+and the four e2e checks (`e2e shard`, `e2e hosted`, `e2e env guard (serial)`,
+`e2e (Playwright happy path)`) are skipped, which counts as satisfied for the required checks,
+only when all of these hold:
 
 - the event is a pull request;
-- test selection is enforced and its decision is SELECTED;
-- every changed path is one of:
-  - a locality manifest, `meizel.toml` - the file meizel reads to describe a directory
-    (its exports, its declared edges, its recorded debt); no runtime reads it,
-  - documentation prose, a `.md` file inside a `docs` directory that is not an OKF bundle file -
-    it describes the system and the product does not read it. Everything else keeps e2e: a
-    `*.meiva.okf.md` bundle is the data `GET /api/okf/graph` rebuilds from on every request, a
-    skill file is read into the model's prompt by the runtime skill loader, and a root
-    `README.md` or `tests/e2e/README.md` is fixture prose nobody promises is inert,
-  - a Python file under a package-internal `tests` directory
-    (`<agent|meiva|meiva_builtins|base|cli|gateway|meizel|ops|scripts|services>/**/tests/**/*.py`),
-  - a Python file under a repository `tooling` package (`<meizel|scripts>/**/*.py`), which
-    the root `meizel.toml` forbids `application` packages from importing, or
-  - a `strict`, debt-free `PACKAGE` Python module whose public AST interface is unchanged
-    against `--base-ref` and that is reached by its owning package's local unit tests
-    (`interface_cutoff_paths`);
-- none of the changed paths is reached by the e2e suite's own import closure.
+- test selection is enforced and its decision is non-empty - a frontend-only pull request passes
+  `FRONTEND_ONLY`, and an empty decision, as after a selector failure, keeps e2e;
+- at least one path changed;
+- no changed path is an e2e input: `tests/e2e/`, `.github/ci-image/`,
+  `.github/workflows/ci.yml`, `scripts/ci/e2e_scope.py`,
+  `tests/harness/test_env_guard_canary.py` or `tests/harness/test_home_isolation.py`;
+- none of the changed paths is reached by the e2e suite's own import closure
+  (`e2e_reached_unit_tests`); that walk fails closed, so a file or an import form it cannot
+  understand keeps e2e.
 
-Top-level `tests/` (which e2e imports from), data files, product code whose public interface
-changed and any path the walk reaches all keep e2e. Manifests and documents are classified by
-file kind rather than by directory: a `ui/web/src/app/meizel.toml` change is a frontend change to
-the lane classifier (`classify_change` reports `frontend`), which is what decides whether the
-frontend suite runs - it is not a change to what a browser loads, so it does not keep e2e. An empty output, as after a selector failure, also
-keeps it. `scripts/ci/tests/test_e2e_scope.py` pins the rule, the wiring, the root manifest
-isolation of `tooling` packages, and the e2e import reachability walk.
+What the change is does not enter the decision. A diff that only edits unit tests, a
+`meizel.toml`, prose under `docs/`, and a product module whose function bodies changed all skip
+e2e alike, because none of them reaches an e2e job. The rule does not ask "could e2e observe
+this change": the net for a pull request's behavior is the scheduled full matrix, not a
+per-diff judgment. The strict-module interface fingerprint that used to answer that question
+here was deleted with the rest of that path in #6052; test selection had already stopped
+consulting it in #8250, and the cutoff argument had stopped reaching this rule in #8091.
 
-Narrowing e2e inside a batch branch is deliberately not this rule: `skips_e2e` reads only the
-event, the mode, the decision and the diff, and never the head ref, so a batch keeps the full e2e
-matrix through its own FULL decision rather than through a branch-name check. The member-PR channel
-a batch would use is #5760.
+The head ref is never read: a pull request on any branch is judged by its diff alone.
+`scripts/ci/tests/test_e2e_scope.py` pins the rule, the workflow wiring, the e2e import
+reachability walk, and the root manifest isolation of `tooling` packages.
 
 ## Selection modes and artifacts
 

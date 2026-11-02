@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ast
-import subprocess
 import tomllib
 from pathlib import Path
 from typing import Any, cast
@@ -37,7 +36,6 @@ _NOT_UNIT_TESTS = [
 def _skip(**overrides: Any) -> bool:
     arguments: dict[str, Any] = {
         "event": "pull_request",
-        "head_ref": "feature",
         "mode": "enforce",
         "decision": "SELECTED",
         "changed": _UNIT_TESTS[:2],
@@ -58,63 +56,6 @@ def test_nothing_else_qualifies(path: str) -> None:
 def test_only_unit_test_changes_with_an_enforced_subset_skip_e2e() -> None:
     assert _skip()
     assert _skip(changed=_UNIT_TESTS)
-
-
-@pytest.mark.parametrize(
-    "path", ["meizel.toml", "ui/web/src/app/meizel.toml", "scripts/ci/meizel.toml"]
-)
-def test_a_locality_manifest_cannot_change_behavior(path: str) -> None:
-    assert e2e_scope.is_locality_manifest(path)
-    assert not e2e_scope.is_package_unit_test(path)
-
-
-@pytest.mark.parametrize("path", ["pyproject.toml", "meizel.policy.toml", "ui/web/package.json"])
-def test_configuration_is_not_a_locality_manifest(path: str) -> None:
-    assert not e2e_scope.is_locality_manifest(path)
-
-
-@pytest.mark.parametrize("path", ["docs/conventions/x.md", "ui/web/src/docs/state.md"])
-def test_documentation_prose_cannot_change_behavior(path: str) -> None:
-    assert e2e_scope.is_documentation(path)
-
-
-@pytest.mark.parametrize(
-    "path",
-    [
-        "docs/checker/x.meiva.okf.md",
-        "ui/web/src/docs/state.meiva.okf.md",
-        "index.meiva.okf.md",
-    ],
-)
-def test_an_okf_bundle_file_is_data_for_the_graph_route(path: str) -> None:
-    assert not e2e_scope.is_documentation(path)
-
-
-@pytest.mark.parametrize(
-    "path",
-    [
-        "meiva_builtins/skills/meiva-workflow/SKILL.md",
-        ".agents/skills/review-contribution/SKILL.md",
-        "README.md",
-        "tests/e2e/README.md",
-    ],
-)
-def test_prompt_and_root_markdown_keep_e2e(path: str) -> None:
-    assert not e2e_scope.is_documentation(path)
-
-
-@pytest.mark.parametrize(
-    "path",
-    [
-        "ui/web/src/app/page.tsx",
-        "ui/web/package.json",
-        "tests/e2e/test_browser.py",
-        "base/lm/engine.py",
-    ],
-)
-def test_code_and_e2e_inputs_are_not_manifests_or_documentation(path: str) -> None:
-    assert not e2e_scope.is_locality_manifest(path)
-    assert not e2e_scope.is_documentation(path)
 
 
 def test_a_manifest_change_alone_skips_e2e() -> None:
@@ -352,87 +293,5 @@ def test_no_application_package_uses_a_tooling_package_in_root_manifest() -> Non
 
 
 def test_application_module_skips_e2e_on_incremental_pr_and_runs_on_dispatch() -> None:
-    assert _skip(
-        changed=["base/lm/retry.py"],
-        interface_unchanged=frozenset({"base/lm/retry.py"}),
-    )
-    assert _skip(
-        changed=["base/lm/retry.py"],
-        interface_unchanged=frozenset(),
-    )
-    assert not _skip(
-        event="workflow_dispatch",
-        changed=["base/lm/retry.py"],
-    )
-
-
-# meiva:note
-# Write one file of the temporary repository these cases build.
-def _write(root: Path, name: str, text: str) -> None:
-    path = root / name
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
-
-
-# meiva:note
-# Run one fixed Git command against that test-owned checkout.
-def _git(root: Path, *args: str) -> str:
-    return subprocess.run(  # noqa: S603
-        ["git", "-C", str(root), *args], check=True, capture_output=True, text=True
-    ).stdout.strip()
-
-
-# meiva:note
-# The surface names come from the policy of the tree being judged: swapping an import behind an
-# `__exports__` list reaches the consumer outside the package only where that policy declares
-# `__exports__` a public-surface name (`__all__` is always one).
-@pytest.mark.parametrize(
-    ("policy", "interface_unchanged"),
-    [
-        ('[public-surface]\nnames = ["__exports__"]\n', False),
-        ("", True),
-        ('[public-surface]\nnames = ["__other__"]\n', True),
-    ],
-)
-def test_interface_cutoff_follows_the_surface_names_the_policy_declares(
-    tmp_path: Path, policy: str, interface_unchanged: bool
-) -> None:
-    _write(
-        tmp_path,
-        "pyproject.toml",
-        '[tool.pytest.ini_options]\ntestpaths = ["tests", "base/**/tests"]\n',
-    )
-    _write(tmp_path, "meizel.policy.toml", policy)
-    _write(tmp_path, "base/lm/meizel.toml", 'purity = "strict"\n')
-    _write(tmp_path, "base/lm/a.py", "def foo() -> int:\n    return 1\n")
-    _write(tmp_path, "base/lm/b.py", "def foo() -> int:\n    return 1\n")
-    _write(tmp_path, "base/lm/m.py", 'from base.lm.a import foo\n__exports__ = ["foo"]\n')
-    _write(
-        tmp_path,
-        "base/lm/tests/test_lm.py",
-        "from base.lm.m import foo\n\ndef test_lm():\n    assert foo() == 1\n",
-    )
-    _write(
-        tmp_path,
-        "tests/consumer/test_cli.py",
-        "from base.lm.m import foo\n\ndef test_cli():\n    assert foo() == 1\n",
-    )
-    _git(tmp_path, "init", "-q")
-    _git(tmp_path, "add", ".")
-    _git(
-        tmp_path,
-        "-c",
-        "user.name=Test",
-        "-c",
-        "user.email=test@example.com",
-        "commit",
-        "-qm",
-        "base",
-    )
-    base = _git(tmp_path, "rev-parse", "HEAD")
-
-    _write(tmp_path, "base/lm/m.py", 'from base.lm.b import foo\n__exports__ = ["foo"]\n')
-    unchanged = e2e_scope.interface_unchanged_paths(
-        ["base/lm/m.py"], repo_root=tmp_path, base_ref=base
-    )
-    assert (unchanged == frozenset({"base/lm/m.py"})) is interface_unchanged
+    assert _skip(changed=["base/lm/retry.py"])
+    assert not _skip(event="workflow_dispatch", changed=["base/lm/retry.py"])
