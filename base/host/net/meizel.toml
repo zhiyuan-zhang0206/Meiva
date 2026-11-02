@@ -1,4 +1,4 @@
-exports = ["auth.py", "http_dial.py", "ports.py", "predicates.py", "resilience.py", "tests", "url_secret.py"]
+exports = ["auth.py", "http_dial.py", "ports.py", "predicates.py", "resilience.py", "tests", "transport_errors.py", "url_secret.py"]
 
 [uses]
 "auth.py" = ["__init__.py"]

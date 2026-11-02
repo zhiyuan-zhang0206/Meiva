@@ -10,7 +10,7 @@ from typing import Any, Protocol, TypeGuard
 
 from base.agents.context import MeivaContext
 from base.agents.context.clients import GatewayHandle
-from base.agents.messages.delivery.retry import GatewayResponse, network_errors, retryable_response
+from base.agents.messages.delivery.retry import GatewayResponse, retryable_response
 from base.api_contracts import contracts
 from base.api_contracts.agent_contract import EXCEPTION_BY_REASON, ErrorReason, GatewayUnavailable
 from base.api_contracts.contracts import Idempotency
@@ -29,9 +29,11 @@ __all__ = [
     "raise_from_response",
 ]
 
-# httpx stays off the `import meiva` path: every function that needs it imports it in its body, and
-# the annotations below are structural (`TransportResponse`, `TransportTimeout`) or the client
-# alias owned by `base.agents.context.clients`.
+# meiva:note
+# httpx stays off the `import meiva` path: every function that needs it imports it in its body, the
+# annotations below are structural (`TransportResponse`, `TransportTimeout`) or the client alias
+# owned by `base.agents.context.clients`, and the retryable-failure tuple the retry loop classifies
+# on is owned by `base.host.net.transport_errors` and read in that same function body.
 
 
 class TransportResponse(GatewayResponse, Protocol):
@@ -276,7 +278,8 @@ def _request_with_retry(
     """Execute one route's policy while keeping its final wire response intact."""
     import httpx
 
-    transport_errors = network_errors()
+    from base.host.net.transport_errors import RETRYABLE_NETWORK_ERRORS
+
     pre_send_errors = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
     gateway_classifier = http_classifier.with_(permanent={500})
 
@@ -284,7 +287,7 @@ def _request_with_retry(
         if not retryable:
             # A non-idempotent POST can only be repeated when nothing was sent.
             return isinstance(exc, pre_send_errors)
-        if isinstance(exc, httpx.TransportError) and not isinstance(exc, transport_errors):
+        if isinstance(exc, httpx.TransportError) and not isinstance(exc, RETRYABLE_NETWORK_ERRORS):
             return False
         return gateway_classifier(exc)
 
@@ -311,7 +314,7 @@ def _request_with_retry(
     except _TransientResponseError as exc:
         # The caller still owns raise_from_response and its wire-reason mapping.
         return exc.response
-    except transport_errors as exc:
+    except RETRYABLE_NETWORK_ERRORS as exc:
         if not retryable and not isinstance(exc, pre_send_errors):
             raise GatewayUnavailable(
                 f"Gateway transport error at {gateway_http(context).base_url} "

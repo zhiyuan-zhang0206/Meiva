@@ -16,13 +16,14 @@ from typing import Any
 import httpx
 from pydantic import BaseModel
 
-from base.agents.messages.delivery.retry import network_errors, retryable_response
+from base.agents.messages.delivery.retry import retryable_response
 from base.agents.messages.envelope import validate_source
 from base.api_contracts.agent_contract import ShellSessionKillTiming
 from base.api_contracts.idempotency import keyed_headers, scoped_chat_message_key
 from base.cluster.machine import GatewayAccess, gateway_api_base, gateway_auth_headers
 from base.host.net import http_dial
 from base.host.net.resilience import ExponentialBackoff, Policy, retry
+from base.host.net.transport_errors import RETRYABLE_NETWORK_ERRORS
 from ops.rpc_schemas import CancelAgentResponse, CompactAgentResponse, TransferAgentResponse
 
 _TIMEOUT_S = 15.0
@@ -239,7 +240,7 @@ class _TransientReplyError(Exception):
 # One idempotency key covers every attempt, so a retry after an ambiguous failure cannot
 # deliver twice. Waits are 0.5s then 1s; a final transport failure is re-raised as it came.
 def _is_transient(error: Exception) -> bool:
-    return isinstance(error, (_TransientReplyError, *network_errors()))
+    return isinstance(error, (_TransientReplyError, *RETRYABLE_NETWORK_ERRORS))
 
 
 _SEND_POLICY = Policy(

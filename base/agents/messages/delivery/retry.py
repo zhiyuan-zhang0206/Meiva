@@ -24,18 +24,6 @@ class GatewayResponse(Protocol):
     def json(self, **kwargs: object) -> object: ...
 
 
-def network_errors() -> tuple[type[Exception], ...]:
-    """The httpx transport failures that leave the gateway reachable on a later attempt."""
-    import httpx  # deferred: `import meiva` reaches this module and must not load the HTTP stack
-
-    return (
-        httpx.TimeoutException,
-        httpx.NetworkError,
-        httpx.RemoteProtocolError,
-        httpx.ProxyError,
-    )
-
-
 def retryable_response(response: GatewayResponse) -> bool:
     """Known transient status, unless the wire refuses retry or proves commit.
 
