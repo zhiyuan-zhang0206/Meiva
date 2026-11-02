@@ -191,15 +191,17 @@ def is_documentable_target(obj: object) -> bool:
 
 
 # meiva:note
-# `meiva.help()` was given something it cannot document; `_not_a_target` says what it can.
+# Why `meiva.help()` must raise, and must keep raising, on a target it cannot document: the
+# fallback is the convenient answer, and it was the code until 2026-11-02, when `repr(target)`
+# printed the live context whole and with it every provider key in this process. An object's repr
+# carries what the object holds, so a fallback turns every future mistyped target into a credential
+# leak; the error costs the caller one corrected call and names what does have documentation.
 class NotHelpTargetError(TypeError): ...
 
 
 # meiva:note
-# Why `help()` refuses a target it cannot document instead of printing it: the fallback was the
-# object's own repr, so `meiva.help(meiva.context)` printed the live context whole — 192,688
-# characters carrying this process's every provider key and bot token (2026-11-02). The message
-# names the shapes that do have documentation, so the caller's next call is right.
+# The refusal names the shapes that do have documentation (a namespace, a routine or class, a
+# documented constant), so the caller's next call is right instead of a retry of the same typo.
 def _not_a_target(target: object) -> NotHelpTargetError:
     return NotHelpTargetError(
         f"meiva.help() documents SDK targets and {type(target).__name__} is not one. Pass a "
