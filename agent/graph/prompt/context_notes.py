@@ -38,6 +38,11 @@ from .note_text import (
 from .sdk_scope import ExpandSkip, SkippedExpand
 from .skill_selection import SkillView, resolve_prompt_skills
 
+# meiva:note
+# Adding a framework note means answering two questions: does it show a timestamp in the timeline
+# (`_NO_TIMESTAMP_NOTE_TAGS` in `base/agents/history/timeline.py`), and which rank slot it takes
+# (here). Both are asserted as closed sets, so a new tag fails CI until it answers them — that is
+# what keeps a note from silently inheriting a default nobody can explain later.
 RANK_EXEC_TIMEOUT = 10
 RANK_TIMEZONE = 15
 RANK_SDK_EXPAND = 16
