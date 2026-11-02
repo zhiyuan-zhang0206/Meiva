@@ -36,7 +36,7 @@ from base.cluster.machine import (
 from base.cluster.machine.boot import gateway_access_from_boot
 from base.config import ConfigBoot
 from base.deploy.git import cluster_drift
-from base.host.resource.sample import resource_sample
+from base.host.resource.sample import battery_sample, resource_sample
 from base.paths import root_manifests_path
 from base.telemetry.lgtm_local import LgtmSettings
 from cli.commands._repo import roles_or_none
@@ -152,7 +152,14 @@ def _execute(
                 database_factory=database_factory,
             )
         case ReadHostResources():
-            _emit(host_resource_lines(_read_host_resources(now=command.clock.now().timestamp())))
+            _emit(
+                host_resource_lines(
+                    _read_host_resources(
+                        now=command.clock.now().timestamp(),
+                        platform=command.host.platform.system,
+                    )
+                )
+            )
         case ProbeLgtm():
             print_lgtm_status(LgtmSettings.from_fields(delivered_config(command.config).get_field))
         case ProbeRedisBridge():
@@ -227,9 +234,9 @@ def _print_service_rows(
 #
 # A read failure is a value, not an abort: the reading is one section of `meiva status`,
 # and a host without psutil must still get the service table and the views below it.
-def _read_host_resources(*, now: float) -> HostReading | HostReadingFailed:
+def _read_host_resources(*, now: float, platform: str) -> HostReading | HostReadingFailed:
     try:
-        sample = resource_sample(now=now)
+        sample = resource_sample(now=now, battery=battery_sample(platform=platform))
     # meiva:note
     # psutil may be absent; the rest of status still prints
     except Exception as exc:
