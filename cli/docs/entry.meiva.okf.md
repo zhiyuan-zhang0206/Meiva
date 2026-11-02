@@ -50,7 +50,8 @@ retry with the start's own code, or give up after the last attempt of the budget
 decided in `cli/startup/outcome.py`; `cli/startup/log_sinks.py` names the sink of each verb
 that opens one, `cli/startup/service_path.py` chooses the tool directories a new home
 declares, and `cli/startup/settings_failure.py` words an unconfigured home's Settings
-failure. The shells read the files, print and execute what those return. Other parsed runtime commands create one
+failure, and `cli/startup/password_input.py` judges what the entry read for `meiva auth set-password`
+(a no-echo prompt or the first line of stdin, read in `main.py`, which hands the verb `args.password`). The shells read the files, print and execute what those return. Other parsed runtime commands create one
 `cli.database.runtime.CommandRuntime` with a zero-read `ConfigBoot` and its lazy
 `MachineIdentity`. Its `home` is the `resolve_meiva_home().resolve()` that `main()` reads once and
 hands to `create(home)`, the same value and spelling as the `HomeSite` of init and start; `create`

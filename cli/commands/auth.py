@@ -2,17 +2,15 @@
 # `meiva auth set-password` — thin client over the gateway's `PUT /api/auth/password`.
 #
 # The gateway owns every rule (the minimum length, the salted hash, which sessions end); this command
-# reads the new password from one of the two places the operator names and forwards it. The password
-# never travels in argv: `--prompt` asks twice at a no-echo prompt, `--stdin` reads the first line of
-# standard input. The request presents the home's human cluster secret as its bearer (a machine API
+# forwards the new password the process entry read from one of the two places the operator names
+# (`cli.main`). The password never travels in argv: `--prompt` asks twice at a no-echo prompt,
+# `--stdin` reads the first line of standard input. The request presents the home's human cluster secret as its bearer (a machine API
 # token would be refused: it cannot choose what a browser logs in with), so the command works only
 # where that secret is held: the gateway home.
 
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable
-from typing import TextIO
 
 import httpx
 from pydantic import BaseModel, ValidationError
@@ -20,38 +18,10 @@ from pydantic import BaseModel, ValidationError
 from base.cluster.machine import GatewayAccess
 
 __all__ = [
-    "PasswordInputError",
     "cmd_auth_set_password",
-    "read_password_from_prompt",
-    "read_password_from_stdin",
 ]
 
 _TIMEOUT_S = 30.0
-
-
-# meiva:note
-# The password cannot be read as the operator asked: nothing was sent.
-class PasswordInputError(ValueError):
-    pass
-
-
-# meiva:note
-# The first line of `stream` without its line ending. Spaces are part of a password, so only the
-# line ending goes.
-def read_password_from_stdin(stream: TextIO) -> str:
-    password = stream.readline().rstrip("\r\n")
-    if not password:
-        raise PasswordInputError("standard input held no password (its first line is empty)")
-    return password
-
-
-# meiva:note
-# The password typed twice at `ask`, a no-echo prompt that takes its question and returns the answer.
-def read_password_from_prompt(ask: Callable[[str], str]) -> str:
-    password = ask("New web login password: ")
-    if ask("Repeat the new password: ") != password:
-        raise PasswordInputError("the two entries differ")
-    return password
 
 
 # meiva:note
