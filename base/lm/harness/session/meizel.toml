@@ -1,0 +1,12 @@
+exports = []
+
+[uses]
+"__init__.py" = ["turn.py", "vocabulary.py"]
+"turn.py" = []
+"vocabulary.py" = []
+
+[purity]
+"." = "strict"
+"__init__.py" = "strict"
+"turn.py" = "strict"
+"vocabulary.py" = "strict"

@@ -11,7 +11,7 @@ from base.lm.harness.acp import AcpNotification
 from base.lm.harness.deepseek.mapping import assistant_text, parse_prompt_result
 from base.lm.harness.deepseek.usage import UsageSnapshot
 from base.lm.harness.events import AssistantText, SessionFaulted, TurnCompleted, Usage
-from base.lm.harness.turn import SessionTotals, TurnOutcome
+from base.lm.harness.session import SessionTotals, TurnOutcome
 from base.lm.pricing import PriceBook, quote
 
 PromptResult = Mapping[str, object]

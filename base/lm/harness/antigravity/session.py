@@ -39,7 +39,7 @@ from base.lm.harness.process import (
     snapshot,
     watch_tree,
 )
-from base.lm.harness.turn import SessionTotals, TurnOutcome
+from base.lm.harness.session import SessionTotals, TurnOutcome
 
 
 # meiva:note

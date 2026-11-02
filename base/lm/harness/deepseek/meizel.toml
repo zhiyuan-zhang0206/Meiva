@@ -1,19 +1,18 @@
 
 [uses]
-"__init__.py" = ["config.py", "mapping.py", "types.py", "usage.py"]
+"__init__.py" = ["config.py", "mapping.py", "usage.py"]
 "config.py" = []
 "environment.py" = []
 "mapping.py" = []
 "requests.py" = []
-"session.py" = ["config.py", "environment.py", "mapping.py", "requests.py", "settle.py", "types.py", "usage.py", "usage_files.py"]
+"session.py" = ["config.py", "environment.py", "mapping.py", "requests.py", "settle.py", "usage.py", "usage_files.py"]
 "settle.py" = ["mapping.py", "usage.py"]
-"types.py" = []
 "usage.py" = []
 "usage_files.py" = ["usage.py"]
 "tests" = ["__init__.py", "environment.py", "mapping.py", "requests.py", "session.py", "settle.py", "usage.py", "usage_files.py"]
 
 [purity]
-"." = "strict-to-be"
+"." = "strict"
 "__init__.py" = "strict"
 "config.py" = "strict"
 "environment.py" = "strict"
@@ -23,6 +22,3 @@
 "session.py" = { mode = "none", why = "the shell that runs one DeepSeek ACP session: it opens the connection, awaits the requests requests.py describes, routes what the runtime sends through settle.py route_notification, and assigns the answers to its own state; the settlement, its cost and the running totals are decided in settle.py" }
 "usage.py" = "strict"
 "usage_files.py" = { mode = "none", why = "the shell that finds and decodes one session's usage log: it globs and stats the candidates expected_log_paths orders and missing_log words, decompresses the bytes (zstd, or the CLI when the wheel is absent), and hands them to usage.parse_usage" }
-
-[debt.impure-edge]
-"types.py#base/lm/harness/base_session.py" = { count = 1, owner = "#7240", until = "waits for the session types at a light owner: types.py re-exports BaseHarnessSession, the session errors and SessionClock from base_session, which owns the running session (asyncio tasks, the child probe) and is none for that reason; the repair is that half moving to a strict module. Repair unverified: that those types are separable from the session's own state" }

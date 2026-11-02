@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from base.lm.harness.base_session import TurnTicket
 from base.lm.harness.cancel import CancelReport
-from base.lm.harness.turn import SessionTotals, TurnOutcome
+from base.lm.harness.session import SessionTotals, TurnOutcome
 
 # meiva:note
 # `SessionTotals.per_turn_usage` turns False as soon as one turn's numbers were

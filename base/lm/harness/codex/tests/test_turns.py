@@ -15,7 +15,7 @@ from base.lm.harness.codex.turns import (
     unclaimed_text,
 )
 from base.lm.harness.events import TurnCompleted, Usage
-from base.lm.harness.turn import SessionTotals, TurnOutcome
+from base.lm.harness.session import SessionTotals, TurnOutcome
 
 
 def test_every_read_notification_is_classified_by_its_method() -> None:

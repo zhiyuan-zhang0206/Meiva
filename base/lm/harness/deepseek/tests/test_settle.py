@@ -17,7 +17,7 @@ from base.lm.harness.deepseek.settle import (
 )
 from base.lm.harness.deepseek.usage import StepUsage, UsageSnapshot
 from base.lm.harness.events import Usage
-from base.lm.harness.turn import SessionTotals
+from base.lm.harness.session import SessionTotals
 from base.lm.pricing import PriceBook
 from base.lm.pricing.archive import load_archive
 

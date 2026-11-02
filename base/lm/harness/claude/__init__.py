@@ -9,7 +9,7 @@ from base.lm.harness.claude.auth import (
     describe_auth,
 )
 from base.lm.harness.claude.config import DEFAULT_MODEL, BridgeConfig
-from base.lm.harness.turn import SessionTotals, TurnOutcome
+from base.lm.harness.session import SessionTotals, TurnOutcome
 
 # meiva:note
 # The package door re-exports the pure half only. `ClaudeSession` and the errors it exports are
