@@ -24,6 +24,7 @@ from base.cluster import port_preflight
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.deploy.tests.containers import redis_server
+from base.host.system.tests.fake_commands import real_commands_host
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.instance.redis_plan import redis_conf_text
@@ -64,6 +65,7 @@ def _start(
         runtime,
         cluster.identity,
         home=cluster.home,
+        host=real_commands_host(environ=os.environ),
         machine=machine,
         tuning=StartTuning(bind_wait_s=bind_wait_s),
         macos=NATIVE_TEST_MACOS,
@@ -195,6 +197,7 @@ def test_a_foreign_redis_keeps_its_acl_and_config(
                 "runtime",
                 "unowned",
                 home=tmp_path,
+                host=real_commands_host(environ=os.environ),
                 machine=command_machine,
                 tuning=StartTuning(bind_wait_s=0.0),
                 macos=NATIVE_TEST_MACOS,

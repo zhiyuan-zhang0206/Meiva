@@ -20,6 +20,7 @@ import pytest
 
 from base.clock import SYSTEM_TIMERS
 from base.cluster.machine import MachineIdentityReader
+from base.host.system.tests.fake_commands import real_commands_host
 from base.paths import meiva_home
 from cli.commands.data_plane import bringup, cluster_instance, completion
 from cli.commands.data_plane.config import DataPlaneConfig
@@ -168,6 +169,7 @@ def test_a_release_readiness_refuses_a_home_without_a_ledger_before_any_dial(
             environment={},
             refresh_schema=False,
             database_factory=operator_database,
+            host=real_commands_host(),
             machine=command_machine,
             macos=NATIVE_TEST_MACOS,
             timers=SYSTEM_TIMERS,

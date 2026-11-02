@@ -183,6 +183,7 @@ def _complete(
         home=born.home,
         environment=born.process_env,
         database_factory=operator_database,
+        host=real_commands_host(),
         machine=command_runtime.machine,
         macos=command_runtime.host.platform.system == "darwin",
         timers=SYSTEM_TIMERS,
@@ -265,6 +266,7 @@ def _born_readonly_cluster(
             home=home,
             environment=cb.process_env,
             database_factory=db,
+            host=real_commands_host(),
             machine=machine,
             macos=system == "darwin",
             timers=SYSTEM_TIMERS,
@@ -449,7 +451,7 @@ def test_pooler_restart_revokes_a_removed_user_a_reload_would_keep(
         bind_wait_s=start_bounds.BIND_WAIT_TIMEOUT_S,
         home=meiva_home(),
     )
-    rc = pooler.ensure_pgbouncer(spec, timers=SYSTEM_TIMERS)
+    rc = pooler.ensure_pgbouncer(spec, host=real_commands_host(), timers=SYSTEM_TIMERS)
     assert rc == 0
     owner_after = ownership.pooler(
         base_pooler.ini_path(meiva_home()), base_pooler.pidfile_path(meiva_home())
@@ -559,6 +561,7 @@ def test_interrupted_birth_retries_to_the_same_generation(
         home=configured.home,
         environment=configured.process_env,
         database_factory=operator_database,
+        host=real_commands_host(),
         machine=command_runtime.machine,
         macos=macos,
         timers=SYSTEM_TIMERS,
@@ -567,15 +570,7 @@ def test_interrupted_birth_retries_to_the_same_generation(
     interrupted = ledger.require_ledger(configured.home)
     assert interrupted.active is None
     assert interrupted.pending is not None and interrupted.pending.number == 0
-    completion.complete_gateway_data_plane(
-        configured.plane,
-        home=configured.home,
-        environment=configured.process_env,
-        database_factory=operator_database,
-        machine=command_runtime.machine,
-        macos=macos,
-        timers=SYSTEM_TIMERS,
-    )
+    _complete(configured, operator_database=operator_database, command_runtime=command_runtime)
     settled = ledger.require_ledger(configured.home)
     assert settled.active is not None and settled.active.number == 0
 

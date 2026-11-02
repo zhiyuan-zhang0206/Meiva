@@ -33,6 +33,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.deploy.tests.containers import free_port
 from base.host.db_authority.delivery import POOLER_ADMIN
+from base.host.system.tests.fake_commands import real_commands_host
 from base.native_process.ownership import OwnedProcess
 from base.paths import meiva_home
 from cli.commands.data_plane import pgbouncer
@@ -92,7 +93,7 @@ def test_a_fresh_start_writes_private_files_and_brings_up_a_pooler_that_answers(
 ) -> None:
     spec = pooler_spec(command_machine, listen_port=free_port(), socket_dir=unit_home)
 
-    assert pgbouncer.ensure_pgbouncer(spec, timers=SYSTEM_TIMERS) == 0
+    assert pgbouncer.ensure_pgbouncer(spec, host=real_commands_host(), timers=SYSTEM_TIMERS) == 0
 
     assert "✓ pgbouncer started" in capsys.readouterr().out
     owner = owned_pooler(unit_home)
@@ -114,7 +115,7 @@ def test_a_reachable_address_that_never_appears_launches_nothing(
     command_machine.set(host="192.0.2.1")
     spec = pooler_spec(command_machine, listen_port=free_port(), socket_dir=unit_home)
 
-    assert pgbouncer.ensure_pgbouncer(spec, timers=SYSTEM_TIMERS) == 1
+    assert pgbouncer.ensure_pgbouncer(spec, host=real_commands_host(), timers=SYSTEM_TIMERS) == 1
 
     err = capsys.readouterr().err
     assert "'192.0.2.1' is not assigned to any local interface" in err
@@ -127,11 +128,11 @@ def test_an_unchanged_running_pooler_is_reloaded_and_keeps_its_process(
     unit_home: Path, command_machine: MachineIdentityReader, capsys: pytest.CaptureFixture[str]
 ) -> None:
     spec = pooler_spec(command_machine, listen_port=free_port(), socket_dir=unit_home)
-    assert pgbouncer.ensure_pgbouncer(spec, timers=SYSTEM_TIMERS) == 0
+    assert pgbouncer.ensure_pgbouncer(spec, host=real_commands_host(), timers=SYSTEM_TIMERS) == 0
     first = owned_pooler(unit_home)
     capsys.readouterr()
 
-    assert pgbouncer.ensure_pgbouncer(spec, timers=SYSTEM_TIMERS) == 0
+    assert pgbouncer.ensure_pgbouncer(spec, host=real_commands_host(), timers=SYSTEM_TIMERS) == 0
 
     assert "already running" in capsys.readouterr().out
     assert owned_pooler(unit_home) == first
@@ -149,6 +150,7 @@ def test_a_changed_userlist_restarts_the_pooler_instead_of_reloading_it(
     assert (
         pgbouncer.ensure_pgbouncer(
             pooler_spec(command_machine, listen_port=port, socket_dir=unit_home),
+            host=real_commands_host(),
             timers=SYSTEM_TIMERS,
         )
         == 0
@@ -159,7 +161,7 @@ def test_a_changed_userlist_restarts_the_pooler_instead_of_reloading_it(
     extra = f'"{POOLER_ADMIN}" "{ADMIN_PASSWORD}"\n"meiva_g1_runner" "other"\n'.encode()
 
     changed = pooler_spec(command_machine, listen_port=port, socket_dir=unit_home, userlist=extra)
-    assert pgbouncer.ensure_pgbouncer(changed, timers=SYSTEM_TIMERS) == 0
+    assert pgbouncer.ensure_pgbouncer(changed, host=real_commands_host(), timers=SYSTEM_TIMERS) == 0
 
     assert "a reload never revokes" in capsys.readouterr().out
     second = owned_pooler(unit_home)
@@ -178,6 +180,7 @@ def test_a_pooler_without_its_reachable_listener_is_restarted_into_a_double_bind
     assert (
         pgbouncer.ensure_pgbouncer(
             pooler_spec(command_machine, listen_port=port, socket_dir=unit_home),
+            host=real_commands_host(),
             timers=SYSTEM_TIMERS,
         )
         == 0
@@ -191,6 +194,7 @@ def test_a_pooler_without_its_reachable_listener_is_restarted_into_a_double_bind
     assert (
         pgbouncer.ensure_pgbouncer(
             pooler_spec(command_machine, listen_port=port, socket_dir=unit_home),
+            host=real_commands_host(),
             timers=SYSTEM_TIMERS,
         )
         == 0
@@ -215,7 +219,7 @@ def test_a_missing_binary_fails_before_anything_is_written(
         binary=str(unit_home / "no-such" / "pgbouncer"),
     )
 
-    assert pgbouncer.ensure_pgbouncer(spec, timers=SYSTEM_TIMERS) == 1
+    assert pgbouncer.ensure_pgbouncer(spec, host=real_commands_host(), timers=SYSTEM_TIMERS) == 1
 
     err = capsys.readouterr().err
     assert "MEIVA_PGBOUNCER_ENABLED is set but pgbouncer is not installed" in err
@@ -243,7 +247,7 @@ def test_the_install_hint_of_a_missing_binary_is_the_platforms_the_spec_names(
         macos=macos,
     )
 
-    assert pgbouncer.ensure_pgbouncer(spec, timers=SYSTEM_TIMERS) == 1
+    assert pgbouncer.ensure_pgbouncer(spec, host=real_commands_host(), timers=SYSTEM_TIMERS) == 1
 
     err = capsys.readouterr().err
     assert install in err and other not in err
@@ -264,7 +268,7 @@ def test_a_foreign_listener_on_the_pooler_port_refuses_before_any_file_is_writte
         )
 
         with pytest.raises(RuntimeError, match="no owned data-plane process"):
-            pgbouncer.ensure_pgbouncer(spec, timers=SYSTEM_TIMERS)
+            pgbouncer.ensure_pgbouncer(spec, host=real_commands_host(), timers=SYSTEM_TIMERS)
 
     assert not (unit_home / "pgbouncer" / "pgbouncer.ini").exists()
     assert owned_pooler(unit_home) is None
@@ -284,7 +288,7 @@ def test_a_recycled_pid_in_the_pidfile_is_refused_before_any_file_is_written(
     spec = pooler_spec(command_machine, listen_port=free_port(), socket_dir=unit_home)
 
     with pytest.raises(RuntimeError, match="cannot verify this home's PgBouncer"):
-        pgbouncer.ensure_pgbouncer(spec, timers=SYSTEM_TIMERS)
+        pgbouncer.ensure_pgbouncer(spec, host=real_commands_host(), timers=SYSTEM_TIMERS)
 
     assert not (unit_home / "pgbouncer" / "pgbouncer.ini").exists()
 
@@ -303,7 +307,7 @@ def test_the_pooler_daemon_is_born_with_exactly_the_environment_it_is_given(
         command_machine, listen_port=free_port(), socket_dir=unit_home, daemon_env=env
     )
 
-    assert pgbouncer.ensure_pgbouncer(spec, timers=SYSTEM_TIMERS) == 0
+    assert pgbouncer.ensure_pgbouncer(spec, host=real_commands_host(), timers=SYSTEM_TIMERS) == 0
 
     owner = owned_pooler(unit_home)
     assert owner is not None
@@ -342,7 +346,7 @@ def test_a_pooler_draining_a_held_client_keeps_custody_and_is_not_replaced(
 ) -> None:
     port = free_port()
     spec = pooler_spec(command_machine, listen_port=port, socket_dir=unit_home)
-    assert pgbouncer.ensure_pgbouncer(spec, timers=SYSTEM_TIMERS) == 0
+    assert pgbouncer.ensure_pgbouncer(spec, host=real_commands_host(), timers=SYSTEM_TIMERS) == 0
     old = owned_pooler(unit_home)
     assert old is not None
     files = (
@@ -360,7 +364,7 @@ def test_a_pooler_draining_a_held_client_keeps_custody_and_is_not_replaced(
             time.sleep(0.05)
 
         with pytest.raises(RuntimeError, match="custody retained"):
-            pgbouncer.ensure_pgbouncer(spec, timers=SYSTEM_TIMERS)
+            pgbouncer.ensure_pgbouncer(spec, host=real_commands_host(), timers=SYSTEM_TIMERS)
 
         assert old.live(), "a normal start must retain a pooler still draining its client"
         assert pgbouncer.running_pid(home=meiva_home()) == old.pid, "no replacement may be launched"

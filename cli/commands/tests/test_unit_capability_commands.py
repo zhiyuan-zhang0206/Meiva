@@ -11,6 +11,7 @@ from base.clock import SYSTEM_TIMERS
 from base.cluster.authority.tests.unit_capability_support import MACHINE, issue, open_issued
 from base.config.service_read import ConfigAuthority, served_db_endpoint
 from base.host.db_authority import delivery, unit
+from base.host.system.tests.fake_commands import real_commands_host
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.config_registration import plugin_bootstrap_config
 from base.paths import meiva_home
@@ -84,6 +85,7 @@ def test_a_bundle_whose_login_cannot_be_proven_never_installs(
         "meiva",
         born.home,
         delivery.active_generation(born.home),
+        host=real_commands_host(),
         machine=command_runtime.machine,
         macos=command_runtime.host.platform.system == "darwin",
         timers=SYSTEM_TIMERS,

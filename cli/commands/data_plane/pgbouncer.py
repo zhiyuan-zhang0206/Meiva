@@ -54,7 +54,8 @@ from base.cluster.dataplane import pooler as pooler_files
 from base.cluster.machine import MachineIdentityReader
 from base.host.db_authority.delivery import POOLER_ADMIN
 from base.host.private_storage import write_private_bytes
-from base.host.proc import process_alive, run_bounded
+from base.host.proc import process_alive
+from base.host.system.hostport import Host
 from base.native_process.os_platform import LockTimeoutError
 from base.native_process.ownership import OwnedProcess
 from cli.commands.converge.spec import ConvergeCtx
@@ -287,6 +288,9 @@ class _Run:
     text: PoolerText
     custodian: OwnedPooler | None
     # meiva:note
+    # The machine this pass acts on: the launch runs as its child, and the ready probes dial it.
+    host: Host
+    # meiva:note
     # The clock of this convergence pass: its ready wait and the stop that precedes a restart are
     # bounded on it, never on one the pass reads for itself.
     timers: Timers
@@ -316,7 +320,7 @@ def _reload(run: _Run) -> int:
 
 def _launch(run: _Run) -> int:
     spec, text = run.spec, run.text
-    result = run_bounded(
+    result = run.host.run(
         [spec.binary, "-d", str(pooler_files.ini_path(spec.home))],
         timeout=_LAUNCH_TIMEOUT_S,
         capture_output=True,
@@ -400,7 +404,7 @@ def _perform(step: PoolerStep, run: _Run) -> int:
 #
 # Only called when MEIVA_PGBOUNCER_ENABLED (gated by the caller in
 # `complete_gateway_data_plane`).
-def ensure_pgbouncer(spec: PoolerSpec, *, timers: Timers) -> int:
+def ensure_pgbouncer(spec: PoolerSpec, *, host: Host, timers: Timers) -> int:
     shape = spec.shape
     if not binary_installed(spec.binary):
         print(not_installed_error(spec.binary, _install_hint(macos=spec.macos)), file=sys.stderr)
@@ -420,7 +424,7 @@ def ensure_pgbouncer(spec: PoolerSpec, *, timers: Timers) -> int:
         listen_port=shape.listen_port,
         logfile=str(_logfile_path(spec.home)),
     )
-    run = _Run(spec, text, custodian, timers)
+    run = _Run(spec, text, custodian, host, timers)
     for step in plan_convergence(observation):
         if failure := _perform(step, run):
             return failure
