@@ -9,7 +9,6 @@ from base import config
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config.domains.observability.settings import ObservabilitySettings
 from base.config.service_read import ConfigAuthority
-from base.host.db_authority.api import telemetry_token
 from base.paths.tests.homes import point_home
 from cli.commands.observability import otel_collector as collector
 from cli.commands.observability.tests.observability_inputs import (
@@ -78,8 +77,8 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
     )
     # meiva:note
     # The runner holds an installed capability and no human secret: its relay bearer is the
-    # telemetry token the capability carries, which is the one the gateway derives from its secret.
-    telemetry = telemetry_token("relay-test-token")
+    # telemetry token the capability carries, which is the one its gateway home published.
+    telemetry = "relay-test-telemetry-" + "t" * 32
     install_unit_capability(tmp_path, telemetry=telemetry)
     command_machine.set(name="relay-test-runner")
     rendered = yaml.safe_load(
@@ -92,7 +91,7 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
                     gateway_otlp_endpoint=settings.gateway_otlp_endpoint,
                     telemetry_otlp_port=settings.telemetry_otlp_port,
                 ),
-                data_plane=data_plane(cluster_secret=""),
+                data_plane=data_plane(),
             ),
             database_factory=operator_database,
             machine=command_machine,

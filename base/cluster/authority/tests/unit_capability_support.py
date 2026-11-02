@@ -10,10 +10,11 @@ from typing import Any
 import pytest
 
 from base.host.db_authority import unit
+from base.host.db_authority.api import ensure_telemetry_token
 
 ENDPOINT = "postgresql://meiva@10.0.0.7:6433/meiva"
 MACHINE = "mini"
-HUMAN = "gateway-human-secret-" + "s" * 32
+TELEMETRY = "gateway-telemetry-" + "t" * 32
 
 
 def no_probe(_dsn: str) -> None:
@@ -25,6 +26,7 @@ def gateway(tmp_path: Path, seed_write_generation: Callable[[Path], Any]) -> Pat
     home = (tmp_path / "gateway").resolve()
     home.mkdir(mode=0o700)
     seed_write_generation(home)
+    ensure_telemetry_token(home, TELEMETRY)
     return home
 
 
@@ -40,7 +42,6 @@ def issue(
     home: Path,
     *,
     endpoint: str = ENDPOINT,
-    cluster_secret: str = HUMAN,
     ttl_s: float = 600.0,
     now: float | None = None,
 ) -> unit.IssuedBundle:
@@ -49,7 +50,6 @@ def issue(
         gateway,
         unit=identity,
         endpoint=endpoint,
-        cluster_secret=cluster_secret,
         ttl_s=ttl_s,
         now=time.time() if now is None else now,
     )

@@ -2,8 +2,9 @@
 # `meiva cluster db-authority issue-unit`, end to end against a real gateway home.
 #
 # The home is a directory on disk with a private ledger that holds an active write generation
-# and a `.env` that names its database; the invocation's configuration (the cluster secret, the
-# reachable address, the data plane) is the `CommandRuntime` the command is handed. Which homes
+# and a `.env` that names its database, and a telemetry token its start published; the
+# invocation's configuration (the reachable address, the data plane) is the `CommandRuntime` the
+# command is handed. Which homes
 # the verb refuses and the wording of the report are asserted on values in
 # `test_db_authority_replies.py`; these tests prove the shell reads the home and the
 # configuration it was given, seals a bundle only the printed key opens, and writes nothing
@@ -13,17 +14,17 @@ from __future__ import annotations
 
 import re
 import stat
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from base.host.db_authority.api import telemetry_token
 from base.host.db_authority.unit import UnitIdentity, open_bundle
 from cli.commands.cluster.control import cmd_db_authority_issue_unit
 from cli.commands.cluster.tests.unit_capability.capability_harness import (
-    CLUSTER_SECRET,
     MACHINE,
+    TELEMETRY_TOKEN,
     runner_api_token,
 )
 from cli.commands.cluster.tests.unit_capability.capability_harness import (
@@ -37,8 +38,8 @@ _REACHABLE = "10.0.0.7"
 
 # meiva:note
 # The invocation of a gateway operator: the gateway home on disk, serving the gateway and
-# naming its database in its `.env`, and the configuration that names the secret and the address
-# runners reach it on.
+# naming its database in its `.env`, and the configuration that names the address runners reach
+# it on.
 def _operator(
     command_runtime: CommandRuntime, home: Path, *, serves_gateway: bool
 ) -> CommandRuntime:
@@ -46,7 +47,6 @@ def _operator(
     (home / ".env").write_text(
         f"MEIVA_MACHINE_SERVE_GATEWAY={flag}\nMEIVA_DB_URL={_LOCAL_DATABASE}\n"
     )
-    command_runtime.config.set_field("cluster_secret", CLUSTER_SECRET)
     command_runtime.config.set_field("machine_host", _REACHABLE)
     return replace(command_runtime, home=home)
 
@@ -86,7 +86,7 @@ def test_it_seals_the_active_generation_for_one_unit_under_the_key_it_prints(
     assert capability.endpoint == f"postgresql://meiva@{_REACHABLE}:6433/meiva"
     assert capability.generation.number == 0
     assert capability.api.token == runner_api_token(gateway_home)
-    assert capability.api.telemetry == telemetry_token(CLUSTER_SECRET)
+    assert capability.api.telemetry == TELEMETRY_TOKEN
     assert bundle.gateway_home == str(gateway_home)
 
 
@@ -182,6 +182,24 @@ def test_it_refuses_a_gateway_home_with_no_active_generation(
     assert _issue(command, out) == 1
 
     assert "issue-unit:" in capsys.readouterr().err
+    assert not out.exists()
+
+
+def test_it_refuses_a_gateway_home_that_never_published_its_telemetry_token(
+    tmp_path: Path,
+    command_runtime: CommandRuntime,
+    seed_write_generation: Callable[[Path], object],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    unstarted = (tmp_path / "unstarted").resolve()
+    unstarted.mkdir(mode=0o700)
+    seed_write_generation(unstarted)
+    command = _operator(command_runtime, unstarted, serves_gateway=True)
+    out = tmp_path / "mini.bundle"
+
+    assert _issue(command, out) == 1
+
+    assert "start the gateway on this home first" in capsys.readouterr().err
     assert not out.exists()
 
 

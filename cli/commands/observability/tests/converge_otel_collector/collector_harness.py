@@ -24,6 +24,7 @@ import yaml
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.deploy.release.collector import plan as collector_plan
+from base.host.db_authority.api import ensure_telemetry_token, telemetry_token_path
 from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
 from base.paths import otel_collector_dir
 from base.telemetry import EventPipeline
@@ -34,7 +35,7 @@ from cli.commands.observability.plans.observability_config import (
     ObservabilityConfig,
 )
 from cli.commands.observability.tests import observability_inputs
-from cli.commands.observability.tests.observability_inputs import REPO_ROOT
+from cli.commands.observability.tests.observability_inputs import REPO_ROOT, TELEMETRY_TOKEN
 from cli.database.runtime import CommandRuntime, UserSession
 
 __all__ = [
@@ -97,6 +98,12 @@ class CollectorUnit:
     machine: ConfiguredMachineIdentity
     runtime: CommandRuntime
     open_url: UrlOpener
+
+    # meiva:note
+    # Take back the telemetry token the fixture published: a unit whose gateway never started, or
+    # a remote unit that was never issued a capability, holds none.
+    def retract_token(self) -> None:
+        telemetry_token_path(self.home.resolve()).unlink()
 
     # meiva:note
     # The rendered config text for a unit with `roles`, reachable at `host`.
@@ -215,8 +222,10 @@ class CollectorUnit:
 
 @pytest.fixture
 def collector_unit(tmp_path: Path, command_runtime: CommandRuntime) -> CollectorUnit:
-    """A named machine whose `.meiva` home under `tmp_path` holds a gateway's start intent."""
+    """A named machine whose `.meiva` home under `tmp_path` holds a gateway's start intent and
+    the telemetry token its start published."""
     observability_inputs.write_cluster_record(tmp_path / ".meiva")
+    ensure_telemetry_token((tmp_path / ".meiva").resolve(), TELEMETRY_TOKEN)
     command_runtime.machine.set(name="test-machine")
     return CollectorUnit(
         home=tmp_path / ".meiva",

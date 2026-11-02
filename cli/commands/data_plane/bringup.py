@@ -38,7 +38,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.host.db_authority import delivery as db_delivery_files
 from base.host.db_authority import ledger, model
-from base.host.db_authority.api import API_TOKEN_ENV, api_token, publish_telemetry_token
+from base.host.db_authority.api import API_TOKEN_ENV, api_token
 from base.host.db_authority.unit import unit_api_delivery, unit_delivery
 from base.host.env.bootstrap import config_source_is_local
 from base.host.env.dotenv_file import env_file_path, read_env_aliases
@@ -128,12 +128,10 @@ def ensure_gateway_data_plane(
             print(message, file=sys.stderr)
             return 1
         case ProbeRemotePlane():
-            publish_telemetry_token(home.resolve(), config.cluster_secret)
             return _verify_remote_plane(config, database_factory=database_factory)
         case StartLocalStorage(ports=ports):
             if retained_children is None:
                 raise RuntimeError("the admitted local storage lost its children")
-            publish_telemetry_token(home.resolve(), config.cluster_secret)
             return instance.ensure_cluster_storage(
                 config,
                 home=home,

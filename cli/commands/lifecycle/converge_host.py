@@ -83,6 +83,7 @@ from cli.commands.converge.steps import (
     ensure_meiva_on_path,
     ensure_pg_binaries_step,
 )
+from cli.commands.converge.telemetry_token import ensure_telemetry_token_step
 from cli.commands.converge.walg import converge_walg
 from cli.commands.data_plane.pgbouncer import ensure_pgbouncer_step
 from cli.commands.extensions.external_skills import converge_external_agent_skill
@@ -470,6 +471,15 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         "skills sync -> $MEIVA_HOME/skills",
         _converge_skills_step,
         roles=frozenset({"agent-runner"}),
+        requires_unit_config=True,
+    ),
+    # meiva:note
+    # The collector step renders the gateway's telemetry token into the sidecar config, so the
+    # token is published before it.
+    ConvergeStep(
+        "telemetry token",
+        ensure_telemetry_token_step,
+        roles=frozenset({"gateway"}),
         requires_unit_config=True,
     ),
     ConvergeStep(

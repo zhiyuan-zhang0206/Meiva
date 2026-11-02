@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from base.cluster.authority.tests.runner_logins import grant_runner_login
+from base.host.db_authority.api import ensure_telemetry_token
 from base.host.db_authority.delivery import active_generation
 from base.host.db_authority.ledger import read_secret
 from base.host.db_authority.unit import UnitIdentity, issue_bundle
@@ -29,8 +30,8 @@ from cli.startup.tests.birth_facts import birth_facts
 
 __all__ = [
     "BOOTSTRAP",
-    "CLUSTER_SECRET",
     "MACHINE",
+    "TELEMETRY_TOKEN",
     "SealedBundle",
     "bootstrap_reply",
     "database_endpoint",
@@ -47,8 +48,9 @@ MACHINE = "mini"
 BOOTSTRAP = ("GET", "/api/bootstrap")
 
 # meiva:note
-# A literal of the throwaway gateway these tests seal bundles for; it never leaves the box.
-CLUSTER_SECRET = "gateway-human-secret-" + "s" * 32
+# The telemetry token the throwaway gateway these tests seal bundles for has published; it never
+# leaves the box.
+TELEMETRY_TOKEN = "gateway-telemetry-" + "t" * 32
 
 
 # meiva:note
@@ -61,10 +63,12 @@ class SealedBundle:
 
 @pytest.fixture
 def gateway_home(tmp_path: Path, seed_write_generation: Callable[[Path], object]) -> Path:
-    """A gateway home whose private ledger holds an active write generation."""
+    """A gateway home whose private ledger holds an active write generation and whose start has
+    published its telemetry token."""
     home = (tmp_path / "gateway").resolve()
     home.mkdir(mode=0o700)
     seed_write_generation(home)
+    ensure_telemetry_token(home, TELEMETRY_TOKEN)
     return home
 
 
@@ -117,7 +121,6 @@ def seal_bundle(
         gateway,
         unit=UnitIdentity(machine=machine, home=str(unit_home)),
         endpoint=endpoint,
-        cluster_secret=CLUSTER_SECRET,
         ttl_s=60,
         now=time.time(),
     )

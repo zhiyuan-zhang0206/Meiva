@@ -63,13 +63,12 @@ class GrafanaCredentials:
 
 
 # meiva:note
-# The cluster data plane as the collector config reads it: the connection URLs, whether the
-# plane lives off-box and the cluster secret the telemetry bearer derives from. The URLs carry the
-# login and the two passwords are secrets: none of them reaches a repr.
+# The cluster data plane as the collector config reads it: the connection URLs and whether the
+# plane lives off-box. The URLs carry the login and the password is a secret: none of them
+# reaches a repr.
 @dataclass(frozen=True)
 class DataPlaneInputs:
     db_url: str = field(repr=False)
     redis_url: str = field(repr=False)
     redis_admin_password: str = field(repr=False)
     is_remote: bool
-    cluster_secret: str = field(repr=False)

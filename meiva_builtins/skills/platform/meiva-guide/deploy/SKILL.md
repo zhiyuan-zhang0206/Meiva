@@ -130,7 +130,7 @@ prints its transport key once. The runner never needs the gateway's cluster
 secret: the capability's API token authenticates it. `meiva init` installs that
 capability and persists local identity; the first start registers the host and waits
 for its selected services. It
-creates no local cluster data plane. To refresh the unit's capability (a rotated human secret changes its telemetry token), install the
+creates no local cluster data plane. To refresh the unit's capability (a fresh expiry, a replaced telemetry token), install the
 newly issued bundle on the stopped unit with `meiva cluster db-authority install-unit
 <bundle>` (the key in `MEIVA_DB_CAPABILITY_KEY` again), then `meiva start --all-services`. Each runner process fetches current
 connection facts from the gateway at Settings construction. See

@@ -11,7 +11,7 @@ internal data plane always authenticates, whatever the bearer
 | `$MEIVA_HOME/backups/logical-backup.passphrase` (0600) | Gateway home | The logical-backup passphrase: minted and pinned at birth (a home born earlier carries `sha256(secret)`, pinned once), never derived and never changed by a secret rotation ([decision](../../decisions/data/backup/2026-09-28-backup-passphrase-minted-at-birth.md)); **backup-critical**: it is the only key to every logical backup |
 | OS user over the owner-only socket (`peer`) | Gateway host | Postgres administrator: provisioning, migrations (acting as the NOLOGIN schema owner), grants, the authority invariant |
 | OS user mapped to `meiva_monitor` (`peer map=meiva_monitor`) | Gateway host's OTel collector | Password-less statistics reader (`pg_read_all_stats`, CONNECT); not a write generation, so no credential exists |
-| `$MEIVA_HOME/db-authority/` (0700; files 0600) | Gateway home | `ledger.json` (owner, groups, active generation), `generations/0.json` (the write generation's two logins with passwords and SCRAM verifiers, and its two machine API tokens), `pooler-admin.json` (PgBouncer admin console `meiva_pooler_admin`) |
+| `$MEIVA_HOME/db-authority/` (0700; files 0600) | Gateway home | `ledger.json` (owner, groups, active generation), `generations/0.json` (the write generation's two logins with passwords and SCRAM verifiers, and its two machine API tokens), `pooler-admin.json` (PgBouncer admin console `meiva_pooler_admin`), `telemetry-token` (the cluster's OTLP relay bearer: random, minted once by the gateway's converge, independent of every secret above) |
 | `$MEIVA_HOME/db-authority/` (0700; files 0600) | Remote agent-runner home | `unit.json` (the installed runner login of one generation, bound to this unit and the served endpoint, with its API admission: the runner API token, the gateway token's digest and the telemetry token) |
 | `MEIVA_REDIS_ADMIN_PASSWORD` | Gateway only | Redis `default` user and `requirepass` |
 | `MEIVA_REDIS_PASSWORD` | Gateway file; embedded in `MEIVA_REDIS_URL` | Redis ACL runtime user |
@@ -119,6 +119,6 @@ journals the rotation as fingerprints (`backups/secret-rotation/bearer.json`),
 verifies the pinned logical-backup passphrase (the secret never touches it;
 a home without a pin pins `sha256(secret)` here), and only then writes the new
 secret into the gateway `.env`; a re-run
-resumes an interrupted rotation from its journal. Restart the gateway, then
-issue every remote unit a new capability bundle: its telemetry relay token
-derives from the secret. New browser logins use the new secret.
+resumes an interrupted rotation from its journal. Restart the gateway. No remote
+unit needs a new capability bundle: its machine API token and its telemetry relay
+token do not derive from the secret. New browser logins use the new secret.

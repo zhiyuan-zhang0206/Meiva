@@ -336,3 +336,13 @@ def test_next_public_keys_ignores_comments_and_substrings(tmp_path: Path) -> Non
 
 def test_next_public_keys_absent_file_is_empty(tmp_path: Path) -> None:
     assert _fe_env.next_public_keys_in_env_file(tmp_path / "nope.env") == []
+
+
+def test_the_telemetry_token_step_runs_on_gateways_before_the_collector_step_renders_it() -> None:
+    names = [step.name for step in converge_host.CONVERGE_STEPS]
+    step = converge_host.CONVERGE_STEPS[names.index("telemetry token")]
+
+    assert step.roles == frozenset({"gateway"})
+    assert step.requires_unit_config is True
+    assert step.host_global is False
+    assert names.index("telemetry token") < names.index("otel collector sidecar")

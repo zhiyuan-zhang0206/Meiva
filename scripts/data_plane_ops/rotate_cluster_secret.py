@@ -1,32 +1,31 @@
 #!/usr/bin/env python3
-"""Rotate the gateway's human cluster secret (the control-plane bearer).
-
-``MEIVA_CLUSTER_SECRET`` authenticates human and operator callers of the gateway
-API and the frontend login. Remote units never hold it: they authenticate with
-their write generation's machine API token. Only their telemetry relay token,
-derived from this secret, changes with it, so every remote unit needs a newly
-issued capability bundle afterwards (``meiva cluster db-authority issue-unit``).
-The rotation never changes Postgres, Redis, their ACLs or PgBouncer.
-
-Run this script only after a bearer leak. It drives ``advance``, which
-journals every step before its effect and never records a secret (only
-fingerprints):
-
-1. Stage the next secret in ``backups/secret-rotation/bearer.pending`` (0600).
-2. Journal ``pinning``: the old and new bearer fingerprints and the fingerprint
-   of the logical-backup passphrase the home keeps.
-3. Verify that pin (``services/backup/artifact/passphrase``). A home has
-   one from its birth, and the secret never touches it; a home without one
-   encrypted its earlier logical backups under ``sha256(secret)``, which is
-   pinned here so they keep decrypting.
-4. Journal ``pinned``. Only then write the new secret into the gateway ``.env``.
-5. Journal ``done`` and delete the staged secret.
-
-A crash resumes from the journal: an unpinned passphrase is derived only from
-the recorded pre-rotation secret, a pinned one is only verified against its
-recorded fingerprint, and the ``.env`` value must be exactly the old or the
-staged secret. Restart the gateway afterwards (``meiva start``).
-"""
+# meiva:note
+# Rotate the gateway's human cluster secret (the control-plane bearer).
+#
+# ``MEIVA_CLUSTER_SECRET`` authenticates human and operator callers of the gateway
+# API and the frontend login. Remote units never hold it: they authenticate with
+# their write generation's machine API token and relay telemetry with a token of
+# their own. The rotation replaces only the operator bearer and ends the browser
+# sessions bound to it; it changes neither the telemetry token nor any remote
+# unit's capability, and never Postgres, Redis, their ACLs or PgBouncer.
+#
+# The script drives ``advance``, which journals every step before its effect and
+# never records a secret (only fingerprints):
+#
+# 1. Stage the next secret in ``backups/secret-rotation/bearer.pending`` (0600).
+# 2. Journal ``pinning``: the old and new bearer fingerprints and the fingerprint
+#    of the logical-backup passphrase the home keeps.
+# 3. Verify that pin (``services/backup/artifact/passphrase``). A home has
+#    one from its birth, and the secret never touches it; a home without one
+#    encrypted its earlier logical backups under ``sha256(secret)``, which is
+#    pinned here so they keep decrypting.
+# 4. Journal ``pinned``. Only then write the new secret into the gateway ``.env``.
+# 5. Journal ``done`` and delete the staged secret.
+#
+# A crash resumes from the journal: an unpinned passphrase is derived only from
+# the recorded pre-rotation secret, a pinned one is only verified against its
+# recorded fingerprint, and the ``.env`` value must be exactly the old or the
+# staged secret. Restart the gateway afterwards (``meiva start``).
 
 from __future__ import annotations
 
@@ -239,9 +238,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print("✓ the gateway .env holds the new bearer; the logical-backup passphrase is pinned")
     print(f"  ({passphrase.pin_path(home)} is backup-critical: keep it with the backup keys).")
-    print("NEXT: restart the gateway (`meiva start`), then issue every remote unit a new")
-    print("capability bundle (`meiva cluster db-authority issue-unit`): its telemetry token")
-    print("derives from the bearer. New browser logins use the new secret.")
+    print("NEXT: restart the gateway (`meiva start`). No remote unit is affected: its capability")
+    print("holds no human secret and its telemetry token is independent. New browser logins use")
+    print("the new secret.")
     return 0
 
 

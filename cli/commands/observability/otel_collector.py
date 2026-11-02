@@ -236,7 +236,7 @@ def _exporters(
 # Render the sidecar config from the repo template and this unit's settings.
 #
 # `meiva_home` names the files the config points at (mirror, log offsets, registry record) and the
-# cluster label; the telemetry bearer is derived for that home. A remote observatory and a pure
+# cluster label; the telemetry bearer is read for that home. A remote observatory and a pure
 # runner relay authenticate with it, so a unit that holds no bearer fails closed rather than
 # render an unauthenticated fan-out. The cluster modules are imported where they are used: the
 # converge step table imports this module on every CLI start.
@@ -253,7 +253,7 @@ def generate_config(
     from base.host.db_authority.unit import telemetry_bearer
 
     obs = settings.observability
-    bearer = telemetry_bearer(meiva_home.resolve(), settings.data_plane.cluster_secret)
+    bearer = telemetry_bearer(meiva_home.resolve())
     bases = lgtm_fanout_bases(
         obs, remote=roles != frozenset({"agent-runner"}), database_factory=database_factory
     )

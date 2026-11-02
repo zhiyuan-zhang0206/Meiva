@@ -25,17 +25,16 @@ from cli.commands.observability.tests.converge_otel_collector.collector_harness 
 from cli.commands.observability.tests.converge_otel_collector.collector_harness import (
     collector_unit as collector_unit,
 )
-from cli.commands.observability.tests.observability_inputs import data_plane, observability
+from cli.commands.observability.tests.observability_inputs import TELEMETRY_TOKEN, observability
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 
-SECRET = data_plane().cluster_secret
 RELAY_EXPORTERS = ("otlphttp/tempo", "otlphttp/loki", "otlphttp/prometheus")
 
 
 def _bearer(unit: CollectorUnit) -> str:
-    bearer = telemetry_bearer(unit.home.resolve(), SECRET)
-    assert bearer is not None
+    bearer = telemetry_bearer(unit.home.resolve())
+    assert bearer is not None and bearer == TELEMETRY_TOKEN
     return bearer
 
 
@@ -43,7 +42,7 @@ def _http(config: dict[str, Any]) -> dict[str, Any]:
     return config["receivers"]["otlp"]["protocols"]["http"]
 
 
-def test_a_pure_runner_relays_every_signal_to_the_gateway_ingress_with_the_derived_bearer(
+def test_a_pure_runner_relays_every_signal_to_the_gateway_ingress_with_the_cluster_bearer(
     collector_unit: CollectorUnit,
 ) -> None:
     config = collector_unit.render(
@@ -54,7 +53,6 @@ def test_a_pure_runner_relays_every_signal_to_the_gateway_ingress_with_the_deriv
     assert "otlp/remote" not in config["receivers"]
     assert set(config["exporters"]) == {*RELAY_EXPORTERS, "file/traces"}
     bearer = _bearer(collector_unit)
-    assert bearer != SECRET
     for exporter_id in RELAY_EXPORTERS:
         exporter = config["exporters"][exporter_id]
         assert exporter["endpoint"] == GATEWAY_INGRESS
@@ -147,20 +145,23 @@ def test_an_ipv6_address_is_bracketed_in_the_receiver_bind_and_in_the_relay_endp
 
 
 @pytest.mark.parametrize(
-    ("roles", "host", "secret"),
+    ("roles", "host", "published"),
     [
-        pytest.param(HYBRID, "localhost", "", id="single-box"),
-        pytest.param(HYBRID, "localhost", SECRET, id="single-box-with-a-secret"),
-        pytest.param(GATEWAY, "10.0.0.10", "", id="gateway-without-a-secret"),
-        pytest.param(STATION, "10.0.0.10", "", id="station-without-a-secret"),
-        pytest.param(GATEWAY, "localhost", SECRET, id="gateway-on-loopback"),
-        pytest.param(STATION, "localhost", SECRET, id="station-on-loopback"),
+        pytest.param(HYBRID, "localhost", False, id="single-box"),
+        pytest.param(HYBRID, "localhost", True, id="single-box-with-a-token"),
+        pytest.param(GATEWAY, "10.0.0.10", False, id="gateway-without-a-token"),
+        pytest.param(STATION, "10.0.0.10", False, id="station-without-a-token"),
+        pytest.param(GATEWAY, "localhost", True, id="gateway-on-loopback"),
+        pytest.param(STATION, "localhost", True, id="station-on-loopback"),
     ],
 )
-def test_nothing_remote_can_dial_a_unit_without_a_secret_or_a_routable_host(
-    collector_unit: CollectorUnit, roles: frozenset[str], host: str, secret: str
+def test_nothing_remote_can_dial_a_unit_without_a_token_or_a_routable_host(
+    collector_unit: CollectorUnit, roles: frozenset[str], host: str, published: bool
 ) -> None:
-    config = collector_unit.render(roles, host=host, data_plane=data_plane(cluster_secret=secret))
+    if not published:
+        collector_unit.retract_token()
+
+    config = collector_unit.render(roles, host=host)
 
     assert "otlp/remote" not in config["receivers"]
     assert "bearertokenauth/cluster" not in config["extensions"]
@@ -175,45 +176,47 @@ def test_nothing_remote_can_dial_a_unit_without_a_secret_or_a_routable_host(
 # meiva:note
 # The wildcard host is a rejection fixture: the render refuses it and nothing binds to it.
 @pytest.mark.parametrize(
-    ("roles", "host", "secret", "gateway_ingress", "message"),
+    ("roles", "host", "published", "gateway_ingress", "message"),
     [
-        pytest.param(RUNNER, "10.0.0.20", SECRET, "", "gateway bootstrap", id="no-ingress"),
+        pytest.param(RUNNER, "10.0.0.20", True, "", "gateway bootstrap", id="no-ingress"),
         pytest.param(
             RUNNER,
             "10.0.0.20",
-            SECRET,
+            True,
             "http://localhost:4318",
             "gateway bootstrap",
             id="loopback-ingress",
         ),
         pytest.param(
-            RUNNER, "10.0.0.20", "", GATEWAY_INGRESS, "telemetry token", id="runner-no-secret"
+            RUNNER, "10.0.0.20", False, GATEWAY_INGRESS, "telemetry token", id="runner-no-token"
         ),
         pytest.param(
             GATEWAY,
             "0.0.0.0",  # noqa: S104
-            SECRET,
+            True,
             "",
             "reachable host",
             id="gateway-wildcard-host",
         ),
-        pytest.param(STATION, "::", SECRET, "", "reachable host", id="station-wildcard-host"),
+        pytest.param(STATION, "::", True, "", "reachable host", id="station-wildcard-host"),
     ],
 )
 def test_a_split_topology_fails_closed_when_its_ingress_identity_is_incomplete(
     collector_unit: CollectorUnit,
     roles: frozenset[str],
     host: str,
-    secret: str,
+    published: bool,
     gateway_ingress: str,
     message: str,
 ) -> None:
+    if not published:
+        collector_unit.retract_token()
+
     with pytest.raises(RuntimeError, match=message):
         collector_unit.render(
             roles,
             host=host,
             observability=observability(gateway_otlp_endpoint=gateway_ingress),
-            data_plane=data_plane(cluster_secret=secret),
         )
 
 
@@ -245,13 +248,14 @@ def test_a_unit_that_consumes_a_remote_observatory_relays_every_signal_to_its_si
     assert _http(config) == {"endpoint": "127.0.0.1:4318"}
 
 
-def test_a_remote_observatory_without_a_cluster_secret_cannot_authenticate_its_relay(
+def test_a_remote_observatory_without_a_telemetry_token_cannot_authenticate_its_relay(
     db_url: str, collector_unit: CollectorUnit, operator_database: Callable[[], Any]
 ) -> None:
+    collector_unit.retract_token()
+
     with pytest.raises(RuntimeError, match="telemetry token"):
         collector_unit.render(
             HYBRID,
             observability=observability(observability_url="http://10.0.0.46"),
-            data_plane=data_plane(cluster_secret=""),
             database_factory=operator_database,
         )

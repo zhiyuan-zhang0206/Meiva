@@ -52,6 +52,7 @@ from services.supervision.roster.service_spec import ServiceSpec, api_access
 from tests.fixtures.gateway_config import anonymous_gateway_client, gateway_test_app
 
 _HUMAN = "human-" + "h" * 40
+_TELEMETRY = "telemetry-" + "t" * 40
 _ENDPOINT = "postgresql://meiva@10.0.0.7:6433/meiva"
 
 
@@ -78,11 +79,12 @@ def _unadmit(home: Path) -> None:
 def gateway(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seed_write_generation: Callable[[Path], Any]
 ) -> Iterator[Path]:
-    """A gateway home with an active generation 0, as this process's home, with
-    its human secret set."""
+    """A gateway home with an active generation 0 and a published telemetry token, as this
+    process's home, with its human secret set."""
     home = (tmp_path / "gateway").resolve()
     home.mkdir(mode=0o700)
     seed_write_generation(home)
+    api.ensure_telemetry_token(home, _TELEMETRY)
     # The gateway's bootstrap serves the connection facts its home's `.env` declares.
     (home / ".env").write_text(
         f"MEIVA_DB_URL={settings.data_plane.db_url}\nMEIVA_REDIS_URL={settings.data_plane.redis_url}\n"
@@ -487,7 +489,6 @@ def runner_home(tmp_path: Path, gateway: Path, monkeypatch: pytest.MonkeyPatch) 
         gateway,
         unit=unit.UnitIdentity(machine="mini", home=str(home)),
         endpoint=_ENDPOINT,
-        cluster_secret=_HUMAN,
         ttl_s=600,
         now=time.time(),
     )
@@ -513,12 +514,12 @@ def test_the_unit_capability_carries_the_api_admission(gateway: Path, runner_hom
     assert capability.api == unit.UnitApi(
         token=tokens.runner,
         gateway=api.token_digest(tokens.gateway),
-        telemetry=api.telemetry_token(_HUMAN),
+        telemetry=_TELEMETRY,
     )
     # The unit holds neither the gateway token nor the human secret.
     stored = unit.unit_capability_path(runner_home).read_text()
     assert tokens.gateway not in stored and _HUMAN not in stored
-    assert unit.telemetry_bearer(runner_home, "") == api.telemetry_token(_HUMAN)
+    assert unit.telemetry_bearer(runner_home) == _TELEMETRY
     assert unit.unit_api_delivery(runner_home) == {api.API_TOKEN_ENV: tokens.runner}
 
 
@@ -534,17 +535,23 @@ def test_remote_unit_ops_accepts_its_generation_never_the_human_secret(
         assert asyncio.run(_ops_status(acceptance, token)) == status
 
 
-def test_a_bundle_cannot_be_issued_without_the_human_secret(gateway: Path, tmp_path: Path) -> None:
-    """Every bundle carries the API admission, which derives its telemetry token from the
-    secret: there is no admission-less capability."""
-    home = (tmp_path / "no-secret-runner").resolve()
+# meiva:note
+# Every bundle carries the API admission, whose telemetry token is the one the gateway home
+# published: a gateway that never started has none to give, so there is no admission-less
+# capability.
+def test_a_bundle_cannot_be_issued_before_the_gateway_published_its_telemetry_token(
+    tmp_path: Path, seed_write_generation: Callable[[Path], Any]
+) -> None:
+    unstarted = (tmp_path / "unstarted-gateway").resolve()
+    unstarted.mkdir(mode=0o700)
+    seed_write_generation(unstarted)
+    home = (tmp_path / "no-token-runner").resolve()
     home.mkdir(mode=0o700)
-    with pytest.raises(ValueError, match="non-empty cluster secret"):
+    with pytest.raises(unit.UnitCapabilityError, match="start the gateway on this home first"):
         unit.issue_bundle(
-            gateway,
+            unstarted,
             unit=unit.UnitIdentity(machine="mini", home=str(home)),
             endpoint=_ENDPOINT,
-            cluster_secret="",
             ttl_s=600,
             now=time.time(),
         )
@@ -626,12 +633,17 @@ def test_clients_present_the_delivered_token_first() -> None:
         gateway_auth_headers(_access(secret="", token=None))
 
 
-def test_the_telemetry_token_is_one_way_and_stable_per_secret() -> None:
-    token = api.telemetry_token(_HUMAN)
-    assert token == api.telemetry_token(_HUMAN) != api.telemetry_token(_HUMAN + "x")
-    assert _HUMAN not in token and token != hashlib.sha256(_HUMAN.encode()).hexdigest()
-    with pytest.raises(ValueError, match="non-empty cluster secret"):
-        api.telemetry_token("")
+# meiva:note
+# A capability is the unit's own token even beside a published file of another value.
+def test_the_telemetry_bearer_is_the_capabilitys_else_the_homes_published_token(
+    tmp_path: Path, gateway: Path, runner_home: Path
+) -> None:
+    assert unit.telemetry_bearer(gateway) == _TELEMETRY
+    api.ensure_telemetry_token(runner_home, "other-" + "o" * 40)
+    assert unit.telemetry_bearer(runner_home) == _TELEMETRY
+    unpublished = (tmp_path / "unpublished").resolve()
+    unpublished.mkdir(mode=0o700)
+    assert unit.telemetry_bearer(unpublished) is None
 
 
 def test_acceptance_cache_reuses_only_its_owner_and_ledger_revision(gateway: Path) -> None:

@@ -27,6 +27,7 @@ from cli.commands.observability.plans.observability_config import (
 __all__ = [
     "FAST_DOWNLOADS",
     "REPO_ROOT",
+    "TELEMETRY_TOKEN",
     "collector_settings",
     "data_plane",
     "install_unit_capability",
@@ -38,6 +39,10 @@ __all__ = [
 # meiva:note
 # The checkout the shells render from: the shipped templates, pins and provisioning tree.
 REPO_ROOT = Path(__file__).resolve().parents[4]
+
+# meiva:note
+# The cluster's telemetry token as a gateway home publishes it. A fixture value, not a credential.
+TELEMETRY_TOKEN = "telemetry-" + "t" * 40
 
 # meiva:note
 # Three attempts with a 10 ms backoff and a generous budget: a retrying download finishes in
@@ -81,8 +86,8 @@ def observability(**changes: Any) -> ObservabilityConfig:
 
 
 # meiva:note
-# A single-box data plane: loopback Redis with an admin password and a cluster token. Both are
-# fixture values, not credentials.
+# A single-box data plane: loopback Redis with an admin password. A fixture value, not a
+# credential.
 def data_plane(**changes: Any) -> DataPlaneInputs:
     return replace(
         DataPlaneInputs(
@@ -90,7 +95,6 @@ def data_plane(**changes: Any) -> DataPlaneInputs:
             redis_url="redis://meiva:runtime@127.0.0.1:6380/0",
             redis_admin_password="abc",  # noqa: S106
             is_remote=False,
-            cluster_secret="cluster-token",  # noqa: S106
         ),
         **changes,
     )

@@ -44,9 +44,11 @@ def test_a_runners_first_join_reaches_the_gateway(
     db_url: str,
 ) -> None:
     from base.host.db_authority import unit
+    from base.host.db_authority.api import ensure_telemetry_token
     from cli.commands.cluster import unit_join
 
     secret = uuid4().hex
+    ensure_telemetry_token(resolve_meiva_home(), uuid4().hex)
     runner_login = served_gateway_home.roles.runner
     grant_runner_login(
         db_url, owner="meiva_citest", login=runner_login.name, password=runner_login.password
@@ -70,7 +72,6 @@ def test_a_runners_first_join_reaches_the_gateway(
             ),
             plugin_cluster_config=plugin_bootstrap_config(home=unit_home),
         )["MEIVA_DB_URL"],
-        cluster_secret=secret,
         ttl_s=600,
         now=time.time(),
     )
