@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 
 import { SpawnForm } from "@/components/agents/spawn-form";
+import { useCoarsePointer } from "@/lib/input/use-coarse-pointer";
 import { useBreakpoint } from "@/lib/layout/breakpoint";
 import { cn } from "@/lib/format/utils";
 
@@ -28,6 +29,8 @@ interface Props {
 export function SpawnPopover({ onSpawn, variant }: Props) {
   const t = useTranslations("spawn");
   const { isNarrow } = useBreakpoint();
+  const coarsePointer = useCoarsePointer();
+  const stacked = isNarrow || coarsePointer;
   const [open, setOpen] = useState(false);
 
   return (
@@ -52,20 +55,22 @@ export function SpawnPopover({ onSpawn, variant }: Props) {
         <Popover.Content
           sideOffset={6}
           align="end"
+          collisionPadding={12}
           // meiva:note
-          // The panel takes its width from the form (`w-fit`): the table sizes every
+          // The panel takes its width from the form (`w-fit`) on desktop: the table sizes every
           // column to its content, so a fixed 660px would only hand the slack to one of
-          // them. The stacked phone layout still wants the full width.
+          // them. Phones and touch tablets use the stacked form so 44px rows and inline
+          // unavailability reasons remain reachable without hover-only tooltips.
           // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
           className={cn(
-            "z-50 max-w-[94vw] text-popover-foreground outline-none",
-            isNarrow ? "w-[94vw]" : "w-fit",
+            "z-50 max-w-[94vw] max-h-[min(80dvh,var(--radix-popover-content-available-height,80dvh))] overflow-y-auto text-popover-foreground outline-none",
+            isNarrow ? "w-[94vw]" : coarsePointer ? "w-[min(26rem,94vw)]" : "w-fit",
           )}
         >
           <SpawnForm
             onSpawn={onSpawn}
             onDone={() => setOpen(false)}
-            layout={isNarrow ? "stack" : "table"}
+            layout={stacked ? "stack" : "table"}
           />
         </Popover.Content>
       </Popover.Portal>

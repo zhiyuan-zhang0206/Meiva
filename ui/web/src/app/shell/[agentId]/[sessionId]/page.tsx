@@ -265,7 +265,7 @@ export function ShellMonitorView({ params, bfcacheId }: ShellMonitorViewProps) {
           {sessionId}
         </h1>
         {data?.session_name && (
-          <span className="hidden shrink-0 truncate font-mono text-[11px] text-muted-foreground sm:inline">
+          <span className="hidden max-w-40 truncate font-mono text-[11px] text-muted-foreground sm:inline">
             {data.session_name}
           </span>
         )}
@@ -306,6 +306,9 @@ export function ShellMonitorView({ params, bfcacheId }: ShellMonitorViewProps) {
           <input
             id="shell-lines"
             type="number"
+            inputMode="numeric"
+            enterKeyHint="done"
+            autoComplete="off"
             min={MIN_LINES}
             max={MAX_LINES}
             value={inputValue}

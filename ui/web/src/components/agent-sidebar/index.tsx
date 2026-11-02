@@ -242,7 +242,12 @@ function MobileSidebar(props: MobileProps) {
   const { mobileOpen, onMobileClose, onSearchOpen, viewMode, onToggleViewMode, showTerminated, onToggleTerminated } = props;
   if (!mobileOpen) return null;
   return (
-    <div className={cn("fixed inset-0 z-50", FLEX)}>
+    <div
+      className={cn(
+        "fixed inset-x-0 top-0 z-50 h-[var(--visual-viewport-height,100dvh)] pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]",
+        FLEX,
+      )}
+    >
       <div
         className="absolute inset-0 bg-black/40"
         onClick={onMobileClose}

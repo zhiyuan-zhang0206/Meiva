@@ -31,10 +31,28 @@ import { pinnedShellHeight } from "@/lib/browser/viewport";
 export function VisualViewportHeightSync() {
   const viewport = useBrowser().viewport;
   useEffect(() => {
+    const rootStyle = document.documentElement.style;
+    const clearPin = () => {
+      rootStyle.height = "";
+      rootStyle.removeProperty("--visual-viewport-height");
+      rootStyle.removeProperty("--safe-area-bottom");
+    };
     const sync = () => {
       const reading = viewport.read();
       const pinned = pinnedShellHeight(reading);
-      document.documentElement.style.height = pinned === null ? "" : `${pinned}px`;
+      if (pinned === null) {
+        clearPin();
+      } else {
+        // meiva:note
+        // CSS `vh`/`dvh` and `position: fixed` resolve against the layout viewport on WebKit,
+        // ignoring `html.style.height`, and `env(safe-area-inset-bottom)` stays non-zero even
+        // when the on-screen keyboard covers the Home Indicator. Publishing `--visual-viewport-height`
+        // and zeroing `--safe-area-bottom` lets fixed overlays, dialogs and max-height caps shrink
+        // with the visible band above the keyboard.
+        rootStyle.height = `${pinned}px`;
+        rootStyle.setProperty("--visual-viewport-height", `${pinned}px`);
+        rootStyle.setProperty("--safe-area-bottom", "0px");
+      }
       if (reading.visual !== null) {
         viewport.resetScroll();
       }
@@ -50,7 +68,7 @@ export function VisualViewportHeightSync() {
       unsubscribe();
       // meiva:note
       // Unmount must not leave the shell stuck at a keyboard height.
-      document.documentElement.style.height = "";
+      clearPin();
     };
   }, [viewport]);
 

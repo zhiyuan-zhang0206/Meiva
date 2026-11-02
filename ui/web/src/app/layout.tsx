@@ -50,6 +50,7 @@ export const viewport: Viewport = {
   // — the `VisualViewportHeightSync` component below is the iOS half of the
   // same contract (task #4779).
   interactiveWidget: "resizes-content",
+  viewportFit: "cover",
 };
 
 export default async function RootLayout({
@@ -83,7 +84,11 @@ export default async function RootLayout({
         // `kapture-loaded`) to body before React hydrates — not a bug,
         // suppress separately.
         suppressHydrationWarning
-        className={cn("min-h-full h-full bg-background text-foreground", FLEX, FLEX_COL)}
+        className={cn(
+          "min-h-full h-full bg-background text-foreground pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]",
+          FLEX,
+          FLEX_COL,
+        )}
       >
         <a
           href="#main-content"

@@ -65,7 +65,10 @@ in the header as a badge.
 
 The + opens the spawn form and mounts `SpawnButton` only while the popover is
 open, so the machine / model / effort / harness pickers never cost the closed
-sidebar a row. The form itself is unchanged — placement, pricing and harness
+sidebar a row. Desktop fine-pointer viewports render the multi-column table;
+narrow viewports and coarse-pointer tablets (`useCoarsePointer()`) render the
+stacked form (`layout="stack"`) so touch rows stay finger-sized and surface
+unavailability reasons inline without relying on hover tooltips. The form itself is unchanged — placement, pricing and harness
 gating stay with [[ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md|Creation Availability]].
 An empty roster replaces the list with one explanatory line and a full-width
 create button, because a bare + does not explain itself to someone who has
@@ -83,12 +86,15 @@ changes never re-sort it. Status dot and awaiting badge are opt-in
 (`display.show_agent_status` / `notification.awaiting_reply`, default off;
 single-line agent rows carry no secondary activity line, user ruling 2026-11-01).
 Labels truncate with a single-line ellipsis (`truncate`) so long names and deep
-tree indents never wrap or vary row height. Hovering a row for 400 ms opens a
-read-only peek card (`agent-hover-card.tsx`) to the right of the sidebar with
-the full untruncated `#ID · label`, lifecycle status, harness, machine, relative
-`Active` and `Spawned` timestamps, and any active lineage or anomaly signals;
-moving to another row within a 300 ms warm-up window switches the card
-immediately (0 ms), and leaving closes it at once.
+tree indents never wrap or vary row height. On fine pointers (`!useCoarsePointer()`),
+hovering a row for 400 ms opens a read-only peek card (`agent-hover-card.tsx`) to
+the right of the sidebar with the full untruncated `#ID · label`, lifecycle status,
+harness, machine, relative `Active` and `Spawned` timestamps, and any active
+lineage or anomaly signals; moving to another row within a 300 ms warm-up window
+switches the card immediately (0 ms), and leaving closes it at once (coarse
+pointers suppress synthetic hover tooltips). Rows can be renamed inline either by
+double-clicking the label or by choosing `Rename` from the context menu (long-press
+on touch, right-click on desktop).
 Status arrives over SSE. Every home entry expands the rail once: the one-time
 reset lives in `HomeShell` (which survives layout-frame switches while the
 sidebar remounts) and waits for the persisted settings, so a cold load with

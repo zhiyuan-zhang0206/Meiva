@@ -58,7 +58,7 @@ export function SearchOverlay({
     .sort((a, b) => b.agent_id - a.agent_id);
 
   return (
-    <div className="fixed inset-0 z-50">
+    <div className="fixed inset-x-0 top-0 z-50 h-[var(--visual-viewport-height,100dvh)] pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
       {/* Slight dim + click-to-close backdrop */}
       <div
         data-testid="search-overlay-backdrop"
@@ -66,29 +66,37 @@ export function SearchOverlay({
         onClick={onClose}
         aria-hidden="true"
       />
-      <div className={cn("relative mx-auto mt-[12vh] w-[min(30rem,calc(100vw-2rem))] rounded-lg border border-border bg-background shadow-2xl", OVERFLOW_HIDDEN)}>
+      <div className={cn("relative mx-auto mt-[min(12vh,calc(var(--visual-viewport-height,100dvh)*0.08))] w-[min(30rem,calc(100vw-2rem))] rounded-lg border border-border bg-background shadow-2xl", OVERFLOW_HIDDEN)}>
         <div className={cn("items-center gap-2 border-b border-border px-3", FLEX)}>
           <Search className="size-4 shrink-0 text-muted-foreground" />
           <input
             autoFocus
-            type="text"
+            type="search"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            enterKeyHint="search"
+            data-form-type="other"
+            data-1p-ignore=""
+            data-lpignore="true"
             value={searchQuery}
             onChange={(e) => onSearchQueryChange(e.target.value)}
             placeholder={t("searchPlaceholder")}
             aria-label={t("searchAgent")}
-            className="w-full bg-transparent py-2.5 text-sm focus:outline-none placeholder:text-muted-foreground/60"
+            className="w-full bg-transparent py-2.5 text-base md:pointer-fine:text-sm focus:outline-none placeholder:text-muted-foreground/60"
           />
           {searchQuery && (
             <button
               onClick={() => onSearchQueryChange("")}
-              className="rounded-sm p-0.5 text-muted-foreground hover:bg-sidebar-accent"
+              className="relative rounded-sm p-0.5 text-muted-foreground hover:bg-sidebar-accent pointer-coarse:after:absolute pointer-coarse:after:-inset-2"
               aria-label={t("clearSearch")}
             >
               <X className="size-3.5" />
             </button>
           )}
         </div>
-        <ul className="max-h-[45vh] overflow-y-auto py-1">
+        <ul className="max-h-[min(45vh,calc(var(--visual-viewport-height,100dvh)-6rem))] overflow-y-auto py-1">
           {results.length === 0 ? (
             <li className="px-3 py-2.5 text-xs text-muted-foreground">
               {t("noMatch", { query: searchQuery })}

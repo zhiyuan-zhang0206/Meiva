@@ -25,6 +25,7 @@ import { useWallDate } from "@/lib/format/now/use-wall-date";
 import { useTimeFormat } from "@/lib/format/use-time-format";
 import { cn } from "@/lib/format/utils";
 import { harnessLabel } from "@/lib/harness/harness";
+import { useCoarsePointer } from "@/lib/input/use-coarse-pointer";
 import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 import { PRIORITY_BG } from "@/lib/notifications/notices";
 
@@ -93,6 +94,8 @@ export function useAgentRowHover(
   agentId: number,
   disabled: boolean,
 ): AgentRowHoverHandlers {
+  const coarsePointer = useCoarsePointer();
+  const hoverDisabled = disabled || coarsePointer;
   const groupCoordinatorRef = useContext(AgentHoverGroupContext);
   const localCoordinatorRef = useRef<HoverWarmupCoordinator>({
     isWarm: false,
@@ -124,7 +127,7 @@ export function useAgentRowHover(
   };
 
   const onMouseEnter = () => {
-    if (disabled) return;
+    if (hoverDisabled) return;
     clearOpenTimer();
     const coordinator = coordinatorRef.current;
     if (coordinator.cooldownTimer != null) {
@@ -188,7 +191,7 @@ export function useAgentRowHover(
   }, [agentId, clearOpenTimer, coordinatorRef]);
 
   return {
-    hoverOpen: hoverOpen && !disabled,
+    hoverOpen: hoverOpen && !hoverDisabled,
     onMouseEnter,
     onMouseLeave,
     dismissHover,

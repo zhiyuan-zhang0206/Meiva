@@ -15,7 +15,22 @@ export function AgentArchive({ props }: { props: InnerProps }) {
   const t = useTranslations("sidebar");
   const [query, setQuery] = useState("");
   return <>
-    <input aria-label={t("archiveSearch")} placeholder={t("archiveSearch")} value={query} onChange={(event) => setQuery(event.target.value)} className="m-2 w-[calc(100%-1rem)] rounded border border-border px-2 py-1 text-xs" />
+    <input
+      type="search"
+      autoComplete="off"
+      autoCorrect="off"
+      autoCapitalize="none"
+      spellCheck={false}
+      enterKeyHint="search"
+      data-form-type="other"
+      data-1p-ignore=""
+      data-lpignore="true"
+      aria-label={t("archiveSearch")}
+      placeholder={t("archiveSearch")}
+      value={query}
+      onChange={(event) => setQuery(event.target.value)}
+      className="m-2 w-[calc(100%-1rem)] rounded border border-border px-2 py-1 text-xs pointer-coarse:text-base"
+    />
     <ArchivePage key={query} query={query} props={props} />
   </>;
 }

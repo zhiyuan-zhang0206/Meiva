@@ -71,8 +71,10 @@ the shell's `100%` resolves against, and the visual band the reader sees (or
 `scroll` events (which orientation changes and `WKWebView` keyboard insets move).
 A phone or tablet keyboard shrinks only the visual band, so
 `lib/browser/viewport.ts` decides whether the shell is pinned to it —
-`pinnedShellHeight` — and `VisualViewportHeightSync` applies the answer to the
-document and resets the root page scroll via `browser.viewport.resetScroll()`.
+`pinnedShellHeight` — and `VisualViewportHeightSync` applies the answer to
+`<html>` (`style.height`, `--visual-viewport-height`, and `--safe-area-bottom: 0px`,
+removing all three when unpinned) and resets the root page scroll via
+`browser.viewport.resetScroll()`.
 That decision is a pure function of the reading, so a test asserts it directly
 and never installs a stub on `innerHeight` or `visualViewport`.
 

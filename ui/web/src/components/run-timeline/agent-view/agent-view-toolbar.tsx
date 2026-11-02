@@ -76,6 +76,8 @@ export function AgentViewToolbar({
           {t("addAgentLabel")}
           <input
             type="number"
+            inputMode="numeric"
+            autoComplete="off"
             min="0"
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
@@ -159,6 +161,10 @@ export function AgentViewToolbar({
         <input
           type="text"
           inputMode="numeric"
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="none"
+          spellCheck={false}
           value={limitDraft}
           aria-invalid={limitInvalid}
           aria-describedby={limitInvalid ? "agent-view-max-arrows-error" : undefined}

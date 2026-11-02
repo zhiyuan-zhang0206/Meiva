@@ -15,7 +15,7 @@ export function ToastHost() {
   return (
     <div
       role="alert"
-      className="fixed right-4 bottom-24 bg-destructive text-destructive-foreground px-4 py-2 rounded-md shadow-lg text-sm z-50"
+      className="fixed right-4 bottom-24 z-50 max-w-[calc(100vw-2rem)] break-words rounded-md bg-destructive px-4 py-2 text-sm text-destructive-foreground shadow-lg"
     >
       {toast}
     </div>

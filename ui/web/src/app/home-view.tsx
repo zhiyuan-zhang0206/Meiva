@@ -237,7 +237,7 @@ export function HomePageView(props: HomePageProps) {
         showError={showError}
         contextAvailable={!isLarge && activeId != null}
         openContext={() => { setMobileContextOpen(true); if (inspector.open) inspector.toggle(); }}
-        contextPanelOpen={contextPanel.open}
+        contextPanelOpen={showContext}
         openContextPanel={() => contextPanel.setOpen(true)}
         breakpoint={breakpoint}
         settings={settings}
@@ -263,7 +263,7 @@ export function HomePageView(props: HomePageProps) {
           noticesFailed={noticeFeed.error}
           mobile={!isLarge}
           onClose={() => { setMobileContextOpen(false); if (inspector.open) inspector.toggle(); }}
-          onCollapse={isLarge ? () => contextPanel.setOpen(false) : undefined}
+          onCollapse={isLarge ? () => { contextPanel.setOpen(false); if (inspector.open) inspector.toggle(); } : undefined}
         />
       </ErrorBoundary>
     ) : null;

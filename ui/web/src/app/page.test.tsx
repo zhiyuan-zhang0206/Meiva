@@ -13,7 +13,7 @@ import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
 import { LAYOUT_INVARIANTS, LAYOUT_VIEWPORT_TIERS } from "@/lib/layout/layout";
 import { transport } from "@/test-support/fake-api";
 import { deferred } from "@/test-support/deferred";
-import { cleanupHomePageTest, HomePageBound as HomePage, hooksState, inspectorMockState, makeAgent, makeItem, resetHomePageTestState, setReplySuggestions, wrap } from "./page-test-mock";
+import { cleanupHomePageTest, HomePageBound as HomePage, homePageProps, HomePageView, hooksState, inspectorMockState, makeAgent, makeItem, resetHomePageTestState, setReplySuggestions, wrap } from "./page-test-mock";
 
 afterEach(cleanupHomePageTest);
 beforeEach(resetHomePageTestState);
@@ -341,5 +341,47 @@ describe("HomePage top-level render", () => {
     // Recovery rendered a fresh panel (its first successful mount); the
     // boundary reset did not tear down a healthy tree.
     expect(inspectorMockState.mounts).toBe(1);
+  });
+
+  it("collapsing the right column while Inspector mode is open closes both contextPanel and inspector, and hides duplicate header reopen button while open", async () => {
+    const base = homePageProps();
+    const agent = makeAgent({ agent_id: 5 });
+    const setContextOpen = vi.fn();
+    const toggleInspector = vi.fn();
+    wrap(
+      <HomePageView
+        {...base}
+        breakpoint={{ isNarrow: false, isLarge: true }}
+        agents={{
+          ...base.agents,
+          agents: [agent],
+          activeAgent: agent,
+          activeId: 5,
+        }}
+        contextPanel={{ open: false, setOpen: setContextOpen }}
+        inspector={{ open: true, toggle: toggleInspector }}
+        HeaderBar={({ pinnedRight }) => (
+          <header data-testid="header-bar">
+            {pinnedRight ? <div data-testid="header-pinned-right">{pinnedRight}</div> : null}
+          </header>
+        )}
+        ContextPanel={({ onCollapse }) => (
+          <div data-testid="inspector-panel">
+            {onCollapse ? (
+              <button type="button" data-testid="inspector-collapse" onClick={onCollapse}>
+                collapse
+              </button>
+            ) : null}
+          </div>
+        )}
+      />,
+    );
+
+    expect(await screen.findByTestId("inspector-panel")).toBeTruthy();
+    expect(screen.queryByTestId("header-pinned-right")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("inspector-collapse"));
+    expect(setContextOpen).toHaveBeenCalledWith(false);
+    expect(toggleInspector).toHaveBeenCalledOnce();
   });
 });

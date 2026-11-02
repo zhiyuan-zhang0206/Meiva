@@ -220,6 +220,7 @@
   html {
     @apply font-sans;
     font-size: 16px;
+    -webkit-tap-highlight-color: transparent;
     /* Paint the root canvas too: the area behind the system bars and any
        overscroll reads this, not the body underneath it. */
     background-color: var(--background);
@@ -276,6 +277,38 @@
      not depend on Radix's table-box horizontal-scrollbar sizing. */
   [data-slot="scroll-area-viewport"] > div {
     display: block !important;
+  }
+  /* On coarse-pointer touch devices, Radix's 10px overlay scrollbar track carries
+     touch-action:none and jumps scrollTop on track press even at opacity:0,
+     hijacking right-edge thumb swipes. Keep it purely visual on touch while
+     preserving desktop mouse hover-to-reveal and thumb dragging. */
+  @media (pointer: coarse) {
+    [data-slot="scroll-area-scrollbar"] {
+      pointer-events: none;
+    }
+  }
+}
+
+/* Home bottom bands clear the iOS/iPadOS Home Indicator when resting
+   (`env(safe-area-inset-bottom, 0px)` is 0px on desktop/Chromium, and
+   VisualViewportHeightSync sets `--safe-area-bottom: 0px` while the keyboard is up,
+   preserving exact pb-6 / py-1 pixel geometry). */
+[data-testid="composer-band"] {
+  padding-bottom: max(1.5rem, var(--safe-area-bottom, env(safe-area-inset-bottom, 0px)));
+}
+[data-testid="sidebar-footer"] {
+  padding-bottom: max(0.25rem, var(--safe-area-bottom, env(safe-area-inset-bottom, 0px)));
+}
+
+/* iOS and iPadOS Safari / WKWebView force-zoom the page whenever a focused form
+   control has computed font-size < 16px, regardless of viewport width. Enforcing
+   >= 16px outside @layer utilities protects raw inputs, textareas and selects on
+   phones and iPads without altering fine-pointer desktop typography. */
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]),
+  textarea,
+  select {
+    font-size: max(16px, 1rem);
   }
 }
 

@@ -8,7 +8,7 @@ import { useCallback, useEffect } from "react";
 
 import { LoginForm } from "@/components/auth/login-form";
 import { useAuth } from "@/lib/auth/auth-context";
-import { FLEX } from "@/lib/layout/layout";
+import { FLEX, FLEX_1, MIN_H_0 } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
 // meiva:note
@@ -46,15 +46,20 @@ export function LoginPageView({ status, redirectHome }: LoginPageViewProps) {
 
   if (status === "loading") {
     return (
-      <div className={cn("min-h-screen items-center justify-center", FLEX)}>
-        <p className="text-muted-foreground">{t("checkingSession")}</p>
+      <div className={cn("overflow-y-auto p-4", FLEX, FLEX_1, MIN_H_0)}>
+        <p className="m-auto text-muted-foreground">{t("checkingSession")}</p>
       </div>
     );
   }
 
   return (
-    <div className={cn("min-h-screen items-center justify-center", FLEX)}>
-      <div className="w-full max-w-sm space-y-6 rounded-lg border bg-card p-8 shadow-sm">
+    // meiva:note
+    // Size from the root flex column (`flex-1 min-h-0 overflow-y-auto`) and center with `m-auto`
+    // rather than `min-h-screen items-center`: on iOS/iPadOS `min-h-screen` stays at the full
+    // layout height while `VisualViewportHeightSync` shrinks `<html>` above the keyboard, which
+    // buried the password input and Sign in button behind the keyboard with root scroll locked.
+    <div className={cn("overflow-y-auto p-4", FLEX, FLEX_1, MIN_H_0)}>
+      <div className="m-auto w-full max-w-sm space-y-6 rounded-lg border bg-card p-6 shadow-sm sm:p-8">
         <div className="space-y-2 text-center">
           <h1 className="text-2xl font-semibold tracking-tight">Meiva</h1>
           <p className="text-sm text-muted-foreground">

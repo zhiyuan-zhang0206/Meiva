@@ -61,7 +61,7 @@ export function CopyButton({ text, label = "code", streaming = false }: Props) {
         "absolute right-1.5 z-10",
         streaming ? "top-1.5" : "bottom-1.5",
         "bg-muted/80 hover:bg-muted text-muted-foreground hover:text-foreground",
-        "opacity-0 group-hover:opacity-100 transition-opacity",
+        "opacity-0 pointer-coarse:opacity-80 group-hover:opacity-100 transition-opacity",
         "focus-visible:opacity-100",
         "border border-border/50"
       )}
