@@ -361,6 +361,7 @@ def ensure_cluster_storage(
         redis_password,
         redis_user,
         home=home,
+        host=host,
         machine=machine,
         macos=system == "darwin",
         timers=timers,

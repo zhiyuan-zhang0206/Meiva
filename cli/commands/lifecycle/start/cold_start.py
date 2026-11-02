@@ -141,6 +141,7 @@ def _run_step(
                 home=command.home,
                 environment=command.config.process_environment(),
                 database_factory=cold.database_factory,
+                host=command.host,
                 machine=command.machine,
                 macos=command.host.platform.system == "darwin",
                 timers=command.timers,

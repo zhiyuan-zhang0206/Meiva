@@ -40,6 +40,7 @@ from base.host.db_authority import ledger, model
 from base.host.db_authority.model import Generation
 from base.host.env.dotenv_file import env_file_path, read_env_aliases
 from base.host.net.url_secret import url_with_userinfo
+from base.host.system.hostport import Host
 from base.native_process.child_env import filter_daemon_env
 from cli.commands.converge.health_preflight import probe_postgres, probe_redis
 from cli.commands.data_plane import cluster_instance as instance
@@ -98,6 +99,7 @@ def ensure_pooler(
     home: Path,
     generation: Generation,
     *,
+    host: Host,
     machine: MachineIdentityReader,
     macos: bool,
     timers: Timers,
@@ -122,7 +124,7 @@ def ensure_pooler(
         macos=macos,
         bind_wait_s=start_bounds.BIND_WAIT_TIMEOUT_S,
     )
-    rc = pgbouncer.ensure_pgbouncer(spec, timers=timers)
+    rc = pgbouncer.ensure_pgbouncer(spec, host=host, timers=timers)
     if rc:
         raise RuntimeError("pooler did not become ready")
 
@@ -232,6 +234,9 @@ class _Completion:
     home: Path
     environment: MutableMapping[str, str]
     database_factory: OperatorDatabaseFactory
+    # meiva:note
+    # The machine this pass acts on: the pooler launch runs as its child.
+    host: Host
     machine: MachineIdentityReader
     macos: bool
     # meiva:note
@@ -343,6 +348,7 @@ class _Completion:
                     database,
                     home,
                     self._generation(stage),
+                    host=self.host,
                     machine=self.machine,
                     macos=self.macos,
                     timers=self.timers,
@@ -403,6 +409,7 @@ def execute_completion(
     home: Path,
     environment: MutableMapping[str, str],
     database_factory: OperatorDatabaseFactory,
+    host: Host,
     machine: MachineIdentityReader,
     macos: bool,
     timers: Timers,
@@ -421,6 +428,7 @@ def execute_completion(
         home=home,
         environment=environment,
         database_factory=database_factory,
+        host=host,
         machine=machine,
         macos=macos,
         timers=timers,
@@ -447,6 +455,7 @@ def complete_gateway_data_plane(
     environment: MutableMapping[str, str],
     refresh_schema: bool = True,
     database_factory: OperatorDatabaseFactory,
+    host: Host,
     machine: MachineIdentityReader,
     macos: bool,
     timers: Timers,
@@ -465,6 +474,7 @@ def complete_gateway_data_plane(
         home=home,
         environment=environment,
         database_factory=database_factory,
+        host=host,
         machine=machine,
         macos=macos,
         timers=timers,

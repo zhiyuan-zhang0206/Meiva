@@ -26,6 +26,7 @@ import pytest
 from base.clock import SYSTEM_TIMERS, Deadline
 from base.cluster import port_preflight
 from base.cluster.machine import MachineIdentityReader
+from base.host.system.tests.fake_commands import real_commands_host
 from base.native_process.ownership import OwnedProcess
 from base.paths import meiva_home
 from base.telemetry import EventPipeline
@@ -183,7 +184,7 @@ def test_a_restart_cannot_replace_a_pooler_holding_a_transaction(
             stop_wait_s=0.5,
         )
 
-        assert pooler.ensure_pgbouncer(spec, timers=SYSTEM_TIMERS) == 1
+        assert pooler.ensure_pgbouncer(spec, host=real_commands_host(), timers=SYSTEM_TIMERS) == 1
 
         assert "could not stop the running pooler" in capsys.readouterr().err
         assert custodian.identity.live()

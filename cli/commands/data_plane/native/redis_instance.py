@@ -28,7 +28,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.host.brew_pin import brew_prefix
 from base.host.net.url_secret import url_host
 from base.host.private_storage import write_private_bytes
-from base.host.proc import run_bounded
+from base.host.system.hostport import Host
 from base.native_process.child_env import filter_daemon_env, inherit_env
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.instance import redis_plan
@@ -99,13 +99,14 @@ def redis_running(
     redis_cli: str,
     redis_admin_password: str,
     redis_port: int,
-    host: str,
+    redis_host: str,
     *,
+    host: Host,
     environ: Mapping[str, str],
 ) -> bool:
     try:
-        out = run_bounded(
-            [redis_cli, "-h", host, "-p", str(redis_port), "ping"],
+        out = host.run(
+            [redis_cli, "-h", redis_host, "-p", str(redis_port), "ping"],
             env=redis_cli_env(redis_admin_password, environ=environ),
             capture_output=True,
             text=True,
@@ -146,6 +147,7 @@ class _RedisStart:
     macos: bool
     redis_cli: str
     dial_host: str
+    host: Host
     timers: Timers
     environ: Mapping[str, str]
 
@@ -178,6 +180,7 @@ class _RedisStart:
                     self.redis_port,
                     self.data,
                     self.machine,
+                    host=self.host,
                     macos=self.macos,
                     environ=self.environ,
                 )
@@ -198,6 +201,7 @@ class _RedisStart:
             admin,
             self.redis_port,
             self.dial_host,
+            host=self.host,
             timers=self.timers,
             environ=self.environ,
         ):
@@ -218,6 +222,7 @@ def start_redis(
     identity: str,
     *,
     home: Path,
+    host: Host,
     machine: MachineIdentityReader,
     macos: bool,
     tuning: StartTuning = PRODUCTION_TUNING,
@@ -239,10 +244,11 @@ def start_redis(
         macos=macos,
         redis_cli=redis_cli,
         dial_host=dial_host,
+        host=host,
         timers=timers,
         environ=environ,
     )
-    running = redis_running(redis_cli, admin, redis_port, dial_host, environ=environ)
+    running = redis_running(redis_cli, admin, redis_port, dial_host, host=host, environ=environ)
     steps = redis_plan.plan_redis_start(
         running=running, macos=macos, off_box_host=off_box_host(machine)
     )
@@ -289,10 +295,11 @@ def _launch_redis(
     data: Path,
     machine: MachineIdentityReader,
     *,
+    host: Host,
     macos: bool,
     environ: Mapping[str, str],
 ) -> bool:
-    result = run_bounded(
+    result = host.run(
         redis_launch_argv(config, redis_port, data, machine, macos=macos),
         capture_output=True,
         text=True,
@@ -316,13 +323,16 @@ def _await_redis(
     redis_port: int,
     dial_host: str,
     *,
+    host: Host,
     timers: Timers,
     environ: Mapping[str, str],
 ) -> bool:
     started = timers.monotonic()
     while True:
         verdict = wait_verdict(
-            satisfied=redis_running(redis_cli, admin, redis_port, dial_host, environ=environ),
+            satisfied=redis_running(
+                redis_cli, admin, redis_port, dial_host, host=host, environ=environ
+            ),
             elapsed_s=timers.monotonic() - started,
             timeout_s=_REDIS_READY_TIMEOUT_S,
         )
