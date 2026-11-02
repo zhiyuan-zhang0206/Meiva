@@ -324,7 +324,7 @@ class CutoffContext:
     base_test_dirs: frozenset[str]
     base_collectable: frozenset[str]
     # meiva:note
-    # The names whose list value is a module's exports (`public_surface_names`): the interface
+    # The names whose list value is a module's exports (`Policy.public_surface`): the interface
     # fingerprint follows the names a list of these exports.
     public_surface: frozenset[str]
 

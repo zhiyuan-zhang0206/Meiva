@@ -11,7 +11,7 @@ POLICY = (
 [ambient]
 db = ["connect()", "pool()", "async_pool()", "Database.from_settings()"]
 bus = ["EventBus.from_settings()"]
-endpoints = ["ServiceEndpoints.from_settings()"]
+registry = ["RegistryTable.from_settings()"]
 """
 )
 HANDLE = """
@@ -38,9 +38,9 @@ FILES = {
     "base/events/live/__init__.py": "from base.events.live.bus import EventBus as EventBus\n",
     "base/events/live/bus.py": HANDLE.replace("Database", "EventBus"),
     "base/events/live/meizel.toml": '[state]\n"__init__.py" = ["bus"]\n"bus.py" = ["bus"]\n',
-    "base/daemon/__init__.py": "",
-    "base/daemon/endpoints.py": HANDLE.replace("Database", "ServiceEndpoints"),
-    "base/daemon/meizel.toml": '[state]\n"endpoints.py" = ["endpoints"]\n',
+    "base/registry/__init__.py": "",
+    "base/registry/table.py": HANDLE.replace("Database", "RegistryTable"),
+    "base/registry/meizel.toml": '[state]\n"table.py" = ["registry"]\n',
     "app/__init__.py": "",
 }
 
@@ -83,14 +83,14 @@ FILES = {
             "base.events.live.bus.EventBus.from_settings",
         ),
         (
-            "from base.daemon.endpoints import ServiceEndpoints\nx = ServiceEndpoints.from_settings()\n",
-            "endpoints",
-            "base.daemon.endpoints.ServiceEndpoints.from_settings",
+            "from base.registry.table import RegistryTable\nx = RegistryTable.from_settings()\n",
+            "registry",
+            "base.registry.table.RegistryTable.from_settings",
         ),
         (
-            "from base.daemon.endpoints import ServiceEndpoints as Table\nx = Table.from_settings()\n",
-            "endpoints",
-            "base.daemon.endpoints.ServiceEndpoints.from_settings",
+            "from base.registry.table import RegistryTable as Table\nx = Table.from_settings()\n",
+            "registry",
+            "base.registry.table.RegistryTable.from_settings",
         ),
     ],
 )
@@ -115,7 +115,7 @@ def test_handle_acquisitions_follow_the_declared_module_and_import_alias(
         "from base.db import Database\ndb = Database.from_boot(None)\nx = db.query()\n",
         "class Database:\n    def from_settings(): ...\n\nx = Database.from_settings()\n",
         "from base.events.live import EventBus\nx = EventBus.from_boot(None)\n",
-        "from base.daemon.endpoints import ServiceEndpoints as Table\nx = Table.from_boot(None)\n",
+        "from base.registry.table import RegistryTable as Table\nx = Table.from_boot(None)\n",
     ],
 )
 def test_importing_a_handle_type_or_building_it_from_explicit_inputs_is_not_an_acquisition(
@@ -126,7 +126,7 @@ def test_importing_a_handle_type_or_building_it_from_explicit_inputs_is_not_an_a
     assert diagnostics(root, "ambient-read") == []
 
 
-@pytest.mark.parametrize("root_kind", ["db", "bus", "endpoints"])
+@pytest.mark.parametrize("root_kind", ["db", "bus", "registry"])
 def test_a_handle_root_exempts_its_own_kind_and_keeps_the_other_handles_visible(
     make_repo: RepoFactory, root_kind: str
 ) -> None:
@@ -136,9 +136,9 @@ def test_a_handle_root_exempts_its_own_kind_and_keeps_the_other_handles_visible(
             "app/mod.py": (
                 "from base.db import Database\n"
                 "from base.events.live import EventBus\n"
-                "from base.daemon.endpoints import ServiceEndpoints\n"
+                "from base.registry.table import RegistryTable\n"
                 "db = Database.from_settings()\nbus = EventBus.from_settings()\n"
-                "endpoints = ServiceEndpoints.from_settings()\n"
+                "registry = RegistryTable.from_settings()\n"
             ),
             "app/meizel.toml": f'[roots]\n"mod.py" = {{ kinds = ["{root_kind}"], why = "reads it" }}\n',
         }
@@ -146,7 +146,7 @@ def test_a_handle_root_exempts_its_own_kind_and_keeps_the_other_handles_visible(
     targets = [
         ("db", "base.db.Database.from_settings"),
         ("bus", "base.events.live.EventBus.from_settings"),
-        ("endpoints", "base.daemon.endpoints.ServiceEndpoints.from_settings"),
+        ("registry", "base.registry.table.RegistryTable.from_settings"),
     ]
     assert [d.debt.key for d in diagnostics(root, "ambient-read") if d.debt] == [
         f"mod.py#{kind} {target}" for kind, target in targets if kind != root_kind

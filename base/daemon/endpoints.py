@@ -5,8 +5,7 @@
 # `MEIVA_<NAME>_HEALTH_PORT` override) and the pidfile under `$MEIVA_HOME/run`. A composition root
 # builds the table from its config owner and runtime directory (`ServiceEndpoints.from_boot`) and
 # hands a daemon its own row (`endpoints.of("labeler")`) and a supervisor, probe or command the
-# table; nothing below the root reads the settings or `MEIVA_HOME` for a port or pidfile; the
-# `ambient-endpoint` rule bans building the table outside the roots a package names.
+# table; nothing below the root reads the settings or `MEIVA_HOME` for a port or pidfile.
 #
 # The table is built from inputs the caller owns: `from_boot(config, runtime=...)` when it has a
 # config owner, `from_fields(read_field, runtime=...)` when the reading module is itself a declared

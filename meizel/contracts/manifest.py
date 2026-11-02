@@ -10,7 +10,7 @@ from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from typing import TypeGuard
 
-from meizel.allowances import POLICY, parse
+from meizel.allowances import POLICY
 from meizel.contracts.debt import (
     CYCLE_EDGE,
     TABLE_KEY,
@@ -397,11 +397,15 @@ class _Reader:
         names = self.names(value, where, line)
         unknown = [name for name in names if name not in allowed]
         if unknown or not names:
+            vocabulary = (
+                f"must list kinds from {', '.join(allowed)}"
+                if allowed
+                else f"cannot name a kind: {POLICY} declares none under [ambient]"
+            )
             self.report(
                 line,
                 Code.MANIFEST_SYNTAX,
-                f"{where} must list kinds from {', '.join(allowed)}"
-                + (f"; unknown: {', '.join(unknown)}" if unknown else ""),
+                f"{where} {vocabulary}" + (f"; unknown: {', '.join(unknown)}" if unknown else ""),
             )
             return ()
         return names
@@ -649,22 +653,16 @@ def _parse_one_manifest(
 
 
 # meiva:note
-# The kinds of state the checkout's policy declares (`Policy.state_kinds`): a manifest's `[state]`
-# may name only those, and its `[roots]` those and the standard library's. The policy is read here,
-# by its own parser, because what a manifest may say depends on it; the problems of the policy file
-# are reported by the policy's reader, not by this one.
-def _state_kinds(universe: Universe) -> tuple[str, ...]:
-    if POLICY not in universe.files:
-        return ()
-    return parse(universe.repo.load_text(POLICY))[0].state_kinds
-
-
+# Every manifest of a tree. What a manifest may say depends on the policy of that same tree: its
+# `[state]` may name only `state_kinds` (`Policy.state_kinds`, the keys of `[ambient]`) and its
+# `[roots]` those and the standard library's. The caller passes the kinds, read from the policy it
+# already holds for the tree, so a manifest is never judged against a policy of another revision;
+# the problems of the policy file are reported by the policy's reader, not by this one.
 def load_manifests(
-    universe: Universe, texts: Mapping[str, str] | None = None
+    universe: Universe, state_kinds: Collection[str], texts: Mapping[str, str] | None = None
 ) -> tuple[dict[str, Manifest], list[Diagnostic]]:
     manifests: dict[str, Manifest] = {}
     diagnostics: list[Diagnostic] = []
-    state_kinds = _state_kinds(universe)
     shape = _shape_digest(universe, state_kinds)
     repo = universe.repo
     for directory in sorted(universe.manifest_dirs):

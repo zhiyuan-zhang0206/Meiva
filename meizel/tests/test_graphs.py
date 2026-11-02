@@ -363,6 +363,53 @@ def test_cli_tests_subcommand_reports_lanes_and_strict_cutoff_selection(
     assert native_only["tests"] == ["app/tests/test_app_native.py"]
 
 
+# meiva:note
+# `meizel tests --base-ref` reads the surface names from the policy of the tree it judges: the same
+# edit to an import behind an `__exports__` list reaches the downstream tests only where the policy
+# declares `__exports__` a public-surface name.
+@pytest.mark.parametrize(
+    ("policy", "downstream_selected"),
+    [
+        ('[public-surface]\nnames = ["__exports__"]\n', True),
+        ("", False),
+        ('[public-surface]\nnames = ["__other__"]\n', False),
+    ],
+)
+def test_cli_tests_subcommand_follows_the_surface_names_the_policy_declares(
+    make_repo: RepoFactory,
+    capsys: pytest.CaptureFixture[str],
+    policy: str,
+    downstream_selected: bool,
+) -> None:
+    files = {
+        "pyproject.toml": PYPROJECT,
+        "meizel.toml": '[uses]\n"app" = ["pkg"]\n"tests" = ["app", "pkg"]\n\n' + ROLES,
+        "pkg/__init__.py": "",
+        "pkg/meizel.toml": 'exports = ["m.py"]\npurity = "strict"\n',
+        "pkg/a.py": "def foo() -> int:\n    return 1\n",
+        "pkg/b.py": "def foo() -> int:\n    return 1\n",
+        "pkg/m.py": 'from pkg.a import foo\n__exports__ = ["foo"]\n',
+        "pkg/tests/test_m.py": (
+            "from pkg.m import foo\ndef test_m() -> None:\n    assert foo() == 1\n"
+        ),
+        "app/__init__.py": "",
+        "app/tests/test_app.py": (
+            "from pkg.m import foo\ndef test_app() -> None:\n    assert foo() == 1\n"
+        ),
+        "tests/test_lint_tree.py": "def test_tree() -> None: pass\n",
+    }
+    if policy:
+        files["meizel.policy.toml"] = policy
+    root = make_repo(files)
+    commit(root, "initial")
+    write(root, {"pkg/m.py": 'from pkg.b import foo\n__exports__ = ["foo"]\n'})
+
+    assert run(root, "tests", "--changed", "pkg/m.py", "--base-ref", "HEAD", "--json") == 0
+    selected = json.loads(capsys.readouterr().out)["tests"]
+    assert ("app/tests/test_app.py" in selected) is downstream_selected
+    assert "pkg/tests/test_m.py" in selected
+
+
 def test_reachability_pure_traversal_and_ancestor_inits(make_repo: RepoFactory) -> None:
     root = make_repo(
         {

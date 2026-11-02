@@ -35,6 +35,6 @@ def scan_batch(
     producer = Path(__file__).with_name("producer.mjs")
     output = run_node_analyzer(producer, json.dumps(request))
     try:
-        return decode_batch(output, frozenset(contents))
+        return decode_batch(output, frozenset(contents), policy.reader_kinds)
     except (TypeError, ValueError) as error:
         raise MeizelError(f"invalid TypeScript compiler result: {error}") from error

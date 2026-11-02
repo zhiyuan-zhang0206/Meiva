@@ -159,6 +159,18 @@ def test_a_state_kind_the_policy_does_not_declare_is_a_manifest_syntax_error(
     assert found.path == "pkg/meizel.toml"
 
 
+def test_a_policy_that_declares_no_state_kind_says_so_rather_than_listing_none(
+    make_repo: RepoFactory,
+) -> None:
+    [found] = code_for(
+        make_repo, '[state]\n"a.py" = ["settings"]\n', "manifest-syntax", policy=NONE
+    )
+    assert found.message == (
+        "[state] 'a.py' cannot name a kind: meizel.policy.toml declares none under [ambient]"
+        "; unknown: settings"
+    )
+
+
 def test_a_kind_the_policy_declares_is_accepted_whatever_it_is_called(
     make_repo: RepoFactory,
 ) -> None:

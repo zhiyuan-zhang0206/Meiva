@@ -332,6 +332,49 @@ def test_interface_early_cutoff_isolates_strict_module_internal_edits(tmp_path: 
     assert signature_changed.tests == ("base/lm/tests/test_lm.py", "tests/consumer/test_cli.py")
 
 
+# meiva:note
+# The surface names come from the policy of the tree the selector judges: swapping an import behind
+# an `__exports__` list reaches the consumer outside the package only where that policy declares
+# `__exports__` a public-surface name (`__all__` is always one).
+@pytest.mark.parametrize(
+    ("policy", "consumer_selected"),
+    [
+        ('[public-surface]\nnames = ["__exports__"]\n', True),
+        ("", False),
+        ('[public-surface]\nnames = ["__other__"]\n', False),
+    ],
+)
+def test_interface_early_cutoff_follows_the_surface_names_the_policy_declares(
+    tmp_path: Path, policy: str, consumer_selected: bool
+) -> None:
+    root = _repo(tmp_path)
+    _write(root, "meizel.policy.toml", policy)
+    _write(root, "base/lm/meizel.toml", 'purity = "strict"\n')
+    _write(root, "base/lm/a.py", "def foo() -> int:\n    return 1\n")
+    _write(root, "base/lm/b.py", "def foo() -> int:\n    return 1\n")
+    _write(root, "base/lm/m.py", 'from base.lm.a import foo\n__exports__ = ["foo"]\n')
+    _write(
+        root,
+        "base/lm/tests/test_lm.py",
+        "from base.lm.m import foo\n\ndef test_lm():\n    assert foo() == 1\n",
+    )
+    _write(
+        root,
+        "tests/consumer/test_cli.py",
+        "from base.lm.m import foo\n\ndef test_cli():\n    assert foo() == 1\n",
+    )
+    _git(root, "init", "-q")
+    _git(root, "add", ".")
+    _git(root, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "base")
+    base = _git(root, "rev-parse", "HEAD")
+
+    _write(root, "base/lm/m.py", 'from base.lm.b import foo\n__exports__ = ["foo"]\n')
+    result = test_selector.select_tests(["base/lm/m.py"], repo_root=root, base_ref=base)
+    assert result.decision == "SELECTED", result.as_json()
+    assert ("tests/consumer/test_cli.py" in result.tests) is consumer_selected
+    assert "base/lm/tests/test_lm.py" in result.tests
+
+
 _BATCH_BODY = """This pull request is based on the [main branch](https://github.com/o/r/tree/main) at [SHA 02af8a4dc690](https://github.com/o/r/commit/02af8a4dc690).
 
 See more details about each PR in the batch here:

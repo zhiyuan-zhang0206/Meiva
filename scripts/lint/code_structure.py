@@ -363,8 +363,8 @@ class _TypeContext:
 
 def _load_type_context(argv: list[str], repo_root: Path) -> tuple[_TypeContext | None, list[str]]:
     universe = load_universe(repo_root)
-    manifests, manifest_problems = load_manifests(universe)
     policy, policy_problems = load_policy(universe)
+    manifests, manifest_problems = load_manifests(universe, policy.state_kinds)
     if manifest_problems or policy_problems:
         return None, [
             f"{d.path}:{d.line}: {d.message}" for d in [*manifest_problems, *policy_problems]

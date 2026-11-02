@@ -339,6 +339,31 @@ def test_policy_surface_reads_a_vocabulary_the_other_way_round(
     assert "**added** `meizel.policy.toml [ambient-readers.environ]` `os.environ`" in out
 
 
+@pytest.mark.parametrize(
+    ("before", "after", "direction"),
+    [
+        ("", '\n[ambient]\nsettings = ["app.Settings.load()"]\n', "wider"),
+        ('\n[ambient]\nsettings = ["app.Settings.load()"]\n', "", "narrower"),
+    ],
+)
+def test_policy_surface_reads_a_declared_kind_s_vocabulary_by_its_direction(
+    make_repo: RepoFactory,
+    capsys: pytest.CaptureFixture[str],
+    before: str,
+    after: str,
+    direction: str,
+) -> None:
+    files = {**LOADER, "app/meizel.toml": MANIFEST, "meizel.toml": ROOT}
+    root = make_repo({**files, "meizel.policy.toml": POLICY + before})
+    commit(root)
+    write(root, {"meizel.policy.toml": POLICY + after})
+    assert run(root, "policy", "surface", "--against", "HEAD") == 0
+    out = capsys.readouterr().out
+    assert f"1 {direction}" in out
+    assert "unknown" not in out
+    assert "`meizel.policy.toml [ambient.settings]` `app.Settings.load()`" in out
+
+
 def test_policy_surface_pairs_a_declaration_with_git_rename(
     make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
 ) -> None:

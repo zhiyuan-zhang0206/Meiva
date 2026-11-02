@@ -3,8 +3,9 @@
 #
 # A file that takes the clock, the environment, the home or working directory, the platform, a
 # process id, randomness, or the process state the repository keeps (the kinds its policy declares
-# under `[ambient]`) instead of being handed it is a decision that cannot be tested by value. The files that may do so are declared under `[roots]` in their directory's `meizel.toml`,
-# each with the kinds it may acquire; every other acquisition in non-test code is a violation.
+# under `[ambient]`) instead of being handed it is a decision that cannot be tested by value. The
+# files that may do so are declared under `[roots]` in their directory's `meizel.toml`, each with
+# the kinds it may acquire; every other acquisition in non-test code is a violation.
 # Recorded like any other, a violation can be carried as debt except where the file is `strict`.
 
 from __future__ import annotations

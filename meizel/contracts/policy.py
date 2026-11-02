@@ -285,12 +285,13 @@ class Change:
 # meiva:note
 # The shape a table of the policy is written in, or None for a table this file does not know: a
 # `name = reason` entry excuses something, a list names a vocabulary, and `ambient-readers` is the
-# one vocabulary that writes itself with a reason.
+# one vocabulary that writes itself with a reason. `ambient` has no fixed sections: every kind the
+# policy declares is a section, and each is a vocabulary.
 def _shape(table: str) -> str | None:
     if table in _ALLOWANCES or table.endswith(_UNLESS):
         return REASONS
     rule, _, section = table.partition(".")
-    if rule == "ambient-readers":
+    if rule in ("ambient", "ambient-readers"):
         return NAMES
     if rule in PER_NAME:
         return REASONS
@@ -312,8 +313,8 @@ def _direction(table: str, kind: str) -> str:
 
 # meiva:note
 # The ambient kinds a root or a state entry declares, as the manifest writes them back.
-def _kinds(kinds: Sequence[object]) -> str:
-    return "[" + ", ".join(str(getattr(kind, "value", kind)) for kind in kinds) + "]"
+def _kinds(kinds: Sequence[str]) -> str:
+    return "[" + ", ".join(kinds) + "]"
 
 
 # meiva:note
@@ -474,12 +475,13 @@ class Surface:
     def of(cls, universe: Universe, *, historical: bool = False) -> Surface:
         found: list[Item] = []
         unread: list[tuple[str, str]] = []
+        policy = Policy()
         if POLICY in universe.files:
             text = universe.repo.load_text(POLICY)
             policy, problems = parse_snapshot(text) if historical else parse(text)
             unread.extend((POLICY, message) for message in problems)
             found.extend(_policy_items(policy))
-        manifests, diagnostics = load_manifests(universe)
+        manifests, diagnostics = load_manifests(universe, policy.state_kinds)
         unread.extend(
             (diagnostic.path, f"line {diagnostic.line}: {diagnostic.message}")
             for diagnostic in diagnostics
