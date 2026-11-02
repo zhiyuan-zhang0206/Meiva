@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "meizel/ — Ambient Surface"
-description: "The table that judges every public name of the standard-library channel modules as an ambient kind or as no read, the `unless`, interval and method forms an entry can take, the ambient-unjudged guard and the test that keep the table closed, how to judge a new name, and the judgments that differ from the obvious spelling."
+description: "The table that judges every public name of the standard-library channel modules as an ambient kind or as no read, the `unless`, interval and method forms an entry can take, the ambient-unjudged guard and the tests that keep the table closed, how to judge a new name, the judgments that differ from the obvious spelling, the modules inspected and left out, and the forms the analysis cannot see."
 tags:
   - locality
   - tool
@@ -12,8 +12,10 @@ tags:
 `ambient_surface.py` holds, for the modules that carry the channels (`CHANNEL_MODULES`: `os`,
 `os.path`, `sys`, `time`, `datetime`, `platform`, `socket`, `getpass`, `pwd`, `grp`, `tempfile`,
 `shutil`, `locale`, `uuid`, `random`, `secrets`, `threading`, `multiprocessing`, `resource`,
-`sysconfig`, `pathlib`, `zoneinfo`), one judgment for every public name, in groups of names that
-share a reason. A judgment is a kind, or `None` with the reason the name is not a read of the
+`sysconfig`, `pathlib`, `zoneinfo`, `fileinput`, `site`, `email.utils`), one judgment for every
+public name, in groups of names that share a reason. The builtin `input` is judged as the name
+`builtins.input` (the scanner spells an unshadowed `input` that way); `builtins` is not a channel
+module, because its other names read nothing. A judgment is a kind, or `None` with the reason the name is not a read of the
 world: a type, a constant, an effect on files the purity layer judges, a function of its inputs.
 The scanner looks a dotted name up by its longest judged prefix (`os.environ.get` is judged as
 `os.environ`, `datetime.datetime.now` as itself).
@@ -49,6 +51,13 @@ never looked at:
   (or by a pattern for a whole family, as `os.O_*`); an entry that names nothing, or a name two
   groups both judge, fails. An interpreter upgrade that adds `os.some_function` fails the test
   before it can reach the rule.
+- No channel module is judged by a bare `*`: a test fails on one. A family of constants may take a
+  prefix pattern (`os.O_*`, `socket.AF_*`), because its members differ in nothing that matters,
+  but a function a module gains later must be listed by hand, so that it cannot inherit a kind
+  nobody chose.
+- A second test pins a representative name of every group that carries a kind (`_PINNED`): moving
+  `socket.gethostname` into the network group, or dropping it from the host group, turns it red,
+  which the completeness test alone would not do when the name stays judged by some entry.
 
 ### Judging a new name
 
@@ -65,27 +74,8 @@ When `ambient-unjudged` or the test names a name:
 4. A kind the channels above do not cover is a change to the vocabulary: it needs the maintainers,
    a channel row here and an `AmbientKind` member.
 
-## Judgments that differ from the obvious spelling
-
-- `Path.resolve` and `os.path.realpath` are not `cwd` reads. Both canonicalise a path, nearly
-  every use is on a path that is already absolute (the repository's roughly 560 `resolve()` and
-  `absolute()` sites in about 290 files include none on a relative literal), the analysis cannot tell the relative receiver from the absolute
-  one, and the purity layer already judges them as file-system reads. A relative path is read
-  where it was made (`sys.argv`, `Path.cwd`). `os.path.abspath`, `Path.absolute` and
-  `os.path.relpath` without a start exist to anchor at the working directory and are `cwd`.
-- `tempfile.gettempprefix` returns the constant `tmp` and reads nothing. `tempfile.gettempdir`
-  and a temporary file created without a `dir` read `TMPDIR`.
-- `time.localtime(secs)`, `time.ctime(secs)` and `time.mktime` are `clock` even when given a value:
-  the same instant reads differently in another zone. `time.gmtime(secs)` does not.
-- `os.sep`, `os.linesep`, `sys.byteorder`, `sys.version_info` and the like format paths or describe
-  the interpreter build the deployment pins; they do not identify the host and are not read.
-  `sys.platform` and `os.name` do, and are `platform`.
-- `sys.path` and `sys.modules` are the interpreter's own mutable state: they are written far more
-  often than they inform a decision.
-- `pwd` and `grp` lookups are `pid`: they answer who a uid is on this host, and the lookup of the
-  process's own user is the common use.
-- Only the standard library's channel modules are closed. A third-party reader (`psutil.Process`)
-  is listed when the repository uses it as a reader, and TypeScript acquisition has its own
-  spellings ([[meizel/docs/checker/typescript.meiva.okf.md|the TypeScript node]]).
+The judgments that differ from the obvious spelling, the modules inspected and left out, and the
+forms the analysis cannot see are in [[meizel/docs/ambient-surface-judgments.meiva.okf.md|the ambient
+surface judgments node]].
 
 Parent: [[meizel/docs/ambient-kinds.meiva.okf.md|the ambient kinds node]].

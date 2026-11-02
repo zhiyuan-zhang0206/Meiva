@@ -20,5 +20,5 @@ exports = ["bringup.py", "cluster_instance.py", "completion.py", "config.py", "h
 "stop_budget.py" = "strict"
 
 [debt.ambient-read]
-"cluster_instance.py#pid getpass.getuser" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
-"pgbouncer.py#environ shutil.which()" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"cluster_instance.py#pid getpass.getuser" = { count = 1, owner = "#8237", until = "waits for `_identity` to take the operator's user name from its caller: it asks getpass for it" }
+"pgbouncer.py#environ shutil.which()" = { count = 1, owner = "#8237", until = "waits for `binary_installed` to take the program path, or the search path, from its caller: it asks PATH for the program itself" }

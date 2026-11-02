@@ -9,4 +9,7 @@
 "write_record.py" = "strict"
 
 [roots]
-"__init__.py" = { kinds = ["clock", "pid", "argv"], why = "Audit shell stamps .env write and tamper records with current UTC time and writer PID; it also reads its command line (argv) once, as the process entry" }
+"__init__.py" = { kinds = ["clock", "pid"], why = "Audit shell stamps .env write and tamper records with current UTC time and writer PID" }
+
+[debt.ambient-read]
+"__init__.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for `_process_metadata` to take the process label from its caller: when psutil fails it falls back to the name in sys.argv[0]" }

@@ -18,7 +18,7 @@ exports = ["brew_pin.py", "firewall.py", "firewall_command.py", "frontend_env.py
 "__init__.py" = "strict"
 
 [debt.ambient-read]
-"firewall.py#pid sys.executable" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
-"ownership_preflight.py#pid grp.getgrgid" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
-"ownership_preflight.py#pid pwd.getpwuid" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
-"steps.py#pid sys.executable" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"firewall.py#pid sys.executable" = { count = 1, owner = "#8237", until = "waits for `serving_binaries` to take the interpreter path from its caller: it reads `sys.executable` itself" }
+"ownership_preflight.py#pid grp.getgrgid" = { count = 1, owner = "#8237", until = "unreviewed: recorded by #8237 on 2026-11-03" }
+"ownership_preflight.py#pid pwd.getpwuid" = { count = 1, owner = "#8237", until = "unreviewed: recorded by #8237 on 2026-11-03" }
+"steps.py#pid sys.executable" = { count = 1, owner = "#8237", until = "waits for `ensure_local_git_hooks` to take the interpreter path from its caller: it reads `sys.executable` itself" }

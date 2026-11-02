@@ -17,6 +17,8 @@ exports = ["analysis", "branch_protection.py", "ensure_plugins_loaded_context_ce
 "module_moves.py" = "imports the old and new module names the operator passes on the command line"
 
 [roots]
+"module_moves.py" = { kinds = ["argv"], why = "Audit script entry: its __main__ block exits with main(sys.argv[1:])" }
+"refusal_loss.py" = { kinds = ["argv"], why = "Audit script entry: its __main__ block exits with main(sys.argv[1:])" }
 "schema_drift.py" = { kinds = ["settings"], why = "CLI schema drift audit falls back to the deployment database URL from settings when --dsn is omitted" }
 
 [purity]
@@ -33,6 +35,4 @@ exports = ["analysis", "branch_protection.py", "ensure_plugins_loaded_context_ce
 "where_used.py" = { mode = "none", why = "the command line shell: it reads the checkout the operator names (tracked and unignored untracked text, skipping symlinks and the regenerated .test_durations), normalizes an absolute target to a checkout-relative path and prints the result; which references exist is analysis/references.py and which group each falls in, and how a report reads, is analysis/report.py" }
 
 [debt.ambient-read]
-"ensure_plugins_loaded_context_census.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
-"module_moves.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
-"refusal_loss.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"ensure_plugins_loaded_context_census.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the argument-list parameter to become required and the process entry to pass sys.argv[1:]: the function falls back to sys.argv[1:] when it is given None" }

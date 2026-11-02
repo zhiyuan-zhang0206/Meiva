@@ -1,9 +1,12 @@
 [roots]
 "aggregate.py" = { kinds = ["clock", "argv"], why = "CLI entry passes current UTC timestamp into main(); it also reads its command line (argv) once, as the process entry" }
-"collect.py" = { kinds = ["clock", "db", "environ", "home", "settings", "argv"], why = "CLI entry snapshots its environment for the ConfigBoot it builds the gateway access from, constructs cluster DB handle, resolves the Meiva home once and passes current UTC timestamp into CollectFacts; it also reads its command line (argv) once, as the process entry" }
-"daily_scan.py" = { kinds = ["settings", "argv"], why = "CLI entry reads self_evolution_coverage_alert_floor from settings in process_env(); it also reads its command line (argv) once, as the process entry" }
+"calibrate.py" = { kinds = ["argv"], why = "Skill script entry: its __main__ block raises SystemExit with main(sys.argv[1:])" }
+"collect.py" = { kinds = ["clock", "db", "environ", "home", "settings", "argv"], why = "CLI entry snapshots its environment for the ConfigBoot it builds the gateway access from, constructs cluster DB handle, resolves the Meiva home once and passes current UTC timestamp into CollectFacts; it also reads its command line (argv) in its `__main__` guard, as the process entry" }
+"daily_scan.py" = { kinds = ["settings", "argv"], why = "CLI entry reads self_evolution_coverage_alert_floor from settings in process_env(); it also reads its command line (argv) in its `__main__` guard, as the process entry" }
 "evaluate.py" = { kinds = ["clock", "home", "random"], why = "Skill evaluation driver stamps evaluation runs with UTC time, generates spawn idempotency keys, and resolves the Meiva home for the evaluation dataset root it prepares and reads" }
 "mine.py" = { kinds = ["clock", "home", "argv"], why = "CLI entry passes current UTC timestamp and the Meiva home it resolves into main() for default dataset resolution; it also reads its command line (argv) once, as the process entry" }
+"render_report.py" = { kinds = ["argv"], why = "Skill script entry: its __main__ block hands the process command line (sys.argv[1:]) to main()" }
+
 [purity]
 "audit.py" = "strict"
 "events_window.py" = "strict"
@@ -12,7 +15,3 @@
 "record_inputs.py" = "strict"
 "scan_report.py" = "strict"
 "window_records.py" = "strict"
-
-[debt.ambient-read]
-"calibrate.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
-"render_report.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }

@@ -23,5 +23,5 @@ exports = ["__main__.py", "commands", "database", "fleet_update", "main.py", "pa
 "start_intent.py" = { kinds = ["environ"], why = "Identity bootstrap precedes Settings: read the birth inputs and pin the resolved home before config imports." }
 
 [debt.ambient-read]
-"start_runtime.py#cwd pathlib.Path.absolute" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
-"start_runtime.py#pid sys.executable" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"start_runtime.py#cwd pathlib.Path.absolute" = { count = 1, owner = "#8237", until = "unreviewed: recorded by #8237 on 2026-11-03" }
+"start_runtime.py#pid sys.executable" = { count = 1, owner = "#8237", until = "unreviewed: recorded by #8237 on 2026-11-03" }

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -54,3 +56,24 @@ def test_default_scope_is_the_builtin_plugins_tree() -> None:
 def test_missing_default_scan_dir_is_an_error(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="meiva_builtins/plugins"):
         gate.main([], repo_root=tmp_path)
+
+
+# meiva:note
+# The command-line entry reads `sys.argv[1:]` and hands it to the rule's `main`; the rule never
+# reads the command line itself. Run as the pre-commit hook runs it, in a process of its own: with
+# no argument it scans the built-in plugins, and an argument that names no file is an error only if
+# the entry delivered it.
+def test_the_entry_hands_its_command_line_to_the_rule(tmp_path: Path) -> None:
+    entry = Path(gate.__file__).with_name("no_plugin_wrap_cli.py")
+    missing = tmp_path / "typo.py"
+
+    scanned = subprocess.run(  # noqa: S603
+        [sys.executable, str(entry)], capture_output=True, text=True, check=False
+    )
+    refused = subprocess.run(  # noqa: S603
+        [sys.executable, str(entry), str(missing)], capture_output=True, text=True, check=False
+    )
+
+    assert scanned.returncode == 0
+    assert refused.returncode == 1
+    assert str(missing) in refused.stderr

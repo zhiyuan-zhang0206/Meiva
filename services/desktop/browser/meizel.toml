@@ -25,5 +25,5 @@ exports = ["mcp_daemon.py", "mcp_socket_bridge.py", "mcp_wrapper.py", "orphan.py
 "mcp_wrapper.py" = { kinds = ["home", "settings"], why = "Service or operator process entry boots configuration before composing its resources; reads the home it runs under once, in main()" }
 
 [debt.ambient-read]
-"macos_readiness.py#pid pwd.getpwuid" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"macos_readiness.py#pid pwd.getpwuid" = { count = 1, owner = "#8237", until = "unreviewed: recorded by #8237 on 2026-11-03" }
 "macos_readiness.py#platform base.host.system.hostport.Host.system" = { count = 1, owner = "#5816", until = "permanently: the module builds one Host with an explicit empty environment to read this machine's platform once, which is the least ambient read available to a platform probe" }

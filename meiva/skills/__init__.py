@@ -161,7 +161,7 @@ def record_skill_invoked_by_path(path: str | Path) -> bool:
     if p.name != "SKILL.md":
         return False
     for skill in names():
-        if Path(skill["path"]).expanduser().absolute() == p.parent:
+        if Path(skill["path"]).expanduser() == p.parent:
             _record_skill_invoked(skill)
             return True
     return False

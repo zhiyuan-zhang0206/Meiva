@@ -8,6 +8,7 @@ from pathlib import Path
 
 from meizel.allowances import Policy
 from meizel.checkout import GitRepo
+from meizel.graph import python_reverse_closure
 from meizel.graph.model import (
     Acquisition,
     AmbientKind,
@@ -295,3 +296,35 @@ def test_sources_and_corrupt_sqlite_entries_degrade_gracefully(tmp_path: Path) -
     db_path.write_bytes(b"corrupt sqlite header bytes")
     recovered = scan_all(GitRepo(root).universe(), Sources(), jobs=1, policy=policy)
     assert set(recovered) == {"pkg/__init__.py", "pkg/a.py"}
+
+
+# meiva:note
+# More files than the parallel threshold (200), so that a pool would be used if `jobs` allowed one.
+def _wide_files() -> dict[str, str]:
+    return {"pkg/__init__.py": "", **{f"pkg/m{i}.py": "VALUE = 1\n" for i in range(250)}}
+
+
+# meiva:note
+# Below the entry a library caller that names no worker count gets one process: every file is read
+# here. A worker pool reads its files in children, so this process would record none of them. The
+# first test shows the probe can tell the two apart; the others pin `jobs=None` as serial.
+def test_a_pool_reads_the_files_in_its_children_not_in_this_process(tmp_path: Path) -> None:
+    root = _init_git_repo(tmp_path, _wide_files())
+    probe = _RecordingCheckout(GitRepo(root))
+    scan_all(probe.universe(), Sources(), jobs=2, policy=Policy())
+    assert len(probe.loaded_bytes) < len(_wide_files())
+
+
+def test_scanning_without_a_worker_count_runs_in_this_process(tmp_path: Path) -> None:
+    root = _init_git_repo(tmp_path, _wide_files())
+    probe = _RecordingCheckout(GitRepo(root))
+    scan_all(probe.universe(), Sources(), jobs=None, policy=Policy())
+    assert sorted(probe.loaded_bytes) == sorted(_wide_files())
+
+
+def test_the_reverse_closure_without_a_worker_count_reads_in_this_process(tmp_path: Path) -> None:
+    root = _init_git_repo(tmp_path, _wide_files())
+    probe = _RecordingCheckout(GitRepo(root))
+    closure = python_reverse_closure(probe.universe(), ["pkg/m0.py"], jobs=None)
+    assert closure == frozenset({"pkg/m0.py"})
+    assert sorted(probe.loaded_bytes) == sorted(_wide_files())

@@ -3,7 +3,7 @@ exports = ["no_meiva_in_hooks_cli.py", "no_plugin_wrap.py"]
 [uses]
 "no_plugin_wrap_cli.py" = ["no_plugin_wrap.py"]
 "no_meiva_in_hooks_cli.py" = ["no_meiva_in_hooks.py"]
-"tests" = ["no_meiva_in_hooks.py", "no_meiva_in_hooks_cli.py", "no_plugin_wrap.py"]
+"tests" = ["no_meiva_in_hooks.py", "no_meiva_in_hooks_cli.py", "no_plugin_wrap.py", "no_plugin_wrap_cli.py"]
 
 [roots]
 "no_meiva_in_hooks_cli.py" = { kinds = ["argv"], why = "pre-commit process entry: reads argv[1:] once and hands it to the rule's main" }

@@ -52,6 +52,17 @@ def acquired(
         ("import time\n\nx = time.tzname\n", [("clock", "time.tzname")]),
         ("import time\n\nx = time.mktime(parts)\n", [("clock", "time.mktime")]),
         ("import time\n\nx = time.localtime(0)\n", [("clock", "time.localtime")]),
+        ("answer = input('go? ')\n", [("pid", "builtins.input")]),
+        ("import site\n\nx = site.getusersitepackages()\n", [("home", "site.getusersitepackages")]),
+        (
+            "import email.utils\n\nx = email.utils.localtime()\n",
+            [("clock", "email.utils.localtime")],
+        ),
+        (
+            "import email.utils\n\nx = email.utils.make_msgid()\n",
+            [("random", "email.utils.make_msgid")],
+        ),
+        ("import time\n\nx = time.get_clock_info('time')\n", [("platform", "time.get_clock_info")]),
     ],
 )
 def test_the_channels_the_table_judges_are_acquisitions(
@@ -105,6 +116,11 @@ def test_a_name_that_reads_nothing_is_not_an_acquisition(
             "def f(parser):\n    return parser.parse_known_args(namespace=None)\n",
             [("argv", "argparse.ArgumentParser.parse_known_args")],
         ),
+        ("import fileinput\n\nx = fileinput.input()\n", [("argv", "fileinput.input()")]),
+        (
+            "import email.utils\n\nx = email.utils.formatdate(localtime=True)\n",
+            [("clock", "email.utils.formatdate()")],
+        ),
         ("def f(path):\n    return path.absolute()\n", []),
         ("def f():\n    return build().absolute()\n", [("cwd", "pathlib.Path.absolute")]),
     ],
@@ -129,6 +145,9 @@ def test_a_call_that_is_not_given_the_value_that_spares_its_read_acquires(
         "def f(moment, zone):\n    return moment.astimezone(zone)\n",
         "def f(parser, argv):\n    return parser.parse_args(argv)\n",
         "def f(parser, argv):\n    return parser.parse_args(args=argv)\n",
+        "import fileinput\n\nx = fileinput.input(files=['/a'])\n",
+        "import fileinput\n\nx = fileinput.FileInput(['/a'])\n",
+        "import email.utils\n\nx = email.utils.formatdate(1.5)\n",
     ],
 )
 def test_the_same_calls_given_the_value_read_nothing(make_repo: RepoFactory, source: str) -> None:
@@ -184,3 +203,21 @@ def test_a_test_file_a_type_position_a_private_name_or_another_module_is_not_unj
 ) -> None:
     root = repo(make_repo, {path: source})
     assert not diagnostics(root, "ambient-unjudged")
+
+
+# meiva:note
+# A known blind spot, pinned so that the documentation of it stays true: the analysis has no types,
+# so it cannot tell a relative receiver from an absolute one, and `resolve()` and `realpath` of a
+# path that came from the command line anchor it at the working directory with no record.
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from pathlib import Path\n\nx = Path('').resolve()\n",
+        "import os\n\nx = os.path.realpath('.')\n",
+        "from pathlib import Path\n\ndef f(argv):\n    return [Path(a).resolve() for a in argv]\n",
+    ],
+)
+def test_resolving_a_relative_path_reads_the_working_directory_unrecorded(
+    make_repo: RepoFactory, source: str
+) -> None:
+    assert acquired(make_repo, source) == []

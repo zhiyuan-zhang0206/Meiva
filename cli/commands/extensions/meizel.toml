@@ -21,4 +21,4 @@ exports = ["external_skills.py", "materialize.py", "memory.py", "parsers", "plug
 "external_skills.py" = { kinds = ["random"], why = "Mints fresh skill installation and staging generation UUIDs" }
 
 [debt.ambient-read]
-"_pkg_source.py#environ tempfile.mkdtemp()" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"_pkg_source.py#environ tempfile.mkdtemp()" = { count = 1, owner = "#8237", until = "waits for `clone_git` to take the parent of its scratch directory from its caller: it creates it where TMPDIR points" }
