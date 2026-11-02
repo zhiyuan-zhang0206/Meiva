@@ -10,6 +10,7 @@ import sys
 import time
 from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -43,6 +44,27 @@ _CONNECTION_CHARS = 200
 # refuses — the enrichment reads below and the sink are best-effort. Ruling: memory pool
 # `meiva/rulings/prod/audit-identity-unreadable-must-refuse-20261031.md` (2026-10-31).
 class AuditUnavailableError(RuntimeError): ...
+
+
+# meiva:note
+# The operation identity a fleet window stamped on this command's environment (task #6024):
+# who started the window, whether the release gate's conditions held, and the bypass when they
+# did not. Read from the command's own environment, never carried over the root-control wire —
+# an older meizel-root rejects a caller block with unknown keys outright, and a host whose
+# checkout is NEW while its root is the old process could not start at all.
+@dataclass(frozen=True)
+class OperationIdentity:
+    initiator: str | None
+    gate: str | None
+    gate_reason: str | None
+
+
+def operation_identity(environ: Mapping[str, str]) -> OperationIdentity:
+    return OperationIdentity(
+        initiator=environ.get("MEIVA_OPERATION_INITIATOR") or None,
+        gate=environ.get("MEIVA_OPERATION_GATE") or None,
+        gate_reason=environ.get("MEIVA_OPERATION_GATE_REASON") or None,
+    )
 
 
 RequestRecorder = Callable[[str, Sequence[str]], None]
@@ -174,12 +196,20 @@ def operator_lifecycle_audit(
             file=sys.stderr,
         )
         head_sha = None
+    operation = operation_identity(environ)
     with lifecycle_audit(
         operator_request_recorder(
-            database_factory=database_factory, caller=caller, head_sha=head_sha, spawn=spawn
+            database_factory=database_factory,
+            caller=caller,
+            head_sha=head_sha,
+            spawn=spawn,
+            operation=operation,
         ),
         operator_result_recorder(
-            database_factory=database_factory, caller=caller, head_sha=head_sha
+            database_factory=database_factory,
+            caller=caller,
+            head_sha=head_sha,
+            operation=operation,
         ),
     ) as command:
         yield command
@@ -230,6 +260,7 @@ def operator_request_recorder(
     caller: CallerPayload,
     head_sha: str | None,
     spawn: Mapping[str, object],
+    operation: OperationIdentity,
 ) -> RequestRecorder:
     def recorder(verb: str, units: Sequence[str]) -> None:
         try:
@@ -239,6 +270,7 @@ def operator_request_recorder(
                 database_factory=database_factory,
                 caller=caller,
                 head_sha=head_sha,
+                operation=operation,
             )
         except Exception:
             logger.opt(exception=True).error(
@@ -255,6 +287,7 @@ def operator_result_recorder(
     database_factory: DatabaseFactory,
     caller: CallerPayload,
     head_sha: str | None,
+    operation: OperationIdentity,
 ) -> ResultRecorder:
     def recorder(verb: str, units: Sequence[str], outcome: Outcome, seconds: float) -> None:
         try:
@@ -269,6 +302,7 @@ def operator_result_recorder(
                 database_factory=database_factory,
                 caller=caller,
                 head_sha=head_sha,
+                operation=operation,
             )
         except Exception:
             logger.opt(exception=True).error(
@@ -285,6 +319,7 @@ def _record(
     database_factory: DatabaseFactory,
     caller: CallerPayload,
     head_sha: str | None,
+    operation: OperationIdentity,
 ) -> None:
     from base.telemetry.audit_events import prepare_event_log, record_audit_reported
 
@@ -293,6 +328,20 @@ def _record(
         event_type=event_type,
         agent_id=agent_id,
         source=f"agent:{agent_id}" if agent_id is not None else "user",
-        payload={**fields, "operation_id": caller["operation_id"], "head_sha": head_sha},
+        payload={
+            **fields,
+            "operation_id": caller["operation_id"],
+            # meiva:note
+            # The operation identity is lifted out of the caller block so a reader filters rows
+            # without walking into the nested object (task #6024): `operation_id` groups every
+            # host row of one window, `initiator` names who started it, and `gate`/`gate_reason`
+            # record whether the release gate's conditions held or were bypassed. Each is None
+            # for a command no window minted — an operator's own `meiva stop`, which is why an
+            # empty `operation_id` reads as "one host, one command", never as "unknown window".
+            "initiator": operation.initiator,
+            "gate": operation.gate,
+            "gate_reason": operation.gate_reason,
+            "head_sha": head_sha,
+        },
     )
     record_audit_reported(database_factory(), event)

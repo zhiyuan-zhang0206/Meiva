@@ -131,3 +131,33 @@ def test_a_state_verb_without_a_caller_is_refused_before_dialing(tmp_path: Path)
 
     with pytest.raises(client.RootClientError, match="needs the client's caller identity"):
         unreachable.down("gateway")
+
+
+# meiva:note
+# The wire header must not grow with the operation identity (task #6024). `parse_request` on an
+# older root rejects a caller block carrying an unknown key outright — `unknown = set(values) -
+# _CALLER_FIELDS` then `raise ProtocolError` — so a NEW command client meeting the root process
+# the previous release left running would fail the command itself, not merely lose attribution.
+# The trio therefore never leaves the host: `cli.database.lifecycle_audit` reads it from the
+# command's own environment when it writes the audit row.
+def test_the_caller_block_names_no_field_an_older_root_would_reject() -> None:
+    environ = {
+        "MEIVA_OPERATION_ID": "op-1",
+        "MEIVA_OPERATION_INITIATOR": "user:zy@laptop",
+        "MEIVA_OPERATION_GATE": "overridden",
+        "MEIVA_OPERATION_GATE_REASON": "track-branch:preview",
+    }
+
+    identity = client.caller_identity(environ, pid=10)
+
+    assert set(identity) == {
+        "pid",
+        "ppid",
+        "uid",
+        "cwd",
+        "argv",
+        "agent_id",
+        "machine",
+        "operation_id",
+        "env_keys",
+    }

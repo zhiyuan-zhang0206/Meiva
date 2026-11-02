@@ -242,6 +242,8 @@ class Cluster:
                 now=now,
                 pacing=self.pacing,
                 timers=ProcessTimers(),
+                operation_id=f"op-{self.invocations:04d}",
+                initiator="user:test@test-host",
             )
         finally:
             self._adopt(json.loads(self.state_path.read_text()))

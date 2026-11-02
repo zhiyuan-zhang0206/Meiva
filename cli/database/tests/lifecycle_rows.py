@@ -19,6 +19,7 @@ import pytest
 from base.native_process.root_control.ipc import CallerPayload
 from cli.database import OperatorDatabaseFactory
 from cli.database.lifecycle_audit import (
+    OperationIdentity,
     lifecycle_audit,
     operator_request_recorder,
     operator_result_recorder,
@@ -86,10 +87,26 @@ def lifecycle_rows(
     """Run the test inside an operator command's audit scope; read its requests back from Postgres."""
     operation = f"test@{uuid.uuid4().hex}"
     caller = caller_block(operation)
+    # meiva:note
+    # The operation identity a fleet window stamps (task #6024) is exercised by the audit tests
+    # that assert on it; this fixture supplies a fixed one so the rows it reads back are the
+    # same shape production writes.
+    identity = OperationIdentity(
+        initiator="user:test@test-host", gate="satisfied", gate_reason="channel"
+    )
     with lifecycle_audit(
         operator_request_recorder(
-            database_factory=operator_database, caller=caller, head_sha=None, spawn=_SPAWN
+            database_factory=operator_database,
+            caller=caller,
+            head_sha=None,
+            spawn=_SPAWN,
+            operation=identity,
         ),
-        operator_result_recorder(database_factory=operator_database, caller=caller, head_sha=None),
+        operator_result_recorder(
+            database_factory=operator_database,
+            caller=caller,
+            head_sha=None,
+            operation=identity,
+        ),
     ):
         yield LifecycleRows(db_conn, operation)

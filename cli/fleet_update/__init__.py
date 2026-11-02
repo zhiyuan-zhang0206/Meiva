@@ -12,6 +12,7 @@ from . import choices
 from .down import down
 from .fleet_gate import resolve_target
 from .plan.host_failures import PARTIAL_FAILURE_EXIT, incomplete_summary
+from .plan.operation import OperationIdentity, gate_for
 from .session import FailedError, Pacing, RefusedError, Session, Timers
 from .up import up
 
@@ -32,6 +33,8 @@ def main(
     now: datetime,
     pacing: Pacing,
     timers: Timers,
+    operation_id: str,
+    initiator: str,
 ) -> int:
     args = choices.parse(argv, env)
     # meiva:note
@@ -43,6 +46,29 @@ def main(
             "agent's shell (a stop closes it); submit the job and return so the agent can drain"
         )
         return 2
+    # meiva:note
+    # The window mints one identity and stamps it on every host command (task #6024). The gate
+    # verdict comes from the target mode the operator asked for, not from what resolution later
+    # finds: `track-branch` ships an unreleased branch and is the one mode that records
+    # `overridden`, which is the fact a reader needs when asking why a release gate did not
+    # stand in the way. An `up`-only half makes no target decision — its gate was decided by the
+    # `down` half that switched the checkouts — so it says so instead of claiming a verdict.
+    target_request = args.target_request
+    if target_request is None:
+        operation = OperationIdentity(
+            operation_id=operation_id,
+            initiator=initiator,
+            gate="overridden",
+            gate_reason="up-only:no target decision in this half",
+        )
+    else:
+        gate, gate_reason = gate_for(target_request.target_mode, branch=target_request.branch)
+        operation = OperationIdentity(
+            operation_id=operation_id,
+            initiator=initiator,
+            gate=gate,
+            gate_reason=gate_reason,
+        )
     s = Session(
         log_dir=args.log_dir,
         half=args.half,
@@ -52,11 +78,18 @@ def main(
         now=now,
         pacing=pacing,
         timers=timers,
+        operation=operation,
     )
     phase = "down" if args.half == "run" else args.half
     try:
         if args.half != "up":
-            resolved = resolve_target(repo, args.target_request)
+            if target_request is None:
+                # meiva:note
+                # `choices.parse` refuses a half that needs a target and was given none, so this
+                # arm is unreachable in a real window; it refuses rather than letting a `None`
+                # reach the resolver, where the failure would name a type instead of the choice.
+                raise FailedError("refused: no target to resolve")
+            resolved = resolve_target(repo, target_request)
             args.resolved_new = resolved.sha
             s.say(resolved.notice)
         hosts = [args.gateway, *args.runner]

@@ -20,6 +20,7 @@ from base.native_process.root_control import instance_lock
 from base.paths import repo_root
 from cli.fleet_update import fleet_verify, oneshot
 from cli.fleet_update.plan.host_commands import PROBE
+from cli.fleet_update.plan.operation import OperationIdentity
 from cli.fleet_update.session import Pacing, Session
 from cli.fleet_update.timers import ProcessTimers
 from cli.tests.fleet_update.fleet_update_cluster import git, ssh_on_path
@@ -185,6 +186,12 @@ def test_the_machine_name_is_asked_through_the_hosts_real_shell(shell: str, tmp_
         now=datetime(2026, 10, 24, 12, 0, 0, tzinfo=UTC),
         pacing=Pacing(),
         timers=ProcessTimers(),
+        operation=OperationIdentity(
+            operation_id="op-test",
+            initiator="user:test@test-host",
+            gate="satisfied",
+            gate_reason="channel",
+        ),
     )
     try:
         names = fleet_verify.machine_names(session, ("mac",))

@@ -19,7 +19,9 @@ from base.events.contract import EVENTS
 from base.native_process.root_control.ipc import CallerPayload
 from cli.database import OperatorDatabaseFactory
 from cli.database.lifecycle_audit import (
+    OperationIdentity,
     lifecycle_audit,
+    operation_identity,
     operator_lifecycle_audit,
     operator_request_recorder,
     operator_result_recorder,
@@ -59,13 +61,25 @@ _SPAWN: dict[str, object] = {
 
 
 def recorders(
-    database: DatabaseFactory, caller: CallerPayload, head_sha: str | None
+    database: DatabaseFactory,
+    caller: CallerPayload,
+    head_sha: str | None,
+    operation: OperationIdentity | None = None,
 ) -> tuple[Callable[[str, Sequence[str]], None], Any]:
+    identity = operation or OperationIdentity(
+        initiator="user:zy@laptop", gate="satisfied", gate_reason="channel"
+    )
     return (
         operator_request_recorder(
-            database_factory=database, caller=caller, head_sha=head_sha, spawn=_SPAWN
+            database_factory=database,
+            caller=caller,
+            head_sha=head_sha,
+            spawn=_SPAWN,
+            operation=identity,
         ),
-        operator_result_recorder(database_factory=database, caller=caller, head_sha=head_sha),
+        operator_result_recorder(
+            database_factory=database, caller=caller, head_sha=head_sha, operation=identity
+        ),
     )
 
 
@@ -359,3 +373,26 @@ def test_outside_a_command_no_request_is_recorded() -> None:
     record_lifecycle_request("down", ["gateway"])
 
     assert requests.batches == []
+
+
+# meiva:note
+# The operation identity is read from the command's own environment, never from the root-control
+# wire (task #6024): an older root rejects a caller block carrying an unknown key, and during a
+# window a host's checkout is NEW while its root process is the one the previous release left
+# running. A command started outside a fleet window carries none of it, which is the fact a
+# reader sees — not "unknown window".
+def test_the_operation_identity_comes_from_the_commands_own_environment() -> None:
+    environ = {
+        "MEIVA_OPERATION_INITIATOR": "user:zy@laptop",
+        "MEIVA_OPERATION_GATE": "overridden",
+        "MEIVA_OPERATION_GATE_REASON": "track-branch:preview",
+    }
+
+    identity = operation_identity(environ)
+
+    assert identity == OperationIdentity(
+        initiator="user:zy@laptop",
+        gate="overridden",
+        gate_reason="track-branch:preview",
+    )
+    assert operation_identity({}) == OperationIdentity(None, None, None)
