@@ -6,12 +6,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-import httpx
 import pytest
 from playwright.sync_api import Request
 
 from base.api_contracts.agent_contract import AgentStatus
 from base.db import Database
+from tests.e2e._credentials import gateway_get
 from tests.e2e._db import enqueue_compact_history_fixture, wait_for_status
 from tests.e2e.fakes.scenarios.compact_transition import (
     BETWEEN_REPLY,
@@ -96,7 +96,7 @@ def _compact(env: E2EEnv, narration: str, *, database: Database) -> None:
 
 
 def _prepare_history_view(e2e_env: E2EEnv) -> list[str]:
-    config = httpx.get(f"{e2e_env.gateway_url}/api/config", timeout=30.0)
+    config = gateway_get(f"{e2e_env.gateway_url}/api/config", timeout=30.0)
     config.raise_for_status()
     depth = next(
         field for field in config.json()["fields"] if field["name"] == "timeline_compact_history"

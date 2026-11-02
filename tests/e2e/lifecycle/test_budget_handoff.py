@@ -16,7 +16,6 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-import httpx
 import psycopg
 import pytest
 
@@ -26,6 +25,7 @@ from base.lm.pricing import cost_usd
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
 from base.sessions.tests.poll_until import poll_until
+from tests.e2e._credentials import gateway_post
 from tests.e2e._db import chat_and_wait, checkpoint_values, wait_for_status
 from tests.e2e._ports import GATEWAY_URL
 from tests.e2e.fakes.scenario_recording import model_inputs, reset_record, scratch_root
@@ -78,7 +78,7 @@ def _paused(root: Path, agent_id: int) -> tuple[bool, object]:
 def _terminate(agent_id: int) -> None:
     # Test-owned cleanup, after assertions that the reminder never terminated peers.
     # Force also reaps a failed scripted model stuck in the kernel retry loop.
-    httpx.post(
+    gateway_post(
         f"{GATEWAY_URL}/api/agents/{agent_id}/terminate",
         json={"force": True},
         timeout=10,
@@ -155,7 +155,7 @@ def test_usage_reminder_preserves_handoff_across_late_checkpoint_and_restart(
         state = _state(root, owner)
         state["peers"] = peers
         write_text_atomic(root / f"{owner}.json", json.dumps(state))
-        httpx.post(
+        gateway_post(
             f"{GATEWAY_URL}/api/agents/{peers[-1]}/messages",
             json={
                 "content": "Preserve another partial result and wait.",
@@ -194,7 +194,7 @@ def _assert_recovery(owner: int, root: Path, count: tuple[Any, ...] | None) -> N
     chat_and_wait(owner, "Late checkpoint: a partial result landed; inspect the handoff.")
     assert (root / f"{owner}.recovered").exists()
     assert (root / f"{owner}.json").read_text() == handoff
-    httpx.post(
+    gateway_post(
         f"{GATEWAY_URL}/api/agents/{owner}/restart",
         json={"message": "restart budget handoff"},
         timeout=30,

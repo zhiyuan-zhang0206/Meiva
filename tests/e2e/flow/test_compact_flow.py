@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-import httpx
 import psycopg
 import pytest
 from playwright.sync_api import ConsoleMessage, Page
@@ -12,6 +11,7 @@ from base.api_contracts.agent_contract import AgentStatus
 from base.config import settings
 from base.db import Database
 from base.sessions.tests.poll_until import poll_until
+from tests.e2e._credentials import gateway_get
 from tests.e2e._db import enqueue_compact_history_fixture, wait_for_status
 from tests.e2e.fakes.scenarios.compact_flow import (
     FIRST_REPLY,
@@ -27,7 +27,7 @@ _UNRECOGNIZED_RE = re.compile(
 
 
 def _timeline(gateway_url: str, agent_id: int) -> list[dict[str, Any]]:
-    return httpx.get(
+    return gateway_get(
         f"{gateway_url}/api/agents/{agent_id}/timeline?limit=1000", timeout=90.0
     ).json()["items"]
 

@@ -3,12 +3,12 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-import httpx
 import psycopg
 import pytest
 
 from base.config import settings
 from base.sessions.tests.poll_until import poll_until
+from tests.e2e._credentials import gateway_get
 from tests.e2e.fixture_environment import E2EEnv
 
 
@@ -97,7 +97,7 @@ def test_self_restart_admits_successor_and_answers_on_same_agent(e2e_env: E2EEnv
             and commands == [("done",)]
             and chats in ([("claimed", True)], [("done", True)])
         ):
-            response = httpx.get(
+            response = gateway_get(
                 f"{e2e_env.gateway_url}/api/agents/{agent_id}/timeline?limit=1000",
                 timeout=30,
             )

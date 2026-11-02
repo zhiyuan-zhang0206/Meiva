@@ -54,10 +54,11 @@ from base.config import set_field, settings
 from tests.e2e._credentials import (
     current_credentials,
     forget_credentials,
+    gateway_get,
+    gateway_post,
     install_browser_login,
     mint_credentials,
 )
-from tests.e2e._credentials import gateway_client_credentials as gateway_client_credentials
 from tests.e2e._db import apply_e2e_seq_offset
 from tests.e2e._ports import (
     FRONTEND_PORT,
@@ -515,7 +516,7 @@ def gateway_proc(scenario_env: None) -> Iterator[str]:
         last_err: Exception | None = None
         for _ in range(60):
             try:
-                resp = httpx.get(f"{GATEWAY_URL}/api/agents", timeout=1.0)
+                resp = gateway_get(f"{GATEWAY_URL}/api/agents", timeout=1.0)
                 last_status = resp.status_code
                 if resp.status_code == 200:
                     break
@@ -704,7 +705,7 @@ def spawned_agent(ops_proc: None, agent_host_proc: None, truncated_db: None) -> 
         yield agent_id
     finally:
         with contextlib.suppress(httpx.HTTPError):
-            httpx.post(f"{GATEWAY_URL}/api/agents/{agent_id}/terminate", timeout=5.0)
+            gateway_post(f"{GATEWAY_URL}/api/agents/{agent_id}/terminate", timeout=5.0)
             # Wait for the agent to finish exiting before this test's
             # function-scoped gateway is torn down. The agent finalizes its
             # own status via POST /api/agents/{id}/exited, which needs a live
@@ -716,7 +717,7 @@ def spawned_agent(ops_proc: None, agent_host_proc: None, truncated_db: None) -> 
             # pg_terminate_backend reap (manifests as a spawn 500).
             terminate_deadline = time.monotonic() + 10.0
             while time.monotonic() < terminate_deadline:
-                tr = httpx.get(f"{GATEWAY_URL}/api/agents/{agent_id}", timeout=2.0)
+                tr = gateway_get(f"{GATEWAY_URL}/api/agents/{agent_id}", timeout=2.0)
                 if (
                     tr.status_code == 200
                     and tr.json().get("status") == AgentStatus.TERMINATED.value

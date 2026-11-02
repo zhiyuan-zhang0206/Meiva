@@ -4,10 +4,10 @@ import re
 import time
 from typing import TypedDict, cast
 
-import httpx
 import pytest
 from playwright.sync_api import Page
 
+from tests.e2e._credentials import gateway_get, gateway_put
 from tests.e2e.fixture_environment import E2EEnv
 
 
@@ -143,7 +143,7 @@ def _settle(page: Page, read_js: str, timeout_s: float = 20.0) -> None:
 
 
 def _pin_page_settings(gateway_url: str) -> None:
-    resp = httpx.put(
+    resp = gateway_put(
         f"{gateway_url}/api/settings/display.inspector_open",
         json={"value": True},
         timeout=30.0,
@@ -160,7 +160,7 @@ def _run_scenario(page: Page, agent_url: str, gateway_url: str, agent_id: int) -
     sid: int | None = None
     deadline = time.monotonic() + 150.0
     while time.monotonic() < deadline and sid is None:
-        items = httpx.get(
+        items = gateway_get(
             f"{gateway_url}/api/agents/{agent_id}/timeline?limit=1000", timeout=60.0
         ).json()["items"]
         for it in items:

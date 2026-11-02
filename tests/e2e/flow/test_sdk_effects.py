@@ -5,13 +5,13 @@ import uuid
 from collections.abc import Iterator
 from typing import Any
 
-import httpx
 import psutil
 import pytest
 
 from base.agents.upload_delivery.paths import delivered_upload_dir
 from base.paths import meiva_home
 from base.sessions.tests.poll_until import poll_until
+from tests.e2e._credentials import gateway_post
 from tests.e2e._db import chat_and_wait
 from tests.e2e._ports import GATEWAY_URL
 from tests.e2e.fakes.scenario_recording import model_inputs, reset_record
@@ -125,7 +125,7 @@ def test_uploaded_file_is_announced_to_the_agent_and_readable(
         agent, home=meiva_home(), name=world.UPLOAD_DIR_NAME, create=False
     )
     try:
-        staged_resp = httpx.post(
+        staged_resp = gateway_post(
             f"{GATEWAY_URL}/api/keyed/v1/agents/{agent}/uploads/staged",
             headers={"Idempotency-Key": uuid.uuid4().hex, "Idempotency-Scope": "principal-v1"},
             files={"file": (world.UPLOAD_NAME, world.UPLOAD_TEXT.encode(), "text/plain")},
@@ -134,7 +134,7 @@ def test_uploaded_file_is_announced_to_the_agent_and_readable(
         assert staged_resp.status_code == 201, staged_resp.text
         staged = staged_resp.json()
 
-        resp = httpx.post(
+        resp = gateway_post(
             f"{GATEWAY_URL}/api/keyed/v1/agents/{agent}/uploads",
             headers={"Idempotency-Key": uuid.uuid4().hex, "Idempotency-Scope": "principal-v1"},
             json={"file_ids": [staged["file_id"]], "text": ""},

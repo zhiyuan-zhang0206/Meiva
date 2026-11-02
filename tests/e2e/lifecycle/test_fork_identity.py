@@ -3,12 +3,12 @@ from __future__ import annotations
 import contextlib
 import time
 
-import httpx
 import psycopg
 import pytest
 
 from base.api_contracts.agent_contract import AgentStatus
 from base.config import settings
+from tests.e2e._credentials import gateway_get, gateway_post
 from tests.e2e._db import wait_for_status
 from tests.e2e.fakes.scenarios.fork_identity import FORK_OK, FORK_PROMPT
 from tests.e2e.fixture_environment import E2EEnv
@@ -52,7 +52,7 @@ def test_fork_delivers_identity_marker_and_prompt(e2e_env: E2EEnv) -> None:
 
         deadline = time.monotonic() + 90.0
         while True:
-            items = httpx.get(
+            items = gateway_get(
                 f"{e2e_env.gateway_url}/api/agents/{forked_id}/timeline?limit=1000", timeout=90.0
             ).json()["items"]
             replies = [it["payload"] for it in items if it["kind"] == "agent_chat"]
@@ -71,5 +71,5 @@ def test_fork_delivers_identity_marker_and_prompt(e2e_env: E2EEnv) -> None:
         )
     finally:
         with contextlib.suppress(Exception):
-            httpx.post(f"{e2e_env.gateway_url}/api/agents/{forked_id}/terminate", timeout=5.0)
+            gateway_post(f"{e2e_env.gateway_url}/api/agents/{forked_id}/terminate", timeout=5.0)
             wait_for_status(forked_id, AgentStatus.TERMINATED.value, timeout=10.0)

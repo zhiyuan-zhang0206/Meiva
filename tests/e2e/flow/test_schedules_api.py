@@ -18,6 +18,7 @@ from base.config import settings
 from base.paths import meiva_home
 from base.sessions.backend import get_shell_backend
 from base.sessions.tests.poll_until import poll_until
+from tests.e2e._credentials import gateway_client, gateway_post
 from tests.e2e._ports import GATEWAY_URL
 from tests.e2e.fakes.scenario_recording import model_inputs, reset_record
 
@@ -55,7 +56,7 @@ def _create_and_check_listed(client: httpx.Client) -> int:
 def test_rest_create_list_get_update_delete_and_version_snapshot(
     gateway_proc: str, truncated_db: None
 ) -> None:
-    with httpx.Client(base_url=GATEWAY_URL, timeout=30.0) as client:
+    with gateway_client(base_url=GATEWAY_URL, timeout=30.0) as client:
         schedule_id = _create_and_check_listed(client)
 
         bad = client.put(f"/api/schedules/{schedule_id}", json={"script": "def (:\n"})
@@ -96,7 +97,7 @@ def test_rest_create_list_get_update_delete_and_version_snapshot(
 def test_rest_start_stop_restart_queue_sync_and_change_enabled(
     gateway_proc: str, truncated_db: None
 ) -> None:
-    with httpx.Client(base_url=GATEWAY_URL, timeout=30.0) as client:
+    with gateway_client(base_url=GATEWAY_URL, timeout=30.0) as client:
         created = client.post(
             "/api/schedules", json={"name": "e2e-control", "script": "pass\n", "enabled": False}
         )
@@ -124,7 +125,7 @@ def test_rest_start_stop_restart_queue_sync_and_change_enabled(
 def test_rest_runs_and_logs_read_persisted_history_and_transcript(
     gateway_proc: str, truncated_db: None, pty_sessions_proc: None
 ) -> None:
-    with httpx.Client(base_url=GATEWAY_URL, timeout=30.0) as client:
+    with gateway_client(base_url=GATEWAY_URL, timeout=30.0) as client:
         created = client.post(
             "/api/schedules", json={"name": "e2e-history", "script": "pass\n", "enabled": False}
         )
@@ -170,7 +171,7 @@ def test_rest_runs_and_logs_read_persisted_history_and_transcript(
 def test_draft_launches_a_writer_with_the_request_in_model_input(spawned_agent: int) -> None:
     reset_record()
     request_text = "e2e draft consolidate memory each night"
-    response = httpx.post(
+    response = gateway_post(
         f"{GATEWAY_URL}/api/keyed/v1/schedules/draft",
         json={"nl": request_text},
         headers={"Idempotency-Key": "e2e-draft", "Idempotency-Scope": "principal-v1"},
@@ -195,7 +196,7 @@ def test_draft_launches_a_writer_with_the_request_in_model_input(spawned_agent: 
             row = conn.execute("SELECT label FROM agents WHERE id = %s", (writer_id,)).fetchone()
         assert row == ("meiva-schedule-writer",)
     finally:
-        httpx.post(f"{GATEWAY_URL}/api/agents/{writer_id}/terminate", timeout=10.0)
+        gateway_post(f"{GATEWAY_URL}/api/agents/{writer_id}/terminate", timeout=10.0)
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.schedules:build")

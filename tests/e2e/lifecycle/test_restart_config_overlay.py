@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import httpx
 import psycopg
 import pytest
 
 from base.config import settings
+from tests.e2e._credentials import gateway_post
 from tests.e2e._ports import GATEWAY_URL
 
 
@@ -13,7 +13,7 @@ def test_restart_config_overlay_persists_and_rejects_invalid_values(spawned_agen
     agent_id = spawned_agent
     overlay = {"completion_notice_policy": "hourly"}
 
-    response = httpx.post(
+    response = gateway_post(
         f"{GATEWAY_URL}/api/agents/{agent_id}/restart",
         json={
             "message": "restart config overlay",
@@ -32,7 +32,7 @@ def test_restart_config_overlay_persists_and_rejects_invalid_values(spawned_agen
     assert persisted_overlay is not None
     assert persisted_overlay[0] == overlay
 
-    invalid = httpx.post(
+    invalid = gateway_post(
         f"{GATEWAY_URL}/api/agents/{agent_id}/restart",
         json={
             "message": "restart config overlay",

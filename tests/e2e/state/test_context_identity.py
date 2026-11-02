@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-import httpx
 import pytest
 
 from base.api_contracts.agent_contract import AgentStatus
 from base.sessions.tests.poll_until import poll_until
+from tests.e2e._credentials import gateway_get
 from tests.e2e._db import wait_for_status
 from tests.e2e.fakes.scenarios.context_identity import REPLY_TEXT
 from tests.e2e.fixture_environment import E2EEnv
@@ -17,7 +17,7 @@ def _wait_for_code_output(gateway_url: str, agent_id: int) -> str:
 
     def reply_reached_timeline() -> tuple[bool, object]:
         nonlocal output
-        items: list[dict[str, Any]] = httpx.get(
+        items: list[dict[str, Any]] = gateway_get(
             f"{gateway_url}/api/agents/{agent_id}/timeline?limit=1000", timeout=90.0
         ).json()["items"]
         output = "\n".join(str(it["payload"]) for it in items if it["kind"] == "code_output")
