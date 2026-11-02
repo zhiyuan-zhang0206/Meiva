@@ -253,3 +253,25 @@ removal is safe. See [development setup](conventions/dev-setup.md).
 A merge proves repository integration, not production health. Runtime rollout is
 a separately authorized operator action with compatibility and recovery checks;
 see [kernel change and deployment safety](../.agents/skills/meiva-self-development/SKILL.md).
+
+## Change the branch protection
+
+The required checks on `main` live in GitHub, outside this tree. `analysis/protection.py`
+states the contract and the weekly `Audit Branch Protection` workflow reports drift between
+that contract and the live setting, so change both in one pull request.
+
+Write the setting with `curl -X PUT`, not `gh api`. A `gh api -X PUT` against
+`/branches/main/protection` exits non-zero with only `unexpected end of JSON input` on stderr
+and leaves the setting untouched, while the same payload through `curl` applies immediately;
+the `.../protection/required_status_checks` sub-endpoint answers 404 on its own. Read the
+current protection into a file, send the whole object back with only your change, then read it
+again and compare — a command that finished is not a setting that changed.
+
+Only a check that reports on every pull request can be required: one that never reports blocks
+every unrelated pull request. Matrix jobs are out — their instance names (`backend shard
+(1/8)`) change with the shard count, and the literal `(${{ matrix.group }}/8)` name appears
+only when the whole matrix is skipped.
+
+When the change cannot live in Git — a repository setting, a workflow disabled by hand — write
+one line to the memory pool in the same minute: time, setting, old value → new value, and why.
+The audit can see the state; only that line carries the intent.
