@@ -50,4 +50,4 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 "discovery.py#inspect.getsource" = 1
 
 [debt.wide-exports]
-"meizel.toml#exports" = 1
+"meizel.toml#exports" = { count = 1, owner = "#7302", until = "waits for the SDK surface to be split into subpackages grouped by the namespace each installs (settings, install, plugins, skill_sources, ...): this package IS the public meiva.<name> surface, so the width is the surface itself and not a fan-out of dependencies" }

@@ -50,5 +50,5 @@
 # the maintainer first and does not take this route again. There is no spare slot to absorb one.
 
 [debt.restricted-python]
-"log-cred-mask-monthly-schedule.py#python subprocess that runs something other than a literal repository file" = 1
-"self-evolution-daily-schedule.py#python subprocess that runs something other than a literal repository file" = 1
+"log-cred-mask-monthly-schedule.py#python subprocess that runs something other than a literal repository file" = { count = 1, owner = "#7302", until = "waits for the run target to be a repository file the checker can follow: the schedule runs the scanner at $MEIVA_HOME/log-cred-mask/monthly_sweep.py, an operator tool that does not ship in this repository, so the path exists only on the machine that owns the schedule" }
+"self-evolution-daily-schedule.py#python subprocess that runs something other than a literal repository file" = { count = 1, owner = "#7302", until = "waits for the run target to be followed by the checker: the schedule runs the installed copy of the self-evolution skill script under $MEIVA_HOME/skills/meiva-self-evolution/reference/daily_scan.py, because the host that fires it has the installed skill, not this checkout" }

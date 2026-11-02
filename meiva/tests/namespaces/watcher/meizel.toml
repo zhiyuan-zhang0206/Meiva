@@ -1,3 +1,3 @@
 [debt.restricted-python]
-"test_watcher.py#python subprocess that runs something other than a literal repository file" = 1
-"test_watcher_plugin_load.py#python subprocess that runs something other than a literal repository file" = 1
+"test_watcher.py#python subprocess that runs something other than a literal repository file" = { count = 1, owner = "#7302", until = "waits for launch_plan.build_boot to emit a file the checker can name: the boot text is generated per session (agent id and script path inlined) under the runtime home, and the regression under test is what that generated child resolves at import, so it has to run as a real child process" }
+"test_watcher_plugin_load.py#python subprocess that runs something other than a literal repository file" = { count = 1, owner = "#7302", until = "the same generated-boot shape as test_watcher.py: the bootstrap file is written into a temporary home and run as a child because the assertion is which plugin surface the generated boot resolves and eager-loads" }
