@@ -68,6 +68,55 @@ def test_the_repository_policy_is_well_formed() -> None:
     assert problems == []
 
 
+def test_the_keys_of_the_ambient_table_declare_the_state_kinds() -> None:
+    text = '[ambient]\nqueue = ["Queue.open()"]\ncache_2 = ["cache"]\n'
+    policy, problems = allowances.parse(text)
+    assert problems == []
+    assert policy.state_kinds == ("queue", "cache_2")
+    assert policy.names("ambient", "queue") == ("Queue.open()",)
+    assert policy.reader_kinds[-2:] == ("queue", "cache_2")
+
+
+@pytest.mark.parametrize("kind", ["environ", "clock", "home", "cwd", "platform", "pid", "random"])
+def test_a_kind_of_the_standard_library_cannot_be_declared_as_state(kind: str) -> None:
+    policy, problems = allowances.parse(f'[ambient]\n{kind} = ["thing()"]\n')
+    assert policy.state_kinds == ()
+    assert [problem.split(" is a kind of the standard library")[0] for problem in problems] == [
+        f"[ambient] {kind!r}"
+    ]
+
+
+@pytest.mark.parametrize("kind", ["Queue", "2fast", "has-dash", "has space"])
+def test_a_state_kind_is_a_lowercase_name(kind: str) -> None:
+    policy, problems = allowances.parse(f'[ambient]\n"{kind}" = ["thing()"]\n')
+    assert policy.state_kinds == ()
+    assert len(problems) == 1
+    assert "must be a lowercase kind name" in problems[0]
+
+
+def test_readers_are_listed_under_a_declared_state_kind_and_under_no_other() -> None:
+    readers = '[ambient-readers.queue]\n"lib.queue.open()" = "opens the broker"\n'
+    declared, problems = allowances.parse("[ambient]\nqueue = []\n" + readers)
+    assert problems == []
+    assert declared.reasons("ambient-readers", "queue") == {"lib.queue.open()": "opens the broker"}
+    undeclared, problems = allowances.parse(readers)
+    assert undeclared.state_kinds == ()
+    assert len(problems) == 1
+    assert "no section 'queue'" in problems[0]
+
+
+def test_a_retired_state_kind_is_not_built_into_the_checker() -> None:
+    assert "endpoints" not in allowances.RULES["ambient-readers"]
+    assert allowances.parse('[ambient-readers.endpoints]\n"a.b()" = "reads"\n')[1]
+
+
+def test_the_public_surface_names_come_from_the_policy() -> None:
+    policy, problems = allowances.parse('[public-surface]\nnames = ["__exports__"]\n')
+    assert problems == []
+    assert policy.names("public-surface", "names") == ("__exports__",)
+    assert allowances.parse("")[0].names("public-surface", "names") == ()
+
+
 # meiva:note
 # `Clock.from_settings()` builds the process clock from the process settings: the read the root
 # declares is `settings`, and the clock it returns runs on the system timers, so it is not a second

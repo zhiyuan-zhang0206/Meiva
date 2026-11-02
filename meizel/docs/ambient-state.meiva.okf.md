@@ -40,8 +40,8 @@ Governed: the framework packages plus `schedules/`. Out of scope: tests, `__main
 
 ## Where the world is read
 
-Reads of the configuration, the database, the event bus and the service endpoints, and of the
-clock and the environment, are not decided here. They are the `ambient-read` code of
+Reads of the state the repository keeps itself (the kinds its policy declares under `[ambient]`),
+and of the clock and the environment, are not decided here. They are the `ambient-read` code of
 `meizel check`: a file declares under `[roots]` in its directory's `meizel.toml` what it may read
 ([[meizel/docs/checker/ambient.meiva.okf.md|ambient reads]]). This rule keeps the module-level state
 a file holds and the background work it starts.

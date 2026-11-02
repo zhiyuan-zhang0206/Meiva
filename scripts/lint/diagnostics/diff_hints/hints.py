@@ -36,8 +36,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[4]
 
 sys.path.insert(0, str(_REPO_ROOT))
 
+from meizel.allowances import POLICY, parse  # noqa: E402
 from meizel.checkout import roles_at  # noqa: E402
-from meizel.graph.model import AmbientKind  # noqa: E402
+from meizel.graph.model import OS_KINDS, KindName  # noqa: E402
 from meizel.roles import all_packages, select_packages  # noqa: E402
 from scripts.lint.diagnostics.diff_hints.acks import (  # noqa: E402
     answers,
@@ -164,38 +165,52 @@ def _is_object_list(value: object) -> TypeGuard[list[object]]:
 
 
 # meiva:note
+# The kinds a manifest at `rev` may name: those of the standard library and the state kinds the
+# policy at the same revision declares.
+def _known_kinds(rev: str) -> frozenset[KindName]:
+    text = _read_blobs(rev, [POLICY]).get(POLICY)
+    return frozenset({*OS_KINDS, *(() if text is None else parse(text)[0].state_kinds)})
+
+
+# meiva:note
 # The `[roots]` table of one manifest text: each declared file and its kinds. The manifest checker
-# validates the full declaration; the hint rejects a malformed table or kind list.
-def _declared(manifest: str, text: str) -> dict[str, frozenset[AmbientKind]]:
+# validates the full declaration; the hint rejects a malformed table, a malformed kind list and a
+# kind the policy does not know.
+def _declared(
+    manifest: str, text: str, known: frozenset[KindName]
+) -> dict[str, frozenset[KindName]]:
     raw: object = tomllib.loads(text).get("roots", {})
     if not _is_str_dict(raw):
         raise GitError(f"{manifest}: [roots] must be a table")
-    found: dict[str, frozenset[AmbientKind]] = {}
+    found: dict[str, frozenset[KindName]] = {}
     for name, value in raw.items():
         if not _is_str_dict(value):
             raise GitError(f"{manifest}: [roots] {name!r} must be a table with kinds and why")
         listed = value.get("kinds")
         if not _is_object_list(listed):
             raise GitError(f"{manifest}: [roots] {name!r} must declare kinds")
-        kinds: set[AmbientKind] = set()
+        kinds: set[KindName] = set()
         for item in listed:
             if not isinstance(item, str):
                 raise GitError(f"{manifest}: root kinds must be strings")
-            kinds.add(AmbientKind(item))
+            if item not in known:
+                raise GitError(f"{manifest}: [roots] {name!r} lists the unknown kind {item!r}")
+            kinds.add(item)
         found[name] = frozenset(kinds)
     return found
 
 
 # meiva:note
 # Read roots from the same Git revision as the Python, including the index at commit-msg.
-def _root_kinds(rev: str, paths: Sequence[str]) -> dict[str, frozenset[AmbientKind]]:
+def _root_kinds(rev: str, paths: Sequence[str]) -> dict[str, frozenset[KindName]]:
     manifests = {path: str(Path(path).parent / "meizel.toml") for path in paths}
     texts = _read_blobs(rev, sorted(set(manifests.values())))
-    found: dict[str, frozenset[AmbientKind]] = {}
+    found: dict[str, frozenset[KindName]] = {}
+    known = _known_kinds(rev)
     for path, manifest in manifests.items():
         text = texts.get(manifest)
         if text is not None:
-            found[path] = _declared(manifest, text).get(Path(path).name, frozenset())
+            found[path] = _declared(manifest, text, known).get(Path(path).name, frozenset())
     return found
 
 
@@ -280,7 +295,7 @@ def _importers_of(rev: str, path: str, roles: Roles) -> Importers:
 
 
 def _importer_counts(
-    rev: str, roots: Mapping[str, frozenset[AmbientKind]], roles: Roles
+    rev: str, roots: Mapping[str, frozenset[KindName]], roles: Roles
 ) -> dict[str, Importers]:
     return {path: _importers_of(rev, path, roles) for path, kinds in roots.items() if kinds}
 
@@ -300,11 +315,13 @@ def _new_roots(spec: Sequence[str], rev: str, roles: Roles) -> list[NewRoot]:
         m for m in names.decode("utf-8", "replace").splitlines() if Path(m).name == "meizel.toml"
     ]
     now = _read_blobs(rev, manifests)
-    before = _read_blobs(spec[0] if len(spec) == 2 else "HEAD", manifests)
+    base = spec[0] if len(spec) == 2 else "HEAD"
+    before = _read_blobs(base, manifests)
+    known, known_before = _known_kinds(rev), _known_kinds(base)
     found: list[NewRoot] = []
     for manifest in manifests:
-        after = _declared(manifest, now[manifest]) if manifest in now else {}
-        old = _declared(manifest, before[manifest]) if manifest in before else {}
+        after = _declared(manifest, now[manifest], known) if manifest in now else {}
+        old = _declared(manifest, before[manifest], known_before) if manifest in before else {}
         for name, kinds in sorted(after.items()):
             path = (Path(manifest).parent / name).as_posix()
             python = classify(path, roles) is FileKind.PRODUCTION

@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "meizel/ — Ambient Reads"
-description: "Only a composition root reaches the world a process runs in: the closed vocabulary of ambient kinds, how acquisition points are found, the [state] and [roots] manifest keys, the policy's reader functions, the ambient-read, ambient-unjudged, stale-root and stale-reader codes, and what the analysis cannot see."
+description: "Only a composition root reaches the world a process runs in: the kinds of ambient reads (the standard library's windows and the state kinds a repository's policy declares), how acquisition points are found, the [state] and [roots] manifest keys, the policy's reader functions, the ambient-read, ambient-unjudged, stale-root and stale-reader codes, and what the analysis cannot see."
 tags:
   - locality
   - tool
@@ -11,9 +11,10 @@ tags:
 
 ## What is it
 
-Code that takes the command line, the clock, the environment, the home directory, the platform, a
-process id, randomness or the process's own configuration, database, event bus or service endpoints instead
-of being handed it cannot be tested by handing it a value, and answers differently on another
+Code that takes the command line, the clock, the environment, the home directory, the platform, a process id,
+randomness or the state the repository keeps itself (its process configuration, a database handle,
+an event bus: whatever its policy declares) instead of being handed it cannot be tested by handing
+it a value, and answers differently on another
 machine or at another time. The rule is the red line of
 [the conventions](../../../docs/conventions/python-conventions.md#composition-roots-and-required-dependencies):
 the world is read once, in a composition root, and passed down. Meizel makes that checkable by
@@ -30,25 +31,39 @@ environment and the variables the Next.js build inlines are in
 
 ## Kinds
 
-The closed vocabulary of ambient kinds, the operating-system channels it is built from, and the
-table that judges every name of those channels:
-[[meizel/docs/ambient-kinds.meiva.okf.md|the ambient kinds node]].
+The kinds of the standard library, a closed vocabulary, the operating-system channels they are
+built from, and the table that judges every name of those channels:
+[[meizel/docs/ambient-kinds.meiva.okf.md|the ambient kinds node]]. The state a repository keeps
+itself is declared by that repository, below.
 
 ## State
 
-`[state]` in a directory's `meizel.toml` says which direct-child files hold state of a kind
-(`settings`, `db`, `endpoints` or `bus`). The policy table `[ambient]` lists, per kind, the names
-through which that state is reached; a name is resolved against each module that declares the
-kind. A bare name (`settings`) acquires where it is imported (`from base.config import settings`)
+The checker has no state kinds of its own: a repository declares them as the keys of the policy
+table `[ambient]`, and the key set is the declaration. Each key lists the names through which state
+of that kind is reached. A kind may not reuse the name of a standard-library kind and is a
+lowercase name (`settings`, `db`, `cache`); a key that breaks either is `policy-syntax`.
+`[state]` in a directory's `meizel.toml` says which direct-child files hold state of one of the
+declared kinds, and `[roots]` may name those kinds beside the standard library's; a kind the policy
+does not declare, in either table, is `manifest-syntax`. A name is resolved against each module that
+declares the kind. A bare name (`settings`) acquires where it is imported (`from base.config import settings`)
 or read as an attribute (`base.config.settings.x`). A name ending in `()` (`get_field()`,
 `Database.from_settings()`) acquires only where it is called, so importing a class for an annotation
 acquires nothing.
 
 ```toml
+# meizel.policy.toml
+[ambient]
+settings = ["settings", "get_field()"]
+db = ["connect()", "Database.from_settings()"]
+
 # base/config/meizel.toml
 [state]
 "__init__.py" = ["settings"]
 ```
+
+`[ambient-readers.<kind>]` accepts the same declared kinds. A kind that leaves the policy leaves
+every manifest that names it: the manifest is `manifest-syntax` until the entry goes, and the
+debt key (`file#kind target`) of a read of it no longer matches anything.
 
 ## Readers
 

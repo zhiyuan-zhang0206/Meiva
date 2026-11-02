@@ -103,13 +103,13 @@ def legal_read_recorded(manifests: Mapping[str, Manifest]) -> list[Diagnostic]:
         rows = manifest.debt.get(Code.AMBIENT_READ, {})
         for name, root in sorted(manifest.roots.items()):
             for kind in sorted(root.kinds):
-                prefix = f"{name}#{kind.value} "
+                prefix = f"{name}#{kind} "
                 found.extend(
                     Diagnostic(
                         manifest.path,
                         manifest.debt_line(Code.AMBIENT_READ, key),
                         Code.LEGAL_READ_RECORDED,
-                        f"[roots] {name!r} declares `{kind.value}`, and {key!r} records that read "
+                        f"[roots] {name!r} declares `{kind}`, and {key!r} records that read "
                         "as debt",
                         (
                             "delete the entry: one read cannot be licensed by [roots] and paid for "

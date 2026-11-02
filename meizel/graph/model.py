@@ -8,6 +8,7 @@ from enum import StrEnum
 from typing import NamedTuple
 
 __all__ = [
+    "OS_KINDS",
     "Acquisition",
     "AmbientKind",
     "AnyCollaboratorSite",
@@ -18,6 +19,7 @@ __all__ = [
     "EnumSubsetUse",
     "Fact",
     "FactKind",
+    "KindName",
     "MeizelError",
     "Patch",
     "Problem",
@@ -105,15 +107,17 @@ class Code(StrEnum):
 
 
 # meiva:note
-# What a process reads from the world it runs in, as a closed vocabulary.
-#
-# The first four are state a repository holds itself (declared under `[state]` and named in
-# the policy); the rest are the standard library's windows onto the process and the machine.
+# The name of a kind of ambient read as a manifest and the policy spell it: an `AmbientKind` value,
+# or a state kind the policy declares under `[ambient]`.
+type KindName = str
+
+
+# meiva:note
+# What a process reads from the world it runs in: the standard library's windows onto the process
+# and the machine, as a closed vocabulary. The state a repository keeps itself (its configuration,
+# a database handle, a bus) is not in it: each repository declares those kinds as the keys of the
+# policy's `[ambient]` table, and a kind of either family travels as a `KindName`.
 class AmbientKind(StrEnum):
-    SETTINGS = "settings"
-    DB = "db"
-    ENDPOINTS = "endpoints"
-    BUS = "bus"
     ENVIRON = "environ"
     CLOCK = "clock"
     HOME = "home"
@@ -122,6 +126,11 @@ class AmbientKind(StrEnum):
     PID = "pid"
     RANDOM = "random"
     ARGV = "argv"
+
+
+# meiva:note
+# The names of `AmbientKind`: the kinds no repository declares, which a state kind may not reuse.
+OS_KINDS: tuple[KindName, ...] = tuple(kind.value for kind in AmbientKind)
 
 
 class Fact(NamedTuple):
@@ -179,7 +188,7 @@ class AnyCollaboratorSite:
 @dataclass(frozen=True, slots=True)
 class Acquisition:
     line: int
-    kind: AmbientKind
+    kind: KindName
     target: str
 
 
@@ -201,8 +210,8 @@ class Unless:
 # names (the policy's readers) acquire at each use of the imported name instead of at the import.
 @dataclass(frozen=True, slots=True)
 class Sources:
-    names: dict[str, AmbientKind] = field(default_factory=dict[str, AmbientKind])
-    calls: dict[str, AmbientKind] = field(default_factory=dict[str, AmbientKind])
+    names: dict[str, KindName] = field(default_factory=dict[str, KindName])
+    calls: dict[str, KindName] = field(default_factory=dict[str, KindName])
     uses: frozenset[str] = frozenset()
     unless: dict[str, Unless] = field(default_factory=dict[str, Unless])
 

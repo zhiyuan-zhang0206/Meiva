@@ -621,14 +621,14 @@ A composition root is where a process builds its parts: a process entry point, a
 command's `CommandRuntime.create()`, or a component's wiring module. It is the only
 code that reads the world: `settings`, the environment or `.env`, the clock, the home
 and working directory, the platform, process ids and randomness, and the process's own
-database, event bus and service endpoints. It constructs configs, clients and the system
+database and event bus. It constructs configs, clients and the system
 implementations of ports, then passes them down as arguments.
 
 That is checked, not held by reviewers: a file that is not a root and reaches one of
 those is an `ambient-read` of `meizel check`
 ([ambient reads](../../meizel/docs/checker/ambient.meiva.okf.md)). A root declares itself
 under `[roots]` in its directory's `meizel.toml` with the kinds it reads (`settings`, `db`,
-`endpoints`, `bus`, `environ`, `clock`, `home`, `cwd`, `platform`, `pid`, `random`) and a reason. The existing reads are recorded debt of the directory
+`bus`, `environ`, `clock`, `home`, `cwd`, `platform`, `pid`, `random`) and a reason. The existing reads are recorded debt of the directory
 that holds them and may only shrink; a file under `purity = "strict"` has none. This reverses
 the earlier decision to leave `settings` to reviewers ("a convention that reviewers hold, not
 a lint"): a component that imports `settings` is no longer a defect only a reader notices.

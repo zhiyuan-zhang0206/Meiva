@@ -80,10 +80,14 @@
 # format); `python -m meizel policy diff` reports every change to any of them.
 # ---------------------------------------------------------------------------------------------
 
-# ambient (meizel/contracts/ambient_read.py): the names through which the state a repository
-# keeps itself is reached. A module declares under [state] in its meizel.toml that it holds state
-# of a kind; the names below, resolved against those modules, are the points where a file acquires
-# it. A bare name acquires when imported or read as an attribute, `name()` only when called.
+# ambient (meizel/contracts/ambient_read.py): the kinds of state this repository keeps itself, and
+# the names through which each is reached. Each key below declares one kind (the checker has no
+# such kinds of its own): a manifest's [state] and [roots] may name it, and an [ambient-readers.<kind>]
+# table may list readers of it. A module declares under [state] in its meizel.toml that it holds
+# state of a kind; the names, resolved against those modules, are the points where a file acquires
+# it. A bare name acquires when imported or read as an attribute, `name()` only when called. The
+# kinds of the standard library (environ, clock, home, cwd, platform, pid, random) are the
+# checker's and cannot be declared here.
 [ambient]
 settings = [
     "settings",
@@ -98,12 +102,15 @@ db = [
     "async_pool()",
     "Database.from_settings()",
 ]
-endpoints = [
-    "ServiceEndpoints.from_settings()",
-]
 bus = [
     "EventBus.from_settings()",
 ]
+
+# public-surface (meizel/test_graph/cutoff.py): the module-level names, besides `__all__`, whose list
+# value names what a module exports. The strict interface cutoff follows the names such a list
+# exports, so a change to the list is a change to the interface.
+[public-surface]
+names = ["__all_for_meiva__"]
 
 # ambient-readers (meizel/contracts/ambient_read.py): repository functions and objects that read the
 # world on their caller's behalf, by kind. A call to one (or, without parentheses, an import or

@@ -279,7 +279,7 @@ def test_native_and_relative_ambient_imports_have_identical_identity(
         }
     )
     result = analyze(seat(root), jobs=1)
-    assert [(item.kind.value, item.target) for item in result.scans[caller].ambient] == [
+    assert [(item.kind, item.target) for item in result.scans[caller].ambient] == [
         ("settings", "runtimes.embedding.src.meiva_embedding_service.state.settings")
     ]
     assert [

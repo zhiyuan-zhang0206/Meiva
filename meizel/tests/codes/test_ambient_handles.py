@@ -98,7 +98,7 @@ def test_handle_acquisitions_follow_the_declared_module_and_import_alias(
     make_repo: RepoFactory, source: str, kind: str, target: str
 ) -> None:
     root = make_repo({**FILES, "app/mod.py": source})
-    assert [(a.kind.value, a.target) for a in analysis_of(root).scans["app/mod.py"].ambient] == [
+    assert [(a.kind, a.target) for a in analysis_of(root).scans["app/mod.py"].ambient] == [
         (kind, target)
     ]
     assert [d.debt.key for d in diagnostics(root, "ambient-read") if d.debt] == [

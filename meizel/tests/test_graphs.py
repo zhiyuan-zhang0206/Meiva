@@ -7,11 +7,13 @@ from pathlib import Path
 
 import pytest
 
+from meizel.allowances import parse
 from meizel.entry import open_repository
 from meizel.graph import ReachabilityScope, reachability_analysis
 from meizel.graph import universe as model
 from meizel.graph.graphs import feedback_edges, strongly_connected, unneeded_back_edges
 from meizel.graph.model import Code
+from meizel.test_graph.cutoff import module_interface_unchanged
 from meizel.tests.synthetic import RepoFactory, commit, run, write
 
 PYPROJECT = '[tool.pytest.ini_options]\ntestpaths = ["tests", "pkg/**/tests", "app/**/tests", "base/**/tests"]\n'
@@ -522,3 +524,25 @@ def test_reachability_cli_execution_and_gating(
 
     assert run(root, "reachability", "pkg/dead.py", "--check") == 1
     assert run(root, "reachability", "app/main.py", "--check") == 0
+
+
+# meiva:note
+# A module that lists its exports under a name of its own: the import of an exported name is part of
+# the interface only where that name is a declared public-surface name (`__all__` always is).
+@pytest.mark.parametrize(
+    ("surface_name", "declared", "unchanged"),
+    [
+        ("__all__", (), False),
+        ("__exports__", (), True),
+        ("__exports__", ("__exports__",), False),
+        ("__exports__", ("__other__",), True),
+    ],
+)
+def test_an_exported_name_follows_the_surface_names_the_policy_declares(
+    surface_name: str, declared: tuple[str, ...], unchanged: bool
+) -> None:
+    base = f'from a import foo\n{surface_name} = ["foo"]\n'
+    head = f'from b import foo\n{surface_name} = ["foo"]\n'
+    names = ", ".join(f'"{name}"' for name in declared)
+    surface = parse(f"[public-surface]\nnames = [{names}]\n")[0].public_surface
+    assert module_interface_unchanged("pkg/m.py", base, head, surface) is unchanged

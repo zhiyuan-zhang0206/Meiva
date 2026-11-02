@@ -11,6 +11,7 @@ __all__ = [
     "FACT_PYTESTER_NATIVE",
     "FACT_SYNTAX_ERROR",
     "FACT_UNANCHORED_READ",
+    "CutoffBase",
     "CutoffContext",
     "FileTestFacts",
     "ModuleTable",
@@ -305,6 +306,15 @@ class TestLanes:
         )
 
 
+# meiva:note
+# What a comparison against a base needs besides the two trees: the ref, and the names whose list
+# value is a module's exports (`Policy.public_surface`).
+@dataclass(frozen=True, slots=True)
+class CutoffBase:
+    ref: str
+    public_surface: frozenset[str]
+
+
 @dataclass(frozen=True, slots=True)
 class CutoffContext:
     base_sources: dict[str, str]
@@ -313,6 +323,10 @@ class CutoffContext:
     head_manifests: dict[str, str]
     base_test_dirs: frozenset[str]
     base_collectable: frozenset[str]
+    # meiva:note
+    # The names whose list value is a module's exports (`public_surface_names`): the interface
+    # fingerprint follows the names a list of these exports.
+    public_surface: frozenset[str]
 
 
 @dataclass(frozen=True, slots=True)

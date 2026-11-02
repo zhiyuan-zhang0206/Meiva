@@ -8,7 +8,7 @@ from __future__ import annotations
 import ast
 from bisect import bisect_left
 
-from meizel.graph.model import AmbientKind
+from meizel.graph.model import KindName
 from scripts.lint.diagnostics.diff_hints.model import (
     FileKind,
     FunctionNode,
@@ -65,7 +65,7 @@ def parse_unit(
     text: str,
     added: frozenset[int],
     roles: Roles,
-    roots: frozenset[AmbientKind],
+    roots: frozenset[KindName],
     importers: Importers,
 ) -> Unit | None:
     kind = classify(path, roles)

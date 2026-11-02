@@ -6,10 +6,11 @@ import hashlib
 import json
 import re
 import tomllib
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from typing import TypeGuard
 
+from meizel.allowances import POLICY, parse
 from meizel.contracts.debt import (
     CYCLE_EDGE,
     TABLE_KEY,
@@ -20,12 +21,11 @@ from meizel.contracts.debt import (
     total,
 )
 from meizel.graph.graphs import cycle_through, strongly_connected, unneeded_back_edges
-from meizel.graph.model import AmbientKind, Code, Diagnostic
+from meizel.graph.model import OS_KINDS, Code, Diagnostic, KindName
 from meizel.graph.universe import MANIFEST, SOURCE_EXTENSIONS, Universe, is_private_module
 from meizel.roles import check_table
 
 __all__ = [
-    "HELD_KINDS",
     "Manifest",
     "Root",
     "effective_purity",
@@ -47,9 +47,6 @@ _TOP_KEYS = (
     "roots",
     TABLE_KEY,
 )
-# meiva:note
-# The kinds a repository holds itself: only these can be declared under `[state]`.
-HELD_KINDS = (AmbientKind.SETTINGS, AmbientKind.DB, AmbientKind.ENDPOINTS, AmbientKind.BUS)
 _EdgeReader = Callable[[str, tuple[str, ...], int], tuple[str, ...]]
 
 
@@ -87,7 +84,7 @@ def _is_str_list(value: object) -> TypeGuard[list[str]]:
 # A file that may read the ambient world: the kinds it may acquire and, optionally, why.
 @dataclass(frozen=True, slots=True)
 class Root:
-    kinds: tuple[AmbientKind, ...]
+    kinds: tuple[KindName, ...]
     why: str = ""
 
 
@@ -102,9 +99,7 @@ class Manifest:
     purity_default: str | None = None
     purity: dict[str, str] = field(default_factory=dict[str, str])
     purity_why: dict[str, str] = field(default_factory=dict[str, str])
-    state: dict[str, tuple[AmbientKind, ...]] = field(
-        default_factory=dict[str, tuple[AmbientKind, ...]]
-    )
+    state: dict[str, tuple[KindName, ...]] = field(default_factory=dict[str, tuple[KindName, ...]])
     roots: dict[str, Root] = field(default_factory=dict[str, Root])
     debt: DebtTable = field(default_factory=dict[Code, dict[str, DebtEntry]])
     back: frozenset[tuple[str, str]] = frozenset()
@@ -215,8 +210,11 @@ class Manifest:
 class _Reader:
     """Validates one parsed document, collecting diagnostics instead of raising."""
 
-    def __init__(self, universe: Universe, directory: str, lines: list[str]) -> None:
+    def __init__(
+        self, universe: Universe, directory: str, lines: list[str], state_kinds: Collection[str]
+    ) -> None:
         self.universe = universe
+        self.state_kinds = tuple(state_kinds)
         self.directory = directory
         self.lines = lines
         self.exports: tuple[str, ...] = ()
@@ -227,7 +225,7 @@ class _Reader:
         self.purity_default: str | None = None
         self.purity: dict[str, str] = {}
         self.purity_why: dict[str, str] = {}
-        self.state: dict[str, tuple[AmbientKind, ...]] = {}
+        self.state: dict[str, tuple[KindName, ...]] = {}
         self.roots: dict[str, Root] = {}
         self.debt: DebtTable = {}
         self.back: frozenset[tuple[str, str]] = frozenset()
@@ -394,34 +392,34 @@ class _Reader:
     # meiva:note
     # A non-empty list of kind names, each one of `allowed`.
     def kinds(
-        self, value: object, where: str, line: int, allowed: tuple[AmbientKind, ...]
-    ) -> tuple[AmbientKind, ...]:
+        self, value: object, where: str, line: int, allowed: tuple[KindName, ...]
+    ) -> tuple[KindName, ...]:
         names = self.names(value, where, line)
-        valid = {kind.value: kind for kind in allowed}
-        unknown = [name for name in names if name not in valid]
+        unknown = [name for name in names if name not in allowed]
         if unknown or not names:
             self.report(
                 line,
                 Code.MANIFEST_SYNTAX,
-                f"{where} must list kinds from {', '.join(valid)}"
+                f"{where} must list kinds from {', '.join(allowed)}"
                 + (f"; unknown: {', '.join(unknown)}" if unknown else ""),
             )
             return ()
-        return tuple(valid[name] for name in names)
+        return names
 
     # meiva:note
-    # `[state]`: files that hold process state the repository itself keeps, by kind.
-    def read_state(self, table: object) -> dict[str, tuple[AmbientKind, ...]]:
+    # `[state]`: files that hold process state the repository itself keeps, by kind: the kinds its
+    # policy declares under `[ambient]`.
+    def read_state(self, table: object) -> dict[str, tuple[KindName, ...]]:
         if not _is_table(table):
             self.report(
                 self.manifest.line_of("state"), Code.MANIFEST_SYNTAX, "[state] must be a table"
             )
             return {}
-        result: dict[str, tuple[AmbientKind, ...]] = {}
+        result: dict[str, tuple[KindName, ...]] = {}
         for key, value in table.items():
             line = self.manifest.line_of(key)
             if self.source_child("state", key, line):
-                kinds = self.kinds(value, f"[state] {key!r}", line, HELD_KINDS)
+                kinds = self.kinds(value, f"[state] {key!r}", line, self.state_kinds)
                 if kinds:
                     result[key] = kinds
         return result
@@ -465,7 +463,7 @@ class _Reader:
                 f'{where} is `{{ kinds = [...], why = "..." }}` with a non-empty why',
             )
             return None
-        kinds = self.kinds(fields.get("kinds"), where, line, tuple(AmbientKind))
+        kinds = self.kinds(fields.get("kinds"), where, line, (*self.state_kinds, *OS_KINDS))
         return Root(kinds, why.strip()) if kinds else None
 
     # meiva:note
@@ -626,8 +624,9 @@ class _CachedManifest:
     diagnostics: tuple[Diagnostic, ...]
 
 
-def _shape_digest(universe: Universe) -> str:
+def _shape_digest(universe: Universe, state_kinds: Collection[str]) -> str:
     hasher = hashlib.sha256()
+    hasher.update(f"k:{'|'.join(state_kinds)}\0".encode())
     for path in sorted(universe.files):
         if path.rsplit("/", 1)[-1] != MANIFEST:
             hasher.update(f"f:{path}\0".encode())
@@ -636,8 +635,10 @@ def _shape_digest(universe: Universe) -> str:
     return hasher.hexdigest()
 
 
-def _parse_one_manifest(universe: Universe, directory: str, text: str) -> _CachedManifest:
-    reader = _Reader(universe, directory, text.splitlines())
+def _parse_one_manifest(
+    universe: Universe, directory: str, text: str, state_kinds: Collection[str]
+) -> _CachedManifest:
+    reader = _Reader(universe, directory, text.splitlines(), state_kinds)
     try:
         document = tomllib.loads(text)
     except tomllib.TOMLDecodeError as error:
@@ -647,12 +648,24 @@ def _parse_one_manifest(universe: Universe, directory: str, text: str) -> _Cache
     return _CachedManifest(reader.manifest, tuple(reader.diagnostics))
 
 
+# meiva:note
+# The kinds of state the checkout's policy declares (`Policy.state_kinds`): a manifest's `[state]`
+# may name only those, and its `[roots]` those and the standard library's. The policy is read here,
+# by its own parser, because what a manifest may say depends on it; the problems of the policy file
+# are reported by the policy's reader, not by this one.
+def _state_kinds(universe: Universe) -> tuple[str, ...]:
+    if POLICY not in universe.files:
+        return ()
+    return parse(universe.repo.load_text(POLICY))[0].state_kinds
+
+
 def load_manifests(
     universe: Universe, texts: Mapping[str, str] | None = None
 ) -> tuple[dict[str, Manifest], list[Diagnostic]]:
     manifests: dict[str, Manifest] = {}
     diagnostics: list[Diagnostic] = []
-    shape = _shape_digest(universe)
+    state_kinds = _state_kinds(universe)
+    shape = _shape_digest(universe, state_kinds)
     repo = universe.repo
     for directory in sorted(universe.manifest_dirs):
         path = manifest_path(directory)
@@ -662,7 +675,7 @@ def load_manifests(
         entry = (
             memo
             if isinstance(memo, _CachedManifest)
-            else _parse_one_manifest(universe, directory, text)
+            else _parse_one_manifest(universe, directory, text, state_kinds)
         )
         if not isinstance(memo, _CachedManifest):
             repo.memo_put(key, entry)

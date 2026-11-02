@@ -14,7 +14,6 @@ from typing import Literal, TypeGuard
 from meizel.allowances import POLICY, Policy
 from meizel.graph.model import (
     Acquisition,
-    AmbientKind,
     AnyCollaboratorSite,
     Code,
     EntropySite,
@@ -50,7 +49,6 @@ _TS_WORLD_SUFFIXES = (".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cj
 _COMMON_SCAN_KEYS = frozenset({"path", "facts", "imported", "symbols", "type_checking", "deps"})
 _FACT_KINDS: dict[str, FactKind] = {k.value: k for k in FactKind}
 _CODES: dict[str, Code] = {c.value: c for c in Code}
-_AMBIENT_KINDS: dict[str, AmbientKind] = {k.value: k for k in AmbientKind}
 _WORKER: dict[str, tuple[Universe, Sources, Policy]] = {}
 type _FixtureForm = Literal["parameter", "usefixtures", "call", "lookup"]
 
@@ -205,7 +203,7 @@ def _scan_to_raw_sites(scan: FileScan, out: dict[str, object]) -> None:
         "input_appends",
         [[a.line, a.function, a.parameter] for a in scan.input_appends],
     )
-    _put_if(out, "ambient", [[a.line, a.kind.value, a.target] for a in scan.ambient])
+    _put_if(out, "ambient", [[a.line, str(a.kind), a.target] for a in scan.ambient])
     _put_if(out, "entropy", [[e.line, e.what] for e in scan.entropy])
     _put_if(out, "type_casts", [[c.line, c.column, c.qualname] for c in scan.type_casts])
     _put_if(
@@ -353,7 +351,7 @@ def _scan_from_raw(value: object) -> FileScan:
             for line, fn, param in _opt_rows(raw, "input_appends", 3)
         ],
         ambient=[
-            Acquisition(_integer(line), _AMBIENT_KINDS[_text(kind)], _text(target))
+            Acquisition(_integer(line), _text(kind), _text(target))
             for line, kind, target in _opt_rows(raw, "ambient", 3)
         ],
         entropy=[
@@ -381,8 +379,8 @@ def decode_file_scan(text: str) -> FileScan:
 
 def _sources_to_json(sources: Sources) -> str:
     payload = {
-        "names": [[k, v.value] for k, v in sorted(sources.names.items())],
-        "calls": [[k, v.value] for k, v in sorted(sources.calls.items())],
+        "names": [[k, str(v)] for k, v in sorted(sources.names.items())],
+        "calls": [[k, str(v)] for k, v in sorted(sources.calls.items())],
         "uses": sorted(sources.uses),
         "unless": [[k, u.parameter, u.position] for k, u in sorted(sources.unless.items())],
     }
@@ -392,12 +390,8 @@ def _sources_to_json(sources: Sources) -> str:
 def _sources_from_json(text: str) -> Sources:
     raw_obj: object = json.loads(text)
     raw = _record(raw_obj)
-    names = {
-        _text(k): AmbientKind(_text(v)) for k, v in (_row(item, 2) for item in _array(raw["names"]))
-    }
-    calls = {
-        _text(k): AmbientKind(_text(v)) for k, v in (_row(item, 2) for item in _array(raw["calls"]))
-    }
+    names = {_text(k): _text(v) for k, v in (_row(item, 2) for item in _array(raw["names"]))}
+    calls = {_text(k): _text(v) for k, v in (_row(item, 2) for item in _array(raw["calls"]))}
     uses = frozenset(_text(item) for item in _array(raw["uses"]))
     unless = {
         _text(k): Unless(_text(param), _optional_int(pos))
@@ -708,8 +702,8 @@ def _ts_batch_key(
             "inlined_env_roots": list(cfg.inlined_env_roots),
         },
         "ambient": {
-            "names": sorted((k, v.value) for k, v in sources.names.items()),
-            "calls": sorted((k, v.value) for k, v in sources.calls.items()),
+            "names": sorted((k, str(v)) for k, v in sources.names.items()),
+            "calls": sorted((k, str(v)) for k, v in sources.calls.items()),
         },
         "world": [[p, digests[p]] for p in world_files],
     }

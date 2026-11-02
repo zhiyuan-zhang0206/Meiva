@@ -79,6 +79,7 @@ def repo(tmp_path: Path) -> Path:
     git(root, "config", "user.name", "test")
     git(root, "config", "user.email", "test@meiva")
     (root / "cli" / "x.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (root / "meizel.policy.toml").write_text("[ambient]\nsettings = []\n", encoding="utf-8")
     commit(root, "base")
     git(root, "update-ref", "refs/remotes/origin/main", "HEAD")
     return root
@@ -451,6 +452,22 @@ def test_an_unknown_root_kind_fails_the_hint_explicitly(repo: Path) -> None:
     done = run(repo, "commit-msg", message_file(repo, "Invalid root\n"))
     assert done.returncode == 2
     assert "typo" in done.stderr
+
+
+def test_a_root_kind_is_known_when_the_policy_at_that_revision_declares_it(repo: Path) -> None:
+    stage_locator(repo)
+    manifest = repo / "cli" / "meizel.toml"
+    manifest.write_text(
+        '[roots]\n"x.py" = { kinds = ["queue"], why = "process entry" }\n', encoding="utf-8"
+    )
+    git(repo, "add", "cli/meizel.toml")
+    refused = run(repo, "commit-msg", message_file(repo, "Declare a queue root\n"))
+    assert refused.returncode == 2
+    assert "unknown kind 'queue'" in refused.stderr
+    (repo / "meizel.policy.toml").write_text("[ambient]\nqueue = []\n", encoding="utf-8")
+    git(repo, "add", "meizel.policy.toml")
+    accepted = run(repo, "commit-msg", message_file(repo, "Declare a queue root\n"))
+    assert accepted.returncode != 2, accepted.stderr
 
 
 def test_a_list_of_root_kinds_fails_the_hint_explicitly(repo: Path) -> None:

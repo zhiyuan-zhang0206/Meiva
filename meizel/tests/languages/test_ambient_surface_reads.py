@@ -29,7 +29,7 @@ def acquired(
     make_repo: RepoFactory, source: str, path: str = "app/mod.py"
 ) -> list[tuple[str, str]]:
     root = repo(make_repo, {path: source})
-    return [(a.kind.value, a.target) for a in analysis_of(root).scans[path].ambient]
+    return [(a.kind, a.target) for a in analysis_of(root).scans[path].ambient]
 
 
 @pytest.mark.parametrize(

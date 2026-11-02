@@ -5,7 +5,6 @@ from typing import TypeGuard
 
 from meizel.graph.model import (
     Acquisition,
-    AmbientKind,
     AnyCollaboratorSite,
     Code,
     EnumSubsetUse,
@@ -99,7 +98,7 @@ def _source(value: object) -> TsScan:
     ambient: list[Acquisition] = []
     for item in _array(r["ambient"]):
         line, kind, target = _row(item, 3)
-        ambient.append(Acquisition(_number(line), AmbientKind(_text(kind)), _text(target)))
+        ambient.append(Acquisition(_number(line), _text(kind), _text(target)))
     casts: list[TypeCastSite] = []
     for item in _array(r["casts"]):
         line, column, name = _row(item, 3)

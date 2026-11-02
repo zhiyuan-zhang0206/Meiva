@@ -164,14 +164,16 @@ def _exported_list_values(node: ast.expr | None) -> set[str]:
     }
 
 
-def _ann_assign_signature(node: ast.AnnAssign, referenced: set[str]) -> tuple[object, ...] | str:
+def _ann_assign_signature(
+    node: ast.AnnAssign, referenced: set[str], surface: frozenset[str]
+) -> tuple[object, ...] | str:
     target = node.target
     if not isinstance(target, ast.Name):
         return "invalid"
     if _is_private_name(target.id):
         return "private"
     referenced.update(_node_names([node.annotation, node.value]))
-    if target.id in ("__all__", "__all_for_meiva__"):
+    if target.id in surface:
         referenced.update(_exported_list_values(node.value))
     return (
         "ann_assign",
@@ -181,7 +183,9 @@ def _ann_assign_signature(node: ast.AnnAssign, referenced: set[str]) -> tuple[ob
     )
 
 
-def _plain_assign_signature(node: ast.Assign, referenced: set[str]) -> tuple[object, ...] | str:
+def _plain_assign_signature(
+    node: ast.Assign, referenced: set[str], surface: frozenset[str]
+) -> tuple[object, ...] | str:
     names: list[str] = []
     for target in node.targets:
         if not isinstance(target, ast.Name):
@@ -193,13 +197,13 @@ def _plain_assign_signature(node: ast.Assign, referenced: set[str]) -> tuple[obj
     if len(public) != len(names):
         return "invalid"
     referenced.update(_node_names([node.value]))
-    if "__all__" in public or "__all_for_meiva__" in public:
+    if surface.intersection(public):
         referenced.update(_exported_list_values(node.value))
     return ("assign", public, ast.unparse(node.value))
 
 
 def _assign_signature(
-    node: ast.Assign | ast.AnnAssign | ast.TypeAlias, referenced: set[str]
+    node: ast.Assign | ast.AnnAssign | ast.TypeAlias, referenced: set[str], surface: frozenset[str]
 ) -> tuple[object, ...] | str:
     if isinstance(node, ast.TypeAlias):
         alias_id = node.name.id
@@ -213,12 +217,14 @@ def _assign_signature(
             ast.unparse(node.value),
         )
     if isinstance(node, ast.AnnAssign):
-        return _ann_assign_signature(node, referenced)
-    return _plain_assign_signature(node, referenced)
+        return _ann_assign_signature(node, referenced, surface)
+    return _plain_assign_signature(node, referenced, surface)
 
 
-def _class_signature(node: ast.ClassDef, referenced: set[str]) -> tuple[object, ...] | None:
-    members = _scope_definitions(node.body, referenced, allow_imports=False)
+def _class_signature(
+    node: ast.ClassDef, referenced: set[str], surface: frozenset[str]
+) -> tuple[object, ...] | None:
+    members = _scope_definitions(node.body, referenced, surface, allow_imports=False)
     if members is None:
         return None
     referenced.update(
@@ -236,7 +242,7 @@ def _class_signature(node: ast.ClassDef, referenced: set[str]) -> tuple[object, 
 
 
 def _scope_definitions(
-    body: list[ast.stmt], referenced: set[str], *, allow_imports: bool
+    body: list[ast.stmt], referenced: set[str], surface: frozenset[str], *, allow_imports: bool
 ) -> tuple[object, ...] | None:
     items: list[object] = []
     for index, stmt in enumerate(body):
@@ -249,12 +255,12 @@ def _scope_definitions(
                 items.append(_func_signature(stmt, referenced))
         elif isinstance(stmt, ast.ClassDef):
             if not _is_private_name(stmt.name):
-                sig = _class_signature(stmt, referenced)
+                sig = _class_signature(stmt, referenced, surface)
                 if sig is None:
                     return None
                 items.append(sig)
         elif isinstance(stmt, (ast.Assign, ast.AnnAssign, ast.TypeAlias)):
-            sig = _assign_signature(stmt, referenced)
+            sig = _assign_signature(stmt, referenced, surface)
             if sig == "invalid":
                 return None
             if isinstance(sig, tuple):
@@ -309,10 +315,10 @@ def _import_bindings(
 
 
 def _module_interface_fingerprint(
-    tree: ast.Module, *, is_package_init: bool
+    tree: ast.Module, surface: frozenset[str], *, is_package_init: bool
 ) -> tuple[object, ...] | None:
     referenced: set[str] = set()
-    defs = _scope_definitions(tree.body, referenced, allow_imports=True)
+    defs = _scope_definitions(tree.body, referenced, surface, allow_imports=True)
     imports = _import_bindings(tree)
     if defs is None or imports is None:
         return None
@@ -330,7 +336,9 @@ def _module_interface_fingerprint(
 # meiva:note
 # Compares public AST interface fingerprints so private body edits under `"strict"` purity can
 # prune downstream consumer tests outside the owning package.
-def module_interface_unchanged(path: str, base_source: str, head_source: str) -> bool:
+def module_interface_unchanged(
+    path: str, base_source: str, head_source: str, surface: frozenset[str]
+) -> bool:
     if not path.endswith(".py"):
         return False
     try:
@@ -339,8 +347,8 @@ def module_interface_unchanged(path: str, base_source: str, head_source: str) ->
     except (SyntaxError, ValueError):
         return False
     is_init = path.endswith("/__init__.py")
-    base_fp = _module_interface_fingerprint(base_tree, is_package_init=is_init)
-    head_fp = _module_interface_fingerprint(head_tree, is_package_init=is_init)
+    base_fp = _module_interface_fingerprint(base_tree, surface, is_package_init=is_init)
+    head_fp = _module_interface_fingerprint(head_tree, surface, is_package_init=is_init)
     return base_fp is not None and base_fp == head_fp
 
 
@@ -393,4 +401,4 @@ def strict_cutoff_eligible(
         or not manifest_boundary_unchanged(path, ctx.base_manifests, ctx.head_manifests)
     ):
         return False
-    return module_interface_unchanged(path, base_source, head_source)
+    return module_interface_unchanged(path, base_source, head_source, ctx.public_surface)

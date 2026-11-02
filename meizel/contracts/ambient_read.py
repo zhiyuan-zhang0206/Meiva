@@ -2,9 +2,8 @@
 # `ambient-read`: only a composition root reaches the world a process runs in.
 #
 # A file that takes the clock, the environment, the home or working directory, the platform, a
-# process id, randomness, or the process state the repository keeps (its configuration, database,
-# event bus, service endpoints) instead of being handed it is a decision that cannot be tested by
-# value. The files that may do so are declared under `[roots]` in their directory's `meizel.toml`,
+# process id, randomness, or the process state the repository keeps (the kinds its policy declares
+# under `[ambient]`) instead of being handed it is a decision that cannot be tested by value. The files that may do so are declared under `[roots]` in their directory's `meizel.toml`,
 # each with the kinds it may acquire; every other acquisition in non-test code is a violation.
 # Recorded like any other, a violation can be carried as debt except where the file is `strict`.
 
@@ -20,11 +19,13 @@ from meizel.contracts.manifest import Manifest, effective_purity
 from meizel.contracts.policy import POLICY, Policy
 from meizel.graph.imports import Scope, collect_scope
 from meizel.graph.model import (
+    OS_KINDS,
     Acquisition,
     AmbientKind,
     Code,
     DebtKey,
     Diagnostic,
+    KindName,
     MeizelError,
     Sources,
     Unless,
@@ -47,11 +48,7 @@ _READERS = "ambient-readers"
 # meiva:note
 # The roles whose source code is governed: what ships, the runnable templates and the tooling.
 _GOVERNED_ROLES = ("application", "standalone", "templates", "tooling", "frontend")
-_WHAT = {
-    AmbientKind.SETTINGS: "the process configuration",
-    AmbientKind.DB: "a database handle built from the live settings",
-    AmbientKind.ENDPOINTS: "the service endpoints built from the live settings",
-    AmbientKind.BUS: "an event bus built from the live settings",
+_WHAT: dict[str, str] = {
     AmbientKind.ENVIRON: "the environment",
     AmbientKind.CLOCK: "the clock",
     AmbientKind.HOME: "the home directory",
@@ -61,7 +58,6 @@ _WHAT = {
     AmbientKind.RANDOM: "randomness",
     AmbientKind.ARGV: "the command line",
 }
-_HELD = frozenset({AmbientKind.SETTINGS, AmbientKind.DB, AmbientKind.ENDPOINTS, AmbientKind.BUS})
 # meiva:note
 # The three lines every ambient-read carries: the principle, the recipe and the rule.
 _WHY = (
@@ -93,7 +89,7 @@ def _state_digest(manifests: Mapping[str, Manifest]) -> str:
     entries = [
         [
             directory,
-            [[file, [k.value for k in kinds]] for file, kinds in sorted(manifest.state.items())],
+            [[file, list(kinds)] for file, kinds in sorted(manifest.state.items())],
         ]
         for directory, manifest in sorted(manifests.items())
         if manifest.state
@@ -107,13 +103,13 @@ def sources_from(manifests: Mapping[str, Manifest], policy: Policy, universe: Un
     cache_key, cached = load_cached_sources(universe, _state_digest(manifests), policy)
     if cached is not None:
         return cached
-    names: dict[str, AmbientKind] = {}
-    calls: dict[str, AmbientKind] = {}
+    names: dict[str, KindName] = {}
+    calls: dict[str, KindName] = {}
     for directory, manifest in manifests.items():
         for file, kinds in manifest.state.items():
             module = _module_of(directory, file)
             for kind in kinds:
-                for name in policy.names("ambient", kind.value):
+                for name in policy.names("ambient", kind):
                     if name.endswith(_CALL_MARK):
                         calls[f"{module}.{name.removesuffix(_CALL_MARK)}"] = kind
                     else:
@@ -139,17 +135,16 @@ def in_scope(path: str, manifests: Mapping[str, Manifest]) -> bool:
 
 def _diagnostic(scan: FileScan, acquisition: Acquisition, mode: str, owner: str) -> Diagnostic:
     kind, target = acquisition.kind, acquisition.target
-    instead = _INSTEAD_HELD if kind in _HELD else _INSTEAD_STDLIB
+    instead = _INSTEAD_STDLIB if kind in OS_KINDS else _INSTEAD_HELD
+    what = _WHAT[kind] if kind in OS_KINDS else f"the `{kind}` state the repository keeps"
     debt = (
-        None
-        if mode == "strict"
-        else DebtKey(owner, file_key(owner, scan.path, f"{kind.value} {target}"))
+        None if mode == "strict" else DebtKey(owner, file_key(owner, scan.path, f"{kind} {target}"))
     )
     return Diagnostic(
         scan.path,
         acquisition.line,
         Code.AMBIENT_READ,
-        f"reads {_WHAT[kind]} (`{target}`) outside a composition root",
+        f"reads {what} (`{target}`) outside a composition root",
         (_WHY, instead, _SEE),
         debt,
     )
@@ -195,7 +190,7 @@ def stale_roots(
                     manifest.path,
                     manifest.line_of(name),
                     Code.STALE_ROOT,
-                    f"[roots] {name!r} declares `{kind.value}` but the file no longer acquires it",
+                    f"[roots] {name!r} declares `{kind}` but the file no longer acquires it",
                     ("remove the kind from [roots]; a root declares what it reads, not more",),
                 )
                 for kind in root.kinds
@@ -207,11 +202,11 @@ def stale_roots(
 # meiva:note
 # The policy's reader entries as `dotted name -> kind`: the calls (`name()`) or the bare names, which
 # acquire where they are imported or read as an attribute.
-def _readers(policy: Policy, *, call: bool) -> dict[str, AmbientKind]:
+def _readers(policy: Policy, *, call: bool) -> dict[str, KindName]:
     return {
         name.removesuffix(_CALL_MARK): kind
-        for kind in AmbientKind
-        for name in policy.reasons(_READERS, kind.value)
+        for kind in policy.reader_kinds
+        for name in policy.reasons(_READERS, kind)
         if name.endswith(_CALL_MARK) == call
     }
 
@@ -249,8 +244,8 @@ def _unless(universe: Universe, target: str, parameter: str) -> Unless | str:
 # spelling. Entries whose clause cannot be read are left to `stale_readers`.
 def _spared(universe: Universe, policy: Policy) -> dict[str, Unless]:
     found: dict[str, Unless] = {}
-    for kind in AmbientKind:
-        for name, parameter in policy.unless_for(_READERS, kind.value).items():
+    for kind in policy.reader_kinds:
+        for name, parameter in policy.unless_for(_READERS, kind).items():
             target = name.removesuffix(_CALL_MARK)
             resolved = _unless(universe, target, parameter)
             if isinstance(resolved, Unless):
@@ -265,9 +260,9 @@ def _spared(universe: Universe, policy: Policy) -> dict[str, Unless]:
 def reader_problems(policy: Policy) -> list[Diagnostic]:
     found: list[Diagnostic] = []
     seen: set[str] = set()
-    for kind in AmbientKind:
-        for name in policy.reasons(_READERS, kind.value):
-            where = f"[{_READERS}.{kind.value}] {name!r}"
+    for kind in policy.reader_kinds:
+        for name in policy.reasons(_READERS, kind):
+            where = f"[{_READERS}.{kind}] {name!r}"
             line = policy.line_of(name)
             if "." not in name.removesuffix(_CALL_MARK):
                 message = (
@@ -279,12 +274,12 @@ def reader_problems(policy: Policy) -> list[Diagnostic]:
                 seen.add(name)
                 continue
             found.append(Diagnostic(POLICY, line, Code.POLICY_SYNTAX, message))
-    for kind in AmbientKind:
-        for name in policy.unless_for(_READERS, kind.value):
+    for kind in policy.reader_kinds:
+        for name in policy.unless_for(_READERS, kind):
             if name.endswith(_CALL_MARK):
                 continue
             message = (
-                f"[{_READERS}.{kind.value}] {name!r} is not a call: `unless` spares the read a call "
+                f"[{_READERS}.{kind}] {name!r} is not a call: `unless` spares the read a call "
                 f"makes, so list it as `{name}()` or drop the clause"
             )
             found.append(Diagnostic(POLICY, policy.line_of(name), Code.POLICY_SYNTAX, message))
@@ -375,9 +370,9 @@ def stale_readers(universe: Universe, policy: Policy) -> list[Diagnostic]:
     found: list[Diagnostic] = []
     moved = ("remove the entry, or fix the name if the function moved",)
     clause = ("fix the parameter name, or drop the `unless` clause",)
-    for kind in AmbientKind:
-        spared = policy.unless_for(_READERS, kind.value)
-        for name in policy.reasons(_READERS, kind.value):
+    for kind in policy.reader_kinds:
+        spared = policy.unless_for(_READERS, kind)
+        for name in policy.reasons(_READERS, kind):
             target = name.removesuffix(_CALL_MARK)
             problem = _missing_reader(universe, target, call=name.endswith(_CALL_MARK))
             hint = moved
@@ -391,7 +386,7 @@ def stale_readers(universe: Universe, policy: Policy) -> list[Diagnostic]:
                         POLICY,
                         policy.line_of(name),
                         Code.STALE_READER,
-                        f"[{_READERS}.{kind.value}] {name!r} {problem}",
+                        f"[{_READERS}.{kind}] {name!r} {problem}",
                         hint,
                     )
                 )
@@ -414,13 +409,13 @@ def _imports(universe: Universe, path: str) -> dict[str, str]:
     return scope.imports
 
 
-type _Spellings = dict[str, dict[str, AmbientKind]]
+type _Spellings = dict[str, dict[str, KindName]]
 
 
 # meiva:note
 # What can be re-exported, by its dotted origin: `module.name` -> {tail: kind}, where the tail is
 # the method path below it (empty for a function).
-def _origins(universe: Universe, readers: Mapping[str, AmbientKind]) -> _Spellings:
+def _origins(universe: Universe, readers: Mapping[str, KindName]) -> _Spellings:
     exported: _Spellings = {}
     for target, kind in readers.items():
         located = _locate(universe, target)
@@ -461,9 +456,9 @@ def _spread(
 # of the names are read, so the cost follows the readers, not the repository.
 def _followed(
     universe: Universe,
-    readers: Mapping[str, AmbientKind],
+    readers: Mapping[str, KindName],
     parsed: dict[str, dict[str, str]] | None = None,
-) -> dict[str, AmbientKind]:
+) -> dict[str, KindName]:
     exported = _origins(universe, readers)
     repo = universe.repo
     seen: set[str] = set()
