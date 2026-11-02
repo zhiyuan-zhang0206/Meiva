@@ -16,3 +16,9 @@ exports = ["brew_pin.py", "firewall.py", "firewall_command.py", "frontend_env.py
 
 [purity]
 "__init__.py" = "strict"
+
+[debt.ambient-read]
+"firewall.py#pid sys.executable" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"ownership_preflight.py#pid grp.getgrgid" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"ownership_preflight.py#pid pwd.getpwuid" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"steps.py#pid sys.executable" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }

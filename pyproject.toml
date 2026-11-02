@@ -1476,6 +1476,11 @@ reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "meizel/graph/tests"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "meizel/language/tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"

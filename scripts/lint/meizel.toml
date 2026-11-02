@@ -6,4 +6,13 @@ exports = ["async_no_sync_blocking.py", "meiva_root_scope.py", "diagnostics", "f
 "tests" = ["agent_docstrings.py", "agents_md_size.py", "async_no_sync_blocking.py", "meiva_root_scope.py", "code_structure.py", "diagnostics", "fixture_scope.py", "host_platform_marks.py", "no_os_environ.py", "plugins", "policy_removal.py", "pool_keepalives.py", "termination_source.py", "turn_scoped_config.py"]
 
 [roots]
-"code_structure.py" = { kinds = ["environ"], why = "LINT_STRUCTURE_BASELINE_BASE is a live per-invocation CI input; standalone lint must not load deployed Settings." }
+"code_structure.py" = { kinds = ["environ", "argv", "cwd"], why = "LINT_STRUCTURE_BASELINE_BASE is a live per-invocation CI input; standalone lint must not load deployed Settings; it also reads its command line (argv) once, as the process entry, and anchors a relative path at the working directory" }
+
+[debt.ambient-read]
+"async_no_sync_blocking.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"fixture_scope.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"host_platform_marks.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"meiva_root_scope.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"pool_keepalives.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"termination_source.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"turn_scoped_config.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }

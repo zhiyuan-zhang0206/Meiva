@@ -10,3 +10,6 @@ exports = ["daemon.py", "service.py", "shutdown_budget.py"]
 
 [roots]
 "daemon.py" = { kinds = ["clock", "cwd", "environ", "home", "pid", "settings"], why = "The exec-host process entry boots configuration and reads the home it runs under before composing its service resources; it builds the process timers every exec run and kill deadline is measured with, and reads the parent environment it was started with once, as the base every child it spawns is given" }
+
+[debt.ambient-read]
+"service.py#pid sys.executable" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }

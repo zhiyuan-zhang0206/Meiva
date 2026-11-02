@@ -10,4 +10,4 @@
 "typescript_index.py" = ["check.py", "model.py"]
 
 [roots]
-"cli.py" = { kinds = ["cwd"], why = "CLI entrypoint resolves the enclosing Git checkout from the current working directory when --repo is omitted" }
+"cli.py" = { kinds = ["cwd", "pid"], why = "CLI entrypoint resolves the enclosing Git checkout from the current working directory when --repo is omitted; it also reads its standard input" }

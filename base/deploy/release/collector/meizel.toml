@@ -8,3 +8,6 @@ exports = ["artifact.py", "plan.py"]
 "__init__.py" = "strict"
 "artifact.py" = { mode = "none", why = "the shell of the pinned collector acquisition: it streams the release archive over the URL opener the caller hands in, hashes it as it arrives, retries under the budget, extracts the binary and writes the version marker, and reports on stdout and stderr; which asset a platform needs, its digest, the archive member, what a spent budget or a failed attempt says and how long to wait are decided in plan.py" }
 "plan.py" = "strict"
+
+[debt.ambient-read]
+"artifact.py#environ tempfile.TemporaryDirectory()" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }

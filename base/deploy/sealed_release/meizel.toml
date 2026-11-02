@@ -15,4 +15,4 @@ exports = ["sealed_plan.py", "sealed_tree.py", "stage.py", "stage_plan.py"]
 "stage_plan.py" = "strict"
 
 [roots]
-"stage.py" = { kinds = ["environ", "platform"], why = "the `python -m base.deploy.sealed_release.stage` entry: it hands its own process environment to the Host it builds (whose constructor reads the platform and uid) and passes the Host down; everything below takes the Host and explicit paths" }
+"stage.py" = { kinds = ["environ", "platform", "argv"], why = "the `python -m base.deploy.sealed_release.stage` entry: it hands its own process environment to the Host it builds (whose constructor reads the platform and uid) and passes the Host down; everything below takes the Host and explicit paths; it also reads its command line (argv) once, as the process entry" }

@@ -35,5 +35,3 @@ exports = ["analysis.py", "cli.py", "enumerations.py", "sync.py"]
 
 [debt.impure-call]
 "cli.py#Path.resolve" = { count = 1, owner = "#5921", until = "permanently: `main()` is the process top, and `_relative_target()` is the one place a typed target becomes a repository-relative path — all seven of its call sites sit in this module, so resolving anywhere above it means a second entry point doing the same resolve. Reopens if the command layer stops being the process top: a second entry point (a library API or a second CLI) that builds `CommandDeps` from raw paths would have to resolve them itself, and the resolve would belong there" }
-
-[debt.impure-edge]

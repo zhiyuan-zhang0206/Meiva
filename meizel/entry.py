@@ -5,6 +5,7 @@
 # names). Everything below it takes those values.
 from __future__ import annotations
 
+import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -32,6 +33,10 @@ def open_repository(root: Path) -> GitRepo:
 # Run one checker command from argv and return the process exit status.
 def main(argv: list[str] | None = None) -> int:
     args = cli.build_parser().parse_args(argv)
+    if args.jobs is None:
+        # meiva:note
+        # The one place the processor count is read: below the entry, `jobs=None` is serial.
+        args.jobs = min(os.cpu_count() or 1, 8)
     try:
         base = args.repo if args.repo is not None else Path.cwd()
         # meiva:note

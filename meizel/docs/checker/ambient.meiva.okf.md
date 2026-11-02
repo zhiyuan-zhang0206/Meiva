@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "meizel/ — Ambient Reads"
-description: "Only a composition root reaches the world a process runs in: the closed vocabulary of ambient kinds, how acquisition points are found, the [state] and [roots] manifest keys, the policy's reader functions, the ambient-read, stale-root and stale-reader codes, and what the analysis cannot see."
+description: "Only a composition root reaches the world a process runs in: the closed vocabulary of ambient kinds, how acquisition points are found, the [state] and [roots] manifest keys, the policy's reader functions, the ambient-read, ambient-unjudged, stale-root and stale-reader codes, and what the analysis cannot see."
 tags:
   - locality
   - tool
@@ -11,8 +11,8 @@ tags:
 
 ## What is it
 
-Code that takes the clock, the environment, the home directory, the platform, a process id,
-randomness or the process's own configuration, database, event bus or service endpoints instead
+Code that takes the command line, the clock, the environment, the home directory, the platform, a
+process id, randomness or the process's own configuration, database, event bus or service endpoints instead
 of being handed it cannot be tested by handing it a value, and answers differently on another
 machine or at another time. The rule is the red line of
 [the conventions](../../../docs/conventions/python-conventions.md#composition-roots-and-required-dependencies):
@@ -30,7 +30,8 @@ environment and the variables the Next.js build inlines are in
 
 ## Kinds
 
-The closed vocabulary of ambient kinds, and the spellings that acquire each one:
+The closed vocabulary of ambient kinds, the operating-system channels it is built from, and the
+table that judges every name of those channels:
 [[meizel/docs/ambient-kinds.meiva.okf.md|the ambient kinds node]].
 
 ## State
@@ -82,6 +83,15 @@ recordable debt like any patch: recorded sites pass, a new one fails, a paid one
 file under `purity = "strict"` has no debt: its read is a plain error. A test file records
 nothing; what a test sets is the patch family's concern. `none` files are judged too, which is
 the point: a shell executes a plan and reads no environment.
+
+`ambient-unjudged` guards the vocabulary itself. The standard-library names that acquire a kind are
+judged in `meizel/graph/ambient_surface.py`, name by name, for every module that carries an
+operating-system channel; a non-test file that uses a member of such a module that no entry judges
+(a function a new interpreter added, a name nobody looked at) fails with this code. It is never
+recordable debt: the gap is in the table, not in the file, and the fix is a judgment for the name
+(a kind, or the reason it reads nothing) in the table, with the test that compares the table with
+the modules themselves ([[meizel/docs/ambient-surface.meiva.okf.md|the ambient surface node]] says how
+to judge a name).
 
 `stale-root` is the other direction: a declared kind the file no longer acquires. A root declares
 what it reads, not more, so a permission cannot outlive the code that needed it. Only a whole-repository

@@ -36,7 +36,7 @@ When `meizel` reports an `impure-call` inside a module that should be `"strict"`
 
 ### 3. Ambient process reads (`ambient-read`)
 
-When code reads `settings`, `os.environ`, the clock (`time.time`, `datetime.now`), paths (`resolve_meiva_home`, `Path.home`, `Path.cwd`), platform/process facts (`sys.platform`, `os.getpid`), randomness (`uuid.uuid4`, `secrets`), or process-global DB/Redis/endpoint handles ([`ambient-read`](../../../meizel/docs/checker/ambient.meiva.okf.md)):
+When code reads `settings`, `os.environ`, the command line (`sys.argv`), the clock (`time.time`, `datetime.now`), paths (`resolve_meiva_home`, `Path.home`, `Path.cwd`), platform/process facts (`sys.platform`, `os.getpid`, `sys.executable`), randomness (`uuid.uuid4`, `secrets`), or process-global DB/Redis/endpoint handles ([`ambient-read`](../../../meizel/docs/checker/ambient.meiva.okf.md)):
 
 - **Lift the read to the composition root** (`wiring.py`, `daemon.py`, `app.py`, `CommandRuntime.create()`) that already owns `[roots]` in `meizel.toml`.
 - **Pass a value or a frozen config dataclass down.** At a component boundary, pass a frozen `XxxConfig` containing only the fields that component reads; inside the component, pass plain values (`now: datetime`, `home: Path`, `timeout_s: float`).

@@ -30,7 +30,8 @@ import ast
 import re
 from collections.abc import Callable, Iterator
 
-from meizel.graph.model import INTERVAL_CLOCKS, EntropySite
+from meizel.graph import INTERVAL_CLOCKS
+from meizel.graph.model import EntropySite
 
 __all__ = [
     "COUNTER_FACTORIES",

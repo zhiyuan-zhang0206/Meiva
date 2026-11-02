@@ -25,4 +25,4 @@ SCAN_DIRS = select_packages(
 __all__ = ["SCAN_DIRS"]
 
 if __name__ == "__main__":
-    raise SystemExit(no_meiva_in_hooks.main(scan_dirs=SCAN_DIRS))
+    raise SystemExit(no_meiva_in_hooks.main(sys.argv[1:], scan_dirs=SCAN_DIRS))

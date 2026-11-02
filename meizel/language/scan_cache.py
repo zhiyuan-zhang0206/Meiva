@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from collections.abc import Callable, Collection, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
@@ -580,7 +579,7 @@ def _scan_in_worker(path: str) -> tuple[FileScan, str]:
 def _scan_python_misses(
     universe: Universe, sources: Sources, paths: list[str], jobs: int | None, policy: Policy
 ) -> list[tuple[FileScan, dict[str, object]]]:
-    workers = jobs if jobs is not None else min(os.cpu_count() or 1, 8)
+    workers = 1 if jobs is None else jobs
     if workers <= 1 or len(paths) < _PARALLEL_FROM:
         return [
             (scan, _scan_to_raw(scan))

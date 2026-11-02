@@ -1,2 +1,2 @@
 [roots]
-"ask.py" = { kinds = ["home"], why = "Web-AI console driver is a command entry: it resolves the Meiva home once for its landing places" }
+"ask.py" = { kinds = ["home", "argv", "pid"], why = "Web-AI console driver is a command entry: it resolves the Meiva home once for its landing places; it also reads its command line (argv) once, as the process entry, and reads its standard input" }

@@ -9,4 +9,4 @@
 "write_record.py" = "strict"
 
 [roots]
-"__init__.py" = { kinds = ["clock", "pid"], why = "Audit shell stamps .env write and tamper records with current UTC time and writer PID" }
+"__init__.py" = { kinds = ["clock", "pid", "argv"], why = "Audit shell stamps .env write and tamper records with current UTC time and writer PID; it also reads its command line (argv) once, as the process entry" }

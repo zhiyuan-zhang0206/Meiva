@@ -12,14 +12,17 @@ exports = ["config.py", "fleet_gateway.py", "fleet_leases.py", "schedules.py", "
 
 [roots]
 "fleet_leases.py" = { kinds = ["home"], why = "Standalone program the window pipes to a host, where it runs under that host's older checkout (see `cli/fleet_update/plan/host_commands.py` and `fleet_pre_verify.sh`): the installed `CommandRuntime.create` takes the resolved home only from the version that added the parameter, so on an older one the program resolves the home itself and passes it nowhere. Delete the probe and this declaration together once the oldest installation these programs reach resolves the home itself" }
-"schedules_verify_read_rows.py" = { kinds = ["home"], why = "Standalone program the window pipes to a host, where it runs under that host's older checkout (see `cli/fleet_update/plan/host_commands.py` and `fleet_pre_verify.sh`): the installed `CommandRuntime.create` takes the resolved home only from the version that added the parameter, so on an older one the program resolves the home itself and passes it nowhere. Delete the probe and this declaration together once the oldest installation these programs reach resolves the home itself" }
-"schedule_verify_child.py" = { kinds = ["cwd"], why = "Schedule verification process entry captures its repository working directory and passes it to call-site analysis" }
-"fleet_gateway.py" = { kinds = ["clock", "random", "settings"], why = "CLI command composition root boots configuration before assembling command inputs and mints a fresh smoke-test idempotency key; builds the process clock from SYSTEM_TIMERS" }
-"schedules.py" = { kinds = ["home"], why = "CLI schedules command entry: resolves Meiva home for plugin schedule provisioning when not passed explicitly" }
-
+"schedules_verify_read_rows.py" = { kinds = ["home", "argv"], why = "Standalone program the window pipes to a host, where it runs under that host's older checkout (see `cli/fleet_update/plan/host_commands.py` and `fleet_pre_verify.sh`): the installed `CommandRuntime.create` takes the resolved home only from the version that added the parameter, so on an older one the program resolves the home itself and passes it nowhere. Delete the probe and this declaration together once the oldest installation these programs reach resolves the home itself; it also reads its command line (argv) once, as the process entry" }
+"schedule_verify_child.py" = { kinds = ["cwd", "pid"], why = "Schedule verification process entry captures its repository working directory and passes it to call-site analysis; it also reads its standard input" }
+"fleet_gateway.py" = { kinds = ["clock", "random", "settings", "argv"], why = "CLI command composition root boots configuration before assembling command inputs and mints a fresh smoke-test idempotency key; builds the process clock from SYSTEM_TIMERS; it also reads its command line (argv) once, as the process entry" }
+"schedules.py" = { kinds = ["home", "pid"], why = "CLI schedules command entry: resolves Meiva home for plugin schedule provisioning when not passed explicitly; it also reads its standard input" }
 [purity]
 "__init__.py" = "strict"
 "child_verdict.py" = "strict"
 "schedule_verify_checks.py" = "strict"
 "schedule_verify_child.py" = { mode = "none", why = "the schedule-verification process entry: it reads the script from stdin, reads this checkout's root, asks the filesystem where a callee is defined and normalizes that path, then prints one verdict line. Every check it reports, including which files count as repository code, is decided by the strict `schedule_verify_checks.py` over the parsed source and the names the script's own imports bound (`is_repo_source` there holds the root, virtualenv and SDK-package rules); this file only starts the process, handles what the filesystem raises, and prints what a missing module, an exception and a red result print" }
 "sweep_outcome.py" = "strict"
+
+[debt.ambient-read]
+"config.py#pid getpass.getuser" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"schedules_verify.py#pid sys.executable" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }

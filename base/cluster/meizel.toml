@@ -20,5 +20,6 @@ exports = ["authority", "checkpoint_schema.py", "dataplane", "derive.py", "front
 "transport_encryption.py" = "strict"
 
 [debt.ambient-read]
+"port_preflight.py#environ shutil.which()" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
 "postgres.py#pid os.getuid" = { count = 1, owner = "#5816", until = "permanently: require_closed() asks whether the postgres process belongs to the user running the check, and a caller-supplied uid would answer for a different user than the one whose process is inspected" }
 "postgres.py#platform base.native_process.os_platform.Platform.current" = { count = 1, owner = "#5816", until = "permanently: read_receipt() compares a receipt against the system this process runs on; a platform handed in would let a receipt from another OS validate here" }

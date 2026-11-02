@@ -2,3 +2,7 @@ exports = ["apt_lock.py", "check_git_hooks.py", "prepush_branch_diff.py", "prepu
 
 [uses]
 "tests" = ["apt_lock.py"]
+
+[debt.ambient-read]
+"prepush_branch_diff.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"prepush_frontend.py#argv sys.argv" = { count = 4, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }

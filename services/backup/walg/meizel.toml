@@ -21,5 +21,8 @@ exports = ["archive.py", "check.py", "config.py", "probe.py", "restore.py", "sta
 "drill.py" = { kinds = ["clock"], why = "Stamps the recovery drill state record with the wall-clock completion instant" }
 "pg_target.py" = { kinds = ["settings"], why = "Operator and tick entrypoint resolver reads data-plane settings to locate this home's Postgres" }
 "probe.py" = { kinds = ["clock"], why = "Cluster health probe entrypoint reads current UTC time to evaluate WAL-G tick and drill freshness" }
-"restore.py" = { kinds = ["clock"], why = "Operator restore command bounds recovery wait and narrates elapsed phase duration" }
+"restore.py" = { kinds = ["clock", "pid"], why = "Operator restore command bounds recovery wait and narrates elapsed phase duration; it also names the current user" }
 "tick.py" = { kinds = ["clock"], why = "Daily WAL-G tick entrypoint stamps step records with current UTC time" }
+
+[debt.ambient-read]
+"check.py#environ tempfile.TemporaryDirectory()" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }

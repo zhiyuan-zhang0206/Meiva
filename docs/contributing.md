@@ -210,7 +210,7 @@ violations pass, anything new fails, and the debt may only shrink
   --target-prefix <prefix>` lists where a target is patched (file, line, form), and `debt diff
   --by-target` reports what a change paid down per target; a codemod PR pastes the latter.
 - Only a composition root reads the world. A file that takes `settings`, the environment, the
-  clock, the home or working directory, the platform, a process id, randomness, or the process's
+  clock, the command line, the home or working directory, the platform, a process id, randomness, or the process's
   own database, event bus or service endpoints is an `ambient-read` unless its directory's
   `meizel.toml` declares it under `[roots]` with that kind. Pass the value in from the root; a
   decision in the middle becomes a pure function of its inputs. Declare a file a root only when

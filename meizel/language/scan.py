@@ -277,7 +277,7 @@ class Scanner(AmbientAccess):
             facts=list(dict.fromkeys(self.facts)),
             restricted=self.restricted,
             patches=self.patches,
-            problems=self.problems,
+            problems=[*self.problems, *self.ambient.unjudged_problems()],
             fixtures=self.fixture_state,
             imported=self.imported,
             purity=self.purity_state.items,
