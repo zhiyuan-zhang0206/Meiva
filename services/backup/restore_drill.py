@@ -49,6 +49,7 @@ from base.db import Database, connect_url
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP
+from base.host.exit_codes import hard_exit
 from base.log import logger
 from base.native_process.child_env import inherited_process_env
 from base.native_process.code_version import CodeVersion
@@ -568,7 +569,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     image = LoadedCommit.capture()
     version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process=process_name())
+    gate = ProcessDbGate(version=version.get, process=process_name(), end_process=hard_exit)
 
     def database_for_url(url: str) -> Database:
         return Database(dataclasses.replace(db_config_from_boot(config), db_url=url), gate=gate)

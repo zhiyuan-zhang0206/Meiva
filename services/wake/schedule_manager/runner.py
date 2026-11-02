@@ -26,6 +26,7 @@ from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
+from base.host.exit_codes import hard_exit
 from base.native_process.code_version import CodeVersion
 from base.paths import meiva_home, prod_service_checkout_error
 from base.telemetry import process_name
@@ -68,7 +69,7 @@ def run(schedule_id: int, revision: int | None = None, *, config: ConfigBoot | N
     machine = ConfiguredMachineIdentity(config)
     image = process_context.loaded_code_image()
     version = CodeVersion(image)
-    gate = ProcessDbGate(process=process_name(), version=version.get)
+    gate = ProcessDbGate(process=process_name(), version=version.get, end_process=hard_exit)
     home = meiva_home()
 
     def database() -> Database:

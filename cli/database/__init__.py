@@ -10,6 +10,7 @@ from threading import Lock
 from typing import TYPE_CHECKING, NoReturn
 
 from base.cluster.machine import MachineIdentityReader
+from base.host.exit_codes import hard_exit
 from base.telemetry import DrainResult, EventPipeline
 
 if TYPE_CHECKING:
@@ -82,7 +83,9 @@ class OperatorDatabaseFactory:
 
         with self._lock:
             if self._gate is None:
-                self._gate = ProcessDbGate(version=_unavailable_version, process="cli", exempt=True)
+                self._gate = ProcessDbGate(
+                    version=_unavailable_version, process="cli", exempt=True, end_process=hard_exit
+                )
         return self._gate
 
     def __call__(self) -> Database:

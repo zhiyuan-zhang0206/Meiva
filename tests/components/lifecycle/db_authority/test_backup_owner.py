@@ -34,6 +34,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.host.db_authority import delivery
+from base.host.exit_codes import hard_exit
 from base.host.net.url_secret import url_with_port
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -118,7 +119,7 @@ def test_scheduled_backup_dumps_as_the_owner_and_restores(
     } | {"MEIVA_DB_URL": maintenance.endpoint()}
     config = ConfigBoot(environment=env)
     version = CodeVersion(LoadedCommit.capture())
-    gate = ProcessDbGate(version=version.get, process="backup-test")
+    gate = ProcessDbGate(version=version.get, process="backup-test", end_process=hard_exit)
 
     def database() -> Database:
         return Database(db_config_from_boot(config), gate=gate)

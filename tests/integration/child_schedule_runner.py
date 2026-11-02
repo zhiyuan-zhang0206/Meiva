@@ -18,6 +18,8 @@ import threading
 import time
 from pathlib import Path
 
+from base.host.exit_codes import hard_exit
+
 # meiva:note
 # The stall budget of the scenarios that build their own engine root, and the bound the
 # stall action puts on its failure writes.
@@ -59,7 +61,9 @@ def _database():
     from base.native_process.loaded_commit import LoadedCommit
 
     image = LoadedCommit.capture()
-    gate = ProcessDbGate(process="schedule-cleanup-test", version=CodeVersion(image).get)
+    gate = ProcessDbGate(
+        process="schedule-cleanup-test", version=CodeVersion(image).get, end_process=hard_exit
+    )
     return Database.from_settings(gate=gate), image
 
 

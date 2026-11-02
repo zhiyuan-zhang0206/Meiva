@@ -7,6 +7,7 @@ from collections.abc import Generator
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 
+from base.host.exit_codes import hard_exit
 from base.agents.context import MeivaContext, deferred_event_bus
 from base.agents.context.clients import ClientSet
 from base.clock import SYSTEM_TIMERS, Clock
@@ -50,7 +51,7 @@ def fresh_schedule_entry(
     config = ConfigBoot()
     config.boot()
     machine = ConfiguredMachineIdentity(config)
-    gate = ProcessDbGate(process=process, version=CodeVersion(image).get)
+    gate = ProcessDbGate(process=process, version=CodeVersion(image).get, end_process=hard_exit)
 
     def database() -> Database:
         return Database(

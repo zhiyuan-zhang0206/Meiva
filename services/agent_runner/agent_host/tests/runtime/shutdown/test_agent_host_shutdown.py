@@ -27,6 +27,7 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config import get_field
 from base.daemon.endpoints import ServiceEndpoints
 from base.db.code_version_gate import ProcessDbGate
+from base.host.exit_codes import hard_exit
 from base.host.tests.daemon_shutdown import (
     EXIT_BOUND_S,
     KILL_SLACK_S,
@@ -91,7 +92,9 @@ def exercise_shutdown(failure: str, home: Path) -> None:
     """Run real signal/asyncio unwinding in a disposable child interpreter."""
     image = LoadedCommit.capture()
     version = CodeVersion(image)
-    _ = ProcessDbGate(version=version.get, process=process_name(), exempt=False)
+    _ = ProcessDbGate(
+        version=version.get, process=process_name(), exempt=False, end_process=hard_exit
+    )
     _run_shutdown(failure, home=home)
 
 

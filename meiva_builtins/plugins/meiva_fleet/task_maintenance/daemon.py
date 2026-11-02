@@ -32,6 +32,7 @@ from base.db.config import db_config_from_boot
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
+from base.host.exit_codes import hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugins.config_registration import (
@@ -623,7 +624,9 @@ def main() -> None:
     machine = ConfiguredMachineIdentity(boot)
     assert_schema_current(boot.view.data_plane.db_url)
     version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process="task_maintenance", exempt=False)
+    gate = ProcessDbGate(
+        version=version.get, process="task_maintenance", exempt=False, end_process=hard_exit
+    )
     process_home = meiva_home()
 
     def database() -> Database:

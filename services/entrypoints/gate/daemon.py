@@ -51,6 +51,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot, settings
 from base.db import Database
+from base.host.exit_codes import hard_exit
 from base.log import logger
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
@@ -448,7 +449,7 @@ def gate_database(
     from base.db.config import db_config_from_boot
     from base.native_process.code_version import CodeVersion
 
-    gate = ProcessDbGate(process="gate", version=CodeVersion(image).get)
+    gate = ProcessDbGate(process="gate", version=CodeVersion(image).get, end_process=hard_exit)
 
     def database() -> Database:
         return Database(

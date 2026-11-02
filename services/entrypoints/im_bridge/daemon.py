@@ -42,6 +42,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.host.db_authority.admission import admission_inputs
 from base.host.env.registry import network_proxy_configured
+from base.host.exit_codes import hard_exit
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -546,7 +547,7 @@ def main() -> None:
     machine = ConfiguredMachineIdentity(machine_config)
     process_home = meiva_home().resolve()
     version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process="im_bridge")
+    gate = ProcessDbGate(version=version.get, process="im_bridge", end_process=hard_exit)
 
     def database() -> Database:
         return Database(

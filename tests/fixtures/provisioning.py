@@ -16,6 +16,7 @@ import pytest_asyncio
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
+from base.host.exit_codes import hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
@@ -456,7 +457,7 @@ def database_version(pytestconfig: pytest.Config) -> CodeVersion:
 def database_gate(database_version: CodeVersion):
     from base.db.code_version_gate import ProcessDbGate
 
-    return ProcessDbGate(process="pytest", version=database_version.get)
+    return ProcessDbGate(process="pytest", version=database_version.get, end_process=hard_exit)
 
 
 @pytest.fixture

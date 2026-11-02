@@ -13,6 +13,7 @@ import pytest
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.lifecycle import home_lifecycle_locks
+from base.host.exit_codes import hard_exit
 from base.host.proc import run_bounded
 from base.native_process.code_version import CodeVersionError
 from base.native_process.loaded_commit import LoadedCommit
@@ -112,7 +113,9 @@ def _captured_image(source: Path, known: bool) -> tuple[ProcessDbGate, LoadedCom
         _git(source, "init", "--initial-branch=main")
         _git(source, "commit", "--allow-empty", "-m", "loaded A")
     image = LoadedCommit.capture(source_root=source)
-    gate = ProcessDbGate(version=repair.source_version(source), process="test")
+    gate = ProcessDbGate(
+        version=repair.source_version(source), process="test", end_process=hard_exit
+    )
     assert (image.sha is not None) is known
     if not known:
         _git(source, "init", "--initial-branch=main")

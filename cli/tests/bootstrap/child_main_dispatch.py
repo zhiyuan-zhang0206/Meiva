@@ -11,6 +11,8 @@ import socket
 import sys
 from typing import Any
 
+from base.host.exit_codes import hard_exit
+
 
 def _defer_logging() -> None:
     """A settings-free entry can import the parser before choosing its path."""
@@ -259,7 +261,7 @@ def _help_admission() -> None:
     def unavailable() -> int:
         raise AssertionError("help and operator admission must not read a Git version")
 
-    service = ProcessDbGate(version=unavailable, process="service")
+    service = ProcessDbGate(version=unavailable, process="service", end_process=hard_exit)
     assert service.min_read_due() is True
     seen: list[ProcessDbGate] = []
 

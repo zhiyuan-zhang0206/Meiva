@@ -683,7 +683,7 @@ def main(*, argv: list[str] | None = None) -> None:
     config.ensure_eager()
     machine = ConfiguredMachineIdentity(config)
     version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process="ops", exempt=False)
+    gate = ProcessDbGate(version=version.get, process="ops", exempt=False, end_process=hard_exit)
 
     def database() -> Database:
         return Database(

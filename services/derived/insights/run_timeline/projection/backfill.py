@@ -13,6 +13,7 @@ from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.protocols import db_config_from_boot
+from base.host.exit_codes import hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from services.derived.insights.run_timeline.projection.jobs import index_next
@@ -36,6 +37,7 @@ def main() -> None:
         gate=ProcessDbGate(
             version=version.get,
             process="timeline-projection-backfill",
+            end_process=hard_exit,
         ),
     )
     timestamps = TimestampSource(

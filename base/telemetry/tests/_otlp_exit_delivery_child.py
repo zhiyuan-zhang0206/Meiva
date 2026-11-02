@@ -11,6 +11,7 @@ from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.host.exit_codes import hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
@@ -20,7 +21,7 @@ def main() -> None:
     marker = sys.argv[1]
     image = LoadedCommit.capture()
     version = CodeVersion(image)
-    gate = ProcessDbGate(process="exit-seam-probe", version=version.get)
+    gate = ProcessDbGate(process="exit-seam-probe", version=version.get, end_process=hard_exit)
     config = ConfigBoot()
     config.read_process_environment()
     pipeline = telemetry.build_pipeline(

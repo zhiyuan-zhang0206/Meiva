@@ -14,6 +14,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.deploy.lifecycle import start_serving
+from base.host.exit_codes import hard_exit
 from base.host.system.hostport import Host
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -51,7 +52,9 @@ class GatewayProcess:
         self.observe = observe
         self.image = image
         self.version = CodeVersion(image)
-        self.gate = ProcessDbGate(version=self.version.get, process="gateway")
+        self.gate = ProcessDbGate(
+            version=self.version.get, process="gateway", end_process=hard_exit
+        )
         self.clients = ClientSet(
             database=self.database,
             pipeline_factory=lambda: build_pipeline(

@@ -17,6 +17,7 @@ from base.cluster.authority.tests.runner_logins import runner_projection
 from base.config import settings
 from base.db import code_version_gate as gate
 from base.db.config import db_config_from_settings
+from base.host.exit_codes import hard_exit
 
 _VERSION = 500
 
@@ -40,7 +41,9 @@ def test_a_runner_login_reads_the_minimum_and_cannot_write_it(
     """The gate needs no new grant: the runner group's blanket `SELECT` covers the
     column, and its inability to `UPDATE` the row (only the gateway raises the
     minimum) is unchanged."""
-    process_gate = gate.ProcessDbGate(version=lambda: _VERSION, process="db-test")
+    process_gate = gate.ProcessDbGate(
+        version=lambda: _VERSION, process="db-test", end_process=hard_exit
+    )
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as admin:
         admin.execute("UPDATE deployment_state SET min_code_version = %s", (_VERSION,))
     runner_url = runner_projection()

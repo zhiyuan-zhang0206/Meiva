@@ -28,6 +28,7 @@ from base.deploy.progress_timeout import (
     NON_CRITICAL_SERVICE_READY_TIMEOUT_S,
     SERVICE_READY_TIMEOUT_S,
 )
+from base.host.exit_codes import hard_exit
 from base.host.system.hostport import Host
 from base.native_process.child_env import inherited_process_env
 from base.native_process.code_version import CodeVersion
@@ -350,7 +351,7 @@ def build_wiring(
     machine = ConfiguredMachineIdentity(config)
     clock = context.clock
     version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process="meiva-root")
+    gate = ProcessDbGate(version=version.get, process="meiva-root", end_process=hard_exit)
 
     def database() -> Database:
         return Database(

@@ -27,6 +27,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
+from base.host.exit_codes import hard_exit
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.native_process.child_env import inherited_process_env
 from base.native_process.code_version import CodeVersion
@@ -263,7 +264,7 @@ def main() -> None:
     image = LoadedCommit.capture()
     assert_schema_current(config.view.data_plane.db_url)
     version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process="pg_backup")
+    gate = ProcessDbGate(version=version.get, process="pg_backup", end_process=hard_exit)
     pipeline = build_pipeline(
         database=lambda: scheduler_database(config, machine, gate, home=process_home),
         machine=machine,

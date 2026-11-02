@@ -43,6 +43,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.host.db_authority.api import read_telemetry_token
+from base.host.exit_codes import hard_exit
 from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
 from base.log import logger
 from base.native_process.code_version import CodeVersion
@@ -160,7 +161,7 @@ def main(*, process_config: ConfigBoot, open_url: UrlOpener) -> None:
     machine = ConfiguredMachineIdentity(process_config)
     process_home = meiva_home().resolve()
     version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process="station")
+    gate = ProcessDbGate(version=version.get, process="station", end_process=hard_exit)
 
     def database() -> Database:
         return Database(

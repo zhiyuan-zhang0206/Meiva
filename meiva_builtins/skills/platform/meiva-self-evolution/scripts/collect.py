@@ -40,6 +40,7 @@ import psycopg
 from pydantic import ValidationError
 
 from base.db import Database
+from base.host.exit_codes import hard_exit
 
 # `record` is a sibling in this skill's own scripts/ dir, not an importable
 # package (PYTHONSAFEPATH=1 keeps a script's own directory off sys.path) —
@@ -591,7 +592,7 @@ def process_database() -> Database:
     from base.native_process.loaded_commit import LoadedCommit
 
     version = CodeVersion(LoadedCommit.capture())
-    gate = ProcessDbGate(version=version.get, process="unknown")
+    gate = ProcessDbGate(version=version.get, process="unknown", end_process=hard_exit)
     return Database.from_settings(gate=gate)
 
 

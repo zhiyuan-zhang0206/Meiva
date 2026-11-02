@@ -83,7 +83,7 @@ from base.deploy.lifecycle.host_exit_message import (
 from base.deploy.release import editable_install
 from base.deploy.timing import assert_clock_lattice, clock_values
 from base.events.live.bus import EventBus, EventBusConfig
-from base.host.exit_codes import HELPER_CHAIN_BROKEN_EXIT_CODE
+from base.host.exit_codes import HELPER_CHAIN_BROKEN_EXIT_CODE, hard_exit
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.host.runtime_interpreter import external_plugin_read_root
 from base.lm.harness.registration import SecureRandom
@@ -709,7 +709,7 @@ def main() -> None:
     assert_schema_current(config.view.data_plane.db_url)
     machine = ConfiguredMachineIdentity(config)
     version = CodeVersion(process_context.loaded_code_image())
-    gate = ProcessDbGate(version=version.get, process="agent_host")
+    gate = ProcessDbGate(version=version.get, process="agent_host", end_process=hard_exit)
 
     def database() -> Database:
         return Database(

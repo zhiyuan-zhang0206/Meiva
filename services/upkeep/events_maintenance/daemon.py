@@ -81,6 +81,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.events.live.bus import EventBus, event_bus_config_from_config
+from base.host.exit_codes import hard_exit
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -465,7 +466,7 @@ def main() -> None:
     # Pre-startup sanity: schema version must match code; raises SchemaVersionMismatch if not.
     assert_schema_current(machine_config.view.data_plane.db_url)
     version = CodeVersion(image)
-    gate = ProcessDbGate(version=version.get, process="events_maintenance")
+    gate = ProcessDbGate(version=version.get, process="events_maintenance", end_process=hard_exit)
 
     def database() -> Database:
         return Database(

@@ -22,6 +22,8 @@ from pathlib import Path
 from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
+from base.host.exit_codes import hard_exit
+
 
 def script_sha256(script: str) -> str:
     """Digest the UTF-8 stored text without newline conversion."""
@@ -160,7 +162,9 @@ def repair_script(
     from base.telemetry import process_name
 
     with repair_guard(home, pid=pid, now=now):
-        gate = ProcessDbGate(version=source_version(source), process=process_name())
+        gate = ProcessDbGate(
+            version=source_version(source), process=process_name(), end_process=hard_exit
+        )
         with Database.from_settings(gate=gate).pool() as pool:
             return replace_script(pool, schedule_id, script, expected_sha256)
 
