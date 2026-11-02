@@ -20,6 +20,7 @@ from meizel.contracts.debt import (
     total,
 )
 from meizel.contracts.debt_edit import (
+    Naming,
     created_notice,
     read_baselines,
     record,
@@ -370,8 +371,12 @@ def _run_diff(repo: Checkout, ref: str, on_growth: str, args: argparse.Namespace
     return 1 if on_growth == "fail" else 0
 
 
-def _run_record(repo: Checkout, targets: list[str], jobs: int | None) -> int:
-    written, created, unrecordable = record(repo, targets, jobs)
+def _run_record(
+    repo: Checkout, targets: list[str], jobs: int | None, args: argparse.Namespace, today: str
+) -> int:
+    written, created, unrecordable = record(
+        repo, targets, jobs, naming=Naming(args.owner, args.until, today)
+    )
     for path in written:
         print(f"meizel: wrote {path}")
     if notice := created_notice(created):
@@ -403,7 +408,9 @@ def _run_carry(repo: Checkout, args: argparse.Namespace) -> int:
     return 0
 
 
-def run_debt(repo: Checkout, targets: list[str], args: argparse.Namespace, jobs: int | None) -> int:
+def run_debt(
+    repo: Checkout, targets: list[str], args: argparse.Namespace, jobs: int | None, today: str = ""
+) -> int:
     mode = args.debt_mode
     if mode is None:
         print(summarize(repo, as_json=args.json, unowned_list=args.unowned))
@@ -431,4 +438,4 @@ def run_debt(repo: Checkout, targets: list[str], args: argparse.Namespace, jobs:
         return _run_diff(repo, args.against, args.on_growth, args)
     if mode == "carry":
         return _run_carry(repo, args)
-    return _run_record(repo, targets, jobs)
+    return _run_record(repo, targets, jobs, args, today)

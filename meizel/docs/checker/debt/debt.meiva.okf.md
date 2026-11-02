@@ -76,38 +76,24 @@ section's end.
 
 ## What one entry says
 
-A `[debt.<code>]` line records a count, and may name the owner paying it down and the condition it
-waits for:
-
-```toml
-[debt.ambient-read]
-"page.py#clock time.time()" = 2                                   # no owner yet
-"boot.py#environ os.environ" = { count = 1, owner = "#7139", until = "waits for the Settings port" }
-```
-
-Both spellings read back as one entry. `count` is required and positive; `owner` and `until` are
-optional, and an empty or unknown field is `manifest-debt` rather than dropped — a misspelt `owner`
-must not read as "no owner". A baseline that names nobody stays byte-identical (a bare count), and
-`record` and `prune` keep the metadata while they change the count.
-
-The account never carries what a rule allows: a `[roots]` kind a `[debt.ambient-read]` entry still
-charges for is `legal-read-recorded` — `check --changed` sees it too.
-
-`check` says how many entries name no owner, and `debt --unowned` lists them as
-`<manifest>: <code> <key> (<count>)`. That number is a to-do, not a gate: requiring an owner on every
-new entry is a later change, once the recorded baseline has been backfilled.
+A `[debt.<code>]` line records a count, the task that re-reads it, and the condition it waits for; an
+entry that leaves out either field is `bare-debt`. The fields, the two shapes an `until` takes, the
+placeholder `record` writes and the three numbers `debt` counts are in
+[[meizel/docs/checker/debt/entry.meiva.okf.md|what one recorded entry says]].
 
 ## Commands
 
 - `debt` inventories manifests without source analysis, even for unparsable code.
-  JSON adds `basis` describing that limit and `unowned` (the entries naming no owner, and the
-  occurrences they carry); its legacy `directories.strict_to_be` and `strict` mean with/without
+  JSON adds `basis` describing that limit, `unowned` and `unstated` (the entries naming no owner and
+  the entries stating no exit condition, each with the occurrences they carry); its legacy `directories.strict_to_be` and `strict` mean with/without
   recorded debt, not manifest purity modes. `--unowned` appends a list of them below the
   tables, one entry per line.
-- `debt record <paths...>` writes the current violations under the paths into
-  their owners' manifests, creating one where there is none (stage it: `check`
-  reads tracked files). It is the only way a baseline grows: `check` and
-  `bootstrap` never write one, and `record` never lowers a count. Cycle
+- `debt record <paths...> [--owner TASK] [--until TEXT]` writes the current violations under the
+  paths into their owners' manifests, creating one where there is none (stage it: `check` reads
+  tracked files). It is the only way a baseline grows: `check` and `bootstrap` never write one, and
+  `record` never lowers a count. Each entry it writes keeps the metadata it already had; `--owner`
+  and `--until` fill the fields it lacks, and an entry that still has no `until` gets the
+  `unreviewed:` placeholder described above. Cycle
   back-edges are chosen greedily and thinned to the ones needed. Violations
   that cannot be recorded are printed and the exit code is 1.
 - `debt prune` lowers counts and drops entries to what still occurs.

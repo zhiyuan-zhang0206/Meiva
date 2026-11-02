@@ -12,7 +12,15 @@ import pytest
 
 from meizel.contracts.analysis import DebtEntry, entry_value, read_entry, set_debt
 from meizel.graph.model import Code
-from meizel.tests.synthetic import RepoFactory, commit, failures, git, run, write
+from meizel.tests.synthetic import (
+    FIXTURE_UNTIL,
+    RepoFactory,
+    commit,
+    failures,
+    git,
+    run,
+    write,
+)
 
 DECLARED = '[uses]\n"a.py" = ["b.py"]\n'
 BASE = {
@@ -204,13 +212,18 @@ def test_the_check_line_names_the_entries_without_an_owner(
         root,
         {
             "pkg/meizel.toml": DECLARED + "\n[debt.private-name]\n"
-            '"a.py -> b.py#_secret" = { count = 1, owner = "#7139" }\n'
-            '"a.py -> b.py#_other" = 1\n'
+            f'"a.py -> b.py#_secret" = {{ count = 1, owner = "#7139", until = "{FIXTURE_UNTIL}" }}\n'
+            f'"a.py -> b.py#_other" = {{ count = 1, until = "{FIXTURE_UNTIL}" }}\n'
         },
     )
     commit(root)
     capsys.readouterr()
-    assert run(root, "check") == 0
+    assert run(root, "check") == 1, "an entry that names no owner is an error now"
+    capsys.readouterr()
+    # meiva:note
+    # A scoped run judges the file it names, so the entry's own manifest stays out of the verdict and
+    # the ok line still reports what the whole tree records.
+    assert run(root, "check", "pkg/a.py") == 0
     assert "1 entry (1 occurrence) names no owner" in capsys.readouterr().out
 
 

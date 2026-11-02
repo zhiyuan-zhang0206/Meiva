@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from meizel.contracts.analysis import analyze
-from meizel.tests.synthetic import RepoFactory, run, seat, write
+from meizel.tests.synthetic import RepoFactory, baseline, run, seat, write
 
 TWO_BAD = {
     "pkg/__init__.py": "",
@@ -85,8 +85,8 @@ def test_recorded_debt_of_a_changed_file_is_reconciled_exactly(
         "pkg/b.py": "_secret = 1\n",
         "pkg/d.py": "VALUE = 1\n",
         "pkg/meizel.toml": (
-            '[uses]\n"a.py" = ["b.py"]\n\n[debt.private-name]\n'
-            '"a.py -> b.py#_secret" = 1\n"d.py -> b.py#_secret" = 1\n'
+            '[uses]\n"a.py" = ["b.py"]\n\n'
+            + baseline("private-name", {"a.py -> b.py#_secret": 1, "d.py -> b.py#_secret": 1})
         ),
     }
     root = make_repo(files)
@@ -151,7 +151,8 @@ def test_debt_about_a_loader_that_did_not_change_is_not_judged(make_repo: RepoFa
         "app/loader.py": "import importlib\nimportlib.import_module('lib')\n",
         "app/other.py": "VALUE = 1\n",
         "app/meizel.toml": (
-            '[loads]\n"loader.py" = ["lib"]\n\n[debt.private-name]\n"loader.py -> other.py#_n" = 1\n'
+            '[loads]\n"loader.py" = ["lib"]\n\n'
+            + baseline("private-name", {"loader.py -> other.py#_n": 1})
         ),
         "meizel.toml": '[uses]\n"app" = ["lib"]\n',
     }

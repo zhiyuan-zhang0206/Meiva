@@ -5,7 +5,7 @@ import pytest
 from meizel.contracts.analysis import render_policy
 from meizel.entry import open_repository
 from meizel.language.scan import is_imported_binding, module_bindings
-from meizel.tests.synthetic import RepoFactory, analysis_of, diagnostics, git, run
+from meizel.tests.synthetic import RepoFactory, analysis_of, diagnostics, git, record, run
 
 
 def test_manifest_purity_accepts_top_level_and_table_forms(make_repo: RepoFactory) -> None:
@@ -50,15 +50,14 @@ def test_impure_edge_fails_in_strict_and_records_in_strict_to_be(
     [found] = diagnostics(root, "impure-edge")
     assert found.debt is None
     assert "core/domain.py -> infra/db.py" in found.message
-    assert run(root, "debt", "record", "core") == 1
+    assert record(root, "core") == 1
 
     (root / "core/meizel.toml").write_text('purity = "strict-to-be"\n', encoding="utf-8")
     git(root, "add", "-A")
-    assert run(root, "debt", "record", "core") == 0
+    assert record(root, "core") == 0
     git(root, "add", "-A")
-    assert '[debt.impure-edge]\n"domain.py#infra/db.py" = 1\n' in (
-        root / "core/meizel.toml"
-    ).read_text(encoding="utf-8")
+    written = (root / "core/meizel.toml").read_text(encoding="utf-8")
+    assert '"domain.py#infra/db.py" = {' in written, "the entry is written with its metadata"
     assert analysis_of(root).verdict == []
 
 

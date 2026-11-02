@@ -16,6 +16,7 @@ from meizel.tests.synthetic import (
     commit,
     counts,
     git,
+    record,
     run,
     seat,
     write,
@@ -171,7 +172,7 @@ def test_same_line_duplicate_class_fields_keep_distinct_diagnostics_and_accumula
     assert len(full) == 2
     assert len({d.message for d in full}) == 2
     assert {d.debt.key for d in full if d.debt is not None} == {"app.py#any C.x"}
-    assert run(root, "debt", "record", ".") == 0
+    assert record(root, ".") == 0
     write(root, {})
     assert counts(analysis_of(root).manifests[""].debt[Code.ANY_COLLABORATOR]) == {
         "app.py#any C.x": 2
@@ -187,7 +188,7 @@ def test_same_line_duplicate_class_fields_keep_distinct_diagnostics_and_accumula
 def test_debt_key_ignores_line_drift_and_tracks_file_moves(make_repo: RepoFactory) -> None:
     source = "from typing import Any\ndef f(x: Any, y: Any) -> int:\n    return 1\n"
     root = make_repo({"app.py": source})
-    assert run(root, "debt", "record", ".") == 0
+    assert record(root, ".") == 0
     write(root, {})
     assert counts(analysis_of(root).manifests[""].debt[Code.ANY_COLLABORATOR]) == {
         "app.py#any f.x": 1,
@@ -213,7 +214,7 @@ def test_debt_key_ignores_line_drift_and_tracks_file_moves(make_repo: RepoFactor
 
 def test_unknown_any_collaborator_policy_table_is_rejected(make_repo: RepoFactory) -> None:
     root = make_repo({"app.py": "from typing import Any\ndef f(x: Any) -> int:\n    return 1\n"})
-    assert run(root, "debt", "record", ".") == 0
+    assert record(root, ".") == 0
     write(root, {})
     policy = (root / "meizel.policy.toml").read_text(encoding="utf-8")
     write(

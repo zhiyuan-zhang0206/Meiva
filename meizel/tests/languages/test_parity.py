@@ -8,7 +8,16 @@ from pathlib import Path
 
 import pytest
 
-from meizel.tests.synthetic import RepoFactory, analysis_of, commit, diagnostics, git, run, write
+from meizel.tests.synthetic import (
+    RepoFactory,
+    analysis_of,
+    commit,
+    diagnostics,
+    git,
+    record,
+    run,
+    write,
+)
 
 
 @pytest.mark.parametrize("extension", ["py", "ts", "tsx", "mts", "cts"])
@@ -25,7 +34,7 @@ def test_both_languages_share_check_record_prune_and_strict_modes(
     [diagnostic] = diagnostics(root, "wide-params")
     assert diagnostic.path == path and diagnostic.debt is not None
     assert run(root, "check") == 1
-    assert run(root, "debt", "record", "pkg") == 0
+    assert record(root, "pkg") == 0
     git(root, "add", "-A")
     assert run(root, "check") == 0
     fixed = (
@@ -41,7 +50,7 @@ def test_both_languages_share_check_record_prune_and_strict_modes(
     write(root, {path: source, "pkg/meizel.toml": 'purity = "strict"\n'})
     strict = diagnostics(root, "wide-params")
     assert len(strict) == 1 and strict[0].debt is None
-    assert run(root, "debt", "record", "pkg") == 1
+    assert record(root, "pkg") == 1
 
 
 @pytest.mark.parametrize("extension", ["py", "ts"])
@@ -76,15 +85,18 @@ def test_typescript_debt_symbol_move_uses_ast_spans(make_repo: RepoFactory) -> N
     moved = "export const moved = (): number => { const text = '}'; return Date.now() + text.length; };\n"
     kept = "export const kept = (): number => Date.now();\n"
     root = make_repo({"pkg/old.ts": moved + kept, "pkg/meizel.toml": 'purity = "strict-to-be"\n'})
-    assert run(root, "debt", "record", "pkg") == 0
+    assert record(root, "pkg") == 0
     git(root, "add", "-A")
     commit(root)
     write(root, {"pkg/old.ts": kept, "pkg/new.ts": moved})
     assert run(root, "debt", "carry", "--move-symbol", "pkg/old.ts::moved=pkg/new.ts") == 0
     git(root, "add", "-A")
     assert run(root, "check") == 0
-    debt = tomllib.loads((root / "pkg/meizel.toml").read_text())["debt"]
-    assert debt["impure-call"] == {"new.ts#moved#Date.now": 1, "old.ts#kept#Date.now": 1}
+    debt = tomllib.loads((root / "pkg/meizel.toml").read_text())["debt"]["impure-call"]
+    assert {key: value["count"] for key, value in debt.items()} == {
+        "new.ts#moved#Date.now": 1,
+        "old.ts#kept#Date.now": 1,
+    }
 
 
 # meiva:note
@@ -200,7 +212,7 @@ def test_typescript_rule_comparison_refreshes_policy_after_the_old_snapshot(
             "meizel.policy.toml": '[typescript]\nimpure-calls = ["afterCall"]\n',
         },
     )
-    assert run(root, "debt", "record", ".") == 0
+    assert record(root, ".") == 0
     write(root, {})
     capsys.readouterr()
     assert (

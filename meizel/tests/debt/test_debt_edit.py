@@ -19,15 +19,31 @@ DIRTY = {
 }
 
 
-def record(root: Path, *paths: str) -> int:
-    code = run(root, "debt", "record", *paths)
+# meiva:note
+# `debt record` with the two fields a recorded entry needs, so the tree it writes is one `check`
+# accepts; `until=None` is the run that states no exit condition and writes the placeholder, which is
+# its own test.
+def record(
+    root: Path,
+    *paths: str,
+    until: str | None = "waits for the test to state it",
+    owner: str = "#6018",
+) -> int:
+    flags = ["--owner", owner, *(("--until", until) if until is not None else ())]
+    code = run(root, "debt", "record", *paths, *flags)
     git(root, "add", "-A")
     return code
 
 
 def debt_of(root: Path, directory: str) -> dict[str, dict[str, int]]:
     path = root / directory / "meizel.toml" if directory else root / "meizel.toml"
-    return tomllib.loads(path.read_text()).get("debt", {})
+    table = tomllib.loads(path.read_text()).get("debt", {})
+    return {
+        code: {
+            key: value["count"] if isinstance(value, dict) else value for key, value in rows.items()
+        }
+        for code, rows in table.items()
+    }
 
 
 def test_record_writes_the_current_violations_into_the_owning_manifest(
@@ -59,8 +75,10 @@ def test_record_text_is_sorted_one_debt_per_line_and_stable(make_repo: RepoFacto
     assert text == (
         '[uses]\n"a.py" = ["b.py"]\n\n'
         "[debt.private-name]\n"
-        '"a.py -> b.py#_other" = 1\n'
-        '"a.py -> b.py#_secret" = 2\n'
+        '"a.py -> b.py#_other" = '
+        '{ count = 1, owner = "#6018", until = "waits for the test to state it" }\n'
+        '"a.py -> b.py#_secret" = '
+        '{ count = 2, owner = "#6018", until = "waits for the test to state it" }\n'
     )
     assert record(root, ".") == 0
     assert (root / "pkg/meizel.toml").read_text() == text
@@ -79,7 +97,8 @@ def test_record_creates_a_manifest_for_an_owner_that_has_none(make_repo: RepoFac
     assert not (root / "app/meizel.toml").exists()
     assert record(root, "app") == 0
     assert (root / "app/meizel.toml").read_text() == (
-        '[debt.restricted-python]\n"run.py#exec of source text" = 1\n'
+        '[debt.restricted-python]\n"run.py#exec of source text" = '
+        '{ count = 1, owner = "#6018", until = "waits for the test to state it" }\n'
     )
 
 
@@ -297,7 +316,29 @@ def test_bootstrap_carries_recorded_debt_into_its_mirror(
     out = tmp_path / "out"
     assert run(root, "bootstrap", "--out", str(out)) == 0
     mirrored = tomllib.loads((out / "pkg/meizel.toml").read_text())
-    assert mirrored["debt"] == debt_of(root, "pkg")
+    assert mirrored["debt"] == tomllib.loads((root / "pkg/meizel.toml").read_text())["debt"]
+
+
+# meiva:note
+# A run that states no exit condition writes the marked placeholder instead of a reason it does not
+# have: the entry is no longer bare, and the summary keeps counting it until a person writes the real
+# condition down.
+def test_record_without_an_until_writes_a_placeholder_the_summary_counts(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = make_repo(DIRTY)
+    assert record(root, "app", until=None) == 0
+    entry = tomllib.loads((root / "app/meizel.toml").read_text())["debt"]["restricted-python"][
+        "run.py#exec of source text"
+    ]
+    assert entry["owner"] == "#6018"
+    assert entry["until"].startswith("unreviewed: recorded by #6018 on ")
+    assert failures(root) == {("private-name", "pkg/a.py")}
+    capsys.readouterr()
+    assert run(root, "debt") == 0
+    assert "1 recorded debt carries an unreviewed exit condition (1 occurrence)" in (
+        capsys.readouterr().out
+    )
 
 
 def test_set_debt_replaces_only_the_debt_block() -> None:

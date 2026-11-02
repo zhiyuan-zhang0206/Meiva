@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from meizel.tests.synthetic import RepoFactory, analysis_of, failures
+from meizel.tests.synthetic import RepoFactory, analysis_of, baseline, entry_text, failures
 
 PRIVATE_USE = {
     "pkg/__init__.py": "",
@@ -10,7 +10,7 @@ PRIVATE_USE = {
     "pkg/b.py": "_secret = 1\n",
 }
 DECLARED = '[uses]\n"a.py" = ["b.py"]\n'
-BASELINE = '\n[debt.private-name]\n"a.py -> b.py#_secret" = 1\n'
+BASELINE = "\n" + baseline("private-name", {"a.py -> b.py#_secret": 1})
 
 
 def verdict_of(make_repo: RepoFactory, manifest: str, extra: dict[str, str] | None = None):
@@ -55,7 +55,7 @@ def test_more_occurrences_than_recorded_fail_with_both_counts(make_repo: RepoFac
 def test_a_recorded_debt_that_no_longer_occurs_fails_and_asks_for_a_prune(
     make_repo: RepoFactory,
 ) -> None:
-    manifest = DECLARED + BASELINE + '"a.py -> b.py#_gone" = 2\n'
+    manifest = DECLARED + BASELINE + f'"a.py -> b.py#_gone" = {entry_text(2)}\n'
     _, found = verdict_of(make_repo, manifest)
     [paid] = found
     assert (paid.path, paid.code.value) == ("pkg/meizel.toml", "debt-paid")
@@ -65,7 +65,7 @@ def test_a_recorded_debt_that_no_longer_occurs_fails_and_asks_for_a_prune(
 
 
 def test_a_count_above_what_remains_is_paid_in_part(make_repo: RepoFactory) -> None:
-    manifest = DECLARED + '\n[debt.private-name]\n"a.py -> b.py#_secret" = 3\n'
+    manifest = DECLARED + "\n" + baseline("private-name", {"a.py -> b.py#_secret": 3})
     _, found = verdict_of(make_repo, manifest)
     [paid] = found
     assert paid.code.value == "debt-paid"
@@ -73,7 +73,7 @@ def test_a_count_above_what_remains_is_paid_in_part(make_repo: RepoFactory) -> N
 
 
 def test_debt_of_a_deleted_file_is_paid(make_repo: RepoFactory) -> None:
-    manifest = DECLARED + BASELINE + '"ghost.py -> b.py#_secret" = 1\n'
+    manifest = DECLARED + BASELINE + f'"ghost.py -> b.py#_secret" = {entry_text(1)}\n'
     _, found = verdict_of(make_repo, manifest)
     assert [d.code.value for d in found] == ["debt-paid"]
 
@@ -88,7 +88,8 @@ def test_a_cross_package_violation_is_owned_by_the_common_directory(
         "top/y/__init__.py": "",
         "top/y/n.py": "_hidden = 1\n",
         "top/y/meizel.toml": 'exports = ["n.py"]\n',
-        "top/meizel.toml": '[uses]\n"x" = ["y"]\n\n[debt.private-name]\n"x/m.py -> y/n.py#_hidden" = 1\n',
+        "top/meizel.toml": '[uses]\n"x" = ["y"]\n\n'
+        + baseline("private-name", {"x/m.py -> y/n.py#_hidden": 1}),
     }
     root = make_repo(files)
     assert analysis_of(root).verdict == []
@@ -126,7 +127,7 @@ def test_the_key_carries_no_line_number(make_repo: RepoFactory) -> None:
     ],
 )
 def test_every_debtable_code_is_accepted(make_repo: RepoFactory, code: str, key: str) -> None:
-    manifest = f'[debt.{code}]\n"{key}" = 1\n'
+    manifest = baseline(code, {key: 1})
     root = make_repo({**PRIVATE_USE, "pkg/meizel.toml": manifest})
     assert not [d for d in analysis_of(root).diagnostics if d.code.value == "manifest-debt"]
 
@@ -171,7 +172,7 @@ CYCLIC = '[uses]\n"a.py" = ["b.py"]\n"b.py" = ["a.py"]\n'
 
 
 def test_recorded_facts_on_a_back_edge_let_a_cyclic_graph_through(make_repo: RepoFactory) -> None:
-    manifest = CYCLIC + '\n[debt.cycle-edge]\n"b.py -> a.py" = 1\n'
+    manifest = CYCLIC + "\n" + baseline("cycle-edge", {"b.py -> a.py": 1})
     root = make_repo({**CYCLE, "pkg/meizel.toml": manifest})
     assert failures(root) == set()
     assert any(d.code.value == "cycle-edge" for d in analysis_of(root).diagnostics)
@@ -180,7 +181,7 @@ def test_recorded_facts_on_a_back_edge_let_a_cyclic_graph_through(make_repo: Rep
 def test_a_new_import_on_a_recorded_back_edge_fails_with_both_counts(
     make_repo: RepoFactory,
 ) -> None:
-    manifest = CYCLIC + '\n[debt.cycle-edge]\n"b.py -> a.py" = 1\n'
+    manifest = CYCLIC + "\n" + baseline("cycle-edge", {"b.py -> a.py": 1})
     source = "from pkg import a\nfrom pkg import a as again\n"
     root = make_repo({**CYCLE, "pkg/b.py": source, "pkg/meizel.toml": manifest})
     found = [d for d in analysis_of(root).verdict if d.code.value == "cycle-edge"]
@@ -200,7 +201,7 @@ def test_a_new_file_on_a_recorded_back_edge_is_a_new_violation(make_repo: RepoFa
         "top/x/meizel.toml": 'exports = ["m.py"]\n',
         "top/y/meizel.toml": 'exports = ["n.py"]\n',
         "top/meizel.toml": (
-            '[uses]\n"x" = ["y"]\n"y" = ["x"]\n\n[debt.cycle-edge]\n"x/m.py -> y/n.py" = 1\n'
+            '[uses]\n"x" = ["y"]\n"y" = ["x"]\n\n' + baseline("cycle-edge", {"x/m.py -> y/n.py": 1})
         ),
     }
     found = [d for d in analysis_of(make_repo(files)).verdict if d.code.value == "cycle-edge"]
@@ -219,8 +220,8 @@ def test_a_cycle_the_back_edges_do_not_cover_still_fails_and_says_so(
         "pkg/b.py": "from pkg import a\n",
     }
     manifest = (
-        '[uses]\n"a.py" = ["b.py", "c.py"]\n"b.py" = ["a.py"]\n"c.py" = ["a.py"]\n'
-        '\n[debt.cycle-edge]\n"b.py -> a.py" = 1\n'
+        '[uses]\n"a.py" = ["b.py", "c.py"]\n"b.py" = ["a.py"]\n"c.py" = ["a.py"]\n\n'
+        + baseline("cycle-edge", {"b.py -> a.py": 1})
     )
     root = make_repo({**files, "pkg/meizel.toml": manifest})
     [found] = [d for d in analysis_of(root).verdict if d.code.value == "manifest-cycle"]
@@ -228,9 +229,8 @@ def test_a_cycle_the_back_edges_do_not_cover_still_fails_and_says_so(
 
 
 def test_facts_on_an_edge_that_no_longer_closes_a_cycle_are_paid(make_repo: RepoFactory) -> None:
-    manifest = (
-        '[uses]\n"a.py" = ["b.py"]\n"b.py" = ["a.py"]\n'
-        '\n[debt.cycle-edge]\n"b.py -> a.py" = 1\n"a.py -> b.py" = 1\n'
+    manifest = '[uses]\n"a.py" = ["b.py"]\n"b.py" = ["a.py"]\n\n' + baseline(
+        "cycle-edge", {"b.py -> a.py": 1, "a.py -> b.py": 1}
     )
     root = make_repo({**CYCLE, "pkg/meizel.toml": manifest})
     [paid] = [d for d in analysis_of(root).verdict if d.code.value == "debt-paid"]
@@ -239,7 +239,7 @@ def test_facts_on_an_edge_that_no_longer_closes_a_cycle_are_paid(make_repo: Repo
 
 
 def test_facts_on_an_edge_that_is_no_longer_declared_are_paid(make_repo: RepoFactory) -> None:
-    manifest = '[uses]\n"a.py" = ["b.py"]\n\n[debt.cycle-edge]\n"b.py -> a.py" = 1\n'
+    manifest = '[uses]\n"a.py" = ["b.py"]\n\n' + baseline("cycle-edge", {"b.py -> a.py": 1})
     root = make_repo({**CYCLE, "pkg/meizel.toml": manifest})
     found = analysis_of(root).verdict
     codes = {d.code.value for d in found}
@@ -254,7 +254,7 @@ def test_a_fact_on_a_back_edge_is_still_judged_by_the_other_rules(make_repo: Rep
         "pkg/b.py": "from pkg.a import _hidden\n",
         "pkg/a.py": "from pkg import b\n_hidden = 1\n",
     }
-    manifest = CYCLIC + '\n[debt.cycle-edge]\n"b.py -> a.py" = 1\n'
+    manifest = CYCLIC + "\n" + baseline("cycle-edge", {"b.py -> a.py": 1})
     root = make_repo({**files, "pkg/meizel.toml": manifest})
     assert {(d.code.value, d.path) for d in analysis_of(root).verdict} == {
         ("private-name", "pkg/b.py")

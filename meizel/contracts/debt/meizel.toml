@@ -1,5 +1,6 @@
 [uses]
-"__init__.py" = ["entry.py"]
+"__init__.py" = ["entry.py", "states.py"]
+"states.py" = ["entry.py"]
 
 [purity]
 "." = "strict"

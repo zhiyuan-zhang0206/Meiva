@@ -5,7 +5,16 @@ from pathlib import Path
 
 import pytest
 
-from meizel.tests.synthetic import RepoFactory, commit, failures, git, run, write
+from meizel.tests.synthetic import (
+    RepoFactory,
+    baseline,
+    commit,
+    entry_text,
+    failures,
+    git,
+    run,
+    write,
+)
 
 LIB = {
     "lib/__init__.py": "",
@@ -24,18 +33,31 @@ FIXTURE = (
 )
 TEST = "def test_a(monkeypatch):\n    monkeypatch.setattr(mod, 'helper', lambda: 2)\n"
 HEADER = "import pytest\nfrom lib import mod\n\n\n"
-PATCH_DEBT = (
-    "[debt.first-party-patch]\n"
-    '"test_x.py#monkeypatch.setattr lib.mod.helper" = 2\n'
-    '"test_x.py#monkeypatch.setattr lib.mod.other" = 1\n'
+PATCH_DEBT = baseline(
+    "first-party-patch",
+    {
+        "test_x.py#monkeypatch.setattr lib.mod.helper": 2,
+        "test_x.py#monkeypatch.setattr lib.mod.other": 1,
+    },
 )
 HELPER = "monkeypatch.setattr lib.mod.helper"
 OTHER = "monkeypatch.setattr lib.mod.other"
 
 
+# meiva:note
+# The counts each entry records, whether the entry is a bare number or a table naming its owner and
+# exit condition: a test that judges where a debt was carried says nothing about either field.
 def debt_of(root: Path, directory: str) -> dict[str, dict[str, int]]:
     path = root / directory / "meizel.toml" if directory else root / "meizel.toml"
-    return tomllib.loads(path.read_text()).get("debt", {}) if path.exists() else {}
+    if not path.exists():
+        return {}
+    table = tomllib.loads(path.read_text()).get("debt", {})
+    return {
+        code: {
+            key: value["count"] if isinstance(value, dict) else value for key, value in rows.items()
+        }
+        for code, rows in table.items()
+    }
 
 
 def patch_rows(root: Path, directory: str) -> dict[str, int]:
@@ -102,7 +124,9 @@ def test_a_private_name_imported_inside_the_moved_function_moves_too(
     top = "from lib.mod import _hidden\n\n\n"
     files = {
         **LIB,
-        "meizel.toml": ROOT + '\n[debt.private-name]\n"app/test_x.py -> lib/mod.py#_hidden" = 2\n',
+        "meizel.toml": ROOT
+        + "\n"
+        + baseline("private-name", {"app/test_x.py -> lib/mod.py#_hidden": 2}),
         "app/test_x.py": f"{top}{reader}\n\ndef test_a():\n    assert _hidden\n",
     }
     root = make_repo(files)
@@ -130,7 +154,8 @@ def test_a_class_moves_like_a_function(make_repo: RepoFactory) -> None:
     files = {
         **LIB,
         "meizel.toml": ROOT,
-        "app/meizel.toml": f'[debt.first-party-patch]\n"test_x.py#{HELPER}" = 1\n"test_x.py#{OTHER}" = 1\n',
+        "app/meizel.toml": f"[debt.first-party-patch]\n"
+        f'"test_x.py#{HELPER}" = {entry_text(1)}\n"test_x.py#{OTHER}" = {entry_text(1)}\n',
         "app/test_x.py": f"{HEADER}{holder}\n\n{TEST}",
     }
     root = make_repo(files)
@@ -167,7 +192,7 @@ def test_a_symbol_without_debt_changes_nothing(
     files = {
         **LIB,
         "meizel.toml": ROOT,
-        "app/meizel.toml": f'[debt.first-party-patch]\n"test_x.py#{HELPER}" = 1\n',
+        "app/meizel.toml": f'[debt.first-party-patch]\n"test_x.py#{HELPER}" = {entry_text(1)}\n',
         "app/test_x.py": f"{HEADER}{quiet}\n\n{TEST}",
     }
     root = make_repo(files)

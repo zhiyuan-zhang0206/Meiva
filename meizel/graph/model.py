@@ -70,6 +70,7 @@ class Code(StrEnum):
     POLICY_SYNTAX = "policy-syntax"
     UNLISTED_ALLOWANCE = "unlisted-allowance"
     DEBT_PAID = "debt-paid"
+    BARE_DEBT = "bare-debt"
     FIRST_PARTY_PATCH = "first-party-patch"
     STDLIB_PATCH = "stdlib-patch"
     THIRD_PARTY_PATCH = "third-party-patch"

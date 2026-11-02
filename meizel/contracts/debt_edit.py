@@ -11,12 +11,14 @@ from __future__ import annotations
 
 import tomllib
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from meizel.contracts.analysis import Analysis, analyze
 from meizel.contracts.debt import (
     CYCLE_EDGE,
     TABLE_KEY,
+    UNREVIEWED,
     DebtEntry,
     DebtTable,
     entry_value,
@@ -33,6 +35,7 @@ from meizel.graph.universe import Checkout, EditPlan, Universe
 
 __all__ = [
     "Baselines",
+    "Naming",
     "created_notice",
     "prune",
     "read_baselines",
@@ -178,16 +181,53 @@ def _recordable(analysis: Analysis, targets: list[str]) -> list[Diagnostic]:
     return [d for d in analysis.diagnostics if d.debt is not None and _within(d.path, targets)]
 
 
-def _merge_cycle_facts(tables: dict[str, DebtTable], current: Analysis, targets: list[str]) -> None:
-    for owner, manifest in current.manifests.items():
-        if not _within(owner, targets):
+def _merge_cycle_facts(
+    tables: dict[str, DebtTable], current: Analysis, targets: list[str], naming: Naming
+) -> None:
+    for directory, manifest in current.manifests.items():
+        if not _within(directory, targets):
             continue
         facts = _cycle_facts(current, manifest)
         if not facts:
             continue
-        edges = tables[owner].setdefault(CYCLE_EDGE, {})
+        edges = tables[directory].setdefault(CYCLE_EDGE, {})
         for key, count in facts.items():
-            edges[key] = _raised(edges.get(key), count)
+            edges[key] = _named(_raised(edges.get(key), count), naming)
+
+
+# meiva:note
+# Who an entry a run writes belongs to, what it waits for, and the day the run wrote it: the three
+# strings a caller states about the entries it creates. One value, because they travel together and
+# because `record` already names its subjects.
+@dataclass(frozen=True, slots=True)
+class Naming:
+    owner: str = ""
+    until: str = ""
+    today: str = ""
+
+
+# meiva:note
+# The entry this run writes: the count it raised, carrying the owner and exit condition the caller
+# gave for it. A field the entry already holds wins, so recording cannot rewrite who pays a debt down
+# or why it waits, and a run that states no exit condition writes the marked placeholder rather than
+# inventing one.
+def _named(entry: DebtEntry, naming: Naming) -> DebtEntry:
+    return replace(
+        entry,
+        owner=entry.owner or naming.owner,
+        until=entry.until or naming.until or _unreviewed(naming),
+    )
+
+
+# meiva:note
+# The placeholder `record` writes when nobody stated what the debt waits for: who asked for the entry
+# and the day it was written, under the prefix the summary counts as unreviewed. `record` is a
+# mechanical step and knows nothing about the debt; a sentence it made up would read like a reason
+# ever after, and the gate exists to stop exactly that.
+def _unreviewed(naming: Naming) -> str:
+    who = naming.owner or "an unnamed lane"
+    stamp = f" on {naming.today}" if naming.today else ""
+    return f"{UNREVIEWED} recorded by {who}{stamp}"
 
 
 # meiva:note
@@ -200,20 +240,22 @@ def record(
     jobs: int | None = None,
     *,
     analysis: Analysis | None = None,
+    naming: Naming | None = None,
 ) -> tuple[list[str], list[str], list[Diagnostic]]:
+    stated = Naming() if naming is None else naming
     current = analyze(repo.universe(), jobs=jobs) if analysis is None else analysis
     _refuse_malformed(current.diagnostics, "record")
     tables = {owner: _copy(m.debt) for owner, m in current.manifests.items()}
-    for (owner, code, key), found in tally(_recordable(current, targets)).items():
-        rows = tables.setdefault(owner, {}).setdefault(code, {})
-        rows[key] = _raised(rows.get(key), len(found))
-    _merge_cycle_facts(tables, current, targets)
+    for (directory, code, key), found in tally(_recordable(current, targets)).items():
+        rows = tables.setdefault(directory, {}).setdefault(code, {})
+        rows[key] = _named(_raised(rows.get(key), len(found)), stated)
+    _merge_cycle_facts(tables, current, targets, stated)
     written: list[str] = []
     created: list[str] = []
-    for owner, table in sorted(tables.items()):
-        if path := write_baseline(repo, owner, table):
+    for directory, table in sorted(tables.items()):
+        if path := write_baseline(repo, directory, table):
             written.append(path)
-            if owner not in current.manifests:
+            if directory not in current.manifests:
                 created.append(path)
     unrecordable = [
         d

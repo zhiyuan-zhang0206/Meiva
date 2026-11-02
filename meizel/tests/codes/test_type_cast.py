@@ -16,6 +16,7 @@ from meizel.tests.synthetic import (
     commit,
     counts,
     git,
+    record,
     run,
     seat,
     write,
@@ -195,7 +196,7 @@ def test_same_line_calls_survive_both_diagnostic_consumers_and_ledger(
     assert len(full) == 2
     assert len({d.message for d in full}) == 2
     assert {d.debt.key for d in full if d.debt is not None} == {"app.py#cast f"}
-    assert run(root, "debt", "record", ".") == 0
+    assert record(root, ".") == 0
     write(root, {})
     assert counts(analysis_of(root).manifests[""].debt[Code.TYPE_CAST]) == {"app.py#cast f": 2}
     assert not analysis_of(root).verdict
@@ -208,7 +209,7 @@ def test_line_movement_preserves_the_key_and_prune_pays_removed_calls(
 ) -> None:
     source = "from typing import cast\ndef f(): return cast(int, a), cast(int, b)\n"
     root = make_repo({"app.py": source})
-    assert run(root, "debt", "record", ".") == 0
+    assert record(root, ".") == 0
     write(root, {})
     write(root, {"app.py": "\n\n" + source})
     assert not analysis_of(root).verdict
@@ -219,7 +220,7 @@ def test_line_movement_preserves_the_key_and_prune_pays_removed_calls(
 
 def test_file_move_carries_type_cast_debt(make_repo: RepoFactory) -> None:
     root = make_repo({"app.py": "from typing import cast\ndef f(): return cast(int, value)\n"})
-    assert run(root, "debt", "record", ".") == 0
+    assert record(root, ".") == 0
     write(root, {})
     commit(root)
     (root / "app.py").rename(root / "moved.py")
@@ -232,7 +233,7 @@ def test_unknown_type_cast_policy_table_is_rejected_with_a_recorded_site(
     make_repo: RepoFactory,
 ) -> None:
     root = make_repo({"app.py": "from typing import cast\ncast(int, value)\n"})
-    assert run(root, "debt", "record", ".") == 0
+    assert record(root, ".") == 0
     write(root, {})
     policy = (root / "meizel.policy.toml").read_text()
     write(
@@ -399,7 +400,7 @@ def test_strict_purity_keeps_authorized_cast_counts_but_rejects_growth(
 ) -> None:
     source = "from typing import cast\ncast(int, value)\n"
     root = make_repo({"app.py": source, "meizel.toml": '[purity]\n"." = "strict"\n'})
-    assert run(root, "debt", "record", ".") == 0
+    assert record(root, ".") == 0
     write(root, {})
     found = analysis_of(root)
     assert found.manifests[""].purity_default == "strict"

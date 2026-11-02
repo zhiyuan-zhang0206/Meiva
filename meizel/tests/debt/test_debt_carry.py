@@ -5,7 +5,16 @@ from pathlib import Path
 
 import pytest
 
-from meizel.tests.synthetic import RepoFactory, analysis_of, commit, failures, git, run, write
+from meizel.tests.synthetic import (
+    RepoFactory,
+    analysis_of,
+    baseline,
+    commit,
+    failures,
+    git,
+    run,
+    write,
+)
 
 LIB = {
     "lib/__init__.py": "",
@@ -17,12 +26,25 @@ LIB = {
     "new/keep.py": "from lib import mod\n",
 }
 TEST = "from lib.mod import _hidden\n\n\ndef test_a():\n    assert _hidden\n"
-ROOT = '[uses]\n"new" = ["lib"]\n"old" = ["lib"]\n\n[debt.private-name]\n"old/test_x.py -> lib/mod.py#_hidden" = 1\n'
+ROOT = '[uses]\n"new" = ["lib"]\n"old" = ["lib"]\n\n' + baseline(
+    "private-name", {"old/test_x.py -> lib/mod.py#_hidden": 1}
+)
 
 
+# meiva:note
+# The counts each entry records, whether the entry is a bare number or a table naming its owner and
+# exit condition: a test that judges where a debt was carried says nothing about either field.
 def debt_of(root: Path, directory: str) -> dict[str, dict[str, int]]:
     path = root / directory / "meizel.toml" if directory else root / "meizel.toml"
-    return tomllib.loads(path.read_text()).get("debt", {}) if path.exists() else {}
+    if not path.exists():
+        return {}
+    table = tomllib.loads(path.read_text()).get("debt", {})
+    return {
+        code: {
+            key: value["count"] if isinstance(value, dict) else value for key, value in rows.items()
+        }
+        for code, rows in table.items()
+    }
 
 
 def carry(root: Path, *flags: str) -> int:
@@ -87,7 +109,7 @@ def test_file_scoped_debt_moves_with_the_file_and_creates_the_manifest_it_needs(
 ) -> None:
     files = {
         "old/test_p.py": "from lib import mod\n\n\ndef test_a(monkeypatch):\n    monkeypatch.setattr(mod, 'x', 1)\n",
-        "old/meizel.toml": '[debt.restricted-python]\n"test_p.py#exec of source text" = 1\n',
+        "old/meizel.toml": baseline("restricted-python", {"test_p.py#exec of source text": 1}),
     }
     root = moved_repo(make_repo, files)
     git(root, "mv", "old/test_p.py", "new/test_p.py")
@@ -135,7 +157,7 @@ def test_a_file_scoped_move_into_a_directory_with_a_manifest_creates_nothing(
 ) -> None:
     files = {
         "old/test_p.py": "def test_a():\n    exec('x = 1')\n",
-        "old/meizel.toml": '[debt.restricted-python]\n"test_p.py#exec of source text" = 1\n',
+        "old/meizel.toml": baseline("restricted-python", {"test_p.py#exec of source text": 1}),
     }
     root = moved_repo(make_repo, files)
     git(root, "mv", "old/test_p.py", "lib/test_p.py")
@@ -157,10 +179,9 @@ def test_two_created_manifests_are_one_plural_notice(
     files = {
         "old/test_p.py": "def test_a():\n    exec('x = 1')\n",
         "old/test_r.py": "def test_b():\n    exec('y = 2')\n",
-        "old/meizel.toml": (
-            "[debt.restricted-python]\n"
-            '"test_p.py#exec of source text" = 1\n'
-            '"test_r.py#exec of source text" = 1\n'
+        "old/meizel.toml": baseline(
+            "restricted-python",
+            {"test_p.py#exec of source text": 1, "test_r.py#exec of source text": 1},
         ),
     }
     root = moved_repo(make_repo, files)
@@ -186,7 +207,7 @@ def test_a_directory_move_keeps_relative_entries_and_remaps_outside_ones(
     make_repo: RepoFactory,
 ) -> None:
     files = {
-        "old/meizel.toml": '[debt.restricted-python]\n"test_x.py#exec of source text" = 1\n',
+        "old/meizel.toml": baseline("restricted-python", {"test_x.py#exec of source text": 1}),
     }
     root = moved_repo(make_repo, files)
     git(root, "mv", "old/test_x.py", "new/test_x.py")
@@ -279,13 +300,15 @@ PATCHED = (
 
 
 def patch_repo(make_repo: RepoFactory) -> Path:
-    baseline = (
-        "[debt.first-party-patch]\n"
-        '"test_p.py#monkeypatch.setattr lib.mod.helper.x" = 1\n'
-        '"test_p.py#monkeypatch.setattr lib.mod.helper.y" = 1\n'
-        '"test_p.py#monkeypatch.setattr lib.mod.other" = 4\n'
+    recorded = baseline(
+        "first-party-patch",
+        {
+            "test_p.py#monkeypatch.setattr lib.mod.helper.x": 1,
+            "test_p.py#monkeypatch.setattr lib.mod.helper.y": 1,
+            "test_p.py#monkeypatch.setattr lib.mod.other": 4,
+        },
     )
-    files = {**LIB, "old/test_p.py": PATCHED, "old/meizel.toml": baseline}
+    files = {**LIB, "old/test_p.py": PATCHED, "old/meizel.toml": recorded}
     root = make_repo(files)
     commit(root)
     return root
