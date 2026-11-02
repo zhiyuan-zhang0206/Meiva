@@ -16,4 +16,4 @@ exports = ["__init__.py", "__main__.py", "choices.py", "fleet_gate.py", "fleet_v
 "oneshot.py" = "strict"
 
 [roots]
-"__main__.py" = { kinds = ["clock", "environ"], why = "The executable composition root reads the caller environment and invocation timestamp once and passes them explicitly to main and the command shells" }
+"__main__.py" = { kinds = ["clock", "environ", "pid", "platform", "random"], why = "The executable composition root reads the caller environment and invocation timestamp once and passes them explicitly to main and the command shells; it also mints this window's identity there — the uid it falls back to when the login name is unreadable, the host it runs on, and a fresh random operation id — so that every host command below carries one identity decided in one place before any host is contacted" }

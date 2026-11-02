@@ -73,6 +73,22 @@ def _h_cluster_destroy(args: argparse.Namespace) -> int:
     )
 
 
+# meiva:note
+# `meiva cluster ops` — read the cluster's lifecycle operations from the audit record: which
+# window ran (`operation_id`), who started it (`initiator`), what the release gate said
+# (`gate`), and how each host ended. The rows were always written; this is the surface that
+# makes them readable without hand-written SQL (task #6024).
+def _h_cluster_ops(args: argparse.Namespace) -> int:
+    from cli.commands.cluster.ops import cmd_cluster_ops
+
+    return cmd_cluster_ops(
+        database_factory=args.database_factory,
+        hours=args.hours,
+        limit=args.limit,
+        operation=args.operation,
+    )
+
+
 def _h_cluster_health_probe(args: argparse.Namespace) -> int:
     from cli.commands.cluster.health import cmd_health_probe
 
@@ -289,3 +305,30 @@ def add_cluster_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser])
         help="remove the OS-scheduled health probe",
     )
     cluster_health_probe_unregister_p.set_defaults(func=_h_cluster_health_probe_unregister)
+
+    # meiva:note
+    # `meiva cluster ops` reads the lifecycle audit rows; see cli/commands/cluster/ops.py.
+    cluster_ops_p = cluster_sub.add_parser(
+        "ops",
+        help="[cluster] read lifecycle operations: who started each window, which commit, and "
+        "what the release gate said",
+    )
+    cluster_ops_p.add_argument(
+        "--hours",
+        type=int,
+        default=24,
+        help="how far back to read (default: 24)",
+    )
+    cluster_ops_p.add_argument(
+        "--limit",
+        type=int,
+        default=200,
+        help="maximum audit rows to read before grouping (default: 200)",
+    )
+    cluster_ops_p.add_argument(
+        "--operation",
+        default=None,
+        metavar="ID",
+        help="expand one operation id to its per-host rows",
+    )
+    cluster_ops_p.set_defaults(func=_h_cluster_ops)

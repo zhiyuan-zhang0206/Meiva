@@ -66,6 +66,27 @@ and the stored-schedule verify — and prints every other effect without
 performing it. With `run`, it previews both halves without stopping, switching
 or starting hosts.
 
+## The operation identity
+
+A window mints one identity and stamps it on every effect command it sends
+(`plan/operation.py`); each host's own `meiva` reads it back into the caller block of its
+lifecycle audit row (`base/native_process/root_control/client.py`, written by
+`cli/database/lifecycle_audit.py`). Three facts come out of it, and a reader gets them from
+`meiva cluster ops`:
+
+- `MEIVA_OPERATION_ID` — one per window, minted at the entry, never derived from a time or a
+  host, so a five-host restart is one operation rather than five unrelated stops.
+- `MEIVA_OPERATION_INITIATOR` — `user:<name>@<host>` here, because a window refuses to run
+  inside an agent's shell; the name of the machine that started it survives in the row's
+  `spawn.ssh_connection` even when this is empty.
+- `MEIVA_OPERATION_GATE` / `MEIVA_OPERATION_GATE_REASON` — `satisfied` when the target was
+  resolved through the certified channel, an explicit release, or a commit a certificate
+  covers; `overridden` when the operator asked for `--track-branch`, and the reason names the
+  branch. This is the field that makes a bypass of the release gate a queryable fact instead of
+  an assumption.
+
+Only effect commands carry it: a read is a question, not an operation.
+
 ## Contracts
 
 ```meiva-contract

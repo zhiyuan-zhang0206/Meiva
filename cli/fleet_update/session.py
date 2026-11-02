@@ -20,6 +20,7 @@ from threading import Lock
 from typing import Protocol
 
 from .plan.host_commands import login_shell
+from .plan.operation import OperationIdentity, shell_exports
 from .plan.redaction import redact
 
 _MAX_PARALLEL = 8
@@ -72,8 +73,15 @@ class Session:
         now: datetime,
         pacing: Pacing,
         timers: Timers,
+        operation: OperationIdentity,
     ) -> None:
         self.dry_run = dry_run
+        # meiva:note
+        # The identity every command below carries (`plan/operation.py`). Held here because
+        # `run` is the one place a host script leaves this process, so stamping it once covers
+        # the probes, the stops, the switches and the starts alike — a per-builder parameter
+        # would leave the first command that forgot it unattributed (task #6024).
+        self.operation = operation
         self.repo = repo
         self.env = env
         self.pacing = pacing
@@ -125,6 +133,13 @@ class Session:
     # is only said under --dry-run. The command goes through the host's login shell once its
     # operating system is known, so the host's profile puts its own tools on PATH.
     def run(self, alias: str, script: str, *, effect: bool = True, stdin: str | None = None) -> str:
+        # meiva:note
+        # Only the commands that change a host carry the operation identity: a read is a
+        # question, not an operation, and prefixing every probe would rewrite the exact text
+        # several call sites match on. The effect commands are the ones the host's own `meiva`
+        # answers, and that is where the audit row is written (task #6024).
+        if effect:
+            script = f"{shell_exports(self.operation)}\n{script}"
         self.say(f"[{alias}] {'$' if effect else 'read:'} " + script.replace("\n", "\n    "))
         if effect and self.dry_run:
             return ""

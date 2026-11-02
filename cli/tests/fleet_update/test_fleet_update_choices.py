@@ -287,3 +287,34 @@ def test_legacy_stop_hosts_omit_message_flags_while_silence_keeps_note(
     assert "--message" not in stops["gw"] and "--no-message" not in stops["gw"]
     assert f"--message {shlex.quote(note)}" in stops["lin"]
     assert f"({note})" in cluster.silence_comment
+
+
+# meiva:note
+# Every effect command a window sends carries the identity the window minted (task #6024): one
+# `operation_id` across all hosts is what lets a reader group one restart, and the gate verdict is
+# what says whether the release gate stood in the way. A read carries none of it — a probe is a
+# question, not an operation, and several call sites match a probe's exact text.
+def test_each_effect_command_carries_the_windows_operation_identity(
+    env: tuple[Cluster, Callable[..., int]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _cluster, run = env
+    assert run("down", "--dry-run") == 0
+    out = capsys.readouterr().out
+    assert 'meiva" stop' in out
+    assert out.count("MEIVA_OPERATION_ID=op-") >= 3
+    assert out.count("MEIVA_OPERATION_INITIATOR=") >= 3
+    assert "MEIVA_OPERATION_GATE=satisfied" in out
+
+
+def test_a_read_carries_no_operation_identity(
+    env: tuple[Cluster, Callable[..., int]],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _cluster, run = env
+    assert run("down", "--dry-run") == 0
+    out = capsys.readouterr().out
+    probe_lines = [line for line in out.splitlines() if "uname -s" in line]
+    assert probe_lines, "the window probed no host"
+    for line in probe_lines:
+        assert "MEIVA_OPERATION_ID" not in line
