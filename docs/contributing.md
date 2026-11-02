@@ -86,7 +86,12 @@ passing as green.
 A `Co-authored-by: Meiva #<id>` line in the description lands as written. GitHub also
 appends the `Co-Authored-By:` trailers whose value parses as `Name <email>`, taken from
 the branch's commits; a trailer with no email, like the `Meiva #<id>` convention, is
-not synthesized, so write that one in the description or it does not reach `main`.
+not synthesized, so write that one in the description or it does not reach `main`. The
+pull request template starts the line for you, and
+`.github/workflows/attribution-gate.yml` comments a reminder on a `meiva-*` pull request
+that reaches `main` without it — a change a person made without an agent writes
+`Meiva: none` on a line of its own in the description instead, and the reminder goes
+away.
 
 ```bash
 # The description is the body of the landed commit: an empty one leaves no record.

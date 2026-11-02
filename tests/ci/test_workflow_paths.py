@@ -22,6 +22,11 @@ EXEMPTIONS = {
         "pull_request",
     ): "Change-class classification inside ci.yml gates backend, frontend, and e2e lanes per diff.",
     ("release-app.yml", "push"): "Version-tag releases; GitHub ignores paths for tags.",
+    (
+        "attribution-gate.yml",
+        "pull_request",
+    ): "Its input is the pull request description, which no paths filter can express; the "
+    "workflow only comments and never fails a check.",
 }
 
 
