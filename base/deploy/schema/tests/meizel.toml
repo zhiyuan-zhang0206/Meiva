@@ -7,4 +7,4 @@ exports = ["migration_support.py", "schema_gate.py"]
 "test_migration_reset.py" = ["migration_support.py"]
 
 [debt.first-party-patch]
-"schema_gate.py#assignment base.deploy.schema.migrations.assert_schema_current" = 1
+"schema_gate.py#assignment base.deploy.schema.migrations.assert_schema_current" = { count = 1, owner = "#5817", until = "waits for the daemon entries to take their boot gate as a parameter: run_child enters a daemon only through mod.main(), and the four daemons that assert the schema call the gate inside main(), so passing one in changes four production entry signatures; the child entry substitutes the gate on the module after import - the one injection point a child process owns" }
