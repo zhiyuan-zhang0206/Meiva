@@ -146,10 +146,11 @@ def test_the_start_leg_waits_only_as_long_as_the_operators_start_timeout(
     served = _served(root.calls)
     assert served[-1] == ("up", "gate") and set(served[:-1]) == {("down", "gate")}
     journal = _journal(run.home)
-    assert journal["complete"] and journal["result"] == {
-        "rc": rc,
-        "error": f"start leg failed with rc={rc}",
-    }
+    assert journal["complete"] and journal["result"]["rc"] == rc
+    assert journal["result"]["error"] == f"start leg failed with rc={rc}"
+    assert any(
+        "1 service(s) not ready" in line for line in journal["result"]["start_leg_output"]
+    ), "the journal keeps the words the start leg printed"
     assert not run.serving_published
     err = capsys.readouterr().err
     assert "1 service(s) not ready" in err and "meiva-gate" in err

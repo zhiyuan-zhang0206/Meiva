@@ -53,6 +53,17 @@ class LifecyclePhase:
     ok: bool | None = None
 
 
+# meiva:note
+# What a phase's body reports about its own outcome.
+#
+# A body that returns normally is `ok` unless it says otherwise: work that returned a failure
+# code has not succeeded, and a journal recording `ok: true` for it would contradict the same
+# operation's final `result`.
+@dataclass
+class PhaseSpan:
+    ok: bool = True
+
+
 @dataclass
 class ResumedFrom:
     """Identity of the finished run whose journal this operation took over.
@@ -164,8 +175,11 @@ def begin(home: Path, operation: str, *, pid: int, deadline: float | None = None
     return True
 
 
+# meiva:note
+# The body may report a failure the journal cannot see as an exception through the yielded
+# `PhaseSpan`, so a phase that returned a failure code is never recorded as ok.
 @contextmanager
-def phase(home: Path, name: str, *, pid: int) -> Generator[None, None, None]:
+def phase(home: Path, name: str, *, pid: int) -> Generator[PhaseSpan, None, None]:
     """Record one named phase; its outcome is written even when it raises.
 
     With no journal yet (a caller that skipped begin), an implicit one is
@@ -185,12 +199,13 @@ def phase(home: Path, name: str, *, pid: int) -> Generator[None, None, None]:
     op.phases.append(entry)
     op.complete = False
     _write(home, op)
+    span = PhaseSpan()
     try:
-        yield
+        yield span
     except BaseException:
         _close_phase(home, entry, ok=False)
         raise
-    _close_phase(home, entry, ok=True)
+    _close_phase(home, entry, ok=span.ok)
 
 
 def _close_phase(home: Path, entry: LifecyclePhase, *, ok: bool) -> None:
