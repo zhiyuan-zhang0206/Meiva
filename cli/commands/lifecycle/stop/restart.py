@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import assert_never
+from typing import TextIO, assert_never
 
 from base.deploy.lifecycle import status_journal
 from base.deploy.lifecycle.host_exit_message import (
@@ -140,8 +142,69 @@ def _run_leg(leg: Leg, run: _Invocation, retained_children: list[subprocess.Pope
 
 
 # meiva:note
-# Run the legs in order until one ends the restart.
-def _restart(run: _Invocation, retained_children: list[subprocess.Popen[bytes]]) -> int:
+# Run one leg and return its exit code; a restart's own test supplies its legs this way.
+LegRunner = Callable[[Leg], int]
+
+
+# meiva:note
+# How many of the start leg's last printed lines the journal keeps. Enough to span a refusal
+# that wraps over several lines, few enough that the journal stays readable.
+TAIL_LINES = 20
+
+
+class _Tail:
+    # meiva:note
+    # The last few lines a leg printed. The start leg runs in THIS process, so the words of a
+    # refusal exist only on the terminal that ran the restart -- an ssh session that is gone by
+    # the time anyone asks. This is what lets the journal keep them (task #6036).
+    def __init__(self, keep: int = TAIL_LINES) -> None:
+        self._lines: deque[str] = deque(maxlen=keep)
+        self._pending = ""
+
+    def feed(self, text: str) -> None:
+        chunks = (self._pending + text).split("\n")
+        self._pending = chunks.pop()
+        self._lines.extend(chunks)
+
+    def lines(self) -> list[str]:
+        kept = list(self._lines)
+        if self._pending:
+            kept.append(self._pending)
+        return kept
+
+
+class _Tee:
+    # meiva:note
+    # Write through to the operator's stream and keep a copy in a `_Tail`.
+    def __init__(self, stream: TextIO, tail: _Tail) -> None:
+        self._stream = stream
+        self._tail = tail
+
+    def write(self, text: str) -> int:
+        self._tail.feed(text)
+        return self._stream.write(text)
+
+    def flush(self) -> None:
+        self._stream.flush()
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._stream, name)
+
+
+# meiva:note
+# Run the legs in order until one ends the restart. `legs` stands in for them; the real ones are
+# `_run_leg` over the invocation this builds.
+def run_restart(
+    request: RestartRequest,
+    *,
+    runtime: StartRuntime,
+    command: CommandRuntime,
+    database_factory: OperatorDatabaseFactory,
+    producer: Callable[[], EventPipeline],
+    retained_children: list[subprocess.Popen[bytes]],
+    legs: LegRunner | None = None,
+) -> int:
+    run = _Invocation(request, runtime, command, database_factory, producer)
     print(f"[meiva restart] cwd = {run.runtime.code_root}")
     # meiva:note
     # When an outer operation's journal is still running, this restart records phases into it
@@ -154,15 +217,29 @@ def _restart(run: _Invocation, retained_children: list[subprocess.Popen[bytes]])
         ),
         flush=True,
     )
+
+    def real_leg(leg: Leg) -> int:
+        return _run_leg(leg, run, retained_children)
+
+    run_leg: LegRunner = real_leg if legs is None else legs
     for leg in Leg:
         if leg.heading:
             print(leg.heading)
-        with status_journal.phase(home, leg.phase, pid=run.command.pid):
-            rc = _run_leg(leg, run, retained_children)
+        tail = _Tail()
+        with ExitStack() as capture:
+            if leg is Leg.START:
+                capture.enter_context(redirect_stdout(_Tee(sys.stdout, tail)))
+                capture.enter_context(redirect_stderr(_Tee(sys.stderr, tail)))
+            with status_journal.phase(home, leg.phase, pid=run.command.pid) as span:
+                rc = run_leg(leg)
+                span.ok = rc == 0
         outcome = settle_leg(leg, rc)
         match outcome:
             case Finish():
-                return conclude(home, outcome, owns_journal=owns_journal)
+                extra: dict[str, object] | None = None
+                if leg is Leg.START and rc != 0:
+                    outcome, extra = _start_failed(home, outcome, tail)
+                return conclude(home, outcome, owns_journal=owns_journal, extra=extra)
             case Continue():
                 pass
             case _:
@@ -171,15 +248,40 @@ def _restart(run: _Invocation, retained_children: list[subprocess.Popen[bytes]])
 
 
 # meiva:note
+# What a failed start leg leaves in the journal beside its exit code: the words it printed.
+#
+# The start leg is in-process (`start.cmd_start_body`), so its refusal exists only on the
+# terminal that ran the restart. Recording the tail and naming the journal is what makes the
+# next occurrence diagnosable without a reproduction (task #6036).
+def _start_failed(home: Path, outcome: Finish, tail: _Tail) -> tuple[Finish, dict[str, object]]:
+    kept = tail.lines()
+    detail = (
+        f"the last {len(kept)} line(s) it printed are in {status_journal.status_path(home)}"
+        if kept
+        else "it printed nothing"
+    )
+    return (
+        replace(outcome, notice=f"  ✗ start leg failed with rc={outcome.rc}; {detail}"),
+        {"start_leg_output": kept},
+    )
+
+
+# meiva:note
 # End the restart: say why on stderr, close the journal when this restart opened it.
 #
 # Only the journal's opener closes it. An outer operation's still-running journal (the updater
 # wrapping this restart) is left to that caller, so its diagnosis is not clobbered (task #2898).
-def conclude(home: Path, outcome: Finish, *, owns_journal: bool) -> int:
+def conclude(
+    home: Path,
+    outcome: Finish,
+    *,
+    owns_journal: bool,
+    extra: dict[str, object] | None = None,
+) -> int:
     if outcome.notice is not None:
         print(outcome.notice, file=sys.stderr)
     if owns_journal:
-        status_journal.finish(home, outcome.rc, error=outcome.error)
+        status_journal.finish(home, outcome.rc, error=outcome.error, extra=extra)
     return outcome.rc
 
 
@@ -196,8 +298,13 @@ def _cmd_restart_body(
     if refusal is not None:
         print(refusal.message, file=sys.stderr)
         return RESTART_DECLINED_EXIT_CODE
-    return _restart(
-        _Invocation(request, runtime, command, database_factory, producer), retained_children
+    return run_restart(
+        request,
+        runtime=runtime,
+        command=command,
+        database_factory=database_factory,
+        producer=producer,
+        retained_children=retained_children,
     )
 
 

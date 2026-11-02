@@ -52,6 +52,9 @@ the units the stop kept). `restart.restart_runtime` admits the checkout once, be
 journal opens, and the `StartRuntime` it returns is held through both legs; the start leg re-reads its source digest when it publishes serving. `meiva restart --only agent-host` first admits the live root
 (`restart.admit_agent_host_restart`, before the roster is built), then downs agent-host through
 it and brings it back (`restart.restart_agent_host`), touching nothing else.
+A start leg that fails keeps the last lines it printed (`start_leg_output`) in the journal's
+result beside its exit code: the leg runs in-process, so nothing else it said outlives the
+terminal that asked for the restart.
 
 The stop does not drain agents itself: root stops agent-host first and waits for it,
 and its own SIGTERM exit settles the running turns

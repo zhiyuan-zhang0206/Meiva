@@ -57,6 +57,19 @@ def test_failed_phase_is_recorded_and_reraised(home: Path) -> None:
     assert "boom" in op.result["error"]
 
 
+# meiva:note
+# A phase whose body reports failure is recorded as failed, not as ok: work that returned a
+# failure code has not succeeded even though nothing raised.
+def test_a_phase_whose_body_reports_failure_is_not_ok(home: Path) -> None:
+    journal.begin(home, "restart", pid=_ENTRY_PID)
+    with journal.phase(home, "start", pid=_ENTRY_PID) as span:
+        span.ok = False
+    op = journal.read(home)
+    assert op is not None
+    assert [phase.name for phase in op.phases] == ["start"]
+    assert op.phases[0].ok is False
+
+
 def test_inner_stop_leg_never_hijacks_the_restart_journal(home: Path) -> None:
     assert journal.begin(home, "restart", pid=_ENTRY_PID) is True
     with journal.phase(home, "preflight", pid=_ENTRY_PID):

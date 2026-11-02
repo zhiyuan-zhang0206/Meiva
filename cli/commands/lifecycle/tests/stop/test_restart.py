@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -22,8 +23,13 @@ from base.host.exit_codes import RESTART_DECLINED_EXIT_CODE
 from base.native_process.kernel_identity import pid_starttime_ticks
 from base.sessions.record import SessionRecord
 from base.telemetry import EventPipeline
-from cli.commands.lifecycle.stop.restart import cmd_restart, cmd_restart_agent_host, conclude
-from cli.commands.lifecycle.stop.restart_plan import Finish
+from cli.commands.lifecycle.stop.restart import (
+    cmd_restart,
+    cmd_restart_agent_host,
+    conclude,
+    run_restart,
+)
+from cli.commands.lifecycle.stop.restart_plan import Finish, Leg, RestartRequest
 from cli.commands.lifecycle.tests.runtime_at import runtime_at
 from cli.commands.lifecycle.tests.stop.stop_support import home as home
 from cli.commands.lifecycle.tests.stop.stop_support import stop_runtime as stop_runtime
@@ -164,3 +170,64 @@ def test_a_restart_whose_probes_fail_is_declined_and_stops_nothing(
     assert journal["complete"] and journal["result"]["rc"] == RESTART_DECLINED_EXIT_CODE
     assert journal["result"]["error"] == "preflight probes failed"
     assert [phase["name"] for phase in journal["phases"]] == ["preflight"]
+
+
+# meiva:note
+# A start leg that returns non-zero is not an ok phase, and the words it printed outlive the
+# terminal that ran the restart.
+#
+# The start leg runs in this process, so nothing it says reaches a record unless the restart
+# keeps it: an operator asking afterwards otherwise has only `rc=1` (task #6036).
+def test_a_failed_start_leg_is_not_ok_and_keeps_the_words_it_printed(
+    home: Path,
+    capsys: pytest.CaptureFixture[str],
+    operator_database: OperatorDatabaseFactory,
+    operator_pipeline: Callable[[], EventPipeline],
+    stop_runtime: CommandRuntime,
+) -> None:
+    refusal = "  \u2717 start refused: a stand-down marker is in force"
+
+    def legs(leg: Leg) -> int:
+        if leg is Leg.START:
+            print(refusal, file=sys.stderr)
+            return 1
+        return 0
+
+    request = RestartRequest(
+        only_services=(),
+        disabled_services=(),
+        all_services=True,
+        keep_shell_sessions=False,
+        keep_browser=True,
+        restart_extras=False,
+        force=False,
+        timeout=30.0,
+        start_timeout=30.0,
+    )
+    assert (
+        run_restart(
+            request,
+            runtime=runtime_at(home),
+            command=stop_runtime,
+            database_factory=operator_database,
+            producer=operator_pipeline,
+            retained_children=[],
+            legs=legs,
+        )
+        == 1
+    )
+
+    journal = json.loads((home / "run/lifecycle-op.json").read_text())
+    assert [(phase["name"], phase["ok"]) for phase in journal["phases"]] == [
+        ("preflight", True),
+        ("preflight", True),
+        ("stop", True),
+        ("start", False),
+    ], "a leg that returned non-zero never records ok"
+    assert journal["complete"] and journal["result"]["rc"] == 1
+    assert journal["result"]["error"] == "start leg failed with rc=1"
+    assert journal["result"]["start_leg_output"] == [refusal]
+
+    err = capsys.readouterr().err
+    assert refusal in err, "the tee still writes through to the operator"
+    assert "start leg failed with rc=1" in err and "lifecycle-op.json" in err
