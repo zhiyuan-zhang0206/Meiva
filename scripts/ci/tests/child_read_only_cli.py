@@ -13,9 +13,7 @@ import json
 import sys
 from pathlib import Path
 
-_OWNER_ONLY = frozenset(
-    {"scripts.ci.pull_requests.owner_operations", "scripts.ci.pull_requests.trunk_api"}
-)
+_OWNER_ONLY = frozenset({"scripts.ci.pull_requests.owner_operations"})
 
 
 class RejectOwnerImports(importlib.abc.MetaPathFinder):

@@ -156,40 +156,23 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
     ]
 
 
+# meiva:note
+# A host with `gh` on its PATH — the sampler's only remaining credential since the Trunk token stopped
+# being read (2026-11-02).
 def _passing_credentials(tmp_path: Path) -> Host:
-    """A host with `gh` on its PATH and a Trunk token on disk."""
-    token = tmp_path / ".trunk" / "api-token"
-    token.parent.mkdir(parents=True, exist_ok=True)
-    token.write_text("tok\n", encoding="utf-8")
     return fake_host(programs=_GH)
 
 
 def test_credential_blocker_names_each_missing_piece(job_roots: JobRoots, tmp_path: Path) -> None:
     assert (
-        job.credential_blocker(roots=job_roots, production=False, host=fake_host())
+        job.credential_blocker(production=False, host=fake_host())
         == "not the registered production home"
     )
 
-    assert (
-        job.credential_blocker(roots=job_roots, production=True, host=fake_host())
-        == "gh CLI not on PATH"
-    )
+    assert job.credential_blocker(production=True, host=fake_host()) == "gh CLI not on PATH"
 
     with_gh = fake_host(programs=_GH)
-    assert (
-        job.credential_blocker(roots=job_roots, production=True, host=with_gh)
-        == f"no Trunk API token at {tmp_path}/.trunk/api-token"
-    )
-
-    token = tmp_path / ".trunk" / "api-token"
-    token.parent.mkdir(parents=True, exist_ok=True)
-    token.write_text("   \n", encoding="utf-8")
-    assert "no Trunk API token" in (
-        job.credential_blocker(roots=job_roots, production=True, host=with_gh) or ""
-    )
-
-    token.write_text("tok\n", encoding="utf-8")
-    assert job.credential_blocker(roots=job_roots, production=True, host=with_gh) is None
+    assert job.credential_blocker(production=True, host=with_gh) is None
 
 
 def test_register_skips_when_os_jobs_are_disabled(

@@ -21,7 +21,6 @@ __all__ = [
     "launchd_plist_content",
     "log_path",
     "shell_command",
-    "trunk_token_path",
 ]
 
 
@@ -78,7 +77,3 @@ def launchd_plist_content(*, paths: JobPaths, path_env: str) -> str:
 
 def cron_entry(paths: JobPaths) -> str:
     return f"{MINUTE} {HOUR} * * * {cron_environment(paths.roots.home)}/bin/sh -c {shlex.quote(shell_command(paths))} >> {shlex.quote(str(log_path(paths.roots)))} 2>&1  {MARKER}"
-
-
-def trunk_token_path(roots: JobRoots) -> Path:
-    return roots.user_home / ".trunk" / "api-token"

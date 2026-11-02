@@ -6,9 +6,7 @@ import subprocess
 import sys
 from typing import NotRequired, TypedDict, TypeGuard
 
-from base.host.net.ports import UrlOpener
 from base.host.system.hostport import Host
-from scripts.ci.pull_requests import trunk_api
 from scripts.ci.pull_requests.job_rerun import FAILING, CiJobRerunError, list_failed_jobs
 
 _GH_TIMEOUT_S = 30.0
@@ -22,7 +20,6 @@ class Diagnosis(TypedDict):
     repo: str
     issues: list[dict[str, object]]
     checks: list[dict[str, object]]
-    trunk: dict[str, object] | None
     synthetic_test_prs: list[dict[str, object]]
     gh_error: NotRequired[str]
     state: NotRequired[object]
@@ -164,11 +161,11 @@ def _synthetic_test_prs(pr: str, repo: str, *, host: Host) -> list[dict[str, obj
 
 
 # meiva:note
-# For an OPEN PR: mergeable=CONFLICTING reports merge_conflict; a recorded base behind main reports stale_base with both shas; an unreadable base freshness reports base_unreadable rather than silence. Merged and closed PRs have mergeable=UNKNOWN and a base behind main by definition — neither is reported as a problem.
+# For an OPEN PR, mergeable=CONFLICTING reports merge_conflict. A base behind main is not an issue
+# since the queue retired (2026-11-01): nothing requires a fresh base before landing, so reporting
+# it would be noise. Merged and closed PRs report mergeable=UNKNOWN by definition.
 # meiva:link scripts/ci/pull_requests/docs/diagnostics.meiva.okf.md
-def _pr_level_issues(
-    view: dict[str, object], pr: str, repo: str, *, host: Host
-) -> list[dict[str, object]]:
+def _pr_level_issues(view: dict[str, object]) -> list[dict[str, object]]:
     issues: list[dict[str, object]] = []
     mergeable = view.get("mergeable")
     if view.get("state") == "OPEN" and mergeable == "CONFLICTING":
@@ -177,26 +174,6 @@ def _pr_level_issues(
                 "kind": "merge_conflict",
                 "detail": f"mergeable={mergeable}",
                 "action": "rebase on origin/main, resubmit",
-            }
-        )
-    stale = None
-    unreadable = False
-    if view.get("state") == "OPEN":
-        stale, unreadable = trunk_api.base_freshness(pr, repo, host=host)
-    if stale:
-        issues.append(
-            {
-                "kind": "stale_base",
-                "detail": f"base {stale[0][:8]} vs main {stale[1][:8]}",
-                "action": "rebase, or drop --require-fresh-base and let the queue re-test the new base",
-            }
-        )
-    elif unreadable:
-        issues.append(
-            {
-                "kind": "base_unreadable",
-                "detail": "base freshness could not be read",
-                "action": "verify the PR base against current main manually",
             }
         )
     return issues
@@ -234,34 +211,12 @@ def _failing_check_entries(
     return entries
 
 
-def _trunk_diagnosis(pr: str, repo: str, token: str, *, open_url: UrlOpener) -> dict[str, object]:
-    data, error = trunk_api.post(
-        "getSubmittedPullRequest", trunk_api.pr_payload(pr, repo), token, open_url=open_url
-    )
-    if error is None and data is not None:
-        return {
-            "state": data.get("state"),
-            "reason": data.get("reason"),
-            "readiness": data.get("readiness"),
-            "verifiedByTestRun": data.get("verifiedByTestRun"),
-        }
-    return {"error": error}
-
-
-def diagnose_pr(
-    pr: str,
-    repo: str,
-    *,
-    token: str | None,
-    host: Host,
-    open_url: UrlOpener,
-) -> Diagnosis:
+def diagnose_pr(pr: str, repo: str, *, host: Host) -> Diagnosis:
     diag: Diagnosis = {
         "pr": pr,
         "repo": repo,
         "issues": [],
         "checks": [],
-        "trunk": None,
         "synthetic_test_prs": [],
     }
     view = _pr_view(pr, repo, "mergeable,headRefOid,state,statusCheckRollup", host=host)
@@ -270,10 +225,8 @@ def diagnose_pr(
         return diag
     diag["state"] = view.get("state")
     diag["mergeable"] = view.get("mergeable")
-    diag["issues"] = _pr_level_issues(view, pr, repo, host=host)
+    diag["issues"] = _pr_level_issues(view)
     diag["checks"] = _failing_check_entries(view, pr, repo, host=host)
-    if token:
-        diag["trunk"] = _trunk_diagnosis(pr, repo, token, open_url=open_url)
     diag["synthetic_test_prs"] = [
         {
             "number": pull.get("number"),
@@ -303,12 +256,6 @@ def print_diagnosis(diag: Diagnosis) -> None:
         print("No failing checks on the PR head.")
     for check in checks:
         print(f"  check {check['check']}: {check['classification']} → {check['action']}")
-    trunk = diag.get("trunk")
-    if isinstance(trunk, dict):
-        if trunk.get("error"):
-            print(f"Trunk queue: not queryable ({trunk['error']})")
-        else:
-            print(f"Trunk queue: state={trunk.get('state')} reason={trunk.get('reason')}")
     synthetic = diag.get("synthetic_test_prs", [])
     for pull in synthetic:
         print(

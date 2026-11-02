@@ -1,22 +1,23 @@
-"""Converge steps that register this host's OS-level scheduled jobs.
+# meiva:note
+# Converge steps that register this host's OS-level scheduled jobs.
+#
+# Six jobs, one concept — everything Meiva asks the platform scheduler (launchd /
+# crontab) to run on its behalf:
+#
+# - **health probe** — periodic cluster health check reporting observations
+#   (gateway); it takes no repair action.
+# - **boot autostart** — brings the whole cluster back after a reboot (prod only).
+# - **logs maintenance** — daily copytruncate rotation followed by tiered retention.
+# - **packages refresh** — the content channel's recurring pass (skills fast lane).
+# - **PR flow** — the daily merge-pipeline sampler, credential-gated to the
+#   production home whose machine holds `gh` (task #2139).
+# - **WAL-G tick** — the daily physical backup, present exactly while
+#   `MEIVA_WALG_CONFIG_FILE` is set.
+#
+# They share a shape worth keeping together: each is idempotent, each delegates the
+# platform branching to a ``base.os_*`` module, and each fails the converge loudly
+# rather than leaving the cluster silently unsupervised.
 
-Six jobs, one concept — everything Meiva asks the platform scheduler (launchd /
-crontab) to run on its behalf:
-
-- **health probe** — periodic cluster health check reporting observations
-  (gateway); it takes no repair action.
-- **boot autostart** — brings the whole cluster back after a reboot (prod only).
-- **logs maintenance** — daily copytruncate rotation followed by tiered retention.
-- **packages refresh** — the content channel's recurring pass (skills fast lane).
-- **PR flow** — the daily merge-pipeline sampler, credential-gated to the
-  production home that can reach GitHub and Trunk (task #2139).
-- **WAL-G tick** — the daily physical backup, present exactly while
-  `MEIVA_WALG_CONFIG_FILE` is set.
-
-They share a shape worth keeping together: each is idempotent, each delegates the
-platform branching to a ``base.os_*`` module, and each fails the converge loudly
-rather than leaving the cluster silently unsupervised.
-"""
 
 from __future__ import annotations
 
@@ -78,14 +79,12 @@ def ensure_packages_refresh_job(ctx: ConvergeCtx) -> None:
     # A registration failure propagates so converge fails fast.
 
 
+# meiva:note
+# Register the daily PR-flow sampler job (task #2139). The gate lives in
+# `base.host.system.pr_flow_job.register_pr_flow_job`: the job registers only on a production home
+# whose machine holds the sampler's remaining credential (`gh` on PATH) — in the fleet, macmini.
+# Every other unit skips with the reason logged, so converge output explains the absence.
 def ensure_pr_flow_job(ctx: ConvergeCtx) -> None:
-    """Register the daily PR-flow sampler job (task #2139).
-
-    The gate lives in `base.host.system.pr_flow_job.register_pr_flow_job`: the job is
-    registered only on a production home whose machine holds the sampler's
-    credentials (`gh` on PATH + a Trunk API token) — in the fleet, macmini.
-    Every other unit skips with the reason logged, so converge output explains
-    the absence. Idempotent."""
     from base.cluster.derive import production_identity
     from base.host.system.pr_flow_job import register_pr_flow_job
 
