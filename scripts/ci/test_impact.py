@@ -12,10 +12,10 @@ import tarfile
 import tempfile
 import tomllib
 from collections.abc import Generator, Iterable, Iterator
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol, TypeGuard
+from typing import TypeGuard
 
 from meizel.allowances import POLICY, Policy, parse
 from meizel.checkout import GitRepo
@@ -23,11 +23,7 @@ from meizel.contracts.sync import prepare_policy_snapshot
 from meizel.test_graph.cutoff import (
     package_local_tests as package_local_tests,
 )
-from meizel.test_graph.cutoff import (
-    strict_cutoff_eligible,
-)
 from meizel.test_graph.impact import propagate_test_consumers
-from meizel.test_graph.model import CutoffContext
 from scripts.structure.imports.facts import UNANCHORED_READ, Fact, FactKind, Unknown, collect
 from scripts.structure.imports.fixture_scopes import declarations
 from scripts.structure.placement import CODE_TOPS, ModuleIndex
@@ -381,65 +377,6 @@ def unknown_diagnostics(items: Iterable[Unknown], *, tree: str) -> tuple[str, ..
     """Stable, visible reasons why the runtime graph cannot certify a subset."""
     return tuple(
         f"{tree}:{item.path}:{item.line}: {item.reason}: {item.expression}" for item in items
-    )
-
-
-def _ancestor_manifests(root: Path, path: str) -> dict[str, str]:
-    manifests: dict[str, str] = {}
-    directory = path.rpartition("/")[0]
-    while True:
-        rel_toml = f"{directory}/meizel.toml" if directory else "meizel.toml"
-        toml_path = root / rel_toml
-        if toml_path.is_file():
-            with suppress(OSError):
-                manifests[rel_toml] = toml_path.read_text(encoding="utf-8")
-        if not directory:
-            break
-        directory = directory.rpartition("/")[0]
-    return manifests
-
-
-class _CheckoutScope(Protocol):
-    @property
-    def repo_root(self) -> Path: ...
-    @property
-    def test_dirs(self) -> frozenset[str]: ...
-    @property
-    def collectable(self) -> frozenset[str]: ...
-
-
-def qualifies_for_interface_cutoff(
-    path: str,
-    *,
-    base: _CheckoutScope,
-    head: _CheckoutScope,
-    base_impact: Impact,
-    head_impact: Impact,
-) -> bool:
-    base_file, head_file = base.repo_root / path, head.repo_root / path
-    if not (path.endswith(".py") and base_file.is_file() and head_file.is_file()):
-        return False
-    try:
-        base_source = base_file.read_text(encoding="utf-8")
-        head_source = head_file.read_text(encoding="utf-8")
-    except OSError:
-        return False
-    ctx = CutoffContext(
-        base_sources={path: base_source},
-        head_sources={path: head_source},
-        base_manifests=_ancestor_manifests(base.repo_root, path),
-        head_manifests=_ancestor_manifests(head.repo_root, path),
-        base_test_dirs=base.test_dirs,
-        base_collectable=base.collectable,
-        public_surface=_policy(head.repo_root).public_surface,
-    )
-    return strict_cutoff_eligible(
-        path,
-        ctx,
-        base_impact.runtime_tests(path),
-        head_impact.runtime_tests(path),
-        head.test_dirs,
-        head.collectable,
     )
 
 
