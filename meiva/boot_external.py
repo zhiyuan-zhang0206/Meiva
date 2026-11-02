@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 import random
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import assert_never
 
@@ -56,7 +56,10 @@ class OwnedBoot:
     clock: Clock
     user_home: Path
     meiva_home: Path
-    environ: Mapping[str, str]
+    # meiva:note
+    # Not printed: this is the process environment an attachment was launched with, values and
+    # all. Its sibling `MeivaContext.environ` prints as a key count for the same reason.
+    environ: Mapping[str, str] = field(repr=False)
     rng: random.SystemRandom
     bus_factory: BusFactory
 

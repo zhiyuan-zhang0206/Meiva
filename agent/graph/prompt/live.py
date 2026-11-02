@@ -160,7 +160,7 @@ def render_expanded_reference(
     extra_hidden_members: frozenset[str] = frozenset(),
 ) -> str:
     import meiva
-    from meiva.sdk_surface.help import ModelHelpProfile
+    from meiva.sdk_surface.help import ModelHelpProfile, is_documentable_target
     from meiva.sdk_surface.help import render as render_help
 
     base_profile = ModelHelpProfile.for_model(model, catalog=catalog)
@@ -201,6 +201,14 @@ def render_expanded_reference(
                     "cross-test global-state leak). effective list was %r",
                     path,
                     list(paths),
+                )
+            continue
+        if not is_documentable_target(target):
+            if report:
+                logger.warning(
+                    "sdk_expand_in_system_prompt: meiva.%s is not an SDK target (a module or "
+                    "namespace, a routine, a class, or a documented constant), skipping",
+                    path,
                 )
             continue
         seen_targets.add(id(target))
