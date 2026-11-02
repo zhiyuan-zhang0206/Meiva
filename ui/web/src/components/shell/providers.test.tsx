@@ -2,16 +2,20 @@
 
 import { QueryClientProvider, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
-import { useEffect, type ReactNode } from "react";
+import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 
-vi.mock("next-themes", () => ({
-  ThemeProvider: ({ children, nonce }: { children: ReactNode; nonce?: string }) => (
+// meiva:note
+// The theme service `app/layout.tsx` mounts is next-themes; jsdom has no matchMedia for its
+// bootstrap, so the tree is composed with the provider below instead — the same input the
+// composition root passes, not a replaced module. It renders its children and answers one scheme.
+const fakeTheme: ThemeRuntime = {
+  Provider: ({ children, nonce }) => (
     <div data-testid="theme-provider" data-nonce={nonce}>{children}</div>
   ),
-  useTheme: () => ({ resolvedTheme: "light" }),
-}));
+  useResolvedTheme: () => "light",
+};
 
 // meiva:note
 // Authentication stays pending while real root readers own their explicit wire
@@ -23,6 +27,7 @@ import { setSessionInvalidHandler, useAuth } from "@/lib/auth/auth-context";
 import { useNonce } from "@/lib/auth/nonce-context";
 import { useApi } from "@/lib/transport/transport-context";
 import { fakeNavigation } from "@/lib/browser/navigation/testing";
+import type { ThemeRuntime } from "@/lib/layout/theme-runtime";
 import { transport as fakeTransport } from "@/test-support/fake-api";
 import { fakeStreamHub } from "@/test-support/fake-stream";
 
@@ -131,7 +136,7 @@ describe("Providers", () => {
   it("passes children through and provides the running app's client", () => {
     const { hub, tab } = fakeStreamHub();
     const view = render(
-      <Providers client={fakeTransport} hub={hub} navigation={navigation}>
+      <Providers client={fakeTransport} hub={hub} navigation={navigation} theme={fakeTheme}>
         <RootProbe />
         <span data-testid="child">child</span>
       </Providers>,
@@ -154,7 +159,13 @@ describe("Providers", () => {
 
   it("passes the request nonce to the theme bootstrap script", () => {
     render(
-      <Providers client={fakeTransport} hub={fakeStreamHub().hub} navigation={navigation} nonce="request-nonce">
+      <Providers
+        client={fakeTransport}
+        hub={fakeStreamHub().hub}
+        navigation={navigation}
+        nonce="request-nonce"
+        theme={fakeTheme}
+      >
         <RootProbe />
         <span>child</span>
       </Providers>,
@@ -169,7 +180,13 @@ describe("Providers", () => {
     }
 
     render(
-      <Providers client={fakeTransport} hub={fakeStreamHub().hub} navigation={navigation} nonce="request-nonce">
+      <Providers
+        client={fakeTransport}
+        hub={fakeStreamHub().hub}
+        navigation={navigation}
+        nonce="request-nonce"
+        theme={fakeTheme}
+      >
         <RootProbe />
         <NonceProbe />
       </Providers>,

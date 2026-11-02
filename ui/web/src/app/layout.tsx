@@ -9,6 +9,7 @@ import { Providers } from "@/components/shell/providers";
 import "./globals.css";
 import { FLEX, FLEX_COL } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
+import { SYSTEM_THEME } from "@/lib/layout/system-theme";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -90,7 +91,7 @@ export default async function RootLayout({
         >
           Skip to main content
         </a>
-        <Providers nonce={nonce}>
+        <Providers nonce={nonce} theme={SYSTEM_THEME}>
           <VisualViewportHeightSync />
           <AuthGuard>{children}</AuthGuard>
         </Providers>
