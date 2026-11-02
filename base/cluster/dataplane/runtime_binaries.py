@@ -91,6 +91,14 @@ def platform_key(*, system: str, machine: str) -> str:
     raise RuntimeError(f"no vendored Postgres available for {sys_name}")
 
 
+# meiva:note
+# The shared-library suffix an installed PostgreSQL extension carries, for the artifact system the
+# caller named. The alternative is asking this process which platform it runs on — a second answer
+# to a question the caller already answered when it chose the runtime.
+def extension_library_suffix(system: str) -> str:
+    return ".dylib" if system == "Darwin" else ".so"
+
+
 def vendored_pg_supported(*, system: str, machine: str) -> bool:
     try:
         return platform_key(system=system, machine=machine) in PG_ARTIFACTS

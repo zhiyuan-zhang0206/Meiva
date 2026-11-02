@@ -4,7 +4,6 @@ import hashlib
 import io
 import lzma
 import shlex
-import sys
 import tarfile
 import zipfile
 from pathlib import Path
@@ -70,8 +69,10 @@ def installed(tmp_path: Path) -> Path:
     library.mkdir()
     (extension / "vector.control").write_text("default_version = '0.8.6'\n")
     (extension / "vector--0.8.6.sql").write_text("-- fixture\n")
-    suffix = ".dylib" if sys.platform == "darwin" else ".so"
-    (library / f"vector{suffix}").touch()
+    # meiva:note
+    # Built for the artifact system every test here names ("Linux"), not for this process: the
+    # suffix follows the caller's `system`, so a macOS dev box exercises Linux's `.so` too.
+    (library / "vector.so").touch()
     body = (
         '#!/bin/sh\ncase "$1" in\n'
         ' --version) echo "PostgreSQL 17.11";;\n'
@@ -228,3 +229,21 @@ def test_vendored_platform_support_follows_the_artifact_table() -> None:
         ("Linux", "aarch64", False),
     ):
         assert runtime_binaries.vendored_pg_supported(system=system, machine=machine) is supported
+
+
+# meiva:note
+# An installed macOS PostgreSQL's `.dylib` is not the library a `system="Linux"` runtime expects.
+# The check reads the suffix off the system it was handed, so this fails on any host; before, a
+# macOS dev box passed it by asking the process instead.
+def test_library_suffix_follows_the_named_artifact_system(installed: Path, tmp_path: Path) -> None:
+    library = installed.parent / "lib"
+    (library / "vector.so").unlink()
+    (library / "vector.dylib").touch()
+    with pytest.raises(RuntimeError, match="Install pgvector"):
+        pg_runtime.ensure_pg_runtime(
+            home=tmp_path,
+            system="Linux",
+            machine="aarch64",
+            platform_bin_dir=installed,
+            path_env="",
+        )
