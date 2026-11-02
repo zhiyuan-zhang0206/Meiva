@@ -13,9 +13,12 @@ exports = ["accounting.py", "classify_paths.py", "commands.py", "export_process.
 
 [roots]
 "accounting.py" = { kinds = ["clock", "environ", "platform"], why = "CLI entrypoint resolves the current UTC timestamp for --report rollups; builds the host of this process with Host.system(), handing it the process environment" }
-"classify_paths.py" = { kinds = ["cwd"], why = "CI classify entrypoint resolves the checked-out repository root from cwd" }
+"classify_paths.py" = { kinds = ["cwd", "argv"], why = "CI classify entrypoint resolves the checked-out repository root from cwd; it also reads its command line (argv) once, as the process entry" }
 "commands.py" = { kinds = ["environ"], why = "CLI entrypoint hands the process environment to the owner-operations dispatch; it is not deployment configuration" }
 "export_process.py" = { kinds = ["db", "settings"], why = "Tool entry composes its process resources from the launch configuration" }
 "pr_flow_export.py" = { kinds = ["clock", "home", "settings"], why = "CLI entrypoint resolves the current UTC timestamp, builds the process clock from the settings, resolves the home it operates once in its __main__ block" }
 "runs_export.py" = { kinds = ["clock", "home", "settings"], why = "CLI entrypoint resolves the current UTC timestamp for trailing-window sampling, builds the process clock from the settings and resolves the home it operates once in its __main__ block, for its state directory and the event writer" }
 "watch_pr.py" = { kinds = ["environ", "home", "platform", "settings"], why = "watcher template resolves the home once to place the verdict file in the launching agent's workspace; builds the process clock from the settings; builds the host of this process with Host.system(), handing it the process environment" }
+
+[debt.ambient-read]
+"plan_file_shards.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }

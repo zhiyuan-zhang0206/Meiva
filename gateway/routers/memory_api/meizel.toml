@@ -5,3 +5,6 @@ exports = ["memory.py", "memory_plan.py"]
 
 [purity]
 "memory_plan.py" = "strict"
+
+[debt.ambient-read]
+"memory.py#environ tempfile.TemporaryDirectory()" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }

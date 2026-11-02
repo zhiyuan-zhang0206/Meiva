@@ -2,6 +2,9 @@ exports = ["graphs.py", "imports.py", "model.py", "universe.py"]
 
 [purity]
 "." = "strict"
+"ambient_judgments.py" = "strict"
+"ambient_process_table.py" = "strict"
+"ambient_surface.py" = "strict"
 "graphs.py" = "strict"
 "impacted.py" = "strict"
 "imports.py" = "strict"
@@ -11,9 +14,13 @@ exports = ["graphs.py", "imports.py", "model.py", "universe.py"]
 "python_layout.py" = "strict"
 
 [uses]
+"ambient_judgments.py" = ["model.py"]
+"ambient_process_table.py" = ["ambient_judgments.py"]
+"ambient_surface.py" = ["ambient_judgments.py", "ambient_process_table.py", "model.py"]
 "impacted.py" = ["scopes.py", "universe.py"]
 "imports.py" = ["model.py", "scopes.py", "universe.py"]
-"__init__.py" = ["impacted.py", "python_layout.py", "reachability.py"]
+"__init__.py" = ["ambient_surface.py", "impacted.py", "python_layout.py", "reachability.py"]
+"tests" = ["ambient_surface.py", "model.py"]
 "reachability.py" = ["model.py", "universe.py"]
 "universe.py" = ["python_layout.py"]
 "python_layout.py" = ["model.py"]

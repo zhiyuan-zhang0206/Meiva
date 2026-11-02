@@ -1,7 +1,7 @@
 # meiva:note
 # Forbid bare monkey-patching of `meiva.*` in plugins — wraps must be declared as `SdkWrap`.
 #
-# Run: `.venv/bin/python scripts/lint/plugins/no_plugin_wrap.py [path ...]` (defaults to scanning
+# Run: `.venv/bin/python scripts/lint/plugins/no_plugin_wrap_cli.py [path ...]` (defaults to scanning
 # `meiva_builtins/plugins/`, the built-in plugins; a missing default dir is an error;
 # an explicit path that does not exist is an error (stderr + exit 1) rather than a
 # silent no-op). Also run automatically via pre-commit hook before commit.
@@ -170,8 +170,7 @@ def _under_plugins(path: Path, repo_root: Path = REPO_ROOT) -> bool:
     return rel == SCAN_DIR or rel.startswith(f"{SCAN_DIR}/")
 
 
-def main(argv: list[str] | None = None, *, repo_root: Path = REPO_ROOT) -> int:
-    argv = argv if argv is not None else sys.argv[1:]
+def main(argv: list[str], *, repo_root: Path = REPO_ROOT) -> int:
     argv, only = lint_common.split_only(argv)
     # argv non-empty = explicit paths (any dir); keep only plugin paths (the
     # plugins dir itself included, so it enumerates its members).
@@ -217,4 +216,7 @@ def main(argv: list[str] | None = None, *, repo_root: Path = REPO_ROOT) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(
+        "the entry of this rule is `python scripts/lint/plugins/no_plugin_wrap_cli.py`: the rule "
+        "takes its argument vector from the shell that reads it"
+    )

@@ -59,6 +59,7 @@ _WHAT = {
     AmbientKind.PLATFORM: "the platform",
     AmbientKind.PID: "the process identity",
     AmbientKind.RANDOM: "randomness",
+    AmbientKind.ARGV: "the command line",
 }
 _HELD = frozenset({AmbientKind.SETTINGS, AmbientKind.DB, AmbientKind.ENDPOINTS, AmbientKind.BUS})
 # meiva:note

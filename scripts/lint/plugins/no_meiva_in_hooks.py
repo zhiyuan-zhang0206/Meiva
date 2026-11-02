@@ -72,10 +72,7 @@ def _scan_file(path: Path, rel: str) -> list[tuple[int, str]]:
     ]
 
 
-def main(
-    argv: list[str] | None = None, *, scan_dirs: tuple[str, ...], repo_root: Path = _REPO_ROOT
-) -> int:
-    argv = argv if argv is not None else sys.argv[1:]
+def main(argv: list[str], *, scan_dirs: tuple[str, ...], repo_root: Path = _REPO_ROOT) -> int:
     argv, only = lint_common.split_only(argv)
     if argv:
         resolved, missing = lint_common.resolve_targets(argv, repo_root)

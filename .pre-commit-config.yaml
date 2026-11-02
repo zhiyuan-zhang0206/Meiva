@@ -345,10 +345,10 @@ repos:
       # Ban bare `meiva.x.y = ...` / setattr monkey-patching in plugins — SDK wraps
       # go through `meiva.extend.wrap` so the stack stays introspectable + reversible.
       # Deliberate exceptions use an inline `# wrap-ok: <reason>`; see
-      # scripts/lint/plugins/no_plugin_wrap.py header.
+      # scripts/lint/plugins/no_plugin_wrap.py header; the entry is no_plugin_wrap_cli.py.
       - id: lint-no-plugin-wrap
         name: lint no plugin wrap (force meiva.extend.wrap)
-        entry: .venv/bin/python scripts/lint/plugins/no_plugin_wrap.py --only
+        entry: .venv/bin/python scripts/lint/plugins/no_plugin_wrap_cli.py --only
         language: system
         types: [python]
 

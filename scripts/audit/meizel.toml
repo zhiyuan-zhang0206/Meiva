@@ -31,3 +31,8 @@ exports = ["analysis", "branch_protection.py", "ensure_plugins_loaded_context_ce
 "sdk_usage.py" = { mode = "none", why = "the command line shell: it reads the mirrors the operator names, hands their lines to the report module and prints the result; every decision is in sdk_usage_report.py" }
 "sdk_usage_report.py" = "strict"
 "where_used.py" = { mode = "none", why = "the command line shell: it reads the checkout the operator names (tracked and unignored untracked text, skipping symlinks and the regenerated .test_durations), normalizes an absolute target to a checkout-relative path and prints the result; which references exist is analysis/references.py and which group each falls in, and how a report reads, is analysis/report.py" }
+
+[debt.ambient-read]
+"ensure_plugins_loaded_context_census.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"module_moves.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"refusal_loss.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }

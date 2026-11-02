@@ -8,10 +8,6 @@ from enum import StrEnum
 from typing import NamedTuple
 
 __all__ = [
-    "INTERVAL_CLOCKS",
-    "LOOP_CLOCK",
-    "OPEN_CALLS",
-    "SEEDABLE_GENERATORS",
     "Acquisition",
     "AmbientKind",
     "AnyCollaboratorSite",
@@ -30,7 +26,6 @@ __all__ = [
     "Sources",
     "TypeCastSite",
     "Unless",
-    "stdlib_kind",
 ]
 
 
@@ -83,6 +78,7 @@ class Code(StrEnum):
     ANY_COLLABORATOR = "any-collaborator"
     TYPE_CHECKING = "type-checking"
     AMBIENT_READ = "ambient-read"
+    AMBIENT_UNJUDGED = "ambient-unjudged"
     LEGAL_READ_RECORDED = "legal-read-recorded"
     FAKE_ENTROPY = "fake-entropy"
     STALE_ROOT = "stale-root"
@@ -125,98 +121,7 @@ class AmbientKind(StrEnum):
     PLATFORM = "platform"
     PID = "pid"
     RANDOM = "random"
-
-
-# meiva:note
-# The interval clocks. Reading one for a deadline, a duration or a TTL is the plain use of `time`
-# that the conventions allow in code no test needs to steer; the read is a decision worth a root
-# only where the same function also waits, because then how long to wait next is decided in
-# a loop. The wall clock is always a window onto the world.
-INTERVAL_CLOCKS = frozenset(
-    {"time.monotonic", "time.monotonic_ns", "time.perf_counter", "time.perf_counter_ns"}
-)
-# meiva:note
-# The target recorded for `loop.time()` of the running event loop, the interval clock of asyncio.
-LOOP_CLOCK = "asyncio.loop.time"
-
-_STDLIB: dict[str, AmbientKind] = {
-    **dict.fromkeys(INTERVAL_CLOCKS, AmbientKind.CLOCK),
-    **dict.fromkeys(
-        (f"os.{name}" for name in ("environ", "getenv", "putenv")), AmbientKind.ENVIRON
-    ),
-    **dict.fromkeys(
-        (
-            "time.time",
-            "time.time_ns",
-            "datetime.datetime.now",
-            "datetime.datetime.utcnow",
-            "datetime.datetime.today",
-            "datetime.date.today",
-        ),
-        AmbientKind.CLOCK,
-    ),
-    **dict.fromkeys(("pathlib.Path.home", "os.path.expanduser"), AmbientKind.HOME),
-    **dict.fromkeys(("os.getcwd", "os.getcwdb", "pathlib.Path.cwd"), AmbientKind.CWD),
-    **dict.fromkeys(
-        ("sys.platform", "os.name", "os.uname", "socket.gethostname", "socket.getfqdn"),
-        AmbientKind.PLATFORM,
-    ),
-    **dict.fromkeys(
-        (
-            "os.getpid",
-            "os.getppid",
-            "os.getpgrp",
-            "os.getuid",
-            "os.geteuid",
-            "os.getgid",
-            "os.getegid",
-            "threading.get_ident",
-            "threading.get_native_id",
-        ),
-        AmbientKind.PID,
-    ),
-    **dict.fromkeys(("uuid.uuid1", "uuid.uuid4", "os.urandom"), AmbientKind.RANDOM),
-}
-# meiva:note
-# Module-wide ambient vocabularies, narrowed by deterministic members below.
-_WHOLE_MODULES = {
-    "platform": AmbientKind.PLATFORM,
-    "random": AmbientKind.RANDOM,
-    "secrets": AmbientKind.RANDOM,
-}
-# meiva:note
-# Calls that read the world only when they are given no argument beyond `arguments`:
-# `time.localtime()` and `time.strftime(fmt)` the wall clock, `psutil.Process()` this process. With the
-# argument the call describes a value it was handed and reads nothing. `Path()` is not listed: it is
-# the empty path `.`, a value that reads nothing (and the sentinel of a walk up the parents).
-OPEN_CALLS: dict[str, tuple[AmbientKind, int]] = {
-    "psutil.Process": (AmbientKind.PID, 0),
-    "time.gmtime": (AmbientKind.CLOCK, 0),
-    "time.localtime": (AmbientKind.CLOCK, 0),
-    "time.ctime": (AmbientKind.CLOCK, 0),
-    "time.asctime": (AmbientKind.CLOCK, 0),
-    "time.strftime": (AmbientKind.CLOCK, 1),
-}
-# meiva:note
-# Constructors whose seed must be inspected at the call, rather than at a class reference.
-SEEDABLE_GENERATORS = frozenset({"random.Random"})
-# meiva:note
-# Class references and constant-time comparison do not themselves acquire randomness.
-_DETERMINISTIC = SEEDABLE_GENERATORS | frozenset({"secrets.compare_digest"})
-
-
-# meiva:note
-# The kind and the acquired name of a dotted standard-library name, or None.
-def stdlib_kind(dotted: str) -> tuple[AmbientKind, str] | None:
-    parts = dotted.split(".")
-    for end in range(1, len(parts) + 1):
-        prefix = ".".join(parts[:end])
-        if prefix in _STDLIB:
-            return _STDLIB[prefix], prefix
-    whole = _WHOLE_MODULES.get(parts[0])
-    if whole is not None and len(parts) > 1 and ".".join(parts[:2]) not in _DETERMINISTIC:
-        return whole, ".".join(parts[:2])
-    return None
+    ARGV = "argv"
 
 
 class Fact(NamedTuple):

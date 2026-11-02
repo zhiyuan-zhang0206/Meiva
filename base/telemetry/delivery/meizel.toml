@@ -14,4 +14,5 @@ exports = ["defer_plan.py", "loss.py", "mirror.py", "pipeline.py", "receipts.py"
 [debt.ambient-read]
 "loss.py#clock datetime.datetime.now" = { count = 1, owner = "#5816", until = "permanently: a loss report carries the instant the loss happened, stamped where the loss is observed" }
 "mirror.py#clock datetime.datetime.now" = { count = 1, owner = "#5816", until = "permanently: the mirror's retention cutoff is the wall clock at prune time, the same fact as the trace mirror's" }
+"pipeline.py#pid threading.current_thread" = { count = 2, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
 "state.py#platform socket.gethostname" = { count = 1, owner = "#5816", until = "permanently: process_state names the mirror's owner by this host's kernel name, and the configured cluster name is a different fact that would mislabel two units on one host" }

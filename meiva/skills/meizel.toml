@@ -8,4 +8,4 @@ exports = ["skill_index.py", "skill_proxies.py"]
 "skill_proxies.py" = "strict"
 
 [roots]
-"__init__.py" = { kinds = ["home"], why = "_consume_skill_body reads Path.home() to tilde-shorten the skill directory header in rendered skill docstrings" }
+"__init__.py" = { kinds = ["home", "cwd"], why = "_consume_skill_body reads Path.home() to tilde-shorten the skill directory header in rendered skill docstrings; it also anchors a relative path at the working directory" }

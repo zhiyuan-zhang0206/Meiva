@@ -7,3 +7,7 @@ exports = ["base.py", "bisect_train.py", "certify.py", "git_tags.py", "nightly.p
 "promote.py" = ["git_tags.py"]
 "tag.py" = ["git_tags.py"]
 "tests" = ["base.py", "bisect_train.py", "certify.py", "git_tags.py", "nightly.py", "promote.py", "tag.py"]
+
+[debt.ambient-read]
+"bisect_train.py#environ tempfile.TemporaryDirectory()" = { count = 2, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"bisect_train.py#pid sys.executable" = { count = 2, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }

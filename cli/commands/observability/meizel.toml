@@ -13,3 +13,6 @@ exports = ["grafana_render.py", "inputs.py", "lgtm.py", "lgtm_native.py", "logs.
 "tests" = ["_lgtm_provisioning.py", "grafana_render.py", "inputs.py", "lgtm_native.py", "otel_collector.py", "plans", "trace.py", "url_split.py"]
 "trace.py" = ["inputs.py", "plans", "url_split.py"]
 "url_split.py" = ["plans"]
+
+[debt.ambient-read]
+"lgtm_native.py#environ tempfile.TemporaryDirectory()" = { count = 3, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }

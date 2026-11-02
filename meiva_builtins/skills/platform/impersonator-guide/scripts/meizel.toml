@@ -1,2 +1,5 @@
 [purity]
 "read_instructions.py" = { mode = "none", why = "the shipped command line shell: it opens and closes the impersonation attachment and prints what the borrowed agent's saved messages carry. The selection rule above it, instruction_text, decides which messages are the inherited instructions and refuses a missing, empty or non-text system prompt; it stays in this file because a shipped skill script is loaded by path, and a sibling import would need the sys.path juggling these scripts no longer do" }
+
+[debt.ambient-read]
+"read_instructions.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }

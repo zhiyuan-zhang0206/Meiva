@@ -8,4 +8,4 @@ exports = ["daemon.py", "tests"]
 "launch_plan.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["home", "pid", "settings"], why = "Service process entry boots configuration and reads its pid and the home it runs under before composing its resources" }
+"daemon.py" = { kinds = ["home", "pid", "settings", "argv"], why = "Service process entry boots configuration and reads its pid and the home it runs under before composing its resources; it also reads its command line (argv) once, as the process entry" }

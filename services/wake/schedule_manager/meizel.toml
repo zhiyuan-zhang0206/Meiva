@@ -25,4 +25,7 @@ exports = ["blocked_streak.py", "daemon.py", "engine.py", "host_restart.py", "la
 
 [roots]
 "daemon.py" = { kinds = ["clock", "home", "pid", "settings"], why = "Service process entry boots configuration and reads the home it runs under before composing its resources; builds the process clock from SYSTEM_TIMERS; it reads its own pid once to claim its pidfile" }
-"runner.py" = { kinds = ["clock", "home", "pid", "random", "settings"], why = "Service or operator process entry boots configuration before composing its resources; it resolves the account home and builds the random generator once, for the SDK context it binds; builds the process clock from SYSTEM_TIMERS" }
+"runner.py" = { kinds = ["clock", "home", "pid", "random", "settings", "argv"], why = "Service or operator process entry boots configuration before composing its resources; it resolves the account home and builds the random generator once, for the SDK context it binds; builds the process clock from SYSTEM_TIMERS; it also reads its command line (argv) once, as the process entry" }
+
+[debt.ambient-read]
+"engine.py#argv sys.argv" = { count = 3, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }

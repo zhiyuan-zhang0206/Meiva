@@ -2,16 +2,17 @@
 # Where a file reaches the ambient world.
 #
 # An acquisition is the point at which code takes something from the process or the machine it
-# runs in instead of being handed it: the clock, the environment, the home directory, the working
-# directory, the platform, the process ids, randomness, and the process state a repository keeps
-# itself (its configuration, its database, event bus and service endpoints). Only the point of
-# acquisition is recorded. What the code does with the object afterwards is not followed: the
-# analysis has no types, so `settings.x.y` after a `from ... import settings` is a plain attribute
-# read of a name that was already acquired.
+# runs in instead of being handed it: the command line, the clock, the environment, the home
+# directory, the working directory, the platform, the process ids, randomness, and the process
+# state a repository keeps itself (its configuration, its database, event bus and service
+# endpoints). Only the point of acquisition is recorded. What the code does with the object
+# afterwards is not followed: the analysis has no types, so `settings.x.y` after a
+# `from ... import settings` is a plain attribute read of a name that was already acquired.
 #
-# The standard-library names come from the shared graph model. The names of the state a repository keeps
-# are the repository's own: a file declares under `[state]` in its `meizel.toml` that it holds state of a
-# kind, and the policy lists, per kind, the names through which that state is reached.
+# The standard-library names come from the judged table of the graph package
+# (`ambient_surface`). The names of the state a repository keeps are the repository's own: a file
+# declares under `[state]` in its `meizel.toml` that it holds state of a kind, and the policy
+# lists, per kind, the names through which that state is reached.
 
 from __future__ import annotations
 
@@ -19,18 +20,23 @@ import ast
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, replace
 
-from meizel.graph.imports import Scope
-from meizel.graph.model import (
+from meizel.graph import (
     INTERVAL_CLOCKS,
     LOOP_CLOCK,
-    OPEN_CALLS,
+    METHOD_READS,
     SEEDABLE_GENERATORS,
+    judged,
+    unjudged,
+)
+from meizel.graph.imports import Scope
+from meizel.graph.model import (
     Acquisition,
     AmbientKind,
+    Code,
     EntropySite,
+    Problem,
     Sources,
     Unless,
-    stdlib_kind,
 )
 from meizel.graph.universe import Universe
 from meizel.language import fake_entropy
@@ -74,8 +80,8 @@ def _called_name(callee: ast.expr) -> str:
 # meiva:note
 # A call whose name says it waits (`sleep`, `asleep`, `retry_sleep`) is a sleep; so is a call of a
 # function of this module that sleeps. The names a function calls are kept to follow the second.
-# The same walk notes whether the function expands a path at all, which is the only reason to ask
-# which of its names carry the caller's values.
+# The same walk notes whether the function anchors a path at all (`expanduser`, `absolute`), which
+# is the only reason to ask which of its names carry the caller's values.
 def _own_facts(
     function: ast.FunctionDef | ast.AsyncFunctionDef,
 ) -> tuple[bool, dict[str, int], bool]:
@@ -86,20 +92,11 @@ def _own_facts(
         if isinstance(node, ast.Call):
             sleeps = sleeps or "sleep" in _called_name(node.func).lower()
             expands = expands or (
-                isinstance(node.func, ast.Attribute) and node.func.attr == "expanduser"
+                isinstance(node.func, ast.Attribute) and node.func.attr in _CALLER_EXEMPT
             )
             if isinstance(node.func, ast.Name):
                 calls.setdefault(node.func.id, node.lineno)
     return sleeps, calls, expands
-
-
-# meiva:note
-# How many arguments a call gives; an unpacked argument or keyword set counts as more than any limit.
-def _given(call: ast.Call) -> int:
-    unpacked = any(isinstance(arg, ast.Starred) for arg in call.args) or any(
-        keyword.arg is None for keyword in call.keywords
-    )
-    return 99 if unpacked else len(call.args) + len(call.keywords)
 
 
 # meiva:note
@@ -146,18 +143,10 @@ def _reader_of(
 
 
 # meiva:note
-# `expanduser()` on a path (`Path("~").expanduser()`) reads the user's home; `os.path.expanduser`
-# is judged by name where it is read.
-def _expands_home(call: ast.Call, callee: str | None) -> bool:
-    func = call.func
-    return isinstance(func, ast.Attribute) and func.attr == "expanduser" and callee is None
-
-
-# meiva:note
-# The path an `expanduser()` call expands: the receiver of the method call.
-def _expanded_receiver(call: ast.Call) -> ast.expr | None:
-    func = call.func
-    return func.value if isinstance(func, ast.Attribute) else None
+# The methods that name a read by their own name, whose receiver has no resolved type: the call
+# `Path("~").expanduser()` reads the user's home, `parser.parse_args()` the argument vector.
+# `os.path.expanduser` and the like are judged by name where they are read.
+_CALLER_EXEMPT = frozenset(name for name, method in METHOD_READS.items() if method.caller_exempt)
 
 
 # meiva:note
@@ -255,6 +244,7 @@ class AmbientRecorder:
         self._open: list[_Frame] = []
         self._reads: list[list[Acquisition]] = []
         self._done: list[_Frame] = []
+        self._unjudged: set[tuple[int, str]] = set()
 
     def enter(
         self, function: ast.FunctionDef | ast.AsyncFunctionDef, *, top_level: bool = False
@@ -303,14 +293,17 @@ class AmbientRecorder:
         if bound in self.sources.uses:
             self._add(line, self.sources.names[bound], bound)
             return
-        found = stdlib_kind(dotted)
-        if found is not None:
-            kind, target = found
-            if target in INTERVAL_CLOCKS:
-                self._interval(line, target)
-            else:
-                self._add(line, kind, target)
-            return
+        reading = judged(dotted)
+        if reading is not None:
+            judgment = reading.judgment
+            if judgment.kind is not None and judgment.unless is None:
+                if judgment.interval:
+                    self._interval(line, reading.name)
+                else:
+                    self._add(line, judgment.kind, reading.name)
+                return
+        elif unjudged(dotted):
+            self._unjudged.add((line, dotted))
         parts = dotted.split(".")
         for end in range(len(bound.split(".")) + 1, len(parts) + 1):
             prefix = ".".join(parts[:end])
@@ -319,19 +312,61 @@ class AmbientRecorder:
                 self._add(line, kind, prefix)
                 return
 
+    # meiva:note
+    # A judged call that reads the world only when it is not handed the value that spares the read
+    # (`tempfile.mkdtemp()` without a `dir`, `time.strftime(fmt)` without a time): the call is the
+    # acquisition, and a reference to the name alone is not.
+    def _conditional(self, callee: str | None, call: ast.Call) -> None:
+        reading = None if callee is None else judged(callee)
+        if reading is None or reading.name != callee:
+            return
+        judgment = reading.judgment
+        if (
+            judgment.kind is not None
+            and judgment.unless is not None
+            and not _spares(call, judgment.unless)
+        ):
+            self._add(call.lineno, judgment.kind, f"{callee}()")
+
+    # meiva:note
+    # A method call on a receiver of no resolved type, judged by its name (`parser.parse_args()`,
+    # `moment.astimezone()`, `Path("~").expanduser()`): the call that is given nothing reads the world.
+    # A path built from the function's own parameters is the caller's value, not a read.
+    def _method(self, callee: str | None, call: ast.Call) -> None:
+        func = call.func
+        if callee is not None or not isinstance(func, ast.Attribute):
+            return
+        method = METHOD_READS.get(func.attr)
+        if method is None or _spares(call, method.unless):
+            return
+        if method.caller_exempt and self._from_caller(func.value):
+            return
+        self._add(call.lineno, method.kind, method.target)
+
     def called(self, callee: str | None, call: ast.Call, *, loop_clock: bool = False) -> None:
         if callee is not None and callee in SEEDABLE_GENERATORS and _ambient_seed(call):
             self._add(call.lineno, AmbientKind.RANDOM, callee)
         if loop_clock:
             self._interval(call.lineno, LOOP_CLOCK)
-        open_call = None if callee is None else OPEN_CALLS.get(callee)
-        if open_call is not None and callee is not None and _given(call) <= open_call[1]:
-            self._add(call.lineno, open_call[0], f"{callee}()")
-        if _expands_home(call, callee) and not self._from_caller(_expanded_receiver(call)):
-            self._add(call.lineno, AmbientKind.HOME, "pathlib.Path.expanduser")
+        self._conditional(callee, call)
+        self._method(callee, call)
         reader = _reader_of(call, callee, self.sources)
         if reader is not None:
             self._add(call.lineno, *reader)
+
+    # meiva:note
+    # The members of channel modules that the ambient surface does not judge, one problem per use.
+    def unjudged_problems(self) -> list[Problem]:
+        return [
+            Problem(
+                line,
+                Code.AMBIENT_UNJUDGED,
+                f"`{dotted}` is a member of a channel module that the ambient surface does not "
+                "judge: add it to a group of meizel/graph/ambient_surface.py, with the kind of read "
+                "it is or, as `None`, the reason it is not one",
+            )
+            for line, dotted in sorted(self._unjudged)
+        ]
 
     # meiva:note
     # The acquisitions of the file once every function is known. The functions of the module that

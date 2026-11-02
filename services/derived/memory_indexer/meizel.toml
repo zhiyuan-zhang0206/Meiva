@@ -15,6 +15,6 @@ exports = ["backends", "chunking.py", "config.py", "daemon.py", "embeddings", "m
 "rerank_plan.py" = "strict"
 
 [roots]
-"recall_regression.py" = { kinds = ["settings"], why = "The operator script entry boots configuration and injects it into the recall regression command" }
+"recall_regression.py" = { kinds = ["settings", "argv"], why = "The operator script entry boots configuration and injects it into the recall regression command; it also reads its command line (argv) once, as the process entry" }
 "daemon.py" = { kinds = ["clock", "home", "pid", "settings"], why = "Service process entry boots configuration and reads the home it runs under before composing its resources; builds the process clock from SYSTEM_TIMERS; it reads its own pid once to claim its pidfile" }
-"memory_search_reconcile.py" = { kinds = ["home", "settings"], why = "Operator script entry boots configuration and reads the home whose memory pool it samples before composing its resources" }
+"memory_search_reconcile.py" = { kinds = ["home", "settings", "argv", "pid"], why = "Operator script entry boots configuration and reads the home whose memory pool it samples before composing its resources; it also reads its command line (argv) once, as the process entry, and reads its standard input" }

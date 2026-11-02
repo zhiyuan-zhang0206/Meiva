@@ -2,4 +2,4 @@
 "sms_messages.py" = "strict"
 
 [roots]
-"query.py" = { kinds = ["clock", "home"], why = "SMS CLI entry resolves ~/Library/Messages/chat.db and current UTC timestamp in __main__" }
+"query.py" = { kinds = ["clock", "home", "argv"], why = "SMS CLI entry resolves ~/Library/Messages/chat.db and current UTC timestamp in __main__; it also reads its command line (argv) once, as the process entry" }

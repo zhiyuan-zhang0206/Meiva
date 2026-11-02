@@ -11,4 +11,9 @@ exports = ["baseline_shards.py", "budgets", "imports", "lazy_modules.py", "local
 "tests_location_suggest.py" = ["placement.py", "placement_evidence.py", "tests_location_allowed.py"]
 
 [roots]
-"cochange.py" = { kinds = ["clock"], why = "CLI sweeper entrypoint resolves the current UTC date to describe the rolling --days window" }
+"cochange.py" = { kinds = ["clock", "argv"], why = "CLI sweeper entrypoint resolves the current UTC date to describe the rolling --days window; it also reads its command line (argv) once, as the process entry" }
+
+[debt.ambient-read]
+"platform_lane_coverage.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"skip_sites.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }
+"tests_location.py#argv sys.argv" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }

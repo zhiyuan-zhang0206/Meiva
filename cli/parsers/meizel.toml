@@ -4,3 +4,6 @@ exports = ["cluster.py", "harness.py", "host.py", "logs.py", "permissions.py", "
 "__init__.py" = ["auth.py", "backup.py", "cluster.py", "computer.py", "harness.py", "host.py", "logs.py", "management.py", "observability.py", "permissions.py", "pty.py"]
 "observability.py" = ["host.py"]
 "tests" = ["__init__.py", "logs.py"]
+
+[debt.ambient-read]
+"host.py#pid sys.stdin" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }

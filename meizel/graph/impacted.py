@@ -7,7 +7,6 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
-import os
 from collections import defaultdict
 from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
@@ -178,7 +177,7 @@ def _extract_in_worker(path: str) -> tuple[str, tuple[str, ...] | None]:
 def _extract_misses(
     lookup: Universe, paths: list[str], jobs: int | None
 ) -> dict[str, tuple[str, ...]] | None:
-    workers = jobs if jobs is not None else min(os.cpu_count() or 1, 8)
+    workers = 1 if jobs is None else jobs
     if workers <= 1 or len(paths) < _PARALLEL_FROM:
         pairs = [(p, _extract_python_deps(lookup, p)) for p in paths]
     else:

@@ -19,4 +19,4 @@ exports = ["derive.py", "jobs.py", "model.py", "reader.py", "source.py"]
 "store.py" = ["model.py"]
 
 [roots]
-"backfill.py" = { kinds = ["clock", "settings"], why = "Service or operator process entry boots configuration before composing its resources; builds the process clock from SYSTEM_TIMERS" }
+"backfill.py" = { kinds = ["clock", "settings", "argv"], why = "Service or operator process entry boots configuration before composing its resources; builds the process clock from SYSTEM_TIMERS; it also reads its command line (argv) once, as the process entry" }

@@ -5,3 +5,6 @@ exports = ["browser.py", "browser_reach.py", "frontend.py", "gate.py", "gateway.
 "otel_collector.py" = ["plans"]
 "protocol_probe.py" = ["insights.py"]
 "tests" = ["browser_mcp.py", "browser_reach.py", "computer_mcp.py", "frontend.py", "gateway.py", "insights.py", "lgtm.py", "mcp_daemon.py", "memory_search.py", "otel_collector.py", "permissions_helper.py", "plans", "prod_venv.py", "protocol_probe.py", "redis_acl.py", "redis_bridge.py"]
+
+[debt.ambient-read]
+"prod_venv.py#environ tempfile.gettempdir" = { count = 1, owner = "#8237", until = "waits for the value from the process entry: this read takes argv, the interpreter path, a program lookup or a scratch directory from the entry that owns it (tracked in #8237, review by 2026-11-20)" }

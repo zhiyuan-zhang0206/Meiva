@@ -10,4 +10,4 @@ exports = ["launch_plan.py", "plans.py", "spawn.py", "wiring.py"]
 "launch_plan.py" = "strict"
 
 [roots]
-"wiring.py" = { kinds = ["home"], why = "The SDK watcher wiring builds a watcher session's inputs for this process on every launch, cron and at call: the launcher's runner projection is computed from the environment the bound context carries (not read here), while the unit home and the OS user's home are read here and the session directories are derived from the same home" }
+"wiring.py" = { kinds = ["home", "environ", "pid"], why = "The SDK watcher wiring builds a watcher session's inputs for this process on every launch, cron and at call: the launcher's runner projection is computed from the environment the bound context carries (not read here), while the unit home and the OS user's home are read here and the session directories are derived from the same home; it also creates scratch space under the temporary directory (TMPDIR), and names its own interpreter (sys.executable) for the command it builds" }
