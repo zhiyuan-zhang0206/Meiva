@@ -26,11 +26,10 @@ Sharded fan-out behind stable check names, every job capped by
 job maps the PR diff through `base/deploy/git/repo_change.py` (the shared CI path
 classifier) and gates the suites: docs-only skips both suites, frontend-only
 skips backend, backend-only skips the frontend unit suite; e2e runs whenever
-either side changed. Draft PRs skip CI until ready_for_review — except
-Trunk test branches (`trunk-merge/*`, `trunk-temp/*`), which must verify.
+either side changed. Draft PRs skip CI until ready_for_review.
 The classifier recognizes component `docs/` layers containing `.meiva.okf.md`
-files, excluding test data. Trunk always sets the backend side so its full
-suite remains reachable; non-PR runs set both sides. Independent documentation,
+files, excluding test data. The job decides both sides from the diff alone and
+only passes the head ref through; a non-PR run sets both sides. Independent documentation,
 language, content-manifest and security gates still run for documentation PRs.
 
 [[test-selection.meiva.okf.md]] covers enforced backend selection; see
@@ -44,8 +43,10 @@ exceptions). A separate dependency-audit job runs `uv audit --frozen` and `pnpm
 audit` as informational checks while the remediation policy matures; its
 failure does not block the workflow yet.
 
-The informational merged-tree structure preview checks main's contribution to
-the PR head; see [merged-tree lint](../docs/conventions/engineering/merged-tree-lint.md).
+There is no separate merged-tree preview job: the suite runs on the merge ref
+itself (`refs/pull/N/merge`), so it already sees main's contribution. See
+[merged-tree lint](../docs/conventions/engineering/merged-tree-lint.md) for what
+that does and does not cover.
 
 | CI check name | Composition |
 |---|---|

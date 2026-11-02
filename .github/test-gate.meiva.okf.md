@@ -16,7 +16,7 @@ frontend-only diffs. Its non-success result reaches the required
 `backend (pytest + pyright)` check even when no backend suite was requested;
 the verifier fails before dependency installation or coverage processing. A
 non-backend diff with successful structure retains the skipped backend check.
-Draft eligibility and the Trunk full-suite policy remain owned by `classify`.
+Draft eligibility and the frontend/backend side selection remain owned by `classify`.
 
 The independent `backend-static-tests` job owns static pytest execution (8 shards
 on full runs; 1 shard filtered to selected static files on `SELECTED` pull requests) and its
@@ -51,8 +51,9 @@ The same step counts the tests from the JUnit report pytest already wrote
 (`scripts/ci/shard_counts.py`), per `tests/` directory, into the job log and
 summary. The informational `backend test counts (all shards)` job adds the 8
 shards, the flaky bucket and the 8 static shards up and prints the difference against the previous
-queue run's total, which each green Trunk merge-queue run records as the
-`test-count-baseline` artifact (main itself runs no CI), so a moved test that fell out of the suite shows as a changed count.
+full run's total: the newest successful `workflow_dispatch` run of `ci.yml` on
+`main` that carries the `test-count-baseline` artifact (a merge to `main` runs no CI), so a moved
+test that fell out of the suite shows as a changed count.
 It is not required and cannot fail the run.
 
 ### Leak-guard findings

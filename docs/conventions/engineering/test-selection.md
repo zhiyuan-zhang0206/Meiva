@@ -2,28 +2,32 @@
 
 ## Purpose
 
-PR CI runs the selected subset whenever impact is computable; the Trunk merge
-queue runs the full suite and is the backstop.
+PR CI runs the selected subset whenever impact is computable; the full suite
+runs after the merge, on `main`, in the six-hourly Release Train and in the
+nightly verdict.
 
-Backend CI uses two layers. A Trunk merge-tree branch (trunk-merge/ or
-trunk-temp/) always runs the full backend suite. A real pull request runs
-the full suite only when its impact cannot be computed (a global path, an
-unmapped path, a deleted path without base facts) and otherwise, when the
-workflow is in enforce mode (the default), an owner-rule-selected subset in its
-place. The merge queue therefore continues to verify the combined tree with its
-full regression net, and a gap in the PR-side subset surfaces in the queue
-instead of reaching main; test selection does not change broken-main risk.
+Backend CI has one layer. A pull request runs the full suite only when its
+impact cannot be computed (a global path, an unmapped path, a deleted path
+without base facts) and otherwise, when the workflow is in enforce mode (the
+default), an owner-rule-selected subset in its place. Nothing re-runs the full
+suite on the tree a pull request would create: the Trunk merge queue that did
+was retired on 2026-11-01
+([decision](../../decisions/engineering/tooling/2026-11-01-release-train-and-channels.md)).
+A gap in the PR-side subset therefore reaches `main`, and the post-merge runs
+find it afterwards. Test selection does change broken-main risk, in one
+direction and by a bounded amount; [what verifies a merge](#what-verifies-a-merge)
+states exactly how much.
 
 No threshold on the subset's size or estimated time sends a pull request back to
 the full suite. "The impact is too large" has no definition that survives
 contact with the repository (a fixture or plugin that most tests import makes
 most of the suite the true impact, and no share of the suite separates that from
-a harmless subset), and the queue already runs the full suite on the exact tree
-that lands. Dropping the threshold is a deliberate trade against the concern of
-task #4183 (PR #3020's subset passed while the full population was red on
+a harmless subset), and a large subset is still the cheaper of the two jobs.
+Dropping the threshold is a deliberate trade against the concern of task #4183
+(PR #3020's subset passed while the full population was red on
 `tests/contracts/test_lint_event_kinds.py`): that concern is answered by the
-pinned tree-scan tests (below) and by the queue, not by sending large subsets
-back to the full fan-out.
+pinned tree-scan tests (below) and by the post-merge full runs, not by sending
+large subsets back to the full fan-out.
 
 The selector is [scripts/ci/test_selector.py](../../../scripts/ci/test_selector.py). It is
 stdlib-only and consumes the shared runtime dependency facts in
@@ -66,7 +70,8 @@ stay in the JSON `diagnostics` field and stderr):
   whose code holds that name as part of a string constant (docstrings and comments read
   nothing). A mixed diff containing another data input still includes tests reaching
   unanchored reads. Recognized resource edges are retained for every class; this rule only
-  controls unrelated unanchored reads. The queue's full run catches anything else before main.
+  controls unrelated unanchored reads. The post-merge full runs catch anything else, after
+  it reaches `main`.
 
 A gap is not one when the file declares it. The shared fact collection reads
 `meizel.policy.toml`: a `[loads]` entry becomes dependency edges to its directories, and an
@@ -108,7 +113,7 @@ matching row decides.
 | 5 | A collectable test file | TEST | itself and its transitive test consumers |
 | 6a | A root meizel manifest (`meizel.toml`, `meizel.policy.toml`) | MANIFEST | runtime readers, meizel's own tests, every test naming the file and the tests of each source module that names it (below) |
 | 6b | A global path (below) | GLOBAL | full suite (impact unknown: it applies to every test) |
-| 7a | `.github/`, `.agents/`, `.meiva/`, `.trunk/` | TREE_SCAN_ONLY | tree-scan tests plus every collectable test whose source names that top-level directory (below) |
+| 7a | `.github/`, `.agents/`, `.meiva/` | TREE_SCAN_ONLY | tree-scan tests plus every collectable test whose source names that top-level directory (below) |
 | 7b | `demos/`, `tests/e2e/`, `.pre-commit-config.yaml`, `.gitignore`, `.gitattributes`, `.gitleaks.toml`, `LICENSE`, `NOTICE`, and Markdown under a global prefix (below) | TREE_SCAN_ONLY | tree-scan tests plus recognized runtime consumers |
 | 8 | A non-Python file under `ui/` | FRONTEND | recognized backend resource consumers, when backend selection runs; the frontend job also owns it |
 | 9 | Any other file under agent/, meiva/, meiva_builtins/, base/, cli/, gateway/, ops/, schedules/, scripts/, services/, tests/ or ui/ | PACKAGE | transitive runtime consumers plus the owning package's tests |
@@ -143,7 +148,7 @@ looked global are not, because their impact is computable rather than unknown:
   hosts, coverage, an unlisted tool) keeps it global, and so does a missing base: `--base-ref`
   absent, or `pyproject.toml` new in the change. The listed set is closed.
 
-Tests read `.github/`, `.agents/`, `.meiva/` and `.trunk/` by path. Recognized
+Tests read `.github/`, `.agents/` and `.meiva/` by path. Recognized
 resource facts reach their transitive consumers. A change there selects, besides the tree-scan tests, every
 collectable test whose source contains the directory as a string literal: the
 unquoted `.github/` (not preceded by a word character or a dot, so the module
@@ -179,8 +184,8 @@ base and head:
 
 Any change to a public parameter name (`backoff_ms` to `backoff_s`), annotation,
 default value, return type, decorator, class field, public constant or re-export
-changes the fingerprint and runs the full transitive consumer closure. The Trunk
-merge queue always runs the full suite before landing.
+changes the fingerprint and runs the full transitive consumer closure. Nothing
+re-runs the full suite before landing; the post-merge runs are what close the gap.
 
 CI passes the committed merge-base through `--base-ref`. Selection reads both base
 and head with the same fact collector and resolver, then intersects the resulting tests
@@ -196,27 +201,35 @@ SKIP keeps the existing documentation-only behavior (no backend suite); only
 SELECTED replaces the backend pytest fan-out, and only in enforce mode.
 
 FULL has two kinds of cause and no third. Rules 1, 2 and 4 keep everything by
-construction: a non-PR event, a Trunk batch whose member list this run cannot
-read, and a batch that changes both sides of the frontend/backend contract.
-Rules 5 to 7 are impact unknown: the selector cannot say which tests a change
-affects, so it does not guess. A large computed impact is not a cause: no rule
-compares the subset with the full suite.
+construction: a non-PR event, a batch whose member list this run cannot read,
+and a batch that changes both sides of the frontend/backend contract. Rules 5
+to 7 are impact unknown: the selector cannot say which tests a change affects,
+so it does not guess. A large computed impact is not a cause: no rule compares
+the subset with the full suite.
+
+Rules 2 and 4 are defensive, not live. They fire only for a head branch named
+`trunk-merge/*` or `trunk-temp/*` — the shape the retired Trunk queue used. No
+workflow produces one now, so on every current pull request they are dead
+weight the selector keeps on purpose: if such a branch ever appears again, a
+batch whose member list cannot be read, or that spans both sides of the
+frontend/backend contract, must keep the full suite rather than select from a
+list it cannot check.
 
 | Order | Changed-path or event condition | Result |
 | --- | --- | --- |
 | 1 | Not a pull_request | FULL (non-pr-event) |
-| 2 | A Trunk batch whose member list cannot be read out of its body | FULL (queue-members-unknown) |
+| 2 | A `trunk-merge/*` batch branch whose member list cannot be read out of its body | FULL (queue-members-unknown) |
 | 3 | Every path is documentation and has no known runtime reader in either tree | SKIP |
-| 4 | A batch that changes both a frontend path and a backend one | FULL (cross-domain-batch; the payload names one path from each side) |
+| 4 | A batch branch that changes both a frontend path and a backend one | FULL (cross-domain-batch; the payload names one path from each side) |
 | 5 | A path is GLOBAL | FULL (impact unknown; `global-path:<first path>`, the payload lists every global path) |
 | 6 | A path is UNMAPPED | FULL (impact unknown; unmapped, the payload lists the paths) |
 | 7 | A deleted path without base facts | FULL (impact unknown; incomplete-impact with diagnostic locations and reasons) |
 | 8 | Otherwise, union the contribution of every path, the tree-scan tests and every test reaching an opaque input in either tree | SELECTED (owner-tests) |
 
-Rules 2 and 4 apply to a Trunk batch only, and they are the whole difference
-between a batch and a pull request. The queue's synthetic pull request lists the
-pull requests it tests under `## Pull Requests Being Tested`, and those numbers
-reach the run in the event payload — no token, no network. The batch's
+Both rules apply to such a branch only, and they are the whole difference
+between a batch and a pull request. A batch's synthetic pull request listed the
+pull requests it tested under `## Pull Requests Being Tested`, and those numbers
+reached the run in the event payload — no token, no network. The batch's
 `changed.txt` is already the union of its members, so the ordinary rules measure
 it once; what a subset cannot vouch for is the completeness of that union, and a
 batch whose member list is missing keeps the full suite rather than selecting
@@ -224,14 +237,14 @@ from a list it cannot check. A batch whose body names members but whose changed 
 the full suite as well (`queue-members-no-changes`): the two contradict each other, and the cheap
 forks are the only ones this selector can take on its own.
 
-The **completeness** of that changed list is the pipeline's guarantee, not the selector's: the
-classify job diffs the batch tree against its merge base, so the list is every path the batch
+For such a branch, the **completeness** of that changed list is the pipeline's guarantee, not the
+selector's: the classify job diffs the batch tree against its merge base, so the list is every path the batch
 changes. The selector never re-derives a member's own diff — that would mean one GitHub read and one
 more permission per member, which is what #5756 deliberately avoided — so a body that names members
 whose changes are absent from the list is a shape the pipeline cannot produce, and the selector does
 not pretend to detect it.
 
-A batch that spans the frontend and the backend
+A batch branch that spans the frontend and the backend
 keeps the full suite too: the two sides meet in a contract — a route, a payload,
 a generated type — that no owner rule crosses, so a subset built from each side
 alone can miss the test that reads both.
@@ -242,9 +255,9 @@ test at all would be a checkout without a single tree-scan test, which
 tests/scripts/test_test_selector_contract.py rules out for the repository).
 
 Rule 6 is a runtime safety net. scripts/tests/test_test_selector_owner_rules.py
-classifies every tracked path and fails when any is UNMAPPED, so the trunk never
-reaches rule 4; a new top-level directory or root file needs a class in the
-selector before it can merge.
+classifies every tracked path and fails when any is UNMAPPED, so a tracked path
+never reaches rule 6; a new top-level directory or root file needs a class in
+the selector before it can merge.
 
 Tree-scan tests join every candidate subset, including one whose changed paths
 reach no test: every `test_lint_*.py` under `tests/` (any depth, non-e2e) and the repo-level
@@ -267,7 +280,7 @@ selector gives up is the signal that a production change broke the harness's own
 every first-party module and name the harness imports, at any depth (static imports, so a broken
 one fails collection), and the test asserts that list equals what the harness really imports. It
 is a tree-scan pin, and it also runs in the static lane on every backend change. Behavior of the
-harness's production dependencies is covered by the merge queue's full run, as for every subset.
+harness's production dependencies is covered by the post-merge full runs, as for every subset.
 
 The documentation predicate reuses base.deploy.git.repo_change.is_doc_path, the same
 owner as CI's frontend/backend classifier. It recognizes the existing project doc
@@ -278,9 +291,9 @@ AGENTS.md and SKILL.md, retains its code-directory classification.
 
 Files under schedules/ and any `tests/` directory (the top-level one or a package's
 own `<pkg>/**/tests/`) are never documentation: they are PACKAGE paths. The classifier's
-existing schedule policy is unchanged. For Trunk PRs, CI always enables the backend
-side before invoking the selector; its forced FULL rule therefore remains reachable
-even on a documentation diff. Non-PR runs enable both sides. The independent
+existing schedule policy is unchanged. The classify job decides the two sides from the diff
+alone and only passes the head ref through, so no branch shape can force a side; a
+non-pull-request event enables both sides before the selector runs. The independent
 documentation, language, content-manifest and security gates run on documentation
 PRs too.
 
@@ -326,8 +339,9 @@ module that many tests reach, the subset is large on the current repository; it 
 evidence that the runtime dependency closure is small or complete.
 
 The graph is rebuilt for every run and no coverage-derived map is committed. Package
-ownership and tree-scan rules remain conservative additions. The complete Trunk and
-non-PR suites remain protected, including when ordinary PR selection is incomplete.
+ownership and tree-scan rules remain conservative additions. The full-suite runs outside PR
+selection — the post-merge Release Train, the nightly verdict and every non-PR event — remain
+protected, including when ordinary PR selection is incomplete.
 A selector `tests` list contains candidate files, not an executed test count: the
 selected native lane omits the independently executed static lane and flaky tests,
 while the serial lane owns flaky execution. JUnit records remain the execution evidence.
@@ -381,7 +395,7 @@ changed. `classify change` sets `skip_e2e` from `scripts/ci/e2e_scope.py`, and t
 checks (`e2e shard`, `e2e hosted`, `e2e env guard (serial)`, `e2e (Playwright happy path)`) are
 skipped, which counts as satisfied for the required checks, only when all of these hold:
 
-- the event is a pull request and not a Trunk queue branch (the queue always runs everything);
+- the event is a pull request;
 - test selection is enforced and its decision is SELECTED;
 - every changed path is one of:
   - a locality manifest, `meizel.toml` - the file meizel reads to describe a directory
@@ -408,9 +422,10 @@ frontend suite runs - it is not a change to what a browser loads, so it does not
 keeps it. `scripts/ci/tests/test_e2e_scope.py` pins the rule, the wiring, the root manifest
 isolation of `tooling` packages, and the e2e import reachability walk.
 
-Narrowing e2e inside a Trunk queue batch is deliberately not this rule: the queue is the last
-composition check before `main`, so its e2e jobs keep running everything until a nightly verdict
-leg watches the same surface (`#5762`). The member-PR channel that a batch would use is #5760.
+Narrowing e2e inside a batch branch is deliberately not this rule: `skips_e2e` reads only the
+event, the mode, the decision and the diff, and never the head ref, so a batch keeps the full e2e
+matrix through its own FULL decision rather than through a branch-name check. The member-PR channel
+a batch would use is #5760.
 
 ## Selection modes and artifacts
 
@@ -430,8 +445,7 @@ routing expression keys off it.
 - The aggregator still requires static / structure / serial flaky / pgvector
   smoke / helper signing exactly as before.
 - No coverage artifacts are produced on that path: the 85% full-tree coverage
-  gate stays on the full fan-out — every Trunk merge-tree branch runs one, as
-  does every non-SELECTED PR.
+  gate stays on the full fan-out — every non-SELECTED run produces one.
 - A selector or setup failure leaves routing outputs empty, which retains the
   full-suite path, and also fails the required backend aggregator. A parser
   failure cannot become a successful FULL decision.
@@ -444,15 +458,12 @@ routing expression keys off it.
   GREEN only when a passing subset meets a failing full non-flaky pytest
   population.
 
-Trunk merge-tree branches never take the enforced path: rule 1 returns FULL,
-so the fan-out runs regardless of the mode.
-
 ## Maintenance and the revert switch
 
 - Review any false green immediately and close a real rule gap; no false
   green is accepted as a known exception.
 - Keep selector unit tests focused on observable decisions, AST resolution,
-  current-test filtering, duration estimates, queue branches, per-class owner
+  current-test filtering, duration estimates, batch branch shapes, per-class owner
   rules, the tracked-tree completeness guard, and deterministic JSON.
 - The daily workflow keeps the timings current; nothing to refresh by hand after
   material suite changes.
@@ -490,8 +501,9 @@ half of a suite larger than the subset job, is still SELECTED.
 2026-10-24 user ruling: the duration guard is deleted (rule 8, FULL when the candidate
 exceeded 80% of the full estimate or, on a large suite, half of it, and rule 8a, FULL
 when no timings were restored), together with the empty-candidate FULL (rule 7). How
-large an impact is too large has no definition, and the merge queue runs the full suite
-before anything reaches main. In the ten pull requests of the day before, nine ran the
+large an impact is too large has no definition, and the Trunk queue then ran the full suite
+before anything reached main (it was retired on 2026-11-01; the post-merge runs carry that
+argument now). In the ten pull requests of the day before, nine ran the
 full fan-out: six on a global path, which this ruling keeps (their impact is unknown, not
 large), and three whose candidate was the whole suite, which now run as SELECTED.
 
@@ -507,16 +519,43 @@ test (it already treated the root conftest, its plugins and `tests/fixtures/` as
 the harness import contract above took over the signal that a production change broke the
 harness's imports.
 
+## What verifies a merge
+
+Four facts about the current pipeline, kept apart because they answer different questions. Only
+the first is a check on a merged tree.
+
+**A pull request's checks run on a merged tree — the one that existed when the run started.**
+`ci.yml` is triggered by `pull_request`, so `github.sha` is `refs/pull/N/merge`: the pull request
+head merged into the base of that moment. The suite does see the combination, not the head alone.
+
+**The base can move afterwards.** Branch protection sets `strict = false` (verified 2026-11-02:
+ten required checks, no strict mode), so a pull request whose base advanced after its run is not
+re-tested against the new base. Two pull requests that are each green against their own base can
+be red together. This is a known and accepted trade, not an oversight: the merge rule does not
+force a rebase onto the latest base, so the recorded verification is the one that actually ran.
+
+**Nothing verifies the merge order.** There is no queue, no serialized integration branch and no
+combined-tree job; the Trunk merge queue that provided one was retired on 2026-11-01. A
+merge-order problem has to survive the post-merge runs below.
+
+**No test suite runs on a push to `main`.** `ci.yml` has exactly two triggers, `pull_request` and
+`workflow_dispatch`; merging to `main` starts no CI run of its own. (Two narrow push workflows exist
+— `cache-warm.yml` and `ci-app.yml` — and neither runs tests.)
+
 ### Where the full suite runs
 
-Three places run the whole population, each for a different question:
+Two scheduled workflows run the whole population on `main`, each for a different question:
 
 | Where | When | What it answers |
 |---|---|---|
-| Trunk merge queue | every landed batch | may this combined tree land |
-| `.github/workflows/refresh-test-durations.yml` (nightly, main) | daily | was main green last night — the `verdict` job reads junit only, so a retried measurement cannot wash a first-attempt failure green |
-| `.github/workflows/release-gate.yml` | when a release wave is launched | may this tree be called `vX.Y.Z` |
+| `.github/workflows/release-gate.yml` | every six hours (`17 */6 * * *`), and on demand before a wave; skipped when `channel/latest` already points at `main` HEAD | may this tree be called `vX.Y.Z` — and, as a side effect, was `main` green |
+| `.github/workflows/refresh-test-durations.yml` (nightly, main) | daily (`30 19 * * *`) | was main green last night — the `verdict` job reads junit only, so a retried measurement cannot wash a first-attempt failure green |
 
 The nightly run is the honest answer to "is main broken", and a red night blocks the release
 gate. It does **not** stop main from accepting merges: a nightly flake must not become a
 cluster-wide stop. The release gate is where a red night becomes blocking.
+
+Put together, the coverage is: **one verification per pull request against the base it started
+from**, and then a full-matrix run on `main` roughly every six hours plus a verdict every night. A
+gap in the PR-side subset, or a combination that only breaks when two green pull requests land
+together, reaches `main` and is found hours later by one of those two runs — found, not prevented.
