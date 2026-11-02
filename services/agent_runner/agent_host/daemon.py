@@ -38,6 +38,7 @@ import sys
 from collections.abc import Awaitable, Callable, Collection, Coroutine, Iterable, Mapping
 from functools import partial
 from pathlib import Path
+from uuid import UUID
 
 from base.clock import SYSTEM_TIMERS, Timers
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
@@ -276,6 +277,8 @@ async def build_checkpointer(
     plugin_state_classes: Iterable[type[BaseModel]] = (),
     *,
     checkpoint_interval: int,
+    expected_owner: UUID | None = None,
+    machine: str | None = None,
 ) -> AsyncPostgresSaver:
     """One saver for the whole host, over the workload pool.
 
@@ -296,7 +299,10 @@ async def build_checkpointer(
     from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
 
     checkpointer = PooledPostgresSaver.from_pool(
-        pool, serde=build_checkpoint_serde(plugin_state_classes)
+        pool,
+        serde=build_checkpoint_serde(plugin_state_classes),
+        expected_owner=expected_owner,
+        machine=machine,
     )
     wrap_saver_writes_with_loud_failure(checkpointer)
     wrap_saver_writes_with_nstep_interval(checkpointer, checkpoint_interval)
@@ -558,10 +564,13 @@ async def run(
             home=home,
             disabled_entries=disabled_entries,
         )
+        runtime_owner = new_uuid(secure_rng)
         checkpointer = await build_checkpointer(
             workload_pool,
             [cls for _plugin, cls in installation.registry.state_classes()],
             checkpoint_interval=config.view.agent.checkpoint_interval,
+            expected_owner=runtime_owner,
+            machine=local_machine,
         )
         stamping = handoff_source(config)
         policy = host_policy(
@@ -592,7 +601,7 @@ async def run(
             ),
             plugin_configs=installation.configs,
             home=home,
-            runtime_owner=new_uuid(secure_rng),
+            runtime_owner=runtime_owner,
         )
         scheduler = TurnScheduler(
             host.run_turn,

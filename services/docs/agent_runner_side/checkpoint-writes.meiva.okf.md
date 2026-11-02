@@ -1,19 +1,34 @@
 ---
 type: doc
 title: Hosted checkpoint write integrity
-description: Exact parent validation and atomic upstream checkpoint writes on one pool lease.
+description: Exact parent validation, host owner fencing, and atomic upstream checkpoint writes on one pool lease.
 tags: []
 ---
 
 # Hosted checkpoint write integrity
 
 `services/agent_runner/agent_host/pooled_checkpoint.py:PooledPostgresSaver`
-owns the hosted checkpoint persistence boundary. Each `aput` borrows one
-exclusive pool connection and enters a PostgreSQL transaction. A config naming
-a parent must find that exact `(thread_id, checkpoint_ns, checkpoint_id)` row.
-The `FOR KEY SHARE` lock remains held until the child transaction commits. A
-first checkpoint without a parent is legal; another namespace's or thread's row
-does not satisfy the check.
+owns the hosted checkpoint persistence boundary. Each `aput`, `aput_writes`, and
+`adelete_thread` borrows one exclusive pool connection and enters a PostgreSQL transaction.
+
+Before writing checkpoint, blob or intermediate write rows, the write transaction
+atomically verifies the runner's ownership against `agents_meta`:
+```sql
+SELECT machine, runtime_owner, status FROM agents_meta WHERE id = %s FOR SHARE
+```
+The row lock (`FOR SHARE`) prevents concurrent takeover or status transition from
+completing until the write commits. When configured with `expected_owner`, the saver
+verifies that the row's `runtime_owner` matches `expected_owner`. If another host daemon
+took over the agent row, or if the agent was reassigned to another machine, the transaction
+raises `StaleIncarnationError` and rolls back immediately, persisting zero rows to
+`checkpoints`, `checkpoint_blobs`, or `checkpoint_writes`. Writes to terminated agents
+are rejected. Unbound savers (`expected_owner=None`), idle agents on this machine before
+first turn, and non-agent threads pass through cleanly.
+
+Within the same transaction, a config naming a parent must find that exact
+`(thread_id, checkpoint_ns, checkpoint_id)` row. The `FOR KEY SHARE` lock remains
+held until the child transaction commits. A first checkpoint without a parent is
+legal; another namespace's or thread's row does not satisfy the check.
 
 The connection-bound upstream `AsyncPostgresSaver` still owns serialization,
 blob/checkpoint inserts, pipeline synchronization and cursor cleanup. The outer
