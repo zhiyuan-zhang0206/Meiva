@@ -1,8 +1,7 @@
 # meiva:note
 # Plugin expansions lead the deduplicated configured expansion list. Wildcards recursively discover public namespaces while excluding disabled entries and capability surfaces; explicitly naming a capability member is refused to avoid injecting whole skill bodies or tool schemas and falsely attributing them as loaded. Media filtering is per rendering call, and installed extensions are visible before rendering captures the SDK overview. The system prompt can be rebuilt when an empty context window is initialized. Delegation checks give the exact `meiva.help(meiva.skills.meiva_workflow)` invocation syntax for non-trivial work.
 import hashlib
-import logging
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from agent.hooks.history_dump import workspace_section_hint
@@ -27,11 +26,10 @@ from .conversation import (
 )
 from .live import (
     SectionInputs,
-    discover_all_namespaces,
+    effective_sdk_expand,
     read_live_sdk,
     render_expanded_reference,
 )
-from .sdk_scope import expand_plan
 
 
 def _resolved(setting: str, inputs: SectionInputs) -> object:
@@ -44,27 +42,6 @@ def _resolved(setting: str, inputs: SectionInputs) -> object:
         models=inputs.catalog.models,
         explicit=inputs.slices.read("agent", setting),
     )
-
-
-def effective_sdk_expand(
-    configured: Sequence[str], *, disabled: Sequence[str], plugin_expansions: Sequence[str]
-) -> list[str]:
-
-    plan = expand_plan(
-        configured,
-        plugin_expansions=plugin_expansions,
-        discovered=discover_all_namespaces(disabled) if "*" in configured else (),
-    )
-    for path in plan.refused:
-        logging.getLogger(__name__).warning(
-            "sdk_expand_in_system_prompt: refusing %r — expanding one member of a "
-            "capability surface would render that skill's whole body (or that "
-            "server's tool schemas) into every prompt and record a bogus 'loaded' "
-            "attribution. Preload a skill with skills_to_expand_at_start; leave a "
-            "server's tools to meiva.help(meiva.mcps.<server>)",
-            path,
-        )
-    return list(plan.paths)
 
 
 def sdk_expand_section(inputs: SectionInputs) -> str:

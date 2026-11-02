@@ -62,6 +62,7 @@ class NoteTag(StrEnum):
     SKILL_RECALL = "skill_recall"
     EXEC_TIMEOUT = "exec_timeout"
     TIMEZONE = "timezone"
+    SDK_EXPAND = "sdk_expand"
 
 
 class MeivaUsage(TypedDict, total=False):

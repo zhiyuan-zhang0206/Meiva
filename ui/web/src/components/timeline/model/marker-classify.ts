@@ -41,6 +41,7 @@ export const NOTE_SOURCES = new Set([
   "preloaded_skills",
   "new_skills",
   "skill_recall",
+  "sdk_expand",
 ]);
 
 export function classifyMarker(source: string | null): MarkerClass {

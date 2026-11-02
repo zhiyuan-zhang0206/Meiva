@@ -209,6 +209,39 @@ async def test_a_plugin_declaration_reaches_the_head_through_the_context_registr
     assert "declared" not in _tags(bare)  # pyright: ignore[reportUnknownArgumentType]
 
 
+# meiva:note
+# The agent reads a broken `sdk_expand_in_system_prompt` entry once, in the head establishment lays
+# down, and the note names the entry. A second pass over the established window is the pass-through
+# below, so the note cannot become per-turn noise; a compaction establishes a new window and states
+# it again, which is the new window's problem to know.
+async def test_a_broken_sdk_expand_entry_is_named_once_in_the_head(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database_gate: ProcessDbGate,
+) -> None:
+    tid = create_agent(db_conn)
+    runtime = _runtime(
+        aops_pool,
+        database_gate=database_gate,
+        pins={"sdk_expand_in_system_prompt": ["shell", "context"]},
+    )
+
+    head = await init_context_node(AgentState(), runtime, _config(tid))
+
+    assert head.update is not None
+    msgs: list[AnyMessage] = head.update["messages"]
+    tags = _tags(msgs)
+    assert "sdk_expand" in tags
+    content = str(msgs[tags.index("sdk_expand")].content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    assert "meiva.context" in content
+    assert "meiva.shell" not in content
+
+    second = await init_context_node(AgentState(messages=msgs), runtime, _config(tid))
+
+    assert second.update is None
+    assert second.goto == "claim"
+
+
 async def test_intact_window_is_a_pass_through(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
