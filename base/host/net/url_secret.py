@@ -11,10 +11,29 @@ the identifier is chosen (`base.cluster.DATA_PLANE_IDENTITY`).
 
 from __future__ import annotations
 
-import re
-from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit, urlunsplit
 
-from base.host.net.predicates import is_loopback_host
+# meiva:note
+# The five readers below are re-exported, not owned here: they moved to url_text.py and the 25 files
+# that import them still name this module. A re-export with no exit is how a forwarding layer
+# outlives everyone who wanted it, so this one has one — it goes when those importers name
+# `url_text` directly, one import line per file and no behaviour change, which is its own PR because
+# moving 25 files inside a commit about a split would hide both changes.
+from base.host.net.url_text import (
+    names_foreign_host as names_foreign_host,
+)
+from base.host.net.url_text import (
+    redacted_url as redacted_url,
+)
+from base.host.net.url_text import (
+    url_has_query_param as url_has_query_param,
+)
+from base.host.net.url_text import (
+    url_host as url_host,
+)
+from base.host.net.url_text import (
+    url_username as url_username,
+)
 
 
 def url_with_userinfo(url: str, user: str, password: str) -> str:
@@ -112,55 +131,3 @@ def url_with_query_param(url: str, key: str, value: str) -> str:
     params = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k != key]
     params.append((key, value))
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(params), parts.fragment))
-
-
-def url_host(url: str, fallback: str = "127.0.0.1") -> str:
-    """The host a URL names — `urlsplit(...).hostname` (lowercased, an IPv6
-    literal unbracketed) or `fallback` when the URL carries no host.
-
-    The data-plane URLs this codebase generates always carry a host (the boot
-    sentinels name loopback), so the fallback is a defensive floor for a
-    hand-written URL without one — never a route for an empty host to reach
-    something unintended: 127.0.0.1 is unreachable off-box, and the connect
-    guard still matches the placeholder URL byte-for-byte.
-    """
-    return urlsplit(url).hostname or fallback
-
-
-# meiva:note
-# The username a URL carries, or empty when absent.
-def url_username(url: str) -> str:
-    return urlsplit(url).username or ""
-
-
-# meiva:note
-# Whether `url`'s query string carries a non-blank `key` parameter.
-def url_has_query_param(url: str, key: str) -> bool:
-    return key in parse_qs(urlsplit(url).query)
-
-
-def names_foreign_host(*urls: str) -> bool:
-    """Whether any of `urls` dials a host other than this box (a non-loopback host).
-
-    The one owner of the "is this data plane hosted off-box" fact: the configuration's
-    `is_remote` and the data-plane commands' config value both answer it here, so a URL
-    swapped on a copy of the config moves the answer with it. A host-less URL reads as
-    loopback (`url_host`'s fallback), so the placeholder and unix-socket forms are local.
-    """
-    return any(not is_loopback_host(url_host(url)) for url in urls)
-
-
-_USERINFO_PASSWORD_RE = re.compile(r"(://[^/@]*:)[^/@]*(@)")
-
-
-def redacted_url(url: str) -> str:
-    """`url` with any userinfo password replaced by `***` — safe to embed in
-    exceptions and log lines.
-
-    Operates on the raw text (not `urlsplit`), so a value the parser would not
-    fully decode — an outer-quoted `.env` line, an unparseable host — still
-    loses its `scheme://user:secret@` password before reaching a log. The
-    username is names-as-data identity, never secret material, and stays
-    visible; a URL with no password is returned unchanged.
-    """
-    return _USERINFO_PASSWORD_RE.sub(r"\1***\2", url)
