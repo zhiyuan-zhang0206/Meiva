@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from cli.commands.observability.plans.lgtm.render import (
     ReadSurface,
     env_divergences,
     listen_read_warnings,
+    placeholder_names,
     render_config,
     render_run_script,
     tempo_topology_warning,
@@ -28,6 +30,11 @@ from cli.commands.observability.plans.lgtm.urls import (
 from cli.commands.observability.url_split import split_url
 
 _REPO = Path(__file__).resolve().parents[5]
+
+
+# meiva:note
+# `{{NAME}}` as a shipped template spells it.
+_PLACEHOLDER = re.compile(r"\{\{([A-Za-z0-9_]+)\}\}")
 
 # meiva:note
 # Literals under test: the wildcard is a bind value the warning cases feed, and the two tokens prove
@@ -367,10 +374,11 @@ def test_a_rotated_webhook_token_changes_the_rendered_environment() -> None:
 
 
 # meiva:note
-# Every placeholder a shipped template spells must be one the renderer substitutes, and every
-# substitution must be spelled somewhere: a template that gains a placeholder without a renderer
-# key ships the literal `{{NAME}}` to the host, which is how a contact point ends up sending an
-# empty credential while its configuration looks complete.
+# Every placeholder a shipped template spells must be one the renderer substitutes: a template that
+# gains a placeholder without a renderer key ships the literal `{{NAME}}` to the host, which is how
+# a contact point ends up sending an empty credential while its configuration looks complete. The
+# other direction -- a substitution no template spells -- is dead configuration and has its own
+# case below.
 def test_shipped_templates_and_renderer_keys_name_the_same_placeholders() -> None:
     rendered = {
         name: render_config(
@@ -382,3 +390,20 @@ def test_shipped_templates_and_renderer_keys_name_the_same_placeholders() -> Non
         live = [line for line in content.splitlines() if not line.lstrip().startswith("#")]
         kept = [line for line in live if "{{" in line]
         assert not kept, f"{name} kept a placeholder the renderer does not substitute: {kept[0]}"
+
+
+# meiva:note
+# The renderer's own keys, against the templates that spell them. A substitution nobody spells is
+# configuration a reader would expect to reach a file and never does. The three Prometheus scrape
+# targets are left out on purpose: `render_config` derives them for one template only, so they have
+# no place in this comparison.
+def test_every_substitution_is_spelled_by_a_template() -> None:
+    spelled = {
+        placeholder
+        for name in ("loki.yaml", "prometheus.yml", "grafana.ini", "runtime.env", "run.sh")
+        for placeholder in _PLACEHOLDER.findall(
+            (_REPO / "deploy/lgtm/native/config" / name).read_text(encoding="utf-8")
+        )
+    }
+    unused = placeholder_names(values()) - spelled
+    assert not unused, f"substitutions no template spells: {sorted(unused)}"

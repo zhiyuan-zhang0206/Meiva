@@ -24,6 +24,7 @@ __all__ = [
     "ReadSurface",
     "env_divergences",
     "listen_read_warnings",
+    "placeholder_names",
     "render_config",
     "render_run_script",
     "tempo_topology_warning",
@@ -76,9 +77,16 @@ def _substitutions(values: NativeRenderValues) -> dict[str, str]:
         "ALERTS_WEBHOOK_TOKEN": shlex.quote(values.alerts_webhook_token),
         "REPO": values.repo,
         "lgtm_grafana_listen_host": values.grafana_listen_host,
-        "LGTM_LOKI_PORT": str(values.loki_port),
         "LGTM_GRAFANA_PORT": str(values.grafana_port),
     }
+
+
+# meiva:note
+# The names `render_config` fills, so a caller can compare a template against them without reading
+# the mapping's private spelling. The Prometheus scrape targets are not here: only that one
+# template derives them.
+def placeholder_names(values: NativeRenderValues) -> frozenset[str]:
+    return frozenset(_substitutions(values))
 
 
 def _fill(template: str, substitutions: Mapping[str, str]) -> str:
