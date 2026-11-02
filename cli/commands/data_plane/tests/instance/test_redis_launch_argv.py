@@ -16,8 +16,8 @@ import pytest
 
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
-from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane.config import DataPlaneConfig
+from cli.commands.data_plane.native import redis_instance
 from cli.database.tests.command_inputs import command_machine as command_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 
@@ -45,7 +45,7 @@ def test_macos_binds_loopback_alone_even_when_the_machine_declares_an_address(
 ) -> None:
     command_machine.set(host=_REACHABLE)
 
-    argv = instance.redis_launch_argv(plane, 6379, tmp_path, command_machine, macos=True)
+    argv = redis_instance.redis_launch_argv(plane, 6379, tmp_path, command_machine, macos=True)
 
     assert _bound(argv) == ["127.0.0.1"]
 
@@ -55,7 +55,7 @@ def test_another_platform_binds_the_declared_address_beside_loopback(
 ) -> None:
     command_machine.set(host=_REACHABLE)
 
-    argv = instance.redis_launch_argv(plane, 6379, tmp_path, command_machine, macos=False)
+    argv = redis_instance.redis_launch_argv(plane, 6379, tmp_path, command_machine, macos=False)
 
     assert _bound(argv) == ["127.0.0.1", _REACHABLE]
 
@@ -65,7 +65,7 @@ def test_a_single_box_binds_loopback_on_either_platform(
 ) -> None:
     command_machine.set(host="localhost")
     for macos in (True, False):
-        argv = instance.redis_launch_argv(plane, 6379, tmp_path, command_machine, macos=macos)
+        argv = redis_instance.redis_launch_argv(plane, 6379, tmp_path, command_machine, macos=macos)
 
         assert _bound(argv) == ["127.0.0.1"]
 
@@ -73,7 +73,7 @@ def test_a_single_box_binds_loopback_on_either_platform(
 def test_the_command_line_names_the_configured_server_port_and_data_directory(
     plane: DataPlaneConfig, command_machine: MachineIdentityReader, tmp_path: Path
 ) -> None:
-    argv = instance.redis_launch_argv(plane, 6391, tmp_path, command_machine, macos=False)
+    argv = redis_instance.redis_launch_argv(plane, 6391, tmp_path, command_machine, macos=False)
 
     assert argv[0] == str(Path(plane.redis_bin_dir) / "redis-server")
     assert argv[argv.index("--port") + 1] == "6391"

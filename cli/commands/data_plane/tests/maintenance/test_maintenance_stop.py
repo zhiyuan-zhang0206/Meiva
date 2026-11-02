@@ -38,6 +38,7 @@ from cli.commands.data_plane import maintenance_stop
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.maintenance.plan import RedisShutdownMode, ShutdownRedis, StopPostgres
 from cli.commands.data_plane.maintenance.process_scan import judge, refusal
+from cli.commands.data_plane.native import redis_instance
 from cli.commands.data_plane.stop_waits import StopLegs, deadline_after
 from cli.commands.data_plane.tests.native_cluster import NATIVE_TEST_SYSTEM
 from cli.commands.data_plane.tests.native_processes import (
@@ -77,14 +78,14 @@ def _sibling(home: Path) -> Path:
 # that nothing captured is found in the process table and refuses the stop, with its pid.
 def test_a_redis_of_this_home_that_nothing_recorded_refuses_the_stop(unit_home: Path) -> None:
     with (
-        running_redis(instance.redis_data_dir(unit_home)) as ours,
+        running_redis(redis_instance.redis_data_dir(unit_home)) as ours,
         pytest.raises(RuntimeError, match=rf"unrecorded or replacement.*redis pid {ours.pid}"),
     ):
         maintenance_stop.require_no_unrecorded({}, home=unit_home, uid=os.getuid())
 
 
 def test_a_recorded_redis_is_accounted_for(unit_home: Path) -> None:
-    with running_redis(instance.redis_data_dir(unit_home)) as ours:
+    with running_redis(redis_instance.redis_data_dir(unit_home)) as ours:
         maintenance_stop.require_no_unrecorded(
             {"redis": frozenset({ours.pid})}, home=unit_home, uid=os.getuid()
         )
@@ -105,7 +106,7 @@ def test_a_process_of_another_uid_is_reported_as_that() -> None:
 
 
 def test_a_redis_of_another_uid_is_not_this_homes(unit_home: Path) -> None:
-    with running_redis(instance.redis_data_dir(unit_home)):
+    with running_redis(redis_instance.redis_data_dir(unit_home)):
         maintenance_stop.require_no_unrecorded({}, home=unit_home, uid=os.getuid() + 1)
 
 
@@ -195,7 +196,7 @@ def test_a_redis_connection_ended_after_capture_cannot_shut_down_another_connect
     context = maintenance_stop.StopContext(
         unit_home, os.getuid(), StopLegs(), emitted_events.producer
     )
-    with running_redis(instance.redis_data_dir(unit_home)) as server:
+    with running_redis(redis_instance.redis_data_dir(unit_home)) as server:
 
         async def scenario() -> None:
             # meiva:note
@@ -212,7 +213,7 @@ def test_a_redis_connection_ended_after_capture_cannot_shut_down_another_connect
             identity = await custody.capture(
                 dedicated,
                 port=server.port,
-                data_dir=instance.redis_data_dir(unit_home),
+                data_dir=redis_instance.redis_data_dir(unit_home),
                 deadline=deadline.at,
             )
             assert identity is not None
@@ -318,7 +319,7 @@ def test_the_stop_ends_a_whole_local_data_plane_in_order(
     retained: list[subprocess.Popen[bytes]] = []
     try:
         with (
-            running_redis(instance.redis_data_dir(unit_home)) as store,
+            running_redis(redis_instance.redis_data_dir(unit_home)) as store,
             running_pooler(unit_home) as pool,
         ):
             plane = _local_plane(data_plane_config, redis_url=store.url, pg_port=pg_port)

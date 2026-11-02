@@ -10,7 +10,7 @@ import subprocess
 import sys
 
 from base.config import settings
-from cli.commands.data_plane import cluster_instance as instance
+from cli.commands.data_plane.native import redis_instance as instance
 
 if __name__ == "__main__":
     redis_bin_dir = settings.data_plane.redis_bin_dir

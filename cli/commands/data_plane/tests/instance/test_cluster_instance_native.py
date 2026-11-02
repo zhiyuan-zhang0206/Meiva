@@ -38,6 +38,7 @@ from base.paths import meiva_home
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane.bringup import ensure_gateway_data_plane
 from cli.commands.data_plane.instance.probe import ProbeState
+from cli.commands.data_plane.native import redis_instance
 from cli.commands.data_plane.pg_probe import pg_running
 from cli.commands.data_plane.tests.native_cluster import (
     ADMIN_PASSWORD,
@@ -479,7 +480,7 @@ def test_redis_is_reachable_with_the_admin_password_only(
 ) -> None:
     assert _storage(native_cluster, command_machine) == 0
     port = native_cluster.redis_port
-    assert instance.redis_reachable(ADMIN_PASSWORD, port, "127.0.0.1")
-    assert not instance.redis_reachable("not-the-admin-password", port, "127.0.0.1")
+    assert redis_instance.redis_reachable(ADMIN_PASSWORD, port, "127.0.0.1")
+    assert not redis_instance.redis_reachable("not-the-admin-password", port, "127.0.0.1")
     with redis.Redis(port=port, password=ADMIN_PASSWORD, decode_responses=True) as admin:
         assert redis_command(admin, "ACL", "WHOAMI") == "default"

@@ -81,6 +81,7 @@ from cli.commands.data_plane.instance.storage_plan import (
     admit_gateway_storage,
 )
 from cli.commands.data_plane.maintenance_stop_report import live_identities
+from cli.commands.data_plane.native import redis_instance
 from cli.commands.data_plane.pg_probe import pg_running
 from cli.commands.data_plane.stop_waits import (
     PROCESS_CLEANUP_WAIT_S,
@@ -481,7 +482,7 @@ def print_data_plane_status(
         except Exception as exc:
             connect_error = failure_detail(str(exc))
     print(local_pg_line(host=pg_host, port=pg_port, probe=pg_probe, connect_error=connect_error))
-    redis_ok = instance.redis_reachable(config.redis_admin_password, redis_port, redis_host)
+    redis_ok = redis_instance.redis_reachable(config.redis_admin_password, redis_port, redis_host)
     print(local_redis_line(host=redis_host, port=redis_port, ok=redis_ok))
     if config.pgbouncer_enabled:
         _print_pooler_status(home)
@@ -535,7 +536,7 @@ def stop_cluster_instance(
     redis_env = (
         None
         if port is None
-        else instance.redis_cli_env(config.redis_admin_password, environ=environ)
+        else redis_instance.redis_cli_env(config.redis_admin_password, environ=environ)
     )
     print("\n→ stopping per-cluster data plane")
     for step in stop_plan.plan_stop(redis_port=port):
@@ -600,12 +601,12 @@ def _stop_redis(
     home: Path,
     macos: bool,
 ) -> bool:
-    servers = _home_redis_servers(instance.redis_data_dir(home).resolve())
+    servers = _home_redis_servers(redis_instance.redis_data_dir(home).resolve())
     returncode, detail = 0, ""
     try:
         shutdown = run_bounded(
             [
-                instance.redis_cli_bin(config.redis_bin_dir, macos=macos),
+                redis_instance.redis_cli_bin(config.redis_bin_dir, macos=macos),
                 "-p",
                 str(port),
                 "shutdown",

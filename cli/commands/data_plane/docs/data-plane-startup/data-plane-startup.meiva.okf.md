@@ -47,14 +47,16 @@ a start), `redis_plan.py` (the conf, the command line, the credential refusals, 
 start), `redis_binaries.py` (override directory, Homebrew formula or PATH), `bounded_wait.py`
 (retry or give up), `storage_plan.py` (admission of a gateway start, the ordered steps of the
 completion), `status_lines.py`, `stop_plan.py` and `bringup_lines.py` (what status, stop and
-the remote probes print and do). `cluster_instance.py`, `bringup.py` (the entry, the probes,
+the remote probes print and do). `cluster_instance.py` (the Postgres half of a native instance and the
+ordered start of the pair), `redis_instance.py` (the Redis half), `start_bounds.py` (the bounds of
+one start and the reachable-address wait both halves share), `bringup.py` (the entry, the probes,
 status, stop, the launch deliveries) and `completion.py` (the final grants, the write generation,
 the pooler and the consumer checks) are their shells: they read the OS user, the platform, the
 machine's addresses and the binaries (`pg_tool`, `redis_*_bin`) and are given the platform,
 execute each step and stop at the first one that fails. A shell `match` over a plan's steps ends
 in `assert_never`, so a step without a branch fails type checking. The bounds a test must
 shorten (the reachable-address wait, the postmaster start, one readiness probe) are the fields
-of `StartTuning`, each defaulting to its production constant. The shell tests run the real
+of `start_bounds.StartTuning`, each defaulting to its production constant. The shell tests run the real
 `postgres` and `redis-server` in the test's own home (`../tests/native_cluster.py`); the plans
 are asserted as values in `../tests/instance/`.
 
@@ -89,15 +91,7 @@ and holds on any catalog/ledger mismatch
 before the pooler. `db_delivery` gives
 each launched service its class login.
 
-## WAL archiving launch arguments
-
-When `MEIVA_WALG_CONFIG_FILE` is set (`DataPlaneConfig.walg_config_file`), `start_pg` appends `archive_mode`,
-`archive_timeout` and `archive_command` (`services.backup.walg.archive.archive_pg_args`)
-to the postmaster's `-c` list; unset adds nothing. The settings live only in the
-launch arguments, and a retained postmaster is reloaded, not relaunched, so they
-take effect at the next new launch. After Postgres is ready, `warn_archive_inactive`
-prints a warning when the running Postgres reports other archive settings
-([[services/backup/walg/docs/walg.meiva.okf.md|WAL-G]]).
+[[wal-archiving|WAL archiving launch arguments]] own the archive settings and when they take effect.
 
 ## Native custody
 
@@ -115,7 +109,7 @@ The layout and bind facts the cli and the root diagnostics must agree on live in
 bind posture (`port_preflight.bind_addrs`: loopback alone on a single box, loopback plus the
 machine's declared reachable address otherwise) and the pooler's binary, files and listener
 probes (`dataplane.pooler`). The data directories are derived from the home the caller hands in
-(`cluster_instance.pg_data_dir(home)`, `redis_data_dir(home)`, `pg_socket_dir(home)`). The cli
+(`cluster_instance.pg_data_dir(home)`, `redis_instance.redis_data_dir(home)`, `cluster_instance.pg_socket_dir(home)`). The cli
 owns bring-up and stop; the diagnostics only look.
 
 ## Pooler and maintenance stop

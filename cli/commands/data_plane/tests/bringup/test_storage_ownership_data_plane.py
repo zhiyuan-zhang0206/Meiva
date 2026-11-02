@@ -27,7 +27,7 @@ from base.native_process.ownership import OwnedProcess
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import maintenance_stop as plane
-from cli.commands.data_plane.cluster_instance import PRODUCTION_TUNING, StartTuning
+from cli.commands.data_plane.native.start_bounds import PRODUCTION_TUNING, StartTuning
 from cli.commands.data_plane.tests.native_cluster import NATIVE_TEST_SYSTEM, NativeCluster
 from cli.commands.data_plane.tests.native_cluster import native_cluster as native_cluster
 from cli.commands.data_plane.tests.native_cluster import retained_children as retained_children

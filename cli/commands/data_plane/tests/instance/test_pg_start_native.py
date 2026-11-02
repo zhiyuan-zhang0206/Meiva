@@ -25,8 +25,8 @@ from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.paths import meiva_home
 from cli.commands.data_plane import cluster_instance as instance
-from cli.commands.data_plane.cluster_instance import StartTuning
 from cli.commands.data_plane.instance.probe import ProbeState
+from cli.commands.data_plane.native.start_bounds import StartTuning
 from cli.commands.data_plane.pg_probe import pg_running
 from cli.commands.data_plane.tests.native_cluster import (
     NATIVE_TEST_SYSTEM,

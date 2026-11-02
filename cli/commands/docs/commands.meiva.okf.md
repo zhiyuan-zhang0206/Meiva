@@ -91,7 +91,7 @@ See [the coordinated operator procedure](../../../docs/conventions/operations/gr
 
 Gateway data-plane startup (`data_plane/cluster_instance`, `data_plane/bringup`,
 `data_plane/pgbouncer`):
-[[cli/commands/data_plane/docs/data-plane-startup.meiva.okf.md|Gateway data-plane startup]].
+[[cli/commands/data_plane/docs/data-plane-startup/data-plane-startup.meiva.okf.md|Gateway data-plane startup]].
 
 ## Notes
 
