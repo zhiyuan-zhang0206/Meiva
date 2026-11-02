@@ -19,7 +19,7 @@ import pytest
 
 from base.events.alarms import open_alarms
 from base.sessions.coding_session_owner_record import full_session_name
-from schedules.jobs.agent_watch import (
+from schedules.jobs.watch.agent_watch import (
     Notice,
     observe,
     read_seat_registries,
@@ -31,7 +31,7 @@ from schedules.jobs.agent_watch import (
     write_seat_state,
     write_state,
 )
-from schedules.plans.agent_watch_rule import (
+from schedules.plans.watch.agent_watch_rule import (
     ESCALATED_REPEAT_SECONDS,
     FIRST_REPEAT_SECONDS,
     REPORT_REPEAT_SECONDS,
@@ -535,7 +535,7 @@ def test_a_refused_send_leaves_the_alarm_on_disk(tmp_path: Path) -> None:
         ("report", f"{_DUTY.agent_id} test duty")
     ]
     assert due[0].delivery_error == "RuntimeError: Connection refused"
-    assert due[0].source == "schedules/jobs/agent_watch.py"
+    assert due[0].source == "schedules/jobs/watch/agent_watch.py"
 
 
 # meiva:note

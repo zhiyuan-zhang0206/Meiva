@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from schedules.jobs.qa_keepalive import (
+from schedules.jobs.watch.qa_keepalive import (
     ENV_AGENT,
     ENV_HOST,
     ENV_PROCESS,
@@ -17,7 +17,7 @@ from schedules.jobs.qa_keepalive import (
     ENV_URL,
     Settings,
 )
-from schedules.plans.keepalive_rule import (
+from schedules.plans.watch.keepalive_rule import (
     BLIND_AFTER_ROUNDS,
     COOLDOWN_SECONDS,
     KeepaliveState,

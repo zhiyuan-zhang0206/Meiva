@@ -7,7 +7,7 @@ import sys
 
 
 def main() -> None:
-    from schedules.jobs import ci_metrics
+    from schedules.jobs.watch import ci_metrics
 
     assert callable(ci_metrics.collect_ci_metrics)
     assert "scripts.ci.pull_requests.runs_api" not in sys.modules

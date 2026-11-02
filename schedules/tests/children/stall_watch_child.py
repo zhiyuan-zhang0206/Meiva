@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from schedules.jobs.stall_watch import StallWatch, run_watch
+from schedules.jobs.watch.stall_watch import StallWatch, run_watch
 
 
 def main(log: str, state: str) -> None:

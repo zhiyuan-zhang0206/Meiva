@@ -1,14 +1,13 @@
-exports = ["adversarial_batch.py", "adversarial_scenario.py", "adversarial_workers.py", "agent_directory.py", "agent_watch.py", "c9_report.py", "catchup.py", "ci_metrics.py", "debt_sweep.py", "dry_import_child.py", "entry.py", "loop.py", "memory_maintenance.py", "model_tracker.py", "qa_keepalive.py", "self_evolution_scan.py", "self_evolution_weekly.py", "stall_watch.py", "telemetry_event.py"]
+exports = ["adversarial_batch.py", "adversarial_scenario.py", "adversarial_workers.py", "agent_directory.py", "c9_report.py", "catchup.py", "debt_sweep.py", "dry_import_child.py", "entry.py", "loop.py", "memory_maintenance.py", "model_tracker.py", "self_evolution_scan.py", "self_evolution_weekly.py", "telemetry_event.py", "watch"]
 
 [loads]
 "dry_import_child.py" = ["schedules"]
 
 [uses]
+"watch" = ["agent_directory.py", "telemetry_event.py"]
 "adversarial_batch.py" = ["adversarial_scenario.py", "adversarial_workers.py", "agent_directory.py"]
 "adversarial_workers.py" = ["agent_directory.py"]
-"agent_watch.py" = ["telemetry_event.py"]
 "c9_report.py" = ["agent_directory.py", "telemetry_event.py"]
-"ci_metrics.py" = ["agent_directory.py"]
 "debt_sweep.py" = ["agent_directory.py", "telemetry_event.py"]
 "loop.py" = ["catchup.py"]
 "memory_maintenance.py" = ["agent_directory.py"]

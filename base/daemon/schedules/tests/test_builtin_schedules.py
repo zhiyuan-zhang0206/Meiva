@@ -86,3 +86,17 @@ class TestLoadManifest:
         )
         with pytest.raises(ManifestError, match="does not exist"):
             load_manifest(path)
+
+
+# meiva:note
+# Every built-in schedule's `script` must resolve next to the manifest and its `command` must run
+# that same path. A schedule whose command names a different file installs and then never starts,
+# which is the failure this repository has already paid for once: "merged" is not "running".
+def test_every_builtin_command_runs_the_script_the_manifest_names() -> None:
+    schedules_dir = Path(__file__).resolve().parents[4] / "schedules"
+    for schedule in load_manifest():
+        script_path = schedules_dir / schedule.script
+        assert script_path.is_file(), f"{schedule.name}: {schedule.script} does not exist"
+        assert schedule.command.split()[-1] == schedule.script, (
+            f"{schedule.name}: command {schedule.command!r} does not run {schedule.script!r}"
+        )

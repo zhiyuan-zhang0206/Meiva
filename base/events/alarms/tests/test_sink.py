@@ -31,7 +31,7 @@ def _raise(home: Path, *, now: datetime = _NOW, kind: str = "burn-rate") -> str:
         judgement="spend above three times the trailing rate",
         reading="2.9h, 37.5 CNY",
         owner="#1818",
-        source="schedules/jobs/agent_watch.py",
+        source="schedules/jobs/watch/agent_watch.py",
         now=now,
     )
     return alarm.id

@@ -27,7 +27,7 @@ from typing import NoReturn
 from zoneinfo import ZoneInfo
 
 import meiva
-from schedules.plans.keepalive_rule import (
+from schedules.plans.watch.keepalive_rule import (
     KeepaliveState,
     RoundContext,
     RoundPlan,

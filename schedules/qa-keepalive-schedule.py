@@ -1,7 +1,7 @@
 # meiva:note
 # A keeper for one site: it watches an HTTP health page and, optionally, a process on a remote
 # host, and wakes the owning agent only after the streak passes the rule in
-# `schedules/plans/keepalive_rule.py`.
+# `schedules/plans/watch/keepalive_rule.py`.
 #
 # Everything site-specific comes from the environment -- `MEIVA_QA_KEEPALIVE_URL`,
 # `MEIVA_QA_KEEPALIVE_AGENT`, `MEIVA_QA_KEEPALIVE_HOST`, and optionally
@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 
 from base.paths.home import resolve_meiva_home
 from schedules.jobs.entry import cluster_timezone
-from schedules.jobs.qa_keepalive import Keepalive, run_keepalive
+from schedules.jobs.watch.qa_keepalive import Keepalive, run_keepalive
 
 HINT = (
     "Recovery: 1) reopen the page and check /health; 2) relaunch the inbound watcher; "

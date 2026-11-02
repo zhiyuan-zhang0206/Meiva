@@ -18,11 +18,11 @@ import pytest
 
 from base.agents.context import MeivaContext
 from meiva.gateway_client import use_client
-from schedules.jobs.stall_watch import StallWatch, initial_state, poll_once
-from schedules.plans.stall_rule import StallSample, WatchState, parse_stats, plan_poll
+from schedules.jobs.watch.stall_watch import StallWatch, initial_state, poll_once
+from schedules.plans.watch.stall_rule import StallSample, WatchState, parse_stats, plan_poll
 from schedules.tests.support.gateway_directory import serve_gateway
 
-_CHILD = Path(__file__).parent / "children" / "stall_watch_child.py"
+_CHILD = Path(__file__).resolve().parents[1] / "children" / "stall_watch_child.py"
 
 
 def _line(minute: int, xacts: int, query_us: int) -> str:
