@@ -6,15 +6,19 @@ langchain-anthropic / langchain-openai all plumb cache + reasoning figures into
 usage_metadata.{input,output}_token_details.
 """
 
+import subprocess
 import sys
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 import pytest
 from langchain_core.messages import AIMessage
 
 from agent.llm.usage import log_llm_usage
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_mapping
 from base.host.proc import run_bounded
 from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
@@ -31,6 +35,16 @@ def _load_provider_plugins() -> None:
 
 def _msgs(records: LogRecords) -> str:
     return "\n".join(r["message"] for r in records)
+
+
+# meiva:note
+# One `extra` figure as a number: the ledger writes these as numbers, and `extras()` hands the
+# values back as `object` so an assertion has to say what it expects before comparing.
+def _number(extra: Mapping[str, object], key: str) -> float:
+    value = extra.get(key)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise TypeError(f"{key} is {type(value).__name__}, not a number")
+    return float(value)
 
 
 def test_deepseek_shape_logs(loguru_records: LogRecords):
@@ -204,8 +218,8 @@ def test_price_snapshot_rides_payload(loguru_records: LogRecords):
         priced_at=datetime(2026, 8, 17, 0, 0, tzinfo=UTC),
         catalog=build_model_catalog(home=meiva_home()),
     )
-    extra = loguru_records[0]["extra"]
-    assert extra["cost_usd"] == pytest.approx(0.0003476)
+    extra = loguru_records.extras()[0]
+    assert _number(extra, "cost_usd") == pytest.approx(0.0003476)
     assert extra["price_miss"] == 0.66
     assert extra["price_hit"] == 0.022
     assert extra["price_out"] == 1.98
@@ -214,7 +228,7 @@ def test_price_snapshot_rides_payload(loguru_records: LogRecords):
 
 
 def test_log_llm_usage_emits_agent_billing_span(tmp_path: Path) -> None:
-    result = run_bounded(
+    result: subprocess.CompletedProcess[str] = run_bounded(
         [sys.executable, "-I", str(Path(__file__).with_name("billing_usage_child.py")), "priced"],
         env={
             "HOME": str(tmp_path),
@@ -231,7 +245,7 @@ def test_log_llm_usage_emits_agent_billing_span(tmp_path: Path) -> None:
 
 
 def test_log_llm_usage_skips_billing_when_usage_metadata_is_incomplete(tmp_path: Path) -> None:
-    result = run_bounded(
+    result: subprocess.CompletedProcess[str] = run_bounded(
         [
             sys.executable,
             "-I",
@@ -267,15 +281,12 @@ def test_price_snapshot_absent_for_unpriced_model(
     log_llm_usage(
         msg, agent_id=7, model="no-such-model", catalog=build_model_catalog(home=meiva_home())
     )
-    usage_record = next(
-        record for record in loguru_records if record["extra"].get("event") == "llm_usage"
-    )
-    extra = usage_record["extra"]
+    extra = loguru_records.extras(event="llm_usage")[0]
     assert "cost_usd" not in extra
     assert "price_miss" not in extra
-    warnings = [record for record in loguru_records if record["level"].name == "WARNING"]
+    warnings = loguru_records.messages("WARNING")
     assert len(warnings) == 1
-    warning = warnings[0]["message"]
+    warning = warnings[0]
     assert "no-such-model" in warning
     assert "base/lm/pricing/pricing_catalog_archive.json" in warning
     assert "plugin price registry" in warning
@@ -317,9 +328,10 @@ def test_message_is_stamped_with_exactly_the_logged_figures(loguru_records: LogR
     log_llm_usage(
         msg, agent_id=7, model="claude-opus-5", catalog=build_model_catalog(home=meiva_home())
     )
-    event = cast("dict[str, Any]", loguru_records[0]["extra"])
-    stamped: dict[str, Any] = msg.additional_kwargs["meiva_usage"]
-    assert stamped["cost_usd"] > 0
+    event = loguru_records.extras()[0]
+    stamped = object_mapping(msg.additional_kwargs).get("meiva_usage")
+    assert is_object_dict(stamped)
+    assert _number(stamped, "cost_usd") > 0
     assert (stamped["cache_write_5m"], stamped["cache_write_1h"]) == (400, 100)
     for key in _EVENT_KEYS:
         assert stamped.get(key) == event.get(key), key
@@ -343,12 +355,11 @@ def test_main_conversation_usage_refuses_missing_identity() -> None:
     msg = AIMessage(
         content="", usage_metadata={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
     )
+    unchecked = cast(Callable[..., object], log_llm_usage)
     with pytest.raises(TypeError, match="agent_id"):
-        cast(Any, log_llm_usage)(
-            msg, model="deepseek-v4-pro", catalog=build_model_catalog(home=meiva_home())
-        )
+        unchecked(msg, model="deepseek-v4-pro", catalog=build_model_catalog(home=meiva_home()))
     with pytest.raises(ValueError, match="explicit agent id"):
-        cast(Any, log_llm_usage)(
+        unchecked(
             msg,
             model="deepseek-v4-pro",
             agent_id=None,
@@ -372,14 +383,14 @@ def test_missing_cache_metering_differs_from_a_measured_zero(
     log_llm_usage(
         msg, agent_id=7, model="deepseek-v4-pro", catalog=build_model_catalog(home=meiva_home())
     )
-    record = next(r for r in loguru_records if r["extra"].get("event") == "llm_usage")
-    extra = record["extra"]
+    extra = loguru_records.extras(event="llm_usage")[0]
+    message = loguru_records.messages()[-1]
     assert extra["in_total"] == 1000
-    assert extra["cost_usd"] > 0
+    assert _number(extra, "cost_usd") > 0
     if cached is None:
         assert "cache_read" not in extra
         assert "cache_write_5m" not in extra
-        assert "cached=" not in record["message"]
+        assert "cached=" not in message
     else:
         assert extra["cache_read"] == cached
-        assert f"cached={cached}" in record["message"]
+        assert f"cached={cached}" in message
