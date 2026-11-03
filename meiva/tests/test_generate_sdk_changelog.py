@@ -18,15 +18,11 @@ _ref_dir = (
     / "reference"
 )
 sys.path.insert(0, str(_ref_dir))
-import generate_sdk_changelog as gsc  # noqa: E402  # type: ignore[import-not-found]
+import generate_sdk_changelog as gsc  # noqa: E402
 
-# The skill under test is a standalone reference file injected via
-# sys.path at runtime — pyright cannot resolve its module type, so every
-# call site reports Unknown. File-level downgrade of the two call-site
-# rules keeps the rest of this file's strict checks intact (audit round-2
-# tests-ci P1, task #1143).
-# pyright: reportUnknownMemberType = warning
-# pyright: reportUnknownArgumentType = warning
+# meiva:note
+# The skill under test is a standalone reference file injected via sys.path at runtime; pyright
+# resolves it through the `extraPaths` of the meiva execution environment.
 
 
 _INIT_V0 = (

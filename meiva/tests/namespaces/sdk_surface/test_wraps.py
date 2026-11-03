@@ -30,15 +30,38 @@ from meiva.sdk_surface import install, wraps
 from meiva.sdk_surface.installation import WrapAdded
 
 
+def _passthrough(inner: Callable[..., object], *a: object, **k: object) -> object:
+    return inner(*a, **k)
+
+
+def _returning(value: str) -> Callable[..., object]:
+    def wrapper(_inner: Callable[..., object], *_a: object, **_k: object) -> object:
+        return value
+
+    return wrapper
+
+
+def _labelled(label: str) -> Callable[..., object]:
+    def wrapper(inner: Callable[..., object], *a: object, **k: object) -> object:
+        return f"{label}({inner(*a, **k)})"
+
+    return wrapper
+
+
 @pytest.fixture
 def probe() -> Iterator[tuple[Any, Any, Any]]:
     """A throwaway root module with a `probe` namespace holding `fn` (documented, with an
     attached member), so wraps target it instead of a real SDK function. Typed `Any` so the
     intentionally dynamic module/function attribute writes stay unchecked."""
 
-    def fn(x, y=1, *, z=2):
+    def fn(x: object, y: object = 1, *, z: object = 2) -> str:
         """probe fn doc."""
         return f"fn({x},{y},{z})"
+
+    # meiva:note
+    # Tests assert the rendered signature text, so the typed test functions carry no annotations
+    # at runtime.
+    fn.__annotations__ = {}
 
     fn_any: Any = fn
     fn_any.MARKER = "attached"  # function-attached member, like meiva.understand.UnderstandError
@@ -106,7 +129,7 @@ def test_wrap_installs_and_stack_lists(probe: tuple[Any, Any, Any], apply: Probe
     """wrap replaces the target; stack reports one (plugin, wrapper) layer."""
     _root, ns, fn = probe
 
-    def w(inner, *a, **k):
+    def w(inner: Callable[..., object], *a: object, **k: object) -> object:
         return inner(*a, **k)
 
     added = apply(w, "myplugin")
@@ -120,7 +143,7 @@ def test_wrap_installs_and_stack_lists(probe: tuple[Any, Any, Any], apply: Probe
 
 
 def test_wrappers_maps_all_targets(probe: tuple[Any, Any, Any], apply: Probe):
-    apply(lambda inner, *a, **k: inner(*a, **k))
+    apply(_passthrough)
     allmap = apply.wrappers()
     assert set(allmap) == {"probe.fn"}
     assert len(allmap["probe.fn"]) == 1
@@ -129,7 +152,7 @@ def test_wrappers_maps_all_targets(probe: tuple[Any, Any, Any], apply: Probe):
 def test_layers_are_attributed_to_their_declaring_plugin(probe: tuple[Any, Any, Any], apply: Probe):
     """Each layer is recorded under the plugin that declared it."""
 
-    def w(inner, *a, **k):
+    def w(inner: Callable[..., object], *a: object, **k: object) -> object:
         return inner(*a, **k)
 
     apply(w, "myplugin")
@@ -141,9 +164,10 @@ def test_signature_drops_inner(probe: tuple[Any, Any, Any], apply: Probe):
     so help()/inspect show the agent-facing arity."""
     _root, ns, _fn = probe
 
-    def w(inner, x, y=1, *, z=2):
+    def w(inner: Callable[..., object], x: object, y: object = 1, *, z: object = 2) -> object:
         return inner(x, y, z=z)
 
+    w.__annotations__ = {}
     apply(w)
     assert str(inspect.signature(ns.fn)) == "(x, y=1, *, z=2)"
 
@@ -153,7 +177,14 @@ def test_added_kwarg_shows_in_signature(probe: tuple[Any, Any, Any], apply: Prob
     (fleet's `label` pattern)."""
     _root, ns, _fn = probe
 
-    def w(inner, x, y=1, *, z=2, extra=None):
+    def w(
+        inner: Callable[..., object],
+        x: object,
+        y: object = 1,
+        *,
+        z: object = 2,
+        extra: object = None,
+    ) -> object:
         return inner(x, y, z=z)
 
     apply(w)
@@ -164,7 +195,7 @@ def test_wrapper_docstring_becomes_contract(probe: tuple[Any, Any, Any], apply: 
     """A wrapper that writes its own docstring supplies the new contract."""
     _root, ns, _fn = probe
 
-    def w(inner, *a, **k):
+    def w(inner: Callable[..., object], *a: object, **k: object) -> object:
         """enhanced doc."""
         return inner(*a, **k)
 
@@ -176,7 +207,7 @@ def test_transparent_wrapper_inherits_docstring(probe: tuple[Any, Any, Any], app
     """A wrapper with no docstring inherits the wrapped function's."""
     _root, ns, _fn = probe
 
-    def w(inner, *a, **k):
+    def w(inner: Callable[..., object], *a: object, **k: object) -> object:
         return inner(*a, **k)
 
     apply(w)
@@ -187,7 +218,7 @@ def test_function_attached_member_carries_through(probe: tuple[Any, Any, Any], a
     """Function-attached members (e.g. meiva.understand.UnderstandError) survive
     the wrap so the agent's documented attribute access keeps working."""
     _root, ns, _fn = probe
-    apply(lambda inner, *a, **k: inner(*a, **k))
+    apply(_passthrough)
     assert ns.fn.MARKER == "attached"
 
 
@@ -196,13 +227,13 @@ def test_stack_last_registered_is_outermost(probe: tuple[Any, Any, Any], apply: 
     _root, ns, _fn = probe
     calls: list[str] = []
 
-    def inner_layer(inner, *a, **k):
+    def inner_layer(inner: Callable[..., object], *a: object, **k: object) -> object:
         calls.append("inner-pre")
         r = inner(*a, **k)
         calls.append("inner-post")
         return r
 
-    def outer_layer(inner, *a, **k):
+    def outer_layer(inner: Callable[..., object], *a: object, **k: object) -> object:
         calls.append("outer-pre")
         r = inner(*a, **k)
         calls.append("outer-post")
@@ -218,7 +249,7 @@ def test_stack_last_registered_is_outermost(probe: tuple[Any, Any, Any], apply: 
 def test_short_circuit_skips_inner(probe: tuple[Any, Any, Any], apply: Probe):
     """A wrapper that does not call inner short-circuits (block / replace)."""
     _root, ns, _fn = probe
-    apply(lambda _inner, *_a, **_k: "blocked")
+    apply(_returning("blocked"))
     assert ns.fn(1) == "blocked"
 
 
@@ -226,7 +257,7 @@ def test_retry_calls_inner_twice(probe: tuple[Any, Any, Any], apply: Probe):
     """A wrapper may call inner multiple times (retry)."""
     _root, ns, _fn = probe
 
-    def double(inner, *a, **k):
+    def double(inner: Callable[..., object], *a: object, **k: object) -> object:
         return f"{inner(*a, **k)}|{inner(*a, **k)}"
 
     apply(double)
@@ -267,7 +298,7 @@ def test_short_circuit_records_an_activation(
     """A plugin layer that skipped inner changed control flow — that is the fact
     philosophy §6 measures, keyed by the ledger's own surface/identifier."""
     _root, ns, _fn = probe
-    apply(lambda _inner, *_a, **_k: "blocked")
+    apply(_returning("blocked"))
 
     assert ns.fn(1) == "blocked"
     assert activations() == [("myplugin", "sdkWraps", "probe.fn", "inner_calls=0")]
@@ -280,7 +311,7 @@ def test_retry_records_an_activation(
 ):
     _root, ns, _fn = probe
 
-    def double(inner, *a, **k):
+    def double(inner: Callable[..., object], *a: object, **k: object) -> object:
         return f"{inner(*a, **k)}|{inner(*a, **k)}"
 
     apply(double)
@@ -297,7 +328,7 @@ def test_transparent_wrap_records_nothing(
     """A layer that calls inner exactly once always runs once installed, so
     counting it would measure the installation rather than the shim."""
     _root, ns, _fn = probe
-    apply(lambda inner, *a, **k: inner(*a, **k))
+    apply(_passthrough)
 
     ns.fn(1)
     assert activations() == []
@@ -329,7 +360,7 @@ def test_activation_recording_never_perturbs_the_call(
     probe: tuple[Any, Any, Any], apply: Probe, loguru_records: list[dict[str, Any]]
 ):
     _root, ns, _fn = probe
-    apply(lambda _inner, *_a, **_k: "blocked")
+    apply(_returning("blocked"))
 
     assert ns.fn(1) == "blocked"
     [warning] = [r for r in loguru_records if r["level"].name == "WARNING"]
@@ -339,7 +370,7 @@ def test_activation_recording_never_perturbs_the_call(
 def test_undo_restores_and_empties(probe: tuple[Any, Any, Any], apply: Probe):
     """The undo restores the original callable and empties the registry."""
     _root, ns, fn = probe
-    added = apply(lambda _inner, *_a, **_k: "wrapped")
+    added = apply(_returning("wrapped"))
     assert ns.fn(1) == "wrapped"
 
     apply.undo(added)
@@ -351,8 +382,8 @@ def test_undo_restores_and_empties(probe: tuple[Any, Any, Any], apply: Probe):
 def test_undoing_newest_first_peels_one_layer_at_a_time(probe: tuple[Any, Any, Any], apply: Probe):
     """With two layers stacked, undoing the outer one leaves the inner one installed and live."""
     _root, ns, fn = probe
-    added_a = apply(lambda inner, *a, **k: f"a({inner(*a, **k)})", "plugin_a")
-    added_b = apply(lambda inner, *a, **k: f"b({inner(*a, **k)})", "plugin_b")
+    added_a = apply(_labelled("a"), "plugin_a")
+    added_b = apply(_labelled("b"), "plugin_b")
     assert ns.fn(0) == "b(a(fn(0,1,2)))"
 
     apply.undo(added_b)
@@ -375,7 +406,7 @@ def test_wrap_captures_the_base_callable_below_a_metering_recorder(
     sampling = fixed_sampling_owner()
     ns.fn = metering.make_recorder(fn, "probe.fn", sampling, None)
 
-    added = apply(lambda inner, *a, **kw: inner(*a, **kw))
+    added = apply(_passthrough)
 
     assert ns.fn("x") == "fn(x,1,2)"  # the chain still runs
 
@@ -390,7 +421,7 @@ def test_wrap_captures_the_base_callable_below_a_metering_recorder(
 # leaves the ledger.
 def test_undo_leaves_a_target_replaced_since_alone(probe: tuple[Any, Any, Any], apply: Probe):
     _root, ns, _fn = probe
-    added = apply(lambda inner, *a, **k: inner(*a, **k))
+    added = apply(_passthrough)
 
     def replacement(x: Any) -> str:
         return f"replaced({x})"
@@ -405,7 +436,7 @@ def test_undo_leaves_a_target_replaced_since_alone(probe: tuple[Any, Any, Any], 
 
 def test_undo_does_not_recreate_a_target_removed_since(probe: tuple[Any, Any, Any], apply: Probe):
     _root, ns, _fn = probe
-    added = apply(lambda inner, *a, **k: inner(*a, **k))
+    added = apply(_passthrough)
 
     del ns.fn
     apply.undo(added)
@@ -421,8 +452,8 @@ def test_undoing_the_older_layer_first_leaves_the_newer_one_installed(
     probe: tuple[Any, Any, Any], apply: Probe
 ):
     _root, ns, _fn = probe
-    added_a = apply(lambda inner, *a, **k: f"a({inner(*a, **k)})", "plugin_a")
-    added_b = apply(lambda inner, *a, **k: f"b({inner(*a, **k)})", "plugin_b")
+    added_a = apply(_labelled("a"), "plugin_a")
+    added_b = apply(_labelled("b"), "plugin_b")
 
     apply.undo(added_a)
 
