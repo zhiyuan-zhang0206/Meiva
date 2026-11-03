@@ -13,7 +13,7 @@ from typing import TypeGuard
 
 from pydantic import JsonValue
 
-from cli.boundary.untyped import object_of
+from base.host.boundary.untyped import object_of
 from cli.commands.extensions.plans.mcp_server_spec import derive_server_name
 
 __all__ = ["auto_detect_mcp", "write_mcp_json"]

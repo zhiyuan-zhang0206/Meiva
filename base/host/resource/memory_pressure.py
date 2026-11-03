@@ -1,13 +1,13 @@
-"""The operating system's own memory-pressure state and per-process footprint.
-
-Two reads, both stateless: `pressure()` is the level the kernel itself reports
-(no threshold of ours is involved), `footprint(pid)` is the memory the kernel
-charges to one process. macOS only today: `kern.memorystatus_vm_pressure_level`
-(1 normal, 2 warning, 4 critical) and `proc_pid_rusage`'s `ri_phys_footprint`,
-which — unlike the RSS `ps` shows — counts compressed and swapped pages. Linux
-has no equivalent state-typed signal (PSI and cgroup events are rates and
-counters), so `host_memory_source()` returns None there and nothing acts on it.
-"""
+# meiva:note
+# The operating system's own memory-pressure state and per-process footprint.
+#
+# Two reads, both stateless: `pressure()` is the level the kernel itself reports
+# (no threshold of ours is involved), `footprint(pid)` is the memory the kernel
+# charges to one process. macOS only today: `kern.memorystatus_vm_pressure_level`
+# (1 normal, 2 warning, 4 critical) and `proc_pid_rusage`'s `ri_phys_footprint`,
+# which, unlike the RSS `ps` shows, counts compressed and swapped pages. Linux
+# has no equivalent state-typed signal (PSI and cgroup events are rates and
+# counters), so `host_memory_source()` returns None there and nothing acts on it.
 
 from __future__ import annotations
 
@@ -23,20 +23,20 @@ PressureLevel = Literal["normal", "warning", "critical"]
 
 _DARWIN_LEVELS: dict[int, PressureLevel] = {1: "normal", 2: "warning", 4: "critical"}
 _RUSAGE_INFO_V2 = 2
-# `struct rusage_info_v2`: a 16-byte uuid, then u64 counters; `ri_phys_footprint`
-# is the 8th of them.
+# meiva:note
+# `struct rusage_info_v2`: a 16-byte uuid, then u64 counters; `ri_phys_footprint` is the 8th of them.
 _PHYS_FOOTPRINT_OFFSET = 16 + 7 * 8
 _RUSAGE_BUFFER_BYTES = 512
 
 
+# meiva:note
+# What the memory guard reads; tests substitute a fake.
 class MemorySource(Protocol):
-    """What the memory guard reads; tests substitute a fake."""
-
     def pressure(self) -> PressureLevel: ...
 
-    def footprint(self, pid: int) -> int:
-        """Bytes the kernel charges to `pid`; 0 when the process is gone."""
-        ...
+    # meiva:note
+    # Bytes the kernel charges to `pid`; 0 when the process is gone.
+    def footprint(self, pid: int) -> int: ...
 
 
 class _DarwinMemory:
@@ -59,6 +59,7 @@ class _DarwinMemory:
         return struct.unpack_from("<Q", buffer, _PHYS_FOOTPRINT_OFFSET)[0]
 
 
+# meiva:note
+# The platform's memory source, or None where the OS exposes no pressure state.
 def host_memory_source() -> MemorySource | None:
-    """The platform's memory source, or None where the OS exposes no pressure state."""
     return _DarwinMemory() if is_macos() else None

@@ -27,6 +27,7 @@ from base import telemetry
 from base.clock.ids import new_uuid
 from base.cluster.machine import GatewayAccess, gateway_auth_headers
 from base.db import Database
+from base.db.rows import query_all, query_one
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
@@ -58,7 +59,6 @@ from gateway.agents.transfer.transfer_plan import (
     verify_cutover_cas,
 )
 from gateway.http.config import GatewayAppState, gateway_rpc, state_as
-from gateway.http.db_rows import query_all, query_one
 from ops.agent_transfer import (
     MAX_BUNDLE_STREAM_BYTES,
     WorkspaceTransferCorruptError,

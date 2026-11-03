@@ -15,9 +15,9 @@ from dataclasses import dataclass
 
 from fastapi import APIRouter, Request
 
+from base.db.rows import query_one
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from gateway.http.config import gateway_rpc, gateway_state
-from gateway.http.db_rows import query_one
-from gateway.http.json_values import is_object_dict, is_object_list
 from gateway.schemas import CommandItem
 from ops.cluster import rpc as cluster_rpc
 

@@ -23,6 +23,7 @@ from decimal import Decimal
 
 import psycopg
 
+from base.db.rows import query_all
 from base.events.contract import (
     LLM_ERROR_FAMILY,
     LLM_USAGE_KEYS,
@@ -46,7 +47,6 @@ from gateway.cluster.schemas import (
     SseReport,
     SseTotals,
 )
-from gateway.http.db_rows import query_all
 
 # meiva:note
 # Window -> (seconds, bucket seconds). Bucket count per window is fixed:

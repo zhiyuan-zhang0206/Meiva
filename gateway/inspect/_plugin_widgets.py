@@ -38,9 +38,9 @@ from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
 from base.agents.tasks.priority import Priority
+from base.db.rows import query_all
 from base.packages.plugins import data_registry
 from base.packages.plugins.surface.inspector import InspectWidgetSpec
-from gateway.http.db_rows import query_all
 from gateway.inspect._plugin_faces import enabled_face_files
 from gateway.inspect.schemas import InspectWidgetResult, InspectWidgetTask
 

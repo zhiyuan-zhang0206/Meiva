@@ -1,4 +1,4 @@
-exports = ["code_version_gate.py", "config.py", "connections.py", "pooled_session.py", "protocols.py", "test_db_guard.py", "tests", "transaction.py"]
+exports = ["code_version_gate.py", "config.py", "connections.py", "pooled_session.py", "protocols.py", "rows.py", "test_db_guard.py", "tests", "transaction.py"]
 
 [dynamic-attrs]
 "protocols.py" = "_DynamicView is the structural type of the configuration view, which answers any slice name by forwarding to the live settings (base/config/_lite.py); a declaration with no body"
@@ -12,7 +12,7 @@ exports = ["code_version_gate.py", "config.py", "connections.py", "pooled_sessio
 "connections.py" = ["code_version_gate.py", "config.py", "pooled_session.py"]
 "handle.py" = ["code_version_gate.py", "config.py", "connections.py"]
 "pooled_session.py" = ["code_version_gate.py", "config.py", "protocols.py"]
-"tests" = ["__init__.py", "code_version_gate.py", "config.py", "connections.py", "pooled_session.py", "test_db_guard.py", "transaction.py"]
+"tests" = ["__init__.py", "code_version_gate.py", "config.py", "connections.py", "pooled_session.py", "rows.py", "test_db_guard.py", "transaction.py"]
 "transaction.py" = ["protocols.py"]
 
 [state]

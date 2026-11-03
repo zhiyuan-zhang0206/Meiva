@@ -26,9 +26,9 @@ from psycopg_pool import ConnectionPool
 
 from base.api_contracts.agent_contract import AgentNotFound
 from base.db import Database
+from base.db.rows import query_one
 from gateway.agents.launch import launch_plan, lifecycle_plan
 from gateway.http.config import GatewayConfig
-from gateway.http.db_rows import query_one
 from ops.cluster import rpc as cluster_rpc
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 

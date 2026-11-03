@@ -21,8 +21,8 @@ from agent.graph.exec.process import (
     run_in_subprocess,
 )
 from base.db.code_version_gate import ProcessDbGate
-from base.host.memory_pressure import PressureLevel
 from base.host.proc import kill_process_tree
+from base.host.resource.memory_pressure import PressureLevel
 from base.native_process.exec_kill_notice import notice_path, read_notice
 from meiva.tests.fixtures.pin_agent import exec_context
 from services.agent_runner.agent_host.exec_memory_guard import (

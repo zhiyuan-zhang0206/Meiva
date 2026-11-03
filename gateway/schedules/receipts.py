@@ -9,9 +9,9 @@ from psycopg import Connection
 from psycopg.types.json import Jsonb
 from pydantic import TypeAdapter
 
+from base.db.rows import query_one
+from base.host.boundary.json_values import is_object_list
 from gateway.http.auth.request_principal import PrincipalScopeError, optional_request_key
-from gateway.http.db_rows import query_one
-from gateway.http.json_values import is_object_list
 from gateway.schedules.rows import ScheduleFullRow
 
 

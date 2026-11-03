@@ -12,9 +12,9 @@ from datetime import datetime
 from fastapi import APIRouter, Request
 from psycopg.types.json import Jsonb
 
+from base.db.rows import query_all, query_one
 from base.db.transaction import write_transaction
 from gateway.http.config import gateway_state
-from gateway.http.db_rows import query_all, query_one
 from gateway.schemas import (
     UserSettingListResponse,
     UserSettingRow,

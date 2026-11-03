@@ -45,8 +45,8 @@ def _rows(value: object) -> _Rows:
 
 # meiva:note
 # `function(*args)` as an `object`, so a call the standard library types as `Any` is read as
-# `object`. The file is shipped to hosts whose installed code predates `cli.boundary`, so it keeps
-# its own copy of `cli.boundary.untyped.object_of`.
+# `object`. The file is shipped to hosts whose installed code predates `base.host.boundary`, so it keeps
+# its own copy of `base.host.boundary.untyped.object_of`.
 def _object_of[**P](function: Callable[P, object], /, *args: P.args, **kwargs: P.kwargs) -> object:
     return function(*args, **kwargs)
 

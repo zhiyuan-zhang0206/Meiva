@@ -1,4 +1,4 @@
-exports = ["atomic_io.py", "brew_pin.py", "config_validators.py", "converge", "db_authority", "env", "exit_codes.py", "git", "memory_pressure.py", "net", "permissions_helper", "private_storage.py", "proc.py", "resource", "runtime_interpreter.py", "system", "tests", "verified_file"]
+exports = ["atomic_io.py", "boundary", "brew_pin.py", "config_validators.py", "converge", "db_authority", "env", "exit_codes.py", "git", "net", "permissions_helper", "private_storage.py", "proc.py", "resource", "runtime_interpreter.py", "system", "tests", "verified_file"]
 
 [uses]
 "brew_pin.py" = ["proc.py"]
@@ -18,7 +18,6 @@ exports = ["atomic_io.py", "brew_pin.py", "config_validators.py", "converge", "d
 "exit_codes.py" = "strict"
 
 [debt.ambient-read]
-"memory_pressure.py#environ ctypes.util.find_library" = { count = 2, owner = "#8237", until = "waits for `_DarwinMemory.pressure` and `_DarwinMemory.footprint` to take the loaded system library from their caller: each asks the library search path (LD_LIBRARY_PATH, PATH) for libc or libproc itself" }
 "proc.py#clock time.monotonic" = { count = 1, owner = "#5816", until = "permanently: wait_owned() takes a clock and defaults it to time.monotonic for a wait on a real process; a monotonic duration source has no better value to hand in" }
 "runtime_interpreter.py#argv sys.flags" = { count = 1, owner = "#8237", until = "waits for nothing that can arrive: `loaded_runtime` reports the launch this interpreter is already running under (`sys.flags.isolated` and `dont_write_bytecode`), and the only way a caller could name those flags is to read the same startup flags of the same interpreter back to it" }
 "runtime_interpreter.py#pid sys.executable" = { count = 1, owner = "#8237", until = "waits for nothing that can arrive: `loaded_runtime` has to name the binary executing this file, and it is also where `LoadedRuntimeError` is raised when the imported modules belong to another installation; a caller could only hand back the path it read from this same interpreter, and a wrong one would describe a runtime the process never ran on" }

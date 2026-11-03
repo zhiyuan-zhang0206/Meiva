@@ -22,8 +22,8 @@ from pathlib import Path
 # Put project root on sys.path so the explicit gateway app factory can be imported.
 # Same pattern as scripts/entrypoints/gateway.py.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from base.host.boundary.json_values import is_object_dict
 from base.host.env.boot_actions import enter_scratch_home
-from gateway.http.json_values import is_object_dict
 
 if __name__ == "__main__":
     enter_scratch_home()

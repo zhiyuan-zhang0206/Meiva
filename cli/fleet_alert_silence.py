@@ -63,7 +63,7 @@ def _is_object_list(value: object) -> TypeGuard[list[object]]:
 # meiva:note
 # `function(*args)` as an `object`, so a call the standard library types as `Any` is read as
 # `object`. This file is piped to the gateway host as source, so it carries its own copy of
-# `cli.boundary.untyped.object_of`.
+# `base.host.boundary.untyped.object_of`.
 def _object_of[**P](function: Callable[P, object], /, *args: P.args, **kwargs: P.kwargs) -> object:
     return function(*args, **kwargs)
 

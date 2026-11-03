@@ -34,6 +34,7 @@ from base.clock import Clock
 from base.cluster.machines import is_paused, lookup_role
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.rows import query_one
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
@@ -50,7 +51,6 @@ from gateway.http.auth.request_principal import (
     request_key,
 )
 from gateway.http.config import EnsureHarnesses
-from gateway.http.db_rows import query_one
 from ops.cluster.rpc import RpcClient
 from ops.lifecycle.launch import spawn_prechecks_blocking
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent

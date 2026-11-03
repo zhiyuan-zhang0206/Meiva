@@ -25,6 +25,7 @@ from base.api_contracts.agent_contract import (
     ProbedHarnessModel,
 )
 from base.db import Database
+from base.db.rows import query_all, query_one
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
@@ -36,7 +37,6 @@ from gateway.http.config import (
     gateway_rpc,
     gateway_state,
 )
-from gateway.http.db_rows import query_all, query_one
 from gateway.http.model_catalog import require_model_catalog
 from gateway.schemas.models import HarnessAvailability
 from ops.cluster.rpc import RpcClient

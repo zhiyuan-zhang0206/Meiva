@@ -18,9 +18,9 @@ from typing import NamedTuple
 import psycopg
 
 from base.api_contracts.agent_contract import HARNESS_BILLING, HarnessBilling
+from base.db.rows import query_all
 from base.events.contract import LLM_USAGE_KEYS
 from base.telemetry.metrics.event_sql import numeric
-from gateway.http.db_rows import query_all
 
 SUBSCRIPTION_SOURCES = tuple(
     sorted(h.value for h, b in HARNESS_BILLING.items() if b is HarnessBilling.SUBSCRIPTION)

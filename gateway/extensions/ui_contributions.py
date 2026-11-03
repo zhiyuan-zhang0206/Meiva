@@ -25,6 +25,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.packages.plugins import enable_config
 from base.packages.plugins.loading.schedule_face import load_plugin_ui_stats_safe
 from base.packages.plugins.manifest import ManifestError, load_manifest
@@ -35,7 +36,6 @@ from gateway.extensions.schemas import (
     UiThemeContribution,
 )
 from gateway.http.config import gateway_state
-from gateway.http.json_values import is_object_dict, is_object_list
 
 router = APIRouter()
 

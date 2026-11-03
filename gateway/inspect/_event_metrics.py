@@ -27,7 +27,7 @@ from typing import LiteralString
 import psycopg
 from psycopg import sql
 
-from gateway.http.db_rows import query_all
+from base.db.rows import query_all
 
 _TERM = re.compile(
     r"sum\((?P<fn>count_over_time|sum_over_time)\(\{(?P<selector>[^}]*)\}\s*\|\s*json"

@@ -26,8 +26,8 @@ from pathlib import Path
 
 import psutil
 
-from base.host.memory_pressure import MemorySource, PressureLevel, host_memory_source
 from base.host.proc import EXEC_DOMAIN_SESSION_ENTRIES
+from base.host.resource.memory_pressure import MemorySource, PressureLevel, host_memory_source
 from base.log import logger
 from base.native_process.exec_kill_notice import write_notice
 

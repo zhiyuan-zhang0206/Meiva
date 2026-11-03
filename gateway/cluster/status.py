@@ -35,6 +35,7 @@ from base.cluster.machine import (
 )
 from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
+from base.db.rows import count_one
 from base.deploy.git.cluster_drift import checkout_head_sha
 from base.deploy.lifecycle import start_serving
 from base.host.resource.reading import ResourceSample
@@ -76,7 +77,6 @@ from gateway.http.config import (
     gateway_state,
     state_as,
 )
-from gateway.http.db_rows import count_one
 from gateway.http.model_catalog import catalog_for_observation, request_catalog
 from gateway.schemas.stats import StatsWindowHours, window_delta
 from ops.cluster import rpc as cluster_rpc

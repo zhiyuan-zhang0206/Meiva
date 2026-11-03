@@ -33,6 +33,8 @@ from base.daemon.schedules.completion_notices import (
     delivery_required_for_agent,
 )
 from base.db import agent_exists
+from base.db.rows import query_one
+from base.host.boundary.json_values import is_object_dict
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.agents.inbound_provenance import request_inbound_provenance
 from gateway.agents.schemas import (
@@ -46,8 +48,6 @@ from gateway.agents.schemas import (
 )
 from gateway.agents.system_note import system_note_blocking as system_note_blocking
 from gateway.http.config import gateway_config, gateway_rpc, gateway_state
-from gateway.http.db_rows import query_one
-from gateway.http.json_values import is_object_dict
 from gateway.http.model_catalog import request_default_model, require_model_catalog
 from ops import lifecycle as _ops
 from ops.agents import get_agent_status

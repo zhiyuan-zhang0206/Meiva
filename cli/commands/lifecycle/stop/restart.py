@@ -23,6 +23,7 @@ from base.deploy.lifecycle.host_exit_message import (
     consume_host_exit_message,
     write_host_exit_message,
 )
+from base.host.boundary.untyped import object_of
 from base.host.exit_codes import RESTART_DECLINED_EXIT_CODE
 from base.host.proc import hosting_exec_domain
 from base.native_process.root_control.client import RootClient
@@ -30,7 +31,6 @@ from base.native_process.root_control.ipc import ResponsePayload
 from base.paths.home import home_checkout_error
 from base.sessions.hosting import hosting_supervised_session
 from base.telemetry import EventPipeline
-from cli.boundary.untyped import object_of
 from cli.commands import _repo
 from cli.commands.lifecycle import root_driver, root_readiness, start
 from cli.commands.lifecycle.root_control.snapshot import root_units

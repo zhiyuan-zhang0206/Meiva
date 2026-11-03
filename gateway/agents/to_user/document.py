@@ -13,9 +13,9 @@ from pydantic import ValidationError
 from base.agents.to_user import ToUserDocument, ToUserReadFailure, ToUserReadRequest
 from base.cluster.machine import gateway_auth_headers
 from base.cluster.machines import MachineGatewayUrlMissing, MachineNotRegistered, lookup
+from base.db.rows import query_one
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.http.config import gateway_config, gateway_rpc, gateway_state
-from gateway.http.db_rows import query_one
 from gateway.http.middleware.error_envelope import error_response
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable
 

@@ -17,6 +17,7 @@ from typing import Annotated
 import psycopg
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from base.db.rows import query_all
 from base.telemetry.metrics.aggregate import (
     build_report_from_aggregate,
     fetch_agent_rollups,
@@ -24,7 +25,6 @@ from base.telemetry.metrics.aggregate import (
 )
 from gateway.events.schemas import AgentMetricsItem, AgentMetricsReport, MetricsMeta, MetricsReport
 from gateway.http.config import gateway_clock, gateway_config, gateway_state
-from gateway.http.db_rows import query_all
 
 router = APIRouter()
 

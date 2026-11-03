@@ -20,6 +20,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.cluster import session_name
+from base.db.rows import query_one
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.deploy.lifecycle.tests.serving_root import observe
 from base.host.env.registry import process_environment
@@ -30,7 +31,6 @@ from base.sessions.pty import client
 from base.sessions.pty.tests.pty_service import PtyServiceProcess, service_socket
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.sessions.pty.tests.pty_shells import wait_for
-from gateway.http.db_rows import query_one
 from gateway.schedules import session_control
 from gateway.schedules.rows import InsertedId
 from gateway.schedules.tests.db_faults import failing_write

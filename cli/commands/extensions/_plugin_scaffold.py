@@ -26,8 +26,8 @@ from pathlib import Path
 from types import ModuleType
 
 from base.cluster.machine import MachineIdentityReader
+from base.host.boundary.untyped import object_of
 from base.packages.plugins.loading.scaffold import ScaffoldFacts
-from cli.boundary.untyped import object_of
 
 
 @dataclass(frozen=True)

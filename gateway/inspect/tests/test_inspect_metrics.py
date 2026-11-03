@@ -13,9 +13,9 @@ from fastapi.testclient import TestClient
 
 from base.clock.tests.fakes import system_clock
 from base.db import Database
+from base.db.rows import query_one
 from base.log.tests.log_records import LogRecords
 from base.telemetry.metrics.observed_metrics import MetricObservation, write_observations
-from gateway.http.db_rows import query_one
 from gateway.inspect import _metrics
 from gateway.inspect.router import InspectAppState, build_query_cache, router
 from gateway.inspect.tests.rows import returned_id

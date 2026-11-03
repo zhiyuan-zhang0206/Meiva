@@ -1,4 +1,4 @@
-exports = ["auth", "config.py", "db_rows.py", "disconnect.py", "error_handlers.py", "json_values.py", "middleware", "model_catalog.py", "process.py"]
+exports = ["auth", "config.py", "disconnect.py", "error_handlers.py", "middleware", "model_catalog.py", "process.py"]
 
 [uses]
 "auth" = ["config.py", "middleware"]

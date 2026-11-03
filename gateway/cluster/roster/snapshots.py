@@ -22,10 +22,10 @@ from datetime import datetime
 from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
+from base.db.rows import query_all
+from base.host.boundary.json_values import is_object_dict
 from gateway.cluster.roster.liveness_snapshot import Snapshot
 from gateway.cluster.roster.roster_rows import RosterRowSpec
-from gateway.http.db_rows import query_all
-from gateway.http.json_values import is_object_dict
 
 
 # meiva:note
