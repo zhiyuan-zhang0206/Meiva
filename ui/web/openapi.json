@@ -17281,6 +17281,17 @@
               }
             ],
             "title": "Machine"
+          },
+          "owner_agent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Agent Id"
           }
         },
         "type": "object",
@@ -17462,6 +17473,17 @@
             ],
             "title": "Owner Plugin"
           },
+          "owner_agent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Agent Id"
+          },
           "placement_status": {
             "type": "string",
             "enum": [
@@ -17568,6 +17590,17 @@
               }
             ],
             "title": "Machine"
+          },
+          "owner_agent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Agent Id"
           }
         },
         "type": "object",
@@ -17641,6 +17674,17 @@
               }
             ],
             "title": "Owner Plugin"
+          },
+          "owner_agent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Agent Id"
           },
           "placement_status": {
             "type": "string",

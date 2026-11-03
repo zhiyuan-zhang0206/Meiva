@@ -1258,6 +1258,7 @@ CREATE TABLE schedules (
     launch_generation     TEXT,                    -- session-host generation the current attempt was launched into (NULL = unknown)
     machine               TEXT NOT NULL CONSTRAINT schedules_machine_nonempty CHECK (btrim(machine) <> ''),
     owner_plugin          TEXT CONSTRAINT schedules_owner_plugin_nonempty CHECK (owner_plugin IS NULL OR btrim(owner_plugin) <> ''),
+    owner_agent_id        BIGINT REFERENCES agents(id),  -- the agent this schedule speaks as; NULL = command-only (task #6102)
     secret_env_vars       TEXT[] NOT NULL DEFAULT '{}'
 );
 COMMENT ON COLUMN schedules.launch_generation IS
@@ -1266,6 +1267,8 @@ COMMENT ON COLUMN schedules.machine IS
     'Name of the machine assigned to execute this schedule. A machine''s local schedule-manager executes only schedules matching its machine name.';
 COMMENT ON COLUMN schedules.owner_plugin IS
     'Plugin directory name that owns and declared this schedule; NULL for operator-created and core builtin schedules.';
+COMMENT ON COLUMN schedules.owner_agent_id IS
+    'Agent this schedule speaks as; NULL for an operator-created schedule that only runs a command. Written into the launched session''s MEIVA_AGENT_ID and into the runner''s bound AgentIdentity, and stamped on schedule_runs.agent_id. Not a privilege boundary: the session token is the cluster agent token either way.';
 COMMENT ON COLUMN schedules.secret_env_vars IS
     'Environment variable names injected into this schedule''s session at launch.';
 CREATE INDEX ON schedules (enabled);

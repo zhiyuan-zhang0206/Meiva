@@ -25,6 +25,7 @@ def _row(
     machine: str = "gateway",
     owner_plugin: str | None = None,
     script: str = "print(1)",
+    owner_agent_id: int | None = None,
 ) -> ScheduleStoreRow:
     return ScheduleStoreRow(
         id=1,
@@ -39,6 +40,7 @@ def _row(
         machine=machine,
         owner_plugin=owner_plugin,
         script=script,
+        owner_agent_id=owner_agent_id,
     )
 
 

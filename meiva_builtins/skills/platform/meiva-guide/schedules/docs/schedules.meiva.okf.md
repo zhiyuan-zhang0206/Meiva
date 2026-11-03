@@ -19,3 +19,8 @@ A **schedule** is a persistent session supervised by the gateway: the gateway ru
 - [[meiva_builtins/skills/docs/skills.meiva.okf.md|Skills index]] — full skills catalog
 - [[gateway/schedules/docs/schedules.meiva.okf.md|Scheduler router]] — `/api/schedules` + session supervision + circuit breaker itself
 - [[meiva/watcher/docs/watcher.meiva.okf.md|Watcher SDK]] — lightweight agent-self background wake-up (contrast: schedule is gateway-managed, survives agent restart)
+
+## Whose identity the script speaks as (`owner_agent_id`)
+A schedule runs with no agent identity by default: `meiva.agents.send_message` still works (the message records the provenance `schedule:<id>`), but every namespace registered **per identity** — `meiva.tasks`, `meiva.ui`, `meiva.watcher` — is absent, and a script that calls one fails at its first write.
+When the script must speak as an agent, pass `owner_agent_id` at creation (or `PUT /api/schedules/<id>` with the field; an explicit `null` clears it). The id is written into the launch environment for a command schedule and into the runner's bound identity for a `.py` script — both, because a `.py` script runs in-process and never reads the environment. An owned schedule is a script carrying that identity, not the agent's turn path: it cannot `compact`, `restart` or `terminate` the agent it speaks for.
+Owner is not a permission: the session already holds the cluster agent token. See [[services/wake/schedule_manager/docs/schedule-identity.meiva.okf.md|the agent a schedule speaks as]].

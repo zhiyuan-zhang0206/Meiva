@@ -3793,6 +3793,7 @@ export interface components {
             description?: string | null;
             enabled: boolean;
             machine?: string | null;
+            owner_agent_id?: number | null;
         };
         ScheduleDraftRequest: {
             nl: string;
@@ -3823,6 +3824,7 @@ export interface components {
             updated_at: string;
             machine: string;
             owner_plugin?: string | null;
+            owner_agent_id?: number | null;
             placement_status: "ok" | "unregistered" | "paused" | "stopped" | "offline";
             placement_reason?: string | null;
         };
@@ -3833,6 +3835,7 @@ export interface components {
             description?: string | null;
             enabled?: boolean | null;
             machine?: string | null;
+            owner_agent_id?: number | null;
         };
         ScheduleView: {
             id: number;
@@ -3846,6 +3849,7 @@ export interface components {
             updated_at: string;
             machine: string;
             owner_plugin?: string | null;
+            owner_agent_id?: number | null;
             placement_status: "ok" | "unregistered" | "paused" | "stopped" | "offline";
             placement_reason?: string | null;
             script: string;
