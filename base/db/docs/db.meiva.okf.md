@@ -65,3 +65,16 @@ its connections and start the borrower. The one fault a real pool cannot be aske
 cancellation, which `base/db/tests/swallowed_cancel.py` holds as `CancelSwallowingPool`: its first
 borrow waits until released and absorbs the first cancellation of that wait, and the interrupt
 watcher's tests drive it instead of subclassing a pool.
+
+## Typed rows
+
+A cursor built with the default row factory hands back `tuple[Any, ...]`, so every column read by
+position (`row[7]`) is untyped and a renamed column moves silently. A query whose result code
+reads is run on `conn.cursor(row_factory=class_row(RowCls))`, where `RowCls` is a frozen dataclass
+declared next to the query with one field per selected column, named as the column (`SELECT ... AS
+name` where the column is computed). `cur.fetchone()` then returns `RowCls | None`, `fetchall()`
+returns `list[RowCls]`, and `fetch_one(cur, context)` returns `RowCls` or raises when the query
+returned no row. `fetch_one` takes the cursor's row type through, so a plain cursor still returns a
+tuple. A column psycopg adapts to a Python type (`int`, `str`, `datetime`, `Decimal`, `list[int]`
+for an array) is declared with that type; a `jsonb` column is declared `object` and narrowed where
+it is read. `dict_row` is not a typed alternative: its values are `Any`.

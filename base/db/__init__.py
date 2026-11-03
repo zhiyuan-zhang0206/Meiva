@@ -11,8 +11,6 @@ writes, wake publish and live-agent reads are owned by `base/agents/inbox/`;
 kernel-only (inbound claim, wait/mark/revert) is in `agent/db/__init__.py`.
 """
 
-from typing import Any
-
 import psycopg
 
 from base.db.config import DbConfig as DbConfig
@@ -27,7 +25,7 @@ from base.db.handle import Database as Database
 from base.db.pooled_session import PG_STATEMENT_TIMEOUT_SET_SQL as PG_STATEMENT_TIMEOUT_SET_SQL
 
 
-def fetch_one(cur: psycopg.Cursor, context: str) -> tuple[Any, ...]:
+def fetch_one[RowT](cur: psycopg.Cursor[RowT], context: str) -> RowT:
     """After `fetchone()`, assert there was a row — for
     `INSERT ... RETURNING` / aggregate queries where SQL contractually
     guarantees "exactly one row". `python -O` swallows assert, so we
