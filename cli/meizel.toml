@@ -25,8 +25,8 @@ exports = ["__main__.py", "commands", "database", "fleet_update", "main.py", "pa
 "start_intent.py" = { kinds = ["environ"], why = "Identity bootstrap precedes Settings: read the birth inputs and pin the resolved home before config imports." }
 
 [debt.ambient-read]
-"start_runtime.py#cwd pathlib.Path.absolute" = { count = 1, owner = "#8237", until = "unreviewed: recorded by #8237 on 2026-11-03" }
-"start_runtime.py#pid sys.executable" = { count = 1, owner = "#8237", until = "unreviewed: recorded by #8237 on 2026-11-03" }
+"start_runtime.py#cwd pathlib.Path.absolute" = { count = 1, owner = "#8237", until = "waits for nothing that can arrive: `admit` absolutizes only the interpreter path it reads from this process, and only a relative `sys.executable` makes `Path.absolute` consult the working directory at all — `admit`'s caller hands in a checkout, never a directory to resolve against, so the one that could be consulted is where this process was launched" }
+"start_runtime.py#pid sys.executable" = { count = 1, owner = "#8237", until = "waits for nothing that can arrive: `admit` fixes the interpreter that will re-exec the runtime for this start, and every caller of it — the observability parser, the restart path and start intent — already runs inside that interpreter; handing the path in would move the same read one frame up, where it is still this process's own executable" }
 
 [debt.restricted-python]
 "init_intent.py#dynamic attribute name" = { count = 3, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }
