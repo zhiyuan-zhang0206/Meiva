@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from math import isfinite
-from typing import Any, NotRequired, TypedDict, TypeGuard
+from typing import NotRequired, TypedDict, TypeGuard
 
 from .errors import ComputerUseError
 
@@ -80,7 +80,7 @@ class AppTarget:
     bundle_id: str | None = None
 
     @staticmethod
-    def schema() -> dict[str, Any]:
+    def schema() -> dict[str, object]:
         """The same explicit process selector for observation and activation."""
         return {
             "oneOf": [

@@ -39,14 +39,14 @@ import math
 import re
 from contextlib import suppress
 from datetime import timedelta
-from typing import Any, Protocol
+from typing import Protocol
 
 from mcp import types
 
 from base import telemetry
 from base.clock import Clock
 from base.log import logger
-from services.desktop.browser.protocol import Request, Response
+from services.desktop.browser.protocol import Response, WireRequest
 
 # meiva:note
 # Expiry sweep cadence: a page is closed on the first pass after its TTL
@@ -74,7 +74,7 @@ _RENEW_PAGE_DESCRIPTION = (
 )
 
 
-def renew_page_tool_dump() -> dict[str, Any]:
+def renew_page_tool_dump() -> dict[str, object]:
     """The daemon-owned ``renew_page`` tool dict, in the same wire shape as the
     upstream tools the daemon passes through verbatim (``types.Tool`` dump):
     appended to ``list_tools`` by ``ChromeMcpDaemon``."""
@@ -228,10 +228,10 @@ class _PageDaemon(Protocol):
     _lock: asyncio.Lock
     pages: PageRegistry
 
-    async def _call(self, name: str, args: dict[str, Any]) -> types.CallToolResult: ...
+    async def _call(self, name: str, args: dict[str, object]) -> types.CallToolResult: ...
 
     async def call_tool(
-        self, name: str, args: dict[str, Any], current_page: int | None
+        self, name: str, args: dict[str, object], current_page: int | None
     ) -> tuple[types.CallToolResult, int | None]: ...
 
 
@@ -242,7 +242,7 @@ def text_of(result: types.CallToolResult) -> str:
 async def forward_legacy_call(
     daemon: _PageDaemon,
     tool: str,
-    args: dict[str, Any],
+    args: dict[str, object],
     conn_page: int | None,
 ) -> tuple[types.CallToolResult, int | None]:
     """Forward one agent-less call with the connection's own page.
@@ -290,7 +290,7 @@ async def release_agent_page(daemon: _PageDaemon, agent_id: int) -> int | None:
 
 
 async def handle_release_agent_page(
-    daemon: _PageDaemon, req: Request, req_id: int | None
+    daemon: _PageDaemon, req: WireRequest, req_id: int | None
 ) -> Response:
     """Release affinity, closing created pages, on a ``release_agent_page`` request.
 
@@ -336,7 +336,7 @@ def _tool_error(text: str) -> types.CallToolResult:
 
 
 async def renew_agent_page(
-    daemon: _PageDaemon, agent_id: int, args: dict[str, Any]
+    daemon: _PageDaemon, agent_id: int, args: dict[str, object]
 ) -> types.CallToolResult:
     """Handle one ``renew_page`` tool call: move the agent page's TTL deadline.
 

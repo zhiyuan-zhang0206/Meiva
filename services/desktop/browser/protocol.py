@@ -18,15 +18,32 @@ on the wire.
 
 from __future__ import annotations
 
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Literal, NotRequired, TypedDict
+
+from pydantic import TypeAdapter
 
 
 class Request(TypedDict):
     id: int
     method: str
     tool: NotRequired[str]  # call_tool only — the upstream tool name
-    args: NotRequired[dict[str, Any]]  # call_tool only — the tool arguments
+    args: NotRequired[dict[str, object]]  # call_tool only — the tool arguments
     agent_id: NotRequired[int]  # call_tool only, optional — keys page affinity per agent
+
+
+# meiva:note
+# A request as the daemon reads it off the wire: every member is optional and still `object`,
+# because a client is not trusted to send the shape `Request` declares. The daemon narrows each
+# member it uses and answers a malformed one with an error instead of failing the connection.
+class WireRequest(TypedDict, total=False):
+    id: object
+    method: object
+    tool: object
+    args: object
+    agent_id: object
+
+
+WIRE_REQUEST = TypeAdapter(WireRequest)
 
 
 # meiva:note

@@ -22,13 +22,13 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any
 
 from mcp import types
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
 from base.config import ConfigBoot
+from base.host.boundary.json_values import is_object_list
 from base.host.net.resilience import retry_asleep
 from base.paths import chrome_mcp_socket, meiva_home
 from services.desktop.browser.mcp_socket_bridge import (
@@ -103,7 +103,11 @@ async def _serve(*, socket_path: Path, timeout_reader: Callable[[], float]) -> N
     async def _list_tools(
         _ctx: object, _params: types.PaginatedRequestParams | None
     ) -> types.ListToolsResult:
-        tools: Any = await link.request({"method": "list_tools"})
+        tools = await link.request({"method": "list_tools"})
+        if not is_object_list(tools):
+            raise TypeError(
+                "the browser daemon answered list_tools with something other than a list"
+            )
         return types.ListToolsResult(tools=[types.Tool.model_validate(t) for t in tools])
 
     # meiva:note
@@ -116,7 +120,7 @@ async def _serve(*, socket_path: Path, timeout_reader: Callable[[], float]) -> N
         )
         return types.CallToolResult.model_validate(result)
 
-    server: Server[Any] = Server("chrome", on_list_tools=_list_tools, on_call_tool=_call_tool)
+    server: Server[object] = Server("chrome", on_list_tools=_list_tools, on_call_tool=_call_tool)
 
     async with stdio_server() as (server_read, server_write):
         await server.run(server_read, server_write, server.create_initialization_options())

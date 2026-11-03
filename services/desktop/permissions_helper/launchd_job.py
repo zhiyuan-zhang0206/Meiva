@@ -29,11 +29,14 @@ import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, TypeGuard
+from typing import Protocol
 
 import psutil
 
 from base.clock import Timers
+from base.host.boundary.fields import optional_str_field
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from base.host.permissions_helper.client import HelperAtSocket
 from base.host.system.cron.mechanics import LAUNCHD_PLIST_MODE
 from base.host.system.hostport import Host
@@ -86,14 +89,6 @@ class LaunchdFacts:
     @property
     def agents_dir(self) -> Path:
         return helper_job_agents_dir(self.user_home)
-
-
-def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
-    return isinstance(value, dict)
-
-
-def _is_object_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
 
 
 def _remaining_sleep(deadline: float, timers: Timers) -> float:
@@ -256,7 +251,7 @@ def executable_pids(executable: Path) -> list[int]:
     return sorted(
         process.pid
         for process in psutil.process_iter(["exe"])
-        if process.info["exe"] and Path(process.info["exe"]).resolve() == target
+        if (exe := optional_str_field(process.info, "exe")) and Path(exe).resolve() == target
     )
 
 
@@ -265,12 +260,12 @@ def retirement_plist(path: Path, home: Path, socket_path: Path, *, uid: int) -> 
     if not stat.S_ISREG(info.st_mode) or info.st_uid != uid or info.st_mode & 0o022:
         raise RuntimeError(f"helper plist is not an owned immutable input: {path}")
     original = path.read_bytes()
-    raw: object = plistlib.loads(original)
-    if not _is_str_dict(raw):
+    raw = object_of(plistlib.loads, original)
+    if not is_object_dict(raw):
         raise TypeError(f"helper plist has invalid launch inputs: {path}")
     environment = raw["EnvironmentVariables"]
     argv = raw["ProgramArguments"]
-    if not _is_str_dict(environment) or not _is_object_list(argv):
+    if not is_object_dict(environment) or not is_object_list(argv):
         raise TypeError(f"helper plist has invalid launch inputs: {path}")
     if (
         raw["Label"] != helper_job_label(home)

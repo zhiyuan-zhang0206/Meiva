@@ -15,17 +15,29 @@ import pytest
 from base.clock.tests.fakes import system_clock
 from base.db import Database
 from base.host.permissions_helper.client import AxNode, AxTreeResult
+from base.host.permissions_helper.wire import (
+    ClickResult,
+    FrontmostApp,
+    PingResult,
+    ScreenSize,
+)
 from base.paths import meiva_home
 from services.desktop.computer import ax_gap
 from services.desktop.computer.ax_gap import Frame, VisualBox
 from services.desktop.computer.errors import ComputerUseError
 from services.desktop.computer.mcp_daemon import ComputerMcpDaemon
-from services.desktop.computer.tests.slices import FakeDesktopHelper, FakeOcr, computer_use_config
+from services.desktop.computer.ocr import OcrItem
+from services.desktop.computer.tests.slices import (
+    FakeDesktopHelper,
+    FakeOcr,
+    computer_use_config,
+    text_block,
+)
 
 WINDOW = (0.0, 0.0, 1000.0, 800.0)
 
 
-def ocr(text: str, x: float, y: float, w: float = 80.0, h: float = 20.0) -> dict[str, Any]:
+def ocr(text: str, x: float, y: float, w: float = 80.0, h: float = 20.0) -> OcrItem:
     return {"text": text, "x": x, "y": y, "w": w, "h": h}
 
 
@@ -105,17 +117,23 @@ class FakeAxHelper(FakeDesktopHelper):
             "elapsed_ms": 1,
         }
 
-    def ping(self, **kw: Any) -> dict[str, Any]:
-        return {"pong": True, "ax_tree_v1": True, "ax_target_v1": True}
+    def ping(self, **kw: Any) -> PingResult:
+        return {
+            "pong": True,
+            "preflight_screen": True,
+            "ax_trusted": True,
+            "ax_tree_v1": True,
+            "ax_target_v1": True,
+        }
 
-    def frontmost_app(self, **kw: Any) -> dict[str, Any]:
+    def frontmost_app(self, **kw: Any) -> FrontmostApp:
         return {"app": "Mail"}
 
-    def click(self, x: float, y: float, **kw: Any) -> dict[str, Any]:
+    def click(self, x: float, y: float, **kw: Any) -> ClickResult:
         self.clicks.append((x, y))
         return {"clicked": {"x": x, "y": y}, "double": False}
 
-    def screen_size(self, **kw: Any) -> dict[str, Any]:
+    def screen_size(self, **kw: Any) -> ScreenSize:
         return {"x": 0.0, "y": 0.0, "w": 1512.0, "h": 982.0, "scale": 2.0}
 
     def ax_tree(self, app: str | None = None, **kw: Any) -> AxTreeResult:
@@ -149,7 +167,7 @@ async def call(
         raise ComputerUseError(resp["error"])
     res = resp["result"]
     assert isinstance(res, dict)
-    return json.loads(res["content"][0]["text"])
+    return json.loads(text_block(res))
 
 
 async def test_include_ocr_gap_appends_only_the_text_the_tree_misses(

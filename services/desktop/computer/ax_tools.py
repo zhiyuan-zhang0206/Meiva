@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any, Literal, NamedTuple
+from typing import Literal, NamedTuple, TypedDict
 
+from base.host.boundary.fields import int_field
 from base.host.permissions_helper.wire import AxNode, AxTreeResult
 
 from . import ax_gap
@@ -256,7 +257,18 @@ def render(
     return "\n".join(lines)
 
 
-def assess_quality(result: AxTreeResult, *, scoped: bool) -> dict[str, Any]:
+# meiva:note
+# The verdict `assess_quality` reaches about one accessibility walk.
+class TreeQuality(TypedDict):
+    ok: bool
+    reason: str | None
+    nodes: int
+    interactive: int
+    partial: bool
+    suggest: str | None
+
+
+def assess_quality(result: AxTreeResult, *, scoped: bool) -> TreeQuality:
     """Whether the tree is worth acting on, and what to do when it is not.
 
     `ok` False means: do not drive this window by element, use the screenshot
@@ -265,7 +277,7 @@ def assess_quality(result: AxTreeResult, *, scoped: bool) -> dict[str, Any]:
     partiality."""
     nodes = result["nodes"]
     partial = bool(result["truncated"] or result["timed_out"] or result["unreadable"])
-    quality: dict[str, Any] = {
+    quality: TreeQuality = {
         "ok": True,
         "reason": "timeout" if result["timed_out"] else None,
         "nodes": result["visited"],
@@ -279,11 +291,11 @@ def assess_quality(result: AxTreeResult, *, scoped: bool) -> dict[str, Any]:
     reason = _unusable_reason(result)
     quality["interactive"] = sum(1 for n in nodes if _is_interactive(n) and _has_frame(n))
     if reason is not None:
-        quality.update(
-            ok=False,
-            reason=reason,
-            suggest=f"AX tree unusable ({reason}: {_REASONS[reason]}): "
-            "use snapshot + find_text/click_text/click, or ax_tree with include_ocr_gap",
+        quality["ok"] = False
+        quality["reason"] = reason
+        quality["suggest"] = (
+            f"AX tree unusable ({reason}: {_REASONS[reason]}): "
+            "use snapshot + find_text/click_text/click, or ax_tree with include_ocr_gap"
         )
     return quality
 
@@ -344,7 +356,7 @@ class TreeArgs(NamedTuple):
     ocr_gap: bool
 
 
-def _args(args: dict[str, Any]) -> TreeArgs:
+def _args(args: dict[str, object]) -> TreeArgs:
     raw_mode = str(args.get("mode") or "interactive")
     if raw_mode == "interactive":
         mode: Mode = "interactive"
@@ -354,7 +366,7 @@ def _args(args: dict[str, Any]) -> TreeArgs:
         mode = "full"
     else:
         raise ComputerUseError(f"mode must be one of {', '.join(_MODES)}, got {raw_mode!r}")
-    max_nodes = int(args.get("max_nodes", DEFAULT_MAX_NODES))
+    max_nodes = int_field(args, "max_nodes") if "max_nodes" in args else DEFAULT_MAX_NODES
     if not 1 <= max_nodes <= _MAX_NODES_LIMIT:
         raise ComputerUseError(f"max_nodes must be 1..{_MAX_NODES_LIMIT}, got {max_nodes}")
     scope = args.get("scope")
@@ -394,7 +406,7 @@ def _cover_frames(nodes: list[AxNode]) -> list[Frame]:
 
 def _visual_gap(
     nodes: list[AxNode], read: ax_gap.GapRead, session: AxSession
-) -> tuple[str, dict[str, Any]]:
+) -> tuple[str, dict[str, object]]:
     """The `px:` block and its report fields; records the boxes on the session
     so `ax_act` press can click them."""
     window = _frame(nodes[0])
@@ -403,7 +415,7 @@ def _visual_gap(
     boxes, hidden = ax_gap.visual_only(read.items, _cover_frames(nodes), window, read.scale)
     session.visual = {n: (b.cx, b.cy, b.text) for n, b in enumerate(boxes, start=1)}
     session.visual_scale = read.scale
-    report: dict[str, Any] = {"visual_only": len(boxes) + hidden}
+    report: dict[str, object] = {"visual_only": len(boxes) + hidden}
     if read.error is not None:
         report["ocr_gap_error"] = read.error
     return (ax_gap.render_visual(boxes, hidden) if boxes else ""), report
@@ -411,14 +423,14 @@ def _visual_gap(
 
 def ax_tree_tool(
     helper: DesktopHelper,
-    args: dict[str, Any],
+    args: dict[str, object],
     agent_id: int,
     scale: float | None,
     session: AxSession,
     stamp: str,
     *,
     home: Path,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """`ax_tree`: read a window's accessibility tree as filtered text."""
     wanted = _args(args)
     app, target = _app_request(helper, args)
@@ -448,7 +460,7 @@ def ax_tree_tool(
         enable_ax=wanted.enable_ax,
     )
     quality = assess_quality(result, scoped=wanted.scope is not None)
-    out: dict[str, Any] = {
+    out: dict[str, object] = {
         "app": result["app"],
         "pid": result["pid"],
         "quality": quality,
@@ -476,7 +488,7 @@ def ax_tree_tool(
 
 
 def _app_request(
-    helper: DesktopHelper, args: dict[str, Any]
+    helper: DesktopHelper, args: dict[str, object]
 ) -> tuple[str | None, dict[str, object] | None]:
     if "target" in args:
         if "app" in args:
@@ -494,7 +506,7 @@ def _app_request(
     return app, None
 
 
-TOOL_DECLARATIONS: list[dict[str, Any]] = [
+TOOL_DECLARATIONS: list[dict[str, object]] = [
     {
         "name": "ax_tree",
         "description": (

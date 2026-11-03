@@ -16,7 +16,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
 
 from base.host.permissions_helper.wire import AxActResult
 
@@ -61,7 +60,7 @@ class AxRequest:
     selection_type: SelectionType | None = None
 
 
-def _string(args: dict[str, Any], key: str, *, nonempty: bool = False) -> str:
+def _string(args: dict[str, object], key: str, *, nonempty: bool = False) -> str:
     value = args.get(key)
     if not isinstance(value, str):
         raise ComputerUseError(f"{key} must be a string")
@@ -72,7 +71,7 @@ def _string(args: dict[str, Any], key: str, *, nonempty: bool = False) -> str:
     return value
 
 
-def _args(args: dict[str, Any]) -> AxRequest:
+def _args(args: dict[str, object]) -> AxRequest:
     element_id = args.get("id")
     match = _ID_RE.fullmatch(element_id) if isinstance(element_id, str) else None
     if match is None:
@@ -99,7 +98,7 @@ def _args(args: dict[str, Any]) -> AxRequest:
     return AxRequest(sid, action)
 
 
-def _selection_request(sid: int, args: dict[str, Any]) -> AxRequest:
+def _selection_request(sid: int, args: dict[str, object]) -> AxRequest:
     text = _string(args, "text", nonempty=True)
     prefix = _string(args, "prefix") if "prefix" in args else None
     suffix = _string(args, "suffix") if "suffix" in args else None
@@ -118,8 +117,8 @@ _VISUAL_ID_RE = re.compile(r"^px:(\d+)$")
 
 
 def _press_visual(
-    helper: DesktopHelper, args: dict[str, Any], session: AxSession
-) -> dict[str, Any]:
+    helper: DesktopHelper, args: dict[str, object], session: AxSession
+) -> dict[str, object]:
     """`px:N` (a visual-only text from `ax_tree(include_ocr_gap)`): the only
     thing that can be done with it is a click at its center."""
     match = _VISUAL_ID_RE.match(str(args["id"]))
@@ -174,11 +173,11 @@ def _attempt(helper: DesktopHelper, table: AxIdTable, request: AxRequest) -> AxA
 
 def ax_act_tool(
     helper: DesktopHelper,
-    args: dict[str, Any],
+    args: dict[str, object],
     _agent_id: int,
     scale: float | None,
     session: AxSession,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """`ax_act`: an AX action or text selection on an `ax_tree` element."""
     if str(args.get("id", "")).startswith("px:"):
         return _press_visual(helper, args, session)
@@ -196,7 +195,7 @@ def ax_act_tool(
         raise ComputerUseError(
             f"element e{sid} is gone or changed in {table.app}: call ax_tree again"
         )
-    out: dict[str, Any] = {
+    out: dict[str, object] = {
         "element": f"e{sid}",
         "action": action,
         "completed": result["completed"],
@@ -216,7 +215,7 @@ def ax_act_tool(
     return out
 
 
-TOOL_DECLARATIONS: list[dict[str, Any]] = [
+TOOL_DECLARATIONS: list[dict[str, object]] = [
     {
         "name": "ax_act",
         "description": (

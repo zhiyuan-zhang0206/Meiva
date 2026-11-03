@@ -18,21 +18,35 @@ dial validate against.
 
 from __future__ import annotations
 
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 
 class Request(TypedDict):
     id: int
     method: str
     tool: NotRequired[str | None]  # call_tool only
-    args: NotRequired[dict[str, Any] | None]  # call_tool only
+    args: NotRequired[dict[str, object] | None]  # call_tool only
     agent_id: NotRequired[int | None]  # the calling agent's identity, stamped by the bridge
+
+
+# meiva:note
+# A request as the daemon reads it off the wire: every member is optional and still `object`,
+# because a client is not trusted to send the shape `Request` declares. The daemon narrows each
+# member it uses and answers a malformed one with an error instead of failing the connection.
+class WireRequest(TypedDict, total=False):
+    id: object
+    method: object
+    tool: object
+    args: object
+    agent_id: object
 
 
 class OkResponse(TypedDict):
     id: int | None  # echoes the request id; None when the request never parsed
     ok: Literal[True]
-    result: dict[str, Any] | list[dict[str, Any]] | str | None  # tool dicts / tool result / "pong"
+    result: (
+        dict[str, object] | list[dict[str, object]] | str | None
+    )  # tool dicts / tool result / "pong"
 
 
 class ErrResponse(TypedDict):

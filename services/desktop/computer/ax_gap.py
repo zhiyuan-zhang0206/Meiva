@@ -15,11 +15,12 @@ still returned, with the error beside it), like `snapshot(include_ocr)`.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import services.desktop.computer.ocr as ocr_mod
+from services.desktop.computer.ocr import OcrItem
 from services.desktop.computer.screen import ScreenHelper, capture_screen
 
 MAX_VISUAL = 40
@@ -40,7 +41,7 @@ class GapRead:
     """One screen read: OCR items (physical pixels), the measured scale, and
     why OCR failed when it did."""
 
-    items: list[dict[str, Any]]
+    items: Sequence[OcrItem]
     scale: float
     error: str | None
 
@@ -60,7 +61,7 @@ def _inside(x: float, y: float, frame: Frame) -> bool:
 
 
 def visual_only(
-    items: list[dict[str, Any]],
+    items: Sequence[OcrItem],
     covers: list[Frame],
     window: Frame,
     scale: float,
@@ -75,11 +76,11 @@ def visual_only(
     seen: set[tuple[str, int, int]] = set()
     found: list[VisualBox] = []
     for item in items:
-        text = str(item["text"]).strip()
+        text = item["text"].strip()
         if not text:
             continue
-        cx = float(item["x"]) + float(item["w"]) / 2
-        cy = float(item["y"]) + float(item["h"]) / 2
+        cx = item["x"] + item["w"] / 2
+        cy = item["y"] + item["h"] / 2
         lx, ly = cx / scale, cy / scale
         if not _inside(lx, ly, window) or any(_inside(lx, ly, c) for c in covers):
             continue
@@ -87,9 +88,7 @@ def visual_only(
         if key in seen:
             continue
         seen.add(key)
-        found.append(
-            VisualBox(text, round(cx), round(cy), round(float(item["w"])), round(float(item["h"])))
-        )
+        found.append(VisualBox(text, round(cx), round(cy), round(item["w"]), round(item["h"])))
     found.sort(key=lambda b: (b.cy, b.cx))
     return found[:limit], max(0, len(found) - limit)
 

@@ -75,6 +75,7 @@ TESTS_OWING_ANY: tuple[str, ...] = (
     "scripts/model_registry",
     "scripts/verify",
     "services/derived",
+    "services/desktop",
     "services/entrypoints",
 )
 

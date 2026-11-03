@@ -17,13 +17,18 @@ from base.clock.tests.fakes import system_clock
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.permissions_helper.client import AxNode, AxTreeResult
+from base.host.permissions_helper.wire import (
+    FrontmostApp,
+    PingResult,
+    ScreenSize,
+)
 from base.paths import meiva_home
 
 from .. import ax_tools as ax
 from ..errors import ComputerUseError
 from ..mcp_daemon import ComputerMcpDaemon
 from ..screen import DesktopHelper
-from .slices import FakeDesktopHelper, computer_use_config
+from .slices import FakeDesktopHelper, computer_use_config, text_block
 
 
 def node(
@@ -173,7 +178,7 @@ def test_quality_ok_for_a_usable_tree() -> None:
 def test_quality_no_window() -> None:
     q = ax.assess_quality(result([]), scoped=False)
     assert q["ok"] is False and q["reason"] == "no_window"
-    assert "snapshot" in q["suggest"]
+    assert q["suggest"] is not None and "snapshot" in q["suggest"]
 
 
 def test_quality_sparse_vs_electron_not_exposed() -> None:
@@ -198,7 +203,8 @@ def test_chromium_apps_get_a_reason_that_says_what_the_enable_step_did(
     nodes = [window(1), node(2, 1, "AXGroup", depth=1)]
     q = ax.assess_quality(result(nodes, framework="chromium", ax_enable=ax_enable), scoped=False)
     assert q["ok"] is False and q["reason"] == reason
-    assert reason in q["suggest"] and "include_ocr_gap" in q["suggest"]
+    suggest = q["suggest"]
+    assert suggest is not None and reason in suggest and "include_ocr_gap" in suggest
 
 
 def test_a_helper_that_predates_ax_enable_still_gets_a_quality_verdict() -> None:
@@ -242,20 +248,26 @@ class FakeAxHelper(FakeDesktopHelper):
         self.target_supported = True
         self.tree = result(compose_window())
 
-    def ping(self, **kw: Any) -> dict[str, Any]:
+    def ping(self, **kw: Any) -> PingResult:
         self.calls.append(("ping", {}))
         return (
-            {"pong": True, "ax_tree_v1": True, "ax_target_v1": self.target_supported}
+            {
+                "pong": True,
+                "preflight_screen": True,
+                "ax_trusted": True,
+                "ax_tree_v1": True,
+                "ax_target_v1": self.target_supported,
+            }
             if self.supported
-            else {"pong": True}
+            else {"pong": True, "preflight_screen": True, "ax_trusted": True}
         )
 
-    def frontmost_app(self, **kw: Any) -> dict[str, Any]:
+    def frontmost_app(self, **kw: Any) -> FrontmostApp:
         if self.forbid_frontmost:
             pytest.fail("explicit AX targets must not select the foreground app")
         return {"app": "Mail"}
 
-    def screen_size(self, **kw: Any) -> dict[str, Any]:
+    def screen_size(self, **kw: Any) -> ScreenSize:
         return {"x": 0.0, "y": 0.0, "w": 1512.0, "h": 982.0, "scale": 2.0}
 
     def ax_tree(self, app: str | None = None, **kw: Any) -> AxTreeResult:
@@ -290,7 +302,7 @@ async def call_ax(
         raise ComputerUseError(resp["error"])
     res = resp["result"]
     assert isinstance(res, dict)
-    return json.loads(res["content"][0]["text"])
+    return json.loads(text_block(res))
 
 
 async def test_ax_tree_defaults_to_the_frontmost_app_and_renders(

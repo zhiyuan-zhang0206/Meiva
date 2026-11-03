@@ -25,7 +25,6 @@ from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from mcp import ClientSession, types
 from mcp.shared.exceptions import MCPError
@@ -40,6 +39,7 @@ from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig, db_config_from_boot
+from base.host.boundary.json_values import is_object_dict
 from base.host.exit_codes import hard_exit
 from base.log import logger
 from base.native_process.code_version import CodeVersion
@@ -70,7 +70,7 @@ from services.desktop.browser.page_lifecycle import (
     renew_page_tool_dump,
     text_of,
 )
-from services.desktop.browser.protocol import Request, Response
+from services.desktop.browser.protocol import WIRE_REQUEST, Response, WireRequest
 from services.desktop.browser.tab_groups.grouping import (
     AgentTabGroups,
     ExtensionWorker,
@@ -112,7 +112,7 @@ def _page_id(value: object) -> int | None:
 
 # meiva:note
 # True for a `new_page` into an isolated browser context (invisible to extensions).
-def _in_isolated_context(args: dict[str, Any]) -> bool:
+def _in_isolated_context(args: dict[str, object]) -> bool:
     return args.get("isolatedContext") is not None
 
 
@@ -159,7 +159,7 @@ class ChromeMcpDaemon:
     # Forward to upstream, flagging `dead` on session death and releasing the page's
     # tab group first on `close_page` (best-effort).
     # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
-    async def _call(self, name: str, args: dict[str, Any]) -> types.CallToolResult:
+    async def _call(self, name: str, args: dict[str, object]) -> types.CallToolResult:
         if name == "close_page":
             closing = _page_id(args.get("pageId"))
             if closing is not None:
@@ -175,7 +175,7 @@ class ChromeMcpDaemon:
                 raise RuntimeError(UPSTREAM_DOWN_MSG) from e
             raise
 
-    async def list_tools(self) -> list[dict[str, Any]]:
+    async def list_tools(self) -> list[dict[str, object]]:
         async with self._lock:
             if self._tools is None:
                 try:
@@ -199,7 +199,7 @@ class ChromeMcpDaemon:
     # meiva:note
     # Forward one call under the serial lock, pinned to `current_page`.
     async def call_tool(
-        self, name: str, args: dict[str, Any], current_page: int | None
+        self, name: str, args: dict[str, object], current_page: int | None
     ) -> tuple[types.CallToolResult, int | None]:
         if name == RENEW_PAGE_TOOL:
             return _renew_requires_agent_result(), current_page
@@ -209,7 +209,7 @@ class ChromeMcpDaemon:
     # meiva:note
     # Forward one call pinned to the agent's page (per-agent affinity).
     async def call_tool_for_agent(
-        self, name: str, args: dict[str, Any], agent_id: int
+        self, name: str, args: dict[str, object], agent_id: int
     ) -> types.CallToolResult:
         if name == RENEW_PAGE_TOOL:
             return await renew_agent_page(self, agent_id, args)
@@ -235,7 +235,9 @@ class ChromeMcpDaemon:
 
     # meiva:note
     # Forward a `new_page`, register its TTL deadline, and group it for the agent.
-    async def _new_page(self, args: dict[str, Any], agent_id: int | None) -> types.CallToolResult:
+    async def _new_page(
+        self, args: dict[str, object], agent_id: int | None
+    ) -> types.CallToolResult:
         group = agent_id is not None
         if group and _in_isolated_context(args):
             group = False
@@ -255,7 +257,7 @@ class ChromeMcpDaemon:
         return result
 
     async def _bootstrap_page(
-        self, name: str, args: dict[str, Any], *, agent_id: int | None
+        self, name: str, args: dict[str, object], *, agent_id: int | None
     ) -> tuple[types.CallToolResult, int | None]:
         """No tab of our own to act on. navigate_page can bootstrap one; anything else fails
         fast instead of touching another client's tab."""
@@ -267,7 +269,7 @@ class ChromeMcpDaemon:
     async def _affinity_call(
         self,
         name: str,
-        args: dict[str, Any],
+        args: dict[str, object],
         current_page: int | None,
         agent_id: int | None = None,
     ) -> tuple[types.CallToolResult, int | None]:
@@ -296,7 +298,7 @@ class ChromeMcpDaemon:
 
     @staticmethod
     def _next_page(
-        name: str, args: dict[str, Any], result: types.CallToolResult, current_page: int | None
+        name: str, args: dict[str, object], result: types.CallToolResult, current_page: int | None
     ) -> int | None:
         """The connection's current page after this call resolved."""
         if result.is_error:
@@ -317,36 +319,35 @@ _ConnPage = int | None  # the connection's current page
 
 
 async def _call_tool_response(
-    daemon: ChromeMcpDaemon, req: Request, req_id: int | None, conn_page: _ConnPage
+    daemon: ChromeMcpDaemon, req: WireRequest, req_id: int | None, conn_page: _ConnPage
 ) -> tuple[Response, _ConnPage]:
     """Serve a `call_tool` request; the response and the connection's page afterwards."""
     tool = req.get("tool")
-    if not tool:
+    if not isinstance(tool, str) or not tool:
         # meiva:note
         # Missing/empty tool name: reject at the protocol edge
         # instead of forwarding a nameless call the upstream
         # would reject with a less legible error.
-        return {
-            "id": req_id,
-            "ok": False,
-            "error": "call_tool requires a non-empty 'tool' name",
-        }, conn_page
+        error = "call_tool requires a non-empty 'tool' name"
+        return {"id": req_id, "ok": False, "error": error}, conn_page
+    raw_args = req.get("args")
+    if raw_args is not None and not is_object_dict(raw_args):
+        return {"id": req_id, "ok": False, "error": "args must be an object"}, conn_page
+    args = raw_args or {}
     agent_id = req.get("agent_id")
     # meiva:note
     # bool is an int subclass — reject it so a JSON
     # `true` can never alias another agent's slot.
     if isinstance(agent_id, int) and not isinstance(agent_id, bool):
-        result = await daemon.call_tool_for_agent(tool, req.get("args") or {}, agent_id)
+        result = await daemon.call_tool_for_agent(tool, args, agent_id)
     else:
-        result, conn_page = await page_lifecycle.forward_legacy_call(
-            daemon, tool, req.get("args") or {}, conn_page
-        )
+        result, conn_page = await page_lifecycle.forward_legacy_call(daemon, tool, args, conn_page)
     return {"id": req_id, "ok": True, "result": result.model_dump(mode="json")}, conn_page
 
 
 async def _respond(
     daemon: ChromeMcpDaemon,
-    req: Request,
+    req: WireRequest,
     req_id: int | None,
     method: str | None,
     conn_page: _ConnPage,
@@ -372,8 +373,8 @@ async def _serve_line(
 ) -> _ConnPage:
     """Parse, serve and answer one request line; the connection's page afterwards."""
     try:
-        req: Request = json.loads(line)
-    except json.JSONDecodeError as e:
+        req = WIRE_REQUEST.validate_json(line)
+    except ValueError as e:
         _write(writer, {"id": None, "ok": False, "error": f"JSON parse error: {e}"})
         await writer.drain()
         return conn_page
