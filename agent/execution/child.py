@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import contextlib
+import io
 import json
 import os
 import random
@@ -16,7 +17,7 @@ import traceback
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Literal, Protocol, TypeGuard
+from typing import Literal, Protocol
 
 from agent.execution.delivery_plan import (
     delivers_telemetry,
@@ -26,6 +27,8 @@ from agent.execution.delivery_plan import (
 from agent.execution.protocol import RequestPayload, ResultPayload
 from base.agents.context import MeivaContext, deferred_event_bus
 from base.agents.context.clients import ClientSet
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.host.env.agent_env import AGENT_ID_ENV
 from base.log import logger
 
@@ -51,10 +54,23 @@ class _FieldSetter(Protocol):
 
 class _Sdk(Protocol):
     state: object
-    state_update: dict[str, Any]
 
+    # meiva:note
+    # The module declares `state_update: dict[str, Any]` but the slot holds whatever a plugin set
+    # (`process_context.set_state_update(value: object)`), so this pair reads the value as `object`
+    # and the child narrows it before it reaches an envelope.
+    @property
+    def state_update(self) -> object: ...
+
+    @state_update.setter
+    def state_update(self, value: object) -> None: ...
+
+    # meiva:note
+    # `validate_state` is `base.packages.plugins.loading.StateGate`; naming that alias would import
+    # the plugin stack this module keeps off its import path, so the view accepts any callable and
+    # the SDK's own signature checks the argument.
     def ensure_plugins_loaded(
-        self, *, surface: bool, validate_state: Callable[[Any], object]
+        self, *, surface: bool, validate_state: Callable[..., object] | None
     ) -> None: ...
 
 
@@ -71,10 +87,12 @@ def import_runtime(boot_started_at: float) -> ChildContext:
 
 
 def line_buffered_output() -> None:
+    # meiva:note
+    # `sys.stdout`/`sys.stderr` are typed `TextIO | Any`; a launched child's streams are
+    # `TextIOWrapper`, the one stream type that carries `reconfigure`.
     for stream in (sys.stdout, sys.stderr):
-        reconfigure = getattr(stream, "reconfigure", None)
-        if reconfigure is not None:
-            reconfigure(line_buffering=True)
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(line_buffering=True)
 
 
 def _install_signal_handlers() -> None:
@@ -104,10 +122,6 @@ def _arm_watchdog(timeout_s: float) -> None:
     timer.start()
 
 
-def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
-    return isinstance(value, dict)
-
-
 def pop_overlay_env() -> tuple[dict[str, object] | None, dict[str, object] | None]:
     import json as _json
 
@@ -119,10 +133,10 @@ def pop_overlay_env() -> tuple[dict[str, object] | None, dict[str, object] | Non
         if not raw:
             maps[env_name] = None
             continue
-        value: object = _json.loads(raw)
-        if not _is_object_dict(value):
+        value = object_of(_json.loads, raw)
+        if not is_object_dict(value):
             raise TypeError(f"{env_name} must be a JSON object, got {type(value).__name__}")
-        maps[env_name] = {str(k): v for k, v in value.items()}
+        maps[env_name] = value
     return (
         maps[AGENT_BIRTH_CONFIG_ENV],
         maps[AGENT_CONFIG_OVERLAY_ENV],
@@ -175,7 +189,7 @@ def _agent_id_of(environ: Mapping[str, str]) -> int | None:
 def init_logger(
     agent_id: int | None,
     *,
-    producer: Callable[[], Any],
+    clients: ClientSet,
     machine_reader: Callable[[], str],
     environ: Mapping[str, str],
     home: Path,
@@ -191,7 +205,7 @@ def init_logger(
         add_event_sink(
             process="agent-exec",
             agent_id=agent_id,
-            producer=producer,
+            producer=clients.event_pipeline,
             machine_reader=machine_reader,
             home=home,
         )
@@ -204,7 +218,7 @@ def init_logger(
         return
     from base.telemetry.delivery.defer_plan import child_defer_plan
 
-    producer().defer_exports(child_defer_plan(environ))
+    clients.event_pipeline().defer_exports(child_defer_plan(environ))
 
 
 def emit_child_boot_timing(child: ChildContext, *, clients: ClientSet, now: float) -> None:
@@ -222,6 +236,15 @@ def emit_child_boot_timing(child: ChildContext, *, clients: ClientSet, now: floa
 
 
 class _LazyStateSlot:
+    # meiva:note
+    # The proxy's own fields are declared so a method reads them as their real types: `__getattr__`
+    # forwards every other name to the state object and `__setattr__` writes through to it, so the
+    # constructor keeps `object.__setattr__` and only attribute reads use the declared types.
+    _payload: RequestPayload
+    _meiva: _Sdk
+    _home: Path
+    _real: object | None
+
     def __init__(self, payload: RequestPayload, meiva: _Sdk, home: Path) -> None:
         object.__setattr__(self, "_payload", payload)
         object.__setattr__(self, "_meiva", meiva)
@@ -229,33 +252,32 @@ class _LazyStateSlot:
         object.__setattr__(self, "_real", None)
 
     def materialize(self) -> None:
-        if object.__getattribute__(self, "_real") is not None:
+        if self._real is not None:
             return
 
-        meiva: _Sdk = object.__getattribute__(self, "_meiva")
+        meiva = self._meiva
+        home = self._home
         from agent.state import build_agent_state, plugin_state_schema
 
         meiva.ensure_plugins_loaded(surface=False, validate_state=plugin_state_schema)
-        payload: RequestPayload = object.__getattribute__(self, "_payload")
         from base.packages.plugins.loading.registry import build_registry
 
-        state_cls = build_agent_state(
-            build_registry(
-                validate_state=plugin_state_schema, home=object.__getattribute__(self, "_home")
-            )
-        )
-        snapshot = payload.materialize_state()
+        state_cls = build_agent_state(build_registry(validate_state=plugin_state_schema, home=home))
+        snapshot = self._payload.materialize_state()
         real = state_cls.model_validate(snapshot)
         object.__setattr__(self, "_real", real)
         meiva.state = real
 
+    # meiva:note
+    # The name arrives from agent code at run time; the value leaves as `object` and the caller
+    # narrows it, which is what `base.host.boundary.untyped` means by reading a dynamic attribute.
     def __getattr__(self, name: str) -> object:
         self.materialize()
-        return getattr(object.__getattribute__(self, "_real"), name)
+        return object_of(getattr, self._real, name)
 
     def __setattr__(self, name: str, value: object) -> None:
         self.materialize()
-        setattr(object.__getattribute__(self, "_real"), name, value)
+        setattr(self._real, name, value)
 
 
 def build_state_slot(child: ChildContext, payload: RequestPayload, *, home: Path) -> None:
@@ -271,7 +293,7 @@ def _take_result_state_update(
     if not state_injected:
         return
     update = child.meiva.state_update
-    if not isinstance(update, dict):
+    if not is_object_dict(update):
         payload.state_update_error = (
             f"plugin tampered with meiva.state_update: expected dict, got {type(update).__name__}"
         )
@@ -324,14 +346,15 @@ def run_code(code: str, payload: ResultPayload) -> None:
     register_agent_source(code)
     import builtins
 
-    builtins_map: dict[str, Any] = (
-        {str(k): v for k, v in __builtins__.items()}
-        if _is_object_dict(__builtins__)
-        else dict(vars(builtins))
-    )
+    # meiva:note
+    # `__builtins__` is untyped and differs in shape (a dict in an imported module, the module in
+    # `__main__`); `vars(builtins)` is the same mapping this module's `__builtins__` holds.
+    builtins_map: dict[str, object] = dict(vars(builtins))
     original_help = builtins_map["help"]
+    if not callable(original_help):
+        raise TypeError("builtins.help is not callable")
     builtins_map["help"] = HelpRouter(original_help, meiva_help=meiva.help)
-    fresh_globals: dict[str, Any] = {
+    fresh_globals: dict[str, object] = {
         "__name__": "__agent_code__",
         "__builtins__": builtins_map,
     }
@@ -468,7 +491,7 @@ def run_child(
     home = resolve_meiva_home()
     init_logger(
         _agent_id_of(os.environ),
-        producer=context.clients.event_pipeline,
+        clients=context.clients,
         machine_reader=context.require_machine().name,
         environ=os.environ,
         home=home,
@@ -488,7 +511,7 @@ def run_child(
 
     init_logger(
         request.agent_id,
-        producer=meiva.context.clients.event_pipeline,
+        clients=meiva.context.clients,
         machine_reader=context.require_machine().name,
         environ=os.environ,
         home=home,
@@ -543,6 +566,17 @@ def run_child(
     deliver_run_telemetry(result_path, payload, clients=context.clients)
 
 
+# meiva:note
+# Release the SDK context only when this process got far enough to import it: a boot failure before
+# that point must not turn its crash path into an import of the module that failed to load.
+def _unbind_exec_context() -> MeivaContext | None:
+    if "meiva.sdk_surface.process_context" not in sys.modules:
+        return None
+    from meiva.sdk_surface.process_context import unbind_context
+
+    return unbind_context()
+
+
 def main() -> None:
     boot_started_at = time.perf_counter()
     request_path = os.environ.get("MEIVA_EXEC_REQUEST_FILE")
@@ -573,8 +607,7 @@ def main() -> None:
 
         deliver_envelope_telemetry(clients=clients)
     finally:
-        slot = sys.modules.get("meiva.sdk_surface.process_context")
-        context = None if slot is None else slot.unbind_context()
+        context = _unbind_exec_context()
         if context is not None and context.clients is not clients:
             context.clients.close()
         if clients is not None:

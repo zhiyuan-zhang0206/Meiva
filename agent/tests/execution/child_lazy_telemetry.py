@@ -62,7 +62,7 @@ def identity_child_record() -> dict[str, Any]:
         clients = ClientSet(pipeline_factory=lambda: pipeline)
         exec_child.init_logger(
             999999,
-            producer=clients.event_pipeline,
+            clients=clients,
             machine_reader=lambda: "lazy-child-probe",
             environ={},
             home=Path(home),
