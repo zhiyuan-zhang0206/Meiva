@@ -17,6 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { InlineError } from "@/components/ui/inline-error";
 import { useWallDate } from "@/lib/format/now/use-wall-date";
 import { formatRelative } from "@/lib/format/time";
 import type { ClusterPanel, MachineStatus, SystemStatus } from "@/lib/contracts/types";
@@ -30,6 +31,7 @@ import { useApi } from "@/lib/transport/transport-context";
 export default function StatusPage() {
   const client = useApi();
   const t = useTranslations("insights.status");
+  const tCommon = useTranslations("common");
   const visible = useSectionVisible();
   // Shares SYSTEM_STATUS_QUERY_KEY with the other /api/status observers (the
   // sidebar SpawnButton, machine badges, Config) — one key, one poll loop per
@@ -37,7 +39,7 @@ export default function StatusPage() {
   // hook watches /api/cluster/status only — see use-cluster-health.ts), so
   // this visibility-gated 15s interval is what keeps the Status view fresh
   // on this route.
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: SYSTEM_STATUS_QUERY_KEY,
     queryFn: client.getSystemStatus,
     refetchInterval: 15_000,
@@ -56,8 +58,10 @@ export default function StatusPage() {
     // line; a failure WITH cached data keeps showing the data (stale-while-
     // error, Task #1051) instead of swapping the panel for an error page.
     return (
-      <div className="p-8 text-center text-sm text-muted-foreground">
-        {t("couldNotReach")}
+      <div className={cn("p-8 justify-center", FLEX)}>
+        <InlineError onRetry={() => void refetch()} retryLabel={tCommon("retry")}>
+          {t("couldNotReach")}
+        </InlineError>
       </div>
     );
   }

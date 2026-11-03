@@ -244,11 +244,11 @@ describe("TaskGraph hover card grace window and states", () => {
     await waitFor(() => expect(screen.getByText("Failed to load tasks.")).toBeTruthy());
   });
 
-  it("stale-while-error: error WITH tasks keeps the board (not the failure screen) and flags stale", async () => {
+  it("stale-while-error: error WITH tasks keeps the board quietly (not the failure screen, no stale badge)", async () => {
     renderGraph(sampleTasks(), { fetchRejects: true });
 
     await waitFor(() => expect(screen.getAllByText(/#2/).length).toBeGreaterThan(0), { timeout: 4000 });
     expect(screen.queryByText("Failed to load tasks.")).toBeNull();
-    await waitFor(() => expect(screen.getByText("Stale")).toBeTruthy());
+    expect(screen.queryByText("Stale")).toBeNull();
   });
 });

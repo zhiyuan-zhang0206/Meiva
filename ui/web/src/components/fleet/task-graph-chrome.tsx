@@ -180,19 +180,6 @@ function StatusToggleButton({
   );
 }
 
-export function StaleBadge({ show }: { show: boolean }) {
-  const t = useTranslations("fleet.task");
-  if (!show) return null;
-  return (
-    <span
-      className="inline-flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400"
-    >
-      <span className="size-1.5 rounded-full bg-amber-500" />
-      {t("stale")}
-    </span>
-  );
-}
-
 const TASK_WINDOW_VALUES: readonly TaskWindow[] = ["24h", "7d", "30d", "all"];
 
 export function FilterCluster({

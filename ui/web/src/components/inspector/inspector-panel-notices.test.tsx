@@ -177,7 +177,7 @@ describe("InspectorPanel", () => {
     await waitFor(() => expect(screen.getByText("boom")).toBeTruthy());
   });
 
-  it("stale refresh: a failed background poll keeps the sections and shows the stale dot (no cold-error swap)", async () => {
+  it("stale refresh: a failed background poll keeps the sections quietly (no stale dot, no cold-error swap)", async () => {
     const qc = createInspectorQueryClient();
     getAgentInspectStatistics.mockResolvedValueOnce(fixture());
     renderWithBrowser(
@@ -192,7 +192,7 @@ describe("InspectorPanel", () => {
       await qc.refetchQueries({ queryKey: ["agent-inspect", 1, 24] });
     });
 
-    await waitFor(() => expect(screen.getByLabelText("Live refresh failing")).toBeTruthy());
+    expect(screen.queryByLabelText("Live refresh failing")).toBeNull();
     expect(screen.getByText("Persistent shells")).toBeTruthy();
     expect(screen.queryByText("refresh failed")).toBeNull();
   });

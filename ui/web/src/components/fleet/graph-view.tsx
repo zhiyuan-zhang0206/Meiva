@@ -23,6 +23,7 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { WindowSelect } from "@/components/agents/window-select";
+import { InlineError } from "@/components/ui/inline-error";
 import { STATS_WINDOW_LABELS, STATS_WINDOWS, type StatsWindowHours } from "@/lib/agents/sidebar";
 import type { PublicAgentStatus } from "@/lib/contracts/types";
 import { useFleetGraph } from "@/lib/fleet/use-fleet-graph";
@@ -378,9 +379,19 @@ export function GraphView({
           internal alerting instead of the user surface (user ruling
           2026-09-18, task #3893). */}
       {paintedNodes.length === 0 ? (
-        <p className={cn("absolute inset-0 items-center justify-center text-xs text-muted-foreground", FLEX)}>
-          {loading || rosterPending ? t("loading") : error ? t("unavailable") : t("empty")}
-        </p>
+        loading || rosterPending ? (
+          <p className={cn("absolute inset-0 items-center justify-center text-xs text-muted-foreground", FLEX)}>
+            {t("loading")}
+          </p>
+        ) : error ? (
+          <div className={cn("absolute inset-0 items-center justify-center", FLEX)}>
+            <InlineError>{t("unavailable")}</InlineError>
+          </div>
+        ) : (
+          <p className={cn("absolute inset-0 items-center justify-center text-xs text-muted-foreground", FLEX)}>
+            {t("empty")}
+          </p>
+        )
       ) : null}
     </div>
   );

@@ -14,6 +14,7 @@ import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_1, FLEX_COL } from "@/lib/layout/layout";
 
 import { SectionRows } from "./context-sections";
+import { InlineError } from "@/components/ui/inline-error";
 import { useApi } from "@/lib/transport/transport-context";
 
 // meiva:note
@@ -154,26 +155,20 @@ function BreakdownQuery({
     );
   }
   if (isError) {
-
     const message = errMsg(error);
-
     const isHttp = httpStatus(error) !== null || message.startsWith("HTTP ");
+    const text = isHttp
+      ? t("failedHttp", { message })
+      : t("failedUnreachable", { message });
     return (
-      <div className={cn("items-start gap-2", FLEX, FLEX_COL)}>
-        <p data-testid="context-breakdown-error" className="text-destructive text-[11.5px]">
-          {isHttp
-            ? t("failedHttp", { message })
-            : t("failedUnreachable", { message })}
-        </p>
-        <button
-          type="button"
-          data-testid="context-breakdown-retry"
-          onClick={() => void refetch()}
-          className="rounded border border-border px-2 py-0.5 text-[11px] hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        >
-          {t("retry")}
-        </button>
-      </div>
+      <InlineError
+        data-testid="context-breakdown-error"
+        onRetry={() => void refetch()}
+        retryLabel={t("retry")}
+        retryTestId="context-breakdown-retry"
+      >
+        {text}
+      </InlineError>
     );
   }
   return <BreakdownContent data={data} categoryHighlight={categoryHighlight} />;

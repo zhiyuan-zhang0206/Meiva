@@ -409,12 +409,11 @@ describe("InboxQueue — error presentation (audit C3)", () => {
     expect(screen.queryByText(/Nothing needs your attention/)).toBeNull();
   });
 
-  it("open feed failure with notices on screen → Stale badge, entries still shown", async () => {
+  it("open feed failure with notices on screen → entries still shown quietly without stale badge", () => {
     setFeed({ openFails: true, awaiting: [n({ id: 10, title: "dec-p2" })] });
     renderQueue([agent({ agent_id: 1, label: "a" })]);
-    await screen.findByText("Stale");
-    expect(screen.getByText("Stale")).not.toBeNull();
     expect(listTitles()).toEqual(["dec-p2"]);
+    expect(screen.queryByText("Stale")).toBeNull();
   });
 
   it("resolved-history failure with open entries on screen → unavailable line", async () => {

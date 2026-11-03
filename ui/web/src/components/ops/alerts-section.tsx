@@ -19,6 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { InlineError } from "@/components/ui/inline-error";
 import { formatDuration } from "@/lib/format/item-summary";
 import { useWallDate } from "@/lib/format/now/use-wall-date";
 import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
@@ -34,7 +35,7 @@ import { useTimeFormat } from "@/lib/format/use-time-format";
 const SEVERITY_BG: Record<AlertSeverity, string> = {
   critical: "bg-destructive",
   error: "bg-orange-500",
-  warning: "bg-yellow-500",
+  warning: "bg-amber-500",
 };
 
 // Status — colors with a text label beside them (never color alone).
@@ -131,8 +132,10 @@ export default function AlertsSection() {
             <Loader2 className="size-5 animate-spin text-muted-foreground" />
           </div>
         ) : error ? (
-          <div className="px-3 py-4 text-center text-sm text-muted-foreground">
-            Couldn&apos;t load alerts — retrying…
+          <div className={cn("px-3 py-4 justify-center", FLEX)}>
+            <InlineError>
+              Couldn&apos;t load alerts — retrying…
+            </InlineError>
           </div>
         ) : alerts.length === 0 ? (
           <div className="px-3 py-4 text-center text-sm text-muted-foreground">

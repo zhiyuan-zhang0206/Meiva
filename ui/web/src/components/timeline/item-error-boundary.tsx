@@ -2,6 +2,8 @@
 
 import { Component, type ReactNode } from "react";
 
+import { InlineError } from "@/components/ui/inline-error";
+
 // Per-item error boundary. If one timeline item throws while rendering
 // (e.g. a transiently malformed payload mid-stream, or a child component's
 // internal state getting out of sync), React unmounts up to the nearest
@@ -40,8 +42,8 @@ export class ItemErrorBoundary extends Component<Props, State> {
   render(): ReactNode {
     if (this.state.error) {
       return (
-        <div className="border-l-2 border-destructive/50 bg-destructive/5 px-3 py-2 rounded-r-sm text-xs font-mono text-destructive [overflow-wrap:anywhere]">
-          Failed to render this item: {this.state.error.message}
+        <div className="rounded border border-destructive/35 bg-destructive/10 px-3 py-2 text-xs font-mono text-destructive [overflow-wrap:anywhere]">
+          <InlineError>Failed to render this item: {this.state.error.message}</InlineError>
         </div>
       );
     }

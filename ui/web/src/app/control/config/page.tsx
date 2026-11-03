@@ -80,6 +80,7 @@ import {
 } from "./_config_row";
 import { DefaultModelPanel } from "./_default_model";
 import { PerModelPanel } from "./_per_model";
+import { InlineError } from "@/components/ui/inline-error";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 import { useApi } from "@/lib/transport/transport-context";
@@ -144,7 +145,7 @@ export default function ConfigPage() {
     browser.local.write(COLLAPSED_GROUPS_STORAGE_KEY, JSON.stringify([...collapsedState.groups]));
   }, [browser.local, collapsedState]);
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: configQueryKey(selection),
     queryFn: () => client.getConfig(selection ?? undefined),
     enabled: visible,
@@ -340,9 +341,9 @@ export default function ConfigPage() {
   // with an error line — only a cold failure shows the error state.
   if (error && !data) {
     return (
-      <p className="text-sm text-muted-foreground">
+      <InlineError onRetry={() => void refetch()}>
         {t("couldntLoad")}
-      </p>
+      </InlineError>
     );
   }
   if (!data) return <p className="text-sm text-muted-foreground">(no data)</p>;
@@ -464,7 +465,7 @@ export default function ConfigPage() {
       })}
 
       {saveError && (
-        <p className="text-sm text-destructive">{saveError}</p>
+        <InlineError>{saveError}</InlineError>
       )}
 
       {restartTargets.length > 0 && (

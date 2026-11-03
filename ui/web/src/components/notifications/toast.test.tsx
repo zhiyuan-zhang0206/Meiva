@@ -31,11 +31,13 @@ describe("ToastHost", () => {
     expect(alert.textContent).toBe("Save failed: 500");
   });
 
-  it("stays above the composer band", () => {
+  it("stays above the composer band with un-occluded z-[100] stacking", () => {
     vi.useFakeTimers();
     render(<ToastHost />);
     act(() => useStore.getState().showToast("boom"));
-    expect(screen.getByRole("alert").className).toContain("bottom-24");
+    const container = screen.getByRole("alert").closest(".bottom-24");
+    expect(container).toBeTruthy();
+    expect(container?.className).toContain("z-[100]");
   });
 
   it("dismisses after 3s", () => {

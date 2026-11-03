@@ -109,9 +109,10 @@ reported as awaiting conversion, never rendered. Agent workspace guidance tells
 agents to rewrite their current shared context into Markdown. Removed stored
 format pins are ignored by the existing config-pin resolver.
 
-A failed read retains an already-cached snapshot and marks it stale; it never
-turns a machine failure into an empty file. Files must remain available on their
-source machine. This is not an offline document store or an archival snapshot.
+A failed read retains an already-cached snapshot quietly without stale banners;
+it never turns a machine failure into an empty file. Cold failures render an
+`InlineError` with Retry. Files must remain available on their source machine.
+This is not an offline document store or an archival snapshot.
 
 On desktop the home page mounts the panel for every selected agent (the document
 area owns its empty and legacy states); on narrow viewports the header's To user

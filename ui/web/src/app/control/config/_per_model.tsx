@@ -6,6 +6,7 @@ import { useState } from "react";
 
 import { groupedModels, modelLabel, providerLabel } from "@/lib/contracts/models";
 import type { ResolvedFieldView } from "@/lib/contracts/types";
+import { InlineError } from "@/components/ui/inline-error";
 
 import { fieldLabel, formatConfigValue } from "../config-groups";
 import { useSectionVisible } from "../visibility";
@@ -112,15 +113,15 @@ export function PerModelPanel({
       </div>
 
       {models.error && (
-        <p role="alert" className="text-xs text-muted-foreground">
+        <InlineError>
           Model settings are unavailable. Check the gateway configuration and reload.
-        </p>
+        </InlineError>
       )}
       {resolved.isLoading && <p className="text-xs text-muted-foreground">{t("loading")}</p>}
       {resolved.error && (
-        <p className="text-xs text-muted-foreground">
+        <InlineError>
           {t("couldntResolve")}
-        </p>
+        </InlineError>
       )}
 
       {!models.error && resolved.data && (
@@ -158,7 +159,7 @@ function PerModelRow({
             {fieldLabel(field.env_var)}
           </button>
           <span
-            className="rounded border border-dashed border-border px-1 text-[11px] text-muted-foreground/80"
+            className="rounded border border-border/70 bg-muted/40 px-1 text-[11px] text-muted-foreground/80"
             data-testid={`per-model-source-${field.name}`}
           >
             {SOURCE_LABEL[field.source]}

@@ -59,7 +59,7 @@ export function ComposerHeldBatchBanner({
       role="alert"
       data-testid="composer-held-batch"
       className={cn(
-        "items-center justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/5 px-2.5 py-1.5 text-xs",
+        "items-center justify-between gap-2 rounded-md border border-destructive/35 bg-destructive/10 px-2.5 py-1.5 text-xs text-destructive",
         FLEX,
       )}
     >

@@ -18,6 +18,7 @@ import { useTranslations } from "next-intl";
 
 import { PackageDraftEntry } from "@/components/plugins/package-draft-entry";
 import { Switch } from "@/components/ui/switch";
+import { InlineError } from "@/components/ui/inline-error";
 
 import {
   Table,
@@ -118,9 +119,7 @@ function SkillsTable({
   }
   if (error) {
     return (
-      <p className="text-sm text-muted-foreground">
-        {t("couldntLoad")}
-      </p>
+      <InlineError>{t("couldntLoad")}</InlineError>
     );
   }
   if (!data) return <p className="text-sm text-muted-foreground">{t("noData")}</p>;

@@ -1,11 +1,12 @@
 // meiva:note
-// ConnectionNotice render tests — the live-update overlay banner. It renders whatever
-// the store says; the "is this drop worth announcing" delay lives in
-// app-connection-banner, whose own test covers the timing.
+// ConnectionNotice render tests — the live-update overlay banner.
+// Renders nothing during transient blips or reconnecting states;
+// surfaces as an un-occluded red floating error banner below HeaderBar (top-[52px] z-30)
+// only when connState is "closed" (sustained disconnect >= 15s).
 // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
 
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useStore } from "@/lib/state/store";
 
@@ -26,33 +27,33 @@ describe("ConnectionNotice", () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it("shows amber 'reconnecting' when connState='reconnecting'", () => {
+  it("renders nothing when connState='reconnecting' (transient blip is completely silent)", () => {
     useStore.setState({ connState: "reconnecting" });
-    render(<ConnectionNotice />);
-    const banner = screen.getByRole("status");
-    expect(banner.textContent).toContain("Live updates reconnecting");
-    expect(banner.className).toContain("amber");
+    const { container } = render(<ConnectionNotice />);
+    expect(container.firstChild).toBeNull();
   });
 
-  it("shows destructive 'connection lost' when connState='closed'", () => {
-    useStore.setState({ connState: "closed" });
+  it("shows floating destructive error with Retry when connState='closed'", () => {
+    const bumpSpy = vi.fn();
+    useStore.setState({ connState: "closed", bumpReconnect: bumpSpy });
     render(<ConnectionNotice />);
-    const banner = screen.getByRole("status");
-    expect(banner.textContent).toContain("Live updates disconnected");
-    expect(banner.textContent).toContain("refresh");
-    expect(banner.className).toContain("destructive");
+
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("Live updates disconnected");
+    expect(alert.className).toContain("text-destructive");
+    expect(alert.className).toContain("bg-popover");
+
+    const retryBtn = screen.getByRole("button", { name: "Retry" });
+    fireEvent.click(retryBtn);
+    expect(bumpSpy).toHaveBeenCalledOnce();
   });
 
-  it("floats over the conversation instead of taking a row of it", () => {
+  it("floats over conversation clearing HeaderBar with top-[52px] and z-30", () => {
     useStore.setState({ connState: "closed" });
     const { container } = render(<ConnectionNotice />);
     const overlay = container.firstElementChild as HTMLElement;
     expect(overlay.className).toContain("absolute");
-  });
-
-  it("has aria-live='polite' for screen reader notification", () => {
-    useStore.setState({ connState: "closed" });
-    render(<ConnectionNotice />);
-    expect(screen.getByRole("status").getAttribute("aria-live")).toBe("polite");
+    expect(overlay.className).toContain("top-[52px]");
+    expect(overlay.className).toContain("z-30");
   });
 });

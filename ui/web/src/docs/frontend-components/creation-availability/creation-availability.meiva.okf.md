@@ -13,8 +13,8 @@ online, non-paused agent-runner machines with `agent_host_online=true`; the host
 verdict keeps its pidfile meaning, and a false or absent verdict leaves that row
 disabled with its reason. While cluster status is loading on cold cache, the
 form presents a compact checking status; if the cold status query fails without
-cached data, it shows cluster status unavailable instead of reporting no runners.
-Background status refetch errors retain cached data (stale-while-error).
+cached data, it shows an `InlineError` with Retry instead of reporting no runners.
+Background status refetch errors retain cached data quietly.
 
 Creation is one table, read left to right: **Machine, Harness, Model, Effort**.
 The machine comes first: harness availability belongs to a machine.
@@ -44,13 +44,13 @@ CLI owns context and compaction, and Meiva retains a basic timeline projection.
 harnesses remain usable from their probed snapshot.
 The action rail puts `Refresh` immediately above `Spawn`. Spawn is disabled with
 the first refusal that applies (a down host, then a harness the machine cannot
-start).
+start), and the refusal reason is rendered visibly in the rail using `InlineError`
+across both desktop and mobile layouts (`spawn-refusal`).
 
 Below the md breakpoint the same decisions stack instead of a table: on a
 390px phone the four fixed columns left the model column 4px wide.
 Each decision becomes a 44px row that states the current pick and opens its list
-on a tap, and a refusal is written beside the action: a touch screen has no
-hover.
+on a tap.
 
 The table shows the **last spawn, not the last click**. `behavior.spawn_*`
 holds the config the previous spawn actually used, cascade included; a click

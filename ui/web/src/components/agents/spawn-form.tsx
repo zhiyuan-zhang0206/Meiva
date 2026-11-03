@@ -15,6 +15,7 @@ import { Loader2, Plus, RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
+import { InlineError } from "@/components/ui/inline-error";
 import { DEFAULT_HARNESS, HARNESSES, harnessRows, type Harness } from "@/lib/harness/harness";
 import { useHarnessAvailabilityByMachine, useRefreshHarnessAvailability } from "@/lib/harness/use-harness-availability";
 import { SpawnStack, SpawnTable, type SpawnMachine } from "./spawn-table";
@@ -306,9 +307,14 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
 
   if (statusQuery.error && !statusData) {
     return (
-      <div role="status" className="px-3 py-2 text-xs text-muted-foreground">
+      <InlineError
+        role="status"
+        className="px-3 py-2"
+        onRetry={() => void statusQuery.refetch()}
+        retryLabel={t("refresh")}
+      >
         {t("statusUnavailable")}
-      </div>
+      </InlineError>
     );
   }
 
@@ -387,10 +393,24 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
     </button>
   );
 
-  const notice = refreshNotice === undefined ? null : (
-    <p role={refresh.isError ? "alert" : "status"}
-      className="text-xs text-muted-foreground">{refreshNotice}</p>
+  const notice = refreshNotice === undefined ? null : refresh.isError ? (
+    <InlineError className="px-3 py-1.5">{refreshNotice}</InlineError>
+  ) : (
+    <p role="status" className="text-xs text-muted-foreground">{refreshNotice}</p>
   );
+
+  const refusalElement = (className?: string) =>
+    spawnReason !== undefined ? (
+      modelsQuery.error ? (
+        <InlineError className={cn("text-[11px] leading-tight", className)} data-testid="spawn-refusal">
+          {spawnReason}
+        </InlineError>
+      ) : (
+        <p data-testid="spawn-refusal" className={cn("text-xs text-muted-foreground", className)}>
+          {spawnReason}
+        </p>
+      )
+    ) : null;
 
   if (layout === "stack") {
     return (
@@ -401,11 +421,7 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
       // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
       <div className={cn("rounded-md border border-border bg-popover text-popover-foreground", FLEX, FLEX_COL)}>
         <SpawnStack {...pickerProps} />
-        {spawnReason !== undefined && (
-          <p data-testid="spawn-refusal" className="px-3 py-2 text-xs text-muted-foreground">
-            {spawnReason}
-          </p>
-        )}
+        {refusalElement("px-3 py-2")}
         <div className={cn("gap-2 border-t border-border p-2", FLEX, FLEX_COL)}>
           {notice}
           {refreshButton("w-full min-h-11 text-sm")}
@@ -427,6 +443,7 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
         <SpawnTable {...pickerProps} />
       </div>
       <div className={cn("w-[7rem] shrink-0 justify-end gap-2 border-l border-border p-2", FLEX, FLEX_COL)}>
+        {refusalElement()}
         {notice}
         {refreshButton("w-full")}
         {spawnButton("w-full")}

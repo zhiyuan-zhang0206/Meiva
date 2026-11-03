@@ -32,7 +32,7 @@ import { useApi } from "@/lib/transport/transport-context";
 const STATUS_DOT: Record<string, string> = {
   running: "bg-green-500",
   stopped: "bg-muted-foreground/40",
-  error: "bg-red-500",
+  error: "bg-destructive",
   completed: "bg-blue-500",
 };
 
@@ -246,8 +246,8 @@ function ScheduleDetail({
         <>
           {s.last_error && (
             <div>
-              <div className="font-medium text-red-500">{t("lastError")}</div>
-              <pre className="mt-1 max-h-40 overflow-auto rounded bg-background p-2 font-mono text-[11px] text-red-400">
+              <div className="font-medium text-destructive">{t("lastError")}</div>
+              <pre className="mt-1 max-h-40 overflow-auto rounded bg-background p-2 font-mono text-[11px] text-destructive">
                 {s.last_error}
               </pre>
             </div>

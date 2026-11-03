@@ -34,6 +34,7 @@ import { useCallback } from "react";
 
 import { PackageDraftEntry } from "@/components/plugins/package-draft-entry";
 import { Button } from "@/components/ui/button";
+import { InlineError } from "@/components/ui/inline-error";
 import {
   Table,
   TableBody,
@@ -199,9 +200,7 @@ function InventoryBody({
   }
   if (controller.error) {
     return (
-      <p className="text-sm text-muted-foreground">
-        {t("couldntLoad")}
-      </p>
+      <InlineError>{t("couldntLoad")}</InlineError>
     );
   }
   if (!controller.data) return <p className="text-sm text-muted-foreground">{t("noData")}</p>;

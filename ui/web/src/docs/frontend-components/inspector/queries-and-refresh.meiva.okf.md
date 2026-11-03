@@ -52,13 +52,13 @@ Closing the panel aborts the browser's in-flight reads, but the gateway's
 shared aggregate work keeps its own bounded admission and deadline — a cancelled
 HTTP waiter does not shorten it.
 
-**Failure rendering.** A failed refresh that still has data keeps every section
-and shows the amber stale dot (stale-while-error); a cold failure with no data
-replaces the section body with its own error + retry (`Liveness` for the live
-read, `Activity` for the windowed read, and an error block below `Page` when the
-widget read fails without cached widgets), and a retry re-fires only that
-section's read — the live failure cannot hide statistics or widgets and vice
-versa.
+**Failure rendering.** A failed refresh that still has data quietly keeps every section
+without amber stale dots or notices (transient refresh failures remain silent while
+TanStack Query retries in the background); a cold failure with no data replaces
+the section body with an `InlineError` + retry (`Liveness` for the live read,
+`Activity` for the windowed read, and an error block below `Page` when the widget
+read fails without cached widgets), and a retry re-fires only that section's read —
+the live failure cannot hide statistics or widgets and vice versa.
 
 **Retention and the switch budget** (`lib/layout/switch-budget.ts`): inactive
 entries persist for `INSPECTOR_RETENTION_MS` (30 minutes) per agent — both as

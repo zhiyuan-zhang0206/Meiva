@@ -384,19 +384,6 @@ function EnvelopeContent({
   );
 }
 
-// Shown at the tail of partial + interrupted items to distinguish "the message
-// simply ends here" vs "streaming interrupted; content may be incomplete".
-// ConnectionNotice pops up at the same time, but the banner is in a separate UI
-// region from timeline content; this inline hint makes the cause-and-effect visible.
-function InterruptedNotice() {
-  const t = useTranslations("timeline");
-  return (
-    <div className="mt-1.5 text-[11px] text-amber-700 dark:text-amber-400 font-mono select-none">
-      {t("streamingInterrupted")}
-    </div>
-  );
-}
-
 function StreamingCursor() {
   return (
     <span
@@ -459,53 +446,30 @@ export const ItemView = memo(function ItemView({
 
     case "agent_chat":
       return (
-        <>
-          <div
-            className={cn(
-              item.interrupted && "border-b border-dashed border-amber-500/60 pb-1",
-            )}
-          >
-            <ChatMarkdown content={streamingPayload} />
-            {item.partial && !item.interrupted ? <StreamingCursor /> : null}
-          </div>
-          {item.interrupted ? <InterruptedNotice /> : null}
-        </>
+        <div>
+          <ChatMarkdown content={streamingPayload} />
+          {item.partial && !item.interrupted ? <StreamingCursor /> : null}
+        </div>
       );
 
     case "agent_code":
       return (
-        <>
-          <div
-            className={cn(
-              "rounded-md border border-border/50 bg-muted/45 dark:bg-black/20 px-2.5 py-2",
-              item.interrupted && "border-amber-500/50",
-            )}
-          >
-            {item.source && item.source !== "execute_code" ? (
-              <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[12px] leading-relaxed m-0 text-foreground/90">
-                {streamingPayload}
-              </pre>
-            ) : (
-              <PythonCode code={streamingPayload} streaming={streaming} copy={false} />
-            )}
-          </div>
-          {item.interrupted ? <InterruptedNotice /> : null}
-        </>
+        <div className="rounded-md border border-border/50 bg-muted/45 dark:bg-black/20 px-2.5 py-2">
+          {item.source && item.source !== "execute_code" ? (
+            <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[12px] leading-relaxed m-0 text-foreground/90">
+              {streamingPayload}
+            </pre>
+          ) : (
+            <PythonCode code={streamingPayload} streaming={streaming} copy={false} />
+          )}
+        </div>
       );
 
     case "agent_reasoning":
       return (
-        <>
-          <div
-            className={cn(
-              "text-[12.5px] leading-relaxed text-muted-foreground/90",
-              item.interrupted && "border-b border-dashed border-amber-500/60 pb-1",
-            )}
-          >
-            <ChatMarkdown content={streamingPayload} />
-          </div>
-          {item.interrupted ? <InterruptedNotice /> : null}
-        </>
+        <div className="text-[12.5px] leading-relaxed text-muted-foreground/90">
+          <ChatMarkdown content={streamingPayload} />
+        </div>
       );
 
     case "code_output":
