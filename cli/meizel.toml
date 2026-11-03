@@ -2,7 +2,7 @@ exports = ["__main__.py", "commands", "database", "fleet_update", "main.py", "pa
 
 [uses]
 "__main__.py" = ["main.py"]
-"commands" = ["database", "start_identity.py", "start_runtime.py", "startup"]
+"commands" = ["database", "options.py", "start_identity.py", "start_runtime.py", "startup"]
 "conftest.py" = ["commands", "tests"]
 "database" = ["options.py"]
 "fleet_update" = ["main.py"]

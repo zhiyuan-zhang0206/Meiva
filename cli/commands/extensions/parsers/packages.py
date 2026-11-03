@@ -8,46 +8,82 @@ from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import dataclass
+from typing import Literal
+
+from cli.options import options
+
+
+@dataclass(frozen=True)
+class _StatusOptions:
+    json_output: bool
+
+
+@dataclass(frozen=True)
+class _RefreshOptions:
+    check: bool
+    package: str | None
+    json_output: bool
+    from_job: bool
+
+
+@dataclass(frozen=True)
+class _RollbackOptions:
+    name: str
+
+
+@dataclass(frozen=True)
+class _PolicyOptions:
+    name: str
+    update_mode: Literal["auto", "notify", "off"] | None
+    check_every: str | None
 
 
 def _h_packages_status(args: argparse.Namespace) -> int:
     from cli.commands.extensions.packages import cmd_packages_status
-    from cli.database.runtime import delivered_config
+    from cli.database.runtime import delivered_config, runtime_of
 
+    runtime = runtime_of(args)
     return cmd_packages_status(
-        config=delivered_config(args.runtime.config),
-        home=args.runtime.home,
-        user_home=args.runtime.session.user_home,
-        now=args.runtime.clock.now(),
-        json_output=args.json_output,
+        config=delivered_config(runtime.config),
+        home=runtime.home,
+        user_home=runtime.session.user_home,
+        now=runtime.clock.now(),
+        json_output=options(args, _StatusOptions).json_output,
     )
 
 
 def _h_packages_refresh(args: argparse.Namespace) -> int:
     from cli.commands.extensions.packages import cmd_packages_refresh
-    from cli.database.runtime import delivered_config
+    from cli.database.runtime import delivered_config, runtime_of
 
+    opts = options(args, _RefreshOptions)
+    runtime = runtime_of(args)
     return cmd_packages_refresh(
-        config=delivered_config(args.runtime.config),
+        config=delivered_config(runtime.config),
         # meiva:note
         # The refresh reads git through the host, and the host it needs is the machine this
         # invocation runs on with the configuration's own environment.
-        host=args.runtime.host_after_config(),
-        repo=args.runtime.checkout,
-        home=args.runtime.home,
-        user_home=args.runtime.session.user_home,
-        now=args.runtime.clock.now(),
-        check_only=args.check,
-        only=args.package,
-        json_output=args.json_output,
-        from_job=args.from_job,
+        host=runtime.host_after_config(),
+        repo=runtime.checkout,
+        home=runtime.home,
+        user_home=runtime.session.user_home,
+        now=runtime.clock.now(),
+        check_only=opts.check,
+        only=opts.package,
+        json_output=opts.json_output,
+        from_job=opts.from_job,
     )
 
 
 def _h_packages_rollback(args: argparse.Namespace) -> int:
     from cli.commands.extensions.packages import cmd_packages_rollback
+    from cli.database.runtime import runtime_of
 
-    return cmd_packages_rollback(args.name, home=args.runtime.home, now=args.runtime.clock.now())
+    runtime = runtime_of(args)
+    return cmd_packages_rollback(
+        options(args, _RollbackOptions).name, home=runtime.home, now=runtime.clock.now()
+    )
 
 
 def _duration(value: str) -> str:
@@ -63,21 +99,23 @@ def _duration(value: str) -> str:
 
 def _h_packages_policy(args: argparse.Namespace) -> int:
     from cli.commands.extensions.packages import cmd_packages_policy
-    from cli.database.runtime import delivered_config
+    from cli.database.runtime import delivered_config, runtime_of
 
-    if args.update_mode is None and args.check_every is None:
+    opts = options(args, _PolicyOptions)
+    if opts.update_mode is None and opts.check_every is None:
         print(
             "meiva: pass --update-mode and/or --check-every — a policy needs at least one field",
             file=sys.stderr,
         )
         return 2
+    runtime = runtime_of(args)
     return cmd_packages_policy(
-        args.name,
-        config=delivered_config(args.runtime.config),
-        update_mode=args.update_mode,
-        check_every=args.check_every,
-        home=args.runtime.home,
-        user_home=args.runtime.session.user_home,
+        opts.name,
+        config=delivered_config(runtime.config),
+        update_mode=opts.update_mode,
+        check_every=opts.check_every,
+        home=runtime.home,
+        user_home=runtime.session.user_home,
     )
 
 

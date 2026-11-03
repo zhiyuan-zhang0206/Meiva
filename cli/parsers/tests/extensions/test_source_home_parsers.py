@@ -5,8 +5,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -21,12 +21,14 @@ _VERBS = ("mcp install", "skill install", "skill scan")
 # stderr and exit 1, never an expansion through the password database.
 @pytest.mark.parametrize("verb", _VERBS)
 def test_another_users_home_in_the_source_is_refused(
-    verb: str, capsys: pytest.CaptureFixture[str]
+    verb: str, capsys: pytest.CaptureFixture[str], command_runtime: CommandRuntime
 ) -> None:
     from cli.parsers import build_parser
 
     args = build_parser().parse_args([*verb.split(), "~someone/src"])
-    args.runtime = SimpleNamespace(session=SimpleNamespace(user_home=Path("/home/operator")))
+    args.runtime = replace(
+        command_runtime, session=replace(command_runtime.session, user_home=Path("/home/operator"))
+    )
 
     assert args.func(args) == 1
     assert "names another user's home" in capsys.readouterr().err
