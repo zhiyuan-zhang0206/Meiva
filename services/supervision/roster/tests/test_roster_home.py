@@ -53,11 +53,12 @@ def test_a_marker_in_the_handed_home_makes_it_the_observability_station(
     (marked / "lgtm-host").touch()
     machine = set_machine_identity(role="gateway")
 
+    gates = composition.gate_settings()
     marked_reason = spec.gate_reason(
-        _service(marked, "loki"), machine=machine, host=fake_host(), home=marked
+        _service(marked, "loki"), settings=gates, machine=machine, host=fake_host(), home=marked
     )
     unmarked_reason = spec.gate_reason(
-        _service(unmarked, "loki"), machine=machine, host=fake_host(), home=unmarked
+        _service(unmarked, "loki"), settings=gates, machine=machine, host=fake_host(), home=unmarked
     )
 
     assert marked_reason is None
@@ -78,7 +79,11 @@ def test_the_hosts_environment_decides_whether_the_collector_override_is_explici
     collector = _service(tmp_path, "otel-collector")
 
     reason = spec.gate_reason(
-        collector, machine=machine, host=fake_host(environ=environ), home=tmp_path
+        collector,
+        settings=composition.gate_settings(),
+        machine=machine,
+        host=fake_host(environ=environ),
+        home=tmp_path,
     )
 
     assert (reason is None) is allowed
@@ -121,7 +126,11 @@ def test_the_collector_runs_on_a_marked_home_it_is_handed(
     machine = set_machine_identity(role="gateway")
 
     reason = spec.gate_reason(
-        _service(marked, "otel-collector"), machine=machine, host=fake_host(), home=marked
+        _service(marked, "otel-collector"),
+        settings=composition.gate_settings(),
+        machine=machine,
+        host=fake_host(),
+        home=marked,
     )
 
     assert reason is None
@@ -135,7 +144,11 @@ def test_the_collector_runs_on_the_home_of_a_station_unit(
     machine = set_machine_identity(role="gateway,observability-station")
 
     reason = spec.gate_reason(
-        _service(station, "otel-collector"), machine=machine, host=fake_host(), home=station
+        _service(station, "otel-collector"),
+        settings=composition.gate_settings(),
+        machine=machine,
+        host=fake_host(),
+        home=station,
     )
 
     assert reason is None

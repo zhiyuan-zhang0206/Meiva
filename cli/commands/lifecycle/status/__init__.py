@@ -84,7 +84,7 @@ from cli.commands.probe import print_service_row
 from cli.database.runtime import CommandRuntime, delivered_config
 from ops.cluster_status import ClusterStatus
 from services.supervision.meiva_root_glue.manifests import launched_services
-from services.supervision.roster.composition import build_services
+from services.supervision.roster.composition import build_services, gate_settings
 from services.supervision.roster.service_spec import ServiceSpec
 from services.supervision.roster.spec import services_for_capabilities_annotated
 
@@ -118,7 +118,11 @@ def _roster(
     if roles is None:
         return tuple((spec, None) for spec in build_services(home=command.home))
     return services_for_capabilities_annotated(
-        roles, machine=command.machine, host=command.host_after_config(), home=command.home
+        roles,
+        settings=gate_settings(),
+        machine=command.machine,
+        host=command.host_after_config(),
+        home=command.home,
     )
 
 

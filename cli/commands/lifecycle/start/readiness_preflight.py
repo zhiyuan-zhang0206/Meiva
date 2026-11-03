@@ -158,12 +158,14 @@ def _occupied(
     from base.deploy.lifecycle.service_selection import resolve_selection
     from cli.commands.lifecycle.root_driver import start_roster
     from cli.commands.probe import occupied_health_ports
-    from services.supervision.roster.composition import build_services
+    from services.supervision.roster.composition import build_services, gate_settings
     from services.supervision.roster.spec import services_for_capabilities_annotated
 
     available = {s.session for s in build_services(home=home)}
     roster = start_roster(
-        services_for_capabilities_annotated(roles, machine=machine, host=host, home=home),
+        services_for_capabilities_annotated(
+            roles, settings=gate_settings(), machine=machine, host=host, home=home
+        ),
         resolve_selection(
             available,
             only=only_services,

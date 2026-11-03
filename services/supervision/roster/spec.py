@@ -38,7 +38,6 @@ from typing import assert_never
 
 from base.cluster.dataplane.redis_bridge import RedisBridgeUnconfiguredError, redis_bridge_endpoint
 from base.cluster.machine import MachineIdentityReader, MachineRoles
-from base.config import get_field
 from base.host.net.url_secret import names_foreign_host
 from base.host.system.hostport import Host
 from base.host.system.probes import (
@@ -60,6 +59,7 @@ from services.supervision.roster.gate_plan import (
     FlagFact,
     GateFact,
     GateKind,
+    GateSettings,
     StationFact,
     gate_kind,
 )
@@ -77,25 +77,24 @@ def _gate_fact(
     kind: GateKind,
     session: str,
     *,
+    settings: GateSettings,
     machine: MachineIdentityReader,
     host: Host,
     home: Path,
 ) -> GateFact | None:
     match kind:
         case "flag":
-            return FlagFact(enabled=_flag_enabled(session))
+            return FlagFact(enabled=_flag_enabled(session, settings=settings))
         case "browser":
-            enabled = bool(get_field("browser_enabled"))
+            enabled = settings.browser_enabled
             return BrowserFact(
                 enabled=enabled,
                 incapability=(
-                    browser_incapability(str(get_field("chrome_binary")), host=host)
-                    if enabled
-                    else None
+                    browser_incapability(settings.chrome_binary, host=host) if enabled else None
                 ),
             )
         case "computer-mcp":
-            helper_enabled = bool(get_field("permissions_helper_enabled"))
+            helper_enabled = settings.permissions_helper_enabled
             return ComputerFact(
                 helper_enabled=helper_enabled,
                 incapability=(
@@ -111,7 +110,7 @@ def _gate_fact(
                 allowed=_collector_allowed(machine, home=home, environ=host.environ)
             )
         case "bridge":
-            return _bridge_fact(machine, host=host, home=home)
+            return _bridge_fact(machine, settings=settings, host=host, home=home)
         case "none":
             return None
         case _:
@@ -120,14 +119,14 @@ def _gate_fact(
 
 # meiva:note
 # The settings flag of a session whose only gate is one flag.
-def _flag_enabled(session: str) -> bool:
+def _flag_enabled(session: str, *, settings: GateSettings) -> bool:
     match session:
         case "heartbeat":
-            return bool(get_field("heartbeat_enabled"))
+            return settings.heartbeat_enabled
         case "delivery-watchdog":
-            return bool(get_field("delivery_watchdog_enabled"))
+            return settings.delivery_watchdog_enabled
         case "im-bridge":
-            return bool(get_field("im_bridge_enabled"))
+            return settings.im_bridge_enabled
         case _:
             raise ValueError(f"session {session!r} has no settings-flag gate")
 
@@ -154,14 +153,14 @@ def _collector_allowed(
 # meiva:note
 # The relay exists only on a macOS gateway with a local data plane and a declared non-loopback
 # address; the same answer drives `meiva status` and the cluster health probe.
-def _bridge_fact(machine: MachineIdentityReader, *, host: Host, home: Path) -> BridgeFact:
+def _bridge_fact(
+    machine: MachineIdentityReader, *, settings: GateSettings, host: Host, home: Path
+) -> BridgeFact:
     try:
         endpoint = redis_bridge_endpoint(
             home,
             machine_host=machine.host,
-            remote_data_plane=lambda: names_foreign_host(
-                str(get_field("db_url")), str(get_field("redis_url"))
-            ),
+            remote_data_plane=lambda: names_foreign_host(settings.db_url, settings.redis_url),
             platform=host.platform.system,
         )
     except RedisBridgeUnconfiguredError as exc:
@@ -182,6 +181,7 @@ def _plugin_gate_reason(spec: ServiceSpec) -> str | None:
 def gate_reason(
     spec: ServiceSpec,
     *,
+    settings: GateSettings,
     machine: MachineIdentityReader,
     host: Host,
     home: Path,
@@ -206,7 +206,7 @@ def gate_reason(
     kind = gate_kind(spec.session)
     return gate_reason_of(
         spec.session,
-        _gate_fact(kind, spec.session, machine=machine, host=host, home=home),
+        _gate_fact(kind, spec.session, settings=settings, machine=machine, host=host, home=home),
     )
 
 
@@ -226,6 +226,7 @@ def gate_reason(
 def services_for_capabilities_annotated(
     roles: MachineRoles,
     *,
+    settings: GateSettings,
     machine: MachineIdentityReader,
     host: Host,
     services: tuple[ServiceSpec, ...] | None = None,
@@ -233,7 +234,7 @@ def services_for_capabilities_annotated(
 ) -> tuple[tuple[ServiceSpec, str | None], ...]:
     roster = build_services(home=home) if services is None else services
     return tuple(
-        (s, gate_reason(s, machine=machine, host=host, home=home))
+        (s, gate_reason(s, settings=settings, machine=machine, host=host, home=home))
         for s in roster
         if s.capabilities & roles
     )
@@ -246,6 +247,7 @@ def services_for_capabilities_annotated(
 def services_for_capabilities(
     roles: MachineRoles,
     *,
+    settings: GateSettings,
     machine: MachineIdentityReader,
     host: Host,
     services: tuple[ServiceSpec, ...] | None = None,
@@ -254,7 +256,7 @@ def services_for_capabilities(
     return tuple(
         s
         for s, reason in services_for_capabilities_annotated(
-            roles, machine=machine, host=host, services=services, home=home
+            roles, settings=settings, machine=machine, host=host, services=services, home=home
         )
         if reason is None
     )

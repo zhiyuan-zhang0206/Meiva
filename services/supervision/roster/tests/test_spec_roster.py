@@ -118,7 +118,11 @@ def test_annotated_roster_membership_per_capability(
     got = {
         s.session
         for s, _reason in spec.services_for_capabilities_annotated(
-            frozenset({role}), machine=machine_identity, host=fake_host(), home=meiva_home()
+            frozenset({role}),
+            settings=composition.gate_settings(),
+            machine=machine_identity,
+            host=fake_host(),
+            home=meiva_home(),
         )
     }
     assert got == expected
@@ -134,6 +138,7 @@ def test_agent_runner_roster_ordering(*, machine_identity: MachineIdentityReader
         s.session
         for s, _r in spec.services_for_capabilities_annotated(
             frozenset({"agent-runner"}),
+            settings=composition.gate_settings(),
             machine=machine_identity,
             host=fake_host(),
             home=meiva_home(),
@@ -157,6 +162,7 @@ def test_station_roster_contains_only_lgtm_with_host_enablement_gate(
 ) -> None:
     rows = spec.services_for_capabilities_annotated(
         frozenset({"observability-station"}),
+        settings=composition.gate_settings(),
         machine=machine_identity,
         host=fake_host(),
         home=unit_home,
@@ -170,6 +176,7 @@ def test_station_roster_contains_only_lgtm_with_host_enablement_gate(
         service.session
         for service in spec.services_for_capabilities(
             frozenset({"observability-station"}),
+            settings=composition.gate_settings(),
             machine=machine_identity,
             host=fake_host(),
             home=unit_home,
@@ -187,7 +194,11 @@ def test_browser_family_is_gated_by_the_platform_when_enabled(
     annotated = {
         s.session: r
         for s, r in spec.services_for_capabilities_annotated(
-            frozenset({"agent-runner"}), machine=machine_identity, host=host, home=meiva_home()
+            frozenset({"agent-runner"}),
+            settings=composition.gate_settings(),
+            machine=machine_identity,
+            host=host,
+            home=meiva_home(),
         )
     }
 

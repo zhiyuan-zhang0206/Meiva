@@ -69,6 +69,7 @@ from cli.commands.probe import probe_service
 from cli.database.runtime import CommandRuntime
 from services.backup.walg import probe as walg_probe
 from services.supervision.meiva_root_glue.manifests import launched_services
+from services.supervision.roster.composition import gate_settings
 from services.supervision.roster.spec import services_for_capabilities_annotated
 
 _GATEWAY_TIMEOUT_S = 10.0
@@ -233,7 +234,11 @@ def read_service_failures(command: CommandRuntime, launched: LaunchRecord) -> tu
     if isinstance(scope, Unavailable):
         return (scope.reason,)
     roster = services_for_capabilities_annotated(
-        roles, machine=command.machine, host=command.host_after_config(), home=command.home
+        roles,
+        settings=gate_settings(),
+        machine=command.machine,
+        host=command.host_after_config(),
+        home=command.home,
     )
     wanted = sessions_to_probe(scope, tuple(RosterGate(s.session, why) for s, why in roster))
     outcomes: list[ProbeOutcome] = []

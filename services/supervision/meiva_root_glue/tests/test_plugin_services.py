@@ -310,6 +310,7 @@ def test_failed_gate_never_produces_a_start_or_status_roster(
     with pytest.raises(RuntimeError, match="broken gate"):
         read(
             frozenset({"gateway"}),
+            settings=composition.gate_settings(),
             machine=machine_identity,
             host=fake_host(),
             services=(service,),

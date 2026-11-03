@@ -14,6 +14,7 @@ from base.config import ConfigBoot
 from base.host.system.tests.fake_commands import fake_host
 from base.paths import meiva_home
 from services.supervision.roster import spec
+from services.supervision.roster.gate_plan import GateSettings
 
 
 def main(roles_csv: str) -> None:
@@ -23,6 +24,7 @@ def main(roles_csv: str) -> None:
     machine.set(role=roles_csv)
     rows = spec.services_for_capabilities_annotated(
         frozenset(roles_csv.split(",")),
+        settings=GateSettings.from_fields(config.get_field),
         machine=machine,
         host=fake_host(environ=config.process_environment()),
         home=meiva_home(),

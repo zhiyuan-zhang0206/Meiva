@@ -714,13 +714,15 @@ def selected_service_names(
     # The services an explicit selection names on this host, resolved like `meiva start`'s
     # roster: capability-gated services never count, and nothing is read from an earlier start.
     from base.deploy.lifecycle.service_selection import resolve_selection
-    from services.supervision.roster.composition import build_services
+    from services.supervision.roster.composition import build_services, gate_settings
     from services.supervision.roster.spec import services_for_capabilities_annotated
 
     specs = (
         tuple((spec, None) for spec in build_services(home=home))
         if roles is None
-        else services_for_capabilities_annotated(roles, machine=machine, host=host, home=home)
+        else services_for_capabilities_annotated(
+            roles, settings=gate_settings(), machine=machine, host=host, home=home
+        )
     )
     skipped = resolve_selection(
         {spec.session for spec, _gate in specs},
