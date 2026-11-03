@@ -125,6 +125,19 @@ def test_agent_code_that_replaced_the_update_does_not_break_the_read(
     assert "# A" in (meiva.skills.alpha.__doc__ or "")
 
 
+# meiva:note
+# Same posture as a replaced slot: a `skill_reads` value that is not a list is left alone for the
+# exec child to report, and the body is still handed over.
+def test_agent_code_that_wrote_the_channel_by_hand_does_not_break_the_read(
+    fake_skills_dir: Path, _exec_turn: dict[str, object]
+) -> None:
+    _skills(fake_skills_dir)
+    _exec_turn["skill_reads"] = {"other": True}
+
+    assert "# A" in (meiva.skills.alpha.__doc__ or "")
+    assert _exec_turn == {"skill_reads": {"other": True}}
+
+
 def test_the_audit_is_still_written_when_the_read_is_noted(
     fake_skills_dir: Path, audited_agent: AuditedAgent
 ) -> None:
