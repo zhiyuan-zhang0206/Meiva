@@ -17,21 +17,16 @@ from schedules.jobs.watch.main_red_watch import (
     LivenessStream,
     STATE_FILE,
     load_state,
+    slot_round,
     watch_once,
 )
-from schedules.plans.watch.main_red import (
-    FAILURE_TEST,
-    NIGHTLY_STALE_AFTER,
-    RELEASE_GATE_STALE_AFTER,
-    Card,
-    RunFacts,
-)
+from schedules.plans.watch.main_red import FAILURE_TEST, NIGHTLY_STALE_AFTER, Card, RunFacts
+from schedules.plans.watch.release_gate_slot import SlotFacts
 
 # meiva:note
 # The three streams whose silence is reported, as the schedule entry wires them: the helper below
 # drives the same table so a test cannot pass against a shape production does not use.
 _LIVENESS = (
-    LivenessStream("release-gate", "release-gate.yml", RELEASE_GATE_STALE_AFTER),
     LivenessStream("nightly", "refresh-test-durations.yml", NIGHTLY_STALE_AFTER),
     LivenessStream("nightly-full", "ci.yml", NIGHTLY_STALE_AFTER),
 )
@@ -196,8 +191,8 @@ def test_a_stale_schedule_is_reported_in_the_round_line(tmp_path: Path) -> None:
     )
 
     def last_start(workflow: str) -> datetime | None:
-        quiet_hours = 12 if workflow == "release-gate.yml" else 2
-        return now - timedelta(hours=quiet_hours)
+        del workflow
+        return now - timedelta(hours=30)
 
     late = watch_once(
         state_path=tmp_path / STATE_FILE,
@@ -474,7 +469,7 @@ def test_one_unreadable_stream_leaves_the_others_read_and_the_round_whole(tmp_pa
         close_card=lambda task_id, reason: closed.append((task_id, reason)),
         emit=lambda payload: heartbeats.append(dict(payload)),
         workflows=("release-gate.yml", "main-push.yml"),
-        liveness=(LivenessStream("release-gate", "release-gate.yml", RELEASE_GATE_STALE_AFTER),),
+        liveness=(LivenessStream("nightly", "refresh-test-durations.yml", NIGHTLY_STALE_AFTER),),
     )
 
     assert asked == ["release-gate.yml", "main-push.yml"]
@@ -507,3 +502,94 @@ def test_an_unreadable_liveness_stream_does_not_stop_the_round(tmp_path: Path) -
 
     assert "stream refresh-test-durations.yml unreadable" in line
     assert heartbeats == [{"fingerprints": 0, "confirmed": 0, "infra": 0, "stale": 1}]
+
+
+# meiva:note
+# The slot round end to end: a cron that stopped arriving opens one card, one make-up dispatch
+# answers it, and the next scheduled run closes the card. The dispatch is what makes the card
+# actionable -- repairing the coverage -- while the card itself waits for the cron to recover.
+def _slot_round(
+    tmp_path: Path,
+    *,
+    hours_ago: float | None,
+    busy: bool = False,
+    uncertified: int | None = 3,
+    opened: list[Card],
+    closed: list[tuple[int, str]],
+    now: datetime | None = None,
+) -> str | None:
+    clock = now or datetime(2026, 11, 4, 6, tzinfo=UTC)
+
+    def open_card(card: Card) -> int:
+        opened.append(card)
+        return 700 + len(opened)
+
+    def close_card(task_id: int, reason: str) -> None:
+        closed.append((task_id, reason))
+
+    start = None if hours_ago is None else clock - timedelta(hours=hours_ago)
+    return slot_round(
+        state_path=tmp_path / STATE_FILE,
+        now=clock,
+        facts=SlotFacts(last_schedule_start=start, busy=busy, uncertified_commits=uncertified),
+        open_card=open_card,
+        close_card=close_card,
+        since=clock - timedelta(hours=9),
+    )
+
+
+def test_a_missing_slot_opens_one_card_across_rounds(tmp_path: Path) -> None:
+    opened: list[Card] = []
+    closed: list[tuple[int, str]] = []
+
+    note = _slot_round(tmp_path, hours_ago=7.5, opened=opened, closed=closed)
+    _slot_round(
+        tmp_path,
+        hours_ago=7.5,
+        opened=opened,
+        closed=closed,
+        now=datetime(2026, 11, 4, 6, 30, tzinfo=UTC),
+    )
+
+    assert len(opened) == 1, "the second round must not open a second card"
+    assert note is not None
+    assert load_state(tmp_path / STATE_FILE).slot.task_id == 701
+
+
+def test_a_scheduled_run_closes_the_slot_card(tmp_path: Path) -> None:
+    opened: list[Card] = []
+    closed: list[tuple[int, str]] = []
+
+    _slot_round(tmp_path, hours_ago=7.5, opened=opened, closed=closed)
+    _slot_round(tmp_path, hours_ago=0.5, opened=opened, closed=closed)
+
+    assert [task for task, _reason in closed] == [701]
+    assert load_state(tmp_path / STATE_FILE).slot.task_id is None
+
+
+# meiva:note
+# A slot the gate would have skipped is not a gap: `release-gate.yml` certifies only when
+# `channel/latest` trails `main`, so "nothing uncertified" and "no red" are both silence. The card
+# that already exists still closes, because its subject -- unchecked commits -- is gone.
+def test_a_slot_with_nothing_uncertified_closes_the_card_without_opening_another(
+    tmp_path: Path,
+) -> None:
+    opened: list[Card] = []
+    closed: list[tuple[int, str]] = []
+
+    _slot_round(tmp_path, hours_ago=7.5, opened=opened, closed=closed)
+    note = _slot_round(tmp_path, hours_ago=8.0, uncertified=0, opened=opened, closed=closed)
+
+    assert len(opened) == 1
+    assert [task for task, _reason in closed] == [701]
+    assert note is not None and "nothing uncertified" in note
+
+
+def test_a_running_release_gate_opens_no_card(tmp_path: Path) -> None:
+    opened: list[Card] = []
+    closed: list[tuple[int, str]] = []
+
+    note = _slot_round(tmp_path, hours_ago=7.5, busy=True, opened=opened, closed=closed)
+
+    assert opened == []
+    assert note == "release-gate is running; the slot check waits"

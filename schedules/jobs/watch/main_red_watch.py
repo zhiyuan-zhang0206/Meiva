@@ -23,6 +23,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import NamedTuple
 
+from base.host.boundary.json_values import is_object_dict
 from schedules.plans.watch.main_red import (
     Card,
     Entry,
@@ -32,14 +33,21 @@ from schedules.plans.watch.main_red import (
     card_title,
     liveness_alert,
 )
+from schedules.plans.watch.release_gate_slot import (
+    RELEASE_GATE_SLOT_STALE_AFTER,
+    SlotFacts,
+    decide_slot,
+)
 
 __all__ = [
     "STATE_FILE",
     "LivenessStream",
+    "SlotLedger",
     "WatchState",
     "load_state",
     "round_line",
     "save_state",
+    "slot_round",
     "watch_once",
 ]
 
@@ -59,11 +67,36 @@ class LivenessStream(NamedTuple):
 # The state file's three maps, kept together so a caller cannot pass one where another belongs: the
 # entries of the reds being tracked, the newest run read per workflow, and when this watch first
 # saw each workflow at all.
+# meiva:note
+# What the slot check remembers between rounds: the gap its card belongs to and that card's id, so
+# one missing slot stays one card however many rounds notice it.
+@dataclass(frozen=True)
+class SlotLedger:
+    gap_id: str | None = None
+    task_id: int | None = None
+
+
 @dataclass(frozen=True)
 class WatchState:
     entries: Mapping[str, Entry]
     watermarks: Mapping[str, str]
     first_seen: Mapping[str, str]
+    slot: SlotLedger = SlotLedger()
+
+
+# meiva:note
+# The slot ledger is a boundary read: the file may predate it, or carry a value a hand edit broke.
+# Each field is accepted only in its own type, so a malformed ledger costs one round's memory of
+# the gap rather than the whole state file.
+def _load_slot(raw: object) -> SlotLedger:
+    if not is_object_dict(raw):
+        return SlotLedger()
+    gap = raw.get("gap_id")
+    task = raw.get("task_id")
+    return SlotLedger(
+        gap_id=gap if isinstance(gap, str) else None,
+        task_id=task if isinstance(task, int) and not isinstance(task, bool) else None,
+    )
 
 
 def load_state(path: Path) -> WatchState:
@@ -89,10 +122,12 @@ def load_state(path: Path) -> WatchState:
         )
         for name, value in raw.get("entries", {}).items()
     }
+    slot = _load_slot(raw.get("slot"))
     return WatchState(
         entries,
         dict(raw.get("watermarks", {})),
         dict(raw.get("first_seen", {})),
+        slot,
     )
 
 
@@ -114,6 +149,10 @@ def save_state(path: Path, state: WatchState) -> None:
         },
         "watermarks": dict(state.watermarks),
         "first_seen": dict(state.first_seen),
+        "slot": {
+            "gap_id": state.slot.gap_id,
+            "task_id": state.slot.task_id,
+        },
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -222,3 +261,41 @@ def watch_once(
         }
     )
     return round_line(entries=len(entries), confirmed=opened, infra=infra, notes=tuple(notes))
+
+
+# meiva:note
+# The slot round: one workflow's cron can stop without anything going red, and the watch would
+# otherwise be silent through exactly the outage it exists to end. A missing slot opens one card
+# and the next scheduled run closes it. The round dispatches nothing: the make-up run certifies,
+# certifying releases, and a release is the user's decision -- so the card carries the command and
+# stays open until a human runs it or the cron recovers.
+def slot_round(
+    *,
+    state_path: Path,
+    now: datetime,
+    facts: SlotFacts,
+    open_card: Callable[[Card], int],
+    close_card: Callable[[int, str], None],
+    since: datetime | None = None,
+) -> str | None:
+    state = load_state(state_path)
+    ledger = state.slot
+    decision = decide_slot(
+        facts,
+        now=now,
+        since=since,
+        stale_after=RELEASE_GATE_SLOT_STALE_AFTER,
+    )
+    if decision.card is None:
+        if ledger.task_id is not None:
+            close_card(ledger.task_id, decision.note or "a scheduled release-gate run appeared")
+        slot = SlotLedger()
+    else:
+        task_id = ledger.task_id if ledger.task_id is not None else open_card(decision.card)
+        slot = SlotLedger(gap_id=decision.gap_id, task_id=task_id)
+    save_state(state_path, replace_state_slot(state, slot))
+    return decision.note
+
+
+def replace_state_slot(state: WatchState, slot: SlotLedger) -> WatchState:
+    return WatchState(state.entries, state.watermarks, state.first_seen, slot)

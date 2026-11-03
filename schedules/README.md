@@ -251,6 +251,20 @@ Every schedule row records a target `machine` (defaulting to the gateway machine
   itself; it only has to pass `home=` to `run_loop`. The argument defaults to
   `None` for a stored copy written before it existed — `meiva schedules
   provision` (or the next manager start) refreshes those from these templates.
+- **A cron that stops arriving is its own card, and the card publishes nothing.**
+  `release-gate.yml` is the only post-merge run that certifies the whole
+  population on a fixed cadence, and this repository's GitHub crons do not keep
+  it: in the three days to 2026-11-04 the six-hourly gate should have run twelve
+  times and ran six, the latest slot starting 1h48m late. The watch reads the
+  newest `event=schedule` run of that workflow each round
+  (`schedules/plans/watch/release_gate_slot.py`). Past
+  `RELEASE_GATE_SLOT_STALE_AFTER` (seven hours: one slot plus the measured late
+  band), with nothing of that workflow running and commits uncertified, it opens
+  one card. The round never dispatches: `release-gate.yml` certifies on success,
+  so a dispatched run mints a `v*` tag and moves `channel/latest`, and a release
+  is the user's decision -- the card carries the command and says so in its first
+  line. A slot the gate would have skipped anyway (nothing uncertified) opens no
+  card, and the card closes when a scheduled run appears again.
 - **A template change reaches a running cluster at the next `schedule-manager`
   start** (see "How built-ins get created"), or at once through
   `meiva schedules provision`. A resynced **enabled** schedule is relaunched onto the
