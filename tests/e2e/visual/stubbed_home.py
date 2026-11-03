@@ -1,17 +1,18 @@
-"""The stubbed Home page the real-browser shell-geometry suites drive.
+# meiva:note
+# The stubbed Home page the real-browser shell-geometry suites drive.
+#
+# A fake EventSource feeds one conversation, `/api/**` answers from JSON stubs, and every
+# suite shares the same context/open/settle sequence (`OVERRIDE_BASE_URL`, `API_STUBS`,
+# `new_context`, `open_page`, `wait_layout_settled`). `test_layout_invariants.py` uses it
+# for I1-I6 and the on-screen-keyboard contract; the measurements it asserts with live in
+# `scripts/verify/post_deploy_visual/layout_assertions.py`.
+#
+# Why a fake EventSource: a fresh browser context cannot open the SSE stream
+# against a cookie-gated deployed cluster, and `page.route` cannot stream to an
+# EventSource, so without one the timeline surface never grows past the viewport
+# width and every geometry assertion false-passes. The fake is ALWAYS injected;
+# target selection is described at `OVERRIDE_BASE_URL` below.
 
-A fake EventSource feeds one conversation, `/api/**` answers from JSON stubs, and every
-suite shares the same context/open/settle sequence (`OVERRIDE_BASE_URL`, `API_STUBS`,
-`new_context`, `open_page`, `wait_layout_settled`). `test_layout_invariants.py` uses it
-for I1-I6 and the on-screen-keyboard contract; the measurements it asserts with live in
-`scripts/post_deploy_visual/layout_assertions.py`.
-
-Why a fake EventSource: a fresh browser context cannot open the SSE stream
-against a cookie-gated deployed cluster, and `page.route` cannot stream to an
-EventSource, so without one the timeline surface never grows past the viewport
-width and every geometry assertion false-passes. The fake is ALWAYS injected;
-target selection is described at `OVERRIDE_BASE_URL` below.
-"""
 
 from __future__ import annotations
 

@@ -443,13 +443,13 @@ def test_the_guards_properties_are_counted_with_the_test_that_carries_them(tmp_p
     )
     counted = shard_counts.count_junit(report)
     assert counted["tests"] == 4
-    assert counted["leaks"] == [
+    assert counted.get("leaks") == [
         {"test": "tests/a/test_x.py::test_1", "kind": "env", "detail": "MEIVA_X was added"}
     ]
-    assert counted["notes"] == [
+    assert counted.get("notes") == [
         {"test": "tests/a/test_x.py::test_2[p]", "kind": "sys.path", "detail": "added ['/p']"}
     ]
-    assert counted["faults"] == [
+    assert counted.get("faults") == [
         {"test": "tests/a/test_y.py::test_3", "kind": "snapshot", "detail": "KeyError: 'x'"}
     ]
 
@@ -467,7 +467,7 @@ def test_a_property_of_any_shape_never_breaks_the_count(tmp_path: Path) -> None:
     )
     counted = shard_counts.count_junit(report)
     assert counted["tests"] == 4
-    assert [x["kind"] for x in counted["leaks"]] == ["", "no separator at all", ""]
+    assert [x["kind"] for x in counted.get("leaks", [])] == ["", "no separator at all", ""]
     assert "notes" not in counted
 
 

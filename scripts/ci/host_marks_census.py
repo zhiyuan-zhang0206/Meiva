@@ -17,8 +17,11 @@ import json
 import platform
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict
+
+from scripts.boundary.options import options
 
 # meiva:note
 # The selection the registry promises for a `marked` lane, spelled the way pytest reads it.
@@ -30,6 +33,12 @@ SELECTION = ("-m", "requires_host")
 DEFAULT_REPORT = "tmp/host-marks-census.json"
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+@dataclass(frozen=True)
+class Options:
+    root: Path
+    report: Path | None
 
 
 # meiva:note
@@ -109,9 +118,9 @@ def main(argv: list[str], *, host: str) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=_REPO_ROOT)
     parser.add_argument("--report", type=Path, default=None)
-    arguments = parser.parse_args(argv)
-    root: Path = arguments.root
-    path: Path = arguments.report or root / DEFAULT_REPORT
+    arguments = options(parser.parse_args(argv), Options)
+    root = arguments.root
+    path = arguments.report or root / DEFAULT_REPORT
     ids = collect(root)
     document = record(ids, path, host)
     print(

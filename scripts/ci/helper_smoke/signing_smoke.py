@@ -13,6 +13,7 @@ from base.config import settings
 from base.host.system.hostport import Host
 from base.paths import meiva_home
 from base.sessions.helperproc import helper_client
+from scripts.boundary.options import attribute
 from services.desktop.permissions_helper import lifecycle
 from services.desktop.permissions_helper.launchd_job import LaunchdFacts, helper_job_label
 
@@ -107,10 +108,10 @@ def main(argv: list[str]) -> int:
     commands.add_parser("run", help="build, sign, read back, launch and ping")
     commands.add_parser("label", help="print the launchd label of the helper job")
     commands.add_parser("converge", help="build, sign, install and load the helper")
-    args = parser.parse_args(argv)
-    if args.command == "label":
+    command = attribute(parser.parse_args(argv), "command", str)
+    if command == "label":
         print(helper_job_label(meiva_home()))
-    elif args.command == "converge":
+    elif command == "converge":
         env = install_env()
         lifecycle.converge(helper=partial(helper_client, home=env.build.home), env=env)
     else:

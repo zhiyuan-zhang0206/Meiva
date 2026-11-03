@@ -1,4 +1,4 @@
-exports = ["scripted_reply.py", "understanding_replay.py"]
+exports = ["post_deploy_visual", "scripted_reply.py", "understanding_replay.py"]
 
 [uses]
 "container.py" = ["boundary.py"]

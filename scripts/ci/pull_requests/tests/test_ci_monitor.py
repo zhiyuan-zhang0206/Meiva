@@ -698,7 +698,7 @@ def limbo_result(
     *,
     pending: list[str] | None = None,
     limbo: list[status.LimboRun] | None = None,
-    failed: list[dict[str, str]] | None = None,
+    failed: list[status.FailedCheck] | None = None,
 ) -> Any:
     return status.CIResult(
         verdict=CIStatus.PENDING,

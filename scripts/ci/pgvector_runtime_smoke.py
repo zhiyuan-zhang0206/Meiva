@@ -25,9 +25,11 @@ from __future__ import annotations
 
 import platform
 import sys
+from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 import psycopg
+from psycopg.rows import class_row
 
 from base.clock import SYSTEM_TIMERS
 from base.cluster.dataplane import runtime_binaries as rb
@@ -35,6 +37,16 @@ from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured
 from base.cluster.dataplane.pg_tools import throwaway_postgres
 from base.config import ConfigBoot
 from base.paths import meiva_home
+
+
+@dataclass(frozen=True)
+class _Distance:
+    distance: float
+
+
+@dataclass(frozen=True)
+class _Count:
+    available: int
 
 
 def _assert_platform_supported(system: str, machine: str) -> None:
@@ -78,26 +90,30 @@ def main() -> int:
             conn.execute("CREATE EXTENSION vector")
             conn.execute("CREATE TABLE smoke_vectors (v vector(3))")
             conn.execute("INSERT INTO smoke_vectors VALUES ('[1,2,3]'), ('[4,5,6]')")
-            rows = conn.execute(
-                "SELECT v <-> '[1,2,4]'::vector FROM smoke_vectors ORDER BY 1"
-            ).fetchall()
-            if len(rows) != 2:
-                raise RuntimeError(f"L2 query returned {len(rows)} rows, expected 2")
-            # L2: [1,2,3] vs [1,2,4] = 1.0; [4,5,6] vs [1,2,4] = sqrt(9+9+4).
-            if abs(float(rows[0][0]) - 1.0) >= 1e-6:
-                raise RuntimeError(f"L2 distance mismatch on row 1: {rows[0]}")
-            if abs(float(rows[1][0]) - (9 + 9 + 4) ** 0.5) >= 1e-6:
-                raise RuntimeError(f"L2 distance mismatch on row 2: {rows[1]}")
-            cosine = conn.execute("SELECT '[1,0,0]'::vector <=> '[1,0,0]'::vector").fetchone()
-            if cosine is None or abs(float(cosine[0])) >= 1e-6:
-                raise RuntimeError(f"cosine distance mismatch: {cosine}")
+            with conn.cursor(row_factory=class_row(_Distance)) as cursor:
+                rows = cursor.execute(
+                    "SELECT v <-> '[1,2,4]'::vector AS distance FROM smoke_vectors ORDER BY 1"
+                ).fetchall()
+                if len(rows) != 2:
+                    raise RuntimeError(f"L2 query returned {len(rows)} rows, expected 2")
+                # L2: [1,2,3] vs [1,2,4] = 1.0; [4,5,6] vs [1,2,4] = sqrt(9+9+4).
+                if abs(rows[0].distance - 1.0) >= 1e-6:
+                    raise RuntimeError(f"L2 distance mismatch on row 1: {rows[0]}")
+                if abs(rows[1].distance - (9 + 9 + 4) ** 0.5) >= 1e-6:
+                    raise RuntimeError(f"L2 distance mismatch on row 2: {rows[1]}")
+                cosine = cursor.execute(
+                    "SELECT '[1,0,0]'::vector <=> '[1,0,0]'::vector AS distance"
+                ).fetchone()
+                if cosine is None or abs(cosine.distance) >= 1e-6:
+                    raise RuntimeError(f"cosine distance mismatch: {cosine}")
             # NOSUPERUSER semantics the runtime relies on (see module docstring).
             conn.execute("CREATE ROLE smoke_nosuper LOGIN NOSUPERUSER")
         with psycopg.connect(f"postgresql://smoke_nosuper@127.0.0.1:{port}/meiva_citest") as conn:
-            row = conn.execute(
-                "SELECT count(*) FROM pg_available_extensions WHERE name = 'vector'"
-            ).fetchone()
-            if row is None or int(row[0]) != 1:
+            with conn.cursor(row_factory=class_row(_Count)) as cursor:
+                row = cursor.execute(
+                    "SELECT count(*)::int AS available FROM pg_available_extensions WHERE name = 'vector'"
+                ).fetchone()
+            if row is None or row.available != 1:
                 raise RuntimeError(
                     "pg_available_extensions does not list 'vector' for a NOSUPERUSER role"
                 )

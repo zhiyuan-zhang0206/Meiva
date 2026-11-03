@@ -8,9 +8,19 @@ collection to `--stacks`; the exit status is pytest's.
 import argparse
 import faulthandler
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
+from scripts.boundary.options import options
 from scripts.ci.collection_tracebacks import periodic_tracebacks
+
+
+@dataclass(frozen=True)
+class Options:
+    count: int
+    plan: str
+    stacks: str
+    files_from: str | None
 
 
 def _listed_files(path: str) -> list[str]:
@@ -26,7 +36,7 @@ def main(argv: list[str]) -> int:
         "--files-from",
         help="plan only the test files listed in this file, one per line (the selected subset)",
     )
-    args = parser.parse_args(argv)
+    args = options(parser.parse_args(argv), Options)
     files = _listed_files(args.files_from) if args.files_from is not None else []
     if args.files_from is not None and not files:
         parser.error(f"{args.files_from} lists no test file")

@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import Literal
 
 _SCRIPT_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(_SCRIPT_REPOSITORY_ROOT) not in sys.path:
@@ -24,6 +25,7 @@ from meizel.checkout import lanes_at, roles_at  # noqa: E402
 from meizel.roles import all_packages, pytest_test_hosts  # noqa: E402
 from meizel.test_graph.cutoff import package_local_tests  # noqa: E402
 from meizel.test_graph.impact import TREE_SCAN_PINS as TREE_SCAN_TESTS  # noqa: E402
+from scripts.boundary.options import options  # noqa: E402
 from scripts.ci.shard_counts import (  # noqa: E402
     estimate_seconds,
     load_durations,
@@ -677,6 +679,18 @@ def _forced_full(classes: dict[str, PathClass], full_estimate: float) -> Selecti
     return None
 
 
+@dataclass(frozen=True)
+class Options:
+    changed_files: Path | None
+    lane: Literal["static", "native"] | None
+    head_ref: str
+    event: str
+    repo_root: Path
+    json: bool
+    base_ref: str | None
+    batch_body: Path | None
+
+
 def main(argv: list[str]) -> int:
     """Run the selector CLI and print either JSON or a concise audit summary."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -694,10 +708,10 @@ def main(argv: list[str]) -> int:
         type=Path,
         help="GitHub event payload whose pull request names the members a batch tests",
     )
-    args = parser.parse_args(argv)
-    if args.changed_files is None and args.lane is None:
-        parser.error("one of --changed-files or --lane is required")
+    args = options(parser.parse_args(argv), Options)
     if args.changed_files is None:
+        if args.lane is None:
+            parser.error("one of --changed-files or --lane is required")
         paths = sorted(lane_tests(args.repo_root, args.lane))
         if args.json:
             print(

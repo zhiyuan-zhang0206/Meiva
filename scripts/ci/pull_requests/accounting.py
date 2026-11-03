@@ -8,11 +8,17 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import TypedDict
 
 from base.host.system.hostport import Host
+from scripts.boundary.fields import optional_int, optional_object, optional_str
+from scripts.boundary.options import options
+from scripts.boundary.process import stdout_text
+from scripts.boundary.untyped import is_object_dict, is_object_list, object_of
 
 _GH_TIMEOUT_S = 60.0
 LINUX_MINUTE_USD = 0.006
@@ -35,6 +41,49 @@ class CiUsageReadError(RuntimeError):
     pass
 
 
+class LedgerEntry(TypedDict):
+    # meiva:note
+    # One CI run's attribution and billable minutes: a line of the append-only JSONL ledger.
+
+    run_id: int
+    day: str
+    agent_id: int | None
+    task_id: int | None
+    pr_number: int | None
+    name: str | None
+    head_branch: str | None
+    conclusion: str | None
+    linux_minutes: int
+    macos_minutes: int
+    jobs: int
+
+
+class ReportRow(TypedDict):
+    # meiva:note
+    # One agent's rollup of the ledger over the report window; `agent_id` None is the unattributed row.
+
+    agent_id: int | None
+    runs: int
+    linux_minutes: int
+    macos_minutes: int
+    est_usd: float
+
+
+@dataclass(frozen=True)
+class Options:
+    # meiva:note
+    # The flags `main` reads, as the parser answered them.
+
+    repo: str
+    since: str | None
+    until: str | None
+    append_ledger: str | None
+    report: bool
+    days: int
+    agent: int | None
+    json: bool
+
+
 # meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
 def _gh_output(argv: list[str], *, operation: str, host: Host) -> str:
     try:
@@ -43,43 +92,40 @@ def _gh_output(argv: list[str], *, operation: str, host: Host) -> str:
         raise CiUsageReadError(f"{operation}: GitHub query timed out") from exc
     if result.returncode != 0:
         raise CiUsageReadError(f"{operation}: GitHub query failed (exit {result.returncode})")
-    return result.stdout
-
-
-def _is_raw_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
-
-
-def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
-    return isinstance(value, dict)
-
-
-def _is_object_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+    return stdout_text(result)
 
 
 # meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
 def _gh_api(path: str, *, host: Host) -> object:
     output = _gh_output(["gh", "api", path], operation=path, host=host)
     try:
-        return json.loads(output)
+        return object_of(json.loads, output)
     except json.JSONDecodeError as exc:
         raise CiUsageReadError(f"{path}: GitHub response is not JSON") from exc
 
 
+# meiva:note
+# The integer `id` a page row was checked to carry.
+def _row_id(row: Mapping[str, object]) -> int:
+    identifier = optional_int(row, "id")
+    if identifier is None:
+        raise CiUsageReadError("invalid row identity")
+    return identifier
+
+
 # meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
-def _read_page(path: str, key: str, *, host: Host) -> tuple[int, list[dict[str, Any]]]:
+def _read_page(path: str, key: str, *, host: Host) -> tuple[int, list[dict[str, object]]]:
     payload = _gh_api(path, host=host)
-    if not _is_object_dict(payload):
+    if not is_object_dict(payload):
         raise CiUsageReadError(f"{path}: expected a GitHub page object")
     total, raw_rows = payload.get("total_count"), payload.get(key)
-    if type(total) is not int or total < 0 or not _is_raw_list(raw_rows):
+    if type(total) is not int or total < 0 or not is_object_list(raw_rows):
         raise CiUsageReadError(f"{path}: missing or invalid page fields")
     if len(raw_rows) > 100:
         raise CiUsageReadError(f"{path}: inconsistent page count")
-    rows: list[dict[str, Any]] = []
+    rows: list[dict[str, object]] = []
     for row in raw_rows:
-        if not _is_object_dict(row) or type(row.get("id")) is not int:
+        if not is_object_dict(row) or type(row.get("id")) is not int:
             raise CiUsageReadError(f"{path}: invalid row identity")
         rows.append(row)
     return total, rows
@@ -88,8 +134,8 @@ def _read_page(path: str, key: str, *, host: Host) -> tuple[int, list[dict[str, 
 # meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
 def _pages(
     path: str, key: str, *, host: Host, max_items: int | None = None
-) -> list[dict[str, Any]]:
-    found: dict[int, dict[str, Any]] = {}
+) -> list[dict[str, object]]:
+    found: dict[int, dict[str, object]] = {}
     expected: int | None = None
     page = 1
     endpoint, _, query = path.partition("?")
@@ -106,9 +152,10 @@ def _pages(
             )
         expected = total
         for row in rows:
-            if row["id"] in found:
+            identifier = _row_id(row)
+            if identifier in found:
                 raise CiUsageReadError(f"{path}: incomplete read; duplicate row across pages")
-            found[row["id"]] = row
+            found[identifier] = row
         if len(found) > total:
             raise CiUsageReadError(f"{path}: inconsistent page count")
         if len(found) == total:
@@ -154,19 +201,28 @@ def job_minutes(started: str | None, completed: str | None) -> int:
 
 
 # meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
+# meiva:note
+# The `number` of each pull request in `raw`; an entry without an integer one is `error`.
+def _pull_request_numbers(raw: list[object], error: str) -> list[int]:
+    numbers: list[int] = []
+    for pr in raw:
+        number = optional_int(pr, "number") if is_object_dict(pr) else None
+        if number is None:
+            raise CiUsageReadError(error)
+        numbers.append(number)
+    return numbers
+
+
+# meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
 def _identity_from_prs(
-    run: dict[str, Any], repo: str, real_pr: int | None, *, host: Host
+    run: Mapping[str, object], repo: str, real_pr: int | None, *, host: Host
 ) -> tuple[int | None, int | None, int | None]:
     raw_pull_requests: object = run.get("pull_requests")
-    if not _is_raw_list(raw_pull_requests):
+    if not is_object_list(raw_pull_requests):
         raise CiUsageReadError("workflow run: invalid pull_requests")
-    pull_requests: list[dict[str, Any]] = []
-    for pr in raw_pull_requests:
-        if not _is_object_dict(pr) or type(pr.get("number")) is not int:
-            raise CiUsageReadError("workflow run: invalid pull_requests")
-        pull_requests.append(pr)
+    pull_requests = _pull_request_numbers(raw_pull_requests, "workflow run: invalid pull_requests")
     if pull_requests:
-        pr_number = pull_requests[0]["number"]
+        pr_number = pull_requests[0]
         title = _pr_title(repo, real_pr if real_pr else pr_number, host=host)
         agent_id, task_id = parse_identity(title)
         return (real_pr or pr_number), agent_id, task_id
@@ -176,19 +232,17 @@ def _identity_from_prs(
     return None, None, None
 
 
-def _merged_pr_of(run: dict[str, Any], repo: str, *, host: Host) -> int | None:
+def _merged_pr_of(run: Mapping[str, object], repo: str, *, host: Host) -> int | None:
     head_sha = str(run.get("head_sha") or "")
     if not head_sha:
         return None
     raw_merged_prs = _gh_api(f"repos/{repo}/commits/{head_sha}/pulls", host=host)
-    if not _is_raw_list(raw_merged_prs):
+    if not is_object_list(raw_merged_prs):
         raise CiUsageReadError(f"commit {head_sha}: invalid pull request associations")
-    merged_prs: list[dict[str, Any]] = []
-    for pr in raw_merged_prs:
-        if not _is_object_dict(pr) or type(pr.get("number")) is not int:
-            raise CiUsageReadError(f"commit {head_sha}: invalid pull request associations")
-        merged_prs.append(pr)
-    return merged_prs[0]["number"] if merged_prs else None
+    merged_prs = _pull_request_numbers(
+        raw_merged_prs, f"commit {head_sha}: invalid pull request associations"
+    )
+    return merged_prs[0] if merged_prs else None
 
 
 # meiva:note
@@ -196,7 +250,7 @@ def _merged_pr_of(run: dict[str, Any], repo: str, *, host: Host) -> int | None:
 # meiva:link scripts/ci/pull_requests/docs/accounting.meiva.okf.md
 def _run_identity(
     # meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
-    run: dict[str, Any],
+    run: Mapping[str, object],
     repo: str,
     *,
     host: Host,
@@ -209,37 +263,38 @@ def _run_identity(
             pr_number = merged
             agent_id, task_id = parse_identity(_pr_title(repo, pr_number, host=host))
     if task_id is None:
-        head_commit: dict[str, Any] = run.get("head_commit") or {}
+        head_commit = optional_object(run, "head_commit") or {}
         _, task_id = parse_identity(str(head_commit.get("message") or ""))
     return pr_number, agent_id, task_id
 
 
-def _run_entry(run: dict[str, Any], repo: str, *, host: Host) -> dict[str, Any]:
+def _run_entry(run: Mapping[str, object], repo: str, *, host: Host) -> LedgerEntry:
     pr_number, agent_id, task_id = _run_identity(run, repo, host=host)
-    day = (run.get("created_at") or "")[:10]
-    return {
-        "run_id": int(run["id"]),
-        "day": day,
-        "agent_id": agent_id,
-        "task_id": task_id,
-        "pr_number": pr_number,
-        "name": run.get("name"),
-        "head_branch": run.get("head_branch"),
-        "conclusion": run.get("conclusion"),
-        "linux_minutes": 0,
-        "macos_minutes": 0,
-        "jobs": 0,
-    }
+    day = (optional_str(run, "created_at") or "")[:10]
+    return LedgerEntry(
+        run_id=_row_id(run),
+        day=day,
+        agent_id=agent_id,
+        task_id=task_id,
+        pr_number=pr_number,
+        name=optional_str(run, "name"),
+        head_branch=optional_str(run, "head_branch"),
+        conclusion=optional_str(run, "conclusion"),
+        linux_minutes=0,
+        macos_minutes=0,
+        jobs=0,
+    )
 
 
 # meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
-def _completed_job_minutes(job: dict[str, Any]) -> int:
-    if job.get("status") != "completed" or not isinstance(job.get("conclusion"), str):
+def _completed_job_minutes(job: Mapping[str, object]) -> int:
+    conclusion = job.get("conclusion")
+    if job.get("status") != "completed" or not isinstance(conclusion, str):
         raise CiUsageReadError(f"job {job['id']}: incomplete; job is not completed")
     if "started_at" not in job or "completed_at" not in job:
         raise CiUsageReadError(f"job {job['id']}: missing completed-job timestamps")
     started, completed = job["started_at"], job["completed_at"]
-    if started is None and job["conclusion"] in {"cancelled", "skipped"}:
+    if started is None and conclusion in {"cancelled", "skipped"}:
         return 0
     if not isinstance(started, str) or not isinstance(completed, str):
         raise CiUsageReadError(f"job {job['id']}: incomplete completed-job timestamps")
@@ -249,7 +304,7 @@ def _completed_job_minutes(job: dict[str, Any]) -> int:
         raise CiUsageReadError(f"job {job['id']}: invalid completed-job timestamps") from exc
 
 
-def _fill_job_minutes(entry: dict[str, Any], repo: str, *, host: Host) -> None:
+def _fill_job_minutes(entry: LedgerEntry, repo: str, *, host: Host) -> None:
     jobs = _pages(f"repos/{repo}/actions/runs/{entry['run_id']}/jobs", "jobs", host=host)
     for job in jobs:
         minutes = _completed_job_minutes(job)
@@ -264,8 +319,8 @@ def _fill_job_minutes(entry: dict[str, Any], repo: str, *, host: Host) -> None:
 
 
 # meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
-def collect(repo: str, since: str, until: str, *, host: Host) -> list[dict[str, Any]]:
-    entries: dict[int, dict[str, Any]] = {}
+def collect(repo: str, since: str, until: str, *, host: Host) -> list[LedgerEntry]:
+    entries: dict[int, dict[str, object]] = {}
     since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
     until_dt = datetime.fromisoformat(until.replace("Z", "+00:00"))
     cursor = since_dt
@@ -288,17 +343,20 @@ def collect(repo: str, since: str, until: str, *, host: Host) -> list[dict[str, 
                 raise CiUsageReadError(f"run {run['id']}: invalid workflow name")
             if name != "CI":
                 continue
+            created_text = run.get("created_at")
+            if not isinstance(created_text, str):
+                raise CiUsageReadError(f"run {run['id']}: invalid created_at")
             try:
-                created = datetime.fromisoformat(run["created_at"].replace("Z", "+00:00"))
-            except (KeyError, AttributeError, ValueError) as exc:
+                created = datetime.fromisoformat(created_text.replace("Z", "+00:00"))
+            except ValueError as exc:
                 raise CiUsageReadError(f"run {run['id']}: invalid created_at") from exc
             if not since_dt <= created < until_dt:
                 continue
             if run.get("status") != "completed" or not isinstance(run.get("conclusion"), str):
                 raise CiUsageReadError(f"run {run['id']}: incomplete; workflow is not completed")
-            entries[run["id"]] = run
+            entries[_row_id(run)] = run
         cursor = datetime.fromtimestamp(chunk_end, tz=UTC)
-    out: list[dict[str, Any]] = []
+    out: list[LedgerEntry] = []
     for run in entries.values():
         entry = _run_entry(run, repo, host=host)
         _fill_job_minutes(entry, repo, host=host)
@@ -306,26 +364,26 @@ def collect(repo: str, since: str, until: str, *, host: Host) -> list[dict[str, 
     return out
 
 
-def load_ledger(path: Path) -> dict[int, dict[str, Any]]:
+def load_ledger(path: Path) -> dict[int, dict[str, object]]:
     if not path.exists():
         return {}
-    ledger: dict[int, dict[str, Any]] = {}
+    ledger: dict[int, dict[str, object]] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
         try:
-            loaded = json.loads(line)
+            loaded = object_of(json.loads, line)
         except json.JSONDecodeError:
             continue
-        if _is_object_dict(loaded) and isinstance(loaded.get("run_id"), int):
-            ledger[loaded["run_id"]] = loaded
+        if is_object_dict(loaded) and (run_id := optional_int(loaded, "run_id")) is not None:
+            ledger[run_id] = loaded
     return ledger
 
 
 # meiva:note
 # append_ledger keys rows by run id: entries already present are skipped, so re-running a window that overlaps the ledger appends only new runs and returns the appended count (a re-fire over the same window appends 0).
 # meiva:link scripts/ci/pull_requests/docs/accounting.meiva.okf.md
-def append_ledger(path: Path, entries: list[dict[str, Any]]) -> int:
+def append_ledger(path: Path, entries: Sequence[LedgerEntry]) -> int:
     # meiva:note
     # The JSONL ledger remains append-only and idempotent by run_id. Collection finishes before append begins, so a failed collection leaves existing bytes unchanged and does not append earlier successful rows from that collection. Existing historical rows are not automatically repaired or replaced.
     # meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
@@ -344,14 +402,14 @@ def append_ledger(path: Path, entries: list[dict[str, Any]]) -> int:
 # report_rows rolls up the last `days` per agent (runs and linux/macos minutes) and prices them at the GitHub-hosted private-repo overage rates (Linux $0.006/min, macOS $0.062/min; corrected 2026-09-06 per GitHub's published pricing). The repo is currently public, so est_usd is a private-repo overage equivalent — phase-2 quotas must gate on MINUTES, not dollars; the account's 3,000 included minutes/month are account-wide across all repos.
 # meiva:link scripts/ci/pull_requests/docs/accounting.meiva.okf.md
 def report_rows(
-    ledger: dict[int, dict[str, Any]],
+    ledger: Mapping[int, Mapping[str, object]],
     *,
     days: int,
     agent: int | None,
     now: datetime,
-) -> list[dict[str, Any]]:
+) -> list[ReportRow]:
     cutoff = now.timestamp() - days * 86400
-    per_agent: dict[int | None, dict[str, Any]] = {}
+    per_agent: dict[int | None, ReportRow] = {}
     for entry in ledger.values():
         if agent is not None and entry.get("agent_id") != agent:
             continue
@@ -363,28 +421,25 @@ def report_rows(
             created = 0.0
         if created < cutoff:
             continue
-        key = entry.get("agent_id") if isinstance(entry.get("agent_id"), int) else None
+        key = optional_int(entry, "agent_id")
         if key not in per_agent:
-            per_agent[key] = {
-                "agent_id": key,
-                "runs": 0,
-                "linux_minutes": 0,
-                "macos_minutes": 0,
-            }
+            per_agent[key] = ReportRow(
+                agent_id=key, runs=0, linux_minutes=0, macos_minutes=0, est_usd=0.0
+            )
         row = per_agent[key]
         row["runs"] += 1
-        row["linux_minutes"] += int(entry.get("linux_minutes") or 0)
-        row["macos_minutes"] += int(entry.get("macos_minutes") or 0)
+        row["linux_minutes"] += optional_int(entry, "linux_minutes") or 0
+        row["macos_minutes"] += optional_int(entry, "macos_minutes") or 0
     rows = list(per_agent.values())
     for row in rows:
         row["est_usd"] = round(
             row["linux_minutes"] * LINUX_MINUTE_USD + row["macos_minutes"] * MACOS_MINUTE_USD,
             2,
         )
-    return sorted(rows, key=lambda r: -(r["est_usd"] or 0))
+    return sorted(rows, key=lambda r: -r["est_usd"])
 
 
-def _print_report(rows: list[dict[str, Any]], days: int) -> None:
+def _print_report(rows: Sequence[ReportRow], days: int) -> None:
     print(
         f"CI usage, last {days} days (minutes primary; est. private-repo overage at "
         f"Linux ${LINUX_MINUTE_USD}/min, macOS ${MACOS_MINUTE_USD}/min):"
@@ -408,7 +463,7 @@ def _report(days: int, agent: int | None, *, as_json: bool, now: datetime) -> No
         _print_report(rows, days)
 
 
-def _print_entries(entries: list[dict[str, Any]]) -> None:
+def _print_entries(entries: Sequence[LedgerEntry]) -> None:
     if not entries:
         print("No CI runs in the window.")
         return
@@ -438,7 +493,7 @@ def main(argv: list[str], *, host: Host) -> int:
         "--agent", type=int, default=None, help="with --report: restrict to one agent"
     )
     parser.add_argument("--json", action="store_true", help="machine-readable output")
-    args = parser.parse_args(argv)
+    args = options(parser.parse_args(argv), Options)
 
     if args.report:
         if args.since or args.until or args.append_ledger:

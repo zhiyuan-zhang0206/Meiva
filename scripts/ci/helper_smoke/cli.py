@@ -12,10 +12,13 @@ import shutil
 import signal
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from base.clock import SYSTEM_TIMERS
+from base.host.permissions_helper.client import RootStatus
+from scripts.boundary.options import options
+from scripts.boundary.untyped import object_of
 
 from .f12 import f12_finish, f12_point
 from .support import (
@@ -23,13 +26,17 @@ from .support import (
     ROOT_WAIT_S,
     UNIT_IDS,
     UNIT_PROBE,
+    JsonObject,
     SmokeError,
     bootout,
+    conflict_pid_of,
     fail,
-    is_object_dict,
     job_pid,
+    json_object,
+    keeper_pid,
     kill,
     launchctl_domain,
+    live_unit_pid,
     pid_alive,
     ping_or_none,
     ppid_of,
@@ -38,13 +45,14 @@ from .support import (
     relaunched_helper,
     root_call,
     run,
+    running_root_pid,
     save,
     status_if_conflict,
     status_if_keeper_running,
     status_if_running,
     tail,
-    unit_entry,
     wait_for,
+    whole_number,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -60,6 +68,16 @@ _ATTRIBUTION_RE = re.compile(
     r".*?(?P<role>requesting|accessing)=\{TCCDProcess: identifier=(?P<requesting_id>[^,]*), "
     r"pid=(?P<requesting_pid>\d+)"
 )
+
+
+@dataclass(frozen=True)
+class Options:
+    workdir: str
+    label: str
+    python: str
+    skip_attribution: bool
+    sample_conflict: bool
+    cleanup: bool
 
 
 def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, wait, and teardown live together on purpose
@@ -79,7 +97,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         help="sample chains + TCC attribution across the helper crash conflict phase (F12b)",
     )
     parser.add_argument("--cleanup", action="store_true", help="remove the workdir at the end")
-    args = parser.parse_args()
+    args = options(parser.parse_args(), Options)
 
     workdir = Path(args.workdir).expanduser()
     if not workdir.is_absolute():
@@ -108,14 +126,11 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
 
     helper_client = PermissionsHelperClient(helper_sock)
 
-    def root_status() -> dict[str, Any]:
+    def root_status() -> JsonObject:
         return root_call(run_dir, "status")
 
-    def helper_root_status() -> dict[str, Any]:
-        status = helper_client.root_status()
-        if not is_object_dict(status):
-            fail("keeper", f"unexpected root_status payload: {status!r}")
-        return status
+    def helper_root_status() -> RootStatus:
+        return helper_client.root_status()
 
     def phase_pass(name: str, detail: str) -> None:
         phases.append(name)
@@ -285,9 +300,11 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             "chain",
             timers=SYSTEM_TIMERS,
         )
-        root_pid = int(status["root"]["pid"])
+        root_pid = running_root_pid(status)
+        if root_pid is None:
+            fail("chain", f"root is not running in {json.dumps(status)[:400]}")
         recorded_pids.add(root_pid)
-        initial_units = {unit_id: int(unit_entry(status, unit_id)["pid"]) for unit_id in UNIT_IDS}
+        initial_units = {unit_id: live_unit_pid(status, unit_id) for unit_id in UNIT_IDS}
         recorded_pids.update(initial_units.values())
 
         helper_ppid = ppid_of(helper_pid)
@@ -346,7 +363,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         if args.skip_attribution:
             print("PHASE attribute: SKIP (--skip-attribution)")
         else:
-            unit_results: dict[str, dict[str, Any]] = {}
+            unit_results: dict[str, JsonObject] = {}
             for unit_id in initial_units:
                 results_path = workdir / f"unit-results-{unit_id}.json"
                 wait_for(
@@ -356,10 +373,12 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
                     "attribute",
                     timers=SYSTEM_TIMERS,
                 )
-                unit_results[unit_id] = json.loads(results_path.read_text())
+                unit_results[unit_id] = json_object(
+                    object_of(json.loads, results_path.read_text()), f"unit {unit_id} results"
+                )
             time.sleep(2.0)
             for unit_id, results in unit_results.items():
-                if int(results["ppid"]) != root_pid:
+                if whole_number(results, "ppid") != root_pid:
                     fail(
                         "attribute", f"unit {unit_id} ppid {results['ppid']} != root pid {root_pid}"
                     )
@@ -400,17 +419,18 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         # the orphan tree is closed, h4 once the re-seed is stable (re-seeded
         # units must resolve to the new helper). h1-h3 are the measurement:
         # what responsibility looks like between death and replacement.
-        conflict_f12: dict[str, Any] = {"points": {}}
+        points: dict[str, object] = {}
+        conflict_f12: JsonObject = {"points": points}
         ab_units = list(initial_units.items())
         ab_chain = [helper_pid, root_pid, *initial_units.values()]
         if args.sample_conflict:
-            conflict_f12["points"]["h0"] = f12_point(
+            points["h0"] = f12_point(
                 workdir, "h0", ab_units, ab_chain, now=time.time(), timers=SYSTEM_TIMERS
             )
         kill(helper_pid, signal.SIGKILL)
         if args.sample_conflict:
             conflict_f12["kill_ts"] = round(time.time(), 3)
-            conflict_f12["points"]["h1"] = f12_point(
+            points["h1"] = f12_point(
                 workdir, "h1", ab_units, ab_chain, now=time.time(), timers=SYSTEM_TIMERS
             )
         new_helper_pid = wait_for(
@@ -428,11 +448,12 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             "conflict",
             timers=SYSTEM_TIMERS,
         )
-        if int(conflict["conflict"]["pid"]) != root_pid:
-            fail("conflict", f"conflict pid {conflict['conflict']['pid']} != orphan {root_pid}")
+        conflict_pid = conflict_pid_of(conflict)
+        if conflict_pid != root_pid:
+            fail("conflict", f"conflict pid {conflict_pid} != orphan {root_pid}")
         save(evidence, "keeper-status-conflict.json", json.dumps(conflict, indent=2))
         if args.sample_conflict:
-            conflict_f12["points"]["h2"] = f12_point(
+            points["h2"] = f12_point(
                 workdir,
                 "h2",
                 ab_units,
@@ -464,7 +485,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             timers=SYSTEM_TIMERS,
         )
         if args.sample_conflict:
-            conflict_f12["points"]["h3"] = f12_point(
+            points["h3"] = f12_point(
                 workdir,
                 "h3",
                 ab_units,
@@ -479,7 +500,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             "conflict",
             timers=SYSTEM_TIMERS,
         )
-        reseeded_pid = int(reseeded["pid"])
+        reseeded_pid = keeper_pid(reseeded)
         recorded_pids.add(reseeded_pid)
         reseeded_status = wait_for(
             "reseeded tree",
@@ -488,9 +509,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
             "conflict",
             timers=SYSTEM_TIMERS,
         )
-        reseeded_units = {
-            unit_id: int(unit_entry(reseeded_status, unit_id)["pid"]) for unit_id in UNIT_IDS
-        }
+        reseeded_units = {unit_id: live_unit_pid(reseeded_status, unit_id) for unit_id in UNIT_IDS}
         recorded_pids.update(reseeded_units.values())
         if ppid_of(reseeded_pid) != new_helper_pid:
             fail("conflict", "reseeded root is not the relaunched helper's child")
@@ -503,7 +522,7 @@ def main() -> int:  # noqa: PLR0915 - one bounded smoke lifecycle: every phase, 
         )
         if args.sample_conflict:
             time.sleep(_F12_STABLE_S)
-            conflict_f12["points"]["h4"] = f12_point(
+            points["h4"] = f12_point(
                 workdir,
                 "h4",
                 [*ab_units, *reseeded_units.items()],

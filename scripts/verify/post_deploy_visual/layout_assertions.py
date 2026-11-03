@@ -1,11 +1,12 @@
-"""Real-browser structural measurements shared by the layout suites and the post-deploy visual gate.
+# meiva:note
+# Real-browser structural measurements shared by the layout suites and the post-deploy visual gate.
+#
+# Document overflow, viewport containment, center-point occlusion, nonempty blocks,
+# settle-before-capture, and the bounded wait that absorbs asynchronously mounted
+# panels before declared minimum visible counts are probed. Both the layout-invariant
+# suite (`tests/e2e/visual/`) and the post-deploy visual gate consume these so their
+# definitions cannot drift.
 
-Document overflow, viewport containment, center-point occlusion, nonempty blocks,
-settle-before-capture, and the bounded wait that absorbs asynchronously mounted
-panels before declared minimum visible counts are probed. Both the layout-invariant
-suite (`tests/e2e/visual/`) and the post-deploy visual gate consume these so their
-definitions cannot drift.
-"""
 
 from __future__ import annotations
 
@@ -15,9 +16,9 @@ from typing import TypedDict, TypeGuard
 from playwright.sync_api import Page
 
 
+# meiva:note
+# One machine-readable structural defect.
 class LayoutFailure(TypedDict):
-    """One machine-readable structural defect."""
-
     kind: str
     selector: str
     detail: str
@@ -167,8 +168,9 @@ _SETTLED_PREDICATE = """
 """
 
 
+# meiva:note
+# Wait until the page is ready and no visible skeleton or spinner remains.
 def wait_for_layout_settled(page: Page, ready_selector: str, *, timeout_ms: int = 60_000) -> None:
-    """Wait until the page is ready and no visible skeleton or spinner remains."""
     page.wait_for_function(
         _SETTLED_PREDICATE,
         arg={"readySelector": ready_selector},
@@ -194,19 +196,27 @@ def _is_layout_failure_list(value: object) -> TypeGuard[list[LayoutFailure]]:
     return _is_object_list(value) and all(_is_raw_dict(item) for item in value)
 
 
+# meiva:note
+# Count visible in-viewport matches per selector.
+#
+#     The same rules as the structural probe's minimum-count check, from the one
+#     shared predicate — a wait built on these counts and the probe's verdict can
+#     never disagree about what "visible in viewport" means.
 def visible_in_viewport_counts(page: Page, selectors: tuple[str, ...]) -> dict[str, int]:
-    """Count visible in-viewport matches per selector.
-
-    The same rules as the structural probe's minimum-count check, from the one
-    shared predicate — a wait built on these counts and the probe's verdict can
-    never disagree about what "visible in viewport" means.
-    """
     counts: object = page.evaluate(_VISIBLE_COUNT_PROBE, list(selectors))
     if not _is_int_dict(counts):
         raise TypeError("visible count probe must return dict[str, int]")
     return counts
 
 
+# meiva:note
+# Wait, bounded, until every selector reaches its minimum visible count.
+#
+#     A panel that mounts only after async data resolves can race an immediate
+#     structural probe, so a caller that declares minimums first waits for them.
+#     Returns the counts observed when the wait ended: satisfying the minimums on
+#     the happy path (the first observation already satisfies them when nothing
+#     is delayed — no sleep), otherwise the still-short counts at the deadline.
 def wait_for_minimum_visible_counts(
     page: Page,
     minimum_counts: dict[str, int],
@@ -214,14 +224,6 @@ def wait_for_minimum_visible_counts(
     timeout_ms: int = 5_000,
     poll_ms: int = 100,
 ) -> dict[str, int]:
-    """Wait, bounded, until every selector reaches its minimum visible count.
-
-    A panel that mounts only after async data resolves can race an immediate
-    structural probe, so a caller that declares minimums first waits for them.
-    Returns the counts observed when the wait ended: satisfying the minimums on
-    the happy path (the first observation already satisfies them when nothing
-    is delayed — no sleep), otherwise the still-short counts at the deadline.
-    """
     selectors = tuple(minimum_counts)
     counts = visible_in_viewport_counts(page, selectors)
     deadline = time.monotonic() + timeout_ms / 1000
@@ -233,6 +235,12 @@ def wait_for_minimum_visible_counts(
     return counts
 
 
+# meiva:note
+# Measure overflow, viewport placement, occlusion, and expected content.
+#
+#     Panels and controls are scrolled into view (nearest) before the viewport
+#     checks: the gate pages scroll inside internal containers, and a panel
+#     below the fold is reachable content, not a defect.
 def structural_failures(
     page: Page,
     *,
@@ -241,12 +249,6 @@ def structural_failures(
     nonempty_selectors: tuple[str, ...] = (),
     minimum_visible_counts: dict[str, int] | None = None,
 ) -> list[LayoutFailure]:
-    """Measure overflow, viewport placement, occlusion, and expected content.
-
-    Panels and controls are scrolled into view (nearest) before the viewport
-    checks: the gate pages scroll inside internal containers, and a panel
-    below the fold is reachable content, not a defect.
-    """
     result: object = page.evaluate(
         _STRUCTURAL_PROBE,
         {
@@ -261,20 +263,23 @@ def structural_failures(
     return result
 
 
+# meiva:note
+# Return whether the document fits its horizontal viewport.
 def no_document_horizontal_overflow(page: Page) -> bool:
-    """Return whether the document fits its horizontal viewport."""
     return not any(
         failure["kind"] == "horizontal-overflow" for failure in structural_failures(page)
     )
 
 
+# meiva:note
+# Return whether one required panel is visible and wholly in the viewport.
 def element_within_viewport(page: Page, selector: str) -> bool:
-    """Return whether one required panel is visible and wholly in the viewport."""
     return not structural_failures(page, visible_selectors=(selector,))
 
 
+# meiva:note
+# Return whether an element's scroll width fits its parent.
 def element_within_parent(page: Page, selector: str) -> bool:
-    """Return whether an element's scroll width fits its parent."""
     return bool(
         page.evaluate(
             """(selector) => {
@@ -287,8 +292,9 @@ def element_within_parent(page: Page, selector: str) -> bool:
     )
 
 
+# meiva:note
+# Return whether at least one match exists and every match fits its parent.
 def all_elements_within_parents(page: Page, selector: str) -> bool:
-    """Return whether at least one match exists and every match fits its parent."""
     return bool(
         page.evaluate(
             """(selector) => {
