@@ -89,12 +89,14 @@ async def _serve_with_guard(service: ExecHostService, path: Path, drain_s: float
 
 
 def _run(home: Path, run: Path, *, default_cwd: Path) -> int:
+    executable = sys.executable
     service = ExecHostService(
         home=home,
         base_environ=child_env.inherited_process_env(),
         default_cwd=default_cwd,
-        source_root=editable_install.current_interpreter_source_root(sys.executable),
+        source_root=editable_install.current_interpreter_source_root(executable),
         timers=SYSTEM_TIMERS,
+        executable=executable,
         pid=os.getpid(),
     )
     path = service_socket_path(run)

@@ -11,7 +11,6 @@ import json
 import os
 import signal
 import subprocess
-import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -310,7 +309,7 @@ class ExecHostService:
         default_cwd: Path,
         source_root: Path | None,
         timers: Timers,
-        executable: str = sys.executable,
+        executable: str,
         pid: int = 0,
     ) -> None:
         self._timers = timers
