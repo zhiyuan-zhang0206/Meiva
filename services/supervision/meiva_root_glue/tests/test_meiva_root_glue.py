@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
+import logging
 import os
 import sys
 import time
@@ -17,6 +19,13 @@ import pytest
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.config.tests.configuration import snapshot_process_config
 from base.daemon.health import DaemonProbe
+from base.host.system.tests.fake_commands import (
+    DARWIN_ARM64,
+    LINUX_X86,
+    FakeCommands,
+    Reply,
+    fake_host,
+)
 from services.supervision.meiva_root.health import HealthMonitor
 from services.supervision.meiva_root.manifest import (
     ROOT_ID,
@@ -473,3 +482,192 @@ def test_the_launch_rewrite_wraps_only_the_capped_units() -> None:
 # alone, so the signature must accept exactly that call.
 def test_the_launch_plans_reference_calls_the_factory_with_the_context_alone() -> None:
     inspect.signature(glue.build_wiring).bind(object())
+
+
+def test_can_scope_units_passes_explicit_env_and_largest_budgets_to_runner() -> None:
+    budgets = [
+        glue.UnitBudget(unit_id="agent-host", max_mb=18432, swap_max_mb=0),
+        glue.UnitBudget(unit_id="exec-host", max_mb=18944, swap_max_mb=256),
+    ]
+    commands = FakeCommands()
+    commands.on("systemd-run", Reply(returncode=0), Reply(returncode=1), OSError("missing"))
+    probe_env = {"PATH": "/usr/bin", "XDG_RUNTIME_DIR": "/run/user/1000"}
+
+    assert (
+        glue.can_scope_units(budgets=budgets, platform="darwin", env=probe_env, run=commands)
+        is False
+    )
+    assert (
+        glue.can_scope_units(
+            budgets=[glue.UnitBudget(unit_id="agent-host", max_mb=0)],
+            platform="linux",
+            env=probe_env,
+            run=commands,
+        )
+        is False
+    )
+    assert commands.calls == []
+
+    assert (
+        glue.can_scope_units(budgets=budgets, platform="linux", env=probe_env, run=commands) is True
+    )
+    assert commands.calls[0].argv == (
+        "systemd-run",
+        "--user",
+        "--scope",
+        "--collect",
+        "-p",
+        "MemoryMax=18944M",
+        "-p",
+        "MemorySwapMax=256M",
+        "true",
+    )
+    assert commands.calls[0].kwargs["env"] == probe_env
+
+    assert (
+        glue.can_scope_units(budgets=budgets, platform="linux", env=probe_env, run=commands)
+        is False
+    )
+    assert (
+        glue.can_scope_units(budgets=budgets, platform="linux", env=probe_env, run=commands)
+        is False
+    )
+
+
+def _recording_systemd_launcher() -> tuple[Any, dict[str, tuple[tuple[str, ...], dict[str, str]]]]:
+    spawned: dict[str, tuple[tuple[str, ...], dict[str, str]]] = {}
+
+    async def launcher(*argv: str, **options: Any) -> asyncio.subprocess.Process:
+        env = dict(cast("dict[str, str]", options["env"]))
+        if argv[0] == "systemd-run":
+            inner = argv[argv.index("--") + 1 :]
+            spawned["agent-host"] = (argv, env)
+            return await asyncio.create_subprocess_exec(*inner, **options)
+        spawned["gateway"] = (argv, env)
+        return await asyncio.create_subprocess_exec(*argv, **options)
+
+    return launcher, spawned
+
+
+# meiva:note
+# Regression for the 2026-11-03 Linux cold-start failure: when `Supervisor` starts without
+# `XDG_RUNTIME_DIR` in its initial `environ` while `/run/user/<uid>` exists, `bind_memory_budget`
+# repairs `XDG_RUNTIME_DIR` on `supervisor`'s launch environment so BOTH the `systemd-run --user`
+# scope probe AND `Supervisor._spawn` receive `XDG_RUNTIME_DIR=/run/user/<uid>`, without mutating
+# global `os.environ`, while per-unit `manifest.env` overrides still take precedence.
+async def test_bind_memory_budget_repairs_launch_env_for_both_scope_probe_and_spawn(
+    tmp_path: Path,
+) -> None:
+    runtime_root = tmp_path / "run_user"
+    expected_runtime_dir = runtime_root / "1000"
+    expected_runtime_dir.mkdir(parents=True)
+
+    agent_plain = tuple(_SLEEPER)
+    gateway_plain = ("/bin/sleep", "61")
+    registry = UnitRegistry(
+        [
+            UnitManifest("agent-host", agent_plain, RestartPolicy.ALWAYS, ROOT_ID),
+            UnitManifest(
+                "gateway",
+                gateway_plain,
+                RestartPolicy.ALWAYS,
+                ROOT_ID,
+                (("XDG_RUNTIME_DIR", "/gateway/override"),),
+            ),
+        ]
+    )
+
+    launcher, spawned = _recording_systemd_launcher()
+    original_global_xdg = os.environ.get("XDG_RUNTIME_DIR")
+    initial_env = {k: v for k, v in os.environ.items() if k != "XDG_RUNTIME_DIR"}
+    supervisor = Supervisor(
+        registry,
+        environ=initial_env,
+        run_dir=tmp_path / "run",
+        clock=system_clock(),
+        root_pid=os.getpid(),
+        spawn=launcher,
+    )
+    commands = FakeCommands()
+    commands.on("systemd-run", Reply(returncode=0))
+    host = fake_host(commands, platform=LINUX_X86, uid=1000, environ={})
+
+    glue.bind_memory_budget(
+        supervisor,
+        host=host,
+        budgets=[glue.UnitBudget(unit_id="agent-host", max_mb=18432, swap_max_mb=0)],
+        retire_after_failures=3,
+        runtime_root=runtime_root,
+    )
+
+    assert os.environ.get("XDG_RUNTIME_DIR") == original_global_xdg
+    assert commands.calls[0].kwargs["env"]["XDG_RUNTIME_DIR"] == str(expected_runtime_dir)
+
+    await supervisor.start()
+    try:
+        assert spawned["agent-host"][0] == (
+            "systemd-run",
+            "--user",
+            "--scope",
+            "--collect",
+            "-p",
+            "MemoryMax=18432M",
+            "-p",
+            "MemorySwapMax=0M",
+            "--",
+            *agent_plain,
+        )
+        assert spawned["agent-host"][1]["XDG_RUNTIME_DIR"] == str(expected_runtime_dir)
+        assert spawned["gateway"] == (
+            gateway_plain,
+            {**initial_env, "XDG_RUNTIME_DIR": "/gateway/override"},
+        )
+        units = {
+            cast(str, row["id"]): (row["state"], row["launch_rewrite"])
+            for row in cast("list[dict[str, object]]", (await supervisor.status())["units"])
+        }
+        assert units == {"agent-host": ("running", "on"), "gateway": ("running", "on")}
+    finally:
+        await supervisor.shutdown()
+
+
+async def test_bind_memory_budget_probes_without_xdg_when_runtime_dir_is_absent(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    initial_env = {k: v for k, v in os.environ.items() if k != "XDG_RUNTIME_DIR"}
+    supervisor = Supervisor(
+        _registry(("agent-host",)),
+        environ=initial_env,
+        run_dir=tmp_path / "run",
+        clock=system_clock(),
+        root_pid=os.getpid(),
+    )
+    commands = FakeCommands()
+    commands.on("systemd-run", Reply(returncode=1))
+    host = fake_host(commands, platform=LINUX_X86, uid=1000, environ={})
+    caplog.set_level(logging.ERROR, logger="services.supervision.meiva_root_glue.glue")
+
+    glue.bind_memory_budget(
+        supervisor,
+        host=host,
+        budgets=[glue.UnitBudget(unit_id="agent-host", max_mb=18432, swap_max_mb=0)],
+        retire_after_failures=3,
+        runtime_root=tmp_path / "absent_run_user",
+    )
+
+    assert "no user runtime dir" in caplog.text
+    assert len(commands.calls) == 1
+    assert "XDG_RUNTIME_DIR" not in commands.calls[0].kwargs["env"]
+    assert "XDG_RUNTIME_DIR" not in supervisor.launch_environ()
+
+    caplog.clear()
+    mac_commands = FakeCommands()
+    glue.bind_memory_budget(
+        supervisor,
+        host=fake_host(mac_commands, platform=DARWIN_ARM64, uid=501, environ={}),
+        budgets=[glue.UnitBudget(unit_id="agent-host", max_mb=18432, swap_max_mb=0)],
+        retire_after_failures=3,
+        runtime_root=tmp_path / "absent_run_user",
+    )
+    assert caplog.text == ""
+    assert mac_commands.calls == []

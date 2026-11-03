@@ -66,6 +66,12 @@ host diagnostic roster.
 On macOS the permissions helper is the root's ancestor and carries the permission
 boundary. Root observes it but cannot restart or upgrade it from inside its own
 tree. On Linux the Meiva tree starts at root; no helper diagnostic is registered.
+When unit memory budgets (`agent-host`, `exec-host`) are configured on Linux,
+`build_wiring` repairs an absent `XDG_RUNTIME_DIR` from `/run/user/<uid>` onto
+`supervisor`'s pre-start launch environment (`set_launch_env`), probes
+`systemd-run --user --scope` under that exact `supervisor.launch_environ()`, and
+installs the `systemd-run --user` launch rewrite only when the probe succeeds;
+each unit's own `manifest.env` still overrides those defaults.
 Postgres, Redis, and PgBouncer have separate native data-plane custody so they can
 remain available during application maintenance.
 

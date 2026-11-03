@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 import types
@@ -9,8 +10,8 @@ from typing import NoReturn
 
 import pytest
 
-from services.supervision.meiva_root.manifest import UnitRegistry
-from services.supervision.meiva_root.supervisor import Supervisor
+from services.supervision.meiva_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
+from services.supervision.meiva_root.supervisor import Supervisor, SupervisorConfig
 from services.supervision.meiva_root.tests.slices import system_clock
 from services.supervision.meiva_root.wiring import (
     WiringContext,
@@ -186,3 +187,84 @@ async def test_stop_attempts_every_participant_and_preserves_error_leaves() -> N
         await stop_participants([Participant(0), Participant(1)])
     assert order == ["1", "0"]
     assert caught.value.exceptions == (failures[1], failures[0])
+
+
+async def _wait_file(path: Path) -> None:
+    for _ in range(100):
+        if path.exists():
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError(f"child did not write {path}")
+
+
+# meiva:note
+# Pre-start `--wiring` repairs (`set_launch_env`) reach spawned units while per-unit `manifest.env`
+# overrides still win, and post-start mutations are refused.
+async def test_wiring_launch_env_repairs_base_environment_while_manifest_env_wins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    child_script = Path(__file__).with_name("child_unit.py")
+    repaired_out, override_out = tmp_path / "repaired", tmp_path / "overridden"
+    repaired = UnitManifest(
+        "repaired",
+        (
+            sys.executable,
+            "-u",
+            str(child_script),
+            "write_environment",
+            str(repaired_out),
+            "XDG_RUNTIME_DIR",
+        ),
+        RestartPolicy.ALWAYS,
+        "root",
+    )
+    overridden = UnitManifest(
+        "overridden",
+        (
+            sys.executable,
+            "-u",
+            str(child_script),
+            "write_environment",
+            str(override_out),
+            "XDG_RUNTIME_DIR",
+        ),
+        RestartPolicy.ALWAYS,
+        "root",
+        (("XDG_RUNTIME_DIR", "/unit/override"),),
+    )
+    registry = UnitRegistry([repaired, overridden])
+    base_env = {k: v for k, v in os.environ.items() if k != "XDG_RUNTIME_DIR"}
+    owner = Supervisor(
+        registry,
+        environ=base_env,
+        run_dir=tmp_path,
+        config=SupervisorConfig(stop_timeout_s=0.2),
+        clock=system_clock(),
+        root_pid=os.getpid(),
+    )
+    context = WiringContext(
+        supervisor=owner,
+        registry=registry,
+        run_dir=tmp_path,
+        log_dir=tmp_path / "logs",
+        clock=system_clock(),
+    )
+
+    def wire(ctx: WiringContext) -> _Recorder:
+        ctx.supervisor.set_launch_env({"XDG_RUNTIME_DIR": "/run/user/1000"})
+        return _Recorder()
+
+    _install(monkeypatch, "wiring_fixture_launch_env", "build", wire)
+    load_wiring("wiring_fixture_launch_env:build", context)
+    assert owner.launch_environ()["XDG_RUNTIME_DIR"] == "/run/user/1000"
+
+    await owner.start()
+    try:
+        with pytest.raises(RuntimeError, match="cannot change while running"):
+            owner.set_launch_env({"XDG_RUNTIME_DIR": "/run/user/2000"})
+        await _wait_file(repaired_out)
+        await _wait_file(override_out)
+        assert repaired_out.read_text() == "/run/user/1000"
+        assert override_out.read_text() == "/unit/override"
+    finally:
+        await owner.shutdown()
