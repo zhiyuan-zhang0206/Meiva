@@ -15,6 +15,9 @@ import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
+
 WAIT_POLL_SECONDS = 10.0
 
 
@@ -53,8 +56,10 @@ def live_reservations(home: Path, *, boot_id: str) -> list[dict[str, object]]:
         return live
     for path in directory.glob("*.json"):
         try:
-            entry = json.loads(path.read_text(encoding="utf-8"))
+            entry = object_of(json.loads, path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
+            continue
+        if not is_object_dict(entry):
             continue
         pid = entry.get("pid")
         if entry.get("boot_id") != boot_id or not isinstance(pid, int) or not _pid_alive(pid):
@@ -94,8 +99,10 @@ def lock_holder(path: Path, *, boot_id: str) -> dict[str, object] | None:
     # A lock file whose process died, or that outlived its boot, is stale: take it over
     # instead of waiting on a job nobody runs any more.
     try:
-        entry = json.loads(path.read_text(encoding="utf-8"))
+        entry = object_of(json.loads, path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
+        return None
+    if not is_object_dict(entry):
         return None
     pid = entry.get("pid")
     if entry.get("boot_id") != boot_id or not isinstance(pid, int):
@@ -145,3 +152,41 @@ def wait_for_lock(
         step = min(WAIT_POLL_SECONDS, max_wait - waited)
         sleep(step)
         waited += step
+
+
+def read_table(path: Path) -> dict[str, dict[str, object]]:
+    # meiva:note
+    # An unreadable table is reported and treated as empty: the job still runs, and the
+    # next measured run rewrites it.
+    try:
+        table = object_of(json.loads, path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"admission: ignoring unreadable table {path}: {exc}", file=sys.stderr)
+        return {}
+    if not is_object_dict(table):
+        print(f"admission: ignoring unreadable table {path}: not a JSON object", file=sys.stderr)
+        return {}
+    rows: dict[str, dict[str, object]] = {}
+    for key, row in table.items():
+        if is_object_dict(row):
+            rows[key] = row
+        else:
+            print(
+                f"admission: ignoring table {path} entry {key!r}: not a JSON object",
+                file=sys.stderr,
+            )
+    return rows
+
+
+def write_table(path: Path, table: dict[str, dict[str, object]]) -> None:
+    # meiva:note
+    # Replace in one step so a concurrent reader sees either the old table or the new one.
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(table, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        temporary.replace(path)
+    except OSError as exc:
+        print(f"admission: cannot write {path}: {exc}", file=sys.stderr)

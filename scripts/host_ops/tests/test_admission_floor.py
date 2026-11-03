@@ -284,3 +284,29 @@ class TestDiskFloor:
         )
 
         assert disk.calls == [26.1]
+
+
+# meiva:note
+# A state or table file whose JSON is not an object is reported on stderr, like an unparseable one,
+# and read as empty: the job still runs, but nobody is left guessing why a peak was "not declared".
+def test_a_floor_state_that_is_not_an_object_is_reported_and_read_as_not_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    state = tmp_path / "state.json"
+    state.write_text("[1]")
+
+    assert admission_floor.read_state(state) is False
+    assert "ignoring unreadable floor state" in capsys.readouterr().err
+
+
+def test_a_peak_table_that_is_not_an_object_is_reported_and_read_as_empty(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    table = tmp_path / "job-classes.json"
+    table.write_text('{"a": {"peak_mb": 5}, "b": 3}')
+
+    assert admission.read_table(table) == {"a": {"peak_mb": 5}}
+    assert "entry 'b'" in capsys.readouterr().err
+    table.write_text("[]")
+    assert admission.read_table(table) == {}
+    assert "ignoring unreadable table" in capsys.readouterr().err

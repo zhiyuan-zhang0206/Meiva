@@ -9,10 +9,13 @@ import re
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
+from typing import Literal
 
+from base.host.boundary.options import options
 from services.desktop.permissions_helper.lifecycle import BuildEnv
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -334,6 +337,15 @@ def facts(env: BuildEnv) -> int:
     return 0
 
 
+@dataclass(frozen=True)
+class Options:
+    command: Literal["status", "facts", "provision", "import", "export", "switch"]
+    path: str | None
+    password_file: str | None
+    start: bool
+    detach: bool
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=DESCRIPTION)
     parser.add_argument(
@@ -353,7 +365,7 @@ def main(argv: list[str]) -> int:
         action="store_true",
         help="re-run this command in its own session, so the switch survives the runtime it stops",
     )
-    args = parser.parse_args(argv)
+    args = options(parser.parse_args(argv), Options)
     from base.paths.home import resolve_meiva_home
 
     cluster_home = resolve_meiva_home()

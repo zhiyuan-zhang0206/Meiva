@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import inspect
+import sys
 from pathlib import Path
 
 _SCRIPT = (
@@ -15,6 +16,9 @@ _SCRIPT = (
 _spec = importlib.util.spec_from_file_location("tcc_onboard_under_test", _SCRIPT)
 assert _spec is not None and _spec.loader is not None
 _mod = importlib.util.module_from_spec(_spec)
+# meiva:note
+# A dataclass in the script looks its module up by name while the class is being built.
+sys.modules[_spec.name] = _mod
 _spec.loader.exec_module(_mod)
 
 

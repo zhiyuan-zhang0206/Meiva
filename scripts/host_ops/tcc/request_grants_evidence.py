@@ -5,14 +5,15 @@ import json
 import re
 import subprocess
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from base.host.boundary.options import options
 from base.host.permissions_helper.grants.probe import HelperChannel
 
 GRANT_SERVICES = ("kTCCServiceScreenCapture", "kTCCServiceAccessibility")
@@ -44,8 +45,10 @@ def _requested_services(lines: list[str]) -> dict[str, set[str]]:
         matched = {service for service in GRANT_SERVICES if service in line}
         if not matched:
             continue
-        for message_id in MSG_ID.findall(line):
-            services.setdefault(message_id, set()).update(matched)
+        for found in MSG_ID.finditer(line):
+            message_id = found[1]
+            if isinstance(message_id, str):
+                services.setdefault(message_id, set()).update(matched)
     return services
 
 
@@ -100,7 +103,14 @@ def tccd_log(start: datetime, window: int) -> str:
     return done.stdout or ""
 
 
-def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+@dataclass(frozen=True)
+class Options:
+    out: str | None
+    window: int
+    require: str | None
+
+
+def _parse_args(argv: list[str] | None) -> Options:
     parser = argparse.ArgumentParser(description=DESCRIPTION)
     parser.add_argument("--out", help="evidence directory (default: $MEIVA_HOME/tcc-evidence)")
     parser.add_argument("--window", type=int, default=120, help="seconds after the request")
@@ -109,17 +119,17 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         choices=GRANT_SERVICES,
         help="also require a decision line for this service (Screen Recording acceptance)",
     )
-    return parser.parse_args(argv)
+    return options(parser.parse_args(argv), Options)
 
 
 def _request_helper_grants(
     client: HelperChannel, *, platform: str
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]] | int:
+) -> tuple[dict[str, object], dict[str, object], dict[str, object]] | int:
     if platform != "darwin":
         print("this evidence run needs macOS", file=sys.stderr)
         return 2
     try:
-        before: dict[str, Any] = dict(client.ping())
+        before: dict[str, object] = dict(client.ping())
     except Exception as exc:
         print(f"the permissions helper did not answer: {exc}", file=sys.stderr)
         return 2
@@ -135,13 +145,13 @@ def _request_helper_grants(
 
 
 def _write_evidence(
-    args: argparse.Namespace,
+    args: Options,
     *,
     home: Path,
     started: datetime,
-    before: dict[str, Any],
-    requested: dict[str, Any],
-    after: dict[str, Any],
+    before: dict[str, object],
+    requested: dict[str, object],
+    after: dict[str, object],
     log_output: str,
 ) -> int:
     lines, decided = decision_evidence(log_output)

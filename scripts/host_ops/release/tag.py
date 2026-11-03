@@ -11,14 +11,20 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(_REPO_ROOT) not in sys.path:
+# meiva:note
+# The checkout root goes first even when an installed project already put it later on `sys.path`:
+# this directory holds a module named `base`, and run by path its own directory would win the name
+# `base` over the application package.
+if sys.path[:1] != [str(_REPO_ROOT)]:
     sys.path.insert(0, str(_REPO_ROOT))
 
 # meiva:link scripts/docs/scripts.meiva.okf.md
+from base.host.boundary.options import options  # noqa: E402
 from cli.fleet_update.plan.release_target import parse_release_tag  # noqa: E402
 from scripts.host_ops.release.git_tags import resolved_commit  # noqa: E402
 
@@ -39,6 +45,13 @@ def plan(tagged: str | None, target: str) -> TagAction:
     return "skip" if tagged == target else "refuse"
 
 
+@dataclass(frozen=True)
+class Options:
+    repo: Path
+    version: str
+    target: str
+
+
 def main(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(description="Decide what the publish step does with a tag.")
     parser.add_argument("--repo", default=".", type=Path, help="checkout to read git facts from")
@@ -48,7 +61,7 @@ def main(argv: Sequence[str]) -> int:
         help="canonical CalVer tag (vYYYY.MM.DD.HHMMSS[-hfN]) the certificate publishes",
     )
     parser.add_argument("--target", required=True, help="commit the certificate certifies")
-    arguments = parser.parse_args(argv)
+    arguments = options(parser.parse_args(argv), Options)
 
     try:
         tagged = tagged_commit(arguments.repo, arguments.version)

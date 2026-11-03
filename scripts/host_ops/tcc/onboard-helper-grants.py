@@ -48,6 +48,7 @@ import signal
 import sys
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -55,6 +56,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from base.clock import SYSTEM_TIMERS
+from base.host.boundary.options import options
 from base.host.permissions_helper.client import PermissionsHelperClient
 from base.host.permissions_helper.grants import probe as permissions_probe
 from base.host.permissions_helper.grants import triggers
@@ -310,7 +312,19 @@ def extended_note(group: str, attempted: set[str]) -> str:
     return "trigger method available via --fill-pending (experimental)"
 
 
-def _parse_args() -> argparse.Namespace:
+@dataclass(frozen=True)
+class Options:
+    workdir: str
+    check: bool
+    fill_pending: bool
+    confirm_user_present: bool
+    tier: str | None
+    items: str | None
+    timeout: float
+    cleanup: bool
+
+
+def _parse_args() -> Options:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument(
         "--workdir",
@@ -363,12 +377,12 @@ def _parse_args() -> argparse.Namespace:
         help="seconds to wait for each dialog decision (default 90)",
     )
     parser.add_argument("--cleanup", action="store_true", help="remove the workdir at the end")
-    return parser.parse_args()
+    return options(parser.parse_args(), Options)
 
 
 def _folder_grants(
     items: list[str],
-    args: argparse.Namespace,
+    args: Options,
     client: PermissionsHelperClient,
     matrix: dict[str, str],
     workdir: Path,
@@ -409,7 +423,7 @@ def _folder_grants(
 
 def _apple_event_grants(
     items: list[str],
-    args: argparse.Namespace,
+    args: Options,
     client: PermissionsHelperClient,
     workdir: Path,
     run_id: str,
@@ -476,7 +490,7 @@ def _screen_access_grants(
 
 def _fill_pending_grants(
     extended: list[str],
-    args: argparse.Namespace,
+    args: Options,
     client: PermissionsHelperClient,
     matrix: dict[str, str],
     workdir: Path,
@@ -528,7 +542,7 @@ def _fill_pending_grants(
 
 def _report_result(
     statuses: dict[str, str],
-    args: argparse.Namespace,
+    args: Options,
     workdir: Path,
     run_id: str,
     items: list[str],
@@ -584,7 +598,7 @@ def _report_result(
     return 1 if unresolved else 0
 
 
-def _requested_items(args: argparse.Namespace) -> list[str] | None:
+def _requested_items(args: Options) -> list[str] | None:
     raw_items = args.items if args.items is not None else ",".join(groups_for_tier(args.tier))
     items = [part.strip() for part in raw_items.split(",") if part.strip()]
     unknown = [part for part in items if part not in ITEM_GROUPS]
@@ -595,9 +609,7 @@ def _requested_items(args: argparse.Namespace) -> list[str] | None:
     return items
 
 
-def _describe_extended(
-    args: argparse.Namespace, items: list[str], matrix: dict[str, str]
-) -> list[str]:
+def _describe_extended(args: Options, items: list[str], matrix: dict[str, str]) -> list[str]:
     extended = [group for group in items if group in EXTENDED_GROUPS]
     if args.tier is not None:
         print(f"tier {args.tier} -- groups: {', '.join(items)}")

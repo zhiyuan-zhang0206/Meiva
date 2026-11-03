@@ -13,8 +13,38 @@ from typing import TypeGuard
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
+from base.host.boundary.options import attribute, options
+from base.host.boundary.untyped import object_of
 from scripts.host_ops.onboarding import catalog, hostfs, transport
 from scripts.host_ops.onboarding.transport import Host
+
+
+@dataclass(frozen=True)
+class DoctorOptions:
+    hosts: list[str] | None
+    checkout: str
+    interpreter: str
+    verify: bool
+    json: bool
+
+
+@dataclass(frozen=True)
+class InstallOptions:
+    harness: list[str]
+    hosts: list[str] | None
+    pin: list[str] | None
+    dry_run: bool
+
+
+@dataclass(frozen=True)
+class SyncOptions:
+    harness: list[str]
+    source: str
+    to: list[str]
+    skip_install: bool
+    accept_credential_risk: bool
+    dry_run: bool
+
 
 DEFAULT_CHECKOUT = "~/.meiva/source"
 DEFAULT_INTERPRETER = ".venv/bin/python"
@@ -85,7 +115,7 @@ def collect_probe(host: Host, checkout: str, interpreter: str) -> list[dict[str,
         )
     for line in result.stdout.splitlines():
         if line.startswith("__PROBE__"):
-            rows: object = json.loads(line[len("__PROBE__") :])
+            rows = object_of(json.loads, line[len("__PROBE__") :])
             if _is_object_list(rows):
                 probes = [row for row in rows if _is_str_object_dict(row)]
                 if len(probes) != len(rows):
@@ -118,8 +148,10 @@ def collect_login(host: Host, harness: str, binary: str | None) -> str:
     if cli == "claude":
         result = host.run(f"unset ANTHROPIC_API_KEY; {binary} auth status", timeout=60)
         try:
-            payload = json.loads(result.stdout[result.stdout.find("{") :])
+            payload = object_of(json.loads, result.stdout[result.stdout.find("{") :])
         except ValueError:
+            return "unknown"
+        if not _is_str_object_dict(payload):
             return "unknown"
         if payload.get("loggedIn") is True:
             return f"in ({payload.get('authMethod', '?')})"
@@ -210,7 +242,7 @@ def render(rows: list[Evidence], *, verify: bool, home: Path) -> str:
     return "\n".join(lines)
 
 
-def cmd_doctor(args: argparse.Namespace, *, home: Path) -> int:
+def cmd_doctor(args: DoctorOptions, *, home: Path) -> int:
     rows: list[Evidence] = []
     failed = False
     for host in transport.parse_hosts(args.hosts):
@@ -370,7 +402,7 @@ def install_on(
     return True
 
 
-def cmd_install(args: argparse.Namespace, *, now: datetime) -> int:
+def cmd_install(args: InstallOptions, *, now: datetime) -> int:
     hosts = transport.parse_hosts(args.hosts)
     pins = parse_pins(args.pin)
     failures = 0
@@ -424,7 +456,7 @@ def _write_payload(target: Host, raw_path: str, payload: dict[str, object]) -> s
     return f"copy {raw_path} -> {target}"
 
 
-def cmd_sync(args: argparse.Namespace, *, now: datetime) -> int:
+def cmd_sync(args: SyncOptions, *, now: datetime) -> int:
     source = Host(args.source)
     targets = transport.parse_hosts(args.to)
     stamp = now.astimezone().strftime("%Y%m%d")
@@ -450,7 +482,7 @@ def sync_target(
     target: Host,
     harness: catalog.HarnessSpec,
     backup_dir: str,
-    args: argparse.Namespace,
+    args: SyncOptions,
 ) -> int:
     if not match_version(target, harness, source_version, args):
         return 1
@@ -462,7 +494,7 @@ def sync_target(
 
 
 def match_version(
-    target: Host, harness: catalog.HarnessSpec, source_version: str, args: argparse.Namespace
+    target: Host, harness: catalog.HarnessSpec, source_version: str, args: SyncOptions
 ) -> bool:
     current = installed_version(target, harness)
     if current == source_version:
@@ -507,7 +539,7 @@ def sync_store(
     harness: catalog.HarnessSpec,
     store: catalog.Store,
     backup_dir: str,
-    args: argparse.Namespace,
+    args: SyncOptions,
 ) -> str:
     stat = source.python(hostfs_source(), {"op": "stat", "paths": [store.path]}).json_payload()
     described = first_file(stat)
@@ -588,15 +620,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str]) -> int:
-    args = build_parser().parse_args(argv)
-    if args.command == "doctor":
-        return cmd_doctor(args, home=Path.home())
+    namespace = build_parser().parse_args(argv)
+    command = attribute(namespace, "command", str)
+    if command == "doctor":
+        return cmd_doctor(options(namespace, DoctorOptions), home=Path.home())
     now = datetime.now(UTC)
-    if args.command == "install":
-        return cmd_install(args, now=now)
-    if args.command == "sync":
-        return cmd_sync(args, now=now)
-    raise ValueError(f"unknown command: {args.command!r}")
+    if command == "install":
+        return cmd_install(options(namespace, InstallOptions), now=now)
+    if command == "sync":
+        return cmd_sync(options(namespace, SyncOptions), now=now)
+    raise ValueError(f"unknown command: {command!r}")
 
 
 if __name__ == "__main__":

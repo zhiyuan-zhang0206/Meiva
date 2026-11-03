@@ -689,6 +689,18 @@ root = "scripts/ci/pull_requests/tests"
 root = "scripts/ci/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "scripts/host_ops/onboarding/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "scripts/host_ops/release/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "scripts/host_ops/tcc/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "scripts/host_ops/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "services/entrypoints/gate/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -713,6 +725,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "scripts/ci"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "scripts/host_ops"
 reportAny = "error"
 reportExplicitAny = "error"
 

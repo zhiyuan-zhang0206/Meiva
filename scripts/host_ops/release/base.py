@@ -15,10 +15,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(_REPO_ROOT) not in sys.path:
+# meiva:note
+# The checkout root goes first even when an installed project already put it later on `sys.path`:
+# this directory holds a module named `base`, and run by path its own directory would win the name
+# `base` over the application package.
+if sys.path[:1] != [str(_REPO_ROOT)]:
     sys.path.insert(0, str(_REPO_ROOT))
 
 # meiva:link scripts/docs/scripts.meiva.okf.md
+from base.host.boundary.options import options  # noqa: E402
 from cli.fleet_update.plan.release_target import (  # noqa: E402
     ReleaseCertificate,
     ReleaseVersion,
@@ -88,6 +93,13 @@ def verify_release_base(
     return Verdict(ok=False, reason="no-gated-ancestor")
 
 
+@dataclass(frozen=True)
+class Options:
+    target: str
+    repo: Path
+    bootstrap_when_empty: bool
+
+
 def main(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(
         description="Verify that a revision descends from a certified release tag."
@@ -99,7 +111,7 @@ def main(argv: Sequence[str]) -> int:
         action="store_true",
         help="allow certifying the first release when no CalVer release tag exists yet",
     )
-    arguments = parser.parse_args(argv)
+    arguments = options(parser.parse_args(argv), Options)
 
     target_sha = resolved_commit(arguments.repo, arguments.target)
     if target_sha is None:

@@ -14,8 +14,12 @@ import json
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, TextIO
+
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 MEM_INFO = "/proc/meminfo"
 
@@ -51,6 +55,18 @@ DEFAULT_DISK_WARN_GIB = 26.0
 DEFAULT_DISK_RESET_MARGIN_GIB = 1.5
 DEFAULT_FLOOR_SAMPLES = 3
 DEFAULT_FLOOR_SAMPLE_INTERVAL_S = 10.0
+
+
+@dataclass(frozen=True)
+class FloorOptions:
+    # meiva:note
+    # The floor's flags as `add_arguments` registers them.
+
+    disk_floor_gib: float
+    disk_warn_gib: float
+    disk_reset_margin_gib: float
+    disk_samples: int
+    disk_sample_interval: float
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -97,11 +113,17 @@ def read_state(path: Path) -> bool:
     # An unreadable state reads as "not refused" — the gate then has to cross the line three
     # times again, which is the safe direction (one more probe, never a silently blocked host).
     try:
-        state = json.loads(path.read_text(encoding="utf-8"))
+        state = object_of(json.loads, path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return False
     except (OSError, json.JSONDecodeError) as exc:
         print(f"admission: ignoring unreadable floor state {path}: {exc}", file=sys.stderr)
+        return False
+    if not is_object_dict(state):
+        print(
+            f"admission: ignoring unreadable floor state {path}: not a JSON object",
+            file=sys.stderr,
+        )
         return False
     return bool(state.get("refused", False))
 

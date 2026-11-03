@@ -10,13 +10,19 @@ import argparse
 import json
 import sys
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(_REPO_ROOT) not in sys.path:
+# meiva:note
+# The checkout root goes first even when an installed project already put it later on `sys.path`:
+# this directory holds a module named `base`, and run by path its own directory would win the name
+# `base` over the application package.
+if sys.path[:1] != [str(_REPO_ROOT)]:
     sys.path.insert(0, str(_REPO_ROOT))
 
 # meiva:link scripts/docs/scripts.meiva.okf.md
+from base.host.boundary.options import options  # noqa: E402
 from cli.fleet_update.plan.release_target import (  # noqa: E402
     ChannelPointer,
     format_tag_message,
@@ -28,6 +34,16 @@ from scripts.host_ops.release.git_tags import (  # noqa: E402
     read_verified_certificate,
     write_annotated_tag,
 )
+
+
+@dataclass(frozen=True)
+class Options:
+    repo: Path
+    version: str
+    updated_at: str
+    reason: str
+    dry_run: bool
+    github_output: Path | None
 
 
 def main(argv: Sequence[str]) -> int:
@@ -44,7 +60,7 @@ def main(argv: Sequence[str]) -> int:
     parser.add_argument("--reason", default="", help="operator note recorded in channel/stable")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--github-output", default=None, type=Path)
-    args = parser.parse_args(argv)
+    args = options(parser.parse_args(argv), Options)
 
     version = args.version.strip()
     if parse_release_tag(version) is None:
