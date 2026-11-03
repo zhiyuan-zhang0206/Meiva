@@ -84,18 +84,22 @@ def merge(texts: dict[str, str], sections: Iterable[str]) -> dict[str, dict[str,
     """
     merged: dict[str, dict[str, int]] = {kind: {} for kind in sections}
     for name, text in sorted(texts.items()):
-        shard = json.loads(text)
-        if not isinstance(shard, dict):
-            raise ValueError(f"shard {name}.json must be an object")  # noqa: TRY004 — schema error
+        shard: object = json.loads(text)
+        if not _is_str_object_dict(shard):
+            raise ValueError(f"shard {name}.json must be an object")
         for kind, entries in shard.items():
             if kind not in merged:
                 raise ValueError(f"shard {name}.json has unknown section {kind!r}")
-            if not isinstance(entries, dict):
-                raise ValueError(f"shard {name}.json section {kind!r} must be an object")  # noqa: TRY004
+            if not _is_str_object_dict(entries):
+                raise ValueError(f"shard {name}.json section {kind!r} must be an object")
             for key, count in entries.items():
                 if key in merged[kind]:
                     raise ValueError(
                         f"shard {name}.json duplicates {kind} entry {key!r} from another shard"
+                    )
+                if not isinstance(count, int):
+                    raise ValueError(  # noqa: TRY004 — schema error
+                        f"shard {name}.json {kind} entry {key!r} must carry an integer"
                     )
                 merged[kind][key] = count
     return merged

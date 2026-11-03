@@ -6,7 +6,7 @@ import json
 import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, TypeGuard
 
 from base.clock import Timers
 from scripts.ci.pull_requests.gh_process import GhProcess
@@ -79,12 +79,28 @@ def run_gh(args: list[str], stats: FetchStats, *, run_process: GhProcess, timers
     raise AssertionError("bounded gh retry loop exhausted without result")
 
 
+def _is_raw_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+
+
+def _is_dict_list(value: object) -> TypeGuard[list[dict[str, Any]]]:
+    return _is_raw_list(value) and all(_is_object_dict(item) for item in value)
+
+
 def _json_list(output: str, description: str) -> list[dict[str, Any]]:
     try:
         parsed = json.loads(output)
     except json.JSONDecodeError as exc:
         raise CiRunsError(f"invalid JSON from {description}") from exc
-    if not isinstance(parsed, list) or not all(isinstance(item, dict) for item in parsed):
+    if not _is_dict_list(parsed):
         raise CiRunsError(f"unexpected {description} payload")
     return parsed
 

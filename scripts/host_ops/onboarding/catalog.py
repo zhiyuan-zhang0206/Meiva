@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, TypeGuard
 
 Rotation = Literal["static", "rotating", "unknown"]
 InstallKind = Literal["script", "npm"]
@@ -198,6 +198,14 @@ def install_command(harness: HarnessSpec, version: str | None = None, *, prefix:
     return f"curl -fsSL {harness.installer.target} | bash -s -- {args}"
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+
+
 def credential_risk(harness: HarnessSpec, path: str, content: bytes) -> Rotation:
     if harness.cli != "codex":
         return _rotation_of(harness, path)
@@ -205,7 +213,7 @@ def credential_risk(harness: HarnessSpec, path: str, content: bytes) -> Rotation
         parsed = json.loads(content.decode("utf-8"))
     except (UnicodeDecodeError, ValueError):
         return _rotation_of(harness, path)
-    if not isinstance(parsed, dict):
+    if not _is_object_dict(parsed):
         return _rotation_of(harness, path)
     if parsed.get("auth_mode") == "apikey" or parsed.get("OPENAI_API_KEY"):
         return "static"

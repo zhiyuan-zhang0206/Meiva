@@ -24,7 +24,7 @@ from dataclasses import asdict, dataclass, field, fields
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Self, TypeGuard
+from typing import Protocol, Self, TypeGuard
 
 import redis
 from dotenv import dotenv_values
@@ -259,6 +259,18 @@ def build_state(
     )
 
 
+# meiva:note
+# The two Redis calls this script makes, typed here because redis-py leaves them partly Unknown.
+class _RedisCommands(Protocol):
+    def ping(self) -> bool: ...
+
+    def execute_command(self, *args: str) -> object: ...
+
+
+def _commands(client: redis.Redis) -> _RedisCommands:
+    return client
+
+
 def redis_probe(host: str, port: int, password: str, *, username: str) -> bool:
     try:
         with redis.Redis(
@@ -269,7 +281,7 @@ def redis_probe(host: str, port: int, password: str, *, username: str) -> bool:
             socket_connect_timeout=3,
             socket_timeout=3,
         ) as client:
-            return bool(client.ping())
+            return bool(_commands(client).ping())
     except (RedisError, OSError):
         return False
 
@@ -347,7 +359,7 @@ def apply_admin(state: RotationState) -> None:
         socket_connect_timeout=3,
         socket_timeout=3,
     ) as client:
-        client.execute_command(*command)
+        _commands(client).execute_command(*command)
 
 
 def runner_acl_plan(

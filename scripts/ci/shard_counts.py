@@ -45,7 +45,7 @@ import math
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 
 def bucket_of(test_file: str) -> str:
@@ -364,13 +364,17 @@ if __name__ == "__main__":
 FULL_FANOUT_SHARDS = 8
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
 # meiva:note
 # Measured pytest node durations, from the file CI restores; an absent timing file has none.
 def load_durations(path: Path) -> dict[str, float]:
     if not path.is_file():
         return {}
     data: object = json.loads(path.read_text())
-    if not isinstance(data, dict):
+    if not _is_raw_dict(data):
         raise TypeError(f"duration file must contain a JSON object: {path}")
     durations: dict[str, float] = {}
     for node_id, seconds in data.items():

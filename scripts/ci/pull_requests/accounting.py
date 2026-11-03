@@ -10,7 +10,7 @@ import subprocess
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 from base.host.system.hostport import Host
 
@@ -46,6 +46,18 @@ def _gh_output(argv: list[str], *, operation: str, host: Host) -> str:
     return result.stdout
 
 
+def _is_raw_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+
+
 # meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
 def _gh_api(path: str, *, host: Host) -> object:
     output = _gh_output(["gh", "api", path], operation=path, host=host)
@@ -58,16 +70,18 @@ def _gh_api(path: str, *, host: Host) -> object:
 # meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
 def _read_page(path: str, key: str, *, host: Host) -> tuple[int, list[dict[str, Any]]]:
     payload = _gh_api(path, host=host)
-    if not isinstance(payload, dict):
+    if not _is_object_dict(payload):
         raise CiUsageReadError(f"{path}: expected a GitHub page object")
-    total, rows = payload.get("total_count"), payload.get(key)
-    if type(total) is not int or total < 0 or not isinstance(rows, list):
+    total, raw_rows = payload.get("total_count"), payload.get(key)
+    if type(total) is not int or total < 0 or not _is_raw_list(raw_rows):
         raise CiUsageReadError(f"{path}: missing or invalid page fields")
-    if len(rows) > 100:
+    if len(raw_rows) > 100:
         raise CiUsageReadError(f"{path}: inconsistent page count")
-    for row in rows:
-        if not isinstance(row, dict) or type(row.get("id")) is not int:
+    rows: list[dict[str, Any]] = []
+    for row in raw_rows:
+        if not _is_object_dict(row) or type(row.get("id")) is not int:
             raise CiUsageReadError(f"{path}: invalid row identity")
+        rows.append(row)
     return total, rows
 
 
@@ -143,11 +157,14 @@ def job_minutes(started: str | None, completed: str | None) -> int:
 def _identity_from_prs(
     run: dict[str, Any], repo: str, real_pr: int | None, *, host: Host
 ) -> tuple[int | None, int | None, int | None]:
-    pull_requests = run.get("pull_requests")
-    if not isinstance(pull_requests, list) or any(
-        not isinstance(pr, dict) or type(pr.get("number")) is not int for pr in pull_requests
-    ):
+    raw_pull_requests: object = run.get("pull_requests")
+    if not _is_raw_list(raw_pull_requests):
         raise CiUsageReadError("workflow run: invalid pull_requests")
+    pull_requests: list[dict[str, Any]] = []
+    for pr in raw_pull_requests:
+        if not _is_object_dict(pr) or type(pr.get("number")) is not int:
+            raise CiUsageReadError("workflow run: invalid pull_requests")
+        pull_requests.append(pr)
     if pull_requests:
         pr_number = pull_requests[0]["number"]
         title = _pr_title(repo, real_pr if real_pr else pr_number, host=host)
@@ -163,11 +180,14 @@ def _merged_pr_of(run: dict[str, Any], repo: str, *, host: Host) -> int | None:
     head_sha = str(run.get("head_sha") or "")
     if not head_sha:
         return None
-    merged_prs = _gh_api(f"repos/{repo}/commits/{head_sha}/pulls", host=host)
-    if not isinstance(merged_prs, list) or any(
-        not isinstance(pr, dict) or type(pr.get("number")) is not int for pr in merged_prs
-    ):
+    raw_merged_prs = _gh_api(f"repos/{repo}/commits/{head_sha}/pulls", host=host)
+    if not _is_raw_list(raw_merged_prs):
         raise CiUsageReadError(f"commit {head_sha}: invalid pull request associations")
+    merged_prs: list[dict[str, Any]] = []
+    for pr in raw_merged_prs:
+        if not _is_object_dict(pr) or type(pr.get("number")) is not int:
+            raise CiUsageReadError(f"commit {head_sha}: invalid pull request associations")
+        merged_prs.append(pr)
     return merged_prs[0]["number"] if merged_prs else None
 
 
@@ -189,7 +209,8 @@ def _run_identity(
             pr_number = merged
             agent_id, task_id = parse_identity(_pr_title(repo, pr_number, host=host))
     if task_id is None:
-        _, task_id = parse_identity(str((run.get("head_commit") or {}).get("message") or ""))
+        head_commit: dict[str, Any] = run.get("head_commit") or {}
+        _, task_id = parse_identity(str(head_commit.get("message") or ""))
     return pr_number, agent_id, task_id
 
 
@@ -293,11 +314,11 @@ def load_ledger(path: Path) -> dict[int, dict[str, Any]]:
         if not line.strip():
             continue
         try:
-            entry = json.loads(line)
+            loaded = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if isinstance(entry, dict) and isinstance(entry.get("run_id"), int):
-            ledger[entry["run_id"]] = entry
+        if _is_object_dict(loaded) and isinstance(loaded.get("run_id"), int):
+            ledger[loaded["run_id"]] = loaded
     return ledger
 
 

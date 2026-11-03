@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, TypedDict, TypeGuard
 
 from base.clock import Clock
 from base.host.proc import run_bounded
@@ -35,6 +35,18 @@ LIMBO_AGE_SECONDS = 600.0
 TRUNK_MERGE_QUEUE_CHECK_NAME = "Trunk Merge Queue"
 MAIN_CI_WORKFLOW_NAME = "CI"
 CORE_SUITE_CHECK_PREFIXES = ("backend shard (", "e2e shard (")
+
+
+def _is_raw_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
 
 
 class CIStatus(Enum):
@@ -92,7 +104,7 @@ class LimboRun(TypedDict):
 @dataclass
 class CIResult:
     verdict: CIStatus
-    checks: list[dict] = field(default_factory=list)
+    checks: list[dict[str, Any]] = field(default_factory=list)
 
     # Derived convenience fields (populated by check_ci)
     completed: list[str] = field(default_factory=list)
@@ -158,7 +170,7 @@ def repo_has_workflows(repo_root: Path) -> bool:
     return any(wf_dir.glob("*.yml")) or any(wf_dir.glob("*.yaml"))
 
 
-def core_suite_skipped(checks: list[dict]) -> list[str] | None:
+def core_suite_skipped(checks: list[dict[str, Any]]) -> list[str] | None:
     """Names of the core suite checks when every attached core check is SKIPPED."""
     core = [c for c in checks if str(c.get("name", "")).startswith(CORE_SUITE_CHECK_PREFIXES)]
     if not core or any(
@@ -189,7 +201,7 @@ def pending_reason(result: CIResult) -> str:
     )
 
 
-def _drop_unexpanded_cancellations(checks: list[dict]) -> list[dict]:
+def _drop_unexpanded_cancellations(checks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Drop the CANCELLED entries a run leaves when it is cut down before its jobs are named.
 
     A run killed in the cancel-in-progress race leaves check entries whose `name` is still the
@@ -216,7 +228,7 @@ def _drop_unexpanded_cancellations(checks: list[dict]) -> list[dict]:
     ]
 
 
-def _latest_completed_per_name(checks: list[dict]) -> list[dict]:
+def _latest_completed_per_name(checks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Keep the newest COMPLETED check run per name.
     GitHub lists every check run on a commit, but branch protection and the required-status UI
     treat same-named runs as ONE logical check whose state is the newest COMPLETED run's. A stale
@@ -226,7 +238,7 @@ def _latest_completed_per_name(checks: list[dict]) -> list[dict]:
 
     Commit statuses are exempt: GitHub already deduplicates StatusContext by
     context, and they carry `state`, not `status`/`conclusion`."""
-    latest: dict[str, dict] = {}
+    latest: dict[str, dict[str, Any]] = {}
     for c in checks:
         name = c.get("name")
         if not isinstance(name, str) or c.get("__typename") == "StatusContext":
@@ -239,7 +251,7 @@ def _latest_completed_per_name(checks: list[dict]) -> list[dict]:
             continue
         if (parse_ts(c.get("completedAt")) or 0) >= (parse_ts(current.get("completedAt")) or 0):
             latest[name] = c
-    kept: list[dict] = []
+    kept: list[dict[str, Any]] = []
     for c in checks:
         name = c.get("name")
         if (
@@ -356,7 +368,7 @@ def runs_not_yet_reporting(head_sha: str, repo: str | None, *, host: Host) -> li
         names = json.loads(r.stdout.strip() or "[]")
     except json.JSONDecodeError:
         return None
-    return [str(n) for n in names] if isinstance(names, list) else None
+    return [str(n) for n in names] if _is_raw_list(names) else None
 
 
 def main_workflow_run_completed(head_sha: str, repo: str | None, *, host: Host) -> bool | None:
@@ -402,7 +414,7 @@ def main_workflow_run_completed(head_sha: str, repo: str | None, *, host: Host) 
     return count > 0
 
 
-def _queued_run_candidates(owner: str, head_sha: str, *, host: Host) -> list[Any] | None:
+def _queued_run_candidates(owner: str, head_sha: str, *, host: Host) -> list[object] | None:
     """The head's `queued` runs as {id, name, created_at} rows; None when the probe cannot answer."""
     try:
         r = host.run(
@@ -425,7 +437,7 @@ def _queued_run_candidates(owner: str, head_sha: str, *, host: Host) -> list[Any
         candidates = json.loads(r.stdout.strip() or "[]")
     except json.JSONDecodeError:
         return None
-    return candidates if isinstance(candidates, list) else None
+    return candidates if _is_raw_list(candidates) else None
 
 
 def _run_job_count(owner: str, run_id: int, *, host: Host) -> int | None:
@@ -464,7 +476,7 @@ def limbo_runs(
     now = clock.now().timestamp()
     limbo: list[LimboRun] = []
     for candidate in candidates:
-        if not isinstance(candidate, dict):
+        if not _is_object_dict(candidate):
             continue
         raw_id = candidate.get("id")
         created_at = candidate.get("created_at")
@@ -510,7 +522,7 @@ def _empty_rollup_verdict(
         result.verdict = CIStatus.NO_CHECKS
 
 
-def _merge_conflict_result(data: dict, result: CIResult) -> CIResult:
+def _merge_conflict_result(data: dict[str, Any], result: CIResult) -> CIResult:
     """Keep the conflict verdict's check detail without entering CI evaluation."""
     result.verdict = CIStatus.MERGE_CONFLICT
     checks = data.get("statusCheckRollup", [])

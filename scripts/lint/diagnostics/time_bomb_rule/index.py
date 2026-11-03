@@ -265,7 +265,7 @@ class Index:
         return uses, covered, family
 
     def summary(
-        self, mod: str, name: str, depth: int = 0, seen: frozenset | None = None
+        self, mod: str, name: str, depth: int = 0, seen: frozenset[tuple[str, str]] | None = None
     ) -> tuple[bool, bool, bool]:
         key = (mod, name)
         cached = self._summary.get(key)

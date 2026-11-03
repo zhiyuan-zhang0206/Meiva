@@ -8,7 +8,7 @@ import re
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 from urllib.parse import quote
 
 BUILD_NUMBER_BASE = 1_000_000
@@ -71,9 +71,17 @@ def build_manifest(
     }
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_str_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+
+
 def assert_version_code_advances(*, current: Path, version_code: int) -> None:
-    body: Any = json.loads(current.read_text(encoding="utf-8"))
-    if not isinstance(body, dict):
+    body: object = json.loads(current.read_text(encoding="utf-8"))
+    if not _is_str_object_dict(body):
         raise TypeError(f"{current} is not a manifest object")
     previous = body.get("versionCode")
     if isinstance(previous, bool) or not isinstance(previous, int):

@@ -402,10 +402,10 @@ def members_from_event(path: Path) -> tuple[int, ...] | None:
         payload: object = json.loads(Path(path).read_text())
     except (OSError, json.JSONDecodeError):
         return None
-    if not isinstance(payload, dict):
+    if not _is_str_dict(payload):
         return None
     request = payload.get("pull_request")
-    if not isinstance(request, dict):
+    if not _is_str_dict(request):
         return None
     body = request.get("body")
     if not isinstance(body, str):

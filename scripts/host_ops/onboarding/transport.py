@@ -4,6 +4,7 @@ import json
 import shlex
 import subprocess
 from dataclasses import dataclass
+from typing import TypeGuard
 
 LOCAL_HOST_NAMES = frozenset({"local", "localhost"})
 
@@ -28,6 +29,14 @@ AGENT_PATH = "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 SSH_OPTIONS = ("-o", "BatchMode=yes", "-o", "ConnectTimeout=10")
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+
+
 @dataclass(frozen=True)
 class Result:
     host: str
@@ -45,7 +54,7 @@ class Result:
             line = raw_line.strip()
             if line.startswith("{"):
                 parsed = json.loads(line)
-                if isinstance(parsed, dict):
+                if _is_object_dict(parsed):
                     return parsed
         raise ValueError(
             f"{self.host}: no JSON on stdout of {self.command!r}: {self.stderr[-400:]}"

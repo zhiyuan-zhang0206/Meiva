@@ -2024,6 +2024,19 @@ reportMissingParameterType = "error"
 reportUnknownLambdaType = "error"
 reportMissingTypeArgument = "error"
 
+# scripts/ holds repository tooling and is held to the same rung as the packages above. Each
+# `scripts/**/tests` directory has its own generated entry earlier in this file, so only the
+# tooling code itself falls through to this one.
+[[tool.pyright.executionEnvironments]]
+root = "scripts"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+reportUnknownVariableType = "error"
+reportUnknownParameterType = "error"
+reportMissingParameterType = "error"
+reportUnknownLambdaType = "error"
+reportMissingTypeArgument = "error"
+
 # Ladder rung — tests/ call-site rules (audit round-2 tests-ci P1, task
 # #1143). The two call-signature rules gate merge on these test directories:
 # the first ones zeroed by the tests/ annotation sweep (integration 16, e2e

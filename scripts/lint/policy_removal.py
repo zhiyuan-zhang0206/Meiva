@@ -37,6 +37,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import TypeGuard
 
 # meiva:note
 # A standalone script: the repository root goes on the path before the first import of the
@@ -527,11 +528,15 @@ def _pull_request(event: str | None) -> dict[str, object]:
     return _object(_object(payload).get("pull_request"))
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
 # meiva:note
 # A JSON object as a string-keyed mapping: the payload is a document this tool did not build, so
 # every step down it is checked once here and the values below stay `object`.
 def _object(value: object) -> dict[str, object]:
-    if not isinstance(value, dict):
+    if not _is_raw_dict(value):
         return {}
     return {str(key): item for key, item in value.items()}
 
