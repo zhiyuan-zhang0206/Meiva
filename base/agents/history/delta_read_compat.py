@@ -36,6 +36,7 @@ import time
 from collections.abc import (
     AsyncGenerator,
     AsyncIterator,
+    Awaitable,
     Callable,
     Generator,
     Iterator,
@@ -45,9 +46,14 @@ from collections.abc import (
 from contextlib import contextmanager
 from copy import copy, deepcopy
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Literal
 
-from langchain_core.messages import BaseMessage, RemoveMessage, convert_to_messages
+from langchain_core.messages import (
+    BaseMessage,
+    MessageLikeRepresentation,
+    RemoveMessage,
+    convert_to_messages,
+)
 from langchain_core.messages.utils import message_chunk_to_message
 from langchain_core.runnables import RunnableConfig
 from langgraph._internal._typing import MISSING
@@ -57,6 +63,7 @@ from langgraph.checkpoint.base import (
     Checkpoint,
     CheckpointMetadata,
     CheckpointTuple,
+    DeltaChannelHistory,
 )
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
@@ -65,9 +72,14 @@ from langgraph.errors import EmptyChannelError
 from langgraph.graph.message import add_messages
 
 from base.agents.messages.identity import (
+    held_value,
+    message_group,
     normalize_checkpoint_message_ids,
+    normalize_message_group,
     normalize_stored_message_ids,
 )
+from base.host.boundary.json_values import is_object_list
+from base.host.boundary.untyped import object_mapping, object_of
 from base.log import logger
 
 DELTA_COUNTERS_KEY = "counters_since_delta_snapshot"
@@ -89,6 +101,17 @@ class ReadSpan:
     tuple_read_ms: float = 0.0
     history_read_ms: float = 0.0
     fold_ms: float = 0.0
+
+
+# meiva:note
+# Call the saver's `aget_tuple` as the read wrapper installed on it (`wrap_saver_reads_with_delta_reconstruction`)
+# answers it: that wrapper takes the recovery scope as a keyword the original method does not declare.
+async def _read_with_scope(
+    reader: Callable[..., Awaitable[CheckpointTuple | None]],
+    config: RunnableConfig,
+    scope: RecoveryReconstructionScope,
+) -> CheckpointTuple | None:
+    return await reader(config, reconstruction=scope)
 
 
 @dataclass(eq=False)
@@ -115,8 +138,7 @@ class RecoveryReconstructionScope:
         view = copy(self.saver)
 
         async def aget_tuple(config: RunnableConfig) -> CheckpointTuple | None:
-            fn: Callable[..., Any] = self.saver.aget_tuple
-            return await fn(config, reconstruction=self)
+            return await _read_with_scope(self.saver.aget_tuple, config, self)
 
         def get_tuple(config: RunnableConfig) -> CheckpointTuple | None:
             return AsyncPostgresSaver.get_tuple(view, config)
@@ -129,6 +151,21 @@ class RecoveryReconstructionScope:
         self.generation += 1
         self.key = None
         self.messages = None
+
+
+# meiva:note
+# The `configurable` mapping of a config, its entries read as `object` (langchain types them `Any`).
+def _configurable(config: RunnableConfig) -> Mapping[str, object]:
+    configurable = config.get("configurable")
+    if configurable is None:
+        raise KeyError("configurable")
+    return object_mapping(configurable)
+
+
+# meiva:note
+# The thread a config reads or writes.
+def _thread_id(config: RunnableConfig) -> str:
+    return str(_configurable(config)["thread_id"])
 
 
 def _invalidate_recovery_scopes(saver: AsyncPostgresSaver, thread_id: str) -> None:
@@ -154,7 +191,7 @@ def _install_recovery_invalidation(saver: AsyncPostgresSaver) -> None:
         metadata: CheckpointMetadata,
         new_versions: ChannelVersions,
     ) -> RunnableConfig:
-        thread_id = str(config["configurable"]["thread_id"])  # pyright: ignore[reportTypedDictNotRequiredAccess]
+        thread_id = _thread_id(config)
         _invalidate_recovery_scopes(saver, thread_id)
         try:
             return await orig_aput(config, checkpoint, metadata, new_versions)
@@ -163,11 +200,11 @@ def _install_recovery_invalidation(saver: AsyncPostgresSaver) -> None:
 
     async def aput_writes(
         config: RunnableConfig,
-        writes: Sequence[tuple[str, Any]],
+        writes: Sequence[tuple[str, object]],
         task_id: str,
         task_path: str = "",
     ) -> None:
-        thread_id = str(config["configurable"]["thread_id"])  # pyright: ignore[reportTypedDictNotRequiredAccess]
+        thread_id = _thread_id(config)
         _invalidate_recovery_scopes(saver, thread_id)
         try:
             await orig_aput_writes(config, writes, task_id, task_path)
@@ -227,7 +264,7 @@ def recovery_reconstruction_scope(
             del scopes[thread_id]
 
 
-def _coerce_group(group: Sequence[Any]) -> list[BaseMessage] | None:
+def _coerce_group(group: Sequence[MessageLikeRepresentation]) -> list[BaseMessage] | None:
     """Coerce one write group through `add_messages`' conversion pipeline.
 
     Returns None when the group cannot take the append fast path (a raw chunk
@@ -242,7 +279,7 @@ def _coerce_group(group: Sequence[Any]) -> list[BaseMessage] | None:
 
 
 def _fast_append(
-    state: list[BaseMessage] | list[Any] | object, groups: Sequence[list[BaseMessage]]
+    state: object, groups: Sequence[Sequence[MessageLikeRepresentation]]
 ) -> list[BaseMessage] | None:
     """Append-only fast path: no removals, every id fresh and present.
 
@@ -254,10 +291,9 @@ def _fast_append(
     """
     if state is MISSING:
         base: list[BaseMessage] = []
-    elif isinstance(state, list):
-        items: list[Any] = [*state]
+    elif is_object_list(state):
         base = []
-        for m in items:
+        for m in state:
             if not isinstance(m, BaseMessage) or m.id is None:
                 return None
             base.append(m)
@@ -277,9 +313,19 @@ def _fast_append(
     return [*base, *flat]
 
 
-def fold_messages(
-    state: list[BaseMessage] | list[Any] | object, writes: Sequence[Any]
-) -> list[BaseMessage]:
+# meiva:note
+# A value the message reducer (or a checkpoint's `messages` channel) holds, as the list of messages
+# it must be.
+def as_messages(value: object) -> list[BaseMessage]:
+    if not is_object_list(value):
+        raise TypeError(f"expected a message list, got {type(value).__name__}")
+    messages = [m for m in value if isinstance(m, BaseMessage)]
+    if len(messages) != len(value):
+        raise TypeError("expected a list of messages")
+    return messages
+
+
+def fold_messages(state: object, writes: Sequence[object]) -> list[BaseMessage]:
     """`DeltaChannel` reducer: fold stored write values into the message list.
 
     Each write is a list of message-likes (or one message-like). Append-only
@@ -287,40 +333,45 @@ def fold_messages(
     `add_messages`, which is the exact semantics of the guarded production
     reducer minus its validation (the writes were validated at commit time).
     """
-    groups: list[list[Any]] = [w if isinstance(w, list) else [w] for w in writes]
+    groups = [message_group(w) for w in writes]
     fast = _fast_append(state, groups)
     if fast is not None:
         return fast
-    result: Any = [] if state is MISSING else normalize_stored_message_ids(state)
+    if state is MISSING:
+        result: list[BaseMessage] = []
+    elif is_object_list(state):
+        result = normalize_stored_message_ids(state)
+    else:
+        raise TypeError(f"expected a message list or MISSING as state, got {type(state).__name__}")
     for group in groups:
-        normalized: Any = normalize_stored_message_ids(group)
-        result = add_messages(result, normalized)
+        left: list[MessageLikeRepresentation] = [*result]
+        right: list[MessageLikeRepresentation] = [*normalize_message_group(group)]
+        result = as_messages(add_messages(left, right))
     return result
 
 
-def fold_history(entry: Mapping[str, Any]) -> list[BaseMessage]:
+def fold_history(entry: DeltaChannelHistory) -> list[BaseMessage]:
     """Fold one `DeltaChannelHistory` entry into the channel value.
 
     A `DeltaChannel` gives the exact runtime semantics for free: `seed` may be
     missing, a plain list, or a `_DeltaSnapshot` (unwrapped), and an
     `Overwrite` write resets the base the same way the runtime's replay does.
     """
-    channel = DeltaChannel[Any](fold_messages).from_checkpoint(
-        normalize_stored_message_ids(entry.get("seed", MISSING))
+    channel = DeltaChannel[list[BaseMessage]](fold_messages).from_checkpoint(
+        normalize_stored_message_ids(object_mapping(entry).get("seed", MISSING))
     )
     channel.replay_writes(entry["writes"])
     try:
-        messages: list[BaseMessage] = normalize_stored_message_ids(channel.get())
-        return messages
+        return as_messages(normalize_stored_message_ids(object_of(channel.get)))
     except EmptyChannelError:
         return []
 
 
 def _repair_kind(
-    checkpoint: Checkpoint, metadata: Mapping[str, Any]
+    checkpoint: Checkpoint, metadata: Mapping[str, object]
 ) -> Literal["snapshot", "walk"] | None:
     """Which reconstruction (if any) this checkpoint needs, per module docstring."""
-    stored = checkpoint["channel_values"].get("messages", MISSING)
+    stored = object_mapping(checkpoint["channel_values"]).get("messages", MISSING)
     if isinstance(stored, _DeltaSnapshot):
         return "snapshot"
     if stored is not MISSING:
@@ -332,6 +383,12 @@ def _repair_kind(
     return "walk"
 
 
+# meiva:note
+# The messages a reconstructed checkpoint carries, as the list they must be.
+def _checkpoint_messages(checkpoint: Checkpoint) -> list[BaseMessage]:
+    return as_messages(object_mapping(checkpoint["channel_values"])["messages"])
+
+
 def _exact_config(tuple_: CheckpointTuple) -> RunnableConfig:
     """The tuple's config with its resolved checkpoint id made explicit.
 
@@ -339,9 +396,12 @@ def _exact_config(tuple_: CheckpointTuple) -> RunnableConfig:
     saver resolves the id through `aget_tuple`, which the read wrapper patches
     (harmless but redundant work, and one more chance to re-enter repair).
     """
-    configurable: dict[str, Any] = dict(tuple_.config.get("configurable") or {})
-    configurable.setdefault("checkpoint_id", tuple_.checkpoint["id"])
-    configurable.setdefault("checkpoint_ns", "")
+    existing = object_mapping(tuple_.config.get("configurable") or {})
+    configurable: dict[str, object] = {
+        "checkpoint_id": tuple_.checkpoint["id"],
+        "checkpoint_ns": "",
+        **existing,
+    }
     config: RunnableConfig = {"configurable": configurable}
     return config
 
@@ -349,16 +409,15 @@ def _exact_config(tuple_: CheckpointTuple) -> RunnableConfig:
 def _apply_reconstruction(
     checkpoint: Checkpoint,
     kind: Literal["snapshot", "walk"],
-    entry: Mapping[str, Any] | None,
+    entry: DeltaChannelHistory | None,
     span: ReadSpan,
 ) -> bool:
     """Replace a delta checkpoint's messages value with its plain equivalent."""
     if kind == "snapshot":
-        stored = checkpoint["channel_values"]["messages"]
+        stored = object_mapping(checkpoint["channel_values"])["messages"]
         if not isinstance(stored, _DeltaSnapshot):
             raise TypeError(f"expected _DeltaSnapshot, got {type(stored).__name__}")
-        messages: list[BaseMessage] = stored.value
-        checkpoint["channel_values"]["messages"] = messages
+        checkpoint["channel_values"]["messages"] = as_messages(held_value(stored))
         return True
     if entry is None or (not entry["writes"] and "seed" not in entry):
         raise RuntimeError("delta checkpoint messages history is missing")
@@ -389,7 +448,7 @@ def reconstruct_delta_messages(
     kind = _repair_kind(checkpoint, tuple_.metadata or {})
     if kind is None:
         return False
-    entry: Mapping[str, Any] | None = None
+    entry: DeltaChannelHistory | None = None
     if kind == "walk":
         started = time.monotonic()
         span.phase = "history_read"
@@ -404,7 +463,7 @@ def reconstruct_delta_messages(
         span.phase = "snapshot"
     repaired = _apply_reconstruction(checkpoint, kind, entry, span)
     if repaired:
-        log_reconstruction(tuple_, len(checkpoint["channel_values"]["messages"]), span=span)
+        log_reconstruction(tuple_, len(_checkpoint_messages(checkpoint)), span=span)
     return repaired
 
 
@@ -418,7 +477,7 @@ async def areconstruct_delta_messages(
     kind = _repair_kind(checkpoint, tuple_.metadata or {})
     if kind is None:
         return False
-    entry: Mapping[str, Any] | None = None
+    entry: DeltaChannelHistory | None = None
     if kind == "walk":
         started = time.monotonic()
         span.phase = "history_read"
@@ -433,7 +492,7 @@ async def areconstruct_delta_messages(
         span.phase = "snapshot"
     repaired = _apply_reconstruction(checkpoint, kind, entry, span)
     if repaired:
-        log_reconstruction(tuple_, len(checkpoint["channel_values"]["messages"]), span=span)
+        log_reconstruction(tuple_, len(_checkpoint_messages(checkpoint)), span=span)
     return repaired
 
 
@@ -445,7 +504,7 @@ async def areconstruct_in_recovery(
     scope: RecoveryReconstructionScope | None,
 ) -> bool:
     normalize_checkpoint_message_ids(tuple_)
-    configurable = tuple_.config["configurable"]  # pyright: ignore[reportTypedDictNotRequiredAccess]
+    configurable = _configurable(tuple_.config)
     if (
         scope is None
         or not scope.active
@@ -458,7 +517,7 @@ async def areconstruct_in_recovery(
     key = (
         str(configurable["thread_id"]),
         tuple_.checkpoint["id"],
-        configurable.get("checkpoint_ns", ""),
+        str(configurable.get("checkpoint_ns", "")),
     )
     span.phase = "cache_lock"
     async with scope.lock:
@@ -472,7 +531,7 @@ async def areconstruct_in_recovery(
         repaired = await areconstruct_delta_messages(saver, tuple_, span=span)
         if repaired and scope.active and scope.generation == generation == read_generation:
             scope.key = key
-            scope.messages = deepcopy(checkpoint["channel_values"]["messages"])
+            scope.messages = deepcopy(_checkpoint_messages(checkpoint))
         return repaired
 
 
@@ -489,7 +548,7 @@ def log_reconstruction(
     span: ReadSpan,
 ) -> None:
     source_config = tuple_.config if tuple_ is not None else config or {}
-    configurable: dict[str, Any] = source_config.get("configurable") or {}
+    configurable = object_mapping(source_config.get("configurable") or {})
     checkpoint_id = (
         tuple_.checkpoint["id"] if tuple_ is not None else configurable.get("checkpoint_id")
     )

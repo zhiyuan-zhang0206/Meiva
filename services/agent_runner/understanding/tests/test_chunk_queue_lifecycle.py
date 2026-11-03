@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from unittest.mock import MagicMock
 
 import pytest
 from psycopg_pool import AsyncConnectionPool
@@ -30,6 +29,7 @@ from services.agent_runner.understanding.tests.chunk_faults import (
 )
 from services.agent_runner.understanding.tests.consumer_helpers import (
     consumer_config,
+    db_without_agent_meta,
     lm_wiring,
 )
 from services.agent_runner.understanding.tests.consumer_history import (
@@ -134,7 +134,7 @@ async def test_a_cancelled_job_is_failed_and_reported_not_put_back(
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     consumer = loop.Consumer(
         aops_pool,
-        MagicMock(),
+        db_without_agent_meta(),
         [],
         clock=CLOCK,
         **lm_wiring(model_catalog),

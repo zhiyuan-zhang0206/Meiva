@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
@@ -282,17 +283,48 @@ def test_roster_attention_skips_resolved_and_unrelated_notices(db_conn: psycopg.
     assert visited_notices(plan) < 100
 
 
-class _FakeConn:
-    def __init__(self, row: tuple[Any, ...] | None) -> None:
-        self.row = row
-        self.queries: list[tuple[str, tuple[Any, ...]]] = []
+_RowFactory = Callable[["_FakeCursor"], Callable[[tuple[object, ...]], object]]
 
-    def execute(self, sql: str, params: tuple[Any, ...]) -> _FakeConn:
-        self.queries.append((sql, tuple(params)))
+
+class _FakeResult:
+    status = psycopg.pq.ExecStatus.TUPLES_OK
+    nfields = 2
+
+    def fname(self, index: int) -> bytes:
+        return (b"config_overlay", b"birth_config")[index]
+
+
+class _FakeCursor:
+    pgresult = _FakeResult()
+    _encoding = "utf-8"
+
+    def __init__(self, conn: _FakeConn, row_factory: _RowFactory):
+        self.conn = conn
+        self.row_factory = row_factory
+
+    def execute(self, sql: str, params: tuple[object, ...]) -> _FakeCursor:
+        self.conn.queries.append((sql, tuple(params)))
         return self
 
-    def fetchone(self) -> tuple[Any, ...] | None:
-        return self.row
+    def fetchone(self) -> object:
+        if self.conn.row is None:
+            return None
+        return self.row_factory(self)(self.conn.row)
+
+    def __enter__(self) -> _FakeCursor:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+
+class _FakeConn:
+    def __init__(self, row: tuple[object, ...] | None) -> None:
+        self.row = row
+        self.queries: list[tuple[str, tuple[object, ...]]] = []
+
+    def cursor(self, *, row_factory: _RowFactory) -> _FakeCursor:
+        return _FakeCursor(self, row_factory)
 
     def __enter__(self) -> _FakeConn:
         return self
@@ -301,7 +333,7 @@ class _FakeConn:
         return None
 
 
-def _install_conn(row: tuple[Any, ...] | None) -> tuple[Database, _FakeConn]:
+def _install_conn(row: tuple[object, ...] | None) -> tuple[Database, _FakeConn]:
     conn = _FakeConn(row)
 
     def _connect(**_kwargs: object) -> _FakeConn:

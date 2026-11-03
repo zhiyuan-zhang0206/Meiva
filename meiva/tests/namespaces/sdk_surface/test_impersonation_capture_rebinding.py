@@ -8,6 +8,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import psycopg
+from pydantic import BaseModel
 
 import meiva
 from base.agents.context import MeivaContext
@@ -117,6 +118,14 @@ async def test_concurrent_calls_capture_the_original_gate_after_context_rebind(
         seal_local_participant(current_gate)
 
 
+# meiva:note
+# The audit event the skill read leaves in the lease log, as the test reads it.
+class _Audit(BaseModel):
+    event_name: str
+    source: str
+    attributes: dict[str, object]
+
+
 def test_sdk_skill_read_captures_borrowed_audit_source_explicitly(
     db_conn: psycopg.Connection[Any],
     owner: RuntimeIncarnation,
@@ -159,12 +168,11 @@ def test_sdk_skill_read_captures_borrowed_audit_source_explicitly(
         audits = [row for row in rows if row["kind"] == "api_event"]
         assert capture_rows(db_conn, lease["id"], participant.source_key) == 1
         assert len(audits) == 1
-        event = audits[0]["payload"]
-        assert event["event_name"] == "skill_invoked" and event["source"] == "self"
-        assert event["attributes"]["skill"] == "capture_test"
+        event = _Audit.model_validate(audits[0]["payload"])
+        assert event.event_name == "skill_invoked" and event.source == "self"
+        assert event.attributes["skill"] == "capture_test"
         assert (
-            event["attributes"]["impersonation_session"]
-            == f"{owner.agent_id}:{lease['session_id']}"
+            event.attributes["impersonation_session"] == f"{owner.agent_id}:{lease['session_id']}"
         )
         assert close_local_participant_admission(gate, timeout=0)
         seal_local_participant(gate)

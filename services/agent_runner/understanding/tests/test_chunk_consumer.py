@@ -40,6 +40,7 @@ from services.agent_runner.understanding.tests.chunk_faults import (
 from services.agent_runner.understanding.tests.consumer_helpers import (
     GroupModels,
     consumer_config,
+    db_without_agent_meta,
     lm_wiring,
 )
 from services.agent_runner.understanding.tests.consumer_history import (
@@ -418,7 +419,7 @@ async def test_a_done_job_is_followed_by_the_upper_level_checks(
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await loop.Consumer(
         aops_pool,
-        MagicMock(),
+        db_without_agent_meta(),
         [],
         clock=CLOCK,
         **lm_wiring(catalog),
@@ -473,7 +474,7 @@ async def test_different_agents_run_together_and_one_agents_jobs_in_order(
     await _enqueue_ends(aops_pool, 2, "m2")
     await loop.Consumer(
         aops_pool,
-        MagicMock(),
+        db_without_agent_meta(),
         [],
         clock=CLOCK,
         **lm_wiring(model_catalog),
@@ -509,7 +510,7 @@ async def test_every_due_job_runs_at_once_each_on_its_own_thread(
         await _enqueue_ends(aops_pool, agent, "m1")
     consumer = loop.Consumer(
         aops_pool,
-        MagicMock(),
+        db_without_agent_meta(),
         [],
         clock=CLOCK,
         **lm_wiring(model_catalog),
@@ -541,7 +542,7 @@ async def test_one_jobs_failure_touches_no_other_job(
         await _enqueue_ends(aops_pool, agent, end)
     await loop.Consumer(
         aops_pool,
-        MagicMock(),
+        db_without_agent_meta(),
         [],
         clock=CLOCK,
         **lm_wiring(model_catalog),
@@ -570,7 +571,7 @@ async def test_a_job_that_cannot_be_settled_is_left_to_its_lease_and_others_fini
         await _enqueue_ends(aops_pool, agent, "m1")
     consumer = loop.Consumer(
         aops_pool,
-        MagicMock(),
+        db_without_agent_meta(),
         [],
         clock=CLOCK,
         **lm_wiring(model_catalog),
@@ -595,7 +596,7 @@ async def test_the_backlog_event_carries_in_flight(
     await _enqueue_ends(aops_pool, 1, "m1")
     consumer = loop.Consumer(
         aops_pool,
-        MagicMock(),
+        db_without_agent_meta(),
         [],
         clock=CLOCK,
         **lm_wiring(model_catalog),
@@ -620,7 +621,7 @@ async def test_the_forever_loop_works_the_queue_and_stops_cleanly_on_cancel(
     task = asyncio.create_task(
         loop.understanding_loop_forever(
             aops_pool,
-            MagicMock(),
+            db_without_agent_meta(),
             [],
             clock=CLOCK,
             **lm_wiring(model_catalog),
@@ -674,7 +675,7 @@ async def test_a_replay_describes_one_agents_segments_together_and_skips_the_upp
     config.set_field("understanding_group_check_open", 6)
     await loop.replay_jobs(
         aops_pool,
-        MagicMock(),
+        db_without_agent_meta(),
         [],
         1,
         clock=CLOCK,

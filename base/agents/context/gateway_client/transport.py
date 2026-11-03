@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json as _json
 import uuid as _uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Protocol, TypeGuard
+from typing import Protocol
 
 from base.agents.context import MeivaContext
 from base.agents.context.clients import GatewayHandle
@@ -15,6 +15,7 @@ from base.api_contracts import contracts
 from base.api_contracts.agent_contract import EXCEPTION_BY_REASON, ErrorReason, GatewayUnavailable
 from base.api_contracts.contracts import Idempotency
 from base.api_contracts.idempotency import keyed_headers
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.net.resilience import Policy, http_classifier, retry
 
 __all__ = [
@@ -28,6 +29,10 @@ __all__ = [
     "post",
     "raise_from_response",
 ]
+
+# meiva:note
+# What one query-string value may be; the same set `httpx` encodes.
+type _QueryValue = str | int | float | bool | None
 
 # meiva:note
 # httpx stays off the `import meiva` path: every function that needs it imports it in its body, the
@@ -178,53 +183,56 @@ def raise_from_response(resp: TransportResponse) -> None:
         # exception that masks the status code.
         resp.raise_for_status()
         return  # unreachable; raise_for_status has raised
-    reason, body = wire
-    if reason == ErrorReason.AGENT_LAUNCH_FAILED:
+    if wire.reason == ErrorReason.AGENT_LAUNCH_FAILED:
         from base.api_contracts.agent_contract import AgentLaunchFailed
 
         raise AgentLaunchFailed(
-            body["detail"],
-            agent_id=body.get("agent_id"),
-            state=body.get("state"),
-            retry_launch_path=body.get("retry_launch_path"),
+            wire.detail,
+            agent_id=wire.agent_id,
+            state=wire.state,
+            retry_launch_path=wire.retry_launch_path,
         )
-    raise EXCEPTION_BY_REASON[reason](body["detail"])
-
-
-def _is_json_object(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
-
-
-def _is_json_array(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
+    raise EXCEPTION_BY_REASON[wire.reason](wire.detail)
 
 
 # meiva:note
 # The body of a reply whose wire contract is one JSON object. `GatewayResponse.json()` returns
 # `object`, so a caller reads a field only through this check; a body of another shape is a
 # protocol mismatch and raises here instead of failing on an index of whatever arrived.
-def json_object(resp: GatewayResponse) -> dict[str, Any]:
+def json_object(resp: GatewayResponse) -> dict[str, object]:
     raw = resp.json()
-    if not _is_json_object(raw):
+    if not is_object_dict(raw):
         raise TypeError(f"gateway reply body is not a JSON object: {type(raw).__name__}")
     return raw
 
 
 # meiva:note
 # The body of a reply whose wire contract is a JSON array of objects (a list of rows).
-def json_rows(resp: GatewayResponse) -> list[dict[str, Any]]:
+def json_rows(resp: GatewayResponse) -> list[dict[str, object]]:
     raw = resp.json()
-    if not _is_json_array(raw):
+    if not is_object_list(raw):
         raise TypeError(f"gateway reply body is not a JSON array: {type(raw).__name__}")
-    rows: list[dict[str, Any]] = []
+    rows: list[dict[str, object]] = []
     for row in raw:
-        if not _is_json_object(row):
+        if not is_object_dict(row):
             raise TypeError(f"gateway reply row is not a JSON object: {type(row).__name__}")
         rows.append(row)
     return rows
 
 
-def _wire_reason(resp: TransportResponse) -> tuple[ErrorReason, dict[str, Any]] | None:
+# meiva:note
+# A parsed wire error: the reason and string detail every wire error carries, plus the launch
+# failure's own fields (set only for `AGENT_LAUNCH_FAILED`).
+@dataclass(frozen=True)
+class _WireError:
+    reason: ErrorReason
+    detail: str
+    agent_id: int | None = None
+    state: dict[str, object] | None = None
+    retry_launch_path: str | None = None
+
+
+def _wire_reason(resp: TransportResponse) -> _WireError | None:
     """Parse the wire `reason` from a non-2xx response body, or None.
 
     None means the body does not carry a valid wire-contract reason (not
@@ -245,20 +253,32 @@ def _wire_reason(resp: TransportResponse) -> tuple[ErrorReason, dict[str, Any]] 
         # protocol-mismatch class; falls through to the clean HTTP error
         # instead of escaping and masking the status code.
         return None
-    if not _is_json_object(raw_body):
+    if not is_object_dict(raw_body):
         return None
     body = raw_body
     try:
         reason = ErrorReason(body["reason"])
     except (KeyError, ValueError):
         return None
-    if not isinstance(body.get("detail"), str):
+    detail = body.get("detail")
+    if not isinstance(detail, str):
         # Valid reason but no string `detail` — the same protocol mismatch
         # class: the reverse-lookup raise would KeyError on `body["detail"]`
         # and mask the status code exactly like the old missing-`reason`
         # path did (task #1205). Fall through to the clean HTTP error.
         return None
-    return reason, body
+    if reason != ErrorReason.AGENT_LAUNCH_FAILED:
+        return _WireError(reason, detail)
+    agent_id = body.get("agent_id")
+    state = body.get("state")
+    retry_launch_path = body.get("retry_launch_path")
+    if (
+        (agent_id is not None and not isinstance(agent_id, int))
+        or (state is not None and not is_object_dict(state))
+        or (retry_launch_path is not None and not isinstance(retry_launch_path, str))
+    ):
+        return None
+    return _WireError(reason, detail, agent_id, state, retry_launch_path)
 
 
 class _TransientResponseError(Exception):
@@ -325,6 +345,54 @@ def _request_with_retry(
         ) from exc
 
 
+# meiva:note
+# One POST or GET on the gateway client. A caller's timeout becomes the `httpx.Timeout` it
+# describes. No timeout leaves the argument off, never passes None: httpx reads an explicit
+# `timeout=None` as "wait forever" and only an absent argument as "use the client's own".
+def _post_once(
+    client: GatewayHandle,
+    path: str,
+    *,
+    json: Mapping[str, object],
+    params: Mapping[str, _QueryValue] | None,
+    timeout: TransportTimeout | None,
+    headers: dict[str, str] | None,
+) -> TransportResponse:
+    import httpx
+
+    if timeout is None:
+        return client.post(path, json=json, params=params, headers=headers)
+    return client.post(
+        path,
+        json=json,
+        params=params,
+        timeout=httpx.Timeout(
+            connect=timeout.connect, read=timeout.read, write=timeout.write, pool=timeout.pool
+        ),
+        headers=headers,
+    )
+
+
+def _get_once(
+    client: GatewayHandle,
+    path: str,
+    *,
+    params: Mapping[str, _QueryValue] | None,
+    timeout: TransportTimeout | None,
+) -> TransportResponse:
+    import httpx
+
+    if timeout is None:
+        return client.get(path, params=params)
+    return client.get(
+        path,
+        params=params,
+        timeout=httpx.Timeout(
+            connect=timeout.connect, read=timeout.read, write=timeout.write, pool=timeout.pool
+        ),
+    )
+
+
 def _post_semantics(path: str, *, idempotent: bool | None) -> Idempotency:
     """The retry semantics of one POST: the caller's explicit override, else the route's contract."""
     if idempotent is None:
@@ -340,8 +408,8 @@ def _idempotency_headers(*, keyed: bool, idempotency_key: str | None) -> dict[st
 
 def post(
     path: str,
-    json: dict[str, Any] | None = None,
-    params: dict[str, Any] | None = None,
+    json: Mapping[str, object] | None = None,
+    params: Mapping[str, _QueryValue] | None = None,
     timeout: TransportTimeout | None = None,
     *,
     idempotent: bool | None = None,
@@ -387,15 +455,6 @@ def post(
     budget) should shrink it — re-sending such a request just waits behind the
     same congestion.
     """
-    import httpx
-
-    # httpx reads an explicit `timeout=None` as "wait forever"; its own way of
-    # saying "use the client's configured timeout" is the USE_CLIENT_DEFAULT
-    # sentinel, which is what the argument defaults to when left off. Forwarding
-    # our None straight through therefore disabled the client's timeout on every
-    # POST in this module rather than falling back to it, so a gateway route that
-    # stopped responding parked its SDK callers forever instead of raising.
-    per_call: Any = httpx.USE_CLIENT_DEFAULT if timeout is None else timeout
 
     # Inherit retry semantics from the route's doorplate unless the caller
     # overrides: server promises (base/api_contracts/contracts.py), clients inherit.
@@ -407,9 +466,20 @@ def post(
     headers = _idempotency_headers(keyed=keyed, idempotency_key=idempotency_key)
 
     retries = request_max_retries(context) if max_retries is None else max_retries
+
+    # meiva:note
+    # httpx reads an explicit `timeout=None` as "wait forever"; forwarding our None straight
+    # through disabled the client's timeout on every POST in this module, so a gateway route that
+    # stopped responding parked its SDK callers forever instead of raising. `_post_once` leaves
+    # the argument off when the caller gave none.
     return _request_with_retry(
-        lambda: gateway_http(context).post(
-            path, json=json or {}, params=params, timeout=per_call, headers=headers
+        lambda: _post_once(
+            gateway_http(context),
+            path,
+            json=json or {},
+            params=params,
+            timeout=timeout,
+            headers=headers,
         ),
         retries,
         retryable=retryable,
@@ -420,7 +490,7 @@ def post(
 def get(
     path: str,
     *,
-    params: dict[str, Any] | None = None,
+    params: Mapping[str, _QueryValue] | None = None,
     timeout: TransportTimeout | None = None,
     max_retries: int | None = None,
     context: MeivaContext,
@@ -437,12 +507,9 @@ def get(
     whose failure it already knows how to degrade — re-sending it only parks
     the agent's birth behind backoff it cannot use.
     """
-    import httpx
-
-    per_call: Any = httpx.USE_CLIENT_DEFAULT if timeout is None else timeout
     retries = request_max_retries(context) if max_retries is None else max_retries
     return _request_with_retry(
-        lambda: gateway_http(context).get(path, params=params, timeout=per_call),
+        lambda: _get_once(gateway_http(context), path, params=params, timeout=timeout),
         retries,
         context=context,
     )
@@ -450,7 +517,7 @@ def get(
 
 def patch(
     path: str,
-    json: dict[str, Any] | None = None,
+    json: Mapping[str, object] | None = None,
     *,
     idempotency_key: str | None = None,
     context: MeivaContext,

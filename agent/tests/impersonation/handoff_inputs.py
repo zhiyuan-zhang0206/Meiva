@@ -35,6 +35,7 @@ from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.agents.history.checkpoint_postgres_walks import HistoryAsyncPostgresSaver
+from base.agents.impersonation import RequestedLease
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.timestamp_policy import TimestampSource
@@ -189,7 +190,7 @@ async def prepare_graph(
     RunnableConfig,
     dict[str, Any],
     RuntimeIncarnation,
-    dict[str, Any],
+    RequestedLease,
     list[Any],
 ]:
     registry = ExtensionRegistry((("handoff", PluginContributions(state=(HandoffState,))),))
@@ -277,7 +278,7 @@ def deliver_peers_and_ack_first(
     db_conn: psycopg.Connection[Any],
     database: Database,
     event_bus: EventBus,
-    requested: dict[str, Any],
+    requested: RequestedLease,
     agent_id: int,
     *,
     machine_identity: MachineIdentityReader,
@@ -318,7 +319,7 @@ def end_external_session(
     db_conn: psycopg.Connection[Any],
     database: Database,
     event_bus: EventBus,
-    requested: dict[str, Any],
+    requested: RequestedLease,
     finish: str,
     *,
     machine_identity: MachineIdentityReader,
@@ -356,7 +357,7 @@ def assert_resumed_transcript(resumed: dict[str, Any], finish: str) -> None:
 def executor_acks_says_and_releases(
     database: Database,
     event_bus: EventBus,
-    requested: dict[str, Any],
+    requested: RequestedLease,
     inbound_id: int,
     *,
     machine_identity: MachineIdentityReader,
@@ -446,7 +447,7 @@ async def stop_takeover_with_lost_relay(
 
 
 def stop_takeover_with_exhausted_ack(
-    db_conn: psycopg.Connection[Any], requested: dict[str, Any], owner: RuntimeIncarnation
+    db_conn: psycopg.Connection[Any], requested: RequestedLease, owner: RuntimeIncarnation
 ) -> str:
     row = db_conn.execute(
         "INSERT INTO inbound_messages(agent_id,kind,source,content) "

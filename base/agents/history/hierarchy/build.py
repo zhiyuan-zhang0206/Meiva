@@ -34,16 +34,18 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal, TypedDict
 
 from langchain_core.messages import AIMessage, BaseMessage
 from psycopg_pool import ConnectionPool
+from pydantic import TypeAdapter
 
 from base.agents.history.checkpoint import FullHistory
 from base.agents.history.hierarchy.chunk_plan import plan_replay, segment_requests
 from base.agents.history.hierarchy.chunks import uncovered
 from base.agents.history.hierarchy.sessions import Session, has_matter
 from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.db.rows import IdRow, query_all, query_one
 from base.db.transaction import write_transaction
 from base.lm.pricing import PriceBook, quote
 
@@ -200,10 +202,28 @@ ON CONFLICT (agent_id, compact_version, start_index, end_index) DO UPDATE SET
     end_msg_id = CASE WHEN j.status IN __ENDED__ THEN EXCLUDED.end_msg_id ELSE j.end_msg_id END,
     boundary_checkpoint_id = CASE WHEN j.status IN __ENDED__
         THEN EXCLUDED.boundary_checkpoint_id ELSE j.boundary_checkpoint_id END
-RETURNING j.id, (SELECT status FROM prior)
+RETURNING j.id, (SELECT status FROM prior) AS prior_status
 """.replace("__ENDED__", "('failed', 'skipped', 'done')")
 
 JobState = Literal["enqueued", "merged"]
+
+
+# meiva:note
+# The row `_ENQUEUE_SQL` returns: the job id and the status of the job it found there before, if any.
+@dataclass(frozen=True)
+class _EnqueuedRow:
+    id: int
+    prior_status: str | None
+
+
+# meiva:note
+# One entry of `understanding_builds.jobs`: a job of the build and the session it belongs to.
+class _ManifestEntry(TypedDict):
+    job_id: int
+    session: int
+
+
+_MANIFEST = TypeAdapter(list[_ManifestEntry])
 
 
 @dataclass(frozen=True)
@@ -242,7 +262,9 @@ def enqueue_build(
         )
         enqueued: list[EnqueuedJob] = []
         for job in jobs:
-            row = conn.execute(
+            row = query_one(
+                conn,
+                _EnqueuedRow,
                 _ENQUEUE_SQL,
                 {
                     "agent": agent_id,
@@ -252,30 +274,36 @@ def enqueue_build(
                     "end_msg_id": job.end_msg_id,
                     "boundary": job.boundary_checkpoint_id,
                 },
-            ).fetchone()
+            )
             assert row is not None, "an upsert with RETURNING always returns a row"  # noqa: S101
-            live = row[1] in ("pending", "running")
-            enqueued.append(EnqueuedJob(int(row[0]), "merged" if live else "enqueued", job))
-        pending = conn.execute(
+            live = row.prior_status in ("pending", "running")
+            enqueued.append(EnqueuedJob(row.id, "merged" if live else "enqueued", job))
+        pending = query_one(
+            conn,
+            IdRow,
             "SELECT id FROM understanding_rebuilds WHERE agent_id = %s AND status = 'pending'"
             " ORDER BY id LIMIT 1 FOR UPDATE",
             (agent_id,),
-        ).fetchone()
+        )
         if pending is None:
-            pending = conn.execute(
+            pending = query_one(
+                conn,
+                IdRow,
                 "INSERT INTO understanding_rebuilds (agent_id) VALUES (%s) RETURNING id",
                 (agent_id,),
-            ).fetchone()
+            )
         assert pending is not None, "an insert with RETURNING always returns a row"  # noqa: S101
-        rebuild_id = int(pending[0])
+        rebuild_id = pending.id
         manifest = [{"job_id": e.job_id, "session": e.planned.session} for e in enqueued]
-        row = conn.execute(
+        row = query_one(
+            conn,
+            IdRow,
             "INSERT INTO understanding_builds (agent_id, sessions, jobs, rebuild_id)"
             " VALUES (%s, %s, %s::jsonb, %s) RETURNING id",
             (agent_id, list(sessions), json.dumps(manifest), rebuild_id),
-        ).fetchone()
+        )
         assert row is not None, "an insert with RETURNING always returns a row"  # noqa: S101
-    return Build(int(row[0]), agent_id, rebuild_id, enqueued)
+    return Build(row.id, agent_id, rebuild_id, enqueued)
 
 
 @dataclass(frozen=True)
@@ -342,6 +370,72 @@ def _sum_costs(costs: Sequence[float | None]) -> float | None:
     return None if any(c is None for c in costs) else float(sum(c for c in costs if c is not None))
 
 
+# meiva:note
+# The head row of `understanding_builds`: when it was cut, its sessions, the manifest of its jobs
+# (a `jsonb` column, validated against `_ManifestEntry` where it is read) and its rebuild.
+@dataclass(frozen=True)
+class _BuildHeadRow:
+    created_at: datetime
+    sessions: list[int]
+    jobs: object
+    rebuild_id: int
+
+
+# meiva:note
+# One job of a build as `understanding_chunk_jobs` stores it.
+@dataclass(frozen=True)
+class _JobRow:
+    id: int
+    status: str
+    start_index: int
+    end_index: int
+    attempts: int
+    error: str | None
+
+
+# meiva:note
+# One provider call of a chunk job: its model, the three token counts and its duration in seconds.
+@dataclass(frozen=True)
+class _ChunkCallRow:
+    job_id: int
+    model: str
+    input_tokens: int
+    cache_read_tokens: int
+    output_tokens: int
+    seconds: float
+
+
+# meiva:note
+# One provider call of a grouping run: the same figures as `_ChunkCallRow` without a job.
+@dataclass(frozen=True)
+class _GroupCallRow:
+    model: str
+    input_tokens: int
+    cache_read_tokens: int
+    output_tokens: int
+    seconds: float
+
+
+# meiva:note
+# The build's rebuild as `understanding_rebuilds` stores it.
+@dataclass(frozen=True)
+class _RebuildRow:
+    status: str
+    attempts: int
+    error: str | None
+    leaves: int | None
+    claimed_at: datetime | None
+    finished_at: datetime | None
+
+
+# meiva:note
+# The node count of one level above the leaves.
+@dataclass(frozen=True)
+class _LevelRow:
+    depth: int
+    n: int
+
+
 @dataclass(frozen=True)
 class _BuildRows:
     """The raw rows of one build (`_read_build`)."""
@@ -349,85 +443,110 @@ class _BuildRows:
     created_at: datetime
     sessions: list[int]
     by_job: dict[int, int]
-    jobs: list[tuple[Any, ...]]
-    calls: list[tuple[Any, ...]]
+    jobs: list[_JobRow]
+    calls: list[_ChunkCallRow]
     rebuild_id: int
-    rebuild: tuple[Any, ...]
-    group_calls: list[tuple[Any, ...]]
+    rebuild: _RebuildRow
+    group_calls: list[_GroupCallRow]
     levels: dict[int, int]
 
 
 def _read_build(pool: ConnectionPool, agent_id: int, build_id: int) -> _BuildRows | None:
     with pool.connection() as conn:
-        build = conn.execute(
+        build = query_one(
+            conn,
+            _BuildHeadRow,
             "SELECT created_at, sessions, jobs, rebuild_id FROM understanding_builds"
             " WHERE id = %s AND agent_id = %s",
             (build_id, agent_id),
-        ).fetchone()
+        )
         if build is None:
             return None
-        created_at, sessions, manifest, rebuild_id = build
-        by_job = {int(m["job_id"]): int(m["session"]) for m in manifest}
-        jobs = conn.execute(
+        by_job = {m["job_id"]: m["session"] for m in _MANIFEST.validate_python(build.jobs)}
+        jobs = query_all(
+            conn,
+            _JobRow,
             "SELECT id, status, start_index, end_index, attempts, error"
             " FROM understanding_chunk_jobs WHERE id = ANY(%s) ORDER BY id",
             (list(by_job),),
-        ).fetchall()
-        calls = conn.execute(
-            "SELECT job_id, model, coalesce((usage_metadata->>'input_tokens')::int, 0),"
-            " coalesce((usage_metadata->'input_token_details'->>'cache_read')::int, 0),"
-            " coalesce((usage_metadata->>'output_tokens')::int, 0), duration_ms / 1000.0"
+        )
+        calls = query_all(
+            conn,
+            _ChunkCallRow,
+            "SELECT job_id, model,"
+            " coalesce((usage_metadata->>'input_tokens')::int, 0) AS input_tokens,"
+            " coalesce((usage_metadata->'input_token_details'->>'cache_read')::int, 0)"
+            " AS cache_read_tokens,"
+            " coalesce((usage_metadata->>'output_tokens')::int, 0) AS output_tokens,"
+            " duration_ms / 1000.0 AS seconds"
             " FROM understanding_chunk_calls WHERE job_id = ANY(%s)",
             (list(by_job),),
-        ).fetchall()
-        rebuild = conn.execute(
+        )
+        rebuild = query_one(
+            conn,
+            _RebuildRow,
             "SELECT status, attempts, error, leaves, claimed_at, finished_at"
             " FROM understanding_rebuilds WHERE id = %s",
-            (rebuild_id,),
-        ).fetchone()
+            (build.rebuild_id,),
+        )
         assert rebuild is not None, "a build's rebuild row is never deleted"  # noqa: S101
-        group_calls = conn.execute(
-            "SELECT model, coalesce((usage_metadata->>'input_tokens')::int, 0),"
-            " coalesce((usage_metadata->'input_token_details'->>'cache_read')::int, 0),"
-            " coalesce((usage_metadata->>'output_tokens')::int, 0), duration_ms / 1000.0"
+        group_calls = query_all(
+            conn,
+            _GroupCallRow,
+            "SELECT model,"
+            " coalesce((usage_metadata->>'input_tokens')::int, 0) AS input_tokens,"
+            " coalesce((usage_metadata->'input_token_details'->>'cache_read')::int, 0)"
+            " AS cache_read_tokens,"
+            " coalesce((usage_metadata->>'output_tokens')::int, 0) AS output_tokens,"
+            " duration_ms / 1000.0 AS seconds"
             " FROM understanding_group_calls WHERE agent_id = %s AND created_at >= %s"
             " AND (%s::timestamptz IS NULL OR created_at <= %s)",
-            (agent_id, rebuild[4] or created_at, rebuild[5], rebuild[5]),
-        ).fetchall()
-        levels = conn.execute(
-            "SELECT depth, count(*) FROM understanding_nodes WHERE agent_id = %s AND depth > 1"
-            " GROUP BY depth ORDER BY depth",
+            (
+                agent_id,
+                rebuild.claimed_at or build.created_at,
+                rebuild.finished_at,
+                rebuild.finished_at,
+            ),
+        )
+        levels = query_all(
+            conn,
+            _LevelRow,
+            "SELECT depth, count(*) AS n FROM understanding_nodes"
+            " WHERE agent_id = %s AND depth > 1 GROUP BY depth ORDER BY depth",
             (agent_id,),
-        ).fetchall()
+        )
     return _BuildRows(
-        created_at=created_at,
-        sessions=[int(n) for n in sessions],
+        created_at=build.created_at,
+        sessions=build.sessions,
         by_job=by_job,
         jobs=jobs,
         calls=calls,
-        rebuild_id=int(rebuild_id),
+        rebuild_id=build.rebuild_id,
         rebuild=rebuild,
         group_calls=group_calls,
-        levels={int(depth): int(count) for depth, count in levels},
+        levels={level.depth: level.n for level in levels},
     )
 
 
 def _rebuild_progress(rows: _BuildRows, *, prices: PriceBook) -> RebuildProgress:
-    status, attempts, error, leaves = rows.rebuild[:4]
+    rebuild = rows.rebuild
     group = rows.group_calls
     return RebuildProgress(
         id=rows.rebuild_id,
-        status=str(status),
-        attempts=int(attempts),
-        error=None if error is None else str(error),
-        leaves=int(leaves or 0),
+        status=rebuild.status,
+        attempts=rebuild.attempts,
+        error=rebuild.error,
+        leaves=rebuild.leaves or 0,
         calls=len(group),
-        input_tokens=sum(int(r[1]) for r in group),
-        cache_read_tokens=sum(int(r[2]) for r in group),
-        output_tokens=sum(int(r[3]) for r in group),
-        seconds=float(sum(float(r[4]) for r in group)),
+        input_tokens=sum(r.input_tokens for r in group),
+        cache_read_tokens=sum(r.cache_read_tokens for r in group),
+        output_tokens=sum(r.output_tokens for r in group),
+        seconds=sum(r.seconds for r in group),
         cost_usd=_sum_costs(
-            [_price(str(r[0]), int(r[1]), int(r[3]), int(r[2]), prices=prices) for r in group]
+            [
+                _price(r.model, r.input_tokens, r.output_tokens, r.cache_read_tokens, prices=prices)
+                for r in group
+            ]
         ),
         levels=rows.levels,
     )
@@ -450,9 +569,7 @@ def load_build(
     rows = _read_build(pool, agent_id, build_id)
     if rows is None:
         return None
-    jobs = [
-        _job_progress(row, rows.by_job[int(row[0])], rows.calls, prices=prices) for row in rows.jobs
-    ]
+    jobs = [_job_progress(row, rows.by_job[row.id], rows.calls, prices=prices) for row in rows.jobs]
     rebuild = _rebuild_progress(rows, prices=prices)
     return BuildProgress(
         build_id=build_id,
@@ -467,27 +584,30 @@ def load_build(
 
 
 def _job_progress(
-    row: tuple[Any, ...],
+    row: _JobRow,
     session: int,
-    calls: Sequence[tuple[Any, ...]],
+    calls: Sequence[_ChunkCallRow],
     *,
     prices: PriceBook,
 ) -> JobProgress:
-    mine = [c for c in calls if int(c[0]) == int(row[0])]
+    mine = [c for c in calls if c.job_id == row.id]
     return JobProgress(
-        job_id=int(row[0]),
+        job_id=row.id,
         session=session,
-        status=str(row[1]),
-        start_index=int(row[2]),
-        end_index=int(row[3]),
-        attempts=int(row[4]),
-        error=None if row[5] is None else str(row[5]),
+        status=row.status,
+        start_index=row.start_index,
+        end_index=row.end_index,
+        attempts=row.attempts,
+        error=row.error,
         calls=len(mine),
-        input_tokens=sum(int(c[2]) for c in mine),
-        cache_read_tokens=sum(int(c[3]) for c in mine),
-        output_tokens=sum(int(c[4]) for c in mine),
-        seconds=float(sum(float(c[5]) for c in mine)),
+        input_tokens=sum(c.input_tokens for c in mine),
+        cache_read_tokens=sum(c.cache_read_tokens for c in mine),
+        output_tokens=sum(c.output_tokens for c in mine),
+        seconds=sum(c.seconds for c in mine),
         cost_usd=_sum_costs(
-            [_price(str(c[1]), int(c[2]), int(c[4]), int(c[3]), prices=prices) for c in mine]
+            [
+                _price(c.model, c.input_tokens, c.output_tokens, c.cache_read_tokens, prices=prices)
+                for c in mine
+            ]
         ),
     )

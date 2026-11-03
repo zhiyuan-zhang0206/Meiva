@@ -1,14 +1,12 @@
 """Explicit gateway failures eligible for bounded retry and deferred delivery."""
 
 import json
-from typing import Any, Protocol, TypeGuard
+from typing import Protocol
+
+from base.host.boundary.json_values import is_object_dict
 
 # 500 is an unknown server failure. The caller must see its original response.
 TRANSIENT_HTTP_STATUSES = frozenset({429, 502, 503, 504})
-
-
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
 
 
 class GatewayResponse(Protocol):
@@ -37,7 +35,7 @@ def retryable_response(response: GatewayResponse) -> bool:
         body = response.json()
     except (json.JSONDecodeError, UnicodeDecodeError):
         return True
-    if not _is_str_dict(body):
+    if not is_object_dict(body):
         return True
     for field in ("retryable", "committed"):
         if field in body and not isinstance(body[field], bool):

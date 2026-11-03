@@ -80,6 +80,7 @@ ANY_RULES = ("reportAny", "reportExplicitAny")
 # when its covering entry holds those rules (otherwise there is nothing to opt out of). Add the
 # prefix in the pull request that adds the covering entry; remove it when the tests are clean.
 TESTS_OWING_ANY: tuple[str, ...] = (
+    "base/agents",
     "cli",
     "gateway/tests",
     "meiva_builtins/skills/coordination",

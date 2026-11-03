@@ -25,6 +25,7 @@ from agent.state import BaseAgentState
 from base.agents import impersonation as leases
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
+from base.agents.impersonation import RequestedLease
 from base.agents.impersonation.maintenance import remind_expiring_impersonations
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.messages.timestamp_policy import TimestampSource
@@ -162,7 +163,7 @@ async def _termination_session(
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     local_machine: str,
-) -> tuple[RuntimeIncarnation, dict[str, Any]]:
+) -> tuple[RuntimeIncarnation, RequestedLease]:
     agent_id = create_agent(conn)
     conn.execute(
         "INSERT INTO agents_meta(id,status,machine) VALUES(%s,'idling',%s)",
@@ -211,6 +212,14 @@ async def _termination_session(
     return owner, session
 
 
+# meiva:note
+# The relay token a session relay's request minted.
+def _relay_token(session: RequestedLease) -> str:
+    token = session.get("relay_token")
+    assert token is not None
+    return token
+
+
 def _native_notices(conn: psycopg.Connection, agent_id: int) -> list[tuple[Any, ...]]:
     return conn.execute(
         "SELECT id,content,payload->>'note_tag',status,created_at FROM inbound_messages "
@@ -223,7 +232,7 @@ async def _terminate_native(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
     owner: RuntimeIncarnation,
-    session: dict[str, Any],
+    session: RequestedLease,
     runtime: Runtime[MeivaContext],
     mode: str,
     database_gate: ProcessDbGate,
@@ -486,7 +495,7 @@ async def test_restart_and_termination_without_a_lease_add_no_notices(
 
 # meiva:note
 # What the controller session reads on its stdout when the relay starts on an ended lease.
-def _assert_interruption_pushed(emitted: str, session: dict[str, Any]) -> None:
+def _assert_interruption_pushed(emitted: str, session: RequestedLease) -> None:
     assert emitted.count("Meiva impersonation lease") == 1
     assert f"Meiva impersonation lease {session['session_id']}" in emitted
     assert session["id"] in emitted
@@ -552,7 +561,7 @@ async def test_terminal_relay_start_delivers_interruption_best_effort(
         relay.cmd_relay,
         args,
         inputs=relay.RelayInputs(
-            token=session["relay_token"],
+            token=_relay_token(session),
             redis_url=redis_url,
             codex_home=None,
             user_home=Path("/nonexistent-relay-user-home"),
@@ -615,7 +624,7 @@ async def test_running_relay_delivers_termination_once_without_reserving_input(
                 agent_id=owner.agent_id,
                 lease_id=UUID(session["id"]),
                 session_id=session["session_id"],
-                token=session["relay_token"],
+                token=_relay_token(session),
                 machine=local_machine,
             ),
             db=database,

@@ -14,13 +14,16 @@
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
+from datetime import datetime
+from uuid import UUID
 
 import psycopg
-from psycopg.rows import dict_row
 
 from base.agents.impersonation.history import append
 from base.agents.impersonation.status import LOG_PROTOCOL_VERSION, pending_reason
+from base.db.rows import query_all
+from base.host.boundary.json_values import is_object_dict
 from base.log import logger
 
 CONDITIONS = ("seal_stuck", "capture_failed")
@@ -61,50 +64,81 @@ SELECT * FROM leases WHERE seal_stuck OR capture_failed
 
 
 # meiva:note
+# One lease row of `_INCOMPLETE_LEASES`. `reported_age` is the jsonb object of seconds since each
+# condition's last report.
+@dataclass(frozen=True)
+class _IncompleteLeaseRow:
+    id: UUID
+    agent_id: int
+    session_id: int
+    machine: str
+    ended_at: datetime | None
+    events_completed_at: datetime | None
+    event_delivery_protocol_version: int | None
+    event_delivery_pending_reason: str | None
+    seal_stuck: bool
+    capture_failed: bool
+    pending_sources: list[str]
+    reported_age: object
+
+
+# meiva:note
 # Report every lease and condition whose last report is older than `repeat_interval_seconds`, and
 # return how many events that emitted. Record then emit inside the caller's transaction: the entry
 # is what dates the report, and a rollback withdraws the claim instead of leaving a silent gap. A
 # failure between the emit and the commit costs one repeated event, never a dropped one.
-def emit_incomplete_event_logs(
-    conn: psycopg.Connection[Any], *, repeat_interval_seconds: int
-) -> int:
-    with conn.cursor(row_factory=dict_row) as cur:
-        cur.execute(_INCOMPLETE_LEASES, (LOG_PROTOCOL_VERSION,))
-        leases = cur.fetchall()
+def emit_incomplete_event_logs(conn: psycopg.Connection, *, repeat_interval_seconds: int) -> int:
+    leases = query_all(conn, _IncompleteLeaseRow, _INCOMPLETE_LEASES, (LOG_PROTOCOL_VERSION,))
     emitted = 0
     for lease in leases:
-        reported_age = lease["reported_age"]
+        reported_age = lease.reported_age
+        if not is_object_dict(reported_age):
+            raise TypeError("reported_age must be a JSON object")
+        holding = {"seal_stuck": lease.seal_stuck, "capture_failed": lease.capture_failed}
         for condition in CONDITIONS:
-            if not lease[condition]:
+            if not holding[condition]:
                 continue
             age = reported_age.get(condition)
-            if age is not None and age < repeat_interval_seconds:
-                continue
-            reason = str(pending_reason(lease) or "unknown")
+            if age is not None:
+                if not isinstance(age, (int, float)):
+                    raise TypeError("a reported age must be a number")
+                if age < repeat_interval_seconds:
+                    continue
+            reason = str(
+                pending_reason(
+                    {
+                        "events_completed_at": lease.events_completed_at,
+                        "event_delivery_protocol_version": lease.event_delivery_protocol_version,
+                        "event_delivery_pending_reason": lease.event_delivery_pending_reason,
+                        "ended_at": lease.ended_at,
+                    }
+                )
+                or "unknown"
+            )
             append(
                 conn,
-                str(lease["id"]),
+                str(lease.id),
                 "lifecycle",
                 {
                     "event": "event_log_incomplete",
                     "condition": condition,
                     "pending_reason": reason,
-                    "pending_sources": list(lease["pending_sources"]),
+                    "pending_sources": list(lease.pending_sources),
                     "lease_ended_at": (
-                        None if lease["ended_at"] is None else lease["ended_at"].isoformat()
+                        None if lease.ended_at is None else lease.ended_at.isoformat()
                     ),
                 },
             )
             logger.warning(
                 "impersonation event log cannot complete: {condition} (lease {lease_id})",
                 event="impersonation_event_log_incomplete",
-                agent_id=lease["agent_id"],
+                agent_id=lease.agent_id,
                 condition=condition,
-                lease_id=str(lease["id"]),
-                lease_machine=str(lease["machine"]),
+                lease_id=str(lease.id),
+                lease_machine=lease.machine,
                 pending_reason=reason,
-                pending_sources=list(lease["pending_sources"]),
-                session=f"{lease['agent_id']}:{lease['session_id']}",
+                pending_sources=list(lease.pending_sources),
+                session=f"{lease.agent_id}:{lease.session_id}",
             )
             emitted += 1
     return emitted

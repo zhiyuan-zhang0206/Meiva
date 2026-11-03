@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
 from langchain_core.messages import (
     AnyMessage,
     BaseMessage,
-    MessageLikeRepresentation,
     RemoveMessage,
     convert_to_messages,
 )
 from langchain_core.messages.utils import message_chunk_to_message
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 
-from base.agents.messages.identity import normalize_stored_message_ids
+from base.agents.messages.identity import is_message_likes, normalize_stored_message_ids
+from base.host.boundary.json_values import is_object_list
 
 
 # meiva:note
@@ -25,16 +25,8 @@ class MessagesMutationError(RuntimeError):
     pass
 
 
-def _is_object_list(value: object) -> TypeGuard[list[Any]]:
-    return isinstance(value, list)
-
-
 def _as_any_message(msg: BaseMessage) -> TypeGuard[AnyMessage]:
     return isinstance(msg, BaseMessage)
-
-
-def _is_message_seq(value: object) -> TypeGuard[Sequence[MessageLikeRepresentation]]:
-    return isinstance(value, Sequence) and not isinstance(value, (str, bytes))
 
 
 # meiva:note
@@ -42,14 +34,14 @@ def _is_message_seq(value: object) -> TypeGuard[Sequence[MessageLikeRepresentati
 # compare the exact objects the reducer merged.
 # meiva:link agent/messages/docs/messages.meiva.okf.md
 def _coerce(messages: object) -> list[AnyMessage]:
-    if not _is_message_seq(messages):
+    if not is_message_likes(messages):
         raise TypeError(f"Expected a sequence of messages, got {type(messages).__name__}")
     converted = [message_chunk_to_message(m) for m in convert_to_messages(messages)]
     return [m for m in converted if _as_any_message(m)]
 
 
 def _contains_remove_all(delta: object) -> bool:
-    msgs: list[Any] = delta if _is_object_list(delta) else [delta]
+    msgs: list[object] = delta if is_object_list(delta) else [delta]
     return any(isinstance(m, RemoveMessage) and m.id == REMOVE_ALL_MESSAGES for m in msgs)
 
 
@@ -59,11 +51,11 @@ def _contains_remove_all(delta: object) -> bool:
 # committed history.
 # meiva:link agent/messages/docs/messages.meiva.okf.md
 def _is_delta(current: object) -> bool:
-    msgs: list[Any] = current if _is_object_list(current) else [current]
+    msgs: list[object] = current if is_object_list(current) else [current]
     return any(isinstance(m, RemoveMessage) for m in msgs)
 
 
-def _fingerprint(m: AnyMessage) -> dict[str, Any]:
+def _fingerprint(m: AnyMessage) -> dict[str, object]:
     return m.model_dump()
 
 
@@ -246,7 +238,7 @@ def guarded_delta_reducer(state: object, writes: Sequence[object]) -> list[AnyMe
     cached: tuple[list[AnyMessage], set[str]] | None = None
     markers = _is_delta(state)
     for write in writes:
-        delta: list[Any] = write if _is_object_list(write) else [write]
+        delta: list[object] = write if is_object_list(write) else [write]
         if not markers:
             fast = _try_pure_append(result, delta, cached)
             if fast is not None:

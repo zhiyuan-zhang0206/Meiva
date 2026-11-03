@@ -15,7 +15,8 @@ from base.agents.messages.inbound_provenance import (
     source_assertion_match,
 )
 from base.api_contracts.caller_identity import caller_payload
-from base.db import Database, fetch_one
+from base.db import Database
+from base.db.rows import IdRow, query_one
 from base.events.live.bus import EventBus
 from base.telemetry import Event
 from base.telemetry.audit_events import prepare_event_log, record_audit
@@ -150,7 +151,9 @@ def insert_inbound_message_in_transaction(
     event_type, target_agent_id = _lineage_event(kind, source)
 
     prepared_event = None
-    cur.execute(
+    inserted = query_one(
+        cur.connection,
+        IdRow,
         "INSERT INTO inbound_messages "
         "(agent_id, content, kind, source, payload, source_verified_by, "
         "source_transport, content_hash, source_assertion_match) "
@@ -167,7 +170,9 @@ def insert_inbound_message_in_transaction(
             assertion_match,
         ),
     )
-    new_id = fetch_one(cur, "insert inbound message")[0]
+    if inserted is None:
+        raise RuntimeError("expected exactly one row: insert inbound message")
+    new_id = inserted.id
     if event_type is not None:
         prepared_event = prepare_event_log(
             event_type=event_type,
@@ -198,12 +203,16 @@ def insert_spawn_prompt_in_transaction(
     """
     validate_source(source)
     payload = caller_payload(source, None)
-    cur.execute(
+    inserted = query_one(
+        cur.connection,
+        IdRow,
         "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
         "VALUES (%s, %s, 'chat', %s, %s::jsonb) RETURNING id",
         (agent_id, content, source, json.dumps(payload) if payload else None),
     )
-    inbound_id: int = fetch_one(cur, "insert spawn prompt")[0]
+    if inserted is None:
+        raise RuntimeError("expected exactly one row: insert spawn prompt")
+    inbound_id = inserted.id
     if not source.startswith("agent:"):
         return inbound_id, None
     event = prepare_event_log(

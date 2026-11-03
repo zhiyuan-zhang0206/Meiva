@@ -32,7 +32,6 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
 
 from langchain_core.messages import BaseMessage, HumanMessage
 
@@ -120,6 +119,20 @@ class GroupCall:
     error: str | None
 
 
+# meiva:note
+# The three captures (first, last, body) of every match of a `<group>` pattern in `text`. The
+# patterns capture three groups that always take part, so each is text; the check narrows the
+# typeshed's `str | Any`.
+def group_texts(text: str, pattern: re.Pattern[str]) -> list[tuple[str, str, str]]:
+    found: list[tuple[str, str, str]] = []
+    for match in pattern.finditer(text):
+        first, last, body = match.group(1), match.group(2), match.group(3)
+        if not (isinstance(first, str) and isinstance(last, str) and isinstance(body, str)):
+            raise TypeError("a <group> element captured something other than text")
+        found.append((first, last, body))
+    return found
+
+
 def build_group_prompt(nodes: Sequence[OpenNode], *, clock: Clock, must_close: bool) -> str:
     """The request: purpose, rules, envelope, then the open nodes by id."""
     listing = "\n\n".join(
@@ -139,7 +152,10 @@ def parse_groups(text: str, nodes: Sequence[OpenNode], *, must_close: bool) -> l
     Raises:
         GroupReplyError: a grouping rule is broken, or no group closed when `must_close`.
     """
-    groups = [Group(int(a), int(b), body.strip()) for a, b, body in _GROUP.findall(text)]
+    groups = [
+        Group(int(first), int(last), body.strip())
+        for first, last, body in group_texts(text, _GROUP)
+    ]
     opened = len(_OPENING.findall(text))
     if opened != len(groups):
         raise GroupReplyError(
@@ -224,7 +240,7 @@ def generate_groups(
         Exception: an unknown model invocation error, unchanged and without retry.
     """
     request = build_group_prompt(nodes, clock=clock, must_close=must_close)
-    messages: list[Any] = [HumanMessage(content=request)]
+    messages: list[BaseMessage] = [HumanMessage(content=request)]
     for round_no in range(corrections + 1):
         started = time.monotonic()
         try:

@@ -33,6 +33,31 @@ class Adoption:
     relay_provider: str | None
 
 
+# meiva:note
+# A selected row is a tuple of untyped column values from the async connection protocol; the
+# match checks every column and fails the admission loudly on a row of another shape.
+def _adoption_of(row: tuple[object, ...], incarnation: RuntimeIncarnation) -> Adoption:
+    match row:
+        case (
+            (UUID() | str()) as lease_id,
+            int() as session_id,
+            str() as status,
+            UUID() as from_generation,
+            UUID() as from_owner,
+            (str() | None) as provider,
+        ):
+            return Adoption(
+                lease_id=str(lease_id),
+                session_id=session_id,
+                status=status,
+                accepted_from=(from_generation, from_owner),
+                accepted_by=(incarnation.generation, incarnation.owner),
+                relay_provider=provider,
+            )
+        case _:
+            raise TypeError("An adopted lease row has columns of unexpected types")
+
+
 async def adopt_for_successor(
     conn: AsyncConnectionLike, agent_id: int, incarnation: RuntimeIncarnation
 ) -> Adoption | None:
@@ -55,22 +80,15 @@ async def adopt_for_successor(
     row = await cursor.fetchone()
     if row is None:
         return None
-    lease_id, session_id, status, from_generation, from_owner, provider = row
+    adoption = _adoption_of(row, incarnation)
     await _record_adoption(
         conn,
-        str(lease_id),
-        accepted_from=(from_generation, from_owner),
-        accepted_by=(incarnation.generation, incarnation.owner),
-        provider=provider,
+        adoption.lease_id,
+        accepted_from=adoption.accepted_from,
+        accepted_by=adoption.accepted_by,
+        provider=adoption.relay_provider,
     )
-    return Adoption(
-        lease_id=str(lease_id),
-        session_id=session_id,
-        status=status,
-        accepted_from=(from_generation, from_owner),
-        accepted_by=(incarnation.generation, incarnation.owner),
-        relay_provider=provider,
-    )
+    return adoption
 
 
 async def _record_adoption(
@@ -135,7 +153,11 @@ async def end_for_replacement(
     row = await cursor.fetchone()
     if row is None:
         return None
-    lease_id, protocol = row
+    match row:
+        case ((UUID() | str()) as lease_id, (int() | None) as protocol):
+            pass
+        case _:
+            raise TypeError("A replaced lease row has columns of unexpected types")
     await conn.execute(
         "UPDATE agent_impersonations SET accepted_generation=%s,accepted_owner=%s WHERE id=%s",
         (incarnation.generation, incarnation.owner, lease_id),

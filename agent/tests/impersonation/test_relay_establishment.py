@@ -6,7 +6,6 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Timer
-from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -27,6 +26,7 @@ from agent.tests.impersonation.lease_support import cluster as cluster
 from base.agents import impersonation as leases
 from base.agents.impersonation.host_transport import antigravity_endpoint_path
 from base.agents.impersonation.relay import RelayAction
+from base.agents.impersonation.status import PublicLease
 from base.agents.observation.relay_supervision import RelaySupervision, terminate_relay
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
@@ -52,7 +52,7 @@ def _wait_for(path: Path, *, complete: bytes = b"") -> bytes:
 
 def _establish(
     cluster: Cluster,
-    session: dict[str, Any],
+    session: PublicLease,
     owner: RuntimeIncarnation,
     relays: RelaySupervision,
     *,
@@ -144,7 +144,8 @@ def test_a_lease_without_a_relay_binding_is_rolled_back(cluster: Cluster, tmp_pa
     accepted = cluster.lease(owner, provider="claude")
     session = cluster.status(owner)
     assert session is not None
-    unbound = {**session, "relay_provider": None}
+    unbound = session.copy()
+    unbound["relay_provider"] = None
     assert not _establish(
         cluster, unbound, owner, RelaySupervision(), tmp_path=tmp_path, mode="exit:9"
     )
@@ -213,7 +214,7 @@ def test_a_codex_relay_that_exits_during_startup_rolls_the_lease_back(
     ended = cluster.get(accepted["id"])
     assert ended["status"] == "rejected"
     assert ended["rejection_reason"] == startup_failure("codex", 5)
-    assert "exit code 5" in ended["rejection_reason"]
+    assert "exit code 5" in str(ended["rejection_reason"])
     assert not relays.children
 
 
@@ -298,6 +299,7 @@ def test_an_unreadable_antigravity_record_rolls_back_with_its_path(
     accepted = cluster.lease(owner, provider="antigravity")
     session = cluster.status(owner)
     assert session is not None
+    assert session["relay_thread_id"] is not None
     record = antigravity_endpoint_path(session["relay_thread_id"], home=tmp_path)
     record.parent.mkdir(parents=True, exist_ok=True)
     record.write_text("not json", encoding="utf-8")
@@ -305,8 +307,8 @@ def test_an_unreadable_antigravity_record_rolls_back_with_its_path(
     assert not _establish(cluster, session, owner, relays, tmp_path=tmp_path, mode="serve")
     ended = cluster.get(accepted["id"])
     assert ended["status"] == "rejected"
-    assert "the Antigravity endpoint is unusable" in ended["rejection_reason"]
-    assert str(record) in ended["rejection_reason"]
+    assert "the Antigravity endpoint is unusable" in str(ended["rejection_reason"])
+    assert str(record) in str(ended["rejection_reason"])
     assert not (tmp_path / "relay" / "pid").exists()
 
 

@@ -1,7 +1,7 @@
 """Inbox read surface: the pending-chat strip and the FYI notice lifetime."""
 
 from datetime import datetime
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 import psycopg
 
@@ -19,7 +19,7 @@ class InboundRow(NamedTuple):
     # JSONB sidecar, None when the column is NULL. Only readers that need it
     # select the column (list_pending_inbounds — the multimodal
     # `{"content_blocks": [...]}` shape); the rest leave it defaulted.
-    payload: dict[str, Any] | None = None
+    payload: dict[str, object] | None = None
 
 
 # FYI notice (require_response=false) lifetime in the open queue: after this many

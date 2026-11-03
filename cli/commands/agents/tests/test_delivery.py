@@ -12,6 +12,7 @@ import redis
 
 from base.agents import impersonation as leases
 from base.agents.impersonation import delivery as delivery
+from base.agents.impersonation.status import PublicLease
 from base.agents.inbox.insert import insert_inbound_message
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
@@ -55,7 +56,7 @@ def assert_expiry_note_explains_pending_messages(
 
 
 def _assert_exhaustion_preserved(
-    ended: dict[str, Any],
+    ended: PublicLease,
     lease: dict[str, Any],
     mid: int,
     db_conn: psycopg.Connection,
@@ -64,7 +65,7 @@ def _assert_exhaustion_preserved(
     machine_identity: MachineIdentityReader,
 ) -> None:
     assert ended["status"] == "active"
-    assert f"message {mid} exhausted" in ended["relay_degraded_reason"]
+    assert f"message {mid} exhausted" in str(ended["relay_degraded_reason"])
     assert ended["reason"] == "Test ACK exhaustion"
     assert (
         reserve(lease, mid, database_gate=database_gate, machine_identity=machine_identity) == set()
@@ -404,4 +405,4 @@ def test_exhausted_message_outside_page_remains_visible_without_ending_lease(
         local_machine=machine_identity.name(),
     )
     assert ended["status"] == "active"
-    assert f"message {other}" in ended["relay_degraded_reason"]
+    assert f"message {other}" in str(ended["relay_degraded_reason"])

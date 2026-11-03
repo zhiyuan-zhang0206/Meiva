@@ -40,12 +40,13 @@ from __future__ import annotations
 import logging
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any
+from dataclasses import dataclass
 
 from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.base import Checkpoint
 from psycopg import Connection
-from psycopg.rows import dict_row
+from psycopg.rows import DictRow, dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
@@ -55,9 +56,11 @@ from base.agents.history.closing_request import (
     FullHistory,
     single_segment_history,
 )
-from base.agents.history.delta_read_compat import reconstruct_delta_messages
+from base.agents.history.delta_read_compat import as_messages, reconstruct_delta_messages
 from base.db import Database
+from base.db.rows import query_all, query_one
 from base.db.transaction import async_write_transaction
+from base.host.boundary.untyped import object_mapping
 
 _log = logging.getLogger(__name__)
 
@@ -71,17 +74,66 @@ class CheckpointReadError(RuntimeError):
     how to tolerate."""
 
 
+# meiva:note
+# Borrow one short-lived autocommit read connection (tuple rows) from a pool of `db`.
 @contextmanager
-def _checkpoint_read_connection(
-    db: Database, *, row_factory: object = None
-) -> Generator[Connection[Any]]:
-    """Borrow one short-lived autocommit read connection from a pool of `db`."""
-    db_pool = db.pool(autocommit=True, row_factory=row_factory)
+def _checkpoint_read_connection(db: Database) -> Generator[Connection]:
+    db_pool = db.pool(autocommit=True)
     try:
         with db_pool.connection() as conn:
             yield conn
     finally:
         db_pool.close()
+
+
+# meiva:note
+# The same, with dict rows: the connection a checkpoint saver is typed for.
+@contextmanager
+def _checkpoint_saver_connection(db: Database) -> Generator[Connection[DictRow]]:
+    db_pool = db.pool(autocommit=True, row_factory=dict_row)
+    try:
+        with db_pool.connection() as conn:
+            yield conn
+    finally:
+        db_pool.close()
+
+
+# meiva:note
+# A checkpoint's `messages` channel as the list of messages it must be; absent means no messages
+# yet (a just-spawned agent's input snapshot has not had the channel written).
+def _stored_messages(checkpoint: Checkpoint) -> list[BaseMessage]:
+    return as_messages(object_mapping(checkpoint["channel_values"]).get("messages", []))
+
+
+# meiva:note
+# A statement that selects (or aliases) one `checkpoint_id` column.
+@dataclass(frozen=True)
+class _CheckpointIdRow:
+    checkpoint_id: str
+
+
+# meiva:note
+# `SELECT max(checkpoint_id) AS latest`: None when the thread has no checkpoint.
+@dataclass(frozen=True)
+class _LatestRow:
+    latest: str | None
+
+
+# meiva:note
+# The type and the first five bytes of a messages blob (both None when the newest version has no
+# blob, as a delta-written thread's).
+@dataclass(frozen=True)
+class _BlobHeaderRow:
+    blob_type: str | None
+    header: bytes | None
+
+
+# meiva:note
+# A compaction boundary: its checkpoint and the closing request recorded in its metadata (jsonb).
+@dataclass(frozen=True)
+class _BoundaryRow:
+    checkpoint_id: str
+    anchor: object
 
 
 def load_checkpoint_messages(db: Database, agent_id: int) -> list[BaseMessage]:
@@ -111,7 +163,7 @@ def load_checkpoint_messages(db: Database, agent_id: int) -> list[BaseMessage]:
         # Direct construction rather than `from_conn_string` — the classmethod
         # does not forward a `serde` argument, and the default permissive serde
         # is exactly what this module is avoiding.
-        with _checkpoint_read_connection(db, row_factory=dict_row) as conn:
+        with _checkpoint_saver_connection(db) as conn:
             saver = PostgresSaver(conn=conn, serde=serde)
             tuple_ = saver.get_tuple(config)
             if tuple_ is not None:
@@ -129,7 +181,7 @@ def load_checkpoint_messages(db: Database, agent_id: int) -> list[BaseMessage]:
     # snapshot, whose channel_values has not yet had the messages channel written
     # (that happens when the first super-step commits). Absence there is a valid
     # "no messages yet" state, not schema drift, so fall back to [].
-    return ckpt["channel_values"].get("messages", [])
+    return _stored_messages(ckpt)
 
 
 def list_compact_boundary_checkpoint_ids(
@@ -154,15 +206,15 @@ def list_compact_boundary_checkpoint_ids(
     try:
         with _checkpoint_read_connection(db) as conn:
             rows = (
-                conn.execute(query, (str(agent_id),)).fetchall()
+                query_all(conn, _CheckpointIdRow, query, (str(agent_id),))
                 if limit is None
-                else conn.execute(f"{query} LIMIT %s", (str(agent_id), limit)).fetchall()
+                else query_all(conn, _CheckpointIdRow, f"{query} LIMIT %s", (str(agent_id), limit))
             )
     except Exception as exc:
         raise CheckpointReadError(
             f"compaction boundary index read failed for agent {agent_id}"
         ) from exc
-    return [str(row[0]) for row in rows]
+    return [row.checkpoint_id for row in rows]
 
 
 def latest_checkpoint_id(db: Database, agent_id: int) -> str | None:
@@ -177,15 +229,15 @@ def latest_checkpoint_id(db: Database, agent_id: int) -> str | None:
     """
     try:
         with _checkpoint_read_connection(db) as conn:
-            row = conn.execute(
-                "SELECT max(checkpoint_id) FROM checkpoints WHERE thread_id = %s",
+            row = query_one(
+                conn,
+                _LatestRow,
+                "SELECT max(checkpoint_id) AS latest FROM checkpoints WHERE thread_id = %s",
                 (str(agent_id),),
-            ).fetchone()
+            )
     except Exception as exc:
         raise CheckpointReadError(f"latest checkpoint read failed for agent {agent_id}") from exc
-    if row is None or row[0] is None:
-        return None
-    return str(row[0])
+    return None if row is None else row.latest
 
 
 def _msgpack_array_length(header: bytes) -> int:
@@ -262,8 +314,10 @@ def load_checkpoint_message_count(db: Database, agent_id: int) -> int:
     """
     try:
         with _checkpoint_read_connection(db) as conn:
-            row = conn.execute(
-                "SELECT b.type, substring(b.blob FROM 1 FOR 5)"
+            row = query_one(
+                conn,
+                _BlobHeaderRow,
+                "SELECT b.type AS blob_type, substring(b.blob FROM 1 FOR 5) AS header"
                 " FROM checkpoints c"
                 " LEFT JOIN checkpoint_blobs b"
                 " ON b.thread_id = c.thread_id"
@@ -273,19 +327,18 @@ def load_checkpoint_message_count(db: Database, agent_id: int) -> int:
                 " WHERE c.thread_id = %s AND c.checkpoint_ns = ''"
                 " ORDER BY c.checkpoint_id DESC LIMIT 1",
                 (str(agent_id),),
-            ).fetchone()
+            )
         if row is None:
             return 0
-        if row[0] is None:
+        if row.blob_type is None:
             # A delta-written thread stores no messages blob for its newest
             # version — the value lives in the write chain (tasks #3180/#3181).
             # Reconstruct and count; a vanilla thread that merely has nothing
             # written yet reconstructs to nothing and still counts 0.
             return _reconstructed_message_count(db, agent_id)
-        blob_type, header = row
-        if is_delta_snapshot_blob(blob_type, header):
+        if is_delta_snapshot_blob(row.blob_type, row.header):
             return _reconstructed_message_count(db, agent_id)
-        return _message_count_from_blob_header(blob_type, header)
+        return _message_count_from_blob_header(row.blob_type, row.header)
     except Exception as exc:
         raise CheckpointReadError(
             f"checkpoint message count read failed for agent {agent_id}"
@@ -299,13 +352,12 @@ def _reconstructed_message_count(db: Database, agent_id: int) -> int:
 
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     serde = CheckpointSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
-    with _checkpoint_read_connection(db, row_factory=dict_row) as conn:
+    with _checkpoint_saver_connection(db) as conn:
         saver = PostgresSaver(conn=conn, serde=serde)
         tuple_ = saver.get_tuple(config)
         if tuple_ is None or not reconstruct_delta_messages(saver, tuple_):
             return 0
-        messages: list[Any] = tuple_.checkpoint["channel_values"].get("messages") or []
-        return len(messages)
+        return len(_stored_messages(tuple_.checkpoint))
 
 
 def load_checkpoint_messages_segment(
@@ -328,13 +380,15 @@ def load_checkpoint_messages_segment(
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     serde = CheckpointSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
     try:
-        with _checkpoint_read_connection(db, row_factory=dict_row) as conn:
-            boundary = conn.execute(
+        with _checkpoint_saver_connection(db) as conn:
+            boundary = query_one(
+                conn,
+                _CheckpointIdRow,
                 "SELECT checkpoint_id FROM checkpoints"
                 " WHERE thread_id = %s AND checkpoint_id = %s"
                 " AND metadata->>'compact_boundary' = 'true'",
                 (str(agent_id), checkpoint_id),
-            ).fetchone()
+            )
             if boundary is None:
                 return []
             saver = PostgresSaver(conn=conn, serde=serde)
@@ -355,7 +409,7 @@ def load_checkpoint_messages_segment(
         ) from exc
     if checkpoint_tuple is None:
         return []
-    messages = checkpoint_tuple.checkpoint["channel_values"].get("messages", [])
+    messages = _stored_messages(checkpoint_tuple.checkpoint)
     if not messages:
         return []
     if not isinstance(messages[0], SystemMessage):
@@ -393,25 +447,27 @@ def load_checkpoint_history_full(db: Database, agent_id: int) -> FullHistory:
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     serde = CheckpointSerializer(allowed_msgpack_modules=STATIC_CHECKPOINT_MSGPACK_TYPES)
     try:
-        with _checkpoint_read_connection(db, row_factory=dict_row) as conn:
+        with _checkpoint_saver_connection(db) as conn:
             saver = PostgresSaver(conn=conn, serde=serde)
             latest_tuple = saver.get_tuple(config)
             if latest_tuple is None:
                 return FullHistory([], (), ())
             reconstruct_delta_messages(saver, latest_tuple)
             latest = latest_tuple.checkpoint
-            boundaries: list[dict[str, Any]] = conn.execute(
+            boundaries = query_all(
+                conn,
+                _BoundaryRow,
                 "SELECT checkpoint_id, metadata -> %s::text AS anchor FROM checkpoints"
                 " WHERE thread_id = %s AND metadata->>'compact_boundary' = 'true'"
                 " ORDER BY checkpoint_id ASC",
                 (METADATA_KEY, str(agent_id)),
-            ).fetchall()
+            )
             if not boundaries:
-                return single_segment_history(latest["channel_values"].get("messages", []))
+                return single_segment_history(_stored_messages(latest))
 
             segments: list[list[BaseMessage]] = []
             for boundary in boundaries:
-                checkpoint_id = boundary["checkpoint_id"]
+                checkpoint_id = boundary.checkpoint_id
                 checkpoint_tuple = saver.get_tuple(
                     {
                         **config,
@@ -423,9 +479,7 @@ def load_checkpoint_history_full(db: Database, agent_id: int) -> FullHistory:
                 )
                 if checkpoint_tuple is not None:
                     reconstruct_delta_messages(saver, checkpoint_tuple)
-                    segments.append(
-                        checkpoint_tuple.checkpoint["channel_values"].get("messages", [])
-                    )
+                    segments.append(_stored_messages(checkpoint_tuple.checkpoint))
     except Exception as exc:
         raise CheckpointReadError(f"full checkpoint read failed for agent {agent_id}") from exc
 
@@ -436,10 +490,10 @@ def load_checkpoint_history_full(db: Database, agent_id: int) -> FullHistory:
     # An empty first snapshot still occupies segment 0 (an empty body).
     heads = list(first.segment_heads) or [None]
     starts = list(first.segment_starts) or [0]
-    latest_is_boundary = any(str(row["checkpoint_id"]) == str(latest["id"]) for row in boundaries)
+    latest_is_boundary = any(row.checkpoint_id == latest["id"] for row in boundaries)
     following_segments = segments[1:]
     if not latest_is_boundary:
-        following_segments = [*following_segments, latest["channel_values"].get("messages", [])]
+        following_segments = [*following_segments, _stored_messages(latest)]
     for segment in following_segments:
         remainder = segment
         head: SystemMessage | None = None
@@ -453,9 +507,9 @@ def load_checkpoint_history_full(db: Database, agent_id: int) -> FullHistory:
     return FullHistory(full_history, tuple(heads), tuple(starts), _closings(boundaries, len(heads)))
 
 
-def _closings(boundaries: list[dict[str, Any]], segments: int) -> tuple[ClosingRequest | None, ...]:
+def _closings(boundaries: list[_BoundaryRow], segments: int) -> tuple[ClosingRequest | None, ...]:
     """Each segment's closing request from its boundary's metadata; the open segment has none."""
-    closings = [ClosingRequest.from_metadata(row.get("anchor")) for row in boundaries]
+    closings = [ClosingRequest.from_metadata(row.anchor) for row in boundaries]
     return tuple(closings + [None] * (segments - len(closings)))
 
 
@@ -493,16 +547,18 @@ def load_checkpoint_messages_by_trace(
         # Both paths borrow the data-plane pool URL, which already names
         # PgBouncer when pooling is enabled.
         with _checkpoint_read_connection(db) as conn:
-            row = conn.execute(
+            row = query_one(
+                conn,
+                _CheckpointIdRow,
                 "SELECT checkpoint_id FROM checkpoints"
                 " WHERE thread_id = %s AND metadata->>'trace_id' = %s"
                 " ORDER BY checkpoint_id DESC LIMIT 1",
                 (str(agent_id), trace_id),
-            ).fetchone()
+            )
         if row is None:
             return None, []
-        checkpoint_id: str = row[0]
-        with _checkpoint_read_connection(db, row_factory=dict_row) as conn:
+        checkpoint_id = row.checkpoint_id
+        with _checkpoint_saver_connection(db) as conn:
             saver = PostgresSaver(conn=conn, serde=serde)
             ckpt = saver.get_tuple(
                 {
@@ -518,11 +574,11 @@ def load_checkpoint_messages_by_trace(
         ) from exc
     if not ckpt:
         return checkpoint_id, []
-    return checkpoint_id, ckpt.checkpoint["channel_values"].get("messages", [])
+    return checkpoint_id, _stored_messages(ckpt.checkpoint)
 
 
 async def attach_trace_to_checkpoint(
-    pool: AsyncConnectionPool[Any] | None,
+    pool: AsyncConnectionPool | None,
     thread_id: str,
     checkpoint_id: str,
     trace_id: str,

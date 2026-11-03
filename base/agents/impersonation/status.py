@@ -3,7 +3,7 @@
 from collections.abc import Mapping
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Literal, TypedDict, TypeGuard
+from typing import Literal, TypedDict, TypeGuard
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -42,43 +42,91 @@ OPEN: tuple[OpenImpersonationStatus, ...] = (
 )
 
 
-class LeaseRecord(TypedDict):
-    """Lifecycle row: status is parsed; other database fields retain their existing types."""
-
+# meiva:note
+# The lease columns that read the same in the stored row and in the public projection: nothing
+# secret and no UUID. `LeaseRecord` and `PublicLease` add what differs.
+class LeaseColumns(TypedDict):
     status: ImpersonationStatus
     session_id: int
+    name: str
+    executor_name: str
+    reason: str
+    start_message: str
+    plugin_delta: list[object]
+    created_at: datetime
+    activated_at: datetime | None
     next_entry: int
     handoff_path: str | None
+    handoff_document: object
     events_completed_at: datetime | None
     event_delivery_protocol_version: int | None
     event_delivery_pending_reason: str | None
     event_admission_closed_at: datetime | None
     ended_at: datetime | None
-    accepted_generation: UUID | None
-    accepted_owner: UUID | None
     ack_window_seconds: int
     agent_id: int
     applied_version: int
     delta_version: int
     expires_at: datetime
     handoff_applied_at: datetime | None
-    id: UUID | str
     machine: str
     max_delivery_attempts: int
     relay_provider: str | None
+    relay_thread_id: str | None
+    relay_codex_remote: str | None
+    relay_batch_window_seconds: int
     relay_generation: int
     relay_heartbeat_at: datetime | None
+    relay_last_failure_at: datetime | None
     relay_minted_at: datetime | None
-    relay_minted_generation: UUID | None
-    relay_minted_owner: UUID | None
     relay_degraded_reason: str | None
-    relay_token_hash: str | None
-    process_metadata: dict[str, Any]
+    process_metadata: dict[str, object]
     source: str
     summary_inbound_id: int | None
     summary: str | None
     rejection_reason: str | None
     ttl_seconds: int
+
+
+class LeaseRecord(LeaseColumns):
+    """Lifecycle row: status is parsed; other database fields retain their existing types."""
+
+    id: UUID | str
+    accepted_generation: UUID | None
+    accepted_owner: UUID | None
+    relay_minted_generation: UUID | None
+    relay_minted_owner: UUID | None
+    relay_token_hash: str | None
+
+
+# meiva:note
+# What `public` hands out: the lease row without its credentials, its UUIDs rendered as strings.
+class PublicLease(LeaseColumns):
+    id: str
+    accepted_generation: str | None
+    accepted_owner: str | None
+    relay_minted_generation: str | None
+    relay_minted_owner: str | None
+
+
+# meiva:note
+# The relay provider of a lease that spawns a relay. The lease row's relay spec constraint
+# guarantees it for codex and antigravity, so a lease without one reaching a spawn is a broken
+# invariant, refused by name.
+def relay_provider(lease: PublicLease) -> str:
+    provider = lease["relay_provider"]
+    if provider is None:
+        raise ValueError(f"lease {lease['id']} carries no relay provider")
+    return provider
+
+
+# meiva:note
+# The relay thread of a lease that spawns a relay; see `relay_provider`.
+def relay_thread_id(lease: PublicLease) -> str:
+    thread_id = lease["relay_thread_id"]
+    if thread_id is None:
+        raise ValueError(f"lease {lease['id']} carries no relay thread id")
+    return thread_id
 
 
 def _is_lease_record(row: dict[str, object]) -> TypeGuard[LeaseRecord]:

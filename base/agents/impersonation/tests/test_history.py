@@ -10,6 +10,7 @@ import pytest
 from base.agents import impersonation as leases
 from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
+from base.agents.impersonation.status import LeaseRecord
 from base.agents.impersonation.tests.impersonation_support import (
     legacy_session,
     recorded_tree,
@@ -48,7 +49,7 @@ def start(
     active: bool = True,
     database_gate: ProcessDbGate,
     local_machine: str,
-) -> dict[str, Any]:
+) -> LeaseRecord:
     result = sessions.request(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
@@ -255,16 +256,17 @@ def test_say_ack_and_file_preserve_all_message_bodies(
     lease = history.resolve(database, owner.agent_id, 0, local_machine=local_machine)
     document, path = history.export_handoff(lease, db_conn, workspace=tmp_path)
     assert Path(path) == tmp_path / "impersonation" / "0.json"
-    assert json.loads(Path(path).read_text()) == document
-    assert [m["payload"]["content"] for m in document["messages"]] == [
+    saved = json.loads(Path(path).read_text())
+    assert saved == document
+    assert [m["payload"]["content"] for m in saved["messages"]] == [
         "Please fix login",
         "I found the cause",
     ]
-    assert document["messages"][0]["acknowledged"] is True
-    assert document["statistics"]["outgoing_messages"] == 1
-    assert document["session"]["executor_name"] == "Codex: thoughtful squirrel"
-    assert document["session"]["process_metadata"]["name"] == "python3.12"
-    said = document["messages"][1]["payload"]["impersonation"]
+    assert saved["messages"][0]["acknowledged"] is True
+    assert saved["statistics"]["outgoing_messages"] == 1
+    assert saved["session"]["executor_name"] == "Codex: thoughtful squirrel"
+    assert saved["session"]["process_metadata"]["name"] == "python3.12"
+    said = saved["messages"][1]["payload"]["impersonation"]
     assert said["executor_name"] == "Codex: thoughtful squirrel"
     assert "process" not in said
     legacy = history.ImpersonationMetadata.model_validate({**said, "process": {"pid": 1}})
@@ -348,8 +350,9 @@ def test_export_handoff_rebuilds_a_cached_v1_document(
         workspace=tmp_path,
     )
 
-    assert document["version"] == 2
-    assert document["statistics"]["event_delivery"]["state"] == "pending"
+    saved = json.loads(json.dumps(document))
+    assert saved["version"] == 2
+    assert saved["statistics"]["event_delivery"]["state"] == "pending"
 
 
 def test_message_retry_does_not_replace_newer_preview(

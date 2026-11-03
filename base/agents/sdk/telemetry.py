@@ -11,27 +11,47 @@ from __future__ import annotations
 import contextlib
 import time
 from collections.abc import Awaitable, Callable, Generator, Mapping
-from typing import Any
+from typing import TYPE_CHECKING
 
 from base.agents.sdk import SamplingPolicy, SamplingPolicyLike
 from base.agents.sdk.capture import SdkCaptureOwner
 from base.agents.sdk.tally import SdkCall, SdkCallTally, sdk_calls_by_tool_call_id
 from base.api_contracts.agent_contract import SdkCaptureAdmission
 
+if TYPE_CHECKING:
+    from base.telemetry.delivery.pipeline import EventPipeline
+
 # Event name written to events for each public SDK entry.
 SDK_CALL_EVENT = "sdk_call"
 
 
+# meiva:note
+# The two fields of a caller identity that an `sdk_call` event records: the agent it is
+# attributed to (None for a system caller) and the event source, "system" when absent. Any
+# other key is a malformed identity, rejected rather than forwarded.
+def _event_identity(identity: Mapping[str, object]) -> tuple[int | None, str]:
+    unknown = identity.keys() - {"agent_id", "source"}
+    if unknown:
+        raise TypeError(f"unknown SDK caller identity fields: {sorted(unknown)}")
+    agent_id = identity.get("agent_id")
+    source = identity.get("source", "system")
+    if agent_id is not None and not isinstance(agent_id, int):
+        raise TypeError("SDK caller identity agent_id must be an integer or None")
+    if not isinstance(source, str):
+        raise TypeError("SDK caller identity source must be a string")
+    return agent_id, source
+
+
 def emit(
     fn: str,
-    detail: Mapping[str, Any] | None = None,
+    detail: Mapping[str, object] | None = None,
     duration: float | None = None,
     *,
-    identity: Mapping[str, Any],
+    identity: Mapping[str, object],
     sampling_owner: SamplingPolicyLike,
     sampling_policy: SamplingPolicy | None = None,
     admission: SdkCaptureAdmission | None = None,
-    producer: Callable[[], Any] | None = None,
+    producer: Callable[[], EventPipeline] | None = None,
     machine_reader: Callable[[], str] | None = None,
 ) -> None:
     """Write one ``sdk_call`` event; invalid input and emitter errors propagate.
@@ -44,24 +64,23 @@ def emit(
     every = current.sample_every if current.sampling_enabled else 1
     if not sampling_owner.should_sample(every):
         return
-    extra: dict[str, Any] = {"fn": fn, "sample_rate": every}
+    extra: dict[str, object] = {"fn": fn, "sample_rate": every}
     if detail:
         extra["detail"] = dict(detail)
     if duration is not None:
         extra["duration"] = duration
     from base import telemetry
 
-    capture_args: dict[str, Any] = {} if admission is None else {"capture": admission.capture}
-    if producer is not None:
-        capture_args["producer"] = producer
-    if machine_reader is not None:
-        capture_args["machine_reader"] = machine_reader
+    agent_id, source = _event_identity(identity)
     telemetry.emit(
         "telemetry",
         SDK_CALL_EVENT,
         attributes=extra,
-        **identity,
-        **capture_args,
+        agent_id=agent_id,
+        source=source,
+        capture=None if admission is None else admission.capture,
+        producer=producer,
+        machine_reader=machine_reader,
     )
 
 
@@ -79,11 +98,11 @@ def _event_capture_admission(
 @contextlib.contextmanager
 def _measure(
     fn: str,
-    identity: Mapping[str, Any],
+    identity: Mapping[str, object],
     tally: SdkCallTally | None,
     capture_owner: SdkCaptureOwner | None,
     sampling_owner: SamplingPolicyLike,
-    producer: Callable[[], Any] | None,
+    producer: Callable[[], EventPipeline] | None,
     machine_reader: Callable[[], str] | None,
 ) -> Generator[None, None, None]:
     snapshot = sampling_owner.read()
@@ -102,7 +121,6 @@ def _measure(
             if tally is not None:
                 tally.add(fn)
             try:
-                capture_args: dict[str, Any] = {} if admission is None else {"admission": admission}
                 emit(
                     fn,
                     duration=time.monotonic() - t0,
@@ -111,7 +129,7 @@ def _measure(
                     sampling_policy=snapshot,
                     producer=producer,
                     machine_reader=machine_reader,
-                    **capture_args,
+                    admission=admission,
                 )
             except BaseException as secondary:
                 if admission is not None:
@@ -124,21 +142,22 @@ def _measure(
                 if primary is None:
                     raise
                 primary.add_note(f"SDK call {fn!r} event emission also failed: {secondary!r}")
-                for note in getattr(secondary, "__notes__", ()):
-                    primary.add_note(note)
+                if hasattr(secondary, "__notes__"):
+                    for note in secondary.__notes__:
+                        primary.add_note(note)
 
 
 def run_metered[ResultT](
     fn: str,
     original: Callable[..., ResultT],
-    args: tuple[Any, ...],
-    kwargs: Mapping[str, Any],
+    args: tuple[object, ...],
+    kwargs: Mapping[str, object],
     *,
-    identity: Mapping[str, Any],
+    identity: Mapping[str, object],
     sampling_owner: SamplingPolicyLike,
     tally: SdkCallTally | None = None,
     capture_owner: SdkCaptureOwner | None = None,
-    producer: Callable[[], Any] | None = None,
+    producer: Callable[[], EventPipeline] | None = None,
     machine_reader: Callable[[], str] | None = None,
 ) -> ResultT:
     """Validate each public entry before execution and retain its call-local snapshots."""
@@ -149,14 +168,14 @@ def run_metered[ResultT](
 async def run_metered_async[ResultT](
     fn: str,
     original: Callable[..., Awaitable[ResultT]],
-    args: tuple[Any, ...],
-    kwargs: Mapping[str, Any],
+    args: tuple[object, ...],
+    kwargs: Mapping[str, object],
     *,
-    identity: Mapping[str, Any],
+    identity: Mapping[str, object],
     sampling_owner: SamplingPolicyLike,
     tally: SdkCallTally | None = None,
     capture_owner: SdkCaptureOwner | None = None,
-    producer: Callable[[], Any] | None = None,
+    producer: Callable[[], EventPipeline] | None = None,
     machine_reader: Callable[[], str] | None = None,
 ) -> ResultT:
     """Validate when awaited, preserving cancellation and the call's own admission."""
@@ -167,11 +186,11 @@ async def run_metered_async[ResultT](
 # ── the wire-side counts: entry model + materialization + read-back ───────────
 
 
-def tally_entries(tally: Mapping[str, int]) -> list[dict[str, Any]]:
+def tally_entries(tally: Mapping[str, int]) -> list[dict[str, object]]:
     """Materialize a recording tally as the wire list that rides the exec result:
     ``[{"method": "<ns>.<fn>", "count": N}, ...]``, sorted by descending count then
     method — the collapsed-code chip's render order (JSON dicts, one per fn)."""
-    entries: list[dict[str, Any]] = []
+    entries: list[dict[str, object]] = []
     for fn, count in sorted(tally.items(), key=lambda item: (-item[1], item[0])):
         entries.append({"method": fn, "count": count})
     return entries

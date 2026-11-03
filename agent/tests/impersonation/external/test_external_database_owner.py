@@ -75,6 +75,7 @@ def test_an_independent_attachment_closes_the_clients_it_owns_at_detach(
     target = lease_target(attached_runtime.lease_id, None)
     with Attachment(AttachInputs(target, None, boot, pid=os.getpid(), suffix="probe")):
         (pid,) = meiva.context.sql.execute("SELECT pg_backend_pid()").fetchone()
+        assert isinstance(pid, int)
         assert backend_alive(attached_runtime, pid)
         assert not pipeline.stopped
     assert pipeline.stopped
@@ -85,6 +86,7 @@ def test_an_independent_attachment_closes_the_clients_it_owns_at_detach(
 def test_a_borrowed_attachment_never_closes_the_prior_clients(attached_runtime: Takeover) -> None:
     prior = meiva.context
     (before,) = prior.sql.execute("SELECT pg_backend_pid()").fetchone()
+    assert isinstance(before, int)
     with impersonation.attach(attached_runtime.lease_id):
         assert meiva.context.clients is prior.clients
     assert meiva.context is prior

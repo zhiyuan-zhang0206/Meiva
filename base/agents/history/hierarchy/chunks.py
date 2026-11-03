@@ -44,16 +44,17 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 
+import psycopg
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
-from psycopg import AsyncCursor
 from psycopg_pool import AsyncConnectionPool
 
 from base import telemetry
 from base.agents.history.checkpoint import FullHistory
-from base.agents.history.hierarchy.store import SCHEMA_VERSION
+from base.agents.history.hierarchy.store import SCHEMA_VERSION, SpanRow
 from base.agents.messages.kwargs import MeivaMsgType, read_meiva_kwargs
+from base.db.rows import ExistsRow, aquery_all, aquery_one
 from base.db.transaction import async_write_transaction
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
@@ -286,7 +287,8 @@ WHERE id = (
     LIMIT 1
 )
 RETURNING id, agent_id, compact_version, start_index, end_index, end_msg_id,
-          boundary_checkpoint_id, attempts, coalesce(extract(epoch FROM now() - waiting_since), 0)
+          boundary_checkpoint_id, attempts,
+          coalesce(extract(epoch FROM now() - waiting_since), 0)::float8 AS age_seconds
 """
 
 # A `running` claim past the lease: its claimer died. The chunk is not attempted again, and the row
@@ -300,6 +302,15 @@ RETURNING id, agent_id, attempts
 """
 
 
+# meiva:note
+# A job `_FAIL_LOST_SQL` failed.
+@dataclass(frozen=True)
+class _LostRow:
+    id: int
+    agent_id: int
+    attempts: int
+
+
 async def claim_job(
     pool: AsyncConnectionPool, *, agent_id: int | None = None, segment_parallel: bool = False
 ) -> ChunkJob | None:
@@ -310,10 +321,13 @@ async def claim_job(
     claimer died (its lease lapsed) is failed with `understanding_chunk_failed`, never claimed
     again.
     """
-    async with async_write_transaction(pool) as conn, conn.cursor() as cur:
-        await cur.execute(_FAIL_LOST_SQL, {"lease": CLAIM_LEASE_SECONDS, "agent": agent_id})
-        lost = await cur.fetchall()
-        await cur.execute(
+    async with async_write_transaction(pool) as conn:
+        lost = await aquery_all(
+            conn, _LostRow, _FAIL_LOST_SQL, {"lease": CLAIM_LEASE_SECONDS, "agent": agent_id}
+        )
+        row = await aquery_one(
+            conn,
+            ChunkJob,
             _CLAIM_SQL,
             {
                 "spacing": RETRY_SPACING_SECONDS,
@@ -322,31 +336,18 @@ async def claim_job(
                 "agent": agent_id,
             },
         )
-        row = await cur.fetchone()
-    for lost_id, lost_agent, lost_attempts in lost:
+    for failed in lost:
         telemetry.emit(
             "telemetry",
             "understanding_chunk_failed",
             attributes={
-                "agent_id": int(lost_agent),
-                "job_id": int(lost_id),
-                "attempts": int(lost_attempts),
+                "agent_id": failed.agent_id,
+                "job_id": failed.id,
+                "attempts": failed.attempts,
                 "error": "claimer lost: lease expired",
             },
         )
-    if row is None:
-        return None
-    return ChunkJob(
-        id=int(row[0]),
-        agent_id=int(row[1]),
-        compact_version=int(row[2]),
-        start_index=int(row[3]),
-        end_index=int(row[4]),
-        end_msg_id=str(row[5]),
-        boundary_checkpoint_id=None if row[6] is None else str(row[6]),
-        attempts=int(row[7]),
-        age_seconds=float(row[8]),
-    )
+    return row
 
 
 async def finish_job(
@@ -391,17 +392,19 @@ class Backlog:
 
 async def backlog(pool: AsyncConnectionPool) -> Backlog:
     """One read of the queue's depth (the loop's per-round telemetry)."""
-    async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute(
-            "SELECT count(*) FILTER (WHERE status = 'pending'),"
-            " count(*) FILTER (WHERE status = 'running'),"
+    async with pool.connection() as conn:
+        row = await aquery_one(
+            conn,
+            Backlog,
+            "SELECT count(*) FILTER (WHERE status = 'pending') AS pending,"
+            " count(*) FILTER (WHERE status = 'running') AS running,"
             " COALESCE(EXTRACT(EPOCH FROM now() - min(created_at)"
-            "                  FILTER (WHERE status = 'pending')), 0)"
-            " FROM understanding_chunk_jobs WHERE status IN ('pending', 'running')"
+            "                  FILTER (WHERE status = 'pending')), 0)::float8"
+            " AS oldest_pending_age_seconds"
+            " FROM understanding_chunk_jobs WHERE status IN ('pending', 'running')",
         )
-        row = await cur.fetchone()
     assert row is not None, "an aggregate query always returns one row"  # noqa: S101
-    return Backlog(int(row[0]), int(row[1]), float(row[2]))
+    return row
 
 
 class ChunkNotReadyError(Exception):
@@ -519,7 +522,7 @@ def _in_segment(
 def message_time(messages: Sequence[BaseMessage], *, last: bool) -> datetime | None:
     """The first (or last) `meiva_created_at` among `messages`, or None."""
     for msg in reversed(messages) if last else messages:
-        stamp: Any = read_meiva_kwargs(msg).get("meiva_created_at")
+        stamp = read_meiva_kwargs(msg).get("meiva_created_at")
         if isinstance(stamp, str) and stamp:
             return datetime.fromisoformat(stamp)
     return None
@@ -571,14 +574,16 @@ async def covered_spans(
     nodes of one level never overlap, so a later chunk is cut down to what no node covers
     (`uncovered`).
     """
-    async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute(
+    async with pool.connection() as conn:
+        rows = await aquery_all(
+            conn,
+            SpanRow,
             "SELECT span_start, span_end FROM understanding_nodes"
             " WHERE agent_id = %s AND depth = 1"
             " AND span_start <= %s AND span_end >= %s ORDER BY span_start",
             (agent_id, span[1], span[0]),
         )
-        return [(int(a), int(b)) for a, b in await cur.fetchall()]
+    return [(row.span_start, row.span_end) for row in rows]
 
 
 def uncovered(span: tuple[int, int], covered: Sequence[tuple[int, int]]) -> list[tuple[int, int]]:
@@ -621,13 +626,13 @@ async def write_group_nodes(
     A row's times are the group's first and last `meiva_created_at` (NULL when no message carries
     one, which keeps the row stored but unservable, like every untimed node).
     """
-    async with async_write_transaction(pool) as conn, conn.cursor() as cur:
+    async with async_write_transaction(pool) as conn:
         for node in nodes:
             input_hash = hashlib.sha256(
                 f"{CHUNK_ENGINE_VERSION}|{CHUNK_PROMPT_VERSION}|{job.agent_id}|{node.span}"
                 f"|{job.end_msg_id}".encode()
             ).hexdigest()
-            await cur.execute(
+            await conn.execute(
                 _UPSERT_NODE_SQL,
                 (
                     job.agent_id,
@@ -646,7 +651,7 @@ async def write_group_nodes(
                     job.id,
                 ),
             )
-        out_of_order = await _out_of_order_end(cur, job.agent_id, nodes)
+        out_of_order = await _out_of_order_end(conn, job.agent_id, nodes)
     if out_of_order is not None:
         telemetry.emit(
             "telemetry",
@@ -660,7 +665,7 @@ async def write_group_nodes(
 
 
 async def _out_of_order_end(
-    cur: AsyncCursor[Any], agent_id: int, nodes: Sequence[GroupNode]
+    conn: psycopg.AsyncConnection, agent_id: int, nodes: Sequence[GroupNode]
 ) -> int | None:
     """The earliest span end of a just-written leaf that lies before a leaf that already has a
     parent, else None.
@@ -673,15 +678,16 @@ async def _out_of_order_end(
     if not nodes:
         return None
     earliest_end = min(n.span[1] for n in nodes)
-    await cur.execute(
+    row = await aquery_one(
+        conn,
+        ExistsRow,
         "SELECT EXISTS (SELECT 1 FROM understanding_nodes WHERE agent_id = %s AND depth = 1"
         " AND parent_id IS NOT NULL"
-        " AND span_start > %s AND NOT (span_start = ANY(%s)))",
+        " AND span_start > %s AND NOT (span_start = ANY(%s))) AS found",
         (agent_id, earliest_end, [n.span[0] for n in nodes]),
     )
-    row = await cur.fetchone()
     assert row is not None, "an EXISTS query always returns one row"  # noqa: S101
-    return earliest_end if row[0] else None
+    return earliest_end if row.found else None
 
 
 @dataclass(frozen=True)

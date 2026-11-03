@@ -22,7 +22,6 @@ class _Attachment(Protocol):
     agent_id: int
     session_id: int
     lease_id: str
-    _event_gate: object
 
     def flush(self) -> None: ...
 

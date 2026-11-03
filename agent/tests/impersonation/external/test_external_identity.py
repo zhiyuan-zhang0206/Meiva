@@ -263,7 +263,7 @@ def test_the_native_snapshot_is_the_checkpoint_the_attachment_never_writes(
     stored, _, _ = load_snapshot(
         attached_runtime.agent_id, database=attached_runtime.cluster.database, home=meiva_home()
     )
-    assert stored.sample__seen == {"native"}
+    assert handle.view(stored).seen == {"native"}
 
 
 def test_external_controls_stay_out_of_the_native_prompt() -> None:

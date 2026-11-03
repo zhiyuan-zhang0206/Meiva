@@ -5,12 +5,14 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Final, LiteralString
 
 import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from base.db.protocols import AsyncConnectionLike, AsyncPool
+from base.db.rows import aquery_one
 from base.db.transaction import async_write_transaction
 
 HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS = 1
@@ -32,6 +34,13 @@ PERMANENT_REJECT_REASON_BILLING: Final = "billing"
 RECOVERY_BREAKER_CLEAR: LiteralString = "permanent_reject_streak < 1"
 
 
+# meiva:note
+# The `RETURNING permanent_reject_streak` of the streak bump.
+@dataclass(frozen=True)
+class _StreakRow:
+    permanent_reject_streak: int
+
+
 async def record_permanent_reject_turn(
     pool: AsyncConnectionPool, agent_id: int, reason: str
 ) -> int:
@@ -43,17 +52,18 @@ async def record_permanent_reject_turn(
     best-effort (log-and-continue on failure): the breaker must never mask
     the original provider rejection.
     """
-    async with async_write_transaction(pool) as conn, conn.cursor() as cur:
-        await cur.execute(
+    async with async_write_transaction(pool) as conn:
+        row = await aquery_one(
+            conn,
+            _StreakRow,
             "UPDATE agents_meta SET permanent_reject_streak = permanent_reject_streak + 1, "
             "last_permanent_reject_reason = %s "
             "WHERE id = %s RETURNING permanent_reject_streak",
             (reason, agent_id),
         )
-        row = await cur.fetchone()
     if row is None:
         raise RuntimeError(f"agent {agent_id} disappeared while recording a permanent rejection")
-    return int(row[0])
+    return row.permanent_reject_streak
 
 
 async def halt_automatic_recovery(pool: AsyncConnectionPool, agent_id: int) -> bool:
@@ -108,7 +118,7 @@ async def _operator_restart_waiting(conn: AsyncConnectionLike, agent_id: int) ->
             (agent_id,),
         )
     ).fetchone()
-    return bool(row[0]) if row is not None else False
+    return row is not None and row[0] is True
 
 
 # meiva:note

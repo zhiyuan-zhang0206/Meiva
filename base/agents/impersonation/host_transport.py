@@ -30,15 +30,19 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from functools import partial
+from http.client import HTTPResponse
 from pathlib import Path
-from typing import Any, TypeGuard
 from uuid import UUID
 
 import psutil
 from websockets.sync.client import ClientConnection, unix_connect
 from websockets.sync.client import connect as ws_connect
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.host.private_storage import write_private_bytes
 
 LIVE_SUBMIT_TIMEOUT_SECONDS = 5.0
@@ -233,7 +237,7 @@ def read_antigravity_endpoint_file(path: Path) -> AntigravityServer | None:
     except OSError as exc:
         raise RuntimeError(f"Antigravity endpoint record {path} cannot be read ({exc})") from exc
     try:
-        parsed: object = json.loads(raw)
+        parsed = object_of(json.loads, raw)
     except ValueError as exc:
         raise RuntimeError(f"Antigravity endpoint record {path} is not JSON") from exc
     record = _as_mapping(parsed) or {}
@@ -307,7 +311,7 @@ def antigravity_rpc(
     *,
     server: AntigravityServer | None = None,
     timeout: float = LIVE_SUBMIT_TIMEOUT_SECONDS,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Call one Connect JSON-RPC method on the local Antigravity language_server."""
     target = server or discover_antigravity_server(timeout=timeout)
     url = f"http://{target.address}{_ANTIGRAVITY_SERVICE_PREFIX}{method}"
@@ -323,8 +327,7 @@ def antigravity_rpc(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
-            raw = resp.read().decode("utf-8")
+        raw = _read_body(partial(urllib.request.urlopen, timeout=timeout), req).decode("utf-8")
     except urllib.error.HTTPError as exc:
         detail = ""
         with contextlib.suppress(OSError, ValueError):
@@ -332,7 +335,7 @@ def antigravity_rpc(
         raise RuntimeError(
             f"Antigravity {method} failed (HTTP {exc.code}): {detail or exc.reason}"
         ) from exc
-    parsed: object = json.loads(raw) if raw.strip() else {}
+    parsed: object = object_of(json.loads, raw) if raw.strip() else {}
     mapping = _as_mapping(parsed)
     if mapping is None:
         raise RuntimeError(f"Antigravity {method} returned non-object JSON")
@@ -361,6 +364,17 @@ def antigravity_live_submit(
         return None
     except Exception as exc:
         return _clip(f"{type(exc).__name__}: {exc}")
+
+
+# meiva:note
+# The body of the answer `opener(request)` gives. `urlopen` types its answer `Any`; a parameter
+# typed with the real `HTTPResponse` takes it without naming the `Any`.
+def _read_body(
+    opener: Callable[[urllib.request.Request], AbstractContextManager[HTTPResponse]],
+    request: urllib.request.Request,
+) -> bytes:
+    with opener(request) as response:
+        return response.read()
 
 
 def _open(endpoint: str, deadline: float) -> ClientConnection:
@@ -411,10 +425,10 @@ def _request(
     method: str,
     params: dict[str, object],
     deadline: float,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     conn.send(json.dumps({"id": request_id, "method": method, "params": params}))
     while True:
-        message: object = json.loads(conn.recv(timeout=_remaining(deadline)))
+        message = object_of(json.loads, conn.recv(timeout=_remaining(deadline)))
         # A reply matches by id and carries result/error; notifications and
         # server-initiated requests interleave and are skipped.
         reply = _as_mapping(message)
@@ -428,13 +442,9 @@ def _request(
             raise TimeoutError(f"no {method} reply within the deadline")
 
 
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
-
-
-def _as_mapping(value: object) -> dict[str, Any] | None:
+def _as_mapping(value: object) -> dict[str, object] | None:
     """One JSON-RPC message as a mapping, when it is one at all."""
-    return value if _is_str_dict(value) else None
+    return value if is_object_dict(value) else None
 
 
 def _error_summary(error: object) -> str:

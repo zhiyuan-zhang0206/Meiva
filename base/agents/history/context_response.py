@@ -6,7 +6,10 @@ models and the budget resolution (the agent's model window and compaction thresh
 rather than in either of them.
 """
 
+from typing import NamedTuple
+
 from loguru import logger
+from pydantic import TypeAdapter
 
 from base.agents.history.context_breakdown import (
     ContextBreakdownResponse as ContextBreakdownResponse,
@@ -22,9 +25,19 @@ from base.agents.history.context_breakdown import (
 )
 from base.agents.model.model_overrides import read_agent_overrides
 from base.db.protocols import SyncPool
+from base.host.boundary.json_values import is_object_dict
 from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import UnknownModelWindowError, resolve_context_budget
 from base.lm.registry import resolve_available_model
+
+
+# meiva:note
+# The `config_overlay` column of an agent's `agents_meta` row, validated from the selected tuple.
+class _OverlayRow(NamedTuple):
+    config_overlay: object
+
+
+_OVERLAY_ROW = TypeAdapter(_OverlayRow)
 
 
 def resolve_agent_model(
@@ -38,11 +51,14 @@ def resolve_agent_model(
     (the caller's live default), resolved through any withdrawal fallback so callers judge the model
     that will actually run. Capability gates (image input) must use this resolved id, never the raw
     configured one."""
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,))
-        row = cur.fetchone()
-    overlay = row[0] if row and row[0] else None
-    model = overlay.get("llm_model") if overlay else None
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,)
+        ).fetchone()
+    overlay = None if row is None else _OVERLAY_ROW.validate_python(row).config_overlay
+    model = overlay.get("llm_model") if is_object_dict(overlay) else None
+    if model is not None and not isinstance(model, str):
+        raise TypeError(f"config_overlay.llm_model of agent {agent_id} is not a string")
     return resolve_available_model(model or default_model, models=catalog.models)
 
 

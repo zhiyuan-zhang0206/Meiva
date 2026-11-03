@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Protocol
+from typing import Protocol
 
 # meiva:note
 # The one thing every external process borrows differently is *how its identity is
@@ -19,7 +19,7 @@ from typing import Any, Protocol
 
 
 class IdentitySource(Protocol):
-    def require(self) -> Mapping[str, Any]: ...
+    def require(self) -> Mapping[str, object]: ...
 
     def validate(self) -> int: ...
 
@@ -35,16 +35,16 @@ class IdentitySource(Protocol):
 class AttachmentCodec[StateT](Protocol):
     def load_snapshot(
         self, agent_id: int
-    ) -> tuple[StateT, Mapping[str, Any] | None, Mapping[str, Any] | None]: ...
+    ) -> tuple[StateT, Mapping[str, object] | None, Mapping[str, object] | None]: ...
 
     def plugin_state_schema(self, state: StateT) -> object: ...
 
     def encode_plugin_delta(
-        self, update: Mapping[str, Any], state_cls: type[Any]
+        self, update: Mapping[str, object], state_cls: type[StateT]
     ) -> dict[str, str]: ...
 
     def decode_plugin_delta(
-        self, encoded: dict[str, str], state_cls: type[Any]
-    ) -> Mapping[str, Any]: ...
+        self, encoded: Mapping[str, object], state_cls: type[StateT]
+    ) -> Mapping[str, object]: ...
 
-    def apply_plugin_delta(self, state: StateT, delta: Mapping[str, Any]) -> None: ...
+    def apply_plugin_delta(self, state: StateT, delta: Mapping[str, object]) -> None: ...

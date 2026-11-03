@@ -10,7 +10,7 @@ exports = ["build.py", "check_plan.py", "chunk_generate.py", "chunk_plan.py", "c
 "leaf_groups.py" = ["group.py", "units.py"]
 "rebuild.py" = ["chunks.py"]
 "serve.py" = ["store.py", "units.py", "usage.py"]
-"sessions.py" = ["chunk_plan.py", "chunks.py", "units.py"]
+"sessions.py" = ["chunk_plan.py", "chunks.py", "store.py", "units.py"]
 "store.py" = ["usage.py"]
 "tests" = ["build.py", "check_plan.py", "chunk_generate.py", "chunks.py", "generate.py", "group.py", "group_store.py", "leaf_groups.py", "serve.py", "sessions.py", "store.py", "units.py", "usage.py"]
 

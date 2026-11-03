@@ -1,9 +1,13 @@
 """Cooperative same-machine leases; the native agent remains the checkpoint owner."""
 
-from typing import Any
+from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import datetime
+from typing import NotRequired
+from uuid import UUID
 
 from psycopg import Connection
-from psycopg.rows import dict_row
+from psycopg.rows import class_row, dict_row
 from psycopg.types.json import Jsonb
 
 from base.agents.impersonation._store import (
@@ -29,6 +33,9 @@ from base.agents.impersonation._store import (
     ImpersonationError as ImpersonationError,
 )
 from base.agents.impersonation._store import (
+    InboxMessage as InboxMessage,
+)
+from base.agents.impersonation._store import (
     live_lease_on_machine as live_lease_on_machine,
 )
 from base.agents.impersonation._store import (
@@ -38,7 +45,12 @@ from base.agents.impersonation._store import (
     require_native as require_native,
 )
 from base.agents.impersonation.history import append, capture_pending, set_actor
-from base.agents.impersonation.status import LOG_PROTOCOL_VERSION, ImpersonationStatus, parse_lease
+from base.agents.impersonation.status import (
+    LOG_PROTOCOL_VERSION,
+    ImpersonationStatus,
+    PublicLease,
+    parse_lease,
+)
 from base.agents.impersonation.wake import wake_agent as wake_agent
 from base.api_contracts.agent_contract import AgentStatus
 from base.api_contracts.caller_identity import CallerIdentity
@@ -74,13 +86,59 @@ RENEW_LEASE_SQL = (
 )
 
 
+# meiva:note
+# What `request` returns: the public lease, and the relay's scoped credential once when the
+# relay runs inside the controller's own session.
+class RequestedLease(PublicLease):
+    relay_token: NotRequired[str]
+
+
+# meiva:note
+# The ids a new lease is minted with: its UUID, and the token of a session relay.
+@dataclass(frozen=True)
+class _LeaseSeed:
+    lease_id: UUID
+    minted_token: str
+
+
+# meiva:note
+# One pending inbox row a controller reads, as the database holds it.
+@dataclass(frozen=True)
+class _PendingMessage:
+    id: int
+    content: str
+    kind: str
+    source: str
+    payload: object
+    created_at: datetime
+
+
+# meiva:note
+# The native runtime's view of whether it owns the agent and an open lease exists.
+@dataclass(frozen=True)
+class _NativeLeaseCheck:
+    owns: bool
+    has_lease: bool
+
+
+# meiva:note
+# The columns a joined read adds to the lease row; they are taken out before the row is shown.
+@dataclass(frozen=True)
+class _JoinedAgent:
+    agent_id: int
+    harness: str
+    fresh: bool
+    machine: str
+    status: str
+
+
 def _ttl(value: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 86400:
         raise ValueError("TTL must be an integer from 1 through 86400 seconds")
     return value
 
 
-def _validate_invoked_python(process_metadata: dict[str, Any] | None) -> None:
+def _validate_invoked_python(process_metadata: dict[str, object] | None) -> None:
     """Renewal reminders shell-quote this path; refuse a malformed one at request
     rather than failing the reminder pass for every lease."""
     invoked_python = (process_metadata or {}).get("invoked_python")
@@ -94,7 +152,7 @@ def _validate_request(
     *,
     name: str,
     executor_name: str,
-    process_metadata: dict[str, Any] | None,
+    process_metadata: dict[str, object] | None,
     relay_provider: str,
     relay_thread_id: str | None,
     relay_codex_remote: str | None,
@@ -112,7 +170,7 @@ def _validate_request(
         raise ValueError("relay_batch_window_seconds must be an integer from 0 through 300")
 
 
-def _reject_open_previous(conn: Connection[Any], agent_id: int) -> None:
+def _reject_open_previous(conn: Connection, agent_id: int) -> None:
     """Lock the agent's latest lease row and refuse a new request while one is still live."""
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
@@ -148,9 +206,9 @@ def request(
     relay_batch_window_seconds: int = 0,
     name: str,
     executor_name: str,
-    process_metadata: dict[str, Any] | None = None,
+    process_metadata: dict[str, object] | None = None,
     local_machine: str,
-) -> dict[str, Any]:
+) -> RequestedLease:
     """Prepare a controller lease and return its scoped relay credential."""
     ttl = _ttl(ttl_seconds)
     _validate_request(
@@ -165,33 +223,36 @@ def request(
     delivery_config = authority.current_field_values()
     with db.write_transaction() as conn:
         meta = lock_agent(conn, agent_id)
-        require_meiva_harness(meta)
-        if meta["machine"] != local_machine:
+        require_meiva_harness(meta.id, meta.harness)
+        if meta.machine != local_machine:
             raise ImpersonationError(
                 machine_mismatch_message(
                     agent_id=agent_id,
-                    agent_machine=meta["machine"],
+                    agent_machine=meta.machine,
                     local_machine=local_machine,
                 )
             )
-        if AgentStatus(meta["status"]) not in (AgentStatus.RUNNING, AgentStatus.IDLING):
+        if AgentStatus(meta.status) not in (AgentStatus.RUNNING, AgentStatus.IDLING):
             raise ImpersonationError("Agent must be running or idling to receive a request")
         _reject_open_previous(conn, agent_id)
         set_actor(conn, caller.source())
-        seed_row = conn.execute(
-            "SELECT gen_random_uuid(), replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '')"
-        ).fetchone()
-        if seed_row is None:
+        with conn.cursor(row_factory=class_row(_LeaseSeed)) as seed_cur:
+            seed = seed_cur.execute(
+                "SELECT gen_random_uuid() AS lease_id, "
+                "replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '') "
+                "AS minted_token"
+            ).fetchone()
+        if seed is None:
             raise RuntimeError("failed to mint lease seed")
-        lease_id, minted_token = seed_row
-        relay_token = minted_token if relay_provider in SESSION_RELAY_PROVIDERS else None
+        lease_id = seed.lease_id
+        relay_token = seed.minted_token if relay_provider in SESSION_RELAY_PROVIDERS else None
         conn.execute(
             INSERT_LEASE_SQL,
             (
                 lease_id,
                 agent_id,
                 caller.source(),
-                meta["machine"],
+                meta.machine,
                 reason,
                 ttl,
                 ttl,
@@ -211,8 +272,8 @@ def request(
         result = public(lock_lease(conn, str(lease_id)))
     wake_agent(db, bus, agent_id, roster_changed=True)
     if relay_token is not None:
-        return result | {"relay_token": relay_token}
-    return result
+        return RequestedLease(**result, relay_token=relay_token)
+    return RequestedLease(**result)
 
 
 def get(
@@ -221,7 +282,7 @@ def get(
     lease_id: str,
     *,
     local_machine: str,
-) -> dict[str, Any]:
+) -> PublicLease:
     with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
         authenticate(
@@ -235,12 +296,33 @@ def get(
     return result
 
 
+# meiva:note
+# Take the joined agent columns out of the row, leaving the lease row alone.
+def _take_joined_agent(row: dict[str, object]) -> _JoinedAgent:
+    agent_id = row.pop("current_agent_id")
+    harness = row.pop("harness")
+    fresh = row.pop("fresh")
+    machine = row.pop("current_machine")
+    status = row.pop("current_status")
+    if not (
+        isinstance(agent_id, int)
+        and isinstance(harness, str)
+        and isinstance(fresh, bool)
+        and isinstance(machine, str)
+        and isinstance(status, str)
+    ):
+        raise TypeError("The joined agent columns have unexpected types")
+    return _JoinedAgent(
+        agent_id=agent_id, harness=harness, fresh=fresh, machine=machine, status=status
+    )
+
+
 def require_active(
     db: Database,
     lease_id: str,
     *,
     local_machine: str,
-) -> dict[str, Any]:
+) -> PublicLease:
     """Check one committed snapshot; SDK work does not hold a database lock."""
     with db.connect() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
@@ -252,13 +334,14 @@ def require_active(
         lease = cur.fetchone()
     if lease is None:
         raise ImpersonationError("Impersonation does not exist")
-    require_meiva_harness({"id": lease.pop("current_agent_id"), "harness": lease.pop("harness")})
+    joined = _take_joined_agent(lease)
+    require_meiva_harness(joined.agent_id, joined.harness)
     parsed_lease = parse_lease(lease)
     validate_active(
         parsed_lease,
-        fresh=lease.pop("fresh"),
-        machine=lease.pop("current_machine"),
-        status=AgentStatus(lease.pop("current_status")),
+        fresh=joined.fresh,
+        machine=joined.machine,
+        status=AgentStatus(joined.status),
         local_machine=local_machine,
     )
     return public(lease)
@@ -273,7 +356,7 @@ def prepare(
     start_message: str,
     *,
     local_machine: str,
-) -> dict[str, Any]:
+) -> PublicLease:
     if not start_message.strip():
         raise ImpersonationError("A nonempty start message is required for the external controller")
     if incarnation.agent_id != agent_id:
@@ -308,7 +391,7 @@ def prepare(
 
 def activate(
     db: DatabaseLike, bus: EventBus, lease_id: str, incarnation: RuntimeIncarnation
-) -> dict[str, Any]:
+) -> PublicLease:
     """Called only after native exec drains AND its checkpoint flush completes."""
     with db.write_transaction() as conn:
         require_native(conn, incarnation)
@@ -351,25 +434,26 @@ def activate(
 
 def native_status(
     db: DatabaseLike, bus: EventBus, agent_id: int, incarnation: RuntimeIncarnation
-) -> dict[str, Any] | None:
+) -> PublicLease | None:
     if incarnation.agent_id != agent_id:
         raise ImpersonationError("Native status belongs to a different agent")
     # meiva:note
     # No-lease reads must not lock the hot native metadata row at every node.
     # A concurrently inserted request still needs this native owner's preparation;
     # absence can delay preparation until the next gate, never activate it.
-    with db.connect() as conn:
-        row = conn.execute(
+    with db.connect() as conn, conn.cursor(row_factory=class_row(_NativeLeaseCheck)) as check_cur:
+        row = check_cur.execute(
             "SELECT runtime_generation=%s AND runtime_owner=%s "
-            "AND status IN ('running','idling'),"
+            "AND status IN ('running','idling') AS owns,"
             "EXISTS(SELECT 1 FROM agent_impersonations WHERE agent_id=%s AND harness='meiva' AND "
             "(status IN ('requested','accepted','active') OR delta_version>applied_version OR handoff_applied_at IS NULL)) "
+            "AS has_lease "
             "FROM agents_meta WHERE id=%s",
             (incarnation.generation, incarnation.owner, agent_id, agent_id),
         ).fetchone()
-    if row is None or row[0] is not True:
+    if row is None or row.owns is not True:
         raise ImpersonationError("Native runtime no longer owns this agent")
-    if not row[1]:
+    if not row.has_lease:
         return None
     with db.write_transaction() as conn:
         require_native(conn, incarnation)
@@ -399,7 +483,7 @@ def renew(
     *,
     ttl_seconds: int | None = None,
     local_machine: str,
-) -> dict[str, Any]:
+) -> PublicLease:
     with db.write_transaction() as conn:
         lease = lock_lease(conn, lease_id)
         require_active_locked(
@@ -425,7 +509,7 @@ def release(
     summary: str,
     *,
     local_machine: str,
-) -> dict[str, Any]:
+) -> PublicLease:
     if not summary.strip():
         raise ValueError("A nonempty handoff summary is required")
     from base.agents.impersonation import manifest as capture
@@ -487,7 +571,7 @@ def inbox(
     *,
     limit: int = 100,
     local_machine: str,
-) -> list[dict[str, Any]]:
+) -> list[InboxMessage]:
     """Read and record the controller's pending inbox page, oldest first."""
     if not 1 <= limit <= 1000:
         raise ValueError("Inbox limit must be from 1 through 1000")
@@ -498,22 +582,31 @@ def inbox(
             lease,
             local_machine=local_machine,
         )
-        with conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(
+        with conn.cursor(row_factory=class_row(_PendingMessage)) as cur:
+            messages = cur.execute(
                 "SELECT id,content,kind,source,payload,created_at FROM inbound_messages "
                 "WHERE agent_id=%s AND status='pending' AND kind IN "
                 "('chat','system_note','cancel','reminder','heartbeat') "
                 "ORDER BY id LIMIT %s",
                 (lease["agent_id"], limit),
-            )
-            messages = cur.fetchall()
+            ).fetchall()
         for message in messages:
             conn.execute(
                 "INSERT INTO agent_impersonation_messages(lease_id,inbound_id) VALUES(%s,%s) "
                 "ON CONFLICT DO NOTHING",
-                (lease_id, message["id"]),
+                (lease_id, message.id),
             )
-    return messages
+    return [
+        InboxMessage(
+            id=message.id,
+            content=message.content,
+            kind=message.kind,
+            source=message.source,
+            payload=message.payload,
+            created_at=message.created_at,
+        )
+        for message in messages
+    ]
 
 
 def ack(
@@ -574,7 +667,7 @@ def ack(
 def merge_plugin_delta(
     db: Database,
     lease_id: str,
-    delta: dict[str, Any],
+    delta: Mapping[str, object],
     *,
     expected_version: int,
     local_machine: str,

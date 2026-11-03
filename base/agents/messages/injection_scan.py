@@ -70,7 +70,10 @@ def triggers(content: str) -> list[str]:
     hits += [p for p in _IMPERATIVES if p in lowered]
     if any(z in content for z in _ZERO_WIDTH):
         hits.append("zero-width-char")
-    for body in _COMMENT_RE.findall(content):
+    for comment in _COMMENT_RE.finditer(content):
+        body = comment.group(1)
+        if not isinstance(body, str):
+            raise TypeError("a comment capture is text")
         low = body.lower()
         if any(k in low for k in _COMMENT_KEYWORDS):
             hits.append("hidden-comment-instruction")

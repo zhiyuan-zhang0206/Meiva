@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Collection
 from typing import NamedTuple
 
+from pydantic import BaseModel
+
 from base.agents.context import MeivaContext
 from base.api_contracts.memory_search import MemorySearchPurpose
 
@@ -38,6 +40,22 @@ class MemorySearchResult(NamedTuple):
 
 
 # meiva:note
+# One hit of the gateway's `/api/memory/search` answer, as the wire carries it.
+class _Hit(BaseModel):
+    path: str
+    description: str
+    tags: list[str]
+    score: float
+    chunk: str
+
+
+# meiva:note
+# The gateway's `/api/memory/search` answer.
+class _Answer(BaseModel):
+    results: list[_Hit]
+
+
+# meiva:note
 # An explicit timeout becomes the request's deadline_seconds and the HTTP timeout adds the margin. Without an explicit timeout the request omits deadline_seconds. attempts bounds transport attempts; the default is two.
 # meiva:link base/agents/context/gateway_client/docs/memory-search.meiva.okf.md
 def memory_search(
@@ -70,13 +88,14 @@ def memory_search(
         context=context,
     )
     transport.raise_from_response(resp)
+    answer = _Answer.model_validate(transport.json_object(resp))
     return [
         MemorySearchResult(
-            path=r["path"],
-            description=r["description"],
-            tags=tuple(r["tags"]),
-            score=float(r["score"]),
-            chunk=r["chunk"],
+            path=hit.path,
+            description=hit.description,
+            tags=tuple(hit.tags),
+            score=hit.score,
+            chunk=hit.chunk,
         )
-        for r in transport.json_object(resp)["results"]
+        for hit in answer.results
     ]

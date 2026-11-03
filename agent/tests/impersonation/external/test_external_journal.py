@@ -108,7 +108,9 @@ def test_delta_codec_preserves_sets_and_message_objects(state_cls: type[Any]) ->
     decoded = decode_plugin_delta(encode_plugin_delta(delta, state_cls), state_cls)
     assert decoded == delta
     assert isinstance(decoded["sample__seen"], set)
-    assert isinstance(decoded["messages"][1], RemoveMessage)
+    messages = decoded["messages"]
+    assert isinstance(messages, list)
+    assert isinstance(messages[1], RemoveMessage)
 
 
 def test_delta_codec_rejects_framework_state_injection(state_cls: type[Any]) -> None:

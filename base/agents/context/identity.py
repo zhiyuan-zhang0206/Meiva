@@ -10,7 +10,15 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Protocol
+
+from pydantic import BaseModel
+
+
+# meiva:note
+# The plugin-config half of a lease's config view: what `PluginConfigView` offers a reader.
+class PluginConfigReader(Protocol):
+    def config_for(self, plugin: str, /) -> BaseModel: ...
 
 
 @dataclass(frozen=True)
@@ -24,7 +32,7 @@ class ExternalLease:
 
     agent_id: int
     validate: Callable[[], int]
-    config: Callable[[], tuple[Mapping[str, Any], Any] | None]
+    config: Callable[[], tuple[Mapping[str, object], PluginConfigReader] | None]
 
 
 @dataclass(frozen=True)
@@ -47,18 +55,21 @@ class AgentIdentity:
     actor: str | None = None
     lease: ExternalLease | None = None
 
-    def describe(self) -> dict[str, Any]:
+    def describe(self) -> dict[str, object]:
         """The JSON form a request envelope carries; a lease is a live object and has none."""
         if self.lease is not None:
             raise ValueError("an identity borrowed through an external lease cannot be described")
         return {"agent_id": self.agent_id, "owns_loop": self.owns_loop, "actor": self.actor}
 
     @classmethod
-    def from_description(cls, description: Mapping[str, Any]) -> AgentIdentity:
+    def from_description(cls, description: Mapping[str, object]) -> AgentIdentity:
         agent_id = description["agent_id"]
+        owns_loop = description["owns_loop"]
         actor = description["actor"]
-        return cls(
-            agent_id=None if agent_id is None else int(agent_id),
-            owns_loop=bool(description["owns_loop"]),
-            actor=None if actor is None else str(actor),
-        )
+        if agent_id is not None and not isinstance(agent_id, int):
+            raise TypeError(f"identity description agent_id must be an int or None: {agent_id!r}")
+        if not isinstance(owns_loop, bool):
+            raise TypeError(f"identity description owns_loop must be a bool: {owns_loop!r}")
+        if actor is not None and not isinstance(actor, str):
+            raise TypeError(f"identity description actor must be a str or None: {actor!r}")
+        return cls(agent_id=agent_id, owns_loop=owns_loop, actor=actor)

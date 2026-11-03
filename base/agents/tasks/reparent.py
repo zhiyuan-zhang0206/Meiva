@@ -46,6 +46,8 @@ def resolve_reparent(cur: psycopg.Cursor, task_id: int, parent_id: int | None) -
         row = cur.fetchone()
         if row is None:
             raise ValueError(f"parent task {effective} does not exist")
+        if not isinstance(row[1], str):
+            raise TypeError(f"agent_tasks.status of task {effective} is not text: {row[1]!r}")
         if is_closed(row[1]):
             raise ValueError(
                 f"task {task_id} cannot be moved under a closed parent "

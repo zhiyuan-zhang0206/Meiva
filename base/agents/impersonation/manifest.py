@@ -8,11 +8,10 @@ completeness predicate live in the database (`event_log`).
 
 from __future__ import annotations
 
-from collections.abc import Callable, Generator, Mapping
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from threading import Condition
-from typing import Any
 
 import psycopg
 from psycopg.rows import dict_row
@@ -24,10 +23,16 @@ from base.agents.impersonation.event_log import (
     locked_receipt_state,
     refresh_completed_export,
 )
-from base.agents.impersonation.status import LOG_PROTOCOL_VERSION, is_log_native
+from base.agents.impersonation.status import (
+    LOG_PROTOCOL_VERSION,
+    LeaseRecord,
+    is_log_native,
+    parse_lease,
+)
 from base.agents.messages.delivery.retry import retryable_database_error
 from base.api_contracts.agent_contract import SdkCaptureAdmission
 from base.db import Database
+from base.db.rows import query_all
 from base.log import logger
 from base.telemetry import Event
 
@@ -365,7 +370,7 @@ def record_central_event(conn: psycopg.Connection, event: Event) -> Event:
         return event
     if len(leases) != 1:
         raise RuntimeError("Central event admission found more than one active lease")
-    lease = leases[0]
+    lease = parse_lease(leases[0])
     if lease["event_admission_closed_at"] is not None:
         return event
     tagged = replace(
@@ -409,16 +414,25 @@ class EventSourceNotSealedError(RuntimeError):
     """A participant is open or failed, so the lease cannot be released."""
 
 
-def require_participants_sealed(conn: psycopg.Connection, lease: Mapping[str, Any]) -> None:
+# meiva:note
+# One controller receipt of a lease.
+@dataclass(frozen=True)
+class _ParticipantKey:
+    source_key: str
+
+
+def require_participants_sealed(conn: psycopg.Connection, lease: LeaseRecord) -> None:
     """Refuse while any controller receipt is open or failed (release precondition)."""
     if not is_log_native(lease):
         return
-    lease_id = lease["id"]
-    source_keys = conn.execute(
+    lease_id = str(lease["id"])
+    participants = query_all(
+        conn,
+        _ParticipantKey,
         "SELECT source_key FROM agent_impersonation_event_participants WHERE lease_id=%s ORDER BY source_key",
         (lease_id,),
-    ).fetchall()
-    states = {locked_receipt_state(conn, lease_id, key) for (key,) in source_keys}
+    )
+    states = {locked_receipt_state(conn, lease_id, key.source_key) for key in participants}
     if "failed" in states:
         raise EventSourceNotSealedError("Impersonation event capture failed")
     if "open" in states:

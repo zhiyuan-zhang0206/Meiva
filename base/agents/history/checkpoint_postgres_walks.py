@@ -7,7 +7,7 @@ from __future__ import annotations
 from collections.abc import Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass
 from inspect import signature
-from typing import Any, LiteralString
+from typing import LiteralString
 
 from langchain_core.messages import RemoveMessage, convert_to_messages
 from langchain_core.runnables import RunnableConfig
@@ -21,7 +21,10 @@ from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from psycopg import AsyncConnection, AsyncPipeline, Connection, Pipeline
 from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
+from pydantic import TypeAdapter
 
+from base.agents.messages.identity import held_value, message_group
+from base.host.boundary.untyped import object_mapping, object_of
 from base.log import logger
 
 # task #3696 exception inventory: transport read guards, not conversation limits.
@@ -79,8 +82,26 @@ FROM checkpoint_blobs
 WHERE thread_id = %s AND checkpoint_ns = %s AND channel = 'messages' AND version = %s
 """
 
-_Query = tuple[LiteralString, Sequence[Any]]
-_Rows = list[dict[str, Any]]
+_Query = tuple[LiteralString, Sequence[object]]
+_Rows = list[DictRow]
+
+
+# meiva:note
+# One message write of the chain as `_WRITE_KEYS_SQL` lists it: where it sits in the chain
+# (`depth`), its key in `checkpoint_writes` and the size of its blob.
+@dataclass(frozen=True, slots=True)
+class WriteKey:
+    depth: int
+    checkpoint_id: str
+    task_id: str
+    task_path: str
+    idx: int
+    size: int
+
+
+_WRITE_KEYS = TypeAdapter(list[WriteKey])
+_STAGE2_ROWS = TypeAdapter(list[_DeltaStage2Row])
+_HISTORIES = TypeAdapter(dict[str, DeltaChannelHistory])
 
 
 # meiva:note
@@ -210,7 +231,10 @@ def installed_private_surface() -> PrivateSurface:
 # One method as the class holds it: `vars` keeps a staticmethod descriptor, which `signature`
 # unwraps to the parameters the class presents.
 def _entry_parameters(base_saver: type, name: str) -> tuple[str, ...]:
-    return _parameters(vars(base_saver)[name])
+    entry = object_of(vars(base_saver).__getitem__, name)
+    if not callable(entry):
+        raise TypeError(f"{base_saver.__name__}.{name} is not callable")
+    return _parameters(entry)
 
 
 def _parameters(target: Callable[..., object]) -> tuple[str, ...]:
@@ -221,79 +245,72 @@ def _without_self(parameters: tuple[str, ...]) -> tuple[str, ...]:
     return parameters[1:] if parameters[:1] == ("self",) else parameters
 
 
-def body_key_batches(keys: _Rows) -> Generator[_Rows]:
-    batch: _Rows = []
+def body_key_batches(keys: Sequence[WriteKey]) -> Generator[list[WriteKey]]:
+    batch: list[WriteKey] = []
     size = 0
     for key in keys:
-        if batch and (size + key["size"] > BODY_BATCH_BYTES or len(batch) >= _BODY_BATCH_ROWS):
+        if batch and (size + key.size > BODY_BATCH_BYTES or len(batch) >= _BODY_BATCH_ROWS):
             yield batch
             batch, size = [], 0
         batch.append(key)
-        size += key["size"]
+        size += key.size
     if batch:
         yield batch
 
 
-def _replay_order(keys: _Rows) -> _Rows:
+def _replay_order(keys: Sequence[WriteKey]) -> list[WriteKey]:
     # meiva:note
     # The reset cut follows the replay order — chain position first, then writes_sort_key inside one checkpoint — so it never depends on database collation.
     ordered = sorted(
         keys,
-        key=lambda key: writes_sort_key(key["task_path"], key["task_id"], key["idx"]),
+        key=lambda key: writes_sort_key(key.task_path, key.task_id, key.idx),
         reverse=True,
     )
-    ordered.sort(key=lambda key: key["depth"])
+    ordered.sort(key=lambda key: key.depth)
     return ordered
 
 
 def _resets_messages(value: object) -> bool:
     if _get_overwrite(value)[0]:
         return True
-    group: list[Any] = [*value] if isinstance(value, list) else [value]
-    messages = convert_to_messages(group)
+    messages = convert_to_messages(message_group(value))
     return any(isinstance(m, RemoveMessage) and m.id == REMOVE_ALL_MESSAGES for m in messages)
 
 
-def _stage2_row(row: dict[str, Any]) -> _DeltaStage2Row:
-    return _DeltaStage2Row(
-        _kind=row["_kind"],
-        checkpoint_id=row["checkpoint_id"],
-        channel=row["channel"],
-        type=row["type"],
-        blob=row["blob"],
-        task_id=row["task_id"],
-        task_path=row["task_path"],
-        idx=row["idx"],
-        version=row["version"],
-    )
-
-
 def _fetch_suffix(
-    saver: BasePostgresSaver, keys: _Rows, thread: str, namespace: str, target: str
-) -> Generator[_Query, _Rows, tuple[_Rows, bool]]:
-    rows: _Rows = []
+    saver: BasePostgresSaver, keys: Sequence[WriteKey], thread: str, namespace: str, target: str
+) -> Generator[_Query, _Rows, tuple[list[_DeltaStage2Row], bool]]:
+    rows: list[_DeltaStage2Row] = []
     body_bytes = body_rows = body_batches = 0
     reset = False
     decode = saver.serde.loads_typed
     for batch in body_key_batches(keys):
-        fetched = yield (
-            _WRITE_BODIES_SQL,
+        fetched = _STAGE2_ROWS.validate_python(
             (
-                [k["checkpoint_id"] for k in batch],
-                [k["task_id"] for k in batch],
-                [k["idx"] for k in batch],
-                thread,
-                namespace,
-            ),
+                yield (
+                    _WRITE_BODIES_SQL,
+                    (
+                        [k.checkpoint_id for k in batch],
+                        [k.task_id for k in batch],
+                        [k.idx for k in batch],
+                        thread,
+                        namespace,
+                    ),
+                )
+            )
         )
         if len(fetched) != len(batch):
             raise RuntimeError("message history changed while reading its write bodies")
         body_batches += 1
         body_rows += len(fetched)
-        body_bytes += sum(len(row["blob"]) for row in fetched)
+        body_bytes += sum(len(row.get("blob") or b"") for row in fetched)
         for row in fetched:
+            blob = row.get("blob")
+            kind = row.get("type")
+            if blob is None or kind is None:
+                raise RuntimeError("a message write has no body")
             rows.append(row)
-            if _resets_messages(decode((row["type"], row["blob"]))):
+            if _resets_messages(object_of(decode, (kind, blob))):
                 reset = True
                 break
         if reset:
@@ -314,21 +331,34 @@ def _fetch_suffix(
     return rows, reset
 
 
+# meiva:note
+# One entry of a config's `configurable` mapping that must be text.
+def _identity_text(identity: Mapping[str, object], key: str, default: str | None = None) -> str:
+    value = identity[key] if default is None else identity.get(key, default)
+    if not isinstance(value, str):
+        raise TypeError(f"checkpoint config {key!r} must be text, got {type(value).__name__}")
+    return value
+
+
 def _history_queries(
-    saver: BasePostgresSaver, config: Mapping[str, Any]
+    saver: BasePostgresSaver, config: RunnableConfig
 ) -> Generator[_Query, _Rows, dict[str, DeltaChannelHistory]]:
     """Share exact query, ordering and reset semantics across both saver APIs."""
-    identity = config["configurable"]
-    thread, namespace = identity["thread_id"], identity.get("checkpoint_ns", "")
-    target = identity["checkpoint_id"]
+    configurable = config.get("configurable")
+    if configurable is None:
+        raise KeyError("configurable")
+    identity = object_mapping(configurable)
+    thread = _identity_text(identity, "thread_id")
+    namespace = _identity_text(identity, "checkpoint_ns", "")
+    target = _identity_text(identity, "checkpoint_id")
     ancestors = yield _ANCESTORS_SQL, (thread, namespace, target, thread, namespace)
     parents: dict[str, str | None] = {}
     versions: list[dict[str, str | None]] = [{}]
     blobs: list[dict[str, bool]] = [{}]
-    inline: list[dict[str, Any]] = [{}]
+    inline: list[dict[str, object]] = [{}]
     chains: dict[str, list[str]] = {"messages": []}
     seeds: dict[str, str | None] = {"messages": None}
-    seed_inline: dict[str, Any] = {}
+    seed_inline: dict[str, object] = {}
     saver._ingest_stage1_page(ancestors, ["messages"], parents, versions, blobs, inline)
     saver._try_advance_walks(
         target,
@@ -344,17 +374,18 @@ def _history_queries(
         set(),
     )
     chain = chains["messages"]
-    keys = yield _WRITE_KEYS_SQL, (chain, thread, namespace)
-    keys = _replay_order(keys)
+    keys = _replay_order(
+        _WRITE_KEYS.validate_python((yield _WRITE_KEYS_SQL, (chain, thread, namespace)))
+    )
     rows, reset = yield from _fetch_suffix(saver, keys, thread, namespace, target)
     # A root can legitimately start without a seed. A missing ancestor cannot:
     # its omitted writes could change every value. A real reset cuts that prefix.
+    parent = object_mapping(ancestors[-1])["parent_checkpoint_id"] if ancestors else None
     if (
         not reset
         and seeds["messages"] is None
         and "messages" not in seed_inline
-        and ancestors
-        and (parent := ancestors[-1]["parent_checkpoint_id"]) is not None
+        and parent is not None
         and parent not in parents
     ):
         raise RuntimeError(f"delta messages ancestry is incomplete at checkpoint {parent}")
@@ -363,13 +394,13 @@ def _history_queries(
         seed_inline.clear()
     if seeds["messages"] is not None and "messages" not in seed_inline:
         seed_rows = yield _SEED_SQL, (thread, namespace, seeds["messages"])
-        rows.extend(seed_rows)
+        rows.extend(_STAGE2_ROWS.validate_python(seed_rows))
     return saver._build_delta_channels_writes_history(
         channels=["messages"],
         chain_by_ch=chains,
         seed_ver_by_ch=seeds,
         seed_inline_by_ch=seed_inline,
-        stage2_rows=[_stage2_row(row) for row in rows],
+        stage2_rows=rows,
     )
 
 
@@ -401,7 +432,7 @@ class HistoryPostgresSaver(PostgresSaver):
                 sql, params = queries.send(rows) if started else next(queries)
                 started = True
             except StopIteration as result:
-                return result.value
+                return _HISTORIES.validate_python(held_value(result))
             with self._cursor() as cursor:
                 cursor.execute(sql, params, binary=True)
                 rows = cursor.fetchall()
@@ -435,7 +466,7 @@ class HistoryAsyncPostgresSaver(AsyncPostgresSaver):
                 sql, params = queries.send(rows) if started else next(queries)
                 started = True
             except StopIteration as result:
-                return result.value
+                return _HISTORIES.validate_python(held_value(result))
             async with self._cursor() as cursor:
                 await cursor.execute(sql, params, binary=True)
                 rows = await cursor.fetchall()

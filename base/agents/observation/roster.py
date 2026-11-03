@@ -7,12 +7,13 @@ History uses descending-ID keyset pages; no implicit list-all operation exists.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 
 import psycopg
 from psycopg import sql
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
 from base.agents.impersonation.status import OpenImpersonationStatus
 from base.agents.observation.evidence import (
@@ -21,9 +22,10 @@ from base.agents.observation.evidence import (
     availability,
     observation,
 )
-from base.agents.observation.snapshot import agent_supports_vision
+from base.agents.observation.snapshot import agent_supports_vision, db_now
 from base.agents.tasks.priority import Priority
 from base.api_contracts.agent_contract import AgentStatus, Harness, LivenessState
+from base.db.rows import query_all, query_one
 from base.lm.catalog import ModelCatalog
 
 AgentDirectoryScope = Literal["live", "terminated", "all"]
@@ -145,81 +147,99 @@ LIVE_SQL = sql.SQL("""
         SELECT {columns} {source} ORDER BY a.id
     )
     SELECT
-        COALESCE((SELECT json_agg(cards) FROM cards), '[]'::json),
+        COALESCE((SELECT json_agg(cards) FROM cards), '[]'::json) AS cards,
         COALESCE((SELECT json_agg(links) FROM (
             SELECT id AS agent_id, spawner, fork_source_agent_id FROM lineage
             WHERE id NOT IN (SELECT id FROM selected) ORDER BY id
-        ) links), '[]'::json)
+        ) links), '[]'::json) AS links
 """).format(columns=sql.SQL(_CARD_COLUMNS), source=sql.SQL(_CARD_FROM))
 
 
 # meiva:note
-# Read the current UTC timestamp from the database session.
-def _db_now(cur: psycopg.Cursor[Any]) -> datetime:
-    cur.execute("SELECT clock_timestamp()")
-    row = cur.fetchone()
-    if row is None or not isinstance(row[0], datetime):
-        raise RuntimeError("clock_timestamp() did not return a timestamp")
-    return row[0]
+# The columns of a card row that only feed the derived card fields (supports_vision,
+# observation, availability) and are not card fields themselves. The SQL emits them as JSON, so
+# the timestamps arrive as ISO strings and are parsed here.
+class _CardFacts(BaseModel):
+    status: str
+    config_overlay: object
+    birth_config: object
+    machine_probe_at: datetime | None
+    agent_host_online: bool | None
+    last_admission_at: datetime | None
+    last_launch_failure_reason: str | None
+    last_launch_failure_at: datetime | None
+
+
+_FACT_COLUMNS = frozenset(_CardFacts.model_fields) - {"status"}
+_CARD_JSON = TypeAdapter(dict[str, object])
+_CARD_LIST_JSON = TypeAdapter(list[dict[str, object]])
+_LINEAGE_LIST_JSON = TypeAdapter(list[AgentLineage])
+
+
+# meiva:note
+# The two aggregates of `LIVE_SQL`: the current cards and the ancestor links, both json.
+@dataclass(frozen=True)
+class _LiveRow:
+    cards: object
+    links: object
+
+
+# meiva:note
+# One directory page row: a single card as json.
+@dataclass(frozen=True)
+class _CardJsonRow:
+    card: object
 
 
 def _card(
-    data: dict[str, Any],
+    data: dict[str, object],
     *,
     catalog: ModelCatalog | None,
     default_model: str,
     now: datetime,
 ) -> AgentCard:
-    data["supports_vision"] = agent_supports_vision(
-        data.pop("config_overlay"),
-        data.pop("birth_config"),
+    facts = _CardFacts.model_validate(data)
+    card_data = {key: value for key, value in data.items() if key not in _FACT_COLUMNS}
+    card_data["supports_vision"] = agent_supports_vision(
+        facts.config_overlay,
+        facts.birth_config,
         catalog=catalog,
         default_model=default_model,
     )
-    probe = data.pop("machine_probe_at")
-    host_online = data.pop("agent_host_online")
-    admission_at = data.pop("last_admission_at")
-    launch_failure_reason = data.pop("last_launch_failure_reason")
-    launch_failure_at = data.pop("last_launch_failure_at")
-    probe_at = datetime.fromisoformat(probe) if probe else None
-    data["observation"] = observation(probe_at)
-    data["availability"] = availability(
-        status=data["status"],
-        host_online=host_online,
-        probe_at=probe_at,
-        admission_at=datetime.fromisoformat(admission_at) if admission_at else None,
+    card_data["observation"] = observation(facts.machine_probe_at)
+    card_data["availability"] = availability(
+        status=facts.status,
+        host_online=facts.agent_host_online,
+        probe_at=facts.machine_probe_at,
+        admission_at=facts.last_admission_at,
         now=now,
-        launch_failure=(
-            launch_failure_reason,
-            datetime.fromisoformat(launch_failure_at) if launch_failure_at else None,
-        ),
+        launch_failure=(facts.last_launch_failure_reason, facts.last_launch_failure_at),
     )
-    return AgentCard.model_validate(data)
+    return AgentCard.model_validate(card_data)
 
 
 def select_roster(
-    conn: psycopg.Connection[Any],
+    conn: psycopg.Connection,
     *,
     catalog: ModelCatalog | None,
     default_model: str,
 ) -> AgentRoster:
     """Read live cards and their ancestor closure from the same database snapshot."""
-    with conn.cursor() as cur:
-        now = _db_now(cur)
-        cur.execute(LIVE_SQL)
-        row = cur.fetchone()
+    now = db_now(conn)
+    row = query_one(conn, _LiveRow, LIVE_SQL)
     if row is None:
         raise RuntimeError("roster aggregate did not return a row")
     return AgentRoster(
         agents=[
-            _card(data, catalog=catalog, default_model=default_model, now=now) for data in row[0]
+            _card(data, catalog=catalog, default_model=default_model, now=now)
+            for data in _CARD_LIST_JSON.validate_python(row.cards)
         ],
-        ancestors=[AgentLineage.model_validate(data) for data in row[1]],
+        ancestors=_LINEAGE_LIST_JSON.validate_python(row.links),
     )
 
 
 def list_directory(
-    conn: psycopg.Connection[Any],
+    conn: psycopg.Connection,
     *,
     catalog: ModelCatalog | None,
     scope: AgentDirectoryScope = "live",
@@ -237,7 +257,7 @@ def list_directory(
         "all": sql.SQL("true"),
     }
     conditions = [predicates[scope]]
-    params: list[Any] = []
+    params: list[int | str | None] = []
     if before_id is not None:
         conditions.append(sql.SQL("a.id < %s"))
         params.append(before_id)
@@ -263,7 +283,7 @@ def list_directory(
             SELECT a.id FROM agents_meta a JOIN agents t ON t.id = a.id
             WHERE {where} ORDER BY a.id DESC LIMIT %s
         )
-        SELECT row_to_json(cards) FROM (
+        SELECT row_to_json(cards) AS card FROM (
             SELECT {columns} {source} ORDER BY a.id DESC
         ) cards
     """).format(
@@ -271,12 +291,16 @@ def list_directory(
         columns=sql.SQL(_CARD_COLUMNS),
         source=sql.SQL(_CARD_FROM),
     )
-    with conn.cursor() as cur:
-        now = _db_now(cur)
-        cur.execute(statement, params)
-        rows = cur.fetchall()
+    now = db_now(conn)
+    rows = query_all(conn, _CardJsonRow, statement, params)
     agents = [
-        _card(row[0], catalog=catalog, default_model=default_model, now=now) for row in rows[:limit]
+        _card(
+            _CARD_JSON.validate_python(row.card),
+            catalog=catalog,
+            default_model=default_model,
+            now=now,
+        )
+        for row in rows[:limit]
     ]
     return AgentDirectoryPage(
         agents=agents,

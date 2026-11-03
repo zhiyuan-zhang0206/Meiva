@@ -2,15 +2,16 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
-from typing import Any
 
-from psycopg.rows import dict_row
+from psycopg.rows import class_row, dict_row
 from psycopg.types.json import Jsonb
 
 from base.agents.impersonation._store import (
     OPEN,
     ImpersonationError,
+    RelayInboxMessage,
     authenticate_relay,
     dismiss_reminders,
     expire,
@@ -24,6 +25,7 @@ from base.agents.impersonation.status import (
     RELAY_FAILURE_STAMP_SECONDS,
     RELAY_HEARTBEAT_STALE_SECONDS,
     ImpersonationStatus,
+    PublicLease,
     parse_lease,
 )
 from base.agents.impersonation.wake import wake_agent
@@ -34,6 +36,20 @@ from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
+# meiva:note
+# One pending inbox row the relay reads, with its delivery state on this lease.
+@dataclass(frozen=True)
+class _RelayMessage:
+    id: int
+    content: str
+    kind: str
+    source: str
+    payload: object
+    created_at: datetime
+    delivery_attempts: int
+    delivery_due: bool
+
+
 def relay_get(
     db: DatabaseLike,
     bus: EventBus,
@@ -41,7 +57,7 @@ def relay_get(
     relay_token: str,
     *,
     local_machine: str,
-) -> dict[str, Any]:
+) -> PublicLease:
     """Lease reads for the bound relay process, under its scoped credential."""
 
     with db.write_transaction() as conn:
@@ -65,7 +81,7 @@ def relay_inbox(
     *,
     limit: int = 100,
     local_machine: str,
-) -> list[dict[str, Any]]:
+) -> list[RelayInboxMessage]:
     """Read the relay's bounded inbox page and durable attempt state."""
     if not 1 <= limit <= 1000:
         raise ValueError("Inbox limit must be from 1 through 1000")
@@ -77,8 +93,8 @@ def relay_inbox(
             relay_token,
             local_machine=local_machine,
         )
-        with conn.cursor(row_factory=dict_row) as cur:
-            cur.execute(
+        with conn.cursor(row_factory=class_row(_RelayMessage)) as cur:
+            messages = cur.execute(
                 "SELECT i.id,i.content,i.kind,i.source,i.payload,i.created_at,"
                 "COALESCE(m.delivery_attempts,0) AS delivery_attempts,"
                 "(m.last_delivery_at IS NULL OR m.last_delivery_at <= "
@@ -89,15 +105,26 @@ def relay_inbox(
                 "('chat','system_note','cancel','reminder','heartbeat') "
                 "ORDER BY i.id LIMIT %s",
                 (lease["ack_window_seconds"], lease_id, lease["agent_id"], limit),
-            )
-            messages = cur.fetchall()
+            ).fetchall()
         for message in messages:
             conn.execute(
                 "INSERT INTO agent_impersonation_messages(lease_id,inbound_id) VALUES(%s,%s) "
                 "ON CONFLICT DO NOTHING",
-                (lease_id, message["id"]),
+                (lease_id, message.id),
             )
-    return messages
+    return [
+        RelayInboxMessage(
+            id=message.id,
+            content=message.content,
+            kind=message.kind,
+            source=message.source,
+            payload=message.payload,
+            created_at=message.created_at,
+            delivery_attempts=message.delivery_attempts,
+            delivery_due=message.delivery_due,
+        )
+        for message in messages
+    ]
 
 
 def relay_heartbeat(
@@ -140,7 +167,7 @@ class RelayProvision:
     # nothing and waits for that carrier instead.
 
     action: RelayAction
-    lease: Mapping[str, Any]
+    lease: PublicLease
 
 
 def provision_relay(
@@ -226,7 +253,7 @@ def record_degradation(
 
 def fail_acceptance(
     db: DatabaseLike, bus: EventBus, lease_id: str, incarnation: RuntimeIncarnation, reason: str
-) -> dict[str, Any]:
+) -> PublicLease:
     """Relay establishment failed: the takeover does not stand.
 
     Terminal 'rejected' carries the reason; a system note tells the native
@@ -311,7 +338,7 @@ def aborted_detail(reason: object) -> str | None:
 
 def abort_lease(
     db: DatabaseLike, bus: EventBus, lease_id: str, incarnation: RuntimeIncarnation, detail: str
-) -> dict[str, Any] | None:
+) -> PublicLease | None:
     # meiva:note
     # Stop a takeover after confirmed executor death, like a TTL expiry.
     #
@@ -357,7 +384,7 @@ def abort_lease(
 
 def stamp_relay_failure(
     db: DatabaseLike,
-    session: dict[str, Any],
+    session: Mapping[str, object],
     agent_id: int,
     *,
     incarnation: RuntimeIncarnation | None,
@@ -365,7 +392,7 @@ def stamp_relay_failure(
     if incarnation is None:
         return
     try:
-        stamped = record_relay_failure(db, session["id"], incarnation)
+        stamped = record_relay_failure(db, str(session["id"]), incarnation)
     except (ImpersonationError, RuntimeError):
         return
     if stamped:

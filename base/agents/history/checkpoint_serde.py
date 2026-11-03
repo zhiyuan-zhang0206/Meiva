@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Literal
 
 import ormsgpack
 from langgraph.checkpoint.serde._msgpack import SAFE_MSGPACK_TYPES
@@ -31,6 +31,8 @@ from langgraph.checkpoint.serde.jsonplus import (
     EXT_PYDANTIC_V1,
     EXT_PYDANTIC_V2,
 )
+
+from base.host.boundary.untyped import object_of
 
 # (module, name) pairs. The nested sub-states of `agent.state_channels` are the
 # only framework channel values serialized as pydantic-v2 ext objects today.
@@ -163,7 +165,7 @@ def _observe_ext(found: set[tuple[str, str]], code: int, data: bytes) -> None:
         return None
 
     if code in _ENVELOPE_EXT_CODES:
-        payload: Any = ormsgpack.unpackb(data, ext_hook=hook, option=_DECODE_OPTIONS)
+        payload = object_of(ormsgpack.unpackb, data, ext_hook=hook, option=_DECODE_OPTIONS)
         name = _envelope_type_name(payload)
         if name is not None:
             found.add(name)

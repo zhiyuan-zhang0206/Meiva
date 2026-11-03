@@ -1,15 +1,19 @@
 """Lease expiration without deleting permanent history on the existing TTL reaper."""
 
 import shlex
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal
+from uuid import UUID
 
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
-from base.agents.impersonation._store import expire, lock_lease
+from base.agents.impersonation._store import LeaseIdRow, expire, lock_lease
 from base.agents.impersonation.status import ImpersonationStatus, parse_lease
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.db import Database
+from base.db.rows import query_all
 from base.db.transaction import write_transaction
 from base.events.live.announce import (
     publish_agent_updated_sync,
@@ -25,6 +29,16 @@ from base.events.live.bus import EventBus
 _PASS_BATCH = 200
 
 
+# meiva:note
+# An active lease whose expiry deadline is close enough to deserve a renewal reminder.
+@dataclass(frozen=True)
+class _ReminderCandidate:
+    id: UUID
+    agent_id: int
+    expires_at: datetime
+    session_id: int
+
+
 def reap_impersonations(
     pool: ConnectionPool, db: Database, bus: EventBus, *, limit: int = _PASS_BATCH
 ) -> int:
@@ -33,14 +47,16 @@ def reap_impersonations(
     Session records, lifecycle events and messages are retained permanently.
     """
     with write_transaction(pool) as conn:
-        candidates = conn.execute(
+        candidates = query_all(
+            conn,
+            LeaseIdRow,
             "SELECT id FROM agent_impersonations WHERE status IN ('requested','accepted','active') "
             "AND expires_at<=clock_timestamp() ORDER BY agent_id LIMIT %s",
             (limit,),
-        ).fetchall()
+        )
         expired_agents: list[int] = []
-        for (lease_id,) in candidates:
-            lease = lock_lease(conn, str(lease_id))
+        for candidate in candidates:
+            lease = lock_lease(conn, str(candidate.id))
             if expire(conn, lease)["status"] == ImpersonationStatus.EXPIRED:
                 expired_agents.append(lease["agent_id"])
     for agent_id in expired_agents:
@@ -170,7 +186,9 @@ def remind_expiring_impersonations(
     """
     reminded_agents: list[int] = []
     with write_transaction(pool) as conn:
-        candidates = conn.execute(
+        candidates = query_all(
+            conn,
+            _ReminderCandidate,
             "SELECT l.id, l.agent_id, l.expires_at, l.session_id "
             "FROM agent_impersonations l "
             "WHERE l.status='active' "
@@ -183,8 +201,10 @@ def remind_expiring_impersonations(
             "AND (r.payload->>'expires_at')::timestamptz=l.expires_at) "
             "ORDER BY l.agent_id LIMIT %s",
             (REMINDER_TTL_FRACTION, window_seconds, _PASS_BATCH),
-        ).fetchall()
-        for lease_id, agent_id, expires_at, session_id in candidates:
+        )
+        for candidate in candidates:
+            lease_id, agent_id = candidate.id, candidate.agent_id
+            expires_at, session_id = candidate.expires_at, candidate.session_id
             lease = lock_lease(conn, str(lease_id))
             if lease["status"] != ImpersonationStatus.ACTIVE or lease["expires_at"] != expires_at:
                 continue

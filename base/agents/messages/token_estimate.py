@@ -5,10 +5,11 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from typing import Any, TypeGuard
 
 from langchain_core.messages import AIMessage, BaseMessage
 
+from base.host.boundary.json_values import is_object_list
+from base.lm.content import message_content
 from base.lm.reasoning import content_blocks
 
 CJK_TOKENS_PER_CHAR = 0.95
@@ -20,10 +21,6 @@ NON_AI_MESSAGE_OVERHEAD_TOKENS = 15.0
 AI_MESSAGE_OVERHEAD_TOKENS = 2.0
 
 _CJK = re.compile(r"[\u3000-\u9fff\uac00-\ud7af\uff00-\uffef]")
-
-
-def _is_object_list(value: object) -> TypeGuard[list[Any]]:
-    return isinstance(value, list)
 
 
 def estimate_text_tokens(text: str) -> float:
@@ -43,7 +40,7 @@ def estimate_message_tokens(msg: BaseMessage) -> float:
 def content_text(content: object) -> str:
     if isinstance(content, str):
         return content
-    if _is_object_list(content):
+    if is_object_list(content):
         parts: list[str] = []
         for b in content_blocks(content):
             if isinstance(b, dict):
@@ -59,10 +56,10 @@ def content_text(content: object) -> str:
 
 def ai_message_texts(msg: AIMessage) -> dict[str, str]:
     out = {"reasoning": "", "output": "", "tool_call": ""}
-    content: Any = msg.content
+    content = message_content(msg)
     if isinstance(content, str):
         out["output"] += content
-    elif _is_object_list(content):
+    elif isinstance(content, list):
         for b in content_blocks(content):
             if not isinstance(b, dict):
                 continue

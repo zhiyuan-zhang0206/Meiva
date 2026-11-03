@@ -27,6 +27,7 @@ from base.agents import impersonation as leases
 from base.agents.context import MeivaContext
 from base.agents.history.checkpoint_postgres_walks import HistoryAsyncPostgresSaver
 from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_reconstruction
+from base.agents.impersonation.status import PublicLease
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.api_contracts.caller_identity import CallerIdentity
@@ -98,7 +99,7 @@ class Cluster:
         provider: str = "codex",
         phase: str = "accepted",
         codex_remote: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> PublicLease:
         if phase not in LEASE_PHASES:
             raise ValueError(f"unknown lease phase {phase!r}")
         session = leases.request(
@@ -147,7 +148,7 @@ class Cluster:
             self.db_conn.commit()
         return self.get(session["id"])
 
-    def get(self, lease_id: str) -> dict[str, Any]:
+    def get(self, lease_id: str) -> PublicLease:
         return leases.get(self.database, self.event_bus, lease_id, local_machine=self.local_machine)
 
     def age_relay(self, lease_id: str, *, seconds: float) -> None:
@@ -159,7 +160,7 @@ class Cluster:
         )
         self.db_conn.commit()
 
-    def status(self, owner: RuntimeIncarnation) -> dict[str, Any] | None:
+    def status(self, owner: RuntimeIncarnation) -> PublicLease | None:
         return leases.native_status(self.database, self.event_bus, owner.agent_id, owner)
 
     def heartbeat(self, lease_id: str, *, seconds_ago: float | None) -> None:

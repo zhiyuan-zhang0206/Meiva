@@ -113,11 +113,13 @@ def _seed(
         )
     if stage is ImpersonationStatus.ACTIVE:
         leases.activate(database, event_bus, lease["id"], owner)
-    token = lease["relay_token"]
-    lease = leases.relay_get(
-        database, event_bus, lease["id"], token, local_machine=machine.name()
-    ) | {"relay_token": token}
-    assert lease["status"] == stage
+    token = lease.get("relay_token")
+    assert token is not None
+    controller: dict[str, Any] = {
+        **leases.relay_get(database, event_bus, lease["id"], token, local_machine=machine.name()),
+        "relay_token": token,
+    }
+    assert controller["status"] == stage
     message_id = insert_inbound_message(
         db_conn,
         agent_id,
@@ -129,8 +131,8 @@ def _seed(
     )
     db_conn.commit()
     if stage is ImpersonationStatus.ACTIVE:
-        leases.relay_inbox(database, lease["id"], token, local_machine=machine.name())
-    return lease, owner, message_id
+        leases.relay_inbox(database, controller["id"], token, local_machine=machine.name())
+    return controller, owner, message_id
 
 
 @pytest.fixture

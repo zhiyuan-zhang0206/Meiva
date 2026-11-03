@@ -48,6 +48,7 @@ from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.loading import StateGate
+from base.telemetry.delivery.pipeline import EventPipeline
 from meiva.mcps import McpClients
 from meiva.sdk_surface import meiva_module, process_context
 from meiva.sdk_surface.process_context import ContextOutsideProcessError
@@ -169,7 +170,7 @@ def process_clients(
     database: DatabaseFactory,
     gateway_url: str | Callable[[], str],
 ) -> ClientSet:
-    def pipeline() -> object:
+    def pipeline() -> EventPipeline:
         from base.paths.home import resolve_meiva_home
         from base.telemetry import build_pipeline
 

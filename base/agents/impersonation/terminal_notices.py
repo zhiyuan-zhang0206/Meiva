@@ -5,13 +5,16 @@ acceptance is the only success this transport proves. Nothing is recorded and
 nothing retries: a notice that is not accepted is reported by the caller and lost.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+
+from psycopg.rows import class_row
 
 from base.agents.impersonation import host_transport
 from base.agents.impersonation.host_transport import AntigravityServer
 from base.db.protocols import DatabaseLike
+from base.host.boundary.json_values import is_object_dict
 
 # meiva:note
 # The failure reason names the record path it looked for, so the event field must
@@ -19,7 +22,7 @@ from base.db.protocols import DatabaseLike
 _REASON_MAX_CHARS = 400
 
 
-def notice_text(snapshot: dict[str, Any]) -> str:
+def notice_text(snapshot: Mapping[str, object]) -> str:
     """Describe exactly the ended historical lease, never a replacement's authority."""
     native = (
         "The agent was terminated; no active native runtime is implied. "
@@ -34,6 +37,21 @@ def notice_text(snapshot: dict[str, Any]) -> str:
         "the named lease and does not end or cancel any newer takeover or its work. "
         f"Notice ID: impersonation-ended:{snapshot['lease_id']}."
     )
+
+
+# meiva:note
+# The answer of the snapshot read: the jsonb the lease's end trigger wrote, still to be checked.
+@dataclass(frozen=True)
+class _SnapshotRow:
+    terminal_notice_snapshot: object
+
+
+# meiva:note
+# A snapshot field that names a destination: text, or NULL when the lease recorded none.
+def _text_or_none(value: object) -> str | None:
+    if value is not None and not isinstance(value, str):
+        raise TypeError("A terminal notice destination field must be text or null")
+    return value
 
 
 # meiva:note
@@ -62,15 +80,18 @@ def send_ended_notice(
     destination (controller-session transports print their own notices), else a
     short failure reason. The submission has its own five-second deadline.
     """
-    with db.connect() as conn:
-        row = conn.execute(
+    with db.connect() as conn, conn.cursor(row_factory=class_row(_SnapshotRow)) as cur:
+        row = cur.execute(
             "SELECT terminal_notice_snapshot FROM agent_impersonations WHERE id=%s", (lease_id,)
         ).fetchone()
-    snapshot = None if row is None else row[0]
-    if not snapshot:
+    recorded = None if row is None else row.terminal_notice_snapshot
+    if not recorded:
         return None
+    if not is_object_dict(recorded):
+        raise TypeError("The terminal notice snapshot must be a JSON object")
+    snapshot = recorded
     if snapshot["provider"] == "antigravity":
-        thread_id = snapshot["thread_id"]
+        thread_id = _text_or_none(snapshot["thread_id"])
         if not thread_id:
             return "the recorded Antigravity destination is not deliverable"
         if home is None:
@@ -84,7 +105,7 @@ def send_ended_notice(
         )
     if snapshot["provider"] != "codex":
         return None
-    endpoint, thread_id = snapshot["endpoint"], snapshot["thread_id"]
+    endpoint, thread_id = _text_or_none(snapshot["endpoint"]), _text_or_none(snapshot["thread_id"])
     if (
         not endpoint
         or not thread_id

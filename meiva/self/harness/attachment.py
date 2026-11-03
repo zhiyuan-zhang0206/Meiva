@@ -306,7 +306,9 @@ class _RegistrationCodec:
 
         return plugin_state_codec.encode_plugin_delta(dict(update), state_cls)
 
-    def decode_plugin_delta(self, encoded: dict[str, str], state_cls: type[Any]) -> dict[str, Any]:
+    def decode_plugin_delta(
+        self, encoded: Mapping[str, object], state_cls: type[Any]
+    ) -> dict[str, Any]:
         from base.agents.context.external_attachment import plugin_state_codec
 
         return plugin_state_codec.decode_plugin_delta(encoded, state_cls)

@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.history.hierarchy.chunks import CLAIM_LEASE_SECONDS, RETRY_SPACING_SECONDS
+from base.db.rows import CountRow, ExistsRow, aquery_all, aquery_one
 from base.db.transaction import async_write_transaction
 
 # A rebuild is retried after a crash or an error this often before it is given up on.
@@ -65,12 +66,13 @@ class RebuildJob:
 
 async def claim_rebuild(pool: AsyncConnectionPool) -> RebuildJob | None:
     """Claim the oldest rebuild whose agent has no live chunk job, or None when nothing is due."""
-    async with async_write_transaction(pool) as conn, conn.cursor() as cur:
-        await cur.execute(
-            _CLAIM_SQL, {"spacing": RETRY_SPACING_SECONDS, "lease": CLAIM_LEASE_SECONDS}
+    async with async_write_transaction(pool) as conn:
+        return await aquery_one(
+            conn,
+            RebuildJob,
+            _CLAIM_SQL,
+            {"spacing": RETRY_SPACING_SECONDS, "lease": CLAIM_LEASE_SECONDS},
         )
-        row = await cur.fetchone()
-    return None if row is None else RebuildJob(int(row[0]), int(row[1]), int(row[2]))
 
 
 async def finish_rebuild(
@@ -107,30 +109,39 @@ async def release_rebuild(
 
 async def rebuild_pending(pool: AsyncConnectionPool, agent_id: int) -> bool:
     """Whether a rebuild of the agent is waiting: its leaves' grouping is then left to it."""
-    async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute(
+    async with pool.connection() as conn:
+        row = await aquery_one(
+            conn,
+            ExistsRow,
             "SELECT EXISTS (SELECT 1 FROM understanding_rebuilds"
-            " WHERE agent_id = %s AND status = 'pending')",
+            " WHERE agent_id = %s AND status = 'pending') AS found",
             (agent_id,),
         )
-        row = await cur.fetchone()
     assert row is not None, "an EXISTS query always returns one row"  # noqa: S101
-    return bool(row[0])
+    return row.found
 
 
 async def checks_idle(pool: AsyncConnectionPool, agent_id: int) -> bool:
     # meiva:note
     # No grouping check of the agent holds a live lease.
-    async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute(
-            "SELECT count(*) FROM understanding_group_state WHERE agent_id = %s"
+    async with pool.connection() as conn:
+        row = await aquery_one(
+            conn,
+            CountRow,
+            "SELECT count(*) AS n FROM understanding_group_state WHERE agent_id = %s"
             " AND claimed_at IS NOT NULL"
             " AND claimed_at > now() - make_interval(secs => %s)",
             (agent_id, CLAIM_LEASE_SECONDS),
         )
-        row = await cur.fetchone()
     assert row is not None, "an aggregate query always returns one row"  # noqa: S101
-    return int(row[0]) == 0
+    return row.n == 0
+
+
+# meiva:note
+# The message-index end of one level-1 node.
+@dataclass(frozen=True)
+class _SpanEndRow:
+    span_end: int
 
 
 async def lift_upper(pool: AsyncConnectionPool, agent_id: int) -> list[int]:
@@ -139,20 +150,22 @@ async def lift_upper(pool: AsyncConnectionPool, agent_id: int) -> list[int]:
     #
     # The level-1 nodes lose their parent; the result is the message-index end of every one that can
     # take part in grouping (timed, of this pipeline), in message order.
-    async with async_write_transaction(pool) as conn, conn.cursor() as cur:
-        await cur.execute(
+    async with async_write_transaction(pool) as conn:
+        await conn.execute(
             "UPDATE understanding_nodes SET parent_id = NULL"
             " WHERE agent_id = %s AND depth = 1 AND parent_id IS NOT NULL",
             (agent_id,),
         )
-        await cur.execute(
+        await conn.execute(
             "DELETE FROM understanding_nodes WHERE agent_id = %s AND depth > 1", (agent_id,)
         )
-        await cur.execute("DELETE FROM understanding_group_state WHERE agent_id = %s", (agent_id,))
-        await cur.execute(
+        await conn.execute("DELETE FROM understanding_group_state WHERE agent_id = %s", (agent_id,))
+        ends = await aquery_all(
+            conn,
+            _SpanEndRow,
             "SELECT span_end FROM understanding_nodes WHERE agent_id = %s AND depth = 1"
             " AND start_ts IS NOT NULL AND end_ts IS NOT NULL"
             " ORDER BY span_start",
             (agent_id,),
         )
-        return [int(r[0]) for r in await cur.fetchall()]
+        return [end.span_end for end in ends]

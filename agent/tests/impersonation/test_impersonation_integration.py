@@ -5,6 +5,7 @@ from typing import Any
 import psycopg
 import pytest
 from psycopg_pool import AsyncConnectionPool
+from pydantic import TypeAdapter
 
 from agent.impersonation import settle_checkpoint
 from agent.impersonation_handoff import deliver_handoff, flush_checkpoint
@@ -28,6 +29,7 @@ from base.agents import impersonation as leases
 from base.agents.context.clients import ClientSet
 from base.agents.context.external_attachment.plugin_state_codec import encode_plugin_delta
 from base.agents.impersonation import history
+from base.agents.impersonation.history import HandoffDocument
 from base.agents.inbox.insert import insert_inbound_message
 from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
@@ -589,6 +591,7 @@ async def test_handoff_of_a_released_log_native_lease_is_already_complete(
     assert landed["handoff_applied_at"] is not None
     assert landed["events_completed_at"] is not None
     assert landed["event_delivery_pending_reason"] is None
-    assert landed["handoff_document"]["statistics"]["event_delivery"]["state"] == "complete"
+    saved = TypeAdapter(HandoffDocument).validate_python(landed["handoff_document"])
+    assert saved["statistics"]["event_delivery"]["state"] == "complete"
     document = host.workspace(owner.agent_id) / "impersonation" / "0.json"
     assert '"state": "complete"' in document.read_text()

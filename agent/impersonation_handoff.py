@@ -1,9 +1,9 @@
 """Durable native checkpoint receipts for automatic session endings."""
 
 import asyncio
-from collections.abc import Awaitable, Collection
+from collections.abc import Awaitable, Collection, Mapping
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
@@ -26,6 +26,7 @@ from agent.takeover.notes import (
 from base.agents.context import MeivaContext
 from base.agents.impersonation import OPEN, lock_lease, require_native
 from base.agents.impersonation.history import export_handoff, metadata
+from base.agents.impersonation.status import LeaseRecord, PublicLease
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.messages.kwargs import NoteTag
 from base.agents.messages.timestamp_policy import TimestampPolicy, TimestampSource
@@ -64,7 +65,7 @@ def note_stamp_of(notes: TimestampPolicy) -> NoteStamp:
     return NoteStamp(created_at, f"{notes.format(created_at)} " if notes.timestamps_enabled else "")
 
 
-def _render(draft: NoteDraft, session: dict[str, Any] | None = None) -> HumanMessage:
+def _render(draft: NoteDraft, session: Mapping[str, object] | None = None) -> HumanMessage:
     note = system_note_message(
         content=draft.text,
         tag=NoteTag.IMPERSONATION,
@@ -82,25 +83,42 @@ def introduction_note(stamp: NoteStamp) -> HumanMessage:
     return _render(introduction_draft(stamp))
 
 
+# meiva:note
+# What the introduction and the takeover anchor read of a lease: who the session is and how it relays.
+class SessionIdentity(TypedDict):
+    agent_id: int
+    session_id: int
+    name: str
+    executor_name: str
+    relay_provider: str | None
+
+
+# meiva:note
+# The graph state update that commits the introduction receipt and the takeover anchor.
+class StartUpdate(TypedDict):
+    messages: list[HumanMessage]
+    impersonation_introduced: bool
+
+
 def start_update(
-    session: dict[str, Any],
+    session: SessionIdentity,
     *,
     introduced: bool,
     stamp: NoteStamp,
     existing_ids: Collection[str] = (),
-) -> dict[str, Any]:
+) -> StartUpdate:
     """Commit the introduction receipt and the takeover anchor together."""
     drafts = start_drafts(
         SessionRef.of(session), stamp, introduced=introduced, existing_ids=existing_ids
     )
-    return {
-        "messages": [_render(draft, session) for draft in drafts],
-        "impersonation_introduced": True,
-    }
+    return StartUpdate(
+        messages=[_render(draft, session) for draft in drafts],
+        impersonation_introduced=True,
+    )
 
 
 async def ensure_start_marker(
-    graph: AgentGraph, session: dict[str, Any], *, notes: TimestampPolicy
+    graph: AgentGraph, session: SessionIdentity, *, notes: TimestampPolicy
 ) -> None:
     """Repair a crash between accepting the request and saving its timeline anchor."""
     config: RunnableConfig = {"configurable": {"thread_id": str(session["agent_id"])}}
@@ -142,11 +160,15 @@ async def handoff_resume_pending(graph: AgentGraph, agent_id: int) -> bool:
 
 
 def save_document(
-    db: DatabaseLike, session: dict[str, Any], incarnation: RuntimeIncarnation, *, workspace: Path
+    db: DatabaseLike,
+    session: PublicLease | LeaseRecord,
+    incarnation: RuntimeIncarnation,
+    *,
+    workspace: Path,
 ) -> tuple[str, str]:
     with db.write_transaction() as conn:
         require_native(conn, incarnation)
-        lease = lock_lease(conn, session["id"])
+        lease = lock_lease(conn, str(session["id"]))
         if lease["status"] in OPEN:
             raise RuntimeError("Cannot hand back an open impersonation session")
         document, path = export_handoff(lease, conn, workspace=workspace)
@@ -161,11 +183,11 @@ def save_document(
 
 
 def record_handoff_receipt(
-    db: DatabaseLike, session: dict[str, Any], incarnation: RuntimeIncarnation
+    db: DatabaseLike, session: PublicLease | LeaseRecord, incarnation: RuntimeIncarnation
 ) -> None:
     with db.write_transaction() as conn:
         require_native(conn, incarnation)
-        lease = lock_lease(conn, session["id"])
+        lease = lock_lease(conn, str(session["id"]))
         # These messages have now been delivered in the durable end-of-session note
         # and record file.
         # Their immutable bodies survive independently of processing status.
@@ -186,7 +208,7 @@ async def deliver_handoff(
     graph: AgentGraph,
     db: DatabaseLike,
     bus: EventBus,
-    session: dict[str, Any],
+    session: PublicLease | LeaseRecord,
     incarnation: RuntimeIncarnation,
     *,
     timestamps: TimestampSource,

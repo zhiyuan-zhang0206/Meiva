@@ -4,8 +4,9 @@ from typing import Any, NamedTuple
 
 import meiva.self
 from base.agents.context.gateway_client import transport
-from base.agents.tasks.model import Task, validate_task_snapshot
+from base.agents.tasks.model import Task, parse_task_snapshot
 from base.agents.tasks.priority import validate_priority, validate_remind_interval_seconds
+from base.host.boundary.json_values import is_object_dict
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.agent_identity import require_lease_free_agent_id
 
@@ -69,10 +70,13 @@ def create_and_assign_guarded(
     )
     transport.raise_from_response(response)
     result = transport.json_object(response)
-    snapshot = validate_task_snapshot(result["task"])
+    snapshot = result["task"]
+    if not is_object_dict(snapshot):
+        raise TypeError("accepted task must be an object")
+    task = parse_task_snapshot(snapshot)
     agent_id = result["agent_id"]
     if isinstance(agent_id, bool) or not isinstance(agent_id, int):
         raise TypeError("accepted agent id must be an integer")
     if agent_id <= 0:
         raise ValueError("accepted agent id must be positive")
-    return TaskAssignment(Task(**snapshot), agent_id)
+    return TaskAssignment(task, agent_id)

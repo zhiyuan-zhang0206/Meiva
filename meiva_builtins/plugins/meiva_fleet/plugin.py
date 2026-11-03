@@ -42,6 +42,8 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import TypedDict
 
+from pydantic import BaseModel
+
 import meiva
 import meiva.sdk_surface.agent_identity
 from base.agents.context.gateway_client.transport import TransportResponse
@@ -87,6 +89,29 @@ class PendingNoticeRow(TypedDict):
     title: str
     created_at: datetime
     priority: str
+
+
+# meiva:note
+# One entry of the gateway's pending-notice list, as the wire carries it.
+class _PendingNoticeWire(BaseModel):
+    id: int
+    title: str
+    created_at: datetime
+    priority: str
+
+
+# meiva:note
+# The gateway's answer to posting a notice.
+class _NoticeAnswer(BaseModel):
+    id: int
+    pending_count: int
+    pending_notices: list[_PendingNoticeWire]
+
+
+# meiva:note
+# The one field of an open-notice row the guarded edit and withdraw routes target.
+class _OpenNoticeWire(BaseModel):
+    id: int
 
 
 class Notice(int):
@@ -225,21 +250,12 @@ def notify(
         context=meiva.context,
     )
     _raise_as_value_error(resp)
-    data = transport.json_object(resp)
+    data = _NoticeAnswer.model_validate(transport.json_object(resp))
     pending_rows: list[PendingNoticeRow] = [
-        PendingNoticeRow(
-            id=int(r["id"]),
-            title=r["title"],
-            created_at=datetime.fromisoformat(r["created_at"]),
-            priority=r["priority"],
-        )
-        for r in data["pending_notices"]
+        PendingNoticeRow(id=r.id, title=r.title, created_at=r.created_at, priority=r.priority)
+        for r in data.pending_notices
     ]
-    return Notice(
-        int(data["id"]),
-        pending_count=int(data["pending_count"]),
-        pending_notices=pending_rows,
-    )
+    return Notice(data.id, pending_count=data.pending_count, pending_notices=pending_rows)
 
 
 def edit_notice(
@@ -334,7 +350,7 @@ def _observe_open_notice_id(agent_id: int) -> int | None:
     )
     transport.raise_from_response(resp)
     rows = transport.json_rows(resp)
-    return int(rows[0]["id"]) if rows else None
+    return _OpenNoticeWire.model_validate(rows[0]).id if rows else None
 
 
 # ── meiva.tasks SDK namespace — the task registry (see task_registry.py) ───────

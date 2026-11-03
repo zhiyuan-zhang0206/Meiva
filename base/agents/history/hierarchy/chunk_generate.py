@@ -26,7 +26,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
-from typing import Any
 
 from langchain_core.messages import BaseMessage, HumanMessage
 
@@ -37,6 +36,7 @@ from base.agents.history.hierarchy.generate import (
     GenParams,
     ModelCall,
     ToolBindableLlm,
+    ToolSpec,
     invoke_agent_shaped,
 )
 from base.agents.history.hierarchy.group import GroupReplyError
@@ -116,7 +116,7 @@ def generate_chunk(
     model: str,
     catalog: ModelCatalog,
     agent_id: int,
-    tools: Sequence[Any],
+    tools: Sequence[ToolSpec],
     corrections: int = 0,
     params: GenParams | None = None,
     retry_attempts: int = UNDERSTANDING_RETRY_ATTEMPTS,
@@ -141,7 +141,9 @@ def generate_chunk(
     buffer: list[ChunkCall] = []
     rounds = 0
 
-    def ask(messages: list[Any], sent: str, kind: str) -> tuple[str, BaseMessage | None, int]:
+    def ask(
+        messages: list[BaseMessage], sent: str, kind: str
+    ) -> tuple[str, BaseMessage | None, int]:
         """One `invoke_agent_shaped` request; its text, final response and that call's row index."""
         nonlocal rounds
         first = rounds
@@ -182,7 +184,7 @@ def generate_chunk(
         return text, buffer[row].response if final_rows else None, row
 
     try:
-        messages: list[Any] = [*prefix, HumanMessage(content=instruction)]
+        messages: list[BaseMessage] = [*prefix, HumanMessage(content=instruction)]
         text, response, row = ask(messages, instruction, "leaf")
         for attempt in range(corrections + 1):
             try:
@@ -196,6 +198,8 @@ def generate_chunk(
                         f"grouping reply refused after {corrections} correction(s): {problem}"
                     ) from exc
             correction = _CORRECTION.format(problem=problem)
+            if response is None:
+                raise AssertionError("a reply has a response")
             messages = [*messages, response, HumanMessage(content=correction)]
             text, response, row = ask(messages, correction, "group-correction")
         raise AssertionError("unreachable: the last attempt returns or raises")  # pragma: no cover

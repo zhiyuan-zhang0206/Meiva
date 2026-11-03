@@ -11,7 +11,7 @@ import psycopg
 import pytest
 
 from base.agents import impersonation as leases
-from base.agents.impersonation import host_transport, relay, terminal_notices
+from base.agents.impersonation import RequestedLease, host_transport, relay, terminal_notices
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.api_contracts.caller_identity import CallerIdentity
 from base.cluster.machine import MachineIdentityReader
@@ -30,7 +30,7 @@ def active(
     *,
     config_authority: ConfigAuthority,
     machine_identity: MachineIdentityReader,
-) -> tuple[dict[str, Any], RuntimeIncarnation]:
+) -> tuple[RequestedLease, RuntimeIncarnation]:
     local_machine = machine_identity.name()
     aid = create_agent(db_conn)
     owner = RuntimeIncarnation(aid, uuid4(), uuid4())
@@ -70,7 +70,7 @@ def active(
 
 
 def end(
-    database: Database, event_bus: EventBus, session: dict[str, Any], *, local_machine: str
+    database: Database, event_bus: EventBus, session: RequestedLease, *, local_machine: str
 ) -> None:
     leases.release(
         database,
@@ -82,7 +82,7 @@ def end(
 
 
 def test_generation_claim_is_single_winner_and_stale_token_loses_authority(
-    active: tuple[dict[str, Any], RuntimeIncarnation],
+    active: tuple[RequestedLease, RuntimeIncarnation],
     database: Database,
     event_bus: EventBus,
     *,
@@ -118,7 +118,7 @@ def test_generation_claim_is_single_winner_and_stale_token_loses_authority(
 
 
 def test_ended_notice_is_submitted_once_to_the_recorded_destination(
-    active: tuple[dict[str, Any], RuntimeIncarnation],
+    active: tuple[RequestedLease, RuntimeIncarnation],
     database: Database,
     event_bus: EventBus,
     tmp_path: Path,
@@ -142,7 +142,7 @@ def test_ended_notice_is_submitted_once_to_the_recorded_destination(
 
 
 def test_ended_notice_failure_is_reported_and_leaves_no_retry_state(
-    active: tuple[dict[str, Any], RuntimeIncarnation],
+    active: tuple[RequestedLease, RuntimeIncarnation],
     database: Database,
     event_bus: EventBus,
     db_conn: psycopg.Connection,
@@ -168,7 +168,7 @@ def test_ended_notice_failure_is_reported_and_leaves_no_retry_state(
 
 
 def test_controller_session_destination_gets_no_host_submission(
-    active: tuple[dict[str, Any], RuntimeIncarnation],
+    active: tuple[RequestedLease, RuntimeIncarnation],
     database: Database,
     event_bus: EventBus,
     db_conn: psycopg.Connection,
@@ -193,7 +193,7 @@ def test_controller_session_destination_gets_no_host_submission(
 
 
 def test_old_notice_keeps_destination_after_replacement_takeover(
-    active: tuple[dict[str, Any], RuntimeIncarnation],
+    active: tuple[RequestedLease, RuntimeIncarnation],
     database: Database,
     event_bus: EventBus,
     db_conn: psycopg.Connection,
@@ -262,7 +262,7 @@ def test_old_notice_keeps_destination_after_replacement_takeover(
 
 
 def test_terminated_agent_notice_names_the_termination(
-    active: tuple[dict[str, Any], RuntimeIncarnation],
+    active: tuple[RequestedLease, RuntimeIncarnation],
     database: Database,
     db_conn: psycopg.Connection,
     tmp_path: Path,
@@ -283,7 +283,7 @@ def test_terminated_agent_notice_names_the_termination(
 
 
 def test_already_terminal_insert_is_not_historically_backfilled(
-    active: tuple[dict[str, Any], RuntimeIncarnation],
+    active: tuple[RequestedLease, RuntimeIncarnation],
     database: Database,
     event_bus: EventBus,
     db_conn: psycopg.Connection,
@@ -311,7 +311,7 @@ def test_already_terminal_insert_is_not_historically_backfilled(
 
 
 def test_ended_antigravity_notice_uses_the_endpoint_the_request_recorded(
-    active: tuple[dict[str, Any], RuntimeIncarnation],
+    active: tuple[RequestedLease, RuntimeIncarnation],
     database: Database,
     event_bus: EventBus,
     db_conn: psycopg.Connection,
@@ -385,7 +385,7 @@ def test_ended_antigravity_notice_uses_the_endpoint_the_request_recorded(
 # when it sends the notice, so a missing argument raised here would stop the agent going down
 # instead of leaving one logged failure (2026-10-31, b656aa594's call site).
 def test_a_notice_with_no_home_names_the_missing_home_and_records_it(
-    active: tuple[dict[str, Any], RuntimeIncarnation],
+    active: tuple[RequestedLease, RuntimeIncarnation],
     database: Database,
     event_bus: EventBus,
     db_conn: psycopg.Connection,
@@ -417,7 +417,7 @@ def test_a_notice_with_no_home_names_the_missing_home_and_records_it(
 
 
 def test_ended_antigravity_notice_without_a_record_names_the_record_it_looked_for(
-    active: tuple[dict[str, Any], RuntimeIncarnation],
+    active: tuple[RequestedLease, RuntimeIncarnation],
     database: Database,
     event_bus: EventBus,
     db_conn: psycopg.Connection,

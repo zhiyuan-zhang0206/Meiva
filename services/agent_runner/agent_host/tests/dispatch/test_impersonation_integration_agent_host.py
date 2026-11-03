@@ -307,6 +307,7 @@ async def test_lease_controls_settle_the_handoff_of_a_dead_relays_lease(
     assert ended["status"] == "expired"
     assert ended["rejection_reason"] == "aborted: the bound relay process exited (exit code 0)"
     assert ended["handoff_applied_at"] is not None
+    assert ended["handoff_path"] is not None
     assert Path(ended["handoff_path"]).is_file()
     assert graph.values["impersonation_handoff_id"] == f"{agent_id}:0"
     assert agent_id not in host.relays.children
@@ -355,7 +356,7 @@ async def _takeover_in_progress(
         local_machine=local_machine,
     )
     leases.activate(database, event_bus, lease["id"], predecessor)
-    return agent_id, cast(str, lease["id"])
+    return agent_id, lease["id"]
 
 
 def _handoff_host(
@@ -489,6 +490,7 @@ async def test_terminate_command_settles_the_ended_takeover_before_the_agent_goe
     ended = leases.get(database, event_bus, lease_id, local_machine=machine)
     assert ended["status"] == "expired"
     assert ended["handoff_applied_at"] is not None
+    assert ended["handoff_path"] is not None
     assert Path(ended["handoff_path"]).is_file()
     assert graph.values["impersonation_handoff_id"] == f"{agent_id}:0"
     assert ended["ended_at"] is not None

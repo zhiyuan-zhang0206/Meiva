@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, TypedDict, TypeGuard
+from typing import TYPE_CHECKING, TypedDict, TypeGuard
 
 from base.lm.content import message_addl_kwargs
 from base.lm.system_note import SYSTEM_NOTE_LEAD
@@ -86,7 +86,7 @@ class MeivaUsage(TypedDict, total=False):
 
 class MeivaMessageKwargs(TypedDict, total=False):
     meiva_ephemeral_message_id: bool
-    meiva_impersonation: dict[str, Any]
+    meiva_impersonation: dict[str, object]
     meiva_msg_type: str
     meiva_source: str
     meiva_inbound_id: int
@@ -95,14 +95,14 @@ class MeivaMessageKwargs(TypedDict, total=False):
     meiva_picked_up_at: str
     meiva_compact_id: str
     meiva_image_urls: list[str]
-    meiva_upload_files: list[dict[str, Any]]
+    meiva_upload_files: list[dict[str, object]]
     meiva_note_tag: str
     meiva_task_id: int
     meiva_exec_ms: int | None
     meiva_exec_status: str
     meiva_exec_started_at: str | None
     meiva_exec_body_start: int
-    sdk_calls: list[dict[str, Any]] | None
+    sdk_calls: list[dict[str, object]] | None
     meiva_reasoning_ms_by_block: dict[str, int]
     meiva_code_ms_by_block: dict[str, int]
     meiva_non_human_wake: bool

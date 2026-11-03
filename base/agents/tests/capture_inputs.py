@@ -12,6 +12,7 @@ from base.agents.impersonation.manifest import (
     LocalParticipant,
     open_local_participant,
 )
+from base.agents.impersonation.status import LeaseRecord
 from base.agents.impersonation.tests import test_history as history_cases
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -62,7 +63,7 @@ def lease(
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
-) -> dict[str, Any]:
+) -> LeaseRecord:
     local_machine = machine_identity.name()
     return history_cases.start(
         owner, authority=config_authority, database_gate=database_gate, local_machine=local_machine

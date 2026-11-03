@@ -17,6 +17,7 @@ from typing import Any, NamedTuple
 import httpx
 import pytest
 from langchain_core.messages import AnyMessage
+from pydantic import ValidationError
 
 import agent.graph.recall.memory_recall as recall
 from agent.messages import InboundTimes, inbound_message
@@ -484,7 +485,7 @@ async def test_programming_error_in_search_still_propagates(
     becomes the bare `except` the fail-fast principle bans."""
     search.response = httpx.Response(200, json={"results": None})
 
-    with pytest.raises(TypeError):
+    with pytest.raises(ValidationError):
         await _recall(context, memory_root)
     assert len(search.asked) == 1
 

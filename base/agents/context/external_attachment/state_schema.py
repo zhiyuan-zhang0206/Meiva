@@ -2,7 +2,7 @@ import operator
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Annotated, Any, TypeGuard
+from typing import Annotated, TypeGuard
 
 from langchain_core.messages import AnyMessage
 from langgraph.channels.delta import DeltaChannel
@@ -26,6 +26,8 @@ from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
 from base.agents.history.checkpoint_serializer import CheckpointSerializer
 from base.agents.messages.guard import guarded_add_messages, guarded_delta_reducer
 from base.agents.messages.security_finding import SecurityFindingEntry
+from base.host.boundary.json_values import is_object_list
+from base.host.boundary.untyped import object_mapping, object_of, object_sequence
 from base.packages.plugins.extensions import (
     PLUGIN_WRITABLE_BASE_FIELDS,
     SDK_WRITTEN_BASE_FIELDS,
@@ -33,7 +35,7 @@ from base.packages.plugins.extensions import (
 )
 
 MESSAGES_DELTA_SNAPSHOT_FREQUENCY = 1000
-MESSAGES_DELTA_CHANNEL: DeltaChannel[Any] = DeltaChannel(
+MESSAGES_DELTA_CHANNEL: DeltaChannel[list[AnyMessage]] = DeltaChannel(
     guarded_delta_reducer, snapshot_frequency=MESSAGES_DELTA_SNAPSHOT_FREQUENCY
 )
 
@@ -60,7 +62,7 @@ class BaseAgentState(BaseModel):
     skill_reads: Annotated[list[str], operator.add] = Field(default_factory=list)
     halted: bool = False
     interrupted_by_restart: bool = False
-    harness_pending_input: dict[str, Any] | None = None
+    harness_pending_input: dict[str, object] | None = None
     turn_active: bool = False
     non_human_wake: bool = False
     exit_requested: bool = False
@@ -83,7 +85,7 @@ BaseAgentState.__module__ = "agent.state"
 
 _BASE_FIELDS: frozenset[str] = frozenset(BaseAgentState.model_fields.keys())
 
-_StateFieldSpec = tuple[Any, FieldInfo]
+_StateFieldSpec = tuple[object, FieldInfo]
 
 
 @dataclass(frozen=True)
@@ -103,7 +105,7 @@ _BASE_STATE_FIELDS: frozenset[str] = _BASE_FIELDS
 # `meiva.state_update`. `state_cls` is typed as `type[Any]` because dynamically built
 # `AgentState` subclasses are passed alongside `BaseModel` types.
 # meiva:link agent/docs/state.meiva.okf.md
-def validate_plugin_state_keys(update: dict[str, Any], state_cls: type[Any]) -> dict[str, Any]:
+def validate_plugin_state_keys[V](update: dict[str, V], state_cls: type[BaseModel]) -> dict[str, V]:
     if not update:
         return update
     base_clash = set(update) & _BASE_STATE_FIELDS
@@ -117,7 +119,7 @@ def validate_plugin_state_keys(update: dict[str, Any], state_cls: type[Any]) -> 
             f"in the plugin's own BaseModel with the exact BaseAgentState annotation. "
             f"Missing prefix typo? Declared: {sorted(base_declared) or '<empty>'}"
         )
-    known = set(state_cls.model_fields.keys())  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    known = set(state_cls.model_fields.keys())
     unknown = set(update) - known
     if unknown:
         raise ValueError(
@@ -132,10 +134,6 @@ def validate_plugin_state_keys(update: dict[str, Any], state_cls: type[Any]) -> 
 _MESSAGES_REDUCER = object()
 
 
-def _is_object_list(value: object) -> TypeGuard[list[Any]]:
-    return isinstance(value, list)
-
-
 # meiva:link agent/docs/state.meiva.okf.md
 def is_messages_reducer_form(m: object) -> bool:
     if m is add_messages or m is guarded_add_messages:
@@ -143,10 +141,16 @@ def is_messages_reducer_form(m: object) -> bool:
     return isinstance(m, DeltaChannel) and m.reducer is guarded_delta_reducer
 
 
+# meiva:note
+# `Annotated.__metadata__` is a tuple; `isinstance` alone would leave its elements unknown.
+def _is_object_tuple(value: object) -> TypeGuard[tuple[object, ...]]:
+    return isinstance(value, tuple)
+
+
 # meiva:link agent/docs/state.meiva.okf.md
-def messages_annotation_key(annotation: object) -> tuple[Any, ...]:
-    meta = getattr(annotation, "__metadata__", None)
-    if meta:
+def messages_annotation_key(annotation: object) -> tuple[object, ...]:
+    meta = object_of(getattr, annotation, "__metadata__", None)
+    if _is_object_tuple(meta) and meta:
         origin = getattr(annotation, "__origin__", None)
         return (
             origin,
@@ -155,23 +159,29 @@ def messages_annotation_key(annotation: object) -> tuple[Any, ...]:
     return (annotation,)
 
 
+# meiva:note
+# The reducer of a last-value field: the new value replaces the old one.
+def _replace_with_new(_old: object, new: object) -> object:
+    return new
+
+
 # meiva:link agent/docs/state.meiva.okf.md
-def resolve_reducer(field: FieldInfo) -> Callable[[Any, Any], Any]:
-    for m in field.metadata:
+def resolve_reducer(field: FieldInfo) -> Callable[..., object]:
+    for m in object_sequence(field.metadata):
         if isinstance(m, DeltaChannel):
             if m.reducer is guarded_delta_reducer:
                 return guarded_add_messages
             continue
         if callable(m) and not isinstance(m, type):
             return guarded_add_messages if m is add_messages else m
-    return lambda _old, new: new
+    return _replace_with_new
 
 
 # meiva:link agent/docs/state.meiva.okf.md
-def accumulate_delta(acc: object, new: object, reducer: Callable[[Any, Any], Any]) -> object:
+def accumulate_delta(acc: object, new: object, reducer: Callable[..., object]) -> object:
     if is_messages_reducer_form(reducer):
-        acc_list: list[Any] = acc if _is_object_list(acc) else [acc]
-        new_list: list[Any] = new if _is_object_list(new) else [new]
+        acc_list = acc if is_object_list(acc) else [acc]
+        new_list = new if is_object_list(new) else [new]
         return acc_list + new_list
     return reducer(acc, new)
 
@@ -204,7 +214,7 @@ def plugin_state_schema(extensions: ExtensionRegistry) -> PluginStateSchema:
                         f"framework core keys; {name!r} is framework-managed every turn "
                         f"(write a private <plugin>__{name} field or contribute via a hook instead)"
                     )
-                base_raw = BaseAgentState.__annotations__[name]
+                base_raw = object_mapping(BaseAgentState.__annotations__)[name]
                 if messages_annotation_key(raw_annotation) != messages_annotation_key(base_raw):
                     raise ValueError(
                         f"plugin {plugin!r} declared base field '{name}' with type "
@@ -250,8 +260,8 @@ def build_agent_state(extensions: ExtensionRegistry) -> type[BaseAgentState]:
     if not schema.extra_fields and not schema.namespace_fields:
         return BaseAgentState
 
-    annotations: dict[str, Any] = {}
-    namespace: dict[str, Any] = {
+    annotations: dict[str, object] = {}
+    namespace: dict[str, object] = {
         "__annotations__": annotations,
         "__plugin_namespace_fields__": schema.namespace_fields,
         "__plugin_base_declared__": schema.base_declared,

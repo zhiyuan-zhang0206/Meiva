@@ -1,7 +1,7 @@
 import importlib.util
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any, cast
+from typing import Annotated
 from uuid import uuid4
 
 import psycopg
@@ -28,6 +28,7 @@ from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
+from base.host.boundary.json_values import is_object_dict
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins import enable_config
 from base.packages.plugins.loading import faces
@@ -206,10 +207,10 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
     )
     assert updated["delta_version"] == 1
     native_snapshot, _, _ = load_snapshot(agent_id, database=database, home=meiva_home())
-    assert decode_plugin_delta(updated["plugin_delta"][0], cast(Any, type(native_snapshot))) == {
-        "integration__seen": {"external"}
-    }
-    assert native_snapshot.integration__seen == {"native"}
+    delta = updated["plugin_delta"][0]
+    assert is_object_dict(delta)
+    assert decode_plugin_delta(delta, type(native_snapshot)) == {"integration__seen": {"external"}}
+    assert handle.view(native_snapshot).seen == {"native"}
     assert reader.read_instructions(reader.Target(lease["session_id"], agent_id)) == expected
     with impersonation.attach(lease["id"]):
         assert handle.read().seen == {"native", "external"}

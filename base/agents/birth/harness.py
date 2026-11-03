@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NamedTuple, TypeGuard
+from typing import NamedTuple
 
 import psycopg
 
@@ -23,6 +23,8 @@ from base.api_contracts.agent_contract import (
     ProbedHarnessModel,
     coerce_harness,
 )
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.host.env.harness_binaries import (
     HARNESS_BIN_DIRS,
     harness_child_path,
@@ -89,7 +91,7 @@ def _require_launchable(
 # caller that skipped client-side validation still fails fast.
 # meiva:link base/agents/docs/harness/harness.meiva.okf.md
 def resolve_birth_harness(
-    cur: psycopg.Cursor[Any],
+    cur: psycopg.Cursor[tuple[object, ...]],
     requested: str | Harness | None,
     fork_from: int | None,
     *,
@@ -125,26 +127,22 @@ def resolve_birth_harness(
 
 def _read_json(path: Path) -> object | None:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return object_of(json.loads, path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
 
 
-def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
-    return isinstance(value, dict)
-
-
 def _has_value(mapping: object, key: str) -> bool:
-    if not _is_object_dict(mapping):
+    if not is_object_dict(mapping):
         return False
     return bool(mapping.get(key))
 
 
 def _nested(value: object, key: str) -> dict[str, object] | None:
-    if not _is_object_dict(value):
+    if not is_object_dict(value):
         return None
     inner = value.get(key)
-    return inner if _is_object_dict(inner) else None
+    return inner if is_object_dict(inner) else None
 
 
 def _epoch_ms(value: object) -> datetime | None:
@@ -253,7 +251,7 @@ def _codex_login(home: Path) -> _LoginEvidence:
     if not auth.is_file():
         return _LoginEvidence(signed_in=None, detail=f"no {where}")
     record = _read_json(auth)
-    if not _is_object_dict(record):
+    if not is_object_dict(record):
         return _LoginEvidence(signed_in=None, detail=f"{where} is unreadable")
     data = record
     if _has_value(data, "OPENAI_API_KEY"):
@@ -374,10 +372,10 @@ def _cli_environment(environ: Mapping[str, str]) -> dict[str, str]:
 
 def _answered_claude(done: subprocess.CompletedProcess[str]) -> _LoginEvidence:
     try:
-        record = json.loads(done.stdout)
+        record = object_of(json.loads, done.stdout)
     except json.JSONDecodeError:
         return _LoginEvidence(signed_in=None, detail="claude auth status printed no JSON")
-    if not _is_object_dict(record):
+    if not is_object_dict(record):
         return _LoginEvidence(signed_in=None, detail="claude auth status printed no login state")
     data = record
     logged_in = data.get("loggedIn")

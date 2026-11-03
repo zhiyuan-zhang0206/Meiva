@@ -4,11 +4,19 @@ from uuid import uuid4
 import pytest
 
 from base.agents.impersonation import _store as store
+from base.agents.impersonation.status import LeaseRecord, parse_lease
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 
 
-def _lease(tree: dict[str, Any]) -> dict[str, Any]:
-    return {"process_metadata": tree, "machine": "attestation-unit", "agent_id": 426}
+def _lease(tree: dict[str, Any]) -> LeaseRecord:
+    return parse_lease(
+        {
+            "status": "active",
+            "process_metadata": tree,
+            "machine": "attestation-unit",
+            "agent_id": 426,
+        }
+    )
 
 
 def test_authenticate_requires_same_machine() -> None:

@@ -22,7 +22,7 @@ from base.agents.impersonation.manifest import (
     record_central_event,
     seal_local_participant,
 )
-from base.agents.impersonation.status import pending_reason
+from base.agents.impersonation.status import LeaseRecord, pending_reason
 from base.agents.impersonation.tests import test_history as history_cases
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
@@ -65,7 +65,7 @@ def lease(
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
-) -> dict[str, Any]:
+) -> LeaseRecord:
     local_machine = machine_identity.name()
     return history_cases.start(
         owner, authority=config_authority, database_gate=database_gate, local_machine=local_machine
@@ -629,7 +629,9 @@ def test_the_handoff_lists_events_in_call_order_not_write_order(
         history.resolve(database, owner.agent_id, 0, local_machine=local_machine),
         history.entries(participant.lease_id, db_conn),
     )
-    assert [row["payload"]["attributes"]["fn"] for row in document["sdk_events"]] == [
+    assert [
+        json.loads(json.dumps(row["payload"]))["attributes"]["fn"] for row in document["sdk_events"]
+    ] == [
         "agents.list_agents",
         "agents.get_status",
         "x.third",
@@ -653,7 +655,7 @@ def test_a_late_seal_rewrites_the_already_delivered_handoff_file(
     _expire(db_conn, lease, database_gate=database_gate, local_machine=local_machine)
     ended = history.resolve(database, owner.agent_id, 0, local_machine=local_machine)
     document, path = history.export_handoff(ended, db_conn, workspace=tmp_path)
-    assert document["statistics"]["event_delivery"]["state"] == "pending"
+    assert json.loads(json.dumps(document))["statistics"]["event_delivery"]["state"] == "pending"
     db_conn.execute(
         "UPDATE agent_impersonations SET handoff_document=%s,handoff_path=%s,"
         "handoff_applied_at=now() WHERE id=%s",

@@ -14,7 +14,6 @@ import asyncio
 import json
 from contextlib import suppress
 from pathlib import Path
-from typing import Any
 
 from base.agents.lifecycle_signals import (
     AgentRestart as AgentRestart,
@@ -28,6 +27,8 @@ from base.agents.lifecycle_signals import (
 from base.agents.lifecycle_signals import (
     SystemHalt as SystemHalt,
 )
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.log import logger
 
 __all__ = [
@@ -66,7 +67,9 @@ async def _release_roundtrip(sock: str, agent_id: int) -> bool:
         line = await reader.readline()
         if not line:
             return False
-        resp: dict[str, Any] = json.loads(line)
+        resp = object_of(json.loads, line)
+        if not is_object_dict(resp):
+            raise ValueError("browser-mcp release reply is not a JSON object")
         return resp.get("ok") is True
     finally:
         await _close_writer(writer)
