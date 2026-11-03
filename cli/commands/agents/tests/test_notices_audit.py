@@ -9,8 +9,8 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 
+from base.api_contracts.notification_audit import NotificationAuditResponse
 from cli.commands.agents.notices_audit import (
-    AuditReport,
     cmd_notices_audit,
     render_json,
     render_text,
@@ -76,7 +76,9 @@ _EXPLAINED = {
 
 
 def test_the_text_report_names_every_section() -> None:
-    text = "\n".join(render_text(AuditReport.model_validate(_REPORT), tz=ZoneInfo("Asia/Shanghai")))
+    text = "\n".join(
+        render_text(NotificationAuditResponse.model_validate(_REPORT), tz=ZoneInfo("Asia/Shanghai"))
+    )
 
     for section in ("Deliveries per day", "Per category", "Candidates and suppression"):
         assert section in text
@@ -86,7 +88,9 @@ def test_the_text_report_names_every_section() -> None:
 
 def test_the_text_report_lists_the_explanation_when_the_gateway_sent_one() -> None:
     text = "\n".join(
-        render_text(AuditReport.model_validate(_EXPLAINED), tz=ZoneInfo("Asia/Shanghai"))
+        render_text(
+            NotificationAuditResponse.model_validate(_EXPLAINED), tz=ZoneInfo("Asia/Shanghai")
+        )
     )
 
     assert "Why each candidate was or was not delivered" in text
