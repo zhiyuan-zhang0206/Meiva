@@ -49,4 +49,4 @@ exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains",
 "base.py#base/paths/home.py" = { count = 1, owner = "#7240", until = "permanently: unit_home() is a pydantic default_factory that runs while a sub-model is constructed, before any settings object exists to carry the home — the home is the input that locates the .env the settings are built from, which is the same boundary base/paths declares with [roots] kinds=[environ, home]" }
 
 [debt.restricted-python]
-"config_registry.py#module __getattr__" = { count = 1, owner = "#8266", until = "waits for the lazy re-export to import its fixed names explicitly: the module serves a few names written in the source, so none of them is known only at run time" }
+"config_registry.py#module __getattr__" = { count = 1, owner = "#6082", until = "waits for the lazy re-export to import its fixed names explicitly: the module serves a few names written in the source, so none of them is known only at run time" }

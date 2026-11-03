@@ -8,4 +8,4 @@ exports = ["rotate_cluster_secret.py", "tests"]
 "rotate_data_plane_secrets.py" = { kinds = ["clock", "home", "random", "settings", "argv"], why = "gateway Redis credential rotation CLI reads the active data-plane configuration, resolves the home it operates once in main(), timestamps the rotation journal, and mints replacement passwords; the __main__ guard reads argv[1:] once and hands it to main" }
 
 [debt.ambient-read]
-"rotate_data_plane_secrets.py#pid builtins.input" = { count = 1, owner = "#8237", until = "waits for `run_rotation` to take the operator's confirmation as a value from `main`: it asks with `input()` itself" }
+"rotate_data_plane_secrets.py#pid builtins.input" = { count = 1, owner = "#5816", until = "waits for `run_rotation` to take the operator's confirmation as a value from `main`: it asks with `input()` itself" }

@@ -12,4 +12,4 @@ exports = ["cancel_fixture.py"]
 "test_turn_end_attribution.py" = ["llm_support.py"]
 
 [debt.restricted-python]
-"test_llm_stream_stall.py#dynamic attribute name" = { count = 3, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }
+"test_llm_stream_stall.py#dynamic attribute name" = { count = 3, owner = "#6082", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

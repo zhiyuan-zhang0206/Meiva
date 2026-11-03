@@ -18,4 +18,4 @@ exports = ["admission.py", "cold_start.py", "cold_start_plan.py", "gateway_hint.
 "stand_down_gate.py" = "strict"
 
 [debt.ambient-read]
-"__init__.py#pid sys.stdout.isatty" = { count = 1, owner = "#8237", until = "waits for nothing that can arrive: `_report_running_tree` hands `sys.stdout.isatty()` to `print_login_link`, where a false answer makes `plan_login_link` skip minting the one-time UI login link for an output nobody is watching; whether this process writes to a terminal is a property of its own stream, which a caller cannot observe without asking the same descriptor" }
+"__init__.py#pid sys.stdout.isatty" = { count = 1, owner = "#5816", until = "waits for nothing that can arrive: `_report_running_tree` hands `sys.stdout.isatty()` to `print_login_link`, where a false answer makes `plan_login_link` skip minting the one-time UI login link for an output nobody is watching; whether this process writes to a terminal is a property of its own stream, which a caller cannot observe without asking the same descriptor" }

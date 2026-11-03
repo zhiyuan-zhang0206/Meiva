@@ -11,7 +11,7 @@ exports = ["feed.py"]
 "feed.py" = { kinds = ["clock", "environ", "home", "argv", "pid"], why = "The script entry assembles Process and AuthSources from the process environment, home directory, and clock before invoking the command; it also reads its command line (argv) once, as the process entry, and reads its standard input" }
 
 [debt.ambient-read]
-"smtp.py#pid email.utils.make_msgid" = { count = 1, owner = "#8237", until = "waits for `_compose` to take the message id from its caller: it asks `email.utils.make_msgid` for one" }
-"smtp.py#platform email.utils.make_msgid" = { count = 1, owner = "#8237", until = "waits for `_compose` to take the message id from its caller: it asks `email.utils.make_msgid` for one (the host name is recorded although `domain` is given, because the table cannot spare one kind of an entry)" }
-"smtp.py#random email.utils.make_msgid" = { count = 1, owner = "#8237", until = "waits for `_compose` to take the message id from its caller: it asks `email.utils.make_msgid` for one" }
+"smtp.py#pid email.utils.make_msgid" = { count = 1, owner = "#5816", until = "waits for `_compose` to take the message id from its caller: it asks `email.utils.make_msgid` for one" }
+"smtp.py#platform email.utils.make_msgid" = { count = 1, owner = "#5816", until = "waits for `_compose` to take the message id from its caller: it asks `email.utils.make_msgid` for one (the host name is recorded although `domain` is given, because the table cannot spare one kind of an entry)" }
+"smtp.py#random email.utils.make_msgid" = { count = 1, owner = "#5816", until = "waits for `_compose` to take the message id from its caller: it asks `email.utils.make_msgid` for one" }
 "smtp.py#clock email.utils.make_msgid" = { count = 1, owner = "#5816", until = "waits for `_compose` to take the message id from its caller: it asks `email.utils.make_msgid` for one, and the id it mints carries the instant it was minted (the Date header beside it does come from the entry, one line up)" }

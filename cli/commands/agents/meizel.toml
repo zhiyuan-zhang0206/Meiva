@@ -15,4 +15,4 @@ exports = ["cleanup_after.py", "computer.py", "control.py", "impersonation.py", 
 "__init__.py" = "strict"
 
 [debt.ambient-read]
-"impersonation.py#pid sys.executable" = { count = 2, owner = "#8237", until = "waits for `_request` to take the interpreter path from its caller: it reads `sys.executable` itself" }
+"impersonation.py#pid sys.executable" = { count = 2, owner = "#5816", until = "waits for `_request` to take the interpreter path from its caller: it reads `sys.executable` itself" }

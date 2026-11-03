@@ -13,5 +13,5 @@ exports = ["control.py", "cron.py", "health.py", "home.py", "ops.py", "plans", "
 "__init__.py" = "strict"
 
 [debt.ambient-read]
-"control.py#clock datetime.datetime.astimezone" = { count = 1, owner = "#8237", until = "waits for `cmd_db_authority_issue_unit` to take the time zone as a value: `.astimezone()` with no argument converts to the host's zone" }
-"control.py#clock datetime.datetime.fromtimestamp()" = { count = 1, owner = "#8237", until = "waits for `cmd_db_authority_issue_unit` to take the time zone as a value: `fromtimestamp` without a zone converts to the host's zone" }
+"control.py#clock datetime.datetime.astimezone" = { count = 1, owner = "#5816", until = "waits for `cmd_db_authority_issue_unit` to take the time zone as a value: `.astimezone()` with no argument converts to the host's zone" }
+"control.py#clock datetime.datetime.fromtimestamp()" = { count = 1, owner = "#5816", until = "waits for `cmd_db_authority_issue_unit` to take the time zone as a value: `fromtimestamp` without a zone converts to the host's zone" }

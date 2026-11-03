@@ -2,4 +2,4 @@
 "tests" = ["__init__.py"]
 
 [debt.ambient-read]
-"__init__.py#environ shutil.which()" = { count = 1, owner = "#8237", until = "waits for `_binary` to take the program path, or the search path, from its caller: it asks PATH for the program itself" }
+"__init__.py#environ shutil.which()" = { count = 1, owner = "#5816", until = "waits for `_binary` to take the program path, or the search path, from its caller: it asks PATH for the program itself" }

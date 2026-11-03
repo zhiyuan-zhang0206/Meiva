@@ -6,5 +6,5 @@ exports = ["api_keys.py", "config_authority.py", "configuration.py", "served_gat
 "test_slice_defaults.py" = ["configuration.py"]
 
 [debt.restricted-python]
-"_boot_lite_child.py#dynamic attribute name" = { count = 2, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }
-"configuration.py#dynamic attribute name" = { count = 4, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }
+"_boot_lite_child.py#dynamic attribute name" = { count = 2, owner = "#6082", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }
+"configuration.py#dynamic attribute name" = { count = 4, owner = "#6082", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

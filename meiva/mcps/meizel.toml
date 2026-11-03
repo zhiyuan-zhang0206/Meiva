@@ -27,4 +27,4 @@ exports = ["config.py", "tests"]
 "_oauth.py#assignment mcp.client.auth.utils.validate_metadata_issuer" = { count = 1, owner = "#6018", until = "waits for mcp to compare issuers through a seam a caller can replace: the same seam as the oauth2 entry -- mcp.client.auth.oauth2 binds this function by name at import, so replacing it in the defining module alone leaves the flow's copy strict, and both assignments go together the day either seam disappears" }
 
 [debt.ambient-read]
-"_oauth.py#environ webbrowser.open" = { count = 1, owner = "#8237", until = "waits for `_open_browser` to take the function that opens a page from its caller: it lets `webbrowser` choose the browser from the process environment" }
+"_oauth.py#environ webbrowser.open" = { count = 1, owner = "#5816", until = "waits for `_open_browser` to take the function that opens a page from its caller: it lets `webbrowser` choose the browser from the process environment" }

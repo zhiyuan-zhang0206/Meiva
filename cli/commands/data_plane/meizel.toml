@@ -20,6 +20,6 @@ exports = ["bringup.py", "cluster_instance.py", "completion.py", "config.py", "h
 "stop_budget.py" = "strict"
 
 [debt.ambient-read]
-"cluster_instance.py#environ getpass.getuser" = { count = 1, owner = "#8237", until = "waits for `_identity` to take the operator's user name from its caller: it asks getpass for it" }
-"cluster_instance.py#pid getpass.getuser" = { count = 1, owner = "#8237", until = "waits for `_identity` to take the operator's user name from its caller: it asks getpass for it" }
-"pgbouncer.py#environ shutil.which()" = { count = 1, owner = "#8237", until = "waits for `binary_installed` to take the program path, or the search path, from its caller: it asks PATH for the program itself" }
+"cluster_instance.py#environ getpass.getuser" = { count = 1, owner = "#5816", until = "waits for `_identity` to take the operator's user name from its caller: it asks getpass for it" }
+"cluster_instance.py#pid getpass.getuser" = { count = 1, owner = "#5816", until = "waits for `_identity` to take the operator's user name from its caller: it asks getpass for it" }
+"pgbouncer.py#environ shutil.which()" = { count = 1, owner = "#5816", until = "waits for `binary_installed` to take the program path, or the search path, from its caller: it asks PATH for the program itself" }

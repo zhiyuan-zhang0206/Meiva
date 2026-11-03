@@ -18,4 +18,4 @@ exports = ["claim", "exec", "hooks", "interrupt", "llm", "llm_errors.py", "node_
 "tests" = ["__init__.py", "_attach_drain.py", "_attach_merge.py", "_callbacks.py", "_init_context.py", "_shared.py", "agent_traceback.py", "claim", "exec", "hooks", "interrupt", "llm", "llm_errors.py", "prompt", "recall"]
 
 [debt.restricted-python]
-"__init__.py#module __getattr__" = { count = 1, owner = "#8266", until = "waits for the lazy re-export to import its fixed names explicitly: the module serves a few names written in the source, so none of them is known only at run time" }
+"__init__.py#module __getattr__" = { count = 1, owner = "#6082", until = "waits for the lazy re-export to import its fixed names explicitly: the module serves a few names written in the source, so none of them is known only at run time" }

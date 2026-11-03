@@ -14,4 +14,4 @@ exports = ["check_doc_references.py", "lint_meiva_okf.py", "lint_no_cjk.py", "li
 "lint_no_tailnet.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 
 [debt.ambient-read]
-"check_doc_references.py#cwd pathlib.Path.absolute" = { count = 1, owner = "#8237", until = "waits for `main` to require an absolute `repo` and absolute docs: `.absolute()` anchors a relative path at the working directory" }
+"check_doc_references.py#cwd pathlib.Path.absolute" = { count = 1, owner = "#5816", until = "waits for `main` to require an absolute `repo` and absolute docs: `.absolute()` anchors a relative path at the working directory" }

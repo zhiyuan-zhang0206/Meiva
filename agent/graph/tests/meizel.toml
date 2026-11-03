@@ -7,4 +7,4 @@ exports = ["cancel_fixture.py", "test_llm_helpers.py"]
 "test_agent_traceback.py" = "executes agent-style code to check how its traceback is rendered"
 
 [debt.restricted-python]
-"test_metering_graph.py#dynamic attribute name" = { count = 2, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }
+"test_metering_graph.py#dynamic attribute name" = { count = 2, owner = "#6082", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

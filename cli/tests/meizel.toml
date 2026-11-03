@@ -12,4 +12,4 @@ exports = ["bootstrap", "guards"]
 "test_start_gate.py" = ["bootstrap/child_admitted_home.py", "guards/start_refusal_child.py"]
 
 [debt.restricted-python]
-"test_cluster_health_parser.py#dynamic attribute name" = { count = 2, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }
+"test_cluster_health_parser.py#dynamic attribute name" = { count = 2, owner = "#6082", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }
