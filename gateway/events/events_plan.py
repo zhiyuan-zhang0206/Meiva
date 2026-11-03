@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import TypedDict
 
 from base.events.contract import EVENTS, EventTier
 
@@ -66,6 +67,21 @@ class EventsRequest:
 
 
 # meiva:note
+# The keyword arguments of the stores' read functions that carry the filters: `EventsFilters`
+# spread into a call, so a store's signature and this shape are checked against each other.
+class FilterKwargs(TypedDict):
+    agent_id: int | None
+    event_names: list[str] | None
+    tiers: list[EventTier] | None
+    trace_id: str | None
+    machine: str | None
+    level: str | None
+    attribute_filters: dict[str, str] | None
+    from_: datetime | None
+    to: datetime | None
+
+
+# meiva:note
 # The filters every store applies, already validated and normalized.
 @dataclass(frozen=True)
 class EventsFilters:
@@ -78,6 +94,19 @@ class EventsFilters:
     attribute_filters: dict[str, str] | None
     from_: datetime | None
     to: datetime | None
+
+    def kwargs(self) -> FilterKwargs:
+        return FilterKwargs(
+            agent_id=self.agent_id,
+            event_names=self.event_names,
+            tiers=self.tiers,
+            trace_id=self.trace_id,
+            machine=self.machine,
+            level=self.level,
+            attribute_filters=self.attribute_filters,
+            from_=self.from_,
+            to=self.to,
+        )
 
 
 # meiva:note

@@ -82,29 +82,13 @@ def _count(request: Request, plan: EventsPlan) -> int:
         if plan.use_audit:
             total += audit_rows.count_events(
                 conn,
-                agent_id=f.agent_id,
-                event_names=f.event_names,
-                tiers=f.tiers,
-                trace_id=f.trace_id,
-                machine=f.machine,
-                level=f.level,
-                attribute_filters=f.attribute_filters,
-                from_=f.from_,
-                to=f.to,
+                **f.kwargs(),
             )
         if plan.use_telemetry:
             total += telemetry_rows.count_events(
                 conn,
                 categories=plan.telemetry_categories,
-                agent_id=f.agent_id,
-                event_names=f.event_names,
-                tiers=f.tiers,
-                trace_id=f.trace_id,
-                machine=f.machine,
-                level=f.level,
-                attribute_filters=f.attribute_filters,
-                from_=f.from_,
-                to=f.to,
+                **f.kwargs(),
             )
     return total
 
@@ -126,15 +110,7 @@ def _read_page(request: Request, plan: EventsPlan) -> tuple[list[EventRecord], b
                 conn,
                 limit=depth,
                 offset=page_offset,
-                agent_id=f.agent_id,
-                event_names=f.event_names,
-                tiers=f.tiers,
-                trace_id=f.trace_id,
-                machine=f.machine,
-                level=f.level,
-                attribute_filters=f.attribute_filters,
-                from_=f.from_,
-                to=f.to,
+                **f.kwargs(),
             )
             rows += page
             has_more = has_more or more
@@ -144,15 +120,7 @@ def _read_page(request: Request, plan: EventsPlan) -> tuple[list[EventRecord], b
                 categories=plan.telemetry_categories,
                 limit=depth,
                 offset=page_offset,
-                agent_id=f.agent_id,
-                event_names=f.event_names,
-                tiers=f.tiers,
-                trace_id=f.trace_id,
-                machine=f.machine,
-                level=f.level,
-                attribute_filters=f.attribute_filters,
-                from_=f.from_,
-                to=f.to,
+                **f.kwargs(),
             )
             rows += page
             has_more = has_more or more
