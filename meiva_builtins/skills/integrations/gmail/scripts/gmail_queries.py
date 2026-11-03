@@ -36,8 +36,12 @@ def since_to_ts(since: str | None, now_ts: int) -> int | None:
         return None
     m = _RE_RELATIVE_SINCE.fullmatch(since)
     if m:
-        secs = int(m.group(1)) * (86400 if m.group(2) == "d" else 3600)
-        return now_ts - secs
+        # meiva:note
+        # `Match.group` is typed `str | Any` (the stub cannot see the pattern's groups) and a union
+        # carrying `Any` is one `reportAny` leaves alone: both captures are guarded into a `str`.
+        amount, unit = m.group(1), m.group(2)
+        if isinstance(amount, str) and isinstance(unit, str):
+            return now_ts - int(amount) * (86400 if unit == "d" else 3600)
     try:
         parsed = _dt.datetime.fromisoformat(since)
     except ValueError:

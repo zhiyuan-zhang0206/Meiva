@@ -65,7 +65,13 @@ def parse_drafts_folder(lines: Sequence[object]) -> str:
         m = _RE_LIST_LINE.match(s)
         if not m:
             raise GmailError(f"unparseable LIST line: {s!r}")
-        attrs, name = m.groups()
+        # meiva:note
+        # `Match.groups()` answers `tuple[str | Any, ...]` (the stub cannot see the pattern's
+        # groups) and a union carrying `Any` is one `reportAny` leaves alone, so both captures are
+        # guarded into a `str` before anything reads them.
+        attrs, name = m.group(1), m.group(2)
+        if not isinstance(attrs, str) or not isinstance(name, str):
+            raise GmailError(f"unparseable LIST line: {s!r}")
         if "\\drafts" in attrs.lower():
             name = name.strip()
             return name[1:-1] if name.startswith('"') and name.endswith('"') else name

@@ -11,6 +11,8 @@ import html
 import re
 from email.message import EmailMessage, Message
 
+from base.host.boundary.untyped import object_of
+
 _RE_TAG = re.compile(r"<[^>]+>")
 _RE_SCRIPT_STYLE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
 _RE_WS = re.compile(r"[ \t]*\n[ \t]*")
@@ -26,8 +28,15 @@ _RE_LIST_ID_BRACKET = re.compile(r"<([^>]+)>")
 def parse_list_id(raw: str | None) -> str | None:
     if not raw:
         return None
-    groups = _RE_LIST_ID_BRACKET.findall(raw)
-    return groups[-1].strip() if groups else raw.strip()
+    # meiva:note
+    # `findall` answers `list[Any]` whatever the pattern is, so the last bracket pair is taken off
+    # `finditer` with each capture guarded into a `str`.
+    last: str | None = None
+    for match in _RE_LIST_ID_BRACKET.finditer(raw):
+        bracket = match.group(1)
+        if isinstance(bracket, str):
+            last = bracket
+    return last.strip() if last is not None else raw.strip()
 
 
 # meiva:note
@@ -46,14 +55,24 @@ def iso(date_hdr: str | None) -> str | None:
 
 
 # meiva:note
+# The value of header `name`, or None. `Message.__getitem__` answers `Any` (a header may be a
+# structured object, not text), and `reportAny` leaves `(value or "")` alone because the union
+# carries the `Any`; `object_of` reads it as an opaque value and the guard makes it the `str` a
+# plain header is. Every header read in this skill goes through here.
+def header(msg: Message[str, str], name: str) -> str | None:
+    value = object_of(msg.__getitem__, name)
+    return value if isinstance(value, str) else None
+
+
+# meiva:note
 # The metadata every lens returns -- newsletter identity lives in List-Id.
 def meta(msg: Message[str, str]) -> dict[str, str | None]:
     return {
-        "message_id": (msg["Message-Id"] or "").strip().strip("<>") or None,
-        "list_id": parse_list_id(msg["List-Id"]),
-        "from": (msg["From"] or "").strip() or None,
-        "subject": (msg["Subject"] or "").strip() or None,
-        "date": iso(msg["Date"]),
+        "message_id": (header(msg, "Message-Id") or "").strip().strip("<>") or None,
+        "list_id": parse_list_id(header(msg, "List-Id")),
+        "from": (header(msg, "From") or "").strip() or None,
+        "subject": (header(msg, "Subject") or "").strip() or None,
+        "date": iso(header(msg, "Date")),
     }
 
 
@@ -66,7 +85,7 @@ def addr_list(raw: str | None) -> list[str]:
     return [addr for _, addr in email.utils.getaddresses([raw]) if addr]
 
 
-def html_to_text(html_body: str) -> str:
+def _html_to_text(html_body: str) -> str:
     no_scripts = _RE_SCRIPT_STYLE.sub(" ", html_body)
     text = html.unescape(_RE_TAG.sub(" ", no_scripts))
     return _RE_WS.sub("\n", re.sub(r"[ \t]{2,}", " ", text)).strip()
@@ -79,8 +98,11 @@ def html_to_text(html_body: str) -> str:
 def body_text(msg: EmailMessage) -> str:
     plain = msg.get_body(preferencelist=("plain",))
     if plain is not None:
-        return str(plain.get_content()).strip()
+        # meiva:note
+        # `get_content` answers `Any` (the part's payload may be bytes, a message or text), so it is
+        # read as an opaque value and rendered by `str` -- the text this function returns.
+        return str(object_of(plain.get_content)).strip()
     htmlpart = msg.get_body(preferencelist=("html",))
     if htmlpart is not None:
-        return html_to_text(str(htmlpart.get_content()))
+        return _html_to_text(str(object_of(htmlpart.get_content)))
     return ""

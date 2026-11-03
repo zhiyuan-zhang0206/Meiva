@@ -72,6 +72,8 @@ from gmail_wire import validate_limit
 from imap import discover, enum, fetch, read, search, sync, to_s1
 from smtp import draft, draft_delete, forward, reply, send
 
+from base.host.boundary.options import attribute, options
+
 
 # meiva:note
 # Everything the CLI reads from its process, read once by the entry point: where the
@@ -160,92 +162,186 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 # meiva:note
-# Run the lens `args.cmd` names and return its JSON-able result.
-def _run(args: argparse.Namespace, proc: Process) -> object:
+# The flags each lens reads, as argparse left them. `options` checks every field against its
+# annotation once, so no branch below reads the `Any` a `Namespace` attribute would hand it.
+@dataclass(frozen=True)
+class _SearchOptions:
+    query: str
+    limit: int
+
+
+@dataclass(frozen=True)
+class _ReadOptions:
+    query: str | None
+    message_id: str | None
+    limit: int
+
+
+@dataclass(frozen=True)
+class _DiscoverOptions:
+    since: str | None
+
+
+@dataclass(frozen=True)
+class _EnumOptions:
+    list_id: str
+    since: str | None
+    limit: int | None
+
+
+@dataclass(frozen=True)
+class _MessageOptions:
+    message_id: str
+
+
+@dataclass(frozen=True)
+class _ComposeOptions:
+    to: str
+    subject: str
+    body: str | None
+    cc: str | None
+    attach: Sequence[str] | None
+    dry_run: bool
+
+
+@dataclass(frozen=True)
+class _ReplyOptions:
+    message_id: str
+    body: str | None
+    reply_all: bool
+    attach: Sequence[str] | None
+    dry_run: bool
+
+
+@dataclass(frozen=True)
+class _ForwardOptions:
+    message_id: str
+    to: str
+    body: str
+    cc: str | None
+    attach: Sequence[str] | None
+    dry_run: bool
+
+
+# meiva:note
+# The body of a send/reply/draft: `--body` if given, else the piped text -- and the stream is read
+# only when the flag is absent, so a `--body` run never waits on a terminal.
+def _body_of(flag: str | None, stdin: TextIO) -> str:
+    return body_arg(flag, stdin.read() if flag is None else "")
+
+
+# meiva:note
+# Run the lens `--` the subcommand `cmd` names -- against the process facts in `proc`, returning its
+# JSON-able result.
+def _run(args: argparse.Namespace, proc: Process, stdin: TextIO) -> object:
     auth = proc.auth
-    match args.cmd:
+    match attribute(args, "cmd", str):
         case "search":
-            return search(auth, args.query, limit=args.limit)
+            search_opts = options(args, _SearchOptions)
+            validate_limit(search_opts.limit)
+            return search(auth, search_opts.query, limit=search_opts.limit)
         case "read":
-            return read(auth, query=args.query, message_id=args.message_id, limit=args.limit)
+            read_opts = options(args, _ReadOptions)
+            validate_limit(read_opts.limit)
+            return read(
+                auth,
+                query=read_opts.query,
+                message_id=read_opts.message_id,
+                limit=read_opts.limit,
+            )
         case "discover":
-            return discover(auth, since_ts=since_to_ts(args.since, proc.now_ts))
+            discover_opts = options(args, _DiscoverOptions)
+            return discover(auth, since_ts=since_to_ts(discover_opts.since, proc.now_ts))
         case "enum":
+            enum_opts = options(args, _EnumOptions)
+            validate_limit(enum_opts.limit)
             return enum(
-                auth, args.list_id, since_ts=since_to_ts(args.since, proc.now_ts), limit=args.limit
+                auth,
+                enum_opts.list_id,
+                since_ts=since_to_ts(enum_opts.since, proc.now_ts),
+                limit=enum_opts.limit,
             )
         case "sync":
+            sync_opts = options(args, _EnumOptions)
+            validate_limit(sync_opts.limit)
             return sync(
                 auth,
-                args.list_id,
+                sync_opts.list_id,
                 root=proc.mirror_root,
                 now_ts=proc.now_ts,
-                since_ts=since_to_ts(args.since, proc.now_ts),
-                limit=args.limit,
+                since_ts=since_to_ts(sync_opts.since, proc.now_ts),
+                limit=sync_opts.limit,
             )
         case "fetch":
+            fetch_opts = options(args, _MessageOptions)
             return to_s1(
-                fetch(auth, args.message_id, root=proc.mirror_root, now_ts=proc.now_ts),
+                fetch(
+                    auth,
+                    fetch_opts.message_id,
+                    root=proc.mirror_root,
+                    now_ts=proc.now_ts,
+                ),
                 root=proc.mirror_root,
             )
         case "send":
+            send_opts = options(args, _ComposeOptions)
             return send(
                 auth,
-                args.to,
-                args.subject,
-                args.body,
-                cc=args.cc,
-                attach=args.attach,
-                dry_run=args.dry_run,
+                send_opts.to,
+                send_opts.subject,
+                _body_of(send_opts.body, stdin),
+                cc=send_opts.cc,
+                attach=send_opts.attach,
+                dry_run=send_opts.dry_run,
                 now_ts=proc.now_ts,
             )
         case "forward":
+            forward_opts = options(args, _ForwardOptions)
             return forward(
                 auth,
-                args.message_id,
-                args.to,
-                body=args.body,
-                cc=args.cc,
-                attach=args.attach,
-                dry_run=args.dry_run,
+                forward_opts.message_id,
+                forward_opts.to,
+                body=forward_opts.body,
+                cc=forward_opts.cc,
+                attach=forward_opts.attach,
+                dry_run=forward_opts.dry_run,
                 now_ts=proc.now_ts,
             )
         case "draft":
+            draft_opts = options(args, _ComposeOptions)
             return draft(
                 auth,
-                args.to,
-                args.subject,
-                args.body,
-                cc=args.cc,
-                attach=args.attach,
-                dry_run=args.dry_run,
+                draft_opts.to,
+                draft_opts.subject,
+                _body_of(draft_opts.body, stdin),
+                cc=draft_opts.cc,
+                attach=draft_opts.attach,
+                dry_run=draft_opts.dry_run,
                 now_ts=proc.now_ts,
             )
         case "draft-delete":
-            return draft_delete(auth, args.message_id)
+            delete_opts = options(args, _MessageOptions)
+            return draft_delete(auth, delete_opts.message_id)
         case "reply":
+            reply_opts = options(args, _ReplyOptions)
             return reply(
                 auth,
-                args.message_id,
-                args.body,
-                reply_all=args.reply_all,
-                attach=args.attach,
-                dry_run=args.dry_run,
+                reply_opts.message_id,
+                _body_of(reply_opts.body, stdin),
+                reply_all=reply_opts.reply_all,
+                attach=reply_opts.attach,
+                dry_run=reply_opts.dry_run,
                 now_ts=proc.now_ts,
             )
-        case _:
-            raise ValueError(f"unknown command {args.cmd!r}")
+        case other:
+            raise ValueError(f"unknown command {other!r}")
 
 
 # meiva:note
 # The CLI: parse `argv`, run the lens against the process facts in `proc`, print the JSON.
 def main(argv: Sequence[str], proc: Process, stdin: TextIO) -> None:
     args = _build_parser().parse_args(argv)
-    if args.cmd in {"search", "read", "enum", "sync"}:
-        validate_limit(args.limit)
-    if args.cmd in {"send", "reply", "draft"}:
-        args.body = body_arg(args.body, stdin.read() if args.body is None else "")
-    print(json.dumps(_run(args, proc), ensure_ascii=False, indent=2))
+    print(json.dumps(_run(args, proc, stdin), ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

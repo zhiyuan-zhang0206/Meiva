@@ -21,7 +21,7 @@ from email.parser import BytesParser
 from email.policy import default as _default_policy
 from functools import cache as _cache
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 
 from gmail_auth import (
     AuthSources,
@@ -31,13 +31,87 @@ from gmail_auth import (
     no_password_error,
     normalize_password,
 )
-from gmail_headers import body_text, meta
+from gmail_headers import body_text, header, meta
 from gmail_queries import discover_query, enum_query, list_id_counts, message_query, read_query
 from gmail_wire import ALL_MAIL, parse_search_response, recent, xgm
 from loguru import logger
 
+from base.host.boundary.fields import (
+    int_field,
+    optional_list_field,
+    optional_object_field,
+    optional_str_field,
+    str_field,
+)
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
+
 IMAP_HOST = "imap.gmail.com"
 IMAP_PORT = 993
+
+
+# meiva:note
+# The author block a mirrored post and an S1 item both carry: the newsletter's durable id (its
+# List-Id, which survives a From address change) and the display name the message came from.
+class Author(TypedDict):
+    id: str | None
+    name: str | None
+
+
+# meiva:note
+# One saved attachment, as the mirror's manifest records it: the traversal-safe name it landed
+# under, the MIME type that named it, whether the sender marked it inline, its size, and its path.
+class Attachment(TypedDict):
+    filename: str
+    content_type: str
+    disposition: str | None
+    size: int
+    path: str
+
+
+# meiva:note
+# The curated post `fetch` returns and `save` writes as `post.json`: one message as a feed item,
+# with the body text, its canonical permalink and the attachment manifest.
+class Post(TypedDict):
+    platform: str
+    message_id: str
+    list_id: str | None
+    url: str | None
+    title: str | None
+    text: str
+    author: Author
+    published_at: str | None
+    list_unsubscribe: str | None
+    attachments: list[Attachment]
+    fetched_at: str
+    fetched_via: str
+
+
+# meiva:note
+# One entry of an S1 item's `media`: the kind of asset (its MIME major type) and where it landed.
+class S1Media(TypedDict):
+    kind: str
+    path: str
+
+
+# meiva:note
+# The cross-platform S1 item `to_s1` projects a post onto: the schema the `web-sources` adapters
+# share, with the newsletter's List-Id as the author and no matrix entity (issues are singletons).
+class S1Item(TypedDict):
+    platform: str
+    source_id: str
+    url: str | None
+    author: Author
+    matrix_entity: str | None
+    title: str | None
+    text: str | None
+    transcript: str | None
+    published_at: str | None
+    fetched_at: str | None
+    fetched_via: str | None
+    media: list[S1Media]
+    stats: dict[str, object]
+    raw_path: str
 
 
 # meiva:note
@@ -177,7 +251,7 @@ def _canonical_url(text: str) -> str | None:
 # The general "find me mail" lens -- e.g. `from:foo newer_than:7d`, `subject:invoice`,
 # `category:updates`. Each item is `meta` (message_id / list_id / from / subject / date).
 # 50 headers keep an interactive search page light (task #3696 exception inventory).
-def search(auth: AuthSources, query: str, *, limit: int | None = 50) -> list[dict[str, Any]]:
+def search(auth: AuthSources, query: str, *, limit: int | None = 50) -> list[dict[str, str | None]]:
     return [meta(_headers(auth, uid)) for uid in recent(search_ids(auth, query), limit)]
 
 
@@ -189,9 +263,9 @@ def search(auth: AuthSources, query: str, *, limit: int | None = 50) -> list[dic
 # `fetch`). Read pulls fewer full messages (5) than search pulls headers.
 def read(
     auth: AuthSources, *, query: str | None = None, message_id: str | None = None, limit: int = 5
-) -> list[dict[str, Any]]:
+) -> list[dict[str, str | None]]:
     q = read_query(query, message_id)
-    out: list[dict[str, Any]] = []
+    out: list[dict[str, str | None]] = []
     for uid in recent(search_ids(auth, q), limit):
         _, msg = fetch_full(auth, uid)
         out.append({**meta(msg), "text": body_text(msg)})
@@ -225,7 +299,7 @@ def enum(
     since_ts: int | None = None,
     limit: int | None = None,
     max_scan: int = 200,
-) -> list[dict[str, Any]]:
+) -> list[dict[str, str | None]]:
     if limit is not None and limit <= 0:
         return []
     ids = search_ids(auth, enum_query(list_id, since_ts))
@@ -278,8 +352,8 @@ def _safe_filename(raw: str | None, *, fallback: str, content_type: str) -> str:
 # ('attachment'/'inline') tells them apart -- each to a deduplicated, traversal-safe filename.
 # A row is `{filename, content_type, disposition, size, path}`. No parts means an empty list
 # and no dir created.
-def _attachments(msg: EmailMessage, outdir: Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
+def _attachments(msg: EmailMessage, outdir: Path) -> list[Attachment]:
+    rows: list[Attachment] = []
     used: set[str] = set()
     adir = outdir / "attachments"
     for i, part in enumerate(msg.iter_attachments()):
@@ -294,7 +368,10 @@ def _attachments(msg: EmailMessage, outdir: Path) -> list[dict[str, Any]]:
             name = f"{Path(base).stem}_{n}{Path(base).suffix}"
             n += 1
         used.add(name)
-        payload = part.get_content()
+        # meiva:note
+        # `get_content` answers `Any` (a part's payload may be bytes, a nested message or text), so
+        # it is read as an opaque value and encoded when it is not already bytes.
+        payload = object_of(part.get_content)
         data = payload if isinstance(payload, (bytes, bytearray)) else str(payload).encode()
         adir.mkdir(parents=True, exist_ok=True)
         (adir / name).write_bytes(data)
@@ -318,7 +395,7 @@ def _attachments(msg: EmailMessage, outdir: Path) -> list[dict[str, Any]]:
 # (never-deleted raw) + `post.json` + `post.md` + any attachments under `attachments/`, and
 # returns the curated post dict (with an `attachments` manifest). Body text is the plain part
 # (or stripped html).
-def fetch(auth: AuthSources, message_id: str, *, root: Path, now_ts: float) -> dict[str, Any]:
+def fetch(auth: AuthSources, message_id: str, *, root: Path, now_ts: float) -> Post:
     # meiva:note
     # The CLI passes <id>, sync passes the bare id; canonicalize.
     message_id = message_id.strip().strip("<>")
@@ -327,22 +404,26 @@ def fetch(auth: AuthSources, message_id: str, *, root: Path, now_ts: float) -> d
         raise GmailError(f"no message with Message-Id {message_id!r}")
     raw, msg = fetch_full(auth, ids[-1])
     msg_meta = meta(msg)
-    if not msg_meta["message_id"]:
+    # meiva:note
+    # A message without a Message-Id has no stable key to mirror it under, so it is refused; binding
+    # it here is also what makes the rest of the function hold a `str`.
+    stored_id = msg_meta["message_id"]
+    if not stored_id:
         raise GmailError(f"message {message_id!r} has no Message-Id header")
     text = body_text(msg)
     from_name = email.utils.parseaddr(msg_meta["from"] or "")[0] or msg_meta["from"]
-    outdir = _outdir(msg_meta["message_id"], root)
+    outdir = _outdir(stored_id, root)
     outdir.mkdir(parents=True, exist_ok=True)
-    post: dict[str, Any] = {
+    post: Post = {
         "platform": "gmail",
-        "message_id": msg_meta["message_id"],
+        "message_id": stored_id,
         "list_id": msg_meta["list_id"],
         "url": _canonical_url(text),
         "title": msg_meta["subject"],
         "text": text,
         "author": {"id": msg_meta["list_id"], "name": from_name},
         "published_at": msg_meta["date"],
-        "list_unsubscribe": (msg["List-Unsubscribe"] or "").strip() or None,
+        "list_unsubscribe": (header(msg, "List-Unsubscribe") or "").strip() or None,
         "attachments": _attachments(msg, outdir),
         "fetched_at": _iso_utc(now_ts),
         "fetched_via": "gmail",
@@ -354,10 +435,11 @@ def fetch(auth: AuthSources, message_id: str, *, root: Path, now_ts: float) -> d
 # meiva:note
 # Persist a fetched message to `<root>/<safe-id>/` (raw.eml + post.json + post.md; any
 # attachments are written separately by `fetch`).
-def save(post: dict[str, Any], raw_eml: bytes, *, root: Path) -> Path:
-    if not post.get("message_id"):
+def save(post: Post, raw_eml: bytes, *, root: Path) -> Path:
+    message_id = post["message_id"]
+    if not message_id:
         raise ValueError("refusing to save a message with no Message-Id")
-    outdir = _outdir(post["message_id"], root)
+    outdir = _outdir(message_id, root)
     outdir.mkdir(parents=True, exist_ok=True)
     (outdir / "raw.eml").write_bytes(raw_eml)
     (outdir / "post.json").write_text(json.dumps(post, ensure_ascii=False, indent=2))
@@ -365,7 +447,7 @@ def save(post: dict[str, Any], raw_eml: bytes, *, root: Path) -> Path:
     return outdir
 
 
-def _render_markdown(post: dict[str, Any]) -> str:
+def _render_markdown(post: Post) -> str:
     a = post["author"]
     lines = [
         f"# {post.get('title') or post['message_id']}",
@@ -384,14 +466,17 @@ def _render_markdown(post: dict[str, Any]) -> str:
 # `web-sources` adapters (see `web-sources/SKILL.md`). author.id = List-Id (the durable
 # per-newsletter key); newsletters are singletons, so matrix_entity stays null. `root` is the
 # mirror root the message was saved under, which is where `raw_path` points.
-def to_s1(post: dict[str, Any], *, root: Path, matrix_entity: str | None = None) -> dict[str, Any]:
+def to_s1(post: Post, *, root: Path, matrix_entity: str | None = None) -> S1Item:
     a = post["author"]
     # meiva:note
     # S1 `media` is image|video only; other attachments (pdf, ...) still land on disk + in
-    # post.json `attachments`, they just are not "media" in S1 terms.
-    media = [
+    # post.json `attachments`, they just are not "media" in S1 terms. `attachments` is read as a
+    # required key because every `Post` that reaches here was built by `fetch` or by
+    # `_post_from_mirror`, which fills `[]` for a `post.json` written before the key existed -- a
+    # hand-built dict without it is outside that contract.
+    media: list[S1Media] = [
         {"kind": att["content_type"].split("/", 1)[0], "path": att["path"]}
-        for att in post.get("attachments", [])
+        for att in post["attachments"]
         if att["content_type"].split("/", 1)[0] in ("image", "video")
     ]
     return {
@@ -413,14 +498,65 @@ def to_s1(post: dict[str, Any], *, root: Path, matrix_entity: str | None = None)
 
 
 # meiva:note
+# The post a previous run wrote into the mirror, read back as the value it was written as. The file
+# is this skill's own, but reading it decodes untyped JSON, so each field is taken through the
+# boundary readers and a missing or mistyped one raises `GmailError` naming the file rather than
+# flowing on as a wrong type.
+def _post_from_mirror(raw: object, path: Path) -> Post:
+    if not is_object_dict(raw):
+        raise GmailError(f"mirror {path} does not hold a JSON object")
+    # meiva:note
+    # The boundary readers raise a bare `TypeError` naming the key (`text is missing, not str`),
+    # which says nothing about WHICH mirror file is broken; every read below is wrapped so the
+    # failure an operator sees names the file.
+    try:
+        author = optional_object_field(raw, "author") or {}
+        attachments: list[Attachment] = []
+        for item in optional_list_field(raw, "attachments") or []:
+            if not is_object_dict(item):
+                raise GmailError(f"mirror {path} holds an attachment that is not a JSON object")
+            attachments.append(
+                Attachment(
+                    filename=str_field(item, "filename"),
+                    content_type=str_field(item, "content_type"),
+                    disposition=optional_str_field(item, "disposition"),
+                    size=int_field(item, "size"),
+                    path=str_field(item, "path"),
+                )
+            )
+        return Post(
+            platform=str_field(raw, "platform"),
+            message_id=str_field(raw, "message_id"),
+            list_id=optional_str_field(raw, "list_id"),
+            url=optional_str_field(raw, "url"),
+            title=optional_str_field(raw, "title"),
+            text=str_field(raw, "text"),
+            author={
+                "id": optional_str_field(author, "id"),
+                "name": optional_str_field(author, "name"),
+            },
+            published_at=optional_str_field(raw, "published_at"),
+            list_unsubscribe=optional_str_field(raw, "list_unsubscribe"),
+            attachments=attachments,
+            fetched_at=str_field(raw, "fetched_at"),
+            fetched_via=str_field(raw, "fetched_via"),
+        )
+    except TypeError as error:
+        raise GmailError(f"mirror {path}: {error}") from error
+
+
+# meiva:note
 # Return the saved post if its raw mirror already exists (re-runs over the same `--since`
 # window reuse it instead of re-fetching) -- Message-Id is the stable, account-independent
 # dedup key.
-def _load_if_mirrored(message_id: str, *, root: Path) -> dict[str, Any] | None:
+def _load_if_mirrored(message_id: str, *, root: Path) -> Post | None:
     post_json = root / _safe_id(message_id) / "post.json"
     if not post_json.exists():
         return None
-    return json.loads(post_json.read_text())
+    # meiva:note
+    # `json.loads` answers `Any`; `object_of` hands the decoded document back as an `object` for
+    # `_post_from_mirror` to read field by field.
+    return _post_from_mirror(object_of(json.loads, post_json.read_text()), post_json)
 
 
 # meiva:note
@@ -437,8 +573,8 @@ def sync(
     since_ts: int | None = None,
     limit: int | None = None,
     matrix_entity: str | None = None,
-) -> list[dict[str, Any]]:
-    out: list[dict[str, Any]] = []
+) -> list[S1Item]:
+    out: list[S1Item] = []
     for it in enum(auth, list_id, since_ts=since_ts, limit=limit):
         mid = it["message_id"]
         if not mid:
