@@ -173,13 +173,13 @@ def _run_probe(worktree: Path, pytest_python: Path, pytest_target: str) -> int:
     return map_pytest_exit_code(done.returncode)
 
 
-def _default_pytest_python(repository: Path) -> Path:
+def _default_pytest_python(repository: Path, *, fallback: Path) -> Path:
     candidate = repository.resolve() / ".venv" / "bin" / "python"
-    return candidate if candidate.exists() else Path(sys.executable)
+    return candidate if candidate.exists() else fallback
 
 
 def _execute_bisect(
-    repository: Path, plan: BisectPlan, pytest_python: Path
+    repository: Path, plan: BisectPlan, pytest_python: Path, *, python: Path
 ) -> tuple[dict[str, object], int]:
     script_path = Path(__file__).resolve()
     # meiva:note
@@ -201,7 +201,7 @@ def _execute_bisect(
                 worktree,
                 "bisect",
                 "run",
-                sys.executable,
+                str(python),
                 str(script_path),
                 "probe",
                 "--worktree",
@@ -291,7 +291,7 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Sequence[str]) -> int:
+def main(argv: Sequence[str], *, python: Path) -> int:
     namespace = _parser().parse_args(argv)
     subcommand = attribute(namespace, "subcommand", str)
     if subcommand == "probe":
@@ -330,12 +330,12 @@ def main(argv: Sequence[str]) -> int:
     pytest_python = (
         run_options.pytest_python
         if run_options.pytest_python is not None
-        else _default_pytest_python(args.repo)
+        else _default_pytest_python(args.repo, fallback=python)
     )
-    payload, rc = _execute_bisect(args.repo, plan, pytest_python)
+    payload, rc = _execute_bisect(args.repo, plan, pytest_python, python=python)
     print(json.dumps(payload))
     return rc
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(main(sys.argv[1:], python=Path(sys.executable)))

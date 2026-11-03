@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import inspect
 import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -89,7 +91,8 @@ def test_bisect_train_plans_and_isolates_exact_culprit_without_mutating_checkout
                 "HEAD",
                 "--pytest-target",
                 "test_calc.py::test_add_one",
-            ]
+            ],
+            python=Path(sys.executable),
         )
         == 0
     )
@@ -112,7 +115,8 @@ def test_bisect_train_plans_and_isolates_exact_culprit_without_mutating_checkout
                 "test_calc.py::test_add_one",
                 "--pytest-python",
                 sys.executable,
-            ]
+            ],
+            python=Path(sys.executable),
         )
         == 0
     )
@@ -142,7 +146,8 @@ def test_bisect_train_refuses_uncertified_good_without_explicit_override(
                 shas[-1],
                 "--pytest-target",
                 "test_calc.py::test_add_one",
-            ]
+            ],
+            python=Path(sys.executable),
         )
         == 2
     )
@@ -162,9 +167,60 @@ def test_bisect_train_refuses_uncertified_good_without_explicit_override(
                 "--pytest-target",
                 "test_calc.py::test_add_one",
                 "--allow-uncertified-good",
-            ]
+            ],
+            python=Path(sys.executable),
         )
         == 0
     )
     allowed = json.loads(capsys.readouterr().out)
     assert allowed["ok"] is True and allowed["good_sha"] == shas[1]
+
+
+# meiva:note
+# The bisect child is started by the interpreter the entry named: a stand-in that records its own
+# start and then execs the real interpreter must both appear in the run and leave the verdict
+# unchanged. A command built from `sys.executable` inside `_execute_bisect` fails this.
+def test_the_bisect_child_runs_on_the_interpreter_the_entry_named(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo, shas = _train_repository(tmp_path)
+    marker = tmp_path / "stand-in-ran"
+    stand_in = tmp_path / "stand-in-python"
+    stand_in.write_text(
+        f"#!/bin/sh\necho ran >> {shlex.quote(str(marker))}\n"
+        f'exec {shlex.quote(sys.executable)} "$@"\n'
+    )
+    stand_in.chmod(0o755)
+    _ = capsys.readouterr()
+
+    assert (
+        bisect_train.main(
+            [
+                "run",
+                "--repo",
+                str(repo),
+                "--good",
+                "channel/latest",
+                "--bad",
+                "HEAD",
+                "--pytest-target",
+                "test_calc.py::test_add_one",
+                "--pytest-python",
+                sys.executable,
+            ],
+            python=stand_in,
+        )
+        == 0
+    )
+    result = json.loads(capsys.readouterr().out)
+    assert result["culprit_sha"] == shas[3]
+    assert marker.exists()
+
+
+# meiva:note
+# The interpreter is the caller's to name. A default would let a run that forgot the argument start
+# the bisect child on whatever interpreter this process happens to be, silently.
+def test_the_bisect_entry_names_its_own_interpreter() -> None:
+    parameter = inspect.signature(bisect_train.main).parameters["python"]
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    assert "python" not in (bisect_train.main.__kwdefaults__ or {})
