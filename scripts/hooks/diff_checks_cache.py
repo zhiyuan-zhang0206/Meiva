@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, TypeGuard
 
+from base.host.boundary.untyped import object_of
+
 CheckMode = Literal["incremental", "full"]
 
 CACHE_VERSION = "diff-checks-cache/v1"
@@ -142,7 +144,7 @@ def _load_entries(cache_path: Path) -> dict[str, dict[str, object]]:
     if not cache_path.is_file():
         return {}
     try:
-        raw: object = json.loads(cache_path.read_text(encoding="utf-8"))
+        raw = object_of(json.loads, cache_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, UnicodeDecodeError):
         return {}
     if not is_str_object_dict(raw) or raw.get("version") != CACHE_VERSION:
