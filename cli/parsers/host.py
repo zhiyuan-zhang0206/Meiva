@@ -41,7 +41,7 @@ def _h_start(
 ) -> int:
     if retained_children is None:
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")
-    from cli.database import database_factory_of, producer_of
+    from cli.database import database_factory_of, pipeline_owner_of
     from cli.start_intent import run_start
     from cli.start_runtime import site_of
 
@@ -50,7 +50,7 @@ def _h_start(
         site_of(args),
         retained_children=retained_children,
         database_factory=database_factory_of(args),
-        producer=producer_of(args),
+        producer=pipeline_owner_of(args),
     )
 
 
