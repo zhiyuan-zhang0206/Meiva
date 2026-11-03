@@ -324,8 +324,11 @@ def _h_status(args: argparse.Namespace) -> int:
     return cmd_status(database_factory=database_factory_of(args), command=runtime_of(args))
 
 
+# meiva:note
+# The start selection `add_service_selection` parses, as the handlers of `converge` and `lgtm
+# on|off` read it.
 @dataclass(frozen=True)
-class _ServiceSelection:
+class ServiceSelection:
     all_services: bool
     only_service: Sequence[str] | None
     disable_service: Sequence[str] | None
@@ -337,7 +340,7 @@ def _h_converge(args: argparse.Namespace) -> int:
     from cli.database import database_factory_of, producer_of
     from cli.database.runtime import runtime_of
 
-    selection = options(args, _ServiceSelection)
+    selection = options(args, ServiceSelection)
     return cmd_converge(
         repo=repo_root(),
         only_services=tuple(selection.only_service or ()),

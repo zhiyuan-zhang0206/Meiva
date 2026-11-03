@@ -8,9 +8,30 @@ from __future__ import annotations
 
 import argparse
 import subprocess
+from dataclasses import dataclass
 from functools import partial
+from typing import Literal
 
-from cli.parsers.host import add_service_selection, refuse_usage
+from cli.options import options
+from cli.parsers.host import ServiceSelection, add_service_selection, refuse_usage
+
+
+@dataclass(frozen=True)
+class _LgtmVerb:
+    lgtm_cmd: Literal["on", "off", "status", "render"]
+
+
+@dataclass(frozen=True)
+class _LgtmRenderOptions:
+    force: bool
+    repo_only: bool
+
+
+@dataclass(frozen=True)
+class _TraceShipOptions:
+    since: str | None
+    until: str | None
+    dry_run: bool
 
 
 def _h_lgtm(
@@ -22,56 +43,64 @@ def _h_lgtm(
     from base.telemetry.lgtm_local import LgtmSettings
     from cli.commands.lifecycle.lgtm_toggle import cmd_lgtm_off, cmd_lgtm_on, selection_problem
     from cli.commands.observability.lgtm import cmd_lgtm_status
-    from cli.database.runtime import delivered_config
+    from cli.database import database_factory_of, producer_of
+    from cli.database.runtime import delivered_config, runtime_of
     from cli.start_runtime import StartRuntime
 
-    if args.lgtm_cmd in ("on", "off"):
+    verb = options(args, _LgtmVerb).lgtm_cmd
+    if verb in ("on", "off"):
         if retained_children is None:
             raise ValueError("PostgreSQL launch requires its caller-owned child retention")
-        only = tuple(args.only_service or ())
-        disabled = tuple(args.disable_service or ())
-        enabled = args.lgtm_cmd == "on"
+        selection = options(args, ServiceSelection)
+        only = tuple(selection.only_service or ())
+        disabled = tuple(selection.disable_service or ())
+        enabled = verb == "on"
         problem = selection_problem(enabled=enabled, only_services=only, disabled_services=disabled)
         if problem is not None:
-            return refuse_usage(f"lgtm {args.lgtm_cmd}", [problem])
+            return refuse_usage(f"lgtm {verb}", [problem])
         return (cmd_lgtm_on if enabled else cmd_lgtm_off)(
             only_services=only,
             disabled_services=disabled,
-            all_services=args.all_services,
+            all_services=selection.all_services,
             runtime=StartRuntime.admit(repo_root()),
             retained_children=retained_children,
-            database_factory=args.database_factory,
-            producer=args.producer,
-            command=args.runtime,
+            database_factory=database_factory_of(args),
+            producer=producer_of(args),
+            command=runtime_of(args),
         )
-    if args.lgtm_cmd == "render":
+    if verb == "render":
         from cli.commands.observability.grafana_render import cmd_grafana_render
 
+        render = options(args, _LgtmRenderOptions)
         return cmd_grafana_render(
-            home=args.runtime.home,
-            force=args.force,
-            repo_only=args.repo_only,
-            database_factory=args.database_factory,
+            home=runtime_of(args).home,
+            force=render.force,
+            repo_only=render.repo_only,
+            database_factory=database_factory_of(args),
         )
+    runtime = runtime_of(args)
     return cmd_lgtm_status(
-        home=args.runtime.home,
-        machine=args.runtime.machine,
-        observability=LgtmSettings.from_fields(delivered_config(args.runtime.config).get_field),
+        home=runtime.home,
+        machine=runtime.machine,
+        observability=LgtmSettings.from_fields(delivered_config(runtime.config).get_field),
     )
 
 
 def _h_trace_ship(args: argparse.Namespace) -> int:
     from base.paths import traces_dir
     from cli.commands.observability.trace import cmd_trace_ship
+    from cli.database.runtime import runtime_of
 
+    opts = options(args, _TraceShipOptions)
+    runtime = runtime_of(args)
     return cmd_trace_ship(
-        since=args.since,
-        until=args.until,
-        dry_run=args.dry_run,
-        machine=args.runtime.machine,
-        traces_dir=traces_dir(args.runtime.home),
-        config=args.runtime.config,
-        home=args.runtime.home,
+        since=opts.since,
+        until=opts.until,
+        dry_run=opts.dry_run,
+        machine=runtime.machine,
+        traces_dir=traces_dir(runtime.home),
+        config=runtime.config,
+        home=runtime.home,
     )
 
 

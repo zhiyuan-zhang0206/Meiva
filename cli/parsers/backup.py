@@ -1,36 +1,59 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
+from dataclasses import dataclass
+
+from cli.options import options
+
+
+@dataclass(frozen=True)
+class _CheckOptions:
+    installed: Callable[..., str | None]
+
+
+@dataclass(frozen=True)
+class _RestoreOptions:
+    dir: str
+    backup: str
+    user: str
+    time: str | None
+    lsn: str | None
 
 
 def _h_backup_walg_check(args: argparse.Namespace) -> int:
     from base.cluster.dataplane.runtime_binaries import artifact_system
     from cli.commands.data_plane.walg import cmd_walg_check, walg_plane
+    from cli.database.runtime import runtime_of
 
-    system, machine = artifact_system(args.runtime.host.platform)
+    runtime = runtime_of(args)
+    system, machine = artifact_system(runtime.host.platform)
     return cmd_walg_check(
-        walg_plane(args.runtime.config),
-        token=f"{args.runtime.rng.getrandbits(128):032x}",
-        home=args.runtime.home,
-        environ=args.runtime.config.process_environment(),
+        walg_plane(runtime.config),
+        token=f"{runtime.rng.getrandbits(128):032x}",
+        home=runtime.home,
+        environ=runtime.config.process_environment(),
         system=system,
         machine=machine,
-        installed=args.installed,
+        installed=options(args, _CheckOptions).installed,
     )
 
 
 def _h_backup_walg_run(args: argparse.Namespace) -> int:
     from base.cluster.dataplane.runtime_binaries import artifact_system
     from cli.commands.data_plane.walg import cmd_walg_run, walg_plane, walg_throwaway
+    from cli.database import database_factory_of
+    from cli.database.runtime import runtime_of
 
-    config = args.runtime.config
-    system, machine = artifact_system(args.runtime.host.platform)
+    runtime = runtime_of(args)
+    config = runtime.config
+    system, machine = artifact_system(runtime.host.platform)
     return cmd_walg_run(
         walg_plane(config),
-        throwaway=walg_throwaway(config, home=args.runtime.home, timers=args.runtime.timers),
-        database_for_url=args.database_factory.for_url,
-        clock=args.runtime.clock,
-        home=args.runtime.home,
+        throwaway=walg_throwaway(config, home=runtime.home, timers=runtime.timers),
+        database_for_url=database_factory_of(args).for_url,
+        clock=runtime.clock,
+        home=runtime.home,
         environ=config.process_environment(),
         system=system,
         machine=machine,
@@ -40,15 +63,18 @@ def _h_backup_walg_run(args: argparse.Namespace) -> int:
 def _h_backup_walg_drill(args: argparse.Namespace) -> int:
     from base.cluster.dataplane.runtime_binaries import artifact_system
     from cli.commands.data_plane.walg import cmd_walg_drill, walg_plane, walg_throwaway
+    from cli.database import database_factory_of
+    from cli.database.runtime import runtime_of
 
-    config = args.runtime.config
-    system, machine = artifact_system(args.runtime.host.platform)
+    runtime = runtime_of(args)
+    config = runtime.config
+    system, machine = artifact_system(runtime.host.platform)
     return cmd_walg_drill(
         walg_plane(config),
-        throwaway=walg_throwaway(config, home=args.runtime.home, timers=args.runtime.timers),
-        database_for_url=args.database_factory.for_url,
-        clock=args.runtime.clock,
-        home=args.runtime.home,
+        throwaway=walg_throwaway(config, home=runtime.home, timers=runtime.timers),
+        database_for_url=database_factory_of(args).for_url,
+        clock=runtime.clock,
+        home=runtime.home,
         environ=config.process_environment(),
         system=system,
         machine=machine,
@@ -58,18 +84,21 @@ def _h_backup_walg_drill(args: argparse.Namespace) -> int:
 def _h_backup_walg_restore(args: argparse.Namespace) -> int:
     from base.cluster.dataplane.runtime_binaries import artifact_system
     from cli.commands.data_plane.walg import cmd_walg_restore, walg_plane
+    from cli.database.runtime import runtime_of
 
-    system, machine = artifact_system(args.runtime.host.platform)
+    opts = options(args, _RestoreOptions)
+    runtime = runtime_of(args)
+    system, machine = artifact_system(runtime.host.platform)
     return cmd_walg_restore(
-        walg_plane(args.runtime.config),
-        directory=args.dir,
-        backup=args.backup,
-        time=args.time,
-        lsn=args.lsn,
-        user=args.user,
-        clock=args.runtime.clock,
-        home=args.runtime.home,
-        environ=args.runtime.config.process_environment(),
+        walg_plane(runtime.config),
+        directory=opts.dir,
+        backup=opts.backup,
+        time=opts.time,
+        lsn=opts.lsn,
+        user=opts.user,
+        clock=runtime.clock,
+        home=runtime.home,
+        environ=runtime.config.process_environment(),
         system=system,
         machine=machine,
     )
@@ -78,10 +107,12 @@ def _h_backup_walg_restore(args: argparse.Namespace) -> int:
 def _h_backup_walg_status(args: argparse.Namespace) -> int:
     from base.cluster.dataplane.runtime_binaries import artifact_system
     from cli.commands.data_plane.walg import cmd_walg_status, walg_plane
+    from cli.database.runtime import runtime_of
 
-    system, machine = artifact_system(args.runtime.host.platform)
+    runtime = runtime_of(args)
+    system, machine = artifact_system(runtime.host.platform)
     return cmd_walg_status(
-        walg_plane(args.runtime.config), home=args.runtime.home, system=system, machine=machine
+        walg_plane(runtime.config), home=runtime.home, system=system, machine=machine
     )
 
 
