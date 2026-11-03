@@ -15,13 +15,59 @@ from __future__ import annotations
 import urllib.request
 from collections.abc import Callable
 from contextlib import AbstractContextManager
-from typing import Any
+from http.client import HTTPResponse
+from typing import Protocol
 
-type UrlOpener = Callable[[str | urllib.request.Request, float], AbstractContextManager[Any]]
-
-
-def _urlopen(target: str | urllib.request.Request, timeout: float) -> AbstractContextManager[Any]:
-    return urllib.request.urlopen(target, timeout=timeout)  # noqa: S310 — a pass-through; each caller owns the validation of its URL
+from base.host.boundary.untyped import object_of
 
 
-SYSTEM_URL_OPENER: UrlOpener = _urlopen
+# meiva:note
+# What a caller of a `UrlOpener` reads of the answer: the body. `urlopen` types its answer `Any`;
+# a test's fake only has to provide what the code under test reads, so the view is split by what a
+# caller needs rather than one wide response.
+class UrlResponse(Protocol):
+    def read(self) -> bytes: ...
+
+
+# meiva:note
+# One header lookup: the name in, its value or None out (`HTTPMessage.get` and `dict.get` both fit).
+class HeaderLookup(Protocol):
+    def get(self, name: str, /) -> str | None: ...
+
+
+# meiva:note
+# The answer of a download that streams it: the headers (for `Content-Length`) and `read1`, which
+# returns what has arrived without waiting to fill the buffer.
+class StreamingUrlResponse(Protocol):
+    @property
+    def headers(self) -> HeaderLookup: ...
+
+    def read1(self, amount: int = -1, /) -> bytes: ...
+
+
+type UrlOpener = Callable[
+    [str | urllib.request.Request, float], AbstractContextManager[UrlResponse]
+]
+type StreamingUrlOpener = Callable[
+    [str | urllib.request.Request, float], AbstractContextManager[StreamingUrlResponse]
+]
+type SystemUrlOpener = Callable[
+    [str | urllib.request.Request, float], AbstractContextManager[HTTPResponse]
+]
+
+
+# meiva:note
+# `urlopen` for an http(s) URL, which answers an `HTTPResponse`. Any other scheme answers a different
+# class (`file:` and `data:` an `addinfourl`) that this port does not serve, so it is refused here
+# instead of reaching a caller that reads `headers` and `read1`. As with `urlopen`, each caller owns the
+# validation of its URL.
+def _urlopen(
+    target: str | urllib.request.Request, timeout: float
+) -> AbstractContextManager[HTTPResponse]:
+    opened = object_of(urllib.request.urlopen, target, timeout=timeout)
+    if not isinstance(opened, HTTPResponse):
+        raise TypeError(f"urlopen answered {type(opened).__name__}, not an http(s) response")
+    return opened
+
+
+SYSTEM_URL_OPENER: SystemUrlOpener = _urlopen

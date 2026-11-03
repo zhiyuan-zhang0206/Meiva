@@ -35,7 +35,7 @@ import subprocess
 from typing import TypedDict
 
 from base.host.boundary.json_values import is_object_dict, is_object_list
-from base.host.boundary.process import stderr_text, stdout_text
+from base.host.boundary.process import stdout_text
 from base.host.boundary.untyped import object_of
 from base.host.system.hostport import Host
 
@@ -74,8 +74,8 @@ class WorkflowJob(TypedDict):
 
 # meiva:note
 # What a failed gh call said: its stderr, else its stdout.
-def _detail(result: subprocess.CompletedProcess[object]) -> str:
-    return (stderr_text(result) or stdout_text(result)).strip()
+def _detail(result: subprocess.CompletedProcess[str]) -> str:
+    return (result.stderr or result.stdout).strip()
 
 
 def _response_rows(data: object, field: str) -> list[dict[str, object]]:

@@ -7,9 +7,10 @@ import time
 import urllib.error
 from collections.abc import Awaitable, Callable
 from collections.abc import Set as AbstractSet
-from contextlib import suppress
 from dataclasses import dataclass, field
-from typing import Protocol, TypeVar
+from typing import Protocol, TypeVar, runtime_checkable
+
+from base.host.boundary.untyped import object_of
 
 __all__ = [
     "ExponentialBackoff",
@@ -126,36 +127,57 @@ def extract_retry_after(exc: Exception) -> float | None:
     HTTPError). Values above ``MAX_RETRY_AFTER_RESPECT_S`` are ignored
     (treated as absent) rather than blindly slept.
     """
-    response = getattr(exc, "response", None)
-    if response is not None and hasattr(response, "headers"):
-        headers = response.headers
-    else:
-        headers = getattr(exc, "headers", None)
-    if headers is None or not hasattr(headers, "get"):
+    headers = _headers_of(exc)
+    if headers is None:
         return None
-    with suppress(TypeError, ValueError):  # unparseable header = absent; try the next form
-        raw_ms = headers.get("retry-after-ms")
-        if raw_ms:
-            seconds = float(raw_ms) / 1000.0
-            if 0 < seconds <= MAX_RETRY_AFTER_RESPECT_S:
-                return seconds
-    with suppress(TypeError, ValueError):  # unparseable header = absent (SDK parse semantics)
-        raw = headers.get("retry-after")
-        if raw:
-            seconds = float(raw)
-            if 0 < seconds <= MAX_RETRY_AFTER_RESPECT_S:
-                return seconds
+    for name, scale in (("retry-after-ms", 1000.0), ("retry-after", 1.0)):
+        seconds = _seconds(headers.get(name), scale)
+        if seconds is not None and 0 < seconds <= MAX_RETRY_AFTER_RESPECT_S:
+            return seconds
     return None
+
+
+# meiva:note
+# A header value as seconds: `scale` is how many of the header's own unit make a second (1000 for
+# milliseconds). A missing or empty value, or one that is not a number, is None (an unparseable header
+# is absent, as the provider SDKs parse it, so the caller tries the next form).
+def _seconds(raw: object, scale: float) -> float | None:
+    if not raw or not isinstance(raw, str | bytes | int | float):
+        return None
+    try:
+        return float(raw) / scale
+    except (TypeError, ValueError):
+        return None
+
+
+@runtime_checkable
+class _HeaderSource(Protocol):
+    def get(self, name: str, /) -> object: ...
+
+
+# meiva:note
+# The headers an exception carries, wherever its type keeps them: `response.headers` (provider SDKs,
+# httpx) or a bare `headers` attribute (urllib's `HTTPError`); None when it has neither or the value
+# cannot be asked for a header by name.
+def _headers_of(exc: Exception) -> _HeaderSource | None:
+    response = object_of(getattr, exc, "response", None)
+    headers = (
+        object_of(getattr, response, "headers", None)
+        if response is not None and hasattr(response, "headers")
+        else object_of(getattr, exc, "headers", None)
+    )
+    return headers if isinstance(headers, _HeaderSource) else None
 
 
 def _status_of(exc: Exception) -> int | None:
     """HTTP status the exception carries, if it is a status-carrying error."""
-    response = getattr(exc, "response", None)
+    response = object_of(getattr, exc, "response", None)
     if response is not None:
-        status = getattr(response, "status_code", None)
-        if status is not None:
+        status = object_of(getattr, response, "status_code", None)
+        if isinstance(status, str | bytes | int | float):
             return int(status)
-    return getattr(exc, "code", None)  # urllib.error.HTTPError
+    code = object_of(getattr, exc, "code", None)  # urllib.error.HTTPError
+    return code if isinstance(code, int) else None
 
 
 def _is_transport(exc: Exception) -> bool:

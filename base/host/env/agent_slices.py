@@ -2,21 +2,19 @@
 # Resolved slices remain fixed for one turn; lists become tuples. Unpinned unsliced reads use the explicit owner live defaults, while pins win without leaking to another agent. ModelOverrides.from_pins reads only supplied pins, so the gateway need not own unrelated config domains. Plugin instances are cached within their own configuration view, not globally.
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field, fields
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import Field, dataclass, field, fields
 from types import MappingProxyType
-from typing import Any, Literal, TypeGuard, overload
+from typing import Literal, overload
 
 from pydantic import BaseModel
 
+from base.host.boundary.json_values import is_object_list
 from base.host.env.agent_env import ModelOverrides as ModelOverrides
+from base.host.env.agent_env import built_from_values
 from base.host.env.config_lite_table import FIELD_DOMAINS
 
 Cadence = Literal["once_per_compaction", "every_time"]
-
-
-def _is_any_list(value: object) -> TypeGuard[list[Any]]:
-    return isinstance(value, list)
 
 
 @dataclass(frozen=True)
@@ -105,40 +103,50 @@ class HarnessCli:
     harness_skip_permissions: bool
 
 
-def _value[T](pins: Mapping[str, object], name: str, default_reader: Callable[[str, str], T]) -> T:
+def _value(
+    pins: Mapping[str, object], name: str, default_reader: Callable[[str, str], object]
+) -> object:
 
-    value: Any = pins[name] if name in pins else default_reader(FIELD_DOMAINS[name], name)
-    result: Any = tuple(value) if _is_any_list(value) else value
-    return result
+    value = pins[name] if name in pins else default_reader(FIELD_DOMAINS[name], name)
+    return tuple(value) if is_object_list(value) else value
 
 
-def agent_setting[T](
+# meiva:note
+# One setting of this agent: its pin if it has one, else the live default. The answer is `object`
+# because a pin or a reader can hold any type; a caller narrows it to what it reads (lists come back
+# as tuples).
+def agent_setting(
     name: str,
     pins: Mapping[str, object] | None = None,
     *,
-    default_reader: Callable[[str, str], T],
-) -> T:
+    default_reader: Callable[[str, str], object],
+) -> object:
 
     return _value(pins or {}, name, default_reader)
 
 
-def _kwargs(
-    slice_type: type, pins: Mapping[str, Any], default_reader: Callable[[str, str], Any]
-) -> dict[str, Any]:
-    return {f.name: _value(pins, f.name, default_reader) for f in fields(slice_type)}
+def _slice[S](
+    slice_type: type[S],
+    slice_fields: Iterable[Field[object]],
+    pins: Mapping[str, object],
+    default_reader: Callable[[str, str], object],
+) -> S:
+    return built_from_values(
+        slice_type, {f.name: _value(pins, f.name, default_reader) for f in slice_fields}
+    )
 
 
 class PluginConfigView:
     __slots__ = ("_cache", "_configs", "_overrides")
 
     def __init__(
-        self, configs: Mapping[str, BaseModel], overrides: Mapping[str, Mapping[str, Any]]
+        self, configs: Mapping[str, BaseModel], overrides: Mapping[str, Mapping[str, object]]
     ) -> None:
         self._configs = configs
         self._overrides = {p: dict(fields) for p, fields in overrides.items()}
         self._cache: dict[str, BaseModel] = {}
 
-    def flat(self) -> dict[str, Any]:
+    def flat(self) -> dict[str, object]:
 
         return {key: value for fields in self._overrides.values() for key, value in fields.items()}
 
@@ -174,18 +182,18 @@ class AgentSlices:
     kernel: AgentKernel
     harness_cli: HarnessCli
 
-    pins: Mapping[str, Any]
-    plugin_pins: Mapping[str, Mapping[str, Any]]
+    pins: Mapping[str, object]
+    plugin_pins: Mapping[str, Mapping[str, object]]
     _plugin_view: PluginConfigView = field(repr=False, compare=False)
-    _default_reader: Callable[[str, str], Any] = field(repr=False, compare=False)
+    _default_reader: Callable[[str, str], object] = field(repr=False, compare=False)
 
     @classmethod
     def resolve(
         cls,
-        pins: Mapping[str, Any] | None = None,
-        plugin_pins: Mapping[str, Mapping[str, Any]] | None = None,
+        pins: Mapping[str, object] | None = None,
+        plugin_pins: Mapping[str, Mapping[str, object]] | None = None,
         *,
-        default_reader: Callable[[str, str], Any],
+        default_reader: Callable[[str, str], object],
         plugin_configs: Mapping[str, BaseModel] | None = None,
         brain: AgentBrain | None = None,
     ) -> AgentSlices:
@@ -195,17 +203,17 @@ class AgentSlices:
         return cls(
             brain=brain
             if brain is not None
-            else AgentBrain(**_kwargs(AgentBrain, pins, default_reader)),
-            prompt=Prompt(**_kwargs(Prompt, pins, default_reader)),
-            memory=MemoryRecall(**_kwargs(MemoryRecall, pins, default_reader)),
-            skill_recall=SkillRecall(**_kwargs(SkillRecall, pins, default_reader)),
-            history_dump=HistoryDump(**_kwargs(HistoryDump, pins, default_reader)),
-            sdk_reminders=SdkReminders(**_kwargs(SdkReminders, pins, default_reader)),
-            llm_policy=LlmCallPolicy(**_kwargs(LlmCallPolicy, pins, default_reader)),
-            overrides=ModelOverrides(**_kwargs(ModelOverrides, pins, default_reader)),
-            sandbox=Sandbox(**_kwargs(Sandbox, pins, default_reader)),
-            kernel=AgentKernel(**_kwargs(AgentKernel, pins, default_reader)),
-            harness_cli=HarnessCli(**_kwargs(HarnessCli, pins, default_reader)),
+            else _slice(AgentBrain, fields(AgentBrain), pins, default_reader),
+            prompt=_slice(Prompt, fields(Prompt), pins, default_reader),
+            memory=_slice(MemoryRecall, fields(MemoryRecall), pins, default_reader),
+            skill_recall=_slice(SkillRecall, fields(SkillRecall), pins, default_reader),
+            history_dump=_slice(HistoryDump, fields(HistoryDump), pins, default_reader),
+            sdk_reminders=_slice(SdkReminders, fields(SdkReminders), pins, default_reader),
+            llm_policy=_slice(LlmCallPolicy, fields(LlmCallPolicy), pins, default_reader),
+            overrides=_slice(ModelOverrides, fields(ModelOverrides), pins, default_reader),
+            sandbox=_slice(Sandbox, fields(Sandbox), pins, default_reader),
+            kernel=_slice(AgentKernel, fields(AgentKernel), pins, default_reader),
+            harness_cli=_slice(HarnessCli, fields(HarnessCli), pins, default_reader),
             pins=MappingProxyType(dict(pins)),
             plugin_pins=MappingProxyType({p: dict(f) for p, f in plugin_pins.items()}),
             _plugin_view=PluginConfigView(plugin_configs or {}, plugin_pins),
@@ -304,6 +312,6 @@ class AgentSlices:
 
         return self._plugin_view.configs()
 
-    def overlay(self) -> dict[str, Any]:
+    def overlay(self) -> dict[str, object]:
 
         return {**self.pins, **self._plugin_view.flat()}

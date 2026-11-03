@@ -355,7 +355,7 @@ def cmd_agents_restart(
         payload["config_overlay"] = config_overlay
     resp = http_dial.post(
         url,
-        **({"json": payload} if payload else {}),
+        json=payload or None,
         timeout=_TIMEOUT_S,
         headers=gateway_auth_headers(access),
     )
@@ -381,7 +381,7 @@ def cmd_agents_resurrect(
         payload["prompt"] = message
     resp = http_dial.post(
         _api(access, f"agents/{agent_id}/resurrect"),
-        **({"json": payload} if payload else {}),
+        json=payload or None,
         timeout=_TIMEOUT_S,
         headers=gateway_auth_headers(access),
     )

@@ -22,9 +22,9 @@ import os
 import signal
 import subprocess
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import IO, Literal, Protocol, TypedDict, TypeGuard, Unpack, overload
 
 import psutil
 
@@ -318,89 +318,209 @@ def terminate_owned_tree(
     wait_owned(alive, _REAP_TIMEOUT_S)
 
 
+# meiva:note
+# `run_bounded`'s call shape: argv, a required timeout, one `CompletedProcess` back. `text=True` answers
+# `str`, no `text` answers `bytes`, as `run_bounded` does. It never raises for a non-zero exit. A tree
+# that outlives `timeout` raises `subprocess.TimeoutExpired`, and a program that cannot start raises
+# `OSError`. A component that must be testable takes one of these (inside a `Host`) and a test passes a
+# fake; a fake that answers in one shape wraps itself with
+# `base.host.system.tests.fake_commands.runner_from`. `input` mirrors `subprocess.run`'s own name.
+class PopenOptions(TypedDict, total=False):
+    cwd: str | os.PathLike[str] | None
+    env: Mapping[str, str] | None
+    stdin: int | IO[str] | IO[bytes] | None
+    stdout: int | IO[str] | IO[bytes] | None
+    stderr: int | IO[str] | IO[bytes] | None
+    start_new_session: bool
+    close_fds: bool
+    shell: bool
+    encoding: str
+    errors: str
+    universal_newlines: bool
+
+
 class CommandRunner(Protocol):
-    """`run_bounded`'s call shape: argv, a required timeout, one `CompletedProcess` back.
-
-    It never raises for a non-zero exit. A tree that outlives `timeout` raises
-    `subprocess.TimeoutExpired`, and a program that cannot start raises `OSError`. A component
-    that must be testable takes one of these (inside a `Host`) and a test passes a fake.
-    """
-
+    @overload
     def __call__(
         self,
         argv: Sequence[str],
         *,
         timeout: float,
         capture_output: bool = False,
-        input: bytes | str | None = None,  # mirrors subprocess.run's own parameter name
-        **popen_kwargs: object,
-    ) -> subprocess.CompletedProcess[Any]: ...
+        input: bytes | str | None = None,
+        text: Literal[True],
+        **popen_kwargs: Unpack[PopenOptions],
+    ) -> subprocess.CompletedProcess[str]: ...
+
+    @overload
+    def __call__(
+        self,
+        argv: Sequence[str],
+        *,
+        timeout: float,
+        capture_output: bool = False,
+        input: bytes | str | None = None,
+        text: Literal[False] | None = None,
+        **popen_kwargs: Unpack[PopenOptions],
+    ) -> subprocess.CompletedProcess[bytes]: ...
 
 
+@overload
 def run_bounded(
     argv: Sequence[str],
     *,
     timeout: float,
     capture_output: bool = False,
-    input: bytes | str | None = None,  # mirrors subprocess.run's own parameter name
-    **popen_kwargs: object,
-) -> subprocess.CompletedProcess[Any]:  # str or bytes, decided by the caller's `text=`
-    """`subprocess.run` whose timeout bounds the **work**, not just the process
-    Python spawned: on expiry the whole tree dies (`kill_process_tree`) before
-    `TimeoutExpired` propagates.
+    input: bytes | str | None = None,
+    text: Literal[True],
+    **popen_kwargs: Unpack[PopenOptions],
+) -> subprocess.CompletedProcess[str]: ...
 
-    Drop-in for the `subprocess.run(argv, timeout=..., check=False)` shape:
-    `capture_output` and `input` are honoured, everything else is passed
-    through to `Popen` (`cwd`, `text`, `env`, …). There is deliberately no
-    `check=` — this returns the `CompletedProcess` and the caller reads
-    `returncode`, so a non-zero exit can never be confused with the timeout
-    path.
 
-    `TimeoutExpired` is raised exactly as `subprocess.run` raises it, carrying
-    whatever output was captured before the bound tripped: a caller that treats a
-    timeout as a failed fetch keeps working unchanged. This fixes the leak, not
-    the control flow.
+@overload
+def run_bounded(
+    argv: Sequence[str],
+    *,
+    timeout: float,
+    capture_output: bool = False,
+    input: bytes | str | None = None,
+    text: Literal[False] | None = None,
+    **popen_kwargs: Unpack[PopenOptions],
+) -> subprocess.CompletedProcess[bytes]: ...
 
-    Raises:
-        subprocess.TimeoutExpired: the tree did not finish within `timeout`. It
-            is dead by the time this is raised.
-    """
-    if capture_output:
-        if "stdout" in popen_kwargs or "stderr" in popen_kwargs:
-            raise ValueError("capture_output=True is exclusive with stdout / stderr")
-        popen_kwargs["stdout"] = subprocess.PIPE
-        popen_kwargs["stderr"] = subprocess.PIPE
 
-    if input is not None:
-        if popen_kwargs.get("stdin") is not None:
-            raise ValueError("stdin and input arguments may not both be used")
-        popen_kwargs["stdin"] = subprocess.PIPE
-
-    proc = subprocess.Popen(argv, **popen_kwargs)  # type: ignore[call-overload]  # noqa: S603 — argv is list-form, callers pass fixed argv
+# meiva:note
+# `subprocess.run` whose timeout bounds the **work**, not just the process Python spawned: on expiry the
+# whole tree dies (`kill_process_tree`) before `TimeoutExpired` propagates.
+#
+# Drop-in for the `subprocess.run(argv, timeout=..., check=False)` shape: `capture_output` and `input`
+# are honoured, everything else is passed through to `Popen` (`cwd`, `env`, ...). There is deliberately
+# no `check=`: this returns the `CompletedProcess` and the caller reads `returncode`, so a non-zero exit
+# can never be confused with the timeout path. `TimeoutExpired` is raised exactly as `subprocess.run`
+# raises it, carrying whatever output was captured before the bound tripped: a caller that treats a
+# timeout as a failed fetch keeps working unchanged. This fixes the leak, not the control flow. The tree
+# is dead by the time `TimeoutExpired` is raised.
+#
+# The no-input call shape stays exactly `communicate(timeout=timeout)` for callers that never asked to
+# feed stdin. After a timeout the tree is killed and the pipes drained: their write ends were inherited
+# by the descendants, so the drain only terminates because they are dead, and it is bounded anyway,
+# because an un-killable holder would otherwise make the drain the new unbounded wait (the same defect,
+# one layer down). `TimeoutExpired` already carries whatever was buffered before the bound tripped, so a
+# drain that times out keeps that partial output; its `stdout` is typed `bytes | None` though a
+# `text=True` run carries str, hence `setattr`. A `KeyboardInterrupt` or cancellation must not leak a
+# tree either, and `Popen` still owns reaping. The argv is list-form and callers pass fixed argv. The
+# `Popen` keywords the callers use are typed by `PopenOptions`; `text` is passed as the `bool | None`
+# it is, which lands on typeshed's `Popen[Any]` fallback overload, so the streams are checked again
+# in `_completed` and `communicate` goes through `_erased`.
+def run_bounded(
+    argv: Sequence[str],
+    *,
+    timeout: float,
+    capture_output: bool = False,
+    input: bytes | str | None = None,
+    text: bool | None = None,
+    **popen_kwargs: Unpack[PopenOptions],
+) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
+    options = _spawn_options(
+        popen_kwargs, text=text, capture_output=capture_output, has_input=input is not None
+    )
+    proc = subprocess.Popen(argv, text=text, **options)  # noqa: S603
+    communicate = _erased(proc.communicate)
     try:
-        # Keep the no-input call shape exactly `communicate(timeout=timeout)`
-        # for callers that never asked to feed stdin.
-        stdout, stderr = (
-            proc.communicate(timeout=timeout)
-            if input is None
-            else proc.communicate(input, timeout=timeout)
+        communicated = (
+            communicate(timeout=timeout) if input is None else communicate(input, timeout=timeout)
         )
     except subprocess.TimeoutExpired as exc:
         kill_process_tree(proc.pid)
-        # The pipes' write ends were inherited by the descendants, so this drain
-        # only terminates because they are dead — bounded anyway, because an
-        # un-killable holder would otherwise make the drain the new unbounded
-        # wait (the same defect, one layer down). `exc` already carries whatever
-        # was buffered before the bound tripped, so a drain that times out keeps
-        # that partial output.
         with contextlib.suppress(subprocess.TimeoutExpired):
-            exc.stdout, exc.stderr = proc.communicate(timeout=_DRAIN_TIMEOUT_S)
+            drained = communicate(timeout=_DRAIN_TIMEOUT_S)
+            if _is_pair(drained):
+                kind = _text_stream if text else _bytes_stream
+                setattr(exc, "stdout", kind(drained[0]))  # noqa: B010
+                setattr(exc, "stderr", kind(drained[1]))  # noqa: B010
         raise
-    except BaseException:  # KeyboardInterrupt / cancellation must not leak a tree either
+    except BaseException:
         kill_process_tree(proc.pid)
-        proc.poll()  # Native liveness observes exit; Popen still owns reaping.
+        proc.poll()
         raise
-    return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
+    return _completed(argv, proc.returncode, communicated, text=bool(text))
+
+
+# meiva:note
+# The validation `run_bounded` owes before it spawns, and the options `Popen` is given: the text-mode
+# options need `text=True` (they are how `str` output is asked for, while the overloads promise `bytes`
+# otherwise), and `capture_output` and `input` are exclusive with the pipes they imply.
+def _spawn_options(
+    popen_kwargs: PopenOptions, *, text: bool | None, capture_output: bool, has_input: bool
+) -> PopenOptions:
+    for other_text_option in ("encoding", "errors", "universal_newlines"):
+        if other_text_option in popen_kwargs and not text:
+            raise ValueError(
+                f"{other_text_option}= needs text=True (it is how str output is asked for)"
+            )
+    options = PopenOptions(**popen_kwargs)
+    if capture_output:
+        if "stdout" in options or "stderr" in options:
+            raise ValueError("capture_output=True is exclusive with stdout / stderr")
+        options["stdout"] = subprocess.PIPE
+        options["stderr"] = subprocess.PIPE
+    if has_input:
+        if options.get("stdin") is not None:
+            raise ValueError("stdin and input arguments may not both be used")
+        options["stdin"] = subprocess.PIPE
+    return options
+
+
+# meiva:note
+# The `CompletedProcess` of a finished child from what `communicate` answered, with each stream checked
+# to be the kind (`str` under `text=True`, else `bytes`) the overloads promised the caller.
+def _completed(
+    argv: Sequence[str], returncode: int, communicated: object, *, text: bool
+) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
+    if not _is_pair(communicated):
+        raise TypeError(f"Popen.communicate answered {type(communicated).__name__}, not a pair")
+    stdout, stderr = communicated
+    if text:
+        return subprocess.CompletedProcess[str](
+            argv, returncode, _text_stream(stdout), _text_stream(stderr)
+        )
+    return subprocess.CompletedProcess[bytes](
+        argv, returncode, _bytes_stream(stdout), _bytes_stream(stderr)
+    )
+
+
+# meiva:note
+# A bound method with its signature erased, so a call is checked against nothing: `Popen.communicate`
+# takes `str` or `bytes` input by the mode the child was opened in, which the type of `proc` (a
+# union of both modes here) cannot say. The mode is `text`, which `_completed` checks on the way out.
+def _erased(function: Callable[..., object]) -> Callable[..., object]:
+    return function
+
+
+def _is_object_tuple(value: object) -> TypeGuard[tuple[object, ...]]:
+    return isinstance(value, tuple)
+
+
+def _is_pair(value: object) -> TypeGuard[tuple[object, object]]:
+    return _is_object_tuple(value) and len(value) == 2
+
+
+# meiva:note
+# One captured stream as text under `text=True`, or None when the child's pipe was not captured.
+# `Popen.communicate` types its answer `Any`; checking the kind here is what lets the overloads above
+# promise it to the caller.
+def _text_stream(stream: object) -> str | None:
+    if stream is None or isinstance(stream, str):
+        return stream
+    raise TypeError(f"expected a str stream, got {type(stream).__name__}")
+
+
+# meiva:note
+# One captured stream as bytes (the default), or None when the child's pipe was not captured.
+def _bytes_stream(stream: object) -> bytes | None:
+    if stream is None or isinstance(stream, bytes):
+        return stream
+    raise TypeError(f"expected a bytes stream, got {type(stream).__name__}")
 
 
 def timeout_stderr_tail(exc: subprocess.TimeoutExpired, *, lines: int = 3) -> str:

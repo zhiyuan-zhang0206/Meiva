@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import psutil
@@ -341,11 +342,20 @@ def test_run_bounded_returns_a_completed_process() -> None:
     assert result.stdout.strip() == "out"
 
 
+# meiva:note
+# `function(*args, **kwargs)` with the call unchecked: the test hands `run_bounded` an argument its signature
+# refuses on purpose, to see the runtime refuse it too.
+def _called_untyped(function: Callable[..., object], *args: object, **kwargs: object) -> object:
+    return function(*args, **kwargs)
+
+
 def test_run_bounded_rejects_check() -> None:
     """There is deliberately no `check=`; a caller assuming run's semantics gets
     a TypeError rather than a silently ignored kwarg."""
     with pytest.raises(TypeError):
-        run_bounded([sys.executable, str(_HOSTING_CHILD), "noop"], timeout=30.0, check=True)
+        _called_untyped(
+            run_bounded, [sys.executable, str(_HOSTING_CHILD), "noop"], timeout=30.0, check=True
+        )
 
 
 def test_run_bounded_rejects_capture_output_with_explicit_pipes() -> None:

@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import TypeGuard
 
 from base.host.atomic_io import write_bytes_atomic
+from base.host.boundary.untyped import object_of
 from base.host.env.boot_policy import (
     BootstrapFetch,
     fetch_backoff,
@@ -198,7 +199,7 @@ def cluster_plugin_config_values(env: Mapping[str, str], plugin: str) -> dict[st
     packet = env.get(PLUGIN_CLUSTER_CONFIG_ENV)
     if packet is None:
         return None
-    raw: object = json.loads(packet)
+    raw = object_of(json.loads, packet)
     if not _is_object_dict(raw):
         raise TypeError("plugin cluster config must be a JSON object")
     if plugin not in raw:
@@ -362,7 +363,7 @@ def fetch_bootstrap_config(
     def _fetch_once() -> dict[str, str]:
         resp = dial_get(url, timeout=tuning.timeout_s, headers=headers)
         resp.raise_for_status()
-        return validated_bootstrap_payload(resp.json())
+        return validated_bootstrap_payload(object_of(resp.json))
 
     return retry(policy)(_fetch_once)
 
@@ -385,7 +386,7 @@ def read_config_snapshot(
 ) -> tuple[dict[str, str], float] | None:
     path = snapshot_path(home)
     try:
-        raw = json.loads(path.read_text())
+        raw = object_of(json.loads, path.read_text())
     except (OSError, ValueError):
         return None
     if not _is_object_dict(raw):

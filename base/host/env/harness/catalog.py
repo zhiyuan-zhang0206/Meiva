@@ -14,6 +14,8 @@ import shlex
 from dataclasses import dataclass
 from typing import Literal, TypeGuard
 
+from base.host.boundary.untyped import object_of
+
 Rotation = Literal["static", "rotating", "unknown"]
 InstallKind = Literal["script", "npm"]
 UpdateSource = Literal["converge", "schedule"]
@@ -271,7 +273,7 @@ def credential_risk(harness: HarnessSpec, path: str, content: bytes) -> Rotation
     if harness.cli != "codex":
         return _rotation_of(harness, path)
     try:
-        parsed = json.loads(content.decode("utf-8"))
+        parsed = object_of(json.loads, content.decode("utf-8"))
     except (UnicodeDecodeError, ValueError):
         return _rotation_of(harness, path)
     if not _is_object_dict(parsed):

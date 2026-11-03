@@ -6,6 +6,8 @@ from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.host.permissions_helper.grants.catalog import (
     CATALOG,
     ITEMS_BY_ID,
@@ -174,14 +176,21 @@ class OnboardingRecord:
 
     @classmethod
     def from_json(cls, text: str) -> OnboardingRecord:
-        data = json.loads(text)
+        data = object_of(json.loads, text)
+        if not is_object_dict(data):
+            raise TypeError("onboarding record is not a JSON object")
         if data.get("version") != RECORD_VERSION:
             raise ValueError(f"unsupported onboarding record version {data.get('version')!r}")
+        checked_at, state, grants = data["checked_at"], data["state"], data["grants"]
+        if not isinstance(checked_at, str) or not isinstance(state, str):
+            raise TypeError("onboarding record needs a string checked_at and state")
+        if not is_object_dict(grants) or not all(isinstance(v, str) for v in grants.values()):
+            raise TypeError("onboarding record grants must map item ids to strings")
         return cls(
-            checked_at=datetime.fromisoformat(data["checked_at"]),
-            state=GateState(data["state"]),
+            checked_at=datetime.fromisoformat(checked_at),
+            state=GateState(state),
             deferred=bool(data["deferred"]),
-            grants={item_id: Grant(value) for item_id, value in data["grants"].items()},
+            grants={item_id: Grant(str(value)) for item_id, value in grants.items()},
         )
 
     @classmethod

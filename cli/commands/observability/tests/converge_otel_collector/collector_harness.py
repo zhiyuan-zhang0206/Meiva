@@ -25,7 +25,7 @@ from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.deploy.release.collector import plan as collector_plan
 from base.host.db_authority.api import ensure_telemetry_token, telemetry_token_path
-from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
+from base.host.net.ports import SYSTEM_URL_OPENER, StreamingUrlOpener
 from base.paths import otel_collector_dir
 from base.telemetry import EventPipeline
 from cli.commands.converge.spec import ConvergeCtx
@@ -97,7 +97,7 @@ class CollectorUnit:
     home: Path
     machine: ConfiguredMachineIdentity
     runtime: CommandRuntime
-    open_url: UrlOpener
+    open_url: StreamingUrlOpener
 
     # meiva:note
     # Take back the telemetry token the fixture published: a unit whose gateway never started, or

@@ -22,6 +22,7 @@ import psutil
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import get_field, settings
+from base.host.system.tests.fake_commands import runner_from
 from base.native_process.ownership import OwnedProcess
 from base.paths import permissions_helper_socket
 from base.telemetry.lgtm_local import LgtmSettings, backend_urls
@@ -174,7 +175,7 @@ def test_the_helper_diagnostic_reads_the_launchd_job_of_the_wired_account_and_ho
         for check in checks_for(
             set(),
             launchd=facts,
-            run=launchctl,
+            run=runner_from(launchctl),
             database=_unused_database,
             machine=machine_identity,
             macos=True,

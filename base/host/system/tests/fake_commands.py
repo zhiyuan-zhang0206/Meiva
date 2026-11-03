@@ -4,9 +4,9 @@ import os
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal, Unpack, overload
 
-from base.host.proc import CommandRunner, run_bounded
+from base.host.proc import CommandRunner, PopenOptions, run_bounded
 from base.host.system.hostport import Host
 from base.native_process.os_platform import Platform
 
@@ -62,8 +62,9 @@ def _result(
     *,
     capture_output: bool,
     popen_kwargs: Mapping[str, object],
+    text: bool | None,
 ) -> subprocess.CompletedProcess[Any]:
-    text = bool(popen_kwargs.get("text") or popen_kwargs.get("encoding"))
+    text = bool(text or popen_kwargs.get("encoding"))
     out = err = None
     if _is_piped(capture_output, popen_kwargs, "stdout"):
         out = _shape(reply.stdout, text=text)
@@ -112,15 +113,112 @@ class FakeCommands:
         timeout: float,
         capture_output: bool = False,
         input: bytes | str | None = None,
-        **popen_kwargs: object,
+        text: bool | None = None,
+        **popen_kwargs: Unpack[PopenOptions],
     ) -> subprocess.CompletedProcess[Any]:
         command = tuple(argv)
         kwargs: dict[str, Any] = {"capture_output": capture_output, "input": input, **popen_kwargs}
+        if text is not None:
+            kwargs["text"] = text
         self.calls.append(Call(command, timeout, kwargs))
         reply = self._next_reply(command)
         if isinstance(reply, BaseException):
             raise reply
-        return _result(command, reply, capture_output=capture_output, popen_kwargs=popen_kwargs)
+        return _result(
+            command, reply, capture_output=capture_output, popen_kwargs=popen_kwargs, text=text
+        )
+
+
+# meiva:note
+# A fake that answers in one shape, as a `CommandRunner`. The port serves callers that read `str` (with
+# `text=True`) and callers that read raw bytes, and a test's own fake function returns whichever its
+# test wants. This wrapper passes the arguments through untouched and conforms the reply to what the
+# caller asked for (`str.encode()` / `bytes.decode()` of the streams), so the fake needs no overloads.
+class _AdaptedRunner:
+    def __init__(
+        self,
+        answer: Callable[
+            ..., subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]
+        ],
+    ) -> None:
+        self._answer = answer
+
+    @overload
+    def __call__(
+        self,
+        argv: Sequence[str],
+        *,
+        timeout: float,
+        capture_output: bool = False,
+        input: bytes | str | None = None,
+        text: Literal[True],
+        **popen_kwargs: Unpack[PopenOptions],
+    ) -> subprocess.CompletedProcess[str]: ...
+
+    @overload
+    def __call__(
+        self,
+        argv: Sequence[str],
+        *,
+        timeout: float,
+        capture_output: bool = False,
+        input: bytes | str | None = None,
+        text: Literal[False] | None = None,
+        **popen_kwargs: Unpack[PopenOptions],
+    ) -> subprocess.CompletedProcess[bytes]: ...
+
+    def __call__(
+        self,
+        argv: Sequence[str],
+        *,
+        timeout: float,
+        capture_output: bool = False,
+        input: bytes | str | None = None,
+        text: bool | None = None,
+        **popen_kwargs: Unpack[PopenOptions],
+    ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
+        reply = self._answer(
+            argv,
+            timeout=timeout,
+            capture_output=capture_output,
+            input=input,
+            text=text,
+            **popen_kwargs,
+        )
+        out: str | bytes | None = reply.stdout
+        err: str | bytes | None = reply.stderr
+        if text:
+            return subprocess.CompletedProcess[str](
+                reply.args, reply.returncode, _as_text(out), _as_text(err)
+            )
+        return subprocess.CompletedProcess[bytes](
+            reply.args, reply.returncode, _as_bytes(out), _as_bytes(err)
+        )
+
+
+def _as_text(stream: str | bytes | None) -> str | None:
+    return stream.decode() if isinstance(stream, bytes) else stream
+
+
+def _as_bytes(stream: str | bytes | None) -> bytes | None:
+    return stream.encode() if isinstance(stream, str) else stream
+
+
+type Answer = Callable[..., subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]]
+
+
+def runner_from(answer: Answer) -> CommandRunner:
+    return _AdaptedRunner(answer)
+
+
+def _as_runner(commands: CommandRunner | Answer | None) -> CommandRunner:
+    if commands is None:
+        return FakeCommands()
+    if isinstance(commands, FakeCommands | _AdaptedRunner):
+        return commands
+    if commands is run_bounded:
+        return run_bounded
+    return _AdaptedRunner(commands)
 
 
 # meiva:note
@@ -129,7 +227,7 @@ class FakeCommands:
 # the host agree with them only where that id happens to be the runner's (#7529, #7648).
 # A test that means a specific account passes it.
 def fake_host(
-    commands: CommandRunner | None = None,
+    commands: CommandRunner | Answer | None = None,
     *,
     platform: Platform = LINUX_X86,
     programs: Mapping[str, str] | None = None,
@@ -138,7 +236,7 @@ def fake_host(
 ) -> Host:
     found = dict(programs or {})
     return Host(
-        run=commands if commands is not None else FakeCommands(),
+        run=_as_runner(commands),
         which=found.get,
         platform=platform,
         uid=os.geteuid() if uid is None else uid,

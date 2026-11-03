@@ -22,6 +22,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.host.db_authority.ledger import (
     Encrypt,
     authority_dir,
@@ -170,14 +172,13 @@ def _intent_checkout(home: Path) -> Path:
     from base.host.verified_file.reader import regular_bytes
 
     try:
-        data: object = json.loads(regular_bytes(home / "start-intent.json", max_bytes=1 << 20))
+        data = object_of(json.loads, regular_bytes(home / "start-intent.json", max_bytes=1 << 20))
     except (OSError, ValueError) as exc:
         raise AuthorityRefusedError(f"the home's start intent is unreadable: {exc}") from exc
-    if not isinstance(data, dict):
+    if not is_object_dict(data):
         raise AuthorityRefusedError("the home's start intent is malformed")
-    fields: dict[str, object] = {str(key): value for key, value in data.items()}  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType] — JSON object
-    checkout = fields.get("checkout")
-    if fields.get("home") != str(home) or not isinstance(checkout, str):
+    checkout = data.get("checkout")
+    if data.get("home") != str(home) or not isinstance(checkout, str):
         raise AuthorityRefusedError("the home's start intent names another home or no checkout")
     return Path(checkout)
 

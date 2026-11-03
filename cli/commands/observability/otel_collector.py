@@ -32,7 +32,7 @@ from base.clock import Timers
 from base.cluster.machine import MachineIdentityReader, MachineRoles
 from base.deploy.release.collector import artifact as collector_artifact
 from base.deploy.release.collector import plan as collector_plan
-from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
+from base.host.net.ports import SYSTEM_URL_OPENER, StreamingUrlOpener
 from base.paths import otel_collector_config, otel_collector_dir
 from base.telemetry.observability import collector_allowed_for_home, endpoint_override_is_explicit
 from base.telemetry.station_endpoint import resolve_station_target, validated_observability_base
@@ -319,7 +319,7 @@ def ensure_otel_collector(
     database_factory: DatabaseFactory,
     machine: MachineIdentityReader,
     timers: Timers,
-    open_url: UrlOpener,
+    open_url: StreamingUrlOpener,
     tag: str | None,
     platform_label: str,
 ) -> None:
