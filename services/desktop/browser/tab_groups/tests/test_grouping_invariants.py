@@ -4,9 +4,8 @@
 # The JS half decides all of it (there is no Python model of Chrome's groups that
 # could drift); these pin the policy the worker must keep, the reports it must send,
 # the WARNING the daemon must leave when it had to merge a duplicate, and the Python
-# side of ungrouping an agent's last tab. Behaviour against a real Chrome (two groups
-# in one window, two windows, a second no-op run) is recorded in
-# services/desktop/browser/docs/tab-groups.meiva.okf.md.
+# side of ungrouping an agent's last tab (including waking an idled-out service
+# worker before closing the page).
 # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
 from __future__ import annotations
 
@@ -17,7 +16,11 @@ from typing import Any
 import pytest
 
 from base.clock import SYSTEM_TIMERS
-from services.desktop.browser.tab_groups.grouping import EXTENSION_DIR, AgentTabGroups
+from services.desktop.browser.tab_groups.grouping import (
+    EXTENSION_DIR,
+    AgentTabGroups,
+    ExtensionWorker,
+)
 from services.desktop.browser.tab_groups.tests.test_grouping import (
     SHIPPED_WORKER,
     ChromeModel,
@@ -31,6 +34,14 @@ def _page(target_id: str, url: str = "https://example.com/") -> dict[str, str]:
 
 def _warnings(records: list[dict[str, Any]]) -> list[str]:
     return [r["message"] for r in records if r["level"].name == "WARNING"]
+
+
+def _groups(chrome: FakeChrome, tasks: asyncio.TaskGroup) -> AgentTabGroups:
+    return AgentTabGroups(
+        chrome.port,
+        tasks,
+        worker=ExtensionWorker(chrome.port, timers=SYSTEM_TIMERS),
+    )
 
 
 # meiva:note
@@ -57,17 +68,19 @@ async def chrome_factory() -> AsyncIterator[Callable[[dict[str, Any]], Awaitable
 
 
 # meiva:note
-# The policy the shipped worker must keep, in source form: a window-scoped lookup,
-# a keeper chosen from the state rather than from Chrome's answer order, the same
-# convergence on Chrome start and extension update, and no touch of a group this
-# stack did not name.
+# The policy the shipped worker must keep, in source form: a browser-wide lookup
+# for `Meiva #<digits>` titles, a keeper chosen deterministically from Chrome's
+# state rather than answer order, keeping the keeper anchored in its window, the
+# same convergence on Chrome start and extension update, and no touch of a group
+# this stack did not name.
 # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
-def test_worker_converges_one_group_per_agent_per_window() -> None:
+def test_worker_converges_one_group_per_agent_across_the_browser() -> None:
     source = next(EXTENSION_DIR.glob("group-*.js")).read_text()
-    assert "chrome.tabGroups.query({ title, windowId })" in source
-    assert "query({ title })" not in source
+    assert "chrome.tabGroups.query({ title })" in source
+    assert "query({ title, windowId })" not in source
     assert "b.size - a.size || a.id - b.id" in source
-    assert "meivaConvergeWindow(title, tab.windowId)" in source
+    assert "meivaConvergeTitle(title)" in source
+    assert "meivaGroupIntoKeeper" in source
     assert "self.meivaConvergeAll" in source
     assert "chrome.runtime.onStartup.addListener" in source
     assert "chrome.runtime.onInstalled.addListener" in source
@@ -94,7 +107,7 @@ async def test_a_merged_duplicate_is_reported_with_agent_window_and_group_ids(
     chrome.listings.append([_page("T1"), _page("T2")])
 
     async with asyncio.TaskGroup() as tasks:
-        groups = AgentTabGroups(chrome.port, tasks, timers=SYSTEM_TIMERS)
+        groups = _groups(chrome, tasks)
         await groups.group_new_page(7, frozenset({"T1"}))
         await _settle(7)
 
@@ -113,7 +126,7 @@ async def test_a_single_group_is_the_normal_path_and_says_nothing(
     chrome.listings.append([_page("T1"), _page("T2")])
 
     async with asyncio.TaskGroup() as tasks:
-        groups = AgentTabGroups(chrome.port, tasks, timers=SYSTEM_TIMERS)
+        groups = _groups(chrome, tasks)
         await groups.group_new_page(7, frozenset({"T1"}))
         await _settle(7)
         await groups.converge_all()
@@ -150,7 +163,7 @@ async def test_converge_all_reports_every_merged_duplicate_of_every_agent(
     chrome = await chrome_factory(model.handlers())
 
     async with asyncio.TaskGroup() as tasks:
-        groups = AgentTabGroups(chrome.port, tasks, timers=SYSTEM_TIMERS)
+        groups = _groups(chrome, tasks)
         await groups.converge_all()
 
     messages = _warnings(loguru_records)
@@ -169,7 +182,7 @@ async def test_converge_all_failure_warns_and_never_raises(
     chrome = await chrome_factory(model.handlers())
 
     async with asyncio.TaskGroup() as tasks:
-        groups = AgentTabGroups(chrome.port, tasks, timers=SYSTEM_TIMERS)
+        groups = _groups(chrome, tasks)
         await groups.converge_all()
 
     assert model.expressions.count("meivaConvergeAll()") == 1
@@ -190,7 +203,7 @@ async def test_a_malformed_report_warns_and_keeps_the_page(
     chrome.listings.append([_page("T1"), _page("T2")])
 
     async with asyncio.TaskGroup() as tasks:
-        groups = AgentTabGroups(chrome.port, tasks, timers=SYSTEM_TIMERS)
+        groups = _groups(chrome, tasks)
         await groups.group_new_page(7, frozenset({"T1"}))
         await _settle(7)
 
@@ -202,11 +215,8 @@ async def test_a_malformed_report_warns_and_keeps_the_page(
 # release_page, ungroup before the last tab closes: Chrome keeps a group whose last
 # tab closes as a SAVED group, and the extension API neither lists nor deletes one.
 # The daemon therefore ungroups that tab first; these pin the Python half of that
-# contract (the JS half decides that the tab is really last and really in this
-# agent's group).
+# contract (including waking an idled-out MV3 service worker before closing).
 # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
-
-
 async def test_release_page_ungroups_the_recorded_target_of_the_agent(
     chrome_factory: Callable[[dict[str, Any]], Awaitable[FakeChrome]],
 ) -> None:
@@ -215,7 +225,7 @@ async def test_release_page_ungroups_the_recorded_target_of_the_agent(
     chrome.listings.append([_page("T1"), _page("T2")])
 
     async with asyncio.TaskGroup() as tasks:
-        groups = AgentTabGroups(chrome.port, tasks, timers=SYSTEM_TIMERS)
+        groups = _groups(chrome, tasks)
         await groups.group_new_page(42, frozenset({"T1"}), 7)
         await _settle(42)
         await groups.release_page(7)
@@ -233,25 +243,27 @@ async def test_release_page_is_a_no_op_for_a_page_it_never_grouped(
     chrome = await chrome_factory(model.handlers())
 
     async with asyncio.TaskGroup() as tasks:
-        await AgentTabGroups(chrome.port, tasks, timers=SYSTEM_TIMERS).release_page(99)
+        await _groups(chrome, tasks).release_page(99)
 
     assert chrome.http_urls == []
     assert model.expressions == []
 
 
-async def test_release_page_does_not_start_a_worker_and_only_warns(
+async def test_release_page_wakes_an_idled_out_worker_to_ungroup_the_last_tab(
     loguru_records: list[dict[str, Any]],
     chrome_factory: Callable[[dict[str, Any]], Awaitable[FakeChrome]],
 ) -> None:
     # meiva:note
-    # A worker that is not running cannot have left a saved group, so the ungroup
-    # never loads one -- it warns that the chip may be left behind.
+    # Chrome stops the MV3 service worker ~30s after grouping finishes while the
+    # open tab group remains in the tab strip; `release_page` must reload/wake the
+    # worker via `loadUnpacked` so closing an agent's tab after >30s removes the
+    # group instead of saving a closed group chip.
     # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
     model = ChromeModel(loaded=False)
     chrome = await chrome_factory(model.handlers())
     chrome.listings.append([_page("T1"), _page("T2")])
     async with asyncio.TaskGroup() as tasks:
-        groups = AgentTabGroups(chrome.port, tasks, timers=SYSTEM_TIMERS)
+        groups = _groups(chrome, tasks)
         await groups.group_new_page(42, frozenset({"T1"}), 7)
         await _settle(42)
         model.expressions.clear()
@@ -259,6 +271,33 @@ async def test_release_page_does_not_start_a_worker_and_only_warns(
         model.worker = None
         await groups.release_page(7)
 
-    assert chrome.ws.methods().count("Extensions.loadUnpacked") == loaded_before
-    messages = _warnings(loguru_records)
-    assert any("saved tab group" in m for m in messages), messages
+    assert chrome.ws.methods().count("Extensions.loadUnpacked") == loaded_before + 1
+    expressions = [e for e in model.expressions if e.startswith("meivaUngroupLast(")]
+    assert expressions == ['meivaUngroupLast("T2", "Meiva #42")']
+    assert _warnings(loguru_records) == []
+
+
+async def test_release_page_serializes_behind_in_flight_grouping(
+    loguru_records: list[dict[str, Any]],
+    chrome_factory: Callable[[dict[str, Any]], Awaitable[FakeChrome]],
+) -> None:
+    # meiva:note
+    # A page closed immediately after creation shares `ExtensionWorker`'s lock with
+    # its background `meivaGroup` task, so grouping cannot finish after ungroup and
+    # leave a grouped tab to close.
+    model = ChromeModel(loaded=True, worker=SHIPPED_WORKER, script_delay=2)
+    chrome = await chrome_factory(model.handlers())
+    chrome.listings.append([_page("T1"), _page("T2")])
+    async with asyncio.TaskGroup() as tasks:
+        groups = _groups(chrome, tasks)
+        await groups.group_new_page(42, frozenset({"T1"}), 7)
+        await asyncio.sleep(0)
+        await groups.release_page(7)
+        await _settle(42)
+
+    calls = [e for e in model.expressions if e.startswith(("meivaGroup(", "meivaUngroupLast("))]
+    assert calls == [
+        'meivaGroup("T2", "Meiva #42")',
+        'meivaUngroupLast("T2", "Meiva #42")',
+    ]
+    assert _warnings(loguru_records) == []

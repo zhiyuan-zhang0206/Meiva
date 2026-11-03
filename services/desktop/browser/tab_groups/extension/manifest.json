@@ -2,6 +2,7 @@
   "manifest_version": 3,
   "name": "Meiva Tab Groups",
   "version": "1",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAm5LCtfMl0qNO8m7HLqZdf1lD7Yfa+LS9FWI8uytYcja+mH8+lq6gzGXDQIK8bdCabt9AJiIKSvDB/7/fnk613ahJCJanaO0XQJYg+jcY8tCM2ww3UCzWSn2u8y2mvI8G/b8IlUrP0OfrJQNI49X1o9py9rGhdr7tMwCwIPW1zBTpv4/HDWwsy+V/lMRUxuQceepNdDnWjaX2MUIx0keSg7UMSHJMHMaO89DL70X7Hfa0Ds2Nqh5OQE8hERQQeeaIXgE68AbVTy195g2CYPGp/1ilKVK8KxL/G3+ZjCuljsGuA1VUt6UYip5xQBrofiVQ6vVMdt/zf6ClPv+z/jE6CQIDAQAB",
   "description": "Files the pages an Meiva agent opens into one tab group per agent.",
   "permissions": [
     "tabs",
@@ -9,6 +10,6 @@
     "debugger"
   ],
   "background": {
-    "service_worker": "group-95451810aeb2.js"
+    "service_worker": "group-fff05db864f5.js"
   }
 }

@@ -48,3 +48,17 @@ regexTarget = "match"
 regexes = [
     "STORAGE_KEY = 'weekly-planner\\.v1'",
 ]
+
+# Chrome Manifest V3 public RSA SubjectPublicKeyInfo (`key` field) used only to
+# derive a fixed unpacked extension id (`cplinpgkjgnbfbdljojalofeigddlmgo`).
+# Keep the exception limited to this exact public key in the tab-groups manifest.
+[[allowlists]]
+description = "Chrome Manifest V3 public key for fixed Meiva Tab Groups extension ID"
+condition = "AND"
+paths = [
+    '''^services/desktop/browser/tab_groups/extension/manifest\.json$''',
+]
+regexTarget = "line"
+regexes = [
+    '''^\s*"key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAm5LCtfMl0qNO8m7HLqZdf1lD7Yfa\+LS9FWI8uytYcja\+mH8\+lq6gzGXDQIK8bdCabt9AJiIKSvDB/7/fnk613ahJCJanaO0XQJYg\+jcY8tCM2ww3UCzWSn2u8y2mvI8G/b8IlUrP0OfrJQNI49X1o9py9rGhdr7tMwCwIPW1zBTpv4/HDWwsy\+V/lMRUxuQceepNdDnWjaX2MUIx0keSg7UMSHJMHMaO89DL70X7Hfa0Ds2Nqh5OQE8hERQQeeaIXgE68AbVTy195g2CYPGp/1ilKVK8KxL/G3\+ZjCuljsGuA1VUt6UYip5xQBrofiVQ6vVMdt/zf6ClPv\+z/jE6CQIDAQAB",\s*$''',
+]

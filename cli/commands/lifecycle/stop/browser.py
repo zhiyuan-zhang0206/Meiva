@@ -26,8 +26,10 @@ def record_browser_session(command: CommandRuntime, *, now: datetime) -> None:
 
     line = session_restore.record_for_stop(
         home=command.home,
-        chrome=session_restore.CdpChrome(
-            command.config.view.services.browser_cdp_port, timers=command.timers
+        chrome=session_restore.CdpChrome.for_home(
+            command.config.view.services.browser_cdp_port,
+            home=command.home,
+            timers=command.timers,
         ),
         now=now,
     )

@@ -25,24 +25,28 @@
 from __future__ import annotations
 
 import asyncio
-import itertools
 import json
-from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
-
-import websockets
-from websockets.asyncio.client import ClientConnection
 
 from base.clock import Timers
 from base.host.atomic_io import write_text_atomic
 from base.log import logger
 from base.paths import run_dir
 
-from .session import cdp_call, http_json
-from .tab_groups.grouping import EXTENSION_DIR, shipped_worker
+from .session import http_json
+from .tab_groups.grouping import (
+    EXTENSION_DIR as EXTENSION_DIR,
+)
+from .tab_groups.grouping import (
+    ExtensionWorker,
+    staged_extension_dir,
+)
+from .tab_groups.grouping import (
+    shipped_worker as shipped_worker,
+)
 
 LEDGER_NAME = "browser-session.json"
 
@@ -52,15 +56,10 @@ LEDGER_NAME = "browser-session.json"
 LISTING_TIMEOUT_S = 2.0
 
 # meiva:note
-# One extension call, plus the retries the service worker needs: a worker that
-# idled out stays listed as a target but refuses attach, so a failed attempt is
-# retried after a reload (see `CdpChrome.worker`). The whole ladder is bounded by
-# WORKER_ATTEMPTS * WORKER_TIMEOUT_S, and every caller treats a failure as
-# "degrade", never as a failed stop or a failed start.
-WORKER_TIMEOUT_S = 4.0
-WORKER_ATTEMPTS = 3
-WORKER_RETRY_S = 0.4
-WORKER_SCRIPT_WAIT_S = 5.0
+# Bound on one service-worker call (waking an idled-out worker via `loadUnpacked`
+# plus evaluating the layout helper). Every caller treats a failure as degrade,
+# never as a failed stop or a failed start.
+WORKER_TIMEOUT_S = 10.0
 
 # meiva:note
 # How long `meiva start` waits for the daemon's reapply before it reports. The
@@ -497,116 +496,39 @@ def record_for_stop(*, home: Path, chrome: Chrome, now: datetime) -> str | None:
 
 
 # meiva:note
-# `Chrome` over this unit's CDP port.
+# `Chrome` over this unit's CDP port, delegating service-worker evaluation to an
+# `ExtensionWorker` so layout capture/reapply shares the staged extension
+# directory, stale-copy cleanup and worker lock.
 class CdpChrome:
     def __init__(
         self,
         cdp_port: int,
         *,
-        timers: Timers,
+        worker: ExtensionWorker,
     ) -> None:
         self._cdp_port = cdp_port
-        self._timers = timers
+        self._worker = worker
+
+    @classmethod
+    def for_home(
+        cls,
+        cdp_port: int,
+        *,
+        home: Path,
+        timers: Timers,
+    ) -> CdpChrome:
+        return cls(
+            cdp_port,
+            worker=ExtensionWorker(
+                cdp_port,
+                timers=timers,
+                extension_dir=staged_extension_dir(home),
+            ),
+        )
 
     async def json(self, path: str) -> object:
         url = f"http://127.0.0.1:{self._cdp_port}{path}"
         return await asyncio.wait_for(http_json(url), LISTING_TIMEOUT_S)
 
-    # meiva:note
-    # Evaluate `expression` in the tab-group extension's worker.
-    #
-    #         The worker is the only thing that can see (and set) `pinned` and tab
-    #         groups; CDP has neither. Attaching is the fragile part: a worker that has
-    #         idled out stays listed as a target but rejects `Target.attachToTarget`,
-    #         and reloading a live one tears it down mid-call. So an attempt reuses a
-    #         live worker, and a failed attempt reloads the extension before the next
-    #         one (measured on Chrome 156: the first call after a load always answers;
-    #         later calls need this ladder).
     async def worker(self, expression: str) -> object:
-        last: BaseException | None = None
-        for attempt in range(WORKER_ATTEMPTS):
-            try:
-                return await self._one_worker_call(expression, reload_first=attempt > 0)
-            except Exception as exc:
-                last = exc
-                await self._timers.asleep(WORKER_RETRY_S)
-        raise RuntimeError(f"extension call failed after {WORKER_ATTEMPTS} attempts: {last}")
-
-    async def _one_worker_call(self, expression: str, *, reload_first: bool) -> object:
-        version: Any = await self.json("/json/version")
-        version_obj: object = version
-        if type(version_obj) is not dict:
-            raise RuntimeError("CDP /json/version did not return a JSON object")
-        ids = itertools.count(1)
-        async with websockets.connect(str(version["webSocketDebuggerUrl"])) as ws:
-            extension_id = await self._extension_id(ws, ids, reload_first=reload_first)
-            url = f"chrome-extension://{extension_id}/{shipped_worker()}"
-            targets = await self._worker_targets(ws, ids, url)
-            failure: BaseException | None = None
-            # meiva:note
-            # Newest target first: Chrome keeps the dead worker targets listed.
-            for target in reversed(targets):
-                try:
-                    return await _attach_and_evaluate(ws, ids, target, expression)
-                except Exception as exc:
-                    failure = exc
-            raise RuntimeError(f"no live worker answered: {failure}")
-
-    async def _extension_id(
-        self, ws: ClientConnection, ids: Iterator[int], *, reload_first: bool
-    ) -> str:
-        loaded = [
-            entry
-            for entry in (await cdp_call(ws, ids, "Extensions.getExtensions", {}))["extensions"]
-            if Path(entry["path"]).resolve() == EXTENSION_DIR.resolve()
-        ]
-        if reload_first or not loaded:
-            loaded_id = (
-                await cdp_call(ws, ids, "Extensions.loadUnpacked", {"path": str(EXTENSION_DIR)})
-            )["id"]
-            await self._timers.asleep(WORKER_RETRY_S)
-            return str(loaded_id)
-        return str(loaded[0]["id"])
-
-    async def _worker_targets(
-        self, ws: ClientConnection, ids: Iterator[int], url: str
-    ) -> list[str]:
-        deadline = self._timers.monotonic() + WORKER_SCRIPT_WAIT_S
-        while True:
-            infos = (await cdp_call(ws, ids, "Target.getTargets", {}))["targetInfos"]
-            targets = [
-                str(info["targetId"])
-                for info in infos
-                if info.get("type") == "service_worker" and info.get("url") == url
-            ]
-            if targets:
-                return targets
-            if self._timers.monotonic() >= deadline:
-                raise RuntimeError("the tab-group worker did not appear")
-            await self._timers.asleep(0.1)
-
-
-# meiva:note
-# Attach to one worker target and evaluate `expression` there (raises on failure).
-async def _attach_and_evaluate(
-    ws: ClientConnection, ids: Iterator[int], target: str, expression: str
-) -> object:
-    session_id = (
-        await asyncio.wait_for(
-            cdp_call(ws, ids, "Target.attachToTarget", {"targetId": target, "flatten": True}),
-            WORKER_TIMEOUT_S,
-        )
-    )["sessionId"]
-    outcome = await asyncio.wait_for(
-        cdp_call(
-            ws,
-            ids,
-            "Runtime.evaluate",
-            {"expression": expression, "awaitPromise": True, "returnByValue": True},
-            session_id=session_id,
-        ),
-        WORKER_TIMEOUT_S,
-    )
-    if "exceptionDetails" in outcome:
-        raise RuntimeError(outcome["exceptionDetails"]["exception"]["description"])
-    return outcome["result"].get("value")
+        return await self._worker.evaluate(expression, timeout_s=WORKER_TIMEOUT_S)

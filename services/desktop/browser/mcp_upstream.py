@@ -15,8 +15,11 @@ from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, suppress
 from datetime import timedelta
 
+import anyio
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import get_default_environment, stdio_client
+from mcp.shared.exceptions import MCPError
+from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 
 from base.log import logger
 from services.desktop.browser.shutdown_budget import SHUTDOWN_STEP_TIMEOUT_S
@@ -205,3 +208,64 @@ async def contained(work: Awaitable[object], what: str) -> None:
         await work
     except Exception:
         logger.exception("[browser-mcp] {} failed", what)
+
+
+# meiva:note
+# Upstream session teardown or MCP CONNECTION_CLOSED / REQUEST_TIMEOUT ends this daemon generation.
+UPSTREAM_DOWN = (anyio.ClosedResourceError, anyio.BrokenResourceError, anyio.EndOfStream)
+_UPSTREAM_DOWN_ERROR_CODES = {CONNECTION_CLOSED, REQUEST_TIMEOUT}
+UPSTREAM_DOWN_MSG = "chrome upstream session is down; restart browser-mcp before continuing"
+
+# meiva:note
+# Upstream watchdog: with no client calling, a wedged upstream would sit
+# undetected forever (ping answers from the daemon, list_tools serves its
+# cache). Probe the upstream itself every interval; a missing reply within the
+# timeout marks the session dead and ends the process (2026-08-06 #899).
+_UPSTREAM_WATCHDOG_INTERVAL_S = 30.0
+_UPSTREAM_WATCHDOG_TIMEOUT_S = 10.0
+
+
+# meiva:note
+# True when `exc` means this upstream session is unusable.
+def is_upstream_down(exc: BaseException) -> bool:
+    return isinstance(exc, UPSTREAM_DOWN) or (
+        isinstance(exc, MCPError) and exc.code in _UPSTREAM_DOWN_ERROR_CODES
+    )
+
+
+# meiva:note
+# Wait for `dead` or `stop` to fire, cancelling the losing waiter on exit.
+async def await_death_or_stop(dead: asyncio.Event, stop: asyncio.Event) -> None:
+    async with asyncio.TaskGroup() as waiters:
+        dead_task = waiters.create_task(dead.wait())
+        stop_task = waiters.create_task(stop.wait())
+        try:
+            await asyncio.wait({stop_task, dead_task}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            dead_task.cancel()
+            stop_task.cancel()
+
+
+# meiva:note
+# Periodically ping the upstream session; a wedged one (no reply within the
+# timeout) sets `dead` so the daemon exits even when no client is calling.
+async def upstream_watchdog(
+    upstream: ClientSession, dead: asyncio.Event, stop: asyncio.Event
+) -> None:
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(upstream.send_ping(), timeout=_UPSTREAM_WATCHDOG_TIMEOUT_S)
+        except (TimeoutError, MCPError) as e:
+            if stop.is_set():
+                return
+            logger.error(
+                "[browser-mcp] upstream watchdog: {} — terminating the daemon",
+                type(e).__name__,
+            )
+            dead.set()
+            return
+        except Exception as e:
+            if stop.is_set():
+                return
+            logger.warning("[browser-mcp] upstream watchdog ping failed: {!r}; retrying", e)
+        await await_stop_or_timeout(stop, _UPSTREAM_WATCHDOG_INTERVAL_S)
