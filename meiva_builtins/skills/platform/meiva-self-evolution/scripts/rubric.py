@@ -20,7 +20,9 @@ budget that only sets the midpoint; tune the constants, the delta still holds.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import NotRequired, TypedDict
+
+from record_shape import RecordBody
 
 COMPLETION_WEIGHTS = {
     "has_output": 0.55,
@@ -42,7 +44,18 @@ REF_TURNS = 8.0
 REF_TOKENS = 60_000.0
 
 
-def _exec_success_rate(rec: dict[str, Any]) -> float:
+# meiva:note
+# The three dimensions one scored run is read for, or the reason it was not scored at all: an
+# abstained run carries the three as `None` plus its `abstain` reason, so a reader that asks only
+# for `overall` sees the abstention without looking for a second shape.
+class Scores(TypedDict):
+    completion: float | None
+    efficiency: float | None
+    overall: float | None
+    abstain: NotRequired[str]
+
+
+def _exec_success_rate(rec: RecordBody) -> float:
     total = rec["exec_ok"] + rec["exec_failed"]
     return rec["exec_ok"] / total if total else 1.0
 
@@ -57,7 +70,7 @@ def _weighted(terms: dict[str, float], weights: dict[str, float]) -> float:
     return round(sum(terms[k] * w for k, w in weights.items()), 3)
 
 
-def completion(rec: dict[str, Any]) -> float:
+def completion(rec: RecordBody) -> float:
     terms = {
         "has_output": 1.0 if rec["final_output"].strip() else 0.0,
         "exec_success": _exec_success_rate(rec),
@@ -66,7 +79,7 @@ def completion(rec: dict[str, Any]) -> float:
     return _weighted(terms, COMPLETION_WEIGHTS)
 
 
-def efficiency(rec: dict[str, Any]) -> float:
+def efficiency(rec: RecordBody) -> float:
     terms = {
         "exec_clean": _exec_success_rate(rec),
         "no_compaction": 1.0 / (1.0 + rec["compactions"]),
@@ -77,7 +90,7 @@ def efficiency(rec: dict[str, Any]) -> float:
     return _weighted(terms, EFFICIENCY_WEIGHTS)
 
 
-def overall(rec: dict[str, Any]) -> float:
+def overall(rec: RecordBody) -> float:
     return _weighted(
         {"completion": completion(rec), "efficiency": efficiency(rec)}, OVERALL_WEIGHTS
     )
@@ -89,7 +102,7 @@ ABSTAIN_NO_TERMINAL = "no_terminal"
 ABSTAIN_INCOMPLETE = "incomplete_evidence"
 
 
-def _has_process_telemetry(rec: dict[str, Any]) -> bool:
+def _has_process_telemetry(rec: RecordBody) -> bool:
     return bool(
         rec["turns"]
         or rec["exec_ok"]
@@ -100,7 +113,7 @@ def _has_process_telemetry(rec: dict[str, Any]) -> bool:
 
 
 # meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/meiva-self-evolution.meiva.okf.md
-def abstain_reason(rec: dict[str, Any]) -> str | None:
+def abstain_reason(rec: RecordBody) -> str | None:
     grade = rec.get("evidence_grade")
     if grade is not None:
         if grade == "complete":
@@ -115,7 +128,7 @@ def abstain_reason(rec: dict[str, Any]) -> str | None:
     return None
 
 
-def scores(rec: dict[str, Any]) -> dict[str, float | str | None]:
+def scores(rec: RecordBody) -> Scores:
     reason = abstain_reason(rec)
     if reason is not None:
         return {"completion": None, "efficiency": None, "overall": None, "abstain": reason}

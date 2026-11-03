@@ -24,6 +24,14 @@ class TranscriptRow(NamedTuple):
     content: str
 
 
+# meiva:note
+# One transcript row as a dataset record and a checkpoint message carry it: the message type and
+# its human-visible text.
+class TranscriptLine(TypedDict):
+    type: str
+    content: str
+
+
 class InboundFact(NamedTuple):
     source: str
     content: str
@@ -130,5 +138,5 @@ def inbound_facts(rows: Sequence[Inbound]) -> tuple[InboundFact, ...]:
     )
 
 
-def transcript_facts(rows: Sequence[Mapping[str, str]]) -> tuple[TranscriptRow, ...]:
+def transcript_facts(rows: Sequence[TranscriptLine]) -> tuple[TranscriptRow, ...]:
     return tuple(TranscriptRow(row.get("type", ""), row.get("content", "")) for row in rows)

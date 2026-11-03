@@ -34,13 +34,18 @@ from __future__ import annotations
 
 import json
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import NotRequired, TypedDict
 from uuid import uuid4
+
+from psycopg.rows import class_row
+from pydantic import TypeAdapter
 
 import meiva
 from base.db import Database
+from base.host.boundary.untyped import object_of
 
 # `audit`/`collect`/`rubric` are siblings in this skill's own scripts/ dir,
 # not an importable package (PYTHONSAFEPATH=1 keeps a script's own directory
@@ -53,10 +58,11 @@ from audit import LeakPaths
 from collect import collect_one
 from events_window import week_label
 from record import task_prompt_of
-from rubric import scores
+from record_shape import LeakAuditEntry, Record, RecordBody
+from rubric import Scores, scores
 
 from base.cluster.machine import GatewayAccess
-from base.paths import meiva_home, workspace_dir
+from base.paths import meiva_home, memory_dir, workspace_dir
 
 # Tool-call prefixes that make a run unsafe to re-run: fleet/user-facing side
 # effects, process lifecycle, arbitrary OS (shell can rm / curl / git push),
@@ -75,7 +81,7 @@ UNSAFE_PREFIXES = (
 )
 
 
-def is_replay_safe(rec: dict[str, Any]) -> tuple[bool, str]:
+def is_replay_safe(rec: RecordBody) -> tuple[bool, str]:
     """Return (safe, reason). A run is safe to re-run only if every tool it
     called is pure read/compute and it actually carries a task prompt."""
     if not task_prompt_of(rec).strip():
@@ -86,19 +92,19 @@ def is_replay_safe(rec: dict[str, Any]) -> tuple[bool, str]:
     return True, "pure read/compute"
 
 
-def verify_replay(original: dict[str, Any], replayed: dict[str, Any]) -> tuple[bool, str]:
+def verify_replay(original_tools_called: dict[str, int], replayed: Record) -> tuple[bool, str]:
     """Check that a completed replay attempted the original task safely."""
     if replayed["turns"] < 1:
         return False, "replay never ran a turn"
     if not replayed["final_output"].strip():
         return False, "replay produced no output"
 
-    replay_tools = set(replayed.get("tools_called", {}))
+    replay_tools = set(replayed["tools_called"])
     unsafe = sorted(tool for tool in replay_tools if tool.startswith(UNSAFE_PREFIXES))
     if unsafe:
         return False, "replay used side-effect tools: " + ", ".join(unsafe)
 
-    original_tools = set(original.get("tools_called", {}))
+    original_tools = set(original_tools_called)
     if original_tools and not replay_tools & original_tools:
         return False, (
             "replay tool profile diverges from original "
@@ -113,6 +119,112 @@ def verify_replay(original: dict[str, Any], replayed: dict[str, Any]) -> tuple[b
 DONE_STATUSES = ("idling", "terminated")
 
 
+# meiva:note
+# One replayed task as `launch` recorded it: the eval agent that re-runs it, the task's source
+# agent, the prompt it was given and the tool profile the original run had.
+class EvalRun(TypedDict):
+    eval_agent_id: int
+    source_agent_id: int
+    prompt: str
+    original_tools_called: dict[str, int]
+    debrief_sent: NotRequired[bool]
+
+
+# meiva:note
+# One task `launch` declined to replay, and the one reason it is not safe to re-run.
+class SkippedTask(TypedDict):
+    source_agent_id: int
+    reason: str
+
+
+# meiva:note
+# The eval state one `launch` persisted: the skill, the stamp its file is named by, the replays it
+# started and the tasks it skipped.
+class EvalState(TypedDict):
+    skill: str
+    stamp: str
+    runs: list[EvalRun]
+    skipped: list[SkippedTask]
+    path: NotRequired[str]
+
+
+# meiva:note
+# Which eval agents are finished and which still run.
+class Progress(TypedDict):
+    done: list[int]
+    pending: list[int]
+
+
+# meiva:note
+# Whether a replay counted towards the mean, and the one reason it did not: a leak, an abstention,
+# or the replay check.
+class Verification(TypedDict):
+    ok: bool
+    reason: str
+
+
+# meiva:note
+# One replayed task's report: its scores, its leak audit and whether it entered the mean.
+class TaskReport(TypedDict):
+    eval_agent_id: int
+    source_agent_id: int
+    label: str
+    scores: Scores
+    leak_audit: list[LeakAuditEntry]
+    invalidated: bool
+    valid: bool
+    verification: Verification
+
+
+# meiva:note
+# The mean of the three scored dimensions over the valid replays.
+class ScoreMean(TypedDict):
+    completion: float
+    efficiency: float
+    overall: float
+
+
+# meiva:note
+# What `gather` reports, and what `aggregate` reads back from its file: the mean, every replay, the
+# invalid ones, the agents still pending and the tasks `launch` skipped.
+class EvalReport(TypedDict):
+    skill: str
+    stamp: str
+    n: int
+    mean: ScoreMean | None
+    per_task: list[TaskReport]
+    invalid: list[TaskReport]
+    invalidated: int
+    pending: list[int]
+    skipped: list[SkippedTask]
+
+
+# meiva:note
+# One debrief message sent to a finished eval agent.
+class DebriefResult(TypedDict):
+    eval_agent_id: int
+    prompt: str
+    debrief_sent: bool
+
+
+# meiva:note
+# One `agents_meta` lifecycle row: the agent and its current status.
+@dataclass(frozen=True)
+class _StatusRow:
+    id: int
+    status: str
+
+
+_STATE = TypeAdapter(EvalState)
+
+
+# meiva:note
+# One eval state file's contents, checked field by field. A state file this shape does not name a
+# field for keeps only the named ones; `poll`/`gather` read nothing else.
+def read_eval_state(value: object) -> EvalState:
+    return _STATE.validate_python(value, strict=True)
+
+
 def _eval_dir() -> Path:
     d = meiva_home() / "self_evolution" / "eval"
     d.mkdir(parents=True, exist_ok=True)
@@ -124,18 +236,18 @@ def _state_path(skill: str, stamp: str) -> Path:
     return _eval_dir() / f"{safe}-{stamp}.json"
 
 
-def launch(skill: str, tasks: list[dict[str, Any]], *, model: str | None = None) -> dict[str, Any]:
+def launch(skill: str, tasks: list[RecordBody], *, model: str | None = None) -> EvalState:
     """Spawn one fresh agent per replay-safe task to re-run it under the current
     skill text. Returns (and persists) the eval state; pass it to `gather` once
     the agents finish. Must run inside an agent process."""
     import meiva
 
-    runs: list[dict[str, Any]] = []
-    skipped: list[dict[str, Any]] = []
+    runs: list[EvalRun] = []
+    skipped: list[SkippedTask] = []
     for task in tasks:
         safe, why = is_replay_safe(task)
         if not safe:
-            skipped.append({"source_agent_id": task["agent_id"], "reason": why})
+            skipped.append(SkippedTask(source_agent_id=task["agent_id"], reason=why))
             continue
         overlay: dict[str, object] = {"eval_isolation": True}
         if model:
@@ -145,15 +257,15 @@ def launch(skill: str, tasks: list[dict[str, Any]], *, model: str | None = None)
             prompt=prompt, config_overlay=overlay, idempotency_key=str(uuid4())
         )
         runs.append(
-            {
-                "eval_agent_id": eval_id,
-                "source_agent_id": task["agent_id"],
-                "prompt": prompt,
-                "original_tools_called": task.get("tools_called", {}),
-            }
+            EvalRun(
+                eval_agent_id=eval_id,
+                source_agent_id=task["agent_id"],
+                prompt=prompt,
+                original_tools_called=task["tools_called"],
+            )
         )
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
-    state: dict[str, Any] = {"skill": skill, "stamp": stamp, "runs": runs, "skipped": skipped}
+    state = EvalState(skill=skill, stamp=stamp, runs=runs, skipped=skipped)
     path = _state_path(skill, stamp)
     path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
     state["path"] = str(path)
@@ -163,12 +275,12 @@ def launch(skill: str, tasks: list[dict[str, Any]], *, model: str | None = None)
 def _status_of(agent_ids: list[int], *, database: Database) -> dict[int, str]:
     if not agent_ids:
         return {}
-    with database.connect() as conn, conn.cursor() as cur:
+    with database.connect() as conn, conn.cursor(row_factory=class_row(_StatusRow)) as cur:
         cur.execute("SELECT id, status FROM agents_meta WHERE id = ANY(%s)", [agent_ids])
-        return {r[0]: r[1] for r in cur.fetchall()}
+        return {row.id: row.status for row in cur.fetchall()}
 
 
-def poll(state: dict[str, Any], *, database: Database) -> dict[str, list[int]]:
+def poll(state: EvalState, *, database: Database) -> Progress:
     """Split the eval agents into done vs still-pending by their current status.
     Call each turn until `pending` is empty, then `gather`, using the same
     caller-supplied Database."""
@@ -179,10 +291,10 @@ def poll(state: dict[str, Any], *, database: Database) -> dict[str, list[int]]:
 # meiva:note
 # Which eval agents are finished and which still run, from the statuses read for them: an agent
 # with no status row counts as still pending.
-def split_progress(run_ids: list[int], statuses: dict[int, str]) -> dict[str, list[int]]:
+def split_progress(run_ids: list[int], statuses: dict[int, str]) -> Progress:
     done = [i for i in run_ids if statuses.get(i) in DONE_STATUSES]
     pending = [i for i in run_ids if i not in done]
-    return {"done": done, "pending": pending}
+    return Progress(done=done, pending=pending)
 
 
 def _reason(leak_invalidated: bool, abstain: str | None, replay_reason: str) -> str:
@@ -193,15 +305,25 @@ def _reason(leak_invalidated: bool, abstain: str | None, replay_reason: str) -> 
     return replay_reason
 
 
-def _is_float_dict(value: object) -> TypeGuard[dict[str, float]]:
-    return isinstance(value, dict)
+# meiva:note
+# The three dimensions of a scored run that all carry a number, or nothing when one of them
+# abstained: the mean is only taken over the runs that were scored on every dimension.
+def _score_terms(scored: Scores) -> ScoreMean | None:
+    completion, efficiency, overall = scored["completion"], scored["efficiency"], scored["overall"]
+    if completion is None or efficiency is None or overall is None:
+        return None
+    return ScoreMean(completion=completion, efficiency=efficiency, overall=overall)
 
 
-def _mean(score_dicts: list[dict[str, float]]) -> dict[str, float] | None:
+def _mean(score_dicts: list[ScoreMean]) -> ScoreMean | None:
     if not score_dicts:
         return None
-    keys = ("completion", "efficiency", "overall")
-    return {k: round(sum(s[k] for s in score_dicts) / len(score_dicts), 3) for k in keys}
+    count = len(score_dicts)
+    return ScoreMean(
+        completion=round(sum(s["completion"] for s in score_dicts) / count, 3),
+        efficiency=round(sum(s["efficiency"] for s in score_dicts) / count, 3),
+        overall=round(sum(s["overall"] for s in score_dicts) / count, 3),
+    )
 
 
 def _leak_paths(agent_id: int) -> LeakPaths:
@@ -209,14 +331,14 @@ def _leak_paths(agent_id: int) -> LeakPaths:
     home = meiva_home()
     agent_workspace = workspace_dir(agent_id, home=home).resolve()
     return LeakPaths(
-        memory_pool=str(meiva.memory.PATH.resolve()),
+        memory_pool=str(memory_dir(home=home).resolve()),
         self_evolution=str((home / "self_evolution").resolve()),
         workspaces_root=str(agent_workspace.parent),
         agent_workspace=str(agent_workspace),
     )
 
 
-def gather(state: dict[str, Any], *, database: Database, gateway: GatewayAccess) -> dict[str, Any]:
+def gather(state: EvalState, *, database: Database, gateway: GatewayAccess) -> EvalReport:
     """Collect + score every finished eval agent.
 
     Agents still running are listed under `pending`. Finished replays that do
@@ -226,7 +348,7 @@ def gather(state: dict[str, Any], *, database: Database, gateway: GatewayAccess)
     """
     progress = poll(state, database=database)
     now = datetime.now(UTC)
-    records = {
+    records: dict[int, Record] = {
         run["eval_agent_id"]: collect_one(
             run["eval_agent_id"],
             week_label(now),
@@ -241,29 +363,28 @@ def gather(state: dict[str, Any], *, database: Database, gateway: GatewayAccess)
     return assemble_report(state, progress["pending"], records)
 
 
-def _evaluate_task(run: dict[str, Any], record: dict[str, Any]) -> dict[str, Any]:
-    rec = dict(record)
-    if not (rec.get("task_prompt") or "").strip():
+def _evaluate_task(run: EvalRun, record: Record) -> TaskReport:
+    rec = Record(**record)
+    if not rec["task_prompt"].strip():
         rec["task_prompt"] = task_prompt_of(rec)
-    replay_ok, replay_reason = verify_replay(
-        {"tools_called": run.get("original_tools_called", {})}, rec
-    )
-    leak_invalidated = rec["invalidated"]
+    replay_ok, replay_reason = verify_replay(run["original_tools_called"], rec)
+    leak_invalidated = rec.get("invalidated")
+    if leak_invalidated is None:
+        raise TypeError(f"eval record for agent {run['eval_agent_id']} carries no leak audit")
     scored = scores(rec)
-    raw_abstain = scored.get("abstain")
-    abstain = raw_abstain if isinstance(raw_abstain, str) else None
+    abstain = scored.get("abstain")
     valid = replay_ok and not leak_invalidated and abstain is None
     reason = _reason(leak_invalidated, abstain, replay_reason)
-    return {
-        "eval_agent_id": run["eval_agent_id"],
-        "source_agent_id": run["source_agent_id"],
-        "label": rec["label"],
-        "scores": scored,
-        "leak_audit": rec["leak_audit"],
-        "invalidated": leak_invalidated,
-        "valid": valid,
-        "verification": {"ok": valid, "reason": reason},
-    }
+    return TaskReport(
+        eval_agent_id=run["eval_agent_id"],
+        source_agent_id=run["source_agent_id"],
+        label=rec["label"],
+        scores=scored,
+        leak_audit=rec.get("leak_audit", []),
+        invalidated=leak_invalidated,
+        valid=valid,
+        verification=Verification(ok=valid, reason=reason),
+    )
 
 
 # meiva:note
@@ -272,9 +393,7 @@ def _evaluate_task(run: dict[str, Any], record: dict[str, Any]) -> dict[str, Any
 # original tool profile and scored; one that never ran, used side-effect tools, diverged, abstained
 # or touched a leak surface stays in `per_task` and `invalid` and is left out of the mean and `n`.
 # The records are not changed.
-def assemble_report(
-    state: dict[str, Any], pending: list[int], records: dict[int, dict[str, Any]]
-) -> dict[str, Any]:
+def assemble_report(state: EvalState, pending: list[int], records: dict[int, Record]) -> EvalReport:
     per_task = [
         _evaluate_task(run, records[run["eval_agent_id"]])
         for run in state["runs"]
@@ -282,33 +401,35 @@ def assemble_report(
     ]
     invalid = [task for task in per_task if not task["valid"]]
     valid = [task for task in per_task if task["valid"]]
-    return {
-        "skill": state["skill"],
-        "stamp": state["stamp"],
-        "n": len(valid),
-        "mean": _mean([s for task in valid if _is_float_dict(s := task["scores"])]),
-        "per_task": per_task,
-        "invalid": invalid,
-        "invalidated": sum(task["invalidated"] for task in per_task),
-        "pending": pending,
-        "skipped": state["skipped"],
-    }
+    return EvalReport(
+        skill=state["skill"],
+        stamp=state["stamp"],
+        n=len(valid),
+        mean=_mean(
+            [terms for task in valid if (terms := _score_terms(task["scores"])) is not None]
+        ),
+        per_task=per_task,
+        invalid=invalid,
+        invalidated=sum(task["invalidated"] for task in per_task),
+        pending=pending,
+        skipped=state["skipped"],
+    )
 
 
-def latest_state(skill: str) -> dict[str, Any]:
+def latest_state(skill: str) -> EvalState:
     """Reload the most recent eval state for a skill (state does not survive
     across turns in memory, so `gather` reloads it from disk)."""
     safe = skill.replace("/", "_").replace(":", "_")
     files = sorted(_eval_dir().glob(f"{safe}-*.json"))
     if not files:
         raise FileNotFoundError(f"no eval state for skill {skill!r} under {_eval_dir()}")
-    return json.loads(files[-1].read_text(encoding="utf-8"))
+    return read_eval_state(object_of(json.loads, files[-1].read_text(encoding="utf-8")))
 
 
 # ─────────────── debrief (the backward pass) ───────────────
 
 
-def debrief(state: dict[str, Any], skill_name: str, *, database: Database) -> list[dict[str, Any]]:
+def debrief(state: EvalState, skill_name: str, *, database: Database) -> list[DebriefResult]:
     """Ask each eval agent that just ran a task: "what would you change?"
 
     This is the backward pass of the evaluation loop — the agent that actually
@@ -318,7 +439,7 @@ def debrief(state: dict[str, Any], skill_name: str, *, database: Database) -> li
 
     Returns one record per debriefed agent: {eval_agent_id, prompt, debrief_sent}.
     """
-    results: list[dict[str, Any]] = []
+    results: list[DebriefResult] = []
     status = _status_of([entry["eval_agent_id"] for entry in state["runs"]], database=database)
     for entry in state["runs"]:
         eval_agent_id = entry["eval_agent_id"]
@@ -339,10 +460,10 @@ def debrief(state: dict[str, Any], skill_name: str, *, database: Database) -> li
             continue
         entry["debrief_sent"] = True
         results.append(
-            {
-                "eval_agent_id": eval_agent_id,
-                "prompt": entry["prompt"],
-                "debrief_sent": True,
-            }
+            DebriefResult(
+                eval_agent_id=eval_agent_id,
+                prompt=entry["prompt"],
+                debrief_sent=True,
+            )
         )
     return results

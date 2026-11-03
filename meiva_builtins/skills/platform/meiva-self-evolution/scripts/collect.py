@@ -33,13 +33,17 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, assert_never
+from typing import assert_never
 
 import httpx
 import psycopg
+from psycopg.rows import class_row
 from pydantic import ValidationError
 
 from base.db import Database
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.options import options
+from base.host.boundary.untyped import object_of
 from base.host.exit_codes import hard_exit
 
 # `record` is a sibling in this skill's own scripts/ dir, not an importable
@@ -72,10 +76,12 @@ from record_inputs import (
     Inbound,
     RunInputs,
     TaskReceipts,
+    TranscriptLine,
     event_facts,
     inbound_facts,
     transcript_facts,
 )
+from record_shape import Record
 from window_records import (
     WindowRows,
     annotated_record,
@@ -163,7 +169,7 @@ def _events_page(
     params: dict[str, str | int],
     *,
     sleep: Callable[[float], None] = retry_sleep,
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+) -> tuple[list[Mapping[str, object]], Mapping[str, object]]:
     """One /api/events page (offset always 0). Returns (items, meta).
 
     Runs on `_EVENTS_RETRY_POLICY`: a transient failure (502/503/504 or a
@@ -171,11 +177,24 @@ def _events_page(
     raises the diagnostics-carrying error, any other status fails fast.
     """
 
-    def fetch() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    def fetch() -> tuple[list[Mapping[str, object]], Mapping[str, object]]:
         resp = client.get(url, params=params, headers=headers, timeout=_HTTP_TIMEOUT_S)
         resp.raise_for_status()
-        payload = resp.json()
-        return payload.get("items", []), payload.get("meta", {})
+        payload = object_of(resp.json)
+        if not is_object_dict(payload):
+            raise TypeError("the /api/events answer is not a JSON object")
+        items = payload.get("items", [])
+        meta = payload.get("meta", {})
+        if not is_object_list(items):
+            raise TypeError("the /api/events answer carries no items list")
+        if not is_object_dict(meta):
+            raise TypeError("the /api/events answer carries no meta object")
+        rows: list[Mapping[str, object]] = []
+        for index, item in enumerate(items):
+            if not is_object_dict(item):
+                raise TypeError(f"/api/events item {index} is not a JSON object")
+            rows.append(item)
+        return rows, meta
 
     return retry(_EVENTS_RETRY_POLICY, sleep=sleep)(fetch)
 
@@ -226,68 +245,129 @@ def fetch_events_window(
     return merge_slices(slices)
 
 
+# meiva:note
+# One `inbound_messages` row of the task-prompt query: the message id (the window query skips these
+# ids) and the fields a record keeps.
+@dataclass(frozen=True)
+class _TaskInboundRow:
+    id: int
+    agent_id: int
+    source: str
+    content: str
+    claimed: bool
+    created_at: datetime
+
+
+# meiva:note
+# One `inbound_messages` row of the window query, with whether the same source and text went to
+# more than one agent in the window (a broadcast the record does not count as a task prompt).
+@dataclass(frozen=True)
+class _WindowInboundRow:
+    id: int
+    agent_id: int
+    source: str
+    content: str
+    claimed: bool
+    created_at: datetime
+    is_broadcast: bool
+
+
+# meiva:note
+# One `task_update_receipts` group row: the receipts an agent accepted, by request field, and how
+# many of them moved the task's status.
+@dataclass(frozen=True)
+class _TaskReceiptRow:
+    actor_agent_id: int
+    note: int
+    status: int
+    results: int
+    state_changes: int
+
+
+# meiva:note
+# One `agents_meta` lifecycle row: who spawned the agent, its status and its last message.
+@dataclass(frozen=True)
+class _AgentMetaRow:
+    id: int
+    spawner: str
+    status: str
+    last_message_text: str | None
+
+
+# meiva:note
+# One row of the TEST- label check: the agent, its own role label and its spawner's.
+@dataclass(frozen=True)
+class _AgentLabelRow:
+    id: int
+    label: str | None
+    spawner_label: str | None
+
+
 # meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md
 def _inbounds_by_agent(
-    cur: psycopg.Cursor, agent_ids: list[int], window_from: datetime, window_to: datetime
+    conn: psycopg.Connection, agent_ids: list[int], window_from: datetime, window_to: datetime
 ) -> dict[int, list[Inbound]]:
-    cur.execute(
-        "SELECT DISTINCT ON (inbound.agent_id, inbound.source) "
-        "inbound.id, inbound.agent_id, inbound.source, inbound.content, "
-        "inbound.claimed_at IS NOT NULL AS claimed, inbound.created_at "
-        "FROM inbound_messages inbound "
-        "LEFT JOIN agents_meta meta ON meta.id = inbound.agent_id "
-        "WHERE inbound.agent_id = ANY(%s) AND inbound.kind = 'chat' "
-        "AND (inbound.source = meta.spawner OR inbound.source = ANY(%s) "
-        "OR inbound.source LIKE 'schedule:%%') "
-        "ORDER BY inbound.agent_id, inbound.source, inbound.created_at",
-        [agent_ids, sorted(HUMAN_SOURCES)],
-    )
-    task_rows = cur.fetchall()
-    task_ids = {row[0] for row in task_rows}
-    cur.execute(
-        "WITH window_inbounds AS ("
-        "SELECT id, agent_id, source, content, claimed_at IS NOT NULL AS claimed, created_at "
-        "FROM inbound_messages "
-        "WHERE agent_id = ANY(%s) AND kind = 'chat' "
-        "AND (source = ANY(%s) OR source LIKE 'agent:%%') "
-        "AND created_at >= %s AND created_at < %s"
-        "), broadcasts AS ("
-        "SELECT source, content FROM window_inbounds "
-        "GROUP BY source, content HAVING count(DISTINCT agent_id) > 1"
-        ") "
-        "SELECT inbound.id, inbound.agent_id, inbound.source, inbound.content, "
-        "inbound.claimed, inbound.created_at, broadcasts.source IS NOT NULL AS is_broadcast "
-        "FROM window_inbounds inbound "
-        "LEFT JOIN broadcasts ON broadcasts.source = inbound.source "
-        "AND broadcasts.content = inbound.content "
-        "ORDER BY inbound.agent_id, inbound.created_at",
-        [agent_ids, sorted(HUMAN_SOURCES), window_from, window_to],
-    )
+    with conn.cursor(row_factory=class_row(_TaskInboundRow)) as cur:
+        cur.execute(
+            "SELECT DISTINCT ON (inbound.agent_id, inbound.source) "
+            "inbound.id, inbound.agent_id, inbound.source, inbound.content, "
+            "inbound.claimed_at IS NOT NULL AS claimed, inbound.created_at "
+            "FROM inbound_messages inbound "
+            "LEFT JOIN agents_meta meta ON meta.id = inbound.agent_id "
+            "WHERE inbound.agent_id = ANY(%s) AND inbound.kind = 'chat' "
+            "AND (inbound.source = meta.spawner OR inbound.source = ANY(%s) "
+            "OR inbound.source LIKE 'schedule:%%') "
+            "ORDER BY inbound.agent_id, inbound.source, inbound.created_at",
+            [agent_ids, sorted(HUMAN_SOURCES)],
+        )
+        task_rows = cur.fetchall()
+    task_ids = {row.id for row in task_rows}
+    with conn.cursor(row_factory=class_row(_WindowInboundRow)) as cur:
+        cur.execute(
+            "WITH window_inbounds AS ("
+            "SELECT id, agent_id, source, content, claimed_at IS NOT NULL AS claimed, created_at "
+            "FROM inbound_messages "
+            "WHERE agent_id = ANY(%s) AND kind = 'chat' "
+            "AND (source = ANY(%s) OR source LIKE 'agent:%%') "
+            "AND created_at >= %s AND created_at < %s"
+            "), broadcasts AS ("
+            "SELECT source, content FROM window_inbounds "
+            "GROUP BY source, content HAVING count(DISTINCT agent_id) > 1"
+            ") "
+            "SELECT inbound.id, inbound.agent_id, inbound.source, inbound.content, "
+            "inbound.claimed, inbound.created_at, broadcasts.source IS NOT NULL AS is_broadcast "
+            "FROM window_inbounds inbound "
+            "LEFT JOIN broadcasts ON broadcasts.source = inbound.source "
+            "AND broadcasts.content = inbound.content "
+            "ORDER BY inbound.agent_id, inbound.created_at",
+            [agent_ids, sorted(HUMAN_SOURCES), window_from, window_to],
+        )
+        window_rows = cur.fetchall()
     rows: dict[int, list[tuple[datetime, Inbound]]] = defaultdict(list)
-    for _msg_id, agent_id, source, content, claimed, created_at in task_rows:
-        rows[agent_id].append(
+    for row in task_rows:
+        rows[row.agent_id].append(
             (
-                created_at,
-                {
-                    "source": source,
-                    "content": content,
-                    "is_broadcast": False,
-                    "claimed": claimed,
-                },
+                row.created_at,
+                Inbound(
+                    source=row.source,
+                    content=row.content,
+                    is_broadcast=False,
+                    claimed=row.claimed,
+                ),
             )
         )
-    for msg_id, agent_id, source, content, claimed, created_at, is_broadcast in cur.fetchall():
-        if msg_id in task_ids:
+    for row in window_rows:
+        if row.id in task_ids:
             continue
-        rows[agent_id].append(
+        rows[row.agent_id].append(
             (
-                created_at,
-                {
-                    "source": source,
-                    "content": content,
-                    "is_broadcast": is_broadcast,
-                    "claimed": claimed,
-                },
+                row.created_at,
+                Inbound(
+                    source=row.source,
+                    content=row.content,
+                    is_broadcast=row.is_broadcast,
+                    claimed=row.claimed,
+                ),
             )
         )
     return {
@@ -296,63 +376,73 @@ def _inbounds_by_agent(
     }
 
 
-def _task_receipts_by_agent(cur: psycopg.Cursor, ids: list[int]) -> dict[int, TaskReceipts]:
-    cur.execute(
-        "WITH status_receipts AS ("
-        "SELECT actor_agent_id, task_id, request->>'status' AS declared, "
-        "lag(request->>'status') OVER ("
-        "PARTITION BY actor_agent_id, task_id ORDER BY accepted_at, operation_key"
-        ") AS previous "
-        "FROM task_update_receipts "
-        "WHERE actor_agent_id = ANY(%s) AND request->>'status' IS NOT NULL"
-        "), state_changes AS ("
-        "SELECT actor_agent_id, count(*) AS changes FROM status_receipts "
-        "WHERE declared IS DISTINCT FROM COALESCE(previous, 'in_progress') "
-        "GROUP BY actor_agent_id"
-        ") "
-        "SELECT r.actor_agent_id, "
-        "count(*) FILTER ("
-        "WHERE r.request->>'note' IS NOT NULL AND r.request->>'status' IS NULL"
-        "), "
-        "count(*) FILTER (WHERE r.request->>'status' IS NOT NULL), "
-        "count(*) FILTER (WHERE r.request->>'results' IS NOT NULL), "
-        "COALESCE(max(c.changes), 0) "
-        "FROM task_update_receipts r "
-        "LEFT JOIN state_changes c ON c.actor_agent_id = r.actor_agent_id "
-        "WHERE r.actor_agent_id = ANY(%s) "
-        "GROUP BY r.actor_agent_id",
-        [ids, ids],
-    )
-    return {row[0]: TaskReceipts(row[1], row[2], row[3], row[4]) for row in cur.fetchall()}
+def _task_receipts_by_agent(conn: psycopg.Connection, ids: list[int]) -> dict[int, TaskReceipts]:
+    with conn.cursor(row_factory=class_row(_TaskReceiptRow)) as cur:
+        cur.execute(
+            "WITH status_receipts AS ("
+            "SELECT actor_agent_id, task_id, request->>'status' AS declared, "
+            "lag(request->>'status') OVER ("
+            "PARTITION BY actor_agent_id, task_id ORDER BY accepted_at, operation_key"
+            ") AS previous "
+            "FROM task_update_receipts "
+            "WHERE actor_agent_id = ANY(%s) AND request->>'status' IS NOT NULL"
+            "), state_changes AS ("
+            "SELECT actor_agent_id, count(*) AS changes FROM status_receipts "
+            "WHERE declared IS DISTINCT FROM COALESCE(previous, 'in_progress') "
+            "GROUP BY actor_agent_id"
+            ") "
+            "SELECT r.actor_agent_id, "
+            "count(*) FILTER ("
+            "WHERE r.request->>'note' IS NOT NULL AND r.request->>'status' IS NULL"
+            ") AS note, "
+            "count(*) FILTER (WHERE r.request->>'status' IS NOT NULL) AS status, "
+            "count(*) FILTER (WHERE r.request->>'results' IS NOT NULL) AS results, "
+            "COALESCE(max(c.changes), 0) AS state_changes "
+            "FROM task_update_receipts r "
+            "LEFT JOIN state_changes c ON c.actor_agent_id = r.actor_agent_id "
+            "WHERE r.actor_agent_id = ANY(%s) "
+            "GROUP BY r.actor_agent_id",
+            [ids, ids],
+        )
+        return {
+            row.actor_agent_id: TaskReceipts(row.note, row.status, row.results, row.state_changes)
+            for row in cur.fetchall()
+        }
 
 
-def _meta_by_agent(cur: psycopg.Cursor, ids: list[int]) -> dict[int, AgentMeta]:
-    cur.execute(
-        "SELECT id, spawner, status, last_message_text FROM agents_meta WHERE id = ANY(%s)",
-        [ids],
-    )
-    return {r[0]: AgentMeta(r[1], r[2], r[3]) for r in cur.fetchall()}
+def _meta_by_agent(conn: psycopg.Connection, ids: list[int]) -> dict[int, AgentMeta]:
+    with conn.cursor(row_factory=class_row(_AgentMetaRow)) as cur:
+        cur.execute(
+            "SELECT id, spawner, status, last_message_text FROM agents_meta WHERE id = ANY(%s)",
+            [ids],
+        )
+        return {
+            row.id: AgentMeta(row.spawner, row.status, row.last_message_text)
+            for row in cur.fetchall()
+        }
 
 
-def _test_label_ids(cur: psycopg.Cursor, ids: list[int]) -> set[int]:
+def _test_label_ids(conn: psycopg.Connection, ids: list[int]) -> set[int]:
     """Benchmark/probe agents and their direct workers, excluded from health data.
 
     A TEST- orchestrator's workers inherit its benchmark-only purpose even
     though their own labels describe the task they execute.
     """
-    cur.execute(
-        "SELECT child.id, child.label, parent.label "
-        "FROM agents child "
-        "LEFT JOIN agents_meta child_meta ON child_meta.id = child.id "
-        "LEFT JOIN agents parent ON child_meta.spawner = 'agent:' || parent.id::text "
-        "WHERE child.id = ANY(%s)",
-        [ids],
-    )
-    return {
-        row[0]
-        for row in cur.fetchall()
-        if (row[1] or "").startswith("TEST-") or (row[2] or "").startswith("TEST-")
-    }
+    with conn.cursor(row_factory=class_row(_AgentLabelRow)) as cur:
+        cur.execute(
+            "SELECT child.id, child.label, parent.label AS spawner_label "
+            "FROM agents child "
+            "LEFT JOIN agents_meta child_meta ON child_meta.id = child.id "
+            "LEFT JOIN agents parent ON child_meta.spawner = 'agent:' || parent.id::text "
+            "WHERE child.id = ANY(%s)",
+            [ids],
+        )
+        return {
+            row.id
+            for row in cur.fetchall()
+            if (row.label or "").startswith("TEST-")
+            or (row.spawner_label or "").startswith("TEST-")
+        }
 
 
 # ─────────────── driver ───────────────
@@ -360,7 +450,7 @@ def _test_label_ids(cur: psycopg.Cursor, ids: list[int]) -> set[int]:
 
 # meiva:note
 # The agent's full transcript rows, or none when its checkpoint cannot be read. An unreadable checkpoint leaves the transcript empty instead of failing the scan, and says so: the record then grades below `complete` and shows in the scan's coverage line.
-def _transcript(agent_id: int, *, database: Database) -> list[dict[str, str]]:
+def _transcript(agent_id: int, *, database: Database) -> list[TranscriptLine]:
     try:
         messages = load_checkpoint_messages_full(database, agent_id)
     except CheckpointReadError as exc:
@@ -403,17 +493,17 @@ def collect_with_counts(
     database: Database,
     gateway: GatewayAccess,
     include_test: bool = False,
-) -> tuple[list[dict[str, object]], dict[str, int]]:
+) -> tuple[list[Record], dict[str, int]]:
     telemetry = fetch_events_window("telemetry", window, gateway=gateway)
     audit = fetch_events_window("audit", window, gateway=gateway)
     events = group_by_agent(telemetry)
     logs = group_by_agent(audit)
     ids = sorted(events)
-    with database.connect() as conn, conn.cursor() as cur:
-        inbounds = _inbounds_by_agent(cur, ids, window.start, window.end)
-        meta = _meta_by_agent(cur, ids)
-        receipts = _task_receipts_by_agent(cur, ids)
-        test_ids: set[int] = set() if include_test else _test_label_ids(cur, ids)
+    with database.connect() as conn:
+        inbounds = _inbounds_by_agent(conn, ids, window.start, window.end)
+        meta = _meta_by_agent(conn, ids)
+        receipts = _task_receipts_by_agent(conn, ids)
+        test_ids: set[int] = set() if include_test else _test_label_ids(conn, ids)
     selection = select_agents(ids, meta.keys(), test_ids)
     rows = WindowRows(
         events=events,
@@ -444,7 +534,7 @@ def collect_one(
     database: Database,
     gateway: GatewayAccess,
     now: datetime,
-) -> dict[str, object]:
+) -> Record:
     # meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md
     window = Window(now - timedelta(days=7), now)
     telemetry = fetch_events_window("telemetry", window, gateway=gateway, agent_id=agent_id)
@@ -455,10 +545,10 @@ def collect_one(
     log_events = group_by_agent([r for r in audit if r.get("agent_id") == agent_id]).get(
         agent_id, []
     )
-    with database.connect() as conn, conn.cursor() as cur:
-        inbounds = _inbounds_by_agent(cur, [agent_id], window.start, window.end).get(agent_id, [])
-        meta = _meta_by_agent(cur, [agent_id]).get(agent_id)
-        receipts = _task_receipts_by_agent(cur, [agent_id]).get(agent_id)
+    with database.connect() as conn:
+        inbounds = _inbounds_by_agent(conn, [agent_id], window.start, window.end).get(agent_id, [])
+        meta = _meta_by_agent(conn, [agent_id]).get(agent_id)
+        receipts = _task_receipts_by_agent(conn, [agent_id]).get(agent_id)
     if meta is None:
         raise ValueError(f"no agents_meta row for agent {agent_id}")
     record = annotated_record(
@@ -487,17 +577,29 @@ def dataset_path(home: Path, week: str) -> Path:
 
 # meiva:note
 # Write the records to `path`, one JSON object per line.
-def write_records(records: Sequence[Mapping[str, object]], path: Path) -> Path:
+def write_records(records: Sequence[Record], path: Path) -> Path:
     with path.open("w", encoding="utf-8") as f:
         for rec in records:
             f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
     return path
 
 
-def write_dataset(records: Sequence[Mapping[str, object]], home: Path, week: str) -> Path:
+def write_dataset(records: Sequence[Record], home: Path, week: str) -> Path:
     """Write dataset to a dated JSONL file. Pass an explicit `--week` to
     regenerate a previous file in place; the default uses today's date."""
     return write_records(records, dataset_path(home, week))
+
+
+# meiva:note
+# The collection window and filter this entry reads: its size in days, an explicit week label or
+# window bounds to backfill, and whether TEST- spawns count.
+@dataclass(frozen=True)
+class CollectOptions:
+    days: int
+    week: str | None
+    from_: str | None
+    to: str | None
+    include_test: bool
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
@@ -545,16 +647,16 @@ class CollectFacts:
 
 
 def main(argv: Sequence[str], env: CollectFacts, *, database: Database) -> None:
-    args = parse_args(argv)
-    week = args.week or week_label(env.now)
+    opts = options(parse_args(argv), CollectOptions)
+    week = opts.week or week_label(env.now)
     window = resolve_window(
         env.now,
-        args.days,
-        _parse_iso(args.from_) if args.from_ else None,
-        _parse_iso(args.to) if args.to else None,
+        opts.days,
+        _parse_iso(opts.from_) if opts.from_ else None,
+        _parse_iso(opts.to) if opts.to else None,
     )
     records, _counts = collect_with_counts(
-        window, week, database=database, gateway=env.gateway, include_test=args.include_test
+        window, week, database=database, gateway=env.gateway, include_test=opts.include_test
     )
     path = write_dataset(records, env.home, week)
     counts = Counter(r["label"] for r in records)

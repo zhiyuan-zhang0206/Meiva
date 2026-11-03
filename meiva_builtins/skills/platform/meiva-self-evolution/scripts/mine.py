@@ -33,9 +33,14 @@ import re
 import sys
 from collections import defaultdict
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+
+from pydantic import TypeAdapter
+
+from base.host.boundary.options import options
+from base.host.boundary.untyped import object_of
 
 # `collect` is a sibling in this skill's own scripts/ dir, not an importable
 # package (PYTHONSAFEPATH=1 keeps a script's own directory off sys.path) —
@@ -44,20 +49,33 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from record import task_prompt_of
+from record_shape import Record
+
+_RECORD = TypeAdapter(Record)
 
 UNATTRIBUTED = "(unattributed)"
 BAD_LABELS = ("failed", "fumbled")
 
 
-def load_records(path: Path) -> list[dict[str, Any]]:
+# meiva:note
+# One dataset line's record, checked field by field against `record_shape.Record`, or a
+# `ValidationError` naming the field and the value it received. A field the shape does not name is
+# dropped here: add it to the shape in the same change that starts writing it. Only the keys a
+# dataset may legitimately lack are optional; a required one that is missing is a broken line, not
+# a record with a default.
+def _read_record(value: object) -> Record:
+    return _RECORD.validate_python(value, strict=True)
+
+
+def load_records(path: Path) -> list[Record]:
     with path.open(encoding="utf-8") as f:
-        return [json.loads(line) for line in f if line.strip()]
+        return [_read_record(object_of(json.loads, line)) for line in f if line.strip()]
 
 
-def cluster_by_skill(records: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+def cluster_by_skill(records: list[Record]) -> dict[str, list[Record]]:
     """Bucket the bad runs under each skill they touched. A run touching two
     skills appears under both — attribution is a suspicion, not a partition."""
-    clusters: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    clusters: dict[str, list[Record]] = defaultdict(list)
     for rec in records:
         if rec["label"] not in BAD_LABELS:
             continue
@@ -67,7 +85,7 @@ def cluster_by_skill(records: list[dict[str, Any]]) -> dict[str, list[dict[str, 
     return clusters
 
 
-def cluster_by_plugin(records: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+def cluster_by_plugin(records: list[Record]) -> dict[str, list[Record]]:
     """Bucket the bad runs under each plugin contribution that fired in them.
 
     Keys are `plugins_activated`'s `"<plugin>/<surface>/<identifier>"` — the
@@ -75,7 +93,7 @@ def cluster_by_plugin(records: list[dict[str, Any]]) -> dict[str, list[dict[str,
     points at the thing to read. `.get` because datasets collected before the
     field existed simply have no plugin attribution (same tolerance
     `exec_duration_stats` shows for `exec_duration_s`)."""
-    clusters: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    clusters: dict[str, list[Record]] = defaultdict(list)
     for rec in records:
         if rec["label"] not in BAD_LABELS:
             continue
@@ -89,7 +107,7 @@ def _oneline(text: str, limit: int = 140) -> str:
     return collapsed[:limit] + ("..." if len(collapsed) > limit else "")
 
 
-def _signals(rec: dict[str, Any]) -> str:
+def _signals(rec: Record) -> str:
     bits: list[str] = []
     if rec["last_exec_failed"]:
         bits.append("ended-on-exec-fail")
@@ -102,7 +120,7 @@ def _signals(rec: dict[str, Any]) -> str:
     return ", ".join(bits) or "(no signal)"
 
 
-def exec_duration_stats(records: list[dict[str, Any]]) -> str:
+def exec_duration_stats(records: list[Record]) -> str:
     """Identify runs with outlier code-execution duration."""
     durations = [(r, r.get("exec_duration_s", 0)) for r in records]
     non_zero = [(r, d) for r, d in durations if d > 0]
@@ -129,7 +147,7 @@ def exec_duration_stats(records: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def render(clusters: dict[str, list[dict[str, Any]]], empty: str = "") -> str:
+def render(clusters: dict[str, list[Record]], empty: str = "") -> str:
     if not clusters:
         return (empty or "No failed or fumbled runs this week.") + "\n"
     lines: list[str] = []
@@ -153,6 +171,13 @@ def _default_dataset(home: Path, now: datetime) -> Path:
     return dataset_path(home, week_label(now))
 
 
+# meiva:note
+# The one flag this entry reads: the dataset to mine, or nothing for this week's.
+@dataclass(frozen=True)
+class DatasetOption:
+    dataset: str | None
+
+
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Cluster a dataset's failed/fumbled runs by skill (markdown digest).",
@@ -165,8 +190,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
 
 
 def main(argv: Sequence[str], *, home: Path, now: datetime) -> None:
-    args = parse_args(argv)
-    path = Path(args.dataset) if args.dataset else _default_dataset(home, now)
+    dataset = options(parse_args(argv), DatasetOption).dataset
+    path = Path(dataset) if dataset else _default_dataset(home, now)
     records = load_records(path)
     print(f"# Failure clusters — {path.name} ({len(records)} runs total)\n")
     print("# By skill\n")

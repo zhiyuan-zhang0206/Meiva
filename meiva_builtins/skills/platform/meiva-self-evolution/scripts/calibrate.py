@@ -10,7 +10,12 @@ import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import NotRequired, TypedDict
+
+from pydantic import TypeAdapter
+
+from base.host.boundary.options import options
+from base.host.boundary.untyped import object_of
 
 Verdict = str
 VERDICTS = ("pass", "fail", "uncertain")
@@ -53,17 +58,30 @@ class Calibration:
         return self.accuracy > self.best_baseline
 
 
-def _is_object_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
+# meiva:note
+# One case as the JSON file states it: the case id, the task, the evidence lines the judge reads,
+# the telemetry summary and the verdict a correct judge returns. `telemetry` is the one optional
+# field.
+class CaseFile(TypedDict):
+    case_id: str
+    task: str
+    evidence: list[str]
+    expected: str
+    telemetry: NotRequired[str]
 
 
-def _is_dict_list(value: object) -> TypeGuard[list[dict[str, Any]]]:
-    return _is_object_list(value) and all(isinstance(item, dict) for item in value)
+_CASES = TypeAdapter(list[CaseFile])
 
 
+# meiva:note
+# The case file a calibration run reads, checked case by case: a file that is not a JSON array of
+# cases, or a case missing a field, is a `ValidationError` naming the entry, not a case with a
+# default.
 def load_cases(path: str | Path) -> list[Case]:
-    raw: object = json.loads(Path(path).read_text(encoding="utf-8"))
-    if not _is_dict_list(raw) or not raw:
+    raw = _CASES.validate_python(
+        object_of(json.loads, Path(path).read_text(encoding="utf-8")), strict=True
+    )
+    if not raw:
         raise ValueError(f"{path}: expected a non-empty JSON array of cases")
     return [
         Case(
@@ -169,14 +187,22 @@ def stub_judge(name: str) -> Judge:
     return stubs[name]
 
 
+# meiva:note
+# The two flags this entry reads: the case file and which stub judge to score.
+@dataclass(frozen=True)
+class CalibrateOptions:
+    cases: str
+    judge: str
+
+
 def main(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(
         description="Score a judge against trivial baselines on a balanced case set."
     )
     parser.add_argument("--cases", required=True, help="JSON case file")
     parser.add_argument("--judge", default="always-pass", help="stub name")
-    args = parser.parse_args(list(argv))
-    cal = calibrate(load_cases(args.cases), stub_judge(args.judge))
+    opts = options(parser.parse_args(list(argv)), CalibrateOptions)
+    cal = calibrate(load_cases(opts.cases), stub_judge(opts.judge))
     print(format_report(cal))
     return 0 if cal.beats_baselines else 1
 

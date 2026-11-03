@@ -123,11 +123,12 @@ def _sdk_findings(code: str) -> list[LeakFinding]:
         if start < 0:
             continue
         name = _SDK_NAME.match(code, start)
-        tool = (
-            name.group(0)
-            if name is not None and code[name.end() :].lstrip().startswith("(")
-            else None
-        )
+        tool: str | None = None
+        if name is not None and code[name.end() :].lstrip().startswith("("):
+            captured = name.group(0)
+            if not isinstance(captured, str):
+                raise TypeError("the SDK name pattern captured no text")
+            tool = captured
         findings.append(
             LeakFinding(
                 surface="sdk",

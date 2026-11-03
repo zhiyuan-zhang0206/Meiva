@@ -13,5 +13,6 @@
 "label.py" = "strict"
 "record.py" = "strict"
 "record_inputs.py" = "strict"
+"record_shape.py" = "strict"
 "scan_report.py" = "strict"
 "window_records.py" = "strict"

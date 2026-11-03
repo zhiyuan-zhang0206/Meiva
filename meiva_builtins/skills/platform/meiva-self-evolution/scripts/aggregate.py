@@ -21,11 +21,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import Literal, TypedDict
+
+from pydantic import TypeAdapter, ValidationError
+
+from base.host.boundary.options import options
+from base.host.boundary.untyped import object_of
 
 # `render_report` is a sibling in this skill's own scripts/ dir, not an
 # importable package (PYTHONSAFEPATH=1 keeps a script's own directory off
@@ -34,51 +41,66 @@ from typing import Any, TypeGuard
 # guard.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from evaluate import ScoreMean
+from render_report import (
+    ClusterRun,
+    EvalResults,
+    FailureCluster,
+    ScoreDimension,
+    ScoreSkill,
+    build_report_data,
+    read_changes,
+)
 
-def load_json(path: Path) -> dict[str, Any]:
+
+def load_json(path: Path) -> object:
     with path.open(encoding="utf-8") as f:
-        return json.load(f)
+        return object_of(json.load, f)
 
 
-def parse_failure_md(text: str) -> list[dict[str, Any]]:
+# meiva:note
+# The text of one captured regex group. `re.Match.group` answers `str | Any` (a group that did not
+# participate is `None`), so a `str` built from it is only checked here.
+def _captured(match: re.Match[str], index: int) -> str:
+    value = match.group(index)
+    if not isinstance(value, str):
+        raise TypeError(f"group {index} of {match.re.pattern!r} captured no text")
+    return value
+
+
+def parse_failure_md(text: str) -> list[FailureCluster]:
     """Parse mine.py's markdown output back into structured clusters.
 
     The markdown format is:
         ## skill_name — N bad runs (F failed, U fumbled)
         - run #agent_id [label] "task prompt"  (signals)
     """
-    import re
-
-    clusters: list[dict[str, Any]] = []
-    current: dict[str, Any] | None = None
+    clusters: list[FailureCluster] = []
+    current: FailureCluster | None = None
 
     for line in text.splitlines():
         h2 = re.match(r"^## (.+?) — (\d+) bad runs \((\d+) failed, (\d+) fumbled\)$", line)
         if h2:
             if current:
                 clusters.append(current)
-            current = {
-                "skill": h2.group(1),
-                "count": int(h2.group(2)),
-                "failed": int(h2.group(3)),
-                "fumbled": int(h2.group(4)),
-                "top_signals": [],
-                "runs": [],
-            }
+            current = FailureCluster(
+                skill=_captured(h2, 1),
+                count=int(_captured(h2, 2)),
+                failed=int(_captured(h2, 3)),
+                fumbled=int(_captured(h2, 4)),
+                top_signals=[],
+                runs=[],
+            )
             continue
 
         run_match = re.match(r"^- run #(\d+) \[(\w+)\] \"(.+?)\"\s+\((.+?)\)$", line)
         if run_match and current is not None:
-            agent_id = int(run_match.group(1))
-            label = run_match.group(2)
-            task = run_match.group(3)
-            signals = [s.strip() for s in run_match.group(4).split(",") if s.strip()]
+            agent_id = int(_captured(run_match, 1))
+            label = _captured(run_match, 2)
+            task = _captured(run_match, 3)
+            signals = [s.strip() for s in _captured(run_match, 4).split(",") if s.strip()]
             current["runs"].append(
-                {
-                    "agent_id": agent_id,
-                    "label": label,
-                    "task_snippet": task[:140],
-                }
+                ClusterRun(agent_id=agent_id, label=label, task_snippet=task[:140])
             )
             for sig in signals:
                 if sig not in current["top_signals"] and sig != "(no signal)":
@@ -89,48 +111,83 @@ def parse_failure_md(text: str) -> list[dict[str, Any]]:
     return clusters
 
 
-def compute_score_dimensions(
-    before: dict[str, float], after: dict[str, float | None]
-) -> list[dict[str, Any]]:
+# meiva:note
+# The three dimensions a mean carries, in the order the template draws them.
+_SCORE_DIMENSIONS: tuple[Literal["completion", "efficiency", "overall"], ...] = (
+    "completion",
+    "efficiency",
+    "overall",
+)
+
+
+def compute_score_dimensions(before: ScoreMean, after: ScoreMean) -> list[ScoreDimension]:
     """Convert two {completion, efficiency, overall} dicts into the dimension list
     the report template expects."""
-    dims: list[dict[str, Any]] = []
-    for key in ("completion", "efficiency", "overall"):
-        b = before.get(key)
-        a = after.get(key)
-        if a is None or b is None:
-            continue
+    dims: list[ScoreDimension] = []
+    for key in _SCORE_DIMENSIONS:
+        b = before[key]
+        a = after[key]
         delta = round(a - b, 3)
         dims.append(
-            {
-                "label": key,
-                "before": b,
-                "after": a,
-                "before_pct": round(b * 100),
-                "after_pct": round(a * 100),
-                "delta": delta,
-                "delta_pct": round(delta * 100),
-                "delta_str": f"{delta:+.3f}",
-                "delta_class": "delta-up"
+            ScoreDimension(
+                label=key,
+                before=b,
+                after=a,
+                before_pct=round(b * 100),
+                after_pct=round(a * 100),
+                delta=delta,
+                delta_pct=round(delta * 100),
+                delta_str=f"{delta:+.3f}",
+                delta_class="delta-up"
                 if delta > 0
                 else ("delta-down" if delta < 0 else "delta-flat"),
-            }
+            )
         )
     return dims
 
 
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
+# meiva:note
+# The fields of one `evaluate.gather` report this aggregator reads. `n` is missing from reports
+# written before it was recorded, and a mean may carry `None` for a dimension that scored nothing
+# (an abstained stamp), so both are optional here: `measured_mean` is what decides whether there is
+# a mean to compare a later stamp against.
+class EvalSummary(TypedDict, total=False):
+    skill: str
+    n: int
+    mean: dict[str, float | None] | None
 
 
-def measured_mean(state: dict[str, Any]) -> dict[str, Any] | None:
-    n = state.get("n")
-    mean: object = state.get("mean")
-    if not _is_str_dict(mean):
+_EVAL_SUMMARY = TypeAdapter(EvalSummary)
+
+
+# meiva:note
+# The mean a `gather` report carries, or nothing when it scored no run: a report whose `n` is zero
+# has no mean to compare against, and a mean with a `None` dimension is an abstention, not a score.
+def measured_mean(summary: EvalSummary) -> ScoreMean | None:
+    if summary.get("n", 0) <= 0:
         return None
-    if isinstance(n, int) and n <= 0:
+    mean = summary.get("mean")
+    if mean is None:
         return None
-    return mean
+    completion = mean.get("completion")
+    efficiency = mean.get("efficiency")
+    overall = mean.get("overall")
+    if completion is None or efficiency is None or overall is None:
+        return None
+    return ScoreMean(completion=completion, efficiency=efficiency, overall=overall)
+
+
+# meiva:note
+# The inputs this aggregator reads and the report it writes: the changes manifest, the eval reports
+# directory, the failure digest, the week label, the dataset's run count and the output path.
+@dataclass(frozen=True)
+class AggregateOptions:
+    changes: str
+    eval_dir: str | None
+    failure_md: str | None
+    week: str
+    total_runs: int
+    out: str
 
 
 def main(argv: Sequence[str], now: datetime) -> None:
@@ -141,23 +198,28 @@ def main(argv: Sequence[str], now: datetime) -> None:
     p.add_argument("--week", required=True, help="ISO week label e.g. 2025-06-30")
     p.add_argument("--total-runs", type=int, required=True, help="total runs in dataset")
     p.add_argument("--out", default="report.json", help="output path")
-    args = p.parse_args(list(argv))
+    opts = options(p.parse_args(list(argv)), AggregateOptions)
 
     # Changes
-    changes = load_json(Path(args.changes))
-    if not isinstance(changes, list):
-        print("ERROR: --changes must be a JSON list", file=sys.stderr)
+    try:
+        changes = read_changes(load_json(Path(opts.changes)))
+    except ValidationError as exc:
+        print(f"ERROR: --changes must be a JSON list of changes: {exc}", file=sys.stderr)
         sys.exit(1)
 
     # Eval scores — gather outputs are per-skill JSON files
-    score_skills: list[dict[str, Any]] = []
-    if args.eval_dir:
-        eval_dir = Path(args.eval_dir)
-        previous: dict[str, dict[str, Any]] = {}
+    score_skills: list[ScoreSkill] = []
+    if opts.eval_dir:
+        eval_dir = Path(opts.eval_dir)
+        previous: dict[str, ScoreMean] = {}
         for f in sorted(eval_dir.glob("*.json")):
-            state = load_json(f)
-            skill = str(state.get("skill", f.stem.rsplit("-", 1)[0]))
-            mean = measured_mean(state)
+            try:
+                summary = _EVAL_SUMMARY.validate_python(load_json(f), strict=True)
+            except ValidationError as exc:
+                print(f"warning: skipping {f}: not an eval report: {exc}", file=sys.stderr)
+                continue
+            skill = summary.get("skill", f.stem.rsplit("-", 1)[0])
+            mean = measured_mean(summary)
             before = previous.get(skill)
             dims = (
                 compute_score_dimensions(before, mean)
@@ -167,36 +229,33 @@ def main(argv: Sequence[str], now: datetime) -> None:
             if mean is not None:
                 previous[skill] = mean
             score_skills.append(
-                {
-                    "skill": skill,
-                    "dimensions": dims,
-                    "n": state.get("n", 0),
-                    "unavailable": mean is None,
-                }
+                ScoreSkill(
+                    skill=skill,
+                    dimensions=dims,
+                    n=summary.get("n", 0),
+                    unavailable=mean is None,
+                )
             )
 
     # Failure clusters from mine.py output
-    failure_clusters: list[dict[str, Any]] = []
-    if args.failure_md:
-        md_text = Path(args.failure_md).read_text(encoding="utf-8")
+    failure_clusters: list[FailureCluster] = []
+    if opts.failure_md:
+        md_text = Path(opts.failure_md).read_text(encoding="utf-8")
         failure_clusters = parse_failure_md(md_text)
 
-    eval_results: dict[str, Any] | None = None
-
-    # Build report data (uses the convenience builder from render_report)
-    from render_report import build_report_data
+    eval_results: EvalResults | None = None
 
     data = build_report_data(
-        week=args.week,
+        week=opts.week,
         changes=changes,
         score_skills=score_skills,
         failure_clusters=failure_clusters,
         eval_results=eval_results,
-        total_runs=args.total_runs,
+        total_runs=opts.total_runs,
         now=now,
     )
 
-    out_path = Path(args.out)
+    out_path = Path(opts.out)
     out_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Wrote {out_path} ({len(json.dumps(data))} bytes)")
 

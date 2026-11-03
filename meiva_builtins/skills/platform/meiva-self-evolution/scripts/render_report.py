@@ -19,9 +19,139 @@ import json
 import re
 import sys
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import NotRequired, TypedDict
+
+from pydantic import TypeAdapter
+
+from base.host.boundary.options import options
+from base.host.boundary.untyped import object_of
+
+
+# meiva:note
+# One score dimension of one skill as the template draws it: the two readings, their percentages
+# and the delta this round.
+class ScoreDimension(TypedDict):
+    label: str
+    before: float
+    after: float
+    before_pct: int
+    after_pct: int
+    delta: float
+    delta_pct: int
+    delta_str: str
+    delta_class: str
+
+
+# meiva:note
+# One skill's dimension list, or the reason it has none (`unavailable`: too few scorable runs).
+class ScoreSkill(TypedDict):
+    skill: str
+    dimensions: list[ScoreDimension]
+    n: NotRequired[int]
+    unavailable: NotRequired[bool]
+
+
+# meiva:note
+# One entry of the hand-written changes manifest: the skill, what changed and where to read it.
+class ChangeEntry(TypedDict):
+    skill: str
+    summary: str
+    pr: NotRequired[int | str]
+    pr_url: NotRequired[str]
+
+
+# meiva:note
+# One bad run named in a failure cluster, as `mine.py`'s digest carries it.
+class ClusterRun(TypedDict):
+    agent_id: int
+    label: str
+    task_snippet: NotRequired[str]
+
+
+# meiva:note
+# One failure cluster: the skill, its counts and the runs behind them.
+class FailureCluster(TypedDict):
+    skill: str
+    count: int
+    failed: int
+    fumbled: int
+    top_signals: list[str]
+    runs: list[ClusterRun]
+
+
+# meiva:note
+# One skill's replay results in the evaluation section.
+class _EvalSkillRowRequired(TypedDict):
+    skill: str
+
+
+class EvalSkillRow(_EvalSkillRowRequired, total=False):
+    replayed: int
+    improved: int
+    regressed: int
+    verdict: str
+
+
+# meiva:note
+# The evaluation section: how many tasks were replayed and how they moved. A producer that only
+# knows some of the counts leaves the rest out.
+class EvalResults(TypedDict, total=False):
+    replayed: int
+    old_ok: int
+    new_ok: int
+    improved: int
+    regressed: int
+    per_skill: list[EvalSkillRow]
+
+
+# meiva:note
+# The whole report the template renders: the header scalars the placeholders name and the four
+# sections below them.
+class ReportData(TypedDict):
+    week: str
+    generated_at: str
+    skill_count: int
+    total_runs: int
+    changes_count: int
+    overall_delta: str
+    tasks_replayed: int
+    improved: int
+    regressed: int
+    cluster_count: int
+    cluster_skills: int
+    changes: list[ChangeEntry]
+    score_skills: list[ScoreSkill]
+    failure_clusters: list[FailureCluster]
+    eval_results: EvalResults | None
+
+
+_REPORT = TypeAdapter(ReportData)
+_CHANGES = TypeAdapter(list[ChangeEntry])
+
+
+# meiva:note
+# One report JSON's data, checked field by field against the shape above. A key the shape does not
+# name is dropped here; a required one that is missing is a broken report, not a default.
+def read_report_data(value: object) -> ReportData:
+    return _REPORT.validate_python(value, strict=True)
+
+
+# meiva:note
+# The changes manifest a reader hands in: a list of entries, each checked against `ChangeEntry`.
+def read_changes(value: object) -> list[ChangeEntry]:
+    return _CHANGES.validate_python(value, strict=True)
+
+
+# meiva:note
+# The two paths this entry reads: the report to render and where to write the page.
+@dataclass(frozen=True)
+class RenderOptions:
+    report_json: str
+    output: str | None
+
 
 # ── Template ────────────────────────────────────────────────────────
 
@@ -41,7 +171,7 @@ def _na_card(skill: str, reason: str) -> str:
   </div>"""
 
 
-def _render_score_skills(data: dict[str, Any]) -> str:
+def _render_score_skills(data: ReportData) -> str:
     skills = data.get("score_skills")
     if not skills:
         return """<div class="empty">No score comparison data for this round.</div>"""
@@ -81,17 +211,19 @@ def _render_score_skills(data: dict[str, Any]) -> str:
 </div>"""
 
 
-def _render_changes_table(data: dict[str, Any]) -> str:
+def _render_changes_table(data: ReportData) -> str:
     changes = data.get("changes")
     if not changes:
         return """<div class="empty">No changes recorded this round.</div>"""
 
     rows: list[str] = []
     for c in changes:
+        pr = c.get("pr")
+        pr_url = c.get("pr_url")
         pr_cell = (
-            f'<a href="{c["pr_url"]}" style="color:#58a6ff">#{c["pr"]}</a>'
-            if c.get("pr") and c.get("pr_url")
-            else (f"#{c['pr']}" if c.get("pr") else "&mdash;")
+            f'<a href="{pr_url}" style="color:#58a6ff">#{pr}</a>'
+            if pr and pr_url
+            else (f"#{pr}" if pr else "&mdash;")
         )
         rows.append(
             f"""<tr>
@@ -109,7 +241,7 @@ def _render_changes_table(data: dict[str, Any]) -> str:
 </table>"""
 
 
-def _render_failure_clusters(data: dict[str, Any]) -> str:
+def _render_failure_clusters(data: ReportData) -> str:
     clusters = data.get("failure_clusters")
     if not clusters:
         return """<div class="empty">No failures this week — all runs completed cleanly.</div>"""
@@ -173,7 +305,7 @@ def _render_failure_clusters(data: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
-def _render_eval_results(data: dict[str, Any]) -> str:
+def _render_eval_results(data: ReportData) -> str:
     er = data.get("eval_results")
     if not er:
         return """<div class="empty">No eval data for this round.</div>"""
@@ -236,19 +368,40 @@ def _render_eval_results(data: dict[str, Any]) -> str:
 # ── Render ──────────────────────────────────────────────────────────
 
 
-def render_report(data: dict[str, Any]) -> str:
+# meiva:note
+# The header scalars the template's `{{ name }}` placeholders stand for, as the strings they render
+# as. Listed one by one rather than read off the report: a placeholder that names anything else is
+# a template bug the empty substitution reports, not a value to guess at.
+def _placeholders(data: ReportData) -> dict[str, str]:
+    return {
+        "week": data["week"],
+        "generated_at": data["generated_at"],
+        "skill_count": str(data["skill_count"]),
+        "total_runs": str(data["total_runs"]),
+        "changes_count": str(data["changes_count"]),
+        "overall_delta": data["overall_delta"],
+        "tasks_replayed": str(data["tasks_replayed"]),
+        "improved": str(data["improved"]),
+        "regressed": str(data["regressed"]),
+        "cluster_count": str(data["cluster_count"]),
+        "cluster_skills": str(data["cluster_skills"]),
+    }
+
+
+def render_report(data: ReportData) -> str:
     """Render the full HTML report from assembled data."""
     template = _load_template()
+    placeholders = _placeholders(data)
 
     # Substitute simple {{ var }} placeholders
+    # meiva:note
+    # `re.Match.group` answers `str | Any` (a group that did not participate is `None`); the
+    # placeholder name is checked before it selects a value.
     def _sub(m: re.Match[str]) -> str:
-        key = m.group(1).strip()
-        val = data.get(key)
-        if val is None:
+        key = m.group(1)
+        if not isinstance(key, str):
             return ""
-        if isinstance(val, bool):
-            return str(val).lower()
-        return str(val)
+        return placeholders.get(key.strip(), "")
 
     html = re.sub(r"\{\{\s*(.+?)\s*\}\}", _sub, template)
 
@@ -277,23 +430,23 @@ def render_report(data: dict[str, Any]) -> str:
 def build_report_data(
     *,
     week: str,
-    changes: list[dict[str, str]],
-    score_skills: list[dict[str, Any]],
-    failure_clusters: list[dict[str, Any]],
+    changes: list[ChangeEntry],
+    score_skills: list[ScoreSkill],
+    failure_clusters: list[FailureCluster],
     now: datetime,
-    eval_results: dict[str, Any] | None = None,
+    eval_results: EvalResults | None = None,
     total_runs: int = 0,
-) -> dict[str, Any]:
+) -> ReportData:
     """Assemble the data context consumed by `render_report`.
 
     See the JSON schema documented in the template's companion README or the
     sample at `skills/meiva-self-evolution/references/sample_report.json`.
     """
     deltas = [
-        delta
-        for s in score_skills
-        for d in s.get("dimensions", [])
-        if d.get("label") == "overall" and (delta := d.get("delta")) is not None
+        dimension["delta"]
+        for skill in score_skills
+        for dimension in skill.get("dimensions", [])
+        if dimension["label"] == "overall"
     ]
     overall_delta = f"{round(sum(deltas) / len(deltas), 3):+.3f}" if deltas else "n/a"
 
@@ -301,23 +454,23 @@ def build_report_data(
     improved = eval_results.get("improved", 0) if eval_results else 0
     regressed = eval_results.get("regressed", 0) if eval_results else 0
 
-    return {
-        "week": week,
-        "generated_at": now.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC"),
-        "skill_count": len(score_skills),
-        "total_runs": total_runs,
-        "changes_count": len(changes),
-        "overall_delta": overall_delta,
-        "tasks_replayed": tasks_replayed,
-        "improved": improved,
-        "regressed": regressed,
-        "cluster_count": len(failure_clusters),
-        "cluster_skills": len({c["skill"] for c in failure_clusters}),
-        "changes": changes,
-        "score_skills": score_skills,
-        "failure_clusters": failure_clusters,
-        "eval_results": eval_results,
-    }
+    return ReportData(
+        week=week,
+        generated_at=now.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC"),
+        skill_count=len(score_skills),
+        total_runs=total_runs,
+        changes_count=len(changes),
+        overall_delta=overall_delta,
+        tasks_replayed=tasks_replayed,
+        improved=improved,
+        regressed=regressed,
+        cluster_count=len(failure_clusters),
+        cluster_skills=len({entry["skill"] for entry in failure_clusters}),
+        changes=changes,
+        score_skills=score_skills,
+        failure_clusters=failure_clusters,
+        eval_results=eval_results,
+    )
 
 
 # ── CLI ──────────────────────────────────────────────────────────────
@@ -332,13 +485,12 @@ def main(argv: Sequence[str]) -> None:
         default=None,
         help="output HTML path (default: <report>.html)",
     )
-    args = p.parse_args(list(argv))
-
-    in_path = Path(args.report_json)
-    data = json.loads(in_path.read_text(encoding="utf-8"))
+    opts = options(p.parse_args(list(argv)), RenderOptions)
+    in_path = Path(opts.report_json)
+    data = read_report_data(object_of(json.loads, in_path.read_text(encoding="utf-8")))
     html = render_report(data)
 
-    out_path = Path(args.output) if args.output else in_path.with_suffix(".html")
+    out_path = Path(opts.output) if opts.output else in_path.with_suffix(".html")
     out_path.write_text(html, encoding="utf-8")
     print(f"Rendered {out_path} ({len(html)} bytes)")
 
