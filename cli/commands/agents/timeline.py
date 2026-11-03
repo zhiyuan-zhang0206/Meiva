@@ -7,6 +7,7 @@ import json
 
 from base.cluster.machine import GatewayAccess, gateway_api_base, gateway_auth_headers
 from base.host.net import http_dial
+from cli.boundary.json_body import response_value
 
 
 # meiva:note
@@ -29,5 +30,5 @@ def cmd_agents_timeline(
         timeout=30.0,
     )
     response.raise_for_status()
-    print(json.dumps(response.json(), ensure_ascii=False))
+    print(json.dumps(response_value(response), ensure_ascii=False))
     return 0

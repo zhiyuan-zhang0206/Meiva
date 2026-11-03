@@ -18,11 +18,11 @@ import asyncio
 import contextlib
 import subprocess
 import sys
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, TextIO, assert_never
+from typing import TextIO, assert_never
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -47,6 +47,8 @@ from base.cluster.machine import MachineIdentityReader
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.redis_listener import RedisInboundListener
+from cli.boundary.fields import bool_field, int_field, str_field
+from cli.boundary.options import options
 from cli.commands.agents.cleanup_after import run_then_clean_up
 from cli.commands.agents.impersonation_adapters import (
     RelayAdapter,
@@ -196,17 +198,7 @@ def read_relay_inbox(
         if latest.status not in OPEN:
             return _closed(latest)
         raise
-    messages = tuple(
-        InboxMessage(
-            id=row["id"],
-            kind=row["kind"],
-            source=row["source"],
-            content=row["content"],
-            delivery_attempts=row["delivery_attempts"],
-            delivery_due=row["delivery_due"],
-        )
-        for row in rows
-    )
+    messages = tuple(_inbox_message(row) for row in rows)
     return InboxSnapshot(
         messages=messages,
         expires_at=lease.expires_at,
@@ -454,7 +446,7 @@ async def heartbeat_completion(
 # heartbeat is joined. Closing the task group without a body exception preserves the CLI's
 # original exception type and exit-code boundary.
 async def run_beside_heartbeat(
-    heartbeat: Coroutine[Any, Any, Exception | None], main: Coroutine[Any, Any, None]
+    heartbeat: Coroutine[object, object, Exception | None], main: Coroutine[object, object, None]
 ) -> None:
     group = asyncio.TaskGroup()
     await group.__aenter__()
@@ -558,6 +550,42 @@ class RelayInputs:
 
 
 # meiva:note
+# What `meiva impersonate relay` carries: the lease by id or by session number (the parser makes
+# exactly one of them present), the host it delivers into and the coalescing window.
+@dataclass(frozen=True)
+class RelayOptions:
+    agent_id: int
+    lease_id: str | None
+    session_id: int | None
+    provider: str
+    thread_id: str | None
+    codex_remote: str | None
+    antigravity_endpoint_file: str | None
+    debounce: float
+
+
+def _inbox_message(row: Mapping[str, object]) -> InboxMessage:
+    return InboxMessage(
+        id=int_field(row, "id"),
+        kind=str_field(row, "kind"),
+        source=str_field(row, "source"),
+        content=str_field(row, "content"),
+        delivery_attempts=int_field(row, "delivery_attempts"),
+        delivery_due=bool_field(row, "delivery_due"),
+    )
+
+
+def _session_number(opts: RelayOptions) -> int:
+    if opts.session_id is None:
+        raise ValueError("pass --lease-id or --session")
+    return opts.session_id
+
+
+def _lease_uuid(lease: Mapping[str, object]) -> UUID:
+    return UUID(str(lease["id"]))
+
+
+# meiva:note
 # Run a native relay until lease release/expiry, failure, or interruption. The transport
 # destination binds before any lease authority is used, and the first heartbeat follows it:
 # the accepting runtime reads that beat as proof the host can be pushed into, so an
@@ -573,14 +601,15 @@ def cmd_relay(
     machine: MachineIdentityReader,
 ) -> int:
     token = inputs.token
+    opts = options(args, RelayOptions)
     try:
         destination = plan_destination(
-            args.provider,
-            args.thread_id,
-            codex_remote=args.codex_remote,
-            endpoint_record=args.antigravity_endpoint_file,
+            opts.provider,
+            opts.thread_id,
+            codex_remote=opts.codex_remote,
+            endpoint_record=opts.antigravity_endpoint_file,
         )
-        tuning = RelayTuning(debounce=args.debounce, max_chars=PUSH_MAX_CHARS)
+        tuning = RelayTuning(debounce=opts.debounce, max_chars=PUSH_MAX_CHARS)
         adapter = bind_adapter(
             destination,
             codex_home=inputs.codex_home,
@@ -593,26 +622,26 @@ def cmd_relay(
         retry = ConnectionRetry(RELAY_CONNECTION_RETRY_DELAYS, inputs.timers)
         db = _survive_connection_loss("opening the operator database", database_factory, retry)
         bus = inputs.bus
-        if args.lease_id is None:
-            lease_id = UUID(
-                str(
-                    _survive_connection_loss(
-                        "resolving the lease",
-                        lambda: resolve(
-                            db, args.agent_id, args.session_id, local_machine=local_machine
-                        ),
-                        retry,
-                    )["id"]
+        if opts.lease_id is None:
+            session_number = _session_number(opts)
+            lease_id = _lease_uuid(
+                _survive_connection_loss(
+                    "resolving the lease",
+                    lambda: resolve(db, opts.agent_id, session_number, local_machine=local_machine),
+                    retry,
                 )
             )
         else:
-            lease_id = UUID(args.lease_id)
-        session_id = _survive_connection_loss(
-            "reading the lease",
-            lambda: relay_get(db, bus, str(lease_id), token, local_machine=local_machine),
-            retry,
-        )["session_id"]
-        lease = RelayLease(args.agent_id, lease_id, session_id, token, local_machine)
+            lease_id = UUID(opts.lease_id)
+        session_id = int_field(
+            _survive_connection_loss(
+                "reading the lease",
+                lambda: relay_get(db, bus, str(lease_id), token, local_machine=local_machine),
+                retry,
+            ),
+            "session_id",
+        )
+        lease = RelayLease(opts.agent_id, lease_id, session_id, token, local_machine)
         asyncio.run(
             _serve(
                 lease,

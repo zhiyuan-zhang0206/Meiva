@@ -10,7 +10,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
+
+from cli.boundary.options import options
 
 
 def _validated_source(value: str) -> str:
@@ -27,10 +32,10 @@ def _validated_source(value: str) -> str:
 def _validated_config_json(value: str) -> str:
     """Argparse type for `--config`: reject a non-object overlay before any command runs."""
     try:
-        parsed = json.loads(value)
+        is_object = isinstance(json.loads(value), dict)
     except json.JSONDecodeError as exc:
         raise argparse.ArgumentTypeError(f"invalid config JSON: {exc}") from exc
-    if not isinstance(parsed, dict):
+    if not is_object:
         raise argparse.ArgumentTypeError("config must be a JSON object")
     return value
 
@@ -65,42 +70,144 @@ def _nonblank_machine(value: str) -> str:
     return stripped
 
 
+@dataclass(frozen=True)
+class _AgentId:
+    agent_id: int
+
+
+@dataclass(frozen=True)
+class _LsOptions:
+    scope: Literal["live", "terminated", "all"]
+    query: str
+    before_id: int | None
+    limit: int
+
+
+@dataclass(frozen=True)
+class _TimelineOptions:
+    agent_id: int
+    limit: int | None
+    before: str | None
+
+
+@dataclass(frozen=True)
+class _SendOptions:
+    agent_id: int
+    content: str
+    source: str | None
+    tail_file: str | None
+    completion: bool
+    client_message_id: str | None
+
+
+@dataclass(frozen=True)
+class _RestartOptions:
+    agent_id: int
+    config: str | None
+    source: str | None
+    message: str | None
+
+
+@dataclass(frozen=True)
+class _LifecycleOptions:
+    agent_id: int
+    source: str | None
+    message: str | None
+
+
+@dataclass(frozen=True)
+class _EndOptions:
+    agent_id: int
+    source: str | None
+    message: str | None
+    kill_all_shell_sessions: bool
+
+
+@dataclass(frozen=True)
+class _TransferOptions:
+    agent_id: int
+    to_machine: str
+    source: str | None
+    message: str | None
+
+
+@dataclass(frozen=True)
+class _NoticesListOptions:
+    agent: int | None
+    priority: str | None
+    type: Literal["decision"] | None
+    stale: bool
+
+
+@dataclass(frozen=True)
+class _NoticesResolveOptions:
+    notice_id: int
+    agent: int
+    action: Literal["answer", "dismiss"]
+    reply: str | None
+
+
+@dataclass(frozen=True)
+class _NoticesClearOptions:
+    agent: int
+    force: bool
+    stale: bool
+
+
+@dataclass(frozen=True)
+class _NoticesAuditOptions:
+    days: int
+    category: str | None
+    tz: str | None
+    now: datetime | None
+    simulate: Sequence[str] | None
+    out: Literal["text", "json"]
+    explain: bool
+
+
 def _h_agents_ls(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.control import cmd_agents_ls
+    from cli.database.runtime import runtime_of
 
+    opts = options(args, _LsOptions)
     return cmd_agents_ls(
-        gateway_access_from_boot(args.runtime.config),
-        scope=args.scope,
-        query=args.query,
-        before_id=args.before_id,
-        limit=args.limit,
+        gateway_access_from_boot(runtime_of(args).config),
+        scope=opts.scope,
+        query=opts.query,
+        before_id=opts.before_id,
+        limit=opts.limit,
     )
 
 
 def _h_agents_timeline(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.timeline import cmd_agents_timeline
+    from cli.database.runtime import runtime_of
 
+    opts = options(args, _TimelineOptions)
     return cmd_agents_timeline(
-        gateway_access_from_boot(args.runtime.config), args.agent_id, args.limit, args.before
+        gateway_access_from_boot(runtime_of(args).config), opts.agent_id, opts.limit, opts.before
     )
 
 
 def h_agents_send(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.control import ProvenanceError, cmd_agents_send
+    from cli.database.runtime import runtime_of
 
+    opts = options(args, _SendOptions)
+    runtime = runtime_of(args)
     try:
         return cmd_agents_send(
-            gateway_access_from_boot(args.runtime.config),
-            args.agent_id,
-            args.content,
-            args.source,
-            args.tail_file,
-            completion=args.completion,
-            idempotency_key=args.runtime.new_id(),
-            client_message_id=args.client_message_id,
+            gateway_access_from_boot(runtime.config),
+            opts.agent_id,
+            opts.content,
+            opts.source,
+            opts.tail_file,
+            completion=opts.completion,
+            idempotency_key=runtime.new_id(),
+            client_message_id=opts.client_message_id,
         )
     except ProvenanceError as exc:
         print(f"meiva: {exc}", file=sys.stderr)
@@ -110,28 +217,36 @@ def h_agents_send(args: argparse.Namespace) -> int:
 def _h_agents_cancel(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.control import cmd_agents_cancel
+    from cli.database.runtime import runtime_of
 
-    return cmd_agents_cancel(gateway_access_from_boot(args.runtime.config), args.agent_id)
+    return cmd_agents_cancel(
+        gateway_access_from_boot(runtime_of(args).config), options(args, _AgentId).agent_id
+    )
 
 
 def _h_agents_compact(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.control import cmd_agents_compact
+    from cli.database.runtime import runtime_of
 
-    return cmd_agents_compact(gateway_access_from_boot(args.runtime.config), args.agent_id)
+    return cmd_agents_compact(
+        gateway_access_from_boot(runtime_of(args).config), options(args, _AgentId).agent_id
+    )
 
 
 def _h_agents_restart(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.control import ProvenanceError, cmd_agents_restart
+    from cli.database.runtime import runtime_of
 
+    opts = options(args, _RestartOptions)
     try:
         return cmd_agents_restart(
-            gateway_access_from_boot(args.runtime.config),
-            args.agent_id,
-            args.config,
-            source=args.source,
-            message=args.message,
+            gateway_access_from_boot(runtime_of(args).config),
+            opts.agent_id,
+            opts.config,
+            source=opts.source,
+            message=opts.message,
         )
     except ProvenanceError as exc:
         print(f"meiva: {exc}", file=sys.stderr)
@@ -141,13 +256,15 @@ def _h_agents_restart(args: argparse.Namespace) -> int:
 def _h_agents_resurrect(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.control import ProvenanceError, cmd_agents_resurrect
+    from cli.database.runtime import runtime_of
 
+    opts = options(args, _LifecycleOptions)
     try:
         return cmd_agents_resurrect(
-            gateway_access_from_boot(args.runtime.config),
-            args.agent_id,
-            source=args.source,
-            message=args.message,
+            gateway_access_from_boot(runtime_of(args).config),
+            opts.agent_id,
+            source=opts.source,
+            message=opts.message,
         )
     except ProvenanceError as exc:
         print(f"meiva: {exc}", file=sys.stderr)
@@ -157,14 +274,16 @@ def _h_agents_resurrect(args: argparse.Namespace) -> int:
 def _h_agents_terminate(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.control import ProvenanceError, cmd_agents_terminate
+    from cli.database.runtime import runtime_of
 
+    opts = options(args, _EndOptions)
     try:
         return cmd_agents_terminate(
-            gateway_access_from_boot(args.runtime.config),
-            args.agent_id,
-            source=args.source,
-            kill_all_shell_sessions=args.kill_all_shell_sessions,
-            message=args.message,
+            gateway_access_from_boot(runtime_of(args).config),
+            opts.agent_id,
+            source=opts.source,
+            kill_all_shell_sessions=opts.kill_all_shell_sessions,
+            message=opts.message,
         )
     except ProvenanceError as exc:
         print(f"meiva: {exc}", file=sys.stderr)
@@ -174,14 +293,16 @@ def _h_agents_terminate(args: argparse.Namespace) -> int:
 def h_agents_kill(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.control import ProvenanceError, cmd_agents_kill
+    from cli.database.runtime import runtime_of
 
+    opts = options(args, _EndOptions)
     try:
         return cmd_agents_kill(
-            gateway_access_from_boot(args.runtime.config),
-            args.agent_id,
-            source=args.source,
-            kill_all_shell_sessions=args.kill_all_shell_sessions,
-            message=args.message,
+            gateway_access_from_boot(runtime_of(args).config),
+            opts.agent_id,
+            source=opts.source,
+            kill_all_shell_sessions=opts.kill_all_shell_sessions,
+            message=opts.message,
         )
     except ProvenanceError as exc:
         print(f"meiva: {exc}", file=sys.stderr)
@@ -193,14 +314,16 @@ def h_agents_kill(args: argparse.Namespace) -> int:
 def _h_agents_transfer(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.control import ProvenanceError, cmd_agents_transfer
+    from cli.database.runtime import runtime_of
 
+    opts = options(args, _TransferOptions)
     try:
         return cmd_agents_transfer(
-            gateway_access_from_boot(args.runtime.config),
-            args.agent_id,
-            to_machine=args.to_machine,
-            source=args.source,
-            message=args.message,
+            gateway_access_from_boot(runtime_of(args).config),
+            opts.agent_id,
+            to_machine=opts.to_machine,
+            source=opts.source,
+            message=opts.message,
         )
     except ProvenanceError as exc:
         print(f"meiva: {exc}", file=sys.stderr)
@@ -210,57 +333,67 @@ def _h_agents_transfer(args: argparse.Namespace) -> int:
 def _h_notices_list(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.notices import cmd_notices_list
+    from cli.database.runtime import runtime_of
 
+    opts = options(args, _NoticesListOptions)
     return cmd_notices_list(
-        gateway_access_from_boot(args.runtime.config),
-        agent_id=args.agent,
-        priority=args.priority,
-        type_filter=args.type,
-        stale=args.stale,
+        gateway_access_from_boot(runtime_of(args).config),
+        agent_id=opts.agent,
+        priority=opts.priority,
+        type_filter=opts.type,
+        stale=opts.stale,
     )
 
 
 def _h_notices_resolve(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.notices import cmd_notices_resolve
+    from cli.database.runtime import runtime_of
 
+    opts = options(args, _NoticesResolveOptions)
+    runtime = runtime_of(args)
     return cmd_notices_resolve(
-        gateway_access_from_boot(args.runtime.config),
-        notice_id=args.notice_id,
-        agent_id=args.agent,
-        action=args.action,
-        reply=args.reply,
-        idempotency_key=args.runtime.new_id(),
+        gateway_access_from_boot(runtime.config),
+        notice_id=opts.notice_id,
+        agent_id=opts.agent,
+        action=opts.action,
+        reply=opts.reply,
+        idempotency_key=runtime.new_id(),
     )
 
 
 def _h_notices_clear(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.notices import cmd_notices_clear
+    from cli.database.runtime import runtime_of
 
+    opts = options(args, _NoticesClearOptions)
+    runtime = runtime_of(args)
     return cmd_notices_clear(
-        gateway_access_from_boot(args.runtime.config),
-        agent_id=args.agent,
-        force=args.force,
-        stale=args.stale,
-        stdin=args.runtime.terminal.stdin,
-        rng=args.runtime.rng,
+        gateway_access_from_boot(runtime.config),
+        agent_id=opts.agent,
+        force=opts.force,
+        stale=opts.stale,
+        stdin=runtime.terminal.stdin,
+        rng=runtime.rng,
     )
 
 
 def _h_notices_audit(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.notices_audit import cmd_notices_audit
+    from cli.database.runtime import runtime_of
 
+    opts = options(args, _NoticesAuditOptions)
     return cmd_notices_audit(
-        access=gateway_access_from_boot(args.runtime.config),
-        days=args.days,
-        category=args.category,
-        tz_name=args.tz,
-        now=args.now,
-        simulate=args.simulate or (),
-        out=args.out,
-        explain=args.explain,
+        access=gateway_access_from_boot(runtime_of(args).config),
+        days=opts.days,
+        category=opts.category,
+        tz_name=opts.tz,
+        now=opts.now,
+        simulate=opts.simulate or (),
+        out=opts.out,
+        explain=opts.explain,
     )
 
 

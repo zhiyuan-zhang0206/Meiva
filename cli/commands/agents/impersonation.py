@@ -15,11 +15,11 @@ import json
 import math
 import os
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, TextIO, assert_never
+from typing import Literal, TextIO, assert_never
 from uuid import UUID
 
 from base.agents.context.clients import DatabaseFactory
@@ -31,6 +31,8 @@ from base.clock import Timers
 from base.db import Database
 from base.events.live.bus import EventBus, event_bus_config_from_config
 from base.events.live.redis_listener import RedisInboundListener
+from cli.boundary.fields import int_field, str_field
+from cli.boundary.options import options
 from cli.commands.agents.cleanup_after import run_then_clean_up
 from cli.commands.agents.impersonation_adapters import codex_endpoint
 from cli.commands.agents.relay.request_plan import (
@@ -40,6 +42,7 @@ from cli.commands.agents.relay.request_plan import (
     plan_request,
     relay_stub_text,
 )
+from cli.database.runtime import runtime_of
 
 
 # meiva:note
@@ -138,19 +141,20 @@ async def _wait_inbox(
     redis_url: str,
     events_channel: str,
     timers: Timers,
-) -> list[dict[str, Any]]:
+) -> list[dict[str, object]]:
     from base.agents import impersonation as control
 
     if not math.isfinite(wait) or wait < 0:
         raise ValueError("--wait must be finite and nonnegative")
-    lease = await asyncio.to_thread(
-        control.require_active, db, lease_id, local_machine=local_machine
+    agent_id = int_field(
+        await asyncio.to_thread(control.require_active, db, lease_id, local_machine=local_machine),
+        "agent_id",
     )
     listener = RedisInboundListener(
-        redis_url, lease["agent_id"], events_channel=events_channel, timers=timers
+        redis_url, agent_id, events_channel=events_channel, timers=timers
     )
 
-    async def read_until_a_message_or_the_deadline() -> list[dict[str, Any]]:
+    async def read_until_a_message_or_the_deadline() -> list[dict[str, object]]:
         if wait:
             await listener.ensure_listening()
         deadline = timers.monotonic() + wait
@@ -168,22 +172,44 @@ async def _wait_inbox(
     )
 
 
+@dataclass(frozen=True)
+class _SessionTarget:
+    agent_id: int
+    session_id: int
+
+
+@dataclass(frozen=True)
+class _ExecOptions:
+    file: str | None
+    agent_id: int
+    session_id: int
+
+
 def _run_local(args: argparse.Namespace) -> int:
     import meiva
 
+    opts = options(args, _ExecOptions)
     code = (
-        args.runtime.terminal.stdin.read()
-        if args.file is None or args.file == "-"
-        else Path(args.file).read_text(encoding="utf-8")
+        runtime_of(args).terminal.stdin.read()
+        if opts.file is None or opts.file == "-"
+        else Path(opts.file).read_text(encoding="utf-8")
     )
     if not code.strip():
         raise ValueError("Python input must be nonempty")
-    with meiva.impersonation.attach(args.session_id, agent_id=args.agent_id):
+    with meiva.impersonation.attach(opts.session_id, agent_id=opts.agent_id):
         exec(
-            compile(code, args.file or "<meiva-external>", "exec"),
+            compile(code, opts.file or "<meiva-external>", "exec"),
             {"__name__": "__main__", "meiva": meiva},
         )
     return 0
+
+
+@dataclass(frozen=True)
+class _SendOptions:
+    agent_id: int
+    session_id: int
+    target_agent_id: int
+    content: str
 
 
 # meiva:note
@@ -194,21 +220,23 @@ def _send(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int
     from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.agents.control import send_agent_message
 
-    content = args.runtime.terminal.stdin.read() if args.content == "-" else args.content
+    opts = options(args, _SendOptions)
+    runtime = runtime_of(args)
+    content = runtime.terminal.stdin.read() if opts.content == "-" else opts.content
     db = database_factory()
     lease_id = sessions.private_id(
-        db, args.agent_id, args.session_id, local_machine=args.runtime.machine.name()
+        db, opts.agent_id, opts.session_id, local_machine=runtime.machine.name()
     )
-    lease = control.require_active(db, lease_id, local_machine=args.runtime.machine.name())
+    lease = control.require_active(db, lease_id, local_machine=runtime.machine.name())
     source = f"agent:{lease['agent_id']}"
     receipt = send_agent_message(
-        gateway_access_from_boot(args.runtime.config),
-        args.target_agent_id,
+        gateway_access_from_boot(runtime.config),
+        opts.target_agent_id,
         content,
         source=source,
-        idempotency_key=args.runtime.new_id(),
+        idempotency_key=runtime.new_id(),
     )
-    _emit({"status": receipt.status, "to": args.target_agent_id, "source": source})
+    _emit({"status": receipt.status, "to": opts.target_agent_id, "source": source})
     return 0
 
 
@@ -238,6 +266,19 @@ def _record_antigravity_endpoint(
     )
 
 
+@dataclass(frozen=True)
+class _RequestOptions:
+    agent_id: int
+    caller: str
+    name: str
+    ttl: int
+    reason: str
+    relay_provider: Literal["codex", "claude", "dsh", "antigravity"]
+    relay_thread_id: str | None
+    relay_codex_remote: str | None
+    relay_batch_window_seconds: int
+
+
 # meiva:note
 # `impersonate request`: create the lease, then hand its relay the credential.
 def _request(
@@ -247,70 +288,111 @@ def _request(
     from base.config.service_read import ConfigAuthority
     from base.native_process.ownership import process_metadata
 
+    opts = options(args, _RequestOptions)
+    runtime = runtime_of(args)
     plan = plan_request(
-        args.relay_provider,
-        args.relay_thread_id,
-        args.relay_codex_remote,
+        opts.relay_provider,
+        opts.relay_thread_id,
+        opts.relay_codex_remote,
         conversation_env=env.antigravity_conversation,
         dsh_stub_env=env.dsh_relay_stub,
     )
-    home: Path = args.runtime.home
+    home: Path = runtime.home
     endpoint = plan.codex_remote
     match plan.handoff:
         case Handoff.CODEX:
             endpoint = codex_endpoint(
-                endpoint, codex_home=env.codex_home, user_home=args.runtime.session.user_home
+                endpoint, codex_home=env.codex_home, user_home=runtime.session.user_home
             )
         case Handoff.ANTIGRAVITY:
             _record_antigravity_endpoint(
                 plan,
                 home,
                 antigravity_server=antigravity_server_from_environment(
-                    args.runtime.config.process_environment()
+                    runtime.config.process_environment()
                 ),
             )
         case Handoff.CLAUDE | Handoff.DSH:
             pass
         case _:
             assert_never(plan.handoff)
-    config = args.runtime.config
-    runtime = config.ensure_eager()
+    config = runtime.config
+    eager = config.ensure_eager()
     response = sessions.request(
         database_factory(),
-        EventBus(
-            event_bus_config_from_config(config), rng=args.runtime.rng, timers=args.runtime.timers
-        ),
-        args.agent_id,
+        EventBus(event_bus_config_from_config(config), rng=runtime.rng, timers=runtime.timers),
+        opts.agent_id,
         authority=ConfigAuthority(
-            runtime=runtime,
-            all_domains=runtime if runtime.profile is None else config.complete_read_model(),
+            runtime=eager,
+            all_domains=eager if eager.profile is None else config.complete_read_model(),
             env_path=home / ".env",
         ),
-        name=args.name,
-        executor_name=args.caller,
+        name=opts.name,
+        executor_name=opts.caller,
         process_metadata={
-            **process_metadata(pid=args.runtime.pid, codex_home=env.codex_home),
+            **process_metadata(pid=runtime.pid, codex_home=env.codex_home),
             "invoked_python": sys.executable,
         },
-        ttl_seconds=args.ttl,
-        reason=args.reason,
-        provider=args.relay_provider,
+        ttl_seconds=opts.ttl,
+        reason=opts.reason,
+        provider=opts.relay_provider,
         thread_id=plan.thread_id,
         codex_remote=endpoint,
-        batch_window_seconds=args.relay_batch_window_seconds,
-        local_machine=args.runtime.machine.name(),
+        batch_window_seconds=opts.relay_batch_window_seconds,
+        local_machine=runtime.machine.name(),
     )
     if plan.dsh_stub is not None:
         write_relay_stub(
             Path(plan.dsh_stub),
-            agent_id=args.agent_id,
-            session_id=int(response["session_id"]),
-            token=str(response.pop("relay_token")),
+            agent_id=opts.agent_id,
+            session_id=int_field(response, "session_id"),
+            token=str_field(response, "relay_token"),
             interpreter=sys.executable,
         )
+        del response["relay_token"]
     _emit(response)
     print(handoff_hint(plan), file=sys.stderr)
     return 0
+
+
+@dataclass(frozen=True)
+class _ListOptions:
+    agent_id: int
+    before: int | None
+    limit: int
+
+
+@dataclass(frozen=True)
+class _RenewOptions:
+    ttl: int
+
+
+@dataclass(frozen=True)
+class _ReleaseOptions:
+    summary: str
+
+
+@dataclass(frozen=True)
+class _InboxOptions:
+    limit: int
+    wait: float
+
+
+@dataclass(frozen=True)
+class _AckOptions:
+    message_ids: Sequence[int]
+
+
+@dataclass(frozen=True)
+class _SayOptions:
+    content: str
+    key: str
+    phase: Literal["commentary", "final"]
+
+
+@dataclass(frozen=True)
+class _Command:
+    impersonation_cmd: str
 
 
 def _dispatch(
@@ -320,90 +402,88 @@ def _dispatch(
     from base.agents.impersonation import sessions
     from base.agents.impersonation.history import public_session, say
 
-    command = args.impersonation_cmd
+    command = options(args, _Command).impersonation_cmd
     if command == "request":
         return _request(args, database_factory=database_factory, env=env)
+    runtime = runtime_of(args)
     db = database_factory()
     bus = EventBus(
-        event_bus_config_from_config(args.runtime.config),
-        rng=args.runtime.rng,
-        timers=args.runtime.timers,
+        event_bus_config_from_config(runtime.config),
+        rng=runtime.rng,
+        timers=runtime.timers,
     )
     if command == "list":
-        _emit(sessions.list_sessions(db, args.agent_id, before=args.before, limit=args.limit))
+        listing = options(args, _ListOptions)
+        _emit(
+            sessions.list_sessions(db, listing.agent_id, before=listing.before, limit=listing.limit)
+        )
         return 0
     if command == "send":
         return _send(args, database_factory=database_factory)
-    args.lease_id = sessions.private_id(
-        db, args.agent_id, args.session_id, local_machine=args.runtime.machine.name()
+    target = options(args, _SessionTarget)
+    lease_id = sessions.private_id(
+        db, target.agent_id, target.session_id, local_machine=runtime.machine.name()
     )
     if command == "status":
-        _emit(
-            public_session(
-                control.get(db, bus, args.lease_id, local_machine=args.runtime.machine.name())
-            )
-        )
+        _emit(public_session(control.get(db, bus, lease_id, local_machine=runtime.machine.name())))
     elif command == "renew":
         _emit(
             public_session(
                 control.renew(
                     db,
                     bus,
-                    args.lease_id,
-                    ttl_seconds=args.ttl,
-                    local_machine=args.runtime.machine.name(),
+                    lease_id,
+                    ttl_seconds=options(args, _RenewOptions).ttl,
+                    local_machine=runtime.machine.name(),
                 )
             )
         )
     elif command == "release":
-        summary = args.runtime.terminal.stdin.read() if args.summary == "-" else args.summary
+        summary = options(args, _ReleaseOptions).summary
         _emit(
             public_session(
                 control.release(
                     db,
                     bus,
-                    args.lease_id,
-                    summary,
-                    local_machine=args.runtime.machine.name(),
+                    lease_id,
+                    runtime.terminal.stdin.read() if summary == "-" else summary,
+                    local_machine=runtime.machine.name(),
                 )
             )
         )
     elif command == "inbox":
+        inbox = options(args, _InboxOptions)
         _emit(
             asyncio.run(
                 _wait_inbox(
                     db,
-                    args.lease_id,
-                    args.limit,
-                    args.wait,
-                    local_machine=args.runtime.machine.name(),
-                    redis_url=args.runtime.config.view.data_plane.redis_url,
+                    lease_id,
+                    inbox.limit,
+                    inbox.wait,
+                    local_machine=runtime.machine.name(),
+                    redis_url=runtime.config.view.data_plane.redis_url,
                     events_channel=bus.channel,
-                    timers=args.runtime.timers,
+                    timers=runtime.timers,
                 )
             )
         )
     elif command == "ack":
-        control.ack(
-            db,
-            bus,
-            args.lease_id,
-            args.message_ids,
-            local_machine=args.runtime.machine.name(),
-        )
-        _emit({"acknowledged": args.message_ids})
+        acknowledged = list(options(args, _AckOptions).message_ids)
+        control.ack(db, bus, lease_id, acknowledged, local_machine=runtime.machine.name())
+        _emit({"acknowledged": acknowledged})
     elif command == "say":
-        content = args.runtime.terminal.stdin.read() if args.content == "-" else args.content
+        spoken = options(args, _SayOptions)
+        content = runtime.terminal.stdin.read() if spoken.content == "-" else spoken.content
         _emit(
             {
                 "seq": say(
                     db,
                     bus,
-                    args.lease_id,
+                    lease_id,
                     content,
-                    phase=args.phase,
-                    message_key=args.key,
-                    local_machine=args.runtime.machine.name(),
+                    phase=spoken.phase,
+                    message_key=spoken.key,
+                    local_machine=runtime.machine.name(),
                 )
             }
         )

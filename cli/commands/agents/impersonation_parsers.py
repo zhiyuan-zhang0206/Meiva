@@ -5,7 +5,10 @@ from __future__ import annotations
 import argparse
 import math
 import sys
+from dataclasses import dataclass
 from functools import partial
+
+from cli.boundary.options import options
 
 
 def _integer_range(value: str, *, maximum: int, minimum: int = 1) -> int:
@@ -41,69 +44,95 @@ def _nonempty(value: str) -> str:
     return value
 
 
+@dataclass(frozen=True)
+class _Verb:
+    impersonation_cmd: str
+
+
+@dataclass(frozen=True)
+class _TokenChannel:
+    token_stdin: bool
+
+
+@dataclass(frozen=True)
+class _RequestRelay:
+    relay_provider: str
+    relay_thread_id: str | None
+    relay_codex_remote: str | None
+
+
 def _h_impersonate(args: argparse.Namespace) -> int:
     from cli.commands.agents.impersonation import ImpersonationEnv, cmd_impersonate
     from cli.commands.agents.relay.destination import relay_spec_problem
+    from cli.database import database_factory_of
+    from cli.database.runtime import runtime_of
 
-    env = ImpersonationEnv.from_environ(args.runtime.config.process_environment())
+    env = ImpersonationEnv.from_environ(runtime_of(args).config.process_environment())
     problem: str | None = None
-    if args.impersonation_cmd == "request":
+    if options(args, _Verb).impersonation_cmd == "request":
+        relay = options(args, _RequestRelay)
         problem = relay_spec_problem(
-            args.relay_provider,
-            args.relay_thread_id,
-            args.relay_codex_remote,
+            relay.relay_provider,
+            relay.relay_thread_id,
+            relay.relay_codex_remote,
             env_thread_id=env.antigravity_conversation,
         )
     if problem is not None:
         print(f"meiva: {problem}", file=sys.stderr)
         return 2
-    return cmd_impersonate(args, database_factory=args.database_factory, env=env)
+    return cmd_impersonate(args, database_factory=database_factory_of(args), env=env)
 
 
 def _h_impersonate_relay(args: argparse.Namespace) -> int:
     from base.agents.impersonation.host_transport import antigravity_server_from_environment
     from base.events.live.bus import EventBus, event_bus_config_from_config
     from cli.commands.agents.impersonation import ImpersonationEnv, relay_token
-    from cli.commands.agents.impersonation_relay import RelayInputs, cmd_relay
+    from cli.commands.agents.impersonation_relay import RelayInputs, RelayOptions, cmd_relay
     from cli.commands.agents.relay.destination import relay_spec_problem
+    from cli.database import database_factory_of
+    from cli.database.runtime import runtime_of
 
+    opts = options(args, RelayOptions)
+    runtime = runtime_of(args)
     problem = relay_spec_problem(
-        args.provider, args.thread_id, args.codex_remote, env_thread_id=None
+        opts.provider, opts.thread_id, opts.codex_remote, env_thread_id=None
     )
     if problem is not None:
         print(f"meiva: {problem}", file=sys.stderr)
         return 2
-    env = ImpersonationEnv.from_environ(args.runtime.config.process_environment())
+    env = ImpersonationEnv.from_environ(runtime.config.process_environment())
     try:
         token = relay_token(
-            token_stdin=args.token_stdin, stdin=args.runtime.terminal.stdin, env=env
+            token_stdin=options(args, _TokenChannel).token_stdin,
+            stdin=runtime.terminal.stdin,
+            env=env,
         )
     except ValueError as exc:
         print(f"Impersonation relay stopped: {exc}", file=sys.stderr)
         return 1
     inputs = RelayInputs(
         token=token,
-        redis_url=args.runtime.config.view.data_plane.redis_url,
+        redis_url=runtime.config.view.data_plane.redis_url,
         codex_home=env.codex_home,
-        user_home=args.runtime.session.user_home,
-        home=args.runtime.home,
+        user_home=runtime.session.user_home,
+        home=runtime.home,
         antigravity_server=antigravity_server_from_environment(
-            args.runtime.config.process_environment()
+            runtime.config.process_environment()
         ),
-        stdout=args.runtime.terminal.stdout,
+        stdout=runtime.terminal.stdout,
         bus=EventBus(
-            event_bus_config_from_config(args.runtime.config),
-            rng=args.runtime.rng,
-            timers=args.runtime.timers,
+            event_bus_config_from_config(runtime.config),
+            rng=runtime.rng,
+            timers=runtime.timers,
         ),
-        clock=args.runtime.clock,
-        timers=args.runtime.timers,
+        clock=runtime.clock,
+        timers=runtime.timers,
     )
     return cmd_relay(
         args,
         inputs=inputs,
-        database_factory=args.database_factory,
-        machine=args.runtime.machine,
+        database_factory=database_factory_of(args),
+        machine=runtime.machine,
     )
 
 
@@ -238,7 +267,7 @@ def add_impersonation_parser(sub: argparse._SubParsersAction[argparse.ArgumentPa
     parsers["inbox"].add_argument(
         "--wait",
         type=_seconds_range,
-        default=0,
+        default=0.0,
         help="finite, nonnegative seconds to wait for new input (0 = return immediately)",
     )
     parsers["ack"].add_argument(

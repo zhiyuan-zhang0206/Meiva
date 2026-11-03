@@ -10,11 +10,13 @@ import sys
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from datetime import datetime, tzinfo
-from typing import Any
 from zoneinfo import ZoneInfo
+
+from pydantic import BaseModel, JsonValue
 
 from base.cluster.machine import GatewayAccess, gateway_api_base, gateway_auth_headers
 from base.host.net import http_dial
+from cli.boundary.json_body import response_object
 
 _TIMEOUT_S = 60.0
 
@@ -39,20 +41,75 @@ def _bar(value: int, peak: int, width: int = 40) -> str:
     return "#" * max(1, round(value * width / peak))
 
 
-def _per_day_section(report: Mapping[str, Any]) -> list[str]:
-    categories: list[str] = list(report["categories"])
+# meiva:note
+# The audit report as far as the text rendering reads it. The gateway's answer carries these
+# fields; `--out json` prints the answer itself, so nothing is lost by reading only these.
+class _Window(BaseModel):
+    start: datetime
+    end: datetime
+    days: int
+    timezone: str
+
+
+class _PerDay(BaseModel):
+    day: str
+    by_category: dict[str, int]
+    total: int
+
+
+class _Delivered(BaseModel):
+    per_day: list[_PerDay]
+    per_category: dict[str, int]
+    per_hour: list[int]
+
+
+class _Candidate(BaseModel):
+    category: str
+    candidates: int
+    delivered: int
+    suppressed: int
+    repeat_deliveries: int
+
+
+class _Simulation(BaseModel):
+    variant: str
+    delivered: int
+    delta: int
+    per_day: float
+
+
+class _Explained(BaseModel):
+    at: datetime
+    category: str
+    agent_id: int
+    outcome: str
+    dedupe_key: str | None = None
+
+
+class AuditReport(BaseModel):
+    window: _Window
+    switches: dict[str, bool]
+    categories: list[str]
+    sources: dict[str, str]
+    delivered: _Delivered
+    candidates: list[_Candidate]
+    simulations: list[_Simulation]
+    explain: list[_Explained] | None = None
+
+
+def _per_day_section(report: AuditReport) -> list[str]:
+    categories = report.categories
     rows: list[list[object]] = [["day", *categories, "total"]]
     totals: Counter[str] = Counter()
-    for row in report["delivered"]["per_day"]:
-        counts: dict[str, int] = dict(row["by_category"])
-        totals.update(counts)
-        rows.append([row["day"], *(counts[name] for name in categories), row["total"]])
+    for row in report.delivered.per_day:
+        totals.update(row.by_category)
+        rows.append([row.day, *(row.by_category[name] for name in categories), row.total])
     rows.append(["total", *(totals[name] for name in categories), sum(totals.values())])
     return ["", "Deliveries per day", *_table(rows[0], rows[1:])]
 
 
-def _per_category_section(report: Mapping[str, Any]) -> list[str]:
-    delivered: dict[str, int] = dict(report["delivered"]["per_category"])
+def _per_category_section(report: AuditReport) -> list[str]:
+    delivered = report.delivered.per_category
     grand_total = sum(delivered.values()) or 1
     return [
         "",
@@ -64,12 +121,12 @@ def _per_category_section(report: Mapping[str, Any]) -> list[str]:
     ]
 
 
-def _per_hour_section(report: Mapping[str, Any]) -> list[str]:
-    hours: list[int] = list(report["delivered"]["per_hour"])
+def _per_hour_section(report: AuditReport) -> list[str]:
+    hours = report.delivered.per_hour
     peak = max(hours) if hours else 0
     return [
         "",
-        f"Per hour ({report['window']['timezone']})",
+        f"Per hour ({report.window.timezone})",
         *_table(
             ["hour", "count", ""],
             [[f"{hour:02d}", count, _bar(count, peak)] for hour, count in enumerate(hours)],
@@ -77,8 +134,7 @@ def _per_hour_section(report: Mapping[str, Any]) -> list[str]:
     ]
 
 
-def _candidates_section(report: Mapping[str, Any]) -> list[str]:
-    rows = report["candidates"]
+def _candidates_section(report: AuditReport) -> list[str]:
     return [
         "",
         "Candidates and suppression",
@@ -86,35 +142,34 @@ def _candidates_section(report: Mapping[str, Any]) -> list[str]:
             ["category", "candidates", "delivered", "suppressed", "repeat deliveries"],
             [
                 [
-                    row["category"],
-                    row["candidates"],
-                    row["delivered"],
-                    row["suppressed"],
-                    row["repeat_deliveries"],
+                    row.category,
+                    row.candidates,
+                    row.delivered,
+                    row.suppressed,
+                    row.repeat_deliveries,
                 ]
-                for row in rows
+                for row in report.candidates
             ],
         ),
     ]
 
 
-def _simulation_section(report: Mapping[str, Any]) -> list[str]:
-    rows = report["simulations"]
+def _simulation_section(report: AuditReport) -> list[str]:
     return [
         "",
         "Simulations (one flipped input at a time, against the configured baseline)",
         *_table(
             ["variant", "delivered", "delta", "per day"],
             [
-                [row["variant"], row["delivered"], f"{row['delta']:+d}", f"{row['per_day']:.1f}"]
-                for row in rows
+                [row.variant, row.delivered, f"{row.delta:+d}", f"{row.per_day:.1f}"]
+                for row in report.simulations
             ],
         ),
     ]
 
 
-def _explain_section(report: Mapping[str, Any]) -> list[str]:
-    rows: list[dict[str, Any]] = report.get("explain") or []
+def _explain_section(report: AuditReport) -> list[str]:
+    rows = report.explain or []
     if not rows:
         return []
     stamp = "%Y-%m-%d %H:%M"
@@ -125,11 +180,11 @@ def _explain_section(report: Mapping[str, Any]) -> list[str]:
             ["at", "category", "agent", "outcome", "dedupe key"],
             [
                 [
-                    datetime.fromisoformat(str(row["at"])).strftime(stamp),
-                    str(row["category"]),
-                    str(row["agent_id"]),
-                    str(row["outcome"]),
-                    str(row["dedupe_key"] or "-"),
+                    row.at.strftime(stamp),
+                    row.category,
+                    str(row.agent_id),
+                    row.outcome,
+                    row.dedupe_key or "-",
                 ]
                 for row in rows
             ],
@@ -137,20 +192,18 @@ def _explain_section(report: Mapping[str, Any]) -> list[str]:
     ]
 
 
-def render_text(report: Mapping[str, Any], *, tz: tzinfo) -> list[str]:
-    window = report["window"]
+def render_text(report: AuditReport, *, tz: tzinfo) -> list[str]:
+    window = report.window
     stamp = "%Y-%m-%d %H:%M"
-    start = datetime.fromisoformat(str(window["start"])).astimezone(tz)
-    end = datetime.fromisoformat(str(window["end"])).astimezone(tz)
+    start = window.start.astimezone(tz)
+    end = window.end.astimezone(tz)
     return [
-        f"Notification audit — {window['days']} day{'' if window['days'] == 1 else 's'} "
-        f"ending {end:{stamp}} {window['timezone']}",
+        f"Notification audit — {window.days} day{'' if window.days == 1 else 's'} "
+        f"ending {end:{stamp}} {window.timezone}",
         f"window    {start:{stamp}} .. {end:{stamp}}",
-        *_source_lines(report["sources"]),
+        *_source_lines(report.sources),
         "switches  "
-        + "  ".join(
-            f"{name}={_on_off(value=bool(value))}" for name, value in report["switches"].items()
-        ),
+        + "  ".join(f"{name}={_on_off(value=value)}" for name, value in report.switches.items()),
         *_per_day_section(report),
         *_per_category_section(report),
         *_per_hour_section(report),
@@ -167,7 +220,7 @@ def _source_lines(sources: Mapping[str, str]) -> list[str]:
     return [head, *(f"          {name.ljust(width)}  {origin}" for name, origin in entries[1:])]
 
 
-def render_json(report: Mapping[str, Any]) -> str:
+def render_json(report: Mapping[str, JsonValue]) -> str:
     return json.dumps(report, indent=2, sort_keys=False)
 
 
@@ -178,8 +231,8 @@ def _on_off(*, value: bool) -> str:
 # meiva:note
 # The gateway's audit report, or (None, why) when the gateway rejected the request.
 def _audit_report(
-    params: dict[str, Any], access: GatewayAccess
-) -> tuple[dict[str, Any] | None, str | None]:
+    params: Mapping[str, str | int | bool | list[str]], access: GatewayAccess
+) -> tuple[dict[str, JsonValue] | None, str | None]:
     resp = http_dial.get(
         f"{gateway_api_base(access.gateway_url)}/api/notifications/audit",
         timeout=_TIMEOUT_S,
@@ -187,10 +240,10 @@ def _audit_report(
         params=params,
     )
     if resp.status_code == 422:
-        detail = resp.json().get("detail")
+        detail = response_object(resp).get("detail")
         return None, detail if isinstance(detail, str) else json.dumps(detail)
     resp.raise_for_status()
-    return resp.json(), None
+    return response_object(resp), None
 
 
 def cmd_notices_audit(
@@ -204,7 +257,11 @@ def cmd_notices_audit(
     out: str = "text",
     explain: bool = False,
 ) -> int:
-    params: dict[str, Any] = {"days": days, "explain": explain, "simulate": list(simulate)}
+    params: dict[str, str | int | bool | list[str]] = {
+        "days": days,
+        "explain": explain,
+        "simulate": list(simulate),
+    }
     if category is not None:
         params["category"] = category
     if tz_name is not None:
@@ -218,6 +275,7 @@ def cmd_notices_audit(
     if out == "json":
         print(render_json(report))
     else:
-        zone = ZoneInfo(report["window"]["timezone"])
-        print("\n".join(render_text(report, tz=zone)))
+        typed = AuditReport.model_validate(report)
+        zone = ZoneInfo(typed.window.timezone)
+        print("\n".join(render_text(typed, tz=zone)))
     return 0

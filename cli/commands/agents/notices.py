@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import random
-from typing import Any, TextIO
+from typing import TextIO
+
+from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from base.api_contracts.idempotency import keyed_headers
 from base.api_contracts.notice_question import parse_question, question_instructions
@@ -24,26 +26,43 @@ def _api(access: GatewayAccess) -> str:
     return f"{gateway_api_base(access.gateway_url)}/api"
 
 
-def _print_notice(
-    n: dict[str, Any], i: int, total: int, *, agent_status: str | None = None
-) -> None:
+# meiva:note
+# One open notice as the gateway lists it, with the fields the CLI reads. Other fields of the
+# answer are ignored.
+class _Notice(BaseModel):
+    id: int
+    agent_id: int
+    priority: str
+    title: str
+    require_response: bool
+    agent_label: str | None = None
+    source_verified_by: str | None = None
+    content: str | None = None
+    question: JsonValue = None
+
+
+class _AgentStatus(BaseModel):
+    status: str
+
+
+def _print_notice(n: _Notice, i: int, total: int, *, agent_status: str | None = None) -> None:
     kind = "NOTICE"
-    label = n.get("agent_label") or ""
+    label = n.agent_label or ""
     status = f" [{agent_status}]" if agent_status else ""
     # meiva:note
     # `source` is the credential the SERVER verified for the write, not the caller's
     # claim; it is what answers "which credential posted this", which the URL's
     # agent_id cannot. Absent on rows written before the column existed.
-    source = n.get("source_verified_by")
+    source = n.source_verified_by
     print(
-        f"[{i}/{total}] #{n['id']} {kind} {n['priority']} "
-        f"agent#{n['agent_id']} {label}{status}: {n['title']}"
+        f"[{i}/{total}] #{n.id} {kind} {n.priority} "
+        f"agent#{n.agent_id} {label}{status}: {n.title}"
         + (f"  [source: {source}]" if source else "")
     )
-    if n.get("content"):
-        print(f"    {n['content'][:120]}")
-    if n.get("question") is not None:
-        print(question_instructions(parse_question(n["question"])))
+    if n.content:
+        print(f"    {n.content[:120]}")
+    if n.question is not None:
+        print(question_instructions(parse_question(n.question)))
 
 
 # meiva:note
@@ -61,11 +80,11 @@ def _agent_status_map(access: GatewayAccess, agent_ids: set[int]) -> dict[int, s
         if resp.status_code == 404:
             continue
         resp.raise_for_status()
-        statuses[agent_id] = resp.json()["status"]
+        statuses[agent_id] = _AgentStatus.model_validate_json(resp.content).status
     return statuses
 
 
-def _fetch_open_notices(access: GatewayAccess) -> list[dict[str, Any]]:
+def _fetch_open_notices(access: GatewayAccess) -> list[_Notice]:
     resp = http_dial.get(
         f"{_api(access)}/notices/open",
         timeout=_TIMEOUT_S,
@@ -73,24 +92,25 @@ def _fetch_open_notices(access: GatewayAccess) -> list[dict[str, Any]]:
         params={"include_awaiting": True},
     )
     resp.raise_for_status()
-    return resp.json()
+    adapter: TypeAdapter[list[_Notice]] = TypeAdapter(list[_Notice])
+    return adapter.validate_json(resp.content)
 
 
 def _filter_notices(
-    notices: list[dict[str, Any]],
+    notices: list[_Notice],
     *,
     agent_id: int | None,
     priority: str | None,
     type_filter: str | None,
-) -> list[dict[str, Any]]:
+) -> list[_Notice]:
     if agent_id is not None:
-        notices = [n for n in notices if n["agent_id"] == agent_id]
+        notices = [n for n in notices if n.agent_id == agent_id]
     if priority:
-        notices = [n for n in notices if n["priority"] == priority.upper()]
+        notices = [n for n in notices if n.priority == priority.upper()]
     if type_filter == "fyi":
-        notices = [n for n in notices if not n["require_response"]]
+        notices = [n for n in notices if not n.require_response]
     elif type_filter == "decision":
-        notices = [n for n in notices if n["require_response"]]
+        notices = [n for n in notices if n.require_response]
     return notices
 
 
@@ -98,7 +118,7 @@ def _filter_notices(
 # List what `clear` will resolve and ask for confirmation. An empty or closed stdin reads as
 # no.
 def _confirm_clear(
-    notices: list[dict[str, Any]], *, stale: bool, agent_id: int | None, stdin: TextIO
+    notices: list[_Notice], *, stale: bool, agent_id: int | None, stdin: TextIO
 ) -> bool:
     for i, n in enumerate(notices, start=1):
         _print_notice(n, i, len(notices))
@@ -131,14 +151,14 @@ def cmd_notices_list(
     )
     statuses: dict[int, str] = {}
     if stale:
-        statuses = _agent_status_map(access, {n["agent_id"] for n in notices})
-        notices = [n for n in notices if statuses.get(n["agent_id"]) == "terminated"]
+        statuses = _agent_status_map(access, {n.agent_id for n in notices})
+        notices = [n for n in notices if statuses.get(n.agent_id) == "terminated"]
     if not notices:
         print("No open notices." if not stale else "No stale notices (terminated agents).")
         return 0
     total = len(notices)
     for i, n in enumerate(notices, start=1):
-        _print_notice(n, i, total, agent_status=statuses.get(n["agent_id"]) if stale else None)
+        _print_notice(n, i, total, agent_status=statuses.get(n.agent_id) if stale else None)
     return 0
 
 
@@ -171,11 +191,11 @@ def cmd_notices_resolve(
 
 
 # meiva:link cli/docs/operator-surfaces/operator-surfaces.meiva.okf.md
-def _resolve_all(access: GatewayAccess, notices: list[dict[str, Any]], rng: random.Random) -> int:
+def _resolve_all(access: GatewayAccess, notices: list[_Notice], rng: random.Random) -> int:
     cleared = 0
     for n in notices:
         r = http_dial.post(
-            f"{_api(access)}/keyed/v1/agents/{n['agent_id']}/notices/{n['id']}/resolve",
+            f"{_api(access)}/keyed/v1/agents/{n.agent_id}/notices/{n.id}/resolve",
             timeout=_TIMEOUT_S,
             headers=_keyed_headers(gateway_auth_headers(access), new_uuid(rng).hex),
             json={"action": "dismiss", "reply": None},
@@ -200,10 +220,10 @@ def cmd_notices_clear(
         return 2
     notices = _fetch_open_notices(access)
     if stale:
-        statuses = _agent_status_map(access, {n["agent_id"] for n in notices})
-        notices = [n for n in notices if statuses.get(n["agent_id"]) == "terminated"]
+        statuses = _agent_status_map(access, {n.agent_id for n in notices})
+        notices = [n for n in notices if statuses.get(n.agent_id) == "terminated"]
     else:
-        notices = [n for n in notices if n["agent_id"] == agent_id]
+        notices = [n for n in notices if n.agent_id == agent_id]
     if not notices:
         print(
             "No stale notices (terminated agents)."
