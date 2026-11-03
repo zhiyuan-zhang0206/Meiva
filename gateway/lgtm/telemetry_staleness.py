@@ -22,10 +22,12 @@ loop while still detecting staleness before the next threshold-sized window.
 from __future__ import annotations
 
 import threading
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from base.db.transaction import ConnectionSource
 from base.log import logger
+from gateway.http.db_rows import query_one
 from gateway.lgtm.staleness_plan import (
     HEARTBEAT_EVENT,
     STALENESS_THRESHOLD_S,
@@ -37,6 +39,13 @@ from gateway.lgtm.staleness_plan import (
 CHECK_INTERVAL_S = 60
 
 
+# meiva:note
+# The newest heartbeat timestamp, or NULL when the window holds none.
+@dataclass(frozen=True)
+class _NewestHeartbeat:
+    newest: datetime | None
+
+
 def heartbeat_age(pool: ConnectionSource, *, now: datetime) -> float | None:
     """Age in seconds of the newest heartbeat row in `telemetry_events`, if any.
 
@@ -45,14 +54,16 @@ def heartbeat_age(pool: ConnectionSource, *, now: datetime) -> float | None:
     """
     with pool.connection() as conn:
         conn.execute("SET LOCAL statement_timeout = '3s'")
-        row = conn.execute(
-            "SELECT max(ts) FROM telemetry_events WHERE event_name = %s AND ts > %s",
+        row = query_one(
+            conn,
+            _NewestHeartbeat,
+            "SELECT max(ts) AS newest FROM telemetry_events WHERE event_name = %s AND ts > %s",
             (
                 HEARTBEAT_EVENT,
                 datetime.fromtimestamp(now.timestamp() - 2 * STALENESS_THRESHOLD_S, UTC),
             ),
-        ).fetchone()
-    newest = row[0] if row is not None else None
+        )
+    newest = row.newest if row is not None else None
     return None if newest is None else now.timestamp() - newest.timestamp()
 
 
