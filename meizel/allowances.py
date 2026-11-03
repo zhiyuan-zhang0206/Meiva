@@ -99,6 +99,7 @@ RULES: dict[str, dict[str, str]] = {
         "max-params": NAMES,
         "max-attr-hops": NAMES,
     },
+    "public-surface": {"names": NAMES},
     "typescript": {
         "scopes": NAMES,
         "import-sources": NAMES,
