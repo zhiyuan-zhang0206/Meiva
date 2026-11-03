@@ -82,14 +82,18 @@ import json
 import logging
 import urllib.error
 import urllib.request
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from functools import partial
+from http.client import HTTPResponse
 from pathlib import Path
-from typing import Any
 
 import psutil
 
 from base.daemon.health import DaemonProbe
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 from . import macos_readiness
 from .orphan import find_cluster_chrome, is_cluster_chrome
@@ -135,19 +139,34 @@ class CdpAnswer:
 
 
 # meiva:note
+# The status of a GET on `url` and, for a 200, its body. `urlopen` types its answer `Any`; a
+# parameter typed with the real `HTTPResponse` takes it without naming the `Any`.
+def _get(
+    opener: Callable[[str], AbstractContextManager[HTTPResponse]], url: str
+) -> tuple[int, bytes]:
+    with opener(url) as resp:
+        return resp.status, resp.read() if resp.status == 200 else b""
+
+
+# meiva:note
+# GET a fixed loopback CDP URL within `timeout_s`; `urlopen`'s errors propagate.
+def fetch_cdp(url: str, timeout_s: float) -> tuple[int, bytes]:
+    return _get(partial(urllib.request.urlopen, timeout=timeout_s), url)
+
+
+# meiva:note
 # Validate the HTTP status and body returned by `/json/version` on `url`.
 def parse_cdp_version_body(url: str, status: int, body: bytes) -> CdpAnswer:
     if status != 200:
         return CdpAnswer(f"CDP {url} returned HTTP {status}", answered=True)
     try:
-        parsed: Any = json.loads(body)
+        parsed = object_of(json.loads, body)
     except (json.JSONDecodeError, UnicodeDecodeError):
         return CdpAnswer(
             f"CDP {url} answered 200 but the body is not JSON — wedged DevTools endpoint",
             answered=True,
         )
-    parsed_obj: object = parsed
-    browser: object = parsed.get("Browser") if isinstance(parsed_obj, dict) else None
+    browser = parsed.get("Browser") if is_object_dict(parsed) else None
     if not isinstance(browser, str) or not browser:
         return CdpAnswer(
             f"CDP {url} answered 200 but the body is not a valid /json/version "
@@ -174,9 +193,7 @@ def cdp_unreachable(port: int) -> CdpAnswer:
     """
     url = cdp_url(port)
     try:
-        with urllib.request.urlopen(url, timeout=_CDP_TIMEOUT_S) as resp:  # noqa: S310 — fixed loopback CDP URL
-            status = resp.status
-            body = resp.read() if status == 200 else b""
+        status, body = fetch_cdp(url, _CDP_TIMEOUT_S)
     except urllib.error.HTTPError as exc:
         # meiva:note
         # urlopen RAISES on any non-2xx status — but a status is still an HTTP

@@ -6,16 +6,29 @@ import stat
 import struct
 import tempfile
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from base.db import Database
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.paths import meiva_home
 from services.desktop.computer import mcp_daemon
 from services.desktop.computer import ocr as ocr_mod
 from services.desktop.computer.config import ComputerUseConfig
+
+
+# meiva:note
+# The text of the one text block of a daemon `call_tool` result (the `CallToolResult` dump).
+def text_block(result: dict[str, object]) -> str:
+    content = result["content"]
+    assert is_object_list(content)
+    block = content[0]
+    assert is_object_dict(block)
+    text = block["text"]
+    assert isinstance(text, str)
+    return text
 
 
 def computer_use_config(**overrides: Any) -> ComputerUseConfig:
@@ -95,7 +108,7 @@ class AuditLog:
 class FakeOcr:
     def __init__(
         self,
-        boxes: list[dict[str, float | str]] | None = None,
+        boxes: Sequence[Mapping[str, object]] | None = None,
         *,
         error: str | None = None,
     ) -> None:
@@ -106,7 +119,7 @@ class FakeOcr:
         self._calls_path = self._binary.with_name("ocr.calls")
         for p in (self._tsv_path, self._err_path, self._calls_path):
             p.unlink(missing_ok=True)
-        self._boxes: list[dict[str, float | str]] = []
+        self._boxes: list[Mapping[str, object]] = []
         self._error: str | None = None
         self.boxes = list(boxes or [])
         self.error = error
@@ -125,11 +138,11 @@ class FakeOcr:
         os.utime(self._binary, (fresh, fresh))
 
     @property
-    def boxes(self) -> list[dict[str, float | str]]:
+    def boxes(self) -> list[Mapping[str, object]]:
         return self._boxes
 
     @boxes.setter
-    def boxes(self, value: list[dict[str, float | str]]) -> None:
+    def boxes(self, value: Sequence[Mapping[str, object]]) -> None:
         self._boxes = list(value)
         lines = [
             f"{item['text']}\t{item.get('x', 0.0)}\t{item.get('y', 0.0)}\t"

@@ -58,6 +58,15 @@ class ProbeResult:
     stderr: str
 
 
+# meiva:note
+# The result of a finished probe. `run_bounded` types its output `Any`; a parameter typed with
+# `CompletedProcess[object]` takes it without naming the `Any`.
+def _result(completed: subprocess.CompletedProcess[object]) -> ProbeResult:
+    return ProbeResult(
+        completed.returncode, str(completed.stdout or ""), str(completed.stderr or "")
+    )
+
+
 def run_probe(argv: list[str]) -> ProbeResult:
     """Run a fixed read-only system query without letting a GUI prompt hang us."""
     try:
@@ -68,11 +77,7 @@ def run_probe(argv: list[str]) -> ProbeResult:
         return ProbeResult(127, "", f"{argv[0]} is unavailable")
     except subprocess.TimeoutExpired:
         return ProbeResult(124, "", f"timed out after {_PROBE_TIMEOUT_S:.0f}s")
-    return ProbeResult(
-        completed.returncode,
-        str(completed.stdout or ""),
-        str(completed.stderr or ""),
-    )
+    return _result(completed)
 
 
 # meiva:note

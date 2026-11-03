@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 from .errors import ComputerUseError
 from .targets import ObservationFrame
@@ -134,7 +137,7 @@ class MouseUpInput(BaseModel):
 
 
 def validate_input[InputModel: BaseModel](
-    model: type[InputModel], args: dict[str, Any]
+    model: type[InputModel], args: dict[str, object]
 ) -> InputModel:
     """Validate action parameters while preserving the daemon's coordination envelope."""
     action = {key: value for key, value in args.items() if key not in {"task_id", "priority"}}
@@ -144,13 +147,110 @@ def validate_input[InputModel: BaseModel](
         raise ComputerUseError(str(exc)) from exc
 
 
-def tool_schema(model: type[BaseModel]) -> dict[str, Any]:
+def tool_schema(model: type[BaseModel]) -> dict[str, object]:
     """Expose the same input contract to MCP, plus screen coordination arguments."""
     schema = model.model_json_schema()
-    schema["properties"].update(
+    properties = object_of(schema.get, "properties")
+    if not is_object_dict(properties):
+        raise TypeError("a tool input model declares its properties")
+    properties.update(
         {
             "task_id": {"type": "integer"},
             "priority": {"type": "string", "enum": ["normal", "high"], "default": "normal"},
         }
     )
     return schema
+
+
+# meiva:note
+# macOS virtual keycodes for the key tool's name/character vocabulary. LLM callers cannot be expected
+# to know raw keycodes, so the MCP surface takes names ('return', 'space', ...) or single characters;
+# the raw keycode stays available via the optional `keycode` argument (the helper API is code-based).
+KEYCODES: dict[str, int] = {
+    "a": 0,
+    "s": 1,
+    "d": 2,
+    "f": 3,
+    "h": 4,
+    "g": 5,
+    "z": 6,
+    "x": 7,
+    "c": 8,
+    "v": 9,
+    "b": 11,
+    "q": 12,
+    "w": 13,
+    "e": 14,
+    "r": 15,
+    "y": 16,
+    "t": 17,
+    "1": 18,
+    "2": 19,
+    "3": 20,
+    "4": 21,
+    "6": 22,
+    "5": 23,
+    "=": 24,
+    "9": 25,
+    "7": 26,
+    "-": 27,
+    "8": 28,
+    "0": 29,
+    "]": 30,
+    "o": 31,
+    "u": 32,
+    "[": 33,
+    "i": 34,
+    "p": 35,
+    "l": 37,
+    "j": 38,
+    "'": 39,
+    "k": 40,
+    ";": 41,
+    "\\": 42,
+    ",": 43,
+    "/": 44,
+    "n": 45,
+    "m": 46,
+    ".": 47,
+    "`": 50,
+    "return": 36,
+    "enter": 36,
+    "tab": 48,
+    "space": 49,
+    "backspace": 51,
+    "delete": 51,
+    "escape": 53,
+    "cmd": 55,
+    "shift": 56,
+    "alt": 58,
+    "ctrl": 59,
+    "esc": 53,
+    "home": 115,
+    "end": 119,
+    "pageup": 116,
+    "pagedown": 121,
+    "forwarddelete": 117,
+    "left": 123,
+    "right": 124,
+    "down": 125,
+    "up": 126,
+    "f1": 122,
+    "f2": 120,
+    "f3": 99,
+    "f4": 118,
+    "f5": 96,
+    "f6": 97,
+    "f7": 98,
+    "f8": 100,
+    "f9": 101,
+    "f10": 109,
+    "f11": 103,
+    "f12": 111,
+}
+
+
+# meiva:note
+# Virtual keycode for a key name or single character (case-insensitive).
+def keycode_for(key: str) -> int | None:
+    return KEYCODES.get(key.lower())

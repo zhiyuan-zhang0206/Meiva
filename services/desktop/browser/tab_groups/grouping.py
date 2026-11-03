@@ -83,16 +83,29 @@ import json
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 
 import websockets
+from pydantic import TypeAdapter
 from websockets.asyncio.client import ClientConnection
 
 from base.clock import Timers
 from base.host.atomic_io import write_bytes_atomic
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.log import logger
 from base.paths import run_dir
-from services.desktop.browser.session import cdp_call, http_json
+from services.desktop.browser.session import (
+    ATTACHED,
+    EXTENSIONS,
+    LOADED,
+    NOTHING,
+    TARGETS,
+    Extension,
+    browser_ws_url,
+    cdp_call,
+    cdp_evaluate,
+    http_json,
+)
 
 # meiva:note
 # The unpacked extension files shipped inside the package. The service-worker
@@ -193,17 +206,13 @@ def _integer(value: object, field: str) -> int:
 
 
 def _convergence(raw: object) -> Convergence:
-    payload: Any = raw
-    checked: object = payload
-    if not isinstance(checked, dict):
+    if not is_object_dict(raw):
         raise TypeError("convergence report must be an object")
-    report: dict[str, Any] = payload
-    group_ids_value: Any = report.get("groups")
-    ids_check: object = group_ids_value
-    if not isinstance(ids_check, list):
+    report = raw
+    group_ids = report.get("groups")
+    if not is_object_list(group_ids):
         raise TypeError("convergence report must carry the group ids it saw")
-    group_ids: list[Any] = group_ids_value
-    kept: Any = report.get("kept")
+    kept = report.get("kept")
     if kept is None:
         raise TypeError("convergence report must name the group it kept")
     return Convergence(
@@ -241,17 +250,38 @@ class _NoUniqueNewPageError(RuntimeError):
     pass
 
 
+# meiva:note
+# The parts of Chrome's target listing and of the extension manifest this module reads.
+class _Listed(TypedDict):
+    id: str
+    type: str
+
+
+class _Background(TypedDict):
+    service_worker: str
+
+
+class _Manifest(TypedDict):
+    background: _Background
+
+
+_LISTING = TypeAdapter(list[_Listed])
+_MANIFEST = TypeAdapter(_Manifest)
+
+
 async def _page_target_ids(cdp_port: int) -> frozenset[str]:
-    raw_listing: Any = await http_json(f"http://127.0.0.1:{cdp_port}/json/list")
-    listing: list[dict[str, Any]] = raw_listing if raw_listing is not None else []
-    return frozenset(t["id"] for t in listing if t.get("type") == "page")
+    raw_listing = await http_json(f"http://127.0.0.1:{cdp_port}/json/list")
+    listing = _LISTING.validate_python(raw_listing if raw_listing is not None else [])
+    return frozenset(t["id"] for t in listing if t["type"] == "page")
 
 
 # meiva:note
 # The service-worker file name the shipped manifest declares.
 def _worker_file() -> str:
-    manifest = json.loads((EXTENSION_DIR / "manifest.json").read_text(encoding="utf-8"))
-    return str(manifest["background"]["service_worker"])
+    manifest = _MANIFEST.validate_json(
+        (EXTENSION_DIR / "manifest.json").read_text(encoding="utf-8")
+    )
+    return manifest["background"]["service_worker"]
 
 
 # meiva:note
@@ -263,11 +293,11 @@ def shipped_worker() -> str:
 
 async def _worker_targets(ws: ClientConnection, ids: Iterator[int], extension_id: str) -> list[str]:
     url = f"chrome-extension://{extension_id}/{_worker_file()}"
-    infos = (await cdp_call(ws, ids, "Target.getTargets", {}))["targetInfos"]
+    infos = (await cdp_call(ws, ids, "Target.getTargets", {}, TARGETS))["targetInfos"]
     return [
-        str(info["targetId"])
+        info["targetId"]
         for info in infos
-        if info.get("type") == "service_worker" and info.get("url") == url
+        if info["type"] == "service_worker" and info["url"] == url
     ]
 
 
@@ -278,7 +308,7 @@ async def _worker_targets(ws: ClientConnection, ids: Iterator[int], extension_id
 async def _uninstall_stale_extensions(
     ws: ClientConnection,
     ids: Iterator[int],
-    extensions: list[dict[str, Any]],
+    extensions: list[Extension],
     *,
     extension_dir: Path,
 ) -> None:
@@ -294,7 +324,7 @@ async def _uninstall_stale_extensions(
         ):
             continue
         try:
-            await cdp_call(ws, ids, "Extensions.uninstall", {"id": entry_id})
+            await cdp_call(ws, ids, "Extensions.uninstall", {"id": entry_id}, NOTHING)
         except Exception as exc:
             logger.opt(exception=True).warning(
                 "[browser-mcp] could not uninstall stale {!r} extension {} at {} ({}: {})",
@@ -323,41 +353,39 @@ async def _worker_session(
     extension_dir: Path = EXTENSION_DIR,
     worker_wait_s: float = WORKER_WAIT_S,
 ) -> str:
-    extensions: list[dict[str, Any]] = (await cdp_call(ws, ids, "Extensions.getExtensions", {}))[
-        "extensions"
-    ]
+    extensions = (await cdp_call(ws, ids, "Extensions.getExtensions", {}, EXTENSIONS))["extensions"]
     await _uninstall_stale_extensions(ws, ids, extensions, extension_dir=extension_dir)
     target = extension_dir.resolve()
-    loaded = [
-        e
-        for e in extensions
-        if isinstance(e.get("path"), str) and Path(e["path"]).resolve() == target
-    ]
+    loaded = [e for e in extensions if "path" in e and Path(e["path"]).resolve() == target]
     session_id: str | None = None
     if loaded:
-        for target_id in reversed(await _worker_targets(ws, ids, str(loaded[0]["id"]))):
+        for target_id in reversed(await _worker_targets(ws, ids, loaded[0]["id"])):
             try:
                 attached = await cdp_call(
-                    ws, ids, "Target.attachToTarget", {"targetId": target_id, "flatten": True}
+                    ws,
+                    ids,
+                    "Target.attachToTarget",
+                    {"targetId": target_id, "flatten": True},
+                    ATTACHED,
                 )
-                session_id = str(attached["sessionId"])
+                session_id = attached["sessionId"]
                 break
             except RuntimeError:
                 continue
     if session_id is None:
         stage_extension(extension_dir)
-        loaded_id = str(
-            (await cdp_call(ws, ids, "Extensions.loadUnpacked", {"path": str(extension_dir)}))["id"]
-        )
+        loaded_id = (
+            await cdp_call(ws, ids, "Extensions.loadUnpacked", {"path": str(extension_dir)}, LOADED)
+        )["id"]
         deadline = timers.monotonic() + worker_wait_s
         while not (targets := await _worker_targets(ws, ids, loaded_id)):
             if timers.monotonic() >= deadline:
                 raise RuntimeError(f"extension {loaded_id} service worker target not found")
             await timers.asleep(_WORKER_POLL_S)
         attached = await cdp_call(
-            ws, ids, "Target.attachToTarget", {"targetId": targets[-1], "flatten": True}
+            ws, ids, "Target.attachToTarget", {"targetId": targets[-1], "flatten": True}, ATTACHED
         )
-        session_id = str(attached["sessionId"])
+        session_id = attached["sessionId"]
     await _await_worker_script(ws, ids, session_id, timers=timers, worker_wait_s=worker_wait_s)
     return session_id
 
@@ -375,14 +403,8 @@ async def _await_worker_script(
 ) -> None:
     deadline = timers.monotonic() + worker_wait_s
     while True:
-        probe = await cdp_call(
-            ws,
-            ids,
-            "Runtime.evaluate",
-            {"expression": "typeof meivaGroup", "returnByValue": True},
-            session_id=session_id,
-        )
-        if probe["result"].get("value") == "function":
+        probe = await cdp_evaluate(ws, ids, session_id, "typeof meivaGroup", await_promise=False)
+        if probe == "function":
             return
         if timers.monotonic() >= deadline:
             raise RuntimeError("extension worker did not define meivaGroup")
@@ -415,15 +437,10 @@ class ExtensionWorker:
             return await asyncio.wait_for(self._evaluate_unlocked(expression), timeout_s)
 
     async def _evaluate_unlocked(self, expression: str) -> object:
-        raw_version: Any = await http_json(f"http://127.0.0.1:{self._cdp_port}/json/version")
-        checked: object = raw_version
-        if not isinstance(checked, dict):
-            raise TypeError("CDP /json/version did not return an object")
-        version: dict[str, Any] = raw_version
         ids = itertools.count(1)
         # meiva:note
         # Closing the websocket detaches the worker session opened below.
-        async with websockets.connect(str(version["webSocketDebuggerUrl"])) as ws:
+        async with websockets.connect(await browser_ws_url(self._cdp_port)) as ws:
             session_id = await _worker_session(
                 ws,
                 ids,
@@ -431,20 +448,7 @@ class ExtensionWorker:
                 extension_dir=self._extension_dir,
                 worker_wait_s=self._worker_wait_s,
             )
-            outcome = await cdp_call(
-                ws,
-                ids,
-                "Runtime.evaluate",
-                {
-                    "expression": expression,
-                    "awaitPromise": True,
-                    "returnByValue": True,
-                },
-                session_id=session_id,
-            )
-        if "exceptionDetails" in outcome:
-            raise RuntimeError(outcome["exceptionDetails"]["exception"]["description"])
-        return outcome["result"].get("value")
+            return await cdp_evaluate(ws, ids, session_id, expression, await_promise=True)
 
 
 # meiva:note
@@ -618,10 +622,7 @@ class AgentTabGroups:
         )
 
     async def _converge_all_call(self) -> list[Convergence]:
-        raw: Any = await self._worker.evaluate(
-            "meivaConvergeAll()", timeout_s=self._group_timeout_s
-        )
-        listed: object = raw
-        if not isinstance(listed, list):
+        raw = await self._worker.evaluate("meivaConvergeAll()", timeout_s=self._group_timeout_s)
+        if not is_object_list(raw):
             raise TypeError("meivaConvergeAll did not return a list of reports")
         return [_convergence(item) for item in raw]

@@ -29,10 +29,12 @@ import json
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol
 
 from base.clock import Timers
 from base.host.atomic_io import write_text_atomic
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from base.log import logger
 from base.paths import run_dir
 
@@ -132,8 +134,16 @@ def ledger_path(home: Path) -> Path:
     return run_dir(home) / LEDGER_NAME
 
 
-def _parse_tab(item: dict[str, Any]) -> Tab:
-    group_val: object = item.get("group")
+# meiva:note
+# A recorded number as `int(...)` reads it: a number or a numeric string; anything else is malformed.
+def _whole(value: object) -> int:
+    if isinstance(value, int | float | str):
+        return int(value)
+    raise TypeError("a recorded number must be a number or a numeric string")
+
+
+def _parse_tab(item: dict[str, object]) -> Tab:
+    group_val = item.get("group")
     if group_val is not None and not isinstance(group_val, str):
         raise TypeError("tab group must be a string or None")
     return Tab(
@@ -141,42 +151,39 @@ def _parse_tab(item: dict[str, Any]) -> Tab:
         title=str(item.get("title", "")),
         pinned=bool(item.get("pinned", False)),
         group=group_val,
-        index=int(item.get("index", 0)),
-        window=int(item.get("window", 0)),
+        index=_whole(item.get("index", 0)),
+        window=_whole(item.get("window", 0)),
     )
 
 
-def _parse_reapply(raw: dict[str, Any] | None) -> dict[str, int] | None:
+def _parse_reapply(raw: dict[str, object] | None) -> dict[str, int] | None:
     if raw is None:
         return None
-    return {str(k): int(v) for k, v in raw.items()}
+    return {str(k): _whole(v) for k, v in raw.items()}
 
 
-def _parse_ledger_payload(raw: dict[str, Any]) -> Ledger:
-    raw_tabs: Any = raw["tabs"]
-    raw_tabs_obj: object = raw_tabs
-    if not isinstance(raw_tabs_obj, list):
+def _parse_ledger_payload(raw: dict[str, object]) -> Ledger:
+    raw_tabs = raw["tabs"]
+    if not is_object_list(raw_tabs):
         raise TypeError("tabs must be a list")
-    tabs_list: list[Any] = raw_tabs
-    for entry in tabs_list:
-        entry_obj: object = entry
-        if not isinstance(entry_obj, dict):
+    tabs_list: list[dict[str, object]] = []
+    for entry in raw_tabs:
+        if not is_object_dict(entry):
             raise TypeError("tab entry must be a dict")
-    raw_pending: object = raw.get("pending")
+        tabs_list.append(entry)
+    raw_pending = raw.get("pending")
     if raw_pending is not None and not isinstance(raw_pending, str):
         raise TypeError("pending must be a string or None")
-    raw_reapply: Any = raw.get("reapply")
-    raw_reapply_obj: object = raw_reapply
-    if raw_reapply_obj is not None and not isinstance(raw_reapply_obj, dict):
+    raw_reapply = raw.get("reapply")
+    if raw_reapply is not None and not is_object_dict(raw_reapply):
         raise TypeError("reapply must be a dict")
-    reapply_dict: dict[str, Any] | None = raw_reapply
     tabs = tuple(_parse_tab(item) for item in tabs_list)
     return Ledger(
         tabs=tabs,
         captured_at=str(raw.get("captured_at", "")),
         layout=bool(raw.get("layout", False)),
         pending=raw_pending,
-        reapply=_parse_reapply(reapply_dict),
+        reapply=_parse_reapply(raw_reapply),
         report_pending=bool(raw.get("report_pending", False)),
     )
 
@@ -186,14 +193,13 @@ def _parse_ledger_payload(raw: dict[str, Any]) -> Ledger:
 def read(home: Path) -> Ledger | None:
     path = ledger_path(home)
     try:
-        raw: Any = json.loads(path.read_text(encoding="utf-8"))
+        raw = object_of(json.loads, path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return None
     except (OSError, ValueError) as exc:
         logger.warning("[browser-session] ignoring unreadable {}: {}", path, exc)
         return None
-    raw_obj: object = raw
-    if not isinstance(raw_obj, dict):
+    if not is_object_dict(raw):
         logger.warning("[browser-session] ignoring malformed ledger {}", path)
         return None
     try:
@@ -270,13 +276,14 @@ async def capture(chrome: Chrome, *, now: datetime) -> Ledger | None:
     tabs: list[Tab] = []
     for window_index, window in enumerate(windows):
         for entry in window:
+            group = entry.get("group")
             tabs.append(
                 Tab(
                     url=str(entry.get("url", "")),
                     title=str(entry.get("title", "")),
                     pinned=bool(entry.get("pinned", False)),
-                    group=entry.get("group") if isinstance(entry.get("group"), str) else None,
-                    index=int(entry.get("index", 0)),
+                    group=group if isinstance(group, str) else None,
+                    index=_whole(entry.get("index", 0)),
                     window=window_index,
                 )
             )
@@ -294,9 +301,9 @@ async def capture(chrome: Chrome, *, now: datetime) -> Ledger | None:
 
 # meiva:note
 # Every window's tabs as the extension sees them, or None when it cannot be asked.
-async def _extension_layout(chrome: Chrome) -> list[list[dict[str, Any]]] | None:
+async def _extension_layout(chrome: Chrome) -> list[list[dict[str, object]]] | None:
     try:
-        raw: Any = await chrome.worker("meivaLayout()")
+        raw = await chrome.worker("meivaLayout()")
     except Exception as exc:
         logger.opt(exception=not isinstance(exc, TimeoutError)).warning(
             "[browser-session] the tab-group worker could not report the layout ({}: {}); "
@@ -305,22 +312,13 @@ async def _extension_layout(chrome: Chrome) -> list[list[dict[str, Any]]] | None
             exc,
         )
         return None
-    raw_obj: object = raw
-    if not isinstance(raw_obj, list):
+    if not is_object_list(raw):
         return None
-    raw_windows: list[Any] = raw
-    windows: list[list[dict[str, Any]]] = []
-    for window in raw_windows:
-        window_obj: object = window
-        if not isinstance(window_obj, list):
+    windows: list[list[dict[str, object]]] = []
+    for window in raw:
+        if not is_object_list(window):
             continue
-        window_rows: list[Any] = window
-        rows: list[dict[str, Any]] = []
-        for row in window_rows:
-            row_obj: object = row
-            if isinstance(row_obj, dict):
-                rows.append(row)
-        windows.append(rows)
+        windows.append([row for row in window if is_object_dict(row)])
     return windows
 
 
@@ -328,20 +326,17 @@ async def _extension_layout(chrome: Chrome) -> list[list[dict[str, Any]]] | None
 # `/json/list` URLs of the page targets, or None when Chrome does not answer.
 async def _listed_urls(chrome: Chrome) -> list[str] | None:
     try:
-        listing: Any = await chrome.json("/json/list")
+        listing = await chrome.json("/json/list")
     except Exception as exc:
         logger.opt(exception=not isinstance(exc, TimeoutError)).warning(
             "[browser-session] could not list Chrome's pages ({}: {})", type(exc).__name__, exc
         )
         return None
-    listing_obj: object = listing
-    if not isinstance(listing_obj, list):
+    if not is_object_list(listing):
         return None
-    targets: list[Any] = listing
     urls: list[str] = []
-    for target in targets:
-        target_obj: object = target
-        if isinstance(target_obj, dict) and target.get("type") == "page":
+    for target in listing:
+        if is_object_dict(target) and target.get("type") == "page":
             urls.append(str(target.get("url", "")))
     return urls
 
@@ -352,7 +347,7 @@ async def _listed_urls(chrome: Chrome) -> list[str] | None:
 
 # meiva:note
 # The extension's `meivaApplyLayout` argument: pins first, then groups by title.
-def layout_spec(ledger: Ledger) -> dict[str, Any]:
+def layout_spec(ledger: Ledger) -> dict[str, object]:
     pins = [tab.url for tab in ledger.tabs if tab.pinned and tab.url]
     grouped: dict[str, list[str]] = {}
     for tab in ledger.tabs:
@@ -376,7 +371,7 @@ async def reapply(home: Path, chrome: Chrome) -> None:
     spec = layout_spec(ledger)
     expected = ledger.layout_expected
     try:
-        outcome: Any = await chrome.worker(f"meivaApplyLayout({json.dumps(spec)})")
+        outcome = await chrome.worker(f"meivaApplyLayout({json.dumps(spec)})")
     except Exception as exc:
         logger.opt(exception=not isinstance(exc, TimeoutError)).warning(
             "[browser-session] could not re-apply the recorded pins/groups ({}: {}); "
@@ -386,9 +381,8 @@ async def reapply(home: Path, chrome: Chrome) -> None:
         )
         write(home, replace(ledger, pending=None, reapply={"applied": 0, "expected": expected}))
         return
-    outcome_obj: object = outcome
-    counts: dict[str, Any] = outcome if isinstance(outcome_obj, dict) else {}
-    applied = int(counts.get("pinned", 0)) + int(counts.get("grouped", 0))
+    counts: dict[str, object] = outcome if is_object_dict(outcome) else {}
+    applied = _whole(counts.get("pinned", 0)) + _whole(counts.get("grouped", 0))
     logger.info("[browser-session] re-applied {}/{} recorded pins/groups", applied, expected)
     write(home, replace(ledger, pending=None, reapply={"applied": applied, "expected": expected}))
 

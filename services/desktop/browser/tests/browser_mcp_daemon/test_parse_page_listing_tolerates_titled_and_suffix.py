@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 
+from base.host.boundary.json_values import is_object_dict
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from services.desktop.browser import page_lifecycle
@@ -273,7 +274,13 @@ async def test_list_tools_appends_renew_page() -> None:
     assert "take_snapshot" in names
     renew = [t for t in tools if t["name"] == "renew_page"]
     assert len(renew) == 1
-    assert renew[0]["inputSchema"]["properties"]["ttl"]["type"] == "number"
+    schema = renew[0]["inputSchema"]
+    assert is_object_dict(schema)
+    properties = schema["properties"]
+    assert is_object_dict(properties)
+    ttl = properties["ttl"]
+    assert is_object_dict(ttl)
+    assert ttl["type"] == "number"
 
 
 async def test_renew_page_emits_audit_event(emitted_events: EmittedEvents) -> None:

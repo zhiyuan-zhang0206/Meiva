@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TypedDict, TypeGuard
+from typing import TypedDict
+
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 BUILD_STATE_NAME = "build-state.json"
 
@@ -13,16 +16,12 @@ class BuildState(TypedDict):
     signed_at: str
 
 
-def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
-    return isinstance(value, dict)
-
-
 def read_build_state(path: Path) -> BuildState | None:
     try:
-        raw: object = json.loads(path.read_text())
+        raw = object_of(json.loads, path.read_text())
     except (FileNotFoundError, OSError, json.JSONDecodeError):
         return None
-    if not _is_str_dict(raw):
+    if not is_object_dict(raw):
         return None
     try:
         source_hash = raw["source_hash"]

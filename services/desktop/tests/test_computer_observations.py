@@ -20,7 +20,9 @@ async def test_region_snapshot_preserves_global_scale_and_ocr_cache(
     desktop: Desktop,
 ) -> None:
     desktop.daemon._scale = 1
-    desktop.daemon._ocr_cache["items"] = [{"text": "previous whole-screen text"}]
+    desktop.daemon._ocr_cache["items"] = [
+        {"text": "previous whole-screen text", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0}
+    ]
     FakeOcr([{"text": "region text", "x": 10.0, "y": 20.0}])
     result = payload(
         await desktop.call(
@@ -35,7 +37,9 @@ async def test_region_snapshot_preserves_global_scale_and_ocr_cache(
         "pixels": {"width": 400, "height": 200},
     }
     assert desktop.daemon._scale == 1
-    assert desktop.daemon._ocr_cache["items"] == [{"text": "previous whole-screen text"}]
+    assert desktop.daemon._ocr_cache["items"] == [
+        {"text": "previous whole-screen text", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0}
+    ]
     assert result["ocr"][0]["text"] == "region text"
     assert (await desktop.call("click", {"x": 40, "y": 20, "frame": result["frame"]}))["ok"] is True
     assert (desktop.action("click")["x"], desktop.action("click")["y"]) == (120, 160)

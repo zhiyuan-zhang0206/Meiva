@@ -22,12 +22,26 @@ from base.clock.tests.manual_timers import ManualTimers
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.permissions_helper.client import UserAbortError
+from base.host.permissions_helper.wire import (
+    AxWindowInfo,
+    ClickPoint,
+    ClickResult,
+    FrontmostApp,
+    IndicatorStopResult,
+    KeyResult,
+    ScreenSize,
+    ScrollResult,
+    SessionInfo,
+    TypeResult,
+    WindowInfo,
+)
 from base.paths import meiva_home
 
 from .. import ocr_text as ocr_text_mod
 from ..errors import ComputerUseError
 from ..mcp_daemon import ComputerMcpDaemon
-from ..protocol import Request, Response
+from ..ocr import OcrItem
+from ..protocol import Response, WireRequest
 from ..screen import DesktopHelper
 from .slices import AuditLog, FakeDesktopHelper, FakeOcr, computer_use_config
 
@@ -56,7 +70,7 @@ def _req(
     tool: str | None = None,
     args: dict[str, Any] | None = None,
     agent_id: int | None = 7,
-) -> Request:
+) -> WireRequest:
     return {
         "id": 1,
         "method": method,
@@ -79,21 +93,21 @@ class FakeHelper(FakeDesktopHelper):
         self.click_errors: list[Exception] = []
         self.indicator_stop_error: Exception | None = None
         self.frontmost = "Finder"
-        self.cursor = {"x": 321.0, "y": 123.0}
-        self.screen = {"x": 0.0, "y": 0.0, "w": 1512.0, "h": 982.0, "scale": 2.0}
+        self.cursor: ClickPoint = {"x": 321.0, "y": 123.0}
+        self.screen: ScreenSize = {"x": 0.0, "y": 0.0, "w": 1512.0, "h": 982.0, "scale": 2.0}
         # PNG the fake screencapture produces (IHDR) — Retina 2x by default;
         # a stale-helper regression sets it to the 1x 1920x1080 shape.
         self.png_size: tuple[int, int] = (3024, 1964)
 
-    def cursor_position(self, **kw: Any) -> dict[str, float]:
+    def cursor_position(self, **kw: Any) -> ClickPoint:
         self.calls.append(("cursor_position", {}))
         return self.cursor
 
-    def screen_size(self, **kw: Any) -> dict[str, Any]:
+    def screen_size(self, **kw: Any) -> ScreenSize:
         self.calls.append(("screen_size", {}))
         return self.screen
 
-    def frontmost_app(self, **kw: Any) -> dict[str, Any]:
+    def frontmost_app(self, **kw: Any) -> FrontmostApp:
         self.calls.append(("frontmost_app", {}))
         return {"app": self.frontmost}
 
@@ -110,41 +124,41 @@ class FakeHelper(FakeDesktopHelper):
             )
         return {"path": path, "bytes": 42}
 
-    def click(self, x: float, y: float, **kw: Any) -> dict[str, Any]:
+    def click(self, x: float, y: float, **kw: Any) -> ClickResult:
         self.calls.append(("click", {"x": x, "y": y, **kw}))
         if self.click_errors:
             raise self.click_errors.pop()
         return {"clicked": {"x": x, "y": y}, "double": bool(kw.get("double"))}
 
-    def type_text(self, text: str, **kw: Any) -> dict[str, Any]:
+    def type_text(self, text: str, **kw: Any) -> TypeResult:
         self.calls.append(("type_text", {"text": text}))
         return {"typed": len(text)}
 
-    def key(self, code: int, **kw: Any) -> dict[str, Any]:
+    def key(self, code: int, **kw: Any) -> KeyResult:
         # Mirrors main.swift's real echo shape {"key": code, "cmd": ...} — the
         # daemon maps it to the MCP "pressed" contract.
         self.calls.append(("key", {"code": code, **kw}))
         return {"key": code, "cmd": bool(kw.get("cmd"))}
 
-    def scroll(self, x: float, y: float, dy: int, **kw: Any) -> dict[str, Any]:
+    def scroll(self, x: float, y: float, dy: int, **kw: Any) -> ScrollResult:
         self.calls.append(("scroll", {"x": x, "y": y, "dy": dy}))
         return {"scrolled": dy}
 
-    def indicator_stop(self, **kw: Any) -> dict[str, Any]:
+    def indicator_stop(self, **kw: Any) -> IndicatorStopResult:
         self.calls.append(("indicator_stop", {}))
         if self.indicator_stop_error is not None:
             raise self.indicator_stop_error
         return {"stopped": False}
 
-    def ax_window_info(self, app: str, **kw: Any) -> dict[str, Any]:
+    def ax_window_info(self, app: str, **kw: Any) -> AxWindowInfo:
         self.calls.append(("ax_window_info", {"app": app}))
         return {"app": app, "x": 0.0, "y": 0.0, "w": 800.0, "h": 600.0}
 
-    def window_info(self, owner: str, **kw: Any) -> dict[str, Any]:
+    def window_info(self, owner: str, **kw: Any) -> WindowInfo:
         self.calls.append(("window_info", {"owner": owner}))
         return {"owner": owner, "x": 0.0, "y": 0.0, "w": 800.0, "h": 600.0}
 
-    def session_info(self, **kw: Any) -> dict[str, Any]:
+    def session_info(self, **kw: Any) -> SessionInfo:
         self.calls.append(("session_info", {}))
         return {"locked": False, "on_console": True}
 
@@ -183,7 +197,7 @@ async def ok_result(
     assert resp["ok"] is True
     res = resp["result"]
     assert isinstance(res, dict)
-    content = cast("dict[str, object]", res).get("content")
+    content = res.get("content")
     assert isinstance(content, list)
     blocks = cast("list[dict[str, str]]", content)
     assert len(blocks) == 1
@@ -428,7 +442,7 @@ async def test_snapshot_without_include_ocr_skips_ocr(
 
 # Physical-pixel OCR boxes over the default fake 1512x982pt @2x screen
 # (3024x1964px capture): reading order is top-to-bottom, left-to-right.
-_OCR_BOXES: list[dict[str, float | str]] = [
+_OCR_BOXES: list[OcrItem] = [
     {"text": "Hello", "x": 10.0, "y": 20.0, "w": 60.0, "h": 20.0},
     {"text": "Search", "x": 500.0, "y": 100.0, "w": 80.0, "h": 24.0},
     {"text": "search", "x": 100.0, "y": 200.0, "w": 80.0, "h": 24.0},

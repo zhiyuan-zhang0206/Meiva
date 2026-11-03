@@ -5,20 +5,76 @@ daemon.
 from __future__ import annotations
 
 import struct
-from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol, TypedDict
 
-from base.host.permissions_helper.wire import AxActResult, AxTreeResult
+from base.host.permissions_helper.wire import (
+    AppsResult,
+    AxActResult,
+    AxTreeResult,
+    AxWindowInfo,
+    ClickPoint,
+    ClickResult,
+    ClipboardReadResult,
+    ClipboardWriteResult,
+    DragResult,
+    FocusAppResult,
+    FrontmostApp,
+    IndicatorStopResult,
+    KeyResult,
+    MouseDownResult,
+    MouseReleaseAllResult,
+    MouseUpResult,
+    MoveResult,
+    PingResult,
+    ScreenSize,
+    ScrollResult,
+    SessionInfo,
+    TypeResult,
+    WindowCaptureResult,
+    WindowInfo,
+    WindowsResult,
+)
 from base.paths import logs_dir
 
 from .errors import ComputerUseError
 from .targets import CaptureRegion
 
 
+# meiva:note
+# The optional parameters a helper call takes, as the caller set them: a field the caller left unset
+# stays out, so the helper client does not demand a capability for a default it never needed.
+class ClickOptions(TypedDict, total=False):
+    double: bool
+    button: str
+    click_count: int
+    modifiers: list[str]
+    duration_ms: float
+
+
+class KeyOptions(TypedDict, total=False):
+    cmd: bool
+    modifiers: list[str]
+    duration_ms: float
+
+
+class ButtonOptions(TypedDict, total=False):
+    button: str
+    modifiers: list[str]
+
+
+class MouseUpOptions(TypedDict, total=False):
+    button: str
+
+
+class ScrollOptions(TypedDict, total=False):
+    dx: int
+    modifiers: list[str]
+
+
 class ScaleHelper(Protocol):
-    def screen_size(self) -> Mapping[str, Any]: ...
+    def screen_size(self) -> ScreenSize: ...
 
 
 class ScreenHelper(ScaleHelper, Protocol):
@@ -26,9 +82,9 @@ class ScreenHelper(ScaleHelper, Protocol):
 
 
 class DesktopHelper(ScreenHelper, Protocol):
-    def ping(self) -> Mapping[str, Any]: ...
-    def frontmost_app(self) -> Mapping[str, Any]: ...
-    def cursor_position(self) -> Mapping[str, Any]: ...
+    def ping(self) -> PingResult: ...
+    def frontmost_app(self) -> FrontmostApp: ...
+    def cursor_position(self) -> ClickPoint: ...
     def click(
         self,
         x: float,
@@ -39,10 +95,8 @@ class DesktopHelper(ScreenHelper, Protocol):
         click_count: int | None = None,
         modifiers: list[str] | None = None,
         duration_ms: float | None = None,
-    ) -> Mapping[str, Any]: ...
-    def move(
-        self, x: float, y: float, *, modifiers: list[str] | None = None
-    ) -> Mapping[str, Any]: ...
+    ) -> ClickResult: ...
+    def move(self, x: float, y: float, *, modifiers: list[str] | None = None) -> MoveResult: ...
     def drag(
         self,
         start_x: float,
@@ -52,7 +106,7 @@ class DesktopHelper(ScreenHelper, Protocol):
         *,
         button: str | None = None,
         modifiers: list[str] | None = None,
-    ) -> Mapping[str, Any]: ...
+    ) -> DragResult: ...
     def mouse_down(
         self,
         x: float | None = None,
@@ -60,16 +114,16 @@ class DesktopHelper(ScreenHelper, Protocol):
         *,
         button: str = "left",
         modifiers: list[str] | None = None,
-    ) -> Mapping[str, Any]: ...
+    ) -> MouseDownResult: ...
     def mouse_up(
         self,
         x: float | None = None,
         y: float | None = None,
         *,
         button: str = "left",
-    ) -> Mapping[str, Any]: ...
-    def mouse_release_all(self) -> Mapping[str, Any]: ...
-    def type_text(self, text: str) -> Mapping[str, Any]: ...
+    ) -> MouseUpResult: ...
+    def mouse_release_all(self) -> MouseReleaseAllResult: ...
+    def type_text(self, text: str) -> TypeResult: ...
     def key(
         self,
         code: int,
@@ -77,7 +131,7 @@ class DesktopHelper(ScreenHelper, Protocol):
         cmd: bool = False,
         modifiers: list[str] | None = None,
         duration_ms: float | None = None,
-    ) -> Mapping[str, Any]: ...
+    ) -> KeyResult: ...
     def scroll(
         self,
         x: float,
@@ -86,17 +140,17 @@ class DesktopHelper(ScreenHelper, Protocol):
         *,
         dx: int | None = None,
         modifiers: list[str] | None = None,
-    ) -> Mapping[str, Any]: ...
-    def clipboard_read(self) -> Mapping[str, Any]: ...
-    def clipboard_write(self, text: str) -> Mapping[str, Any]: ...
-    def indicator_stop(self) -> Mapping[str, Any]: ...
-    def list_apps(self) -> Mapping[str, Any]: ...
-    def list_windows(self, app: str | None = None) -> Mapping[str, Any]: ...
-    def focus_app(self, target: dict[str, object]) -> Mapping[str, Any]: ...
-    def screencapture_window(self, pid: int, window_id: int, path: str) -> Mapping[str, Any]: ...
-    def ax_window_info(self, app: str) -> Mapping[str, Any]: ...
-    def window_info(self, owner: str) -> Mapping[str, Any]: ...
-    def session_info(self) -> Mapping[str, Any]: ...
+    ) -> ScrollResult: ...
+    def clipboard_read(self) -> ClipboardReadResult: ...
+    def clipboard_write(self, text: str) -> ClipboardWriteResult: ...
+    def indicator_stop(self) -> IndicatorStopResult: ...
+    def list_apps(self) -> AppsResult: ...
+    def list_windows(self, app: str | None = None) -> WindowsResult: ...
+    def focus_app(self, target: dict[str, object]) -> FocusAppResult: ...
+    def screencapture_window(self, pid: int, window_id: int, path: str) -> WindowCaptureResult: ...
+    def ax_window_info(self, app: str) -> AxWindowInfo: ...
+    def window_info(self, owner: str) -> WindowInfo: ...
+    def session_info(self) -> SessionInfo: ...
     def ax_tree(
         self,
         app: str | None = None,
@@ -185,7 +239,7 @@ def snapshot_path(agent_id: int | None, *, stamp: str, home: Path) -> Path:
 
 def capture_screen(
     helper: ScreenHelper, agent_id: int, *, stamp: str, home: Path
-) -> tuple[Path, Mapping[str, Any], float, tuple[int, int]]:
+) -> tuple[Path, ScreenSize, float, tuple[int, int]]:
     """One full-screen capture: (PNG path, helper screen report, measured
     scale, physical pixel size).
 

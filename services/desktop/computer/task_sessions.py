@@ -16,11 +16,10 @@ Config via env: MEIVA_COMPUTER_SESSION_IDLE_S (default 600).
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
 
 DEFAULT_IDLE_S = 600.0
 
-SessionEvent = tuple[str, int, dict[str, Any]]
+SessionEvent = tuple[str, int, dict[str, object]]
 
 
 class _TaskSession:

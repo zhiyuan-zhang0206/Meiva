@@ -9,15 +9,22 @@ can be acted on, and an element that left the window or changed answers
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, TypedDict
 
 import pytest
 
 from base.clock.tests.fakes import system_clock
 from base.db import Database
+from base.host.boundary.json_values import is_object_dict
 from base.host.permissions_helper.client import (
     AxNode,
     PermissionsHelperError,
+)
+from base.host.permissions_helper.wire import (
+    ClickResult,
+    FrontmostApp,
+    PingResult,
+    ScreenSize,
 )
 from base.paths import meiva_home
 
@@ -25,7 +32,7 @@ from .. import ax_act as ax_action_tools
 from ..ax_ids import AxIdTable, AxSession
 from ..errors import ComputerUseError
 from ..mcp_daemon import ComputerMcpDaemon
-from .slices import AuditLog, FakeDesktopHelper, computer_use_config
+from .slices import AuditLog, FakeDesktopHelper, computer_use_config, text_block
 
 TYPED_TEXT = "hunter2-s3cret"
 
@@ -39,6 +46,15 @@ def el(fp: str, role: str, parent: str | None, title: str = "", **kw: Any) -> di
         "frame": (10, 20, 100, 40),
         **kw,
     }
+
+
+# meiva:note
+# The capabilities the fake helper advertises in its ping.
+class _Caps(TypedDict, total=False):
+    ax_tree_v1: bool
+    ax_act_v1: bool
+    ax_act_v2: bool
+    ax_target_v1: bool
 
 
 class FakeAxApp(FakeDesktopHelper):
@@ -57,8 +73,12 @@ class FakeAxApp(FakeDesktopHelper):
         self.table: dict[int, str] = {}
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self.acted: list[tuple[str, str, str | None]] = []
-        self.caps = {"ax_tree_v1": True, "ax_act_v1": True, "ax_act_v2": True}
-        self.caps["ax_target_v1"] = True
+        self.caps: _Caps = {
+            "ax_tree_v1": True,
+            "ax_act_v1": True,
+            "ax_act_v2": True,
+            "ax_target_v1": True,
+        }
         self.unanswered = False
         self.act_error: str | None = None
 
@@ -74,17 +94,17 @@ class FakeAxApp(FakeDesktopHelper):
         self.table = {}
 
     # -- helper surface
-    def ping(self, **kw: Any) -> dict[str, Any]:
-        return {"pong": True, **self.caps}
+    def ping(self, **kw: Any) -> PingResult:
+        return {"pong": True, "preflight_screen": True, "ax_trusted": True, **self.caps}
 
-    def frontmost_app(self, **kw: Any) -> dict[str, Any]:
+    def frontmost_app(self, **kw: Any) -> FrontmostApp:
         return {"app": "Mail"}
 
-    def click(self, x: float, y: float, **kw: Any) -> dict[str, Any]:
+    def click(self, x: float, y: float, **kw: Any) -> ClickResult:
         self.clicks.append((x, y))
         return {"clicked": {"x": x, "y": y}, "double": False}
 
-    def screen_size(self, **kw: Any) -> dict[str, Any]:
+    def screen_size(self, **kw: Any) -> ScreenSize:
         return {"x": 0.0, "y": 0.0, "w": 1512.0, "h": 982.0, "scale": 2.0}
 
     def ax_tree(self, app: str | None = None, **kw: Any) -> Any:
@@ -190,7 +210,7 @@ async def call(
         raise ComputerUseError(resp["error"])
     res = resp["result"]
     assert isinstance(res, dict)
-    return json.loads(res["content"][0]["text"])
+    return json.loads(text_block(res))
 
 
 def ids_in(tree: str) -> dict[str, str]:
@@ -449,7 +469,9 @@ async def test_ax_act_is_declared_with_its_required_arguments(database: Database
     tools = resp["result"]
     assert isinstance(tools, list)
     declared = next(t for t in tools if t["name"] == "ax_act")
-    assert declared["input_schema"]["required"] == ["id", "action"]
+    schema = declared["input_schema"]
+    assert is_object_dict(schema)
+    assert schema["required"] == ["id", "action"]
 
 
 async def test_perform_action_forwards_a_reported_platform_identifier(

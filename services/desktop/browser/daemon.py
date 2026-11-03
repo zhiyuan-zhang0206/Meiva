@@ -27,7 +27,6 @@ import signal
 import subprocess
 import sys
 import urllib.error
-import urllib.request
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Literal
@@ -44,7 +43,7 @@ from base.paths import logs_dir, meiva_home
 from . import macos_readiness, session_restore
 from . import profile as browser_profile
 from .orphan import find_cluster_chrome, reap_cluster_chrome
-from .probe import cdp_unreachable, cdp_url, our_chrome_holds_port
+from .probe import cdp_unreachable, cdp_url, fetch_cdp, our_chrome_holds_port
 from .profile import profile_dir as profile_dir
 
 _CDP_TIMEOUT_S = 2.0
@@ -69,8 +68,8 @@ def cdp_reachable(port: int) -> bool:
     """
     url = cdp_url(port)
     try:
-        with urllib.request.urlopen(url, timeout=_CDP_TIMEOUT_S) as resp:  # noqa: S310 — fixed localhost CDP URL
-            return resp.status == 200
+        status, _ = fetch_cdp(url, _CDP_TIMEOUT_S)
+        return status == 200
     except (urllib.error.URLError, OSError):
         return False
 

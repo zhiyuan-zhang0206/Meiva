@@ -11,10 +11,25 @@ import asyncio
 import json
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
-from typing import Any
+from typing import TypedDict
 
+from pydantic import TypeAdapter
+
+from base.host.boundary.untyped import object_of
 from base.host.net.resilience import Policy, aretry, retry_asleep
-from services.desktop.browser.protocol import Response
+
+
+# meiva:note
+# One response line as a client reads it: every member optional and `object`, because a daemon
+# that answered an error without a message still fails the call with the service's own label.
+class _WireResponse(TypedDict, total=False):
+    id: object
+    ok: object
+    result: object
+    error: object
+
+
+_RESPONSE = TypeAdapter(_WireResponse)
 
 LINE_LIMIT = 64 * 1024 * 1024
 _TRANSPORT_ERRNOS = frozenset({32, 54, 61})  # EPIPE, ECONNRESET, ECONNREFUSED
@@ -79,7 +94,7 @@ class SocketLink:
         *,
         service_label: str,
         timeout_reader: Callable[[], float],
-        extra_fields: Mapping[str, Any],
+        extra_fields: Mapping[str, object],
     ) -> None:
         self._reader = reader
         self._writer = writer
@@ -89,7 +104,7 @@ class SocketLink:
         self._lock = asyncio.Lock()
         self._id = 0
 
-    async def request(self, payload: dict[str, Any]) -> object:
+    async def request(self, payload: dict[str, object]) -> object:
         async with self._lock:
             self._id += 1
             request = {"id": self._id, **payload, **self._extra_fields}
@@ -103,14 +118,14 @@ class SocketLink:
                 line = await self._reader.readline()
                 if not line:
                     raise ConnectionError(f"{self._service_label} closed the connection")
-                resp: Response = json.loads(line)
+                resp = _RESPONSE.validate_python(object_of(json.loads, line))
                 if resp.get("id") != self._id:
                     raise RuntimeError(
                         f"{self._service_label} response id {resp.get('id')} != request {self._id}"
                     )
-                if resp["ok"] is False:
+                if resp.get("ok") is not True:
                     raise RuntimeError(resp.get("error", f"{self._service_label} error"))
-                return resp["result"]
+                return resp.get("result")
 
             return await asyncio.wait_for(roundtrip(), timeout=self._timeout_reader())
 
@@ -163,12 +178,12 @@ class ReconnectingLink:
         self._link.close()
         self._link = None
 
-    async def request(self, payload: dict[str, Any]) -> object:
+    async def request(self, payload: dict[str, object]) -> object:
         async with self._lock:
             phase = "connect"
             policy = Policy(
                 max_attempts=self._max_attempts,
-                backoff=lambda attempt: self._base_delay * (2**attempt),
+                backoff=lambda attempt: self._base_delay * (1 << attempt),
                 jitter="none",
                 jitter_span=1.0,
                 classify=lambda exc: (

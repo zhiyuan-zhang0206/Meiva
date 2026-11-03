@@ -61,7 +61,8 @@ from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+
+from pydantic import TypeAdapter
 
 from base.clock import SYSTEM_TIMERS, Clock, Timers
 from base.clock.configuration import clock_config_from_boot
@@ -70,6 +71,8 @@ from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot, settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.host.boundary.fields import optional_float_field, optional_int_field
+from base.host.boundary.json_values import is_object_dict
 from base.host.exit_codes import hard_exit
 from base.host.permissions_helper.client import PermissionsHelperError
 from base.log import logger
@@ -91,7 +94,8 @@ from .config import (
     loop_is_silent,
 )
 from .execute import TOOLS, DesktopHelper, execute_tool, mcp_result, priority
-from .protocol import Request, Response
+from .ocr import OcrCache
+from .protocol import Response, WireRequest
 from .screen import snapshot_stamp
 from .session import ScreenSession
 from .task_sessions import TaskSessionTracker
@@ -266,6 +270,20 @@ async def bounded_cleanup(
         dump_and_exit(f"shutdown cleanup did not finish within {drain_s:g}s")
 
 
+# meiva:note
+# The number `record[key]`; a tool result or argument that lacks it is malformed.
+def _float_field(record: dict[str, object], key: str) -> float:
+    value = optional_float_field(record, key)
+    if value is None:
+        raise TypeError(f"{key} is not a number")
+    return value
+
+
+# meiva:note
+# One request line as the daemon reads it; see `WireRequest`.
+_WIRE_REQUEST = TypeAdapter(WireRequest)
+
+
 class ComputerMcpDaemon:
     """Unix-socket server for the computer-mcp line protocol."""
 
@@ -294,7 +312,7 @@ class ComputerMcpDaemon:
         # daemon runs (snapshot include_ocr, find_text, click_text) so a later
         # find_text with snapshot_fresh=false searches the screen the caller
         # last saw instead of capturing again.
-        self._ocr_cache: dict[str, Any] = {"items": []}
+        self._ocr_cache: OcrCache = {"items": []}
         # Stable accessibility element ids (ax_tree / ax_act), one app at a time.
         self._ax_session = AxSession()
         # The agent whose mouse_down is outstanding (the helper holds at most one button).
@@ -325,8 +343,8 @@ class ComputerMcpDaemon:
                     if not line:
                         break
                     try:
-                        req: Request = json.loads(line)
-                    except json.JSONDecodeError as e:
+                        req = _WIRE_REQUEST.validate_json(line)
+                    except ValueError as e:
                         resp: Response = {
                             "id": None,
                             "ok": False,
@@ -343,7 +361,7 @@ class ComputerMcpDaemon:
             with suppress(OSError):
                 await writer.wait_closed()
 
-    async def _dispatch(self, req: Request) -> Response:
+    async def _dispatch(self, req: WireRequest) -> Response:
         req_id = req.get("id")
         if not isinstance(req_id, int) or isinstance(req_id, bool):
             return {"id": None, "ok": False, "error": "request id must be an integer"}
@@ -355,44 +373,58 @@ class ComputerMcpDaemon:
         if method != "call_tool":
             return {"id": req_id, "ok": False, "error": f"unknown method {method!r}"}
         tool = req.get("tool") or ""
-        args = req.get("args") or {}
+        raw_args: object = req.get("args") or {}
         agent_id = req.get("agent_id")
-        return await self._call_tool(tool, args, agent_id, req_id)
+        if not isinstance(tool, str) or not is_object_dict(raw_args):
+            return {
+                "id": req_id,
+                "ok": False,
+                "error": "call_tool needs a 'tool' name and object 'args'",
+            }
+        if agent_id is not None and (not isinstance(agent_id, int) or isinstance(agent_id, bool)):
+            return {"id": req_id, "ok": False, "error": "agent_id must be an integer"}
+        return await self._call_tool(tool, raw_args, agent_id, req_id)
 
-    def _track_tool_effects(self, tool: str, args: dict[str, Any], result: dict[str, Any]) -> None:
+    def _track_tool_effects(
+        self, tool: str, args: dict[str, object], result: dict[str, object]
+    ) -> None:
         """Remember the scale and pointer the tool's result established, for later conversions."""
         if tool == "snapshot" and "frame" not in result:
             # click/scroll convert with the scale the caller saw.
-            self._scale = float(result["screen"]["scale"])
+            screen = result["screen"]
+            if not is_object_dict(screen):
+                raise TypeError("the snapshot result carries no screen")
+            self._scale = _float_field(screen, "scale")
         elif tool == "click_text":
             # The click landed where OCR found the text; record the
             # pointer AND the scale its capture measured, so later
             # click/scroll convert like this call did.
-            self._scale = float(result["scale"])
-            self._pointer = (float(result["x"]), float(result["y"]))
+            self._scale = _float_field(result, "scale")
+            self._pointer = (_float_field(result, "x"), _float_field(result, "y"))
         if "frame" in args:
             return
         if tool in {"click", "move"} or (
             tool in {"scroll", "mouse_down", "mouse_up"} and "x" in args and "y" in args
         ):
-            self._pointer = (float(args["x"]), float(args["y"]))
+            self._pointer = (_float_field(args, "x"), _float_field(args, "y"))
         elif tool == "drag":
-            self._pointer = (float(args["end_x"]), float(args["end_y"]))
+            self._pointer = (_float_field(args, "end_x"), _float_field(args, "end_y"))
 
-    async def _renew_and_note(self, agent_id: int, tool: str, args: dict[str, Any]) -> None:
+    async def _renew_and_note(self, agent_id: int, tool: str, args: dict[str, object]) -> None:
         """A live caller renews the lease (success or failure — it is still acting on the
         screen) and its task session notes the action."""
         await self._screen.touch(agent_id)
-        task_id = args.get("task_id")
-        if task_id is None:
+        # meiva:note
+        # A task_id that is not a whole number: the computer_action row still carries it as-is and the
+        # envelope just does not form; the action is what matters here.
+        if args.get("task_id") is None:
             return
-        # Garbage task_id: the computer_action row still carries it
-        # as-is; the envelope just does not form (suppress, not a
-        # silent except:pass — the action is what matters here).
-        tid: int | None = None
-        with suppress(TypeError, ValueError):
-            tid = int(task_id)
+        tid = optional_int_field(args, "task_id")
         if tid is None:
+            logger.warning(
+                "[computer-mcp] task_id {!r} is not a whole number; no task session forms",
+                args["task_id"],
+            )
             return
         try:
             for event_type, session_agent_id, payload in self._task_sessions.note(
@@ -407,7 +439,7 @@ class ComputerMcpDaemon:
             logger.warning(f"[computer-mcp] task-session event failed: {e}")
 
     async def _call_tool(
-        self, tool: str, args: dict[str, Any], agent_id: int | None, req_id: int
+        self, tool: str, args: dict[str, object], agent_id: int | None, req_id: int
     ) -> Response:
         if tool == "release_control":
             return await self._release_control(agent_id, args, req_id)
@@ -459,7 +491,7 @@ class ComputerMcpDaemon:
             return {"id": req_id, "ok": True, "result": mcp_result(result)}
 
     async def _release_control(
-        self, agent_id: int | None, args: dict[str, Any], req_id: int
+        self, agent_id: int | None, args: dict[str, object], req_id: int
     ) -> Response:
         """release_control tool: the holder hands the screen to the next FIFO
         waiter. `force` (CLI-only, not in the MCP schema) releases regardless of
@@ -473,7 +505,7 @@ class ComputerMcpDaemon:
                 logger.info(f"[computer-mcp] operator forced release of agent {released}")
             # A button this agent still holds comes up with the screen, and also when its
             # release_control is refused because the screen had already moved on.
-            mouse: dict[str, Any] = {}
+            mouse: dict[str, object] = {}
             if self._mouse_holder is not None and (
                 released is not None or self._mouse_holder == agent_id
             ):
@@ -498,7 +530,7 @@ class ComputerMcpDaemon:
                 ),
             }
 
-    def _track_mouse_hold(self, tool: str, agent_id: int | None, result: dict[str, Any]) -> None:
+    def _track_mouse_hold(self, tool: str, agent_id: int | None, result: dict[str, object]) -> None:
         """Remember who has a button down, from the helper's own answers."""
         if result.get("auto_released"):
             self._mouse_holder = None  # the helper let go by itself; nothing is held now
@@ -507,7 +539,7 @@ class ComputerMcpDaemon:
         elif tool == "mouse_up":
             self._mouse_holder = None
 
-    def _release_held_mouse(self, why: str) -> dict[str, Any]:
+    def _release_held_mouse(self, why: str) -> dict[str, object]:
         """Ask the helper to let go of any button, loudly: a stuck button hurts the user.
 
         Failure keeps the holder recorded so the next call tries again, and is returned to
@@ -531,10 +563,10 @@ class ComputerMcpDaemon:
         self,
         agent_id: int | None,
         tool: str,
-        args: dict[str, Any],
+        args: dict[str, object],
         outcome: str,
         error: str | None,
-        result: dict[str, Any] | None = None,
+        result: dict[str, object] | None = None,
     ) -> None:
         """One computer_action audit event per call — facts for later review."""
         coords = audit_coords(tool, args, result)
@@ -564,7 +596,9 @@ class ComputerMcpDaemon:
 
         emit_recorded_central_event(self._db, event)
 
-    def _emit_session_event(self, event_type: str, agent_id: int, payload: dict[str, Any]) -> None:
+    def _emit_session_event(
+        self, event_type: str, agent_id: int, payload: dict[str, object]
+    ) -> None:
         """One computer_session_start/end audit row (no app lookup — the
         envelope describes the task, not a screen state)."""
         event = audit_events.prepare_event_log(

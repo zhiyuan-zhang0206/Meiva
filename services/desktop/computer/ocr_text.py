@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 
 import services.desktop.computer.ocr as ocr_mod
+from base.host.boundary.fields import int_field
 from services.desktop.computer.errors import ComputerUseError
+from services.desktop.computer.ocr import OcrCache, OcrItem
 from services.desktop.computer.screen import DesktopHelper, capture_screen, to_logical
 
 
-def _ocr_screen(
-    path: Path, ocr_cache: dict[str, Any] | None, *, home: Path
-) -> list[dict[str, Any]]:
+def _ocr_screen(path: Path, ocr_cache: OcrCache | None, *, home: Path) -> list[OcrItem]:
     """Recognize text in a fresh capture and record it in the OCR cache.
 
     Strict where the snapshot tool is soft: find_text/click_text exist to act
@@ -42,7 +42,33 @@ def validate_text_query(query: str, mode: str) -> None:
         raise ComputerUseError(f"match must be 'contains' or 'exact', got {mode!r}")
 
 
-def match_ocr_boxes(items: list[dict[str, Any]], query: str, mode: str) -> list[dict[str, Any]]:
+# meiva:note
+# One matching OCR box: its physical-pixel box, its center (the click target) and its 0-based
+# position in the returned reading order.
+class OcrMatch(TypedDict):
+    text: str
+    x: float
+    y: float
+    w: float
+    h: float
+    cx: float
+    cy: float
+    index: int
+
+
+# meiva:note
+# An `OcrMatch` before its reading-order position is known.
+class _Box(TypedDict):
+    text: str
+    x: float
+    y: float
+    w: float
+    h: float
+    cx: float
+    cy: float
+
+
+def match_ocr_boxes(items: list[OcrItem], query: str, mode: str) -> list[OcrMatch]:
     """OCR boxes matching ``query``, in reading order (top-to-bottom, then
     left-to-right).
 
@@ -52,15 +78,15 @@ def match_ocr_boxes(items: list[dict[str, Any]], query: str, mode: str) -> list[
     0-based position in the returned ordering (the index click_text acts on).
     """
     needle = query.casefold()
-    matches: list[dict[str, Any]] = []
+    boxes: list[_Box] = []
     for item in items:
-        text = str(item.get("text") or "")
+        text = item["text"]
         folded = text.casefold()
         hit = folded == needle if mode == "exact" else needle in folded
         if not hit:
             continue
-        x, y, w, h = (float(item[k]) for k in ("x", "y", "w", "h"))
-        matches.append(
+        x, y, w, h = item["x"], item["y"], item["w"], item["h"]
+        boxes.append(
             {
                 "text": text,
                 "x": x,
@@ -71,21 +97,19 @@ def match_ocr_boxes(items: list[dict[str, Any]], query: str, mode: str) -> list[
                 "cy": y + h / 2,
             }
         )
-    matches.sort(key=lambda m: (m["y"], m["x"]))
-    for position, match in enumerate(matches):
-        match["index"] = position
-    return matches
+    boxes.sort(key=lambda m: (m["y"], m["x"]))
+    return [{**box, "index": position} for position, box in enumerate(boxes)]
 
 
 def find_text_tool(
     helper: DesktopHelper,
-    args: dict[str, Any],
+    args: dict[str, object],
     agent_id: int,
-    ocr_cache: dict[str, Any] | None,
+    ocr_cache: OcrCache | None,
     *,
     stamp: str,
     home: Path,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """find_text: OCR the screen and return the boxes matching ``text``.
 
     Fresh capture by default. snapshot_fresh=false searches the last OCR
@@ -99,7 +123,7 @@ def find_text_tool(
     validate_text_query(query, mode)
     cached_items = ocr_cache.get("items") if ocr_cache is not None else None
     if not args.get("snapshot_fresh", True) and cached_items:
-        items: list[dict[str, Any]] = cached_items  # the screen the caller last saw
+        items = cached_items  # the screen the caller last saw
         fresh = False
     else:
         path, _size, _scale, _pixels = capture_screen(helper, agent_id, stamp=stamp, home=home)
@@ -117,13 +141,13 @@ def find_text_tool(
 
 def click_text_tool(
     helper: DesktopHelper,
-    args: dict[str, Any],
+    args: dict[str, object],
     agent_id: int,
-    ocr_cache: dict[str, Any] | None,
+    ocr_cache: OcrCache | None,
     *,
     stamp: str,
     home: Path,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """click_text: OCR -> locate -> click, one audited action.
 
     Always reads the screen fresh: the click must land on what is there NOW,
@@ -134,7 +158,7 @@ def click_text_tool(
     """
     query = str(args.get("text") or "")
     mode = str(args.get("match") or "contains")
-    index = int(args.get("index", 0))
+    index = int_field(args, "index") if "index" in args else 0
     validate_text_query(query, mode)
     if index < 0:
         raise ComputerUseError("index must be >= 0")

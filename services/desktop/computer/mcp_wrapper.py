@@ -21,13 +21,13 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from typing import Any
 
 from mcp import types
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
 from base.config import ConfigBoot
+from base.host.boundary.json_values import is_object_list
 from base.host.env.agent_env import AGENT_ID_ENV
 from base.host.net.resilience import retry_asleep
 from base.paths import computer_mcp_socket, meiva_home
@@ -92,7 +92,11 @@ async def _serve(*, sock: str, timeout_reader: Callable[[], float]) -> None:
     link = ReconnectingSocketLink(sock=sock, timeout_reader=timeout_reader, agent_id=_agent_id())
 
     async def _list_tools(_ctx: object, _params: object) -> types.ListToolsResult:
-        tools: Any = await link.request({"method": "list_tools"})
+        tools = await link.request({"method": "list_tools"})
+        if not is_object_list(tools):
+            raise TypeError(
+                "the computer daemon answered list_tools with something other than a list"
+            )
         return types.ListToolsResult(tools=[types.Tool.model_validate(t) for t in tools])
 
     async def _call_tool(_ctx: object, params: types.CallToolRequestParams) -> types.CallToolResult:
@@ -101,7 +105,9 @@ async def _serve(*, sock: str, timeout_reader: Callable[[], float]) -> None:
         )
         return types.CallToolResult.model_validate(result)
 
-    server: Server[Any] = Server("computer_use", on_list_tools=_list_tools, on_call_tool=_call_tool)
+    server: Server[object] = Server(
+        "computer_use", on_list_tools=_list_tools, on_call_tool=_call_tool
+    )
 
     async with stdio_server() as (server_read, server_write):
         await server.run(server_read, server_write, server.create_initialization_options())

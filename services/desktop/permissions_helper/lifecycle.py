@@ -13,6 +13,8 @@ from pathlib import Path
 import base.paths
 from base.clock import Clock, Timers
 from base.host.atomic_io import write_bytes_atomic
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.host.permissions_helper.client import HelperFactory
 from base.host.system.cron.mechanics import LAUNCHD_PLIST_MODE, write_launchd_plist
 from base.log import logger
@@ -358,10 +360,12 @@ def foreign_label_plists(*, facts: LaunchdFacts, socket: Path, current_label: st
     foreign: list[Path] = []
     for plist in facts.agents_dir.glob(f"{HELPER_BUNDLE_ID}.*.plist"):
         try:
-            data = plistlib.loads(plist.read_bytes())
+            data = object_of(plistlib.loads, plist.read_bytes())
         except (plistlib.InvalidFileException, OSError):
             continue
-        if activation_plan.is_foreign_label_job(data, label=current_label, socket=sock):
+        if is_object_dict(data) and activation_plan.is_foreign_label_job(
+            data, label=current_label, socket=sock
+        ):
             foreign.append(plist)
     return foreign
 

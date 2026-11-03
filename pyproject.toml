@@ -734,6 +734,24 @@ root = "services/derived/memory_indexer/tests"
 root = "services/derived/memory_search/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "services/desktop/browser/tab_groups/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/desktop/browser/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/desktop/computer/ocr/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/desktop/computer/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/desktop/permissions_helper/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/desktop/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "services/entrypoints/gate/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -783,6 +801,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "services/derived"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/desktop"
 reportAny = "error"
 reportExplicitAny = "error"
 

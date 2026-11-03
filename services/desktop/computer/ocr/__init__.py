@@ -28,9 +28,28 @@ from __future__ import annotations
 import shutil
 import subprocess
 from pathlib import Path
+from typing import TypedDict
 
+from base.host.boundary.process import stderr_text, stdout_text
 from base.host.proc import run_bounded
 from base.paths import logs_path
+
+
+# meiva:note
+# One recognized text box in physical pixels (top-left origin), the coordinate space of the click tool.
+class OcrItem(TypedDict):
+    text: str
+    x: float
+    y: float
+    w: float
+    h: float
+
+
+# meiva:note
+# The last OCR result the daemon keeps for `find_text(snapshot_fresh=false)`.
+class OcrCache(TypedDict, total=False):
+    items: list[OcrItem]
+
 
 SOURCE = Path(__file__).with_name("ocr.swift")
 # A 4K full-screen run takes ~0.5-2s; 30s is generous but bounded.
@@ -63,7 +82,7 @@ def _binary(
             text=True,
         )
         if built.returncode != 0:
-            raise OcrError(f"swiftc failed: {built.stderr.strip()[:300]}")
+            raise OcrError(f"swiftc failed: {stderr_text(built).strip()[:300]}")
     return resolved
 
 
@@ -75,7 +94,7 @@ def ocr_image(
     swiftc: str | None = None,
     timeout: float = _OCR_TIMEOUT_S,
     home: Path,
-) -> list[dict[str, float | str]]:
+) -> list[OcrItem]:
     """Recognize text in a PNG and return items with physical-pixel boxes.
 
     Each item is {"text", "x", "y", "w", "h"} in the same coordinate space
@@ -92,9 +111,9 @@ def ocr_image(
     except (subprocess.TimeoutExpired, OSError) as e:
         raise OcrError(f"ocr run failed: {e}") from e
     if ran.returncode != 0:
-        raise OcrError(f"ocr exited {ran.returncode}: {ran.stderr.strip()[:300]}")
-    items: list[dict[str, float | str]] = []
-    for line in ran.stdout.splitlines():
+        raise OcrError(f"ocr exited {ran.returncode}: {stderr_text(ran).strip()[:300]}")
+    items: list[OcrItem] = []
+    for line in stdout_text(ran).splitlines():
         parts = line.split("\t")
         if len(parts) >= 5:
             try:
