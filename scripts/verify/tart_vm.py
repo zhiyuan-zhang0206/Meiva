@@ -25,7 +25,11 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
+
+from base.host.boundary.fields import bool_field, str_field
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
@@ -95,6 +99,15 @@ def export_commit(repo: Path, commit: str, destination: Path, *, home: Path) -> 
     return destination
 
 
+class TartVm(TypedDict):
+    # meiva:note
+    # The three fields of a `tart list --format json` row that this recipe reads.
+
+    Name: str
+    Source: str
+    Running: bool
+
+
 class Tart:
     """One Tart binary. With `dry_run`, commands are printed and never run."""
 
@@ -124,14 +137,30 @@ class Tart:
 
     # ------------------------------------------------------------------- inventory
 
-    def vms(self) -> list[dict[str, Any]]:
+    def vms(self) -> list[TartVm]:
         """The local VMs (images pulled from a registry are not VMs)."""
         if self.dry_run:
             return []
-        listed = json.loads(self.run("list", "--format", "json").stdout)
-        return [row for row in listed if row["Source"] == "local"]
+        listed = object_of(json.loads, self.run("list", "--format", "json").stdout)
+        if not is_object_list(listed):
+            raise RunFailedError(f"`tart list` answered {type(listed).__name__}, not an array")
+        vms: list[TartVm] = []
+        for index, row in enumerate(listed):
+            if not is_object_dict(row):
+                raise RunFailedError(
+                    f"`tart list` row {index} is {type(row).__name__}, not an object"
+                )
+            if str_field(row, "Source") == "local":
+                vms.append(
+                    TartVm(
+                        Name=str_field(row, "Name"),
+                        Source="local",
+                        Running=bool_field(row, "Running"),
+                    )
+                )
+        return vms
 
-    def find(self, name: str) -> dict[str, Any] | None:
+    def find(self, name: str) -> TartVm | None:
         return next((row for row in self.vms() if row["Name"] == name), None)
 
     def require_capacity(self) -> None:

@@ -15,6 +15,8 @@ from typing import TypedDict, TypeGuard
 
 from playwright.sync_api import Page
 
+from base.host.boundary.untyped import object_of
+
 
 # meiva:note
 # One machine-readable structural defect.
@@ -203,7 +205,7 @@ def _is_layout_failure_list(value: object) -> TypeGuard[list[LayoutFailure]]:
 #     shared predicate — a wait built on these counts and the probe's verdict can
 #     never disagree about what "visible in viewport" means.
 def visible_in_viewport_counts(page: Page, selectors: tuple[str, ...]) -> dict[str, int]:
-    counts: object = page.evaluate(_VISIBLE_COUNT_PROBE, list(selectors))
+    counts = object_of(page.evaluate, _VISIBLE_COUNT_PROBE, list(selectors))
     if not _is_int_dict(counts):
         raise TypeError("visible count probe must return dict[str, int]")
     return counts
@@ -249,7 +251,8 @@ def structural_failures(
     nonempty_selectors: tuple[str, ...] = (),
     minimum_visible_counts: dict[str, int] | None = None,
 ) -> list[LayoutFailure]:
-    result: object = page.evaluate(
+    result = object_of(
+        page.evaluate,
         _STRUCTURAL_PROBE,
         {
             "visibleSelectors": visible_selectors,
@@ -281,7 +284,8 @@ def element_within_viewport(page: Page, selector: str) -> bool:
 # Return whether an element's scroll width fits its parent.
 def element_within_parent(page: Page, selector: str) -> bool:
     return bool(
-        page.evaluate(
+        object_of(
+            page.evaluate,
             """(selector) => {
               const element = document.querySelector(selector);
               return Boolean(element && element.parentElement &&
@@ -296,7 +300,8 @@ def element_within_parent(page: Page, selector: str) -> bool:
 # Return whether at least one match exists and every match fits its parent.
 def all_elements_within_parents(page: Page, selector: str) -> bool:
     return bool(
-        page.evaluate(
+        object_of(
+            page.evaluate,
             """(selector) => {
               const elements = document.querySelectorAll(selector);
               return elements.length > 0 && Array.from(elements).every((element) =>

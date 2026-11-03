@@ -14,12 +14,16 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 import time
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import NotRequired, TypedDict
+
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 # The start profile (the deleted native preview's, plus a declared time zone): no cron,
 # boot or logs jobs, no browser, no remote memory or transfer, no GitHub gate, no
@@ -109,17 +113,61 @@ def resolve_commit(repo: Path, ref: str) -> str:
 # ------------------------------------------------------------------------- evidence
 
 
+class StepRow(TypedDict):
+    # meiva:note
+    # One recorded step: the command (None for an in-process action), its log, and how it ended.
+
+    name: str
+    argv: list[str] | None
+    log: str | None
+    returncode: NotRequired[int | str]
+    error: NotRequired[str]
+    seconds: NotRequired[float]
+
+
+class ImageInfo(TypedDict):
+    tag: str
+    built: bool
+    id: NotRequired[str]
+    architecture: NotRequired[str]
+    size_bytes: NotRequired[int]
+    base: NotRequired[str]
+
+
+class RunResult(TypedDict):
+    # meiva:note
+    # The document `result.json` holds: what the run was asked, every step, and the keys each recipe
+    # adds as it goes (the container or VM it used, the evidence it copied out, what it removed).
+
+    ref: str
+    commit: str
+    steps: list[StepRow]
+    result: str
+    recipe_repo: NotRequired[str]
+    image: NotRequired[str | ImageInfo]
+    vm: NotRequired[str]
+    golden: NotRequired[str]
+    tart: NotRequired[str]
+    container: NotRequired[str]
+    collected: NotRequired[dict[str, bool]]
+    removed: NotRequired[bool]
+    error: NotRequired[str]
+    collect_error: NotRequired[str]
+    cleanup_error: NotRequired[str]
+    observer_error: NotRequired[str]
+
+
 @dataclass
 class Evidence:
     """One run's directory: a log per step, the observer's JSON, and result.json."""
 
     root: Path
-    result: dict[str, Any]
+    result: RunResult
     timeouts: dict[str, int]
 
     def step(self, name: str, argv: list[str], *, stdin: str | None = None) -> None:
         log = self.root / f"{len(self.result['steps']):02d}-{name}.log"
-        row: dict[str, Any] = {"name": name, "argv": argv, "log": log.name}
+        row = StepRow(name=name, argv=argv, log=log.name)
         self.result["steps"].append(row)
         started = time.monotonic()
         try:
@@ -146,7 +194,7 @@ class Evidence:
     def action(self, name: str) -> Generator[None]:
         """A step done in this process rather than by a command (booting a VM): timed and
         recorded like one, and an error in it fails the run."""
-        row: dict[str, Any] = {"name": name, "argv": None, "log": None}
+        row = StepRow(name=name, argv=None, log=None)
         self.result["steps"].append(row)
         started = time.monotonic()
         try:
@@ -159,6 +207,27 @@ class Evidence:
         finally:
             row["seconds"] = round(time.monotonic() - started, 1)
             self.save()
+
+    # meiva:note
+    # Whether the observer's JSON says the run passed; a missing or malformed one fails the run
+    # loudly: the reason goes to stderr and into `result.json` as `observer_error`.
+    def observer_passed(self) -> bool:
+        observer = self.root / "observer.json"
+        problem: str | None = None
+        passed = False
+        try:
+            document = object_of(json.loads, observer.read_text())
+        except (OSError, json.JSONDecodeError) as error:
+            problem = f"{observer} cannot be read: {error}"
+        else:
+            if not is_object_dict(document) or "result" not in document:
+                problem = f"{observer} is not an object carrying a result"
+            else:
+                passed = document["result"] == "passed"
+        if problem is not None:
+            self.result["observer_error"] = problem
+            print(f"observer: {problem}", file=sys.stderr, flush=True)
+        return passed
 
     def save(self) -> None:
         (self.root / "result.json").write_text(json.dumps(self.result, indent=2) + "\n")

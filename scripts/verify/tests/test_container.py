@@ -229,3 +229,20 @@ def test_init_records_the_identity_and_start_takes_only_the_selection() -> None:
     start = parser.parse_args(container.START_ARGV[1:])
     assert start.only_service == list(boundary.SERVICES)
     assert {"init", "start"} <= set(container.TIMEOUTS)  # every step a run records is bounded
+
+
+# meiva:note
+# A missing or malformed observer document fails the run and says why, on stderr and in `result.json`.
+def test_a_malformed_observer_document_fails_loudly(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    evidence = boundary.Evidence(
+        tmp_path, boundary.RunResult(ref="r", commit="c", steps=[], result="running"), {}
+    )
+    assert evidence.observer_passed() is False
+    assert "cannot be read" in capsys.readouterr().err
+    (tmp_path / "observer.json").write_text("[]")
+    assert evidence.observer_passed() is False
+    assert "not an object carrying a result" in evidence.result.get("observer_error", "")
+    (tmp_path / "observer.json").write_text('{"result": "passed"}')
+    assert evidence.observer_passed() is True

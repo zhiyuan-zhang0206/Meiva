@@ -701,6 +701,9 @@ root = "scripts/host_ops/tcc/tests"
 root = "scripts/host_ops/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "scripts/verify/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "services/entrypoints/gate/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -730,6 +733,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "scripts/host_ops"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "scripts/verify"
 reportAny = "error"
 reportExplicitAny = "error"
 

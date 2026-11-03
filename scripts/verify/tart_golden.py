@@ -7,8 +7,10 @@ import shutil
 import sys
 import tempfile
 import time
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TypeGuard
 
 DESCRIPTION = """Build the golden macOS image the Tart verification runs clone from.
 
@@ -49,8 +51,20 @@ RECIPE = Path(__file__).resolve().parent
 REPO = RECIPE.parents[1]
 sys.path.insert(0, str(REPO))
 
-from scripts.verify.boundary import Evidence, resolve_commit  # noqa: E402 — standalone script
-from scripts.verify.tart_vm import (  # noqa: E402 — standalone script
+# meiva:note
+# Standalone script: the checkout root goes on `sys.path` above, so the project imports follow it.
+from base.host.boundary.json_values import (  # noqa: E402
+    is_object_dict,
+    is_object_list,
+)
+from base.host.boundary.options import options  # noqa: E402
+from base.host.boundary.untyped import object_of  # noqa: E402
+from scripts.verify.boundary import (  # noqa: E402
+    Evidence,
+    RunResult,
+    resolve_commit,
+)
+from scripts.verify.tart_vm import (  # noqa: E402
     GUEST_SOURCE,
     PREPARE_SOURCE,
     PYTHON,
@@ -167,9 +181,20 @@ TIMEOUTS = {
 _LEAF_RE = re.compile(r'certificate leaf = H"(?P<leaf>[0-9a-f]+)"')
 
 
-def _certificate_leaf(record: dict[str, Any]) -> str | None:
+def _is_str_list(value: object) -> TypeGuard[list[str]]:
+    return is_object_list(value) and all(isinstance(line, str) for line in value)
+
+
+def _signature(record: Mapping[str, object]) -> list[str]:
+    lines = record["signature"]
+    if not _is_str_list(lines):
+        raise TypeError("the record's signature is not a list of lines")
+    return lines
+
+
+def _certificate_leaf(record: Mapping[str, object]) -> str | None:
     designated = next(
-        (line for line in record["signature"] if line.startswith("designated =>")), None
+        (line for line in _signature(record) if line.startswith("designated =>")), None
     )
     if designated is None:
         return None
@@ -177,8 +202,8 @@ def _certificate_leaf(record: dict[str, Any]) -> str | None:
     return match.group("leaf") if match else None
 
 
-def _identity_problems(record: dict[str, Any], leaf: str | None) -> list[str]:
-    designated = [line for line in record["signature"] if line.startswith("designated =>")]
+def _identity_problems(record: Mapping[str, object], leaf: str | None) -> list[str]:
+    designated = [line for line in _signature(record) if line.startswith("designated =>")]
     if any("cdhash" in line for line in designated):
         return [f"the helper is ad-hoc signed: {designated}"]
     if leaf is None:
@@ -186,30 +211,52 @@ def _identity_problems(record: dict[str, Any], leaf: str | None) -> list[str]:
     return []
 
 
-def _tcc_problems(record: dict[str, Any], leaf: str | None) -> list[str]:
+def _tcc_problems(record: Mapping[str, object], leaf: str | None) -> list[str]:
     problems: list[str] = []
+    tcc = record["tcc"]
+    if not is_object_dict(tcc):
+        raise TypeError("the record's tcc is not an object")
     for service, allowed in GRANTED.items():
-        row = record["tcc"].get(service)
-        if row is None or row[0] != allowed:
+        row = tcc.get(service)
+        if row is None:
             problems.append(f"the system TCC row for {service} is {row}, expected auth {allowed}")
-        elif leaf is not None and leaf.upper() not in row[1].upper():
+            continue
+        if not is_object_list(row) or len(row) != 2:
+            raise TypeError(f"the TCC row for {service} is not an [auth, text] pair: {row!r}")
+        if row[0] != allowed:
+            problems.append(f"the system TCC row for {service} is {row}, expected auth {allowed}")
+        elif leaf is not None and leaf.upper() not in str(row[1]).upper():
             problems.append(
                 f"the TCC row for {service} does not carry the helper's certificate requirement"
             )
     return problems
 
 
-def _capture_problems(capture: dict[str, Any]) -> list[str]:
+def _number(capture: Mapping[str, object], key: str) -> float:
+    value = capture[key]
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise TypeError(f"the capture's {key} is not a number: {value!r}")
+    return float(value)
+
+
+def _capture_problems(capture: Mapping[str, object]) -> list[str]:
     if "error" in capture:
         return [f"no capture through the helper: {capture['error']}"]
-    if capture["distinct"] <= 50 or capture["top_share"] >= 0.95:
+    if _number(capture, "distinct") <= 50 or _number(capture, "top_share") >= 0.95:
         return [f"the capture is a uniform image: {capture}"]
     return []
 
 
-def judge_grant(record: dict[str, Any]) -> list[str]:
+def _section(record: Mapping[str, object], key: str) -> Mapping[str, object]:
+    section = record[key]
+    if not is_object_dict(section):
+        raise TypeError(f"the record's {key} is not an object")
+    return section
+
+
+def judge_grant(record: Mapping[str, object]) -> list[str]:
     """Why a golden image's helper is not ready to be cloned; empty when it is."""
-    ping = record["ping"]
+    ping = _section(record, "ping")
     leaf = _certificate_leaf(record)
     return [
         *(
@@ -219,7 +266,7 @@ def judge_grant(record: dict[str, Any]) -> list[str]:
         ),
         *_identity_problems(record, leaf),
         *_tcc_problems(record, leaf),
-        *_capture_problems(record["capture"]),
+        *_capture_problems(_section(record, "capture")),
     ]
 
 
@@ -245,10 +292,16 @@ class Build:
         self.guest("verify", vm, VERIFY)
         if self.evidence is None:
             return []
-        log = (self.evidence.root / self.evidence.result["steps"][-1]["log"]).read_text()
-        record = json.loads(
-            next(line for line in log.splitlines() if line.startswith("RECORD "))[len("RECORD ") :]
+        log_name = self.evidence.result["steps"][-1]["log"]
+        if log_name is None:
+            raise RuntimeError("the last step left no log to read the helper record from")
+        log = (self.evidence.root / log_name).read_text()
+        record = object_of(
+            json.loads,
+            next(line for line in log.splitlines() if line.startswith("RECORD "))[len("RECORD ") :],
         )
+        if not is_object_dict(record):
+            raise RuntimeError(f"the helper record is {type(record).__name__}, not an object")
         (self.evidence.root / "golden-record.json").write_text(json.dumps(record, indent=2) + "\n")
         return judge_grant(record)
 
@@ -282,14 +335,7 @@ def build_golden(
     if not dry_run:
         evidence = Evidence(
             evidence_root / f"golden-{stamp}-{commit[:8]}",
-            {
-                "ref": ref,
-                "commit": commit,
-                "image": IMAGE,
-                "vm": name,
-                "steps": [],
-                "result": "running",
-            },
+            RunResult(ref=ref, commit=commit, image=IMAGE, vm=name, steps=[], result="running"),
             TIMEOUTS,
         )
         evidence.root.mkdir(parents=True, mode=0o700)
@@ -341,6 +387,15 @@ def build_golden(
     return 0
 
 
+@dataclass(frozen=True)
+class Options:
+    ref: str
+    name: str
+    tart: str
+    evidence_root: Path
+    dry_run: bool
+
+
 def main() -> int:
     user_home = Path.home()
     stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -361,7 +416,7 @@ def main() -> int:
     parser.add_argument(
         "--dry-run", action="store_true", help="print every step; run nothing and touch nothing"
     )
-    args = parser.parse_args()
+    args = options(parser.parse_args(), Options)
     if not args.dry_run:
         args.evidence_root.mkdir(parents=True, exist_ok=True)
     return build_golden(

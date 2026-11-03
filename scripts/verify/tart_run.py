@@ -31,7 +31,6 @@ from __future__ import annotations
 import argparse
 import base64
 import io
-import json
 import shutil
 import signal
 import subprocess
@@ -40,6 +39,7 @@ import tarfile
 import tempfile
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType
 
@@ -47,14 +47,18 @@ RECIPE = Path(__file__).resolve().parent
 REPO = RECIPE.parents[1]
 sys.path.insert(0, str(REPO))
 
-from scripts.verify.boundary import (  # noqa: E402 — standalone script
+# meiva:note
+# Standalone script: the checkout root goes on `sys.path` above, so the project imports follow it.
+from base.host.boundary.options import options  # noqa: E402
+from scripts.verify.boundary import (  # noqa: E402
     START_ARGV,
     Evidence,
+    RunResult,
     init_argv,
     profile_text,
     resolve_commit,
 )
-from scripts.verify.tart_vm import (  # noqa: E402 — standalone script
+from scripts.verify.tart_vm import (  # noqa: E402
     GUEST_SOURCE,
     PREPARE_SOURCE,
     PYTHON,
@@ -183,7 +187,7 @@ def run(ref: str, evidence_root: Path, *, repo: Path, golden: str, tart: Tart, s
     commit = resolve_commit(repo, ref)
     evidence = Evidence(
         evidence_root / f"{stamp}-{commit[:8]}",
-        {"ref": ref, "commit": commit, "recipe_repo": str(REPO), "steps": [], "result": "running"},
+        RunResult(ref=ref, commit=commit, recipe_repo=str(REPO), steps=[], result="running"),
         TIMEOUTS,
     )
     evidence.root.mkdir(parents=True, mode=0o700)
@@ -222,12 +226,10 @@ def run(ref: str, evidence_root: Path, *, repo: Path, golden: str, tart: Tart, s
             evidence.result["removed"] = False
             evidence.result["cleanup_error"] = repr(error)
         shutil.rmtree(export, ignore_errors=True)
-        observer = evidence.root / "observer.json"
         passed = (
             failure is None
-            and observer.is_file()
-            and json.loads(observer.read_text())["result"] == "passed"
-            and evidence.result["removed"]
+            and evidence.observer_passed()
+            and evidence.result.get("removed") is True
         )
         evidence.result["result"] = "passed" if passed else "failed"
         evidence.save()
@@ -239,6 +241,14 @@ def run(ref: str, evidence_root: Path, *, repo: Path, golden: str, tart: Tart, s
 
 def _interrupted(_signum: int, _frame: FrameType | None) -> None:
     raise SystemExit(143)
+
+
+@dataclass(frozen=True)
+class Options:
+    ref: str
+    golden: str
+    tart: str
+    evidence_root: Path
 
 
 def main() -> int:
@@ -258,7 +268,7 @@ def main() -> int:
         default=Path(tempfile.gettempdir()) / "meiva-verify",
         help="parent directory of the per-run evidence directory",
     )
-    args = parser.parse_args()
+    args = options(parser.parse_args(), Options)
     signal.signal(signal.SIGTERM, _interrupted)
     args.evidence_root.mkdir(parents=True, exist_ok=True)
     return run(

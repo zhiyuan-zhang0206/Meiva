@@ -346,6 +346,17 @@ def phase_node(container: str, *, docker: list[str]) -> None:
     print("  (a frontend build failure after the packages landed is pre-existing and tolerated)")
 
 
+# meiva:note
+# The parsed flags as a typed namespace. This recipe depends only on the standard library and runs
+# from a bare checkout, so the flags are read through the namespace's own annotations, which argparse
+# fills with the converted values, instead of through `base.host.boundary.options`.
+class _Arguments(argparse.Namespace):
+    ref: str
+    image: str
+    keep: bool
+    docker: str
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -357,7 +368,7 @@ def main() -> int:
     parser.add_argument("--image", default="ubuntu:24.04")
     parser.add_argument("--keep", action="store_true", help="leave the container running")
     parser.add_argument("--docker", default="docker", help='docker command, e.g. "sudo -n docker"')
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=_Arguments())
     docker = docker_argv(args.docker)
     if shutil.which("git") is None:
         print("git is not on PATH", file=sys.stderr)

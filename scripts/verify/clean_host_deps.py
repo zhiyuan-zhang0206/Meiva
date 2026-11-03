@@ -268,6 +268,17 @@ def wait_until_serving(container: str, *, docker: list[str]) -> str:
     raise CleanHostDepsError(f"the gateway or its data plane is not serving:\n{status[-4000:]}")
 
 
+# meiva:note
+# The parsed flags as a typed namespace. This recipe depends only on the standard library and runs
+# from a bare checkout, so the flags are read through the namespace's own annotations, which argparse
+# fills with the converted values, instead of through `base.host.boundary.options`.
+class _Arguments(argparse.Namespace):
+    ref: str
+    image: str
+    keep: bool
+    docker: str
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Prove a clean host gets its missing packages from `meiva start`."
@@ -276,7 +287,7 @@ def main() -> int:
     parser.add_argument("--image", default="ubuntu:24.04")
     parser.add_argument("--keep", action="store_true", help="leave the container running")
     parser.add_argument("--docker", default="docker", help='docker command, e.g. "sudo -n docker"')
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=_Arguments())
 
     if shutil.which("git") is None:
         print("git is not on PATH", file=sys.stderr)
