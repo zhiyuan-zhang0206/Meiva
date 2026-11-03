@@ -23,6 +23,7 @@ class Scope:
         "_closure_override",
         "imports",
         "is_class",
+        "parameters",
         "parent",
         "shadowed",
         "stores",
@@ -41,6 +42,7 @@ class Scope:
         self.parent = parent
         self.is_class = is_class
         self.imports: dict[str, str] = {}
+        self.parameters: dict[str, ast.expr | None] = {}
         self.shadowed: set[str] = set()
         self.stores: dict[str, int] = {}
         self.values: dict[str, ast.expr] = {}
@@ -60,6 +62,20 @@ class Scope:
         if known is not None and known != origin:
             self.shadowed.add(name)
         self.imports[name] = origin
+
+    # meiva:note
+    # Whether `name` is a parameter here or in an enclosing function, and its annotation. Walks
+    # outward and stops at the first scope that binds the name: a parameter there answers with its
+    # annotation, any other binding there means the name is no longer the caller's promise.
+    def parameter(self, name: str) -> tuple[bool, ast.expr | None]:
+        scope: Scope | None = self
+        while scope is not None:
+            if name in scope.parameters:
+                return True, scope.parameters[name]
+            if name in scope.shadowed:
+                return False, None
+            scope = scope.parent
+        return False, None
 
     def find(self, name: str) -> tuple[str | None, bool]:
         """(import origin, whether any scope binds the name)."""

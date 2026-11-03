@@ -283,3 +283,84 @@ def test_a_command_edge_is_judged_like_an_import(make_repo: RepoFactory) -> None
         "undeclared-edge",
         "not-exported",
     }
+
+
+# meiva:note
+# A parameter typed with the module's own interpreter type is the caller's promise about which
+# interpreter starts the child. The command stays visible, so a threaded `python=` keeps the edge
+# that a bare `sys.executable` used to be the only evidence for.
+def test_a_parameter_typed_as_the_interpreter_keeps_the_module_edge(make_repo: RepoFactory) -> None:
+    body = (
+        "Interpreter = str\n"
+        "\n"
+        "def go(python: Interpreter):\n"
+        '    subprocess.run([python, "-m", "lib.tool"])\n'
+    )
+    root = check(make_repo, body)
+    assert restricted_of(root) == []
+    assert loads_of(root) == {("app/x.py", "lib/tool.py")}
+
+
+# meiva:note
+# Every other annotation is silence, not evidence: the rule reads the one declared name and never
+# guesses at a value that merely looks like an interpreter.
+@pytest.mark.parametrize("annotation", ["str", "object", "Any", "str | None", "Optional[str]"])
+def test_only_the_named_interpreter_type_is_evidence(
+    make_repo: RepoFactory, annotation: str
+) -> None:
+    body = (
+        "from typing import Any, Optional\n"
+        "Interpreter = str\n"
+        f"def go(python: {annotation}):\n"
+        '    subprocess.run([python, "-m", "lib.tool"])\n'
+    )
+    assert loads_of(check(make_repo, body)) == set()
+
+
+def test_an_unannotated_parameter_is_not_evidence(make_repo: RepoFactory) -> None:
+    body = 'def go(python):\n    subprocess.run([python, "-m", "lib.tool"])\n'
+    assert loads_of(check(make_repo, body)) == set()
+
+
+def test_the_interpreter_type_must_be_bound_in_the_module(make_repo: RepoFactory) -> None:
+    body = 'def go(python: Interpreter):\n    subprocess.run([python, "-m", "lib.tool"])\n'
+    assert loads_of(check(make_repo, body)) == set()
+
+
+def test_a_local_variable_typed_as_the_interpreter_is_not_a_caller_promise(
+    make_repo: RepoFactory,
+) -> None:
+    body = (
+        "Interpreter = str\n"
+        "\n"
+        "def go():\n"
+        "    python: Interpreter = str(3)\n"
+        '    subprocess.run([python, "-m", "lib.tool"])\n'
+    )
+    assert loads_of(check(make_repo, body)) == set()
+
+
+def test_a_nested_function_keeps_the_parameter_its_enclosing_function_took(
+    make_repo: RepoFactory,
+) -> None:
+    body = (
+        "Interpreter = str\n"
+        "\n"
+        "def go(python: Interpreter):\n"
+        "    def inner():\n"
+        '        subprocess.run([python, "-m", "lib.tool"])\n'
+        "    return inner\n"
+    )
+    assert loads_of(check(make_repo, body)) == {("app/x.py", "lib/tool.py")}
+
+
+def test_a_rebound_name_stops_at_the_scope_that_rebinds_it(make_repo: RepoFactory) -> None:
+    body = (
+        "Interpreter = str\n"
+        "\n"
+        "def go(python: Interpreter):\n"
+        "    def inner(python):\n"
+        '        subprocess.run([python, "-m", "lib.tool"])\n'
+        "    return inner\n"
+    )
+    assert loads_of(check(make_repo, body)) == set()
