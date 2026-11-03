@@ -634,10 +634,18 @@ reportUnusedCallResult = "warning"
 # do). Do not edit between the markers. The generator and this region go when the last root
 # leaves TESTS_OWING_ANY, that is when reportAny is a global error.
 # BEGIN GENERATED pyright tests environments (scripts/codegen/gen_pyright_test_environments.py; edit nothing between the markers)
+[[tool.pyright.executionEnvironments]]
+root = "cli/commands/management/tests"
+
 # END GENERATED pyright tests environments
 
 # Directory entries that raise reportAny / reportExplicitAny to "error" once a directory's count is
 # 0. Their tests directories follow them unless the root is listed in TESTS_OWING_ANY.
+[[tool.pyright.executionEnvironments]]
+root = "cli/commands/management"
+reportAny = "error"
+reportExplicitAny = "error"
+
 [[tool.pyright.executionEnvironments]]
 root = "gateway/routers"
 reportAny = "error"

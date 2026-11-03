@@ -16,11 +16,12 @@ from __future__ import annotations
 import argparse
 import getpass
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
+from pydantic import JsonValue
 from pydantic_core import PydanticUndefined
 
 from base.api_contracts.config import (
@@ -30,6 +31,8 @@ from base.api_contracts.config import (
     ConfigWriteResult,
 )
 from base.cluster.machine import MachineIdentityReader
+from cli.boundary.json_body import response_object
+from cli.boundary.options import options
 from ops.env_audit import EnvWriteAudit, read_env_write_records
 
 _HTTP_TIMEOUT_S = 15.0
@@ -157,11 +160,11 @@ def get_config_audit(machine: str | None, last: int, process: ConfigProcess) -> 
         headers=_auth_headers(process),
     )
     resp.raise_for_status()
-    return ConfigAuditView.model_validate(resp.json())
+    return ConfigAuditView.model_validate_json(resp.content)
 
 
 def put_config(
-    body: dict[str, Any], machine: str | None, process: ConfigProcess
+    body: dict[str, JsonValue], machine: str | None, process: ConfigProcess
 ) -> ConfigWriteResult:
     from base.host.net.http_dial import put as dial_put
 
@@ -176,9 +179,9 @@ def put_config(
     )
     if resp.status_code == 400:
         # The gateway rejects unknown / read-only fields with a 400 + detail.
-        raise ConfigError(resp.json().get("detail", resp.text))
+        raise ConfigError(str(response_object(resp).get("detail", resp.text)))
     resp.raise_for_status()
-    return ConfigWriteResult.model_validate(resp.json())
+    return ConfigWriteResult.model_validate_json(resp.content)
 
 
 class ConfigError(Exception):
@@ -208,10 +211,6 @@ def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict)
 
 
-def _is_any_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
-
-
 def _local_fields() -> dict[str, _LocalConfigField]:
     """Build local-edit metadata from the registry, never from Settings values."""
     from base.config.config_registry import FIELD_INFOS, field_alias, field_editor_type
@@ -219,7 +218,7 @@ def _local_fields() -> dict[str, _LocalConfigField]:
     fields: dict[str, _LocalConfigField] = {}
     for name, info in FIELD_INFOS.items():
         raw_extra: object = info.json_schema_extra
-        extra = raw_extra if _is_any_dict(raw_extra) else {}
+        extra = raw_extra if _is_object_dict(raw_extra) else {}
         default = info.get_default(call_default_factory=True)
         if default is PydanticUndefined:
             default = None
@@ -514,11 +513,11 @@ def cmd_config_get(
 
 def _build_delta(
     view: ConfigView,
-    pairs: dict[str, Any] | None,
+    pairs: dict[str, str] | None,
     unset_keys: list[str] | None,
     *,
     machine: str | None,
-) -> dict[str, Any]:
+) -> dict[str, JsonValue]:
     """Build a merge patch carrying ONLY the changed keys (reducer semantics).
 
     A set is `{field: value}`; an unset is `{field: None}` (explicit deletion).
@@ -530,7 +529,7 @@ def _build_delta(
         ConfigError: an unknown key, or an edit of a read-only field.
     """
     index = _index_fields(view)
-    body: dict[str, Any] = {}
+    body: dict[str, JsonValue] = {}
     for key, raw in (pairs or {}).items():
         field = _resolve_field(key, index)
         if not field_editable(field, remote=machine is not None):
@@ -618,7 +617,7 @@ def _edit_local_config(
 
 
 def _edit_config(
-    pairs: dict[str, Any] | None,
+    pairs: dict[str, str] | None,
     unset_keys: list[str] | None,
     machine: str | None,
     verb: str,
@@ -699,36 +698,76 @@ def cmd_config_unset(
 # argparse handlers (co-located with the commands; wired by the cli/parsers tree)
 
 
+@dataclass(frozen=True)
+class _GetOptions:
+    key: str | None
+    machine: str | None
+    local: bool
+
+
+@dataclass(frozen=True)
+class _SetOptions:
+    assignments: Sequence[str]
+    machine: str | None
+    local: bool
+
+
+@dataclass(frozen=True)
+class _UnsetOptions:
+    keys: Sequence[str]
+    machine: str | None
+    local: bool
+
+
+@dataclass(frozen=True)
+class _AuditOptions:
+    last: int
+    key: str | None
+    machine: str | None
+
+
+# meiva:note
+# The runtime accessor pulls Settings in; the local repair path of `meiva config`
+# must import this module without them, so the import happens when a handler runs.
 def _process(args: argparse.Namespace) -> ConfigProcess:
-    return ConfigProcess(environ=args.runtime.config.process_environment(), home=args.runtime.home)
+    from cli.database.runtime import runtime_of
+
+    runtime = runtime_of(args)
+    return ConfigProcess(environ=runtime.config.process_environment(), home=runtime.home)
 
 
 def h_config_get(args: argparse.Namespace) -> int:
+    opts = options(args, _GetOptions)
     return cmd_config_get(
-        key=args.key, machine=args.machine, process=_process(args), local=args.local
+        key=opts.key, machine=opts.machine, process=_process(args), local=opts.local
     )
 
 
 def h_config_set(args: argparse.Namespace) -> int:
+    opts = options(args, _SetOptions)
     return cmd_config_set(
-        assignments=args.assignments,
-        machine=args.machine,
+        assignments=list(opts.assignments),
+        machine=opts.machine,
         process=_process(args),
-        local=args.local,
+        local=opts.local,
     )
 
 
 def h_config_unset(args: argparse.Namespace) -> int:
+    opts = options(args, _UnsetOptions)
     return cmd_config_unset(
-        keys=args.keys, machine=args.machine, process=_process(args), local=args.local
+        keys=list(opts.keys), machine=opts.machine, process=_process(args), local=opts.local
     )
 
 
 def h_config_audit(args: argparse.Namespace) -> int:
+    from cli.database.runtime import runtime_of
+
+    opts = options(args, _AuditOptions)
     return cmd_config_audit(
-        last=args.last,
-        key=args.key,
-        machine=args.machine,
-        identity=args.runtime.machine,
+        last=opts.last,
+        key=opts.key,
+        machine=opts.machine,
+        identity=runtime_of(args).machine,
         process=_process(args),
     )

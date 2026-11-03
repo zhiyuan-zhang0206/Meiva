@@ -16,6 +16,8 @@ from pydantic import JsonValue, TypeAdapter, ValidationError
 
 __all__ = ["JsonShapeError", "loads", "response_list", "response_object", "response_value"]
 
+_JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+
 
 # meiva:note
 # A JSON body that parsed but is not the container the caller asked for.
@@ -26,9 +28,8 @@ class JsonShapeError(ValueError):
 # meiva:note
 # The JSON value in `text`.
 def loads(text: str | bytes) -> JsonValue:
-    adapter: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
     try:
-        return adapter.validate_json(text)
+        return _JSON_VALUE.validate_json(text)
     except ValidationError as exc:
         document = text if isinstance(text, str) else text.decode("utf-8", errors="replace")
         raise json.JSONDecodeError(exc.errors()[0]["msg"], document, 0) from exc

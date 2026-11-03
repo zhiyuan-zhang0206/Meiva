@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import inspect
 import json
-from typing import Any
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime
 
 import psycopg
+from psycopg.rows import TupleRow, class_row
 
 _QUERY = (
     "SELECT agent_id, session_id, executor_name, expires_at FROM agent_impersonations "
@@ -18,42 +21,59 @@ _QUERY = (
 )
 
 
+@dataclass(frozen=True)
+class _LeaseRow:
+    agent_id: int
+    session_id: int
+    executor_name: str
+    expires_at: datetime
+
+
 # meiva:note
 # Every active lease, one row per takeover: the session the operator acts on, and none of the
 # token hashes, the handoff document or the process metadata the log must not carry. The filter is
 # the status the table holds rather than the clock -- a stopped cluster's reaper lags, and a row
 # still marked active is exactly the one a stop would end.
-def active_leases(conn: psycopg.Connection[Any]) -> list[dict[str, Any]]:
-    rows = conn.execute(_QUERY).fetchall()
+def active_leases(conn: psycopg.Connection[TupleRow]) -> list[dict[str, str | int]]:
+    with conn.cursor(row_factory=class_row(_LeaseRow)) as cursor:
+        rows = cursor.execute(_QUERY).fetchall()
     return [
         {
-            "agent_id": int(agent_id),
-            "session_id": int(session_id),
-            "executor": str(executor),
-            "expires_at": expires_at.isoformat(timespec="seconds"),
+            "agent_id": row.agent_id,
+            "session_id": row.session_id,
+            "executor": row.executor_name,
+            "expires_at": row.expires_at.isoformat(timespec="seconds"),
         }
-        for agent_id, session_id, executor, expires_at in rows
+        for row in rows
     ]
+
+
+# meiva:note
+# `function` as a callable of any arguments: which generation's signature it has is decided by
+# `inspect.signature` where it is called. This program is piped to hosts whose installed code
+# predates the checkout it came from.
+def _by_signature[T](function: Callable[..., T]) -> Callable[..., T]:
+    return function
 
 
 # meiva:note
 # A connection through this home's own operator handle, the one every `meiva` command reads
 # through: the program needs nothing from the operator's checkout but it.
-def operator_connection() -> psycopg.Connection[Any]:
+def operator_connection() -> psycopg.Connection[TupleRow]:
     from cli.database import open_operator_database, operator_database_factory
     from cli.database.runtime import CommandRuntime
 
     # meiva:note
-    # This program is piped to hosts whose installed code predates the checkout it came from;
-    # `CommandRuntime.create` and the operator factory take the resolved home only in newer ones.
-    create: Any = CommandRuntime.create
+    # `CommandRuntime.create` and the operator factory take the resolved home only in newer
+    # generations.
+    create = _by_signature(CommandRuntime.create)
     if "home" in inspect.signature(create).parameters:
         from base.paths.home import resolve_meiva_home
 
         command = create(resolve_meiva_home().resolve())
     else:
         command = create()
-    build: Any = operator_database_factory
+    build = _by_signature(operator_database_factory)
     if "home" in inspect.signature(build).parameters:
         factory = build(
             local_host=command.machine.host, home=command.home, open_database=open_operator_database

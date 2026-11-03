@@ -38,9 +38,10 @@ from __future__ import annotations
 import ast
 import inspect
 import sys
+import types
 from pathlib import Path
-from typing import Any
 
+from cli.boundary.untyped import object_of
 from cli.commands.management import schedule_verify_checks
 
 _DETAIL_MAX = 160
@@ -49,9 +50,31 @@ _DETAIL_MAX = 160
 # globals the runtime provides.
 
 
+def _wrapped(obj: object) -> object:
+    return object_of(getattr, obj, "__wrapped__", None)
+
+
+# meiva:note
+# The file `obj` is defined in, looking through the wrappers `functools.wraps` records (what
+# `inspect.unwrap` does), so a decorated repo function is attributed to the repo and not to the
+# decorator.
+def _source_file(obj: object) -> str | None:
+    current = obj
+    for _ in range(sys.getrecursionlimit()):
+        inner = _wrapped(current)
+        if inner is None:
+            break
+        current = inner
+    else:
+        raise ValueError(f"wrapper cycle: {obj!r}")
+    if isinstance(current, types.FunctionType | types.MethodType | types.ModuleType | type):
+        return inspect.getsourcefile(current)
+    raise TypeError("not a source-bearing object")
+
+
 def _is_repo_code(obj: object, root: Path) -> bool:
     try:
-        source = inspect.getsourcefile(inspect.unwrap(obj))  # pyright: ignore[reportArgumentType]
+        source = _source_file(obj)
     except (TypeError, ValueError):
         return schedule_verify_checks.is_repo_source(None, root=root)
     return schedule_verify_checks.is_repo_source(
@@ -73,7 +96,7 @@ def main() -> int:
         if isinstance(node, ast.Import | ast.ImportFrom)
         and (segment := ast.get_source_segment(src, node))
     ]
-    namespace: dict[str, Any] = {"__name__": "dryimport"}
+    namespace: dict[str, object] = {"__name__": "dryimport"}
     try:
         exec(compile("\n".join(segments), "<imports-only>", "exec"), namespace)
     except ModuleNotFoundError as exc:

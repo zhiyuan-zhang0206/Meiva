@@ -41,6 +41,9 @@ class _Notice(BaseModel):
     question: JsonValue = None
 
 
+_NOTICES = TypeAdapter(list[_Notice])
+
+
 class _AgentStatus(BaseModel):
     status: str
 
@@ -92,8 +95,7 @@ def _fetch_open_notices(access: GatewayAccess) -> list[_Notice]:
         params={"include_awaiting": True},
     )
     resp.raise_for_status()
-    adapter: TypeAdapter[list[_Notice]] = TypeAdapter(list[_Notice])
-    return adapter.validate_json(resp.content)
+    return _NOTICES.validate_json(resp.content)
 
 
 def _filter_notices(
