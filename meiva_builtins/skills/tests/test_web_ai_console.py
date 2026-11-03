@@ -62,6 +62,7 @@ def test_to_row_completed_answer_is_ok() -> None:
             "answer": "the answer",
             "complete": True,
             "url": "https://chatgpt.com/c/abc",
+            "chat_id": None,
             "tab_kept": False,
         }
     )
@@ -79,6 +80,7 @@ def test_to_row_incomplete_partial_is_not_ok() -> None:
             "answer": "Thinking",
             "complete": False,
             "url": "https://chatgpt.com/c/abc",
+            "chat_id": None,
             "tab_kept": False,
         }
     )
@@ -95,6 +97,7 @@ def test_to_row_empty_complete_answer_is_not_ok() -> None:
             "answer": "",
             "complete": True,
             "url": "https://chatgpt.com/c/abc",
+            "chat_id": None,
             "tab_kept": False,
         }
     )
@@ -117,7 +120,7 @@ def test_to_row_includes_chat_id_when_present() -> None:
     assert row["chat_id"] == "abc-123"
 
 
-def test_to_row_chat_id_none_when_absent() -> None:
+def test_to_row_chat_id_none_when_the_conversation_url_carries_none() -> None:
     row = ask._to_row(
         {
             "site": "chatgpt",
@@ -126,6 +129,7 @@ def test_to_row_chat_id_none_when_absent() -> None:
             "answer": "the answer",
             "complete": True,
             "url": "https://chatgpt.com/c/abc-123",
+            "chat_id": None,
             "tab_kept": False,
         }
     )

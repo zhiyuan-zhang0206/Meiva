@@ -35,10 +35,11 @@ import re
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
+from base.host.boundary.options import attribute, options
 from base.paths.home import resolve_meiva_home, user_home
 
 # `webchat` lives in the parent skill's scripts/ dir, a sibling tree within
@@ -49,55 +50,96 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts"
 
 import webchat
 
-# Per-site Deep Research knobs. Buttons are matched by VISIBLE TEXT (via
-# webchat.click_by_text), which survives redesigns far better than CSS selectors
-# — the labels here are what the agent would read on screen.
-DR: dict[str, dict[str, Any]] = {
-    "gemini": {
+
+# meiva:note
+# One site's Deep Research knobs. Buttons are matched by VISIBLE TEXT (via `webchat.click_by_text`),
+# which survives redesigns far better than CSS selectors — the labels here are what the agent would
+# read on screen. `plan_texts` is empty for a site that begins researching on submit (perplexity),
+# and `report_export` marks the site whose report lives in a sandboxed frame that must be fetched
+# through the widget's own Export-to-Markdown control.
+@dataclass(frozen=True)
+class _Profile:
+    enable_path: tuple[tuple[str, ...], ...]
+    report_selectors: tuple[str, ...]
+    min_report_chars: int
+    plan_texts: tuple[str, ...] = ()
+    report_export: bool = False
+
+
+# meiva:note
+# The sites `start` / `check` / `reply` accept, and what each one's Deep Research mode looks like.
+DR: dict[str, _Profile] = {
+    "gemini": _Profile(
         # Deep Research lives inside the composer's tools menu: open the menu
         # (its trigger has no text, matched via aria-label), then pick the item.
-        "enable_path": [["Upload & tools"], ["Deep research", "Deep Research"]],
-        "plan_texts": ["Start research", "Begin research"],
+        enable_path=(("Upload & tools",), ("Deep research", "Deep Research")),
+        plan_texts=("Start research", "Begin research"),
         # Panel ONLY — no chat-transcript fallback. The plan bubble lives in the
         # chat and is stable text, so a transcript fallback could read a long
         # plan as a finished "report"; the immersive panel exists only once
         # research actually produced output.
-        "report_selectors": ["deep-research-immersive-panel"],
-        "min_report_chars": 1200,
-    },
-    "chatgpt": {
+        report_selectors=("deep-research-immersive-panel",),
+        min_report_chars=1200,
+    ),
+    "chatgpt": _Profile(
         # Deep research is a radio item inside the composer's plus menu.
-        "enable_path": [["Add files and more"], ["Deep research", "Deep Research"]],
-        "plan_texts": ["Start research"],
+        enable_path=(("Add files and more",), ("Deep research", "Deep Research")),
+        plan_texts=("Start research",),
         # The report renders inside a sandboxed frame the page DOM cannot read
         # (zero assistant messages in the main document on a finished run) —
         # check fetches it through the widget's own Export-to-Markdown control
         # instead of CSS report selectors.
-        "report_export": True,
-        "min_report_chars": 1200,
-    },
-    "perplexity": {
+        report_export=True,
+        report_selectors=(),
+        min_report_chars=1200,
+    ),
+    "perplexity": _Profile(
         # The mode selector is a composer menu whose trigger label is the CURRENT
         # mode ("Search" by default, "Deep research" once selected) — listing both
         # as the first step opens the menu from either state; the second step picks
         # the Deep research item. Research begins on submit (no plan-approval or
         # clarifying gate), so there is no plan_texts.
-        "enable_path": [["Search", "Deep research"], ["Deep research"]],
+        enable_path=(("Search", "Deep research"), ("Deep research",)),
         # The finished report renders into the same markdown-content-<n> block a
         # normal answer uses (just longer, with inline citations). Done = the stop
         # button is gone and the text has stopped growing — check's stability loop
         # handles it; no report_export / sandboxed frame here.
-        "report_selectors": ['[id^="markdown-content"]'],
-        "min_report_chars": 1200,
-    },
+        report_selectors=('[id^="markdown-content"]',),
+        min_report_chars=1200,
+    ),
 }
+
+
+# meiva:note
+# The flags each subcommand reads, as argparse left them. `options` checks every field against its
+# annotation once, so nothing below reads the `Any` a `Namespace` attribute would hand it.
+@dataclass(frozen=True)
+class _StartOptions:
+    site: str
+    prompt: str
+    assume_mode: bool
+    plan_wait: float
+
+
+@dataclass(frozen=True)
+class _CheckOptions:
+    site: str
+    url: str
+
+
+@dataclass(frozen=True)
+class _ReplyOptions:
+    site: str
+    url: str
+    prompt: str
+
 
 # Seconds between the two report samples `check` compares to judge "done": a
 # finished report is identical across the gap, an in-progress one still grows.
 _STABILITY_GAP_S = 6.0
 
 
-def _cfg(site: str) -> dict[str, Any]:
+def _cfg(site: str) -> _Profile:
     try:
         return DR[site]
     except KeyError:
@@ -105,7 +147,11 @@ def _cfg(site: str) -> dict[str, Any]:
 
 
 def _slug(text: str, *, max_len: int = 40) -> str:
-    words = re.findall(r"[A-Za-z0-9]+", text.lower())
+    # meiva:note
+    # `re.sub` answers a `str`; `re.findall` answers `list[Any]` (the stub cannot see that the
+    # pattern has no groups), and joining that list is the unchecked path this rule closes. Both
+    # spell the same tokens: the alphanumeric runs, lowercased.
+    words = re.sub(r"[^A-Za-z0-9]+", " ", text.lower()).split()
     return "-".join(words)[:max_len].strip("-") or "research"
 
 
@@ -126,8 +172,7 @@ def _wait_for_conversation_url(site: str, *, timeout: float) -> str:
 def _try_approve_plan(site: str, *, timeout: float) -> str | None:
     """If a research-plan confirmation is showing, click it. Returns the button
     text clicked, or None if no plan button appeared within `timeout`."""
-    cfg = _cfg(site)
-    plan_texts = cfg.get("plan_texts")
+    plan_texts = _cfg(site).plan_texts
     if not plan_texts:
         # Some sites (Perplexity) begin researching the moment the prompt is
         # submitted — there is no plan-approval button to click.
@@ -143,10 +188,10 @@ def _try_approve_plan(site: str, *, timeout: float) -> str | None:
 
 
 def _read_report(site: str) -> str:
-    cfg = _cfg(site)
+    selectors = _cfg(site).report_selectors
     js = (
         "() => {"
-        f"  for (const s of {json.dumps(cfg['report_selectors'])}) {{"
+        f"  for (const s of {json.dumps(selectors)}) {{"
         "    const els = document.querySelectorAll(s);"
         "    if (els.length) return els[els.length - 1].innerText || '';"
         "  }"
@@ -170,32 +215,33 @@ def _save(site: str, url: str, report: str, places: webchat.Places) -> Path:
     return outdir
 
 
-def cmd_start(args: argparse.Namespace, *, clock: Callable[[], float]) -> dict[str, Any]:
-    cfg = _cfg(args.site)
+def cmd_start(args: argparse.Namespace, *, clock: Callable[[], float]) -> dict[str, object]:
+    opts = options(args, _StartOptions)
+    profile = _cfg(opts.site)
     # The research runs server-side once the plan is approved below, so this tab
     # is closed on the way out; `url` is the handle `check` reopens to poll.
-    page_id = webchat.open_chat(args.site, clock=clock)
+    page_id = webchat.open_chat(opts.site, clock=clock)
     try:
         enabled = True
-        if not args.assume_mode:
+        if not opts.assume_mode:
             # Each step is one click (open a menu, then pick the item); every step
             # must land or the mode is not on.
-            for step in cfg["enable_path"]:
+            for step in profile.enable_path:
                 hit = webchat.click_by_text(step)
                 if not hit:
                     raise RuntimeError(
-                        f"could not find {step!r} while enabling Deep Research for "
-                        f"{webchat.site(args.site).label} — enable it in the browser and "
+                        f"could not find {list(step)!r} while enabling Deep Research for "
+                        f"{webchat.site(opts.site).label} — enable it in the browser and "
                         f"re-run with --assume-mode (or update enable_path in research.py)"
                     )
                 # A menu/mode click re-renders the composer area; let it settle.
                 time.sleep(1.0)
-        webchat.inject_prompt(args.site, args.prompt)
-        via = webchat.submit(args.site)
-        url = _wait_for_conversation_url(args.site, timeout=25.0)
-        approved = _try_approve_plan(args.site, timeout=args.plan_wait)
+        webchat.inject_prompt(opts.site, opts.prompt)
+        via = webchat.submit(opts.site)
+        url = _wait_for_conversation_url(opts.site, timeout=25.0)
+        approved = _try_approve_plan(opts.site, timeout=opts.plan_wait)
         return {
-            "site": args.site,
+            "site": opts.site,
             "url": url,
             "submitted_via": via,
             "deep_research_enabled": enabled,
@@ -207,12 +253,12 @@ def cmd_start(args: argparse.Namespace, *, clock: Callable[[], float]) -> dict[s
 
 
 def _check_via_export(
-    args: argparse.Namespace, places: webchat.Places, *, clock: Callable[[], float]
-) -> dict[str, Any]:
+    opts: _CheckOptions, places: webchat.Places, *, clock: Callable[[], float]
+) -> dict[str, object]:
     """check for a site whose report lives in a sandboxed frame: judge state
     from the rendered accessibility tree (which crosses frames) and fetch the
     finished report through the widget's own Export-to-Markdown control."""
-    page_id = webchat.navigate(args.url)
+    page_id = webchat.navigate(opts.url)
     try:
         # The research widget is a separate frame that mounts well after the page
         # (tens of seconds on a finished run) — poll the rendered tree for a
@@ -224,7 +270,7 @@ def _check_via_export(
             time.sleep(3.0)
             snap = webchat.page_snapshot()
             if "Stop research" in snap:
-                return {"state": "running", "url": args.url, "chars": 0}
+                return {"state": "running", "url": opts.url, "chars": 0}
             if "Export" in snap:
                 break
             if "Error loading app" in snap and not reloaded:
@@ -232,21 +278,21 @@ def _check_via_export(
                 # finished run); one reload recovers it.
                 reloaded = True
                 webchat.close_tab(page_id)  # the reload opens a fresh tab
-                page_id = webchat.navigate(args.url)
+                page_id = webchat.navigate(opts.url)
         if "Export" not in snap:
             # Neither running nor finished: the research hasn't started — a plan
             # waiting for approval, or a clarifying question waiting for `reply`.
-            approved = _try_approve_plan(args.site, timeout=3.0)
+            approved = _try_approve_plan(opts.site, timeout=3.0)
             return {
                 "state": "running",
-                "url": args.url,
+                "url": opts.url,
                 "approved_plan_this_check": approved,
                 "chars": 0,
-                "last_message": webchat.read_answer(args.site)[:1000],
+                "last_message": webchat.read_answer(opts.site)[:1000],
             }
         outdir = (
             webchat.downloads_root("deep-research", places=places)
-            / f"{_run_stamp()}-{args.site}-report"
+            / f"{_run_stamp()}-{opts.site}-report"
         )
         if not webchat.click_by_text(["Export"]):
             raise RuntimeError("finished report detected but the Export control would not open")
@@ -266,7 +312,7 @@ def _check_via_export(
         report = dest.read_text(encoding="utf-8")
         (outdir / "meta.json").write_text(
             json.dumps(
-                {"site": args.site, "url": args.url, "chars": len(report)},
+                {"site": opts.site, "url": opts.url, "chars": len(report)},
                 ensure_ascii=False,
                 indent=2,
             ),
@@ -274,7 +320,7 @@ def _check_via_export(
         )
         return {
             "state": "done",
-            "url": args.url,
+            "url": opts.url,
             "chars": len(report),
             "dir": str(outdir),
             "report": report,
@@ -285,14 +331,15 @@ def _check_via_export(
 
 def cmd_check(
     args: argparse.Namespace, places: webchat.Places, *, clock: Callable[[], float]
-) -> dict[str, Any]:
-    cfg = _cfg(args.site)
-    webchat.assert_same_site(args.url, args.site)
-    if cfg.get("report_export"):
-        return _check_via_export(args, places, clock=clock)
+) -> dict[str, object]:
+    opts = options(args, _CheckOptions)
+    profile = _cfg(opts.site)
+    webchat.assert_same_site(opts.url, opts.site)
+    if profile.report_export:
+        return _check_via_export(opts, places, clock=clock)
     # check reopens the conversation in its own tab and closes it on the way out;
     # the research keeps running server-side, polled again via `url`.
-    page_id = webchat.navigate(args.url)
+    page_id = webchat.navigate(opts.url)
     try:
         # The report surface mounts lazily after navigation (Gemini's immersive
         # panel takes 10-20s to auto-open on a finished conversation) — poll for it
@@ -300,7 +347,7 @@ def cmd_check(
         deadline = time.monotonic() + 30.0
         report = ""
         while True:
-            report = _read_report(args.site)
+            report = _read_report(opts.site)
             if report.strip() or time.monotonic() >= deadline:
                 break
             time.sleep(2.0)
@@ -310,16 +357,16 @@ def cmd_check(
             # report exists. (The plan-confirmation widget stays in the transcript
             # forever — clicking it on a page that already has a report would
             # inject a junk message into the conversation, so never click then.)
-            approved = _try_approve_plan(args.site, timeout=3.0)
+            approved = _try_approve_plan(opts.site, timeout=3.0)
             return {
                 "state": "running",
-                "url": args.url,
+                "url": opts.url,
                 "approved_plan_this_check": approved,
                 "chars": 0,
                 # The last chat message: when a site asks clarifying questions
                 # before starting, this is where the agent reads them (answer with
                 # the `reply` command).
-                "last_message": webchat.read_answer(args.site)[:1000],
+                "last_message": webchat.read_answer(opts.site)[:1000],
             }
         # A finished report stops growing; an in-progress one is still changing.
         # Sample until two consecutive reads are identical (the panel hydrates in
@@ -333,23 +380,23 @@ def cmd_check(
         stable = False
         while time.monotonic() < budget:
             time.sleep(_STABILITY_GAP_S)
-            cur = _read_report(args.site)
-            if cur == report2 and len(cur) >= cfg["min_report_chars"]:
+            cur = _read_report(opts.site)
+            if cur == report2 and len(cur) >= profile.min_report_chars:
                 stable = True
                 break
             report2 = cur
-        if stable and not webchat.is_streaming(args.site):
-            outdir = _save(args.site, args.url, report2, places)
+        if stable and not webchat.is_streaming(opts.site):
+            outdir = _save(opts.site, opts.url, report2, places)
             return {
                 "state": "done",
-                "url": args.url,
+                "url": opts.url,
                 "chars": len(report2),
                 "dir": str(outdir),
                 "report": report2,
             }
         return {
             "state": "running",
-            "url": args.url,
+            "url": opts.url,
             "approved_plan_this_check": None,
             "chars": len(report2),
         }
@@ -357,14 +404,15 @@ def cmd_check(
         webchat.close_tab(page_id)
 
 
-def cmd_reply(args: argparse.Namespace, *, clock: Callable[[], float]) -> dict[str, Any]:
+def cmd_reply(args: argparse.Namespace, *, clock: Callable[[], float]) -> dict[str, object]:
     """Send a follow-up message into the research conversation — answering the
     clarifying questions some sites ask before starting. Returns right after
     the submit; the research output is still collected via `check`."""
-    r = webchat.ask(args.site, args.prompt, conversation_url=args.url, wait=False, clock=clock)
+    opts = options(args, _ReplyOptions)
+    r = webchat.ask(opts.site, opts.prompt, conversation_url=opts.url, wait=False, clock=clock)
     return {
-        "site": args.site,
-        "url": args.url,
+        "site": opts.site,
+        "url": opts.url,
         "submitted_via": r["submitted_via"],
         "state": "replied",
     }
@@ -412,7 +460,11 @@ def main() -> None:
     p_reply.add_argument("--prompt", required=True, help="the answer to send")
 
     args = parser.parse_args()
-    match args.cmd:
+    # meiva:note
+    # The subcommand name decides which parser's flags this namespace carries; `attribute` reads it
+    # as a `str` so the dispatch below never holds the `Any` of a `Namespace` attribute.
+    cmd = attribute(args, "cmd", str)
+    match cmd:
         case "start":
             result = cmd_start(args, clock=time.monotonic)
         case "check":
@@ -422,7 +474,7 @@ def main() -> None:
         case "reply":
             result = cmd_reply(args, clock=time.monotonic)
         case _:
-            raise ValueError(f"unknown command {args.cmd!r}")
+            raise ValueError(f"unknown command {cmd!r}")
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

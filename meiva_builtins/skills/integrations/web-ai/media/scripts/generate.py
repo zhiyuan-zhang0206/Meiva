@@ -33,10 +33,13 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, TypeGuard
 
+from base.host.boundary.fields import optional_int_field, optional_str_field
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.options import attribute, options
 from base.paths.home import resolve_meiva_home, user_home
 
 # `webchat` lives in the parent skill's scripts/ dir, a sibling tree within
@@ -57,7 +60,11 @@ VIDEO_SITES = ("gemini",)  # ChatGPT video (Sora) lives on a separate app, out o
 
 
 def _slug(text: str, *, max_len: int = 40) -> str:
-    words = re.findall(r"[A-Za-z0-9]+", text.lower())
+    # meiva:note
+    # `re.sub` answers a `str`; `re.findall` answers `list[Any]` (the stub cannot see that the
+    # pattern has no groups), and joining that list is the unchecked path this rule closes. Both
+    # spell the same tokens: the alphanumeric runs, lowercased.
+    words = re.sub(r"[^A-Za-z0-9]+", " ", text.lower()).split()
     return "-".join(words)[:max_len].strip("-") or "media"
 
 
@@ -66,12 +73,60 @@ def _slug(text: str, *, max_len: int = 40) -> str:
 # --------------------------------------------------------------------------- #
 
 
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
+# meiva:note
+# The <img> the page offered to download, as `_find_image_src` read it: its src plus the rendered
+# size that let the caller tell a generated asset from a logo. Every field is None when the page had
+# nothing to offer.
+@dataclass(frozen=True)
+class _ImageHit:
+    src: str | None
+    w: int | None
+    h: int | None
 
 
-def _is_object_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
+# meiva:note
+# The <video> the page offered to download: its src and any nearby download link. Both are None
+# when the page had nothing to offer.
+@dataclass(frozen=True)
+class _VideoHit:
+    src: str | None
+    download: str | None
+
+
+_NOTHING_IMAGE = _ImageHit(src=None, w=None, h=None)
+_NOTHING_VIDEO = _VideoHit(src=None, download=None)
+
+
+# meiva:note
+# The flags each subcommand reads, as argparse left them. `options` checks every field against its
+# annotation once, so nothing below reads the `Any` a `Namespace` attribute would hand it.
+@dataclass(frozen=True)
+class _ImageOptions:
+    site: str
+    prompt: str
+    raw: bool
+    timeout: float
+    min_px: int
+    keep_tab: bool
+
+
+@dataclass(frozen=True)
+class _VideoOptions:
+    site: str
+    prompt: str
+    raw: bool
+    wait: bool
+    timeout: float
+    keep_tab: bool
+
+
+@dataclass(frozen=True)
+class _CheckOptions:
+    site: str
+    kind: str
+    url: str
+    min_px: int
+    keep_tab: bool
 
 
 def _image_srcs(*, min_px: int) -> list[str]:
@@ -88,10 +143,10 @@ def _image_srcs(*, min_px: int) -> list[str]:
         "}"
     )
     raw = webchat.evaluate(js)
-    return [str(x) for x in raw] if _is_object_list(raw) else []
+    return [str(x) for x in raw] if is_object_list(raw) else []
 
 
-def _find_image_src(*, min_px: int, exclude: list[str]) -> dict[str, Any]:
+def _find_image_src(*, min_px: int, exclude: list[str]) -> _ImageHit:
     """The last <img> on the page at least `min_px` on both sides whose src is
     not in `exclude` (skips avatars, icons, inline svg, and anything that was
     already on the page before the prompt). Returns {src, w, h} or {src: None}."""
@@ -110,10 +165,16 @@ def _find_image_src(*, min_px: int, exclude: list[str]) -> dict[str, Any]:
         "}"
     )
     raw = webchat.evaluate(js)
-    return raw if _is_str_dict(raw) else {"src": None}
+    if not is_object_dict(raw):
+        return _NOTHING_IMAGE
+    return _ImageHit(
+        src=optional_str_field(raw, "src"),
+        w=optional_int_field(raw, "w"),
+        h=optional_int_field(raw, "h"),
+    )
 
 
-def _find_video_src() -> dict[str, Any]:
+def _find_video_src() -> _VideoHit:
     """The last <video> on the page; reports its src and a nearby download link
     href if one exists. Returns {src, download, poster} (any may be null)."""
     js = (
@@ -129,30 +190,34 @@ def _find_video_src() -> dict[str, Any]:
         "}"
     )
     raw = webchat.evaluate(js)
-    return raw if _is_str_dict(raw) else {"src": None}
+    if not is_object_dict(raw):
+        return _NOTHING_VIDEO
+    return _VideoHit(
+        src=optional_str_field(raw, "src"), download=optional_str_field(raw, "download")
+    )
 
 
-def _wait_for_image(*, timeout: float, min_px: int, exclude: list[str]) -> dict[str, Any]:
+def _wait_for_image(*, timeout: float, min_px: int, exclude: list[str]) -> _ImageHit:
 
     deadline = time.monotonic() + timeout
     while True:
         found = _find_image_src(min_px=min_px, exclude=exclude)
-        if found.get("src"):
+        if found.src:
             return found
         if time.monotonic() >= deadline:
-            return {"src": None}
+            return _NOTHING_IMAGE
         time.sleep(1.5)
 
 
-def _wait_for_video(*, timeout: float) -> dict[str, Any]:
+def _wait_for_video(*, timeout: float) -> _VideoHit:
 
     deadline = time.monotonic() + timeout
     while True:
         found = _find_video_src()
-        if found.get("src") or found.get("download"):
+        if found.src or found.download:
             return found
         if time.monotonic() >= deadline:
-            return {"src": None}
+            return _NOTHING_VIDEO
         time.sleep(3.0)
 
 
@@ -194,13 +259,18 @@ def _canvas_data_url(src: str) -> str | None:
         "}"
     )
     raw = webchat.evaluate(js)
-    data_url = raw.get("dataUrl") if _is_str_dict(raw) else None
-    return data_url if isinstance(data_url, str) else None
+    return optional_str_field(raw, "dataUrl") if is_object_dict(raw) else None
 
 
 def _ext_from_url(src: str, *, default: str) -> str:
     m = re.search(r"\.(png|jpg|jpeg|webp|gif|mp4|webm|mov)(?:[?#]|$)", src, re.I)
-    return m.group(1).lower() if m else default
+    if m is None:
+        return default
+    # meiva:note
+    # `Match.group` is typed `str | Any` — a union carrying `Any` is one `reportAny` leaves alone —
+    # so the suffix is a `str` only after the guard; a group that did not participate falls back.
+    ext = m.group(1)
+    return ext.lower() if isinstance(ext, str) else default
 
 
 def _curl_args(url: str, dest: Path, *, max_filesize: str, max_time: str) -> list[str]:
@@ -340,8 +410,8 @@ def _attempt_video(
 
 
 def _close_on_done(
-    page_id: int | None, result: dict[str, Any], *, keep_tab: bool
-) -> dict[str, Any]:
+    page_id: int | None, result: dict[str, object], *, keep_tab: bool
+) -> dict[str, object]:
     """One-shot cleanup for a terminal (done) result: close the owned tab unless
     --keep-tab, then stamp `tab_kept` onto the result. Non-terminal results keep
     their tab and set tab_kept themselves (the work continues, polled via url)."""
@@ -353,19 +423,20 @@ def _close_on_done(
 
 def cmd_image(
     args: argparse.Namespace, places: webchat.Places, *, clock: Callable[[], float]
-) -> dict[str, Any]:
-    page_id = webchat.open_chat(args.site, clock=clock)
+) -> dict[str, object]:
+    opts = options(args, _ImageOptions)
+    page_id = webchat.open_chat(opts.site, clock=clock)
     # Baseline BEFORE submitting: only an img that appears after the prompt can
     # be the generated asset.
-    baseline = _image_srcs(min_px=args.min_px)
-    prompt = args.prompt if args.raw else _IMAGE_PREFIX + args.prompt
-    webchat.inject_prompt(args.site, prompt)
-    via = webchat.submit(args.site)
+    baseline = _image_srcs(min_px=opts.min_px)
+    prompt = opts.prompt if opts.raw else _IMAGE_PREFIX + opts.prompt
+    webchat.inject_prompt(opts.site, prompt)
+    via = webchat.submit(opts.site)
     # Conversation URL first — it confirms the submit actually landed and is
     # the poll handle a pending result hands back.
-    url = _wait_for_conversation_url(args.site, timeout=25.0)
-    found = _wait_for_image(timeout=args.timeout, min_px=args.min_px, exclude=baseline)
-    if not found.get("src"):
+    url = _wait_for_conversation_url(opts.site, timeout=25.0)
+    found = _wait_for_image(timeout=opts.timeout, min_px=opts.min_px, exclude=baseline)
+    if found.src is None:
         # Not done — the image is still rendering and gets collected later via
         # `check --url`, so the tab stays open regardless of --keep-tab.
         return {
@@ -378,40 +449,41 @@ def cmd_image(
         }
     dest_dir = (
         webchat.downloads_root("media", places=places)
-        / f"{_run_stamp()}-{args.site}-{_slug(args.prompt)}"
+        / f"{_run_stamp()}-{opts.site}-{_slug(opts.prompt)}"
     )
     dest_dir.mkdir(parents=True, exist_ok=True)
-    path, note = _attempt_image(found["src"], dest_dir)
+    path, note = _attempt_image(found.src, dest_dir)
     return _close_on_done(
         page_id,
         {
             "state": "done",
             "kind": "image",
             "url": url,
-            "src": found["src"],
+            "src": found.src,
             "path": path,
             "note": note,
             "dir": str(dest_dir),
-            "w": found.get("w"),
-            "h": found.get("h"),
+            "w": found.w,
+            "h": found.h,
         },
-        keep_tab=args.keep_tab,
+        keep_tab=opts.keep_tab,
     )
 
 
 def cmd_video(
     args: argparse.Namespace, places: webchat.Places, *, clock: Callable[[], float]
-) -> dict[str, Any]:
-    page_id = webchat.open_chat(args.site, clock=clock)
-    prompt = args.prompt if args.raw else _VIDEO_PREFIX + args.prompt
-    webchat.inject_prompt(args.site, prompt)
-    via = webchat.submit(args.site)
+) -> dict[str, object]:
+    opts = options(args, _VideoOptions)
+    page_id = webchat.open_chat(opts.site, clock=clock)
+    prompt = opts.prompt if opts.raw else _VIDEO_PREFIX + opts.prompt
+    webchat.inject_prompt(opts.site, prompt)
+    via = webchat.submit(opts.site)
     # Read the per-conversation URL (not the still-blank /app) so the poll handle
     # the agent gets back actually points at this generation.
-    url = _wait_for_conversation_url(args.site, timeout=25.0)
+    url = _wait_for_conversation_url(opts.site, timeout=25.0)
     # Video generation is slow; don't block a turn on it by default. With --wait
     # the agent asked to wait in-turn; otherwise return the URL to poll via check.
-    if not args.wait:
+    if not opts.wait:
         # Still generating, collected later via `check --url` — keep the tab.
         return {
             "state": "submitted",
@@ -422,10 +494,10 @@ def cmd_video(
             "note": "poll with: check --kind video --url <url>",
         }
     res = _collect_video(
-        args.site, url, timeout=args.timeout, prompt=args.prompt, places=places, clock=clock
+        opts.site, url, timeout=opts.timeout, prompt=opts.prompt, places=places, clock=clock
     )
     if res["state"] == "done":
-        return _close_on_done(page_id, res, keep_tab=args.keep_tab)
+        return _close_on_done(page_id, res, keep_tab=opts.keep_tab)
     res["tab_kept"] = True  # still pending — keep the tab to poll
     return res
 
@@ -438,9 +510,9 @@ def _collect_video(
     prompt: str,
     places: webchat.Places,
     clock: Callable[[], float],
-) -> dict[str, Any]:
+) -> dict[str, object]:
     found = _wait_for_video(timeout=timeout)
-    if not found.get("src") and not found.get("download"):
+    if found.src is None and found.download is None:
         return {
             "state": "pending",
             "kind": "video",
@@ -451,15 +523,13 @@ def _collect_video(
         webchat.downloads_root("media", places=places) / f"{_run_stamp()}-{site}-{_slug(prompt)}"
     )
     dest_dir.mkdir(parents=True, exist_ok=True)
-    path, note = _attempt_video(
-        found.get("src"), found.get("download"), dest_dir, places.downloads, clock=clock
-    )
+    path, note = _attempt_video(found.src, found.download, dest_dir, places.downloads, clock=clock)
     return {
         "state": "done",
         "kind": "video",
         "url": url,
-        "src": found.get("src"),
-        "download": found.get("download"),
+        "src": found.src,
+        "download": found.download,
         "path": path,
         "dir": str(dest_dir),
         "note": note,
@@ -468,43 +538,44 @@ def _collect_video(
 
 def cmd_check(
     args: argparse.Namespace, places: webchat.Places, *, clock: Callable[[], float]
-) -> dict[str, Any]:
-    webchat.assert_same_site(args.url, args.site)
-    page_id = webchat.navigate(args.url)
+) -> dict[str, object]:
+    opts = options(args, _CheckOptions)
+    webchat.assert_same_site(opts.url, opts.site)
+    page_id = webchat.navigate(opts.url)
 
     time.sleep(2.0)
-    if args.kind == "image":
+    if opts.kind == "image":
         # No pre-submit baseline exists on a revisit; on the conversation page
         # the generated asset is the dominant img, so exclude nothing.
-        found = _find_image_src(min_px=args.min_px, exclude=[])
-        if not found.get("src"):
-            return {"state": "running", "kind": "image", "url": args.url, "tab_kept": True}
+        found = _find_image_src(min_px=opts.min_px, exclude=[])
+        if found.src is None:
+            return {"state": "running", "kind": "image", "url": opts.url, "tab_kept": True}
         dest_dir = (
-            webchat.downloads_root("media", places=places) / f"{_run_stamp()}-{args.site}-image"
+            webchat.downloads_root("media", places=places) / f"{_run_stamp()}-{opts.site}-image"
         )
         dest_dir.mkdir(parents=True, exist_ok=True)
-        path, note = _attempt_image(found["src"], dest_dir)
+        path, note = _attempt_image(found.src, dest_dir)
         return _close_on_done(
             page_id,
             {
                 "state": "done",
                 "kind": "image",
-                "url": args.url,
-                "src": found["src"],
+                "url": opts.url,
+                "src": found.src,
                 "path": path,
                 "note": note,
                 "dir": str(dest_dir),
             },
-            keep_tab=args.keep_tab,
+            keep_tab=opts.keep_tab,
         )
-    found = _find_video_src()
-    if not found.get("src") and not found.get("download"):
-        return {"state": "running", "kind": "video", "url": args.url, "tab_kept": True}
+    found_video = _find_video_src()
+    if found_video.src is None and found_video.download is None:
+        return {"state": "running", "kind": "video", "url": opts.url, "tab_kept": True}
     res = _collect_video(
-        args.site, args.url, timeout=1.0, prompt="video", places=places, clock=clock
+        opts.site, opts.url, timeout=1.0, prompt="video", places=places, clock=clock
     )
     if res["state"] == "done":
-        return _close_on_done(page_id, res, keep_tab=args.keep_tab)
+        return _close_on_done(page_id, res, keep_tab=opts.keep_tab)
     res["tab_kept"] = True
     return res
 
@@ -543,7 +614,6 @@ def main() -> None:
         action="store_true",
         help="leave the browser tab open when done (default: close it once the image is saved)",
     )
-    p_img.set_defaults(fn=cmd_image)
 
     p_vid = sub.add_parser("video", help="generate a video (submit, then poll with check)")
     p_vid.add_argument("--site", required=True, choices=sorted(VIDEO_SITES))
@@ -562,7 +632,6 @@ def main() -> None:
         action="store_true",
         help="leave the browser tab open when a --wait run finishes (default: close it)",
     )
-    p_vid.set_defaults(fn=cmd_video)
 
     p_chk = sub.add_parser("check", help="re-check a submitted generation and download when ready")
     p_chk.add_argument("--site", required=True, choices=sorted(IMAGE_SITES))
@@ -574,11 +643,24 @@ def main() -> None:
         action="store_true",
         help="leave the browser tab open when the result is ready (default: close it)",
     )
-    p_chk.set_defaults(fn=cmd_check)
 
     args = parser.parse_args()
     places = webchat.system_places(resolve_meiva_home(), user_home())
-    print(json.dumps(args.fn(args, places, clock=time.monotonic), ensure_ascii=False, indent=2))
+    # meiva:note
+    # The subcommand name decides which parser's flags this namespace carries; `attribute` reads it
+    # as a `str`, so the dispatch table is never the `Any` a `Namespace` attribute (or a
+    # `set_defaults`-bound function) would hand back.
+    cmd = attribute(args, "cmd", str)
+    match cmd:
+        case "image":
+            result = cmd_image(args, places, clock=time.monotonic)
+        case "video":
+            result = cmd_video(args, places, clock=time.monotonic)
+        case "check":
+            result = cmd_check(args, places, clock=time.monotonic)
+        case _:
+            raise ValueError(f"unknown command {cmd!r}")
+    print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

@@ -759,6 +759,8 @@ extraPaths = [".agents/skills/meiva-self-development/reference"]
 # needs extraPaths.
 [[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/skills/integrations/web-ai"
+reportAny = "error"
+reportExplicitAny = "error"
 extraPaths = ["meiva_builtins/skills/integrations/web-ai/scripts"]
 
 [[tool.pyright.executionEnvironments]]
