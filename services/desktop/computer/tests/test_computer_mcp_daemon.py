@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -183,11 +183,13 @@ async def ok_result(
     assert resp["ok"] is True
     res = resp["result"]
     assert isinstance(res, dict)
-    content = res.get("content")
-    assert isinstance(content, list) and len(content) == 1  # pyright: ignore[reportUnknownArgumentType]
-    block = content[0]
+    content = cast("dict[str, object]", res).get("content")
+    assert isinstance(content, list)
+    blocks = cast("list[dict[str, str]]", content)
+    assert len(blocks) == 1
+    block = blocks[0]
     assert block["type"] == "text"
-    return json.loads(block["text"])  # pyright: ignore[reportUnknownArgumentType]
+    return json.loads(block["text"])
 
 
 # ── list_tools / ping ───────────────────────────────────────────────────────
@@ -242,7 +244,7 @@ async def test_unknown_method_and_tool(*, db_url: str, database_gate: ProcessDbG
 
 async def test_click_executes_and_converts_coordinates(
     fake_helper: FakeHelper,
-    audit_log: list,
+    audit_log: AuditLog,
     monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
@@ -256,7 +258,7 @@ async def test_click_executes_and_converts_coordinates(
 
 async def test_user_abort_is_an_error_and_is_never_retried_or_replayed(
     fake_helper: FakeHelper,
-    audit_log: list,
+    audit_log: AuditLog,
     monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
@@ -281,7 +283,7 @@ async def test_user_abort_is_an_error_and_is_never_retried_or_replayed(
 
 
 async def test_snapshot_file_name_carries_the_daemon_clocks_stamp(
-    fake_helper: FakeHelper, audit_log: list, *, database_gate: ProcessDbGate
+    fake_helper: FakeHelper, audit_log: AuditLog, *, database_gate: ProcessDbGate
 ) -> None:
     timers = ManualTimers(wall_start=datetime(2026, 3, 4, 5, 6, 7, 123456, tzinfo=UTC))
     clock = Clock(
@@ -301,7 +303,7 @@ async def test_snapshot_file_name_carries_the_daemon_clocks_stamp(
 # The captures land under the home the daemon was handed, not the process's own.
 async def test_snapshot_returns_path_and_geometry(
     fake_helper: FakeHelper,
-    audit_log: list,
+    audit_log: AuditLog,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
@@ -321,7 +323,7 @@ async def test_snapshot_returns_path_and_geometry(
 
 async def test_snapshot_and_click_measure_scale_not_helper_claim(
     fake_helper: FakeHelper,
-    audit_log: list,
+    audit_log: AuditLog,
     monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
@@ -351,7 +353,7 @@ async def test_snapshot_and_click_measure_scale_not_helper_claim(
 
 async def test_snapshot_measures_scale_on_2x_and_converts_ax(
     fake_helper: FakeHelper,
-    audit_log: list,
+    audit_log: AuditLog,
     monkeypatch: pytest.MonkeyPatch,
     *,
     database_gate: ProcessDbGate,
@@ -372,7 +374,7 @@ async def test_snapshot_measures_scale_on_2x_and_converts_ax(
 
 
 async def test_click_before_any_snapshot_falls_back_to_helper_scale(
-    fake_helper: FakeHelper, audit_log: list, *, database_gate: ProcessDbGate
+    fake_helper: FakeHelper, audit_log: AuditLog, *, database_gate: ProcessDbGate
 ) -> None:
     """Before the first snapshot the daemon has no measurement; it uses the
     helper's live screen report (also the only sane cold-start behavior)."""
@@ -383,7 +385,7 @@ async def test_click_before_any_snapshot_falls_back_to_helper_scale(
 
 async def test_snapshot_include_ocr_adds_text_boxes(
     fake_helper: FakeHelper,
-    audit_log: Any,
+    audit_log: AuditLog,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -396,7 +398,7 @@ async def test_snapshot_include_ocr_adds_text_boxes(
 
 async def test_snapshot_include_ocr_failure_degrades(
     fake_helper: FakeHelper,
-    audit_log: Any,
+    audit_log: AuditLog,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -410,7 +412,7 @@ async def test_snapshot_include_ocr_failure_degrades(
 
 async def test_snapshot_without_include_ocr_skips_ocr(
     fake_helper: FakeHelper,
-    audit_log: Any,
+    audit_log: AuditLog,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -483,7 +485,7 @@ def test_validate_text_query_rejects_blank_and_unknown_mode() -> None:
 
 async def test_find_text_returns_matching_boxes(
     fake_helper: FakeHelper,
-    audit_log: list,
+    audit_log: AuditLog,
     fake_ocr: FakeOcr,
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -504,7 +506,7 @@ async def test_find_text_returns_matching_boxes(
 
 async def test_find_text_reuses_last_ocr_when_asked(
     fake_helper: FakeHelper,
-    audit_log: list,
+    audit_log: AuditLog,
     fake_ocr: FakeOcr,
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -525,7 +527,7 @@ async def test_find_text_reuses_last_ocr_when_asked(
 
 async def test_find_text_fresh_then_stale_share_one_capture(
     fake_helper: FakeHelper,
-    audit_log: list,
+    audit_log: AuditLog,
     fake_ocr: FakeOcr,
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -545,7 +547,7 @@ async def test_find_text_fresh_then_stale_share_one_capture(
 
 async def test_find_text_stale_with_empty_cache_captures(
     fake_helper: FakeHelper,
-    audit_log: list,
+    audit_log: AuditLog,
     fake_ocr: FakeOcr,
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -563,7 +565,7 @@ async def test_find_text_stale_with_empty_cache_captures(
 
 async def test_find_text_ocr_failure_is_an_error(
     fake_helper: FakeHelper,
-    audit_log: list,
+    audit_log: AuditLog,
     fake_ocr: FakeOcr,
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -580,7 +582,7 @@ async def test_find_text_ocr_failure_is_an_error(
 
 
 async def test_find_text_requires_text_argument(
-    fake_helper: FakeHelper, audit_log: list, *, database_gate: ProcessDbGate
+    fake_helper: FakeHelper, audit_log: AuditLog, *, database_gate: ProcessDbGate
 ) -> None:
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
     resp = await call(d, "find_text", {})
@@ -593,7 +595,7 @@ async def test_find_text_requires_text_argument(
 
 async def test_click_text_ocrs_locates_and_clicks(
     fake_helper: FakeHelper,
-    audit_log: list,
+    audit_log: AuditLog,
     fake_ocr: FakeOcr,
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -614,7 +616,7 @@ async def test_click_text_ocrs_locates_and_clicks(
 
 async def test_click_text_index_selects_among_matches(
     fake_helper: FakeHelper,
-    audit_log: list,
+    audit_log: AuditLog,
     fake_ocr: FakeOcr,
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -633,7 +635,7 @@ async def test_click_text_index_selects_among_matches(
 
 async def test_click_text_failures_are_readable_and_never_click(
     fake_helper: FakeHelper,
-    audit_log: list,
+    audit_log: AuditLog,
     fake_ocr: FakeOcr,
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -658,7 +660,7 @@ async def test_click_text_failures_are_readable_and_never_click(
 
 async def test_click_text_audits_the_clicked_center(
     fake_helper: FakeHelper,
-    audit_log: list,
+    audit_log: AuditLog,
     fake_ocr: FakeOcr,
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -667,7 +669,7 @@ async def test_click_text_audits_the_clicked_center(
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
     await call(d, "click_text", {"text": "search"})
     actions = [ev for ev in audit_log if ev["event_type"] == "computer_action"]
-    assert len(actions) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert len(actions) == 1
     ev = actions[0]
     assert ev["payload"]["action"] == "click_text"
     assert ev["payload"]["outcome"] == "ok"

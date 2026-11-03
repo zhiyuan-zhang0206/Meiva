@@ -1,10 +1,4 @@
 # meiva:note
-# These existing fault tests use heterogeneous spy state at precise failure boundaries.
-# pyright: reportUnknownMemberType = warning
-# pyright: reportUnknownArgumentType = warning
-# pyright: reportUnknownLambdaType = warning
-# pyright: reportUnknownVariableType = warning
-# meiva:note
 # The upper-level rebuild: its queue (claim order, who blocks whom) and the replay.
 from __future__ import annotations
 
@@ -99,10 +93,11 @@ def _groups(config: ConfigBoot, model_catalog: ModelCatalog) -> dict[str, Any]:
     config.set_field("understanding_group_check_decay", 1)
     config.set_field("understanding_group_model", "deepseek-flash")
     config.set_field("understanding_group_corrections", 0)
-    state: dict[str, Any] = {
-        "asked": [],
-        "reply": lambda nodes: [Group(nodes[0][0], nodes[2][0], f"group of {nodes[0][0]}")],
-    }
+
+    def reply(nodes: list[tuple[int, str]]) -> list[Group]:
+        return [Group(nodes[0][0], nodes[2][0], f"group of {nodes[0][0]}")]
+
+    state: dict[str, Any] = {"asked": [], "reply": reply}
     state["models"] = GroupModels(model_catalog, state)
     return state
 

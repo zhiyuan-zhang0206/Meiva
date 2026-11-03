@@ -9,7 +9,6 @@ import plistlib
 import socket
 import threading
 import time
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -22,6 +21,7 @@ from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import DARWIN_ARM64, LINUX_X86, fake_host
 from services.desktop.permissions_helper.tests.test_permissions_helper import (
     FakeHelper,
+    HelperStarter,
     fake_tools,
     is_whitelisted_file_path,
     parse_strings,
@@ -37,7 +37,7 @@ from services.desktop.permissions_helper.tests.test_permissions_helper import (
 )
 
 
-def test_root_keeper_method_requests_and_results(fake_helper) -> None:
+def test_root_keeper_method_requests_and_results(fake_helper: HelperStarter) -> None:
     seen: list[dict[str, object]] = []
     results: dict[str, dict[str, object]] = {
         "root_seed": {
@@ -64,9 +64,9 @@ def test_root_keeper_method_requests_and_results(fake_helper) -> None:
         "helper_shutdown": {"stopping": True, "pid": 4242, "run_dir": "/opt/meiva/run"},
     }
 
-    def handler(req: dict) -> dict:
-        seen.append({key: value for key, value in req.items() if key != "id"})  # pyright: ignore[reportUnknownMemberType]
-        return {"id": req["id"], "ok": True, "result": results[req["method"]]}  # pyright: ignore[reportUnknownArgumentType]
+    def handler(req: dict[str, object]) -> dict[str, object]:
+        seen.append({key: value for key, value in req.items() if key != "id"})
+        return {"id": req["id"], "ok": True, "result": results[str(req["method"])]}
 
     path = fake_helper(handler)
     config: client.RootSeedConfig = {
@@ -78,31 +78,31 @@ def test_root_keeper_method_requests_and_results(fake_helper) -> None:
         "env": {"MEIVA_TEST": "1"},
     }
 
-    seeded = PermissionsHelperClient(path).seed_root(config)  # pyright: ignore[reportUnknownArgumentType]
+    seeded = PermissionsHelperClient(path).seed_root(config)
     assert seeded["state"] == "running"
     assert seeded.get("pid") == 5150
     assert seen[0] == {"method": "root_seed", "config": config}
 
-    status = PermissionsHelperClient(path).root_status()  # pyright: ignore[reportUnknownArgumentType]
+    status = PermissionsHelperClient(path).root_status()
     assert status["state"] == "conflict"
     assert status.get("conflict") == {"pid": 4090, "since": 1_700_000_000.0}
     assert seen[1] == {"method": "root_status"}
 
-    stopped = PermissionsHelperClient(path).stop_root()  # pyright: ignore[reportUnknownArgumentType]
+    stopped = PermissionsHelperClient(path).stop_root()
     assert stopped["state"] == "stopping"
     assert stopped["stop_requested"] is True
     assert seen[2] == {"method": "root_stop"}
-    shutdown = PermissionsHelperClient(path).shutdown_helper(Path("/opt/meiva/run"))  # pyright: ignore[reportUnknownArgumentType]
+    shutdown = PermissionsHelperClient(path).shutdown_helper(Path("/opt/meiva/run"))
     assert shutdown == {"stopping": True, "pid": 4242, "run_dir": "/opt/meiva/run"}
     assert seen[3] == {"method": "helper_shutdown", "run_dir": "/opt/meiva/run"}
 
 
-def test_file_method_mapping_and_list_result(fake_helper) -> None:
+def test_file_method_mapping_and_list_result(fake_helper: HelperStarter) -> None:
     seen: list[str] = []
     entries = [{"name": "notes.txt", "size": 12, "mtime": 1_725_000_000, "is_dir": False}]
 
-    def handler(req: dict) -> dict:
-        seen.append(req["method"])  # pyright: ignore[reportUnknownArgumentType]
+    def handler(req: dict[str, object]) -> dict[str, object]:
+        seen.append(str(req["method"]))
         return {
             "id": req["id"],
             "ok": True,
@@ -110,16 +110,16 @@ def test_file_method_mapping_and_list_result(fake_helper) -> None:
         }
 
     path = fake_helper(handler)
-    assert PermissionsHelperClient(path).list_dir("/Users/meiva/Downloads") == entries  # pyright: ignore[reportUnknownArgumentType]
+    assert PermissionsHelperClient(path).list_dir("/Users/meiva/Downloads") == entries
     assert seen == ["file_list"]
 
 
 @pytest.mark.parametrize("content", [b"", b"\x00binary\xff\n"])
-def test_read_file_decodes_base64_content(fake_helper, content: bytes) -> None:
+def test_read_file_decodes_base64_content(fake_helper: HelperStarter, content: bytes) -> None:
     seen: list[str] = []
 
-    def handler(req: dict) -> dict:
-        seen.append(req["method"])  # pyright: ignore[reportUnknownArgumentType]
+    def handler(req: dict[str, object]) -> dict[str, object]:
+        seen.append(str(req["method"]))
         return {
             "id": req["id"],
             "ok": True,
@@ -127,32 +127,32 @@ def test_read_file_decodes_base64_content(fake_helper, content: bytes) -> None:
         }
 
     path = fake_helper(handler)
-    assert PermissionsHelperClient(path).read_file("/Users/meiva/Downloads/example.bin") == content  # pyright: ignore[reportUnknownArgumentType]
+    assert PermissionsHelperClient(path).read_file("/Users/meiva/Downloads/example.bin") == content
     assert seen == ["file_read"]
 
 
 @pytest.mark.parametrize("result", [{}, {"content_b64": 1}, {"content_b64": "%%%"}])
 def test_read_file_rejects_missing_or_malformed_content(
-    fake_helper, result: dict[str, object]
+    fake_helper: HelperStarter, result: dict[str, object]
 ) -> None:
-    def handler(req: dict) -> dict:
+    def handler(req: dict[str, object]) -> dict[str, object]:
         return {"id": req["id"], "ok": True, "result": result}
 
     path = fake_helper(handler)
     with pytest.raises(PermissionsHelperError, match="invalid file_read response"):
-        PermissionsHelperClient(path).read_file("/Users/meiva/Downloads/example.bin")  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(path).read_file("/Users/meiva/Downloads/example.bin")
 
 
-def test_file_operations_raise_server_errors(fake_helper) -> None:
-    def handler(req: dict) -> dict:
+def test_file_operations_raise_server_errors(fake_helper: HelperStarter) -> None:
+    def handler(req: dict[str, object]) -> dict[str, object]:
         error = "outside whitelist" if req["method"] == "file_list" else "file too large"
         return {"id": req["id"], "ok": False, "error": error}
 
     path = fake_helper(handler)
     with pytest.raises(PermissionsHelperError, match="outside whitelist"):
-        PermissionsHelperClient(path).list_dir("/private/secret")  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(path).list_dir("/private/secret")
     with pytest.raises(PermissionsHelperError, match="file too large"):
-        PermissionsHelperClient(path).read_file("/Users/meiva/Downloads/large.bin")  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(path).read_file("/Users/meiva/Downloads/large.bin")
 
 
 def test_file_whitelist_boundary_reference(tmp_path: Path) -> None:
@@ -180,22 +180,22 @@ def test_file_whitelist_boundary_reference(tmp_path: Path) -> None:
     assert not is_whitelisted_file_path(Path("Downloads/report.txt"), roots)
 
 
-def test_gui_ops_wire_requests(fake_helper) -> None:
+def test_gui_ops_wire_requests(fake_helper: HelperStarter) -> None:
     # Pin the wire request each GUI-driver wrapper emits (method name + args),
     # so a driver script can rely on these exact shapes.
-    seen: list[dict] = []
+    seen: list[dict[str, object]] = []
 
-    def handler(req: dict) -> dict:
-        seen.append({k: v for k, v in req.items() if k != "id"})  # pyright: ignore[reportUnknownMemberType]
+    def handler(req: dict[str, object]) -> dict[str, object]:
+        seen.append({k: v for k, v in req.items() if k != "id"})
         return {"id": req["id"], "ok": True, "result": {}}
 
     path = fake_helper(handler)
-    PermissionsHelperClient(path).key(76)  # pyright: ignore[reportUnknownArgumentType]
-    PermissionsHelperClient(path).key(9, cmd=True)  # pyright: ignore[reportUnknownArgumentType]
-    PermissionsHelperClient(path).scroll(10, 20, -50)  # pyright: ignore[reportUnknownArgumentType]
-    PermissionsHelperClient(path).window_info("Notes")  # pyright: ignore[reportUnknownArgumentType]
-    PermissionsHelperClient(path).session_info()  # pyright: ignore[reportUnknownArgumentType]
-    PermissionsHelperClient(path).click(5, 6, double=True)  # pyright: ignore[reportUnknownArgumentType]
+    PermissionsHelperClient(path).key(76)
+    PermissionsHelperClient(path).key(9, cmd=True)
+    PermissionsHelperClient(path).scroll(10, 20, -50)
+    PermissionsHelperClient(path).window_info("Notes")
+    PermissionsHelperClient(path).session_info()
+    PermissionsHelperClient(path).click(5, 6, double=True)
     assert seen == [
         {"method": "key", "code": 76, "cmd": False},
         {"method": "key", "code": 9, "cmd": True},
@@ -229,7 +229,7 @@ def test_incapability_branch_ordering() -> None:
     assert "macOS only" in reason(fake_host(platform=LINUX_X86))
 
 
-def test_recv_reassembles_across_chunks(fake_helper) -> None:
+def test_recv_reassembles_across_chunks(fake_helper: HelperStarter) -> None:
     def raw(conn: socket.socket) -> None:
         read_line(conn)
         payload = json.dumps({"id": 1, "ok": True, "result": {"pong": True}}).encode() + b"\n"
@@ -237,26 +237,24 @@ def test_recv_reassembles_across_chunks(fake_helper) -> None:
         time.sleep(0.05)
         conn.sendall(payload[5:])
 
-    assert PermissionsHelperClient(fake_helper(raw=raw)).ping() == {"pong": True}  # pyright: ignore[reportUnknownArgumentType]
+    assert PermissionsHelperClient(fake_helper(raw=raw)).ping() == {"pong": True}
 
 
-def test_closed_without_response_raises(fake_helper) -> None:
+def test_closed_without_response_raises(fake_helper: HelperStarter) -> None:
     with pytest.raises(PermissionsHelperError, match="closed without a response"):
-        PermissionsHelperClient(
-            fake_helper(raw=read_line)  # pyright: ignore[reportUnknownArgumentType]
-        ).ping()  # read, then close, no reply
+        PermissionsHelperClient(fake_helper(raw=read_line)).ping()  # read, then close, no reply
 
 
-def test_truncated_response_raises(fake_helper) -> None:
+def test_truncated_response_raises(fake_helper: HelperStarter) -> None:
     def raw(conn: socket.socket) -> None:
         read_line(conn)
         conn.sendall(b'{"id":1,"ok":tr')  # partial JSON, no trailing newline
 
     with pytest.raises(PermissionsHelperError, match="truncated"):
-        PermissionsHelperClient(fake_helper(raw=raw)).ping()  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(fake_helper(raw=raw)).ping()
 
 
-def test_call_timeout_raises(fake_helper: Callable[..., Path]) -> None:
+def test_call_timeout_raises(fake_helper: HelperStarter) -> None:
     def raw(conn: socket.socket) -> None:
         read_line(conn)
         time.sleep(1.0)  # accept, never reply
@@ -265,7 +263,7 @@ def test_call_timeout_raises(fake_helper: Callable[..., Path]) -> None:
         PermissionsHelperClient(fake_helper(raw=raw), call_timeout_s=0.2).ping()
 
 
-def test_line_limit_guard(fake_helper) -> None:
+def test_line_limit_guard(fake_helper: HelperStarter) -> None:
     def raw(conn: socket.socket) -> None:
         read_line(conn)
         chunk = b"x" * (1 << 20)
@@ -276,7 +274,7 @@ def test_line_limit_guard(fake_helper) -> None:
                 break
 
     with pytest.raises(PermissionsHelperError, match="exceeded line limit"):
-        PermissionsHelperClient(fake_helper(raw=raw)).ping()  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(fake_helper(raw=raw)).ping()
 
 
 def test_connect_retries_then_succeeds() -> None:
@@ -313,21 +311,21 @@ def test_label_is_per_cluster() -> None:
     assert launchd_job.helper_job_label(demo) == f"com.meiva.permissions-helper.{home_slug(demo)}"
 
 
-def test_screen_capture_probe_reads_the_helpers_grant(fake_helper) -> None:
+def test_screen_capture_probe_reads_the_helpers_grant(fake_helper: HelperStarter) -> None:
     seen: list[str] = []
 
-    def handler(req: dict) -> dict:
-        seen.append(req["method"])  # pyright: ignore[reportUnknownArgumentType]
+    def handler(req: dict[str, object]) -> dict[str, object]:
+        seen.append(str(req["method"]))
         return ping_reply(True)(req)
 
-    status = PermissionsHelperClient(fake_helper(handler)).check_screen_capture()  # pyright: ignore[reportUnknownArgumentType]
+    status = PermissionsHelperClient(fake_helper(handler)).check_screen_capture()
     assert seen == ["ping"]  # measured in the helper, not in whoever is asking
     assert status.state is ScreenCaptureState.AVAILABLE
     assert status.available is True
 
 
-def test_screen_capture_probe_reports_no_grant(fake_helper) -> None:
-    status = PermissionsHelperClient(fake_helper(ping_reply(False))).check_screen_capture()  # pyright: ignore[reportUnknownArgumentType]
+def test_screen_capture_probe_reports_no_grant(fake_helper: HelperStarter) -> None:
+    status = PermissionsHelperClient(fake_helper(ping_reply(False))).check_screen_capture()
     assert status.state is ScreenCaptureState.NO_GRANT
     assert status.available is False
     # The fix is authorizing the helper, not restarting the cluster from a local
@@ -350,7 +348,7 @@ def test_screen_capture_probe_keeps_unreachable_distinct_from_denied() -> None:
 
 
 def test_screen_capture_probe_waits_out_a_cold_helper(
-    fake_helper: Callable[..., Path],
+    fake_helper: HelperStarter,
 ) -> None:
     calls = 0
 
@@ -372,14 +370,14 @@ def test_screen_capture_probe_waits_out_a_cold_helper(
     assert status.state is ScreenCaptureState.AVAILABLE
 
 
-def test_accessibility_probe_reads_the_helpers_grant(fake_helper) -> None:
-    status = PermissionsHelperClient(fake_helper(ping_reply(True, True))).check_accessibility()  # pyright: ignore[reportUnknownArgumentType]
+def test_accessibility_probe_reads_the_helpers_grant(fake_helper: HelperStarter) -> None:
+    status = PermissionsHelperClient(fake_helper(ping_reply(True, True))).check_accessibility()
     assert status.state is AccessibilityState.GRANTED
     assert status.available is True
 
 
-def test_accessibility_probe_reports_missing_grant(fake_helper) -> None:
-    status = PermissionsHelperClient(fake_helper(ping_reply(True, False))).check_accessibility()  # pyright: ignore[reportUnknownArgumentType]
+def test_accessibility_probe_reports_missing_grant(fake_helper: HelperStarter) -> None:
+    status = PermissionsHelperClient(fake_helper(ping_reply(True, False))).check_accessibility()
     assert status.state is AccessibilityState.NOT_GRANTED
     assert status.available is False
     assert "System Settings" in status.diagnostic

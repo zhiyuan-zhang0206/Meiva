@@ -1,16 +1,11 @@
 # meiva:note
-# These existing fault tests use heterogeneous spy state at precise failure boundaries.
-# pyright: reportUnknownMemberType = warning
-# pyright: reportUnknownArgumentType = warning
-# pyright: reportUnknownLambdaType = warning
-# pyright: reportUnknownVariableType = warning
-# meiva:note
 # The understanding consumer loop: claim, locate, describe, store, settle.
 from __future__ import annotations
 
 import asyncio
 import threading
 import time
+from typing import cast
 from unittest.mock import MagicMock
 
 import psycopg
@@ -87,7 +82,7 @@ async def test_chunk_not_yet_checkpointed_goes_back_to_the_queue(
     [(status, attempts, error)] = await job_statuses(aops_pool)
     # meiva:note
     # waiting spends no attempt
-    assert (status, attempts) == ("pending", 0) and "shorter" in error
+    assert (status, attempts) == ("pending", 0) and "shorter" in str(error)
     assert await written_nodes(aops_pool) == []
 
 
@@ -100,7 +95,7 @@ async def test_drifted_indices_fail_the_job_with_an_event(
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="not-m1")
     await run_rounds(aops_pool, 1, model_catalog=model_catalog, seams=chunk_seams)
     [(status, _, error)] = await job_statuses(aops_pool)
-    assert status == "failed" and "not-m1" in error
+    assert status == "failed" and "not-m1" in str(error)
     assert "understanding_chunk_failed" in emitted_events.names()
 
 
@@ -119,7 +114,7 @@ async def test_a_database_blink_fails_the_job_with_an_event_and_is_not_retried(
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await run_rounds(aops_pool, 2, model_catalog=model_catalog, seams=chunk_seams)
     [(status, attempts, error)] = await job_statuses(aops_pool)
-    assert (status, attempts) == ("failed", 1) and "closed the connection" in error
+    assert (status, attempts) == ("failed", 1) and "closed the connection" in str(error)
     assert emitted_events.names() == ["understanding_chunk_failed"]
 
 
@@ -194,7 +189,7 @@ async def test_checkpoint_read_failure_fails_the_job(
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await run_rounds(aops_pool, 1, model_catalog=model_catalog, seams=chunk_seams)
     [(status, _, error)] = await job_statuses(aops_pool)
-    assert status == "failed" and "db blip" in error
+    assert status == "failed" and "db blip" in str(error)
 
 
 async def test_loop_is_idle_when_the_feature_is_off(
@@ -290,7 +285,8 @@ async def test_raw_calls_are_persisted_for_a_done_job(
         [(job_id,)] = await cur.fetchall()
     assert row[:8] == (job_id, 5, 1, 0, "deepseek-flash", "describe it", 3, 1)
     assert row[8] == [{"type": "thinking", "thinking": "hm"}, {"type": "text", "text": "what"}]
-    assert row[10]["input_tokens"] == 9 and row[11] == {"stop_reason": "end_turn"}
+    assert cast("dict[str, object]", row[10])["input_tokens"] == 9
+    assert row[11] == {"stop_reason": "end_turn"}
     assert row[12:] == (12.5, None)
 
 
@@ -331,13 +327,17 @@ async def test_each_group_is_a_node_covering_the_chunk_to_its_end(
 ) -> None:
     # meiva:note
     # Request [head, m0..m3]; chunk [1, 5): four units in three groups.
-    chunk_seams.state["answer"] = lambda located: chunk_result(
-        located,
-        UnitGroup(0, 0, "first"),
-        UnitGroup(1, 2, "second"),
-        UnitGroup(3, 3, "third"),
-        timeline_inputs=chunk_timestamps,
-    )
+
+    def answer(located: LocatedChunk) -> ChunkResult:
+        return chunk_result(
+            located,
+            UnitGroup(0, 0, "first"),
+            UnitGroup(1, 2, "second"),
+            UnitGroup(3, 3, "third"),
+            timeline_inputs=chunk_timestamps,
+        )
+
+    chunk_seams.state["answer"] = answer
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 5), end_msg_id="m3")
     await run_rounds(aops_pool, 1, model_catalog=model_catalog, seams=chunk_seams)
     assert await written_nodes(aops_pool) == [
@@ -375,7 +375,7 @@ async def test_a_refused_grouping_fails_the_job_at_once_without_nodes(
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await run_rounds(aops_pool, 1, model_catalog=model_catalog, seams=chunk_seams)
     [(status, attempts, error)] = await job_statuses(aops_pool)
-    assert (status, attempts) == ("failed", 1) and "refused" in error
+    assert (status, attempts) == ("failed", 1) and "refused" in str(error)
     assert await written_nodes(aops_pool) == []
 
 
@@ -696,5 +696,5 @@ async def test_a_chunk_of_only_framework_notes_is_skipped_without_a_call(
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await run_rounds(aops_pool, 1, model_catalog=model_catalog, seams=chunk_seams)
     [(status, _, error)] = await job_statuses(aops_pool)
-    assert status == "skipped" and "only framework notes" in error
+    assert status == "skipped" and "only framework notes" in str(error)
     assert chunk_seams.state["described"] == [] and await written_nodes(aops_pool) == []

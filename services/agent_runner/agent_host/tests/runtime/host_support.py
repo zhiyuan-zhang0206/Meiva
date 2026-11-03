@@ -511,8 +511,9 @@ class EventTap:
         while True:
             # meiva:note
             # The suppression is the harness's: a fixed argv of repository scripts, no shell, no user input.
-            message: dict[str, Any] | None = await self._subscription.get_message(  # pyright: ignore[reportUnknownMemberType]
-                ignore_subscribe_messages=True, timeout=0.3
+            message = cast(
+                "dict[str, Any] | None",
+                await self._subscription.get_message(ignore_subscribe_messages=True, timeout=0.3),
             )
             if message is None:
                 return found
@@ -529,7 +530,7 @@ async def event_tap(event_bus: EventBus) -> AsyncGenerator[EventTap]:
     client = event_bus.open_async_redis()
     async with client.pubsub() as subscription:  # pyright: ignore[reportUnknownMemberType]
         await subscription.subscribe(event_bus.channel)
-        await subscription.get_message(timeout=1.0)  # pyright: ignore[reportUnknownMemberType]
+        await subscription.get_message(timeout=1.0)
         yield EventTap(subscription)
     await client.aclose()
 

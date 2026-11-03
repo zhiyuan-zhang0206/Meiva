@@ -7,6 +7,7 @@ import pytest
 from base.db.code_version_gate import ProcessDbGate
 from base.host.permissions_helper.client import PermissionsHelperError
 
+from ..slices import AuditLog
 from ..test_computer_mcp_daemon import (
     FakeHelper,
     call,
@@ -25,7 +26,7 @@ def _stops(fake_helper: FakeHelper) -> int:
 
 
 async def test_a_successful_release_ends_the_badge(
-    fake_helper: FakeHelper, audit_log: list, *, database_gate: ProcessDbGate
+    fake_helper: FakeHelper, audit_log: AuditLog, *, database_gate: ProcessDbGate
 ) -> None:
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
     assert (await call(d, "type_text", {"text": "hi"}))["ok"] is True
@@ -36,7 +37,7 @@ async def test_a_successful_release_ends_the_badge(
 
 
 async def test_a_refused_release_keeps_the_badge(
-    fake_helper: FakeHelper, audit_log: list, *, database_gate: ProcessDbGate
+    fake_helper: FakeHelper, audit_log: AuditLog, *, database_gate: ProcessDbGate
 ) -> None:
     d = computer_daemon(database_gate=database_gate, helper=fake_helper)
     assert (await call(d, "type_text", {"text": "hi"}))["ok"] is True
@@ -55,7 +56,7 @@ async def test_a_refused_release_keeps_the_badge(
 )
 async def test_a_failed_stop_is_logged_and_the_release_still_succeeds(
     fake_helper: FakeHelper,
-    audit_log: list,
+    audit_log: AuditLog,
     loguru_records: list[dict[str, Any]],
     monkeypatch: pytest.MonkeyPatch,
     failure: Exception,

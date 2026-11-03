@@ -1,10 +1,4 @@
 # meiva:note
-# These existing fault tests use heterogeneous spy state at precise failure boundaries.
-# pyright: reportUnknownMemberType = warning
-# pyright: reportUnknownArgumentType = warning
-# pyright: reportUnknownLambdaType = warning
-# pyright: reportUnknownVariableType = warning
-# meiva:note
 # A claimed chunk job's wait and the span it ends up describing: the spacing a released job keeps,
 # the give-up clock, cancellation, the part of the chunk existing nodes already cover, and a
 # closing chunk past its snapshot.
@@ -91,7 +85,7 @@ async def test_a_chunk_that_overlaps_existing_nodes_describes_only_what_is_left(
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 2), end_msg_id="m0")
     await run_rounds(aops_pool, 1, model_catalog=model_catalog, seams=chunk_seams)
     status = (await job_statuses(aops_pool))[-1]
-    assert status[0] == "skipped" and "already described" in status[2]
+    assert status[0] == "skipped" and "already described" in str(status[2])
 
 
 async def test_existing_nodes_in_the_middle_leave_a_gap_that_is_reported_not_dropped(
@@ -210,7 +204,7 @@ async def test_a_job_that_never_becomes_describable_is_given_up_on_by_age(
         )
     await run_rounds(aops_pool, 1, model_catalog=model_catalog, seams=chunk_seams)
     [(status, _, error)] = await job_statuses(aops_pool)
-    assert status == "failed" and "gave up" in error
+    assert status == "failed" and "gave up" in str(error)
 
 
 async def test_a_closing_chunk_past_its_snapshot_describes_what_exists_and_reports_the_rest(

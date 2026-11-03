@@ -1,10 +1,4 @@
 # meiva:note
-# These existing fault tests use heterogeneous spy state at precise failure boundaries.
-# pyright: reportUnknownMemberType = warning
-# pyright: reportUnknownArgumentType = warning
-# pyright: reportUnknownLambdaType = warning
-# pyright: reportUnknownVariableType = warning
-# meiva:note
 # Upper-level grouping run by the consumer: due checks, sealing, the durable cursor, failures.
 from __future__ import annotations
 
@@ -124,7 +118,7 @@ def test_generation_reads_late_policy_after_model_construction(
         assert calls[0].problem is not None and "at least one group" in calls[0].problem
 
 
-def _first(row: tuple | None) -> int:
+def _first(row: tuple[int, ...] | None) -> int:
     assert row is not None
     return int(row[0])
 
@@ -174,7 +168,7 @@ def _seams(model_catalog: ModelCatalog, emitted_events: EmittedEvents) -> dict[s
     return seen
 
 
-async def _parents(pool: AsyncConnectionPool) -> list[tuple]:
+async def _parents(pool: AsyncConnectionPool) -> list[tuple[int, int, int, int, str]]:
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             "SELECT depth, span_start, span_end, children_count, text FROM understanding_nodes"
@@ -263,7 +257,11 @@ async def test_a_check_closes_groups_links_children_and_resets_the_baseline(
     config: ConfigBoot, aops_pool: AsyncConnectionPool, _seams: dict[str, Any]
 ) -> None:
     ids = await _fill(aops_pool, 6)
-    _seams["reply"] = lambda nodes: [Group(nodes[0][0], nodes[2][0], "first three")]
+
+    def reply(nodes: list[tuple[int, str]]) -> list[Group]:
+        return [Group(nodes[0][0], nodes[2][0], "first three")]
+
+    _seams["reply"] = reply
     await gc.run_group_checks(
         aops_pool,
         MagicMock(),
@@ -345,9 +343,11 @@ async def test_closing_a_level_can_make_the_next_level_due(
     for i in range(5):
         await _add_leaf(aops_pool, 100 + i, depth=2)
     await _fill(aops_pool, 5)
-    _seams["reply"] = lambda nodes: (
-        [Group(nodes[0][0], nodes[2][0], "g")] if nodes[0][1].startswith("leaf") else []
-    )
+
+    def reply(nodes: list[tuple[int, str]]) -> list[Group]:
+        return [Group(nodes[0][0], nodes[2][0], "g")] if nodes[0][1].startswith("leaf") else []
+
+    _seams["reply"] = reply
     await gc.run_group_checks(
         aops_pool,
         MagicMock(),
@@ -370,7 +370,11 @@ async def test_a_failed_check_emits_an_event_records_calls_and_waits_for_five_mo
     emitted_events: EmittedEvents,
 ) -> None:
     await _fill(aops_pool, 5)
-    _seams["reply_text"] = lambda _nodes: '<group first="1">unclosed'
+
+    def reply_text(_nodes: list[tuple[int, str]]) -> str:
+        return '<group first="1">unclosed'
+
+    _seams["reply_text"] = reply_text
     await gc.run_group_checks(
         aops_pool,
         MagicMock(),
@@ -575,7 +579,11 @@ async def test_the_baseline_counts_leaves_that_landed_while_the_call_ran(
 def test_an_open_set_past_three_checks_must_close_a_group(
     config: ConfigBoot, model_catalog: ModelCatalog
 ) -> None:
-    state: dict[str, Any] = {"reply": lambda nodes: [Group(nodes[0][0], nodes[1][0], "g")]}
+
+    def reply(nodes: list[tuple[int, str]]) -> list[Group]:
+        return [Group(nodes[0][0], nodes[1][0], "g")]
+
+    state: dict[str, Any] = {"reply": reply}
     models = GroupModels(model_catalog, state)
     none = ModelOverrides.from_pins(None)
     nodes = [
@@ -652,7 +660,14 @@ def test_an_open_set_past_three_checks_must_close_a_group(
     ]
 
 
-async def _tree(pool: AsyncConnectionPool) -> tuple[list[tuple], list[tuple]]:
+# meiva:note
+# One understanding_nodes row: (id, depth, span_start, span_end, parent_id).
+type _TreeRow = tuple[int, int, int, int, int | None]
+
+
+async def _tree(
+    pool: AsyncConnectionPool,
+) -> tuple[list[_TreeRow], list[_TreeRow]]:
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             "SELECT id, depth, span_start, span_end, parent_id FROM understanding_nodes"
@@ -699,7 +714,7 @@ async def test_single_groups_in_the_middle_close_and_no_level_ever_overlaps(
         )
     rows, parents = await _tree(aops_pool)
     assert parents, "the plans must have closed some groups"
-    by_parent: dict[int, list[tuple]] = {}
+    by_parent: dict[int, list[_TreeRow]] = {}
     for row in rows:
         if row[4] is not None:
             by_parent.setdefault(row[4], []).append(row)

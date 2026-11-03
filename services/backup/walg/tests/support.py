@@ -66,7 +66,7 @@ class Sandbox:
     # meiva:note
     # The environment the run helpers are handed: a deliberate mapping, not this test process's,
     # so a test proves the value travelled from its caller (`filter_daemon_env` keeps these).
-    environ: Mapping[str, str] = field(default_factory=dict)
+    environ: Mapping[str, str] = field(default_factory=dict[str, str])
 
     # meiva:note
     # The configured WAL-G path as this sandbox holds it: its file, or None while off.

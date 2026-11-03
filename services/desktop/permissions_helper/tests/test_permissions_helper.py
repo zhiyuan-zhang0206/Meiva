@@ -16,10 +16,10 @@ import plistlib
 import socket
 import subprocess
 import threading
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Protocol
 
 import pytest
 
@@ -59,14 +59,14 @@ class FakeHelper:
     def __init__(
         self,
         path: str,
-        handler: Callable[[dict], dict] | None = None,
-        raw: Callable[[socket.socket], None] | None = None,
+        handler: Callable[[dict[str, object]], dict[str, object]] | None = None,
+        raw: Callable[[socket.socket], object] | None = None,
     ) -> None:
         self._srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._srv.bind(path)
         self._srv.listen(8)
         self._srv.settimeout(0.25)
-        self._handler = handler  # pyright: ignore[reportUnknownMemberType]
+        self._handler = handler
         self._raw = raw
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -82,8 +82,8 @@ class FakeHelper:
                 if self._raw is not None:
                     self._raw(conn)
                     continue
-                assert self._handler is not None  # pyright: ignore[reportUnknownMemberType]
-                resp = self._handler(json.loads(read_line(conn)))  # pyright: ignore[reportUnknownMemberType]
+                assert self._handler is not None
+                resp = self._handler(json.loads(read_line(conn)))
                 conn.sendall((json.dumps(resp) + "\n").encode())
 
     def close(self) -> None:
@@ -92,15 +92,26 @@ class FakeHelper:
         self._srv.close()
 
 
+# meiva:note
+# Starts a fake helper on a fresh socket and returns the socket path.
+class HelperStarter(Protocol):
+    def __call__(
+        self,
+        handler: Callable[[dict[str, object]], dict[str, object]] | None = None,
+        *,
+        raw: Callable[[socket.socket], object] | None = None,
+    ) -> str: ...
+
+
 @pytest.fixture
-def fake_helper():
+def fake_helper() -> Iterator[HelperStarter]:
     servers: list[FakeHelper] = []
     paths: list[str] = []
 
     def start(
-        handler: Callable[[dict], dict] | None = None,
+        handler: Callable[[dict[str, object]], dict[str, object]] | None = None,
         *,
-        raw: Callable[[socket.socket], None] | None = None,
+        raw: Callable[[socket.socket], object] | None = None,
     ) -> str:
         # Keep the path short: AF_UNIX sun_path caps near 104 chars, well under
         # what pytest's tmp_path would produce.
@@ -117,27 +128,27 @@ def fake_helper():
         Path(p).unlink(missing_ok=True)
 
 
-def test_call_echoes_method_and_returns_result(fake_helper) -> None:
-    seen: dict = {}
+def test_call_echoes_method_and_returns_result(fake_helper: HelperStarter) -> None:
+    seen: dict[str, object] = {}
 
-    def handler(req: dict) -> dict:
-        seen.update(req)  # pyright: ignore[reportUnknownMemberType]
+    def handler(req: dict[str, object]) -> dict[str, object]:
+        seen.update(req)
         return {"id": req["id"], "ok": True, "result": {"path": req["path"], "bytes": 42}}
 
     path = fake_helper(handler)
-    out = PermissionsHelperClient(path).screencapture_region(1, 2, 3, 4, "out.png")  # pyright: ignore[reportUnknownArgumentType]
+    out = PermissionsHelperClient(path).screencapture_region(1, 2, 3, 4, "out.png")
     assert out == {"path": "out.png", "bytes": 42}
     assert seen["method"] == "screencapture_region"
     assert (seen["x"], seen["y"], seen["w"], seen["h"]) == (1, 2, 3, 4)
 
 
-def test_ok_false_raises_with_server_error(fake_helper) -> None:
+def test_ok_false_raises_with_server_error(fake_helper: HelperStarter) -> None:
     path = fake_helper(lambda req: {"id": req["id"], "ok": False, "error": "no focused window"})
     with pytest.raises(PermissionsHelperError, match="no focused window"):
-        PermissionsHelperClient(path).ax_window_info("Finder")  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(path).ax_window_info("Finder")
 
 
-def test_user_abort_reply_raises_its_own_error(fake_helper) -> None:
+def test_user_abort_reply_raises_its_own_error(fake_helper: HelperStarter) -> None:
     path = fake_helper(
         lambda req: {
             "id": req["id"],
@@ -147,13 +158,13 @@ def test_user_abort_reply_raises_its_own_error(fake_helper) -> None:
         }
     )
     with pytest.raises(UserAbortError, match="stopped by the user") as raised:
-        PermissionsHelperClient(path).click(1, 2)  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(path).click(1, 2)
     # Existing handlers of helper failures still see it as one.
     assert isinstance(raised.value, PermissionsHelperError)
     # Any other failure stays a plain helper error.
     other = fake_helper(lambda req: {"id": req["id"], "ok": False, "error": "no focused window"})
     with pytest.raises(PermissionsHelperError) as plain:
-        PermissionsHelperClient(other).click(1, 2)  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(other).click(1, 2)
     assert not isinstance(plain.value, UserAbortError)
 
 
@@ -182,35 +193,35 @@ def test_permissions_helper_app_dir_is_stable_under_meiva_home(
     )
 
 
-def test_method_name_mapping(fake_helper) -> None:
+def test_method_name_mapping(fake_helper: HelperStarter) -> None:
     # type_text dispatches as method "type", not "type_text" -- pin that wire name.
     seen: list[str] = []
 
-    def handler(req: dict) -> dict:
-        seen.append(req["method"])  # pyright: ignore[reportUnknownArgumentType]
+    def handler(req: dict[str, object]) -> dict[str, object]:
+        seen.append(str(req["method"]))
         return {"id": req["id"], "ok": True, "result": {}}
 
     path = fake_helper(handler)
-    PermissionsHelperClient(path).type_text("hi")  # pyright: ignore[reportUnknownArgumentType]
-    PermissionsHelperClient(path).click(1, 2)  # pyright: ignore[reportUnknownArgumentType]
-    PermissionsHelperClient(path).ping()  # pyright: ignore[reportUnknownArgumentType]
+    PermissionsHelperClient(path).type_text("hi")
+    PermissionsHelperClient(path).click(1, 2)
+    PermissionsHelperClient(path).ping()
     assert seen == ["type", "click", "ping"]
 
 
-def test_indicator_stop_needs_the_helper_capability(fake_helper) -> None:
-    seen: list[dict] = []
+def test_indicator_stop_needs_the_helper_capability(fake_helper: HelperStarter) -> None:
+    seen: list[dict[str, object]] = []
     capable = [True]
 
-    def handler(req: dict) -> dict:
-        seen.append({key: value for key, value in req.items() if key != "id"})  # pyright: ignore[reportUnknownMemberType]
+    def handler(req: dict[str, object]) -> dict[str, object]:
+        seen.append({key: value for key, value in req.items() if key != "id"})
         results: dict[str, object] = {
             "ping": {"pong": True, "capture_indicator_v1": capable[0]},
             "indicator_stop": {"stopped": True},
         }
-        return {"id": req["id"], "ok": True, "result": results[req["method"]]}
+        return {"id": req["id"], "ok": True, "result": results[str(req["method"])]}
 
     path = fake_helper(handler)
-    assert PermissionsHelperClient(path).indicator_stop()["stopped"] is True  # pyright: ignore[reportUnknownArgumentType]
+    assert PermissionsHelperClient(path).indicator_stop()["stopped"] is True
     assert seen == [{"method": "ping"}, {"method": "indicator_stop"}]
     # The helper shows the badge itself; there is no client call that asks it to.
     assert not hasattr(client, "indicator_hold")
@@ -218,25 +229,25 @@ def test_indicator_stop_needs_the_helper_capability(fake_helper) -> None:
     capable[0] = False
     seen.clear()
     with pytest.raises(PermissionsHelperError, match="capture_indicator_v1"):
-        PermissionsHelperClient(path).indicator_stop()  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(path).indicator_stop()
     assert seen == [{"method": "ping"}]
 
 
-def test_nursery_method_requests_and_results(fake_helper) -> None:
-    seen: list[dict] = []
+def test_nursery_method_requests_and_results(fake_helper: HelperStarter) -> None:
+    seen: list[dict[str, object]] = []
 
-    def handler(req: dict) -> dict:
-        seen.append({key: value for key, value in req.items() if key != "id"})  # pyright: ignore[reportUnknownMemberType]
+    def handler(req: dict[str, object]) -> dict[str, object]:
+        seen.append({key: value for key, value in req.items() if key != "id"})
         results: dict[str, object] = {
             "spawn": {"pid": 4123, "reused": False},
             "session_list": {"sessions": [{"name": "agent-demo", "pid": 4123, "alive": True}]},
             "session_has": {"alive": True},
             "signal": {"sent": True},
         }
-        return {"id": req["id"], "ok": True, "result": results[req["method"]]}
+        return {"id": req["id"], "ok": True, "result": results[str(req["method"])]}
 
     path = fake_helper(handler)
-    assert PermissionsHelperClient(path).spawn_process(  # pyright: ignore[reportUnknownArgumentType]
+    assert PermissionsHelperClient(path).spawn_process(
         "agent-demo",
         ["/usr/bin/env", "python"],
         {"MEIVA_HOME": "/Users/meiva/.meiva"},
@@ -244,12 +255,12 @@ def test_nursery_method_requests_and_results(fake_helper) -> None:
         "/Users/meiva/logs/stdout.log",
         "/Users/meiva/logs/stderr.log",
     ) == {"pid": 4123, "reused": False}
-    assert PermissionsHelperClient(path).session_list("agent-") == [  # pyright: ignore[reportUnknownArgumentType]
+    assert PermissionsHelperClient(path).session_list("agent-") == [
         {"name": "agent-demo", "pid": 4123, "alive": True}
     ]
-    assert PermissionsHelperClient(path).session_has("agent-demo")  # pyright: ignore[reportUnknownArgumentType]
-    assert PermissionsHelperClient(path).signal_session(name="agent-demo", sig=2)  # pyright: ignore[reportUnknownArgumentType]
-    assert PermissionsHelperClient(path).signal_session(pid=4123)  # pyright: ignore[reportUnknownArgumentType]
+    assert PermissionsHelperClient(path).session_has("agent-demo")
+    assert PermissionsHelperClient(path).signal_session(name="agent-demo", sig=2)
+    assert PermissionsHelperClient(path).signal_session(pid=4123)
 
     assert seen == [
         {
@@ -268,11 +279,11 @@ def test_nursery_method_requests_and_results(fake_helper) -> None:
     ]
 
 
-def test_spawn_process_preserves_reused_result(fake_helper) -> None:
-    def handler(req: dict) -> dict:
+def test_spawn_process_preserves_reused_result(fake_helper: HelperStarter) -> None:
+    def handler(req: dict[str, object]) -> dict[str, object]:
         return {"id": req["id"], "ok": True, "result": {"pid": 4123, "reused": True}}
 
-    assert PermissionsHelperClient(fake_helper(handler)).spawn_process(  # pyright: ignore[reportUnknownArgumentType]
+    assert PermissionsHelperClient(fake_helper(handler)).spawn_process(
         "agent-demo",
         ["/usr/bin/env", "python"],
         {},
@@ -407,7 +418,9 @@ def is_whitelisted_file_path(path: Path, roots: list[Path]) -> bool:
 # reads it from the helper; the calling process's own grant is a different fact.
 
 
-def ping_reply(preflight_screen: bool, ax_trusted: bool = True) -> Callable[[dict], dict]:
+def ping_reply(
+    preflight_screen: bool, ax_trusted: bool = True
+) -> Callable[[dict[str, object]], dict[str, object]]:
     return lambda req: {
         "id": req["id"],
         "ok": True,
