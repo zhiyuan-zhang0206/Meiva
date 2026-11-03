@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     # Annotation-only (`build` return): keeps the chat-model stack off the
@@ -27,10 +27,10 @@ _QWEN_EFFORT_LEVELS = ("none", "high")
 
 def qwen_extra_body(
     *,
-    thinking: Mapping[str, Any] | None,
+    thinking: Mapping[str, object] | None,
     reasoning_effort: str,
     effort_levels: tuple[str, ...],
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Resolve the qwen branch's `extra_body` kwarg.
 
     Same shape as `mimo_extra_body` on a different wire switch: DashScope's
@@ -76,14 +76,11 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # the cross-provider effort maps onto the same on/off switch. Verified live
     # 2026-08-20 on both registered models: `enable_thinking: false` returns 200
     # with empty reasoning, not the 400 the undocumented switch risked.
-    qwen_kwargs: dict[str, Any] = {}
     extra_body = qwen_extra_body(
         thinking=ctx.thinking,
         reasoning_effort=ctx.resolved_effort,
         effort_levels=(ctx.effort_levels if ctx.effort_levels is not None else _QWEN_EFFORT_LEVELS),
     )
-    if extra_body:
-        qwen_kwargs["extra_body"] = extra_body
     # stream_usage sends `stream_options.include_usage`, without which the
     # stream carries no final usage frame — and DashScope reports its implicit
     # context-cache hits in that frame's `prompt_tokens_details.cached_tokens`,
@@ -100,7 +97,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
         stream_usage=True,
         disable_streaming=ctx.disable_streaming,
         timeout=ctx.timeout,
-        **qwen_kwargs,
+        extra_body=extra_body or None,
     )
 
 

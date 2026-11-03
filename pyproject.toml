@@ -1112,6 +1112,11 @@ reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/lm_alibaba"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/plugins/lm_moonshot"
 reportAny = "error"
 reportExplicitAny = "error"
