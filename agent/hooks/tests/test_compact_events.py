@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import Any, get_type_hints
+from typing import get_type_hints
 
 import pytest
 from pydantic import ValidationError
@@ -59,7 +59,7 @@ def test_each_compaction_pair_serializes_and_restores_existing_wire_values(
 @pytest.mark.parametrize(
     "role,field", [("compact_started", "mode"), ("compact_finished", "status")]
 )
-def test_raw_event_domain_rejects_unknown_values(role: str, field: str, invalid: Any) -> None:
+def test_raw_event_domain_rejects_unknown_values(role: str, field: str, invalid: object) -> None:
     raw = {
         "agent_id": 7,
         "role": role,

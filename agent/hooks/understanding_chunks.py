@@ -23,10 +23,11 @@ may fail the agent's turn.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
 
 from langchain_core.messages import AIMessage, AnyMessage
+from psycopg.rows import class_row
 from psycopg_pool import AsyncConnectionPool
 
 from agent.state import AgentState
@@ -53,7 +54,7 @@ async def due_chunk_update(
     agent_id: int,
     agent: AgentSlices,
     catalog: ModelCatalog,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """The state update after one llm turn: `{}`, or the moved cut once a chunk is enqueued.
 
     `request` is the message list the turn sent (head included); `final_msg`
@@ -116,17 +117,27 @@ async def enqueue_closing_chunk(
     )
 
 
+# meiva:note
+# The one column `_NEWEST_CHECKPOINT_TS` selects: the checkpoint's stored `ts`, if it has one.
+@dataclass(frozen=True)
+class _CheckpointTs:
+    ts: str | None
+
+
+# meiva:note
+# The column is aliased (`AS ts`) because the row is read through `class_row`, which maps by column
+# name; `checkpoint->>'ts'` on its own arrives as `?column?`.
 _NEWEST_CHECKPOINT_TS = (
-    "SELECT checkpoint->>'ts' FROM checkpoints WHERE thread_id = %s AND checkpoint_ns = ''"
+    "SELECT checkpoint->>'ts' AS ts FROM checkpoints WHERE thread_id = %s AND checkpoint_ns = ''"
     " ORDER BY checkpoint_id DESC LIMIT 1"
 )
 
 
 async def newest_checkpoint_ts(pool: AsyncConnectionPool, agent_id: int) -> datetime | None:
-    async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute(_NEWEST_CHECKPOINT_TS, (str(agent_id),))
+    async with pool.connection() as conn, conn.cursor(row_factory=class_row(_CheckpointTs)) as cur:
+        _ = await cur.execute(_NEWEST_CHECKPOINT_TS, (str(agent_id),))
         row = await cur.fetchone()
-    return None if row is None or not row[0] else datetime.fromisoformat(str(row[0]))
+    return None if row is None or not row.ts else datetime.fromisoformat(row.ts)
 
 
 async def await_snapshot(

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
@@ -65,7 +64,16 @@ def _reply(input_tokens: int) -> AIMessage:
 _BASELINED = CompactState(understanding_cut_index=1, understanding_cut_tokens=500)
 
 
-async def _jobs(pool: AsyncConnectionPool) -> list[tuple[Any, ...]]:
+# meiva:note
+# The `compact` arm of the update, narrowed: a state update is `dict[str, object]` (the channel
+# values differ by key), and these tests read the moved cut's fields.
+def _moved_cut(update: dict[str, object]) -> CompactState:
+    moved = update["compact"]
+    assert isinstance(moved, CompactState)
+    return moved
+
+
+async def _jobs(pool: AsyncConnectionPool) -> list[tuple[object, ...]]:
     async with pool.connection() as conn, conn.cursor() as cur:
         await cur.execute(
             "SELECT agent_id, compact_version, start_index, end_index, end_msg_id,"
@@ -90,7 +98,7 @@ async def test_a_turn_past_the_threshold_queues_the_chunk_and_moves_the_cut(
     )
 
     assert await _jobs(aops_pool) == [(_AGENT, 4, 1, 10, "m9", None, "pending")]
-    moved = update["compact"]
+    moved = _moved_cut(update)
     assert (moved.understanding_cut_index, moved.understanding_cut_tokens, moved.version) == (
         10,
         500 + _threshold(model_catalog),
@@ -128,7 +136,7 @@ async def test_a_segments_first_turn_records_the_baseline_without_queueing(
         catalog=model_catalog,
     )
 
-    baseline = update["compact"]
+    baseline = _moved_cut(update)
     assert (baseline.understanding_cut_index, baseline.understanding_cut_tokens) == (1, 30_000)
     assert await _jobs(aops_pool) == []
 

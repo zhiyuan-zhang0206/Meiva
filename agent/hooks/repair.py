@@ -54,9 +54,8 @@
 
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Any
 
-from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, ToolMessage
 from langchain_core.messages.modifier import RemoveMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
@@ -162,7 +161,7 @@ def dangling_tool_pairing_repairs(
     *,
     created_at: datetime,
     pending_notes: Sequence[AnyMessage] = (),
-) -> list[Any]:
+) -> list[BaseMessage]:
     """Return one full rebuild enforcing exactly one result per tool_call id.
 
     Redundant tool_results are dropped first. Every remaining tool_use without
@@ -184,7 +183,7 @@ def dangling_tool_pairing_repairs(
         while j < len(survivors) and isinstance(survivors[j], ToolMessage):
             j += 1
         inserts[j - 1] = [_synthetic_tool_result(t, created_at=created_at) for t in ids]
-    rebuilt: list[Any] = [RemoveMessage(id=REMOVE_ALL_MESSAGES)]
+    rebuilt: list[BaseMessage] = [RemoveMessage(id=REMOVE_ALL_MESSAGES)]
     for k, m in enumerate(survivors):
         rebuilt.append(m)
         rebuilt.extend(inserts.get(k, ()))
@@ -204,7 +203,7 @@ class _RepairDanglingToolPairingHook(Hook):
         runtime: Runtime[MeivaContext],
         config: RunnableConfig,
         /,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, object] | None:
         repairs = dangling_tool_pairing_repairs(
             state.messages,
             created_at=runtime.context.require_clock().now(),

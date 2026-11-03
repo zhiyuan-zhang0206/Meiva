@@ -59,7 +59,9 @@ async def test_after_init_initializes_each_host_workspace_without_sdk_slot(
     state_cls = build_agent_state(ExtensionRegistry((("meiva_code", agent_runtime.contribute()),)))
     hook = agent_runtime.ValidateCwdAfterInitHook()
 
-    async def after_init(state: BaseAgentState, runtime: Runtime[MeivaContext]) -> dict[str, str]:
+    async def after_init(
+        state: BaseAgentState, runtime: Runtime[MeivaContext]
+    ) -> dict[str, object]:
         assert not hasattr(meiva, "context")
         return await hook(state, runtime, None) or {}
 

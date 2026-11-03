@@ -33,6 +33,7 @@ from base.config.tests.configuration import defaults
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.host.boundary.json_values import is_object_list
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
@@ -468,9 +469,14 @@ async def test_a_skill_installed_after_establishment_reaches_the_next_turn(
     )
 
     assert update is not None
-    (note,) = update["messages"]
+    written = update["messages"]
+    assert is_object_list(written)
+    (note,) = written
+    assert isinstance(note, HumanMessage)
     assert "- `meiva.skills.beta` — Beta desc" in note.content
-    assert update["capabilities"].indexed == {"alpha", "beta"}
+    capabilities = update["capabilities"]
+    assert isinstance(capabilities, CapabilitiesState)
+    assert capabilities.indexed == {"alpha", "beta"}
 
 
 @pytest.mark.usefixtures("skills_unit")
