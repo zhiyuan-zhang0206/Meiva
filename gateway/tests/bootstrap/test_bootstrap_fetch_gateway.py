@@ -3,6 +3,7 @@
 from typing import Any
 from urllib.parse import urlsplit
 
+import psycopg
 import pytest
 
 from base import config
@@ -22,7 +23,7 @@ _SECRET = "live-secret"  # noqa: S105
 
 
 def test_fetch_bootstrap_config_against_live_endpoint(
-    db_conn,
+    db_conn: psycopg.Connection,
     monkeypatch: pytest.MonkeyPatch,
     served_gateway_home: Any,
     *,

@@ -19,7 +19,7 @@ def _checkpoint(conn: psycopg.Connection, agent_id: int) -> str:
     return "ckpt-1"
 
 
-def _row(conn: psycopg.Connection, agent_id: int) -> dict:
+def _row(conn: psycopg.Connection, agent_id: int) -> dict[str, object]:
     with conn.cursor() as cur:
         cur.execute("SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,))
         r = cur.fetchone()
@@ -27,7 +27,7 @@ def _row(conn: psycopg.Connection, agent_id: int) -> dict:
     return r[0] or {}
 
 
-def _fork_inbound(conn: psycopg.Connection, agent_id: int) -> dict | None:
+def _fork_inbound(conn: psycopg.Connection, agent_id: int) -> dict[str, object] | None:
     with conn.cursor() as cur:
         cur.execute(
             "SELECT payload FROM inbound_messages WHERE agent_id = %s AND kind = 'fork'",

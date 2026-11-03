@@ -424,7 +424,7 @@ def test_client(db_conn: psycopg.Connection):
         yield client
 
 
-def _put_checkpoint(agent_id: int, messages: list) -> None:
+def _put_checkpoint(agent_id: int, messages: Sequence[BaseMessage]) -> None:
     from langgraph.checkpoint.base import empty_checkpoint
     from langgraph.checkpoint.postgres import PostgresSaver
 

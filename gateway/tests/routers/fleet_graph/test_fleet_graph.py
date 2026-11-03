@@ -16,6 +16,7 @@ import json
 import math
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 import psycopg
 import pytest
@@ -127,7 +128,7 @@ def test_decay_lambda_comes_from_display_config(
     assert len(edges) == 1  # exp(0 * 15d) = 1.0 — above the 0.01 drop threshold
 
 
-def _nodes_by_id(client: TestClient, query: str = "") -> dict[int, dict]:
+def _nodes_by_id(client: TestClient, query: str = "") -> dict[int, dict[str, object]]:
     resp = client.get(f"/api/fleet/graph{query}")
     assert resp.status_code == 200, resp.text
     return {n["agent_id"]: n for n in resp.json()["nodes"]}
@@ -277,7 +278,7 @@ def test_node_drops_degree_fields(db_conn: psycopg.Connection) -> None:
 # ── edge weight: per-event sum-of-exponentials decay ──────────────────────
 
 
-def _edges_by_type(client: TestClient, query: str = "") -> dict[str, dict]:
+def _edges_by_type(client: TestClient, query: str = "") -> dict[str, dict[str, object]]:
     resp = client.get(f"/api/fleet/graph{query}")
     assert resp.status_code == 200, resp.text
     return {e["event_type"]: e for e in resp.json()["edges"]}
@@ -374,7 +375,7 @@ def test_edge_weight_sums_per_event_with_decay(db_conn: psycopg.Connection) -> N
         edges = _edges_by_type(client)
 
     expected = 1.0 + math.exp(-0.5 * 2.0)
-    assert edges["send_message"]["weight"] == pytest.approx(expected, abs=1e-3)  # pyright: ignore[reportUnknownMemberType]
+    assert edges["send_message"]["weight"] == pytest.approx(expected, abs=1e-3)
     assert edges["send_message"]["event_count"] == 2
 
 
@@ -401,7 +402,7 @@ def test_edge_aggregation_applies_window_live_filter_and_weights(
     by_type = {name: (weight, count) for _target, _agent, name, weight, count, _last in rows}
     assert by_type["spawn"] == (2.0, 1)
     message_weight, message_count = by_type["send_message"]
-    assert message_weight == pytest.approx(math.exp(-1.0), abs=1e-3)  # pyright: ignore[reportUnknownMemberType]
+    assert message_weight == pytest.approx(math.exp(-1.0), abs=1e-3)
     assert message_count == 1  # the 96h-old message is outside the 3-day window
     assert "fork" not in by_type
 
@@ -425,8 +426,10 @@ def test_decay_lambda_param_steepens_decay(db_conn: psycopg.Connection) -> None:
     _event(db_conn, source_agent=s, target_agent=c, event_type="send_message", age_hours=48)
 
     with gateway_test_client() as client:
-        gentle = _edges_by_type(client, "?decay_lambda=0.1")["send_message"]["weight"]
-        steep = _edges_by_type(client, "?decay_lambda=2.0")["send_message"]["weight"]
+        gentle = cast(
+            "float", _edges_by_type(client, "?decay_lambda=0.1")["send_message"]["weight"]
+        )
+        steep = cast("float", _edges_by_type(client, "?decay_lambda=2.0")["send_message"]["weight"])
 
     # A larger lambda decays an aged event harder -> smaller weight.
     assert steep < gentle
@@ -440,9 +443,11 @@ def test_decay_lambda_is_quantized_for_edge_computation(
     _event(db_conn, source_agent=s, target_agent=c, event_type="send_message", age_hours=48)
 
     with gateway_test_client() as client:
-        weight = _edges_by_type(client, "?decay_lambda=0.551")["send_message"]["weight"]
+        weight = cast(
+            "float", _edges_by_type(client, "?decay_lambda=0.551")["send_message"]["weight"]
+        )
 
-    assert weight == pytest.approx(math.exp(-0.55 * 2.0), abs=1e-4)  # pyright: ignore[reportUnknownMemberType]
+    assert weight == pytest.approx(math.exp(-0.55 * 2.0), abs=1e-4)
 
 
 def test_decay_lambda_quantization_aliases_cache_key(db_conn: psycopg.Connection) -> None:

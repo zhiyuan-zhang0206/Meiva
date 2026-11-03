@@ -38,10 +38,12 @@ from gateway.tests.support.runner_ops.ops_stub import completed, runner_ops
 def make_agent(db: psycopg.Connection) -> int:
     with db.cursor() as cur:
         cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
-        aid = cur.fetchone()[0]  # type: ignore[index]
+        row = cur.fetchone()
+        assert row is not None
+        aid: int = row[0]
         cur.execute(
             "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'test', 'running')",
-            (aid,),  # pyright: ignore[reportUnknownArgumentType]
+            (aid,),
         )
     db.commit()
     return aid
@@ -65,7 +67,9 @@ def make_task(
             "VALUES (%s, %s, %s, %s, %s, 'user', %s, %s) RETURNING id",
             (title, description, results, status, owner, remind_interval_seconds, parent_id),
         )
-        tid = cur.fetchone()[0]  # type: ignore[index]
+        row = cur.fetchone()
+        assert row is not None
+        tid: int = row[0]
     db.commit()
     return tid
 
@@ -76,7 +80,9 @@ def make_root_task(db: psycopg.Connection) -> int:
             "INSERT INTO agent_tasks (title, description, status, created_by, is_root) "
             "VALUES ('Root', 'root', 'in_progress', 'system', TRUE) RETURNING id"
         )
-        tid = cur.fetchone()[0]  # type: ignore[index]
+        row = cur.fetchone()
+        assert row is not None
+        tid: int = row[0]
     db.commit()
     return tid
 

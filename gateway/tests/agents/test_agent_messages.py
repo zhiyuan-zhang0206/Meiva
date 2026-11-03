@@ -18,9 +18,12 @@ Coverage:
     empty history)
 """
 
+from collections.abc import Sequence
+
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from langchain_core.messages import BaseMessage
 
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -39,7 +42,7 @@ def test_client(db_conn: psycopg.Connection, *, machine_identity: MachineIdentit
         yield client
 
 
-def _put_checkpoint(agent_id: int, messages: list) -> None:
+def _put_checkpoint(agent_id: int, messages: Sequence[BaseMessage]) -> None:
     """Write channel_values.messages = `messages` directly via
     PostgresSaver.put, bypassing the graph — the endpoint only cares about
     reading back what is in the checkpoint."""

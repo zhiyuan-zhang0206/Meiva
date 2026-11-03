@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import json
+from typing import cast
 
 import psycopg
 import pytest
@@ -83,7 +84,7 @@ async def _collect_throttled_frames(
                     # heartbeat frame decodes to an object, not a list — skip it.
                     parsed = json.loads(frame.decode().removeprefix("data: ").strip())
                     if isinstance(parsed, list):
-                        event_count += len(parsed)  # pyright: ignore[reportUnknownArgumentType]
+                        event_count += len(cast("list[object]", parsed))
     finally:
         req.disconnected = True
         await pub_task
@@ -92,7 +93,7 @@ async def _collect_throttled_frames(
     return frames
 
 
-def _decode_throttled_frames(chunks: list[bytes]) -> list[list[dict]]:
+def _decode_throttled_frames(chunks: list[bytes]) -> list[list[dict[str, object]]]:
     """Parse throttled SSE frames exactly like the browser does — ONE
     `json.parse` per `data:` line, yielding a JSON array of event OBJECTS.
 
@@ -104,7 +105,7 @@ def _decode_throttled_frames(chunks: list[bytes]) -> list[list[dict]]:
     point: this helper must model the client so a double-encode regression
     can never pass green again.
     """
-    out: list[list[dict]] = []
+    out: list[list[dict[str, object]]] = []
     text = b"".join(chunks).decode()
     for frame in text.split("\n\n"):
         # Split/rejoin exactly like the browser: "\n" only. str.splitlines() would also break on U+0085 / U+2028 /
@@ -114,14 +115,15 @@ def _decode_throttled_frames(chunks: list[bytes]) -> list[list[dict]]:
         ]
         if not data_lines:
             continue
-        payload = json.loads("\n".join(data_lines))
-        assert isinstance(payload, list), f"throttled frame is not a JSON array: {payload!r}"
+        decoded = json.loads("\n".join(data_lines))
+        assert isinstance(decoded, list), f"throttled frame is not a JSON array: {decoded!r}"
+        payload = cast("list[object]", decoded)
         for elem in payload:
             assert isinstance(elem, dict), (
-                f"throttled frame element is {type(elem).__name__}, not an object — "  # pyright: ignore[reportUnknownArgumentType]
+                f"throttled frame element is {type(elem).__name__}, not an object — "
                 f"the server double-encoded the batch: {elem!r}"
             )
-        out.append(payload)  # pyright: ignore[reportUnknownMemberType]
+        out.append(cast("list[dict[str, object]]", payload))
     return out
 
 
@@ -151,10 +153,10 @@ def test_throttled_batches_multiple_events(
         )
     )
     decoded = _decode_throttled_frames(frames)
-    assert len(decoded) >= 1  # pyright: ignore[reportUnknownArgumentType]
+    assert len(decoded) >= 1
     # All 3 events should be present, however many frames they landed in
     all_events = [e for batch in decoded for e in batch]
-    assert len(all_events) == 3  # pyright: ignore[reportUnknownArgumentType]
+    assert len(all_events) == 3
     roles = [e["role"] for e in all_events]
     assert "chat_delta" in roles
     assert "code_delta" in roles
@@ -292,7 +294,7 @@ def test_throttled_drops_invalid_payload(
     decoded = _decode_throttled_frames(frames)
     all_events = [e for batch in decoded for e in batch]
     # Only the valid event makes it through
-    assert len(all_events) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert len(all_events) == 1
     assert all_events[0]["role"] == "chat_delta"
     assert all_events[0]["content"] == "valid"
 
@@ -342,5 +344,5 @@ def test_throttled_stream_keeps_unicode_line_separators(
     )
     decoded = _decode_throttled_frames(frames)
     all_events = [e for batch in decoded for e in batch]
-    assert len(all_events) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert len(all_events) == 1
     assert all_events[0]["content"] == content

@@ -12,10 +12,10 @@ import threading
 import time
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import cast
 
 from base.cluster.derive import inbound_channel
 from base.events.live.bus import EventBus
+from gateway.tests.support.live_events.pubsub_view import messages
 
 __all__ = ["WakeLog", "recording_wakes"]
 
@@ -58,15 +58,13 @@ def recording_wakes(bus: EventBus, agent_id: int) -> Generator[WakeLog]:
 
     def listen() -> None:
         while not stop.is_set():
-            # meiva:note
-            # The redis-py client and its pubsub are untyped. The value comes from an untyped third-party call.
-            message = pubsub.get_message(timeout=_POLL_S)  # pyright: ignore[reportUnknownMemberType]
+            message = messages(pubsub).get_message(timeout=_POLL_S)
             if message is None:
                 continue
             if message["type"] == "subscribe":
                 ready.set()
             elif message["type"] == "message":
-                data = cast(object, message["data"])
+                data = message["data"]
                 wakes.append(str(data))
 
     thread = threading.Thread(target=listen, name="wake-recorder")
@@ -78,5 +76,5 @@ def recording_wakes(bus: EventBus, agent_id: int) -> Generator[WakeLog]:
     finally:
         stop.set()
         thread.join()
-        pubsub.close()  # pyright: ignore[reportUnknownMemberType]
+        pubsub.close()
         redis.close()

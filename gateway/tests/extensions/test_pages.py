@@ -56,7 +56,12 @@ def _close_page(client: TestClient, agent_id: int, name: str) -> Any:
     )
 
 
-def _page_rows(conn: psycopg.Connection, agent_id: int) -> list[tuple]:
+# meiva:note
+# One agent_pages row: (name, port, host, title, serve_dir, closed_at).
+type _PageRow = tuple[str, int, str, str | None, str | None, datetime | None]
+
+
+def _page_rows(conn: psycopg.Connection, agent_id: int) -> list[_PageRow]:
     with conn.cursor() as cur:
         cur.execute(
             "SELECT name, port, host, title, serve_dir, closed_at FROM agent_pages "
@@ -143,13 +148,13 @@ def _assert_reopen_response_pair(
     assert reopened["url"] == f"http://test-gateway.invalid:8000/pages/{aid}-p/"
 
 
-def _assert_two_page_rows(rows: list[tuple]) -> None:
+def _assert_two_page_rows(rows: list[_PageRow]) -> None:
     # Two total rows: r1 now closed, r2 open.
-    assert len(rows) == 2  # pyright: ignore[reportUnknownArgumentType]
+    assert len(rows) == 2
     closed_row = [r for r in rows if r[5] is not None]
     open_row = [r for r in rows if r[5] is None]
-    assert len(closed_row) == 1  # pyright: ignore[reportUnknownArgumentType]
-    assert len(open_row) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert len(closed_row) == 1
+    assert len(open_row) == 1
     assert open_row[0] == ("p", 8002, "localhost", "v2", None, None)
 
 
@@ -248,7 +253,7 @@ def test_close_page_cas_open_to_closed(db_conn: psycopg.Connection) -> None:
 
     db_conn.rollback()
     rows = _page_rows(db_conn, aid)
-    assert len(rows) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert len(rows) == 1
     assert rows[0][5] is not None  # closed_at
 
 

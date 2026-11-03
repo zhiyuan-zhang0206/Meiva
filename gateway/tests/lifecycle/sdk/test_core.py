@@ -1,5 +1,6 @@
 from uuid import uuid4
 
+import httpx
 import psycopg
 import pytest
 
@@ -26,7 +27,9 @@ def _spawn_self() -> int:
 
 
 class TestSelfTerminate:
-    def test_terminate_inserts_inbound(self, db_conn: psycopg.Connection, gateway_client):
+    def test_terminate_inserts_inbound(
+        self, db_conn: psycopg.Connection, gateway_client: httpx.Client
+    ):
         aid = _spawn_self()
         with pytest.raises(meiva.self.AgentTermination):
             meiva.self.terminate()
@@ -36,7 +39,7 @@ class TestSelfTerminate:
 
 class TestSelfRestart:
     def test_rejects_incompatible_effort_without_overlay_or_inbound(
-        self, db_conn: psycopg.Connection, gateway_client
+        self, db_conn: psycopg.Connection, gateway_client: httpx.Client
     ) -> None:
         aid = meiva.agents.spawn(
             config_overlay={"llm_model": "deepseek-flash"}, idempotency_key=str(uuid4())
@@ -50,7 +53,7 @@ class TestSelfRestart:
         assert not _inbound_rows(db_conn, aid)
 
     def test_model_and_effort_change_commit_with_the_restart(
-        self, db_conn: psycopg.Connection, gateway_client
+        self, db_conn: psycopg.Connection, gateway_client: httpx.Client
     ) -> None:
         aid = meiva.agents.spawn(
             config_overlay={"llm_model": "gpt-5.6-sol", "reasoning_effort": "low"},
@@ -65,7 +68,9 @@ class TestSelfRestart:
         ).fetchone() == (overlay,)
         assert _inbound_rows(db_conn, aid) == [("model change", "restart", "self")]
 
-    def test_restart_inserts_inbound(self, db_conn: psycopg.Connection, gateway_client):
+    def test_restart_inserts_inbound(
+        self, db_conn: psycopg.Connection, gateway_client: httpx.Client
+    ):
         aid = _spawn_self()
         with pytest.raises(meiva.self.AgentRestart):
             meiva.self.restart("restart self")

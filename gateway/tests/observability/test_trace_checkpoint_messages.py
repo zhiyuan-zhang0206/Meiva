@@ -12,9 +12,12 @@ Coverage:
   - checkpoint read failure surfaces as 503
 """
 
+from collections.abc import Sequence
+
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from langchain_core.messages import BaseMessage
 
 from base.db import create_agent
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
@@ -27,7 +30,9 @@ def test_client(db_conn: psycopg.Connection):
         yield client
 
 
-def _put_checkpoint_with_trace(agent_id: int, messages: list, trace_id: str) -> str:
+def _put_checkpoint_with_trace(
+    agent_id: int, messages: Sequence[BaseMessage], trace_id: str
+) -> str:
     """Write one checkpoint whose metadata carries trace_id; return its id."""
     from typing import cast
 

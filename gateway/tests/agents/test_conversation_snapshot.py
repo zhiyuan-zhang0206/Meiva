@@ -8,9 +8,12 @@ route's edge contract (nonexistent agent 404s through the timeline read,
 matching GET .../timeline).
 """
 
+from collections.abc import Sequence
+
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from langchain_core.messages import BaseMessage
 
 from base.agents.inbox.insert import insert_inbound_message
 from base.config import settings
@@ -27,7 +30,7 @@ def test_client(db_conn: psycopg.Connection):
         yield client
 
 
-def _put_checkpoint(agent_id: int, messages: list) -> None:
+def _put_checkpoint(agent_id: int, messages: Sequence[BaseMessage]) -> None:
     """Write channel_values.messages directly (same helper shape as
     test_token_usage.py): the composed reads only care about what is stored."""
     from langgraph.checkpoint.base import empty_checkpoint

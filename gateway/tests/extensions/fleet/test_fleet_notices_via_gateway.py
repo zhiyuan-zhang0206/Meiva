@@ -3,7 +3,8 @@
 Split out of `meiva_builtins/plugins/meiva_fleet/tests/test_meiva_fleet_plugin.py`: these cases route the SDK's gateway client at `gateway.app`, so they live with the gateway tests."""
 
 from collections.abc import Iterator
-from typing import Any
+from datetime import datetime
+from typing import cast
 from uuid import uuid4
 
 import psycopg
@@ -74,7 +75,9 @@ def load_activity_plugin(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         yield
 
 
-def _notices(db_conn: psycopg.Connection, agent_id: int) -> list[tuple]:
+def _notices(
+    db_conn: psycopg.Connection, agent_id: int
+) -> list[tuple[str, str, str, bool, bool, datetime | None, str | None, str | None]]:
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT title, content, priority, require_response, blocking, "
@@ -85,7 +88,14 @@ def _notices(db_conn: psycopg.Connection, agent_id: int) -> list[tuple]:
         return cur.fetchall()
 
 
-def _assert_first_notice_is_sole_pending_fyi(nid: Any) -> None:
+# meiva:note
+# What these tests read of the fleet plugin's `Notice`: an int carrying the still-open notices.
+class NoticeView(int):
+    pending_count: int
+    pending_notices: list[dict[str, object]]
+
+
+def _assert_first_notice_is_sole_pending_fyi(nid: NoticeView) -> None:
     assert nid.pending_count == 1
     assert len(nid.pending_notices) == 1
     assert nid.pending_notices[0]["id"] == nid
@@ -94,7 +104,7 @@ def _assert_first_notice_is_sole_pending_fyi(nid: Any) -> None:
     assert "created_at" in nid.pending_notices[0]
 
 
-def _assert_second_notice_is_refused(nid: Any) -> None:
+def _assert_second_notice_is_refused(nid: NoticeView) -> None:
     assert nid.pending_count == 1
     assert [n["title"] for n in nid.pending_notices] == ["migration done"]
 
@@ -105,8 +115,11 @@ def test_notify_defaults_to_response_and_snapshot_lists_question(
     # meiva:link meiva/docs/ui.meiva.okf.md
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    nid = meiva.ui.notify(  # pyright: ignore[reportCallIssue]
-        "migration done", content="14k rows", priority="P1", idempotency_key=str(uuid4())
+    nid = cast(
+        "NoticeView",
+        meiva.ui.notify(  # pyright: ignore[reportCallIssue]
+            "migration done", content="14k rows", priority="P1", idempotency_key=str(uuid4())
+        ),
     )
     assert isinstance(nid, int)
     _assert_first_notice_is_sole_pending_fyi(nid)
@@ -278,9 +291,12 @@ def test_edit_notice_partial_update(
 ):
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    nid = meiva.ui.notify(
-        "draft title", content="old body", priority="P2", idempotency_key=str(uuid4())
-    )  # type: ignore[attr-defined]
+    nid = cast(
+        "NoticeView",
+        meiva.ui.notify(  # type: ignore[attr-defined]
+            "draft title", content="old body", priority="P2", idempotency_key=str(uuid4())
+        ),
+    )
     # change only title + priority; content is left as-is (omitted != cleared).
     meiva.ui.edit_notice(title="new title", priority="P0")  # type: ignore[attr-defined]
 
@@ -288,7 +304,7 @@ def test_edit_notice_partial_update(
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT title, content, priority, updated_at FROM agent_notices WHERE agent_id = %s AND local_id = %s",
-            (agent_id, nid),  # pyright: ignore[reportUnknownArgumentType]
+            (agent_id, nid),
         )
         row = cur.fetchone()
     assert row is not None
@@ -304,7 +320,7 @@ def test_edit_notice_partial_update(
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT content FROM agent_notices WHERE agent_id = %s AND local_id = %s",
-            (agent_id, nid),  # pyright: ignore[reportUnknownArgumentType]
+            (agent_id, nid),
         )
         row = cur.fetchone()
     assert row is not None and row[0] is None
@@ -390,14 +406,14 @@ def test_dismiss_notice_withdraws(
 ):
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    nid = meiva.ui.notify("stale fyi", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+    nid = cast("NoticeView", meiva.ui.notify("stale fyi", idempotency_key=str(uuid4())))  # type: ignore[attr-defined]
     meiva.ui.dismiss_notice()  # type: ignore[attr-defined]
 
     db_conn.rollback()
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT resolved_at, resolution FROM agent_notices WHERE agent_id = %s AND local_id = %s",
-            (agent_id, nid),  # pyright: ignore[reportUnknownArgumentType]
+            (agent_id, nid),
         )
         row = cur.fetchone()
     assert row is not None
