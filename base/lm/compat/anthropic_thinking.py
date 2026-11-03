@@ -18,11 +18,22 @@ This is the Anthropic-side mirror of `base/lm/compat/openai_reasoning.py`
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Protocol
 
+from anthropic.types import RawMessageStreamEvent
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessageChunk
 from langchain_core.outputs import ChatResult
+
+from base.host.boundary.untyped import object_of
+
+
+# meiva:note
+# The part of an Anthropic response `_format_output` reads: its `usage`, whose `speed` the SDK model
+# declares only as an extra field.
+class _ResponseWithUsage(Protocol):
+    @property
+    def usage(self) -> object: ...
 
 
 class ThinkingTokensChatAnthropic(ChatAnthropic):
@@ -35,12 +46,14 @@ class ThinkingTokensChatAnthropic(ChatAnthropic):
     """
 
     def _format_output(
-        self, data: object, *, generation_info: dict[str, Any] | None = None, **kwargs: object
+        self,
+        data: _ResponseWithUsage,
+        *,
+        generation_info: dict[str, object] | None = None,
+        **kwargs: object,
     ) -> ChatResult:
-        raw_data: Any = data
-        raw_kwargs: Any = kwargs
-        result = super()._format_output(raw_data, generation_info=generation_info, **raw_kwargs)
-        speed = getattr(raw_data.usage, "speed", None)
+        result = super()._format_output(data, generation_info=generation_info, **kwargs)
+        speed = getattr(data.usage, "speed", None)
         if speed is not None:
             for generation in result.generations:
                 generation.message.response_metadata["speed"] = speed
@@ -48,19 +61,17 @@ class ThinkingTokensChatAnthropic(ChatAnthropic):
 
     def _make_message_chunk_from_anthropic_event(
         self,
-        event: object,
+        event: RawMessageStreamEvent,
         *,
         stream_usage: bool = True,
         coerce_content_to_string: bool = False,
-        block_start_event: object = None,
-    ) -> tuple[AIMessageChunk | None, Any]:
-        raw_event: Any = event
-        raw_block_start: Any = block_start_event
+        block_start_event: RawMessageStreamEvent | None = None,
+    ) -> tuple[AIMessageChunk | None, RawMessageStreamEvent | None]:
         msg, next_block_start = super()._make_message_chunk_from_anthropic_event(
-            raw_event,
+            event,
             stream_usage=stream_usage,
             coerce_content_to_string=coerce_content_to_string,
-            block_start_event=raw_block_start,
+            block_start_event=block_start_event,
         )
         return retain_usage_details(msg, event), next_block_start
 
@@ -88,9 +99,11 @@ def retain_usage_details(msg: AIMessageChunk | None, event: object) -> AIMessage
     # output_tokens_details.thinking_tokens — which the upstream
     # _create_usage_metadata drops. Supplement the chunk's usage_metadata.
     elif kind == "message_delta" and msg.usage_metadata is not None:
-        output_details = getattr(getattr(event, "usage", None), "output_tokens_details", None)
+        usage = object_of(getattr, event, "usage", None)
+        output_details = object_of(getattr, usage, "output_tokens_details", None)
         if output_details is not None:
-            thinking_tokens: int = getattr(output_details, "thinking_tokens", 0) or 0
+            reported = object_of(getattr, output_details, "thinking_tokens", 0)
+            thinking_tokens = reported if isinstance(reported, int) else 0
             if thinking_tokens > 0:
                 existing = msg.usage_metadata.get("output_token_details") or {}
                 if "reasoning" not in existing and "reasoning_tokens" not in existing:

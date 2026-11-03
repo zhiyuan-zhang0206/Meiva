@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from base.lm.harness.codex.frames import JsonObject
 from base.lm.harness.codex.turns import (
     Bind,
     ErrorReport,
@@ -45,7 +46,7 @@ def test_a_notification_names_the_turn_it_reports_on() -> None:
 
 
 def test_a_completion_carries_the_turn_object_it_reports() -> None:
-    turn = {"id": "codex-turn-2", "status": "completed"}
+    turn: JsonObject = {"id": "codex-turn-2", "status": "completed"}
     message = inbound(
         "turn/completed", {"threadId": "thread-1", "turn": turn}, session_id="thread-1"
     )

@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
 
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.lm.harness.events import (
     BridgeEvent,
     ReasoningDelta,
@@ -15,15 +15,12 @@ from base.lm.harness.events import (
     Usage,
 )
 
-type JsonValue = (
-    str | int | float | bool | dict[str, Any] | list[JsonValue] | Mapping[str, Any] | None
-)
-type JsonObject = dict[str, Any]
-type RequestParams = Mapping[str, Any]
+type JsonObject = dict[str, object]
+type RequestParams = Mapping[str, object]
 
 
-def _as_object(value: JsonValue) -> JsonObject:
-    return value if isinstance(value, dict) else {}
+def _as_object(value: object) -> JsonObject:
+    return value if is_object_dict(value) else {}
 
 
 def _as_text(value: object) -> str | None:
@@ -85,8 +82,8 @@ def _reasoning(item: RequestParams, phase: str, turn_id: str) -> list[BridgeEven
     if phase != "completed":
         return []
     for field in ("summary", "content"):
-        raw: JsonValue = item.get(field)
-        if isinstance(raw, list):
+        raw = item.get(field)
+        if is_object_list(raw):
             parts = [s.strip() for s in raw if isinstance(s, str) and s.strip()]
             if parts:
                 return [ReasoningText(turn_id=turn_id, text="\n\n".join(parts))]
@@ -276,8 +273,8 @@ def _web_search(item: RequestParams, phase: str, turn_id: str) -> list[BridgeEve
     ]
 
 
-def _paths(value: JsonValue) -> list[str]:
-    if not isinstance(value, list):
+def _paths(value: object) -> list[str]:
+    if not is_object_list(value):
         return []
     paths: list[str] = []
     for entry in value:
@@ -287,8 +284,8 @@ def _paths(value: JsonValue) -> list[str]:
     return paths
 
 
-def _changes(value: JsonValue) -> list[dict[str, object]]:
-    if not isinstance(value, list):
+def _changes(value: object) -> list[dict[str, object]]:
+    if not is_object_list(value):
         return []
     changes: list[dict[str, object]] = []
     has_detail = False
@@ -311,8 +308,8 @@ def _changes(value: JsonValue) -> list[dict[str, object]]:
     return changes if has_detail else []
 
 
-def _arguments(value: JsonValue) -> dict[str, object]:
-    if isinstance(value, dict):
+def _arguments(value: object) -> dict[str, object]:
+    if is_object_dict(value):
         return dict(value)
     return {"arguments": value}
 

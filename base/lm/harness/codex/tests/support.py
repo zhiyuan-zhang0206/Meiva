@@ -6,9 +6,10 @@ from pathlib import Path
 from typing import Any
 
 from base.clock.tests.fakes import system_clock
+from base.host.boundary.json_values import is_object_list
 from base.lm.harness.base_session import SessionBinding
 from base.lm.harness.codex import CodexConfig
-from base.lm.harness.codex.frames import JsonValue, as_object, as_text
+from base.lm.harness.codex.frames import as_object, as_text
 from base.lm.harness.codex.session import CodexSession
 from base.lm.harness.codex.tests.fake_app_server import CODEX_PID, FakeAppServer
 from base.lm.harness.events import UnsolicitedSink
@@ -19,10 +20,10 @@ from base.lm.harness.registry import FileSessionRegistry
 # meiva:note
 # The text of the first input item of a `turn/start` request, so a test can assert
 # what the bridge actually sent without re-declaring the request shape.
-def turn_text(params: JsonValue) -> str:
+def turn_text(params: object) -> str:
     data = as_object(params)
-    inputs: JsonValue = data.get("input")
-    if not isinstance(inputs, list):
+    inputs = data.get("input")
+    if not is_object_list(inputs):
         return ""
     return as_text(as_object(inputs[0]).get("text")) or "" if inputs else ""
 

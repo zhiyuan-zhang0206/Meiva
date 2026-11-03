@@ -4,9 +4,9 @@ import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
-type _Json = str | int | float | bool | dict[str, Any] | list[_Json] | None
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 # meiva:note
 # ACP carries only an aggregate `usage_update` (`used`/`size` are context-window
@@ -117,24 +117,24 @@ def _parse(payload: bytes) -> tuple[StepUsage, ...]:
         if not line:
             continue
         try:
-            decoded: _Json = json.loads(line)
+            decoded = object_of(json.loads, line)
         except json.JSONDecodeError as exc:
             raise ValueError(f"session log line {number} is not JSON") from exc
-        if not isinstance(decoded, dict):
+        if not is_object_dict(decoded):
             continue
         if decoded.get("type") != "assistant/message":
             continue
-        raw_data: _Json = decoded.get("data")
-        if not isinstance(raw_data, dict):
+        raw_data = decoded.get("data")
+        if not is_object_dict(raw_data):
             continue
-        raw_usage: _Json = raw_data.get("usage")
-        if not isinstance(raw_usage, dict):
+        raw_usage = raw_data.get("usage")
+        if not is_object_dict(raw_usage):
             continue
         steps.append(_step(raw_data, raw_usage))
     return tuple(steps)
 
 
-def _step(data: Mapping[str, Any], usage: Mapping[str, Any]) -> StepUsage:
+def _step(data: Mapping[str, object], usage: Mapping[str, object]) -> StepUsage:
     return StepUsage(
         turn=_int(data.get("turn")),
         step=_int(data.get("step")),

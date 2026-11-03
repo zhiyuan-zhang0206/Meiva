@@ -7,8 +7,11 @@ import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NewType
+from typing import NewType
 
+from base.host.boundary.fields import int_field, str_field
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.log import logger
 
 # meiva:note
@@ -70,8 +73,8 @@ class HarnessRegistration:
     expires_at: str
     status: str | None = None
 
-    def document(self) -> dict[str, Any]:
-        document: dict[str, Any] = {
+    def document(self) -> dict[str, object]:
+        document: dict[str, object] = {
             "agent_id": self.agent_id,
             "harness": self.harness,
             "external_session_id": self.external_session_id,
@@ -133,29 +136,27 @@ class RegistrationStore:
     def read(self, agent_id: int) -> HarnessRegistration | None:
         path = self.path(agent_id)
         try:
-            raw: dict[str, Any] | list[Any] | str | int | float | bool | None = json.loads(
-                path.read_text(encoding="utf-8")
-            )
+            raw = object_of(json.loads, path.read_text(encoding="utf-8"))
         except FileNotFoundError:
             return None
         except json.JSONDecodeError as exc:
             raise ValueError(f"registration at {path} is not valid JSON") from exc
-        if not isinstance(raw, dict):
+        if not is_object_dict(raw):
             raise TypeError(f"registration at {path} is not an object")
-        payload: dict[str, Any] = raw
+        payload = raw
         missing = _REQUIRED - set(payload)
         if missing:
             raise ValueError(f"registration at {path} misses {sorted(missing)}")
         try:
             return HarnessRegistration(
-                agent_id=int(payload["agent_id"]),
-                harness=str(payload["harness"]),
-                external_session_id=str(payload["external_session_id"]),
-                machine=str(payload["machine"]),
-                controller_pid=int(payload["controller_pid"]),
-                handle_sha256=str(payload["handle_sha256"]),
-                created_at=str(payload["created_at"]),
-                expires_at=str(payload["expires_at"]),
+                agent_id=int_field(payload, "agent_id"),
+                harness=str_field(payload, "harness"),
+                external_session_id=str_field(payload, "external_session_id"),
+                machine=str_field(payload, "machine"),
+                controller_pid=int_field(payload, "controller_pid"),
+                handle_sha256=str_field(payload, "handle_sha256"),
+                created_at=str_field(payload, "created_at"),
+                expires_at=str_field(payload, "expires_at"),
                 status=_optional_text(payload.get("status")),
             )
         except (TypeError, ValueError) as exc:

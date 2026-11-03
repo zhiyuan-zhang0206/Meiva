@@ -3,12 +3,11 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Mapping
 from dataclasses import replace
-from typing import Any
 
+from base.host.boundary.json_values import is_object_dict
 from base.host.env.harness_binaries import resolve_harness_binary
 from base.lm.harness.antigravity.config import AntigravityConfig
 from base.lm.harness.antigravity.mapping import (
-    JsonPayload,
     assistant_text,
     map_init,
     map_step_update,
@@ -57,7 +56,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         environ: Mapping[str, str] | None = None,
         binding: SessionBinding,
         probe: ChildProbe | None = None,
-        transport_factory: Callable[[], Any] | None = None,
+        transport_factory: Callable[[], AgyTransport] | None = None,
         clock: SessionClock,
     ) -> None:
         super().__init__(
@@ -239,7 +238,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             self._emit(SessionFailed(error=error))
         self._fail_active(SessionClosedError(error))
 
-    def _handle(self, payload: dict[str, Any]) -> None:
+    def _handle(self, payload: dict[str, object]) -> None:
         name = payload.get("event")
         if name == "init":
             event = map_init(payload)
@@ -255,10 +254,9 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         if ticket is None:
             return
         if name == "step_update":
-            raw: JsonPayload = payload.get("step_update")
-            if not isinstance(raw, dict):
+            update = payload.get("step_update")
+            if not is_object_dict(update):
                 return
-            update: dict[str, Any] = raw
             self._accumulate(update)
             for event in map_step_update(update, turn_id=ticket.turn_id):
                 self._emit(event)
@@ -275,7 +273,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
                     self._emit(done)
             return
 
-    def _accumulate(self, update: dict[str, Any]) -> None:
+    def _accumulate(self, update: dict[str, object]) -> None:
         if update.get("step_type") != "agent_response":
             return
         index = update.get("step_index", 0)
@@ -294,7 +292,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._step_text.clear()
         return leftover
 
-    def _take_step_text(self, update: dict[str, Any]) -> str:
+    def _take_step_text(self, update: dict[str, object]) -> str:
         index = update.get("step_index", 0)
         bucket = self._step_text.pop(index if isinstance(index, int) else 0, [])
         return "".join(bucket).strip()
@@ -307,19 +305,19 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
     # the two are indistinguishable, which is why the turn's reply text is built from
     # this ticket's own parts rather than from the frame (#5664).
     # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
-    def _handle_result_event(self, payload: dict[str, Any]) -> None:
+    def _handle_result_event(self, payload: dict[str, object]) -> None:
         ticket = self._active
         if ticket is not None and self._sent_turn == ticket.turn_id:
             self._sent_turn = None
             self._handle_result(payload.get("result"), ticket)
             return
         self._sent_turn = None
-        raw: JsonPayload = payload.get("result")
-        fields = parse_result(raw if isinstance(raw, dict) else {})
+        raw = payload.get("result")
+        fields = parse_result(raw if is_object_dict(raw) else {})
         self._unsolicited(UnsolicitedOutput(source="result", text=fields.text.strip()))
 
-    def _handle_result(self, payload: JsonPayload, ticket: TurnTicket) -> None:
-        fields = parse_result(payload if isinstance(payload, dict) else {})
+    def _handle_result(self, payload: object, ticket: TurnTicket) -> None:
+        fields = parse_result(payload if is_object_dict(payload) else {})
         text = "".join(ticket.parts).strip() or self._flush_step_text() or fields.text.strip()
         outcome = TurnOutcome(
             turn_id=ticket.turn_id,

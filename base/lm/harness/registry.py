@@ -5,7 +5,11 @@ import os
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol
+
+from base.host.boundary.fields import int_field, str_field
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 _REQUIRED_FIELDS = frozenset({"agent_id", "session_id", "cwd", "model", "created_at", "updated_at"})
 _FIELDS = _REQUIRED_FIELDS | {"resumes", "harness"}
@@ -65,16 +69,14 @@ class FileSessionRegistry:
     def load(self, agent_id: int, *, harness: str | None = None) -> SessionRecord | None:
         path = self.path(agent_id)
         try:
-            raw: dict[str, Any] | list[Any] | str | int | float | bool | None = json.loads(
-                path.read_text(encoding="utf-8")
-            )
+            raw = object_of(json.loads, path.read_text(encoding="utf-8"))
         except FileNotFoundError:
             return None
         except json.JSONDecodeError as exc:
             raise ValueError(f"session record at {path} is not valid JSON") from exc
-        if not isinstance(raw, dict):
+        if not is_object_dict(raw):
             raise TypeError(f"session record at {path} is not an object")
-        payload: dict[str, Any] = raw
+        payload = raw
         unknown = set(payload) - _FIELDS
         missing = _REQUIRED_FIELDS - set(payload)
         if unknown or missing:
@@ -91,17 +93,17 @@ class FileSessionRegistry:
         return record
 
     @staticmethod
-    def _record(path: Path, payload: dict[str, Any]) -> SessionRecord:
+    def _record(path: Path, payload: dict[str, object]) -> SessionRecord:
         try:
             return SessionRecord(
-                agent_id=int(payload["agent_id"]),
-                session_id=str(payload["session_id"]),
-                cwd=str(payload["cwd"]),
-                model=str(payload["model"]),
-                created_at=str(payload["created_at"]),
-                updated_at=str(payload["updated_at"]),
-                harness=str(payload.get("harness", LEGACY_HARNESS)),
-                resumes=int(payload.get("resumes", 0)),
+                agent_id=int_field(payload, "agent_id"),
+                session_id=str_field(payload, "session_id"),
+                cwd=str_field(payload, "cwd"),
+                model=str_field(payload, "model"),
+                created_at=str_field(payload, "created_at"),
+                updated_at=str_field(payload, "updated_at"),
+                harness=str_field(payload, "harness") if "harness" in payload else LEGACY_HARNESS,
+                resumes=int_field(payload, "resumes") if "resumes" in payload else 0,
             )
         except (TypeError, ValueError) as exc:
             raise ValueError(f"session record at {path} has invalid values: {exc}") from exc

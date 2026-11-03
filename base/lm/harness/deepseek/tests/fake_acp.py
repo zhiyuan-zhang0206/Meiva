@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator, Mapping
 from typing import Any, cast
 
 from base.lm.harness.acp import AcpTimeoutError
@@ -32,7 +33,7 @@ class FakeConnection:
         return None
 
     async def request(
-        self, method: str, params: dict[str, Any] | None = None, *, timeout: float | None = None
+        self, method: str, params: Mapping[str, Any] | None = None, *, timeout: float | None = None
     ) -> dict[str, Any]:
         payload = dict(params or {})
         self.requests.append((method, payload))
@@ -72,7 +73,7 @@ class FakeConnection:
         await self.emit({"sessionUpdate": "usage_update", "used": 12, "size": 1000})
         return {"stopReason": "end_turn"}
 
-    async def notify(self, method: str, params: dict[str, Any] | None = None) -> None:
+    async def notify(self, method: str, params: Mapping[str, Any] | None = None) -> None:
         self.sent.append((method, dict(params or {})))
         if method == "session/cancel":
             session_id = str((params or {}).get("sessionId"))
@@ -88,7 +89,7 @@ class FakeConnection:
             )
         )
 
-    async def notifications(self) -> Any:
+    async def notifications(self) -> AsyncIterator[AcpNotification]:
         while True:
             item = await self._queue.get()
             if item is None:

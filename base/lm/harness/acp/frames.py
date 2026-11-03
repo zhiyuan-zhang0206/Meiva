@@ -3,17 +3,18 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
 
-type Json = str | int | float | bool | dict[str, Any] | list[Json] | None
-JsonObject = dict[str, Any]
-Params = Mapping[str, Any]
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
+
+JsonObject = dict[str, object]
+Params = Mapping[str, object]
 
 JSONRPC = "2.0"
 
 # meiva:note
 # A JSON-RPC id is a number, a string or null.
-type RequestId = int | str | None
+type RequestId = int | float | str | None
 
 
 def request_frame(request_id: int, method: str, params: Params | None) -> JsonObject:
@@ -71,7 +72,7 @@ def decode_line(line: bytes) -> Blank | NonJson | NotAnObject | Frame:
     if not text:
         return Blank()
     try:
-        frame: Json = json.loads(text)
+        frame = object_of(json.loads, text)
     except json.JSONDecodeError:
         return NonJson(text)
-    return Frame(frame) if isinstance(frame, dict) else NotAnObject()
+    return Frame(frame) if is_object_dict(frame) else NotAnObject()

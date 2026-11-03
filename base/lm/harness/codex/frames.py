@@ -3,18 +3,17 @@ from __future__ import annotations
 import json
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
 
-type JsonValue = (
-    str | int | float | bool | dict[str, Any] | list[JsonValue] | Mapping[str, Any] | None
-)
-type JsonObject = dict[str, Any]
-type RequestParams = Mapping[str, Any]
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
+
+type JsonObject = dict[str, object]
+type RequestParams = Mapping[str, object]
 
 # meiva:note
 # A JSON-RPC id is a number, a string or null; the ids this client mints are numbers, and only a
 # reply to one of them can be correlated.
-type RequestId = int | str | None
+type RequestId = int | float | str | None
 
 JSONRPC = "2.0"
 
@@ -46,8 +45,8 @@ class JsonRpcError(RuntimeError):
         self.data = data
 
 
-def as_object(value: JsonValue) -> JsonObject:
-    return value if isinstance(value, dict) else {}
+def as_object(value: object) -> JsonObject:
+    return value if is_object_dict(value) else {}
 
 
 def as_text(value: object) -> str | None:
@@ -139,15 +138,18 @@ class Notification:
 # alone is a notification, and one with an integer `id` alone answers a request of ours.
 def classify(line: bytes) -> ServerRequest | Reply | Notification | None:
     try:
-        decoded = json.loads(line)
+        decoded = object_of(json.loads, line)
     except json.JSONDecodeError:
         return None
     message = as_object(decoded)
     if not message:
         return None
     if "id" in message and "method" in message:
+        server_id = message["id"]
+        if not (server_id is None or isinstance(server_id, int | float | str)):
+            return None
         return ServerRequest(
-            message.get("id"),
+            server_id,
             as_text(message.get("method")) or "",
             as_object(message.get("params")),
         )

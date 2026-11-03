@@ -6,8 +6,9 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping
 from dataclasses import asdict, dataclass, field
 from dataclasses import fields as dataclass_fields
-from typing import Any, Literal, overload
+from typing import Literal, overload
 
+from base.host.boundary.untyped import object_mapping
 from base.lm.pricing import PriceBook
 
 
@@ -167,7 +168,7 @@ class ModelSpec:
         prices: PriceBook,
         anthropic_protocol_by_model: Mapping[str, bool] | None = None,
     ) -> None:
-        for tuning_name, tuning_value in asdict(DEFAULT_TUNING).items():
+        for tuning_name, tuning_value in object_mapping(asdict(DEFAULT_TUNING)).items():
             if tuning_value is None:
                 raise RuntimeError(
                     f"DEFAULT_TUNING.{tuning_name} is None — the shared-default floor "
@@ -401,14 +402,32 @@ def explain_setting(
 ) -> ResolvedSetting[SettingValue]: ...
 
 
+# meiva:note
+# One tuning field read by name. An unknown name fails with the `AttributeError` a plain
+# attribute read would raise; a value outside the setting types is a registry bug.
+def _tuning_setting(tuning: ModelTuning, setting: str) -> SettingValue:
+    if setting not in ModelTuning.field_names():
+        raise AttributeError(f"{type(tuning).__name__!r} object has no attribute {setting!r}")
+    return _setting_value(object_mapping(asdict(tuning))[setting])
+
+
+# meiva:note
+# A value the shared floor, a model's tuning or a caller supplies for a setting: a bool, number,
+# string or the unset `None`.
+def _setting_value(value: object) -> SettingValue:
+    if value is None or isinstance(value, bool | int | float | str):
+        return value
+    raise TypeError(f"a setting value must be a bool, number, string or None, got {type(value)!r}")
+
+
 def explain_setting(
     setting: str, *, model: str, explicit: object, models: Mapping[str, ModelSpec]
 ) -> ResolvedSetting[SettingValue]:
-    floor: SettingValue = getattr(DEFAULT_TUNING, setting)
+    floor = _tuning_setting(DEFAULT_TUNING, setting)
     spec = models.get(model)
-    tuned: SettingValue = getattr(spec.tuning, setting) if spec is not None else None
+    tuned = _tuning_setting(spec.tuning, setting) if spec is not None else None
     if explicit is not None:
-        explicit_val: Any = explicit
+        explicit_val = _setting_value(explicit)
         return ResolvedSetting(setting, explicit_val, "explicit", floor, tuned, explicit_val)
     if tuned is not None:
         return ResolvedSetting(setting, tuned, "model-default", floor, tuned, None)

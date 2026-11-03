@@ -67,7 +67,7 @@ class DraftReply:
 # meiva:note
 # The provider contract already accepts an HTTP transport. This adapter changes only the network
 # destination, then delegates socket I/O to httpx's real transport; it never answers a request.
-class LocalTransport:
+class LocalTransport(httpx.AsyncBaseTransport):
     def __init__(self, base_url: str) -> None:
         self._url = httpx.URL(base_url)
         self._network = httpx.AsyncHTTPTransport()
@@ -84,11 +84,11 @@ class LocalTransport:
 
     async def __aexit__(
         self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        traceback: TracebackType | None,
+        exc_type: type[BaseException] | None = None,
+        exc_value: BaseException | None = None,
+        traceback: TracebackType | None = None,
     ) -> None:
-        await self._network.__aexit__(exc_type, exc, traceback)
+        await self._network.__aexit__(exc_type, exc_value, traceback)
 
 
 class ProviderWire:

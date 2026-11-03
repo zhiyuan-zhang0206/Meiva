@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from base.lm.harness.acp import AcpClosedError, AcpNotification, AcpRpcError
-from base.lm.harness.acp.tests.support import collect, connect
+from base.lm.harness.acp import AcpClosedError, AcpRpcError
+from base.lm.harness.acp.tests.support import chunk_text, collect, connect, object_at, update_of
 
 
 async def test_initialize_reports_the_agent_identity() -> None:
@@ -15,7 +15,7 @@ async def test_initialize_reports_the_agent_identity() -> None:
     try:
         result = await connection.request("initialize", {"protocolVersion": 1})
         assert result["protocolVersion"] == 1
-        assert result["agentInfo"]["name"] == "fake-acp-agent"
+        assert object_at(result["agentInfo"])["name"] == "fake-acp-agent"
     finally:
         await connection.close()
 
@@ -28,11 +28,7 @@ async def test_notifications_stream_session_updates_in_order(tmp_path: Path) -> 
             "session/prompt", {"sessionId": "session-1", "prompt": [{"type": "text", "text": "hi"}]}
         )
         updates = await collect(connection, count=3)
-        kinds = [
-            item.params["update"]["sessionUpdate"]
-            for item in updates
-            if isinstance(item, AcpNotification)
-        ]
+        kinds = [update_of(item)["sessionUpdate"] for item in updates]
         assert kinds == ["agent_thought_chunk", "agent_message_chunk", "usage_update"]
     finally:
         await connection.close()
@@ -47,10 +43,9 @@ async def test_permission_allow_is_answered_with_the_option_id() -> None:
         )
         updates = await collect(connection, count=1)
         texts = [
-            item.params["update"]["content"]["text"]
+            chunk_text(item)
             for item in updates
-            if isinstance(item, AcpNotification)
-            and item.params["update"]["sessionUpdate"] == "agent_message_chunk"
+            if update_of(item)["sessionUpdate"] == "agent_message_chunk"
         ]
         assert texts == ["decision:allow-once"]
         assert seen[0].session_id == "session-1"
@@ -68,10 +63,9 @@ async def test_missing_permission_handler_reads_as_cancelled() -> None:
         )
         updates = await collect(connection, count=1)
         texts = [
-            item.params["update"]["content"]["text"]
+            chunk_text(item)
             for item in updates
-            if isinstance(item, AcpNotification)
-            and item.params["update"]["sessionUpdate"] == "agent_message_chunk"
+            if update_of(item)["sessionUpdate"] == "agent_message_chunk"
         ]
         assert texts == ["decision:cancelled"]
     finally:

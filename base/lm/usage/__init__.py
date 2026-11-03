@@ -7,11 +7,12 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Literal
 
 from langchain_core.messages import AIMessage
 from loguru import logger
 
+from base.host.boundary.json_values import is_object_dict
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_contract import InferenceSpeed
 from base.lm.content import message_addl_kwargs
@@ -44,14 +45,13 @@ def _default_cache_write_ttl(model: str, *, catalog: ModelCatalog) -> Literal["5
     return "30m" if vendor_of_model(model, catalog=catalog) == "openai" else "5m"
 
 
-def _metered_cache_read(usage: Mapping[str, Any], cached: int) -> int | None:
+def _metered_cache_read(usage: Mapping[str, object], cached: int) -> int | None:
     # meiva:note
     # Distinguish absent provider metering from an explicitly reported zero.
-    details: Mapping[str, Any] = usage.get("input_token_details") or {}
+    details = usage.get("input_token_details")
+    keys = details if is_object_dict(details) else {}
     return (
-        cached
-        if any(key == "cache_read" or key.endswith("_cache_read") for key in details)
-        else None
+        cached if any(key == "cache_read" or key.endswith("_cache_read") for key in keys) else None
     )
 
 
@@ -136,7 +136,7 @@ def log_usage_from_message(
         usage_metadata.get("input_token_details") or {},
         default_ttl=_default_cache_write_ttl(model, catalog=catalog),
     )
-    record: dict[str, Any] = {}
+    record: dict[str, object] = {}
     logged = _log_usage(
         _UsageEvent(
             model=usage_model(msg, model, catalog=catalog),
@@ -267,7 +267,7 @@ class _UsageEvent:
 def _log_usage(
     event: _UsageEvent,
     *,
-    record_out: dict[str, Any] | None = None,
+    record_out: dict[str, object] | None = None,
 ) -> tuple[int, float]:
     # meiva:note
     # Emit one priced or explicitly unpriced usage event and billing span.
@@ -303,7 +303,7 @@ def _log_usage(
         snapshot = {"unpriced": 1}
     # meiva:note
     # The one figure set both the event and (via `record_out`) the message carry.
-    record: dict[str, Any] = {
+    record: dict[str, object] = {
         "model": event.model,
         "in_total": event.in_total,
         "out_total": event.out_total,

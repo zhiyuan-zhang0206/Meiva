@@ -8,12 +8,13 @@ import signal
 from collections import deque
 from collections.abc import AsyncIterator, Coroutine, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
 
 from base.lm.harness.acp.errors import AcpClosedError, AcpError, AcpRpcError, AcpTimeoutError
 from base.lm.harness.acp.frames import (
     Frame,
+    JsonObject,
     NonJson,
+    Params,
     decode_line,
     encode_frame,
     non_json_note,
@@ -51,7 +52,7 @@ MAX_STDERR_LINES = 200
 class _Pending:
     request_id: int
     method: str
-    future: asyncio.Future[dict[str, Any]]
+    future: asyncio.Future[JsonObject]
 
 
 class AcpConnection:
@@ -129,8 +130,8 @@ class AcpConnection:
         return self._closed
 
     async def request(
-        self, method: str, params: Mapping[str, Any] | None = None, *, timeout: float | None = None
-    ) -> dict[str, Any]:
+        self, method: str, params: Params | None = None, *, timeout: float | None = None
+    ) -> JsonObject:
         pending = self._register(method)
         try:
             await self._write(request_frame(pending.request_id, method, params))
@@ -144,7 +145,7 @@ class AcpConnection:
             self._pending.pop(pending.request_id, None)
             raise AcpTimeoutError(f"{method} did not answer within {deadline:.0f}s") from exc
 
-    async def notify(self, method: str, params: Mapping[str, Any] | None = None) -> None:
+    async def notify(self, method: str, params: Params | None = None) -> None:
         await self._write(notification_frame(method, params))
 
     async def notifications(self) -> AsyncIterator[AcpNotification]:
@@ -207,12 +208,12 @@ class AcpConnection:
         if self._closed or self._process is None or self._process.returncode is not None:
             raise AcpClosedError("connection is not open")
         self._next_id += 1
-        future: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
+        future: asyncio.Future[JsonObject] = asyncio.get_running_loop().create_future()
         pending = _Pending(request_id=self._next_id, method=method, future=future)
         self._pending[self._next_id] = pending
         return pending
 
-    async def _write(self, frame: Mapping[str, Any]) -> None:
+    async def _write(self, frame: Params) -> None:
         stdin = self._stdin
         if stdin is None or self._closed:
             raise AcpClosedError("connection is not open")

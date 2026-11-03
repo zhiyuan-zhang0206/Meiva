@@ -74,8 +74,10 @@ import math
 from collections.abc import Iterator, Mapping, Sequence
 from datetime import UTC, date, datetime
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.lm.pricing.catalog import (
     CacheTokens,
     CostQuote,
@@ -117,7 +119,9 @@ __all__ = [
 
 
 def parse_archive(data: bytes) -> dict[str, ModelPrice]:
-    raw: Any = json.loads(data.decode("utf-8"))
+    raw = object_of(json.loads, data.decode("utf-8"))
+    if not is_object_dict(raw):
+        raise TypeError(f"pricing catalog archive must be a JSON object, got {type(raw).__name__}")
     return parse_catalog(raw)
 
 
@@ -155,8 +159,7 @@ def plugin_model_price(
             raise ValueError(
                 f"provider plugin {plugin!r}: {model!r} price {name} must be finite and non-negative"
             )
-    periods_any: Any = price.periods
-    raw_periods: list[dict[str, Any]] = (
+    raw_periods: list[dict[str, object]] = (
         [
             {
                 "effective_from": period.effective_from,
@@ -169,9 +172,9 @@ def plugin_model_price(
                             "input": tier.cache_miss,
                             "cache_read": tier.cache_hit,
                             "output": tier.output,
-                            "cache_write_5m": getattr(tier, "cache_write_5m", None),
-                            "cache_write_1h": getattr(tier, "cache_write_1h", None),
-                            "cache_write_30m": getattr(tier, "cache_write_30m", None),
+                            "cache_write_5m": tier.cache_write_5m,
+                            "cache_write_1h": tier.cache_write_1h,
+                            "cache_write_30m": tier.cache_write_30m,
                         },
                         "utc_daily_overrides": [
                             {
@@ -181,9 +184,9 @@ def plugin_model_price(
                                     "input": window.cache_miss,
                                     "cache_read": window.cache_hit,
                                     "output": window.output,
-                                    "cache_write_5m": getattr(window, "cache_write_5m", None),
-                                    "cache_write_1h": getattr(window, "cache_write_1h", None),
-                                    "cache_write_30m": getattr(window, "cache_write_30m", None),
+                                    "cache_write_5m": window.cache_write_5m,
+                                    "cache_write_1h": window.cache_write_1h,
+                                    "cache_write_30m": window.cache_write_30m,
                                 },
                             }
                             for window in tier.windows
@@ -192,9 +195,9 @@ def plugin_model_price(
                     for tier in period.tiers
                 ],
             }
-            for period in periods_any
+            for period in price.periods
         ]
-        if periods_any
+        if price.periods
         else [
             {
                 "effective_from": None,
@@ -347,6 +350,17 @@ def cost_usd(
     return priced.cost_usd if priced is not None else None
 
 
+# meiva:note
+# A provider's token count as an int: nothing (None, 0, empty) counts as zero, a number or numeric
+# text is converted (non-numeric text raises `ValueError`), any other type is refused naming `key`.
+def _token_count(value: object, key: str) -> int:
+    if not value:
+        return 0
+    if isinstance(value, int | float | str):
+        return int(value)
+    raise TypeError(f"token count {key!r} must be a number, got {type(value).__name__}")
+
+
 def tally_tokens(
     messages: Sequence[AnyMessage],
 ) -> tuple[int | None, int | None, int | None]:
@@ -365,10 +379,9 @@ def tally_tokens(
         seen = True
         tok_in += meta["input_tokens"]
         tok_out += meta["output_tokens"]
-        raw_details: Any = meta.get("input_token_details") or {}
-        details: dict[str, int] = raw_details
+        details: Mapping[str, object] = meta.get("input_token_details") or {}
         tok_cached += sum(
-            int(value or 0)
+            _token_count(value, key)
             for key, value in details.items()
             if key == "cache_read" or key.endswith("_cache_read")
         )

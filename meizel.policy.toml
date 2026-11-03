@@ -508,6 +508,7 @@ argv-wrappers = [
 
 [purity]
 pure-third-party = [
+    "anthropic",
     "dotenv",
     "feedparser",
     "langchain_anthropic",

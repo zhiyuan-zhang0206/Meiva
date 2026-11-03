@@ -683,6 +683,36 @@ root = "base/agents/tests"
 root = "base/agents/upload_delivery/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/lm/catalog/decide/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/lm/compat/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/lm/decision/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/lm/harness/acp/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/lm/harness/antigravity/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/lm/harness/claude/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/lm/harness/codex/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/lm/harness/deepseek/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/lm/harness/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/lm/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/telemetry/metrics/core/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -953,6 +983,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "base/agents"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/lm"
 reportAny = "error"
 reportExplicitAny = "error"
 

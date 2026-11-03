@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
-from base.lm.harness.codex.frames import JsonObject, JsonValue, RequestParams, as_object, as_text
+from base.host.boundary.json_values import is_object_list
+from base.lm.harness.codex.frames import JsonObject, RequestParams, as_object, as_text
 from base.lm.harness.codex.mapping import TurnFields, assistant_text
 from base.lm.harness.events import TurnCompleted, Usage
 from base.lm.harness.session import SessionTotals, TurnOutcome
@@ -197,8 +198,8 @@ def error_report(params: RequestParams) -> ErrorReport | None:
 # nobody here has read, and the only part of such a turn worth handing on (#5663).
 # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
 def unclaimed_text(turn: RequestParams) -> str:
-    items: JsonValue = turn.get("items")
-    if not isinstance(items, list):
+    items = turn.get("items")
+    if not is_object_list(items):
         return ""
     return "\n".join(
         text for entry in items if (text := assistant_text(as_object(entry))) is not None

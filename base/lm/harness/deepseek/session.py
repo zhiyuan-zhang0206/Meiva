@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import Callable, Mapping
-from typing import Any, Protocol
+from collections.abc import AsyncIterator, Callable, Mapping
+from typing import Protocol
 
 from base.lm.harness.acp import (
     AcpClosedError,
@@ -12,6 +12,7 @@ from base.lm.harness.acp import (
     AcpRpcError,
     AcpTimeoutError,
 )
+from base.lm.harness.acp.frames import JsonObject, Params
 from base.lm.harness.acp.permission import PermissionRequest
 from base.lm.harness.acp.transport import AcpConnection
 from base.lm.harness.base_session import BaseHarnessSession, SessionBinding, TurnTicket
@@ -97,6 +98,32 @@ class DeepSeekProbe(ChildProbe, Protocol):
     def kill(self, pid: int, sig: int = 15) -> None: ...
 
 
+# meiva:note
+# The part of an ACP connection the session drives. `AcpConnection` is the real one; a test hands a
+# scripted stand-in with the same surface.
+class DeepSeekConnection(Protocol):
+    @property
+    def pid(self) -> int | None: ...
+
+    @property
+    def returncode(self) -> int | None: ...
+
+    @property
+    def closed(self) -> bool: ...
+
+    async def start(self) -> None: ...
+
+    async def request(
+        self, method: str, params: Params | None = None, *, timeout: float | None = None
+    ) -> JsonObject: ...
+
+    async def notify(self, method: str, params: Params | None = None) -> None: ...
+
+    def notifications(self) -> AsyncIterator[AcpNotification]: ...
+
+    async def close(self, *, reason: str = "closed") -> None: ...
+
+
 class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
     def __init__(
         self,
@@ -105,7 +132,7 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
         environ: Mapping[str, str],
         binding: SessionBinding,
         probe: DeepSeekProbe | None = None,
-        connect: Callable[..., Any] | None = None,
+        connect: Callable[[], DeepSeekConnection] | None = None,
         clock: SessionClock,
     ) -> None:
         resolved_probe: DeepSeekProbe = probe if probe is not None else PsutilChildProbe()
@@ -120,7 +147,7 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
         self._prices: PriceBook | None = config.prices
         self._environ = dict(environ)
         self._connect = connect or self.open_connection
-        self._connection: AcpConnection | None = None
+        self._connection: DeepSeekConnection | None = None
         self._agent_pid: int | None = None
         self._permission_denials: list[str] = []
         self._unclaimed_updates = 0
@@ -340,7 +367,7 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
             self._permission_denials.append(choice.denial)
         return choice.option_id
 
-    async def _read_loop(self, connection: AcpConnection) -> None:
+    async def _read_loop(self, connection: DeepSeekConnection) -> None:
         try:
             async for notification in connection.notifications():
                 self._dispatch(notification)
@@ -421,7 +448,7 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
     def _settle_turn(
         self,
         ticket: TurnTicket,
-        result: Mapping[str, Any],
+        result: Mapping[str, object],
         observed: UsageSnapshot | None,
     ) -> None:
         settled = settle_turn(
@@ -451,7 +478,7 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
         self._emit(settled.completed)
         self._complete(ticket, settled.outcome)
 
-    def _require_connection(self) -> AcpConnection:
+    def _require_connection(self) -> DeepSeekConnection:
         if self._connection is None:
             raise SessionClosedError("session not started")
         return self._connection

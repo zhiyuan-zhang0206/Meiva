@@ -3,7 +3,8 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
-from base.lm.harness.acp.frames import JSONRPC, Json, JsonObject, RequestId
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.lm.harness.acp.frames import JSONRPC, JsonObject, RequestId
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,8 +37,8 @@ PermissionHandler = Callable[[PermissionRequest], str | Awaitable[str | None] | 
 # meiva:note
 # Decode a `session/request_permission` payload into a `PermissionRequest`.
 def parse_permission_request(params: JsonObject) -> PermissionRequest:
-    raw_options: Json = params.get("options")
-    option_items = raw_options if isinstance(raw_options, list) else []
+    raw_options = params.get("options")
+    option_items = raw_options if is_object_list(raw_options) else []
     options = tuple(
         PermissionOption(
             option_id=str(option.get("optionId", "")),
@@ -45,12 +46,12 @@ def parse_permission_request(params: JsonObject) -> PermissionRequest:
             kind=str(option.get("kind", "")),
         )
         for option in option_items
-        if isinstance(option, dict)
+        if is_object_dict(option)
     )
-    raw_tool_call: Json = params.get("toolCall")
+    raw_tool_call = params.get("toolCall")
     return PermissionRequest(
         session_id=str(params.get("sessionId", "")),
-        tool_call=raw_tool_call if isinstance(raw_tool_call, dict) else {},
+        tool_call=raw_tool_call if is_object_dict(raw_tool_call) else {},
         options=options,
     )
 
