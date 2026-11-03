@@ -6,15 +6,13 @@
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, JsonValue
 
 from base.agents.messages.delivery.retry import retryable_response
 from base.agents.messages.envelope import validate_source
@@ -24,6 +22,7 @@ from base.cluster.machine import GatewayAccess, gateway_api_base, gateway_auth_h
 from base.host.net import http_dial
 from base.host.net.resilience import ExponentialBackoff, Policy, retry
 from base.host.net.transport_errors import RETRYABLE_NETWORK_ERRORS
+from cli.boundary.json_body import loads, response_object
 from ops.rpc_schemas import CancelAgentResponse, CompactAgentResponse, TransferAgentResponse
 
 _TIMEOUT_S = 15.0
@@ -72,6 +71,13 @@ class _AgentListItem(BaseModel):
     label: str | None
 
 
+# meiva:note
+# One page of the agent directory and the cursor for the next one.
+class _AgentPage(BaseModel):
+    agents: list[_AgentListItem]
+    next_cursor: int | None
+
+
 def _api(access: GatewayAccess, path: str) -> str:
     return f"{gateway_api_base(access.gateway_url)}/api/{path}"
 
@@ -96,8 +102,8 @@ def cmd_agents_ls(
         headers=gateway_auth_headers(access),
     )
     resp.raise_for_status()
-    page = resp.json()
-    rows = [_AgentListItem.model_validate(r) for r in page["agents"]]
+    page = _AgentPage.model_validate_json(resp.content)
+    rows = page.agents
 
     if not rows:
         print("(no agents)")
@@ -113,8 +119,8 @@ def cmd_agents_ls(
             f"{str(r.agent_id).rjust(id_w)}  {str(r.status).ljust(status_w)}  "
             f"{r.machine.ljust(machine_w)}  {label}"
         )
-    if page["next_cursor"] is not None:
-        print(f"(more agents: repeat with --before-id {page['next_cursor']})")
+    if page.next_cursor is not None:
+        print(f"(more agents: repeat with --before-id {page.next_cursor})")
     return 0
 
 
@@ -156,6 +162,14 @@ def _explicit_send_source(source: str | None) -> str:
 @dataclass(frozen=True)
 class SendReceipt:
     status: str
+    inbound_id: int | None = None
+    duplicate: bool = False
+
+
+# meiva:note
+# The gateway's answer to a send, as far as the receipt reads it.
+class _SendAnswer(BaseModel):
+    status: str | None = None
     inbound_id: int | None = None
     duplicate: bool = False
 
@@ -287,11 +301,9 @@ def send_agent_message(
     if response.status_code >= 400:
         print(response.text, file=sys.stderr)
     response.raise_for_status()
-    answer = response.json()
+    answer = _SendAnswer.model_validate_json(response.content)
     return SendReceipt(
-        status=str(answer.get("status")),
-        inbound_id=answer.get("inbound_id"),
-        duplicate=bool(answer.get("duplicate")),
+        status=str(answer.status), inbound_id=answer.inbound_id, duplicate=answer.duplicate
     )
 
 
@@ -333,10 +345,8 @@ def cmd_agents_restart(
     payload: dict[str, object] = {**_explicit_caller(source), "message": message}
     if config_json is not None:
         try:
-            config_overlay: dict[str, object] | list[object] | str | int | float | bool | None = (
-                json.loads(config_json)
-            )
-        except json.JSONDecodeError as exc:
+            config_overlay = loads(config_json)
+        except ValueError as exc:
             print(f"invalid config JSON: {exc}", file=sys.stderr)
             return 1
         if not isinstance(config_overlay, dict):
@@ -350,7 +360,7 @@ def cmd_agents_restart(
         headers=gateway_auth_headers(access),
     )
     resp.raise_for_status()
-    print(f"  ✓ agent {agent_id} restart: {resp.json().get('status')}")
+    print(f"  ✓ agent {agent_id} restart: {response_object(resp).get('status')}")
     return 0
 
 
@@ -376,7 +386,7 @@ def cmd_agents_resurrect(
         headers=gateway_auth_headers(access),
     )
     resp.raise_for_status()
-    print(f"  ✓ agent {agent_id} resurrect: {resp.json().get('status')}")
+    print(f"  ✓ agent {agent_id} resurrect: {response_object(resp).get('status')}")
     return 0
 
 
@@ -407,10 +417,25 @@ def _terminate(
         headers=gateway_auth_headers(access),
     )
     resp.raise_for_status()
-    data = resp.json()
-    suffix = _shell_sessions_suffix(data.get("shell_sessions"), requested=kill_all_shell_sessions)
-    print(f"  ✓ agent {agent_id} {verb}: {data.get('status')}{suffix}")
+    data = _TerminateAnswer.model_validate_json(resp.content)
+    suffix = _shell_sessions_suffix(data.shell_sessions, requested=kill_all_shell_sessions)
+    print(f"  ✓ agent {agent_id} {verb}: {data.status}{suffix}")
     return 0
+
+
+# meiva:note
+# What the gateway reports of the shell sessions a terminate asked to kill: when they die, and for
+# an immediate kill which sessions did.
+class _ShellKillReport(BaseModel):
+    when: JsonValue
+    killed: list[int] | None = None
+
+
+# meiva:note
+# The gateway's answer to a terminate or kill, as far as the status line reads it.
+class _TerminateAnswer(BaseModel):
+    status: str | None = None
+    shell_sessions: _ShellKillReport | None = None
 
 
 # meiva:note
@@ -418,13 +443,14 @@ def _terminate(
 #
 # A requested kill answered without a report came from a version that does not know the
 # option: nothing was killed, and the output says so.
-def _shell_sessions_suffix(shell: dict[str, Any] | None, *, requested: bool) -> str:
+def _shell_sessions_suffix(shell: _ShellKillReport | None, *, requested: bool) -> str:
     if shell is None:
         return " — shell sessions NOT killed (its runner predates the option)" if requested else ""
-    when = ShellSessionKillTiming(shell["when"])
-    if when is ShellSessionKillTiming.AT_EXIT:
+    if ShellSessionKillTiming(shell.when) is ShellSessionKillTiming.AT_EXIT:
         return " — its shell sessions are killed when it exits"
-    killed: list[int] = shell["killed"]
+    if shell.killed is None:
+        raise ValueError("the shell-session report names no killed sessions")
+    killed = shell.killed
     if not killed:
         return " — no shell sessions to kill"
     return f" — killed {len(killed)} shell session(s): {', '.join(str(i) for i in killed)}"

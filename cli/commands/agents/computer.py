@@ -17,6 +17,7 @@ from pathlib import Path
 from pydantic import JsonValue
 
 from base.paths import computer_mcp_socket
+from cli.boundary.json_body import loads
 
 
 # meiva:note
@@ -45,8 +46,8 @@ def cmd_computer_release(*, home: Path) -> int:
         print("computer-mcp daemon closed the connection", file=sys.stderr)
         return 1
     try:
-        resp: JsonValue = json.loads(line)
-    except json.JSONDecodeError:
+        resp = loads(line)
+    except ValueError:
         resp = None
     if not isinstance(resp, dict):
         print("computer-mcp daemon returned a corrupted response", file=sys.stderr)
@@ -58,8 +59,8 @@ def cmd_computer_release(*, home: Path) -> int:
     match resp.get("result"):
         case {"content": [{"text": str(text)}, *_]}:
             try:
-                result = json.loads(text)
-            except json.JSONDecodeError:
+                result = loads(text)
+            except ValueError:
                 result = None
         case _:
             result = None
