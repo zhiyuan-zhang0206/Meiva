@@ -7,7 +7,10 @@ from dataclasses import dataclass
 
 from langchain_core.messages import BaseMessage, SystemMessage
 
+from base.agents.messages.identity import is_message_likes
 from base.agents.messages.kwargs import MeivaMsgType, NoteTag, read_meiva_kwargs
+from base.host.boundary.options import options
+from base.host.boundary.untyped import object_of
 from meiva import impersonation
 
 
@@ -36,6 +39,25 @@ class Target:
 
 
 # meiva:note
+# `native_snapshot()` answers `Any` — the borrowed agent's saved state — so its message list is read
+# as `object` and checked here instead of annotated: a snapshot with no message sequence, or one
+# holding something that is not a message, is refused by name before `instruction_text` decides
+# which of the messages are the inherited instructions.
+def snapshot_messages(snapshot: object) -> Sequence[BaseMessage]:
+    messages = object_of(getattr, snapshot, "messages", None)
+    if not is_message_likes(messages):
+        raise TypeError("the borrowed agent's snapshot carries no message sequence")
+    kept: list[BaseMessage] = []
+    for message in messages:
+        if not isinstance(message, BaseMessage):
+            raise TypeError(
+                f"the borrowed agent's snapshot carries {type(message).__name__}, not a message"
+            )
+        kept.append(message)
+    return kept
+
+
+# meiva:note
 # Read native guidance under the attachment's authority checks. The attachment is opened and
 # closed here, and closing revalidates the lease, so the text is selected and returned only
 # after the lease held through detach. meiva.state also includes external journal replay, so
@@ -43,18 +65,19 @@ class Target:
 # inherited instructions.
 def read_instructions(target: Target) -> str:
     with impersonation.attach(target.session_id, agent_id=target.agent_id) as attached:
-        messages: Sequence[BaseMessage] = attached.native_snapshot().messages
+        messages = snapshot_messages(object_of(attached.native_snapshot))
     return instruction_text(messages)
 
 
 # meiva:note
-# The session and agent named on the command line.
+# The session and agent named on the command line, read once through `options` as the `Target` the
+# rest of the file takes: the namespace's attributes are `Any`, so this is the one place that reads
+# them.
 def parse_target(argv: Sequence[str]) -> Target:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("session_id", type=int)
     parser.add_argument("--agent", required=True, type=int, dest="agent_id")
-    args = parser.parse_args(argv)
-    return Target(session_id=args.session_id, agent_id=args.agent_id)
+    return options(parser.parse_args(argv), Target)
 
 
 def main(argv: Sequence[str]) -> None:
