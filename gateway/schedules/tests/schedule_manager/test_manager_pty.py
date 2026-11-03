@@ -30,7 +30,9 @@ from base.sessions.pty import client
 from base.sessions.pty.tests.pty_service import PtyServiceProcess, service_socket
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.sessions.pty.tests.pty_shells import wait_for
+from gateway.http.db_rows import query_one
 from gateway.schedules import session_control
+from gateway.schedules.rows import InsertedId
 from gateway.schedules.tests.db_faults import failing_write
 from services.wake.schedule_manager import manager as sm
 from services.wake.schedule_manager.tests.manager_support import NOW, schedule_manager
@@ -79,16 +81,16 @@ def _insert_schedule(
     enabled: bool = True,
     machine: str = "gateway",
 ) -> int:
-    with conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO schedules (name, script, command, enabled, status, machine) "
-            "VALUES (%s, %s, %s, %s, 'stopped', %s) RETURNING id",
-            (name, script, command, enabled, machine),
-        )
-        row = cur.fetchone()
+    row = query_one(
+        conn,
+        InsertedId,
+        "INSERT INTO schedules (name, script, command, enabled, status, machine) "
+        "VALUES (%s, %s, %s, %s, 'stopped', %s) RETURNING id",
+        (name, script, command, enabled, machine),
+    )
     conn.commit()
     assert row is not None
-    return int(row[0])
+    return row.id
 
 
 @pytest.fixture

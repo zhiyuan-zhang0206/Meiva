@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import cast
 
 import pytest
@@ -12,6 +13,7 @@ from gateway.schedules.plans import (
     edit_needs_sync,
     logs_view,
 )
+from gateway.schedules.rows import ScheduleStoreRow
 
 
 def _row(
@@ -23,22 +25,20 @@ def _row(
     machine: str = "gateway",
     owner_plugin: str | None = None,
     script: str = "print(1)",
-) -> tuple[object, ...]:
-    # meiva:note
-    # id, name, description, command, enabled, status, last_error, created_at, updated_at, machine, owner_plugin, script
-    return (
-        1,
-        name,
-        description,
-        command,
-        enabled,
-        "stopped",
-        None,
-        None,
-        None,
-        machine,
-        owner_plugin,
-        script,
+) -> ScheduleStoreRow:
+    return ScheduleStoreRow(
+        id=1,
+        name=name,
+        description=description,
+        command=command,
+        enabled=enabled,
+        status="stopped",
+        last_error=None,
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+        updated_at=datetime(2026, 1, 1, tzinfo=UTC),
+        machine=machine,
+        owner_plugin=owner_plugin,
+        script=script,
     )
 
 

@@ -11,6 +11,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal, assert_never
 
+from gateway.schedules.rows import ScheduleStoreRow
+
 __all__ = [
     "UPDATABLE",
     "ControlAction",
@@ -49,16 +51,17 @@ class ControlPlan:
 
 
 # meiva:note
-# The requested fields that differ from the row (columns: name, description, script,
-# command, enabled, machine, in the router's full-row order).
-def changed_fields(previous: tuple[object, ...], fields: Mapping[str, object]) -> dict[str, object]:
-    current = dict(
-        zip(
-            UPDATABLE,
-            (previous[1], previous[2], previous[11], previous[3], previous[4], previous[9]),
-            strict=True,
-        )
-    )
+# The requested fields that differ from the stored row (name, description, script, command,
+# enabled, machine).
+def changed_fields(previous: ScheduleStoreRow, fields: Mapping[str, object]) -> dict[str, object]:
+    current: dict[str, object] = {
+        "name": previous.name,
+        "description": previous.description,
+        "script": previous.script,
+        "command": previous.command,
+        "enabled": previous.enabled,
+        "machine": previous.machine,
+    }
     return {col: fields[col] for col in UPDATABLE if col in fields and fields[col] != current[col]}
 
 
