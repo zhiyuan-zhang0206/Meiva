@@ -963,7 +963,22 @@ reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/skills/integrations/audio-transcribe"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/skills/integrations/gmail"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/skills/integrations/sms"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/skills/integrations/telegram-send-file"
 reportAny = "error"
 reportExplicitAny = "error"
 

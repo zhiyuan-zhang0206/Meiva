@@ -28,11 +28,13 @@ import mimetypes
 import os
 import sys
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
 
 from base.config import settings
+from base.host.boundary.options import options
 
 # meiva:note
 # `telegram_delivery` is a sibling in this skill's own scripts/ dir, not an importable
@@ -99,6 +101,15 @@ def _deliver(path_arg: str, caption: str | None, *, api_base: str, credentials: 
 
 
 # meiva:note
+# The two flags `main` reads, one field per namespace attribute; `api_base` and `credentials` are
+# not fields because the process entry binds them rather than the parser.
+@dataclass(frozen=True)
+class _SendOptions:
+    path: str
+    caption: str | None
+
+
+# meiva:note
 # CLI entry point: validate, send, report. Returns the exit code.
 def main(argv: Sequence[str], *, api_base: str, credentials: Credentials) -> int:
     parser = argparse.ArgumentParser(
@@ -111,9 +122,9 @@ def main(argv: Sequence[str], *, api_base: str, credentials: Credentials) -> int
         default=None,
         help="optional plain-text caption (at most 1024 chars)",
     )
-    args = parser.parse_args(argv)
+    opts = options(parser.parse_args(argv), _SendOptions)
     try:
-        print(_deliver(args.path, args.caption, api_base=api_base, credentials=credentials))
+        print(_deliver(opts.path, opts.caption, api_base=api_base, credentials=credentials))
         return 0
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)

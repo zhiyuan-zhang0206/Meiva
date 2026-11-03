@@ -19,8 +19,12 @@ import argparse
 import sqlite3
 import sys
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+
+from base.host.boundary.options import options
+from base.host.boundary.untyped import object_of
 
 # meiva:note
 # `sms_messages` is a sibling in this skill's own scripts/ dir, not an importable package
@@ -38,6 +42,7 @@ from sms_messages import (
     build_chat_query,
     format_code_line,
     format_message_line,
+    parse_rows,
     select_messages,
 )
 
@@ -50,7 +55,10 @@ def fetch_rows(db_path: Path, query: ChatQuery) -> list[ChatRow]:
         raise FileNotFoundError(f"Messages database not found at {db_path}")
     conn = sqlite3.connect(str(db_path))
     try:
-        return [ChatRow(*row) for row in conn.execute(query.sql, query.params).fetchall()]
+        # meiva:note
+        # `fetchall` answers `Any`; `object_of` hands the rows over as one `object` for
+        # `parse_rows` to check column by column.
+        return parse_rows(object_of(conn.execute(query.sql, query.params).fetchall))
     finally:
         conn.close()
 
@@ -62,6 +70,18 @@ def query_messages(db_path: Path, now: datetime, filt: ChatFilter) -> list[SmsMe
 
 
 # meiva:note
+# The five flags `main` reads, one field per namespace attribute; `chat_db` and `now` are not
+# fields because the caller binds them rather than the parser.
+@dataclass(frozen=True)
+class _QueryOptions:
+    recent_codes: bool
+    recent_messages: bool
+    phone_suffix: str | None
+    lookback_hours: float
+    limit: int
+
+
+# meiva:note
 # The CLI: parse `argv`, query the chat.db at `chat_db` as of `now`, print one line per
 # message. A limit or lookback that selects nothing is refused as a usage error.
 def main(argv: Sequence[str], *, chat_db: Path, now: datetime) -> None:
@@ -69,24 +89,27 @@ def main(argv: Sequence[str], *, chat_db: Path, now: datetime) -> None:
     parser.add_argument("--recent-codes", action="store_true", help="Get recent verification codes")
     parser.add_argument("--recent-messages", action="store_true", help="Get recent SMS messages")
     parser.add_argument("--phone-suffix", type=str, default=None, help="Filter by last N digits")
-    parser.add_argument("--lookback-hours", type=float, default=DEFAULT_LOOKBACK_HOURS)
+    # meiva:note
+    # argparse converts only a *string* default through `type`; this flag declares a float, so its
+    # default is written as one.
+    parser.add_argument("--lookback-hours", type=float, default=float(DEFAULT_LOOKBACK_HOURS))
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT, help="Max messages")
-    args = parser.parse_args(argv)
+    opts = options(parser.parse_args(argv), _QueryOptions)
 
-    if not (args.recent_codes or args.recent_messages):
+    if not (opts.recent_codes or opts.recent_messages):
         parser.print_help(sys.stderr)
         return
     try:
         filt = ChatFilter(
-            phone_suffix=args.phone_suffix,
-            lookback_hours=args.lookback_hours,
-            limit=args.limit,
-            codes_only=args.recent_codes,
+            phone_suffix=opts.phone_suffix,
+            lookback_hours=opts.lookback_hours,
+            limit=opts.limit,
+            codes_only=opts.recent_codes,
         )
     except ValueError as exc:
         parser.error(str(exc))
     results = query_messages(chat_db, now, filt)
-    if args.recent_codes:
+    if opts.recent_codes:
         for message in results:
             print(format_code_line(message))
         if not results:

@@ -41,6 +41,7 @@ from typing import assert_never
 from openai import OpenAI, omit
 
 from base.config import settings
+from base.host.boundary.options import options
 
 # meiva:note
 # `transcribe_plan` is a sibling in this skill's own scripts/ dir, not an importable
@@ -181,6 +182,22 @@ def transcribe(
 
 
 # meiva:note
+# The flags `main` reads, one field per namespace attribute; `access` and `tools` are not fields
+# because the caller binds them. `json_output` is the `--json` flag under another name, because
+# `json` already names the module the result is printed with.
+@dataclass(frozen=True)
+class _TranscribeOptions:
+    source: str
+    model: str
+    language: str | None
+    prompt: str | None
+    max_bytes: int
+    max_segment_s: int
+    max_duration_s: float
+    json_output: bool
+
+
+# meiva:note
 # The CLI: parse `argv`, transcribe, print the text (or the full result with --json).
 # `access` is None when no OpenAI key is configured, which is refused after the arguments
 # are validated.
@@ -207,34 +224,40 @@ def main(argv: Sequence[str], *, access: OpenAIAccess | None, tools: Tools) -> N
         default=MAX_SEGMENT_SECONDS,
         help="Max segment duration in seconds",
     )
+    # meiva:note
+    # argparse converts only a *string* default through `type`; this flag declares a float, so its
+    # default is written as one.
     p.add_argument(
         "--max-duration-s",
         type=float,
-        default=MAX_TOTAL_SECONDS,
+        default=float(MAX_TOTAL_SECONDS),
         help="Max total audio duration (safety ceiling)",
     )
     p.add_argument(
-        "--json", action="store_true", help="Output full result as JSON instead of plain text"
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help="Output full result as JSON instead of plain text",
     )
-    args = p.parse_args(argv)
+    opts = options(p.parse_args(argv), _TranscribeOptions)
 
     limits = Limits(
-        max_bytes=args.max_bytes,
-        max_segment_s=args.max_segment_s,
-        max_duration_s=args.max_duration_s,
+        max_bytes=opts.max_bytes,
+        max_segment_s=opts.max_segment_s,
+        max_duration_s=opts.max_duration_s,
     )
     if access is None:
         raise RuntimeError("OPENAI_API_KEY not set (expected in ~/.meiva/.env) — cannot transcribe")
     result = transcribe(
-        args.source,
+        opts.source,
         client=OpenAI(api_key=access.api_key, base_url=access.base_url),
         tools=tools,
-        model=args.model,
-        language=args.language,
-        prompt=args.prompt,
+        model=opts.model,
+        language=opts.language,
+        prompt=opts.prompt,
         limits=limits,
     )
-    if args.json:
+    if opts.json_output:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     else:
         print(result["text"])
