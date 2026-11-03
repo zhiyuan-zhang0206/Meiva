@@ -93,9 +93,6 @@ from base.telemetry.otlp.telemetry_otlp_metrics import (
     LLM_LATENCY_BUCKETS_MS as LLM_LATENCY_BUCKETS_MS,
 )
 from base.telemetry.otlp.telemetry_otlp_metrics import (
-    EventDimensionResourceExporter as EventDimensionResourceExporter,
-)
-from base.telemetry.otlp.telemetry_otlp_metrics import (
     MetricsResource,
     build_providers,
     strip_unit_suffix,

@@ -58,9 +58,11 @@ def _make_backend(*, mirror_dir: Path, queue_maxsize: int = 8) -> tuple[Any, Any
     from opentelemetry.sdk.metrics import MeterProvider
     from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
+    from base.telemetry.otlp.event_resource_exporter import EventDimensionResourceExporter
+
     log_exporter = InMemoryLogRecordExporter()
     logger_provider = LoggerProvider()
-    resource_exporter: Any = telemetry_otlp.EventDimensionResourceExporter(log_exporter)
+    resource_exporter = EventDimensionResourceExporter(log_exporter)
     logger_provider.add_log_record_processor(SimpleLogRecordProcessor(resource_exporter))
     metric_reader = InMemoryMetricReader()
     metric_provider = MeterProvider(metric_readers=[metric_reader])
