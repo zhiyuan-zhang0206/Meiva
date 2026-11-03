@@ -27,6 +27,7 @@ __all__ = [
     "STATE_CONFIRMED",
     "STATE_INFRA",
     "STATE_SUSPECTED",
+    "WATCH_STALE_AFTER",
     "Card",
     "Entry",
     "Failure",
@@ -42,6 +43,12 @@ __all__ = [
 
 FAILURE_TEST = "test"
 FAILURE_INFRA = "infra"
+
+# meiva:note
+# The watch's own heartbeat, in missed slots: a round lands every half hour, so one hour is two
+# missed slots. One missed slot is a slow round; two mean the watch stopped reporting.
+WATCH_STALE_AFTER = timedelta(hours=1)
+
 
 STATE_SUSPECTED = "suspected"
 STATE_CONFIRMED = "confirmed"
@@ -124,6 +131,42 @@ class Card:
     fingerprint: str
     title: str
     body: str
+
+    # meiva:note
+    # The card for a watch whose rounds stopped. It lives here, on the type it builds, rather than
+    # as another module-level decision: `main_red` sits at the module surface budget, and this
+    # question shares the card vocabulary with every other card the watch opens. A watch with no
+    # round on record returns nothing -- a schedule that never ran is the manager's business, and a
+    # fresh site would otherwise open a card the first time the check ran.
+    @classmethod
+    def for_stale_watch(
+        cls, last_round_at: datetime | None, now: datetime, *, stale_after: timedelta
+    ) -> Card | None:
+        if last_round_at is None:
+            return None
+        age = now - last_round_at
+        if age < stale_after:
+            return None
+        hours = stale_after.total_seconds() / 3600
+        return cls(
+            fingerprint="main-red-watch/liveness",
+            title="The main-red watch stopped reporting: no round heartbeat",
+            body=(
+                f"The watch's last round was {age.total_seconds() / 3600:.1f}h ago "
+                f"(threshold {hours:.0f}h, newest {last_round_at.isoformat()}).\n\n"
+                "This reports the watch, not `main`: while it is down, a red on `main` opens no "
+                "card.\n\n"
+                "Check, in this order:\n\n"
+                "1. `meiva schedules runs <id>` -- is the entry running, and did its last session "
+                "end `interrupted`?\n"
+                "2. `meiva schedules logs <id>` -- does a round print its `fingerprints=...` line, "
+                "or does it raise before printing?\n"
+                "3. `gh api repos/zhiyuan-zhang0206/Meiva/actions/workflows/release-gate.yml/runs` "
+                "-- if GitHub itself is down or the workflow was disabled, the watch has nothing "
+                "to read and says so in its own round.\n\n"
+                "Closes when a round lands again."
+            ),
+        )
 
 
 # meiva:note

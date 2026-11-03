@@ -56,8 +56,10 @@ usually a flake, and that same commit passed the nightly an hour later), a red
 that survives onto a second commit becomes a card, and a green run closes it.
 Failures that happen around the suite rather than in it — a container that never
 pulled, a disk that filled — are counted and never become a card. Each round
-emits `main_red_watch_round`, so a watch that stops running is a missing event
-rather than silence.
+emits `main_red_watch_round`, and that event is persisted rather than lived in
+the mirror alone: a second trigger five minutes after each round reads the
+newest one back and opens a card for the lead when it is more than an hour old,
+so a watch that stopped reporting is a card rather than silence.
 
 - **product** schedules (adversarial evaluation, self-evolution, memory, model
   tracking, debt clearing, CI observability, trace shipping) are Meiva's own

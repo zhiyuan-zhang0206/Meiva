@@ -239,6 +239,7 @@ EVENTS: dict[str, EventSpec] = {
         "one main-red-watch round — open fingerprints, cards opened, infra failures, stale schedules",
         payload=TrunkRedWatchRound,
         site="schedules/main-red-watch-schedule.py:watch_round (via emit_system_event)",
+        persist=True,
     ),
     "debt_sweep_daily": telemetry_event(
         "debt_sweep_daily",
