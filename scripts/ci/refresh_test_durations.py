@@ -129,6 +129,7 @@ def run_suite(
     *,
     coverage: bool,
     run_process: SuiteProcess,
+    python: str,
     junit_path: Path | None = None,
 ) -> int:
     """Run one suite with duration recording; return the pytest exit code.
@@ -141,7 +142,7 @@ def run_suite(
     `--clean-durations` replaces that target with this run's tests only.
     """
     cmd = [
-        sys.executable,
+        python,
         "-m",
         "pytest",
         *pytest_args,
@@ -175,6 +176,7 @@ def _measure_shard(
     *,
     target_path: Path,
     run_process: SuiteProcess,
+    python: str,
     junit_path: Path | None = None,
 ) -> int:
     """Record one CI-equivalent shard, retrying only that isolated measurement."""
@@ -247,6 +249,7 @@ def _measure_shard(
             output_path,
             coverage=coverage,
             run_process=run_process,
+            python=python,
             junit_path=junit_path if attempt == 1 else None,
         )
         if result == 0:
@@ -309,7 +312,7 @@ def write_durations(durations: dict[str, float], *, target_path: Path) -> dict[s
     return rounded
 
 
-def _refresh_all(*, target_path: Path, run_process: SuiteProcess) -> int:
+def _refresh_all(*, target_path: Path, run_process: SuiteProcess, python: str) -> int:
     previous = load_durations(target_path)
     print(f"refreshing .test_durations (previous: {len(previous)} entries)")
 
@@ -330,6 +333,7 @@ def _refresh_all(*, target_path: Path, run_process: SuiteProcess) -> int:
             backend_path,
             coverage=True,
             run_process=run_process,
+            python=python,
         )
         if backend_rc != 0:
             print(
@@ -344,6 +348,7 @@ def _refresh_all(*, target_path: Path, run_process: SuiteProcess) -> int:
             e2e_path,
             coverage=False,
             run_process=run_process,
+            python=python,
         )
         if e2e_rc != 0:
             print(
@@ -410,12 +415,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: list[str] | None = None, *, target_path: Path, run_process: SuiteProcess) -> int:
+def main(
+    argv: list[str] | None = None, *, target_path: Path, run_process: SuiteProcess, python: str
+) -> int:
     """Dispatch the legacy local refresh or the nightly isolation commands."""
     parsed = _parse_args([] if argv is None else argv)
     command = attribute(parsed, "command", object)
     if command in (None, "refresh"):
-        return _refresh_all(target_path=target_path, run_process=run_process)
+        return _refresh_all(target_path=target_path, run_process=run_process, python=python)
     if command == "measure":
         measure = options(parsed, MeasureOptions)
         if measure.junit_xml is not None:
@@ -426,6 +433,7 @@ def main(argv: list[str] | None = None, *, target_path: Path, run_process: Suite
             measure.output,
             target_path=target_path,
             run_process=run_process,
+            python=python,
             junit_path=measure.junit_xml,
         )
     if command == "merge":
@@ -436,4 +444,11 @@ def main(argv: list[str] | None = None, *, target_path: Path, run_process: Suite
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1:], target_path=DURATIONS_PATH, run_process=subprocess.run))
+    raise SystemExit(
+        main(
+            sys.argv[1:],
+            target_path=DURATIONS_PATH,
+            run_process=subprocess.run,
+            python=sys.executable,
+        )
+    )
