@@ -31,6 +31,7 @@ from services.entrypoints.im_bridge.types import (
     OutboundChunk,
     PreparedOutboundSend,
     SendNotStartedError,
+    TimelineItem,
 )
 
 
@@ -93,7 +94,7 @@ def candidate(
     replay: str = "",
     qualified: bool = True,
 ) -> TimelineCandidate:
-    item = {
+    item: TimelineItem = {
         "item_id": f"{index}.0",
         "kind": "agent_chat",
         "payload": text,

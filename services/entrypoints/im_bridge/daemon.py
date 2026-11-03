@@ -22,10 +22,11 @@ from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol
 
 from psycopg.errors import ConnectionDoesNotExist, ConnectionFailure
 from psycopg_pool import ConnectionPool, PoolTimeout
+from pydantic import TypeAdapter
 
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
@@ -64,6 +65,10 @@ from services.entrypoints.im_bridge.types import NETWORK_ERRORS, IMAdapter
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 
 _log = logging.getLogger("services.entrypoints.im_bridge.daemon")
+
+# meiva:note
+# The body of `POST /send`: a JSON object whose `text` member the handler checks.
+_SEND_BODY = TypeAdapter(dict[str, object])
 
 # Staleness ceiling for the healthz liveness — generous: the daemon is
 # mostly idle waiting on long polls; only a wedged event loop should trip it.
@@ -304,7 +309,7 @@ class NotifyTarget(Protocol):
 
 async def handle_send(
     core: NotifyTarget,
-) -> Callable[[bytes], Coroutine[Any, Any, tuple[int, bytes, str]]]:
+) -> Callable[[bytes], Coroutine[object, object, tuple[int, bytes, str]]]:
     """Route handler for the daemon's ``POST /send`` RPC (ops-alerts fan-out).
 
     Body: ``{"text": str}`` — fanned out to every loaded adapter's owner chat
@@ -318,7 +323,7 @@ async def handle_send(
 
     async def handle(body: bytes) -> tuple[int, bytes, str]:
         try:
-            payload = json.loads(body or b"{}")
+            payload = _SEND_BODY.validate_json(body or b"{}")
         except ValueError:
             return 400, b'{"error": "invalid json body"}', "application/json"
         text = payload.get("text")

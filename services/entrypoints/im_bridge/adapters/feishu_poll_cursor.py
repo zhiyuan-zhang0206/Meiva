@@ -14,9 +14,11 @@ delivery and save does not become a second inbound.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Protocol
+from collections.abc import Sequence
+from typing import Protocol
 
 import requests
+from pydantic import BaseModel, ConfigDict
 
 from services.entrypoints.im_bridge.types import RetryableTransportError, raise_http_failure
 
@@ -28,7 +30,7 @@ class FeishuRawResponse(Protocol):
 
 class FeishuResponseData(Protocol):
     @property
-    def items(self) -> list[Any] | None: ...
+    def items(self) -> Sequence[object] | None: ...
 
 
 class FeishuMessageResponse(Protocol):
@@ -39,13 +41,18 @@ class FeishuMessageResponse(Protocol):
     @property
     def msg(self) -> str: ...
     @property
-    def data(self) -> FeishuResponseData | None: ...
+    def data(self) -> object | None: ...
 
     def success(self) -> bool: ...
 
 
+class FeishuListResponse(FeishuMessageResponse, Protocol):
+    @property
+    def data(self) -> FeishuResponseData | None: ...
+
+
 class FeishuMessageResource(Protocol):
-    def list(self, request: object, /) -> FeishuMessageResponse: ...
+    def list(self, request: object, /) -> FeishuListResponse: ...
     def create(self, request: object, /) -> FeishuMessageResponse: ...
 
 
@@ -59,16 +66,53 @@ class FeishuImNamespace(Protocol):
     def v1(self) -> FeishuImV1: ...
 
 
-class FeishuRestConfig(Protocol):
-    @property
-    def timeout(self) -> float | None: ...
-
-
 class FeishuRestClient(Protocol):
     @property
     def im(self) -> FeishuImNamespace: ...
-    @property
-    def _config(self) -> FeishuRestConfig: ...
+
+
+# meiva:note
+# What this adapter reads of an SDK object: built from its attributes, so an SDK object and a
+# stand-in that carries only some of them read alike, and an attribute the object lacks reads as
+# None. An attribute that is present with another type fails validation.
+class FeishuView(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore", from_attributes=True)
+
+
+class FeishuOpenIdHolder(FeishuView):
+    open_id: str | None = None
+
+
+# meiva:note
+# The sender of a message in either SDK shape: an event's `sender_id.open_id`, or a listed message's
+# `id` qualified by `id_type`.
+class FeishuSender(FeishuView):
+    sender_type: str | None = None
+    sender_id: FeishuOpenIdHolder | None = None
+    id: str | None = None
+    id_type: str | None = None
+
+
+class FeishuListedBody(FeishuView):
+    content: str | None = None
+
+
+# meiva:note
+# One message of a ListMessage answer. `create_time` is epoch milliseconds, an int from the SDK.
+class FeishuListedMessage(FeishuView):
+    message_id: str | None = None
+    chat_type: str | None = None
+    msg_type: str | None = None
+    sender: FeishuSender | None = None
+    body: FeishuListedBody | None = None
+    create_time: int | str | None = None
+
+
+# meiva:note
+# The `data` of a create-message answer: the message sent and the chat it resolved to.
+class FeishuSentMessage(FeishuView):
+    chat_id: str | None = None
+    message_id: str | None = None
 
 
 class FeishuListRejected(RuntimeError):  # noqa: N818 — reads as the outcome, like its log message "Feishu list rejected"
@@ -91,12 +135,12 @@ def idempotency_key(message_id: str | None) -> str | None:
     return f"feishu:{message_id}" if message_id else None
 
 
-def create_ms(item: object) -> int | None:
+def create_ms(item: FeishuListedMessage) -> int | None:
     """A listed message's create time in epoch ms; None when absent/garbled."""
 
     try:
-        return int(getattr(item, "create_time", ""))
-    except (TypeError, ValueError):
+        return int("" if item.create_time is None else item.create_time)
+    except ValueError:
         return None
 
 
@@ -106,7 +150,7 @@ def create_ms(item: object) -> int | None:
 # not leave the chat without a cursor, which would replay the whole window. An empty window still
 # yields a time position, so the first message afterwards is replayed after a restart rather than
 # mistaken for history. `now_ms` is the caller's clock reading.
-def anchor(items: list[Any], *, now_ms: int) -> tuple[str | None, int]:
+def anchor(items: list[FeishuListedMessage], *, now_ms: int) -> tuple[str | None, int]:
     newest = next((item for item in reversed(items) if item.message_id), None)
     if newest is None:
         return None, now_ms
@@ -122,14 +166,14 @@ def anchor(items: list[Any], *, now_ms: int) -> tuple[str | None, int]:
 # A replay also drops what is older than the replay window (measured from `now_ms`); a live round
 # never does.
 def pending_after(
-    items: list[Any],
+    items: list[FeishuListedMessage],
     cursor_id: str | None,
     cursor_ms: int | None,
     *,
     replay: bool,
     replay_window_s: float,
     now_ms: int,
-) -> tuple[list[Any], list[Any]]:
+) -> tuple[list[FeishuListedMessage], list[FeishuListedMessage]]:
     ids = [item.message_id for item in items]
     if cursor_id is not None and cursor_id in ids:
         gap = items[ids.index(cursor_id) + 1 :]
@@ -140,8 +184,8 @@ def pending_after(
     if not replay:
         return gap, []
     cutoff = now_ms - int(replay_window_s * 1000)
-    fresh: list[Any] = []
-    stale: list[Any] = []
+    fresh: list[FeishuListedMessage] = []
+    stale: list[FeishuListedMessage] = []
     for item in gap:
         created = create_ms(item)
         (stale if created is not None and created < cutoff else fresh).append(item)
@@ -150,7 +194,7 @@ def pending_after(
 
 # meiva:note
 # The chat's newest page of messages (20), ascending; failed list calls raise.
-async def list_chat(rest_client: FeishuRestClient, chat_id: str) -> list[Any]:
+async def list_chat(rest_client: FeishuRestClient, chat_id: str) -> list[FeishuListedMessage]:
     from lark_oapi.api.im.v1 import ListMessageRequest  # pyright: ignore[reportUnknownVariableType]
 
     request: object = (
@@ -162,7 +206,7 @@ async def list_chat(rest_client: FeishuRestClient, chat_id: str) -> list[Any]:
         .build()
     )
     try:
-        response: FeishuMessageResponse = await asyncio.to_thread(
+        response: FeishuListResponse = await asyncio.to_thread(
             rest_client.im.v1.message.list, request
         )
     except (requests.exceptions.SSLError, requests.exceptions.ProxyError):
@@ -174,6 +218,19 @@ async def list_chat(rest_client: FeishuRestClient, chat_id: str) -> list[Any]:
     if response.code != 0:
         raise FeishuListRejected(response.code, f"Feishu list rejected: code={response.code}")
     data = response.data
-    items: list[Any] = list((data.items or []) if data is not None else [])
+    items = [
+        FeishuListedMessage.model_validate(item)
+        for item in ((data.items or []) if data is not None else [])
+    ]
     items.reverse()
     return items
+
+
+# meiva:note
+# Poll delay after `failures` consecutive all-chats-failed rounds.
+#
+# Doubles the interval per failure (capped at 32x); the absolute cap never drops below the
+# configured interval, so a >300s interval keeps its own cadence instead of being clamped to 300s.
+# The doubling is a shift because `int ** int` is typed `Any`.
+def backoff_delay(interval: float, failures: int) -> float:
+    return min(interval * (1 << min(failures, 5)), max(300.0, interval))

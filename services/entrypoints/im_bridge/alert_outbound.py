@@ -2,8 +2,10 @@
 
 import asyncio
 import json
+from collections.abc import Mapping
+from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Literal
 
 from psycopg import Connection
 from psycopg.errors import ConnectionDoesNotExist, ConnectionFailure
@@ -11,7 +13,9 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import PoolTimeout
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from base.db.rows import query_all, query_one
 from base.db.transaction import write_transaction
+from base.host.boundary.json_values import is_object_dict
 from base.log import logger
 from base.telemetry.alerts.native import AlertGroupOrigin, NativeAlertSourceError, load_native_group
 from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
@@ -66,21 +70,60 @@ class AlertOutboundRequest(BaseModel):
     source_origin: Literal[AlertGroupOrigin.NATIVE]
 
 
+# meiva:note
+# A native alert group as `load_native_group` answers it: a JSON object, still `object` until a
+# reader narrows a member.
+type NativeGroup = dict[str, object]
+
+
+def _group_id(group: Mapping[str, object]) -> int:
+    value = group["id"]
+    if type(value) is not int:
+        raise TypeError("a native alert group carries an integer id")
+    return value
+
+
+def _group_text(group: Mapping[str, object]) -> str:
+    value = group["text"]
+    if not isinstance(value, str):
+        raise TypeError("a native alert group carries its rendered text")
+    return value
+
+
+@dataclass(frozen=True)
+class _ReceiptRow:
+    request: object
+    decisions: object
+    intent_ids: list[int]
+
+
+@dataclass(frozen=True)
+class _IdRow:
+    id: int
+
+
 class AlertOutboundStore:
     def __init__(self, outbound: IMOutboxStore) -> None:
         self.outbound = outbound
 
     @staticmethod
-    def _receipt(conn: Connection, group_id: int) -> tuple[dict[str, Any], AlertAcceptance] | None:
-        row = conn.execute(
+    def _receipt(conn: Connection, group_id: int) -> tuple[NativeGroup, AlertAcceptance] | None:
+        row = query_one(
+            conn,
+            _ReceiptRow,
             "SELECT request,decisions,intent_ids FROM im_bridge_alert_acceptances WHERE group_id=%s",
             (group_id,),
-        ).fetchone()
+        )
         if row is None:
             return None
-        return row[0], AlertAcceptance(group_id=group_id, decisions=row[1], intent_ids=row[2])
+        if not is_object_dict(row.request):
+            raise TypeError("a retained alert request is a JSON object")
+        acceptance = AlertAcceptance.model_validate(
+            {"group_id": group_id, "decisions": row.decisions, "intent_ids": row.intent_ids}
+        )
+        return row.request, acceptance
 
-    def lookup(self, group_id: int) -> tuple[dict[str, Any], AlertAcceptance | None]:
+    def lookup(self, group_id: int) -> tuple[NativeGroup, AlertAcceptance | None]:
         with self.outbound._pool().connection() as conn:
             previous = self._receipt(conn, group_id)
             if previous is not None:
@@ -88,14 +131,15 @@ class AlertOutboundStore:
             return load_native_group(conn, group_id), None
 
     def accept(
-        self, group: dict[str, Any], decisions: tuple[AlertRecipientDecision, ...]
+        self, group: NativeGroup, decisions: tuple[AlertRecipientDecision, ...]
     ) -> AlertAcceptance:
+        group_id = _group_id(group)
         with write_transaction(self.outbound._pool()) as conn:
-            previous = self._receipt(conn, group["id"])
+            previous = self._receipt(conn, group_id)
             if previous is not None:
                 return previous[1]
-            current = load_native_group(conn, group["id"], lock=True)
-            previous = self._receipt(conn, group["id"])
+            current = load_native_group(conn, group_id, lock=True)
+            previous = self._receipt(conn, group_id)
             if previous is not None:
                 return previous[1]
             if current != group:
@@ -108,13 +152,13 @@ class AlertOutboundStore:
             conn.execute(
                 "INSERT INTO im_bridge_alert_acceptances(group_id,request,decisions,intent_ids) "
                 "VALUES (%s,%s,%s,%s)",
-                (current["id"], Jsonb(current), Jsonb(frozen), list(ids)),
+                (group_id, Jsonb(current), Jsonb(frozen), list(ids)),
             )
-            return AlertAcceptance(group_id=current["id"], decisions=decisions, intent_ids=ids)
+            return AlertAcceptance(group_id=group_id, decisions=decisions, intent_ids=ids)
 
     @staticmethod
     def _intents(
-        group: dict[str, Any], decisions: tuple[AlertRecipientDecision, ...]
+        group: Mapping[str, object], decisions: tuple[AlertRecipientDecision, ...]
     ) -> tuple[OutboundIntent, ...]:
         if len({decision.channel for decision in decisions}) != len(decisions):
             raise ValueError("alert fanout has duplicate channels")
@@ -134,7 +178,9 @@ class AlertOutboundStore:
                     chat_id=decision.recipient,
                     agent_id=None,
                     source=OutboundSource(
-                        kind=OutboundSourceKind.ALERT_GROUP, identity=str(group["id"]), block_idx=0
+                        kind=OutboundSourceKind.ALERT_GROUP,
+                        identity=str(_group_id(group)),
+                        block_idx=0,
                     ),
                     prepared=decision.prepared,
                 )
@@ -143,13 +189,15 @@ class AlertOutboundStore:
 
     def pending_after(self, after: int, limit: int = 16) -> tuple[int, ...]:
         with self.outbound._pool().connection() as conn:
-            rows = conn.execute(
+            rows = query_all(
+                conn,
+                _IdRow,
                 "SELECT g.id FROM alert_notification_groups g WHERE g.origin='native-v1' AND g.id>%s "
                 "AND NOT EXISTS(SELECT 1 FROM im_bridge_alert_acceptances a WHERE a.group_id=g.id) "
                 "ORDER BY g.id LIMIT %s",
                 (after, limit),
-            ).fetchall()
-            return tuple(int(row[0]) for row in rows)
+            )
+            return tuple(row.id for row in rows)
 
 
 class AlertOutboundBridge:
@@ -170,7 +218,7 @@ class AlertOutboundBridge:
             raise AlertAcceptanceHeldError("native alert acceptance is paused")
         decisions = tuple(
             [
-                await self._prepare(channel, adapter, group["text"])
+                await self._prepare(channel, adapter, _group_text(group))
                 for channel, adapter in sorted(self.adapters.items())
             ]
         )

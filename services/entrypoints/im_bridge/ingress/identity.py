@@ -3,8 +3,8 @@
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from typing import Any
 
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from services.entrypoints.im_bridge.ingress.types import ProviderSource
 
 
@@ -93,11 +93,10 @@ def validate_message_items(items: Sequence[Mapping[str, object]]) -> None:
             raise ValueError("Weixin provider item type is unknown")
         for field in ("text_item", "voice_item"):
             data = item.get(field)
-            data_any: Any = data
             if data is not None:
-                if not isinstance(data, Mapping):
+                if not is_object_dict(data):
                     raise TypeError("Weixin text/transcript must be an optional string")
-                text_val: object = data_any.get("text")
+                text_val = data.get("text")
                 if text_val is not None and not isinstance(text_val, str):
                     raise TypeError("Weixin text/transcript must be an optional string")
 
@@ -121,15 +120,11 @@ def poll_update_fields(
     if new_buf is not None and not isinstance(new_buf, str):
         raise TypeError("Weixin continuation token must be an opaque string")
     raw_msgs = response.get("msgs")
-    msgs_any: Any = raw_msgs
-    if not isinstance(raw_msgs, list):
+    if not is_object_list(raw_msgs):
         raise TypeError("Weixin updates must contain a message list")
-    raw_items: list[Any] = msgs_any
     messages: list[dict[str, object]] = []
-    for message in raw_items:
-        msg_any: Any = message
-        if not isinstance(message, dict):
+    for message in raw_msgs:
+        if not is_object_dict(message):
             raise TypeError("Weixin provider message must be an object")
-        item: dict[str, object] = msg_any
-        messages.append(item)
+        messages.append(message)
     return messages, new_buf, timeout_ms

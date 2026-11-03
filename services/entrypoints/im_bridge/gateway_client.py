@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import random
 from collections.abc import AsyncGenerator, Mapping
-from typing import Any, Literal
+from typing import Literal, TypedDict
 
 import httpx
+from pydantic import TypeAdapter
 
 from base.api_contracts.idempotency import keyed_headers
 from base.clock.ids import new_uuid
@@ -18,12 +18,34 @@ from services.entrypoints.im_bridge.types import (
     NETWORK_ERRORS,
     AgentDetail,
     AgentDirectoryPage,
+    CommandInfo,
+    ModelsView,
     RetryableTransportError,
+    TimelineItem,
     raise_http_failure,
     retryable_http_status,
 )
 
 _log = logging.getLogger("services.entrypoints.im_bridge.gateway_client")
+
+
+class _Timeline(TypedDict):
+    items: list[TimelineItem]
+
+
+class _SpawnedAgent(TypedDict):
+    id: object
+
+
+# meiva:note
+# The gateway's answers as the bridge reads them. Members the bridge does not read are ignored.
+_AGENT_PAGE = TypeAdapter(AgentDirectoryPage)
+_AGENT_DETAIL = TypeAdapter(AgentDetail)
+_MODELS = TypeAdapter(ModelsView)
+_COMMANDS = TypeAdapter(list[CommandInfo])
+_TIMELINE = TypeAdapter(_Timeline)
+_SPAWNED = TypeAdapter(_SpawnedAgent)
+_EVENT = TypeAdapter(dict[str, object])
 
 
 class GatewayClient:
@@ -69,7 +91,7 @@ class GatewayClient:
         resp = await client.get("/api/agents", headers=self._headers(), params=params)
         if resp.status_code != 200:
             raise_http_failure(resp.status_code, f"list agents failed: HTTP {resp.status_code}")
-        return resp.json()
+        return _AGENT_PAGE.validate_json(resp.content)
 
     async def get_agent(self, agent_id: int) -> AgentDetail | None:
         """Fetch one agent's detail, distinguishing absence from gateway failure."""
@@ -81,7 +103,7 @@ class GatewayClient:
             raise_http_failure(
                 resp.status_code, f"get agent {agent_id} failed: HTTP {resp.status_code}"
             )
-        return resp.json()
+        return _AGENT_DETAIL.validate_json(resp.content)
 
     async def send_message(
         self, agent_id: int, text: str, *, idempotency_key: str | None = None
@@ -131,12 +153,12 @@ class GatewayClient:
             f"send to agent {agent_id} failed after {len(self._config.im_send_retry_delays)} attempts"
         )
 
-    async def list_models(self) -> dict[str, Any]:
+    async def list_models(self) -> ModelsView:
         client = await self._http()
         resp = await client.get("/api/models", headers=self._headers())
         if resp.status_code != 200:
             raise_http_failure(resp.status_code, f"list models failed: HTTP {resp.status_code}")
-        return resp.json()
+        return _MODELS.validate_json(resp.content)
 
     async def spawn_agent(
         self,
@@ -158,12 +180,12 @@ class GatewayClient:
             raise_http_failure(
                 resp.status_code, f"spawn failed: HTTP {resp.status_code} - {resp.text[:300]}"
             )
-        agent_id = resp.json()["id"]
+        agent_id = _SPAWNED.validate_json(resp.content)["id"]
         if type(agent_id) is not int or agent_id <= 0:
             raise TypeError("spawn response requires a positive integer agent id")
         return agent_id
 
-    async def list_commands(self) -> list[dict[str, Any]]:
+    async def list_commands(self) -> list[CommandInfo]:
         """GET /api/commands — the Meiva slash-command catalog (every active
         skill gets a same-named command; project/user/plugin templates add
         more). name + description + instruction_hint, deduped and sorted."""
@@ -171,9 +193,9 @@ class GatewayClient:
         resp = await client.get("/api/commands", headers=self._headers())
         if resp.status_code != 200:
             raise_http_failure(resp.status_code, f"list commands failed: HTTP {resp.status_code}")
-        return resp.json()
+        return _COMMANDS.validate_json(resp.content)
 
-    async def get_timeline(self, agent_id: int, limit: int | None = None) -> list[dict[str, Any]]:
+    async def get_timeline(self, agent_id: int, limit: int | None = None) -> list[TimelineItem]:
         """GET /api/agents/{id}/timeline?limit=N → rendered TimelineItems.
 
         Without an explicit limit, N is the configured /switch fetch window
@@ -191,11 +213,11 @@ class GatewayClient:
             raise_http_failure(
                 resp.status_code, f"timeline {agent_id} failed: HTTP {resp.status_code}"
             )
-        return resp.json()["items"]
+        return _TIMELINE.validate_json(resp.content)["items"]
 
     async def stream_events(
         self, agent_id: int
-    ) -> AsyncGenerator[dict[str, Any], None]:  # pragma: no cover - generator
+    ) -> AsyncGenerator[dict[str, object], None]:  # pragma: no cover - generator
         """SSE GET /api/agents/{id}/events/stream; yield parsed event dicts."""
         client = await self._http()
         async with client.stream(
@@ -226,4 +248,4 @@ class GatewayClient:
                         if line.startswith("data:"):
                             data = line[5:].strip()
                     if data and data != '{"role":"heartbeat"}':
-                        yield json.loads(data)
+                        yield _EVENT.validate_json(data)

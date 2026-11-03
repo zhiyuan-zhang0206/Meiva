@@ -115,6 +115,14 @@ class FakeAdapter:
         self.sent.append((text, "owner", buttons))  # pyright: ignore[reportUnknownMemberType]
 
 
+# meiva:note
+# One round of the outbound worker of the core that owns `bridge`.
+async def _deliver(bridge: NoticeBridge) -> None:
+    core = bridge.core
+    assert isinstance(core, IMBridgeCore)
+    await core.outbound_worker.run_once()
+
+
 def _accepted_ids(pool: ConnectionPool) -> list[int]:
     with pool.connection() as conn:
         rows = conn.execute(
@@ -178,7 +186,7 @@ async def test_poll_pushes_new_notices_and_accepts_each(
 
         await bridge.poll_once()
         for _ in range(2):
-            await bridge.core.outbound_worker.run_once()
+            await _deliver(bridge)
         assert len(adapter.sent) == 2  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
         assert "A" in adapter.sent[0][0]  # pyright: ignore[reportUnknownMemberType]
         assert _accepted_ids(pool) == first
@@ -189,7 +197,7 @@ async def test_poll_pushes_new_notices_and_accepts_each(
         ]
         await bridge.poll_once()
         for _ in range(2):
-            await bridge.core.outbound_worker.run_once()
+            await _deliver(bridge)
         assert len(adapter.sent) == 4
         assert _accepted_ids(pool) == [*first, *second]
 
@@ -214,7 +222,7 @@ async def test_switched_off_decisions_are_accepted_but_not_pushed(
         notice = _seed_notice(db_conn, create_agent(db_conn), "decide")
 
         await bridge.poll_once()
-        await bridge.core.outbound_worker.run_once()
+        await _deliver(bridge)
 
         assert adapter.sent == []
         assert _accepted_ids(pool) == [notice]
@@ -240,7 +248,7 @@ async def test_historical_fyi_is_filtered_even_with_needs_input_disabled(
         notice = _seed_notice(db_conn, create_agent(db_conn), "just an fyi", require_response=False)
 
         await bridge.poll_once()
-        await bridge.core.outbound_worker.run_once()
+        await _deliver(bridge)
 
         assert adapter.sent == []
         assert _accepted_ids(pool) == [notice]
@@ -257,7 +265,7 @@ async def test_filter_agent_restricts_pushes(
         bridge._filters = {"min_priority": None, "agent": wanted}
 
         await bridge.poll_once()
-        await bridge.core.outbound_worker.run_once()
+        await _deliver(bridge)
         assert len(adapter.sent) == 1
         assert "from wanted" in adapter.sent[0][0]
 
@@ -511,7 +519,7 @@ def test_poll_reads_directly_from_db(
         db_conn, agent_id, "direct db notice", require_response=True
     )  # after the cutover is fixed
     asyncio.run(bridge.poll_once())
-    asyncio.run(bridge.core.outbound_worker.run_once())
+    asyncio.run(_deliver(bridge))
     assert len(adapter.sent) == 1
     assert "direct db notice" in adapter.sent[0][0]
     assert _accepted_ids(pool) == [nid]
@@ -647,7 +655,7 @@ async def test_poll_accepts_before_uncertain_send_and_never_retries(
         assert _accepted_ids(pool) == notices, "accepted means durable intent, not provider success"
         assert flaky.sent == []
         with pytest.raises(RuntimeError) as caught:
-            await bridge.core.outbound_worker.run_once()
+            await _deliver(bridge)
         assert caught.value is flaky.failure, "unknown send errors reach the service owner"
         with pool.connection() as conn:
             assert [
@@ -655,10 +663,10 @@ async def test_poll_accepts_before_uncertain_send_and_never_retries(
                 for r in conn.execute("SELECT status FROM im_bridge_outbound_intents ORDER BY id")
             ] == ["uncertain", "queued", "queued"]
         for _ in range(2):
-            await bridge.core.outbound_worker.run_once()
+            await _deliver(bridge)
         assert len(flaky.sent) == 2
         await bridge.poll_once()
-        await bridge.core.outbound_worker.run_once()
+        await _deliver(bridge)
         assert len(flaky.sent) == 2, "ambiguous first send is retained, never poll-replayed"
         with pool.connection() as conn:
             assert [

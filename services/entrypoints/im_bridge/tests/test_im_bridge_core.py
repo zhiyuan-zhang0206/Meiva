@@ -641,8 +641,14 @@ class FakeTypingAdapter(DurableAdapter):
     async def typing(self, chat_id: str) -> None:
         self.typing_calls.append(chat_id)
 
-    async def send_to_owner(self, text: str, *, markdown: bool = False) -> None:
-        del markdown
+    async def send_to_owner(
+        self,
+        text: str,
+        *,
+        markdown: bool = False,
+        buttons: list[tuple[str, str]] | None = None,
+    ) -> None:
+        del markdown, buttons
         self.owner_sent.append(text)
 
 

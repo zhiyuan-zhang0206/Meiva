@@ -64,8 +64,14 @@ class _RecordingAdapter(DurableAdapter):
     ) -> None:
         del chat_id, text, buttons, markdown
 
-    async def send_to_owner(self, text: str, *, markdown: bool = False) -> None:
-        del markdown
+    async def send_to_owner(
+        self,
+        text: str,
+        *,
+        markdown: bool = False,
+        buttons: list[tuple[str, str]] | None = None,
+    ) -> None:
+        del markdown, buttons
         self.attempts += 1
         if self.skipped:
             raise NotImplementedError("no owner chat")

@@ -2,14 +2,15 @@
 
 import random
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
 from uuid import UUID
 
 from psycopg import Connection
 from psycopg.types.json import Jsonb
 
 from base.clock.ids import new_uuid
+from base.db.rows import query_all, query_one
 from base.db.transaction import ConnectionSource, write_transaction
 from base.telemetry.alerts.native import stamp_native_sent
 from services.entrypoints.im_bridge.cursor_store import (
@@ -20,6 +21,7 @@ from services.entrypoints.im_bridge.cursor_store import (
 from services.entrypoints.im_bridge.outbound.claim_fence import (
     ATTEMPT_SQL,
     BINDING_SQL,
+    BindingRow,
     ClaimFence,
     StalePollBindingError,
     attempt_parameters,
@@ -35,12 +37,101 @@ from services.entrypoints.im_bridge.outbound.types import (
 )
 
 
+@dataclass(frozen=True)
+class _CursorRow:
+    push_account_id: str | None
+    push_agent_id: int | None
+    push_created_at: str | None
+    push_item_id: str | None
+    push_initialized: bool
+
+
+@dataclass(frozen=True)
+class _ReplayRow:
+    agent_id: int
+    intent_ids: list[int]
+    push_created_at: str | None
+    push_item_id: str | None
+    switch_arg: str
+
+
+@dataclass(frozen=True)
+class _ReplayFactsRow:
+    agent_id: int
+    intent_ids: list[int]
+    switch_arg: str
+
+
+@dataclass(frozen=True)
+class _IdRow:
+    id: int
+
+
+@dataclass(frozen=True)
+class _IntentRow:
+    id: int
+    request: object
+
+
+@dataclass(frozen=True)
+class _SelectionRow:
+    push_account_id: str | None
+    push_agent_id: int | None
+
+
+@dataclass(frozen=True)
+class _AgentRow:
+    push_agent_id: int | None
+
+
+@dataclass(frozen=True)
+class _ChatAgentRow:
+    chat_id: str
+    push_agent_id: int
+
+
+@dataclass(frozen=True)
+class _ChatSelectionRow:
+    channel: str
+    chat_id: str
+    push_agent_id: int | None
+
+
+@dataclass(frozen=True)
+class _CandidateRow:
+    channel: str
+    chat_id: str
+    push_agent_id: int | None
+    push_account_id: str | None
+    push_initialized: bool
+
+
+@dataclass(frozen=True)
+class _StreamRow:
+    channel: str
+    account_id: str
+    chat_id: str
+
+
+@dataclass(frozen=True)
+class _HealthRow:
+    channel: str
+    pending: int
+    last_ok: datetime | None
+
+
+@dataclass(frozen=True)
+class _SourceRow:
+    source_kind: str
+    source_id: str
+
+
 # meiva:note
 # Take the ingress store's locks on the fence's binding and attempt inside this transaction, and
 # refuse a superseded generation or attempt.
 def _enforce_claim_fence(conn: Connection, fence: ClaimFence) -> None:
     if not binding_is_current(
-        conn.execute(BINDING_SQL).fetchone(),
+        query_one(conn, BindingRow, BINDING_SQL),
         namespace=fence.namespace,
         account_id=fence.account_id,
         epoch=fence.epoch,
@@ -265,19 +356,26 @@ class IMOutboxStore:
         *,
         initial_agent: int | None = None,
         initialize: bool = False,
-    ) -> tuple[Any, Any, PushWatermark | None, bool]:
+    ) -> tuple[str | None, int | None, PushWatermark | None, bool]:
         conn.execute(
             "INSERT INTO im_bridge_cursors (channel, chat_id, push_agent_id, push_initialized) VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING",
             (channel, chat_id, initial_agent, initialize),
         )
-        row = conn.execute(
+        row = query_one(
+            conn,
+            _CursorRow,
             "SELECT push_account_id, push_agent_id, push_created_at, push_item_id, push_initialized "
             "FROM im_bridge_cursors WHERE channel=%s AND chat_id=%s FOR UPDATE",
             (channel, chat_id),
-        ).fetchone()
+        )
         if row is None:
             raise RuntimeError("outbound cursor or intent disappeared within its transaction")
-        return row[0], row[1], PushWatermark(row[2], row[3]) if row[3] is not None else None, row[4]
+        watermark = (
+            PushWatermark(row.push_created_at, row.push_item_id)
+            if row.push_item_id is not None
+            else None
+        )
+        return row.push_account_id, row.push_agent_id, watermark, row.push_initialized
 
     @staticmethod
     def _save_cursor(
@@ -313,20 +411,24 @@ class IMOutboxStore:
         *,
         expected_agent: int | None = None,
     ) -> TimelineAcceptance | None:
-        row = conn.execute(
+        row = query_one(
+            conn,
+            _ReplayRow,
             "SELECT agent_id, intent_ids, push_created_at, push_item_id, switch_arg FROM im_bridge_outbound_replays "
             "WHERE channel=%s AND account_id=%s AND chat_id=%s AND replay_id=%s",
             (channel, account, chat, replay),
-        ).fetchone()
+        )
         if row is None:
             return None
-        if row[4] != switch_arg or (expected_agent is not None and row[0] != expected_agent):
+        if row.switch_arg != switch_arg or (
+            expected_agent is not None and row.agent_id != expected_agent
+        ):
             raise OutboundIdentityConflictError(
                 "switch replay identity already accepted another target"
             )
         return TimelineAcceptance(
-            tuple(row[1]),
-            PushWatermark(row[2], row[3]) if row[3] else None,
+            tuple(row.intent_ids),
+            PushWatermark(row.push_created_at, row.push_item_id) if row.push_item_id else None,
             selected_agent_id=selected_agent,
         )
 
@@ -345,43 +447,52 @@ class IMOutboxStore:
             intent.replay_id,
         )
         request = intent.model_dump(mode="json")
-        row = conn.execute(
+        inserted = query_one(
+            conn,
+            _IdRow,
             "INSERT INTO im_bridge_outbound_intents "
             "(channel,account_id,chat_id,agent_id,source_kind,source_id,block_idx,replay_id,request) "
             "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING RETURNING id",
             (*key, Jsonb(request)),
-        ).fetchone()
-        if row is not None:
-            return int(row[0])
-        row = conn.execute(
+        )
+        if inserted is not None:
+            return inserted.id
+        existing = query_one(
+            conn,
+            _IntentRow,
             "SELECT id, request FROM im_bridge_outbound_intents WHERE channel=%s AND account_id=%s "
             "AND chat_id=%s AND agent_id IS NOT DISTINCT FROM %s AND source_kind=%s AND source_id=%s AND block_idx=%s AND replay_id=%s",
             key,
-        ).fetchone()
-        if row is None:
+        )
+        if existing is None:
             raise RuntimeError("outbound cursor or intent disappeared within its transaction")
-        if row[1] != request:
+        if existing.request != request:
             raise OutboundIdentityConflictError(
                 "timeline source identity has another immutable request"
             )
-        return int(row[0])
+        return existing.id
 
     def lookup_replay(
         self, channel: str, account: str, chat: str, replay: str, switch_arg: str
     ) -> TimelineAcceptance | None:
         """Recover accepted commands before querying mutable agent status/labels."""
         with write_transaction(self._pool()) as conn:
-            row = conn.execute(
+            row = query_one(
+                conn,
+                _SelectionRow,
                 "SELECT push_account_id,push_agent_id FROM im_bridge_cursors WHERE channel=%s AND chat_id=%s FOR UPDATE",
                 (channel, chat),
-            ).fetchone()
+            )
             if row is None:
                 return None
-            saved_account, selected = row
             previous = self._replay_receipt(
-                conn, channel, account, chat, replay, switch_arg, selected
+                conn, channel, account, chat, replay, switch_arg, row.push_agent_id
             )
-            if previous is not None and saved_account is not None and saved_account != account:
+            if (
+                previous is not None
+                and row.push_account_id is not None
+                and row.push_account_id != account
+            ):
                 raise OutboundAccountMismatchError(
                     "accepted replay belongs to a superseded account"
                 )
@@ -392,36 +503,42 @@ class IMOutboxStore:
     ) -> dict[str, object] | None:
         """Return the original switch receipt facts, never a later current selection."""
         with write_transaction(self._pool()) as conn:
-            row = conn.execute(
+            row = query_one(
+                conn,
+                _ReplayFactsRow,
                 "SELECT agent_id,intent_ids,switch_arg FROM im_bridge_outbound_replays "
                 "WHERE channel=%s AND account_id=%s AND chat_id=%s AND replay_id=%s",
                 (channel, account, chat, replay),
-            ).fetchone()
+            )
             if row is None:
                 return None
-            if row[2] != switch_arg:
+            if row.switch_arg != switch_arg:
                 raise OutboundIdentityConflictError(
                     "switch replay identity identifies another argument"
                 )
-            return {"agent_id": row[0], "intent_ids": list(row[1])}
+            return {"agent_id": row.agent_id, "intent_ids": list(row.intent_ids)}
 
     def native_selections(self, channel: str, account: str) -> dict[str, int]:
         """Derived subscriptions restore only canonical selections belonging to this account."""
         with self._pool().connection() as conn:
-            rows = conn.execute(
+            rows = query_all(
+                conn,
+                _ChatAgentRow,
                 "SELECT chat_id,push_agent_id FROM im_bridge_cursors WHERE channel=%s AND push_account_id=%s AND push_agent_id IS NOT NULL",
                 (channel, account),
-            ).fetchall()
-            return dict(rows)
+            )
+            return {row.chat_id: row.push_agent_id for row in rows}
 
     def native_selection(self, channel: str, account: str, chat: str) -> int | None:
         """Read only a matching native account selection, never import unbound JSON."""
         with self._pool().connection() as conn:
-            row = conn.execute(
+            row = query_one(
+                conn,
+                _AgentRow,
                 "SELECT push_agent_id FROM im_bridge_cursors WHERE channel=%s AND chat_id=%s AND push_account_id=%s",
                 (channel, chat, account),
-            ).fetchone()
-            return row[0] if row is not None else None
+            )
+            return row.push_agent_id if row is not None else None
 
     def selection(
         self, channel: str, account: str, chat: str, legacy_agent: int | None
@@ -452,12 +569,12 @@ class IMOutboxStore:
 
     def selections(self) -> dict[tuple[str, str], int | None]:
         with self._pool().connection() as conn:
-            return {
-                (channel, chat): agent
-                for channel, chat, agent in conn.execute(
-                    "SELECT channel,chat_id,push_agent_id FROM im_bridge_cursors WHERE push_initialized OR push_account_id IS NOT NULL"
-                ).fetchall()
-            }
+            rows = query_all(
+                conn,
+                _ChatSelectionRow,
+                "SELECT channel,chat_id,push_agent_id FROM im_bridge_cursors WHERE push_initialized OR push_account_id IS NOT NULL",
+            )
+            return {(row.channel, row.chat_id): row.push_agent_id for row in rows}
 
     def restore_candidates(
         self, legacy: dict[tuple[str, str], int]
@@ -465,14 +582,16 @@ class IMOutboxStore:
         """Bound cursors win; unbound legacy rows use the existing JSON choice, including clear."""
         result: dict[tuple[str, str], int | None] = dict(legacy)
         with self._pool().connection() as conn:
-            rows = conn.execute(
-                "SELECT channel,chat_id,push_agent_id,push_account_id,push_initialized FROM im_bridge_cursors"
-            ).fetchall()
-        for channel, chat, agent, account, initialized in rows:
-            if initialized or account is not None:
-                result[channel, chat] = agent
+            rows = query_all(
+                conn,
+                _CandidateRow,
+                "SELECT channel,chat_id,push_agent_id,push_account_id,push_initialized FROM im_bridge_cursors",
+            )
+        for row in rows:
+            if row.push_initialized or row.push_account_id is not None:
+                result[row.channel, row.chat_id] = row.push_agent_id
             else:
-                result.setdefault((channel, chat), None)
+                result.setdefault((row.channel, row.chat_id), None)
         return result
 
     def clear_selection(
@@ -511,15 +630,16 @@ class IMOutboxStore:
         if not accounts:
             return []
         with self._pool().connection() as conn:
-            return list(
-                conn.execute(
-                    "SELECT channel,account_id,chat_id FROM im_bridge_outbound_intents "
-                    "WHERE status='queued' AND (channel,account_id) IN "
-                    "(SELECT key,value FROM jsonb_each_text(%s)) GROUP BY channel,account_id,chat_id "
-                    "ORDER BY min(id) LIMIT 16",
-                    (Jsonb(accounts),),
-                ).fetchall()
+            rows = query_all(
+                conn,
+                _StreamRow,
+                "SELECT channel,account_id,chat_id FROM im_bridge_outbound_intents "
+                "WHERE status='queued' AND (channel,account_id) IN "
+                "(SELECT key,value FROM jsonb_each_text(%s)) GROUP BY channel,account_id,chat_id "
+                "ORDER BY min(id) LIMIT 16",
+                (Jsonb(accounts),),
             )
+            return [(row.channel, row.account_id, row.chat_id) for row in rows]
 
     def push_health_snapshot(
         self, channels: Sequence[str]
@@ -531,13 +651,15 @@ class IMOutboxStore:
         if not channels:
             return {}
         with self._pool().connection() as conn:
-            rows = conn.execute(
-                "SELECT channel, count(*) FILTER (WHERE status IN ('queued','sending')), "
-                "max(completed_at) FILTER (WHERE status = 'sent') "
+            rows = query_all(
+                conn,
+                _HealthRow,
+                "SELECT channel, count(*) FILTER (WHERE status IN ('queued','sending')) AS pending, "
+                "max(completed_at) FILTER (WHERE status = 'sent') AS last_ok "
                 "FROM im_bridge_outbound_intents WHERE channel = ANY(%s) GROUP BY channel",
                 (list(channels),),
-            ).fetchall()
-            return {channel: (int(pending), last_ok) for channel, pending, last_ok in rows}
+            )
+            return {row.channel: (row.pending, row.last_ok) for row in rows}
 
     def claim(self, stream: tuple[str, str, str]) -> tuple[int, UUID, OutboundIntent] | None:
         """Atomically start one queued intent; never steal an unresolved attempt.
@@ -546,21 +668,23 @@ class IMOutboxStore:
         do not prevent later queued intents from being claimed.
         """
         with write_transaction(self._pool()) as conn:
-            row = conn.execute(
+            row = query_one(
+                conn,
+                _IntentRow,
                 "SELECT id,request FROM im_bridge_outbound_intents "
                 "WHERE channel=%s AND account_id=%s AND chat_id=%s AND status='queued' "
                 "ORDER BY id LIMIT 1 FOR UPDATE",
                 stream,
-            ).fetchone()
+            )
             if row is None:
                 return None
             attempt = new_uuid(self._rng)
             conn.execute(
                 "UPDATE im_bridge_outbound_intents SET status='sending', attempt_id=%s, started_at=now(), "
                 "outcome_reason='send_result_unconfirmed' WHERE id=%s AND status='queued'",
-                (attempt, row[0]),
+                (attempt, row.id),
             )
-            return int(row[0]), attempt, OutboundIntent.model_validate(row[1])
+            return row.id, attempt, OutboundIntent.model_validate(row.request)
 
     def finish(
         self, intent_id: int, attempt_id: UUID, status: OutboundStatus, reason: str | None
@@ -568,11 +692,17 @@ class IMOutboxStore:
         if status not in (OutboundStatus.SENT, OutboundStatus.UNCERTAIN, OutboundStatus.FAILED):
             raise ValueError("a sending attempt requires a terminal outcome")
         with write_transaction(self._pool()) as conn:
-            row = conn.execute(
+            row = query_one(
+                conn,
+                _SourceRow,
                 "UPDATE im_bridge_outbound_intents SET status=%s, outcome_reason=%s, completed_at=now() "
                 "WHERE id=%s AND attempt_id=%s AND status='sending' RETURNING source_kind,source_id",
                 (status.value, reason, intent_id, attempt_id),
-            ).fetchone()
-            if row is not None and status == OutboundStatus.SENT and row[0] == "alert_group":
-                stamp_native_sent(conn, int(row[1]))
+            )
+            if (
+                row is not None
+                and status == OutboundStatus.SENT
+                and row.source_kind == "alert_group"
+            ):
+                stamp_native_sent(conn, int(row.source_id))
             return row is not None

@@ -44,6 +44,14 @@ class FakeCore:
         self.received.append(message)
 
 
+# meiva:note
+# What the adapter delivered to its (fake) core.
+def received(adapter: FeishuAdapter) -> list[InboundMessage]:
+    core = adapter.core
+    assert isinstance(core, FakeCore)
+    return core.received
+
+
 def make_event(
     *,
     chat_type: str = "p2p",
@@ -173,8 +181,8 @@ def adapter(state_dir: Path) -> FeishuAdapter:
 
 async def test_p2p_text_forwarded_to_core(adapter: FeishuAdapter) -> None:
     await adapter._handle_event(make_event())
-    assert len(adapter.core.received) == 1
-    message = adapter.core.received[0]
+    assert len(received(adapter)) == 1
+    message = received(adapter)[0]
     assert message.channel == "feishu"
     assert message.chat_id == "ou_user_1"
     assert message.text == "hello feishu"
@@ -184,7 +192,7 @@ async def test_p2p_text_forwarded_to_core(adapter: FeishuAdapter) -> None:
 @pytest.mark.parametrize("chat_type", ["group", "chat", "p2p_group"])
 async def test_group_chat_ignored(adapter: FeishuAdapter, chat_type: str) -> None:
     await adapter._handle_event(make_event(chat_type=chat_type))
-    assert adapter.core.received == []
+    assert received(adapter) == []
 
 
 @pytest.mark.parametrize("message_type", ["image", "post", "file", "audio", "media"])
@@ -192,30 +200,30 @@ async def test_non_text_messages_ignored(adapter: FeishuAdapter, message_type: s
     await adapter._handle_event(
         make_event(message_type=message_type, content='{"image_key": "img_v1"}')
     )
-    assert adapter.core.received == []
+    assert received(adapter) == []
 
 
 async def test_malformed_content_fails(adapter: FeishuAdapter) -> None:
     with pytest.raises(ValueError):
         await adapter._handle_event(make_event(content="not-json"))
-    assert adapter.core.received == []
+    assert received(adapter) == []
 
 
 async def test_blank_text_ignored(adapter: FeishuAdapter) -> None:
     await adapter._handle_event(make_event(content='{"text": "   "}'))
-    assert adapter.core.received == []
+    assert received(adapter) == []
 
 
 async def test_missing_open_id_ignored(adapter: FeishuAdapter) -> None:
     await adapter._handle_event(make_event(open_id=""))
-    assert adapter.core.received == []
+    assert received(adapter) == []
 
 
 async def test_bot_own_message_ignored(adapter: FeishuAdapter) -> None:
     # The bot's own outgoing messages also fire receive_v1; without this guard
     # they would echo back into core forever.
     await adapter._handle_event(make_event(sender_type="app"))
-    assert adapter.core.received == []
+    assert received(adapter) == []
 
 
 async def test_ws_callback_dispatches_on_main_loop(
@@ -226,15 +234,15 @@ async def test_ws_callback_dispatches_on_main_loop(
         adapter._tasks = tasks
         adapter._accepting_events = True
         adapter._on_im_message(make_event())
-        await poll_until_async(lambda: bool(adapter.core.received))
-        assert len(adapter.core.received) == 1
+        await poll_until_async(lambda: bool(received(adapter)))
+        assert len(received(adapter)) == 1
 
 
 async def test_ws_callback_drops_when_no_main_loop(adapter: FeishuAdapter) -> None:
     adapter._on_im_message(make_event())
     # The no-loop path drops synchronously, so no delivery can arrive later.
     await asyncio.sleep(0.05)
-    assert adapter.core.received == []
+    assert received(adapter) == []
 
 
 # -- credentials / lifecycle ------------------------------------------------
@@ -502,7 +510,11 @@ def test_rest_client_applies_configured_timeout(state_dir: Path) -> None:
     )
     adapter._app_id = "cli_x"
     adapter._app_secret = "secret_x"  # noqa: S105
+    import lark_oapi as lark
+
     client = adapter._build_rest_client()
+    assert isinstance(client, lark.Client)
+    assert client._config is not None
     assert client._config.timeout == 7.5
 
 
@@ -543,8 +555,8 @@ async def test_card_action_forwards_command_to_core(adapter: FeishuAdapter) -> N
         )
     )
     await adapter._handle_card_action(event)
-    assert len(adapter.core.received) == 1
-    message = adapter.core.received[0]
+    assert len(received(adapter)) == 1
+    message = received(adapter)[0]
     assert message.channel == "feishu"
     assert message.chat_id == "ou_user_1"
     assert message.text == "/switch 405"
@@ -559,7 +571,7 @@ async def test_card_action_missing_key_ignored(adapter: FeishuAdapter) -> None:
         )
     )
     await adapter._handle_card_action(event)
-    assert adapter.core.received == []
+    assert received(adapter) == []
 
 
 # -- polling fallback (2026-09-01: platform delivers no receive_v1) ---------
@@ -645,5 +657,5 @@ async def test_poll_seeds_cursor_without_processing(adapter: FeishuAdapter) -> N
     adapter._rest_client = rest
     adapter._poll_chats.add("oc_p2p_1")
     await adapter._poll_once("oc_p2p_1")
-    assert adapter.core.received == []
+    assert received(adapter) == []
     assert adapter._poll_cursor == {"oc_p2p_1": "om_3"}

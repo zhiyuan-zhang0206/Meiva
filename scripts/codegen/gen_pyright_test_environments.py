@@ -65,7 +65,7 @@ ANY_RULES = ("reportAny", "reportExplicitAny")
 # Any rules in production code. A tests directory under a listed prefix gets a generated entry only
 # when its covering entry holds those rules (otherwise there is nothing to opt out of). Add the
 # prefix in the pull request that adds the covering entry; remove it when the tests are clean.
-TESTS_OWING_ANY: tuple[str, ...] = ("cli", "gateway/tests", "scripts/ci")
+TESTS_OWING_ANY: tuple[str, ...] = ("cli", "gateway/tests", "scripts/ci", "services/entrypoints")
 
 
 def _covers(root: str, directory: str) -> bool:

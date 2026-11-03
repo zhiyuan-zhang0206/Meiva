@@ -12,8 +12,11 @@ import pytest
 
 from base.clock.tests.fakes import system_clock
 from base.sessions.tests.poll_until import poll_until_async
-from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter, backoff_delay
-from services.entrypoints.im_bridge.adapters.feishu_poll_cursor import FeishuListRejected
+from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter
+from services.entrypoints.im_bridge.adapters.feishu_poll_cursor import (
+    FeishuListRejected,
+    backoff_delay,
+)
 from services.entrypoints.im_bridge.tests.adapters.test_feishu_adapter import (
     FakeCore,
     FakeRestClient,
@@ -21,6 +24,7 @@ from services.entrypoints.im_bridge.tests.adapters.test_feishu_adapter import (
     make_list_item,
     make_list_item_listapi,
     make_list_response,
+    received,
     websocket_ready,
 )
 from services.entrypoints.im_bridge.tests.adapters.test_feishu_adapter import (
@@ -49,7 +53,7 @@ async def test_poll_feeds_messages_newer_than_cursor_in_order(adapter: FeishuAda
         )
     ]
     await adapter._poll_once("oc_p2p_1")
-    assert adapter.core.received == []
+    assert received(adapter) == []
     # Round 2: om_3 and om_4 arrive; only they are fed, in order.
     rest.list_responses = [
         make_list_response(
@@ -62,8 +66,8 @@ async def test_poll_feeds_messages_newer_than_cursor_in_order(adapter: FeishuAda
         )
     ]
     await adapter._poll_once("oc_p2p_1")
-    assert [m.text for m in adapter.core.received] == ["three", "four"]
-    assert [m.chat_id for m in adapter.core.received] == ["ou_user_1", "ou_user_1"]
+    assert [m.text for m in received(adapter)] == ["three", "four"]
+    assert [m.chat_id for m in received(adapter)] == ["ou_user_1", "ou_user_1"]
     assert adapter._poll_cursor == {"oc_p2p_1": "om_4"}
 
 
@@ -88,7 +92,7 @@ async def test_poll_skips_own_sends_and_non_text(adapter: FeishuAdapter) -> None
     ]
     await adapter._poll_once("oc_p2p_1")
     await adapter._poll_once("oc_p2p_1")
-    assert [m.text for m in adapter.core.received] == ["user text"]
+    assert [m.text for m in received(adapter)] == ["user text"]
 
 
 async def test_poll_dedups_by_message_id(adapter: FeishuAdapter) -> None:
@@ -108,8 +112,8 @@ async def test_poll_dedups_by_message_id(adapter: FeishuAdapter) -> None:
     await adapter._poll_once("oc_p2p_1")
     await adapter._poll_once("oc_p2p_1")
     await adapter._poll_once("oc_p2p_1")
-    assert len(adapter.core.received) == 1
-    assert [m.text for m in adapter.core.received] == ["dup"]
+    assert len(received(adapter)) == 1
+    assert [m.text for m in received(adapter)] == ["dup"]
 
 
 async def test_poll_and_ws_paths_are_idempotent(adapter: FeishuAdapter) -> None:
@@ -130,10 +134,10 @@ async def test_poll_and_ws_paths_are_idempotent(adapter: FeishuAdapter) -> None:
     ]
     await adapter._poll_once("oc_p2p_1")
     await adapter._poll_once("oc_p2p_1")
-    assert len(adapter.core.received) == 1
+    assert len(received(adapter)) == 1
     # The same message arrives via the WS path afterwards — must be dropped.
     await adapter._handle_event(make_event(message_id="om_same", content='{"text": "once"}'))
-    assert len(adapter.core.received) == 1
+    assert len(received(adapter)) == 1
 
 
 async def test_send_registers_chat_for_polling(adapter: FeishuAdapter) -> None:
@@ -203,7 +207,7 @@ async def test_poll_seed_restores_owner_open_id_after_restart(adapter: FeishuAda
     assert adapter._last_open_id == ""
     await adapter._poll_once("oc_p2p_1")
     assert adapter._last_open_id == "ou_owner"
-    assert adapter.core.received == []  # seed still delivers nothing
+    assert received(adapter) == []  # seed still delivers nothing
 
 
 async def test_poll_seed_restores_open_id_from_list_api_shape(adapter: FeishuAdapter) -> None:
@@ -261,8 +265,8 @@ async def test_poll_normalizes_list_message_api_shape(adapter: FeishuAdapter) ->
     ]
     await adapter._poll_once("oc_p2p_1")
     await adapter._poll_once("oc_p2p_1")
-    assert [m.text for m in adapter.core.received] == ["via list api"]
-    assert [m.chat_id for m in adapter.core.received] == ["ou_user_1"]
+    assert [m.text for m in received(adapter)] == ["via list api"]
+    assert [m.chat_id for m in received(adapter)] == ["ou_user_1"]
     assert adapter._last_open_id == "ou_user_1"
 
 
@@ -287,7 +291,7 @@ async def test_poll_list_api_item_with_union_id_rejected(adapter: FeishuAdapter)
     ]
     await adapter._poll_once("oc_p2p_1")
     await adapter._poll_once("oc_p2p_1")
-    assert adapter.core.received == []
+    assert received(adapter) == []
     # The union-id message must not replace the seed-restored owner id.
     assert adapter._last_open_id == "ou_user_1"
 
@@ -342,7 +346,7 @@ async def test_poll_seed_anchors_newest_id_carrying_item(adapter: FeishuAdapter)
         )
     ]
     await adapter._poll_once("oc_p2p_1")
-    assert adapter.core.received == []
+    assert received(adapter) == []
     assert adapter._poll_cursor == {"oc_p2p_1": "om_3"}
 
 
@@ -396,9 +400,9 @@ async def test_poll_empty_seed_round_delivers_first_message(adapter: FeishuAdapt
         make_list_response([make_list_item(message_id="om_1", content='{"text": "first"}')]),
     ]
     await adapter._poll_once("oc_p2p_1")
-    assert adapter.core.received == []
+    assert received(adapter) == []
     await adapter._poll_once("oc_p2p_1")
-    assert [m.text for m in adapter.core.received] == ["first"]
+    assert [m.text for m in received(adapter)] == ["first"]
     assert adapter._poll_cursor == {"oc_p2p_1": "om_1"}
 
 
@@ -425,7 +429,7 @@ async def test_poll_failed_list_round_does_not_seed(adapter: FeishuAdapter) -> N
     assert adapter._poll_cursor == {}
     # Next round still seeds (no replay of history).
     assert await adapter._poll_once("oc_p2p_1") is True
-    assert adapter.core.received == []
+    assert received(adapter) == []
     assert adapter._poll_cursor == {"oc_p2p_1": "om_3"}
 
 
@@ -447,7 +451,7 @@ async def test_poll_idless_items_never_delivered_or_cursored(adapter: FeishuAdap
     ]
     await adapter._poll_once("oc_p2p_1")
     await adapter._poll_once("oc_p2p_1")
-    assert [m.text for m in adapter.core.received] == ["two"]
+    assert [m.text for m in received(adapter)] == ["two"]
     assert adapter._poll_cursor == {"oc_p2p_1": "om_2"}
 
 
@@ -658,13 +662,13 @@ async def test_poll_loop_survives_a_failed_round_and_recovers(
         assert not poll_task.done()
         await poll_until_async(
             lambda: (
-                bool(adapter.core.received) and adapter._poll_failures == 0,
-                (len(adapter.core.received), adapter._poll_failures),
+                bool(received(adapter)) and adapter._poll_failures == 0,
+                (len(received(adapter)), adapter._poll_failures),
             ),
             what="the next round to recover and reset the backoff",
             timeout=5,
         )
-        assert [m.text for m in adapter.core.received] == ["recovered"]
+        assert [m.text for m in received(adapter)] == ["recovered"]
         assert adapter._poll_cursor == {"oc_p2p_1": "om_1"}
 
 

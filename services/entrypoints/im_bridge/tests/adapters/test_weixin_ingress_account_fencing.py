@@ -19,6 +19,10 @@ from services.entrypoints.im_bridge.tests.slices import system_rng
 from services.entrypoints.im_bridge.tests.support import held_table_lock
 
 
+async def _park() -> None:
+    await asyncio.Event().wait()
+
+
 async def test_registration_before_new_poll_rejects_old_runtime_without_effects(
     native_weixin: NativeWeixin, db_conn: psycopg.Connection
 ) -> None:
@@ -79,9 +83,9 @@ async def test_new_active_account_clears_old_runtime_without_deleting_history(
     state = core.chats[("weixin", "peer-1")]
     assert state.current_agent_id == native_weixin.agent_id
     history = dict(core._switch_state)
-    task = asyncio.create_task(asyncio.Event().wait())
+    task = asyncio.create_task(_park())
     core._subscriptions[("weixin", "peer-1")] = task
-    typing = asyncio.create_task(asyncio.Event().wait())
+    typing = asyncio.create_task(_park())
     core._typing_tasks[("weixin", "peer-1")] = typing
     new = await replace_account(native_weixin, "replacement")
     await new._poll_once("", 35000)  # Only a real empty provider response activates.

@@ -6,17 +6,21 @@ import asyncio
 import json
 import logging
 import random
+from collections.abc import Mapping
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, TypeGuard
+from typing import NotRequired, Protocol, TypedDict
 
 from psycopg.errors import ConnectionDoesNotExist, ConnectionFailure
 from psycopg_pool import ConnectionPool, PoolTimeout
+from pydantic import TypeAdapter
 
 from base.api_contracts.idempotency import keyed_headers
 from base.api_contracts.notice_question import parse_question, question_instructions
 from base.clock import Clock
 from base.clock.ids import new_uuid
+from base.db.rows import query_all
 from base.db.transaction import write_transaction
 from base.events.notifications.catalog import core_catalog
 from base.events.notifications.policy import enabled_for
@@ -61,40 +65,81 @@ _NEEDS_INPUT = core_catalog()["core.needs_input"]
 # backlogged notices never happens. Row shape mirrors the gateway's
 # NoticeItem exactly, so the push/filter logic is unchanged.
 _SELECT_NOTICE = (
-    "SELECT n.id, n.agent_id, t.label, n.title, n.content, n.priority, "
-    "n.require_response, n.blocking, n.created_at, n.resolved_at, n.resolution, n.reply, n.task_id, n.question "
+    "SELECT n.id, n.agent_id, t.label AS agent_label, n.title, n.content, n.priority, "
+    "n.require_response, n.question "
     "FROM agent_notices n JOIN agents t ON t.id = n.agent_id "
 )
 
 
-def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
-    return isinstance(value, dict)
+# meiva:note
+# One notice as the push and filter logic reads it: the members of the gateway's NoticeItem wire
+# shape that a push renders or a filter judges. `question` is the notice's raw question (jsonb).
+class Notice(TypedDict):
+    id: int
+    agent_id: int
+    agent_label: NotRequired[str | None]
+    title: str
+    content: NotRequired[str | None]
+    priority: str
+    require_response: bool
+    question: NotRequired[object]
 
 
-def _row_to_notice(r: tuple[Any, ...]) -> dict[str, Any]:
+# meiva:note
+# The columns of `_SELECT_NOTICE`.
+@dataclass(frozen=True)
+class _NoticeRow:
+    id: int
+    agent_id: int
+    agent_label: str | None
+    title: str
+    content: str | None
+    priority: str
+    require_response: bool
+    question: object
+
+
+# meiva:note
+# The notice push filter: the lowest priority to push and the one agent to push for, each None
+# when unset.
+class NoticeFilters(TypedDict):
+    min_priority: str | None
+    agent: int | None
+
+
+# meiva:note
+# An armed reply window on one chat: the notice it answers, until when, and the account that
+# armed it (None before the account is proven).
+class ReplyMode(TypedDict):
+    notice_id: int
+    agent_id: int
+    expires_at: float
+    account_id: str | None
+
+
+_NOTICES = TypeAdapter(list[Notice])
+_FILTERS = TypeAdapter(NoticeFilters)
+_OBJECT = TypeAdapter(dict[str, object])
+
+
+def _row_to_notice(r: _NoticeRow) -> Notice:
     """One agent_notices row as the dict the push/filter logic consumes
     (same keys as the gateway's NoticeItem wire shape)."""
     return {
-        "id": int(r[0]),
-        "agent_id": int(r[1]),
-        "agent_label": r[2],
-        "title": r[3],
-        "content": r[4],
-        "priority": r[5],
-        "require_response": bool(r[6]),
-        "blocking": bool(r[7]),
-        "created_at": r[8],
-        "resolved_at": r[9],
-        "resolution": r[10],
-        "reply": r[11],
-        "task_id": r[12],
-        "question": r[13],
+        "id": r.id,
+        "agent_id": r.agent_id,
+        "agent_label": r.agent_label,
+        "title": r.title,
+        "content": r.content,
+        "priority": r.priority,
+        "require_response": r.require_response,
+        "question": r.question,
     }
 
 
-def _parse_filter_tokens(rest: list[str]) -> dict[str, Any]:
+def _parse_filter_tokens(rest: list[str]) -> NoticeFilters:
     """`{"min_priority", "agent"}` from the tokens after `/notice filter`."""
-    filters: dict[str, Any] = {"min_priority": None, "agent": None}
+    filters: NoticeFilters = {"min_priority": None, "agent": None}
     i = 0
     while i < len(rest):
         tok = rest[i]
@@ -128,14 +173,14 @@ class NoticeBridge(NoticeBridgeOwner):
         rng: random.Random,
     ) -> None:
         self._config = config
-        self.core: Any = core
+        self.core: NoticeBridgeCore = core
         self.db_pool: ConnectionPool | None = db_pool
         self._state_dir = state_dir
         self._clock = clock
         self._rng = rng
         self.poll_store = NoticePollStore(self.core.outbound_store)
-        self._reply_modes: dict[str, dict[str, Any]] = {}  # chat_id -> mode
-        self._filters: dict[str, Any] = {"min_priority": None, "agent": None}
+        self._reply_modes: dict[str, ReplyMode] = {}  # chat_id -> mode
+        self._filters: NoticeFilters = {"min_priority": None, "agent": None}
         self._load_state()
 
     def _now(self) -> float:
@@ -147,26 +192,26 @@ class NoticeBridge(NoticeBridgeOwner):
         d = self._state_dir
         d.mkdir(parents=True, exist_ok=True)
         with suppress(FileNotFoundError):
-            self._filters = json.loads((d / "notice_filters.json").read_text())
-        if not isinstance(self._filters, dict):
-            raise TypeError("notice filters must be an object")
+            self._filters = _FILTERS.validate_json((d / "notice_filters.json").read_text())
 
-    def _save(self, name: str, value: dict[str, Any]) -> None:
+    def _save(self, name: str, value: NoticeFilters) -> None:
         (self._state_dir / name).write_text(json.dumps(value))
 
     # -- gateway -----------------------------------------------------------
 
-    async def _get(self, path: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    async def _get(
+        self, path: str, params: Mapping[str, str | int | bool] | None = None
+    ) -> list[Notice]:
         g = self.core.gateway
         resp = await (await g._http()).get(path, params=params, headers=g._headers())
         resp.raise_for_status()
-        return resp.json()
+        return _NOTICES.validate_json(resp.content)
 
     def _keyed_headers(self) -> dict[str, str]:
         """Auth headers plus one fresh principal-v1 operation key for a resolve call."""
         return {**self.core.gateway._headers(), **keyed_headers(str(new_uuid(self._rng)))}
 
-    async def _post(self, path: str, body: dict[str, Any]) -> None:
+    async def _post(self, path: str, body: Mapping[str, object]) -> None:
         g = self.core.gateway
         resp = await (await g._http()).post(path, json=body, headers=self._keyed_headers())
         resp.raise_for_status()
@@ -193,9 +238,7 @@ class NoticeBridge(NoticeBridgeOwner):
                 self._warn_push_held(notice)
                 break
 
-    async def _accept_normal_notice(
-        self, notice: dict[str, Any], *, switches: dict[str, bool]
-    ) -> bool:
+    async def _accept_normal_notice(self, notice: Notice, *, switches: dict[str, bool]) -> bool:
         # meiva:note
         # One place decides whether a notice reaches Telegram, and it says why: this
         # bridge's `/notice filter` scope, historical FYI rows and the user's category
@@ -204,17 +247,14 @@ class NoticeBridge(NoticeBridgeOwner):
         # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
         reason = self._filter_reason(notice, switches=switches)
         filtered = reason is not None
-        snapshot = {
-            key: notice[key]
-            for key in (
-                "id",
-                "agent_id",
-                "title",
-                "content",
-                "priority",
-                "require_response",
-                "agent_label",
-            )
+        snapshot: dict[str, object] = {
+            "id": notice["id"],
+            "agent_id": notice["agent_id"],
+            "title": notice["title"],
+            "content": notice.get("content"),
+            "priority": notice["priority"],
+            "require_response": notice["require_response"],
+            "agent_label": notice.get("agent_label"),
         }
         snapshot["filters"] = dict(self._filters)
         snapshot["switches"] = dict(switches)
@@ -262,15 +302,17 @@ class NoticeBridge(NoticeBridgeOwner):
     # intent. The TTL bounds this compatibility scan; active queues contain only
     # notices that require a response.
     # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-    def _unaccepted_notices(self, limit: int | None = None) -> list[dict[str, Any]]:
+    def _unaccepted_notices(self, limit: int | None = None) -> list[Notice]:
         from base.agents.inbox.rows import NOTICE_FYI_TTL_DAYS
 
         if limit is None:
             limit = self._config.notices_open_default_limit
         if self.db_pool is None:
             raise RuntimeError("notice bridge requires a database pool")
-        with self.db_pool.connection() as conn, conn.cursor() as cur:
-            cur.execute(
+        with self.db_pool.connection() as conn:
+            rows = query_all(
+                conn,
+                _NoticeRow,
                 _SELECT_NOTICE + "JOIN im_bridge_notice_poll_state s ON s.singleton "
                 "LEFT JOIN im_bridge_notice_acceptances a ON a.notice_id=n.id "
                 "WHERE n.id > s.legacy_floor AND a.notice_id IS NULL "
@@ -279,47 +321,49 @@ class NoticeBridge(NoticeBridgeOwner):
                 "ORDER BY n.id ASC LIMIT %s",
                 (NOTICE_FYI_TTL_DAYS, limit),
             )
-            return [_row_to_notice(r) for r in cur.fetchall()]
+        return [_row_to_notice(r) for r in rows]
 
-    def _open_notices(self, limit: int | None = None) -> list[dict[str, Any]]:
+    def _open_notices(self, limit: int | None = None) -> list[Notice]:
         if limit is None:
             limit = self._config.im_bridge_notice_open_limit
         if self.db_pool is None:
             raise RuntimeError("notice bridge requires a database pool")
-        with write_transaction(self.db_pool) as conn, conn.cursor() as cur:
-            cur.execute(
+        with write_transaction(self.db_pool) as conn:
+            rows = query_all(
+                conn,
+                _NoticeRow,
                 _SELECT_NOTICE
                 + "WHERE n.resolved_at IS NULL AND n.require_response "
                 + "ORDER BY n.priority ASC, n.blocking DESC, n.created_at ASC, n.id ASC LIMIT %s",
                 (limit,),
             )
-            return [_row_to_notice(r) for r in cur.fetchall()]
+        return [_row_to_notice(r) for r in rows]
 
     # meiva:note
     # Historical FYI rows are never pushed, even when the needs-input category is
     # disabled. Their distinct receipt reason preserves the transport audit.
     # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-    def _filter_reason(self, n: dict[str, Any], *, switches: dict[str, bool]) -> str | None:
+    def _filter_reason(self, n: Notice, *, switches: dict[str, bool]) -> str | None:
         if not n["require_response"]:
             return "fyi"
         if not enabled_for(_NEEDS_INPUT, switches):
             return "needs_input_off"
-        agent = (self._filters or {}).get("agent")
-        if agent is not None and int(n["agent_id"]) != int(agent):
+        agent = self._filters.get("agent")
+        if agent is not None and n["agent_id"] != int(agent):
             return "agent"
         return None
 
     @staticmethod
-    def _render_notice(
-        n: dict[str, Any], prefix: str | None = None
-    ) -> tuple[str, list[tuple[str, str]]]:
+    def _render_notice(n: Notice, prefix: str | None = None) -> tuple[str, list[tuple[str, str]]]:
         lines = [f"🔔 {n['title']}"]  # emoji-ok: Telegram notification icon (user-facing)
         if prefix:
             lines.append(prefix)
-        if n.get("content"):
-            lines.append(str(n["content"]))
-        if n.get("question") is not None:
-            lines.append(question_instructions(parse_question(n["question"])))
+        content = n.get("content")
+        if content:
+            lines.append(str(content))
+        question = n.get("question")
+        if question is not None:
+            lines.append(question_instructions(parse_question(question)))
         label = n.get("agent_label") or ""
         lines.append(f"[#{n['agent_id']} {label}] · {n['priority']}".rstrip())
         cb = f"{n['agent_id']}:{n['id']}"
@@ -330,9 +374,9 @@ class NoticeBridge(NoticeBridgeOwner):
         buttons.append(("📋 Queue", _CB_LIST))  # emoji-ok: queue-view button
         return "\n\n".join(lines), buttons
 
-    async def _push(self, n: dict[str, Any], *, prefix: str | None = None) -> bool:
+    async def _push(self, n: Notice, *, prefix: str | None = None) -> bool:
         """Deliver one notice; return True when it was sent."""
-        adapter: Any = self.core.adapters.get("telegram")
+        adapter = self.core.adapters.get("telegram")
         if adapter is None:
             return False
         text, buttons = self._render_notice(n, prefix)
@@ -347,7 +391,7 @@ class NoticeBridge(NoticeBridgeOwner):
     #: 3s poll round.
     _push_held_warned_at = 0.0
 
-    def _warn_push_held(self, n: dict[str, Any]) -> None:
+    def _warn_push_held(self, n: Notice) -> None:
         """Log that the cursor is held on notice ``n`` — throttled, because
         an absent telegram adapter would otherwise log every poll round."""
         now = self._clock.monotonic()
@@ -474,10 +518,7 @@ class NoticeBridge(NoticeBridgeOwner):
             headers=self._keyed_headers(),
         )
         response.raise_for_status()
-        result: object = response.json()
-        if not _is_object_dict(result):
-            raise TypeError("notice resolution response must be an object")
-        return result
+        return _OBJECT.validate_json(response.content)
 
     async def handle_inbound(self, chat_id: str, text: str) -> str | None:
         """Reply-mode window: plain text resolves the notice; returns a
@@ -538,7 +579,7 @@ class NoticeBridge(NoticeBridgeOwner):
         """/notice [filter ...] — show status or update the push filter."""
         parts = args.strip().split()
         if not parts or parts[0] != "filter":
-            f = self._filters or {}
+            f = self._filters
             bits = [
                 f"min_priority={f.get('min_priority') or 'off'}",
                 f"agent={f.get('agent') or 'all'}",
@@ -550,7 +591,7 @@ class NoticeBridge(NoticeBridgeOwner):
             )
         rest = parts[1:]
         if not rest:
-            f = self._filters or {}
+            f = self._filters
             return (
                 "Current filter: " + " ".join(f"{k}={v}" for k, v in f.items() if v is not None)
                 or "none (all pushed)"

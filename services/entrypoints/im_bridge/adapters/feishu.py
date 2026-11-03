@@ -12,7 +12,7 @@ import json
 from collections import deque
 from collections.abc import Callable, Coroutine
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol
 
 import requests
 
@@ -54,16 +54,6 @@ class FeishuWsClient(Protocol):
     async def _disconnect(self) -> None: ...
 
 
-def backoff_delay(interval: float, failures: int) -> float:
-    """Poll delay after `failures` consecutive all-chats-failed rounds.
-
-    Doubles the interval per failure (capped at 32x); the absolute cap never
-    drops below the configured interval, so a >300s interval keeps its own
-    cadence instead of being clamped to 300s.
-    """
-    return min(interval * (2 ** min(failures, 5)), max(300.0, interval))
-
-
 class FeishuAdapter(IMAdapter):
     """Bridge enterprise bot p2p text through WS events and polling fallback.
 
@@ -102,8 +92,8 @@ class FeishuAdapter(IMAdapter):
         self._tasks: asyncio.TaskGroup | None = None
         self._ws_exit: asyncio.Future[None] | None = None
         self._accepting_events = False
-        self._ws_client: Any = ws_client
-        self._rest_client: Any = rest_client
+        self._ws_client: FeishuWsClient | None = ws_client
+        self._rest_client: cursors.FeishuRestClient | None = rest_client
         self._cursor_store = cursor_store
         # Initialized here (not only in _normalize) so send_to_owner before the
         # first inbound p2p — e.g. right after a daemon restart — fails with the
@@ -230,7 +220,7 @@ class FeishuAdapter(IMAdapter):
             self._ws_exit.set_exception(error)
 
     def _spawn_event(
-        self, handler: Callable[[object], Coroutine[Any, Any, None]], data: object
+        self, handler: Callable[[object], Coroutine[object, object, None]], data: object
     ) -> None:
         tasks = self._tasks
         if not self._accepting_events or tasks is None:
@@ -278,7 +268,7 @@ class FeishuAdapter(IMAdapter):
             return self._ws_client
         import lark_oapi as lark  # pyright: ignore[reportUnknownVariableType]
 
-        handler: Any = lark.EventDispatcherHandler.builder(  # pyright: ignore[reportUnknownMemberType]
+        handler = lark.EventDispatcherHandler.builder(  # pyright: ignore[reportUnknownMemberType]
             "", ""
         )
         handler = handler.register_p2_im_message_receive_v1(self._on_im_message)
@@ -286,7 +276,12 @@ class FeishuAdapter(IMAdapter):
             # Card button callbacks ride the long connection too (official SDK
             # support); the try keeps older lark-oapi versions working where the
             # v2 card event is not registered by name.
-            handler = handler.register_p2_card_action_trigger(self._on_card_action)
+            # meiva:note
+            # lark-oapi declares a card callback answer; ours answers nothing. Ledger entry
+            # `deps:lark-oapi-optional-client-and-card-callback-types`.
+            handler = handler.register_p2_card_action_trigger(
+                self._on_card_action  # pyright: ignore[reportArgumentType]
+            )
         except (AttributeError, TypeError):
             logger.warning("FeishuAdapter: card.action.trigger not available in lark-oapi")
         handler = handler.build()
@@ -294,21 +289,25 @@ class FeishuAdapter(IMAdapter):
         # the SDK pins proxy=None on websockets>=15, which makes the long
         # connection direct-only and therefore unreachable behind a proxy.
         allow_env_proxy_for_ws(proxy_configured=self._proxy_configured)
-        client: Any = lark.ws.Client(  # pyright: ignore[reportUnknownMemberType]
+        return lark.ws.Client(  # pyright: ignore[reportUnknownMemberType]
             self._app_id, self._app_secret, event_handler=handler
         )
-        return client
 
     def _build_rest_client(self) -> cursors.FeishuRestClient:
         """Build the REST client used for sending (worker thread)."""
         import lark_oapi as lark  # pyright: ignore[reportUnknownVariableType]
 
-        builder: Any = lark.Client.builder()  # pyright: ignore[reportUnknownMemberType]
+        builder = lark.Client.builder()  # pyright: ignore[reportUnknownMemberType]
         # Explicit timeout (G6, task #698): the lark SDK's own default is 30s
         # but that is an SDK-version property, not a contract — pin it so a hung
         # Feishu REST line cannot park an IM outbound longer than configured.
         timeout = self._config.feishu_rest_timeout_seconds
-        return builder.app_id(self._app_id).app_secret(self._app_secret).timeout(timeout).build()
+        # meiva:note
+        # lark-oapi types the built client's `im` as optional. Ledger entry
+        # `deps:lark-oapi-optional-client-and-card-callback-types`.
+        return (  # pyright: ignore[reportReturnType]
+            builder.app_id(self._app_id).app_secret(self._app_secret).timeout(timeout).build()
+        )
 
     # -- inbound -------------------------------------------------------------
 
@@ -427,7 +426,7 @@ class FeishuAdapter(IMAdapter):
             self._poll_failures = 0
             return interval
         self._poll_failures += 1
-        return backoff_delay(interval, self._poll_failures)
+        return cursors.backoff_delay(interval, self._poll_failures)
 
     def _now_ms(self) -> int:
         return int(self._clock.now().timestamp() * 1000)
@@ -513,7 +512,7 @@ class FeishuAdapter(IMAdapter):
                 self._poll_cursor_ms[chat_id],
             )
 
-    def _restore_owner_open_id(self, items: list[Any]) -> None:
+    def _restore_owner_open_id(self, items: list[cursors.FeishuListedMessage]) -> None:
         """After a daemon restart the in-memory owner open id is gone;
         restore it from the newest user message in the window so outbound
         notifications do not fail until the user's next message
@@ -522,15 +521,17 @@ class FeishuAdapter(IMAdapter):
         if self._last_open_id:
             return
         for item in reversed(items):
-            sender = getattr(item, "sender", None)
-            if sender is None or getattr(sender, "sender_type", "") != "user":
+            sender = item.sender
+            if sender is None or sender.sender_type != "user":
                 continue
             open_id = self._sender_open_id(sender)
             if open_id:
                 self._last_open_id = open_id
                 return
 
-    async def _poll_deliver(self, pending: list[Any], chat_id: str) -> str | None:
+    async def _poll_deliver(
+        self, pending: list[cursors.FeishuListedMessage], chat_id: str
+    ) -> str | None:
         """Advance only past delivered or explicitly unsupported messages.
 
         A transport failure leaves the cursor before the undelivered message.
@@ -557,10 +558,10 @@ class FeishuAdapter(IMAdapter):
         return last
 
     @staticmethod
-    def _sender_open_id(sender: object) -> str:
+    def _sender_open_id(sender: cursors.FeishuSender) -> str:
         return sender_open_id(sender)
 
-    def _normalize_poll_item(self, item: object) -> InboundMessage | None:
+    def _normalize_poll_item(self, item: cursors.FeishuListedMessage) -> InboundMessage | None:
         msg = normalize_poll_item(item, channel=self.channel)
         if msg is not None:
             self._last_open_id = msg.chat_id
@@ -650,14 +651,16 @@ class FeishuAdapter(IMAdapter):
         # Register the returned p2p chat for polling.
         await self._register_sent_chat(chat_id)
 
-    async def send_to_owner(self, text: str, *, markdown: bool = False) -> None:
+    async def send_to_owner(
+        self, text: str, *, markdown: bool = False, buttons: list[tuple[str, str]] | None = None
+    ) -> None:
         """Send to the last known p2p sender; skip if there is no owner chat."""
 
         del markdown  # platform contract: accepted, not rendered
         if not self._last_open_id:
             # NotImplementedError: the notify fan-out skips (no retry fixes it; #4964).
             raise NotImplementedError("feishu: no known user chat yet")
-        await self.send(self._last_open_id, text)
+        await self.send(self._last_open_id, text, buttons=buttons)
 
     def _create_message(
         self, client: cursors.FeishuRestClient, request: object
@@ -716,7 +719,7 @@ class FeishuAdapter(IMAdapter):
                 {"tag": "action", "actions": actions},
             ],
         }
-        request: Any = (
+        request: object = (
             CreateMessageRequest.builder()  # pyright: ignore[reportUnknownMemberType]
             .receive_id_type("open_id")
             .request_body(
@@ -738,10 +741,11 @@ class FeishuAdapter(IMAdapter):
     # #4250: one per API-confirmed send). Returns the resolved chat id, "" when the response
     # carries none.
     def _record_send(self, chat_id: str, data: object) -> str:
-        resolved = getattr(data, "chat_id", "") if data is not None else ""
+        sent = cursors.FeishuSentMessage.model_validate(data) if data is not None else None
+        resolved = sent.chat_id or "" if sent is not None else ""
         if resolved:
             self._sent_chat_ids[chat_id] = resolved
-        message_id = getattr(data, "message_id", "") if data is not None else ""
+        message_id = sent.message_id or "" if sent is not None else ""
         logger.info("feishu send ok chat_id={} message_id={}", chat_id, message_id)
         return resolved
 
@@ -753,7 +757,7 @@ class FeishuAdapter(IMAdapter):
             CreateMessageRequestBody,
         )
 
-        request: Any = (
+        request: object = (
             CreateMessageRequest.builder()  # pyright: ignore[reportUnknownMemberType]
             .receive_id_type("open_id")
             .request_body(
@@ -778,7 +782,7 @@ def segment_text(text: str, limit: int) -> list[str]:
     return [text[i : i + limit] for i in range(0, len(text), limit)]
 
 
-def _log_future_error(future: concurrent.futures.Future[Any]) -> None:
+def _log_future_error(future: concurrent.futures.Future[None]) -> None:
     """Surface an exception a scheduled coroutine raised (else swallow)."""
     try:
         future.result()

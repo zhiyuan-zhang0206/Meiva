@@ -191,3 +191,10 @@ fixture/incident scope.
 - **evidence**: `tests/fixtures/leak_guard.py` reads signal handlers through the C module `_signal.getsignal` directly (the `signal.getsignal` wrapper costs three Python frames per signal and per read, and the guard reads them around every test). The `_signal` module ships no stub, so the import carries its original `# pyright: ignore[reportMissingImports]` and the callable is typed by a cast (`_getsignal = cast("Callable[[int], Any]", _signal.getsignal)`). Revive when the stdlib stubs cover `_signal`, or when the guard's read is cheap enough to go through `signal.getsignal`; the ignore then goes.
 - **first-seen**: 2026-11-03 (top-level tests/ promotion)
 - **last-verified**: 2026-11-03
+
+### deps:lark-oapi-optional-client-and-card-callback-types
+- **class**: deps
+- **status**: open
+- **evidence**: `services/entrypoints/im_bridge/adapters/feishu.py` carries two suppressions where lark-oapi 1.7.3's declared types disagree with what the bridge relies on: `_build_rest_client` returns the built `lark.Client` as a `FeishuRestClient` view although the SDK types `Client.im` (and the links below it) as optional, and `register_p2_card_action_trigger(self._on_card_action)` passes a callback that answers nothing where the SDK declares a `P2CardActionTriggerResponse`. Both work at run time; a lark-oapi bump that makes `im` truly absent or rejects a `None` card answer would surface only on the first send or the first card tap. Repair: type the view with the optional links and resolve them once, and answer the card callback with an explicit empty response when the SDK accepts one.
+- **first-seen**: 2026-11-03 (PR #8343)
+- **last-verified**: 2026-11-03

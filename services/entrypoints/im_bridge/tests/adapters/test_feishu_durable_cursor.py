@@ -53,13 +53,21 @@ class _Core:
         self.received.append(message)
 
 
+# meiva:note
+# What the adapter delivered to its (fake) core.
+def received(adapter: FeishuAdapter) -> list[InboundMessage]:
+    core = adapter.core
+    assert isinstance(core, _Core)
+    return core.received
+
+
 class _Rest:
     def __init__(self) -> None:
         self.responses: list[SimpleNamespace] = []
         self.page_tokens: list[str | None] = []
 
     @property
-    def im(self) -> SimpleNamespace:
+    def im(self) -> Any:
         return SimpleNamespace(v1=SimpleNamespace(message=SimpleNamespace(list=self._list)))
 
     def _list(self, request: Any) -> SimpleNamespace:
@@ -117,7 +125,13 @@ async def _first_run(store: CursorStore, state_dir: Path, *newest_first: SimpleN
 
 
 def _texts(adapter: FeishuAdapter) -> list[str]:
-    return [m.message_id or "" for m in adapter.core.received]
+    return [m.message_id or "" for m in received(adapter)]
+
+
+def _rest(adapter: FeishuAdapter) -> _Rest:
+    rest = adapter._rest_client
+    assert isinstance(rest, _Rest)
+    return rest
 
 
 def _window_ms() -> int:
@@ -136,7 +150,7 @@ async def test_restart_replays_messages_that_arrived_during_downtime(
     assert _CHAT in adapter._poll_chats  # polled again without an outbound send
     assert await adapter._poll_once(_CHAT)
     assert _texts(adapter) == ["om_2", "om_3"]
-    assert [m.idempotency_key for m in adapter.core.received] == ["feishu:om_2", "feishu:om_3"]
+    assert [m.idempotency_key for m in received(adapter)] == ["feishu:om_2", "feishu:om_3"]
     assert adapter._poll_cursor == {_CHAT: "om_3"}
 
 
@@ -150,7 +164,7 @@ async def test_cursor_survives_a_second_restart(store: CursorStore, state_dir: P
         store, state_dir, _listing(_item("om_2", 1 * _H), _item("om_1", 5 * _H))
     )
     await second._poll_once(_CHAT)
-    assert second.core.received == []  # om_2 was handled before the first restart ended
+    assert received(second) == []  # om_2 was handled before the first restart ended
 
 
 async def test_restart_reads_one_page_from_the_saved_cursor_and_does_not_page_back(
@@ -168,10 +182,10 @@ async def test_restart_reads_one_page_from_the_saved_cursor_and_does_not_page_ba
     )
     assert await adapter._poll_once(_CHAT)
     assert _texts(adapter) == ["om_3", "om_4"]  # om_2 sat on the unread older page
-    assert adapter._rest_client.page_tokens == [None]
+    assert _rest(adapter).page_tokens == [None]
     assert adapter._poll_cursor == {_CHAT: "om_4"}
     assert _CHAT not in adapter._poll_replay
-    adapter._rest_client.responses = [_listing(_item("om_5", 0), _item("om_4", 1 * _H))]
+    _rest(adapter).responses = [_listing(_item("om_5", 0), _item("om_4", 1 * _H))]
     assert await adapter._poll_once(_CHAT)
     assert _texts(adapter) == ["om_3", "om_4", "om_5"]  # later rounds continue from om_4
     assert adapter._poll_cursor == {_CHAT: "om_5"}
@@ -187,9 +201,9 @@ async def test_a_failed_page_fails_the_round_and_keeps_the_replay(
     adapter = await _restarted(store, state_dir, failing)
     with pytest.raises(RetryableTransportError):
         await adapter._poll_once(_CHAT)
-    assert adapter.core.received == []
+    assert received(adapter) == []
     assert _CHAT in adapter._poll_replay
-    adapter._rest_client.responses = [_listing(_item("om_3", 1 * _H), _item("om_1", 5 * _H))]
+    _rest(adapter).responses = [_listing(_item("om_3", 1 * _H), _item("om_1", 5 * _H))]
     assert await adapter._poll_once(_CHAT)
     assert _texts(adapter) == ["om_3"]
 
@@ -204,7 +218,7 @@ async def test_all_stale_gap_advances_cursor_so_it_is_never_replayed_later(
     await adapter._poll_once(_CHAT)
     assert adapter._poll_cursor == {_CHAT: "om_2"}
     await adapter._poll_once(_CHAT)
-    assert adapter.core.received == []
+    assert received(adapter) == []
 
 
 async def test_cursor_rotated_out_of_the_page_replays_only_newer_messages(
@@ -231,7 +245,7 @@ async def test_chat_without_a_saved_cursor_still_seeds_without_replaying_history
     )
     adapter._poll_chats.add(_CHAT)
     await adapter._poll_once(_CHAT)
-    assert adapter.core.received == []
+    assert received(adapter) == []
     assert adapter._poll_cursor == {_CHAT: "om_2"}
 
 

@@ -2,12 +2,12 @@
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from services.entrypoints.im_bridge.cursor_store import PushWatermark
-from services.entrypoints.im_bridge.types import PreparedOutboundSend
+from services.entrypoints.im_bridge.types import PreparedOutboundSend, TimelineItem
 
 
 class OutboundStatus(StrEnum):
@@ -33,7 +33,7 @@ class OutboundSource(BaseModel):
     block_idx: int = Field(ge=0)
 
 
-def timeline_source(item: dict[str, Any]) -> OutboundSource | None:
+def timeline_source(item: TimelineItem) -> OutboundSource | None:
     """A qualified source; never positional item_id, text or timestamp."""
     block = item.get("source_block_idx")
     if not isinstance(block, int) or isinstance(block, bool) or block < 0:
@@ -82,7 +82,7 @@ class OutboundAccountMismatchError(ValueError):
 
 @dataclass(frozen=True)
 class TimelineCandidate:
-    item: dict[str, Any]
+    item: TimelineItem
     intent: OutboundIntent | None
 
 

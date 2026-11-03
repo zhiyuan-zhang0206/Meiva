@@ -12,11 +12,12 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 import httpx
 
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.log import logger
 from base.paths import meiva_home
 from services.entrypoints.im_bridge.adapters.weixin import (
@@ -33,7 +34,7 @@ from services.entrypoints.im_bridge.config import state_dir_of
 
 async def _qr_get(
     client: httpx.AsyncClient, base_url: str, endpoint: str, query: str
-) -> dict[str, Any] | None:
+) -> dict[str, object] | None:
     """GET an iLink QR endpoint; None on any transient error (caller retries)."""
     try:
         resp = await client.get(f"{base_url.rstrip('/')}/{endpoint}?{query}", headers=get_headers())
@@ -43,7 +44,11 @@ async def _qr_get(
     if resp.status_code != 200:
         logger.warning("weixin: {} failed: HTTP {}", endpoint, resp.status_code)
         return None
-    return resp.json()
+    answer = object_of(resp.json)
+    if not is_object_dict(answer):
+        logger.warning("weixin: {} answered something other than an object", endpoint)
+        return None
+    return answer
 
 
 def _show_qr(qrcode_value: str, qrcode_url: str) -> None:
@@ -80,8 +85,8 @@ async def _refresh_qr(
 
 
 def _confirmed_credentials(
-    status: dict[str, Any], state_dir: Path, *, saved_at: datetime
-) -> dict[str, Any] | None:
+    status: dict[str, object], state_dir: Path, *, saved_at: datetime
+) -> dict[str, str] | None:
     """Validate a "confirmed" status payload; persist and return credentials."""
     account_id = get_str(status, "ilink_bot_id")
     bot_token = get_str(status, "bot_token")
@@ -117,7 +122,7 @@ class _QrSession:
 
 
 async def _on_qr_state(
-    client: httpx.AsyncClient, session: _QrSession, state: str, status: dict[str, Any]
+    client: httpx.AsyncClient, session: _QrSession, state: str, status: dict[str, object]
 ) -> bool:
     """React to a QR status change; False when the login cannot continue."""
     if state == "wait":
@@ -146,7 +151,7 @@ async def qr_login(
     timeout_seconds: int = 480,
     client: httpx.AsyncClient | None = None,
     clock: Clock,
-) -> dict[str, Any] | None:
+) -> dict[str, str] | None:
     """Run the interactive iLink QR login; persist credentials on success."""
     owns_client = client is None
     if client is None:
@@ -184,6 +189,12 @@ async def qr_login(
             await client.aclose()
 
 
+# meiva:note
+# The flags `main` registers, declared so the parsed namespace reads as typed values.
+class _Arguments(argparse.Namespace):
+    login: bool
+
+
 def main(argv: list[str]) -> int:
     """CLI entry: ``python -m services.entrypoints.im_bridge.adapters.weixin_login --login``."""
     parser = argparse.ArgumentParser(
@@ -195,7 +206,7 @@ def main(argv: list[str]) -> int:
         action="store_true",
         help="Interactive QR login; credentials are written to $MEIVA_HOME/state/im_bridge/weixin_account.json",
     )
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=_Arguments())
     if args.login:
         clock = Clock(
             ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS
