@@ -7,9 +7,9 @@ exports = ["bootstrap.py", "harness_probe.py", "harness_rows.py", "machine_pause
 "monitor" = ["schemas.py"]
 "roster" = ["schemas.py"]
 "router.py" = ["admin_events_plan.py", "harness_probe.py", "harness_rows.py", "ops_dispatch.py", "roster", "schemas.py", "status.py"]
-"server.py" = ["process_boot.py", "serve_plan.py"]
+"server.py" = ["process_boot.py", "serve_plan.py", "startup_warnings.py"]
 "status.py" = ["_health.py", "monitor", "roster", "schemas.py"]
-"tests" = ["admin_events_plan.py", "bootstrap.py", "harness_probe.py", "harness_rows.py", "monitor", "roster", "schemas.py", "serve_plan.py", "status.py"]
+"tests" = ["admin_events_plan.py", "bootstrap.py", "harness_probe.py", "harness_rows.py", "monitor", "roster", "schemas.py", "serve_plan.py", "startup_warnings.py", "status.py"]
 
 [purity]
 "__init__.py" = "strict"

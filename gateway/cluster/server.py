@@ -29,6 +29,7 @@ from base.native_process.os_platform import raise_fd_limit
 from base.telemetry.process_logging import init_gateway_process
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
 from gateway.cluster.serve_plan import ServePlan, serve_plan
+from gateway.cluster.startup_warnings import startup_warnings
 from gateway.http.middleware import stopping
 
 _log = logging.getLogger(__name__)
@@ -160,6 +161,15 @@ def _serve_process(
         verify_transport_encryption_declaration(
             plan.bind_host, process.config.view.data_plane.transport_encryption, authenticated=True
         )
+    view = process.config.view
+    alerts_token = view.alerts.webhook_token
+    for line in startup_warnings(
+        human_auth=view.gateway.human_auth,
+        alerts_token_configured=bool(alerts_token and alerts_token.get_secret_value()),
+        env_path=process.home / ".env",
+        bind_host=plan.bind_host,
+    ):
+        _log.warning(line)
     _log.warning("gateway starts with one uvicorn worker because rate limiters are process-local")
     if plan.app_factory_path is not None:
         # The parent never constructs the ASGI app a reload worker will serve.

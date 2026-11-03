@@ -75,6 +75,7 @@ guard correct.
 | A unit's `/ops` | its write generation's gateway or runner API token | `base/host/net/auth.py` `verify_bearer_digest` over digests only |
 | Gateway and station OTLP ingress (remote receiver) | the telemetry token (a random value the gateway home keeps in `db-authority/telemetry-token`; remote units hold only the token, from their capability) | otel-collector `bearertokenauth/cluster` extension |
 | Data plane (Postgres/Redis) | split admin/runtime credentials, gateway-only admin | `docs/conventions/data/data-plane-secret-split.md` |
+| Alerts ingest (`POST /api/alerts`) | `MEIVA_ALERTS_WEBHOOK_TOKEN` (`X-Alerts-Token` header, or the same value as a bearer), else a cluster bearer; **with no token configured, any loopback caller is admitted** | `gateway.http.auth.webhook.authenticate_webhook` |
 | Loki/Prometheus backend APIs | none — loopback-only (`MEIVA_LGTM_LISTEN_HOST`) | n/a |
 | Grafana UI | gateway session auth through `/grafana/*` proxy | gateway middleware; Grafana runs anonymous read-only |
 
@@ -113,3 +114,22 @@ every remote unit then needs a new bundle.
   probe dials the **advertised** address (rule 1), never a bare connect.
   Probe failure is fail-open: it logs and never blocks local business (the station hosts the
   observability backends, so no alert can carry its own failure).
+
+
+## New home checklist
+
+Two switches default to their open value, so a home that never writes them comes up open.
+Nothing refuses to start over it: a fresh home has no password to require yet, and a
+tightened default would strand every existing deployment at its next release. The gateway
+therefore says so out loud — `gateway.cluster.startup_warnings` logs one line per switch,
+before the listener binds, when the listener is bound beyond loopback and the key is absent
+from `<MEIVA_HOME>/.env`.
+
+| Key | Default | What the open value allows | Check |
+|---|---|---|---|
+| `MEIVA_GATEWAY_HUMAN_AUTH` | `trusted_network` | Any client that reaches the listener is served as the cluster administrator; the browser `Origin` and `Host` checks still apply | `grep -c '^MEIVA_GATEWAY_HUMAN_AUTH=required' "$MEIVA_HOME/.env"` returns 1, and no such line appears at gateway start |
+| `MEIVA_ALERTS_WEBHOOK_TOKEN` | unset | `POST /api/alerts` admits any loopback caller without a credential (any process on the box can forge an alert and its IM notification) and refuses a webhook sent from another host | `grep -c '^MEIVA_ALERTS_WEBHOOK_TOKEN=.' "$MEIVA_HOME/.env"` returns 1, and no such line appears at gateway start |
+
+Both keys live in `<MEIVA_HOME>/.env` and take effect on the next gateway restart. A key
+that is written — even when its value is the open one — silences the line: the operator
+declared it, and the process does not second-guess a declared choice on every start.
