@@ -12,8 +12,9 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, tzinfo
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, JsonValue
+from pydantic import JsonValue
 
+from base.api_contracts.notification_audit import NotificationAuditResponse
 from base.cluster.machine import GatewayAccess, gateway_api_base, gateway_auth_headers
 from base.host.net import http_dial
 from cli.boundary.json_body import response_object
@@ -41,63 +42,7 @@ def _bar(value: int, peak: int, width: int = 40) -> str:
     return "#" * max(1, round(value * width / peak))
 
 
-# meiva:note
-# The audit report as far as the text rendering reads it. The gateway's answer carries these
-# fields; `--out json` prints the answer itself, so nothing is lost by reading only these.
-class _Window(BaseModel):
-    start: datetime
-    end: datetime
-    days: int
-    timezone: str
-
-
-class _PerDay(BaseModel):
-    day: str
-    by_category: dict[str, int]
-    total: int
-
-
-class _Delivered(BaseModel):
-    per_day: list[_PerDay]
-    per_category: dict[str, int]
-    per_hour: list[int]
-
-
-class _Candidate(BaseModel):
-    category: str
-    candidates: int
-    delivered: int
-    suppressed: int
-    repeat_deliveries: int
-
-
-class _Simulation(BaseModel):
-    variant: str
-    delivered: int
-    delta: int
-    per_day: float
-
-
-class _Explained(BaseModel):
-    at: datetime
-    category: str
-    agent_id: int
-    outcome: str
-    dedupe_key: str | None = None
-
-
-class AuditReport(BaseModel):
-    window: _Window
-    switches: dict[str, bool]
-    categories: list[str]
-    sources: dict[str, str]
-    delivered: _Delivered
-    candidates: list[_Candidate]
-    simulations: list[_Simulation]
-    explain: list[_Explained] | None = None
-
-
-def _per_day_section(report: AuditReport) -> list[str]:
+def _per_day_section(report: NotificationAuditResponse) -> list[str]:
     categories = report.categories
     rows: list[list[object]] = [["day", *categories, "total"]]
     totals: Counter[str] = Counter()
@@ -108,7 +53,7 @@ def _per_day_section(report: AuditReport) -> list[str]:
     return ["", "Deliveries per day", *_table(rows[0], rows[1:])]
 
 
-def _per_category_section(report: AuditReport) -> list[str]:
+def _per_category_section(report: NotificationAuditResponse) -> list[str]:
     delivered = report.delivered.per_category
     grand_total = sum(delivered.values()) or 1
     return [
@@ -121,7 +66,7 @@ def _per_category_section(report: AuditReport) -> list[str]:
     ]
 
 
-def _per_hour_section(report: AuditReport) -> list[str]:
+def _per_hour_section(report: NotificationAuditResponse) -> list[str]:
     hours = report.delivered.per_hour
     peak = max(hours) if hours else 0
     return [
@@ -134,7 +79,7 @@ def _per_hour_section(report: AuditReport) -> list[str]:
     ]
 
 
-def _candidates_section(report: AuditReport) -> list[str]:
+def _candidates_section(report: NotificationAuditResponse) -> list[str]:
     return [
         "",
         "Candidates and suppression",
@@ -154,7 +99,7 @@ def _candidates_section(report: AuditReport) -> list[str]:
     ]
 
 
-def _simulation_section(report: AuditReport) -> list[str]:
+def _simulation_section(report: NotificationAuditResponse) -> list[str]:
     return [
         "",
         "Simulations (one flipped input at a time, against the configured baseline)",
@@ -168,7 +113,7 @@ def _simulation_section(report: AuditReport) -> list[str]:
     ]
 
 
-def _explain_section(report: AuditReport) -> list[str]:
+def _explain_section(report: NotificationAuditResponse) -> list[str]:
     rows = report.explain or []
     if not rows:
         return []
@@ -180,7 +125,7 @@ def _explain_section(report: AuditReport) -> list[str]:
             ["at", "category", "agent", "outcome", "dedupe key"],
             [
                 [
-                    row.at.strftime(stamp),
+                    datetime.fromisoformat(row.at).strftime(stamp),
                     row.category,
                     str(row.agent_id),
                     row.outcome,
@@ -192,11 +137,11 @@ def _explain_section(report: AuditReport) -> list[str]:
     ]
 
 
-def render_text(report: AuditReport, *, tz: tzinfo) -> list[str]:
+def render_text(report: NotificationAuditResponse, *, tz: tzinfo) -> list[str]:
     window = report.window
     stamp = "%Y-%m-%d %H:%M"
-    start = window.start.astimezone(tz)
-    end = window.end.astimezone(tz)
+    start = datetime.fromisoformat(window.start).astimezone(tz)
+    end = datetime.fromisoformat(window.end).astimezone(tz)
     return [
         f"Notification audit — {window.days} day{'' if window.days == 1 else 's'} "
         f"ending {end:{stamp}} {window.timezone}",
@@ -275,7 +220,7 @@ def cmd_notices_audit(
     if out == "json":
         print(render_json(report))
     else:
-        typed = AuditReport.model_validate(report)
+        typed = NotificationAuditResponse.model_validate(report)
         zone = ZoneInfo(typed.window.timezone)
         print("\n".join(render_text(typed, tz=zone)))
     return 0
