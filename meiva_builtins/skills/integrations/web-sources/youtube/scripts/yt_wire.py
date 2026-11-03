@@ -15,6 +15,8 @@ import re
 from dataclasses import dataclass
 from typing import Literal, TypeGuard, assert_never
 
+from base.host.boundary.untyped import object_of
+
 SubKind = Literal["human", "auto"]
 
 # meiva:note
@@ -162,7 +164,10 @@ def _as_object(value: object, what: str) -> dict[str, object]:
 
 
 def _load_object(stdout: str, what: str) -> dict[str, object]:
-    return _as_object(json.loads(stdout), what)
+    # meiva:note
+    # `json.loads` answers `Any`; `object_of` hands the decoded document over as an opaque value
+    # for `_as_object` to narrow.
+    return _as_object(object_of(json.loads, stdout), what)
 
 
 def _text(obj: dict[str, object], key: str) -> str | None:

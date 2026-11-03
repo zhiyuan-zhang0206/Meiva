@@ -51,6 +51,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeGuard
 
+from base.host.boundary.options import attribute, options
+from base.host.boundary.untyped import object_of
 from base.paths.home import resolve_meiva_home
 
 # meiva:note
@@ -168,7 +170,10 @@ def _read_post(root: Path, entry_id: str) -> Post | None:
     post_json = root / _entry_slug(entry_id) / "post.json"
     if not post_json.exists():
         return None
-    loaded: object = json.loads(post_json.read_text())
+    # meiva:note
+    # `json.loads` answers `Any`; `object_of` hands the decoded document over as an opaque value
+    # for `_is_post` to judge.
+    loaded = object_of(json.loads, post_json.read_text())
     return loaded if _is_post(loaded) else None
 
 
@@ -250,6 +255,26 @@ def _mirror_from(out: str | None) -> Path:
 
 
 # meiva:note
+# The flags each subcommand reads, as argparse left them. `options` checks every field against its
+# annotation once, so no branch below reads the `Any` a `Namespace` attribute would hand it.
+@dataclass(frozen=True)
+class _EnumOptions:
+    url: str
+    since: str | None
+    limit: int | None
+
+
+@dataclass(frozen=True)
+class _SyncOptions:
+    url: str
+    since: str | None
+    limit: int | None
+    full: bool
+    matrix_entity: str | None
+    out: str | None
+
+
+# meiva:note
 # Parse `argv` and run the command it names with `scrape` as the way to the web and `now` (unix
 # seconds) as the current time, returning the JSON value to print: the listing for `enum` and the
 # S1 items for `sync`.
@@ -276,26 +301,33 @@ def run(argv: list[str], scrape: ScrapeConfig, now: float) -> object:
     ps.add_argument("--out", help="raw-mirror dir (default $MEIVA_HOME/state/mirrors/rss)")
 
     args = p.parse_args(argv)
-    since_ts = since_to_ts(args.since, now)
-    match args.cmd:
+    match attribute(args, "cmd", str):
         case "enum":
-            return enum(scrape.curl, args.url, since_ts=since_ts, limit=args.limit, now=now)
+            enum_opts = options(args, _EnumOptions)
+            return enum(
+                scrape.curl,
+                enum_opts.url,
+                since_ts=since_to_ts(enum_opts.since, now),
+                limit=enum_opts.limit,
+                now=now,
+            )
         case "sync":
+            sync_opts = options(args, _SyncOptions)
             config = RssConfig(
                 curl=scrape.curl,
-                root=_mirror_from(args.out),
-                full=scrape if args.full else None,
+                root=_mirror_from(sync_opts.out),
+                full=scrape if sync_opts.full else None,
             )
             return sync(
                 config,
-                args.url,
-                since_ts=since_ts,
-                limit=args.limit,
-                matrix_entity=args.matrix_entity,
+                sync_opts.url,
+                since_ts=since_to_ts(sync_opts.since, now),
+                limit=sync_opts.limit,
+                matrix_entity=sync_opts.matrix_entity,
                 now=now,
             )
-        case _:
-            raise ValueError(f"unknown command {args.cmd!r}")
+        case other:
+            raise ValueError(f"unknown command {other!r}")
 
 
 # meiva:note

@@ -789,6 +789,8 @@ extraPaths = ["meiva_builtins/skills/integrations/web-ai/scripts"]
 
 [[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/skills/integrations/web-sources"
+reportAny = "error"
+reportExplicitAny = "error"
 extraPaths = ["meiva_builtins/skills/integrations/web-sources/scripts"]
 
 [[tool.pyright.executionEnvironments]]

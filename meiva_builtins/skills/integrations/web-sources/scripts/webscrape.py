@@ -54,11 +54,14 @@ import re
 import subprocess
 import sys
 import urllib.parse
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeGuard, assert_never
 
 from loguru import logger
 
+from base.host.boundary.options import attribute, options
+from base.host.boundary.untyped import object_of
 from base.paths.home import resolve_meiva_home
 
 # meiva:note
@@ -220,7 +223,10 @@ def _load_if_complete(url: str, root: Path) -> Post | None:
     post_json = root / _url_slug(url) / "post.json"
     if not post_json.exists():
         return None
-    loaded: object = json.loads(post_json.read_text())
+    # meiva:note
+    # `json.loads` answers `Any`; `object_of` hands the decoded document over as an opaque value
+    # for `_is_post` to judge.
+    loaded = object_of(json.loads, post_json.read_text())
     return loaded if _is_post(loaded) else None
 
 
@@ -322,6 +328,32 @@ def _mirror_from(out: str | None) -> Path:
 
 
 # meiva:note
+# The flags each subcommand reads, as argparse left them. `options` checks every field against its
+# annotation once, so no branch below reads the `Any` a `Namespace` attribute would hand it.
+@dataclass(frozen=True)
+class _EnumOptions:
+    url: str
+    link_pattern: str | None
+    limit: int | None
+
+
+@dataclass(frozen=True)
+class _SyncOptions:
+    url: str
+    link_pattern: str | None
+    limit: int | None
+    matrix_entity: str | None
+    out: str | None
+
+
+@dataclass(frozen=True)
+class _FetchOptions:
+    url: str
+    matrix_entity: str | None
+    out: str | None
+
+
+# meiva:note
 # Parse `argv` and run the command it names against `config`, returning the JSON value to print:
 # the links for `enum`, the S1 items for `sync` and the S1 item for `fetch`.
 def run(argv: list[str], config: ScrapeConfig) -> object:
@@ -351,24 +383,33 @@ def run(argv: list[str], config: ScrapeConfig) -> object:
     pf.add_argument("--out", help="raw-mirror dir (default $MEIVA_HOME/state/mirrors/web-scrape)")
 
     args = p.parse_args(argv)
-    match args.cmd:
+    match attribute(args, "cmd", str):
         case "enum":
-            return harvest_links(config, args.url, args.link_pattern, limit=args.limit)
+            enum_opts = options(args, _EnumOptions)
+            return harvest_links(
+                config, enum_opts.url, enum_opts.link_pattern, limit=enum_opts.limit
+            )
         case "sync":
+            sync_opts = options(args, _SyncOptions)
             return sync(
                 config,
-                args.url,
-                link_pattern=args.link_pattern,
-                limit=args.limit,
-                matrix_entity=args.matrix_entity,
-                root=_mirror_from(args.out),
+                sync_opts.url,
+                link_pattern=sync_opts.link_pattern,
+                limit=sync_opts.limit,
+                matrix_entity=sync_opts.matrix_entity,
+                root=_mirror_from(sync_opts.out),
             )
         case "fetch":
-            root = _mirror_from(args.out)
-            post = fetch(config, args.url, root=root)
-            return to_s1(post, matrix_entity=args.matrix_entity, raw_path=_raw_path(root, args.url))
-        case _:
-            raise ValueError(f"unknown command {args.cmd!r}")
+            fetch_opts = options(args, _FetchOptions)
+            root = _mirror_from(fetch_opts.out)
+            post = fetch(config, fetch_opts.url, root=root)
+            return to_s1(
+                post,
+                matrix_entity=fetch_opts.matrix_entity,
+                raw_path=_raw_path(root, fetch_opts.url),
+            )
+        case other:
+            raise ValueError(f"unknown command {other!r}")
 
 
 # meiva:note

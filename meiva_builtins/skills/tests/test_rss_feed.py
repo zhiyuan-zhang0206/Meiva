@@ -244,6 +244,37 @@ def test_parse_feed_empty_or_invalid(xml_bytes: bytes, should_raise: bool) -> No
         assert parsed.entries == ()
 
 
+# meiva:note
+# `feedparser` is untyped, so what its `parse` answers is checked rather than assumed: a callable
+# that hands back something other than a feed mapping is refused by name, instead of failing later
+# as a `KeyError` on a field the entries never had.
+def test_parse_with_refuses_a_callable_that_answers_something_other_than_a_feed() -> None:
+    def answers_a_list(_data: bytes) -> object:
+        return [b"entries"]
+
+    with pytest.raises(post_mod.RssError, match="not a parsed feed"):
+        post_mod._parse_with(answers_a_list, b"<rss/>", _FEED_URL)
+
+
+# meiva:note
+# An entry the feedparser answer carries that is not a mapping is refused by name: entries are
+# indexed field by field, so a list or a string there would otherwise fail deep inside `_entry`.
+def test_parse_with_refuses_an_entry_that_is_not_a_mapping() -> None:
+    def answers_one_bad_entry(_data: bytes) -> object:
+        return {"entries": ["not-a-mapping"], "feed": {"title": "T"}}
+
+    with pytest.raises(post_mod.RssError, match="not a feedparser entry mapping"):
+        post_mod._parse_with(answers_one_bad_entry, b"<rss/>", _FEED_URL)
+
+
+# meiva:note
+# The other half of the same guard: a `parse` attribute that is not callable at all is a
+# `TypeError` naming it, not a silent `Any` call.
+def test_parse_with_refuses_a_parse_attribute_that_is_not_callable() -> None:
+    with pytest.raises(TypeError, match="not callable"):
+        post_mod._parse_with(object(), b"<rss/>", _FEED_URL)
+
+
 def test_content_encoded_preferred_over_summary() -> None:
     assert _entries(_ITEM_FULL).entries[0].body_html == "<p>Full body one</p>"
     assert _entries(_ITEM_UNDATED).entries[0].body_html == "no date here"
