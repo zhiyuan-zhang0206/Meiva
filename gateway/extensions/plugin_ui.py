@@ -38,6 +38,7 @@ from fastapi.responses import FileResponse, RedirectResponse, Response
 
 from base.packages.plugins import enable_config
 from base.packages.skills import names
+from gateway.http.config import gateway_state
 
 router = APIRouter()
 
@@ -131,7 +132,7 @@ def plugin_ui_get(plugin: str, rest: str, request: Request) -> Response:
     links against the URL it was loaded from, so `…/board` would send
     `app.js` to `…/app.js` — one level above where the plugin put it.
     """
-    ui_dir = _enabled_plugin_dir(plugin, home=request.app.state.gateway_process.home)
+    ui_dir = _enabled_plugin_dir(plugin, home=gateway_state(request).gateway_process.home)
     _validate_segments(rest)
     if rest and not rest.endswith("/") and (ui_dir / rest).is_dir():
         return RedirectResponse(f"/api/plugin-ui/{plugin}/{rest}/", status_code=307)

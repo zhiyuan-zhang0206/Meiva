@@ -1,30 +1,26 @@
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 from gateway.cluster.roster.liveness_snapshot import Snapshot
 from gateway.extensions.inventory_matrix import collapse_inventory, plan_dials
-from ops.rpc_schemas import InventoryReadResult
+from ops.rpc_schemas import InventoryReadItem, InventoryReadResult
 
 
 def _read(
-    plugins: dict[str, Any], mcp_servers: dict[str, Any], machine: str
+    plugins: dict[str, InventoryReadItem], mcp_servers: dict[str, InventoryReadItem], machine: str
 ) -> InventoryReadResult:
     return InventoryReadResult(machine=machine, plugins=plugins, mcp_servers=mcp_servers)
 
 
-def _plugin(*, enabled: bool, description: str = "") -> dict[str, Any]:
-    return {"enabled": enabled, "can_enable": None, "reason": None, "description": description}
+def _plugin(*, enabled: bool, description: str = "") -> InventoryReadItem:
+    return InventoryReadItem(enabled=enabled, can_enable=None, reason=None, description=description)
 
 
 def _mcp(
     *, enabled: bool, can_enable: bool | None, reason: str | None, description: str = ""
-) -> dict[str, Any]:
-    return {
-        "enabled": enabled,
-        "can_enable": can_enable,
-        "reason": reason,
-        "description": description,
-    }
+) -> InventoryReadItem:
+    return InventoryReadItem(
+        enabled=enabled, can_enable=can_enable, reason=reason, description=description
+    )
 
 
 def test_collapse_present_and_absent_cells() -> None:

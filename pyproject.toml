@@ -665,13 +665,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "gateway/inspect"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-reportUnknownVariableType = "error"
-reportUnknownParameterType = "error"
-reportMissingParameterType = "error"
-reportUnknownLambdaType = "error"
-reportMissingTypeArgument = "error"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "gateway/extensions"
 reportAny = "error"
 reportExplicitAny = "error"
 

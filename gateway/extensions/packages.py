@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from gateway.agents.creation import create_and_launch_agent, guarded_draft_key
-from gateway.http.config import gateway_clock, gateway_ensure_harnesses, gateway_rpc
+from gateway.http.config import gateway_clock, gateway_ensure_harnesses, gateway_rpc, gateway_state
 from gateway.http.model_catalog import require_model_catalog
 from ops.rpc_schemas import SpawnAgentRequest
 
@@ -63,12 +63,12 @@ async def guarded_draft_package(
     )
     spawned = await create_and_launch_agent(
         body_obj,
-        request.app.state.machine.name(),
-        request.app.state.db_pool,
-        request.app.state.db,
-        request.app.state.bus,
+        gateway_state(request).machine.name(),
+        gateway_state(request).db_pool,
+        gateway_state(request).db,
+        gateway_state(request).bus,
         catalog=require_model_catalog(request),
-        authority=request.app.state.config_authority,
+        authority=gateway_state(request).config_authority,
         creation_key=key,
         clock=gateway_clock(request),
         rpc=gateway_rpc(request),

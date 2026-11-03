@@ -2,24 +2,21 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
 
-from fastapi import Request
+from fastapi import FastAPI, Request
 
 from base import paths
 from base.packages.extensions import install_registry
 from base.packages.extensions.install_registry import InstalledPackage, PackageOrigin, tree_hash
 from base.paths import meiva_home
 from gateway.extensions.skills import get_skills
+from gateway.http.config import GatewayAppState
 
 
 def _request(home: Path) -> Request:
-    return cast(
-        Request,
-        SimpleNamespace(
-            app=SimpleNamespace(state=SimpleNamespace(gateway_process=SimpleNamespace(home=home)))
-        ),
-    )
+    app = FastAPI()
+    app.state = GatewayAppState({"gateway_process": SimpleNamespace(home=home)})
+    return Request({"type": "http", "app": app, "headers": []})
 
 
 def _mk_skill(name: str, body: str = "# skill\n") -> Path:

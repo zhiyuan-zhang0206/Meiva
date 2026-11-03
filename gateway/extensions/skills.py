@@ -23,6 +23,7 @@ from base.packages.extensions import install_registry
 from base.packages.extensions.install_registry import IGNORED_NAMES, PackageOrigin, tree_hash
 from base.packages.skills.names import display_name, match_key
 from gateway.extensions.schemas import SkillEnableUpdate, SkillLayer, SkillsView, SkillView
+from gateway.http.config import gateway_state
 
 router = APIRouter()
 
@@ -72,12 +73,12 @@ def get_skills(request: Request) -> SkillsView:
     the on-disk copy drifted from what converge last wrote (`modified_locally`).
     A directory with no registry entry is reported as `untracked` (present on
     disk but the scanner won't load it)."""
-    registry = install_registry.load(home=request.app.state.gateway_process.home)
+    registry = install_registry.load(home=gateway_state(request).gateway_process.home)
     # Registry rows are keyed by folded name (design R2-B1): a row written
     # `meiva-code` and a directory still spelled `meiva_code/` are one skill —
     # correlate through the fold, not the raw spelling (audit 02 #4).
     by_name = {match_key(p.name): p for p in registry.packages}
-    skills_root = paths.skills_dir(request.app.state.gateway_process.home)
+    skills_root = paths.skills_dir(gateway_state(request).gateway_process.home)
 
     rows: list[SkillView] = []
     if skills_root.is_dir():
@@ -107,7 +108,7 @@ def update_skill_enabled(body: SkillEnableUpdate, request: Request) -> SkillView
     read and then re-saving it would let a concurrent `meiva skill install` or
     `meiva converge` land its rows in between, and this handler's save — built on
     a registry read before those rows existed — would drop them."""
-    with install_registry.mutate(home=request.app.state.gateway_process.home) as registry:
+    with install_registry.mutate(home=gateway_state(request).gateway_process.home) as registry:
         key = match_key(body.name)
         pkg = next((p for p in registry.packages if match_key(p.name) == key), None)
         if pkg is None:
@@ -118,5 +119,5 @@ def update_skill_enabled(body: SkillEnableUpdate, request: Request) -> SkillView
         pkg.enabled = body.enabled
 
     # Build the updated SkillView from the on-disk directory
-    dir_path = paths.skills_dir(request.app.state.gateway_process.home) / pkg.name
+    dir_path = paths.skills_dir(gateway_state(request).gateway_process.home) / pkg.name
     return _build_skill_view(pkg.name, pkg, dir_path)
