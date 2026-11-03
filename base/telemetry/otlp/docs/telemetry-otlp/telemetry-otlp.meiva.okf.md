@@ -80,8 +80,9 @@ Enablement flags, endpoint defaults and the read topology have their own node:
 - `base/telemetry/pipeline_build.py` — caller: `_write_batch` runs the OTLP export after
   the JSONL mirror append; the concrete pipeline closes its own exporter after
   joining the ordinary writer. `_drain_on_exit` observes that same pipeline.
-- OTel SDK (`opentelemetry-*`) — imported lazily inside `_build_providers` /
-  `_emit_log`, so flag-off processes never pay for it.
+- OTel SDK (`opentelemetry-*`) — `telemetry_otlp_sdk` (providers, views, resource) is imported
+  lazily at worker bring-up, so flag-off processes never pay for the SDK; the backend modules
+  import only the OTel API value types (`LogRecord`, `Observation`, `Context`).
 - `base/config/domains/observability/settings.py` — the producer-local `telemetry_otlp_*`
   settings plus gateway-local backend URLs.
 - `base/deploy/release/collector/artifact.py` — pinned downloader for release prep and

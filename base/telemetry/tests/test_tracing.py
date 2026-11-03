@@ -442,7 +442,9 @@ def test_collector_unreachable_retries_once_until_init_succeeds(
         config=cfg,
         readiness=trace_readiness,
     )
-    retry_thread = tracing_mod.state["retry_owner"]._thread
+    retry_owner = tracing_mod.state["retry_owner"]
+    assert retry_owner is not None
+    retry_thread = retry_owner._thread
     assert isinstance(retry_thread, threading.Thread)
 
     initialize_tracing(
@@ -451,7 +453,7 @@ def test_collector_unreachable_retries_once_until_init_succeeds(
         config=cfg,
         readiness=trace_readiness,
     )
-    assert tracing_mod.state["retry_owner"]._thread is retry_thread
+    assert retry_owner._thread is retry_thread
 
     late_server = CollectorStubServer(port=port)
     try:
@@ -527,7 +529,9 @@ def test_teardown_drains_pending_arm_thread(
         config=trace_config(enabled=True),
         readiness=trace_readiness,
     )
-    arm_thread = tracing_mod.state["arm_owner"]._thread
+    arm_owner = tracing_mod.state["arm_owner"]
+    assert arm_owner is not None
+    arm_thread = arm_owner._thread
     assert isinstance(arm_thread, threading.Thread)
     assert arm_thread.is_alive()
     # Intentionally no wait_init_resolved(): the fixture teardown must drain.

@@ -11,6 +11,7 @@ from base.paths.tests.homes import point_home
 from base.telemetry import observability
 from base.telemetry.otlp import telemetry_otlp
 from base.telemetry.otlp.telemetry_otlp import default_exporter
+from base.telemetry.tests.otlp.fake_sdk_providers import FakeLogger, FakeMeter
 from base.telemetry.tests.otlp.identity_inputs import machine_identity
 
 
@@ -212,7 +213,10 @@ def test_stop_marks_the_exporter_closing_before_the_drain(tmp_path: Path) -> Non
 
 
 class _NoopLoggerProvider:
-    def force_flush(self, timeout_millis: int = 2000) -> bool:
+    def get_logger(self, _name: str, /) -> FakeLogger:
+        return FakeLogger()
+
+    def force_flush(self, *, timeout_millis: int = 2000) -> bool:
         del timeout_millis
         return True
 
@@ -221,7 +225,7 @@ class _NoopLoggerProvider:
 
 
 class _ShutdownMeterProvider(_NoopLoggerProvider):
-    def get_meter(self, _name: str) -> object:
+    def get_meter(self, _name: str, /) -> FakeMeter:
         raise RuntimeError("cannot schedule new futures after interpreter shutdown")
 
 

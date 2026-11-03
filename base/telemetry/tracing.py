@@ -13,13 +13,14 @@ import time
 from collections.abc import Callable, Generator, Sequence
 from functools import wraps
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 
 import httpx
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 
 from base.cluster.machine import MachineIdentityReader
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.log import logger
 from base.paths import traces_dir
 from base.telemetry.delivery.reporting import report_no_pipeline
@@ -129,7 +130,23 @@ def _is_content_attribute(key: str) -> bool:
     return any(key.startswith(p) for p in _CONTENT_ATTR_PREFIXES)
 
 
-def _attribute_value_size(value: dict[str, Any]) -> int:
+# meiva:note
+# Decoded OTLP is checked as it is read: a value of another shape raises, since a skipped
+# attribute could leak content.
+def _as_object(value: object) -> dict[str, object]:
+    if not is_object_dict(value):
+        raise TypeError(f"OTLP export holds {type(value).__name__} where an object belongs")
+    return value
+
+
+def _objects_at(parent: dict[str, object], key: str) -> list[dict[str, object]]:
+    items = parent.get(key, [])
+    if not is_object_list(items):
+        raise TypeError(f"OTLP export holds {type(items).__name__} at {key!r} where a list belongs")
+    return [_as_object(item) for item in items]
+
+
+def _attribute_value_size(value: dict[str, object]) -> int:
     """Approximate serialized size of one OTLP AnyValue dict (chars of the
     dominant string payload). Used by the size guard; a content-free
     attribute is a few hundred chars at most."""
@@ -137,16 +154,33 @@ def _attribute_value_size(value: dict[str, Any]) -> int:
         if field in value:
             return len(str(value[field]))
     if "arrayValue" in value:
-        return sum(_attribute_value_size(v) for v in value["arrayValue"].get("values", []))
+        return sum(
+            _attribute_value_size(v) for v in _objects_at(_as_object(value["arrayValue"]), "values")
+        )
     if "kvlistValue" in value:
         return sum(
-            _attribute_value_size(kv.get("value", {})) + len(kv.get("key", ""))
-            for kv in value["kvlistValue"].get("values", [])
+            _attribute_value_size(_as_object(kv.get("value", {}))) + len(str(kv.get("key", "")))
+            for kv in _objects_at(_as_object(value["kvlistValue"]), "values")
         )
     return 0
 
 
-def strip_content_attributes(otlp: dict[str, Any]) -> None:
+# meiva:note
+# Keep on a span or event only the attributes that may reach disk (no content, within the guard).
+def _strip_attributes(owner: dict[str, object]) -> None:
+    kept = [
+        kv
+        for kv in _objects_at(owner, "attributes")
+        if not _is_content_attribute(str(kv.get("key", "")))
+        and _attribute_value_size(_as_object(kv.get("value", {}))) <= MAX_ATTR_STRING_CHARS
+    ]
+    if kept:
+        owner["attributes"] = kept
+    else:
+        owner.pop("attributes", None)
+
+
+def strip_content_attributes(otlp: dict[str, object]) -> None:
     """Remove LLM-content attributes from a decoded OTLP export request, in place.
 
     Walks resourceSpans -> scopeSpans -> spans (attributes + events) and drops
@@ -155,34 +189,23 @@ def strip_content_attributes(otlp: dict[str, Any]) -> None:
     size guard — metadata is never large). Span names, timestamps, status,
     ids and `traceloop.*` / `gen_ai.task.*` / `langgraph.*` metadata survive.
     """
-    for rs in otlp.get("resourceSpans", []):
-        for ss in rs.get("scopeSpans", []):
-            for span in ss.get("spans", []):
-                kept: list[dict[str, Any]] = [
-                    kv
-                    for kv in span.get("attributes", [])
-                    if not _is_content_attribute(kv.get("key", ""))
-                    and _attribute_value_size(kv.get("value", {})) <= MAX_ATTR_STRING_CHARS
-                ]
-                if kept:
-                    span["attributes"] = kept
-                else:
-                    span.pop("attributes", None)
-                for ev in span.get("events", []):
-                    ev_kept: list[dict[str, Any]] = [
-                        kv
-                        for kv in ev.get("attributes", [])
-                        if not _is_content_attribute(kv.get("key", ""))
-                        and _attribute_value_size(kv.get("value", {})) <= MAX_ATTR_STRING_CHARS
-                    ]
-                    if ev_kept:
-                        ev["attributes"] = ev_kept
-                    else:
-                        ev.pop("attributes", None)
+    for rs in _objects_at(otlp, "resourceSpans"):
+        for ss in _objects_at(rs, "scopeSpans"):
+            for span in _objects_at(ss, "spans"):
+                _strip_attributes(span)
+                for ev in _objects_at(span, "events"):
+                    _strip_attributes(ev)
 
 
-# Module-level mutable state for the idempotent init guard and collector retry.
-state: dict[str, Any] = {
+class _TraceState(TypedDict):
+    closed: bool
+    arm_owner: TraceArm | None
+    retry_owner: CollectorRetry | None
+    collector_offline_reported: bool
+    traceloop_init: Callable[..., object] | None
+
+
+state: _TraceState = {
     "closed": False,
     "arm_owner": None,
     "retry_owner": None,
@@ -511,15 +534,16 @@ def shutdown(timeout: float = 2.0, *, readiness: TraceReadiness) -> tuple[str, .
     with _lifecycle_lock:
         state["closed"] = True
         readiness.close()
-        owners = [owner for key in ("retry_owner", "arm_owner") if (owner := state.get(key))]
-    for owner in owners:
+        named = (("trace-collector-retry", state["retry_owner"]), ("trace-arm", state["arm_owner"]))
+    owners = [(name, owner) for name, owner in named if owner is not None]
+    for _, owner in owners:
         owner.request_stop()
     unfinished: list[str] = []
     primary: BaseException | None = None
-    for owner in owners:
+    for name, owner in owners:
         try:
             if not owner.stop(timeout=max(0.0, deadline - time.monotonic())):
-                unfinished.append(owner._thread.name)
+                unfinished.append(name)
         except BaseException as exc:
             if primary is None:
                 primary = exc

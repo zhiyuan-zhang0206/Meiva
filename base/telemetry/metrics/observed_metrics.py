@@ -18,13 +18,15 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from threading import Lock
-from typing import Any, Literal, TypedDict, TypeGuard
+from typing import Literal, TypedDict, TypeGuard
 
 import psycopg
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base.db import Database
+from base.db.rows import CountRow, query_one
+from base.host.boundary.json_values import is_object_dict
 from base.telemetry.delivery.mirror import event_row
 from base.telemetry.delivery.receipts import Event
 from base.telemetry.metrics.aggregate_sql import EXEC_FAILURE_EVENTS
@@ -63,10 +65,6 @@ def _is_obj_list(value: object) -> TypeGuard[list[object]]:
     return isinstance(value, list)
 
 
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
-
-
 def _number(value: object) -> float:
     if not isinstance(value, (int, float, str, Decimal)):
         raise TypeError("observed metric must be a finite nonnegative number")
@@ -97,13 +95,13 @@ class _MetricIdentity(TypedDict):
     occurred_at: datetime
 
 
-def _activity(attributes: Mapping[str, Any]) -> tuple[float, float]:
+def _activity(attributes: Mapping[str, object]) -> tuple[float, float]:
     entries = attributes.get("nodes", [attributes])
     if not _is_obj_list(entries):
         raise TypeError("observed node batch must be a list")
     active = execution = 0.0
     for raw in entries:
-        if not _is_str_dict(raw):
+        if not is_object_dict(raw):
             raise TypeError("observed node entry must be an object")
         entry = raw
         node = entry.get("node", "")
@@ -117,7 +115,7 @@ def _activity(attributes: Mapping[str, Any]) -> tuple[float, float]:
     return active, execution
 
 
-def _usage(base: _MetricIdentity, attributes: Mapping[str, Any]) -> MetricObservation:
+def _usage(base: _MetricIdentity, attributes: Mapping[str, object]) -> MetricObservation:
     """Preserve a usage-time price or explicitly record the call as unpriced."""
     cost = attributes.get("cost_usd")
     unpriced = cost is None or _count(attributes.get("unpriced", 0)) != 0
@@ -147,7 +145,7 @@ def _usage(base: _MetricIdentity, attributes: Mapping[str, Any]) -> MetricObserv
     )
 
 
-def _supports(name: str, category: str, agent_id: int | None) -> bool:
+def _supports(name: object, category: object, agent_id: object) -> bool:
     if agent_id is None:
         return False
     if name in {"llm_usage", "turn_end"}:
@@ -155,7 +153,7 @@ def _supports(name: str, category: str, agent_id: int | None) -> bool:
     return name in {"node_exit", "exec", *EXEC_FAILURE_EVENTS}
 
 
-def observe_row(row: Mapping[str, Any]) -> MetricObservation | None:
+def observe_row(row: Mapping[str, object]) -> MetricObservation | None:
     """Reduce a normalized JSONL/Loki row; malformed supported events raise.
 
     Callers isolate malformed rows explicitly. Unknown event families and events
@@ -165,7 +163,7 @@ def observe_row(row: Mapping[str, Any]) -> MetricObservation | None:
     if not _supports(name, row["category"], row["agent_id"]):
         return None
     raw_attributes = row["attributes"]
-    if not _is_str_dict(raw_attributes):
+    if not is_object_dict(raw_attributes):
         raise TypeError("observed event attributes must be an object")
     attributes = raw_attributes
     occurred_at = row["ts"]
@@ -279,7 +277,7 @@ WITH inserted AS (
         turn_duration_max = greatest(agent_metric_days.turn_duration_max, EXCLUDED.turn_duration_max),
         last_observed_at = greatest(agent_metric_days.last_observed_at, EXCLUDED.last_observed_at)
     RETURNING agent_id
-) SELECT count(*) FROM inserted
+) SELECT count(*) AS n FROM inserted
 """  # noqa: S608 — identifiers come exclusively from static constants.
 
 _pool: ConnectionPool | None = None
@@ -304,9 +302,7 @@ def close_projection() -> None:
             _pool = None
 
 
-def write_observations(
-    observations: Sequence[MetricObservation], *, db: psycopg.Connection[Any]
-) -> int:
+def write_observations(observations: Sequence[MetricObservation], *, db: psycopg.Connection) -> int:
     """Atomically store novel facts and day sums; return number newly inserted.
 
     The connection belongs to the caller, who owns commit (replay, tests, and the live
@@ -315,16 +311,16 @@ def write_observations(
     """
     if not observations:
         return 0
-    rows: list[dict[str, Any]] = []
+    rows: list[dict[str, object]] = []
     for observation in observations:
         row = asdict(observation)
         row["occurred_at"] = observation.occurred_at.isoformat()
         row["cost_usd"] = str(observation.cost_usd)
         rows.append(row)
-    result = db.execute(_WRITE_SQL.encode(), (Jsonb(rows),)).fetchone()
+    result = query_one(db, CountRow, _WRITE_SQL.encode(), (Jsonb(rows),))
     if result is None:
         raise RuntimeError("observed metric insert returned no count")
-    return int(result[0])
+    return result.n
 
 
 # meiva:note

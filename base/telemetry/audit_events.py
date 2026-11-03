@@ -43,8 +43,8 @@ branching on a payload's fields; do not model display-only events.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Sequence
-from typing import Any, Literal
+from collections.abc import Callable, Mapping, Sequence
+from typing import Literal
 
 import psycopg
 from psycopg_pool import AsyncConnectionPool
@@ -79,7 +79,7 @@ def prepare_event_log(
     agent_id: int | None,
     source: str,
     target_agent_id: int | None = None,
-    payload: dict[str, Any] | None = None,
+    payload: Mapping[str, object] | None = None,
 ) -> telemetry.Event:
     """Construct one audit event (category=audit) without recording or emitting it.
 
@@ -144,7 +144,7 @@ def audit_event_uid(event: telemetry.Event, *, stream_id: int | None = None) -> 
     return uid - (1 << 64) if uid >= 1 << 63 else uid
 
 
-def _audit_row(event: telemetry.Event) -> tuple[Any, ...]:
+def _audit_row(event: telemetry.Event) -> tuple[object, ...]:
     """The INSERT parameters of one audit event; ValueError unless it is registered audit."""
     spec = EVENTS.get(event.event_name)
     if (

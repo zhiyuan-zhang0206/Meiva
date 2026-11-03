@@ -27,16 +27,16 @@ the rule explicitly labels the alert ``notify_im="false"``.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
-from typing import Any, TypeGuard
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 import psycopg
-from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
+from pydantic import TypeAdapter
 
+from base.db.rows import query_one
 from base.telemetry.alerts.copy import (
     ALERT_GROUP_COUNT,
     ALERT_GROUP_MORE,
@@ -51,6 +51,37 @@ _log = logging.getLogger(__name__)
 
 # (fingerprint, starts_at) — the dedup key for one alert instance.
 AlertKey = tuple[str, datetime]
+
+# meiva:note
+# One alert as the webhook hands it over: a plain JSON object whose fields are read through the
+# typed accessors below, never indexed as if they were known strings.
+type AlertPayload = dict[str, object]
+
+_STRING_MAP = TypeAdapter(dict[str, str])
+
+
+# meiva:note
+# The label or annotation map of one alert; absent or empty is an empty map, anything that is not a
+# string-to-string object is a malformed payload and raises.
+def _string_map(alert: AlertPayload, key: str) -> dict[str, str]:
+    return _STRING_MAP.validate_python(alert.get(key) or {})
+
+
+# meiva:note
+# The label map of one alert, for the callers that group by a label.
+def alert_labels(alert: AlertPayload) -> dict[str, str]:
+    return _string_map(alert, "labels")
+
+
+# meiva:note
+# One text field of an alert; absent or empty is ``""``, any other non-string is a malformed
+# payload and raises.
+def _text(alert: AlertPayload, key: str) -> str:
+    value = alert.get(key) or ""
+    if not isinstance(value, str):
+        raise TypeError(f"alert field {key!r} must be a string")
+    return value
+
 
 # Alertmanager sends the zero time ("0001-01-01T00:00:00Z") for the not-yet-known
 # endsAt of a firing alert — treat it as NULL, not a real timestamp.
@@ -143,6 +174,51 @@ def im_fanout_allowed(labels: dict[str, str]) -> bool:
     return labels.get(_IM_GATE_LABEL) != _IM_GATE_VALUE
 
 
+# meiva:note
+# The latest known start of one fingerprint.
+@dataclass(frozen=True)
+class _StartsAtRow:
+    starts_at: datetime
+
+
+# meiva:note
+# The notification state of an instance before this ingest touched it.
+@dataclass(frozen=True)
+class _PriorAlertRow:
+    status: str
+    severity: str
+    notified_at: datetime | None
+
+
+# meiva:note
+# The stored alert after the upsert, plus whether the statement inserted it. ``labels`` and
+# ``annotations`` are jsonb the schema keeps as string maps; the SSE publisher validates them.
+@dataclass(frozen=True)
+class _StoredAlertRow:
+    id: int
+    status: str
+    severity: str
+    alertname: str
+    labels: object
+    annotations: object
+    starts_at: datetime
+    ends_at: datetime | None
+    fingerprint: str
+    generator_url: str
+    source: str
+    notified_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+    inserted: bool
+
+
+# meiva:note
+# The IM template language row: ``value`` is jsonb and only a string is a language.
+@dataclass(frozen=True)
+class _DisplayLanguageRow:
+    value: object
+
+
 def _existing_starts_at(conn: psycopg.Connection, fp: str, alertname: str) -> datetime | None:
     """The latest known starts_at of `fp` for a payload that carries none; None rejects it."""
     # No starts_at (payload drift): re-sends of an EXISTING instance
@@ -150,14 +226,14 @@ def _existing_starts_at(conn: psycopg.Connection, fp: str, alertname: str) -> da
     # stable. A genuinely new alert with no starts_at has no stable
     # identity — fabricating now() would make every re-send a fresh
     # instance (duplicate rows + duplicate IMs), so it is rejected.
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT starts_at FROM alerts WHERE fingerprint = %s ORDER BY starts_at DESC LIMIT 1",
-            (fp,),
-        )
-        row = cur.fetchone()
+    row = query_one(
+        conn,
+        _StartsAtRow,
+        "SELECT starts_at FROM alerts WHERE fingerprint = %s ORDER BY starts_at DESC LIMIT 1",
+        (fp,),
+    )
     if row is not None:
-        return row[0]
+        return row.starts_at
     _log.warning(
         "alerts: alert %r has no starts_at and no existing instance "
         "— rejected (dedup key would be unstable)",
@@ -194,8 +270,8 @@ def _transition_notifies(
 
 
 def _upsert_row(
-    cur: psycopg.Cursor[dict[str, Any]],
-    alert: dict[str, Any],
+    conn: psycopg.Connection,
+    alert: AlertPayload,
     *,
     status: str,
     severity: str,
@@ -203,9 +279,13 @@ def _upsert_row(
     fp: str,
     starts_at: datetime,
     source: str,
-) -> tuple[dict[str, Any], bool]:
+) -> tuple[dict[str, object], bool]:
     """INSERT .. ON CONFLICT the instance; the stored row and whether it was a fresh insert."""
-    cur.execute(
+    # xmax = 0 distinguishes the fresh INSERT from the ON CONFLICT UPDATE
+    # (rowcount is 1 on both paths).
+    stored = query_one(
+        conn,
+        _StoredAlertRow,
         "INSERT INTO alerts"
         " (status, severity, alertname, labels, annotations, starts_at, ends_at,"
         "  fingerprint, generator_url, source)"
@@ -226,34 +306,31 @@ def _upsert_row(
             status,
             severity,
             alertname,
-            Jsonb(alert.get("labels") or {}),
-            Jsonb(alert.get("annotations") or {}),
+            Jsonb(_string_map(alert, "labels")),
+            Jsonb(_string_map(alert, "annotations")),
             starts_at,
-            parse_ts(alert.get("ends_at") or ""),
+            parse_ts(_text(alert, "ends_at")),
             fp,
             str(alert.get("generator_url") or ""),
             source,
         ),
     )
-    # xmax = 0 distinguishes the fresh INSERT from the ON CONFLICT UPDATE
-    # (rowcount is 1 on both paths).
-    row = cur.fetchone()
-    assert row is not None  # noqa: S101 — upsert always returns a row
-    did_insert = bool(row.pop("inserted"))
-    return row, did_insert
+    assert stored is not None  # noqa: S101 — upsert always returns a row
+    row = asdict(stored)
+    del row["inserted"]
+    return row, stored.inserted
 
 
-def alert_instance_fingerprint(alert: dict[str, Any]) -> str:
+def alert_instance_fingerprint(alert: AlertPayload) -> str:
     """Use the webhook fingerprint or the established Alertmanager fallback."""
-    labels: dict[str, str] = alert.get("labels") or {}
-    return alert.get("fingerprint") or fingerprint(labels)
+    return _text(alert, "fingerprint") or fingerprint(_string_map(alert, "labels"))
 
 
-def resolve_alert_key(conn: psycopg.Connection, alert: dict[str, Any]) -> AlertKey | None:
+def resolve_alert_key(conn: psycopg.Connection, alert: AlertPayload) -> AlertKey | None:
     """Resolve the existing instance identity without inventing a missing start time."""
-    labels: dict[str, str] = alert.get("labels") or {}
+    labels = _string_map(alert, "labels")
     fp = alert_instance_fingerprint(alert)
-    starts_at = parse_ts(alert.get("starts_at") or "")
+    starts_at = parse_ts(_text(alert, "starts_at"))
     if starts_at is None:
         starts_at = _existing_starts_at(conn, fp, parse_alertname(labels))
     return (fp, starts_at) if starts_at is not None else None
@@ -261,11 +338,11 @@ def resolve_alert_key(conn: psycopg.Connection, alert: dict[str, Any]) -> AlertK
 
 def upsert_alert(
     conn: psycopg.Connection,
-    alert: dict[str, Any],
+    alert: AlertPayload,
     source: str = "grafana",
     *,
     instance_key: AlertKey | None = None,
-) -> tuple[AlertKey, bool, bool, dict[str, Any]]:
+) -> tuple[AlertKey, bool, bool, dict[str, object]]:
     """Upsert one alert instance; return (key, did_insert, should_notify, row).
 
     ``alert`` is the Alertmanager-webhook alert shape as a dict (the model
@@ -289,7 +366,7 @@ def upsert_alert(
       resolved): False
     """
 
-    labels: dict[str, str] = alert.get("labels") or {}
+    labels = _string_map(alert, "labels")
     status = normalize_status(str(alert.get("status") or "firing"))
     severity = parse_severity(labels)
     alertname = parse_alertname(labels)
@@ -299,27 +376,26 @@ def upsert_alert(
         return (fp, datetime.min.replace(tzinfo=UTC)), False, False, {}
     fp, starts_at = key
 
-    with conn.cursor(row_factory=dict_row) as cur:
-        cur.execute(
-            "SELECT status, severity, notified_at FROM alerts "
-            "WHERE fingerprint = %s AND starts_at = %s",
-            (fp, starts_at),
-        )
-        old = cur.fetchone()
-        old_status = old["status"] if old else None
-        old_severity = str(old["severity"]) if old else None
-        was_notified = old is not None and old["notified_at"] is not None
+    old = query_one(
+        conn,
+        _PriorAlertRow,
+        "SELECT status, severity, notified_at FROM alerts WHERE fingerprint = %s AND starts_at = %s",
+        (fp, starts_at),
+    )
+    old_status = old.status if old else None
+    old_severity = old.severity if old else None
+    was_notified = old is not None and old.notified_at is not None
 
-        row, did_insert = _upsert_row(
-            cur,
-            alert,
-            status=status,
-            severity=severity,
-            alertname=alertname,
-            fp=fp,
-            starts_at=starts_at,
-            source=source,
-        )
+    row, did_insert = _upsert_row(
+        conn,
+        alert,
+        status=status,
+        severity=severity,
+        alertname=alertname,
+        fp=fp,
+        starts_at=starts_at,
+        source=source,
+    )
 
     should_notify = im_fanout_allowed(labels) and _transition_notifies(
         status, severity, old_status, old_severity, was_notified=was_notified
@@ -387,13 +463,8 @@ def frontend_base_url(gateway_url: str, frontend_healthcheck_url: str) -> str:
     return f"{gw.scheme or 'http'}://{host}:{port}"
 
 
-def _is_str_dict(value: object) -> TypeGuard[dict[str, str]]:
-    return isinstance(value, dict)
-
-
-def _summary(alert: dict[str, Any]) -> str:
-    raw = alert.get("annotations")
-    annotations: dict[str, str] = raw if _is_str_dict(raw) else {}
+def _summary(alert: AlertPayload) -> str:
+    annotations = _string_map(alert, "annotations")
     return str(annotations.get("summary") or annotations.get("description") or "")
 
 
@@ -406,14 +477,14 @@ def display_language(conn: psycopg.Connection) -> str:
     Only template/framework copy is translated — alert data never is.
     """
 
-    with conn.cursor() as cur:
-        cur.execute("SELECT value FROM user_settings WHERE key = 'display.language'")
-        row = cur.fetchone()
-    raw = row[0] if row else None
-    return raw if raw in ALERT_LANGUAGES else ALERT_LANGUAGE_DEFAULT
+    row = query_one(
+        conn, _DisplayLanguageRow, "SELECT value FROM user_settings WHERE key = 'display.language'"
+    )
+    raw = row.value if row else None
+    return raw if isinstance(raw, str) and raw in ALERT_LANGUAGES else ALERT_LANGUAGE_DEFAULT
 
 
-def notify_text(alert: dict[str, Any], lang: str | None = None, *, style: AlertMessageStyle) -> str:
+def notify_text(alert: AlertPayload, lang: str | None = None, *, style: AlertMessageStyle) -> str:
     """The alert IM message — the alert-specific format (user design 2026-08-12):
     a warning-sign-prefixed ``ALERT [<severity>] <alertname>`` head line, the
     summary body, the generatorURL when present, the trigger time, and the
@@ -432,7 +503,7 @@ def notify_text(alert: dict[str, Any], lang: str | None = None, *, style: AlertM
     passes through untranslated.
     """
 
-    labels: dict[str, str] = alert.get("labels") or {}
+    labels = _string_map(alert, "labels")
     severity = parse_severity(labels).upper()
     alertname = parse_alertname(labels)
     resolved = normalize_status(str(alert.get("status") or "")) == "resolved"
@@ -444,9 +515,10 @@ def notify_text(alert: dict[str, Any], lang: str | None = None, *, style: AlertM
     summary = _summary(alert)
     if summary:
         lines.append(summary[:200])
-    if alert.get("generator_url"):
-        lines.append(alert["generator_url"])
-    start = format_local(parse_ts(alert.get("starts_at") or ""), style.zone)
+    generator_url = _text(alert, "generator_url")
+    if generator_url:
+        lines.append(generator_url)
+    start = format_local(parse_ts(_text(alert, "starts_at")), style.zone)
     if start:
         lines.append(ALERT_TRIGGERED_AT[lang].format(time=start))
     if style.base_url:
@@ -455,7 +527,7 @@ def notify_text(alert: dict[str, Any], lang: str | None = None, *, style: AlertM
 
 
 def notify_group_text(
-    alerts: list[dict[str, Any]], lang: str | None = None, *, style: AlertMessageStyle
+    alerts: list[AlertPayload], lang: str | None = None, *, style: AlertMessageStyle
 ) -> str:
     """One IM message for the instances of one rule that a single webhook POST carries.
 
@@ -472,7 +544,7 @@ def notify_group_text(
     lines += [f"- {s[:200]}" for a in alerts[:_GROUP_LISTED] if (s := _summary(a))]
     if len(alerts) > _GROUP_LISTED:
         lines.append(ALERT_GROUP_MORE[lang].format(n=len(alerts) - _GROUP_LISTED))
-    starts = [t for a in alerts if (t := parse_ts(a.get("starts_at") or "")) is not None]
+    starts = [t for a in alerts if (t := parse_ts(_text(a, "starts_at"))) is not None]
     if starts:
         lines.append(ALERT_TRIGGERED_AT[lang].format(time=format_local(min(starts), style.zone)))
     if style.base_url:
@@ -480,10 +552,10 @@ def notify_group_text(
     return "\n".join(lines)
 
 
-def _group_head(alerts: list[dict[str, Any]], lang: str) -> str:
+def _group_head(alerts: list[AlertPayload], lang: str) -> str:
     """The grouped message's head: highest severity, the alertname and the count."""
 
-    labels_of = [raw if _is_str_dict(raw := a.get("labels")) else {} for a in alerts]
+    labels_of = [_string_map(a, "labels") for a in alerts]
     severity = max((parse_severity(lab) for lab in labels_of), key=_SEVERITY_RANK.__getitem__)
     resolved = normalize_status(str(alerts[0].get("status") or "")) == "resolved"
     head = ALERT_HEAD[lang]["resolved" if resolved else "firing"].format(

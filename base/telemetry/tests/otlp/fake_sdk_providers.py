@@ -54,7 +54,7 @@ class FakeProvider:
         self,
         *,
         on_emit: Callable[[Any], None] | None = None,
-        on_get_meter: Callable[[], object] | None = None,
+        on_get_meter: Callable[[], FakeMeter] | None = None,
         on_metric: Callable[[int | float], None] | None = None,
         on_flush: Callable[[int], None] | None = None,
         on_shutdown: Callable[[], None] | None = None,
@@ -70,7 +70,7 @@ class FakeProvider:
     def get_logger(self, _name: str) -> FakeLogger:
         return FakeLogger(self._on_emit)
 
-    def get_meter(self, _name: str) -> object:
+    def get_meter(self, _name: str) -> FakeMeter:
         if self._on_get_meter is not None:
             return self._on_get_meter()
         return FakeMeter(self._on_metric)

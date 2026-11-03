@@ -143,7 +143,9 @@ class ImBridge:
                 group_id = int(request["group_id"])
                 with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
                     source = load_native_group(conn, group_id)
-                    accepted = bridge.callback(source["text"])
+                    text = source["text"]
+                    assert isinstance(text, str)
+                    accepted = bridge.callback(text)
                     if accepted:
                         stamp_native_sent(conn, group_id)
                 self.send_response(200 if accepted else 503)

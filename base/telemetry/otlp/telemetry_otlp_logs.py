@@ -19,16 +19,11 @@ the function so flag-off processes never pay for the SDK.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any, Protocol
+from opentelemetry.context import Context
 
 from base.telemetry.delivery.receipts import Event
 from base.telemetry.delivery.serialization import event_line
-
-
-class _LoggerProvider(Protocol):
-    get_logger: Callable[..., Any]
-
+from base.telemetry.otlp.telemetry_otlp_worker import LogsProvider
 
 # Log-record severity mapping — OTel SeverityNumber values (plain ints; the
 # enum is constructed at the record site, see emit_log_record).
@@ -41,7 +36,7 @@ _SEVERITY_NUMBERS: dict[str, int] = {
 }
 
 
-def emit_log_record(logs: _LoggerProvider, event: Event) -> None:
+def emit_log_record(logs: LogsProvider, event: Event) -> None:
     """Map one Event to an OTLP LogRecord and emit it through `logs`.
 
     `logs` is the backend's LoggerProvider (an OTel type; any-typed here
@@ -55,7 +50,7 @@ def emit_log_record(logs: _LoggerProvider, event: Event) -> None:
         set_span_in_context,
     )
 
-    attributes: dict[str, Any] = {
+    attributes: dict[str, str | int] = {
         "event_name": event.event_name,
         "category": event.category,
         "level": event.level,
@@ -73,7 +68,7 @@ def emit_log_record(logs: _LoggerProvider, event: Event) -> None:
     # constructor): a NonRecordingSpan carries the captured trace/span ids
     # into the OTLP LogRecord fields. No ids -> no context -> trace_id 0
     # (OTLP's "no trace").
-    context: Any = None
+    context: Context | None = None
     if event.trace_id and event.span_id:
         span_context = SpanContext(
             trace_id=int(event.trace_id, 16),

@@ -30,11 +30,11 @@ inside its write/prune operations so entry inputs can be typed before Settings a
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
+from base.api_contracts.agent_contract import EventSink
 from base.events.contract import EVENTS
 from base.events.contract import category_for_kind as registry_category
 from base.telemetry.delivery.mirror import event_id
@@ -186,11 +186,11 @@ def emit(
     agent_id: int | None = None,
     source: str = "system",
     target_agent_id: int | None = None,
-    attributes: dict[str, Any] | None = None,
+    attributes: Mapping[str, object] | None = None,
     ts: datetime | None = None,
     machine_reader: Callable[[], str] | None = None,
     capture: Callable[[Event], Event] | None = None,
-    producer: Callable[[], EventPipeline] | None = None,
+    producer: Callable[[], EventSink] | None = None,
 ) -> None:
     """Enqueue one event into the unified stream. Never raises — except for a
     contract violation (R2-C): an `event_name` with no `EventSpec` in
@@ -239,7 +239,7 @@ def prepare_event(
     agent_id: int | None = None,
     source: str = "system",
     target_agent_id: int | None = None,
-    attributes: dict[str, Any] | None = None,
+    attributes: Mapping[str, object] | None = None,
     ts: datetime | None = None,
     machine_reader: Callable[[], str] | None = None,
 ) -> Event:
@@ -290,7 +290,7 @@ def emit_prepared(
     event: Event,
     *,
     capture: Callable[[Event], Event] | None = None,
-    producer: Callable[[], EventPipeline] | None = None,
+    producer: Callable[[], EventSink] | None = None,
 ) -> None:
     """Capture through an explicit producer dependency, then enqueue that exact event."""
     if capture is not None:

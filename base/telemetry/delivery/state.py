@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import socket
 from collections.abc import Callable
-from typing import Any
+from typing import Protocol, TypedDict
+
+from base.telemetry.delivery.receipts import DrainResult, Event
 
 
 def _hostname() -> str:
@@ -30,9 +32,41 @@ def resolve_machine(name_reader: Callable[[], str] | None = None) -> str:
 
 # ── pipeline state (per-process singleton) ────────────────────────────────────
 
-# The emitter pipeline; None until explicit process initialization. Dict mutation avoids ruff
-# PLW0603 the same way base/telemetry/tracing.py does.
-process_state: dict[str, Any] = {
+
+# meiva:note
+# What a process binding promises about its event pipeline. `EventPipeline` is the one
+# implementation; it cannot be named here because its loss path imports this module.
+class BoundPipeline(Protocol):
+    @property
+    def stopped(self) -> bool: ...
+
+    def enqueue(self, event: Event) -> None: ...
+
+    def flush(self) -> DrainResult: ...
+
+    def sync(self, timeout: float = 5.0) -> DrainResult: ...
+
+    def stop(self, timeout: float = 5.0) -> DrainResult: ...
+
+    def record_export_loss(self, report: Event) -> None: ...
+
+
+# meiva:note
+# The slots of the per-process binding. Each slot names one fact a process establishes at boot;
+# `jsonl_day` is the day stamp of the last mirror prune.
+class ProcessState(TypedDict):
+    pipeline: BoundPipeline | None
+    process: str
+    agent_id: int | None
+    machine: str | None
+    cluster: str | None
+    jsonl_day: str | None
+
+
+# meiva:note
+# The emitter pipeline stays None until explicit process initialization. Dict mutation avoids
+# ruff PLW0603 the same way base/telemetry/tracing.py does.
+process_state: ProcessState = {
     "pipeline": None,
     "process": "unknown",
     "agent_id": None,
@@ -48,7 +82,7 @@ def process_name() -> str:
     backend stamps it into the metrics Resource (`service.name=meiva-<process>`)
     so same-named counters from different process kinds cannot collide into
     one Prometheus series."""
-    return str(process_state["process"])
+    return process_state["process"]
 
 
 def ambient_agent_id() -> int | None:

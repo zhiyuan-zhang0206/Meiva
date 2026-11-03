@@ -18,7 +18,8 @@ from base.db import Database
 from base.paths import meiva_home
 from base.telemetry.delivery.defer_plan import CHILD_DEFER_MAX_AGE_DEFAULT_S, ChildDeferPlan
 from base.telemetry.delivery.receipts import Category, Event, Level
-from base.telemetry.otlp import telemetry_otlp
+from base.telemetry.otlp import telemetry_otlp, telemetry_otlp_sdk
+from base.telemetry.otlp.telemetry_otlp_exporting import ExportingEventPipeline
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from base.telemetry.tests.otlp.identity_inputs import machine_identity
@@ -84,7 +85,9 @@ def otlp_backend(
         endpoint=lambda: "http://127.0.0.1:4318",
     )
 
-    telemetry.process_state["pipeline"]._exporter = backend
+    pipeline = telemetry.process_state["pipeline"]
+    assert isinstance(pipeline, ExportingEventPipeline)
+    pipeline._exporter = backend
     yield backend, log_exporter, metric_reader
     backend.shutdown()
 
@@ -300,7 +303,7 @@ def test_metrics_resource_carries_cluster(tmp_path: Path) -> None:
     home = tmp_path / ".meiva-preview"
     home.mkdir()
 
-    resource = telemetry_otlp.metrics_resource(home=home)
+    resource = telemetry_otlp_sdk.metrics_resource(home=home)
 
     assert resource.attributes["cluster"] == ".meiva-preview"
 
@@ -444,7 +447,7 @@ def test_metric_views_shape_latency_histograms() -> None:
     from opentelemetry.sdk.metrics import MeterProvider
 
     reader = InMemoryMetricReader()
-    provider = MeterProvider(metric_readers=[reader], views=telemetry_otlp.metric_views())
+    provider = MeterProvider(metric_readers=[reader], views=telemetry_otlp_sdk.metric_views())
     meter = provider.get_meter("meiva.telemetry")
     hist = meter.create_histogram("meiva_llm_usage_latency", unit="ms")
     hist.record(45000.0, {"model": "m", "agent_id": 7, "machine": "x", "process": "p"})
@@ -459,7 +462,7 @@ def test_metric_views_shape_gateway_event_loop_lag_histogram() -> None:
     from opentelemetry.sdk.metrics import MeterProvider
 
     reader = InMemoryMetricReader()
-    provider = MeterProvider(metric_readers=[reader], views=telemetry_otlp.metric_views())
+    provider = MeterProvider(metric_readers=[reader], views=telemetry_otlp_sdk.metric_views())
     meter = provider.get_meter("meiva.telemetry")
     hist = meter.create_histogram("meiva_gateway_event_loop_lag", unit="ms")
     hist.record(45000.0, {"machine": "x", "process": "gateway"})

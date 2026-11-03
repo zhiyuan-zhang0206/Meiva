@@ -38,6 +38,7 @@ from collections.abc import Callable
 from base.telemetry.delivery.defer_plan import ChildDeferPlan
 from base.telemetry.delivery.receipts import Event
 from base.telemetry.delivery.reporting import failure_isolated
+from base.telemetry.otlp.telemetry_otlp_barrier import QueueItem, WorkerFlushMarker
 
 
 class ChildDeferral:
@@ -54,7 +55,7 @@ class ChildDeferral:
     def __init__(
         self,
         *,
-        queue: queue.Queue[Event | None],
+        queue: queue.Queue[QueueItem],
         bring_up: Callable[[], bool],
         record_metrics: Callable[[Event], None],
         export_live: Callable[[list[Event]], None],
@@ -186,6 +187,9 @@ class ChildDeferral:
                 return held
             if event is None:  # pragma: no cover — shutdown finalizes first
                 break
+            if isinstance(event, WorkerFlushMarker):
+                event.done.set()
+                continue
             held.append(event)
         return held
 

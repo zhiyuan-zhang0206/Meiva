@@ -85,12 +85,18 @@ def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
 
 
 # meiva:note
+# The database a pipeline under test must never reach.
+def _no_database() -> Database:
+    raise AssertionError("this pipeline must not reach the database")
+
+
+# meiva:note
 # The mirror and the exporter's loss reports land under the home, so a relative home would put
 # them under the working directory: the boundary refuses it before anything is built.
 def test_a_relative_home_is_refused_before_any_sink_is_built() -> None:
     with pytest.raises(ValueError, match="absolute home"):
         telemetry.build_pipeline(
-            database=lambda: None,
+            database=_no_database,
             machine=machine_identity(),
             home=Path(".meiva"),
             otlp_enabled=lambda: False,
@@ -105,7 +111,7 @@ def test_the_pipeline_builds_its_exporter_over_its_own_home(tmp_path: Path) -> N
     home = tmp_path / "pipeline-home"
     home.mkdir()
     pipeline = telemetry.build_pipeline(
-        database=lambda: None,
+        database=_no_database,
         machine=machine_identity(),
         home=home,
         otlp_enabled=lambda: False,

@@ -58,7 +58,6 @@ import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Protocol
 
 from base.cluster.derive import production_identity
 from base.cluster.machine import MachineIdentityReader
@@ -74,14 +73,15 @@ from base.telemetry.delivery.reporting import (
 from base.telemetry.emitter import emit, pipeline_bound
 from base.telemetry.metrics import ci_runs_metrics
 from base.telemetry.observability import gateway_observability_home
-from base.telemetry.otlp import telemetry_otlp_metrics
 from base.telemetry.otlp.plans import (
     BASE_METRIC_DISPOSITION,
     select_metric_attributes,
 )
+from base.telemetry.otlp.telemetry_otlp_barrier import QueueItem
 from base.telemetry.otlp.telemetry_otlp_defer import ChildDeferral
 from base.telemetry.otlp.telemetry_otlp_gauges import (
     GaugeValues,
+    MetricAttributes,
     observable_gauge_callback,
     record_gauge,
 )
@@ -93,15 +93,19 @@ from base.telemetry.otlp.telemetry_otlp_metrics import (
     LLM_LATENCY_BUCKETS_MS as LLM_LATENCY_BUCKETS_MS,
 )
 from base.telemetry.otlp.telemetry_otlp_metrics import (
-    MetricsResource,
-    build_providers,
+    numeric_fields,
     strip_unit_suffix,
     unit_for,
 )
-from base.telemetry.otlp.telemetry_otlp_metrics import (
-    metric_views as metric_views,
+from base.telemetry.otlp.telemetry_otlp_worker import (
+    CounterLike,
+    HistogramLike,
+    LogsProvider,
+    MeterLike,
+    MetricsProvider,
+    OtlpWorker,
+    SdkResource,
 )
-from base.telemetry.otlp.telemetry_otlp_worker import OtlpWorker
 
 __all__ = [
     "COLLECTOR_RETRY_INTERVAL_S",
@@ -236,11 +240,6 @@ def _executor_shutdown_at_exit(exc: BaseException) -> bool:
     )
 
 
-class _Instrument(Protocol):
-    add: Callable[..., Any]
-    record: Callable[..., Any]
-
-
 class OtlpBackend:
     """One owned OTLP export backend: bounded queue + worker thread that
     feeds the OTel SDK log processor, plus direct in-memory metric recording.
@@ -254,7 +253,7 @@ class OtlpBackend:
         self,
         *,
         export_allowed: Callable[[], bool],
-        providers: tuple[Any, Any] | None = None,
+        providers: tuple[LogsProvider, MetricsProvider] | None = None,
         queue_maxsize: int = _QUEUE_MAXSIZE,
         enabled: Callable[[], bool],
         endpoint: Callable[[], str],
@@ -270,14 +269,16 @@ class OtlpBackend:
         self._home = home
         self._export_decision: bool | None = None
         self._eligibility_lock = threading.Lock()
-        self._queue: queue.Queue[Any] = queue.Queue(maxsize=queue_maxsize)
+        self._queue: queue.Queue[QueueItem] = queue.Queue(maxsize=queue_maxsize)
         self._dropped = 0
         self._dropped_lock = threading.Lock()
         self._providers = providers
-        self._logs: Any = None  # LoggerProvider (any-typed: OTel SDK imported lazily)
-        self._metric_provider: Any = None
-        self._meter: Any = None
-        self._instruments: dict[tuple[str, str], Any] = {}
+        self._logs: LogsProvider | None = None
+        self._metric_provider: MetricsProvider | None = None
+        self._meter: MeterLike | None = None
+        self._counters: dict[tuple[str, str], CounterLike] = {}
+        self._histograms: dict[tuple[str, str], HistogramLike] = {}
+        self._gauge_instruments: dict[tuple[str, str], object] = {}
         self._gauge_values: GaugeValues = {}
         self._gauge_lock = threading.Lock()
         self._init_failed_at: float | None = None
@@ -563,13 +564,15 @@ class OtlpBackend:
                     )
                     return False
 
-                def keep_logs(provider: object) -> None:
+                from base.telemetry.otlp.telemetry_otlp_sdk import build_providers
+
+                def keep_logs(provider: LogsProvider) -> None:
                     worker.logs = provider
 
-                def keep_reader(reader: object) -> None:
+                def keep_reader(reader: SdkResource) -> None:
                     worker.metric_reader = reader
 
-                def keep_metrics(provider: object) -> None:
+                def keep_metrics(provider: MetricsProvider) -> None:
                     worker.metrics = provider
 
                 worker.logs, worker.metrics = build_providers(
@@ -616,7 +619,10 @@ class OtlpBackend:
         The mapping body lives in `base.telemetry.otlp.telemetry_otlp_logs` (split for the
         800-line ceiling); runs on the worker thread (or flush()).
         """
-        emit_log_record(self._logs, event)
+        logs = self._logs
+        if logs is None:
+            raise RuntimeError("the OTLP log provider is not initialized")
+        emit_log_record(logs, event)
 
     def _record_metrics(self, event: Event) -> None:
         """Map a telemetry event's numeric payload fields to OTLP instruments.
@@ -638,22 +644,20 @@ class OtlpBackend:
         if event.category != "telemetry":
             return
         attrs = self._metric_attributes(event)
-        for key, value in event.attributes.items():
-            # bool must be checked before int — `isinstance(True, int)` is True.
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                continue
+        for key, value in numeric_fields(event.attributes):
             default_kind = "counter" if isinstance(value, int) else "histogram"
             kind = METRIC_DISPOSITION.get((event.event_name, key), default_kind)
             if kind is None:
                 continue
-            inst = self._instrument(event.event_name, key, kind)
-            if inst is None:
-                continue
             if kind == "counter":
-                inst.add(value, attrs)
+                counter = self._counter(event.event_name, key)
+                if counter is not None:
+                    counter.add(value, attrs)
             elif kind == "histogram":
-                inst.record(value, attrs)
-            else:
+                histogram = self._histogram(event.event_name, key)
+                if histogram is not None:
+                    histogram.record(value, attrs)
+            elif self._gauge(event.event_name, key) is not None:
                 record_gauge(
                     self._gauge_values,
                     self._gauge_lock,
@@ -663,7 +667,7 @@ class OtlpBackend:
                     max_only=(event.event_name, key) == ("event_log_drop", "last_dropped_at"),
                 )
 
-    def _metric_attributes(self, event: Event) -> dict[str, Any]:
+    def _metric_attributes(self, event: Event) -> MetricAttributes:
         """The datapoint attribute set: process dimensions + declared payload
         scalars that pass the content/cardinality guard.
 
@@ -684,46 +688,72 @@ class OtlpBackend:
             allowed_keys=payload_keys(event.event_name),
         )
 
-    def _instrument(self, event_name: str, field: str, kind: str) -> _Instrument | None:
-        """Lazily create (and cache) the instrument for one (event, field).
-
-        Returns None (and reports) on a creation conflict — e.g. two event/
-        field pairs collapsing onto one metric name with different kinds —
-        so one bad pair sheds only its own metrics, never the batch."""
+    # meiva:note
+    # Lazily create (and cache in `cache`) the instrument for one (event, field).
+    #
+    # Returns None (and reports) on a creation conflict — e.g. two event/field pairs collapsing onto
+    # one metric name with different kinds — so one bad pair sheds only its own metrics, never the
+    # batch.
+    def _instrument[InstrumentT](
+        self,
+        cache: dict[tuple[str, str], InstrumentT],
+        event_name: str,
+        field: str,
+        create: Callable[[MeterLike, str], InstrumentT],
+    ) -> InstrumentT | None:
         key = (event_name, field)
-        inst: Any = self._instruments.get(key)
-        if inst is not None:
-            return inst
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
         name = f"meiva_{event_name}_{strip_unit_suffix(field)}"
+        meter = self._meter
+        if meter is None:
+            self._report(f"OTLP metric instrument {name!r} creation failed: no meter")
+            return None
         try:
-            if kind == "counter":
-                inst = self._meter.create_counter(
-                    name,
-                    unit=unit_for(field),
-                    description=f"{event_name}.{field} — OTLP-mapped from the unified event stream",
-                )
-            elif kind == "histogram":
-                inst = self._meter.create_histogram(
-                    name,
-                    unit=unit_for(field),
-                    description=f"{event_name}.{field} — OTLP-mapped from the unified event stream",
-                )
-            else:
-                inst = self._meter.create_observable_gauge(
-                    name,
-                    callbacks=[
-                        observable_gauge_callback(
-                            self._gauge_values, self._gauge_lock, (event_name, field)
-                        )
-                    ],
-                    unit=unit_for(field),
-                    description=f"{event_name}.{field} — OTLP-mapped absolute state from the unified event stream",
-                )
+            created = create(meter, name)
         except Exception as exc:  # report once per pair, skip the pair
             self._report(f"OTLP metric instrument {name!r} creation failed: {exc!r}")
             return None
-        self._instruments[key] = inst
-        return inst
+        cache[key] = created
+        return created
+
+    def _counter(self, event_name: str, field: str) -> CounterLike | None:
+        desc = f"{event_name}.{field} — OTLP-mapped from the unified event stream"
+        return self._instrument(
+            self._counters,
+            event_name,
+            field,
+            lambda meter, name: meter.create_counter(name, unit=unit_for(field), description=desc),
+        )
+
+    def _histogram(self, event_name: str, field: str) -> HistogramLike | None:
+        desc = f"{event_name}.{field} — OTLP-mapped from the unified event stream"
+        return self._instrument(
+            self._histograms,
+            event_name,
+            field,
+            lambda meter, name: meter.create_histogram(
+                name, unit=unit_for(field), description=desc
+            ),
+        )
+
+    def _gauge(self, event_name: str, field: str) -> object | None:
+        return self._instrument(
+            self._gauge_instruments,
+            event_name,
+            field,
+            lambda meter, name: meter.create_observable_gauge(
+                name,
+                callbacks=[
+                    observable_gauge_callback(
+                        self._gauge_values, self._gauge_lock, (event_name, field)
+                    )
+                ],
+                unit=unit_for(field),
+                description=f"{event_name}.{field} — OTLP-mapped absolute state from the unified event stream",
+            ),
+        )
 
     # ── diagnostics ──────────────────────────────────────────────────────────
 
@@ -768,9 +798,3 @@ def default_exporter(
         mirror_dir=mirror_dir,
         home=home,
     )
-
-
-# meiva:note
-# Build the metric resource for the cluster home ``home``.
-def metrics_resource(*, home: Path) -> MetricsResource:
-    return telemetry_otlp_metrics.metrics_resource(home=home)
