@@ -19,9 +19,11 @@ MEMORY_ARBITRATOR_LABEL = "memory-arbiter"
 TRIGGERS = (
     Trigger(
         "0 4 * * *",
-        "Daily consolidation (commit + push + PR merge) — merge only PRs whose `validate`"
-        " check is green, whose author is not the merger, and write the collector snapshot"
-        " (each face's HEAD + dirty count) into the PR body first",
+        "Daily consolidation (rebuild indexes, commit, push, PR merge) — rebuild `MEMORY.md`"
+        " and the directory indexes first (`rebuild_memory_index.py`, `gen_indexes_tree.py`),"
+        " then merge only PRs whose `validate` check is green, whose author is not the merger,"
+        " and write the collector snapshot (each face's HEAD + dirty count) into the PR body"
+        " first",
     ),
     Trigger("0 7 * * *", "Daily health check — OKF, size, dedup, stale"),
 )
