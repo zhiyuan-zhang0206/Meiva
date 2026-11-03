@@ -10,6 +10,21 @@ tags: [gateway, schedules]
 `schedules.owner_agent_id` names the agent a schedule acts for; NULL is an
 operator-created schedule that only runs a command (a backup, a sweep, a probe).
 
+## How the value is assigned
+
+Provisioning, never the API. `POST` and `PUT /api/schedules` refuse the field with
+a 422 that names the operator path, an explicit null included — clearing an owner is
+as much an assignment as naming one. The reason is that the gateway cannot tell its
+callers apart (one shared administrator credential; caller labels are deliberately
+absent), so an exposed owner field would let any caller make an unattended script
+write under another agent's name.
+
+`scripts/host_ops/set_schedule_owner.py` is that path. It runs on the gateway host
+against the home's database, requires `--reason`, and writes the `schedules` row and
+a `schedule_owner_changes` row in one transaction: old owner, new owner,
+`ops:<hostname>`, the reason and the time. That row is the only audit an assignment
+will ever have.
+
 The value must reach **two** places, because a schedule's script runs in one of two
 ways:
 
@@ -40,9 +55,14 @@ may do belongs to the restricted-credential work.
 
 An owned schedule is a script carrying an agent's identity, not that agent's turn
 path, so its identity binds `owns_loop = False` (the same posture a shell session's
-child script gets). It therefore cannot `meiva.self.compact`, `restart` or
-`terminate` the agent it speaks for — the refusal is explicit, and a test pins all
-three.
+child script gets). That refuses `meiva.self.compact`, `meiva.self.restart` and
+`meiva.self.terminate` — the three calls that end or reshape the loop the identity
+belongs to — and a test pins all three.
+
+It does **not** reach the cross-agent calls. `meiva.agents.terminate(<owner>)` is an
+ordinary peer action and stays available, exactly as it is for any process holding
+the cluster token. Reads that treat `owns_loop = False` as "this schedule cannot
+touch its owner" overstate it.
 
 ## Run history
 

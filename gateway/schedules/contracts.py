@@ -11,12 +11,13 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from gateway.schedules.placement import PlacementStatus
 
 __all__ = [
     "DEFAULT_COMMAND",
+    "OWNER_VIA_PROVISIONING",
     "ScheduleCreate",
     "ScheduleDraftRequest",
     "ScheduleDraftResponse",
@@ -28,6 +29,17 @@ __all__ = [
 ]
 
 DEFAULT_COMMAND = "python schedule.py"
+
+# meiva:note
+# `owner_agent_id` is a provisioning fact, not an API field. Whoever a schedule speaks as decides
+# whose name its unattended writes carry, and the gateway cannot see the caller (one shared
+# administrator credential, caller labels deliberately absent), so no API caller can be allowed to
+# set it for another agent. The field stays declared only so a caller that sends it gets this
+# sentence back instead of a silently ignored key.
+OWNER_VIA_PROVISIONING = (
+    "owner is assigned through provisioning, not the API: run "
+    "scripts/host_ops/set_schedule_owner.py --reason <why> on the gateway host"
+)
 
 
 class ScheduleSummary(BaseModel):
@@ -60,6 +72,11 @@ class ScheduleCreate(BaseModel):
     machine: str | None = None
     owner_agent_id: int | None = None
 
+    @field_validator("owner_agent_id")
+    @classmethod
+    def _refuse_owner(cls, _value: int | None) -> None:
+        raise ValueError(OWNER_VIA_PROVISIONING)
+
 
 class ScheduleUpdate(BaseModel):
     name: str | None = None
@@ -69,6 +86,11 @@ class ScheduleUpdate(BaseModel):
     enabled: bool | None = None
     machine: str | None = None
     owner_agent_id: int | None = None
+
+    @field_validator("owner_agent_id")
+    @classmethod
+    def _refuse_owner(cls, _value: int | None) -> None:
+        raise ValueError(OWNER_VIA_PROVISIONING)
 
 
 class ScheduleRunView(BaseModel):
