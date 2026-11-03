@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from base.host.boundary.options import options
 from meiva.shell.coding_tools import (
     add_capability_arguments,
     add_lineage_arguments,
@@ -25,6 +27,25 @@ from meiva.shell.coding_tools import (
 )
 
 _SKILL_DIR = Path(__file__).resolve().parent.parent
+
+
+# meiva:note
+# The flags this entry reads, as real types: `options` checks every field against the annotation
+# here, so nothing past `parse_args` carries an `argparse.Namespace` attribute's `Any`. `mode` stays
+# `str` — `announce_capability` takes the string argparse already narrowed to its choices.
+@dataclass(frozen=True)
+class ClaudeOptions:
+    workspace: str
+    tasks_file: str | None
+    work_file: str | None
+    prompt: str | None
+    ttl_seconds: float
+    caller_instance: str | None
+    status: bool
+    resume: str | None
+    cancel_generation: str | None
+    mode: str
+    force_mode: bool
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -56,8 +77,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--ttl-seconds",
         type=float,
-        default=claude.DEFAULT_TTL_SECONDS,
-        help="Task-adapted hard expiry, up to one day (default: %(default)s).",
+        default=float(claude.DEFAULT_TTL_SECONDS),
+        help="Task-adapted hard expiry, up to one day (default: %(default)g).",
     )
     parser.add_argument(
         "--caller-instance",
@@ -86,52 +107,56 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
-    if args.prompt is not None:
-        if args.status or args.cancel_generation:
+def _validate_args(parser: argparse.ArgumentParser, opts: ClaudeOptions) -> None:
+    if opts.prompt is not None:
+        if opts.status or opts.cancel_generation:
             parser.error("--prompt requires a launch")
-        if args.tasks_file is not None or args.work_file is not None:
+        if opts.tasks_file is not None or opts.work_file is not None:
             parser.error("--tasks-file/--work-file cannot be combined with --prompt")
-        if not args.prompt.strip():
+        if not opts.prompt.strip():
             parser.error("--prompt must be non-empty")
 
 
 def main(argv: list[str]) -> int:
     parser = _build_parser()
-    args = parser.parse_args(argv)
-    _validate_args(parser, args)
+    parsed = parser.parse_args(argv)
+    opts = options(parsed, ClaudeOptions)
+    _validate_args(parser, opts)
 
     user_home = Path.home()
-    workspace = claude.placed_path(args.workspace, user_home=user_home).resolve()
-    if not args.status and not args.cancel_generation:
-        workspace = claude.resolve_dir(args.workspace, user_home=user_home)
-    if args.status:
-        return claude.status(workspace, mode=args.mode, force=args.force_mode)
-    if args.cancel_generation:
-        return claude.cancel(workspace, args.cancel_generation)
+    workspace = claude.placed_path(opts.workspace, user_home=user_home).resolve()
+    if not opts.status and not opts.cancel_generation:
+        workspace = claude.resolve_dir(opts.workspace, user_home=user_home)
+    if opts.status:
+        return claude.status(workspace, mode=opts.mode, force=opts.force_mode)
+    if opts.cancel_generation:
+        return claude.cancel(workspace, opts.cancel_generation)
     tasks_file = None
     work_file = None
-    if args.prompt is None:
+    if opts.prompt is None:
         tasks_file = claude.resolve_file(
-            workspace, args.tasks_file or "tasks.md", user_home=user_home
+            workspace, opts.tasks_file or "tasks.md", user_home=user_home
         )
-        work_file = claude.resolve_file(workspace, args.work_file or "work.md", user_home=user_home)
+        work_file = claude.resolve_file(workspace, opts.work_file or "work.md", user_home=user_home)
     provenance = None
     prompt = None
-    if args.prompt is not None:
-        prompt = f"{require_lineage(parser, args, now=datetime.now(UTC), takeover=True)}\n\n{args.prompt}"
-    elif args.resume is None:
-        provenance = require_lineage(parser, args, now=datetime.now(UTC))
-    refusal = announce_capability("claude", mode=args.mode, force=args.force_mode)
+    if opts.prompt is not None:
+        prompt = (
+            f"{require_lineage(parser, parsed, now=datetime.now(UTC), takeover=True)}"
+            f"\n\n{opts.prompt}"
+        )
+    elif opts.resume is None:
+        provenance = require_lineage(parser, parsed, now=datetime.now(UTC))
+    refusal = announce_capability("claude", mode=opts.mode, force=opts.force_mode)
     if refusal:
         return refusal
     return claude.launch(
         workspace,
         tasks_file,
         work_file,
-        args.ttl_seconds,
-        args.caller_instance,
-        resume=args.resume,
+        opts.ttl_seconds,
+        opts.caller_instance,
+        resume=opts.resume,
         prompt=prompt,
         provenance=provenance,
         skill_dir=_SKILL_DIR,
