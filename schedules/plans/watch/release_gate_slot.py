@@ -31,11 +31,22 @@ __all__ = [
 ]
 
 # meiva:note
-# One six-hour slot plus an hour. The measured late band for this repository's crons is 45m-6h40
-# (2026-11-04), so a slot is called missing only once it is past every arrival that same cron has
-# shown -- later than the six hours it was declared with, earlier than the nine the liveness note
-# used before this check existed.
-RELEASE_GATE_SLOT_STALE_AFTER = timedelta(hours=7)
+# Seven hours is inside the band this repository's crons arrive in, so at seven hours the check
+# reports lateness, not a missing slot. It cannot count arrivals; it can only see when the newest
+# scheduled run started. Measured on
+# 2026-11-04 across every scheduled workflow here: 164 scheduled runs arrived 45m to 7h50m after the
+# slot they served (median 4h34m), and the last five gaps between release-gate starts were 4h05m,
+# 8h05m, 9h59m, 8h49m and 13h18m. Four of those five exceed seven hours, yet one of them contained
+# no missing slot at all -- only a run that served its slot 5h57m late. A seven-hour threshold would
+# therefore have opened a card in four of five windows, which is the opposite of reporting a
+# missing slot.
+#
+# Two whole slots is the smallest silence this data never produced by lateness alone, and it still
+# speaks before a third slot would have come due. The two factors stay separate because the second
+# one is a judgement about arrivals, not a duration someone should tune in hours.
+RELEASE_GATE_SLOT_INTERVAL = timedelta(hours=6)
+SLOTS_BEFORE_MISSING = 2
+RELEASE_GATE_SLOT_STALE_AFTER = RELEASE_GATE_SLOT_INTERVAL * SLOTS_BEFORE_MISSING
 
 FINGERPRINT = "main-red-watch/release-gate-slot"
 _NO_GAP = ""
@@ -102,9 +113,11 @@ def _card(facts: SlotFacts, age: timedelta, *, threshold: timedelta) -> Card:
             "that window, so a red merged in it is invisible rather than absent.\n\n"
             "The make-up run is `gh workflow run release-gate.yml --ref main`. It certifies on "
             "success, so it releases: that is the user's call, not the watch's.\n\n"
-            "Why the threshold is where it is: this repository's crons have been measured late by "
-            "45m to 6h40 (2026-11-04), and the six-hourly gate has missed about half its slots -- "
-            "twelve expected in three days, six observed.\n\n"
+            "Why the threshold is where it is: across every scheduled workflow in this repository, "
+            "164 scheduled runs arrived 45m to 7h50m after the slot they served (median 4h34m, "
+            "2026-11-04), so one late slot is not a missing one. The gate has also missed about half "
+            "its slots -- twelve expected in three days, six observed -- and two whole slots of "
+            "silence is the smallest gap that data never produced by lateness alone.\n\n"
             "Closes when a scheduled run appears again."
         ),
     )

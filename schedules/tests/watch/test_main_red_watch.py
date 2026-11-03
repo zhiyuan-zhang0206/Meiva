@@ -534,7 +534,7 @@ def _slot_round(
         facts=SlotFacts(last_schedule_start=start, busy=busy, uncertified_commits=uncertified),
         open_card=open_card,
         close_card=close_card,
-        since=clock - timedelta(hours=9),
+        since=clock - timedelta(hours=13),
     )
 
 
@@ -542,10 +542,10 @@ def test_a_missing_slot_opens_one_card_across_rounds(tmp_path: Path) -> None:
     opened: list[Card] = []
     closed: list[tuple[int, str]] = []
 
-    note = _slot_round(tmp_path, hours_ago=7.5, opened=opened, closed=closed)
+    note = _slot_round(tmp_path, hours_ago=13.5, opened=opened, closed=closed)
     _slot_round(
         tmp_path,
-        hours_ago=7.5,
+        hours_ago=13.5,
         opened=opened,
         closed=closed,
         now=datetime(2026, 11, 4, 6, 30, tzinfo=UTC),
@@ -560,7 +560,7 @@ def test_a_scheduled_run_closes_the_slot_card(tmp_path: Path) -> None:
     opened: list[Card] = []
     closed: list[tuple[int, str]] = []
 
-    _slot_round(tmp_path, hours_ago=7.5, opened=opened, closed=closed)
+    _slot_round(tmp_path, hours_ago=13.5, opened=opened, closed=closed)
     _slot_round(tmp_path, hours_ago=0.5, opened=opened, closed=closed)
 
     assert [task for task, _reason in closed] == [701]
@@ -577,8 +577,8 @@ def test_a_slot_with_nothing_uncertified_closes_the_card_without_opening_another
     opened: list[Card] = []
     closed: list[tuple[int, str]] = []
 
-    _slot_round(tmp_path, hours_ago=7.5, opened=opened, closed=closed)
-    note = _slot_round(tmp_path, hours_ago=8.0, uncertified=0, opened=opened, closed=closed)
+    _slot_round(tmp_path, hours_ago=13.5, opened=opened, closed=closed)
+    note = _slot_round(tmp_path, hours_ago=13.0, uncertified=0, opened=opened, closed=closed)
 
     assert len(opened) == 1
     assert [task for task, _reason in closed] == [701]
@@ -589,7 +589,7 @@ def test_a_running_release_gate_opens_no_card(tmp_path: Path) -> None:
     opened: list[Card] = []
     closed: list[tuple[int, str]] = []
 
-    note = _slot_round(tmp_path, hours_ago=7.5, busy=True, opened=opened, closed=closed)
+    note = _slot_round(tmp_path, hours_ago=13.5, busy=True, opened=opened, closed=closed)
 
     assert opened == []
     assert note == "release-gate is running; the slot check waits"
