@@ -58,7 +58,7 @@ def _repo(tmp_path: Path) -> Path:
 
 
 def _run(
-    tmp_path: Path, state: dict, *args: str
+    tmp_path: Path, state: dict[str, object], *args: str
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()

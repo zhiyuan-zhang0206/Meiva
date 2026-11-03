@@ -12,6 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.paths.home import resolve_meiva_home
 from meiva_builtins.plugins.meiva_memory.pool_ops import pool_dir, refresh_index, repo_slug, run
 
@@ -25,6 +26,22 @@ FACES_FILE = "memory-faces.txt"
 # meiva:note
 # None means the checks could not be read; an empty list means there are none. That
 # difference is what turns into UNREADABLE below.
+def _decoded(text: str) -> object:
+    try:
+        value: object = json.loads(text or "{}")
+    except json.JSONDecodeError:
+        return None
+    return value
+
+
+def _first_text(row: dict[str, object], *keys: str) -> str:
+    for key in keys:
+        value = row.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
 def _checks(pr: int, slug: str) -> list[tuple[str, str]] | None:
     r = run(
         ["gh", "pr", "view", str(pr), "--repo", slug, "--json", "statusCheckRollup"],
@@ -32,17 +49,22 @@ def _checks(pr: int, slug: str) -> list[tuple[str, str]] | None:
     )
     if r.returncode != 0:
         return None
-    try:
-        payload = json.loads(r.stdout or "{}")
-    except json.JSONDecodeError:
+    payload = _decoded(r.stdout)
+    if not is_object_dict(payload):
         return None
     rows: list[tuple[str, str]] = []
-    for check in payload.get("statusCheckRollup") or []:
-        name = str(check.get("name") or check.get("context") or "?")
-        state = str(
-            check.get("conclusion") or check.get("state") or check.get("status") or ""
-        ).upper()
-        rows.append((name, state))
+    rollup = payload.get("statusCheckRollup")
+    if not is_object_list(rollup):
+        return rows
+    for check in rollup:
+        if not is_object_dict(check):
+            continue
+        rows.append(
+            (
+                _first_text(check, "name", "context") or "?",
+                _first_text(check, "conclusion", "state", "status").upper(),
+            )
+        )
     return rows
 
 
@@ -130,10 +152,11 @@ def _write_snapshot(pr: int, slug: str, snapshot: str) -> bool:
     r = run(["gh", "pr", "view", str(pr), "--repo", slug, "--json", "body"], check=False)
     if r.returncode != 0:
         return False
-    try:
-        body = json.loads(r.stdout or "{}").get("body") or ""
-    except json.JSONDecodeError:
+    payload = _decoded(r.stdout)
+    if not is_object_dict(payload):
         return False
+    raw_body = payload.get("body")
+    body = raw_body if isinstance(raw_body, str) else ""
     kept = (
         body.split(SNAPSHOT_HEADING, 1)[0].rstrip() if SNAPSHOT_HEADING in body else body.rstrip()
     )
@@ -152,12 +175,13 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description="Merge pool PRs whose pool gate is green (dormant: pass --apply to act)"
     )
-    ap.add_argument(
+    _ = ap.add_argument(
         "--apply",
         action="store_true",
         help="actually merge; without it the run only reports what it would merge",
     )
-    args = ap.parse_args()
+    apply_flag: object = ap.parse_args().apply
+    apply_changes = apply_flag is True
 
     pool = pool_dir(resolve_meiva_home())
     slug = repo_slug(pool)
@@ -192,7 +216,7 @@ def main() -> int:
             skipped.append((n, f"validate {verdict}"))
             print(f"  ✗ PR #{n} skipped: validate {verdict}", file=sys.stderr)
             continue
-        if not args.apply:
+        if not apply_changes:
             print(f"  would merge PR #{n} (validate GREEN) — dry run, pass --apply to merge")
             continue
         if not _write_snapshot(n, slug, snapshot):
@@ -208,9 +232,10 @@ def main() -> int:
             skipped.append((n, reason))
             print(f"  ✗ PR #{n} merge failed: {reason}", file=sys.stderr)
 
-    verb = "merged" if args.apply else "would merge (dry run)"
+    verb = "merged" if apply_changes else "would merge (dry run)"
     print(
-        f"\n  {verb}: {len(merged) if args.apply else len(numbers) - len(skipped)}  skipped: {len(skipped)}"
+        f"\n  {verb}: {len(merged) if apply_changes else len(numbers) - len(skipped)}  "
+        f"skipped: {len(skipped)}"
     )
     rc = 1 if skipped else 0
 
