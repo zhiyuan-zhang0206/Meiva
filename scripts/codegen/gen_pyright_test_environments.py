@@ -81,6 +81,7 @@ ANY_RULES = ("reportAny", "reportExplicitAny")
 # prefix in the pull request that adds the covering entry; remove it when the tests are clean.
 TESTS_OWING_ANY: tuple[str, ...] = (
     "agent/execution/tests",
+    "agent/messages/tests",
     "base/agents",
     "cli",
     "gateway/tests",

@@ -638,6 +638,9 @@ reportUnusedCallResult = "warning"
 root = "agent/execution/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "agent/messages/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/agents/context/gateway_client/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -886,6 +889,11 @@ root = "services/wake/schedule_manager/tests"
 # 0. Their tests directories follow them unless their path is under a prefix listed in TESTS_OWING_ANY.
 [[tool.pyright.executionEnvironments]]
 root = "agent/execution"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "agent/messages"
 reportAny = "error"
 reportExplicitAny = "error"
 
