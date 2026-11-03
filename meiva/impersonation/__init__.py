@@ -3,21 +3,21 @@
 from __future__ import annotations
 
 from types import TracebackType
-from typing import Any, Protocol, Self
+from typing import Protocol, Self
 
 __all_for_meiva__ = []
 
 
 # meiva:note
 # `native_snapshot()` returns the agent's saved state, and the annotation would like to say so by
-# naming `base.agents.context.external_attachment.state_schema.BaseAgentState`. It stays `Any`
-# because that module imports `langchain_core.messages` (`AnyMessage`) and `import meiva` reaches
-# this package: measured 2026-10-31, naming the type pulled 345 langchain / langgraph / langsmith
-# modules into a bare `import meiva` and turned nine lazy-import guards red (three under
+# naming `base.agents.context.external_attachment.state_schema.BaseAgentState`. It says `object`
+# instead because that module imports `langchain_core.messages` (`AnyMessage`) and `import meiva`
+# reaches this package: measured 2026-10-31, naming the type pulled 345 langchain / langgraph /
+# langsmith modules into a bare `import meiva` and turned nine lazy-import guards red (three under
 # `meiva/tests/bootstrap`, four under `agent/tests/execution/test_lazy_child_imports.py`, one in
 # `meiva_fleet`'s lazy-plugin test, one in `meiva_memory`'s subprocess-import test). The
 # reader that needs the type -- the attachment -- imports the schema itself in `attachment.py`,
-# when `attach()` runs.
+# when `attach()` runs; a caller that reads a field off the snapshot narrows it there.
 class _Attachment(Protocol):
     agent_id: int
     session_id: int
@@ -27,7 +27,7 @@ class _Attachment(Protocol):
 
     def close(self) -> None: ...
 
-    def native_snapshot(self) -> Any: ...
+    def native_snapshot(self) -> object: ...
 
     def __enter__(self) -> Self: ...
 

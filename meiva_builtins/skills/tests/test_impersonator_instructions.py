@@ -87,7 +87,7 @@ def test_instruction_script_requires_the_agent(
 
 
 # meiva:note
-# `native_snapshot()` answers `Any`, so `snapshot_messages` is the check that a borrowed agent's
+# `native_snapshot()` answers `object`, so `snapshot_messages` is the check that a borrowed agent's
 # snapshot really carries messages: a state object with no message list, and a list holding
 # something that is not a message, are both refused by name.
 def test_snapshot_messages_refuses_a_snapshot_without_messages(instruction_reader: Any) -> None:
