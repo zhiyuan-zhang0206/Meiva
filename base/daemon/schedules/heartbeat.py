@@ -28,6 +28,7 @@ __all__ = [
     "Beat",
     "alert_marks_path",
     "beat_path",
+    "clear_beat",
     "is_overdue",
     "read_alert_marks",
     "read_beat",
@@ -102,6 +103,13 @@ def write_beat(
 def read_beat(home: Path, schedule_id: int) -> Beat | None:
     payload = _read_json(beat_path(home, schedule_id))
     return None if payload is None else Beat.from_payload(payload)
+
+
+# meiva:note
+# A beat describes the attempt that wrote it. A new attempt starts with no beat on disk, so an
+# operator reading a stale file cannot mistake the previous process's last round for this one's.
+def clear_beat(home: Path, schedule_id: int) -> None:
+    beat_path(home, schedule_id).unlink(missing_ok=True)
 
 
 # meiva:note

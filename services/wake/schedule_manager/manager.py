@@ -22,7 +22,6 @@ import logging
 import math
 import threading
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
 from pathlib import Path
 from typing import assert_never
 
@@ -30,10 +29,9 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.cluster import session_name
-from base.db.rows import query_all
+from base.daemon.schedules.heartbeat import clear_beat
 from base.db.transaction import write_transaction
 from base.deploy.lifecycle import start_serving
-from base.deploy.schedule_timing import SCHEDULE_STALL_ALERT_AFTER_S
 from base.sessions.protocol import SessionBackend
 from services.wake.schedule_manager import host_restart, revisions
 from services.wake.schedule_manager.blocked_streak import (
@@ -58,7 +56,7 @@ from services.wake.schedule_manager.convergence import (
 from services.wake.schedule_manager.launch_events import emit_gate_held, emit_launch_refused
 from services.wake.schedule_manager.manager_policy import ManagerPolicy
 from services.wake.schedule_manager.recovery_gate import GateState, observe_gate, refuse
-from services.wake.schedule_manager.round_progress import report_late_rounds
+from services.wake.schedule_manager.round_progress import report_late_rounds, report_stalled
 
 _log = logging.getLogger(__name__)
 
@@ -67,20 +65,12 @@ _log = logging.getLogger(__name__)
 # lag on a crash is fine and keeps the polling cheap.
 POLL_INTERVAL_S = 5.0
 
-STALL_ALERT_AFTER_S = SCHEDULE_STALL_ALERT_AFTER_S
-
 # meiva:link services/wake/schedule_manager/docs/host-replacement.meiva.okf.md
 INTERRUPTED_HOST_REPLACED = "interrupted (session host replaced)"
 
 # Repo root (services/wake/schedule_manager/../../.. == <repo>/) — the cwd the runner launches from, so its
 # relative `.venv/bin/python` resolves into this checkout's venv.
 REPO_ROOT = Path(__file__).resolve().parents[3]
-
-
-@dataclass(frozen=True)
-class _StallRow:
-    id: int
-    stalled_seconds: float
 
 
 # meiva:note
@@ -276,7 +266,13 @@ class ScheduleManager:
         enabled = set(enabled_rows)
         known = live | enabled
         self._forget_unknown(known)
-        self._report_stalled_schedules(enabled_rows, live)
+        report_stalled(
+            self._pool,
+            machine=self._machine_name,
+            home=self._home,
+            status_by_id=enabled_rows,
+            live_ids=live,
+        )
         report_late_rounds(self._pool, home=self._home, status_by_id=enabled_rows, live_ids=live)
         # A launch can find a same-name session after liveness initially said it
         # was absent. If the official reap refused it, this set makes the next
@@ -398,58 +394,6 @@ class ScheduleManager:
         )
         return True
 
-    def _report_stalled_schedules(self, status_by_id: dict[int, str], live_ids: set[int]) -> None:
-        """Alert once when an active schedule has been sessionless for 2h.
-
-        The clock is the row's ``not_live_since``; the alert claims
-        ``stall_alerted_at`` in the same statement that finds it due, so one
-        outage alerts once even across restarts. A live, completed or disabled
-        schedule has both cleared, which rearms a later outage."""
-        eligible = {sid for sid, status in status_by_id.items() if status != "completed"}
-        missing = sorted(eligible - live_ids)
-        with write_transaction(self._pool) as conn:
-            conn.execute(
-                "UPDATE schedules SET not_live_since = NULL, stall_alerted_at = NULL "
-                "WHERE machine = %s AND NOT (id = ANY(%s)) "
-                "AND (not_live_since IS NOT NULL OR stall_alerted_at IS NOT NULL)",
-                (self._machine_name, missing),
-            )
-            conn.execute(
-                "UPDATE schedules SET not_live_since = clock_timestamp() "
-                "WHERE machine = %s AND id = ANY(%s) AND not_live_since IS NULL",
-                (self._machine_name, missing),
-            )
-            alerts = query_all(
-                conn,
-                _StallRow,
-                "UPDATE schedules SET stall_alerted_at = clock_timestamp() "
-                "WHERE machine = %s AND id = ANY(%s) AND stall_alerted_at IS NULL "
-                "AND not_live_since < clock_timestamp() - make_interval(secs => %s) "
-                "RETURNING id, EXTRACT(EPOCH FROM clock_timestamp() - not_live_since)::float8 "
-                "AS stalled_seconds",
-                (self._machine_name, missing, STALL_ALERT_AFTER_S),
-            )
-        for alert in alerts:
-            schedule_id, stalled_seconds = alert.id, alert.stalled_seconds
-            rounded_seconds = round(stalled_seconds, 3)
-            status = status_by_id[schedule_id]
-            _log.warning(
-                "schedule %s has had no live session for %.1fs (status=%s)",
-                schedule_id,
-                rounded_seconds,
-                status,
-            )
-            telemetry.emit(
-                "telemetry",
-                event_name="schedule_stalled",
-                level="warning",
-                attributes={
-                    "schedule_id": schedule_id,
-                    "status": status,
-                    "stalled_seconds": rounded_seconds,
-                },
-            )
-
     def _live_ids(self, now: float, *, owned_id: int | None = None) -> set[int]:
         from base.sessions.pty.allocation_freeze import current_generation
 
@@ -530,6 +474,10 @@ class ScheduleManager:
         # row, and without this the old one would render as in-progress beside
         # it forever (QA P2-2).
         self._close_null_runs(schedule_id)
+        # meiva:note
+        # A new attempt starts with no round beat: leaving the previous process's
+        # file would let its last round stand in for this one's first.
+        clear_beat(self._home, schedule_id)
         # The unit's config + this run's schedule id ride the env dict, which the
         # backend sends in the request body of the pty-sessions service's 0600
         # socket (never argv — issue #974). The service submits the command once
