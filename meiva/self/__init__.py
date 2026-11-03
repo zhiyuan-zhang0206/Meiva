@@ -283,7 +283,8 @@ def pause_heartbeat(duration: float) -> None:
 
     seconds = plans.pause_duration(duration, _settings.agent_setting("heartbeat_pause_max_seconds"))
     agent_id = agent_identity.require_agent_id()
-    with process_context.current_context().sql.cursor() as cur:
+    ctx = process_context.current_context()
+    with ctx.sql.cursor() as cur:
         _run(cur, plans.heartbeat_pause_statements(agent_id, seconds))
         from base.telemetry import emit
 
@@ -293,6 +294,8 @@ def pause_heartbeat(duration: float) -> None:
             level="info",
             agent_id=agent_id,
             attributes=dict(lifecycle_plans.heartbeat_pause_attributes(seconds)),
+            machine_reader=None if ctx.machine is None else ctx.machine.name,
+            producer=ctx.clients.event_producer(),
         )
 
 
@@ -323,7 +326,8 @@ def compact(summary: str) -> NoReturn:
     bus = _settings.bus()
     notice = lifecycle_plans.compact_notice(summary)
     # The inbound and its audit fact commit together.
-    db = process_context.current_context().sql
+    ctx = process_context.current_context()
+    db = ctx.sql
     with db.transaction(), db.cursor() as cur:
         _assert_native_self_action("compact", cur)
         _run(cur, (plans.compact_statement(agent_identity.require_agent_id(), summary),))
@@ -336,7 +340,7 @@ def compact(summary: str) -> NoReturn:
                 payload=dict(notice.audit_payload),
             ),
         )
-    emit_prepared(compact_event)
+    emit_prepared(compact_event, producer=ctx.clients.event_producer())
     # Best-effort: a publish failure must not stop the wake + SystemHalt below.
     # The durable compact_summary inbound is already committed; if this live-UI
     # event is lost the frontend recovers on its next fetch. Routed through the

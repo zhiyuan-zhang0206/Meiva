@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from base.api_contracts.agent_contract import Harness
+from base.host.env.agent_env import MEIVA_PYTHON_ENV
 from base.host.env.harness_binaries import resolve_harness_binary, with_harness_path
 from base.host.env.registry import process_environment
 from base.lm.harness.antigravity import AgySession, AntigravityConfig
@@ -50,7 +51,13 @@ def session_environ(environ: Mapping[str, str]) -> dict[str, str]:
     base = dict(environ)
     venv_bin = str(Path(sys.executable).parent)
     existing = base.get("PATH")
-    base["PATH"] = f"{venv_bin}{os.pathsep}{existing}" if existing else venv_bin
+    if existing:
+        entries = existing.split(os.pathsep)
+        if entries[0] != venv_bin:
+            base["PATH"] = f"{venv_bin}{os.pathsep}{existing}"
+    else:
+        base["PATH"] = venv_bin
+    base[MEIVA_PYTHON_ENV] = sys.executable
     return with_harness_path(base)
 
 
@@ -67,6 +74,7 @@ def open_session(
     skip_permissions: bool = True,
     unsolicited: UnsolicitedSink | None = None,
 ) -> HarnessSession:
+    binding = SessionBinding(agent_id, registry, unsolicited)
     if harness is Harness.CLAUDE_CODE:
         claude_env = session_environ(environ)
         claude_config = BridgeConfig(
@@ -79,14 +87,14 @@ def open_session(
         return ClaudeSession(
             claude_config,
             environ={**dict.fromkeys(process_environment(), ""), **claude_env},
-            binding=SessionBinding(agent_id, registry, unsolicited),
+            binding=binding,
             clock=clock,
         )
     if harness is Harness.CODEX:
         return CodexSession(
             CodexConfig(cwd=cwd, model=model, reasoning_effort=reasoning_effort),
             environ=environ,
-            binding=SessionBinding(agent_id, registry),
+            binding=binding,
             clock=clock,
         )
     if harness is Harness.ANTIGRAVITY:
@@ -96,7 +104,7 @@ def open_session(
         return AgySession(
             antigravity_config,
             environ=environ,
-            binding=SessionBinding(agent_id, registry),
+            binding=binding,
             clock=clock,
         )
     raise ValueError(f"no session adapter for harness {harness.value!r}")

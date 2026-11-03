@@ -279,3 +279,34 @@ def test_a_derived_set_keeps_the_event_pipeline_factory_of_its_parent() -> None:
 
     assert derived.event_pipeline() is built[0]
     assert parent.event_pipeline() is built[1]
+
+
+def test_event_producer_answers_the_set_pipeline_only_when_no_process_pipeline_is_bound(
+    tmp_path: Path,
+) -> None:
+    from base import telemetry
+    from base.telemetry.delivery.pipeline import EventPipeline
+    from base.telemetry.delivery.state import process_state
+
+    assert ClientSet().event_producer() is None
+
+    set_pipeline = EventPipeline(writer=lambda _batch: None)
+    process_pipeline = EventPipeline(writer=lambda _batch: None)
+
+    def build_set_pipeline() -> EventPipeline:
+        return set_pipeline
+
+    clients = ClientSet(pipeline_factory=build_set_pipeline)
+    prior_pipeline = process_state["pipeline"]
+    try:
+        process_state["pipeline"] = None
+        producer = clients.event_producer()
+        assert producer is not None
+        assert producer() is set_pipeline
+
+        telemetry.init_telemetry(home=tmp_path, process="test-clients", pipeline=process_pipeline)
+        assert clients.event_producer() is None
+    finally:
+        process_pipeline.stop(timeout=2)
+        set_pipeline.stop(timeout=2)
+        process_state["pipeline"] = prior_pipeline

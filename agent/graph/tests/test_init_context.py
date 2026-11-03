@@ -23,7 +23,6 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph._init_context import init_context_node
 from agent.graph.hooks.tests.scripted_model import ScriptedModel
-from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState, CapabilitiesState, ContextReset
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
@@ -70,6 +69,7 @@ def _runtime(
     *,
     resources: HostedTurnResources | None = None,
     harness: Harness = Harness.MEIVA,
+    harness_bridge: Any = None,
     agent_id: int | None = None,
     database_gate: ProcessDbGate,
     pins: Mapping[str, Any] | None = None,
@@ -84,6 +84,7 @@ def _runtime(
             identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
             clients=snapshot_clients(),
             harness=harness,
+            harness_bridge=harness_bridge,
             hosted_resources=resources,
             ops_pool=ops_pool,
             llm=llm if llm is not None else AsyncMock(),
@@ -636,8 +637,6 @@ def test_parked_tail_survives_the_checkpoint_round_trip() -> None:
 def test_capabilities_snapshot_survives_the_checkpoint_round_trip() -> None:
     from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
-    from agent.state import CapabilitiesState
-
     serde = JsonPlusSerializer()
 
     recorded = CapabilitiesState(indexed={"alpha", "web-ai:deep-research"})
@@ -676,124 +675,3 @@ async def test_compacted_takeover_context_restores_explanation_before_summary(
     assert (
         await init_context_node(restored, _runtime(None, database_gate=database_gate), _config(42))
     ).update is None
-
-
-@pytest.mark.parametrize("harness", [Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY])
-async def test_external_harness_cold_start_establishes_handoff_and_standing_notes(
-    harness: Harness,
-    db_conn: psycopg.Connection,
-    aops_pool: AsyncConnectionPool,
-    database_gate: ProcessDbGate,
-) -> None:
-    tid = create_agent(db_conn)
-
-    def custom_section(_slices: AgentSlices, *, catalog: ModelCatalog) -> str:
-        del catalog
-        return "# Custom Plugin Section\n\nFollow the cluster workflow."
-
-    def custom_note(_ctx: MeivaContext) -> HumanMessage:
-        return system_note_message(
-            content="Custom plugin standing note.", tag=NoteTag.MEMORY, picked_up_at=_PICKED_UP_AT
-        )
-
-    registry = ExtensionRegistry(
-        (
-            (
-                "demo",
-                PluginContributions(
-                    system_prompt_sections=(custom_section,),
-                    context_notes=(ContextNote(custom_note),),
-                ),
-            ),
-        )
-    )
-    command = await init_context_node(
-        AgentState(),
-        _runtime(aops_pool, registry, harness=harness, agent_id=tid, database_gate=database_gate),
-        _config(tid),
-    )
-
-    from base.agents.history.harness_messages import load_harness_timeline_items
-
-    assert command.update is not None
-    assert "messages" not in command.update
-    items = load_harness_timeline_items(db_conn, tid)
-    assert len(items) >= 3 and items[0].kind == "system_prompt"
-    head_text = str(items[0].payload)
-    assert all(
-        s in head_text
-        for s in (
-            f"# Role & Operating Context — Agent #{tid}",
-            "meiva.self",
-            "pause_heartbeat",
-            "# Custom Plugin Section",
-        )
-    )
-    note_texts = "\n".join(str(it.payload) for it in items[1:])
-    assert all(
-        s in note_texts
-        for s in (
-            "Conversation timezone:",
-            f"Your Agent ID is {tid}",
-            "Custom plugin standing note.",
-        )
-    )
-    assert (
-        isinstance(command.update["capabilities"], CapabilitiesState)
-        and command.update["context_reset"] == ContextReset()
-        and command.goto == "claim"
-    )
-
-
-@pytest.mark.parametrize("harness", [Harness.CLAUDE_CODE, Harness.CODEX])
-async def test_external_context_reset_preserves_the_tail_behind_handoff(
-    harness: Harness,
-    database_gate: ProcessDbGate,
-) -> None:
-    tail: list[AnyMessage] = [
-        HumanMessage(content="The real compact summary", id="compact-summary")
-    ]
-    command = await init_context_node(
-        AgentState(context_reset=ContextReset(tail=tail, resume="before_llm")),
-        _runtime(None, harness=harness, database_gate=database_gate),
-        _config(42),
-    )
-
-    assert command.update is not None
-    assert "messages" not in command.update
-    prompt = command.update["harness_pending_input"]["prompt"]
-    assert "# Role & Operating Context — Agent #42" in prompt
-    assert prompt.endswith("The real compact summary")
-    assert command.update["context_reset"] == ContextReset()
-    assert command.goto == "harness_turn"
-
-
-@pytest.mark.parametrize("harness", [Harness.CLAUDE_CODE, Harness.CODEX])
-async def test_existing_external_history_and_cursor_are_not_rewritten(
-    harness: Harness,
-    database_gate: ProcessDbGate,
-) -> None:
-    state = AgentState(
-        messages=[SystemMessage(content="Legacy local prompt"), HumanMessage(content="Task")],
-    )
-    command = await init_context_node(
-        state,
-        _runtime(None, harness=harness, database_gate=database_gate),
-        _config(42),
-    )
-
-    assert command.update is not None
-    assert "messages" not in command.update
-    assert state.messages[0].content == "Legacy local prompt"
-
-
-async def test_the_built_in_loop_writes_no_cursor(
-    database_gate: ProcessDbGate,
-) -> None:
-    command = await init_context_node(
-        AgentState(), _runtime(None, database_gate=database_gate), _config(42)
-    )
-
-    assert command.update is not None
-    assert "messages" in command.update
-    assert "harness_pending_input" not in command.update

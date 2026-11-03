@@ -224,6 +224,18 @@ class ClientSet:
                 self._event_pipeline = self._pipeline_factory()
             return self._event_pipeline
 
+    # meiva:note
+    # Return this set's lazy event-pipeline producer when no process pipeline is bound.
+    # meiva:link base/agents/context/docs/clients.meiva.okf.md
+    def event_producer(self) -> Callable[[], EventPipeline] | None:
+        from base.telemetry.emitter import pipeline_bound
+
+        if pipeline_bound():
+            return None
+        if self._event_pipeline is not None or self._pipeline_factory is not None:
+            return self.event_pipeline
+        return None
+
     def sync_events(self, timeout: float = 5.0) -> DrainResult:
         """Observe this owner's constructed writer without creating one during flush."""
         from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus

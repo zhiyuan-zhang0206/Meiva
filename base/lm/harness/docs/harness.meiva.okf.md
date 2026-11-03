@@ -68,38 +68,10 @@ registered in the [tech-debt ledger](../../../../future/tech-debt/ledger.md).
 
 ## Where the CLI comes from
 
-A harness session starts from the daemon child environment, which is a positive
-allowlist and therefore carries no `PATH`: a bare `codex`/`claude`/`agy` would
-resolve against the OS default (`/usr/bin:/bin:/usr/sbin:/sbin`), so a real spawn
-failed while `which codex` in a shell succeeded. Two rules close that gap.
-
-The environment a session starts from is a required value: the host root builds it once
-(`child_env(process_environment())`) and hands it down as
-`HostPolicy.harness_environ`; `bridge_for`, `open_session` and `session_environ` never fall
-back to the process environment.
-
-`base/host/env/harness_binaries.py::with_harness_path` rebuilds `PATH` at the
-session delivery point (`wiring.session_environ`): the host's own entries first,
-then the directories harness CLIs install into (`~/.local/bin`, `~/.npm-global/bin`,
-`~/.bun/bin`, `~/.claude/local`, `/usr/local/bin`, `/opt/homebrew/bin`), then the
-system dirs. The same list feeds the probe in `base/agents/birth/harness.py` and the
-`launchd` job PATH in `base/host/system/cron/mechanics.py`, so all three agree on where the
-CLIs live.
-
-Every unit this repository installs composes its PATH through
-`harness_binaries.harness_unit_path`, which appends the table and then refuses a
-result that omits any of it (`HarnessPathIncompleteError`, naming the unit and the
-directories): a hand-written narrow PATH fails where the unit is written, not at the
-first spawn.
-
-Each adapter then spawns the path it resolved, not the name: `codex` and `agy` cache
-the resolution, and the Claude Code session passes the SDK a `cli_path` because the
-SDK resolves a bare name with `shutil.which` against its own process environment. A
-failure names the PATH and every directory that was searched instead of a bare
-`No such file or directory`. A successful search returns an absolute path before
-the child changes to its workspace, including when PATH contains relative entries.
-The path keeps symlinks intact; it does not resolve their targets. An explicitly
-configured path containing a separator is validated and returned unchanged.
+Session environment construction (`wiring.session_environ`), `PATH` rebuilding
+(`with_harness_path`), `MEIVA_PYTHON` interpreter delivery, and per-adapter binary
+resolution (`resolve_harness_binary`) are defined in
+[[base/lm/harness/docs/cli-delivery.meiva.okf.md|Harness CLI and environment delivery]].
 
 ## The handoff document
 

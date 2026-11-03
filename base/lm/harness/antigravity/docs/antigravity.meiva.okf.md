@@ -58,8 +58,9 @@ signal. The adapter turns that into `subtype="denied"`, `is_error=True`,
 `permission_denials=("command:RunCommand",)`.
 | Every `run_command` is a fresh shell: `cd` and `export` do not survive into the next call | `handoff_rules.SHELL_SEMANTICS`, appended to the handoff by `build_handoff()` |
 | A background process started with `&` is killed when the turn ends | same: the handoff tells the agent to use `setsid nohup …` or tmux |
+| `run_command` caps `WaitMsBeforeAsync` at 10s, while cold `import meiva` attachment + plugin loading takes several seconds | same: the handoff tells the agent to pass `WaitMsBeforeAsync=10000` and batch synchronous `meiva.*` calls in one `"$MEIVA_PYTHON" -c` invocation |
 
-The first is enforced in code and pinned by `test_denied.py`; the other two are
+The first is enforced in code and pinned by `test_denied.py`; the shell/runtime rules are
 behaviour of the CLI that the adapter cannot change, so they are disclosed in the
 text the agent reads, and `test_handoff.py` pins that the text is present (and
 absent from a plain `Handoff`).
@@ -107,35 +108,9 @@ nothing in the protocol can tell the two apart.
 
 ## Interrupt, measured on the real CLI
 
-`SIGINT` stops `agy` but not its tool tree. In a live run the turn was asked to
-`run_command: sleep 90`; after the interrupt the CLI had exited while both
-`bash -c sleep 90` and `sleep 90` were still running. Those pids are known only
-inside this call — the model can no longer track them and the caller never saw
-them — so the adapter reaps them itself, by default and without a switch.
-
-The report still has to be honest: `settled` is true only when every observed pid
-is gone after the reap. A process that survives (permission, pid reuse, a reaper
-that refuses) leaves `settled=False` and names the survivors in `remaining`;
-`killed` lists what the adapter actually signalled.
-
-Closing an active session uses the same reaping path. The session snapshots its
-tree before cancelling the stream reader, whose finalizer can close and detach
-the transport. This keeps a hosted cancellation or termination from losing its
-observed children and claiming an unobserved close. Remaining children fail the
-close; the final CLI exit status survives transport detachment.
-
-Same live run after reaping:
-
-```
-CancelReport(settled=True, remaining=(),
-                observed=(bash -c sleep 90; echo done, sleep 90),
-                killed=(2615594, 2615595), cli_alive=False, waited_ms=8039)
-turn: interrupted, is_error=True
-next: AFTER-CANCEL          # respawned with --conversation
-```
-
-The session itself recovers: the next turn respawns `agy` with
-`--conversation <id>` and completed normally in the same measurement.
+`SIGINT` delivery, tool-tree reaping on `interrupt()` and `close()`, and
+`--conversation` respawn recovery are documented in
+[[base/lm/harness/antigravity/docs/interrupt.meiva.okf.md|Antigravity interrupt and process-tree reaping]].
 
 ## Usage and cost
 

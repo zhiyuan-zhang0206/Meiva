@@ -26,6 +26,7 @@ class HarnessTurn:
     subtype: str
     is_error: bool
     interrupted: bool
+    stop_reason: str | None = None
     num_turns: int = 1
     steps: tuple[Usage, ...] = ()
     prelude: tuple[HarnessTurn, ...] = ()
@@ -53,6 +54,9 @@ class CompletedTurnEvent(Protocol):
 
     @property
     def interrupted(self) -> bool: ...
+
+    @property
+    def stop_reason(self) -> str | None: ...
 
     @property
     def num_turns(self) -> int: ...

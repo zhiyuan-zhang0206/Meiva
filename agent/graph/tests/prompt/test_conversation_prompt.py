@@ -157,6 +157,7 @@ def test_background_wake_reply_prefix_guidance_in_native_and_harness_sections() 
         assert f"`{USER_REPLY_PREFIX}`" in section
         assert "woken solely by non-human inputs" in section
         assert "collapsed work log" in section
+        assert "End the turn with no assistant text" not in section
         assert f"omit `{USER_REPLY_PREFIX}` on human-triggered runs" in section
         milestone_tail = section.split("## Meaningful progress", maxsplit=1)[1]
         assert f"`{USER_REPLY_PREFIX}`" in milestone_tail

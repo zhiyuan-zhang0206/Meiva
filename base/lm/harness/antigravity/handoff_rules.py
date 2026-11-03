@@ -26,6 +26,11 @@ SHELL_SEMANTICS: tuple[str, ...] = (
     "line, or use absolute paths.",
     "A background process started with `&` is killed when your turn ends. Start anything "
     "that must outlive the turn with `setsid nohup … &` or inside tmux.",
+    "A fresh `\"$MEIVA_PYTHON\" -c 'import meiva; ...'` command attaches your agent identity "
+    "and loads the SDK plugin surface on first use (~5-15s on cold start): pass "
+    "`WaitMsBeforeAsync=10000` on synchronous `meiva.*` commands and batch related SDK "
+    'calls into one `"$MEIVA_PYTHON" -c` invocation so short waits do not background them '
+    "mid-call.",
 )
 
 

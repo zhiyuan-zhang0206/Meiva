@@ -87,6 +87,7 @@ class FakeSession:
         opening: str | None = None,
         fault: str | None = None,
         during: Sequence[BridgeEvent] = (),
+        resumed: bool = False,
     ) -> None:
         self.started = 0
         self.closed = False
@@ -95,6 +96,7 @@ class FakeSession:
         self.handoff_ticket: FakeTicket | None = None
         self.submitted: list[tuple[str, str | None, str]] = []
         self.session_id = None
+        self.resumed = resumed
         # meiva:note
         # The adapter contract's third state holder (task #5616): a fake has no child
         # process, so it answers None unless a test sets one.
@@ -309,6 +311,51 @@ async def test_the_handoff_is_injected_once_and_the_session_started_once() -> No
     ]
 
 
+async def test_calling_set_handoff_again_on_a_warm_session_does_not_reinject_the_handoff() -> None:
+    session = FakeSession()
+    doc = handoff()
+    bridge = make_bridge(session, handoff=doc)
+
+    await bridge.run_turn("one", key="inbound-1")
+    bridge.set_handoff(doc)
+    await bridge.run_turn("two", key="inbound-2")
+
+    assert session.submitted == [
+        (f"{doc.render().strip()}\n\none", "inbound-1", "t1"),
+        ("two", "inbound-2", "t2"),
+    ]
+
+
+async def test_a_rebuilt_unresumed_session_after_fault_accepts_a_new_handoff_once() -> None:
+    faulted, fresh = FakeSession(fault="cli died"), FakeSession()
+    sessions = [faulted, fresh]
+    doc = handoff()
+    bridge = HarnessBridge(
+        Harness.CLAUDE_CODE,
+        6984,
+        lambda _handle: sessions.pop(0),
+        machine="macmini",
+        handoff=doc,
+        registration_ttl_seconds=3600.0,
+        clock=system_clock(),
+        handle_rng=SecureRandom(random.SystemRandom()),
+        controller_pid=os.getpid(),
+    )
+
+    with pytest.raises(HarnessTurnFaultedError, match="cli died"):
+        await bridge.run_turn("hello", key="inbound-1")
+
+    bridge.set_handoff(doc)
+    await bridge.run_turn("two", key="inbound-2")
+    bridge.set_handoff(doc)
+    await bridge.run_turn("three", key="inbound-3")
+
+    assert fresh.submitted == [
+        (f"{doc.render().strip()}\n\ntwo", "inbound-2", "t1"),
+        ("three", "inbound-3", "t2"),
+    ]
+
+
 async def test_a_faulted_session_fails_the_turn() -> None:
     bridge = make_bridge(FakeSession(fault="cli died"))
 
@@ -387,6 +434,7 @@ def test_execution_selection_reaches_the_adapter(
         binary = binary_dir / name
         binary.write_text("#!/bin/sh\nexit 0\n")
         binary.chmod(0o755)
+    received: list[UnsolicitedOutput] = []
     session = open_session(
         harness,
         agent_id=71,
@@ -396,8 +444,11 @@ def test_execution_selection_reaches_the_adapter(
         clock=system_clock(),
         model=model,
         reasoning_effort=effort,
+        unsolicited=received.append,
     )
     assert isinstance(session, (ClaudeSession, CodexSession, AgySession))
+    session._unsolicited(UnsolicitedOutput(source="probe", text="hello"))
+    assert received == [UnsolicitedOutput(source="probe", text="hello")]
     assert session.config.model == model
     if isinstance(session, AgySession):
         command = session.config.command(resume=None)
@@ -459,6 +510,7 @@ def test_the_antigravity_wake_document_carries_its_shell_semantics() -> None:
     rendered = bridge.handoff.render()
     assert "setsid" in rendered
     assert "fresh shell" in rendered
+    assert "WaitMsBeforeAsync=10000" in rendered
 
 
 def test_an_antigravity_session_is_built_with_the_skip_flag_it_was_given() -> None:
@@ -649,6 +701,37 @@ def test_the_sweep_drops_an_expired_registration(tmp_path: Path) -> None:
     store.write(registration(expires_at="2000-01-01T00:00:00+00:00"))
 
     assert store.sweep(now=system_clock().now()) == [6984]
+
+
+async def test_session_model_and_error_detail_surface_through_bridge() -> None:
+    class ModelOnStartSession(FakeSession):
+        model: str | None = "gpt-6.1-sol"
+
+        async def start(self, *, resume: str | None = None, handoff: Handoff | None = None) -> None:
+            self.started += 1
+            self.session_id = "session-1"
+
+        def submit(self, text: str, *, key: str | None = None) -> FakeTicket:
+            self._n += 1
+            turn_id = f"t{self._n}"
+            if self._n == 2:
+                self._queue.append(
+                    replace(
+                        completion(turn_id, ""),
+                        subtype="failed",
+                        is_error=True,
+                        stop_reason="usage limit reached",
+                    )
+                )
+            else:
+                self._queue.append(completion(turn_id, "ok"))
+            return FakeTicket(turn_id)
+
+    bridge = make_bridge(ModelOnStartSession())
+    await bridge.run_turn("one", key="k1")
+    assert bridge.model == "gpt-6.1-sol"
+    with pytest.raises(HarnessTurnFaultedError, match="failed \\(failed\\): usage limit reached"):
+        await bridge.run_turn("two", key="k2")
 
 
 def registration(

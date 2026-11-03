@@ -231,6 +231,7 @@ def _record_skill_invoked(skill: Skill) -> None:
     from meiva.sdk_surface.settings import database
 
     capture_owner = None if context is None else context.sdk_capture
+    producer = None if context is None else context.clients.event_producer()
     record_audit_reported(
         database(),
         prepare_event_log(
@@ -243,6 +244,7 @@ def _record_skill_invoked(skill: Skill) -> None:
                 invocation_depth="loaded",
             ).model_dump(),
         ),
+        producer=producer,
         **({"capture": capture_owner.capture_local_event} if capture_owner is not None else {}),
     )
 

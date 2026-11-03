@@ -53,6 +53,10 @@ Under Plan B:
   `state.harness_pending_input`.
 - `harness_turn` executes the bridge turn, streams `BridgeEvent`s, atomically appends
   committed timeline items to `agent_harness_messages`, and clears `harness_pending_input`.
+  When an adapter delivers an asynchronous `ToolResult` after a completed intermediate
+  `AssistantText` step, `HarnessTurnProjector` flushes that completed response step
+  before settling the tool result so live deltas, reasoning durations, and subsequent
+  tool or text steps remain isolated.
 
 ## The bridge
 
@@ -62,7 +66,9 @@ in `FileSessionRegistry`.
 
 - `bridge_for` builds the handoff and `ScopedSessionRegistry` (which binds every
   load/save to `SessionRecord.harness`). The handoff is co-delivered once on the
-  first turn of a fresh session.
+  first turn of a fresh session; `HarnessBridge` tracks delivery per active session
+  so later `set_handoff` calls on a warm or resumed session never re-prepend the
+  handoff document.
 - `run_turn` starts the session, submits turn text under the newest inbound row id
   (or `window-{cursor + len(pending)}` when the batch carries only notes such as a
   heartbeat check-in), and streams `BridgeEvent`s via `on_event`. Completed keys within
@@ -112,14 +118,7 @@ Execution model/effort resolve through the registry binding described in
 
 ## Capability boundary
 
-Because an external harness CLI owns its context window and turn loop, native
-context/lifecycle mutations are native (`Harness.MEIVA`) only:
-
-- **`fork`, `compact`, and `meiva.self.attach` are native-only**:
-  - `fork` (`fork_from`) and `POST /api/agents/{id}/compact` reject external harnesses with HTTP 400 (`ForkHarnessMismatch` on fork; guarded in `claim` dispatch); the web UI hides `Fork` and `Compact` (and omits `/compact` from slash autocomplete) for external harnesses.
-  - `POST /api/agents/{id}/restart` and the Web UI `Restart` action are supported on `idling` external-harness agents and for bidirectional harness switching on `idling`/`terminated` agents (requiring a non-empty `message`). Calling `meiva.self.restart()` from code remains native-only (raises `RuntimeError` on external harnesses).
-  - Calling `meiva.self.compact()` or `meiva.self.attach()` on an external harness raises `RuntimeError`.
-- **Supported `meiva.self` surface on external harnesses**:
-  - `harness_sdk_expand_section` and `meiva.help(meiva.self)` expose only `meiva.self.terminate()`, `meiva.self.pause_heartbeat(duration)`, and read-only identity constants (`AGENT_ID`, `MACHINE_SPEC`, `MachineSpec`). Use `terminate` and `resurrect`, or `restart` via API/UI to stop and resume an external harness agent.
-
-A cancelled turn keeps its message in the window, so the next turn re-submits it. `LAUNCHABLE_HARNESSES` gates a wake before any of this runs.
+Native-only context/lifecycle operations (`fork`, `compact`, `meiva.self.attach`,
+`meiva.self.restart`) versus supported external-harness `meiva.self` and API restart
+surfaces are defined in
+[[agent/graph/docs/harness-capability-boundary.meiva.okf.md|Harness turn capability boundary]].

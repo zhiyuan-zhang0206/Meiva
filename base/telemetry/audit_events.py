@@ -197,7 +197,12 @@ async def record_audit_async(conn: AsyncConnectionLike, event: telemetry.Event) 
     return event
 
 
-def record_audit_standalone_many(db: Database, events: Sequence[telemetry.Event]) -> None:
+def record_audit_standalone_many(
+    db: Database,
+    events: Sequence[telemetry.Event],
+    *,
+    producer: Callable[[], telemetry.EventPipeline] | None = None,
+) -> None:
     """Record several audit events in one write transaction, then emit them all.
 
     All rows commit together or none does; nothing is emitted unless they commit.
@@ -206,10 +211,15 @@ def record_audit_standalone_many(db: Database, events: Sequence[telemetry.Event]
         for event in events:
             record_audit(conn, event)
     for event in events:
-        telemetry.emit_prepared(event)
+        telemetry.emit_prepared(event, producer=producer)
 
 
-def record_audit_standalone(db: Database, event: telemetry.Event) -> None:
+def record_audit_standalone(
+    db: Database,
+    event: telemetry.Event,
+    *,
+    producer: Callable[[], telemetry.EventPipeline] | None = None,
+) -> None:
     """Record one audit event in its own write transaction, then emit it.
 
     For a producer that owns no business transaction: the effect already
@@ -221,7 +231,7 @@ def record_audit_standalone(db: Database, event: telemetry.Event) -> None:
     """
     with db.write_transaction() as conn:
         record_audit(conn, event)
-    telemetry.emit_prepared(event)
+    telemetry.emit_prepared(event, producer=producer)
 
 
 async def record_audit_standalone_async(pool: AsyncConnectionPool, event: telemetry.Event) -> None:
@@ -233,7 +243,13 @@ async def record_audit_standalone_async(pool: AsyncConnectionPool, event: teleme
     telemetry.emit_prepared(event)
 
 
-def _report_unrecorded(event: telemetry.Event, exc: Exception, *, emit: bool = True) -> None:
+def _report_unrecorded(
+    event: telemetry.Event,
+    exc: Exception,
+    *,
+    emit: bool = True,
+    producer: Callable[[], telemetry.EventPipeline] | None = None,
+) -> None:
     """Make a failed audit write loud without failing the caller.
 
     An error log with the traceback plus an `audit_write_failed` anomaly event.
@@ -256,9 +272,10 @@ def _report_unrecorded(event: telemetry.Event, exc: Exception, *, emit: bool = T
             "error_class": type(exc).__name__,
             "error": str(exc)[:500],
         },
+        producer=producer,
     )
     if emit:
-        telemetry.emit_prepared(event)
+        telemetry.emit_prepared(event, producer=producer)
 
 
 def record_audit_reported(
@@ -266,6 +283,7 @@ def record_audit_reported(
     event: telemetry.Event,
     *,
     capture: Callable[[telemetry.Event], telemetry.Event] | None = None,
+    producer: Callable[[], telemetry.EventPipeline] | None = None,
 ) -> None:
     """:func:`record_audit_standalone` for a producer that must not fail its caller.
 
@@ -278,16 +296,16 @@ def record_audit_reported(
     """
     if capture is None:
         try:
-            record_audit_standalone(db, event)
+            record_audit_standalone(db, event, producer=producer)
         except Exception as exc:
-            _report_unrecorded(event, exc)
+            _report_unrecorded(event, exc, producer=producer)
         return
     try:
         with db.write_transaction() as conn:
             record_audit(conn, event)
     except Exception as exc:
-        _report_unrecorded(event, exc, emit=False)
-    telemetry.emit_prepared(event, capture=capture)
+        _report_unrecorded(event, exc, emit=False, producer=producer)
+    telemetry.emit_prepared(event, capture=capture, producer=producer)
 
 
 async def record_audit_reported_async(pool: AsyncConnectionPool, event: telemetry.Event) -> None:

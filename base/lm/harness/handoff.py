@@ -123,7 +123,7 @@ class Handoff:
     def _python_example_lines(self) -> list[str]:
         names = {entry.name for entry in self.entries}
         lines = [
-            "python3 -c '",
+            '"$MEIVA_PYTHON" -c \'',
             "import meiva",
             "",
             "# Inspect available SDK namespaces and function signatures",
@@ -187,8 +187,9 @@ class Handoff:
             "through these active SDK surfaces:",
             *_bullets([f"`{entry.name}` — {entry.purpose}" for entry in self.entries]),
             "",
-            "Run Python from your shell/command tool (`python3 -c ...`) whenever you need to "
-            "inspect SDK contracts or interact with the cluster. For example:",
+            'Run Python from your shell/command tool (`"$MEIVA_PYTHON" -c ...`, which always '
+            "targets this agent's Meiva interpreter even in login shells or foreign virtualenvs) "
+            "whenever you need to inspect SDK contracts or interact with the cluster. For example:",
             "```bash",
             *self._python_example_lines(),
             "```",

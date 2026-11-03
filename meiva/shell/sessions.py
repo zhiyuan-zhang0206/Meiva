@@ -4,7 +4,7 @@ __all_for_meiva__ = ["capture", "kill", "list", "new", "renew", "send", "send_ke
 
 import builtins
 import contextlib
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime
 from pathlib import Path
 
@@ -15,6 +15,7 @@ from base.paths import repo_root
 from base.sessions.backend import PtySessionBackend, get_shell_backend
 from base.sessions.env_forwarding import cwd_is_inside_checkout, forward_env_dict
 from base.sessions.page_session import is_page_label
+from base.telemetry.delivery.pipeline import EventPipeline
 from meiva.files import agent_workspace
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
 from meiva.security import scan_content
@@ -28,11 +29,17 @@ from meiva.shell.session_plan import validate_ttl
 # One agent's persistent shell sessions on a backend and a database. The module functions below are the SDK entries: each reads this process's agent identity once (`shell_sessions()`) and calls the matching method here, whose every dependency is a constructor or call argument, so a test builds one over the real pty-sessions backend and a throwaway database.
 class ShellSessions:
     def __init__(
-        self, *, backend: PtySessionBackend, database: DatabaseHandle, agent_id: int
+        self,
+        *,
+        backend: PtySessionBackend,
+        database: DatabaseHandle,
+        agent_id: int,
+        producer: Callable[[], EventPipeline] | None = None,
     ) -> None:
         self._backend = backend
         self._database = database
         self._agent_id = agent_id
+        self._producer = producer
 
     @property
     def agent_id(self) -> int:
@@ -149,6 +156,7 @@ class ShellSessions:
                 "prev_expires_at": prev_expires.isoformat(),
                 "new_expires_at": new_expires.isoformat(),
             },
+            producer=self._producer,
         )
         return new_expires
 
@@ -181,13 +189,15 @@ def open_sessions(agent_id: int) -> ShellSessions:
     from meiva.sdk_surface import process_context
     from meiva.sdk_surface.settings import database
 
-    backend = get_shell_backend(home=process_context.current_context().require_meiva_home())
+    ctx = process_context.current_context()
+    backend = get_shell_backend(home=ctx.require_meiva_home())
     if not isinstance(backend, PtySessionBackend):
         raise TypeError(f"shell sessions require PtySessionBackend, got {type(backend).__name__}")
     return ShellSessions(
         backend=backend,
         database=database(),
         agent_id=agent_id,
+        producer=ctx.clients.event_producer(),
     )
 
 

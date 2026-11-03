@@ -39,10 +39,12 @@ def initialize_request() -> tuple[str, JsonObject]:
 
 
 # meiva:note
-# The method and payload that open the thread: a recorded thread resumes by id with the selected
-# model override; a fresh one starts with the sandbox, approval policy and model, and inherits the
-# whole shell environment so a command the turn runs sees what the bridge sees. `model` is omitted
-# rather than sent empty: an unset model means the account's default, not a request for no model.
+# The method and payload that open the thread: both `thread/start` and `thread/resume` carry the
+# working directory, sandbox, approval policy and full shell environment inheritance, because
+# `thread/resume` otherwise resets the thread's execution policy to `read-only` with restricted
+# network and strips inherited environment variables such as `MEIVA_HARNESS_HANDLE`. `model` is
+# omitted rather than sent empty: an unset model means the account's default, not a request for
+# no model.
 def open_thread_request(
     resume: str | None,
     *,
@@ -51,11 +53,6 @@ def open_thread_request(
     approval_policy: str,
     sandbox: str,
 ) -> tuple[str, JsonObject]:
-    if resume:
-        resume_params: JsonObject = {"threadId": resume}
-        if model is not None:
-            resume_params["model"] = model
-        return "thread/resume", resume_params
     params: JsonObject = {
         "cwd": cwd,
         "approvalPolicy": approval_policy,
@@ -64,6 +61,8 @@ def open_thread_request(
     }
     if model:
         params["model"] = model
+    if resume:
+        return ("thread/resume", {"threadId": resume, **params})
     return ("thread/start", params)
 
 

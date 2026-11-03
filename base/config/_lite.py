@@ -259,13 +259,18 @@ def _plant_placeholders(env: dict[str, str] | os._Environ[str]) -> None:
     env.setdefault("MEIVA_REDIS_URL", _LITE_REDIS_URL)
 
 
+# meiva:note
+# Debug-only observability (Q6): the event is already visible in `boot_state()` for tests and
+# acceptance runs. Skip unless a process root initialized sinks (`base.log.process.init_done`),
+# so bare SDK subprocesses do not print through loguru's default DEBUG stderr sink.
 def _log_upgrade(reason: str) -> None:
-    # Debug-only observability (Q6): the event is already visible in
-    # `boot_state()` for tests and acceptance runs.
-    if "loguru" not in sys.modules:
+    if "base.log.process" not in sys.modules:
         return
     from base.log import logger
+    from base.log import process as log_process
 
+    if not log_process.init_done:
+        return
     logger.debug("config boot-lite upgraded to the eager config chain (reason={!r})", reason)
 
 

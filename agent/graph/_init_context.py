@@ -89,6 +89,54 @@ def cluster_facts(ctx: MeivaContext) -> tuple[ClusterFact, ...]:
     return tuple(facts)
 
 
+async def _seed_harness_timeline(
+    ctx: MeivaContext,
+    *,
+    agent_id: int,
+    notes: Sequence[BaseMessage],
+    tail: Sequence[BaseMessage],
+    warm_session: bool,
+) -> Handoff | None:
+    if ctx.ops_pool is None:
+        return _build_grounded_handoff(ctx, agent_id=agent_id)
+    async with async_write_transaction(ctx.ops_pool) as pool_conn:
+        count = await aload_harness_message_count(pool_conn, agent_id)
+        handoff = (
+            _build_grounded_handoff(ctx, agent_id=agent_id)
+            if count == 0 or tail or not warm_session
+            else None
+        )
+        to_append: list[BaseMessage] = (
+            [SystemMessage(content=handoff.render()), *notes, *tail]
+            if count == 0 and handoff is not None
+            else list(tail)
+        )
+        if to_append:
+            items, _ = build_timeline_items(to_append, inputs=ctx.timestamp_policy())
+            await aappend_harness_timeline_items(pool_conn, agent_id, ctx.harness.value, items)
+        return handoff
+
+
+def _pending_input_payload(
+    handoff: Handoff,
+    notes: Sequence[BaseMessage],
+    tail: Sequence[BaseMessage],
+) -> dict[str, Any]:
+    pending: list[BaseMessage] = [
+        SystemMessage(content=handoff.render()),
+        *notes,
+        *pending_messages(tail),
+    ]
+    inbound_ids = [
+        iid for m in pending if isinstance(iid := read_meiva_kwargs(m).get("meiva_inbound_id"), int)
+    ]
+    return {
+        "prompt": render_messages(pending),
+        "key": turn_key(pending),
+        "inbound_ids": inbound_ids,
+    }
+
+
 async def _establish_external_harness_context(
     ctx: MeivaContext,
     *,
@@ -97,42 +145,26 @@ async def _establish_external_harness_context(
     reset: ContextReset,
     indexed: set[str],
 ) -> Command[NodeName]:
-    handoff = _build_grounded_handoff(ctx, agent_id=agent_id)
-    set_handoff = getattr(ctx.harness_bridge, "set_handoff", None)
-    if callable(set_handoff):
-        set_handoff(handoff)
-    if ctx.ops_pool is not None:
-        async with async_write_transaction(ctx.ops_pool) as pool_conn:
-            count = await aload_harness_message_count(pool_conn, agent_id)
-            to_append: list[BaseMessage] = (
-                [SystemMessage(content=handoff.render()), *notes, *reset.tail]
-                if count == 0
-                else list(reset.tail)
-            )
-            if to_append:
-                items, _ = build_timeline_items(to_append, inputs=ctx.timestamp_policy())
-                await aappend_harness_timeline_items(pool_conn, agent_id, ctx.harness.value, items)
+    warm_session = getattr(ctx.harness_bridge, "session_id", None) is not None
+    handoff = await _seed_harness_timeline(
+        ctx,
+        agent_id=agent_id,
+        notes=notes,
+        tail=reset.tail,
+        warm_session=warm_session,
+    )
+    if handoff is not None:
+        set_handoff = getattr(ctx.harness_bridge, "set_handoff", None)
+        if callable(set_handoff):
+            set_handoff(handoff)
     target = route_target(ctx, reset.resume)
     ext_update: dict[str, Any] = {
         "capabilities": CapabilitiesState(indexed=indexed),
         "context_reset": ContextReset(),
     }
-    pending: list[BaseMessage] = (
-        [SystemMessage(content=handoff.render()), *notes, *pending_messages(reset.tail)]
-        if target == "harness_turn" and reset.tail
-        else []
-    )
-    if pending:
-        inbound_ids = [
-            iid
-            for m in pending
-            if isinstance(iid := read_meiva_kwargs(m).get("meiva_inbound_id"), int)
-        ]
-        ext_update["harness_pending_input"] = {
-            "prompt": render_messages(pending),
-            "key": turn_key(pending),
-            "inbound_ids": inbound_ids,
-        }
+    if target == "harness_turn" and reset.tail:
+        grounded = handoff or _build_grounded_handoff(ctx, agent_id=agent_id)
+        ext_update["harness_pending_input"] = _pending_input_payload(grounded, notes, reset.tail)
     return Command[NodeName](update=ext_update, goto=target)
 
 

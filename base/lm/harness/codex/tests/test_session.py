@@ -133,7 +133,12 @@ async def test_resume_uses_the_registry_and_skips_the_handoff(tmp_path: Path) ->
     try:
         bound = await harness.wait_for(lambda event: isinstance(event, SessionBound))
         assert harness.session.resumed is True
-        assert harness.server.params_for("thread/resume")[0]["threadId"] == "thread-old"
+        resume_params = harness.server.params_for("thread/resume")[0]
+        assert resume_params["threadId"] == "thread-old"
+        assert resume_params["cwd"] == str(tmp_path)
+        assert resume_params["approvalPolicy"] == "never"
+        assert resume_params["sandbox"] == "danger-full-access"
+        assert resume_params["config"] == {"shell_environment_policy": {"inherit": "all"}}
         assert "thread/start" not in harness.server.methods()
         assert harness.session.handoff_ticket is None
         assert harness.of(HandoffInjected) == []

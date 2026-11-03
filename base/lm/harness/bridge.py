@@ -115,6 +115,7 @@ class HarnessBridge:
         self._registration_ttl = timedelta(seconds=registration_ttl_seconds)
         self._created_at: str | None = None
         self._session: HarnessSession | None = None
+        self._handoff_delivered = False
         self._model: str | None = None
         self._digest: str | None = None
         self._closed = False
@@ -164,6 +165,10 @@ class HarnessBridge:
             raise
         self._exit_code = None
         self._session = session
+        session_model = getattr(session, "model", None)
+        if isinstance(session_model, str) and session_model:
+            self._model = session_model
+        self._handoff_delivered = bool(getattr(session, "resumed", False))
         return session
 
     async def run_turn(
@@ -181,10 +186,11 @@ class HarnessBridge:
             raise HarnessSetupError(f"{self.harness.value} session could not start: {exc}") from exc
         self._register(session.session_id or "")
         handoff, self._handoff = self._handoff, None
-        if handoff is not None and not getattr(session, "resumed", False):
+        if handoff is not None and not self._handoff_delivered:
             rendered = handoff.render().strip()
             if not text.startswith(rendered):
                 text = f"{rendered}\n\n{text}" if text else rendered
+        self._handoff_delivered = True
         try:
             try:
                 ticket: SubmittedTurn = session.submit(text, key=key)
@@ -228,6 +234,7 @@ class HarnessBridge:
     async def _retire(self, session: HarnessSession, reason: str) -> None:
         if self._session is session:
             self._session = None
+            self._handoff_delivered = False
             self._created_at = None
         self._retire_registration()
         try:
@@ -283,8 +290,17 @@ class HarnessBridge:
             done = self._consume_event(event, turn_id, streamed, on_event=on_event)
             if done is not None:
                 if done.is_error:
+                    detail = next(
+                        (
+                            candidate.strip()
+                            for candidate in (done.stop_reason, done.text)
+                            if candidate and candidate.strip() and candidate.strip() != done.subtype
+                        ),
+                        "",
+                    )
+                    suffix = f": {detail}" if detail else ""
                     raise HarnessTurnFaultedError(
-                        f"{self.harness.value} turn {done.turn_id} failed ({done.subtype})"
+                        f"{self.harness.value} turn {done.turn_id} failed ({done.subtype}){suffix}"
                     )
                 return done
         raise HarnessClosedError(f"harness event stream ended before turn {turn_id} completed")
@@ -298,7 +314,8 @@ class HarnessBridge:
         on_event: Callable[[BridgeEvent], None] | None = None,
     ) -> HarnessTurn | None:
         if isinstance(event, SessionStarted):
-            self._model = event.model
+            if event.model:
+                self._model = event.model
             self._register(event.session_id)
             return None
         if isinstance(event, TurnCompleted):
@@ -309,37 +326,7 @@ class HarnessBridge:
             streamed.setdefault(event.turn_id, []).append(event.text)
         if self._forward(event, turn_id, on_event):
             return None
-        # meiva:note
-        # Only a failure that names this turn can end it. A session-level failure ends
-        # the turn too, but as what it is — the session is gone — and never as this
-        # turn's own verdict; a failure or a report that names another turn is not
-        # ours to act on, and neither is output the provider produced for a turn we
-        # never ran (#5663).
-        # meiva:link base/lm/harness/docs/harness.meiva.okf.md
-        if isinstance(event, TurnFaulted):
-            if event.turn_id == turn_id:
-                raise HarnessTurnFaultedError(event.error)
-            return None
-        if isinstance(event, SessionFailed):
-            raise HarnessClosedError(f"harness session failed: {event.error}")
-        if isinstance(event, UnsolicitedOutput):
-            return None
-        if isinstance(event, SessionFaulted):
-            # meiva:note
-            # The retired shape, emitted by an adapter that has not migrated yet. It
-            # splits the same way: naming a turn is turn-scoped, naming none is the
-            # session's own failure. It is checked last because the two events above
-            # are also instances of it.
-            # meiva:link base/lm/harness/docs/harness.meiva.okf.md
-            if event.turn_id is None:
-                raise HarnessClosedError(f"harness session failed: {event.error}")
-            if event.turn_id == turn_id:
-                raise HarnessTurnFaultedError(event.error)
-            return None
-        if isinstance(event, SessionClosed):
-            raise HarnessClosedError(
-                f"harness session closed before turn {turn_id} completed: {event.reason}"
-            )
+        _raise_if_faulted(event, turn_id)
         return None
 
     def _forward(
@@ -366,6 +353,40 @@ class HarnessBridge:
         return True
 
 
+# meiva:note
+# Only a failure that names this turn can end it. A session-level failure ends
+# the turn too, but as what it is — the session is gone — and never as this
+# turn's own verdict; a failure or a report that names another turn is not
+# ours to act on, and neither is output the provider produced for a turn we
+# never ran (#5663).
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+def _raise_if_faulted(event: BridgeEvent, turn_id: str) -> None:
+    if isinstance(event, TurnFaulted):
+        if event.turn_id == turn_id:
+            raise HarnessTurnFaultedError(event.error)
+        return
+    if isinstance(event, SessionFailed):
+        raise HarnessClosedError(f"harness session failed: {event.error}")
+    if isinstance(event, UnsolicitedOutput):
+        return
+    if isinstance(event, SessionFaulted):
+        # meiva:note
+        # The retired shape, emitted by an adapter that has not migrated yet. It
+        # splits the same way: naming a turn is turn-scoped, naming none is the
+        # session's own failure. It is checked last because the two events above
+        # are also instances of it.
+        # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+        if event.turn_id is None:
+            raise HarnessClosedError(f"harness session failed: {event.error}")
+        if event.turn_id == turn_id:
+            raise HarnessTurnFaultedError(event.error)
+        return
+    if isinstance(event, SessionClosed):
+        raise HarnessClosedError(
+            f"harness session closed before turn {turn_id} completed: {event.reason}"
+        )
+
+
 def _completed(event: CompletedTurnEvent, streamed: str) -> HarnessTurn:
     return HarnessTurn(
         turn_id=event.turn_id,
@@ -375,6 +396,7 @@ def _completed(event: CompletedTurnEvent, streamed: str) -> HarnessTurn:
         subtype=event.subtype,
         is_error=event.is_error,
         interrupted=event.interrupted,
+        stop_reason=getattr(event, "stop_reason", None),
         num_turns=max(int(getattr(event, "num_turns", 1) or 1), 1),
         steps=tuple(getattr(event, "steps", ()) or ()),
     )
