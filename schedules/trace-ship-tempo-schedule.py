@@ -49,4 +49,5 @@ if __name__ == "__main__":
             ship_traces,
             schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
             started_at=datetime.now(UTC),
+            clock=lambda: datetime.now(UTC),
         )

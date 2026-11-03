@@ -9,8 +9,8 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Iterable
-from datetime import UTC, datetime, timedelta
+from collections.abc import Callable, Iterable
+from datetime import datetime, timedelta
 from typing import assert_never
 
 import meiva
@@ -65,13 +65,17 @@ def _read_worker(agent_id: int) -> WorkerRead:
 # Returns the workers that did not finish within `deadline` after being terminated with force.
 # The deadline is measured from the call; `poll_seconds` is the pause between reads.
 def wait_for_workers(
-    worker_ids: Iterable[int], deadline: timedelta, poll_seconds: float
+    worker_ids: Iterable[int],
+    deadline: timedelta,
+    poll_seconds: float,
+    *,
+    clock: Callable[[], datetime],
 ) -> frozenset[int]:
     pending = frozenset(worker_ids)
-    give_up_at = datetime.now(UTC) + deadline
+    give_up_at = clock() + deadline
     while True:
         reads = {agent_id: _read_worker(agent_id) for agent_id in sorted(pending)}
-        step = plan_wait(reads, datetime.now(UTC), give_up_at, poll_seconds)
+        step = plan_wait(reads, clock(), give_up_at, poll_seconds)
         match step:
             case Settled():
                 return frozenset()

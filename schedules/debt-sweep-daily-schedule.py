@@ -49,4 +49,5 @@ if __name__ == "__main__":
                 partial(sweep_day, job=sweep, recipient=recipient, inputs=inputs),
                 schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
                 started_at=now,
+                clock=lambda: datetime.now(UTC),
             )

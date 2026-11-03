@@ -142,7 +142,9 @@ def test_known_workers_are_read_by_id_and_never_by_listing_the_directory(
         gateway.agents[10] = AgentReply("terminated")
         gateway.agents[20] = AgentReply("idling", "done")
 
-        timed_out = wait_for_workers([10, 20], timedelta(seconds=30), 0.01)
+        timed_out = wait_for_workers(
+            [10, 20], timedelta(seconds=30), 0.01, clock=lambda: datetime.now(UTC)
+        )
 
     assert timed_out == frozenset()
     assert {request.path for request in gateway.requests} == {
@@ -160,7 +162,9 @@ def test_a_fresh_worker_without_output_is_not_done_and_is_terminated_at_the_dead
         gateway.agents[20] = AgentReply("running", "a half-finished preamble:")
         gateway.agents[30] = AgentReply("terminated")
 
-        timed_out = wait_for_workers([30, 20, 10], timedelta(0), 0.01)
+        timed_out = wait_for_workers(
+            [30, 20, 10], timedelta(0), 0.01, clock=lambda: datetime.now(UTC)
+        )
 
     assert timed_out == frozenset({10, 20})
     terminations = _requests(gateway, "POST", "/terminate")
@@ -185,7 +189,9 @@ def test_a_worker_that_finishes_while_the_batch_waits_ends_the_wait(
         finisher = threading.Thread(target=finish_after_the_first_read)
         finisher.start()
         try:
-            timed_out = wait_for_workers([10], timedelta(seconds=30), 0.02)
+            timed_out = wait_for_workers(
+                [10], timedelta(seconds=30), 0.02, clock=lambda: datetime.now(UTC)
+            )
         finally:
             finisher.join()
 
@@ -278,7 +284,7 @@ def test_a_week_of_finished_workers_is_audited_and_recorded_without_an_alert(
     with _gateway(*_empty_directory()) as gateway:
         _finished_workers(gateway)
 
-        scoreboard_path = run_weekly_batch(config, _EVEN_WEEK)
+        scoreboard_path = run_weekly_batch(config, _EVEN_WEEK, clock=lambda: datetime.now(UTC))
 
     root = config.root
     assert scoreboard_path == root / "results" / "scoreboard-2026-36.json"
@@ -328,7 +334,7 @@ def test_workers_that_outlive_the_deadline_are_terminated_scored_zero_and_wake_t
         gateway.spawned_agent_id = _FIRST_WORKER
         gateway.agents.update(dict.fromkeys(range(_FIRST_WORKER, 540), AgentReply("running")))
 
-        scoreboard_path = run_weekly_batch(config, _EVEN_WEEK)
+        scoreboard_path = run_weekly_batch(config, _EVEN_WEEK, clock=lambda: datetime.now(UTC))
 
     scoreboard = json.loads(scoreboard_path.read_text(encoding="utf-8"))
     assert scoreboard["alerted"] is True
@@ -356,7 +362,7 @@ def test_a_case_whose_workers_cannot_be_spawned_is_recorded_and_the_week_is_aler
     with _gateway(
         *_empty_directory(owner_page), refuse=frozenset({"/api/keyed/v1/agents"})
     ) as gateway:
-        scoreboard_path = run_weekly_batch(config, _EVEN_WEEK)
+        scoreboard_path = run_weekly_batch(config, _EVEN_WEEK, clock=lambda: datetime.now(UTC))
 
     scoreboard = json.loads(scoreboard_path.read_text(encoding="utf-8"))
     assert scoreboard["alerted"] is True
@@ -394,7 +400,7 @@ def test_a_marker_left_by_a_dead_batch_is_recorded_its_workers_terminated_and_th
         gateway.agents[101] = AgentReply("running")
         gateway.agents[102] = AgentReply("idling")
 
-        run_weekly_batch(config, _EVEN_WEEK)
+        run_weekly_batch(config, _EVEN_WEEK, clock=lambda: datetime.now(UTC))
 
     index_path = config.root / "results" / "index.jsonl"
     aborted, week = (json.loads(line) for line in index_path.read_text().splitlines())
@@ -431,7 +437,7 @@ def test_a_batch_that_raises_is_indexed_wakes_the_owner_and_leaves_its_marker(
     ) as gateway:
         _finished_workers(gateway)
 
-        fire_weekly_batch(_EVEN_WEEK, None, config=config)
+        fire_weekly_batch(_EVEN_WEEK, None, config=config, clock=lambda: datetime.now(UTC))
 
     marker = json.loads((config.root / "cases" / ".batch.json").read_text())
     assert marker["probe_ids"][0] == _FIRST_WORKER
@@ -455,7 +461,7 @@ def test_an_owner_that_cannot_be_woken_does_not_hide_the_batch_failure(
     ) as gateway:
         _finished_workers(gateway)
 
-        fire_weekly_batch(_EVEN_WEEK, None, config=config)
+        fire_weekly_batch(_EVEN_WEEK, None, config=config, clock=lambda: datetime.now(UTC))
 
     out = capsys.readouterr().out
     assert "adversarial-eval owner alert failed" in out
@@ -474,7 +480,7 @@ def test_the_batch_runs_once_inside_the_durable_claim(
     config = _config(tmp_path)
     slot = datetime(2026, 8, 26, 4, 0, tzinfo=UTC)
     schedule_id = insert_schedule(db_conn, name="adversarial-claim", created_at=slot)
-    fire = partial(fire_weekly_batch, config=config)
+    fire = partial(fire_weekly_batch, config=config, clock=lambda: datetime.now(UTC))
     with _gateway(*_empty_directory()) as gateway:
         _finished_workers(gateway)
 

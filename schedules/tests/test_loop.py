@@ -323,6 +323,7 @@ def _run_until_killed(
         fire,
         schedule_id=schedule_id,
         started_at=started_at,
+        clock=lambda: datetime.now(UTC),
     )
 
 

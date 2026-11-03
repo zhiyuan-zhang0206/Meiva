@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import shutil
 import traceback
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -204,7 +204,9 @@ def _judge(
             assert_never(case)
 
 
-def run_weekly_batch(config: BatchConfig, started_at: datetime) -> Path:
+def run_weekly_batch(
+    config: BatchConfig, started_at: datetime, *, clock: Callable[[], datetime]
+) -> Path:
     week = batch_week(started_at)
     subset = select_case_ids(week.number)
     cases_root = config.root / "cases"
@@ -226,7 +228,9 @@ def run_weekly_batch(config: BatchConfig, started_at: datetime) -> Path:
         worker_to_case = {
             agent_id: case.case_id for case in prepared for agent_id in worker_ids(case)
         }
-        timed_out = wait_for_workers(worker_to_case, config.deadline, config.poll_seconds)
+        timed_out = wait_for_workers(
+            worker_to_case, config.deadline, config.poll_seconds, clock=clock
+        )
         timeout_cases = {worker_to_case[agent_id] for agent_id in timed_out}
         audit_counts = server.counts()
         spawners = child_spawners_of(worker_to_case)
@@ -253,9 +257,11 @@ def run_weekly_batch(config: BatchConfig, started_at: datetime) -> Path:
 # meiva:note
 # A batch that raised is recorded in the index and the owner is woken; the claimed slot is not
 # retried. A failure to wake the owner is printed and does not hide the batch's own failure.
-def fire_weekly_batch(slot: datetime, _payload: str | None, *, config: BatchConfig) -> None:
+def fire_weekly_batch(
+    slot: datetime, _payload: str | None, *, config: BatchConfig, clock: Callable[[], datetime]
+) -> None:
     try:
-        run_weekly_batch(config, slot)
+        run_weekly_batch(config, slot, clock=clock)
     except Exception as exc:
         detail = "".join(traceback.format_exception(exc))
         index_path = _append_index(config.root, error_line(slot, detail))
