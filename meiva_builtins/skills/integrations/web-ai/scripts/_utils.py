@@ -1,11 +1,10 @@
 # meiva:note
-# The effects around where a web-ai child run lands its files: the places it lands them in, handed in by the child's entry script (the composition root that reads both homes and calls `system_places`), creating a capability's landing directory, and reading the clock for the run stamp. The naming itself is `_landing`.
+# The effects around where a web-ai child run lands its files: the places it lands them in, handed in by the child's entry script (the composition root that reads both homes and calls `system_places`), and creating a capability's landing directory. The naming itself is `_landing`; the instant a run is named by is read in the entry and reaches it as a value.
 from __future__ import annotations
 
-import datetime as _dt
 from pathlib import Path
 
-from _landing import Places, capability_dir, format_stamp
+from _landing import Places, capability_dir
 
 
 # meiva:note
@@ -20,9 +19,3 @@ def downloads_root(capability: str, *, places: Places) -> Path:
     root = capability_dir(places, capability)
     root.mkdir(parents=True, exist_ok=True)
     return root
-
-
-# meiva:note
-# The local-time `YYYYmmdd-HHMMSS` stamp for naming a run's output directory, read from the clock now.
-def now_stamp() -> str:
-    return format_stamp(_dt.datetime.now().astimezone())

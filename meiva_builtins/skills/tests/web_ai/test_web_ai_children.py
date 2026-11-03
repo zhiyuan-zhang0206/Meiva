@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import re
+import time
 from pathlib import Path
 
 import pytest
@@ -28,6 +30,11 @@ generate = load_skill_script(
 )
 
 CONVERSATION = "https://chatgpt.com/c/abc"
+
+# meiva:note
+# The clock the tests hand the children: the real monotonic clock, since nothing here waits out
+# a deadline that matters.
+CLOCK = time.monotonic
 
 
 def test_research_slug_keeps_the_first_words_of_the_report() -> None:
@@ -65,7 +72,7 @@ def test_research_reply_types_the_answer_into_the_conversation_and_keeps_the_tab
     )
     args = argparse.Namespace(site="chatgpt", prompt="focus on 2025", url=CONVERSATION)
 
-    result = research.cmd_reply(args)
+    result = research.cmd_reply(args, clock=CLOCK)
 
     assert result == {
         "site": "chatgpt",
@@ -74,6 +81,13 @@ def test_research_reply_types_the_answer_into_the_conversation_and_keeps_the_tab
         "state": "replied",
     }
     assert chrome.tabs[2].typed == "focus on 2025" and chrome.tabs[2].submitted
+
+
+# meiva:note
+# The run stamp moved from the shared helper into each child's entry (the entry is the only
+# place allowed to read the wall clock); this keeps the shape test that used to sit on the helper.
+def test_the_run_stamp_is_a_sortable_local_time_stamp() -> None:
+    assert re.fullmatch(r"\d{8}-\d{6}", generate._run_stamp())
 
 
 def test_generate_slug_defaults_to_media() -> None:

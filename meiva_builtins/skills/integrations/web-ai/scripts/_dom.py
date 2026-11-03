@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import shutil
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from _landing import DownloadEntry, download_settled, newest_new_download
@@ -55,21 +55,22 @@ def _size(path: Path) -> int | None:
 
 
 # meiva:note
-# Click a control that triggers a browser download and collect the landed file from `downloads` into `dest` (the full target path). The browser carries the session auth that a bare fetch of the asset URL does not. Returns None when the control was not found or no file landed in time; an in-flight download sits at .crdownload, so a suffix filter only sees completed files.
+# Click a control that triggers a browser download and collect the landed file from `downloads` into `dest` (the full target path), counting the timeout on the run's `clock`, which the entry handed up. The browser carries the session auth that a bare fetch of the asset URL does not. Returns None when the control was not found or no file landed in time; an in-flight download sits at .crdownload, so a suffix filter only sees completed files.
 def download_by_click(
     texts: Sequence[str],
     *,
     dest: Path,
     suffixes: Sequence[str],
     downloads: Path,
+    clock: Callable[[], float],
     timeout: float = 60.0,
     pace: Pacing = STANDARD_PACE,
 ) -> Path | None:
     before = {entry.name for entry in _entries(downloads, suffixes)}
     if not click_by_text(texts):
         return None
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+    deadline = clock() + timeout
+    while clock() < deadline:
         time.sleep(pace.download_poll)
         newest = newest_new_download(before, _entries(downloads, suffixes))
         if newest is None:

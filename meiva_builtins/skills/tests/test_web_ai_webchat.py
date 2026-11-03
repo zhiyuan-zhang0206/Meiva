@@ -2,7 +2,7 @@
 # Tests of the shell of the web-ai shared driver (meiva_builtins/skills/integrations/web-ai/scripts/webchat.py), run against a stand-in browser behind a real MCP daemon socket (`web_ai/chrome_stand_in.py`). Every navigation must open its OWN fresh tab, a finished ask closes its tab, and a failure anywhere after a tab opened closes it too. The decisions the shell executes are pure modules, tested with plain values in `web_ai/test_web_ai_decisions.py`.
 from __future__ import annotations
 
-import re
+import time
 from pathlib import Path
 
 import pytest
@@ -48,6 +48,12 @@ FAST = M.pacing.Pacing(
 
 
 # meiva:note
+# The clock every test hands the driver: the real monotonic clock, since only the deadlines
+# (a fraction of a second) are ever waited out. The driver reads none by itself.
+CLOCK = time.monotonic
+
+
+# meiva:note
 # A page that streams two texts with the stop control up, then holds the final one with the control gone, and lands on a conversation URL once the prompt is submitted.
 def answering(final: str = "final answer", url: str = CONVERSATION) -> PageScript:
     return PageScript(after_submit_url=url, answers=("partial", final), stops=(True, False))
@@ -78,10 +84,6 @@ def test_system_places_carry_the_homes_they_are_given(tmp_path: Path) -> None:
     places = M.utils.system_places(tmp_path / "given-home", tmp_path / "given-user-home")
     assert places.home == tmp_path / "given-home"
     assert places.downloads == tmp_path / "given-user-home" / "Downloads"
-
-
-def test_now_stamp_is_a_sortable_local_time_stamp() -> None:
-    assert re.fullmatch(r"\d{8}-\d{6}", M.utils.now_stamp())
 
 
 def test_navigate_opens_new_tab_not_navigate_page(serve_chrome: ServeChrome) -> None:
@@ -115,7 +117,7 @@ def test_select_activates_tab(serve_chrome: ServeChrome) -> None:
 def test_open_chat_returns_owned_page_id(serve_chrome: ServeChrome) -> None:
     chrome = browser(serve_chrome)
 
-    assert webchat.open_chat("chatgpt", pace=FAST) == 2
+    assert webchat.open_chat("chatgpt", pace=FAST, clock=CLOCK) == 2
 
     assert sorted(chrome.tabs) == [1, 2]
     assert chrome.tabs[2].location == webchat.site("chatgpt").new_chat_url
@@ -131,7 +133,7 @@ def test_open_chat_signs_in_through_google_when_the_page_shows_a_wall(
     )
     chrome = browser(serve_chrome, {CHATGPT: wall})
 
-    assert webchat.open_chat("chatgpt", pace=FAST) == 2
+    assert webchat.open_chat("chatgpt", pace=FAST, clock=CLOCK) == 2
 
     assert chrome.tabs[2].composer
     assert "click 2 1_1" in chrome.events
@@ -143,7 +145,7 @@ def test_open_chat_closes_its_tab_when_no_sign_in_path_works(serve_chrome: Serve
     )
 
     with pytest.raises(RuntimeError, match="ChatGPT: not logged in"):
-        webchat.open_chat("chatgpt", pace=FAST)
+        webchat.open_chat("chatgpt", pace=FAST, clock=CLOCK)
 
     assert sorted(chrome.tabs) == [1]
 
@@ -152,7 +154,7 @@ def test_open_chat_reports_selector_drift_and_closes_its_tab(serve_chrome: Serve
     chrome = browser(serve_chrome, {CHATGPT: PageScript(composer=False, snapshot="nothing known")})
 
     with pytest.raises(RuntimeError, match=r"composer not found at https://chatgpt.com/"):
-        webchat.open_chat("chatgpt", pace=FAST)
+        webchat.open_chat("chatgpt", pace=FAST, clock=CLOCK)
 
     assert sorted(chrome.tabs) == [1]
 
@@ -165,7 +167,7 @@ def test_open_chat_closes_its_tab_when_the_browser_fails_mid_wait(
     chrome = serve_chrome(StandInChrome(js=M.js, profiles={}))
 
     with pytest.raises(meiva.mcps.MCPCallError, match="no site profile"):
-        webchat.open_chat("chatgpt", pace=FAST)
+        webchat.open_chat("chatgpt", pace=FAST, clock=CLOCK)
 
     assert sorted(chrome.tabs) == [1]
 
@@ -247,7 +249,7 @@ def test_submit_falls_back_to_enter_and_raises_without_any_target(
 def test_ask_one_shot_closes_owned_tab(serve_chrome: ServeChrome) -> None:
     chrome = browser(serve_chrome, {CHATGPT: answering()})
 
-    r = webchat.ask("chatgpt", "hello", timeout=5.0, pace=FAST)
+    r = webchat.ask("chatgpt", "hello", timeout=5.0, pace=FAST, clock=CLOCK)
 
     assert r["tab_kept"] is False
     assert sorted(chrome.tabs) == [1]
@@ -259,14 +261,14 @@ def test_ask_one_shot_closes_owned_tab(serve_chrome: ServeChrome) -> None:
 
 def test_ask_types_the_prompt_into_the_fresh_chat(serve_chrome: ServeChrome) -> None:
     chrome = browser(serve_chrome, {CHATGPT: answering()})
-    webchat.ask("chatgpt", "hello", keep_tab=True, timeout=5.0, pace=FAST)
+    webchat.ask("chatgpt", "hello", keep_tab=True, timeout=5.0, pace=FAST, clock=CLOCK)
     assert chrome.tabs[2].typed == "hello"
 
 
 def test_ask_keep_tab_leaves_tab_open(serve_chrome: ServeChrome) -> None:
     chrome = browser(serve_chrome, {CHATGPT: answering()})
 
-    r = webchat.ask("chatgpt", "hello", keep_tab=True, timeout=5.0, pace=FAST)
+    r = webchat.ask("chatgpt", "hello", keep_tab=True, timeout=5.0, pace=FAST, clock=CLOCK)
 
     assert sorted(chrome.tabs) == [1, 2]
     assert r["tab_kept"] is True
@@ -277,7 +279,7 @@ def test_ask_keep_tab_leaves_tab_open(serve_chrome: ServeChrome) -> None:
 def test_ask_wait_false_always_keeps_tab(serve_chrome: ServeChrome) -> None:
     chrome = browser(serve_chrome, {CHATGPT: answering()})
 
-    r = webchat.ask("chatgpt", "hello", wait=False, pace=FAST)
+    r = webchat.ask("chatgpt", "hello", wait=False, pace=FAST, clock=CLOCK)
 
     assert sorted(chrome.tabs) == [1, 2]
     assert r["tab_kept"] is True and r["answer"] == "" and r["complete"] is False
@@ -288,7 +290,7 @@ def test_ask_returns_the_partial_answer_when_the_wait_times_out(serve_chrome: Se
     streaming = PageScript(after_submit_url=CONVERSATION, answers=("still going",), stops=(True,))
     chrome = browser(serve_chrome, {CHATGPT: streaming})
 
-    r = webchat.ask("chatgpt", "hello", timeout=0.1, pace=FAST)
+    r = webchat.ask("chatgpt", "hello", timeout=0.1, pace=FAST, clock=CLOCK)
 
     assert r["answer"] == "still going" and r["complete"] is False
     assert sorted(chrome.tabs) == [1]
@@ -299,7 +301,9 @@ def test_ask_returns_the_partial_answer_when_the_wait_times_out(serve_chrome: Se
 def test_ask_continue_url_closes_its_own_tab(serve_chrome: ServeChrome) -> None:
     chrome = browser(serve_chrome, {CHATGPT: PageScript(), CONVERSATION: answering()})
 
-    r = webchat.ask("chatgpt", "follow up", conversation_url=CONVERSATION, timeout=5.0, pace=FAST)
+    r = webchat.ask(
+        "chatgpt", "follow up", conversation_url=CONVERSATION, timeout=5.0, pace=FAST, clock=CLOCK
+    )
 
     assert chrome.events[0] == f"new_page {CONVERSATION}"
     assert sorted(chrome.tabs) == [1]
@@ -312,7 +316,9 @@ def test_ask_refuses_a_conversation_url_on_another_host_before_opening_a_tab(
     chrome = browser(serve_chrome)
 
     with pytest.raises(ValueError, match=r"refusing to navigate to non-chatgpt\.com URL"):
-        webchat.ask("chatgpt", "hi", conversation_url="https://evil.example/c/abc", pace=FAST)
+        webchat.ask(
+            "chatgpt", "hi", conversation_url="https://evil.example/c/abc", pace=FAST, clock=CLOCK
+        )
 
     assert chrome.events == []
 
@@ -323,7 +329,7 @@ def test_ask_closes_the_tab_when_the_conversation_has_no_composer(
     chrome = browser(serve_chrome, {CONVERSATION: PageScript(composer=False)})
 
     with pytest.raises(RuntimeError, match=r"composer not found at https://chatgpt\.com/c/abc"):
-        webchat.ask("chatgpt", "hi", conversation_url=CONVERSATION, pace=FAST)
+        webchat.ask("chatgpt", "hi", conversation_url=CONVERSATION, pace=FAST, clock=CLOCK)
 
     assert sorted(chrome.tabs) == [1]
 
@@ -334,7 +340,7 @@ def test_ask_closes_owned_tab_when_wait_raises(serve_chrome: ServeChrome) -> Non
     chrome = browser(serve_chrome, {CHATGPT: PageScript(answer_fails=True)})
 
     with pytest.raises(meiva.mcps.MCPCallError, match="stopped answering"):
-        webchat.ask("chatgpt", "hello", timeout=5.0, pace=FAST)
+        webchat.ask("chatgpt", "hello", timeout=5.0, pace=FAST, clock=CLOCK)
 
     assert sorted(chrome.tabs) == [1]
 
@@ -347,7 +353,7 @@ def test_ask_wait_false_closes_the_tab_when_the_url_cannot_be_read(
     chrome = browser(serve_chrome, {CHATGPT: PageScript(location_fails=True)})
 
     with pytest.raises(meiva.mcps.MCPCallError, match="the tab is gone"):
-        webchat.ask("chatgpt", "hello", wait=False, pace=FAST)
+        webchat.ask("chatgpt", "hello", wait=False, pace=FAST, clock=CLOCK)
 
     assert sorted(chrome.tabs) == [1]
 
@@ -358,7 +364,7 @@ def test_start_closes_tab_when_submit_raises(serve_chrome: ServeChrome) -> None:
     chrome = browser(serve_chrome, {CHATGPT: PageScript(send="none")})
 
     with pytest.raises(RuntimeError, match="could not submit"):
-        webchat.ask("chatgpt", "hello", pace=FAST)
+        webchat.ask("chatgpt", "hello", pace=FAST, clock=CLOCK)
 
     assert sorted(chrome.tabs) == [1]
 
@@ -368,14 +374,14 @@ def test_wait_until_idle_settles_on_the_final_answer(serve_chrome: ServeChrome) 
     webchat.navigate(CHATGPT)
     webchat.submit("chatgpt")
 
-    answer = webchat.wait_until_idle("chatgpt", timeout=5.0, pace=FAST)
+    answer = webchat.wait_until_idle("chatgpt", timeout=5.0, pace=FAST, clock=CLOCK)
 
     assert (answer.text, answer.complete) == ("final answer", True)
 
 
 def test_wait_many_idle_empty_is_noop(serve_chrome: ServeChrome) -> None:
     chrome = browser(serve_chrome)
-    assert webchat.wait_many_idle({}, timeout=1.0, pace=FAST) == {}
+    assert webchat.wait_many_idle({}, timeout=1.0, pace=FAST, clock=CLOCK) == {}
     assert chrome.events == []
 
 
@@ -395,6 +401,7 @@ def test_wait_many_idle_polls_each_tab_under_its_own_selection(serve_chrome: Ser
         {"A": M.idle.Tab("chatgpt", first), "B": M.idle.Tab("gemini", second)},
         timeout=5.0,
         pace=FAST,
+        clock=CLOCK,
     )
 
     assert (out["A"].text, out["A"].complete) == ("ans-chatgpt", True)
@@ -409,7 +416,9 @@ def test_wait_many_idle_returns_partial_on_timeout(serve_chrome: ServeChrome) ->
     webchat.submit("chatgpt")
     assert page_id is not None
 
-    out = webchat.wait_many_idle({"A": M.idle.Tab("chatgpt", page_id)}, timeout=-1.0, pace=FAST)
+    out = webchat.wait_many_idle(
+        {"A": M.idle.Tab("chatgpt", page_id)}, timeout=-1.0, pace=FAST, clock=CLOCK
+    )
 
     assert (out["A"].text, out["A"].complete) == ("still going", False)
 
@@ -426,7 +435,9 @@ def test_ask_many_sets_up_all_tabs_before_waiting(serve_chrome: ServeChrome) -> 
         {CHATGPT: answering("A-chatgpt", "https://chatgpt.com/c/1"), GEMINI: answering("A-gemini")},
     )
 
-    rows = webchat.ask_many([_spec("chatgpt"), _spec("gemini")], timeout=10.0, pace=FAST)
+    rows = webchat.ask_many(
+        [_spec("chatgpt"), _spec("gemini")], timeout=10.0, pace=FAST, clock=CLOCK
+    )
 
     submits = [i for i, e in enumerate(chrome.events) if e.startswith("submit ")]
     reads = [i for i, e in enumerate(chrome.events) if e.startswith("answer ")]
@@ -449,7 +460,10 @@ def test_ask_many_setup_failure_isolated_to_its_row(serve_chrome: ServeChrome) -
     )
 
     rows = webchat.ask_many(
-        [_spec("chatgpt"), _spec("gemini"), _spec("claude")], timeout=10.0, pace=FAST
+        [_spec("chatgpt"), _spec("gemini"), _spec("claude")],
+        timeout=10.0,
+        pace=FAST,
+        clock=CLOCK,
     )
 
     assert [r["site"] for r in rows] == ["chatgpt", "gemini", "claude"]
@@ -462,7 +476,7 @@ def test_ask_many_setup_failure_isolated_to_its_row(serve_chrome: ServeChrome) -
 def test_ask_many_none_page_id_becomes_error_row(serve_chrome: ServeChrome) -> None:
     browser(serve_chrome, {CHATGPT: answering()}, marks_selected=False)
 
-    rows = webchat.ask_many([_spec("chatgpt")], timeout=10.0, pace=FAST)
+    rows = webchat.ask_many([_spec("chatgpt")], timeout=10.0, pace=FAST, clock=CLOCK)
 
     assert "page-list format drift" in rows[0].get("error", "")
 
@@ -471,7 +485,7 @@ def test_ask_many_unknown_site_raises_before_any_tab_opens(serve_chrome: ServeCh
     chrome = browser(serve_chrome)
 
     with pytest.raises(ValueError, match="unknown site 'bard'"):
-        webchat.ask_many([_spec("bard")], timeout=10.0, pace=FAST)
+        webchat.ask_many([_spec("bard")], timeout=10.0, pace=FAST, clock=CLOCK)
 
     assert chrome.events == []
 
@@ -479,7 +493,7 @@ def test_ask_many_unknown_site_raises_before_any_tab_opens(serve_chrome: ServeCh
 def test_ask_many_keep_tab_leaves_tabs_open(serve_chrome: ServeChrome) -> None:
     chrome = browser(serve_chrome, {CHATGPT: answering()})
 
-    rows = webchat.ask_many([_spec("chatgpt")], timeout=10.0, keep_tab=True, pace=FAST)
+    rows = webchat.ask_many([_spec("chatgpt")], timeout=10.0, keep_tab=True, pace=FAST, clock=CLOCK)
 
     assert sorted(chrome.tabs) == [1, 2]
     assert rows[0].get("tab_kept") is True
@@ -491,7 +505,7 @@ def test_ask_many_closes_live_tabs_when_wait_raises(serve_chrome: ServeChrome) -
     chrome = browser(serve_chrome, {CHATGPT: answering(), GEMINI: PageScript(answer_fails=True)})
 
     with pytest.raises(meiva.mcps.MCPCallError, match="stopped answering"):
-        webchat.ask_many([_spec("chatgpt"), _spec("gemini")], timeout=10.0, pace=FAST)
+        webchat.ask_many([_spec("chatgpt"), _spec("gemini")], timeout=10.0, pace=FAST, clock=CLOCK)
 
     assert sorted(chrome.tabs) == [1]
     assert sorted(e for e in chrome.events if e.startswith("close_page")) == [
@@ -512,7 +526,7 @@ def test_ask_many_mid_loop_raise_closes_rest_exactly_once(serve_chrome: ServeChr
     )
 
     with pytest.raises(meiva.mcps.MCPCallError, match="the tab is gone"):
-        webchat.ask_many([_spec("chatgpt"), _spec("gemini")], timeout=10.0, pace=FAST)
+        webchat.ask_many([_spec("chatgpt"), _spec("gemini")], timeout=10.0, pace=FAST, clock=CLOCK)
 
     closes = [e for e in chrome.events if e.startswith("close_page")]
     assert sorted(closes) == ["close_page 2", "close_page 3"]
@@ -524,7 +538,7 @@ def test_check_login_detects_login_indicators(serve_chrome: ServeChrome) -> None
         serve_chrome, {CHATGPT: PageScript(composer=False, snapshot="Log in to ChatGPT")}
     )
 
-    assert webchat.check_login("chatgpt", pace=FAST) is False
+    assert webchat.check_login("chatgpt", pace=FAST, clock=CLOCK) is False
 
     assert sorted(chrome.tabs) == [1]
 
@@ -532,7 +546,7 @@ def test_check_login_detects_login_indicators(serve_chrome: ServeChrome) -> None
 def test_check_login_confirms_logged_in_when_composer_present(serve_chrome: ServeChrome) -> None:
     chrome = browser(serve_chrome)
 
-    assert webchat.check_login("chatgpt", pace=FAST) is True
+    assert webchat.check_login("chatgpt", pace=FAST, clock=CLOCK) is True
 
     assert sorted(chrome.tabs) == [1]
 
@@ -550,7 +564,7 @@ def test_attach_file_walks_the_attach_path_and_hands_over_the_file(
     chrome = browser(serve_chrome, {CHATGPT: PageScript(snapshot=_ATTACH_MENU)})
     webchat.navigate(CHATGPT)
 
-    webchat.attach_file("chatgpt", note, pace=FAST)
+    webchat.attach_file("chatgpt", note, pace=FAST, clock=CLOCK)
 
     assert chrome.tabs[2].uploads == ["note.txt"]
     assert "click 2 a1" in chrome.events
@@ -562,7 +576,7 @@ def test_attach_file_raises_for_a_missing_file_without_touching_the_browser(
     chrome = browser(serve_chrome)
 
     with pytest.raises(FileNotFoundError, match="attachment not found"):
-        webchat.attach_file("chatgpt", tmp_path / "absent.txt", pace=FAST)
+        webchat.attach_file("chatgpt", tmp_path / "absent.txt", pace=FAST, clock=CLOCK)
 
     assert chrome.events == []
 
@@ -576,7 +590,7 @@ def test_attach_file_names_the_control_it_could_not_find(
     webchat.navigate(CHATGPT)
 
     with pytest.raises(RuntimeError, match=r"could not find \('Add files and more',\)"):
-        webchat.attach_file("chatgpt", note, pace=FAST)
+        webchat.attach_file("chatgpt", note, pace=FAST, clock=CLOCK)
 
 
 def _export_page(downloads: Path, *, saves: bool = True) -> PageScript:
@@ -601,6 +615,7 @@ def test_download_by_click_moves_the_new_file_to_dest(
         downloads=downloads,
         timeout=2.0,
         pace=FAST,
+        clock=CLOCK,
     )
 
     assert got == dest and dest.read_text(encoding="utf-8") == "downloaded"
@@ -621,6 +636,7 @@ def test_download_by_click_is_none_when_the_control_is_missing(
         suffixes=(".md",),
         downloads=downloads,
         pace=FAST,
+        clock=CLOCK,
     )
 
     assert got is None
@@ -642,6 +658,7 @@ def test_download_by_click_is_none_when_no_new_file_lands_in_time(
         downloads=downloads,
         timeout=0.1,
         pace=FAST,
+        clock=CLOCK,
     )
 
     assert got is None

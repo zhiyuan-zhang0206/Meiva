@@ -32,6 +32,8 @@ import re
 import subprocess
 import sys
 import time
+from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any, TypeGuard
 
@@ -266,7 +268,7 @@ def _assert_media_bytes(path: Path) -> None:
 
 
 def _browser_download_video(
-    dest_dir: Path, *, downloads: Path, timeout: float = 60.0
+    dest_dir: Path, *, downloads: Path, clock: Callable[[], float], timeout: float = 60.0
 ) -> Path | None:
     """Click the player's own download control and collect the landed file —
     the browser carries the session auth that a bare curl on the asset URL does
@@ -276,6 +278,7 @@ def _browser_download_video(
         dest=dest_dir / "video.mp4",
         suffixes=(".mp4",),
         downloads=downloads,
+        clock=clock,
         timeout=timeout,
     )
 
@@ -301,14 +304,19 @@ def _attempt_image(src: str, dest_dir: Path) -> tuple[str | None, str | None]:
 
 
 def _attempt_video(
-    src: str | None, download: str | None, dest_dir: Path, downloads: Path
+    src: str | None,
+    download: str | None,
+    dest_dir: Path,
+    downloads: Path,
+    *,
+    clock: Callable[[], float],
 ) -> tuple[str | None, str | None]:
     """Download the video, never raising: returns (path, note).
 
     Order: the player's own download button first (the browser carries the
     session auth — Gemini's asset URL serves an auth interstitial to a bare
     curl), then a direct https fetch validated to be media bytes."""
-    path = _browser_download_video(dest_dir, downloads=downloads)
+    path = _browser_download_video(dest_dir, downloads=downloads, clock=clock)
     if path is not None:
         return str(path), None
     url = next((u for u in (download, src) if u and u.startswith("https://")), None)
@@ -343,8 +351,10 @@ def _close_on_done(
     return result
 
 
-def cmd_image(args: argparse.Namespace, places: webchat.Places) -> dict[str, Any]:
-    page_id = webchat.open_chat(args.site)
+def cmd_image(
+    args: argparse.Namespace, places: webchat.Places, *, clock: Callable[[], float]
+) -> dict[str, Any]:
+    page_id = webchat.open_chat(args.site, clock=clock)
     # Baseline BEFORE submitting: only an img that appears after the prompt can
     # be the generated asset.
     baseline = _image_srcs(min_px=args.min_px)
@@ -368,7 +378,7 @@ def cmd_image(args: argparse.Namespace, places: webchat.Places) -> dict[str, Any
         }
     dest_dir = (
         webchat.downloads_root("media", places=places)
-        / f"{webchat.now_stamp()}-{args.site}-{_slug(args.prompt)}"
+        / f"{_run_stamp()}-{args.site}-{_slug(args.prompt)}"
     )
     dest_dir.mkdir(parents=True, exist_ok=True)
     path, note = _attempt_image(found["src"], dest_dir)
@@ -389,8 +399,10 @@ def cmd_image(args: argparse.Namespace, places: webchat.Places) -> dict[str, Any
     )
 
 
-def cmd_video(args: argparse.Namespace, places: webchat.Places) -> dict[str, Any]:
-    page_id = webchat.open_chat(args.site)
+def cmd_video(
+    args: argparse.Namespace, places: webchat.Places, *, clock: Callable[[], float]
+) -> dict[str, Any]:
+    page_id = webchat.open_chat(args.site, clock=clock)
     prompt = args.prompt if args.raw else _VIDEO_PREFIX + args.prompt
     webchat.inject_prompt(args.site, prompt)
     via = webchat.submit(args.site)
@@ -409,7 +421,9 @@ def cmd_video(args: argparse.Namespace, places: webchat.Places) -> dict[str, Any
             "tab_kept": True,
             "note": "poll with: check --kind video --url <url>",
         }
-    res = _collect_video(args.site, url, timeout=args.timeout, prompt=args.prompt, places=places)
+    res = _collect_video(
+        args.site, url, timeout=args.timeout, prompt=args.prompt, places=places, clock=clock
+    )
     if res["state"] == "done":
         return _close_on_done(page_id, res, keep_tab=args.keep_tab)
     res["tab_kept"] = True  # still pending — keep the tab to poll
@@ -417,7 +431,13 @@ def cmd_video(args: argparse.Namespace, places: webchat.Places) -> dict[str, Any
 
 
 def _collect_video(
-    site: str, url: str, *, timeout: float, prompt: str, places: webchat.Places
+    site: str,
+    url: str,
+    *,
+    timeout: float,
+    prompt: str,
+    places: webchat.Places,
+    clock: Callable[[], float],
 ) -> dict[str, Any]:
     found = _wait_for_video(timeout=timeout)
     if not found.get("src") and not found.get("download"):
@@ -428,11 +448,12 @@ def _collect_video(
             "note": "no video yet; re-run: check --kind video --url <url>",
         }
     dest_dir = (
-        webchat.downloads_root("media", places=places)
-        / f"{webchat.now_stamp()}-{site}-{_slug(prompt)}"
+        webchat.downloads_root("media", places=places) / f"{_run_stamp()}-{site}-{_slug(prompt)}"
     )
     dest_dir.mkdir(parents=True, exist_ok=True)
-    path, note = _attempt_video(found.get("src"), found.get("download"), dest_dir, places.downloads)
+    path, note = _attempt_video(
+        found.get("src"), found.get("download"), dest_dir, places.downloads, clock=clock
+    )
     return {
         "state": "done",
         "kind": "video",
@@ -445,7 +466,9 @@ def _collect_video(
     }
 
 
-def cmd_check(args: argparse.Namespace, places: webchat.Places) -> dict[str, Any]:
+def cmd_check(
+    args: argparse.Namespace, places: webchat.Places, *, clock: Callable[[], float]
+) -> dict[str, Any]:
     webchat.assert_same_site(args.url, args.site)
     page_id = webchat.navigate(args.url)
 
@@ -457,8 +480,7 @@ def cmd_check(args: argparse.Namespace, places: webchat.Places) -> dict[str, Any
         if not found.get("src"):
             return {"state": "running", "kind": "image", "url": args.url, "tab_kept": True}
         dest_dir = (
-            webchat.downloads_root("media", places=places)
-            / f"{webchat.now_stamp()}-{args.site}-image"
+            webchat.downloads_root("media", places=places) / f"{_run_stamp()}-{args.site}-image"
         )
         dest_dir.mkdir(parents=True, exist_ok=True)
         path, note = _attempt_image(found["src"], dest_dir)
@@ -478,11 +500,19 @@ def cmd_check(args: argparse.Namespace, places: webchat.Places) -> dict[str, Any
     found = _find_video_src()
     if not found.get("src") and not found.get("download"):
         return {"state": "running", "kind": "video", "url": args.url, "tab_kept": True}
-    res = _collect_video(args.site, args.url, timeout=1.0, prompt="video", places=places)
+    res = _collect_video(
+        args.site, args.url, timeout=1.0, prompt="video", places=places, clock=clock
+    )
     if res["state"] == "done":
         return _close_on_done(page_id, res, keep_tab=args.keep_tab)
     res["tab_kept"] = True
     return res
+
+
+# meiva:note
+# The local `YYYYmmdd-HHMMSS` stamp a run's output directory is named by. It is read here because this is the entry -- the only place allowed to read the wall clock; every deadline inside the run counts on `time.monotonic`, which `main` hands the driver as its `clock`.
+def _run_stamp() -> str:
+    return webchat.format_stamp(datetime.now().astimezone())
 
 
 def main() -> None:
@@ -548,7 +578,7 @@ def main() -> None:
 
     args = parser.parse_args()
     places = webchat.system_places(resolve_meiva_home(), user_home())
-    print(json.dumps(args.fn(args, places), ensure_ascii=False, indent=2))
+    print(json.dumps(args.fn(args, places, clock=time.monotonic), ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

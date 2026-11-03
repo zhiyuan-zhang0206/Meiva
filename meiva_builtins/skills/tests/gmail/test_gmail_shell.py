@@ -29,8 +29,11 @@ NOW_TS = 1_800_000_000
 _FEED = Path(__file__).resolve().parents[2] / "integrations" / "gmail" / "scripts" / "feed.py"
 
 
-def test_now_iso_ends_with_z() -> None:
-    assert imap.now_iso().endswith("Z")
+# meiva:note
+# The mirror's `fetched_at` stamp is the instant the entry handed down, rendered as ISO-8601
+# UTC -- no clock is read here, so the value is exactly this one.
+def test_the_fetched_at_stamp_renders_the_instant_it_is_given() -> None:
+    assert imap._iso_utc(NOW_TS) == "2027-01-15T08:00:00Z"
 
 
 _SECURITY = """
@@ -329,7 +332,7 @@ def test_a_real_send_without_a_password_fails_before_any_smtp_connection(
     tmp_path: Path,
 ) -> None:
     with pytest.raises(auth.GmailError, match="no Gmail app password"):
-        M.smtp.send(_process(tmp_path).auth, "a@b.com", "Subject", "Body")
+        M.smtp.send(_process(tmp_path).auth, "a@b.com", "Subject", "Body", now_ts=NOW_TS)
 
 
 # meiva:note

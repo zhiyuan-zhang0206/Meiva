@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import datetime as _dt
 import email.utils
 import hashlib
 import imaplib
@@ -16,6 +15,7 @@ import json
 import mimetypes
 import re
 import subprocess
+from datetime import UTC, datetime
 from email.message import EmailMessage
 from email.parser import BytesParser
 from email.policy import default as _default_policy
@@ -38,6 +38,14 @@ from loguru import logger
 
 IMAP_HOST = "imap.gmail.com"
 IMAP_PORT = 993
+
+
+# meiva:note
+# An instant as the ISO-8601 UTC stamp the raw mirror records in `fetched_at`
+# (`2026-06-22T00:00:00Z`); seconds only, so every mirror of one second renders alike.
+def _iso_utc(ts: float) -> str:
+    return datetime.fromtimestamp(ts, tz=UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
 
 # meiva:note
 # Substack and most editorial senders prefix the plaintext body with this line; it carries
@@ -156,10 +164,6 @@ def _headers(auth: AuthSources, uid: bytes) -> EmailMessage:
 def fetch_full(auth: AuthSources, uid: bytes) -> tuple[bytes, EmailMessage]:
     raw = _fetch(auth, uid, "(RFC822)")
     return raw, BytesParser(EmailMessage, policy=_default_policy).parsebytes(raw)
-
-
-def now_iso() -> str:
-    return _dt.datetime.now(tz=_dt.UTC).isoformat().replace("+00:00", "Z")
 
 
 def _canonical_url(text: str) -> str | None:
@@ -314,7 +318,7 @@ def _attachments(msg: EmailMessage, outdir: Path) -> list[dict[str, Any]]:
 # (never-deleted raw) + `post.json` + `post.md` + any attachments under `attachments/`, and
 # returns the curated post dict (with an `attachments` manifest). Body text is the plain part
 # (or stripped html).
-def fetch(auth: AuthSources, message_id: str, *, root: Path) -> dict[str, Any]:
+def fetch(auth: AuthSources, message_id: str, *, root: Path, now_ts: float) -> dict[str, Any]:
     # meiva:note
     # The CLI passes <id>, sync passes the bare id; canonicalize.
     message_id = message_id.strip().strip("<>")
@@ -340,7 +344,7 @@ def fetch(auth: AuthSources, message_id: str, *, root: Path) -> dict[str, Any]:
         "published_at": msg_meta["date"],
         "list_unsubscribe": (msg["List-Unsubscribe"] or "").strip() or None,
         "attachments": _attachments(msg, outdir),
-        "fetched_at": now_iso(),
+        "fetched_at": _iso_utc(now_ts),
         "fetched_via": "gmail",
     }
     save(post, raw, root=root)
@@ -429,6 +433,7 @@ def sync(
     list_id: str,
     *,
     root: Path,
+    now_ts: float,
     since_ts: int | None = None,
     limit: int | None = None,
     matrix_entity: str | None = None,
@@ -438,6 +443,6 @@ def sync(
         mid = it["message_id"]
         if not mid:
             continue
-        post = _load_if_mirrored(mid, root=root) or fetch(auth, mid, root=root)
+        post = _load_if_mirrored(mid, root=root) or fetch(auth, mid, root=root, now_ts=now_ts)
         out.append(to_s1(post, root=root, matrix_entity=matrix_entity))
     return out

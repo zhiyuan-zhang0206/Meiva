@@ -16,7 +16,7 @@ import email.utils
 import imaplib
 import mimetypes
 import smtplib
-import time
+from datetime import UTC, datetime
 from email.message import EmailMessage
 from functools import cache as _cache
 from pathlib import Path
@@ -55,13 +55,15 @@ def _attach_files(msg: EmailMessage, paths: list[str]) -> None:
 
 # meiva:note
 # Build an EmailMessage (plain text, plus any file attachments) from the authenticated
-# account.
+# account, stamped with `now_ts` -- the instant the entry read once and handed down, so the
+# Date header and the draft's internaldate are the same instant as the rest of the run.
 def _compose(
     auth: AuthSources,
     *,
     to: list[str],
     subject: str,
     body: str,
+    now_ts: float,
     cc: list[str] | None = None,
     in_reply_to: str | None = None,
     references: str | None = None,
@@ -74,7 +76,7 @@ def _compose(
     if cc:
         msg["Cc"] = ", ".join(cc)
     msg["Subject"] = subject
-    msg["Date"] = email.utils.formatdate(localtime=True)
+    msg["Date"] = email.utils.format_datetime(datetime.fromtimestamp(now_ts, tz=UTC))
     msg["Message-Id"] = email.utils.make_msgid(domain=acct.rsplit("@", 1)[-1])
     if in_reply_to:
         msg["In-Reply-To"] = in_reply_to
@@ -119,13 +121,20 @@ def send(
     cc: str | list[str] | None = None,
     attach: list[str] | None = None,
     dry_run: bool = False,
+    now_ts: float,
 ) -> dict[str, Any]:
     to_list = recipient_list(to)
     if not to_list:
         raise GmailInputError("send needs at least one recipient")
     cc_list = recipient_list(cc)
     msg = _compose(
-        auth, to=to_list, subject=subject, body=body, cc=cc_list or None, attachments=attach
+        auth,
+        to=to_list,
+        subject=subject,
+        body=body,
+        now_ts=now_ts,
+        cc=cc_list or None,
+        attachments=attach,
     )
     if not dry_run:
         _smtp_send(auth, msg)
@@ -157,6 +166,7 @@ def reply(
     reply_all: bool = False,
     attach: list[str] | None = None,
     dry_run: bool = False,
+    now_ts: float,
 ) -> dict[str, Any]:
     orig = _original(auth, message_id)
     plan = plan_reply(orig, message_id, account(auth), reply_all)
@@ -165,6 +175,7 @@ def reply(
         to=list(plan.to),
         subject=plan.subject,
         body=body,
+        now_ts=now_ts,
         cc=list(plan.cc) or None,
         in_reply_to=plan.in_reply_to,
         references=plan.references,
@@ -203,6 +214,7 @@ def forward(
     cc: str | list[str] | None = None,
     attach: list[str] | None = None,
     dry_run: bool = False,
+    now_ts: float,
 ) -> dict[str, Any]:
     to_list = recipient_list(to)
     if not to_list:
@@ -216,6 +228,7 @@ def forward(
         to=to_list,
         subject=plan.subject,
         body=plan.body,
+        now_ts=now_ts,
         cc=cc_list or None,
         attachments=attach,
     )
@@ -253,18 +266,25 @@ def draft(
     cc: str | list[str] | None = None,
     attach: list[str] | None = None,
     dry_run: bool = False,
+    now_ts: float,
 ) -> dict[str, Any]:
     to_list = recipient_list(to)
     if not to_list:
         raise GmailInputError("draft needs at least one recipient")
     cc_list = recipient_list(cc)
     msg = _compose(
-        auth, to=to_list, subject=subject, body=body, cc=cc_list or None, attachments=attach
+        auth,
+        to=to_list,
+        subject=subject,
+        body=body,
+        now_ts=now_ts,
+        cc=cc_list or None,
+        attachments=attach,
     )
     if not dry_run:
         folder = _drafts_folder(auth)
         typ, data = connection(auth).append(
-            f'"{folder}"', r"(\Draft)", imaplib.Time2Internaldate(time.time()), msg.as_bytes()
+            f'"{folder}"', r"(\Draft)", imaplib.Time2Internaldate(now_ts), msg.as_bytes()
         )
         if typ != "OK":
             raise GmailError(f"APPEND to {folder!r} failed (typ={typ}): {data!r}")

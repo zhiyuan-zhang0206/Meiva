@@ -25,7 +25,9 @@ import argparse
 import json
 import re
 import sys
-from collections.abc import Mapping, Sequence
+import time
+from collections.abc import Callable, Mapping, Sequence
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -93,9 +95,7 @@ def _render_markdown(prompt: str, results: list[dict[str, Any]]) -> str:
 
 
 def _save(prompt: str, results: list[dict[str, Any]], places: webchat.Places) -> Path:
-    outdir = (
-        webchat.downloads_root("console", places=places) / f"{webchat.now_stamp()}-{_slug(prompt)}"
-    )
+    outdir = webchat.downloads_root("console", places=places) / f"{_run_stamp()}-{_slug(prompt)}"
     outdir.mkdir(parents=True, exist_ok=True)
     (outdir / "answers.md").write_text(_render_markdown(prompt, results), encoding="utf-8")
     (outdir / "result.json").write_text(
@@ -195,6 +195,7 @@ def main(
     *,
     places: webchat.Places,
     pace: webchat.Pacing = webchat.STANDARD_PACE,
+    clock: Callable[[], float],
 ) -> None:
     args = _build_parser().parse_args(argv)
     continue_url = _continue_url(args)
@@ -211,7 +212,9 @@ def main(
     # when no composer is found, it detects login walls and attempts auto-login
     # via "Continue with Google".  A login failure becomes an error row in the
     # result — one model's sign-in wall never sinks the others.
-    rows = webchat.ask_many(specs, timeout=args.timeout, keep_tab=args.keep_tab, pace=pace)
+    rows = webchat.ask_many(
+        specs, timeout=args.timeout, keep_tab=args.keep_tab, pace=pace, clock=clock
+    )
     results = [_to_row(r) for r in rows]
     outdir = _save(prompt, results, places)
 
@@ -231,5 +234,15 @@ def main(
     )
 
 
+# meiva:note
+# The local `YYYYmmdd-HHMMSS` stamp a run's output directory is named by. It is read here because this is the entry -- the only place allowed to read the wall clock; every deadline inside the run counts on `time.monotonic`, handed to `main` as its `clock`.
+def _run_stamp() -> str:
+    return webchat.format_stamp(datetime.now().astimezone())
+
+
 if __name__ == "__main__":
-    main(sys.argv[1:], places=webchat.system_places(resolve_meiva_home(), user_home()))
+    main(
+        sys.argv[1:],
+        places=webchat.system_places(resolve_meiva_home(), user_home()),
+        clock=time.monotonic,
+    )

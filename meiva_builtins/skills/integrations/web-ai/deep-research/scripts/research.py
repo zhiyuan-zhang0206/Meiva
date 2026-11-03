@@ -34,6 +34,8 @@ import json
 import re
 import sys
 import time
+from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -157,7 +159,7 @@ def _read_report(site: str) -> str:
 def _save(site: str, url: str, report: str, places: webchat.Places) -> Path:
     outdir = (
         webchat.downloads_root("deep-research", places=places)
-        / f"{webchat.now_stamp()}-{site}-{_slug(report)}"
+        / f"{_run_stamp()}-{site}-{_slug(report)}"
     )
     outdir.mkdir(parents=True, exist_ok=True)
     (outdir / "report.md").write_text(report, encoding="utf-8")
@@ -168,11 +170,11 @@ def _save(site: str, url: str, report: str, places: webchat.Places) -> Path:
     return outdir
 
 
-def cmd_start(args: argparse.Namespace) -> dict[str, Any]:
+def cmd_start(args: argparse.Namespace, *, clock: Callable[[], float]) -> dict[str, Any]:
     cfg = _cfg(args.site)
     # The research runs server-side once the plan is approved below, so this tab
     # is closed on the way out; `url` is the handle `check` reopens to poll.
-    page_id = webchat.open_chat(args.site)
+    page_id = webchat.open_chat(args.site, clock=clock)
     try:
         enabled = True
         if not args.assume_mode:
@@ -204,7 +206,9 @@ def cmd_start(args: argparse.Namespace) -> dict[str, Any]:
         webchat.close_tab(page_id)
 
 
-def _check_via_export(args: argparse.Namespace, places: webchat.Places) -> dict[str, Any]:
+def _check_via_export(
+    args: argparse.Namespace, places: webchat.Places, *, clock: Callable[[], float]
+) -> dict[str, Any]:
     """check for a site whose report lives in a sandboxed frame: judge state
     from the rendered accessibility tree (which crosses frames) and fetch the
     finished report through the widget's own Export-to-Markdown control."""
@@ -242,7 +246,7 @@ def _check_via_export(args: argparse.Namespace, places: webchat.Places) -> dict[
             }
         outdir = (
             webchat.downloads_root("deep-research", places=places)
-            / f"{webchat.now_stamp()}-{args.site}-report"
+            / f"{_run_stamp()}-{args.site}-report"
         )
         if not webchat.click_by_text(["Export"]):
             raise RuntimeError("finished report detected but the Export control would not open")
@@ -252,6 +256,7 @@ def _check_via_export(args: argparse.Namespace, places: webchat.Places) -> dict[
             dest=outdir / "report.md",
             suffixes=(".md",),
             downloads=places.downloads,
+            clock=clock,
         )
         if dest is None:
             raise RuntimeError(
@@ -278,11 +283,13 @@ def _check_via_export(args: argparse.Namespace, places: webchat.Places) -> dict[
         webchat.close_tab(page_id)
 
 
-def cmd_check(args: argparse.Namespace, places: webchat.Places) -> dict[str, Any]:
+def cmd_check(
+    args: argparse.Namespace, places: webchat.Places, *, clock: Callable[[], float]
+) -> dict[str, Any]:
     cfg = _cfg(args.site)
     webchat.assert_same_site(args.url, args.site)
     if cfg.get("report_export"):
-        return _check_via_export(args, places)
+        return _check_via_export(args, places, clock=clock)
     # check reopens the conversation in its own tab and closes it on the way out;
     # the research keeps running server-side, polled again via `url`.
     page_id = webchat.navigate(args.url)
@@ -350,17 +357,23 @@ def cmd_check(args: argparse.Namespace, places: webchat.Places) -> dict[str, Any
         webchat.close_tab(page_id)
 
 
-def cmd_reply(args: argparse.Namespace) -> dict[str, Any]:
+def cmd_reply(args: argparse.Namespace, *, clock: Callable[[], float]) -> dict[str, Any]:
     """Send a follow-up message into the research conversation — answering the
     clarifying questions some sites ask before starting. Returns right after
     the submit; the research output is still collected via `check`."""
-    r = webchat.ask(args.site, args.prompt, conversation_url=args.url, wait=False)
+    r = webchat.ask(args.site, args.prompt, conversation_url=args.url, wait=False, clock=clock)
     return {
         "site": args.site,
         "url": args.url,
         "submitted_via": r["submitted_via"],
         "state": "replied",
     }
+
+
+# meiva:note
+# The local `YYYYmmdd-HHMMSS` stamp a run's output directory is named by. It is read here because this is the entry -- the only place allowed to read the wall clock; every deadline inside the run counts on `time.monotonic`, which `main` hands the driver as its `clock`.
+def _run_stamp() -> str:
+    return webchat.format_stamp(datetime.now().astimezone())
 
 
 def main() -> None:
@@ -401,11 +414,13 @@ def main() -> None:
     args = parser.parse_args()
     match args.cmd:
         case "start":
-            result = cmd_start(args)
+            result = cmd_start(args, clock=time.monotonic)
         case "check":
-            result = cmd_check(args, webchat.system_places(resolve_meiva_home(), user_home()))
+            result = cmd_check(
+                args, webchat.system_places(resolve_meiva_home(), user_home()), clock=time.monotonic
+            )
         case "reply":
-            result = cmd_reply(args)
+            result = cmd_reply(args, clock=time.monotonic)
         case _:
             raise ValueError(f"unknown command {args.cmd!r}")
     print(json.dumps(result, ensure_ascii=False, indent=2))
