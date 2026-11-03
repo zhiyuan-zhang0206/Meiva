@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -99,7 +99,8 @@ def test_an_interrupted_claim_resumes_from_its_recorded_payload_without_flags(
 
     repair_env_publication(home)
     assert init() == 0
-    assert cluster.get_record(home) == cluster.ClusterRecord(**pending["record"])
+    recorded = cluster.get_record(home)
+    assert recorded is not None and asdict(recorded) == pending["record"]
     assert dict(dotenv_values(home / ".env")) == pending["env"]
     done = start_identity.read_intent(home)
     assert done is not None and done["phase"] == "configured" and done["env"] == {}

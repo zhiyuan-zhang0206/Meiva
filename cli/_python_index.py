@@ -7,6 +7,7 @@ import os
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
+from typing import TypeGuard
 from urllib.parse import urlsplit
 
 PYPI_INDEX = "https://pypi.org/simple"
@@ -29,24 +30,54 @@ def _checked_index(value: str) -> str:
     return value.rstrip("/")
 
 
+def _is_table(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _is_array(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _mapping(value: object) -> Mapping[str, object]:
+    return value if _is_table(value) else {}
+
+
+def _mappings(value: object) -> list[Mapping[str, object]]:
+    return [item for item in value if _is_table(item)] if _is_array(value) else []
+
+
+def _text(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
 def _uv_config_index(path: Path, *, project: bool = False) -> str | None:
     if not path.is_file():
         return None
     with path.open("rb") as stream:
-        document = tomllib.load(stream)
-    settings = document.get("tool", {}).get("uv", {}) if project else document
-    pip_settings = settings.get("pip", {})
-    indexes = settings.get("index", [])
-    if len(indexes) > 1 or settings.get("extra-index-url") or pip_settings.get("extra-index-url"):
+        return _configured_index(tomllib.load(stream), path, project=project)
+
+
+# meiva:note
+# The single default index a uv settings document names, or None. `document` is the parsed TOML
+# (the standard library types it `Any`); each table is read as a mapping of `object`.
+def _configured_index(document: Mapping[str, object], path: Path, *, project: bool) -> str | None:
+    settings = _mapping(_mapping(document.get("tool")).get("uv")) if project else document
+    pip_settings = _mapping(settings.get("pip"))
+    indexes = _mappings(settings.get("index"))
+    extra = settings.get("extra-index-url") or pip_settings.get("extra-index-url")
+    if len(indexes) > 1 or extra:
         raise ValueError(f"Multiple Python indexes are unsupported for locked installs: {path}")
     if indexes:
-        if indexes[0].get("default") is not True or indexes[0].get("explicit") is True:
+        first = indexes[0]
+        if first.get("default") is not True or first.get("explicit") is True:
             raise ValueError(
                 f"Locked installs require a default index, not an additional/explicit-only index: {path}"
             )
-        return str(indexes[0]["url"])
+        return str(first["url"])
     return (
-        pip_settings.get("index-url") or settings.get("default-index") or settings.get("index-url")
+        _text(pip_settings.get("index-url"))
+        or _text(settings.get("default-index"))
+        or _text(settings.get("index-url"))
     )
 
 

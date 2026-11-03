@@ -17,8 +17,9 @@ import argparse
 import os
 import subprocess
 import sys
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 import psutil
@@ -33,6 +34,7 @@ from base.host.system import boot_policy
 from base.host.system.hostport import Host
 from base.native_process.os_platform import file_lock, is_macos
 from base.paths.private_dir import ensure_private_dir
+from cli.boundary.options import options
 from cli.database import OperatorDatabaseFactory, OperatorEventPipeline
 from cli.start_identity import require_initialized
 from cli.start_runtime import HomeSite, StartRuntime
@@ -103,6 +105,18 @@ def finish_start(
         raise
 
 
+@dataclass(frozen=True)
+class _Selection:
+    disable_service: Sequence[str] | None
+    only_service: Sequence[str] | None
+    all_services: bool
+
+
+@dataclass(frozen=True)
+class _Boot:
+    boot: bool
+
+
 def start_once(
     args: argparse.Namespace,
     site: HomeSite,
@@ -126,24 +140,27 @@ def start_once(
             # Runtime delivery is imported here, after admission, so that admission
             # stays settings-free.
             from cli.commands.lifecycle.start import cmd_start
+            from cli.database.runtime import runtime_of
 
+            selection = options(args, _Selection)
+            command = runtime_of(args)
             result = cmd_start(
-                disabled_services=tuple(args.disable_service or ()),
-                only_services=tuple(args.only_service or ()),
-                all_services=args.all_services,
+                disabled_services=tuple(selection.disable_service or ()),
+                only_services=tuple(selection.only_service or ()),
+                all_services=selection.all_services,
                 runtime=runtime,
                 retained_children=retained_children,
                 database_factory=database_factory,
                 producer=producer,
-                command=args.runtime,
+                command=command,
                 boot_attempt=boot,
             )
             finish_start(
                 result,
-                helper=args.runtime.helper,
-                host=args.runtime.host,
+                helper=command.helper,
+                host=command.host,
                 home=site.home,
-                control_pid=args.runtime.pid,
+                control_pid=command.pid,
             )
             return result
     except ValidationError as exc:
@@ -199,7 +216,7 @@ def run_start(
     database_factory: OperatorDatabaseFactory,
     producer: OperatorEventPipeline,
 ) -> int:
-    if not args.boot:
+    if not options(args, _Boot).boot:
         return start_once(
             args,
             site,

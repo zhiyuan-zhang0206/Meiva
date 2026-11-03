@@ -8,7 +8,7 @@ import socket
 import subprocess
 import sys
 import time
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -189,7 +189,8 @@ def test_crash_after_intent_before_env_resumes_same_claim(inputs: identity.Ident
     assert pending is not None and pending["phase"] == "claiming"
     repair_env_publication(inputs.home)
     identity.resume_claim(inputs.home, backup_passphrase=MINTED_BACKUP_PASSPHRASE)
-    assert cluster.get_record(inputs.home) == cluster.ClusterRecord(**pending["record"])
+    recorded = cluster.get_record(inputs.home)
+    assert recorded is not None and asdict(recorded) == pending["record"]
     assert dict(dotenv_values(inputs.home / ".env")) == pending["env"]
 
 
@@ -522,7 +523,9 @@ def test_the_fixed_table_is_a_valid_reservation(inputs: identity.IdentityInput) 
     data["record"]["ports"] = dict(cluster.FIXED_PORTS)
     path.write_text(json.dumps(data))
     read = identity.read_intent(inputs.home)
-    assert read is not None and read["record"]["ports"] == cluster.FIXED_PORTS
+    assert read is not None
+    record = read["record"]
+    assert record is not None and record["ports"] == cluster.FIXED_PORTS
 
 
 @pytest.mark.parametrize(

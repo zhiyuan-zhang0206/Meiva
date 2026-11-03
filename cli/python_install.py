@@ -292,6 +292,19 @@ def _install_from_mirror(
     return run([*common, "--editable", str(repo), *reinstall], repo, env)
 
 
+# meiva:note
+# The options of `main`, as the typed namespace argparse fills in: this file is the dependency-free
+# bootstrap, so it declares the attributes on a `Namespace` subclass instead of reading them as `Any`.
+class _Arguments(argparse.Namespace):
+    repo: Path
+    no_dev: bool
+    compile_bytecode: bool
+    verbose: bool
+    python: str | None
+    reinstall_package: str | None
+    mirror_env: Path | None
+
+
 def main() -> int:
     """Dependency-free entry point for locked source-development dependencies."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -304,7 +317,7 @@ def main() -> int:
     parser.add_argument("--python")
     parser.add_argument("--reinstall-package")
     parser.add_argument("--mirror-env", type=Path)
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=_Arguments())
     try:
         return install(
             args.repo.resolve(),

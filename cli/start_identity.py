@@ -13,9 +13,10 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import Literal, TypedDict, TypeGuard
 
 from dotenv import dotenv_values
+from pydantic import TypeAdapter
 
 from base import cluster
 from base.host.atomic_io import write_text_atomic
@@ -23,6 +24,7 @@ from base.host.env.dotenv_file import upsert_env
 from base.host.net.auth import require_cluster_secret
 from base.host.private_storage import ensure_private_file
 from base.paths.private_dir import ensure_private_dir
+from cli.boundary.json_text import loads
 from cli.startup.service_path import BirthFacts
 
 INTENT_NAME = cluster.INTENT_NAME
@@ -61,7 +63,24 @@ class IdentityInput:
     config_digest: str | None = None
 
 
-def _is_any_dict(value: object) -> TypeGuard[dict[str, Any]]:
+# meiva:note
+# The private intent a home records of itself (`start-intent.json`). It is a plain dict on disk and
+# in memory because `meiva init` rewrites it step by step (`phase`, then an emptied `env`).
+class StartIntent(TypedDict):
+    version: int
+    home: str
+    checkout: str
+    roles: list[str]
+    config_digest: str | None
+    phase: Literal["claiming", "configured", "provisioned", "ready"]
+    record: dict[str, object] | None
+    env: dict[str, str]
+
+
+_INTENT: TypeAdapter[StartIntent] = TypeAdapter(StartIntent)
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict)
 
 
@@ -73,19 +92,19 @@ def _is_object_list(value: object) -> TypeGuard[list[object]]:
     return isinstance(value, list)
 
 
-def _write(path: Path, data: dict[str, Any]) -> None:
+def _write(path: Path, data: StartIntent) -> None:
     ensure_private_file(path)
     write_text_atomic(path, json.dumps(data, sort_keys=True) + "\n", mode=0o600, sync_parent=True)
 
 
-def read_intent(home: Path) -> dict[str, Any] | None:
+def read_intent(home: Path) -> StartIntent | None:
     path = home / INTENT_NAME
     if not path.exists():
         return None
     ensure_private_file(path)
-    data: object = json.loads(path.read_text())
+    data = loads(path.read_text())
     required = {"version", "home", "checkout", "roles", "config_digest", "phase", "record", "env"}
-    if not _is_any_dict(data):
+    if not _is_object_dict(data):
         raise TypeError("invalid start identity shape")
     if set(data) != required:
         raise RuntimeError(
@@ -97,10 +116,10 @@ def read_intent(home: Path) -> dict[str, Any] | None:
     if data["phase"] not in _PHASES:
         raise RuntimeError("unknown start identity phase")
     _validate_intent_fields(data, home)
-    return data
+    return _INTENT.validate_python(data)
 
 
-def _validate_intent_fields(data: dict[str, Any], home: Path) -> None:
+def _validate_intent_fields(data: dict[str, object], home: Path) -> None:
     if not isinstance(data["checkout"], str) or not Path(data["checkout"]).is_absolute():
         raise RuntimeError("invalid start checkout")
     raw_roles = data["roles"]
@@ -118,7 +137,7 @@ def _validate_intent_fields(data: dict[str, Any], home: Path) -> None:
     _validate_intent_record(data["record"], home, gateway="gateway" in roles)
 
 
-def _validate_intent_environment(data: dict[str, Any]) -> None:
+def _validate_intent_environment(data: dict[str, object]) -> None:
     raw = data["env"]
     if not _is_raw_dict(raw):
         raise TypeError("invalid start environment")
@@ -139,13 +158,13 @@ def _validate_intent_record(raw: object, home: Path, *, gateway: bool) -> None:
         if raw is not None:
             raise RuntimeError("remote unit cannot claim a gateway reservation")
         return
-    if not _is_any_dict(raw):
+    if not _is_object_dict(raw):
         raise TypeError("invalid start reservation")
     rec = raw
     if rec.get("gateway_home") != str(home):
         raise RuntimeError("start reservation belongs to another home")
     raw_ports = rec.get("ports")
-    if not _is_any_dict(raw_ports):
+    if not _is_object_dict(raw_ports):
         raise TypeError("invalid start port reservation")
     ports = raw_ports
     if set(ports) != set(cluster.FIXED_PORTS):
@@ -219,7 +238,7 @@ def gateway_values(rec: cluster.ClusterRecord, inputs: IdentityInput) -> dict[st
 # meiva:note
 # Publish a claim's payload. A gateway's logical backups are encrypted under a passphrase the
 # entry minted, independent of its cluster secret (an empty one included).
-def _publish_claim(home: Path, data: dict[str, Any], *, backup_passphrase: str) -> None:
+def _publish_claim(home: Path, data: StartIntent, *, backup_passphrase: str) -> None:
     if data["phase"] == "claiming":
         if data["record"] is not None:
             from services.backup.artifact import passphrase
@@ -238,7 +257,7 @@ def _refuse_detached(home: Path) -> None:
         raise RuntimeError("home is being destroyed or detached; explicit reattachment required")
 
 
-def pending_claim(home: Path) -> dict[str, Any] | None:
+def pending_claim(home: Path) -> StartIntent | None:
     """The home's interrupted claim; None for a home with no intent.
 
     Refuses a detached home and a home `meiva init` already finished: initialization
@@ -321,16 +340,16 @@ def _create_claim(inputs: IdentityInput) -> None:
     rec = _new_record(inputs) if "gateway" in inputs.roles else None
     if rec is not None:
         values = gateway_values(rec, replace(inputs, values=values))
-    data = {
-        "version": 1,
-        "home": str(inputs.home),
-        "checkout": str(inputs.checkout),
-        "roles": sorted(inputs.roles),
-        "config_digest": inputs.config_digest,
-        "phase": "claiming",
-        "record": asdict(rec) if rec else None,
-        "env": values,
-    }
+    data = StartIntent(
+        version=1,
+        home=str(inputs.home),
+        checkout=str(inputs.checkout),
+        roles=sorted(inputs.roles),
+        config_digest=inputs.config_digest,
+        phase="claiming",
+        record=asdict(rec) if rec else None,
+        env=values,
+    )
     _write(inputs.home / INTENT_NAME, data)
     _publish_claim(inputs.home, data, backup_passphrase=inputs.birth.backup_passphrase)
 
@@ -375,7 +394,7 @@ class InitializedHome:
     """What `meiva start` admitted: the capability set and the intent it comes from."""
 
     roles: frozenset[str]
-    intent: dict[str, Any]
+    intent: StartIntent
 
 
 def require_initialized(home: Path) -> InitializedHome:

@@ -635,14 +635,53 @@ reportUnusedCallResult = "warning"
 # leaves TESTS_OWING_ANY, that is when reportAny is a global error.
 # BEGIN GENERATED pyright tests environments (scripts/codegen/gen_pyright_test_environments.py; edit nothing between the markers)
 [[tool.pyright.executionEnvironments]]
+root = "cli/commands/agents/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "cli/commands/cluster/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "cli/commands/converge/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "cli/commands/data_plane/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "cli/commands/extensions/plans/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "cli/commands/extensions/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "cli/commands/lifecycle/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "cli/commands/management/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "cli/commands/observability/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "cli/commands/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "cli/database/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "cli/parsers/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "cli/startup/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "cli/tests"
 
 # END GENERATED pyright tests environments
 
 # Directory entries that raise reportAny / reportExplicitAny to "error" once a directory's count is
 # 0. Their tests directories follow them unless the root is listed in TESTS_OWING_ANY.
 [[tool.pyright.executionEnvironments]]
-root = "cli/commands/management"
+root = "cli"
 reportAny = "error"
 reportExplicitAny = "error"
 
