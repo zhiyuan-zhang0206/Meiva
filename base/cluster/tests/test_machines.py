@@ -116,7 +116,7 @@ def test_register_self_co_located_station_composes_with_gateway(
     assert stopped_at is None
 
 
-def _read_stopped_at(name: str):
+def _read_stopped_at(name: str) -> datetime | None:
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute("SELECT stopped_at FROM machines WHERE name = %s", (name,))
         row = cur.fetchone()
@@ -401,7 +401,7 @@ def test_set_staging_unknown_machine_returns_false(
     )
 
 
-def _read_pause(name: str) -> tuple:
+def _read_pause(name: str) -> tuple[datetime | None, str | None]:
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT paused_at, pause_reason FROM machines WHERE name = %s",

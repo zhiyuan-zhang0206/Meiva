@@ -1,8 +1,11 @@
 import pytest
 from langchain_core.messages import AIMessage
+
+# meiva:note
+# The pinned SDK leaves these private helpers' dict parameters unparameterized.
 from langchain_openai.chat_models.base import (
-    _construct_lc_result_from_responses_api,
-    _convert_responses_chunk_to_generation_chunk,
+    _construct_lc_result_from_responses_api,  # pyright: ignore[reportUnknownVariableType]
+    _convert_responses_chunk_to_generation_chunk,  # pyright: ignore[reportUnknownVariableType]
 )
 from openai.types.responses import Response, ResponseCompletedEvent
 

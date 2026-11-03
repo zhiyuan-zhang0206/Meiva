@@ -7,7 +7,7 @@ from base.lm.catalog import ModelCatalog
 from base.lm.compat.stop import StopCategory, classify_stop
 
 
-def _msg(metadata: dict) -> AIMessage:
+def _msg(metadata: dict[str, object]) -> AIMessage:
     return AIMessage(content="x", response_metadata=metadata)
 
 

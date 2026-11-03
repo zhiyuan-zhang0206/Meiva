@@ -23,6 +23,7 @@ from base.lm.call import answer_text, extract_text, invoke_text
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.effort import ReasoningEffort
+from base.log.tests.log_records import LogRecords
 from base.packages.tests.lm.providers.lm_process import run_billing
 from base.packages.tests.model_catalog import inert_keys
 
@@ -178,7 +179,7 @@ def test_invoke_text_empty_response_raises_error_type(*, model_catalog: ModelCat
 
 
 def test_invoke_text_upstream_error_wrapped_in_error_type(
-    loguru_records, *, model_catalog: ModelCatalog
+    loguru_records: LogRecords, *, model_catalog: ModelCatalog
 ) -> None:
     class _Boom:
         def invoke(self, messages: list[Any]) -> Any:
@@ -194,11 +195,7 @@ def test_invoke_text_upstream_error_wrapped_in_error_type(
             model="deepseek-v4-pro",
             catalog=model_catalog,
         )
-    events = [
-        record
-        for record in loguru_records
-        if record["extra"].get("event") == "llm_provider_error"  # pyright: ignore[reportUnknownMemberType]
-    ]
+    events = loguru_records.events("llm_provider_error")
     assert events[-1]["extra"]["status"] == 429
     assert events[-1]["extra"]["vendor"] == "deepseek"
 

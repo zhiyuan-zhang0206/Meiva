@@ -178,6 +178,12 @@ extraPaths = ["meiva_builtins/skills/integrations/web-ai/scripts"]
 """
 
 
+# meiva:note
+# The synthetic checkouts below model one promoted root; the real PROMOTED_ROOTS grows as roots
+# are promoted and must not change what these cases demonstrate.
+_SYNTHETIC_PROMOTED = ("scripts",)
+
+
 def _without_region(text: str) -> str:
     return text[: text.index(gen.BEGIN)] + text[text.index(gen.END) :]
 
@@ -210,7 +216,7 @@ def test_an_entry_is_written_only_where_the_package_rules_differ_from_the_standa
         "meiva/z/tests/test_c.py",  # no environment, global warning: needs one
         "meiva_builtins/skills/integrations/web-ai/scripts/tests/test_w.py",  # repeats the extraPaths
     ]
-    text = gen.generate(_SYNTHETIC_PYPROJECT, tracked)
+    text = gen.generate(_SYNTHETIC_PYPROJECT, tracked, promoted_roots=_SYNTHETIC_PROMOTED)
     assert _generated_roots(text) == [
         "base/x/tests",
         "meiva/z/tests",
@@ -235,12 +241,12 @@ def test_a_promoted_root_gets_no_tests_entry_and_must_hold_all_seven_at_error() 
     pyproject = _SYNTHETIC_PYPROJECT.replace('"cli/**/tests"', '"cli/**/tests", "scripts/**/tests"')
     tracked = ["base/x/tests/test_a.py", "scripts/ci/tests/test_b.py"]
     with pytest.raises(SystemExit, match="promoted tests directories are not held"):
-        gen.generate(pyproject, tracked)
+        gen.generate(pyproject, tracked, promoted_roots=_SYNTHETIC_PROMOTED)
     held = pyproject + (
         '\n[[tool.pyright.executionEnvironments]]\nroot = "scripts"\n'
         + "".join(f'{rule} = "error"\n' for rule in TESTS_STANDARD)
     )
-    text = gen.generate(held, tracked)
+    text = gen.generate(held, tracked, promoted_roots=_SYNTHETIC_PROMOTED)
     assert _generated_roots(text) == ["base/x/tests"]
     config = tomllib.loads(text)["tool"]["pyright"]
     assert set(effective_rules(config, "scripts/ci/tests").values()) == {"error"}
@@ -248,9 +254,9 @@ def test_a_promoted_root_gets_no_tests_entry_and_must_hold_all_seven_at_error() 
 
 def test_generating_twice_changes_nothing_and_the_output_is_sorted() -> None:
     tracked = ["services/b/tests/test_a.py", "base/x/tests/test_a.py", "meiva/a/tests/test_a.py"]
-    once = gen.generate(_SYNTHETIC_PYPROJECT, tracked)
-    assert gen.generate(once, tracked) == once
-    assert gen.generate(once, list(reversed(tracked))) == once
+    once = gen.generate(_SYNTHETIC_PYPROJECT, tracked, promoted_roots=_SYNTHETIC_PROMOTED)
+    assert gen.generate(once, tracked, promoted_roots=_SYNTHETIC_PROMOTED) == once
+    assert gen.generate(once, list(reversed(tracked)), promoted_roots=_SYNTHETIC_PROMOTED) == once
     roots = _generated_roots(once)
     assert roots == sorted(roots)
 
@@ -305,10 +311,10 @@ class _Checkout:
         self._git("rm", "-q", "-f", rel)
 
     def check(self) -> int:
-        return gen.main(["--check"], repo_root=self.root)
+        return gen.main(["--check"], repo_root=self.root, promoted_roots=_SYNTHETIC_PROMOTED)
 
     def regenerate(self) -> int:
-        return gen.main([], repo_root=self.root)
+        return gen.main([], repo_root=self.root, promoted_roots=_SYNTHETIC_PROMOTED)
 
     def roots(self) -> list[str]:
         return _generated_roots(self.pyproject.read_text())

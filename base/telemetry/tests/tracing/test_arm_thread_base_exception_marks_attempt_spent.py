@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.telemetry import tracing as tracing_mod
 from base.telemetry.otlp.trace_readiness import TraceReadiness
@@ -370,7 +371,7 @@ def test_claim_idle_wait_span_skips_non_recording_span(tmp_path: Path) -> None:
 
 
 def test_gzip_old_mirror_failure_is_reported_not_swallowed(
-    tmp_path: Path, loguru_records: list[dict]
+    tmp_path: Path, loguru_records: LogRecords
 ) -> None:
     from base.telemetry.tracing import gzip_old_mirror
 

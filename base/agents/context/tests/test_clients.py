@@ -95,7 +95,12 @@ def test_close_closes_the_connections_it_made_and_keeps_going_past_a_failure() -
     from base.db import Database
 
     sql, redis = _Closable(), _Closable()
-    fake_db = cast("Database", SimpleNamespace(connect=lambda *, autocommit: (autocommit, sql)[1]))
+
+    def connect(*, autocommit: bool) -> _Closable:
+        del autocommit
+        return sql
+
+    fake_db = cast("Database", SimpleNamespace(connect=connect))
     clients = ClientSet(database=lambda: fake_db, redis=lambda: redis)
     assert clients.sql._get() is sql
     assert clients.redis._get() is redis

@@ -1,5 +1,7 @@
 """Registration test roots retain one machine owner and an explicit unit home."""
 
+from datetime import datetime
+
 import psycopg
 import pytest
 
@@ -57,7 +59,7 @@ def machine_setup(process_config: ConfigBoot) -> MachineSetup:
     return MachineSetup(ConfiguredMachineIdentity(process_config))
 
 
-def read_machine(name: str) -> tuple:
+def read_machine(name: str) -> tuple[str | None, list[str], str | None, datetime | None]:
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT gateway_url, role, description, stopped_at FROM machines WHERE name = %s",
@@ -76,7 +78,7 @@ def read_description(name: str) -> str | None:
     return row[0]
 
 
-def read_up_since(name: str):
+def read_up_since(name: str) -> tuple[datetime]:
     """machines.up_since_at for `name`."""
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute("SELECT up_since_at FROM machines WHERE name = %s", (name,))
@@ -85,7 +87,7 @@ def read_up_since(name: str):
     return row
 
 
-def read_unit_up_since(name: str, home: str):
+def read_unit_up_since(name: str, home: str) -> tuple[datetime | None]:
     """machine_units.up_since_at for one unit."""
     with psycopg.connect(settings.data_plane.db_url) as conn, conn.cursor() as cur:
         cur.execute(

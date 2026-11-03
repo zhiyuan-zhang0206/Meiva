@@ -10,8 +10,9 @@ pub/sub.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import redis
@@ -26,8 +27,14 @@ _SECRET = "redisacltestsecret"  # noqa: S105 — test fixture, not a real creden
 
 
 def _acl_users(admin_url: str) -> list[str]:
+    # meiva:note
+    # The redis-py stubs leave the client's response types partially unknown, so the ACL LIST
+    # reply is cast to the list of rule strings it is.
     with redis.Redis.from_url(admin_url, decode_responses=True) as r:  # pyright: ignore[reportUnknownMemberType]
-        return r.execute_command("ACL", "LIST")  # pyright: ignore[reportUnknownMemberType,reportReturnType]
+        return cast(
+            "list[str]",
+            r.execute_command("ACL", "LIST"),  # pyright: ignore[reportUnknownMemberType]
+        )
 
 
 def test_ensure_creates_enabled_channel_scoped_user(redis_access: None) -> None:
@@ -64,7 +71,10 @@ def test_owned_acl_refuses_reconnect_before_mutation(
         with redis.Redis.from_url(url, decode_responses=True) as admin:  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
             directory = Path(str(admin.config_get("dir")["dir"]))  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
         before = _acl_users(url)
-        original = redis.Redis.from_url  # pyright: ignore[reportUnknownMemberType] — test double or third-party stubs
+        original = cast(
+            "Callable[..., redis.Redis]",
+            redis.Redis.from_url,
+        )
         clients: list[redis.Redis] = []
 
         def capture_client(url: str, **kwargs: Any) -> redis.Redis:
@@ -198,9 +208,9 @@ def test_runtime_user_is_confined_to_cluster_data_and_channel_prefix(redis_acces
         )
         user_url = url_with_userinfo(admin_url, "meiva_feat_x", _SECRET)
         with redis.Redis.from_url(user_url, decode_responses=True) as r:  # pyright: ignore[reportUnknownMemberType]
-            assert r.set("meiva:feat-x:probe:1", "1", ex=60)  # pyright: ignore[reportUnknownMemberType]
-            assert r.set("fleet_graph:cache", "v", ex=60)  # pyright: ignore[reportUnknownMemberType]
-            assert r.get("fleet_graph:cache") == "v"  # pyright: ignore[reportUnknownMemberType]
+            assert r.set("meiva:feat-x:probe:1", "1", ex=60)
+            assert r.set("fleet_graph:cache", "v", ex=60)
+            assert r.get("fleet_graph:cache") == "v"
             assert r.publish("meiva:feat-x:events", "ok") == 0  # pyright: ignore[reportUnknownMemberType]
             with pytest.raises(NoPermissionError):
                 r.publish("meiva:other:events", "denied")  # pyright: ignore[reportUnknownMemberType]
@@ -213,5 +223,8 @@ def test_runtime_user_is_confined_to_cluster_data_and_channel_prefix(redis_acces
                 ("ACL", "SETUSER", "meiva_feat_x", "~*", "&*"),
                 ("PSUBSCRIBE", "meiva:other:inbound:*"),
             ):
-                verdict = admin.execute_command("ACL", "DRYRUN", "meiva_feat_x", *command)  # pyright: ignore[reportUnknownMemberType]
+                verdict = cast(
+                    "object",
+                    admin.execute_command("ACL", "DRYRUN", "meiva_feat_x", *command),  # pyright: ignore[reportUnknownMemberType]
+                )
                 assert verdict != "OK", command

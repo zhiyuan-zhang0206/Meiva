@@ -1,7 +1,3 @@
-# pyright: reportUnknownMemberType = warning
-# pyright: reportUnknownArgumentType = warning
-# pyright: reportUnknownLambdaType = warning
-# pyright: reportUnknownVariableType = warning
 """Upper-level grouping: the plain-text reply rules and the correction conversation."""
 
 from __future__ import annotations

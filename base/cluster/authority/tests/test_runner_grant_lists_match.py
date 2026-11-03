@@ -41,14 +41,14 @@ def test_runtime_grants_match_the_bootstrap_grants_in_the_schema() -> None:
     recorder = _StatementRecorder()
     grant_event_log_runner_access(cast(psycopg.Connection, recorder), "meiva_runner")
 
-    runtime = {"INSERT": set(), "UPDATE": set()}
+    runtime: dict[str, set[str]] = {"INSERT": set(), "UPDATE": set()}
     for statement in recorder.statements:
         for privilege in runtime:
             if f"GRANT {privilege} (" in statement and "ON agent_impersonations" in statement:
                 runtime[privilege] |= _columns(statement, privilege)
 
     schema = SCHEMA.read_text()
-    bootstrap = {"INSERT": set(), "UPDATE": set()}
+    bootstrap: dict[str, set[str]] = {"INSERT": set(), "UPDATE": set()}
     for privilege in bootstrap:
         match = re.search(
             rf"GRANT {privilege} \((.*?)\) ON agent_impersonations TO meiva_runner", schema, re.S

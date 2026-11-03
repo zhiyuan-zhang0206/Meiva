@@ -27,6 +27,7 @@ from base.log import (
     StdlibInterceptHandler,
     install_stdlib_intercept,
 )
+from base.log.tests.log_records import LogRecords
 
 _MODEL = "gemini-2.5-flash"
 _GENAI_CHAT_MODELS_LOGGER = "langchain_google_genai.chat_models"
@@ -35,7 +36,7 @@ _GENAI_CHAT_MODELS_LOGGER = "langchain_google_genai.chat_models"
 _EMPTY_PARTS_MARKER = "converted to no Gemini parts"
 
 
-def _messages(loguru_records: list[dict]) -> list[str]:
+def _messages(loguru_records: LogRecords) -> list[str]:
     """Loguru messages captured by the `loguru_records` fixture."""
     return [
         str(record["message"])  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -48,7 +49,7 @@ def _convert(ai_message: AIMessage) -> None:
     _parse_chat_history([HumanMessage(content="hi"), ai_message], model=_MODEL)
 
 
-def test_empty_ai_message_warning_does_not_reach_loguru(loguru_records: list[dict]) -> None:
+def test_empty_ai_message_warning_does_not_reach_loguru(loguru_records: LogRecords) -> None:
     """`AIMessage(content=[])` converts to no parts -> the library substitutes
     an empty text part and warns; that warning must not reach loguru."""
     install_stdlib_intercept()
@@ -56,7 +57,7 @@ def test_empty_ai_message_warning_does_not_reach_loguru(loguru_records: list[dic
     assert not any(_EMPTY_PARTS_MARKER in message for message in _messages(loguru_records))
 
 
-def test_dropped_content_blocks_warning_does_not_reach_loguru(loguru_records: list[dict]) -> None:
+def test_dropped_content_blocks_warning_does_not_reach_loguru(loguru_records: LogRecords) -> None:
     """The "after all N content block(s) were dropped" variant is dropped too,
     while the library's distinct per-block warning still flows."""
     install_stdlib_intercept()
@@ -66,7 +67,7 @@ def test_dropped_content_blocks_warning_does_not_reach_loguru(loguru_records: li
     assert any("cannot be represented as a Gemini part" in message for message in messages)
 
 
-def test_other_records_from_the_same_logger_pass(loguru_records: list[dict]) -> None:
+def test_other_records_from_the_same_logger_pass(loguru_records: LogRecords) -> None:
     """Only the two variants are dropped: other warnings and INFO records on the
     same logger still reach loguru — the reason a blanket setLevel(ERROR) was
     rejected."""
@@ -79,7 +80,7 @@ def test_other_records_from_the_same_logger_pass(loguru_records: list[dict]) -> 
     assert "GenAI conversion completed" in messages
 
 
-def test_same_marker_from_another_logger_passes(loguru_records: list[dict]) -> None:
+def test_same_marker_from_another_logger_passes(loguru_records: LogRecords) -> None:
     """The drop is scoped to `langchain_google_genai` and its dotted children —
     an identical message from any other logger is untouched."""
     install_stdlib_intercept()
@@ -89,7 +90,7 @@ def test_same_marker_from_another_logger_passes(loguru_records: list[dict]) -> N
     assert any(_EMPTY_PARTS_MARKER in message for message in _messages(loguru_records))
 
 
-def test_repeated_install_does_not_stack_filters(loguru_records: list[dict]) -> None:
+def test_repeated_install_does_not_stack_filters(loguru_records: LogRecords) -> None:
     """`init_*` entry points may install the intercept more than once per process
     (#970): the second install must rebuild the handler instead of accumulating
     filters on top of the first."""

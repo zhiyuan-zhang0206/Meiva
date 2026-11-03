@@ -48,10 +48,12 @@ class LiveEvents:
         self.publisher.emit(marker)
         arrived: list[str] = []
         while True:
-            raw = await self._subscription.get_message(  # pyright: ignore[reportUnknownMemberType]
-                ignore_subscribe_messages=True, timeout=_ARRIVAL_TIMEOUT_S
+            message = cast(
+                "dict[str, Any] | None",
+                await self._subscription.get_message(
+                    ignore_subscribe_messages=True, timeout=_ARRIVAL_TIMEOUT_S
+                ),
             )
-            message = cast("dict[str, Any] | None", raw)
             if message is None:
                 raise AssertionError(f"live events did not arrive within {_ARRIVAL_TIMEOUT_S}s")
             data = str(message["data"])
@@ -85,7 +87,7 @@ async def live_events(event_bus: EventBus) -> AsyncIterator[LiveEvents]:
     try:
         async with subscriber.pubsub() as subscription:  # pyright: ignore[reportUnknownMemberType]
             await subscription.subscribe(channel)
-            await subscription.get_message(timeout=_ARRIVAL_TIMEOUT_S)  # pyright: ignore[reportUnknownMemberType]
+            await subscription.get_message(timeout=_ARRIVAL_TIMEOUT_S)
             await publisher.start(tasks)
             yield LiveEvents(publisher, subscription)
     finally:

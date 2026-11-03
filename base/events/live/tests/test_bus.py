@@ -3,6 +3,8 @@ share one body."""
 
 from __future__ import annotations
 
+from typing import cast
+
 import redis.asyncio as aredis
 
 from base.clock import SYSTEM_TIMERS
@@ -60,8 +62,14 @@ async def test_publish_goes_to_the_events_channel_unless_another_is_named(
     try:
         assert await handle.publish_best_effort("p1", context="t") == 1
         assert await handle.publish_best_effort("p2", channel="meiva:page:bus-test") == 1
-        msg1 = await pubsub.get_message(timeout=1.0, ignore_subscribe_messages=True)
-        msg2 = await pubsub.get_message(timeout=1.0, ignore_subscribe_messages=True)
+        msg1 = cast(
+            "dict[str, object] | None",
+            await pubsub.get_message(timeout=1.0, ignore_subscribe_messages=True),
+        )
+        msg2 = cast(
+            "dict[str, object] | None",
+            await pubsub.get_message(timeout=1.0, ignore_subscribe_messages=True),
+        )
         assert msg1 is not None and (msg1["channel"], msg1["data"]) == (
             "meiva:events:bus-test",
             "p1",

@@ -1,7 +1,3 @@
-# pyright: reportUnknownMemberType = warning
-# pyright: reportUnknownArgumentType = warning
-# pyright: reportUnknownLambdaType = warning
-# pyright: reportUnknownVariableType = warning
 """The chunk instruction and the agent-shaped, grouping chunk request."""
 
 from __future__ import annotations

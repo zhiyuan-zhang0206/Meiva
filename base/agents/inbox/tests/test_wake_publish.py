@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Iterable
+from typing import cast
 
 import psycopg
 import pytest
@@ -32,10 +34,11 @@ async def test_publish_leaves_no_redis_key(database: Database, event_bus: EventB
     )
     try:
         prefix = redis_channel_prefix(settings.data_plane.events_channel)
-        leftover = [
-            str(key)  # pyright: ignore[reportUnknownArgumentType]
-            for key in r.scan_iter(match=f"{prefix}:*{agent_id}*")  # pyright: ignore[reportUnknownMemberType]
-        ]
+        scanned = cast(
+            "Iterable[object]",
+            r.scan_iter(match=f"{prefix}:*{agent_id}*"),  # pyright: ignore[reportUnknownMemberType]
+        )
+        leftover = [str(key) for key in scanned]
         assert leftover == [], f"publish left Redis keys behind: {leftover}"
     finally:
         r.close()

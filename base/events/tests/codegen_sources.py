@@ -2,25 +2,29 @@
 
 import ast
 from collections import defaultdict
+from collections.abc import Iterable
 from pathlib import Path
+from typing import Literal
 
-# Untyped test helper: its call sites report Unknown. File-level downgrade of the two call-site
-# rules keeps the rest of this package's strict checks intact (the same two rules are warnings
-# outside every package tests directory).
-# pyright: reportUnknownMemberType = warning
-# pyright: reportUnknownArgumentType = warning
+type NodeBinding = tuple[Literal["node"], ast.stmt]
+type ImportBinding = tuple[Literal["import"], str, str]
+type ModuleBinding = tuple[Literal["module"], str]
+type ConditionalBinding = tuple[Literal["conditional"], int]
+type Binding = NodeBinding | ImportBinding | ModuleBinding
+type ModuleBindings = dict[str, Binding | ConditionalBinding]
+type FunctionNode = ast.FunctionDef | ast.AsyncFunctionDef
 
 
 class SourceGraph:
-    def __init__(self, root):
+    def __init__(self, root: str | Path) -> None:
         self.root = Path(root)
-        self.visited = set()
-        self.classes = set()
-        self.paths = {}
-        self.trees = {}
-        self.module_bindings = {}
+        self.visited: set[tuple[str, str]] = set()
+        self.classes: set[tuple[str, str]] = set()
+        self.paths: dict[str, Path | None] = {}
+        self.trees: dict[str, list[ast.stmt]] = {}
+        self.module_bindings: dict[str, ModuleBindings] = {}
 
-    def path(self, module):
+    def path(self, module: str) -> Path | None:
         if module not in self.paths:
             base = self.root.joinpath(*module.split("."))
             self.paths[module] = next(
@@ -28,29 +32,31 @@ class SourceGraph:
             )
         return self.paths[module]
 
-    def nodes(self, module):
+    def nodes(self, module: str) -> list[ast.stmt]:
         if module not in self.trees:
             path = self.path(module)
             self.trees[module] = ast.parse(path.read_text()).body if path else []
         return self.trees[module]
 
-    def import_target(self, module, node):
+    def import_target(self, module: str, node: ast.ImportFrom) -> str:
         if not node.level:
             assert node.module is not None, "absolute from-import without a module"
             return node.module
-        package = module if self.path(module).name == "__init__.py" else module.rpartition(".")[0]
+        module_path = self.path(module)
+        assert module_path is not None, f"relative import from an unresolved module: {module}"
+        package = module if module_path.name == "__init__.py" else module.rpartition(".")[0]
         parts = package.split(".")
         return ".".join(
             parts[: len(parts) - node.level + 1] + ([node.module] if node.module else [])
         )
 
-    def bindings(self, module):
+    def bindings(self, module: str) -> ModuleBindings:
         if module not in self.module_bindings:
             self.module_bindings[module] = self.read_bindings(module)
         return self.module_bindings[module]
 
-    def read_bindings(self, module):
-        result = {}
+    def read_bindings(self, module: str) -> ModuleBindings:
+        result: ModuleBindings = {}
         for node in self.nodes(module):
             if isinstance(node, (ast.ImportFrom, ast.Import)):
                 result.update(self.import_bindings(module, node))
@@ -67,13 +73,13 @@ class SourceGraph:
                 result.update(self.conditional_bindings(module, node))
         return result
 
-    def conditional_bindings(self, module, node):
+    def conditional_bindings(self, module: str, node: ast.stmt) -> ModuleBindings:
         """Track uncertain globals; reject only when schema traversal uses one."""
-        result = {}
-        pending = [node]
+        result: ModuleBindings = {}
+        pending: list[ast.AST] = [node]
         while pending:
             current = pending.pop()
-            names = []
+            names: Iterable[str] = []
             if isinstance(current, (ast.Import, ast.ImportFrom)):
                 names = self.import_bindings(module, current)
             elif isinstance(current, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -84,17 +90,18 @@ class SourceGraph:
             else:
                 pending.extend(ast.iter_child_nodes(current))
             if names:
+                assert isinstance(current, ast.stmt)
                 result.update(dict.fromkeys(names, ("conditional", current.lineno)))
         return result
 
-    def binding(self, module, name):
+    def binding(self, module: str, name: str) -> Binding | None:
         info = self.bindings(module).get(name)
         assert not info or info[0] != "conditional", (
             f"Unsupported conditional schema binding: {module}.{name}"
         )
         return info
 
-    def import_bindings(self, module, node):
+    def import_bindings(self, module: str, node: ast.Import | ast.ImportFrom) -> dict[str, Binding]:
         if isinstance(node, ast.ImportFrom):
             target = self.import_target(module, node)
             assert all(alias.name != "*" for alias in node.names), (
@@ -111,7 +118,7 @@ class SourceGraph:
             for alias in node.names
         }
 
-    def symbol(self, module, name):
+    def symbol(self, module: str, name: str) -> None:
         key = module, name
         if key in self.visited:
             return
@@ -135,7 +142,7 @@ class SourceGraph:
         elif isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value:
             self.expression(module, node.value)
 
-    def qualified(self, module, node):
+    def qualified(self, module: str, node: ast.AST) -> str | None:
         if isinstance(node, ast.Name):
             binding = self.binding(module, node.id)
             if binding and binding[0] == "module":
@@ -148,7 +155,7 @@ class SourceGraph:
                 return self.imported_module(value, node.attr, set())
         return None
 
-    def imported_module(self, module, name, seen):
+    def imported_module(self, module: str, name: str, seen: set[tuple[str, str]]) -> str | None:
         """Resolve package module aliases before interpreting an attribute."""
         key = module, name
         assert key not in seen, f"Cyclic module re-export: {key}"
@@ -161,7 +168,7 @@ class SourceGraph:
         candidate = f"{module}.{name}"
         return candidate if self.path(candidate) else None
 
-    def expression(self, module, node):
+    def expression(self, module: str, node: ast.AST) -> None:
         for sub in ast.walk(node):
             if isinstance(sub, ast.Name):
                 self.symbol(module, sub.id)
@@ -180,7 +187,7 @@ class SourceGraph:
                     self.expression(module, quoted)
 
     @staticmethod
-    def route_decorators(func):
+    def route_decorators(func: FunctionNode) -> list[ast.Call]:
         methods = {"get", "post", "put", "delete", "patch", "head", "options", "api_route"}
         return [
             decorator
@@ -190,7 +197,7 @@ class SourceGraph:
             and decorator.func.attr in methods
         ]
 
-    def route_annotations(self, func):
+    def route_annotations(self, func: FunctionNode) -> list[ast.expr]:
         decorators = self.route_decorators(func)
         if not decorators:
             return []
@@ -209,7 +216,7 @@ class SourceGraph:
         )
         return annotations
 
-    def route_classes(self):
+    def route_classes(self) -> set[tuple[str, str]]:
         # Routes live in `gateway/routers/` (single-module surfaces) and in the
         # gateway's feature packages (`gateway/agents/`, `gateway/cluster/`,
         # `gateway/inspect/`, ...), all mounted by gateway/app.py — so every
@@ -226,8 +233,13 @@ class SourceGraph:
                     self.expression(module, annotation)
         return self.classes
 
-    def schema_sources(self, components, generated):
-        origins = defaultdict(set)
+    def relative_source(self, module: str) -> str:
+        path = self.path(module)
+        assert path is not None, f"module without a source file: {module}"
+        return str(path.relative_to(self.root))
+
+    def schema_sources(self, components: Iterable[str], generated: Iterable[str]) -> set[str]:
+        origins: defaultdict[str, set[str]] = defaultdict(set)
         for module, name in self.route_classes():
             origins[name].add(module)
         # Name indexes are used only after reachability has established
@@ -238,10 +250,10 @@ class SourceGraph:
         assert not unknown, f"Unresolved components: {sorted(unknown)}"
         assert not ambiguous, f"Ambiguous reachable components: {ambiguous}"
         # Include newly added models and inherited fields before regeneration.
-        return {str(self.path(module).relative_to(self.root)) for module, _name in self.classes}
+        return {self.relative_source(module) for module, _name in self.classes}
 
-    def imported_sources(self, start):
-        seen = set()
+    def imported_sources(self, start: str) -> set[str]:
+        seen: set[str] = set()
         pending = [start]
         while pending:
             module = pending.pop()
@@ -255,4 +267,4 @@ class SourceGraph:
                     target = self.import_target(module, node)
                     pending.append(target)
                     pending.extend(target + "." + alias.name for alias in node.names)
-        return {str(self.path(module).relative_to(self.root)) for module in seen}
+        return {self.relative_source(module) for module in seen}
