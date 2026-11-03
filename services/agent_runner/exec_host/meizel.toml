@@ -10,6 +10,3 @@ exports = ["daemon.py", "service.py", "shutdown_budget.py"]
 
 [roots]
 "daemon.py" = { kinds = ["clock", "cwd", "environ", "home", "pid", "settings"], why = "The exec-host process entry boots configuration and reads the home it runs under before composing its service resources; it builds the process timers every exec run and kill deadline is measured with, and reads the parent environment it was started with once, as the base every child it spawns is given" }
-
-[debt.ambient-read]
-"service.py#pid sys.executable" = { count = 1, owner = "#5816", until = "waits for `__init__` to take the interpreter path from its caller: it reads `sys.executable` itself" }

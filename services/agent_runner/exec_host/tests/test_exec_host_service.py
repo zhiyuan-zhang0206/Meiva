@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import json
 import os
 import sys
@@ -114,7 +115,9 @@ def _write_request_envelope(
 
 
 @contextlib.asynccontextmanager
-async def _running_service(home: Path, timers: Timers) -> AsyncGenerator[Path]:
+async def _running_service(
+    home: Path, timers: Timers, *, executable: str = sys.executable
+) -> AsyncGenerator[Path]:
     sock_path = service_socket_path(run_dir(home))
     base_env = {
         **child_env.inherited_process_env(),
@@ -125,8 +128,9 @@ async def _running_service(home: Path, timers: Timers) -> AsyncGenerator[Path]:
         home=home,
         base_environ=base_env,
         default_cwd=home,
-        source_root=editable_install.current_interpreter_source_root(sys.executable),
+        source_root=editable_install.current_interpreter_source_root(executable),
         timers=timers,
+        executable=executable,
         pid=os.getpid(),
     )
     async with asyncio.TaskGroup() as tg:
@@ -153,6 +157,15 @@ async def _read_frames(reader: asyncio.StreamReader) -> list[dict[str, Any]]:
         if "ok" in msg:
             break
     return frames
+
+
+# meiva:note
+# The caller names the interpreter. A default would let a caller that forgets the argument
+# run the child on whatever interpreter this process happens to be, silently.
+def test_service_takes_the_interpreter_from_its_caller() -> None:
+    parameter = inspect.signature(ExecHostService).parameters["executable"]
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    assert "executable" not in (ExecHostService.__init__.__kwdefaults__ or {})
 
 
 @pytest.mark.asyncio
@@ -210,6 +223,44 @@ async def test_run_streams_output_and_writes_result(tmp_path: Path) -> None:
         assert res_file.exists()
         envelope = json.loads(res_file.read_text(encoding="utf-8"))
         assert envelope["kind"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_run_reports_the_spawn_failure_of_an_interpreter_that_is_not_there(
+    tmp_path: Path,
+) -> None:
+    missing = str(tmp_path / "no-such-python")
+    async with _running_service(tmp_path, SYSTEM_TIMERS, executable=missing) as sock_path:
+        exec_dir = exec_run_dir(tmp_path)
+        req_file = exec_dir / "1" / "req-missing.json"
+        res_file = exec_dir / "1" / "res-missing.json"
+        _write_request_envelope(req_file, "print('never runs', flush=True)\n")
+
+        reader, writer = await asyncio.open_unix_connection(str(sock_path))
+        try:
+            writer.write(
+                protocol.encode(
+                    {
+                        "id": 9,
+                        "method": "run",
+                        "agent_id": 1,
+                        "request_path": str(req_file),
+                        "result_path": str(res_file),
+                        "timeout_s": 15.0,
+                        "cwd": str(tmp_path),
+                    }
+                )
+            )
+            await writer.drain()
+            frames = await _read_frames(reader)
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    final = frames[-1]
+    assert final["ok"] is False
+    assert "exec subprocess could not be spawned" in final["error"]
+    assert not res_file.exists()
 
 
 @pytest.mark.asyncio
