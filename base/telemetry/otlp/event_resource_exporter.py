@@ -26,7 +26,7 @@ def _dimension(value: object) -> str | bool | int | float:
 # encoder then emits resource-homogeneous groups.
 #
 # This module imports the OTel SDK at module level and is only imported while the providers are
-# built, so flag-off processes never pay for the SDK (see `telemetry_otlp_metrics.build_providers`).
+# built, so flag-off processes never pay for the SDK (see `telemetry_otlp_sdk.build_providers`).
 class EventDimensionResourceExporter(LogRecordExporter):
     def __init__(self, exporter: LogRecordExporter) -> None:
         self._exporter = exporter

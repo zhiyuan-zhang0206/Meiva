@@ -11,7 +11,7 @@ tags:
 
 # OTLP exit flush
 
-`base/telemetry/otlp/telemetry_otlp_metrics._build_providers` builds both SDK providers
+`base/telemetry/otlp/telemetry_otlp_sdk.build_providers` builds both SDK providers
 with `shutdown_on_exit=False`, so neither registers an atexit shutdown of
 its own. `base.telemetry.drain_on_exit` is the single ordered exit seam:
 the concrete pipeline closes emitter admission and joins its sole writer,

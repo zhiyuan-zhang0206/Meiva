@@ -77,9 +77,9 @@ def report_loss(
     if record_metric is not None:
         metric_report = report
         if queue_name == "emitter":
-            metric_report = replace(
-                report, attributes={k: v for k, v in report.attributes.items() if k != "n"}
-            )
+            attributes = dict(report.attributes)
+            attributes.pop("n", None)
+            metric_report = replace(report, attributes=attributes)
         try:
             record_metric(metric_report)
         except Exception as exc:

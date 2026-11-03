@@ -25,7 +25,7 @@ import re
 import threading
 import time
 from collections.abc import Sequence
-from typing import Any, LiteralString, TypeGuard
+from typing import LiteralString
 
 import psycopg
 from psycopg.types.json import Jsonb
@@ -33,6 +33,8 @@ from psycopg_pool import ConnectionPool
 
 from base.db import Database
 from base.events.contract import EVENTS
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.telemetry.delivery.mirror import event_row
 from base.telemetry.delivery.receipts import Event
 from base.telemetry.delivery.reporting import report_no_pipeline
@@ -83,10 +85,13 @@ def event_uid(stream_id: int) -> int:
     return stream_id - (1 << 64) if stream_id >= 1 << 63 else stream_id
 
 
-def stored_row(row: dict[str, Any], *, imported_from: str | None = None) -> dict[str, Any]:
+def stored_row(row: dict[str, object], *, imported_from: str | None = None) -> dict[str, object]:
     """One mirror/Loki row dict (`event_row` shape, with its `id`) as an insert record."""
+    stream_id = row["id"]
+    if type(stream_id) is not int:
+        raise TypeError("an event row carries an integer id")
     return {
-        "event_uid": event_uid(int(row["id"])),
+        "event_uid": event_uid(stream_id),
         "ts": row["ts"],
         "trace_id": row["trace_id"],
         "span_id": row["span_id"],
@@ -104,14 +109,14 @@ def stored_row(row: dict[str, Any], *, imported_from: str | None = None) -> dict
     }
 
 
-def _jsonb(records: Sequence[dict[str, Any]]) -> Jsonb:
+def _jsonb(records: Sequence[dict[str, object]]) -> Jsonb:
     text = json.dumps(list(records), default=str, ensure_ascii=False)
     if "\\u0000" in text:
         text = _NUL_ESCAPE.sub(lambda m: m.group(1) + "\\ufffd", text)
     return Jsonb(json.loads(text))
 
 
-def insert_rows(conn: psycopg.Connection[Any], records: Sequence[dict[str, Any]]) -> int:
+def insert_rows(conn: psycopg.Connection, records: Sequence[dict[str, object]]) -> int:
     """Append insert records (`stored_row` shape) in the caller's transaction.
 
     Idempotent on `(event_uid, ts)`. Returns how many rows were new.
@@ -122,21 +127,21 @@ def insert_rows(conn: psycopg.Connection[Any], records: Sequence[dict[str, Any]]
     return max(cursor.rowcount, 0)
 
 
-def ensure_partitions(conn: psycopg.Connection[Any]) -> None:
+def ensure_partitions(conn: psycopg.Connection) -> None:
     """Create the partitions from last month through the coming months (idempotent,
     SECURITY DEFINER)."""
     conn.execute("SELECT ensure_telemetry_event_partitions(%s)", (PARTITION_MONTHS_AHEAD,))
 
 
 _lock = threading.Lock()
-_pool: ConnectionPool[Any] | None = None
+_pool: ConnectionPool | None = None
 _disabled = False
 failures = 0
 retry_at = 0.0
 _ensured_month: tuple[int, int] | None = None
 
 
-def _open_pool(db: Database) -> ConnectionPool[Any]:
+def _open_pool(db: Database) -> ConnectionPool:
     global _pool  # noqa: PLW0603
     if _pool is None:
         _pool = db.pool(min_size=0, max_size=1, timeout=_POOL_TIMEOUT_S)
@@ -152,7 +157,7 @@ def next_backoff_deadline(
     first_s: float = _BACKOFF_FIRST_S,
     max_s: float = _BACKOFF_MAX_S,
 ) -> float:
-    return now + min(first_s * 2 ** (consecutive_failures - 1), max_s)
+    return now + min(first_s * 2.0 ** (consecutive_failures - 1), max_s)
 
 
 def store_events(db: Database, events: Sequence[Event], *, now: float | None = None) -> None:
@@ -181,7 +186,7 @@ def store_events(db: Database, events: Sequence[Event], *, now: float | None = N
             failures = 0
 
 
-def write(db: Database, records: list[dict[str, Any]], *, month: tuple[int, int]) -> None:
+def write(db: Database, records: list[dict[str, object]], *, month: tuple[int, int]) -> None:
     global _ensured_month  # noqa: PLW0603
     from base.db.transaction import write_transaction
 
@@ -262,21 +267,17 @@ def set_enabled(*, enabled: bool) -> bool:
     return previous
 
 
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
-
-
-def jsonl_rows(lines: Sequence[bytes]) -> list[dict[str, Any]]:
+def jsonl_rows(lines: Sequence[bytes]) -> list[dict[str, object]]:
     """Insert records for complete mirror lines."""
-    records: list[dict[str, Any]] = []
+    records: list[dict[str, object]] = []
     for raw in lines:
-        parsed = json.loads(raw)
-        if not _is_str_dict(parsed):
+        row = object_of(json.loads, raw)
+        if not is_object_dict(row):
             continue
-        row = parsed
-        if row["category"] not in STORED_CATEGORIES or not is_persisted(
-            row["event_name"], row["level"]
-        ):
+        category, name, level = row["category"], row["event_name"], row["level"]
+        if not isinstance(name, str) or not isinstance(level, str):
+            raise TypeError("a mirror line carries a string event_name and level")
+        if category not in STORED_CATEGORIES or not is_persisted(name, level):
             continue
         records.append(stored_row(row, imported_from="jsonl"))
     return records

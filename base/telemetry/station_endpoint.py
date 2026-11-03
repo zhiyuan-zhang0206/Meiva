@@ -9,6 +9,7 @@ from urllib.parse import urlparse, urlsplit
 import psycopg
 
 from base.db import Database
+from base.db.rows import query_all
 
 
 @dataclass(frozen=True)
@@ -24,20 +25,29 @@ class StationTarget:
     name: str | None = None
 
 
+# meiva:note
+# One advertised unit: its machine and the URL it serves the observability station on.
+@dataclass(frozen=True)
+class _StationUnitRow:
+    machine_name: str
+    url: str
+
+
 def advertised_station_unit(conn: psycopg.Connection, base: str) -> tuple[str, str] | None:
     """Find this host's pure station; hybrid advertisements are gateway/ops URLs."""
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT machine_name, url FROM machine_units "
-            "WHERE serve_observability_station AND NOT serve_gateway "
-            "AND NOT serve_agent_runner AND stopped_at IS NULL "
-            "AND url IS NOT NULL ORDER BY machine_name, home"
-        )
-        matches = [
-            (str(name), str(url).rstrip("/"))
-            for name, url in cur.fetchall()
-            if urlsplit(str(url)).hostname == urlsplit(base).hostname
-        ]
+    rows = query_all(
+        conn,
+        _StationUnitRow,
+        "SELECT machine_name, url FROM machine_units "
+        "WHERE serve_observability_station AND NOT serve_gateway "
+        "AND NOT serve_agent_runner AND stopped_at IS NULL "
+        "AND url IS NOT NULL ORDER BY machine_name, home",
+    )
+    matches = [
+        (row.machine_name, row.url.rstrip("/"))
+        for row in rows
+        if urlsplit(row.url).hostname == urlsplit(base).hostname
+    ]
     if len({url for _, url in matches}) > 1:
         raise RuntimeError(f"multiple station ingress advertisements for {base}")
     return matches[0] if matches else None

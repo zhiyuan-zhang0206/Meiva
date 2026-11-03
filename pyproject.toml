@@ -683,6 +683,18 @@ root = "base/agents/tests"
 root = "base/agents/upload_delivery/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/telemetry/metrics/core/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/telemetry/metrics/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/telemetry/otlp/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/telemetry/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "cli/commands/agents/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -899,6 +911,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "base/agents"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/telemetry"
 reportAny = "error"
 reportExplicitAny = "error"
 

@@ -84,7 +84,7 @@ would mint a new stream per process start.
 
 ## Views
 
-`_metric_views()` shapes `meiva_llm_usage_latency` / `meiva_llm_usage_decode` with
+`telemetry_otlp_sdk.metric_views()` shapes `meiva_llm_usage_latency` / `meiva_llm_usage_decode` with
 explicit LLM-scale buckets (250 ms .. 300 s — the OTel defaults top out at
 10 s, clipping every slower call into +Inf and flatlining ops p95 at exactly
 10 s) and an attribute keep-list of {machine, process, model}. `agent_id`

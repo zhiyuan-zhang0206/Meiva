@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from base.telemetry.otlp import telemetry_otlp, telemetry_otlp_metrics
+from base.telemetry.otlp import telemetry_otlp, telemetry_otlp_metrics, telemetry_otlp_sdk
 
 
 class _ProbeHandler(http.server.BaseHTTPRequestHandler):
@@ -90,7 +90,7 @@ def test_production_otlp_provider_construction_contract(tmp_path: Path) -> None:
     assert 0 < timeout_s <= 5.0
     assert plan.shutdown_on_exit is False
 
-    logs, metrics = telemetry_otlp_metrics.build_providers(
+    logs, metrics = telemetry_otlp_sdk.build_providers(
         "http://127.0.0.1:4318", mirror_dir=tmp_path, home=tmp_path
     )
     try:

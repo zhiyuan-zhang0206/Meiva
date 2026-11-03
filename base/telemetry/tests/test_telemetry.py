@@ -223,7 +223,7 @@ def test_the_cluster_label_is_materialized_from_the_home_the_boot_hands_in(
     other = tmp_path / ".meiva-other-unit"
     other.mkdir()
     bound = emitter.process_state["pipeline"]
-    assert bound is not None
+    assert isinstance(bound, telemetry.EventPipeline)
     monkeypatch.setitem(emitter.process_state, "cluster", None)
     telemetry.init_telemetry(process="test-proc", pipeline=bound, home=other)
 

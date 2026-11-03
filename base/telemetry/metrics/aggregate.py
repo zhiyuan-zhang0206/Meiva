@@ -14,12 +14,18 @@ from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import TypedDict
 
 import psycopg
 
 from base.telemetry.metrics import (
+    AgentActivityData,
+    ExecData,
+    LlmTurnsData,
     MetricSection,
+    PluginActivationData,
+    PositionBlocks,
+    SyntaxFixData,
     fix_kinds,
     pctiles,
     render_agent_activity,
@@ -30,11 +36,56 @@ from base.telemetry.metrics import (
     third_of,
 )
 from base.telemetry.metrics.aggregate_sql import (
-    LIFECYCLE_EVENTS,
+    AgentCounters,
     LlmCostSums,
     read_agent_window,
     read_window,
 )
+
+
+# meiva:note
+# The `meta` header of the report: the window, its filters and the event totals.
+class ReportMeta(TypedDict):
+    window_days: int
+    agent_filter: int | None
+    generated_at: str
+    total_events: int
+    distinct_agents: int
+    since_compact: bool
+
+
+# meiva:note
+# The `metrics` map of the report: one fragment per section, keyed by the section name.
+class ReportMetrics(TypedDict):
+    syntax_fix: SyntaxFixData
+    exec: ExecData
+    llm_turns: LlmTurnsData
+    agent_activity: AgentActivityData
+    plugin_activation: PluginActivationData
+
+
+# meiva:note
+# The machine report `build_report_from_aggregate` returns and `/api/metrics` serves.
+class ReportData(TypedDict):
+    meta: ReportMeta
+    metrics: ReportMetrics
+
+
+# meiva:note
+# One agent's headline counters for `/api/metrics/agents`. `cache_hit_pct` is None when the agent
+# has input tokens but no call reported cache metering.
+class AgentRollup(TypedDict):
+    events: int
+    cost_usd: float
+    llm_calls: int
+    tokens_in: int
+    tokens_out: int
+    tokens_cached: int
+    cache_hit_pct: float | None
+    turn_ok: int
+    turn_total: int
+    exec_ok: int
+    exec_failed: int
 
 
 @dataclass(frozen=True)
@@ -113,21 +164,21 @@ class EventAggregate:
 
 
 def _per_agent_aggs(
-    per_agent: dict[int | None, dict[str, Any]], fallback: datetime
+    per_agent: dict[int | None, AgentCounters], fallback: datetime
 ) -> dict[int | None, _PerAgentAgg]:
     return {
         agent: _PerAgentAgg(
             agent,
-            int(row["events"]),
-            int(row.get("turn_total", 0)),
-            int(row.get("turn_ok", 0)),
-            int(row.get("exec_ok", 0)),
-            int(row.get("exec_failed", 0)),
-            row.get("first_ts") or fallback,
-            row.get("last_ts") or fallback,
+            row.events,
+            row.turn_total,
+            row.turn_ok,
+            row.exec_ok,
+            row.exec_failed,
+            row.first_ts or fallback,
+            row.last_ts or fallback,
         )
         for agent, row in per_agent.items()
-        if row["events"]
+        if row.events
     }
 
 
@@ -138,11 +189,6 @@ def _llm_by_agent(
         agent: [(model, n, i, o, c) for model, (n, i, o, c, _r) in models.items()]
         for agent, models in llm_per_agent.items()
     }
-
-
-def _total(rows: list[dict[str, Any]], key: str) -> int:
-    """The sum of one per-agent counter over every group (a group without it counts 0)."""
-    return sum(int(r.get(key, 0)) for r in rows)
 
 
 def _llm_by_model(
@@ -159,7 +205,7 @@ def _llm_by_model(
 
 
 def fetch_aggregate(
-    conn: psycopg.Connection[Any],
+    conn: psycopg.Connection,
     days: int,
     agent_id: int | None,
     *,
@@ -173,17 +219,17 @@ def fetch_aggregate(
     always kept).
     """
     data = read_window(conn, days, agent_id, now=now, since_compact=since_compact)
-    raw: dict[int | None, dict[str, Any]] = data["per_agent"]
+    raw = data["per_agent"]
     rows = list(raw.values())
     lengths = data["lengths"]
     return EventAggregate(
-        total_events=_total(rows, "events"),
+        total_events=sum(r.events for r in rows),
         distinct_agents=len([a for a in raw if a is not None]),
-        code_blocks=_total(rows, "code"),
-        code_blocks_per_agent={a: int(r["code"]) for a, r in raw.items() if r.get("code")},
+        code_blocks=sum(r.code for r in rows),
+        code_blocks_per_agent={a: r.code for a, r in raw.items() if r.code},
         fix_events=data["fix_events"],
-        exec_ok=_total(rows, "exec_ok"),
-        exec_failed=_total(rows, "exec_failed"),
+        exec_ok=sum(r.exec_ok for r in rows),
+        exec_failed=sum(r.exec_failed for r in rows),
         failure_types=data["failure_types"],
         code_len=lengths["code_len"],
         output_len=lengths["output_len"],
@@ -191,36 +237,36 @@ def fetch_aggregate(
         llm_position=data["llm_position"],
         llm_costs=data["llm_costs"],
         llm_cache_input=data["llm_cache_input"],
-        turn_total=_total(rows, "turn_total"),
-        turn_ok=_total(rows, "turn_ok"),
+        turn_total=sum(r.turn_total for r in rows),
+        turn_ok=sum(r.turn_ok for r in rows),
         turn_durations=lengths["turn_dur"],
         per_agent=_per_agent_aggs(raw, data["start"]),
         per_agent_llm=_llm_by_agent(data["llm_per_agent"]),
         spawners=data["spawners"],
         lifecycle={
-            name: sum(r.get("lifecycle", {}).get(name, 0) for r in rows)
-            for name in LIFECYCLE_EVENTS.values()
+            "spawned": sum(r.spawned for r in rows),
+            "resurrected": sum(r.resurrected for r in rows),
         },
-        idle_halts=_total(rows, "idle_halts"),
+        idle_halts=sum(r.idle_halts for r in rows),
         plugin_acts=data["plugin_acts"],
     )
 
 
 def fetch_agent_rollups(
-    conn: psycopg.Connection[Any],
+    conn: psycopg.Connection,
     days: int,
     *,
     now: datetime,
     since_compact: bool = False,
-) -> tuple[int, dict[int, dict[str, Any]]]:
+) -> tuple[int, dict[int, AgentRollup]]:
     """`(total_events, per-agent headline counters)` of the window, for `/api/metrics/agents`.
 
     Runs only the statements that endpoint needs: the per-agent counters and the `llm_usage` sums.
     """
     data = read_agent_window(conn, days, now=now, since_compact=since_compact)
-    raw: dict[int | None, dict[str, Any]] = data["per_agent"]
+    raw = data["per_agent"]
     per_agent = _per_agent_aggs(raw, now)
-    total = sum(int(r["events"]) for r in raw.values())
+    total = sum(r.events for r in raw.values())
     return total, agent_rollups(
         per_agent, _llm_by_agent(data["llm_per_agent"]), data["llm_costs"], data["llm_cache_input"]
     )
@@ -250,7 +296,7 @@ def _llm_totals_from_models(
     return _LlmTotals(calls, tin, tout, tcached, treason, cost, unpriced)
 
 
-def _data_syntax_fix(agg: EventAggregate) -> dict[str, Any]:
+def _data_syntax_fix(agg: EventAggregate) -> SyntaxFixData:
     """The `syntax_fix` section data."""
     # syntax_fix: per-event kinds (Counter, stream order) + per-block
     # ruff_format position thirds (block index i among the agent's n blocks ->
@@ -277,13 +323,13 @@ def _data_syntax_fix(agg: EventAggregate) -> dict[str, Any]:
         "code_blocks": agg.code_blocks,
         "trigger_counts": dict(kind_counts),
         "ruff_format_by_position": {
-            b: {"hits": hits[b], "blocks": blocks_b[b]} for b in ("early", "mid", "late")
+            b: PositionBlocks(hits=hits[b], blocks=blocks_b[b]) for b in ("early", "mid", "late")
         },
         "ruff_format_rate_pct_by_position": rate,
     }
 
 
-def _data_exec(agg: EventAggregate) -> dict[str, Any]:
+def _data_exec(agg: EventAggregate) -> ExecData:
     """The `exec` section data."""
     total_exec = agg.exec_ok + agg.exec_failed
     return {
@@ -297,7 +343,7 @@ def _data_exec(agg: EventAggregate) -> dict[str, Any]:
     }
 
 
-def _data_llm_turns(agg: EventAggregate) -> dict[str, Any]:
+def _data_llm_turns(agg: EventAggregate) -> LlmTurnsData:
     """The `llm_turns` section data."""
     totals = _llm_totals_from_models(agg.llm_by_model, agg.llm_costs)
     cache_input = sum(agg.llm_cache_input.values())
@@ -326,7 +372,7 @@ def _data_llm_turns(agg: EventAggregate) -> dict[str, Any]:
     }
 
 
-def _data_agent_activity(agg: EventAggregate) -> dict[str, Any]:
+def _data_agent_activity(agg: EventAggregate) -> AgentActivityData:
     """The `agent_activity` section data."""
     by_spawner: Counter[str] = Counter()
     subagents = 0
@@ -350,7 +396,7 @@ def _data_agent_activity(agg: EventAggregate) -> dict[str, Any]:
     }
 
 
-def _data_plugin_activation(agg: EventAggregate) -> dict[str, Any]:
+def _data_plugin_activation(agg: EventAggregate) -> PluginActivationData:
     """The `plugin_activation` section data."""
     # plugin_activation — philosophy §6's "removable as a gauge, not a vibe".
     # `by_contribution` is keyed the way `meiva plugins inspect` spells a
@@ -375,22 +421,38 @@ def _data_plugin_activation(agg: EventAggregate) -> dict[str, Any]:
     }
 
 
-def _sections_from_aggregate(agg: EventAggregate) -> list[MetricSection]:
-    """Rebuild the five unit data dicts from `EventAggregate`, then render
-    them with the shared render functions — the text blocks stay identical to
-    the per-row path because the renders are the same functions."""
-    data_syntax = _data_syntax_fix(agg)
-    data_exec = _data_exec(agg)
-    data_llm = _data_llm_turns(agg)
-    data_activity = _data_agent_activity(agg)
-    data_plugin = _data_plugin_activation(agg)
+# meiva:note
+# Rebuild the five unit data fragments from `EventAggregate`.
+def _metrics_from_aggregate(agg: EventAggregate) -> ReportMetrics:
+    return {
+        "syntax_fix": _data_syntax_fix(agg),
+        "exec": _data_exec(agg),
+        "llm_turns": _data_llm_turns(agg),
+        "agent_activity": _data_agent_activity(agg),
+        "plugin_activation": _data_plugin_activation(agg),
+    }
 
+
+# meiva:note
+# Render the five fragments with the shared render functions — the text blocks stay identical to
+# the per-row path because the renders are the same functions.
+def _sections_from_metrics(metrics: ReportMetrics) -> list[MetricSection]:
     return [
-        MetricSection("syntax_fix", render_syntax_fix(data_syntax), data_syntax),
-        MetricSection("exec", render_exec(data_exec), data_exec),
-        MetricSection("llm_turns", render_llm_turns(data_llm), data_llm),
-        MetricSection("agent_activity", render_agent_activity(data_activity), data_activity),
-        MetricSection("plugin_activation", render_plugin_activation(data_plugin), data_plugin),
+        MetricSection(
+            "syntax_fix", render_syntax_fix(metrics["syntax_fix"]), metrics["syntax_fix"]
+        ),
+        MetricSection("exec", render_exec(metrics["exec"]), metrics["exec"]),
+        MetricSection("llm_turns", render_llm_turns(metrics["llm_turns"]), metrics["llm_turns"]),
+        MetricSection(
+            "agent_activity",
+            render_agent_activity(metrics["agent_activity"]),
+            metrics["agent_activity"],
+        ),
+        MetricSection(
+            "plugin_activation",
+            render_plugin_activation(metrics["plugin_activation"]),
+            metrics["plugin_activation"],
+        ),
     ]
 
 
@@ -401,17 +463,18 @@ def build_report_from_aggregate(
     *,
     now: datetime,
     since_compact: bool = False,
-) -> tuple[str, dict[str, Any]]:
+) -> tuple[str, ReportData]:
     """Assemble the same text + data `build_report` produces, from an
     `EventAggregate` (see `fetch_aggregate`). Meta semantics are identical:
     `total_events` counts every telemetry/log row in the window (service-level
     rows included), `distinct_agents` excludes agent_id NULL."""
-    sections = _sections_from_aggregate(agg)
+    metrics = _metrics_from_aggregate(agg)
+    sections = _sections_from_metrics(metrics)
     names = [s.name for s in sections]
     if len(names) != len(set(names)):
         raise ValueError(f"duplicate metric section names would clobber the JSON: {names}")
     generated_at = now.isoformat()
-    meta: dict[str, Any] = {
+    meta: ReportMeta = {
         "window_days": days,
         "agent_filter": agent_id,
         "generated_at": generated_at,
@@ -430,8 +493,7 @@ def build_report_from_aggregate(
         + "\n"
     )
     text = header + "\n" + "\n".join(s.text for s in sections)
-    data = {"meta": meta, "metrics": {s.name: s.data for s in sections}}
-    return text, data
+    return text, {"meta": meta, "metrics": metrics}
 
 
 def agent_rollups(
@@ -439,9 +501,9 @@ def agent_rollups(
     per_agent_llm: dict[int | None, list[tuple[str, int, int, int, int]]],
     costs: dict[int | None, dict[str, LlmCostSums]],
     cache_inputs: dict[int | None, int],
-) -> dict[int, dict[str, Any]]:
+) -> dict[int, AgentRollup]:
     """Per-agent headline counters for `/api/metrics/agents` (service rows excluded)."""
-    out: dict[int, dict[str, Any]] = {}
+    out: dict[int, AgentRollup] = {}
     for aid, row in per_agent.items():
         if aid is None:
             continue

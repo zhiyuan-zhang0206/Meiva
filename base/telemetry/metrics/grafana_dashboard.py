@@ -40,8 +40,8 @@ import copy
 import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, TypeGuard
 
+from base.host.boundary.json_values import is_object_dict
 from base.telemetry.metrics.plugin_metrics import MetricSpec, render_targets, render_title
 
 # ── shell constants ───────────────────────────────────────────────────────────
@@ -105,7 +105,7 @@ _CORE_SECTION_TITLES = frozenset(
 # (task #3697). Spec-level ``options`` / ``custom`` / ``field_defaults`` merge
 # on top of these; keys not present there keep the profile values.
 
-_LOKI_TS_CUSTOM: dict[str, Any] = {
+_LOKI_TS_CUSTOM: dict[str, object] = {
     "lineInterpolation": "smooth",
     "showPoints": "never",
     "fillOpacity": 12,
@@ -113,27 +113,27 @@ _LOKI_TS_CUSTOM: dict[str, Any] = {
     "lineWidth": 1,
     "spanNulls": True,
 }
-_PROM_TS_CUSTOM: dict[str, Any] = {
+_PROM_TS_CUSTOM: dict[str, object] = {
     "drawStyle": "line",
     "lineWidth": 1,
     "fillOpacity": 8,
     "showPoints": "never",
 }
-_BARCHART_CUSTOM: dict[str, Any] = {
+_BARCHART_CUSTOM: dict[str, object] = {
     "stacking": {"mode": "normal", "group": "A"},
     "fillOpacity": 85,
     "lineWidth": 1,
     "drawStyle": "bars",
     "barAlignment": 0,
 }
-_TABLE_CUSTOM: dict[str, Any] = {
+_TABLE_CUSTOM: dict[str, object] = {
     "align": "auto",
     "cellOptions": {"type": "auto"},
     "filterable": False,
     "inspect": False,
 }
 
-_STAT_OPTIONS: dict[str, Any] = {
+_STAT_OPTIONS: dict[str, object] = {
     "colorMode": "value",
     "graphMode": "area",
     "justifyMode": "auto",
@@ -141,7 +141,7 @@ _STAT_OPTIONS: dict[str, Any] = {
     "reduceOptions": {"calcs": ["last"], "fields": "", "values": False},
     "textMode": "auto",
 }
-_LOKI_TS_OPTIONS: dict[str, Any] = {
+_LOKI_TS_OPTIONS: dict[str, object] = {
     "legend": {
         "calcs": ["mean", "max", "last"],
         "displayMode": "table",
@@ -150,11 +150,11 @@ _LOKI_TS_OPTIONS: dict[str, Any] = {
     },
     "tooltip": {"mode": "multi", "sort": "desc"},
 }
-_PROM_TS_OPTIONS: dict[str, Any] = {
+_PROM_TS_OPTIONS: dict[str, object] = {
     "legend": {"displayMode": "list", "placement": "bottom", "showLegend": True},
     "tooltip": {"mode": "multi", "sort": "desc"},
 }
-_BARCHART_OPTIONS: dict[str, Any] = {
+_BARCHART_OPTIONS: dict[str, object] = {
     "legend": {
         "calcs": ["sum", "max"],
         "displayMode": "table",
@@ -171,57 +171,52 @@ _BARCHART_OPTIONS: dict[str, Any] = {
     "xTickLabelSpacing": 100,
     "xField": "Time",
 }
-_TABLE_OPTIONS: dict[str, Any] = {
+_TABLE_OPTIONS: dict[str, object] = {
     "cellHeight": "sm",
     "footer": {"countRows": False, "enablePagination": True, "show": False},
     "showHeader": True,
     "showTypeIcons": False,
     "sortBy": [],
 }
-_LOGS_OPTIONS: dict[str, Any] = {"showTime": True, "sortOrder": "Descending"}
+_LOGS_OPTIONS: dict[str, object] = {"showTime": True, "sortOrder": "Descending"}
 
 _DEFAULT_SIZE = {"stat": (8, 4)}
 
 
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
-
-
-def _merge(base: dict[str, Any], overrides: dict[str, Any] | None) -> dict[str, Any]:
+def _merge(base: Mapping[str, object], overrides: Mapping[str, object] | None) -> dict[str, object]:
     """Recursive merge of a look override onto a profile: dict values merge
     key-wise, everything else replaces. Returns a fresh dict."""
-    merged: dict[str, Any] = dict(base)
+    merged = dict(base)
     if not overrides:
         return merged
-    copied: dict[str, Any] = copy.deepcopy(overrides)
+    copied = copy.deepcopy(overrides)
     for key, value in copied.items():
         existing = merged.get(key)
-        if _is_str_dict(value) and _is_str_dict(existing):
+        if is_object_dict(value) and is_object_dict(existing):
             merged[key] = _merge(existing, value)
         else:
             merged[key] = value
     return merged
 
 
-def _thresholds(spec: MetricSpec) -> dict[str, Any]:
+def _thresholds(spec: MetricSpec) -> dict[str, object]:
     """``fieldConfig.defaults.thresholds``: the green base plus the spec's
     steps; an explicit empty list renders the empty steps list (the panel has
     no thresholds at all)."""
     if spec.thresholds is None:
-        steps: list[dict[str, Any]] = [{"color": "green", "value": None}]
+        steps: list[dict[str, object]] = [{"color": "green", "value": None}]
     elif not spec.thresholds:
         steps = []
     else:
-        steps = [{"color": "green", "value": None}] + [
-            {"color": step.color, "value": step.value} for step in spec.thresholds
-        ]
+        steps = [{"color": "green", "value": None}]
+        steps.extend({"color": step.color, "value": step.value} for step in spec.thresholds)
     return {"mode": "absolute", "steps": steps}
 
 
-def _field_config_defaults(spec: MetricSpec) -> dict[str, Any] | None:
+def _field_config_defaults(spec: MetricSpec) -> dict[str, object] | None:
     """The panel's ``fieldConfig.defaults`` — None for panels that carry no
     field config at all (logs panels)."""
-    defaults: dict[str, Any]
+    defaults: dict[str, object]
     if spec.panel == "stat":
         defaults = {
             "color": {"mode": "fixed", "fixedColor": "blue"},
@@ -272,7 +267,7 @@ def _field_config_defaults(spec: MetricSpec) -> dict[str, Any] | None:
     return defaults
 
 
-def _options(spec: MetricSpec) -> dict[str, Any]:
+def _options(spec: MetricSpec) -> dict[str, object]:
     if spec.panel == "stat":
         profile = _STAT_OPTIONS
     elif spec.panel == "timeseries":
@@ -293,14 +288,14 @@ def _is_instant(spec: MetricSpec, first_query: str) -> bool:
     return spec.panel in ("stat", "table") or "$__range" in first_query
 
 
-def _targets(spec: MetricSpec) -> list[dict[str, Any]]:
+def _targets(spec: MetricSpec) -> list[dict[str, object]]:
     rendered = render_targets(spec)
     names = spec.target_names
     if spec.query_type != "sql" and names is None:
         raise DashboardRenderError(
             f"metric {spec.name!r} renders {spec.query_type} targets but has no target_names"
         )
-    targets: list[dict[str, Any]] = []
+    targets: list[dict[str, object]] = []
     for index, expr in enumerate(rendered):
         ref_id = chr(ord("A") + index)
         legend = None if names is None else names[index]
@@ -316,7 +311,7 @@ def _targets(spec: MetricSpec) -> list[dict[str, Any]]:
                 }
             )
         elif spec.query_type == "promql":
-            target: dict[str, Any] = {
+            target: dict[str, object] = {
                 "datasource": dict(_PROMETHEUS),
                 "editorMode": "code",
                 "expr": expr,
@@ -345,8 +340,8 @@ def _targets(spec: MetricSpec) -> list[dict[str, Any]]:
     return targets
 
 
-def _panel(spec: MetricSpec, panel_id: int, grid: dict[str, int]) -> dict[str, Any]:
-    panel: dict[str, Any] = {}
+def _panel(spec: MetricSpec, panel_id: int, grid: dict[str, int]) -> dict[str, object]:
+    panel: dict[str, object] = {}
     defaults = _field_config_defaults(spec)
     if defaults is not None:
         panel["fieldConfig"] = {"defaults": defaults}
@@ -421,7 +416,7 @@ def _size(spec: MetricSpec) -> tuple[int, int]:
     return spec.width or default_width, spec.height or default_height
 
 
-def _row(section_title: str, row_id: int, grid: dict[str, int]) -> dict[str, Any]:
+def _row(section_title: str, row_id: int, grid: dict[str, int]) -> dict[str, object]:
     return {
         "collapsed": False,
         "gridPos": grid,
@@ -463,7 +458,7 @@ def render_dashboard(
     for spec in plugins:
         plugin_groups.setdefault(spec.plugin, []).append(spec)
 
-    panels: list[dict[str, Any]] = []
+    panels: list[dict[str, object]] = []
     layout = Layout()
 
     def render_core_section(section: _Section) -> None:

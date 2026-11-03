@@ -7,7 +7,6 @@ import json
 from datetime import UTC, datetime, timedelta
 from hashlib import blake2b
 from pathlib import Path
-from typing import Any
 
 from base.telemetry.delivery.receipts import Event
 from base.telemetry.delivery.reporting import failure_isolated, report_no_pipeline
@@ -23,7 +22,7 @@ def event_id(line: str, ts_ns: int) -> int:
     return int.from_bytes(blake2b(f"{ts_ns}:{line}".encode(), digest_size=8).digest(), "big")
 
 
-def event_row(event: Event) -> dict[str, Any]:
+def event_row(event: Event) -> dict[str, object]:
     """Canonical mirror row and stable identity shared by metric projection."""
     body = event_payload(event)
     body_str = event_line(event)

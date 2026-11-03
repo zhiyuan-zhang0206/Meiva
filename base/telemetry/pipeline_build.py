@@ -11,7 +11,6 @@ from __future__ import annotations
 import atexit
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 from base.cluster.machine import MachineIdentityReader
 from base.paths import logs_path
@@ -25,7 +24,7 @@ from base.telemetry.delivery.state import process_state
 def write_batch(
     events: list[Event],
     *,
-    database: Callable[[], Any],
+    database: Callable[[], object],
     export: Callable[[list[Event]], None],
     target_dir: Path,
 ) -> None:
@@ -39,14 +38,32 @@ def write_batch(
     if not events:
         return
     append_jsonl(events, target_dir=target_dir)
+    # meiva:note
+    # The factory is typed `object`: naming `Database` at module level would load the settings stack
+    # with `base.telemetry`, which every cold process imports. The check is made here, where the
+    # sinks that need it are imported.
     with failure_isolated("telemetry_events store"):
+        from base.db import Database
         from base.telemetry.event_store import store_events
 
-        store_events(database(), events)
+        store = database()
+        if not isinstance(store, Database):
+            raise TypeError(
+                f"the event pipeline's database factory returned {type(store).__name__}"
+            )
+        store_events(store, events)
     try:
+        from base.db import Database
         from base.telemetry.metrics.observed_metrics import project_events
 
-        project_events(database(), events)
+        projected = database()
+        if isinstance(projected, Database):
+            project_events(projected, events)
+        else:
+            report_no_pipeline(
+                "[observed-metrics] sink unavailable: database factory returned {kind}",
+                kind=type(projected).__name__,
+            )
     except Exception as exc:
         report_no_pipeline("[observed-metrics] sink unavailable: {err}", err=repr(exc))
     export(events)
@@ -61,7 +78,7 @@ def write_batch(
 # it is not.
 def build_pipeline(
     *,
-    database: Callable[[], Any],
+    database: Callable[[], object],
     machine: MachineIdentityReader,
     home: Path,
     otlp_enabled: Callable[[], bool],

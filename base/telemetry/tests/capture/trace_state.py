@@ -6,11 +6,8 @@ from base.telemetry import tracing
 
 
 def reset_tracing_state() -> None:
-    tracing.state.clear()
-    tracing.state.update(
-        closed=False,
-        collector_offline_reported=False,
-        retry_owner=None,
-        arm_owner=None,
-        traceloop_init=None,
-    )
+    tracing.state["closed"] = False
+    tracing.state["collector_offline_reported"] = False
+    tracing.state["retry_owner"] = None
+    tracing.state["arm_owner"] = None
+    tracing.state["traceloop_init"] = None

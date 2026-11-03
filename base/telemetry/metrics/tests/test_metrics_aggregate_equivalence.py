@@ -22,6 +22,7 @@ import psycopg
 import pytest
 
 from base.telemetry.metrics.aggregate import (
+    ReportData,
     build_report_from_aggregate,
     fetch_agent_rollups,
     fetch_aggregate,
@@ -40,7 +41,7 @@ def _run_aggregate(
     days: int = 1,
     agent: int | None = None,
     since_compact: bool = False,
-) -> tuple[str, dict[str, Any], dict[int, Any]]:
+) -> tuple[str, ReportData, dict[int, Any]]:
     """Run the aggregate path and return (text, data, per-agent rollups)."""
     agg = fetch_aggregate(stream.db, days, agent, now=stream.now, since_compact=since_compact)
     text, data = build_report_from_aggregate(
@@ -136,7 +137,7 @@ def _assert_full_thread_text_digest(text: str) -> None:
     assert "agents: 1 distinct  1 spawns (1 subagents)  1 idle halts" in text
 
 
-def _assert_full_thread_data_fragment(data: dict[str, Any]) -> None:
+def _assert_full_thread_data_fragment(data: ReportData) -> None:
     sx = data["metrics"]["syntax_fix"]
     assert sx["trigger_counts"] == {"ruff": 1, "ruff_format": 1}
     assert sx["code_blocks"] == 1

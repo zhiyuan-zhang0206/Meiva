@@ -12,10 +12,11 @@ from __future__ import annotations
 import itertools
 import os
 import traceback as _traceback
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from datetime import datetime
 from functools import partial
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Literal, Protocol, runtime_checkable
 
 import loguru
 
@@ -57,9 +58,19 @@ class LoadedImage(Protocol):
     def sha(self) -> str | None: ...
 
 
+# meiva:note
+# The slice of loguru's private `Core` that tells which sink ids are still registered. loguru
+# publishes no public listing of live handlers, and its stubs declare no `_core`, so
+# `add_event_sink` reads the attribute and checks it against this shape before using it.
+@runtime_checkable
+class _LoguruCore(Protocol):
+    @property
+    def handlers(self) -> Mapping[int, object]: ...
+
+
 def message_to_params(
     message: loguru.Message,
-) -> tuple[Any, int | None, str, str, dict[str, Any], str]:
+) -> tuple[datetime, int | None, str, str, dict[str, object], str]:
     """Extract `(ts, agent_id, level, event, payload, source)` from one loguru record.
 
     Pure — no IO, no pool access — so the sync `_event_sink` and the
@@ -91,18 +102,30 @@ def message_to_params(
     minus dedicated columns, plus `msg` (`record.message` formatted
     text) so a single jsonb line shows the full picture during debug."""
     record = message.record
-    extra = dict(record["extra"])
+    extra: dict[str, object] = dict(record["extra"])
     agent_id_raw = extra.pop("agent_id")  # required — init_* bound it; KeyError fast
     event_explicit = extra.pop("event", None)
     if event_explicit == "":
         raise ValueError(f"empty event= passed to logger: {record['message']!r}")
-    event = event_explicit or "log"
+    if event_explicit is None:
+        event = "log"
+    elif isinstance(event_explicit, str):
+        event = event_explicit
+    else:
+        raise TypeError(f"event= passed to logger must be a string, got {event_explicit!r}")
     transport_source = extra.pop("transport_source", None)
     source = transport_source if transport_source is not None else extra.pop("source", "system")
+    if not isinstance(source, str):
+        raise TypeError(f"source= passed to logger must be a string, got {source!r}")
     # "-" sentinel = no agent (gateway / unbound logger), maps to
     # NULL. Other values must be real agent_ids (accepts str | int;
     # int() direct cast).
-    agent_id: int | None = None if agent_id_raw == "-" else int(agent_id_raw)
+    if agent_id_raw == "-":
+        agent_id = None
+    elif isinstance(agent_id_raw, str | int):
+        agent_id = int(agent_id_raw)
+    else:
+        raise TypeError(f"agent_id bound on the logger must be str | int, got {agent_id_raw!r}")
     extra["msg"] = record["message"]
     # When the caller uses `logger.opt(exception=True).warning(...)`
     # or `logger.exception(...)`, record["exception"] is non-empty;
@@ -260,9 +283,10 @@ def add_event_sink(
         home=home,
     )
     global _event_sink_id  # noqa: PLW0603 — process-level singleton
-    core: Any = getattr(logger, "_core", None)
-    live_handlers: Any = core.handlers
-    if _event_sink_id is not None and _event_sink_id in live_handlers:
+    core: object = getattr(logger, "_core", None)
+    if not isinstance(core, _LoguruCore):
+        raise TypeError("the loguru logger exposes no `_core.handlers` registry")
+    if _event_sink_id is not None and _event_sink_id in core.handlers:
         return _event_sink_id
     _event_sink_id = add_sink(
         partial(event_sink, producer=producer),

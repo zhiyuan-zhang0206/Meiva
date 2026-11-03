@@ -11,15 +11,11 @@ from __future__ import annotations
 import contextlib
 import time
 from collections.abc import Awaitable, Callable, Generator, Mapping
-from typing import TYPE_CHECKING
 
 from base.agents.sdk import SamplingPolicy, SamplingPolicyLike
 from base.agents.sdk.capture import SdkCaptureOwner
 from base.agents.sdk.tally import SdkCall, SdkCallTally, sdk_calls_by_tool_call_id
-from base.api_contracts.agent_contract import SdkCaptureAdmission
-
-if TYPE_CHECKING:
-    from base.telemetry.delivery.pipeline import EventPipeline
+from base.api_contracts.agent_contract import EventSink, SdkCaptureAdmission
 
 # Event name written to events for each public SDK entry.
 SDK_CALL_EVENT = "sdk_call"
@@ -51,7 +47,7 @@ def emit(
     sampling_owner: SamplingPolicyLike,
     sampling_policy: SamplingPolicy | None = None,
     admission: SdkCaptureAdmission | None = None,
-    producer: Callable[[], EventPipeline] | None = None,
+    producer: Callable[[], EventSink] | None = None,
     machine_reader: Callable[[], str] | None = None,
 ) -> None:
     """Write one ``sdk_call`` event; invalid input and emitter errors propagate.
@@ -102,7 +98,7 @@ def _measure(
     tally: SdkCallTally | None,
     capture_owner: SdkCaptureOwner | None,
     sampling_owner: SamplingPolicyLike,
-    producer: Callable[[], EventPipeline] | None,
+    producer: Callable[[], EventSink] | None,
     machine_reader: Callable[[], str] | None,
 ) -> Generator[None, None, None]:
     snapshot = sampling_owner.read()
@@ -157,7 +153,7 @@ def run_metered[ResultT](
     sampling_owner: SamplingPolicyLike,
     tally: SdkCallTally | None = None,
     capture_owner: SdkCaptureOwner | None = None,
-    producer: Callable[[], EventPipeline] | None = None,
+    producer: Callable[[], EventSink] | None = None,
     machine_reader: Callable[[], str] | None = None,
 ) -> ResultT:
     """Validate each public entry before execution and retain its call-local snapshots."""
@@ -175,7 +171,7 @@ async def run_metered_async[ResultT](
     sampling_owner: SamplingPolicyLike,
     tally: SdkCallTally | None = None,
     capture_owner: SdkCaptureOwner | None = None,
-    producer: Callable[[], EventPipeline] | None = None,
+    producer: Callable[[], EventSink] | None = None,
     machine_reader: Callable[[], str] | None = None,
 ) -> ResultT:
     """Validate when awaited, preserving cancellation and the call's own admission."""

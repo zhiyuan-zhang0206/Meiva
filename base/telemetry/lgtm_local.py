@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 
 # meiva:note
@@ -22,7 +21,7 @@ class LgtmSettings:
     storage_dir_setting: str
 
     @classmethod
-    def from_fields(cls, read_field: Callable[[str], Any]) -> LgtmSettings:
+    def from_fields(cls, read_field: Callable[[str], int | str]) -> LgtmSettings:
         return cls(
             loki_port=int(read_field("lgtm_loki_port")),
             prometheus_port=int(read_field("lgtm_prometheus_port")),

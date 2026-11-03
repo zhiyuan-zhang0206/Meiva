@@ -1,7 +1,15 @@
 from base.telemetry.metrics import core as core
 from base.telemetry.metrics.report import (
+    AgentActivityData,
+    ContributionCount,
+    ExecData,
+    LlmTurnsData,
     MetricSection,
     Pctiles,
+    PluginActivationData,
+    PositionBlocks,
+    SectionData,
+    SyntaxFixData,
     fix_kinds,
     pctiles,
     render_agent_activity,
@@ -16,8 +24,16 @@ from base.telemetry.metrics.report import (
 )
 
 __all__ = [
+    "AgentActivityData",
+    "ContributionCount",
+    "ExecData",
+    "LlmTurnsData",
     "MetricSection",
     "Pctiles",
+    "PluginActivationData",
+    "PositionBlocks",
+    "SectionData",
+    "SyntaxFixData",
     "core",
     "fix_kinds",
     "pctiles",

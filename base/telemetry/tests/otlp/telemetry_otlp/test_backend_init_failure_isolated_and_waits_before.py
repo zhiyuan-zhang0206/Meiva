@@ -30,6 +30,7 @@ from base.telemetry.delivery import loss
 from base.telemetry.otlp import telemetry_otlp
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
+from base.telemetry.tests.otlp.fake_sdk_providers import FakeLogger, FakeMeter
 from base.telemetry.tests.otlp.identity_inputs import machine_identity
 from base.telemetry.tests.otlp.test_telemetry_otlp import AGENT, collected_metrics, otlp_test_event
 from base.telemetry.tests.otlp.test_telemetry_otlp import (
@@ -41,6 +42,9 @@ from base.telemetry.tests.otlp.test_telemetry_otlp import (
 
 
 class _NoopProvider:
+    def get_logger(self, _name: str, /) -> FakeLogger:
+        return FakeLogger()
+
     def shutdown(self) -> None:
         pass
 
@@ -54,11 +58,11 @@ class _FailingMetricsProvider(_NoopProvider):
         self._fail_times = fail_times
         self._message = message
 
-    def get_meter(self, _name: str) -> object:
+    def get_meter(self, _name: str, /) -> FakeMeter:
         self._attempts.append(len(self._attempts) + 1)
         if self._fail_times is None or len(self._attempts) <= self._fail_times:
             raise RuntimeError(self._message)
-        return object()
+        return FakeMeter()
 
 
 class _BlockedLogExporter(LogRecordExporter):

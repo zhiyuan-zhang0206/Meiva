@@ -6,12 +6,80 @@ import math
 import queue
 import threading
 import time
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Callable, Sequence
+from typing import Protocol
 
-from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus
+from opentelemetry._logs import LogRecord
+from opentelemetry.metrics import Observation
+
+from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus, Event
 from base.telemetry.delivery.reporting import failure_isolated, report_no_pipeline
-from base.telemetry.otlp.telemetry_otlp_barrier import WorkerFlushMarker
+from base.telemetry.otlp.telemetry_otlp_barrier import QueueItem, WorkerFlushMarker
+from base.telemetry.otlp.telemetry_otlp_gauges import MetricAttributes
+
+
+# meiva:note
+# What the worker needs of an SDK resource it flushes and closes. The SDK stays unimported until
+# a backend comes up, so the worker names the surface it calls instead of the SDK classes.
+class SdkResource(Protocol):
+    def force_flush(self, *, timeout_millis: int) -> object: ...
+
+    def shutdown(self) -> None: ...
+
+
+# meiva:note
+# The slice of an SDK logger the backend emits through.
+class LoggerLike(Protocol):
+    def emit(self, record: LogRecord, /) -> None: ...
+
+
+# meiva:note
+# The SDK `LoggerProvider` as the backend uses it: a logger source that can also be flushed.
+class LogsProvider(SdkResource, Protocol):
+    def get_logger(self, name: str, /) -> LoggerLike: ...
+
+
+# meiva:note
+# The slice of an SDK Counter the backend records through.
+class CounterLike(Protocol):
+    def add(self, amount: int | float, attributes: MetricAttributes | None = None, /) -> None: ...
+
+
+# meiva:note
+# The slice of an SDK Histogram the backend records through.
+class HistogramLike(Protocol):
+    def record(
+        self, amount: int | float, attributes: MetricAttributes | None = None, /
+    ) -> None: ...
+
+
+# meiva:note
+# The slice of an SDK Meter that creates the three instrument kinds the backend maps events to.
+# An observable gauge is only kept alive, so its handle is an opaque object.
+class MeterLike(Protocol):
+    def create_counter(
+        self, name: str, /, *, unit: str = "", description: str = ""
+    ) -> CounterLike: ...
+
+    def create_histogram(
+        self, name: str, /, *, unit: str = "", description: str = ""
+    ) -> HistogramLike: ...
+
+    def create_observable_gauge(
+        self,
+        name: str,
+        /,
+        *,
+        callbacks: Sequence[Callable[[object], Sequence[Observation]]],
+        unit: str = "",
+        description: str = "",
+    ) -> object: ...
+
+
+# meiva:note
+# The SDK `MeterProvider` as the backend uses it: a meter source that can also be flushed.
+class MetricsProvider(SdkResource, Protocol):
+    def get_meter(self, name: str, /) -> MeterLike: ...
 
 
 class OtlpWorker:
@@ -20,10 +88,10 @@ class OtlpWorker:
     def __init__(
         self,
         *,
-        event_queue: queue.Queue[Any],
+        event_queue: queue.Queue[QueueItem],
         initialize: Callable[[OtlpWorker], bool],
-        emit_log: Callable[[Any], None],
-        record_metrics: Callable[[Any], None],
+        emit_log: Callable[[Event], None],
+        record_metrics: Callable[[Event], None],
         producers_idle: threading.Event,
         deferred_idle: threading.Event,
         deferred_active: Callable[[], bool],
@@ -36,9 +104,9 @@ class OtlpWorker:
         self._deferred_idle = deferred_idle
         self._deferred_active = deferred_active
         self._deferred_replayed = False
-        self.logs: Any = None
-        self.metrics: Any = None
-        self.metric_reader: Any = None
+        self.logs: LogsProvider | None = None
+        self.metrics: MetricsProvider | None = None
+        self.metric_reader: SdkResource | None = None
         self.initialized = False
         self._stop_requested = threading.Event()
         self.ready = threading.Event()
@@ -114,7 +182,7 @@ class OtlpWorker:
         if self._deferred_replayed or not self._deferred_active():
             return
         self._deferred_replayed = True
-        held: list[Any] = []
+        held: list[QueueItem] = []
         while True:
             try:
                 held.append(self._queue.get_nowait())
@@ -128,10 +196,14 @@ class OtlpWorker:
             self._queue.put_nowait(event)
 
     def _flush_providers(self, *, timeout_millis: int) -> None:
-        for name, provider in (("logs", self.logs), ("metrics", self.metrics)):
+        flushable: tuple[tuple[str, SdkResource | None], ...] = (
+            ("logs", self.logs),
+            ("metrics", self.metrics),
+        )
+        for name, provider in flushable:
             if provider is not None:
                 with failure_isolated(f"otlp {name} flush"):
-                    provider.force_flush(timeout_millis=timeout_millis)
+                    _ = provider.force_flush(timeout_millis=timeout_millis)
 
     def _close_providers(self) -> None:
         # Direct metric producers can still be in an SDK call. Retaining their
@@ -140,7 +212,10 @@ class OtlpWorker:
         self._deferred_idle.wait()
         complete = True
         primary: BaseException | None = None
-        providers = (("logs", self.logs), ("metrics", self.metrics))
+        providers: tuple[tuple[str, SdkResource | None], ...] = (
+            ("logs", self.logs),
+            ("metrics", self.metrics),
+        )
         if self.metrics is None:
             providers += (("half-built metric reader", self.metric_reader),)
         for name, provider in providers:
@@ -150,7 +225,7 @@ class OtlpWorker:
             if name != "half-built metric reader":
                 try:
                     with failure_isolated(f"otlp {name} flush"):
-                        provider.force_flush(timeout_millis=2000)
+                        _ = provider.force_flush(timeout_millis=2000)
                 except BaseException as exc:
                     self._remember_cleanup_error(exc)
                     if primary is None:

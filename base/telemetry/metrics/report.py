@@ -18,14 +18,7 @@ from __future__ import annotations
 import re
 import statistics
 from dataclasses import dataclass
-from typing import Any, TypedDict
-
-
-@dataclass
-class MetricSection:
-    name: str  # unit key, e.g. "syntax_fix"
-    text: str  # human/agent-readable block
-    data: dict[str, Any]  # machine fragment for the JSON / API
+from typing import TypedDict
 
 
 class Pctiles(TypedDict):
@@ -38,6 +31,95 @@ class Pctiles(TypedDict):
     p90: float
     max: float
     mean: float
+
+
+# meiva:note
+# One position third's `ruff_format` hit count and the number of code blocks that fell in it.
+class PositionBlocks(TypedDict):
+    hits: int
+    blocks: int
+
+
+# meiva:note
+# The `syntax_fix` section's machine fragment: the shape `render_syntax_fix` reads and the
+# JSON / API carries.
+class SyntaxFixData(TypedDict):
+    code_blocks: int
+    trigger_counts: dict[str, int]
+    ruff_format_by_position: dict[str, PositionBlocks]
+    ruff_format_rate_pct_by_position: dict[str, float]
+
+
+# meiva:note
+# The `exec` section's machine fragment.
+class ExecData(TypedDict):
+    exec_total: int
+    exec_ok: int
+    exec_failed: int
+    success_rate_pct: float
+    failure_types: dict[str, int]
+    code_len_chars: Pctiles
+    output_len_chars: Pctiles
+
+
+# meiva:note
+# The `llm_turns` section's machine fragment. A cache hit percentage is None when the window has
+# input tokens but no call reported cache metering.
+class LlmTurnsData(TypedDict):
+    llm_calls: int
+    tokens_in: int
+    tokens_out: int
+    tokens_cached: int
+    tokens_reasoning: int
+    cache_hit_pct: float | None
+    cache_hit_pct_by_position: dict[str, float | None]
+    cost_usd: float
+    cost_unpriced_calls: int
+    turn_duration_s: Pctiles
+    turn_ok: int
+    turn_total: int
+    turns_per_agent: Pctiles
+
+
+# meiva:note
+# The `agent_activity` section's machine fragment.
+class AgentActivityData(TypedDict):
+    distinct_agents: int
+    spawns_total: int
+    spawns_by_spawner: dict[str, int]
+    subagent_spawns: int
+    lifecycle: dict[str, int]
+    idle_halts: int
+    agent_lifetime_s: Pctiles
+
+
+# meiva:note
+# One `<plugin>/<surface>/<identifier>` contribution and how often it fired.
+class ContributionCount(TypedDict):
+    contribution: str
+    count: int
+
+
+# meiva:note
+# The `plugin_activation` section's machine fragment.
+class PluginActivationData(TypedDict):
+    total_activations: int
+    distinct_plugins: int
+    by_plugin: dict[str, int]
+    by_contribution: list[ContributionCount]
+    by_plugin_model: dict[str, int]
+
+
+type SectionData = (
+    SyntaxFixData | ExecData | LlmTurnsData | AgentActivityData | PluginActivationData
+)
+
+
+@dataclass
+class MetricSection:
+    name: str  # unit key, e.g. "syntax_fix"
+    text: str  # human/agent-readable block
+    data: SectionData  # machine fragment for the JSON / API
 
 
 def pctiles(values: list[float]) -> Pctiles:
@@ -95,7 +177,7 @@ def render_pctiles(title: str, p: Pctiles) -> str:
     )
 
 
-def render_syntax_fix(data: dict[str, Any]) -> str:
+def render_syntax_fix(data: SyntaxFixData) -> str:
     text = render_counts(
         "syntax_fix trigger counts (per code block):", data["trigger_counts"], data["code_blocks"]
     )
@@ -109,7 +191,7 @@ def render_syntax_fix(data: dict[str, Any]) -> str:
     return text
 
 
-def render_exec(data: dict[str, Any]) -> str:
+def render_exec(data: ExecData) -> str:
     text = (
         f"exec: {data['exec_ok']} ok / {data['exec_failed']} failed  (success {data['success_rate_pct']}%)\n"
         + render_pctiles("executed-code length (chars):", data["code_len_chars"])
@@ -120,7 +202,7 @@ def render_exec(data: dict[str, Any]) -> str:
     return text
 
 
-def render_llm_turns(data: dict[str, Any]) -> str:
+def render_llm_turns(data: LlmTurnsData) -> str:
     cache_hit = data["cache_hit_pct"]
     cache_label = f"{cache_hit}%" if cache_hit is not None else "N/A"
     text = (
@@ -146,7 +228,7 @@ def render_llm_turns(data: dict[str, Any]) -> str:
     return text
 
 
-def render_agent_activity(data: dict[str, Any]) -> str:
+def render_agent_activity(data: AgentActivityData) -> str:
     text = (
         f"agents: {data['distinct_agents']} distinct  "
         f"{data['spawns_total']} spawns ({data['subagent_spawns']} subagents)  {data['idle_halts']} idle halts\n"
@@ -159,7 +241,7 @@ def render_agent_activity(data: dict[str, Any]) -> str:
     return text
 
 
-def render_plugin_activation(data: dict[str, Any]) -> str:
+def render_plugin_activation(data: PluginActivationData) -> str:
     """Which plugin injection surfaces actually fired in the window.
 
     Philosophy §6 asks a shim to measure its own obsolescence, so the block
@@ -173,9 +255,9 @@ def render_plugin_activation(data: dict[str, Any]) -> str:
         f"across {data['distinct_plugins']} plugins\n"
     )
     if data["by_contribution"]:
-        max_c = int(data["by_contribution"][0]["count"])
+        max_c = data["by_contribution"][0]["count"]
         for item in data["by_contribution"][:20]:
-            bar = render_bar(int(item["count"]), max_c)
+            bar = render_bar(item["count"], max_c)
             text += f"  {item['contribution']:<46} {item['count']:>6}  {bar}\n"
         text += render_counts("by plugin x model:", data["by_plugin_model"])
     else:

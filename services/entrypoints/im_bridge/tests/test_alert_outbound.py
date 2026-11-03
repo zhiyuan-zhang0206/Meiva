@@ -11,6 +11,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.host.boundary.json_values import is_object_list
 from base.paths import meiva_home
 from base.telemetry.alerts import AlertMessageStyle, upsert_alert
 from base.telemetry.alerts.native import load_native_group, native_sent_count, stamp_native_sent
@@ -153,7 +154,9 @@ async def test_shadow_history_mixed_unknown_fresh_and_pause_resume(pool: Connect
     [group] = native
     with pool.connection() as conn:
         source = load_native_group(conn, group)
-        assert len(source["members"]) == 1 and "fresh" in source["text"]
+        members, text = source["members"], source["text"]
+        assert is_object_list(members) and len(members) == 1
+        assert isinstance(text, str) and "fresh" in text
         assert conn.execute(
             "SELECT count(*) FROM alert_notification_groups WHERE origin='shadow'"
         ).fetchone() == (2,)
@@ -176,7 +179,8 @@ async def test_repeat_ab_then_abc_reuses_original_groups_and_text(pool: Connecti
     assert receipt_count(pool) == (2, 2)
     with pool.connection() as conn:
         original_source = load_native_group(conn, next(iter(original)))
-        assert "different same operation" not in original_source["text"]
+        original_text = original_source["text"]
+        assert isinstance(original_text, str) and "different same operation" not in original_text
         assert conn.execute("SELECT count(*) FROM alert_notification_members").fetchone() == (3,)
 
 

@@ -593,6 +593,13 @@ class Event:
 
 
 # meiva:note
+# What a producer of events must offer the emitter: take one event. The pipeline satisfies it; a
+# module that cannot import the pipeline (the exec child's cold path) types a producer with it.
+class EventSink(Protocol):
+    def enqueue(self, event: Event) -> object: ...
+
+
+# meiva:note
 # One call's retained receipt admission, released after its final event.
 class SdkCaptureAdmission(Protocol):
     # meiva:note

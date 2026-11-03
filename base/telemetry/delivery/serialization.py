@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from datetime import datetime
 from hashlib import sha256
-from typing import Any, Protocol
+from typing import Protocol
 
 
 class _SerializableEvent(Protocol):
@@ -46,10 +47,10 @@ class _SerializableEvent(Protocol):
     def target_agent_id(self) -> int | None: ...
 
     @property
-    def attributes(self) -> dict[str, Any]: ...
+    def attributes(self) -> Mapping[str, object]: ...
 
 
-def event_payload(event: _SerializableEvent) -> dict[str, Any]:
+def event_payload(event: _SerializableEvent) -> dict[str, object]:
     """Return the persistent shape without its derived surrogate id."""
     return {
         "ts": event.ts.isoformat(),

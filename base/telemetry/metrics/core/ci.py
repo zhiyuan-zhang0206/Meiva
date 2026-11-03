@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from types import ModuleType
-from typing import Any
 
 from base.telemetry.metrics.core import fleet, pr_flow
 from base.telemetry.metrics.plugin_metrics import MetricSpec
@@ -21,7 +20,7 @@ def _workflow_query(field: str) -> str:
     return f"max by (workflow) (last_over_time(meiva_ci_workflow_window_{field}_ratio[26h]))"
 
 
-def _day_transformations(names: list[str]) -> list[dict[str, Any]]:
+def _day_transformations(names: list[str]) -> list[dict[str, object]]:
     """Join instant Prometheus targets into one Grafana table row per day."""
     exclusions = {f"Time {index}": True for index in range(1, len(names) + 1)}
     return [
@@ -38,7 +37,7 @@ def _day_transformations(names: list[str]) -> list[dict[str, Any]]:
     ]
 
 
-def _workflow_transformations(names: list[str]) -> list[dict[str, Any]]:
+def _workflow_transformations(names: list[str]) -> list[dict[str, object]]:
     """Join instant Prometheus targets into one Grafana table row per workflow."""
     exclusions = {f"Time {index}": True for index in range(1, len(names) + 1)}
     return [

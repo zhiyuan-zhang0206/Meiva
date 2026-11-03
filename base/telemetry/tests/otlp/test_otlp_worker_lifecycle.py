@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from opentelemetry.sdk._logs import LoggerProvider
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
@@ -64,7 +67,7 @@ def _logged_exceptions(loguru_records: LogRecords) -> list[BaseException]:
 def test_blocked_sdk_init_stays_owned_after_finite_stop(tmp_path: Path) -> None:
     entered, release = threading.Event(), threading.Event()
 
-    def get_meter() -> object:
+    def get_meter() -> FakeMeter:
         entered.set()
         assert release.wait(5)
         return FakeMeter()
@@ -149,7 +152,7 @@ def test_unknown_error_after_stop_is_immediate_and_same_owner_raises(
     entered, release = threading.Event(), threading.Event()
     error = BaseException("unknown late initialization defect")
 
-    def get_meter() -> object:
+    def get_meter() -> FakeMeter:
         entered.set()
         assert release.wait(5)
         raise error
@@ -180,7 +183,7 @@ def test_failed_sdk_build_keeps_partial_resources_until_owned_cleanup(tmp_path: 
         cleaning.set()
         assert release.wait(5)
 
-    def fail_meter() -> object:
+    def fail_meter() -> FakeMeter:
         raise RuntimeError("named SDK construction failure")
 
     logs, metrics = FakeProvider(on_shutdown=close), FakeProvider(on_get_meter=fail_meter)
@@ -277,7 +280,7 @@ def test_primary_error_survives_blocked_secondary_cleanup(
     secondary = BaseException("secondary SDK teardown defect")
     cleaning, release = threading.Event(), threading.Event()
 
-    def get_meter() -> object:
+    def get_meter() -> FakeMeter:
         raise primary
 
     def close() -> None:
@@ -330,7 +333,7 @@ def test_deferral_completion_in_flight_cannot_close_providers_under_replay(tmp_p
     entered, release = threading.Event(), threading.Event()
     calls: list[tuple[str, int]] = []
 
-    def get_meter() -> object:
+    def get_meter() -> FakeMeter:
         entered.set()
         assert release.wait(5)
         return FakeMeter(lambda v: calls.append(("metric", int(v))))
@@ -417,9 +420,13 @@ def test_real_sdk_partial_build_threads_are_owned_and_closed(tmp_path: Path) -> 
         assert worker.finished.wait(5)
         assert worker.logs is not None and worker.metric_reader is not None
         assert worker.metrics is None
+        assert isinstance(worker.logs, LoggerProvider)
+        assert isinstance(worker.metric_reader, PeriodicExportingMetricReader)
         processor = worker.logs._multi_log_record_processor._log_record_processors[0]
+        assert isinstance(processor, BatchLogRecordProcessor)
         assert not processor._batch_processor._worker_thread.is_alive()
-        assert not worker.metric_reader._daemon_thread.is_alive()
+        reader_thread = worker.metric_reader._daemon_thread
+        assert reader_thread is not None and not reader_thread.is_alive()
         assert backend.shutdown().status is DrainStatus.COMPLETED
     finally:
         server.shutdown()
@@ -432,7 +439,7 @@ def test_failed_teardown_owner_is_not_overwritten_at_retry_deadline(tmp_path: Pa
     def close() -> None:
         raise RuntimeError("SDK cannot close the half-built resource")
 
-    def fail_meter() -> object:
+    def fail_meter() -> FakeMeter:
         attempts.append(len(attempts) + 1)
         raise RuntimeError("named SDK init failure")
 
@@ -462,7 +469,7 @@ def test_failed_teardown_owner_is_not_overwritten_at_retry_deadline(tmp_path: Pa
 def test_unknown_failed_attempt_still_closes_deferred_admission_and_clock(tmp_path: Path) -> None:
     error = BaseException("failed attempt before deferred stop")
 
-    def fail_meter() -> object:
+    def fail_meter() -> FakeMeter:
         raise error
 
     backend, _, _ = _backend(tmp_path, metrics=FakeProvider(on_get_meter=fail_meter))
