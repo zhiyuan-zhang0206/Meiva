@@ -13,10 +13,13 @@ attempt's traceback reaches the record. Both emit sites name the owning agent
 explicitly — the process-wide log binding is the no-agent sentinel, and the
 Inspector activity projection drops records without it.
 
-The record of the attempt that stops the model loop is emitted one node later, by the
-turn boundary (`agent/graph/claim/turn_end.py`): only claim knows whether the turn ended
-there, so it holds the measured call and writes it once, with `ended_with` — the closed
-vocabulary of `base/agents/observation/ended_with.py`:
+`turn_end` is written per LLM attempt, but whether the turn *ends* is not known until
+claim has run a node later — so the attempt that stops the model loop cannot write the
+turn's own record. That is structural, not an oversight: any reason written there would
+have to be guessed, and the guess would be wrong on exactly the turns the field exists to
+count. The halting attempt holds its measured call instead (`turn_end_held_seconds`), and
+the turn boundary (`agent/graph/claim/turn_end.py`) writes it once, with `ended_with` —
+the closed vocabulary of `base/agents/observation/ended_with.py`:
 
 - `no_input` — claim ended the turn at its idle boundary: nothing more arrived;
 - `budget` — a budget rail ended it (truncated output, exhausted retry budget), the only
@@ -26,9 +29,22 @@ vocabulary of `base/agents/observation/ended_with.py`:
   the state: `waiting:` requires its object, and `deferred:time` requires the one-sentence
   reason that makes a dependency-free delay attributable.
 
-A value outside that set is an invalid record. A turn that continues past its halt, and a
-turn ended by terminate or restart, carry no `ended_with`: the loop did not end those by
-running out of input, and it does not guess.
+A value outside that set is an invalid record, not free text: `deferred:time` is the
+dependency-free delay this field exists to measure, so it cannot be recorded without the
+one-sentence reason that makes it attributable, and `validate` refuses anything else where
+the declaration enters the state.
+
+A turn that continues past its halt, and a turn ended by terminate or restart, carry no
+`ended_with`: the loop did not end those by running out of input, and it does not guess.
+
+**A record without `ended_with` is an unlabelled turn, not a turn that had nothing to
+defer.** Declaring is deliberately not required — a turn that says nothing is measured
+rather than rejected, because making the declaration mandatory would turn the measurement
+into compliance and move the behaviour under test. No production agent is asked to declare
+yet (that is an evaluation arm, not a platform rule), so a query over production sees
+`no_input` and `budget` and nothing else. Reading the absence of `deferred:time` as "nobody
+defers" would repeat the absence-is-not-an-event error: count the unlabelled rows and the
+declaration rate before reading any other share.
 
 A failed try publishes no Error: retries may still succeed, so Error is
 published once by the runloop after the retry layer is exhausted, while
