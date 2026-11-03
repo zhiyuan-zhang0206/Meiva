@@ -767,6 +767,11 @@ reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "scripts/codegen"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "scripts/host_ops"
 reportAny = "error"
 reportExplicitAny = "error"

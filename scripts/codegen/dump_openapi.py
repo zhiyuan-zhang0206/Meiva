@@ -28,6 +28,7 @@ if __name__ == "__main__":
     enter_scratch_home()
 
 from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 # meiva.self.AGENT_ID stays None here — fine; dump is a build-time tool that
 # does not exercise the SDK or make any gateway HTTP calls.
@@ -35,7 +36,9 @@ from base.host.boundary.json_values import is_object_dict
 
 def _product_version() -> str:
     pyproject = Path(__file__).resolve().parent.parent.parent / "pyproject.toml"
-    version = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["version"]
+    document = object_of(tomllib.loads, pyproject.read_text(encoding="utf-8"))
+    project = document["project"] if is_object_dict(document) else None
+    version = project["version"] if is_object_dict(project) else None
     if not isinstance(version, str):
         raise TypeError(f"{pyproject} [project].version is not a string")
     return version

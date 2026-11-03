@@ -52,8 +52,9 @@ import json
 import os
 import sys
 import tempfile
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, NamedTuple, TypeGuard
+from typing import NamedTuple, TypeGuard
 
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined
@@ -105,7 +106,7 @@ def _ensure_index_present() -> None:
     The stub only has to be valid JSON carrying every key."""
     if _OUT.exists():
         try:
-            payload = json.loads(_OUT.read_text(encoding="utf-8"))
+            payload = object_of(json.loads, _OUT.read_text(encoding="utf-8"))
             if isinstance(payload, dict) and _EMPTY_INDEX.keys() <= payload.keys():
                 return
         except ValueError:
@@ -123,6 +124,10 @@ from base.host.env.boot_actions import enter_scratch_home  # noqa: E402
 
 if __name__ == "__main__":
     enter_scratch_home()
+# meiva:note
+# A hook runs this file, and the scratch-home rule keeps every `base.*` import below `enter_scratch_home()`: this one is only needed by `_ensure_index_present`, which runs next.
+from base.host.boundary.untyped import object_of  # noqa: E402
+
 _ensure_index_present()
 
 from base.config.config_registry import (  # noqa: E402 — must follow the bootstrap above
@@ -130,6 +135,10 @@ from base.config.config_registry import (  # noqa: E402 — must follow the boot
     field_alias,
     schema_extra,
 )
+
+# meiva:note
+# `FieldRef.info` is the registry's narrow `FieldInfoLike` view, not pydantic's `FieldInfo`, so the signatures here name the registry's types to say what they read of an entry instead of reaching for pydantic's `Any`-typed attributes.
+from base.config.profiles import FieldInfoLike, FieldRef  # noqa: E402
 
 
 class LiteField(NamedTuple):
@@ -268,7 +277,9 @@ def _literal_default(row: LiteField, default: object) -> str | bool | int | floa
     return default
 
 
-def _default(row: LiteField, info: FieldInfo, reg: dict[str, Any]) -> tuple[str, object]:
+def _default(
+    row: LiteField, info: FieldInfoLike, reg: Mapping[str, FieldRef]
+) -> tuple[str, object]:
     """Resolve (default kind, literal default), asserting the manifest matches the field.
 
     `info` is the field's pydantic `FieldInfo` (the registry stores it behind a
@@ -319,15 +330,19 @@ def _is_str_object_dict(value: object) -> TypeGuard[dict[str, object]]:
     return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
 
 
-def _is_required_field(info: object) -> bool:
-    return (
-        isinstance(info, FieldInfo)
-        and info.default is PydanticUndefined
-        and info.default_factory is None
-    )
+def _is_required_field(info: FieldInfoLike) -> bool:
+    return info.default is PydanticUndefined and info.default_factory is None
 
 
-def _lite_row(row: LiteField, reg: dict[str, Any]) -> _LiteRow:
+# meiva:note
+# The `FieldInfoLike` view is only a promise about the registry; a manifest row naming an entry that is not really a pydantic `FieldInfo` should stop with a message naming it, not with an `AttributeError` further down. This is the one place the promise is checked, which is why `_is_required_field` no longer repeats it.
+def _checked_info(name: str, ref: FieldRef) -> FieldInfoLike:
+    if not isinstance(ref.info, FieldInfo):
+        raise SystemExit(f"{name!r} registry entry is not a FieldInfo")
+    return ref.info
+
+
+def _lite_row(row: LiteField, reg: Mapping[str, FieldRef]) -> _LiteRow:
     """Validate one manifest row against its registry field; the table row it renders to."""
     if row.check is not None and row.check not in _ALLOWED_CHECKS:
         raise SystemExit(
@@ -336,9 +351,7 @@ def _lite_row(row: LiteField, reg: dict[str, Any]) -> _LiteRow:
     ref = reg.get(row.name)
     if ref is None:
         raise SystemExit(f"{row.name!r} is in LITE_MANIFEST but not in the live config registry")
-    info = ref.info
-    if not isinstance(info, FieldInfo):
-        raise SystemExit(f"{row.name!r} registry entry is not a FieldInfo")
+    info = _checked_info(row.name, ref)
     default_kind, value = _default(row, info, reg)
     return (
         ref.domain,
@@ -350,13 +363,19 @@ def _lite_row(row: LiteField, reg: dict[str, Any]) -> _LiteRow:
     )
 
 
-def _sensitive_fields(reg: dict[str, Any]) -> list[str]:
+# meiva:note
+# pydantic types `json_schema_extra` through `Any`; reading it into an `object` local keeps that `Any` from being bound to a name, and `_is_str_object_dict` narrows it for the caller.
+def _json_schema_extra(ref: FieldRef) -> object:
+    extra: object = ref.info.json_schema_extra
+    return extra
+
+
+def _sensitive_fields(reg: Mapping[str, FieldRef]) -> list[str]:
     """Project the sensitivity marker without broadening the flag admission rule."""
     return [
         name
         for name, ref in sorted(reg.items())
-        if _is_str_object_dict(extra := ref.info.json_schema_extra)
-        and extra.get("sensitive") is True
+        if _is_str_object_dict(extra := _json_schema_extra(ref)) and extra.get("sensitive") is True
     ]
 
 

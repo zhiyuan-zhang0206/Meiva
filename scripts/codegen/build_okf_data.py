@@ -14,21 +14,23 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
+from base.host.boundary.options import options
 from base.packages.docs.okf_graph import build_graph_data
 from base.packages.okf_bundle import read_bundle
 
 
 def _print_stats(
     node_count: int,
-    tree_edges: list[Any],
-    cross_edges: list[Any],
+    tree_edges: Sequence[object],
+    cross_edges: Sequence[object],
     raw_links: list[tuple[str, str, str | None]],
-    all_tags: list[Any],
+    all_tags: Sequence[object],
 ) -> None:
     """Print build statistics to stderr."""
     unresolved = [(s, t) for s, t, r in raw_links if r is None]
@@ -46,14 +48,21 @@ def _print_stats(
             print(f"  unresolved: {s} -> {t}", file=sys.stderr)
 
 
-def main():
+@dataclass(frozen=True)
+class Options:
+    bundle_dir: str
+    out_file: str
+    name: str
+
+
+def main() -> None:
     parser = argparse.ArgumentParser(description="Build OKF graph data for D3 viz")
     parser.add_argument(
         "bundle_dir", help="Path to bundle directory containing .meiva.okf.md files"
     )
     parser.add_argument("out_file", nargs="?", default="tmp/graph_data.json")
     parser.add_argument("--name", default="OKF", help="Bundle name")
-    args = parser.parse_args()
+    args = options(parser.parse_args(), Options)
 
     raw_links: list[tuple[str, str, str | None]] = []
     data = build_graph_data(
