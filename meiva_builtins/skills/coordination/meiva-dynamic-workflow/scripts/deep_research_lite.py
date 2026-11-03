@@ -15,10 +15,13 @@ Contrast with deep_research_orchestrator.py (7 waves, ~40 agents).
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 from uuid import uuid4
 
 import meiva
+from base.host.boundary.fields import int_field, optional_int_field, optional_str_field
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 ORCH = meiva.self.AGENT_ID
 HD = meiva.files.resolve("deep_research_lite")
@@ -39,17 +42,44 @@ def hf(wave: int, role: str) -> Path:
     return HD / f"w{wave}_{role}.json"
 
 
+# meiva:note
+# The draft report a wave wrote, or the whole draft document as JSON when it carries no `report`.
+def _draft_text(path: Path) -> str:
+    if not path.exists():
+        return ""
+    draft = object_of(json.loads, meiva.files.read(str(path)))
+    if not is_object_dict(draft):
+        raise TypeError(f"{path.name} is not a JSON object")
+    return optional_str_field(draft, "report") or json.dumps(draft, ensure_ascii=False)
+
+
 def spawn(prompt: str) -> int:
     return meiva.agents.spawn(prompt=prompt, idempotency_key=str(uuid4()))
 
 
-def read_state() -> dict[str, Any]:
+# meiva:note
+# What the orchestrator records between runs: the wave a resumed run starts from, the wave after
+# it, and how many agents it spawned there.
+class _State(TypedDict):
+    wave: int
+    next: int | None
+    spawned: int
+
+
+def read_state() -> _State:
     if SF.exists():
-        return json.loads(meiva.files.read(str(SF)))
-    return {"wave": 1}
+        recorded = object_of(json.loads, meiva.files.read(str(SF)))
+        if not is_object_dict(recorded):
+            raise TypeError("orchestrator state is not a JSON object")
+        return _State(
+            wave=int_field(recorded, "wave"),
+            next=optional_int_field(recorded, "next"),
+            spawned=optional_int_field(recorded, "spawned") or 0,
+        )
+    return _State(wave=1, next=None, spawned=0)
 
 
-def write_state(state: dict[str, Any]) -> None:
+def write_state(state: _State) -> None:
     with open(SF, "w") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
@@ -207,11 +237,7 @@ def wave4():
     log("=" * 50)
     log("WAVE 4/5: Adversarial — 2 agents challenge")
 
-    draft_path = hf(3, "draft")
-    draft_text = ""
-    if draft_path.exists():
-        draft = json.loads(meiva.files.read(str(draft_path)))
-        draft_text = draft.get("report", json.dumps(draft, ensure_ascii=False))
+    draft_text = _draft_text(hf(3, "draft"))
 
     W4_FILES: list[str] = []
     for role in ["fact-checker", "gap-finder"]:

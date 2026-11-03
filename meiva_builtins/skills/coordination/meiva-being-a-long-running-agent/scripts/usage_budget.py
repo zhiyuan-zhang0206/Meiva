@@ -33,14 +33,14 @@ def check_usd_limit(usd_limit: float | None) -> None:
 
 
 # meiva:note
-# What a reminder states about a usage report: the recorded cost, the calls without a price, the agents counted, the lineage and the window it covered.
+# What a reminder states about a usage report: the recorded cost, the calls without a price, the agents counted, the lineage and the window it covered. `start` is None for a lifetime window, which has no lower bound.
 @dataclass(frozen=True)
 class BudgetFacts:
     recorded_cost_usd: float
     unpriced_calls: int
     agent_ids: tuple[int, ...]
     lineage: str
-    start: str
+    start: str | None
     end: str
 
 

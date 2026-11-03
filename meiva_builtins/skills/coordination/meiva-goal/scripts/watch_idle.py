@@ -35,6 +35,8 @@ import redis
 
 import meiva
 from base.config import settings
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 # Substitute before launching: the id of the agent you want to watch.
 TARGET_AGENT_ID = 0
@@ -140,7 +142,9 @@ def watch(target_id: int) -> None:
             payload = message["data"]
             if not isinstance(payload, str):
                 continue  # every published event is a JSON string
-            event = json.loads(payload)
+            event = object_of(json.loads, payload)
+            if not is_object_dict(event):
+                continue
             if _is_target_idle(event, target_id):
                 _notify(target_id)
                 return
