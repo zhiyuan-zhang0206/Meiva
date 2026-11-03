@@ -640,8 +640,8 @@ class TestRestart:
                 f"/api/agents/{agent_id}/restart",
                 json={
                     "message": "bad model",
-                    "config_overlay": {"harness": "kimi_code", "llm_model": "gpt-6.1-sol"},
+                    "config_overlay": {"harness": "claude_code", "llm_model": "gpt-6.1-sol"},
                 },
             )
             assert resp_bad_model.status_code == 400
-            assert "not supported by harness 'kimi_code'" in resp_bad_model.json()["detail"]
+            assert "not supported by harness 'claude_code'" in resp_bad_model.json()["detail"]

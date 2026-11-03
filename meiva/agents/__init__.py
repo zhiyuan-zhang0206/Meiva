@@ -474,7 +474,7 @@ def spawn(
     execution, and uncertain transport outcomes are not automatically retried.
 
     `harness` is the runtime loop the agent runs on: "meiva" (the default) or an external
-    harness such as "claude_code", "codex", "antigravity" or "kimi_code"; unknown names are
+    harness such as "claude_code", "codex" or "antigravity"; unknown names are
     refused, never replaced by the default. It is fixed for the agent's whole life: no restart or
     resurrect changes it. Omit it to run the built-in runtime; forking (`fork_from`) is only
     supported for native "meiva" agents, and asking a fork for an external harness or forking an

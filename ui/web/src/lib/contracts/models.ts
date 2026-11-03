@@ -24,7 +24,6 @@ export const HARNESSES: readonly Harness[] = [
   "claude_code",
   "codex",
   "antigravity",
-  "kimi_code",
 ];
 
 export const DEFAULT_HARNESS: Harness = "meiva";

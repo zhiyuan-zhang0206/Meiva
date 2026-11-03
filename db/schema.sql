@@ -125,7 +125,7 @@ CREATE TABLE agents_meta (
     spawned_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
     session_index              BIGINT NOT NULL DEFAULT 0,  -- unified shell+watcher session sequence number, auto-incrementing; meiva.shell.new()/meiva.watcher.launch() atomically take the next via UPDATE ... RETURNING
     machine                    TEXT NOT NULL DEFAULT 'unknown',  -- physical machine identifier, for multi-machine deployment (private network + central Postgres); source = MEIVA_MACHINE_NAME, written on INSERT in the create path (spawn_agent), claim_agent_row only verifies
-    harness                    TEXT NOT NULL DEFAULT 'meiva' CHECK (harness IN ('meiva', 'claude_code', 'codex', 'antigravity', 'kimi_code')),  -- the agent-loop runtime this agent runs on: 'meiva' = the built-in loop, the others = an external CLI harness (Claude Code / Codex / Antigravity / Kimi Code). Written by the birth INSERT, and mutable on restart when idling or terminated. Model and provider are separate concerns and are not derived from it.
+    harness                    TEXT NOT NULL DEFAULT 'meiva' CHECK (harness IN ('meiva', 'claude_code', 'codex', 'antigravity', 'kimi_code')),  -- the agent-loop runtime this agent runs on: 'meiva' = the built-in loop, the others = an external CLI harness (Claude Code / Codex / Antigravity; 'kimi_code' retained in CHECK for expand-contract phase 1). Written by the birth INSERT, and mutable on restart when idling or terminated. Model and provider are separate concerns and are not derived from it.
     status_changed_at          TIMESTAMPTZ NOT NULL DEFAULT now(),  -- when the row last entered its current status; maintained by the agents_meta_status_changed_at trigger. Lets the restarter reap unclaimed idling rows older than a grace (unlike spawned_at, this resets on resurrect's terminated -> idling)
     last_active_at             TIMESTAMPTZ NOT NULL DEFAULT now(),  -- when the agent last did REAL work: written = now() by the agent process on every completed LLM turn (agent/graph/llm/node.py). Deliberately NOT touched by ops lifecycle churn (rollout quiesce / restarter respawn / self.update / stop-start) — for an idle agent that whole cycle runs without an LLM turn, so this survives it. The heartbeat daemon's idle clock reads THIS (not status_changed_at, which every status flip incl. ops restarts bumps) so an ops event never resets an agent's idle timer. Backfilled from status_changed_at at add time.
     heartbeat_paused_until     TIMESTAMPTZ,              -- pause window for the gateway heartbeat daemon; set to now()+duration by meiva.self.pause_heartbeat(). While in the future, the daemon skips this agent's idle-nudge. NULL = never paused.
@@ -946,7 +946,7 @@ CREATE TRIGGER agents_meta_born_spawner_append_only
 
 -- ─────────────── agent_harness_messages ───────────────
 -- Dedicated append-only UI display table for external harnesses (claude_code,
--- codex, antigravity, kimi_code). Native meiva continues using LangGraph checkpoints
+-- codex, antigravity). Native meiva continues using LangGraph checkpoints
 -- as both execution truth and UI store; external harnesses write rendered TimelineItems
 -- here so LangGraph checkpoints remain decoupled from external harness execution.
 CREATE TABLE agent_harness_messages (

@@ -49,7 +49,7 @@ SDK reference: `meiva.agents` (`spawn` / `terminate` / `restart` / `resurrect` /
 ## Switching Harnesses & Handoff Process
 
 An agent's harness (the runtime loop it runs on: `meiva`, `claude_code`, `codex`,
-`antigravity`, `kimi_code`) can be switched bidirectionally (`meiva` <-> external,
+`antigravity`) can be switched bidirectionally (`meiva` <-> external,
 or external <-> external) via `restart` with a config overlay:
 
 - **SDK**: `meiva.agents.restart(agent_id, message="Switching to Codex", config_overlay={"harness": "codex"})`

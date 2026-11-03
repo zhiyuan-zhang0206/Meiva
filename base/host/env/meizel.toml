@@ -28,7 +28,7 @@ exports = ["agent_env.py", "agent_slices.py", "boot_actions.py", "boot_policy.py
 
 [debt.ambient-read]
 "dotenv_file.py#home base.paths.home.resolve_meiva_home" = { count = 1, owner = "#5816", until = "waits for a caller that holds the home: every caller of process_env_file() is a module with no home to pass (base.config, base.lm, the plugin config view), so handing one in would move the same resolve_meiva_home() into each of them instead of removing it" }
-"harness_binaries.py#home base.paths.home.user_home" = { count = 1, owner = "#5816", until = "waits for both call sites to hold the user home: the kimi config resolves HOME from the forwarded environment and the antigravity transcript mapper has none in hand, so the fallback stays until each passes one" }
+"harness_binaries.py#home base.paths.home.user_home" = { count = 1, owner = "#5816", until = "waits for every call site to hold the user home: the antigravity transcript mapper has none in hand, so the fallback stays until it passes one" }
 "port_lease.py#environ tempfile.gettempdir" = { count = 1, owner = "#8237", until = "waits for `_root` to take the temporary directory from its caller: it asks the process environment (TMPDIR) for it" }
 "port_lease.py#pid os.getpid" = { count = 1, owner = "#5816", until = "waits for nothing (the 2026-10-31 ruling): the holder of a lease is the process holding the flock, and a caller-supplied pid would let one process answer for another's lease" }
 "port_lease.py#pid os.getuid" = { count = 1, owner = "#5816", until = "waits for nothing (the 2026-10-31 ruling): each user owns one lease namespace and the uid is the owner of the shared directory, so a caller-supplied uid would write into somebody else's namespace" }

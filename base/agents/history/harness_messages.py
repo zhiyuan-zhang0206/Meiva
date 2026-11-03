@@ -1,7 +1,7 @@
 # meiva:note
 # Database operations for the append-only agent_harness_messages table used as
-# the UI display store for external harnesses (claude_code, codex, antigravity,
-# kimi_code). Native meiva continues using LangGraph checkpoints as both its
+# the UI display store for external harnesses (claude_code, codex, antigravity).
+# Native meiva continues using LangGraph checkpoints as both its
 # execution truth and UI store.
 
 from __future__ import annotations

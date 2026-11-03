@@ -56,7 +56,11 @@ def is_runnable(
     # wakes reach it without one. Without a launcher the only loop this host
     # could run for a row is the built-in one, which is not what the row says.
     # meiva:link base/agents/docs/harness/harness.meiva.okf.md
-    if Harness(stored.harness) not in launchable:
+    try:
+        harness = Harness(stored.harness)
+    except ValueError:
+        harness = None
+    if harness is None or harness not in launchable:
         logger.debug(
             "hosted wake for agent {agent_id} ignored — harness {harness} has no launcher",
             agent_id=agent_id,

@@ -3022,7 +3022,7 @@ export interface components {
         HTTPValidationError: {
             detail?: components["schemas"]["ValidationError"][];
         };
-        Harness: "meiva" | "claude_code" | "codex" | "antigravity" | "kimi_code";
+        Harness: "meiva" | "claude_code" | "codex" | "antigravity";
         HarnessAvailability: {
             harness: components["schemas"]["Harness"];
             status: "available" | "unavailable" | "unknown";

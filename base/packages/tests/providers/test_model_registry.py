@@ -538,7 +538,6 @@ def test_api_fast_service_does_not_claim_external_cli_support(
         ("claude-opus-5-5", Harness.CLAUDE_CODE, "low", "claude-opus-5-5"),
         ("gpt-6.1-sol", Harness.CODEX, "xhigh", "gpt-6.1-sol"),
         ("gpt-6-astra", Harness.CODEX, "ultra", "gpt-6-astra"),
-        ("kimi-k3.1-pro", Harness.KIMI_CODE, "max", "kimi-k3.1-pro"),
         ("gemini-4-argon", Harness.ANTIGRAVITY, "low", "gemini-4-argon-low"),
         ("claude-opus-5-5", Harness.ANTIGRAVITY, "high", "claude-opus-5-5-high"),
         ("gemini-3.8-flash", Harness.ANTIGRAVITY, "medium", "gemini-3.8-flash-medium"),
