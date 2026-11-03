@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import TypeAdapter
 
 from services.supervision.healthchecks.plans.lgtm_plan import (
     Accepted,
     Failed,
+    LokiAnswer,
     PushStep,
     Retry,
     marker_visible,
@@ -70,7 +72,20 @@ def test_the_query_window_looks_back_from_the_marker_to_a_fresh_end() -> None:
 
 
 def test_the_marker_is_visible_only_as_a_streamed_value() -> None:
-    found = {"data": {"result": [{"values": [["1", "other"], ["2", "m"]]}]}}
+    found: LokiAnswer = {"data": {"result": [{"values": [["1", "other"], ["2", "m"]]}]}}
 
     assert marker_visible(found, "m") is True
     assert marker_visible({"data": {"result": []}}, "m") is False
+
+
+def test_a_real_query_range_envelope_validates_to_the_probe_view() -> None:
+    envelope = {
+        "status": "success",
+        "data": {
+            "resultType": "streams",
+            "result": [{"stream": {"agent_id": "watchdog"}, "values": [["2", "m"]]}],
+            "stats": {"summary": {"bytesProcessedPerSecond": 0}},
+        },
+    }
+
+    assert marker_visible(TypeAdapter(LokiAnswer).validate_python(envelope), "m") is True

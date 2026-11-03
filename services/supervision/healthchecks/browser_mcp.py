@@ -5,8 +5,10 @@ import json
 import socket
 from pathlib import Path
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.paths import chrome_mcp_socket
-from services.desktop.browser.protocol import Request, Response
+from services.desktop.browser.protocol import Request
 
 _TIMEOUT_S = 5.0
 
@@ -25,7 +27,9 @@ def browser_mcp_probe(home: Path, *, port: int) -> bool:
             if not chunk:
                 return False
             buf += chunk
-        resp: Response = json.loads(buf.split(b"\n", 1)[0])
+        resp = object_of(json.loads, buf.split(b"\n", 1)[0])
+        if not is_object_dict(resp):
+            raise TypeError("the ping answer is not a JSON object")
         return bool(resp.get("ok"))
     finally:
         sock.close()

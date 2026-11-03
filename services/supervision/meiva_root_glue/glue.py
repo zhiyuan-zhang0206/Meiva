@@ -55,7 +55,8 @@ from services.supervision.meiva_root_glue.diagnostics import (
     RootHealthRounds,
     RoundsInputs,
 )
-from services.supervision.roster.composition import build_services
+from services.supervision.roster.composition import build_services, setting
+from services.supervision.roster.field_values import flag, real, text, whole
 
 _log = logging.getLogger(__name__)
 
@@ -341,16 +342,20 @@ def probe_config_from_settings(*, home: Path) -> ProbeConfig:
     return ProbeConfig(
         home=home,
         helper_socket=helper_client(home=home).sock_path,
-        redis_url=str(get_field("redis_url")),
-        db_url=str(get_field("db_url")),
-        pgbouncer_enabled=bool(get_field("pgbouncer_enabled")),
-        observability_url=str(get_field("observability_url")),
-        observability_otlp_port=int(get_field("observability_otlp_port")),
-        gateway_health_url=str(get_field("gateway_health_url")),
-        browser_cdp_port=int(get_field("browser_cdp_port")),
+        redis_url=text(setting("redis_url"), "redis_url"),
+        db_url=text(setting("db_url"), "db_url"),
+        pgbouncer_enabled=flag(setting("pgbouncer_enabled"), "pgbouncer_enabled"),
+        observability_url=text(setting("observability_url"), "observability_url"),
+        observability_otlp_port=whole(
+            setting("observability_otlp_port"), "observability_otlp_port"
+        ),
+        gateway_health_url=text(setting("gateway_health_url"), "gateway_health_url"),
+        browser_cdp_port=whole(setting("browser_cdp_port"), "browser_cdp_port"),
         browser_profile=profile_dir(home),
-        browser_reach_timeout_s=float(get_field("browser_reach_timeout_s")),
-        browser_reach_probe_interval_s=float(get_field("browser_reach_probe_interval_s")),
+        browser_reach_timeout_s=real(setting("browser_reach_timeout_s"), "browser_reach_timeout_s"),
+        browser_reach_probe_interval_s=real(
+            setting("browser_reach_probe_interval_s"), "browser_reach_probe_interval_s"
+        ),
         loki_url=backend_urls(LgtmSettings.from_fields(get_field))["loki"],
         environment=MappingProxyType(inherited_process_env()),
     )

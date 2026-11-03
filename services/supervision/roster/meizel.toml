@@ -1,20 +1,21 @@
-exports = ["__main__.py", "composition.py", "healthz.py", "plugin_services.py", "service_spec.py", "spec.py"]
+exports = ["__main__.py", "composition.py", "field_values.py", "healthz.py", "plugin_services.py", "service_spec.py", "spec.py"]
 
 [uses]
 "__init__.py" = ["healthz.py", "service_spec.py"]
-"composition.py" = ["gate_plan.py", "healthz.py", "plugin_services.py", "service_spec.py"]
+"composition.py" = ["field_values.py", "gate_plan.py", "healthz.py", "plugin_services.py", "service_spec.py"]
 "__main__.py" = ["composition.py"]
 "healthz.py" = ["service_spec.py"]
 "plugin_services.py" = ["service_spec.py"]
 "spec.py" = ["composition.py", "gate_plan.py", "plugin_services.py", "service_spec.py"]
-"tests" = ["__init__.py", "composition.py", "gate_plan.py", "healthz.py", "service_spec.py", "spec.py"]
+"tests" = ["__init__.py", "composition.py", "field_values.py", "gate_plan.py", "healthz.py", "service_spec.py", "spec.py"]
 
 [external]
 "plugin_services.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
 
 [purity]
+"field_values.py" = "strict"
 "gate_plan.py" = "strict"
 
 [roots]
 "__main__.py" = { kinds = ["home"], why = "`python -m services.supervision.roster` resolves the home whose plugins declare the services it prints" }
-"composition.py" = { kinds = ["settings"], why = "assembles the roster at use time: reads the machine host, the database and Redis urls, the gateway settings that the service specs take, and the enablement flags the roster gates judge (through `gate_settings()`, which `spec.gate_reason` takes as a value), and builds the health-endpoint table from those port fields and the home its caller names" }
+"composition.py" = { kinds = ["settings"], why = "assembles the roster at use time: reads the machine host, the database and Redis urls, the gateway settings that the service specs take, and the enablement flags the roster gates judge (through `gate_settings()`, which `spec.gate_reason` takes as a value), read by name through `setting()`, and builds the health-endpoint table from those port fields and the home its caller names" }

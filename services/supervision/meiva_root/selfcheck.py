@@ -30,9 +30,11 @@ import logging
 from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Protocol
 
 from base.clock import Timers
+from base.host.boundary.fields import int_field
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.proc import child_state, read_process
 
 _log = logging.getLogger(__name__)
@@ -98,10 +100,15 @@ class TreeSelfCheck:
         now = self._timers.monotonic()
         self._state.rounds += 1
         view = self._host.tree_view()
-        raw_root_pid: Any = view["root_pid"]
-        root_pid = int(raw_root_pid)
-        raw_units: Any = view["units"]
-        units: list[dict[str, object]] = raw_units
+        root_pid = int_field(view, "root_pid")
+        raw_units = view["units"]
+        if not is_object_list(raw_units):
+            raise TypeError("tree view units must be a list")
+        units: list[dict[str, object]] = []
+        for raw_unit in raw_units:
+            if not is_object_dict(raw_unit):
+                raise TypeError("tree view unit must be an object")
+            units.append(raw_unit)
         broken, reasons, unverifiable = self._walk(units, root_pid, verdicts=verdicts)
         self._fold_broken(broken, reasons, root_pid, now)
         self._fold_unverifiable(unverifiable, now)
@@ -123,16 +130,14 @@ class TreeSelfCheck:
             unit_id = str(entry["id"])
             if entry["state"] != "running":
                 continue
-            pid = entry["pid"]
-            if pid is None:
+            if entry["pid"] is None:
                 broken.append(unit_id)
                 reasons[unit_id] = "running without a recorded pid"
                 continue
-            raw_pid: Any = pid
             verdict = (
                 verdicts[unit_id]
                 if verdicts is not None and unit_id in verdicts
-                else child_state(int(raw_pid), root_pid, read=read_process)
+                else child_state(int_field(entry, "pid"), root_pid, read=read_process)
             )
             if verdict == "attached":
                 continue

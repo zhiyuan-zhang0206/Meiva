@@ -12,18 +12,23 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from functools import partial
 from http.client import HTTPException, HTTPResponse
 from pathlib import Path
-from typing import Any, assert_never
+from typing import assert_never
+
+from pydantic import TypeAdapter
 
 from base.clock import Clock
 from base.cluster.machine import MachineIdentityReader, MachineRoleMissing, MachineRoles
 from base.daemon.health import DaemonProbe
+from base.host.boundary.untyped import object_of
 from services.supervision.healthchecks.plans.lgtm_plan import (
     NANOSECONDS_PER_SECOND,
     Accepted,
     Failed,
+    LokiAnswer,
     Retry,
     marker_visible,
     probe_payload,
@@ -32,6 +37,8 @@ from services.supervision.healthchecks.plans.lgtm_plan import (
     readiness_failure,
 )
 
+_LOKI_ANSWER = TypeAdapter(LokiAnswer)
+
 
 def _now_ns(clock: Clock) -> int:
     return int(clock.now().timestamp() * NANOSECONDS_PER_SECOND)
@@ -39,10 +46,18 @@ def _now_ns(clock: Clock) -> int:
 
 def open_local(request: str | urllib.request.Request, *, timeout: float) -> HTTPResponse:
     """Open a loopback URL without consulting the environment's proxies."""
-    res: Any = urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
-        request, timeout=timeout
-    )
-    return res
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    return _opened(partial(opener.open, timeout=timeout), request)
+
+
+# meiva:note
+# The answer of `open_` for `request`. The opener types its answer `Any`; a parameter typed with
+# the real `HTTPResponse` takes it without naming the `Any`.
+def _opened(
+    open_: Callable[[str | urllib.request.Request], HTTPResponse],
+    request: str | urllib.request.Request,
+) -> HTTPResponse:
+    return open_(request)
 
 
 _WRITE_PROBE_END_LAG_SECONDS = 1
@@ -149,7 +164,9 @@ def write_path_probe(
         with open_local(query_request, timeout=2.0) as response:
             if not 200 <= response.status < 300:
                 return False, "query_error"
-            visible = marker_visible(json.loads(response.read()), marker)
+            visible = marker_visible(
+                _LOKI_ANSWER.validate_python(object_of(json.loads, response.read())), marker
+            )
     except (OSError, HTTPException, ValueError, KeyError, TypeError):
         return False, "query_error"
     return (True, "ok") if visible else (False, "probe_not_visible")

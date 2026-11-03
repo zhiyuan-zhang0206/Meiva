@@ -15,9 +15,10 @@ import inspect
 import sys
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import TypeGuard
 
 from base.daemon.endpoints import ServiceEndpoints
+from base.host.boundary.untyped import object_of
 from services.supervision.roster.service_spec import ServiceSpec
 
 
@@ -86,11 +87,9 @@ def _declared_plugin_services(
         raise PluginServiceError(
             f"plugin {name!r} services() must accept the keywords home and endpoints: {exc}"
         ) from exc
-    declared = declare(home=home, endpoints=endpoints)
-    declared_any: Any = declared
-    if not isinstance(declared, tuple):
+    declared_items = object_of(declare, home=home, endpoints=endpoints)
+    if not _is_tuple(declared_items):
         raise PluginServiceError(f"plugin {name!r} services() must return tuple[ServiceSpec, ...]")
-    declared_items: tuple[Any, ...] = declared_any
     specs: list[ServiceSpec] = []
     for item in declared_items:
         if not isinstance(item, ServiceSpec):
@@ -150,6 +149,10 @@ def assert_unique_sessions(core: tuple[ServiceSpec, ...], plugin: tuple[ServiceS
                 "session names must be unique across core + all plugins"
             )
         seen.add(s.session)
+
+
+def _is_tuple(value: object) -> TypeGuard[tuple[object, ...]]:
+    return isinstance(value, tuple)
 
 
 class PluginServiceError(RuntimeError):

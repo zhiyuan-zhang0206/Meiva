@@ -10,12 +10,17 @@ from __future__ import annotations
 import importlib
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Protocol, TypeGuard
 
 from base.daemon.health import DaemonProbe
+from base.host.boundary.untyped import object_of
 
 Probe = Callable[[], DaemonProbe]
 """A total probe: returns a verdict, never raises (the healthcheck contract)."""
+
+
+def _is_probe(value: object) -> TypeGuard[Probe]:
+    return callable(value)
 
 
 class ProbeSource(Protocol):
@@ -69,13 +74,12 @@ def resolve_ref(ref: str) -> Probe:
     except Exception as exc:
         raise ProbeError(f"cannot import probe module {module_name!r}: {exc}") from exc
     try:
-        resolved = getattr(module, attribute)
+        resolved = object_of(getattr, module, attribute)
     except AttributeError as exc:
         raise ProbeError(f"module {module_name!r} has no attribute {attribute!r}") from exc
-    if not callable(resolved):
+    if not _is_probe(resolved):
         raise ProbeError(f"probe reference {ref!r} resolves to a non-callable")
-    probe: Any = resolved
-    return probe
+    return resolved
 
 
 class ProbeRegistry:

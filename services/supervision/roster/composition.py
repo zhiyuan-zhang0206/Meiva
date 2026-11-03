@@ -17,10 +17,12 @@ from base.cluster.dataplane.redis_bridge import (
 from base.config import get_field
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import DaemonProbe
+from base.host.boundary.untyped import object_of
 from base.host.net.url_secret import names_foreign_host
 from base.native_process.stop_timing import HOST_STOP_CEILING_S, OPS_STOP_CEILING_S
 from base.paths import otel_collector_binary, otel_collector_config, run_dir
 from services.supervision.roster import plugin_services
+from services.supervision.roster.field_values import optional_text, real, text, texts, whole
 from services.supervision.roster.gate_plan import GateSettings
 from services.supervision.roster.healthz import healthz_daemon
 from services.supervision.roster.service_spec import AGENT_RUNNER, BOTH, GATEWAY, ServiceSpec
@@ -52,15 +54,23 @@ def redis_bridge_launch(endpoint: RedisBridgeEndpoint | None) -> tuple[str, str,
 
 
 # meiva:note
+# One setting by name, untyped; the readers in `field_values` check the type it declares.
+def setting(name: str) -> object:
+    return object_of(get_field, name)
+
+
+# meiva:note
 # Observe the relay endpoint when the roster is built. The required-relay gate
 # reports an unconfigured home; its declaration still carries the bare command.
 def redis_bridge_command(home: Path) -> tuple[str, str, int]:
     try:
         endpoint = redis_bridge_endpoint(
             home,
-            machine_host=lambda: str(get_field("machine_host")).strip() or "localhost",
+            machine_host=lambda: (
+                text(setting("machine_host"), "machine_host").strip() or "localhost"
+            ),
             remote_data_plane=lambda: names_foreign_host(
-                str(get_field("db_url")), str(get_field("redis_url"))
+                text(setting("db_url"), "db_url"), text(setting("redis_url"), "redis_url")
             ),
         )
     except RedisBridgeUnconfiguredError:
@@ -123,17 +133,22 @@ def build_services(
     _fe_port = app_port()
     _fe_url = f"http://localhost:{_fe_port}"
     _bridge_cmd, _bridge_host, _bridge_port = redis_bridge_command(home)
-    gateway_health_url = str(get_field("gateway_health_url"))
-    gateway_shutdown_timeout_s = float(get_field("gateway_graceful_shutdown_timeout_seconds"))
-    memory_search_port = int(get_field("memory_search_port"))
-    memory_search_uri = str(get_field("memory_search_uri"))
-    embedding_backend = str(get_field("embedding_backend"))
-    embedding_revision = get_field("embeddinggemma_revision")
-    gateway_port = int(get_field("gateway_port"))
-    browser_origins = tuple(str(origin) for origin in get_field("browser_origins"))
-    browser_cdp_port = int(get_field("browser_cdp_port"))
+    gateway_health_url = text(setting("gateway_health_url"), "gateway_health_url")
+    gateway_shutdown_timeout_s = real(
+        setting("gateway_graceful_shutdown_timeout_seconds"),
+        "gateway_graceful_shutdown_timeout_seconds",
+    )
+    memory_search_port = whole(setting("memory_search_port"), "memory_search_port")
+    memory_search_uri = text(setting("memory_search_uri"), "memory_search_uri")
+    embedding_backend = text(setting("embedding_backend"), "embedding_backend")
+    embedding_revision = optional_text(
+        setting("embeddinggemma_revision"), "embeddinggemma_revision"
+    )
+    gateway_port = whole(setting("gateway_port"), "gateway_port")
+    browser_origins = texts(setting("browser_origins"), "browser_origins")
+    browser_cdp_port = whole(setting("browser_cdp_port"), "browser_cdp_port")
     browser_profile = profile_dir(home)
-    telemetry_otlp_port = int(get_field("telemetry_otlp_port"))
+    telemetry_otlp_port = whole(setting("telemetry_otlp_port"), "telemetry_otlp_port")
     probe_protocol_service = partial(probe_protocol, home=home, browser_cdp_port=browser_cdp_port)
 
     gateway_services = (

@@ -20,10 +20,11 @@ so a short drill still records real rounds and verdicts.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol
 
 from base.clock import Clock
 from base.daemon.health import DaemonProbe
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.proc import process_alive
 from services.supervision.meiva_root.health import HealthConfig
 from services.supervision.meiva_root.probes import Probe, ProbeRegistry
@@ -76,15 +77,12 @@ def liveness_probe(
         except Exception as exc:
             return DaemonProbe.unavailable(f"tree view failed: {exc}")
         units_raw = view.get("units")
-        units_any: Any = units_raw
-        if not isinstance(units_raw, list):
+        if not is_object_list(units_raw):
             return DaemonProbe.unavailable("tree view units is not a list")
-        units_list: list[Any] = units_any
-        for item in units_list:
-            item_any: Any = item
-            if not isinstance(item, dict):
+        for item in units_raw:
+            if not is_object_dict(item):
                 continue
-            unit: dict[str, Any] = item_any
+            unit = item
             if unit["id"] == unit_id:
                 pid = unit["pid"]
                 state = unit["state"]

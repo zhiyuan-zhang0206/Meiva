@@ -29,14 +29,20 @@ import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, TypeGuard, runtime_checkable
 
 from base.clock import Clock
+from base.host.boundary.json_values import is_object_list
+from base.host.boundary.untyped import object_of
 from services.supervision.meiva_root.manifest import UnitRegistry
 from services.supervision.meiva_root.supervisor import Supervisor
 
 _log = logging.getLogger("meiva_root")
 ResourceHandler = Callable[[dict[str, object]], Awaitable[object]]
+
+
+def _is_tuple(value: object) -> TypeGuard[tuple[object, ...]]:
+    return isinstance(value, tuple)
 
 
 class WiringError(ValueError):
@@ -93,7 +99,7 @@ def load_wiring(spec: str | None, context: WiringContext) -> tuple[WiringPartici
     except Exception as exc:
         raise WiringError(f"cannot import wiring module {module_name!r}: {exc}") from exc
     try:
-        factory = getattr(module, attribute)
+        factory = object_of(getattr, module, attribute)
     except AttributeError as exc:
         raise WiringError(f"module {module_name!r} has no attribute {attribute!r}") from exc
     if not callable(factory):
@@ -102,11 +108,9 @@ def load_wiring(spec: str | None, context: WiringContext) -> tuple[WiringPartici
         produced = factory(context)
     except Exception as exc:
         raise WiringError(f"wiring factory {spec!r} raised: {exc}") from exc
-    produced_any: Any = produced
-    if isinstance(produced, (list, tuple)):
-        candidates: tuple[Any, ...] = tuple(produced_any)
-    else:
-        candidates = (produced_any,)
+    candidates: tuple[object, ...] = (
+        tuple(produced) if is_object_list(produced) or _is_tuple(produced) else (produced,)
+    )
     participants: list[WiringParticipant] = []
     for index, candidate in enumerate(candidates):
         if inspect.isclass(candidate):

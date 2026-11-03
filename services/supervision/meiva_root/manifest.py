@@ -19,9 +19,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
 
 from base.deploy.progress_timeout import ROOT_HEALTH_INTERVAL_S
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from services.supervision.meiva_root.inputs import InputSeal, parse_inputs
 
 # The implicit tree root. Units attach here by default; it is never a unit
@@ -142,12 +143,10 @@ class UnitManifest:
 
 
 def _parse_exec(raw: object, origin: str) -> tuple[str, ...]:
-    raw_any: Any = raw
-    if not isinstance(raw, list) or not raw:
+    if not is_object_list(raw) or not raw:
         raise ManifestError(f"{origin}: exec must be a non-empty argv list")
-    items: list[Any] = raw_any
     argv: list[str] = []
-    for index, part in enumerate(items):
+    for index, part in enumerate(raw):
         if not isinstance(part, str) or not part:
             raise ManifestError(f"{origin}: exec[{index}] must be a non-empty string")
         argv.append(part)
@@ -173,12 +172,10 @@ def _parse_stop_timeout(raw: object, origin: str, field: str = "stop_timeout_s")
 
 
 def _parse_environment(raw: object, origin: str) -> tuple[tuple[str, str], ...]:
-    raw_any: Any = raw
-    if not isinstance(raw, dict):
+    if not is_object_dict(raw):
         raise ManifestError(f"{origin}: env must contain valid string keys and values")
-    env_map: dict[Any, Any] = raw_any
     pairs: list[tuple[str, str]] = []
-    for key, value in env_map.items():
+    for key, value in raw.items():
         if (
             not isinstance(key, str)
             or not key
@@ -291,28 +288,23 @@ def load_manifests(path: Path) -> UnitRegistry:
     except OSError as exc:
         raise ManifestError(f"cannot read manifest file {path}: {exc}") from exc
     try:
-        root = json.loads(text)
+        root = object_of(json.loads, text)
     except json.JSONDecodeError as exc:
         raise ManifestError(f"{path}: not valid JSON: {exc}") from exc
-    root_any: Any = root
-    if not isinstance(root, dict):
+    if not is_object_dict(root):
         raise ManifestError(f"{path}: top level must be an object with a 'units' list")
-    document: dict[str, Any] = root_any
+    document = root
     unknown = set(document) - _FILE_FIELDS
     if unknown:
         raise ManifestError(f"{path}: unknown top-level field(s) {sorted(unknown)}")
     units_raw = document.get("units")
-    units_any: Any = units_raw
-    if not isinstance(units_raw, list):
+    if not is_object_list(units_raw):
         raise ManifestError(f"{path}: 'units' must be a list")
-    units_list: list[Any] = units_any
     manifests: list[UnitManifest] = []
-    for index, item in enumerate(units_list):
-        item_any: Any = item
-        if not isinstance(item, dict):
+    for index, item in enumerate(units_raw):
+        if not is_object_dict(item):
             raise ManifestError(f"{path}: units[{index}] must be an object")
-        item_map: dict[str, Any] = item_any
-        manifests.append(UnitManifest.from_mapping(item_map, origin=f"{path}: units[{index}]"))
+        manifests.append(UnitManifest.from_mapping(item, origin=f"{path}: units[{index}]"))
     digest = document.get("launch_digest")
     if digest is not None and not isinstance(digest, str):
         raise ManifestError("launch_digest must be a string")

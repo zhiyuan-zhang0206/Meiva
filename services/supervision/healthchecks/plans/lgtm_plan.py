@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from typing import TypedDict
 
 __all__ = [
     "Accepted",
     "Failed",
+    "LokiAnswer",
     "PushStep",
     "Retry",
     "marker_visible",
@@ -22,6 +24,24 @@ __all__ = [
 ]
 
 NANOSECONDS_PER_SECOND = 1_000_000_000
+
+
+# meiva:note
+# The part of a Loki `query_range` answer the probe reads: `data.result[].values[]`. The answer
+# also carries `status`, `data.resultType`, `data.stats` and a `stream` label set per entry; a
+# validator built from these views ignores them.
+class LokiStream(TypedDict):
+    values: list[list[str]]
+
+
+class LokiData(TypedDict):
+    result: list[LokiStream]
+
+
+class LokiAnswer(TypedDict):
+    data: LokiData
+
+
 WRITE_PROBE_LOOKBACK_SECONDS = 120
 
 
@@ -121,9 +141,7 @@ def query_params(*, marker: str, marker_ns: int, query_end_ns: int) -> dict[str,
 
 # meiva:note
 # Whether a Loki `query_range` answer holds the marker line.
-def marker_visible(
-    payload: dict[str, dict[str, list[dict[str, list[list[str]]]]]], marker: str
-) -> bool:
+def marker_visible(payload: LokiAnswer, marker: str) -> bool:
     return any(
         value[1] == marker for stream in payload["data"]["result"] for value in stream["values"]
     )
