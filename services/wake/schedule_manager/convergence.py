@@ -39,6 +39,11 @@ class Desired(NamedTuple):
     applied: int
     launch_generation: str | None
     secret_env_vars: tuple[str, ...] = ()
+    # meiva:note
+    # The agent this schedule speaks as, or None for an operator-created schedule that only
+    # runs a command. It rides the launch env (command schedules) and the runner's bound
+    # identity (.py schedules); see services/wake/schedule_manager/docs/schedule-identity.meiva.okf.md.
+    owner_agent_id: int | None = None
 
 
 class SyncAction(StrEnum):

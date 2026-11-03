@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import shutil
-from datetime import datetime
 from pathlib import Path
 
 import psycopg
@@ -10,7 +9,6 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from psycopg import sql
 from psycopg.rows import class_row
 from psycopg_pool import ConnectionPool
-from pydantic import BaseModel, Field
 
 from base.cluster import session_name
 from base.db.transaction import write_transaction
@@ -29,7 +27,18 @@ from gateway.http.db_rows import query_all, query_one
 from gateway.http.model_catalog import require_model_catalog
 from gateway.routers.receipts import creation as creation_receipts
 from gateway.schedules import plans, receipts, session_control
-from gateway.schedules.placement import MachineSnapshot, PlacementStatus, judge_placement
+from gateway.schedules.contracts import (
+    DEFAULT_COMMAND,
+    ScheduleCreate,
+    ScheduleDraftRequest,
+    ScheduleDraftResponse,
+    ScheduleLogsView,
+    ScheduleRunView,
+    ScheduleSummary,
+    ScheduleUpdate,
+    ScheduleView,
+)
+from gateway.schedules.placement import MachineSnapshot, judge_placement
 from gateway.schedules.rows import (
     ControlRow,
     DeletedRow,
@@ -52,6 +61,12 @@ _SCHEDULE_BASE_COLS = (
     "s.id, s.name, s.description, s.command, s.enabled, s.status, s.last_error, "
     "s.created_at, s.updated_at, s.machine, s.owner_plugin"
 )
+# meiva:note
+# Appended last in every query that returns it, never in the middle: `ScheduleFullRow` is a
+# NamedTuple the operator repair script (`scripts/host_ops/update_schedule_script.py`) indexes
+# positionally against whichever gateway source is installed, so a column inserted before
+# `script` would silently shift every field after it.
+_OWNER_COL = "s.owner_agent_id"
 _PLACEMENT_COLS = (
     "m.name IS NOT NULL AS machine_registered, m.paused_at, m.pause_reason, "
     "m.stopped_at, m.maintenance_reason, mp.online, mp.consecutive_failures"
@@ -63,10 +78,12 @@ _JOIN_CLAUSE = (
 )
 
 _SUMMARY_QUERY = (
-    f"SELECT {_SCHEDULE_BASE_COLS}, {_PLACEMENT_COLS} {_JOIN_CLAUSE} ORDER BY s.id DESC"
+    f"SELECT {_SCHEDULE_BASE_COLS}, {_PLACEMENT_COLS}, {_OWNER_COL} "
+    f"{_JOIN_CLAUSE} ORDER BY s.id DESC"
 )
 _FULL_QUERY = (
-    f"SELECT {_SCHEDULE_BASE_COLS}, s.script, {_PLACEMENT_COLS} {_JOIN_CLAUSE} WHERE s.id = %s"
+    f"SELECT {_SCHEDULE_BASE_COLS}, s.script, {_PLACEMENT_COLS}, {_OWNER_COL} "
+    f"{_JOIN_CLAUSE} WHERE s.id = %s"
 )
 _MACHINE_PLACEMENT_QUERY = sql.SQL(
     "SELECT {} FROM (SELECT %s::text AS target) t "
@@ -75,69 +92,10 @@ _MACHINE_PLACEMENT_QUERY = sql.SQL(
 ).format(sql.SQL(_PLACEMENT_COLS))
 _SCHEDULE_STORE_COLS = (
     "id, name, description, command, enabled, status, last_error, created_at, updated_at, "
-    "machine, owner_plugin, script"
+    "machine, owner_plugin, script, owner_agent_id"
 )
 
-_DEFAULT_COMMAND = "python schedule.py"
-
-
-class ScheduleSummary(BaseModel):
-    id: int
-    name: str
-    description: str | None
-    command: str
-    enabled: bool
-    status: str
-    last_error: str | None
-    created_at: datetime
-    updated_at: datetime
-    machine: str
-    owner_plugin: str | None = None
-    placement_status: PlacementStatus
-    placement_reason: str | None = None
-
-
-class ScheduleView(ScheduleSummary):
-    script: str
-
-
-class ScheduleCreate(BaseModel):
-    name: str
-    script: str
-    command: str = _DEFAULT_COMMAND
-    description: str | None = None
-    enabled: bool = True
-    machine: str | None = None
-
-
-class ScheduleUpdate(BaseModel):
-    name: str | None = None
-    script: str | None = None
-    command: str | None = None
-    description: str | None = None
-    enabled: bool | None = None
-    machine: str | None = None
-
-
-class ScheduleRunView(BaseModel):
-    id: int
-    ran_at: datetime
-    ok: bool | None
-    agent_id: int | None
-    note: str | None
-
-
-class ScheduleLogsView(BaseModel):
-    source: str
-    lines: list[str]
-
-
-class ScheduleDraftRequest(BaseModel):
-    nl: str = Field(description="Natural-language description of the scheduled task.")
-
-
-class ScheduleDraftResponse(BaseModel):
-    agent_id: int
+_DEFAULT_COMMAND = DEFAULT_COMMAND
 
 
 def _snapshot(r: ScheduleSummaryRow | ScheduleFullRow) -> MachineSnapshot:
@@ -166,6 +124,7 @@ def _summary(r: ScheduleSummaryRow) -> ScheduleSummary:
         updated_at=r.updated_at,
         machine=r.machine,
         owner_plugin=r.owner_plugin,
+        owner_agent_id=r.owner_agent_id,
         placement_status=placement.status,
         placement_reason=placement.reason,
     )
@@ -185,6 +144,7 @@ def _view(r: ScheduleFullRow) -> ScheduleView:
         updated_at=r.updated_at,
         machine=r.machine,
         owner_plugin=r.owner_plugin,
+        owner_agent_id=r.owner_agent_id,
         placement_status=placement.status,
         placement_reason=placement.reason,
         script=r.script,
@@ -370,6 +330,7 @@ def _reconstruct_created_row(
         maintenance_reason=placement.maintenance_reason,
         online=placement.online,
         consecutive_failures=placement.consecutive_failures,
+        owner_agent_id=body.owner_agent_id,
     )
 
 
@@ -392,9 +353,18 @@ def create_blocking(
             if created is not None:
                 return _reconstruct_created_row(conn, created, body, machine)
             cur.execute(
-                "INSERT INTO schedules (name, description, script, command, enabled, machine) "
-                "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
-                (body.name, body.description, body.script, body.command, body.enabled, machine),
+                "INSERT INTO schedules "
+                "(name, description, script, command, enabled, machine, owner_agent_id) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (
+                    body.name,
+                    body.description,
+                    body.script,
+                    body.command,
+                    body.enabled,
+                    machine,
+                    body.owner_agent_id,
+                ),
             )
             inserted = cur.fetchone()
             assert inserted is not None  # noqa: S101

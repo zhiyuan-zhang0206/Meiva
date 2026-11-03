@@ -38,14 +38,14 @@ def desired(
     with pool.connection() as conn:
         if machine is not None:
             row = conn.execute(
-                "SELECT enabled, status, desired_revision, applied_revision, launch_generation, secret_env_vars "
-                "FROM schedules WHERE id = %s AND machine = %s",
+                "SELECT enabled, status, desired_revision, applied_revision, launch_generation, "
+                "secret_env_vars, owner_agent_id FROM schedules WHERE id = %s AND machine = %s",
                 (schedule_id, machine),
             ).fetchone()
         else:
             row = conn.execute(
-                "SELECT enabled, status, desired_revision, applied_revision, launch_generation, secret_env_vars "
-                "FROM schedules WHERE id = %s",
+                "SELECT enabled, status, desired_revision, applied_revision, launch_generation, "
+                "secret_env_vars, owner_agent_id FROM schedules WHERE id = %s",
                 (schedule_id,),
             ).fetchone()
     if row is None:
@@ -57,6 +57,7 @@ def desired(
         applied=row[3],
         launch_generation=row[4],
         secret_env_vars=tuple(row[5] or ()),
+        owner_agent_id=row[6],
     )
 
 

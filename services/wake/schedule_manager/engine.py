@@ -215,17 +215,30 @@ def finish_completed(database: Database, schedule_id: int, run_id: int | None) -
         record_run_end(database, run_id, ok=True, note=None)
 
 
-def record_run_start(database: Database, schedule_id: int) -> int | None:
-    """Open a run-history row for this process execution (ok = NULL, in-progress).
+# meiva:note
+# The runner reads this before it binds its identity. A `.py` script runs in-process and takes
+# its agent from that binding, so the value cannot come from the launch environment; reading it
+# here is what lets the same column feed both write paths.
+def owner_agent_id(database: Database, schedule_id: int) -> int | None:
+    with database.connect(autocommit=True) as conn:
+        row = conn.execute(
+            "SELECT owner_agent_id FROM schedules WHERE id = %s", (schedule_id,)
+        ).fetchone()
+    return None if row is None else row[0]
 
-    Returns the run id, or None when the write fails — run history is severable
-    observability, so a DB hiccup must never break the schedule itself (the
-    caller then skips the closing write)."""
+
+# meiva:note
+# Returns the run id, or None when the write fails — run history is severable observability, so
+# a DB hiccup must never break the schedule itself (the caller then skips the closing write).
+# The row's `agent_id` is the schedule's owner, read in the same statement that inserts the run
+# so a concurrent owner change cannot split the two facts apart.
+def record_run_start(database: Database, schedule_id: int) -> int | None:
     try:
         with database.write_transaction() as conn, conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO schedule_runs (schedule_id) VALUES (%s) RETURNING id",
-                (schedule_id,),
+                "INSERT INTO schedule_runs (schedule_id, agent_id) "
+                "SELECT %s, owner_agent_id FROM schedules WHERE id = %s RETURNING id",
+                (schedule_id, schedule_id),
             )
             row = cur.fetchone()
             return row[0] if row is not None else None

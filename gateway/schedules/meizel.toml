@@ -1,9 +1,10 @@
 exports = ["receipts.py", "router.py", "session_control.py", "tests"]
 
 [uses]
+"contracts.py" = ["placement.py"]
 "plans.py" = ["rows.py"]
 "receipts.py" = ["rows.py"]
-"router.py" = ["placement.py", "plans.py", "receipts.py", "rows.py", "session_control.py"]
+"router.py" = ["contracts.py", "placement.py", "plans.py", "receipts.py", "rows.py", "session_control.py"]
 "tests" = ["placement.py", "plans.py", "router.py", "rows.py", "session_control.py"]
 
 [external]
@@ -11,6 +12,7 @@ exports = ["receipts.py", "router.py", "session_control.py", "tests"]
 
 [purity]
 "__init__.py" = "strict"
+"contracts.py" = "strict"
 "placement.py" = "strict"
 "plans.py" = "strict"
 "rows.py" = "strict"

@@ -163,6 +163,7 @@ def cmd_schedules_create(
     description: str | None,
     *,
     machine: str | None = None,
+    owner_agent_id: int | None = None,
     disabled: bool = False,
     idempotency_key: str,
 ) -> int:
@@ -186,6 +187,8 @@ def cmd_schedules_create(
         body["description"] = description
     if machine is not None:
         body["machine"] = machine
+    if owner_agent_id is not None:
+        body["owner_agent_id"] = owner_agent_id
 
     resp = dial_post(
         f"{_gateway_base(access)}/api/schedules",
@@ -219,6 +222,8 @@ def cmd_schedules_update(
     description: str | None,
     *,
     machine: str | None = None,
+    owner_agent_id: int | None = None,
+    clear_owner: bool = False,
     enabled: bool | None,
     idempotency_key: str,
 ) -> int:
@@ -250,6 +255,13 @@ def cmd_schedules_update(
         body["description"] = description
     if machine is not None:
         body["machine"] = machine
+    if owner_agent_id is not None:
+        body["owner_agent_id"] = owner_agent_id
+    elif clear_owner:
+        # meiva:note
+        # An explicit null is how a schedule stops claiming to speak for an agent; omitting the
+        # key would leave the column untouched (the router's exclude-unset semantics).
+        body["owner_agent_id"] = None
     if enabled is not None:
         body["enabled"] = enabled
 
@@ -587,6 +599,7 @@ class _CreateOptions:
     command: str | None
     description: str | None
     machine: str | None
+    owner_agent_id: int | None
     disabled: bool
 
 
@@ -599,6 +612,8 @@ class _UpdateOptions:
     command: str | None
     description: str | None
     machine: str | None
+    owner_agent_id: int | None
+    clear_owner: bool
     enable: bool
     disable: bool
 
@@ -650,6 +665,7 @@ def h_schedules_create(args: argparse.Namespace) -> int:
         opts.command,
         opts.description,
         machine=opts.machine,
+        owner_agent_id=opts.owner_agent_id,
         disabled=opts.disabled,
         idempotency_key=runtime_of(args).new_id(),
     )
@@ -668,6 +684,8 @@ def h_schedules_update(args: argparse.Namespace) -> int:
         opts.command,
         opts.description,
         machine=opts.machine,
+        owner_agent_id=opts.owner_agent_id,
+        clear_owner=opts.clear_owner,
         enabled=enabled,
         idempotency_key=runtime_of(args).new_id(),
     )

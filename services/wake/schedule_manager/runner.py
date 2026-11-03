@@ -39,6 +39,7 @@ from services.wake.schedule_manager.stall_policy import StallPolicy
 def _bind_schedule_actor(
     schedule_id: int,
     *,
+    owner_agent_id: int | None,
     clients: ClientSet,
     clock_factory: Callable[[], Clock],
     config: ConfigBoot,
@@ -49,7 +50,18 @@ def _bind_schedule_actor(
 ) -> None:
     process_context.bind_context(
         MeivaContext(
-            identity=AgentIdentity(agent_id=None, owns_loop=True, actor=f"schedule:{schedule_id}"),
+            identity=AgentIdentity(
+                agent_id=owner_agent_id,
+                # meiva:note
+                # A schedule that speaks as an agent is a script carrying that identity, not
+                # the agent's own turn path (the same posture a shell session's child script
+                # gets). owns_loop stays False so a schedule cannot compact, restart or
+                # terminate the agent it speaks for; the actor keeps the provenance
+                # "schedule:<id>" either way. With no owner this is unchanged from before:
+                # agent_id=None makes owns_loop unobservable.
+                owns_loop=owner_agent_id is None,
+                actor=f"schedule:{schedule_id}",
+            ),
             clients=clients,
             machine=machine,
             clock_factory=clock_factory,
@@ -91,6 +103,7 @@ def run(schedule_id: int, revision: int | None = None, *, config: ConfigBoot | N
         # the engine opens any history for it.
         _bind_schedule_actor(
             schedule_id,
+            owner_agent_id=engine.owner_agent_id(database(), schedule_id),
             clients=clients,
             clock_factory=clock_factory,
             config=config,

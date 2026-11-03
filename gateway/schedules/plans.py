@@ -26,7 +26,7 @@ __all__ = [
     "select_declared_secrets",
 ]
 
-UPDATABLE = ("name", "description", "script", "command", "enabled", "machine")
+UPDATABLE = ("name", "description", "script", "command", "enabled", "machine", "owner_agent_id")
 
 # meiva:note
 # A logs request always asks the session for at least this many lines, so a small window still
@@ -61,6 +61,7 @@ def changed_fields(previous: ScheduleStoreRow, fields: Mapping[str, object]) -> 
         "command": previous.command,
         "enabled": previous.enabled,
         "machine": previous.machine,
+        "owner_agent_id": previous.owner_agent_id,
     }
     return {col: fields[col] for col in UPDATABLE if col in fields and fields[col] != current[col]}
 

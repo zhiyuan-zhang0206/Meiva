@@ -12,6 +12,7 @@ from psycopg_pool import ConnectionPool
 import services.wake.schedule_manager.manager as sm
 from base.cluster import session_name
 from base.config import settings
+from base.db import create_agent
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.tests.serving_root import observe
 from base.sessions.protocol import SessionBackend
@@ -114,13 +115,19 @@ def fake_session(
 
 
 def _insert(
-    conn: psycopg.Connection, name: str, *, enabled: bool = True, machine: str = "gateway"
+    conn: psycopg.Connection,
+    name: str,
+    *,
+    enabled: bool = True,
+    machine: str = "gateway",
+    owner_agent_id: int | None = None,
 ) -> int:
     with conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO schedules (name, script, command, enabled, status, machine) "
-            "VALUES (%s, 'x', 'python schedule.py', %s, 'stopped', %s) RETURNING id",
-            (name, enabled, machine),
+            "INSERT INTO schedules "
+            "(name, script, command, enabled, status, machine, owner_agent_id) "
+            "VALUES (%s, 'x', 'python schedule.py', %s, 'stopped', %s, %s) RETURNING id",
+            (name, enabled, machine, owner_agent_id),
         )
         row = cur.fetchone()
     conn.commit()
@@ -313,6 +320,38 @@ def test_launch_env_carries_cluster_timezone(
     env = backend.launch_envs[0]
     assert env["MEIVA_TIMEZONE"] == POLICY.timezone
     assert env["MEIVA_SCHEDULE_ID"] == str(sid)
+
+
+def test_launch_env_carries_the_owner_agent_id(
+    db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
+) -> None:
+    backend, launched = fake_session
+    owner = create_agent(db_conn)
+    sid = _insert(db_conn, "job-owned", owner_agent_id=owner)
+
+    schedule_manager(pool, backend)._launch(sid, NOW)
+
+    assert launched == [sid]
+    env = backend.launch_envs[0]
+    assert env["MEIVA_AGENT_ID"] == str(owner)
+    # meiva:note
+    # The schedule id stays beside it: a command schedule must remain traceable to the schedule
+    # that launched it even while it speaks as an agent.
+    assert env["MEIVA_SCHEDULE_ID"] == str(sid)
+
+
+def test_launch_env_omits_agent_id_without_an_owner(
+    db_conn: psycopg.Connection, pool: ConnectionPool, fake_session: tuple[_FakeBackend, list[int]]
+) -> None:
+    backend, _ = fake_session
+    sid = _insert(db_conn, "job-plain")
+
+    schedule_manager(pool, backend)._launch(sid, NOW)
+
+    # meiva:note
+    # Absence, not "": the SDK reads a missing key as "no agent", and an empty value would be a
+    # third state that never means anything.
+    assert "MEIVA_AGENT_ID" not in backend.launch_envs[0]
 
 
 def test_adopts_live_session_without_relaunch(

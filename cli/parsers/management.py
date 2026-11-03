@@ -22,6 +22,8 @@ class _ScheduleUpdateFields:
     command: str | None
     description: str | None
     machine: str | None
+    owner_agent_id: int | None
+    clear_owner: bool
     enable: bool
     disable: bool
 
@@ -79,12 +81,15 @@ def _h_schedules_update(args: argparse.Namespace) -> int:
         and fields.command is None
         and fields.description is None
         and fields.machine is None
+        and fields.owner_agent_id is None
+        and not fields.clear_owner
         and not fields.enable
         and not fields.disable
     ):
         print(
             "meiva: pass at least one of --name / --script / --script-file / --command / "
-            "--description / --machine / --enable / --disable — a partial update needs at least one field",
+            "--description / --machine / --owner-agent-id / --clear-owner / --enable / --disable "
+            "— a partial update needs at least one field",
             file=sys.stderr,
         )
         return 2
@@ -182,6 +187,50 @@ def add_config_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
     audit_p.set_defaults(func=_h_config_audit)
 
 
+# meiva:note
+# `create` only names an owner; `update` also needs the way back to NULL, and the two flags are
+# mutually exclusive there (one field, two directions).
+def _add_owner_args(parser: argparse.ArgumentParser, *, clear: bool) -> None:
+    if not clear:
+        parser.add_argument(
+            "--owner-agent-id",
+            type=int,
+            default=None,
+            help="agent id this schedule speaks as (default: none — command-only schedule)",
+        )
+        return
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--owner-agent-id", type=int, default=None, help="agent id this schedule speaks as"
+    )
+    group.add_argument(
+        "--clear-owner",
+        action="store_true",
+        default=False,
+        help="stop speaking as an agent (owner_agent_id = NULL)",
+    )
+
+
+def _add_create_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    parser = sub.add_parser("create", help="create a schedule")
+    parser.add_argument("--name", required=True, help="unique schedule name")
+    _add_script_args(parser, required=True)
+    parser.add_argument(
+        "--command", default=None, help="command that runs the script (default: python schedule.py)"
+    )
+    parser.add_argument("--description", default=None, help="what this schedule does")
+    parser.add_argument(
+        "--machine", default=None, help="host machine to run schedule on (default: gateway machine)"
+    )
+    _add_owner_args(parser, clear=False)
+    parser.add_argument(
+        "--disabled",
+        action="store_true",
+        help="create without launching it (enabled by default)",
+    )
+    parser.set_defaults(func=_h_schedules_create)
+
+
 def add_schedules_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     # `meiva schedules` — manage gateway-supervised schedules (thin client over
     # /api/schedules). Every verb takes a name or a numeric id.
@@ -237,22 +286,7 @@ def add_schedules_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
     )
     schedules_verify_p.set_defaults(func=_h_schedules_verify)
 
-    schedules_create_p = schedules_sub.add_parser("create", help="create a schedule")
-    schedules_create_p.add_argument("--name", required=True, help="unique schedule name")
-    _add_script_args(schedules_create_p, required=True)
-    schedules_create_p.add_argument(
-        "--command", default=None, help="command that runs the script (default: python schedule.py)"
-    )
-    schedules_create_p.add_argument("--description", default=None, help="what this schedule does")
-    schedules_create_p.add_argument(
-        "--machine", default=None, help="host machine to run schedule on (default: gateway machine)"
-    )
-    schedules_create_p.add_argument(
-        "--disabled",
-        action="store_true",
-        help="create without launching it (enabled by default)",
-    )
-    schedules_create_p.set_defaults(func=_h_schedules_create)
+    _add_create_parser(schedules_sub)
 
     schedules_update_p = schedules_sub.add_parser(
         "update", help="partial-update a schedule (by name or id) — only passed fields change"
@@ -265,6 +299,7 @@ def add_schedules_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser
     schedules_update_p.add_argument(
         "--machine", default=None, help="reassign schedule to host machine"
     )
+    _add_owner_args(schedules_update_p, clear=True)
     enabled_group = schedules_update_p.add_mutually_exclusive_group()
     enabled_group.add_argument(
         "--enable", action="store_true", help="set enabled=true (does not force a relaunch)"

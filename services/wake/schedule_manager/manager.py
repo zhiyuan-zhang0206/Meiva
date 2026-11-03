@@ -523,6 +523,15 @@ class ScheduleManager:
         # the login shell is ready.
         env = dict(self._launch_env)
         env["MEIVA_SCHEDULE_ID"] = str(schedule_id)
+        # meiva:note
+        # The owner rides the environment so a command schedule's subprocess speaks as that
+        # agent. A NULL owner leaves the key out entirely rather than writing an empty value:
+        # `launch_agent_id` reads absence as "no agent", and "" would be a third state.
+        # A `.py` schedule never reads this key — it runs in-process and takes its identity
+        # from the bound AgentIdentity (runner.py `_bind_schedule_actor`); both write paths
+        # carry the same `owner_agent_id`.
+        if wanted.owner_agent_id is not None:
+            env["MEIVA_AGENT_ID"] = str(wanted.owner_agent_id)
         # The runner's cron math is timezone-DEFINED: it must fire on the
         # CLUSTER's clock, not on whatever ambient env the session happens to
         # meiva:note

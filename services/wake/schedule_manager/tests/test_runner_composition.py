@@ -16,7 +16,7 @@ from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.config.tests.configuration import data_plane_environment
 from base.daemon.schedules.inputs import ScheduleInputs
-from base.db import Database
+from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.host.exit_codes import hard_exit
 from base.native_process.code_version import CodeVersion
@@ -192,3 +192,93 @@ def test_the_engine_names_the_script_context_when_no_caller_bound_one(
     assert actor == f"schedule:{sid}"
     assert environ_home == str(unit_home)
     assert home == str(unit_home)
+
+
+# meiva:note
+# A schedule that speaks as an agent: the owner is created first (the column is a foreign key),
+# then the schedule names it. Nothing else about the row differs from `_schedule`.
+def _owned_schedule(conn: psycopg.Connection, script: str) -> tuple[int, int]:
+    owner = create_agent(conn)
+    row = conn.execute(
+        "INSERT INTO schedules (name, script, command, machine, owner_agent_id) "
+        "VALUES ('owned', %s, 'python schedule.py', 'gateway', %s) RETURNING id",
+        (script, owner),
+    ).fetchone()
+    conn.commit()
+    assert row is not None
+    return int(row[0]), owner
+
+
+def test_an_owned_schedule_speaks_as_its_agent_and_cannot_drive_its_loop(
+    db_conn: psycopg.Connection, unit_home: Path
+) -> None:
+    marker = unit_home / "owned.txt"
+    script = (
+        "import meiva\n"
+        "from pathlib import Path\n"
+        "from meiva.sdk_surface.agent_identity import require_actor, require_agent_id\n"
+        "seen = {'agent_id': meiva.self.AGENT_ID, 'actor': require_actor(),\n"
+        "        'required': require_agent_id(),\n"
+        "        'owns_loop': meiva.context.identity.owns_loop}\n"
+        "for name, call in (('terminate', meiva.self.terminate),\n"
+        "                   ('restart', lambda: meiva.self.restart('probe')),\n"
+        "                   ('compact', lambda: meiva.self.compact('probe'))):\n"
+        "    try:\n"
+        "        call()\n"
+        "        seen[name] = 'ALLOWED'\n"
+        "    except BaseException as exc:\n"
+        "        seen[name] = type(exc).__name__ + ': ' + str(exc)\n"
+        f"Path({str(marker)!r}).write_text(repr(seen))\n"
+    )
+    sid, owner = _owned_schedule(db_conn, script)
+
+    assert runner.run(sid, config=_runner_boot()) == 0
+
+    # meiva:note
+    # the test's own repr.
+    seen = eval(marker.read_text())  # noqa: S307
+    assert (seen["agent_id"], seen["required"], seen["actor"]) == (owner, owner, f"schedule:{sid}")
+    assert seen["owns_loop"] is False
+    # meiva:note
+    # The negative control: an owned schedule must not be able to compact, restart or terminate
+    # the agent it speaks for, and the refusal must be explicit (not a silent no-op).
+    for action in ("terminate", "restart", "compact"):
+        assert "can only be called from inside an agent process" in seen[action], seen[action]
+    # meiva:note
+    # The run row names the same agent, so "which run" and "for whom" are one lookup.
+    assert db_conn.execute("SELECT agent_id FROM schedule_runs").fetchall() == [(owner,)]
+
+
+def test_an_ownerless_schedule_has_no_agent_namespaces(
+    db_conn: psycopg.Connection, unit_home: Path
+) -> None:
+    # meiva:note
+    # The control case: without an owner the schedule still runs a command-only script, and the
+    # per-identity namespaces stay absent. Without this, the owned test above could pass on a
+    # surface that loads them for everyone.
+    marker = unit_home / "plain.txt"
+    script = (
+        "import meiva\n"
+        "from pathlib import Path\n"
+        "from meiva.sdk_surface.agent_identity import require_actor, require_agent_id\n"
+        "seen = {'actor': require_actor(), 'agent_id': meiva.self.AGENT_ID}\n"
+        "try:\n"
+        "    require_agent_id()\n"
+        "    seen['require'] = 'ALLOWED'\n"
+        "except BaseException as exc:\n"
+        "    seen['require'] = type(exc).__name__ + ': ' + str(exc)\n"
+        f"Path({str(marker)!r}).write_text(repr(seen))\n"
+    )
+    sid = _schedule(db_conn, script)
+
+    assert runner.run(sid, config=_runner_boot()) == 0
+
+    # meiva:note
+    # the test's own repr.
+    seen = eval(marker.read_text())  # noqa: S307
+    assert seen["agent_id"] is None
+    assert seen["actor"] == f"schedule:{sid}"
+    # meiva:note
+    # The gate a `meiva.tasks` write would hit: without an owner the schedule cannot attribute the
+    # write, so it fails here rather than landing a task nobody owns.
+    assert "no established agent identity" in seen["require"], seen["require"]

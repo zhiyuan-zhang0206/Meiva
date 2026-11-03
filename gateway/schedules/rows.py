@@ -58,6 +58,7 @@ class ScheduleSummaryRow:
     maintenance_reason: str | None
     online: bool | None
     consecutive_failures: int | None
+    owner_agent_id: int | None
 
 
 # meiva:note
@@ -86,6 +87,7 @@ class ScheduleFullRow(NamedTuple):
     maintenance_reason: str | None
     online: bool | None
     consecutive_failures: int | None
+    owner_agent_id: int | None
 
 
 # meiva:note
@@ -104,6 +106,7 @@ class ScheduleStoreRow:
     machine: str
     owner_plugin: str | None
     script: str
+    owner_agent_id: int | None
 
 
 # meiva:note
