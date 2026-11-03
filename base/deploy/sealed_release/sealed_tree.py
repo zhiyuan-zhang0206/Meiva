@@ -27,9 +27,9 @@ from base.deploy.sealed_release.sealed_plan import (
 )
 from base.host.atomic_io import write_text_atomic
 from base.host.system.hostport import Host
+from base.host.verified_file.plan import stat_changed
 
 _SEAL_TIMEOUT_S = 600.0
-_STABLE = ("st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns")
 
 
 class SealedTreeError(RuntimeError):
@@ -68,7 +68,7 @@ def _entry(path: Path, before: os.stat_result, *, content: bool) -> Entry:
     digest = _sha256(path) if content and kind is EntryKind.FILE else None
     if digest is not None:
         after = path.lstat()
-        if any(getattr(before, key) != getattr(after, key) for key in _STABLE):
+        if stat_changed(before, after):
             raise SealedTreeError(f"changed while reading: {path}")
     return Entry(
         kind=kind,

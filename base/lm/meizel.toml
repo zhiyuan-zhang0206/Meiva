@@ -36,4 +36,4 @@ exports = ["attach", "call.py", "catalog", "compat", "content.py", "context_budg
 "factory.py#environ base.host.env.registry.process_environment" = { count = 1, owner = "#5816", until = "waits for its four callers to hand the environment: process_provider_keys(catalog) resolves API keys from the declared env registry, and its callers (meiva/boot.py, the labeler daemon, agent_host configuration, the verify scripts) all hold a boot or a config view to take the mapping from" }
 
 [debt.restricted-python]
-"registry.py#dynamic attribute name" = { count = 4, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }
+"registry.py#dynamic attribute name" = { count = 2, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }

@@ -49,5 +49,4 @@ exports = ["activation.py", "config_face.py", "config_registration.py", "config_
 "config_registration.py#base/packages/plugins/config_view.py" = { count = 1, owner = "#7240", until = "waits for the pure view helpers to live apart from the plugin door: config_view resolves pins, overlays the cluster policy and builds the config classes, but it imports config_face for its types, which is why the file is not strict itself. Repair unverified: that the pure view helpers can move to a module that does not import that door" }
 
 [debt.restricted-python]
-"extensions.py#dynamic attribute name" = { count = 2, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }
 "flags.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }

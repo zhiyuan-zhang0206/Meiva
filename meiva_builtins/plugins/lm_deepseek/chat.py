@@ -17,6 +17,7 @@ from base.lm.compat.anthropic_thinking import ThinkingTokensChatAnthropic
 
 DEEPSEEK_API_BASE = "https://api.deepseek.com"
 DEEPSEEK_ANTHROPIC_API_BASE = f"{DEEPSEEK_API_BASE}/anthropic"
+_STRUCTURED_OUTPUT = "with_structured_output"
 
 
 class _StructuredOutputFactory(Protocol):
@@ -51,8 +52,7 @@ class DeepSeekChatModel(ThinkingTokensChatAnthropic):
         if method != "json_schema":
             if http_client is not None or http_async_client is not None:
                 raise ValueError("Custom HTTP clients require method='json_schema'")
-            attr = "with_structured_output"
-            build: object = getattr(super(), attr)
+            build: object = getattr(super(), _STRUCTURED_OUTPUT)
             if not _is_structured_output_factory(build):
                 raise TypeError("super().with_structured_output is not callable")
             return build(schema, include_raw=include_raw, method=method, **kwargs)
@@ -76,8 +76,7 @@ class DeepSeekChatModel(ThinkingTokensChatAnthropic):
             http_async_client=http_async_client,
         )
         kwargs.setdefault("strict", True)
-        attr = "with_structured_output"
-        build = getattr(model, attr)
+        build = getattr(model, _STRUCTURED_OUTPUT)
         if not _is_structured_output_factory(build):
             raise TypeError("model.with_structured_output is not callable")
         return build(schema, method="json_schema", include_raw=include_raw, **kwargs)

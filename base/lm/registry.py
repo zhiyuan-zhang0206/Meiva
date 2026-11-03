@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from dataclasses import fields as dataclass_fields
 from typing import Any, Literal, overload
 
@@ -160,11 +160,12 @@ class ModelSpec:
             )
         if not spec.spawnable:
             return
-        missing = [
-            fact
-            for fact in ("context_window", "knowledge_cutoff", "effort_levels")
-            if getattr(spec, fact) is None
-        ]
+        facts = {
+            "context_window": spec.context_window,
+            "knowledge_cutoff": spec.knowledge_cutoff,
+            "effort_levels": spec.effort_levels,
+        }
+        missing = [fact for fact, value in facts.items() if value is None]
         if missing:
             raise RuntimeError(
                 f"spawnable model {model_id!r} is missing registry facts {missing} — "
@@ -206,10 +207,10 @@ class ModelSpec:
         prices: PriceBook,
         anthropic_protocol_by_model: Mapping[str, bool] | None = None,
     ) -> None:
-        for tuning_field in dataclass_fields(ModelTuning):
-            if getattr(DEFAULT_TUNING, tuning_field.name) is None:
+        for tuning_name, tuning_value in asdict(DEFAULT_TUNING).items():
+            if tuning_value is None:
                 raise RuntimeError(
-                    f"DEFAULT_TUNING.{tuning_field.name} is None — the shared-default floor "
+                    f"DEFAULT_TUNING.{tuning_name} is None — the shared-default floor "
                     f"must be fully populated (it is the last resort of resolve_setting)"
                 )
         for model_id, spec in models.items():

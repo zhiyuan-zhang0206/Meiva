@@ -6,6 +6,3 @@ exports = ["__init__.py", "calls.py", "frozen.py", "refusal_loss.py"]
 [uses]
 "__init__.py" = ["ddl.py", "moves.py", "protection.py", "protection_report.py", "reach.py", "references.py", "report.py", "schema.py"]
 "report.py" = ["frozen.py", "references.py"]
-
-[debt.restricted-python]
-"references.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }

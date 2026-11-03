@@ -221,7 +221,13 @@ def _facts(entry: Entry, *, content: bool) -> tuple[object, ...]:
 
 
 def _changed_fields(sealed: Entry, seen: Entry, *, content: bool) -> list[str]:
-    fields = [name for name in _STAT_FIELDS if getattr(sealed, name) != getattr(seen, name)]
+    fields = [
+        name
+        for name, was, now in zip(
+            _STAT_FIELDS, _facts(sealed, content=False), _facts(seen, content=False), strict=True
+        )
+        if was != now
+    ]
     if content and sealed.sha256 != seen.sha256:
         fields.append("sha256")
     return fields

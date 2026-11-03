@@ -30,7 +30,3 @@ exports = ["__main__.py", "failure_state.py", "health.py", "inputs.py", "manifes
 [roots]
 "__main__.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 "daemon.py" = { kinds = ["clock", "environ", "pid"], why = "process entry of the root supervisor: reads its own pid and, once, the base environment the supervisor starts every child from (before any pre-start --wiring repairs and per-unit manifest overrides); the helper-chain watch is given the same process environment to read the marker of the process that spawned it (it re-reads it each round, since its question is whether that parent is still there); builds the process clock from SYSTEM_TIMERS" }
-
-[debt.restricted-python]
-"inputs.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }
-"stopping.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }

@@ -24,6 +24,3 @@ exports = ["graphs.py", "imports.py", "model.py", "universe.py"]
 "reachability.py" = ["model.py", "universe.py"]
 "universe.py" = ["python_layout.py"]
 "python_layout.py" = ["model.py"]
-
-[debt.restricted-python]
-"scopes.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }

@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import TypeGuard
 
 import oss2
-from oss2.models import PartInfo
+from oss2.models import HeadObjectResult, PartInfo
 
 from services.backup.artifact.names import REMOTE_ROOT
 from services.backup.artifact.offsite_plan import (
@@ -91,13 +91,11 @@ def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict)
 
 
-def _str_attr(value: object, name: str) -> str:
-    raw = getattr(value, name)
+def _str_value(raw: object) -> str:
     return raw if isinstance(raw, str) else str(raw)
 
 
-def _int_attr(value: object, name: str) -> int:
-    raw = getattr(value, name)
+def _int_value(raw: object) -> int:
     if isinstance(raw, bool) or not isinstance(raw, (int, str)):
         raise TypeError("expected int")
     return int(raw)
@@ -107,8 +105,7 @@ def _is_str_mapping(value: object) -> TypeGuard[Mapping[str, str]]:
     return isinstance(value, Mapping)
 
 
-def _headers_attr(value: object, name: str) -> dict[str, str]:
-    raw = getattr(value, name)
+def _headers_value(raw: object) -> dict[str, str]:
     if not _is_str_mapping(raw):
         return {}
     return {str(k): str(v) for k, v in raw.items()}
@@ -239,12 +236,8 @@ def _upload_part(
     return etag
 
 
-def _extract_head(head: object) -> tuple[str, int, dict[str, str]]:
-    return (
-        _str_attr(head, "etag"),
-        _int_attr(head, "content_length"),
-        _headers_attr(head, "headers"),
-    )
+def _extract_head(head: HeadObjectResult) -> tuple[str, int, dict[str, str]]:
+    return (_str_value(head.etag), _int_value(head.content_length), _headers_value(head.headers))
 
 
 def _verified(

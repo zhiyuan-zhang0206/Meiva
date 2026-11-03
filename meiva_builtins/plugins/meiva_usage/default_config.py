@@ -60,11 +60,27 @@ def _validate_env_var_name(name: str | None, field_name: str) -> None:
         raise ValueError(f"{field_name}: '{name}' must not start with 'MEIVA_'")
 
 
+# meiva:note
+# The selector fields a provider may refuse, by name: `_check_disallowed_fields` names them.
+def _selector_fields(collector: CollectorConfig) -> dict[str, object]:
+    return {
+        "key_env": collector.key_env,
+        "credentials_path": collector.credentials_path,
+        "keychain_account": collector.keychain_account,
+        "account_email": collector.account_email,
+        "oauth_client_id_env": collector.oauth_client_id_env,
+        "oauth_client_secret_env": collector.oauth_client_secret_env,
+        "known_balance_usd": collector.known_balance_usd,
+        "balance_as_of": collector.balance_as_of,
+    }
+
+
 def _check_disallowed_fields(
     collector: CollectorConfig, disallowed: tuple[str, ...], name: str
 ) -> None:
+    selected = _selector_fields(collector)
     for field in disallowed:
-        if getattr(collector, field) is not None:
+        if selected[field] is not None:
             if field.startswith("oauth_"):
                 raise ValueError(f"{name} collector does not accept OAuth client env vars")
             raise ValueError(f"{name} collector does not accept {field}")

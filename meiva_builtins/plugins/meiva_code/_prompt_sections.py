@@ -10,8 +10,6 @@ import meiva
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 
-_PROMOTED_MODULES = ("cwd", "files", "shell")
-
 
 def coding_tools_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     del catalog
@@ -29,10 +27,9 @@ def coding_tools_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
         )
     )
     pieces: list[str] = []
-    for name in _PROMOTED_MODULES:
+    for name, mod in (("cwd", meiva.cwd), ("files", meiva.files), ("shell", meiva.shell)):
         if name in expanded:
             continue
-        mod = getattr(meiva, name)
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             meiva.help(mod)

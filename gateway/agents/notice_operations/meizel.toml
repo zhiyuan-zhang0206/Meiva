@@ -8,6 +8,3 @@ exports = ["current.py", "notice_answers.py", "notice_plan.py", "notices.py", "r
 [purity]
 "__init__.py" = "strict"
 "notice_plan.py" = "strict"
-
-[debt.restricted-python]
-"current.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }

@@ -47,7 +47,6 @@ from cli.commands.observability.plans.trace_ship.target import (
 from cli.commands.observability.url_split import split_url
 
 _WATERMARK_NAME = ".ship-watermark.json"
-_SPAN_ID_LENGTHS = (("trace_id", 16), ("span_id", 8), ("parent_span_id", 8))
 
 
 # meiva:note
@@ -118,10 +117,12 @@ def post_line(client: httpx.Client, target: ShipTarget, line: str) -> int:
     for resource_spans in request.resource_spans:
         for scope_spans in resource_spans.scope_spans:
             for span in scope_spans.spans:
-                for attribute, expected_length in _SPAN_ID_LENGTHS:
-                    repaired = repaired_span_id(getattr(span, attribute), expected_length)
-                    if repaired is not None:
-                        setattr(span, attribute, repaired)
+                if (repaired := repaired_span_id(span.trace_id, 16)) is not None:
+                    span.trace_id = repaired
+                if (repaired := repaired_span_id(span.span_id, 8)) is not None:
+                    span.span_id = repaired
+                if (repaired := repaired_span_id(span.parent_span_id, 8)) is not None:
+                    span.parent_span_id = repaired
     headers = {"Content-Type": "application/x-protobuf", **target.headers}
     response = client.post(target.endpoint, content=request.SerializeToString(), headers=headers)
     response.raise_for_status()

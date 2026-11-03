@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Iterator
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any, Literal, Protocol
@@ -101,14 +101,23 @@ class PluginContributions:
     def merged(self, other: PluginContributions) -> PluginContributions:
         if self.config is not None and other.config is not None:
             raise ValueError("config is declared by more than one face")
-        values: dict[str, Any] = {}
-        for f in fields(self):
-            mine, theirs = getattr(self, f.name), getattr(other, f.name)
-            values[f.name] = mine + theirs if isinstance(mine, tuple) else mine or theirs
+        theirs = vars(other)
+        values: dict[str, Any] = {
+            name: mine + theirs[name] if isinstance(mine, tuple) else mine or theirs[name]
+            for name, mine in vars(self).items()
+        }
         return PluginContributions(**values)
 
     def hooks(self, point: HookPoint) -> tuple[GraphHook, ...]:
-        return getattr(self, point)
+        match point:
+            case "after_init":
+                return self.after_init
+            case "before_llm":
+                return self.before_llm
+            case "before_exec":
+                return self.before_exec
+            case "after_exec":
+                return self.after_exec
 
     def as_records(self, plugin: str) -> tuple[Contribution, ...]:
         return (
