@@ -75,9 +75,13 @@ describe("CompactingBlock", () => {
     expect(screen.getByTestId("compacting-elapsed").textContent).toBe("24s");
   });
 
-  it("keeps a failure readable, then self-hides after the grace", () => {
+  it("keeps a failure readable with destructive styling, then self-hides after the grace", () => {
     setLive({ status: "failure", finishedAt: "2026-09-14T03:00:05+00:00" });
     renderWithQuery(<CompactingBlock />);
+    const block = screen.getByTestId("compacting-block");
+    expect(block.dataset.status).toBe("failure");
+    expect(block.className).toContain("text-destructive");
+    expect(block.className).toContain("border-destructive/35");
     expect(screen.getByText("Compaction failed")).toBeTruthy();
     act(() => {
       vi.advanceTimersByTime(40_000);

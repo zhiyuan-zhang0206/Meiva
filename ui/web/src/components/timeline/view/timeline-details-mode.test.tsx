@@ -348,14 +348,13 @@ describe("agent_chat canvas prose and streaming indicators", () => {
     expect(screen.getByTestId("streaming-cursor")).toBeTruthy();
     expect(screen.queryByText(/\(streaming…\)/)).toBeNull();
   });
-  it("agent_chat interrupted=true → renders InterruptedNotice without streaming cursor", () => {
+  it("agent_chat interrupted=true → drops streaming cursor without InterruptedNotice", () => {
     render(
       <TimelineView
         items={[makeItem({ kind: "agent_chat", payload: "x", partial: true, interrupted: true })]}
       />,
     );
     expect(screen.queryByTestId("streaming-cursor")).toBeNull();
-    const labels = screen.getAllByText(/streaming interrupted/i);
-    expect(labels.length).toBeGreaterThan(0);
+    expect(screen.queryByText(/streaming interrupted/i)).toBeNull();
   });
 });

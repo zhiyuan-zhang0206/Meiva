@@ -12,7 +12,6 @@
   "window1h": "1h",
   "window24h": "24h",
   "window7d": "7d",
-  "liveRefreshFailing": "Live refresh failing",
   "loadFailed": "Failed to load",
   "retryInspector": "Retry inspector",
   "retry": "Retry",

@@ -7,6 +7,7 @@ import { useTranslations } from "next-intl";
 import { BAR_HEIGHT_CLASS, FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
 import type { QueueUnit } from "@/lib/notifications/task-notify";
 import type { PublicAgentStatus, NoticeItem, PageRow } from "@/lib/contracts/types";
+import { InlineError } from "@/components/ui/inline-error";
 import { cn } from "@/lib/format/utils";
 
 import { fmtLabel, openKey, resolvedKey, type OpenItem } from "./keys";
@@ -17,11 +18,10 @@ import { NoticeListRow } from "./rows";
 export function QueueHeader({
   total,
   onCollapse,
-  stale,
 }: {
   total: number;
   onCollapse?: () => void;
-  stale: boolean;
+  stale?: boolean;
 }) {
   const t = useTranslations("fleet.inboxPanel");
   return (
@@ -30,19 +30,6 @@ export function QueueHeader({
       {total > 0 && (
         <span className="rounded-full bg-muted px-1.5 text-[10px] tabular-nums text-foreground">
           {total}
-        </span>
-      )}
-      {/* Stale-while-error marker (audit C3): a refresh failed but the last
-          loaded entries are still on screen — lightweight flag, never a blank
-          queue (the "Failed to load inbox." screen is reserved for a cold
-          failure). Same treatment as the Task Graph's StaleBadge. */}
-      {stale && (
-        <span
-          className="inline-flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400"
-          title={t("refreshFailed")}
-        >
-          <span className="size-1.5 rounded-full bg-amber-500" />
-          {t("stale")}
         </span>
       )}
       {onCollapse && (
@@ -64,9 +51,9 @@ export function EmptyState({ failed, loading }: { failed: boolean; loading: bool
   const t = useTranslations("fleet.inboxPanel");
   if (failed) {
     return (
-      <p className="px-4 py-8 text-center text-xs text-destructive">
-        {t("loadFailed")}
-      </p>
+      <div className={cn("px-4 py-8 justify-center", FLEX)}>
+        <InlineError>{t("loadFailed")}</InlineError>
+      </div>
     );
   }
   if (loading) {

@@ -26,7 +26,7 @@ describe("ItemView: agent_chat", () => {
     expect(screen.getByTestId("streaming-cursor")).toBeTruthy();
     expect(screen.queryByText(/streaming…/)).toBeNull();
   });
-  it("interrupted=true → shows InterruptedNotice and drops streaming cursor", () => {
+  it("interrupted=true → drops streaming cursor without InterruptedNotice", () => {
     render(
       <TimelineView
         items={[
@@ -40,8 +40,7 @@ describe("ItemView: agent_chat", () => {
       />,
     );
     expect(screen.queryByTestId("streaming-cursor")).toBeNull();
-    expect(screen.getAllByText(/streaming interrupted/i).length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText(/reconnects resume receiving/)).toBeTruthy();
+    expect(screen.queryByText(/streaming interrupted/i)).toBeNull();
   });
 });
 

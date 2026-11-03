@@ -39,16 +39,6 @@ import {
 } from "./inspector-live-sections";
 import { useApi } from "@/lib/transport/transport-context";
 
-function StaleDot() {
-  const t = useTranslations("inspector");
-  return (
-    <span
-      aria-label={t("liveRefreshFailing")}
-      className="size-1.5 shrink-0 rounded-full bg-amber-500"
-    />
-  );
-}
-
 function matchesInspectWindow(
   data: AgentInspectStatistics | undefined,
   agentId: number,
@@ -106,10 +96,6 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
   const windowedData = matchesInspectWindow(windowedQuery.data, agentId, hours)
     ? windowedQuery.data
     : undefined;
-  const hasStaleError =
-    (liveQuery.error !== null && liveData !== undefined) ||
-    (windowedQuery.error !== null && windowedData !== undefined) ||
-    (widgetsQuery.error !== null && widgetsQuery.data !== undefined);
 
   // meiva:note
   // The Cost + Activity section header owns the panel's only manual refresh and its window picker. The refresh re-fires only the windowed statistics read; the picker re-scopes that same read and offers only cumulative-since-spawn (All), the last 5m, and the supported 1h / 24h / 7d windows. Neither control touches the current-state or widget reads, and a retention-clamped selection labels itself with the applied hours.
@@ -174,7 +160,6 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
         <ExternalLink className="size-3 shrink-0 text-muted-foreground group-hover:text-foreground" aria-hidden />
         <span className="truncate">{t("openRunTimeline")}</span>
       </Link>
-      {hasStaleError ? <span className="shrink-0"><StaleDot /></span> : null}
     </div>
   );
   sections.push({

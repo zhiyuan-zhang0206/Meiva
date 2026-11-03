@@ -46,6 +46,10 @@ export {
 // first content row slides under the bar (the #874/#979 layout-regression
 // class).
 export const BAR_CLEAR_TOP_PADDING_CLASS = "pt-[52px]";
+// meiva:note
+// Top offset that places floating banners (such as ConnectionNotice) immediately
+// below the floating HeaderBar (top-0 h-11 = 44px + 8px clearance = 52px).
+export const BAR_CLEAR_TOP_OFFSET_CLASS = "top-[52px]";
 
 // Like OVERFLOW_HIDDEN, but without creating a scroll container — a sticky
 // descendant keeps resolving against the outer scroller (task #3215: the work

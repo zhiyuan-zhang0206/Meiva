@@ -24,6 +24,8 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
+import { InlineError } from "@/components/ui/inline-error";
+
 import { useWallNow } from "@/lib/transport/transport-context";
 import { useDisplayLimit } from "@/lib/format/display-limits";
 import { readScrollMemory, saveScrollMemory, type SavedScroll } from "@/lib/layout/scroll-memory";
@@ -332,10 +334,8 @@ export function ShellMonitorView({ params, bfcacheId }: ShellMonitorViewProps) {
         </div>
 
         <span className={cn("shrink-0 items-center gap-1.5 font-mono text-[11px] text-muted-foreground", FLEX)}>
-          <span
-            className={`size-1.5 rounded-full ${error ? "bg-amber-500" : "bg-green-500"}`}
-          />
-          {error ? "Stale" : "Live"}
+          <span className="size-1.5 rounded-full bg-green-500" />
+          Live
         </span>
       </header>
 
@@ -352,11 +352,12 @@ export function ShellMonitorView({ params, bfcacheId }: ShellMonitorViewProps) {
         ) : error && !data ? (
           // meiva:note
           // Cold failure only — with no output yet there is nothing to keep
-          // showing, so surface the error. Once we have output, a failed poll
-          // falls through to the stale pane below (the amber "stale" dot flags it).
-          <p className={`font-mono text-xs whitespace-pre-wrap ${isDark ? "text-red-400" : "text-red-700"}`}>
+          // showing, so surface the error with InlineError and a retry button.
+          // Once we have output, background refresh retries happen silently while
+          // retaining the cached output.
+          <InlineError onRetry={() => void refetch()} retryLabel="Retry">
             {error instanceof Error ? error.message : "Failed to load shell output"}
-          </p>
+          </InlineError>
         ) : !data ? (
           <p className={`font-mono text-xs ${terminalMuted}`}>Loading…</p>
         ) : data.lines.length === 0 ? (

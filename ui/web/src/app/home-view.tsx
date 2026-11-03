@@ -16,7 +16,7 @@ import { ContextPanelToggle } from "@/components/shell/context-panel-toggle";
 import type { HeaderBar as HeaderBarComponent } from "@/components/shell/header-bar";
 import { HomeLayout } from "@/components/shell/home-layout";
 import type { TimelineView as TimelineViewComponent } from "@/components/timeline";
-import { Button } from "@/components/ui/button";
+import { InlineError } from "@/components/ui/inline-error";
 import { usePendingMessages, withoutTimelineDuplicates } from "@/lib/agents/use-pending-messages";
 import type { useAgents } from "@/lib/agents/use-agents";
 import type { useSidebarCollapsed } from "@/lib/agents/sidebar";
@@ -448,13 +448,16 @@ function HomeContent({
     <section className={cn("relative", FLEX, MIN_H_0, FLEX_1, MIN_W_0, OVERFLOW_HIDDEN)}>
       <ErrorBoundary diagnostics={diagnostics}>
         <div data-testid="timeline-surface" className={cn("relative", FLEX, FLEX_COL, FLEX_1, MIN_H_0, MIN_W_0)}>
-          {timelineError && (
-            <div role="alert" className="mx-4 mt-14 mb-2 rounded-md border border-destructive/30 p-3 text-sm">
-              <p>{timelineText(items.length > 0 ? "refreshFailed" : "loadFailed")}</p>
-              <p className="mt-1 break-words text-xs text-muted-foreground">{errMsg(timelineError)}</p>
-              <Button className="mt-2" variant="outline" size="sm" disabled={isFetching} onClick={retryTimeline}>
-                {timelineText("retryLoad")}
-              </Button>
+          {timelineError && items.length === 0 && (
+            <div className="mx-4 mt-14 mb-2">
+              <InlineError
+                onRetry={retryTimeline}
+                retryLabel={timelineText("retryLoad")}
+                retryDisabled={isFetching}
+                detail={errMsg(timelineError)}
+              >
+                {timelineText("loadFailed")}
+              </InlineError>
             </div>
           )}
           <TimelineView

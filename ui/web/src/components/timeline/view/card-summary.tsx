@@ -30,16 +30,8 @@ export function agentChatTitle(item: BackendTimelineItem): {
   titleKey: string;
   titleValues: Record<string, string>;
 } {
-  const suffixKey = item.interrupted
-    ? "timeline.streamingInterruptedSuffix"
-    : item.partial
-      ? "timeline.streamingSuffix"
-      : "";
-  const suffix = item.interrupted
-    ? " (streaming interrupted)"
-    : item.partial
-      ? " (streaming…)"
-      : "";
+  const suffixKey = item.partial ? "timeline.streamingSuffix" : "";
+  const suffix = item.partial ? " (streaming…)" : "";
   return {
     title: `Meiva ▸${suffix}`,
     titleKey: "agentChat",

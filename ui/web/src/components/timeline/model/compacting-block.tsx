@@ -10,7 +10,7 @@
 // retires the entry), or self-hides after a grace window so a missed terminal
 // can never leave it ticking forever.
 
-import { Loader2 } from "lucide-react";
+import { AlertCircle, Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 
@@ -82,21 +82,33 @@ function CompactingBlockBody({ compact }: { compact: LiveCompact }) {
           : t("compactSuperseded");
   const elapsedMs = startedMs === null ? null : (finishedMs ?? now) - startedMs;
 
+  const isFailure = compact.status === "failure";
+
   return (
     <div
       data-testid="compacting-block"
       data-status={compact.status ?? "running"}
       className={cn(
         FLEX,
-        "items-center gap-2 rounded-lg border border-border/60 bg-muted/35 px-3 py-2 text-xs text-muted-foreground",
+        "items-center gap-2 rounded-lg border px-3 py-2 text-xs",
+        isFailure
+          ? "border-destructive/35 bg-destructive/10 text-destructive"
+          : "border-border/60 bg-muted/35 text-muted-foreground",
       )}
     >
-      {settled ? null : (
+      {isFailure ? (
+        <AlertCircle aria-hidden className="size-3.5 shrink-0 text-destructive" />
+      ) : settled ? null : (
         <Loader2 aria-hidden className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
       )}
-      <span className="font-medium text-foreground">{label}</span>
+      <span className={cn("font-medium", isFailure ? "text-destructive" : "text-foreground")}>
+        {label}
+      </span>
       {elapsedMs === null ? null : (
-        <span className="tabular-nums text-muted-foreground" data-testid="compacting-elapsed">
+        <span
+          className={cn("tabular-nums", isFailure ? "text-destructive/80" : "text-muted-foreground")}
+          data-testid="compacting-elapsed"
+        >
           {formatDuration(Math.max(0, elapsedMs))}
         </span>
       )}

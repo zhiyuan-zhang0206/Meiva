@@ -33,5 +33,6 @@
   "openImage": "Open image",
   "closeImage": "Close image",
   "liveUpdatesReconnecting": "Live updates reconnecting…",
-  "liveUpdatesDisconnected": "Live updates disconnected — refresh the page to restore them"
+  "liveUpdatesDisconnected": "Live updates disconnected — refresh the page to restore them",
+  "retry": "Retry"
 }

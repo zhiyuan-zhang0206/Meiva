@@ -104,19 +104,15 @@ describe("HomePage top-level render", () => {
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByTestId("timeline").getAttribute("data-item-count")).toBe("1");
   });
-  it("shows a refresh failure without replacing loaded history, and disables Retry during its read", () => {
+  it("silently retains loaded history during background refresh errors without showing error banner", () => {
     hooksState.activeId = 42;
     hooksState.agents = [makeAgent({ agent_id: 42 })];
     hooksState.timelineItems = [makeItem({ item_id: "0.1", kind: "agent_chat", payload: "retained history" })];
     hooksState.timelineError = new Error("Checkpoint history unavailable for agent 42");
     hooksState.timelineFetching = true;
     wrap(<HomePage />);
-    expect(screen.getByRole("alert").textContent).toContain("Previously loaded messages are still shown.");
+    expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByTestId("timeline").getAttribute("data-item-count")).toBe("1");
-    const retry = screen.getByRole("button", { name: "Retry" });
-    expect(retry.hasAttribute("disabled")).toBe(true);
-    fireEvent.click(retry);
-    expect(hooksState.retryTimeline).not.toHaveBeenCalled();
   });
   it("activeId=null → composer 'disabled' + label '…'", () => {
     wrap(<HomePage />);

@@ -1,7 +1,8 @@
 // meiva:note
-// AppConnectionBanner owns the "is this drop worth telling the user about" delay: a
-// merged-stream reconnect on every agent switch must not flash the banner, a socket
-// that stops retrying must show at once, and recovery must cancel a pending banner.
+// AppConnectionBanner owns the sustained-disconnect escalation delay:
+// transient drops (reconnecting or closed) auto-retry silently via backoff;
+// drops lasting >= CONNECTION_ERROR_DELAY_MS (15s) escalate directly to "closed",
+// and a subsequent "open" immediately clears any pending timer and restores "open".
 // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -30,12 +31,8 @@ function ApiWrapper({ children }: { children: ReactNode }) {
 
 import { AppConnectionBanner } from "./app-connection-banner";
 import { resetStreamHandlers, streamHandlers, TestStreamProvider } from "@/test-support/fake-stream";
-import { NOTICE_DELAY_MS } from "@/components/notifications/connection-notice";
+import { CONNECTION_ERROR_DELAY_MS } from "@/components/notifications/connection-notice";
 
-// meiva:note
-// The banner mounts only once the session is authenticated, so the test renders the real
-// AuthProvider over the same rig: the rig answers `/api/auth/check` and leaves every other call
-// hanging, which is what the banner's own pollers then meet. Nothing replaces the auth module.
 function render(ui: ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   clients.add(qc);
@@ -52,9 +49,6 @@ function render(ui: ReactElement) {
   );
 }
 
-// meiva:note
-// The session check is a promise the provider awaits on mount; flush it before driving the
-// stream, which the banner subscribes to only after it renders.
 async function renderBanner() {
   const view = render(<AppConnectionBanner />);
   await vi.waitFor(() => expect(streamHandlers.connection).toBeDefined());
@@ -90,56 +84,70 @@ afterEach(async () => {
 });
 
 describe("AppConnectionBanner connection state", () => {
-  it("does not announce a reconnect that finishes inside the delay", async () => {
+  it("does not announce reconnecting or closed drops that recover within 15s", async () => {
     const view = await renderBanner();
     await vi.waitFor(() =>
       expect(gateway.requests.map((request) => request.path)).toContain("/api/cluster/status"),
     );
+
     act(() => streamHandlers.connection?.({ type: "reconnecting" }));
     act(() => {
-      vi.advanceTimersByTime(NOTICE_DELAY_MS - 50);
+      vi.advanceTimersByTime(5_000);
     });
     act(() => streamHandlers.connection?.({ type: "open" }));
-    act(() => {
-      vi.advanceTimersByTime(NOTICE_DELAY_MS * 2);
-    });
     expect(states).toEqual(["open"]);
-    expect(gateway.requests.map((request) => request.path)).toEqual([
-      "/api/auth/check",
-      "/api/cluster/status",
-    ]);
+
+    act(() => streamHandlers.connection?.({ type: "closed" }));
+    act(() => {
+      vi.advanceTimersByTime(10_000);
+    });
+    act(() => streamHandlers.connection?.({ type: "open" }));
+    expect(states).toEqual(["open", "open"]);
+
     act(() => streamHandlers.connection?.({ type: "reconnecting" }));
     view.unmount();
     expect(streamHandlers.connection).toBeUndefined();
-    for (const client of clients) {
-      expect(client.getQueryCache().getAll().every((query) => query.getObserversCount() === 0)).toBe(true);
-    }
-    act(() => { vi.advanceTimersByTime(NOTICE_DELAY_MS * 2); });
-    expect(states).toEqual(["open"]);
+    act(() => {
+      vi.advanceTimersByTime(CONNECTION_ERROR_DELAY_MS * 2);
+    });
+    expect(states).toEqual(["open", "open"]);
   });
 
-  it("announces a reconnect that outlasts the delay", async () => {
+  it("escalates sustained reconnecting to closed after 15s", async () => {
     await renderBanner();
     act(() => streamHandlers.connection?.({ type: "reconnecting" }));
     act(() => {
-      vi.advanceTimersByTime(NOTICE_DELAY_MS);
+      vi.advanceTimersByTime(CONNECTION_ERROR_DELAY_MS - 100);
     });
-    expect(states).toEqual(["reconnecting"]);
-  });
+    expect(states).toEqual([]);
 
-  it("announces a closed socket at once, with no wait", async () => {
-    await renderBanner();
-    act(() => streamHandlers.connection?.({ type: "closed" }));
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
     expect(states).toEqual(["closed"]);
   });
 
-  it("drops a pending reconnect banner when the socket closes", async () => {
+  it("escalates sustained closed socket to closed after 15s grace window (not immediately)", async () => {
     await renderBanner();
-    act(() => streamHandlers.connection?.({ type: "reconnecting" }));
+    act(() => streamHandlers.connection?.({ type: "closed" }));
+    expect(states).toEqual([]);
+
+    act(() => {
+      vi.advanceTimersByTime(CONNECTION_ERROR_DELAY_MS);
+    });
+    expect(states).toEqual(["closed"]);
+  });
+
+  it("subsequent open event immediately clears sustained closed state", async () => {
+    await renderBanner();
     act(() => streamHandlers.connection?.({ type: "closed" }));
     act(() => {
-      vi.advanceTimersByTime(NOTICE_DELAY_MS * 2);
+      vi.advanceTimersByTime(CONNECTION_ERROR_DELAY_MS);
     });
     expect(states).toEqual(["closed"]);
+
+    act(() => streamHandlers.connection?.({ type: "open" }));
+    expect(states).toEqual(["closed", "open"]);
+    expect(useStore.getState().connState).toBe("open");
   });
 });

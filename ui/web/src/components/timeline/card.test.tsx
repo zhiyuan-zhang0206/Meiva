@@ -122,9 +122,9 @@ describe("messageCardConfig", () => {
     expect(cfg!.title).toContain("(streaming…)");
   });
 
-  it("agent_chat interrupted → title includes '(streaming interrupted)'", () => {
+  it("agent_chat interrupted → title does not include '(streaming interrupted)'", () => {
     const cfg = messageCardConfig(item("agent_chat", { interrupted: true }));
-    expect(cfg!.title).toContain("(streaming interrupted)");
+    expect(cfg!.title).not.toContain("(streaming interrupted)");
   });
 
   it("inbound_chat source=user → Human", () => {

@@ -316,7 +316,7 @@ describe("ConfigPage per-model resolution view", () => {
       "0.55",
     );
     expect(screen.getByTestId("per-model-source-auto_compact_fraction").className).toContain(
-      "border-dashed",
+      "border-border/70",
     );
     expect(screen.getByTestId("per-model-source-auto_compact_fraction").className).toContain(
       "text-muted-foreground/80",

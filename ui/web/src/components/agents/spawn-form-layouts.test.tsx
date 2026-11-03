@@ -335,9 +335,12 @@ describe("unavailable model catalog", () => {
     );
     transport.getModels.mockRejectedValue(new Error("catalog down"));
     wrap();
-    expect(await screen.findByText("Models unavailable")).toBeTruthy();
+    expect((await screen.findAllByText("Models unavailable")).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Spawn" }).hasAttribute("disabled")).toBe(true);
     expect(screen.getByRole("button", { name: "Refresh" })).toBeTruthy();
+    const refusal = screen.getByTestId("spawn-refusal");
+    expect(refusal.textContent).toContain("Models unavailable");
+    expect(refusal.className).toContain("text-destructive");
   });
 
   it("allows an external harness spawn from live probed models even when /api/models fails", async () => {

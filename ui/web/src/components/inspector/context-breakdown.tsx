@@ -122,7 +122,7 @@ export function ContextButton(props: ContextButtonProps) {
           // hidden instead of flowing across lines like the rest of the
           // panel.
           className={cn(
-            "absolute left-0 z-50 min-w-80 max-w-[min(28rem,90vw)] max-h-[50vh] overflow-x-hidden overflow-y-auto whitespace-normal rounded-md border border-border bg-popover p-2.5 text-popover-foreground dark:text-[#ece9e2] shadow-md",
+            "absolute left-0 z-50 min-w-80 max-w-[min(28rem,90vw)] max-h-[min(50dvh,calc(100dvh-8rem))] overflow-x-hidden overflow-y-auto whitespace-normal rounded-md border border-border bg-popover p-2.5 text-popover-foreground dark:text-[#ece9e2] shadow-md",
             "bottom-full mb-2",
           )}
         >

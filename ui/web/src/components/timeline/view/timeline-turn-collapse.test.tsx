@@ -220,7 +220,7 @@ describe("turn-collapse (settled turns collapsed by default, live trailing turn 
     const runHeader = runToggle();
     expect(runHeader.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText(/t2-cut/)).toBeTruthy();
-    expect(screen.getByText(/reconnects resume receiving/)).toBeTruthy();
+    expect(screen.queryByText(/reconnects resume receiving/)).toBeNull();
   });
 
   it("a turn block carries a stable data-item-id (its first member id)", () => {

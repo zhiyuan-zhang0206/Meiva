@@ -22,6 +22,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { InlineError } from "@/components/ui/inline-error";
 import { CodeHighlighterPreloader } from "@/components/content/code-highlighter-preloader";
 import { Input } from "@/components/ui/input";
 import {
@@ -154,8 +155,8 @@ export function SchedulesPageView({ navigate }: SchedulesPageViewProps) {
   // (nothing loaded yet) shows the error state.
   if (error && !schedules) {
     return (
-      <div className="p-8 text-center text-sm text-muted-foreground">
-        {t("couldntLoad")}
+      <div className={cn("p-8 justify-center", FLEX)}>
+        <InlineError>{t("couldntLoad")}</InlineError>
       </div>
     );
   }

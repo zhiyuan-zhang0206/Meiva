@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 
 import { WindowSelect } from "@/components/agents/window-select";
+import { InlineError } from "@/components/ui/inline-error";
 import { ContextButton } from "@/components/inspector/context-breakdown";
 import { Metric, Section } from "@/components/inspector/inspector-section";
 import { useAgentRoster } from "@/lib/agents/use-agents";
@@ -38,17 +39,13 @@ export function InspectReadError({ message, retryLabel, pending, onRetry }: {
   onRetry: () => void;
 }) {
   return (
-    <div className="space-y-2 font-mono text-[10.5px] text-destructive" role="alert">
-      <p>{message}</p>
-      <button
-        type="button"
-        onClick={onRetry}
-        disabled={pending}
-        className="rounded border border-destructive/40 px-2 py-1 hover:bg-destructive/10 disabled:opacity-50"
-      >
-        {retryLabel}
-      </button>
-    </div>
+    <InlineError
+      onRetry={onRetry}
+      retryLabel={retryLabel}
+      retryDisabled={pending}
+    >
+      {message}
+    </InlineError>
   );
 }
 

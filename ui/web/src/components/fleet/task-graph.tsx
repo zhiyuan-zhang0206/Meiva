@@ -35,9 +35,9 @@ import {
 } from "./force-controls";
 import { ForceGraph } from "./force-graph";
 import type { ForceGraphEdge, ForceGraphNode } from "./force-graph-geometry";
+import { InlineError } from "@/components/ui/inline-error";
 import {
   FilterCluster,
-  StaleBadge,
   TASK_FORCE_KEY,
   TaskHoverCard,
 } from "./task-graph-chrome";
@@ -313,12 +313,10 @@ export function TaskGraph({
       </div>
     );
   }
-  // Cold failure only — with tasks already loaded, a failed poll keeps the board
-  // (stale-while-error); the StaleBadge in the toolbar flags it instead of blanking.
   if (error && tasks.length === 0) {
     return (
-      <div className={cn("h-full items-center justify-center text-xs text-destructive", FLEX)}>
-        {t("loadFailed")}
+      <div className={cn("h-full items-center justify-center", FLEX)}>
+        <InlineError>{t("loadFailed")}</InlineError>
       </div>
     );
   }
@@ -365,7 +363,6 @@ export function TaskGraph({
           <span className="text-xs text-muted-foreground">
             {t("taskCount", { count: visibleSubtaskCount })}
           </span>
-          <StaleBadge show={error} />
           <FilterCluster
             taskWindow={taskWindow}
             setTaskWindow={setTaskWindow}
@@ -410,7 +407,6 @@ export function TaskGraph({
         <span className="text-xs text-muted-foreground">
           {t("taskCount", { count: visibleSubtaskCount })}
         </span>
-        <StaleBadge show={error} />
         <FilterCluster
           taskWindow={taskWindow}
           setTaskWindow={setTaskWindow}

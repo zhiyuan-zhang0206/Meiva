@@ -16,11 +16,10 @@ and the reads behind them in
 that wears the same row chrome as the Page section's rows — the rounded
 `bg-sidebar-accent/40` (`dark:bg-[#2a2926]`) block, a leading external-link icon that brightens on
 hover, `11.5px` monospace values in anti-glare `#f0ede7` on dark surfaces, and the hover highlight — so the panel's clickable rows and `Metric` cells read as one
-family. The panel's amber stale dot renders at its end — it marks
-"live refresh is failing" only when a snapshot is already displayed
-(stale-while-error); a cold failure gets the full error message in the body
-instead, so the dot never replaces content. The fleet task link (`fleetTaskHref`)
-is a typed literal route so `next/link` infers it without a cast.
+family. A cold failure gets the full error message (`InlineError`) in the body
+instead. Background refresh failures stay silent while cached snapshots are retained.
+The fleet task link (`fleetTaskHref`) is a typed literal route so `next/link` infers it
+without a cast.
 
 **Activity** carries the cost, TPS and duration cells in its own node: [[ui/web/src/docs/frontend-components/inspector/activity.meiva.okf.md|Activity section]].
 

@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
 import { ChatMarkdown } from "@/components/content/markdown";
+import { InlineError } from "@/components/ui/inline-error";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ZoomableImage } from "@/components/content/zoomable-image";
 import type { BrowserNavigation } from "@/lib/browser/browser";
@@ -193,14 +194,13 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
       <ScrollArea data-testid="shared-document" hidden={bodyHidden} viewportRef={viewportRef} className={cn(MIN_H_0, FLEX_1)}>
         {bodyHidden ? null : (
           <>
-            {failed && content && <div role="status" className="border-b bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">{t("stale")}</div>}
             {!content ? (
               <div className={cn("items-center justify-center px-8 text-center text-[13px] text-muted-foreground", FLEX, FLEX_1)}>
                 {loading ? t("loading") : refusal ? (
                   <div data-testid="document-failure" className="space-y-1">
-                    <p>{t(refusal.text)}</p>
+                    <InlineError>{t(refusal.text)}</InlineError>
                     {refusal.raw && references.length > 0 ? (
-                      <a className="underline hover:text-foreground" href={rawUrl} target="_blank" rel="noopener noreferrer">{t("openRaw")}</a>
+                      <a className="underline hover:text-foreground text-xs" href={rawUrl} target="_blank" rel="noopener noreferrer">{t("openRaw")}</a>
                     ) : null}
                   </div>
                 ) : current?.legacy_html ? t("legacyHtml") : t("empty")}

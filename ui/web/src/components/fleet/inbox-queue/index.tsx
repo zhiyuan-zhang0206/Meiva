@@ -230,7 +230,6 @@ export const InboxQueue = memo(function InboxQueue({
   // so "queue empty" is never indistinguishable from "couldn't load".
   const openFailed = error && openItems.length === 0; // open feed never loaded
   const historyFailed = resolvedError && resolved.length === 0; // history never loaded
-  const stale = (error && openItems.length > 0) || (resolvedError && resolved.length > 0);
 
   // Compact (mobile): show list or detail full-screen, never both. An empty
   // selection means "show the list" — so this uses selectedKey (not the
@@ -245,7 +244,7 @@ export const InboxQueue = memo(function InboxQueue({
       <div className={cn("h-full", className, FLEX, FLEX_COL, MIN_H_0)}>
         {openSel == null && selectedResolved == null ? (
           <div className={cn("h-full", FLEX, FLEX_COL, MIN_H_0)}>
-            <QueueHeader total={total} stale={stale} />
+            <QueueHeader total={total} />
             {empty ? (
               <EmptyState failed={(error || resolvedError) && empty} loading={isLoading && empty} />
             ) : (
@@ -286,7 +285,7 @@ export const InboxQueue = memo(function InboxQueue({
     // never persisted.
     <div className={cn( className, FLEX)}>
       <div className={cn("h-full w-[42%] shrink-0", FLEX, FLEX_COL, MIN_H_0, MIN_W_0)}>
-        <QueueHeader total={total} onCollapse={onCollapse} stale={stale} />
+        <QueueHeader total={total} onCollapse={onCollapse} />
         {empty ? (
           <EmptyState failed={(error || resolvedError) && empty} loading={isLoading && empty} />
         ) : (
