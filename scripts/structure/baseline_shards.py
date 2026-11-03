@@ -27,6 +27,8 @@ from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
 from typing import TypeGuard
 
+from base.host.boundary.untyped import object_of
+
 SHARD_DIR = "scripts/structure/baseline"
 RULES_FILE = "rules.json"
 
@@ -84,7 +86,7 @@ def merge(texts: dict[str, str], sections: Iterable[str]) -> dict[str, dict[str,
     """
     merged: dict[str, dict[str, int]] = {kind: {} for kind in sections}
     for name, text in sorted(texts.items()):
-        shard: object = json.loads(text)
+        shard = object_of(json.loads, text)
         if not _is_str_object_dict(shard):
             raise ValueError(f"shard {name}.json must be an object")
         for kind, entries in shard.items():
@@ -218,7 +220,7 @@ def _is_str_object_dict(value: object) -> TypeGuard[dict[str, object]]:
 
 def parse_rules(text: str) -> dict[str, int]:
     """The rule versions of a `rules.json` text: section -> integer version >= 1."""
-    rules: object = json.loads(text)
+    rules = object_of(json.loads, text)
     if not _is_str_object_dict(rules):
         raise ValueError(f"{RULES_FILE} must map a section to an integer rule version >= 1")
     result: dict[str, int] = {}

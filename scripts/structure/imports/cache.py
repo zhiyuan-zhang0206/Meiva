@@ -26,6 +26,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TypeGuard
 
+from base.host.boundary.untyped import object_of
 from scripts.structure import imports
 
 __all__ = ["CACHE_PATH", "production_imports"]
@@ -121,7 +122,7 @@ def _entry(value: object) -> Entry | None:
 def _load(cache_file: Path) -> dict[str, Entry]:
     """The cached entries; a missing, unreadable or foreign-version cache is simply empty."""
     try:
-        data: object = json.loads(cache_file.read_text(encoding="utf-8"))
+        data = object_of(json.loads, cache_file.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     if not _is_str_object_dict(data):

@@ -713,6 +713,15 @@ root = "scripts/host_ops/tests"
 root = "scripts/model_registry/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "scripts/structure/budgets/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "scripts/structure/imports/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "scripts/structure/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "scripts/verify/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -804,6 +813,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "scripts/model_registry"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "scripts/structure"
 reportAny = "error"
 reportExplicitAny = "error"
 

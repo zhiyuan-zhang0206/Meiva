@@ -38,11 +38,19 @@ import sys
 from collections.abc import Mapping
 from pathlib import Path
 
+# meiva:note
+# A standalone script: the repository root goes on the path before the first import of the
+# repository's own packages.
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
-from meizel import lint_common  # noqa: E402 — standalone script
-from scripts.structure import tests_location_allowed  # noqa: E402 — standalone script
+from base.host.env.boot_actions import enter_scratch_home  # noqa: E402
+
+if __name__ == "__main__":
+    enter_scratch_home()
+
+from meizel import lint_common  # noqa: E402
+from scripts.structure import tests_location_allowed  # noqa: E402
 
 _CATEGORIES = ("contract", "integration")
 
