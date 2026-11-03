@@ -50,6 +50,50 @@ from base.telemetry.audit_events import prepare_event_log, record_audit_async
 
 
 # meiva:note
+# The `session_index` of the row this incarnation just locked. The column is BIGINT NOT NULL, so a
+# row of another shape means the query and this reader disagree, and the cutoff below would be
+# computed from an unchecked value.
+def _session_index(row: tuple[object, ...]) -> int:
+    match row:
+        case (int() as index,):
+            return index
+        case _:
+            raise TypeError("a locked agents_meta row carried no integer session index")
+
+
+# meiva:note
+# Whether one closed terminate asked for the agent's shell sessions to go with it. Read one row per
+# closed command because one death serves them all, and the flag decides which sessions the caller
+# cuts after the commit.
+def _kill_requested(row: tuple[object, ...]) -> bool:
+    match row:
+        case (bool() as requested,):
+            return requested
+        case _:
+            raise TypeError("a closed terminate row carried no boolean kill flag")
+
+
+# meiva:note
+# The four columns of a claimed restart/terminate command, matched by type rather than trusted: a
+# row of another shape fails here, naming what it is, instead of carrying an unchecked value into
+# the lifecycle write. `content` is the message the command carried, empty for a bare terminate.
+@dataclass(frozen=True)
+class _LifecycleCommand:
+    id: int
+    kind: str
+    source: str
+    content: str
+
+    @classmethod
+    def from_row(cls, row: tuple[object, ...]) -> "_LifecycleCommand":
+        match row:
+            case (int() as id_, str() as kind, str() as source, str() as content):
+                return cls(id_, kind, source, content)
+            case _:
+                raise TypeError("a claimed lifecycle command row has columns of unexpected types")
+
+
+# meiva:note
 # Execute the claimed restart/terminate command and mark it done, in one transaction.
 #
 #     Called after the existing single-flight continuation has safely ended. The
@@ -92,17 +136,18 @@ async def apply_hosted_lifecycle(
         row = await cursor.fetchone()
         if row is None:
             return None
+        session_index = _session_index(row)
         cursor = await conn.execute(
             "SELECT id,kind,source,content FROM inbound_messages WHERE agent_id=%s "
             "AND kind IN ('restart','terminate') AND status='claimed' "
             "ORDER BY id LIMIT 1 FOR UPDATE",
             (incarnation.agent_id,),
         )
-        command = await cursor.fetchone()
-        if command is None:
+        claimed = await cursor.fetchone()
+        if claimed is None:
             return None
-        command_id, command_kind, command_source, command_content = command
-        kind = lifecycle_kind(command_kind)
+        command = _LifecycleCommand.from_row(claimed)
+        kind = lifecycle_kind(command.kind)
         match kind:
             case "restart":
                 await conn.execute(
@@ -117,12 +162,12 @@ async def apply_hosted_lifecycle(
                     "UPDATE inbound_messages SET status='done',"
                     "payload=COALESCE(payload,'{}'::jsonb)||jsonb_build_object('lifecycle_release',true) "
                     "WHERE id=%s",
-                    (command_id,),
+                    (command.id,),
                 )
                 note = resume_note(
-                    command_source,
+                    command.source,
                     resume_turn=resume_turn,
-                    message=command_content or None,
+                    message=command.content or None,
                 )
                 if note is not None:
                     await conn.execute(
@@ -142,7 +187,10 @@ async def apply_hosted_lifecycle(
                     "COALESCE((payload -> 'kill_all_shell_sessions') = 'true'::jsonb, false)",
                     (incarnation.agent_id,),
                 )
-                cutoff = shell_cutoff([kill for (kill,) in await closed.fetchall()], row[0])
+                closed_rows = await closed.fetchall()
+                cutoff = shell_cutoff(
+                    [_kill_requested(closed_row) for closed_row in closed_rows], session_index
+                )
                 await conn.execute(
                     "UPDATE agents_meta SET status='terminated',termination_source='user' WHERE id=%s",
                     (incarnation.agent_id,),
@@ -190,6 +238,24 @@ async def _carry_impersonation(
 
 
 # meiva:note
+# The admission UPDATE's own row: the generation the claim wrote and the status the row left. The
+# statement mints the generation when the owner changed (`CASE ... ELSE gen_random_uuid()`), so a
+# row whose generation is not a UUID is one this reader cannot name an incarnation for.
+@dataclass(frozen=True)
+class _AdmissionRow:
+    generation: UUID
+    previous_status: str
+
+    @classmethod
+    def from_row(cls, row: tuple[object, ...]) -> "_AdmissionRow":
+        match row:
+            case (UUID() as generation, str() as previous_status):
+                return cls(generation, previous_status)
+            case _:
+                raise TypeError("an admitted agents_meta row has columns of unexpected types")
+
+
+# meiva:note
 # Admit one turn: the circuit breaker, then one UPDATE.
 #
 #     Only this machine's running or idling row is claimed; a terminated or foreign
@@ -228,8 +294,8 @@ async def admit_hosted_runtime(
         ).fetchone()
         if claimed is None:
             return None
-        generation, previous_status = claimed
-        incarnation = RuntimeIncarnation(agent_id, generation, owner)
+        admission = _AdmissionRow.from_row(claimed)
+        incarnation = RuntimeIncarnation(agent_id, admission.generation, owner)
         adoption, ended_lease = await _carry_impersonation(conn, agent_id, incarnation)
         if adoption is not None:
             logger.info(
@@ -271,7 +337,7 @@ async def admit_hosted_runtime(
             event_type="status_change",
             agent_id=agent_id,
             source="system",
-            payload=admitted_payload(previous_status),
+            payload=admitted_payload(admission.previous_status),
         )
         recorded.append(await record_audit_async(conn, admitted_event))
     for event in recorded:
@@ -293,7 +359,7 @@ async def admit_hosted_runtime(
         # harness, a bare re-admission) still admits: it then cannot send an Antigravity
         # notice, and the notice records exactly that instead of failing silently.
         await asyncio.to_thread(deliver_ended_notice, db, agent_id, ended_lease, home=home)
-    logger.info("hosted runtime admitted", agent_id=agent_id, generation=str(generation))
+    logger.info("hosted runtime admitted", agent_id=agent_id, generation=str(admission.generation))
     return incarnation
 
 
@@ -345,6 +411,36 @@ class AdmissionRefused:
 
 
 # meiva:note
+# The columns the refusal classifier reads: the row's status, the machine hosting it, the recovery
+# breaker's streak and the wake suppression paired with it. The two nullable columns are matched as
+# nullable rather than trusted, so a row of another shape fails here instead of borrowing a reason
+# it does not describe.
+@dataclass(frozen=True)
+class _RefusalRow:
+    status: str
+    machine: str
+    streak: int
+    suppress_reason: str | None
+    suppressed_until: datetime | None
+
+    @classmethod
+    def from_row(cls, row: tuple[object, ...]) -> "_RefusalRow":
+        match row:
+            case (
+                str() as status,
+                str() as machine,
+                int() as streak,
+                object() as reason,
+                object() as until,
+            ) if (reason is None or isinstance(reason, str)) and (
+                until is None or isinstance(until, datetime)
+            ):
+                return cls(status, machine, streak, reason, until)
+            case _:
+                raise TypeError("an agents_meta refusal row has columns of unexpected types")
+
+
+# meiva:note
 # Classify a refusal by reading the row. Callers use this only after admission returned
 # None, so it costs one extra SELECT on a path that is already idle.
 #
@@ -368,20 +464,20 @@ async def explain_admission_refusal(
         ).fetchone()
     if row is None:
         return AdmissionRefused(AdmissionRefusal.OTHER)
-    status, home, streak, suppress_reason, suppressed_until = row
-    if status == "terminated":
-        return AdmissionRefused(AdmissionRefusal.TERMINATED, status=status)
-    if home is not None and home != machine:
-        return AdmissionRefused(AdmissionRefusal.PLACED_ELSEWHERE, status=status)
-    if streak >= HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS:
+    refusal = _RefusalRow.from_row(row)
+    if refusal.status == "terminated":
+        return AdmissionRefused(AdmissionRefusal.TERMINATED, status=refusal.status)
+    if refusal.machine != machine:
+        return AdmissionRefused(AdmissionRefusal.PLACED_ELSEWHERE, status=refusal.status)
+    if refusal.streak >= HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS:
         return AdmissionRefused(
             AdmissionRefusal.BREAKER,
-            status=status,
-            streak=streak,
-            suppress_reason=suppress_reason,
-            suppressed_until=suppressed_until,
+            status=refusal.status,
+            streak=refusal.streak,
+            suppress_reason=refusal.suppress_reason,
+            suppressed_until=refusal.suppressed_until,
         )
-    return AdmissionRefused(AdmissionRefusal.OTHER, status=status)
+    return AdmissionRefused(AdmissionRefusal.OTHER, status=refusal.status)
 
 
 # meiva:note

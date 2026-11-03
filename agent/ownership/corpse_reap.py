@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from loguru import logger
 
 from agent.ownership.audit_payloads import reaped_payload
@@ -11,6 +13,24 @@ from base.db.protocols import AsyncPool
 from base.deploy.progress_timeout import CORPSE_REAP_GRACE_S
 from base.telemetry import Event, emit_prepared
 from base.telemetry.audit_events import prepare_event_log, record_audit_async
+
+
+# meiva:note
+# The two columns the reap UPDATE returns: the corpse's id and whether it still owed a handoff
+# receipt. Matched by type rather than trusted, so a row of another shape fails here instead of
+# stamping a termination against an unchecked id.
+@dataclass(frozen=True)
+class _ReapedRow:
+    agent_id: int
+    handoff_unapplied: bool
+
+    @classmethod
+    def from_row(cls, row: tuple[object, ...]) -> _ReapedRow:
+        match row:
+            case (int() as agent_id, bool() as handoff_unapplied):
+                return cls(agent_id, handoff_unapplied)
+            case _:
+                raise TypeError("a reaped agents_meta row has columns of unexpected types")
 
 
 # meiva:note
@@ -53,7 +73,8 @@ async def reap_crash_corpses(
         ).fetchall()
         reaped: list[ReapedCorpse] = []
         recorded: list[Event] = []
-        for agent_id, handoff_unapplied in rows:
+        for row in rows:
+            corpse = _ReapedRow.from_row(row)
             # meiva:note
             # A reaped row that still owed a handoff receipt is a different failure from an
             # ordinary corpse: the held path settled nothing, so the reaper is the only thing
@@ -62,14 +83,14 @@ async def reap_crash_corpses(
             # meiva:link docs/conventions/agents/agent-impersonation.md
             event = prepare_event_log(
                 event_type="status_change",
-                agent_id=agent_id,
+                agent_id=corpse.agent_id,
                 source="system",
-                payload=reaped_payload(handoff_unapplied=handoff_unapplied),
+                payload=reaped_payload(handoff_unapplied=corpse.handoff_unapplied),
             )
             recorded.append(await record_audit_async(conn, event))
             reaped.append(
                 ReapedCorpse(
-                    agent_id,
+                    corpse.agent_id,
                 )
             )
     for event in recorded:

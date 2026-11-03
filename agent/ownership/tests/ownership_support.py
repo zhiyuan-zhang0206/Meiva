@@ -1,6 +1,6 @@
 import json
 from collections.abc import AsyncGenerator
-from typing import Any, cast
+from typing import cast
 from uuid import uuid4
 
 import psycopg
@@ -14,6 +14,8 @@ from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.tests.async_pubsub_view import async_messages
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
@@ -49,27 +51,33 @@ def agent_row(conn: psycopg.Connection) -> int:
 
 
 def insert(conn: psycopg.Connection, agent_id: int) -> int:
-    row = conn.execute(
+    row: tuple[object, ...] | None = conn.execute(
         "INSERT INTO inbound_messages (agent_id, content, kind, source) "
         "VALUES (%s, 'durable', 'chat', 'user') RETURNING id",
         (agent_id,),
     ).fetchone()
     conn.commit()
     assert row is not None
-    return row[0]
+    inserted = row[0]
+    if not isinstance(inserted, int):
+        raise TypeError("the inserted inbound row returned no integer id")
+    return inserted
 
 
 def insert_lifecycle_command(
     conn: psycopg.Connection, agent_id: int, kind: str, payload: dict[str, object] | None = None
 ) -> int:
-    row = conn.execute(
+    row: tuple[object, ...] | None = conn.execute(
         "INSERT INTO inbound_messages(agent_id,content,kind,source,payload) "
         "VALUES (%s,'',%s,'user',%s) RETURNING id",
         (agent_id, kind, Jsonb(payload) if payload is not None else None),
     ).fetchone()
     conn.commit()
     assert row is not None
-    return row[0]
+    command = row[0]
+    if not isinstance(command, int):
+        raise TypeError("the inserted lifecycle command returned no integer id")
+    return command
 
 
 async def admit_owner(
@@ -104,9 +112,15 @@ class BusTap:
             )
             if message is None:
                 return ids
-            event: dict[str, Any] = json.loads(str(message["data"]))
-            if event["role"] == "agent_updated":
-                ids.append(event["agent_id"])
+            read = object_of(json.loads, str(message["data"]))
+            if not is_object_dict(read):
+                raise TypeError("an agent_updated hint is not a JSON object")
+            if read["role"] != "agent_updated":
+                continue
+            hinted = read["agent_id"]
+            if not isinstance(hinted, int) or isinstance(hinted, bool):
+                raise TypeError(f"an agent_updated hint carried {hinted!r}, not an agent id")
+            ids.append(hinted)
 
 
 # meiva:note
