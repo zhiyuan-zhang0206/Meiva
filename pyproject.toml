@@ -866,6 +866,12 @@ root = "services/supervision/meiva_root_glue/tests"
 root = "services/supervision/roster/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "services/upkeep/events_maintenance/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/upkeep/ttl_reaper/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "services/wake/delivery_watchdog/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -990,6 +996,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "services/wake"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/upkeep"
 reportAny = "error"
 reportExplicitAny = "error"
 

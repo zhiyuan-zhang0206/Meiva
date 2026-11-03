@@ -40,16 +40,15 @@ import asyncio
 import functools
 import logging
 from datetime import datetime, timedelta
-from typing import Any
 
 import psycopg
-from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
+from base.db.rows import query_all
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 from ops.cluster import rpc as cluster_rpc
@@ -108,18 +107,19 @@ def dispatch_deadline_s(rpc: cluster_rpc.RpcClient) -> float:
 # ``expires_at`` and ``created_at`` so the interruption notice can state when the TTL expired
 # and how long it was.
 def expired_shell_rows_blocking(pool: ConnectionPool) -> list[ShellRow]:
-    with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-        cur.execute(
+    with pool.connection() as conn:
+        return query_all(
+            conn,
+            ShellRow,
             "SELECT t.agent_id, t.session_id, t.expires_at, t.created_at, m.machine "
             "FROM agent_shell_ttls t LEFT JOIN agents_meta m ON m.id = t.agent_id "
             "WHERE t.expires_at <= clock_timestamp() "
             "ORDER BY t.agent_id, t.session_id LIMIT %s",
             (PASS_BATCH,),
         )
-        return [ShellRow(**row) for row in cur.fetchall()]
 
 
-def claim_still_expired(cur: psycopg.Cursor[Any], agent_id: int, session_id: int) -> bool:
+def claim_still_expired(cur: psycopg.Cursor, agent_id: int, session_id: int) -> bool:
     """The claim UPDATE; True only while the row is STILL expired.
 
     The guard compares against ``clock_timestamp()`` — the statement time,
@@ -193,10 +193,10 @@ async def _dispatch_shell_op(
     db: Database,
     machine: str,
     kind: str,
-    payload: dict[str, Any],
+    payload: dict[str, object],
     *,
     deadline_s: float,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     async with asyncio.timeout(deadline_s):
         return await rpc.dispatch_to_machine(
             db, machine, kind, payload, timeout_s=_SHELL_OP_TIMEOUT_S
@@ -351,8 +351,10 @@ async def reap_expired_shells(
 # is filtered out here rather than returned for a later round — it cannot be swept at all, and
 # letting it into the batch would fill every sweep with rows that can never settle.
 def stale_shell_rows_blocking(pool: ConnectionPool) -> list[ShellRow]:
-    with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-        cur.execute(
+    with pool.connection() as conn:
+        return query_all(
+            conn,
+            ShellRow,
             "SELECT t.agent_id, t.session_id, t.expires_at, t.created_at, m.machine "
             "FROM agent_shell_ttls t LEFT JOIN agents_meta m ON m.id = t.agent_id "
             "WHERE t.expires_at > clock_timestamp() "
@@ -361,7 +363,6 @@ def stale_shell_rows_blocking(pool: ConnectionPool) -> list[ShellRow]:
             "ORDER BY t.agent_id, t.session_id LIMIT %s",
             (STALE_ROW_GRACE, shell_plan.UNKNOWN_MACHINE, PASS_BATCH),
         )
-        return [ShellRow(**row) for row in cur.fetchall()]
 
 
 # meiva:note

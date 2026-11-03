@@ -275,8 +275,7 @@ def test_emit_checkpoint_table_sizes_samples_without_vacuuming(
             # VACUUM (ANALYZE) refreshes the live-tuple stats synchronously so
             # the assertion below cannot race the stats collector.
             cur.execute("VACUUM (ANALYZE) checkpoints")
-        with conn.cursor() as cur:
-            sizes = blob_vacuum.emit_checkpoint_table_sizes(cur)
+        sizes = blob_vacuum.emit_checkpoint_table_sizes(conn)
 
     assert sizes is not None  # the fixture's tables exist, so the emit ran
     assert sizes.blobs_live == 0  # nothing inserted into blobs
@@ -295,9 +294,9 @@ def test_emit_skips_missing_tables_fresh_cluster(
     checkpoint tables yet): the maintenance daemon exits on ProgrammingError,
     so an unguarded UndefinedTable here would crash-loop the hourly pass —
     same defensive posture as the vacuum's `test_run_skips_missing_tables_fresh_cluster`."""
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("DROP TABLE checkpoint_blobs, checkpoints, checkpoint_writes")
-        sizes = blob_vacuum.emit_checkpoint_table_sizes(cur)
+    with pool.connection() as conn:
+        conn.execute("DROP TABLE checkpoint_blobs, checkpoints, checkpoint_writes")
+        sizes = blob_vacuum.emit_checkpoint_table_sizes(conn)
 
     assert sizes is None  # skipped, nothing emitted
     assert len(emitted_events) == 0

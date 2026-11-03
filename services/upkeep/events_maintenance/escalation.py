@@ -21,6 +21,7 @@ from typing import assert_never
 import psycopg
 from psycopg_pool import ConnectionPool
 
+from base.db.rows import query_all
 from base.db.transaction import write_transaction
 
 __all__ = [
@@ -77,10 +78,12 @@ def due_escalations(
     # meiva:note
     # Open episodes past their age floor whose ledger row is not cooling down. The condition facts
     # come from `alerts` in this query, which is what keeps the ledger from disagreeing with them.
-    rows = conn.execute(
+    return query_all(
+        conn,
+        Candidate,
         """
-        SELECT a.id, a.alertname, a.severity,
-               EXTRACT(EPOCH FROM (%(now)s - a.starts_at)) AS age_s
+        SELECT a.id AS source_id, a.alertname, a.severity,
+               EXTRACT(EPOCH FROM (%(now)s - a.starts_at))::float8 AS age_s
         FROM alerts a
         LEFT JOIN alert_escalations e
                ON e.source_kind = 'alerts' AND e.source_id = a.id
@@ -97,8 +100,7 @@ def due_escalations(
             "min_age_s": float(min_age_s),
             "limit": limit,
         },
-    ).fetchall()
-    return [Candidate(row[0], row[1], row[2], float(row[3])) for row in rows]
+    )
 
 
 def record_shadow(

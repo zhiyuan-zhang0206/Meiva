@@ -39,6 +39,7 @@ from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.db.code_version_gate import ProcessDbGate
 from base.events.contract import LLM_USAGE_KEYS, TURN_END_KEYS
+from base.host.boundary.options import options
 from base.host.exit_codes import hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -197,6 +198,12 @@ def roll_range(conn: psycopg.Connection, first: date, last: date, *, today: date
     return RangeReport(result, rebuilt)
 
 
+@dataclass(frozen=True)
+class _Range:
+    first: date
+    last: date
+
+
 # meiva:note
 # The inclusive `(first, last)` range of closed UTC days the operator asked for. An argument error
 # or an inverted range exits with the usage message before anything else starts.
@@ -204,7 +211,7 @@ def parse_range(argv: list[str] | None) -> tuple[date, date]:
     parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     parser.add_argument("--from", dest="first", type=_day_arg, required=True, metavar="YYYYMMDD")
     parser.add_argument("--to", dest="last", type=_day_arg, required=True, metavar="YYYYMMDD")
-    args = parser.parse_args(argv)
+    args = options(parser.parse_args(argv), _Range)
     if args.first > args.last:
         parser.error("--from is after --to")
     return args.first, args.last
