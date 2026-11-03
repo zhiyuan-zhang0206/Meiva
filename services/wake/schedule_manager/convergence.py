@@ -170,9 +170,14 @@ def reclaim_verdict(
 # The shell command a schedule's session runs.
 #
 # ``cd`` first: the login shell's own profile can move the cwd the daemon forked with (macOS
-# path_helper rebuilds PATH; a profile ``cd`` would strand the relative runner path). The
-# ``; exit $?`` tail makes the shell end with the runner, so a dead runner never leaves a live
-# session behind for the reconcile's session-existence liveness to misread.
+# path_helper rebuilds PATH; a profile ``cd`` would strand the relative runner path).
+#
+# The ``; exit $?`` tail is meant to end the shell with the runner, and it does not reliably do
+# that: the session is an interactive login shell, and a runner killed with SIGKILL leaves it
+# running (measured 2026-11-04 on company-mini: the shell outlived its runner, the session stayed
+# in ``list_sessions``, and ``_live_ids`` kept counting that schedule alive -- so ``not_live_since``
+# was never written and no absence alert could fire). A session's existence therefore says nothing
+# about whether the runner is producing; the round heartbeat is the only signal for that (#6164).
 def launch_command(repo_root: str, schedule_id: int, revision: int) -> str:
     return (
         f"cd {shlex.quote(repo_root)} && "
