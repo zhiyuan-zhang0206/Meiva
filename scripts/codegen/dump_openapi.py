@@ -22,13 +22,12 @@ from pathlib import Path
 # Put project root on sys.path so the explicit gateway app factory can be imported.
 # Same pattern as scripts/entrypoints/gateway.py.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-from base.host.boundary.json_values import is_object_dict
 from base.host.env.boot_actions import enter_scratch_home
 
 if __name__ == "__main__":
     enter_scratch_home()
 
-from gateway.http.json_values import is_object_dict
+from base.host.boundary.json_values import is_object_dict
 
 # meiva.self.AGENT_ID stays None here — fine; dump is a build-time tool that
 # does not exercise the SDK or make any gateway HTTP calls.
