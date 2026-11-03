@@ -3,6 +3,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
+from base.host.boundary.process import stderr_bytes, stderr_text, stdout_bytes, stdout_text
 from base.host.proc import run_bounded
 from scripts.content_lint.code_comments.check import Repository
 from scripts.content_lint.code_comments.model import NoteKind, Source
@@ -28,8 +29,8 @@ class Snapshot:
 def git(root: Path, *args: str) -> str:
     result = run_bounded(["git", *args], cwd=root, timeout=30, capture_output=True)
     if result.returncode:
-        raise ValueError(f"Git comparison failed: {result.stderr.decode('utf-8').strip()}")
-    return result.stdout.decode("utf-8")
+        raise ValueError(f"Git comparison failed: {stderr_bytes(result).decode('utf-8').strip()}")
+    return stdout_bytes(result).decode("utf-8")
 
 
 def comparison_base(
@@ -166,7 +167,7 @@ def parse_blobs(root: Path, contents: dict[str, str]) -> dict[str, Source]:
             timeout=60,
         )
         if result.returncode:
-            stderr = result.stderr.strip()
+            stderr = stderr_text(result).strip()
             if "Cannot find module 'typescript'" in stderr:
                 raise ValueError(
                     "TypeScript blob parser failed: this checkout has no installed frontend "
@@ -175,7 +176,7 @@ def parse_blobs(root: Path, contents: dict[str, str]) -> dict[str, Source]:
                     "this worktree, or `pnpm install --frozen-lockfile` in ui/web"
                 )
             raise ValueError(f"TypeScript blob parser failed: {stderr}")
-        sources.update(parsed_sources(result.stdout, scripts))
+        sources.update(parsed_sources(stdout_text(result), scripts))
     return sources
 
 

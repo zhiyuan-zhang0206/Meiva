@@ -41,6 +41,7 @@ from base.host.env.boot_actions import enter_scratch_home
 if __name__ == "__main__":
     enter_scratch_home()
 
+from base.host.boundary.process import stdout_text
 from base.host.git import host_version
 from base.host.proc import run_bounded
 from base.packages.plugins import manifest as pm
@@ -71,7 +72,7 @@ def _tracked(
     if result.returncode != 0:
         return []
     out: list[Path] = []
-    for rel in result.stdout.split("\0"):
+    for rel in stdout_text(result).split("\0"):
         if not rel:
             continue
         if rel_dir is not None and not rel.startswith(rel_dir + "/"):

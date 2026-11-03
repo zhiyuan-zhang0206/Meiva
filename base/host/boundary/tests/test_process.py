@@ -7,7 +7,7 @@ import subprocess
 
 import pytest
 
-from base.host.boundary.process import stderr_text, stdout_text
+from base.host.boundary.process import stderr_bytes, stderr_text, stdout_bytes, stdout_text
 
 
 def test_a_text_stream_is_read_as_it_is_and_an_uncaptured_one_is_empty() -> None:
@@ -27,3 +27,13 @@ def test_a_bytes_stream_means_text_true_was_forgotten() -> None:
         stdout_text(done)
     with pytest.raises(TypeError, match="was text=True passed"):
         stderr_text(done)
+
+
+def test_raw_bytes_are_read_as_they_are_and_a_text_stream_is_refused() -> None:
+    done = subprocess.CompletedProcess[object]([], 0, b"out\r\n", None)
+    assert (stdout_bytes(done), stderr_bytes(done)) == (b"out\r\n", b"")
+    text = subprocess.CompletedProcess[object]([], 0, "out", "err")
+    with pytest.raises(TypeError, match="was text= passed"):
+        stdout_bytes(text)
+    with pytest.raises(TypeError, match="was text= passed"):
+        stderr_bytes(text)

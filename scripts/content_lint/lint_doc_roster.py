@@ -49,7 +49,7 @@ import re
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Protocol
 
 from base.host.env.boot_actions import enter_scratch_home
 
@@ -119,9 +119,23 @@ def parse_roster(text: str) -> set[str]:
     return names
 
 
+# meiva:note
+# What the service lint reads of a `ServiceSpec`: the session suffix the roster documents.
+class _Registered(Protocol):
+    @property
+    def session(self) -> str: ...
+
+
+# meiva:note
+# What the healthcheck lint reads of a `ServiceSpec`: the module its protocol probe lives in.
+class _Probed(Protocol):
+    @property
+    def healthcheck_module(self) -> str | None: ...
+
+
 def check(
     *,
-    services: Sequence[Any],
+    services: Sequence[_Registered],
     service_roster: Path = SERVICE_ROSTER,
 ) -> int:
     """Compare the parsed roster against build_services(); return 0/1 exit code."""
@@ -214,7 +228,7 @@ def directory_healthchecks() -> set[str]:
     return {p.stem for p in _HEALTHCHECK_DIR.glob("*.py") if p.name != "__init__.py"}
 
 
-def spec_healthchecks(*, services: Sequence[Any]) -> set[str]:
+def spec_healthchecks(*, services: Sequence[_Probed]) -> set[str]:
     """The healthcheck modules registered on ServiceSpec rows inside this
     directory (`services.supervision.healthchecks.<x>`, last segment).
 
@@ -259,7 +273,7 @@ def parse_healthcheck_roster(text: str) -> set[str]:
 def check_healthcheck_roster(
     *,
     roster_path: Path = HEALTHCHECK_ROSTER,
-    services: Sequence[Any],
+    services: Sequence[_Probed],
     directory: set[str] | None = None,
     hand_added: set[str] | None = None,
 ) -> int:

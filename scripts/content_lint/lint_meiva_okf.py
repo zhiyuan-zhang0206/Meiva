@@ -9,6 +9,7 @@ import re
 import sys
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeGuard
 
@@ -19,6 +20,8 @@ from base.host.env.boot_actions import enter_scratch_home
 if __name__ == "__main__":
     enter_scratch_home()
 
+from base.host.boundary.options import options
+from base.host.boundary.untyped import object_of
 from base.packages.docs.okf_graph import logical_path, resolve_wikilink
 from base.packages.text_budget import LengthBudget, Level, Unit, evaluate
 
@@ -112,7 +115,7 @@ def parse_frontmatter(text: str) -> tuple[dict[object, object], str, int]:
         if lines[i].strip() == "---":
             fm_text = "\n".join(lines[1:i])
             try:
-                raw: object = yaml.safe_load(fm_text)
+                raw = object_of(yaml.safe_load, fm_text)
             except yaml.YAMLError:
                 return {}, text, i + 1
             fm = raw if _is_raw_dict(raw) else {}
@@ -529,6 +532,14 @@ def _report(all_errors: dict[str, list[LintError]], repo_root: Path, n_files: in
     return error_count
 
 
+# meiva:note
+# The flags `main` declares, read once so the rest of the run holds `list[str]` and `bool` instead of the parser's `Any`.
+@dataclass(frozen=True)
+class Options:
+    paths: list[str]
+    fix: bool
+
+
 def main(argv: Sequence[str], *, check_layer: bool = True):
     parser = argparse.ArgumentParser(description="Lint Meiva OKF document format")
     parser.add_argument(
@@ -537,7 +548,7 @@ def main(argv: Sequence[str], *, check_layer: bool = True):
     parser.add_argument(
         "--fix", action="store_true", help="Auto-fix where possible (not yet implemented)"
     )
-    args = parser.parse_args(argv)
+    args = options(parser.parse_args(argv), Options)
 
     missing = [p for p in args.paths if not Path(p).exists()]
     if missing:

@@ -160,13 +160,13 @@ def shell_flags(script: Path) -> set[str]:
     """Long options a bash script's own argument-parsing arms match on."""
     src = script.read_text()
     flags: set[str] = set()
-    for arm in _CASE_ARM.findall(src):
+    for arm_match in _CASE_ARM.finditer(src):
         # One arm may list alternatives (`--a|--b)`) and may take `=value`.
-        for part in arm.split("|"):
+        for part in str(arm_match[1]).split("|"):
             name = part.split("=", 1)[0]
             if name.startswith("--") and len(name) > 2:
                 flags.add(name)
-    flags |= set(re.findall(r'== ?"(--[a-z0-9][a-z0-9-]*)"', src))
+    flags |= {str(m[1]) for m in re.finditer(r'== ?"(--[a-z0-9][a-z0-9-]*)"', src)}
     return flags
 
 
