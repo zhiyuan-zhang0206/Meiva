@@ -636,6 +636,11 @@ reportUnusedCallResult = "warning"
 # tests/ci/test_pyright_test_environments.py fail until you do). Do not edit between the markers.
 # Two changes that add entries collide only where their roots are neighbors in this order;
 # resolve by running the script again.
+# A package entry's `reportAny` / `reportExplicitAny` gate production code; a generated tests entry
+# never repeats them. A promoted root's tests directories inherit the covering entry's rules, Any
+# included, unless the entry's root is listed in `TESTS_OWING_ANY` in the generator: then each
+# tests directory under it gets its own entry (the seven rules, no Any rule) until its Any debt is
+# repaid and the root leaves the list.
 # BEGIN GENERATED pyright tests environments (scripts/codegen/gen_pyright_test_environments.py; edit nothing between the markers)
 [[tool.pyright.executionEnvironments]]
 root = "ops/agent_transfer/tests"

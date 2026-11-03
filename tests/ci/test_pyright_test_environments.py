@@ -237,6 +237,64 @@ def test_an_entry_is_written_only_where_the_package_rules_differ_from_the_standa
     assert config["executionEnvironments"][1]["root"] == "base/x/tests"  # above `base`
 
 
+# meiva:note
+# A package that has repaid its Any debt holds `reportAny` and `reportExplicitAny` at `error` in its
+# own entry. Its tests directories do not repeat them: those gate production code, and a tests
+# directory's own entry keeps only the tests standard plus settings such as `extraPaths`.
+def test_a_tests_entry_does_not_repeat_the_any_rules_of_its_package() -> None:
+    pyproject = _SYNTHETIC_PYPROJECT.replace(
+        'root = "cli"\nreportUnknownMemberType = "error"\nreportUnknownArgumentType = "error"\n',
+        'root = "cli"\n'
+        + "".join(
+            f'{rule} = "error"\n' for rule in [*TESTS_STANDARD, "reportAny", "reportExplicitAny"]
+        ),
+    )
+    assert pyproject != _SYNTHETIC_PYPROJECT
+    text = gen.generate(pyproject, ["cli/y/tests/test_b.py"], promoted_roots=_SYNTHETIC_PROMOTED)
+    region = text[text.index(gen.BEGIN) : text.index(gen.END)]
+    assert (
+        'root = "cli/y/tests"\n'
+        'reportUnknownMemberType = "error"\n'
+        'reportUnknownArgumentType = "error"\n\n'
+    ) in region
+    assert "reportAny" not in region
+
+
+# meiva:note
+# A promoted root's tests directories need no entry: they inherit every rule of the covering
+# entry. When that entry holds the Any rules the tests are held to them too (the ratchet only
+# tightens), unless the entry's root is listed as owing Any: then each tests directory under it gets
+# an entry that keeps the seven rules at `error` and leaves the Any rules out.
+def _any_holding_sub_package_pyproject() -> str:
+    seven = "".join(f'{rule} = "error"\n' for rule in TESTS_STANDARD)
+    pyproject = _SYNTHETIC_PYPROJECT.replace(
+        '[[tool.pyright.executionEnvironments]]\nroot = "base"\n',
+        f'[[tool.pyright.executionEnvironments]]\nroot = "base/x"\n{seven}'
+        'reportAny = "error"\nreportExplicitAny = "error"\n\n'
+        '[[tool.pyright.executionEnvironments]]\nroot = "base"\n',
+    )
+    assert pyproject != _SYNTHETIC_PYPROJECT
+    return pyproject
+
+
+def test_a_promoted_tests_directory_under_an_any_entry_is_held_to_it_unless_the_root_owes_any() -> (
+    None
+):
+    pyproject = _any_holding_sub_package_pyproject()
+    tracked = ["base/x/tests/test_a.py", "base/y/tests/test_b.py"]
+    promoted = ("base", *_SYNTHETIC_PROMOTED)
+
+    held = gen.generate(pyproject, tracked, promoted_roots=promoted, owing_any=())
+    assert _generated_roots(held) == []
+
+    owing = gen.generate(pyproject, tracked, promoted_roots=promoted, owing_any=("base/x",))
+    region = owing[owing.index(gen.BEGIN) : owing.index(gen.END)]
+    seven = "".join(f'{rule} = "error"\n' for rule in TESTS_STANDARD)
+    assert _generated_roots(owing) == ["base/x/tests"]
+    assert 'root = "base/x/tests"\n' + seven in region
+    assert "reportAny" not in region
+
+
 def test_a_promoted_root_gets_no_tests_entry_and_must_hold_all_seven_at_error() -> None:
     pyproject = _SYNTHETIC_PYPROJECT.replace('"cli/**/tests"', '"cli/**/tests", "scripts/**/tests"')
     tracked = ["base/x/tests/test_a.py", "scripts/ci/tests/test_b.py"]
