@@ -38,7 +38,7 @@ from gateway.extensions.schemas import (
     InventoryMachineView,
     InventoryWriteResult,
 )
-from gateway.http.config import gateway_clock, gateway_rpc
+from gateway.http.config import gateway_clock, gateway_rpc, gateway_state
 from ops.cluster import rpc as cluster_rpc
 from ops.rpc_schemas import InventoryReadResult, InventoryWriteOpResult
 
@@ -216,17 +216,17 @@ async def get_inventory(
     """
     if machine is None:
         return await _aggregate(
-            request.app.state.db,
-            request.app.state.db_pool,
+            gateway_state(request).db,
+            gateway_state(request).db_pool,
             rpc=gateway_rpc(request),
-            budget_s=request.app.state.gateway_config.inventory_host_wait_seconds,
+            budget_s=gateway_state(request).gateway_config.inventory_host_wait_seconds,
             now=gateway_clock(request).now(),
         )
 
-    await asyncio.to_thread(_assert_inventory_target, request.app.state.db_pool, machine)
+    await asyncio.to_thread(_assert_inventory_target, gateway_state(request).db_pool, machine)
     try:
         read = await _dispatch_inventory_read(
-            request.app.state.db, machine, rpc=gateway_rpc(request)
+            gateway_state(request).db, machine, rpc=gateway_rpc(request)
         )
     except (cluster_rpc.ClusterOpUnreachable, cluster_rpc.ClusterOpFailed) as exc:
         raise HTTPException(
@@ -286,10 +286,10 @@ async def put_inventory(
         raise HTTPException(
             status_code=400, detail="inventory writes require ?machine=<agent-runner>"
         )
-    await asyncio.to_thread(_assert_inventory_target, request.app.state.db_pool, machine)
+    await asyncio.to_thread(_assert_inventory_target, gateway_state(request).db_pool, machine)
 
     result = await _dispatch_inventory_write(
-        request.app.state.db, machine, body.plugins, body.mcp_servers, rpc=gateway_rpc(request)
+        gateway_state(request).db, machine, body.plugins, body.mcp_servers, rpc=gateway_rpc(request)
     )
     return InventoryWriteResult(
         applied=result.applied,

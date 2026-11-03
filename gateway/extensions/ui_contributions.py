@@ -22,7 +22,6 @@ manifest that fails here means the on-disk copy changed under the cluster.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, TypeGuard
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -35,30 +34,24 @@ from gateway.extensions.schemas import (
     UiStatContribution,
     UiThemeContribution,
 )
+from gateway.http.config import gateway_state
+from gateway.http.json_values import is_object_dict, is_object_list
 
 router = APIRouter()
 
 
-def _is_object_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
-
-
-def _is_str_any_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
-
-
-def _dict_list(value: object) -> list[dict[str, Any]]:
-    return [item for item in value if _is_str_any_dict(item)] if _is_object_list(value) else []
+def _dict_list(value: object) -> list[dict[str, object]]:
+    return [item for item in value if is_object_dict(item)] if is_object_list(value) else []
 
 
 def _str_dict(value: object) -> dict[str, str]:
-    return {str(k): str(v) for k, v in value.items()} if _is_str_any_dict(value) else {}
+    return {k: str(v) for k, v in value.items()} if is_object_dict(value) else {}
 
 
-def _enabled_ui_declarations(*, home: Path) -> list[tuple[str, Path, dict[str, Any]]]:
+def _enabled_ui_declarations(*, home: Path) -> list[tuple[str, Path, dict[str, object]]]:
     installed = enable_config.installed_plugin_dirs(home=home)
     config = enable_config.load_for_runtime(set(installed), home=home)
-    declarations: list[tuple[str, Path, dict[str, Any]]] = []
+    declarations: list[tuple[str, Path, dict[str, object]]] = []
     for name in sorted(installed):
         plugin_dir = installed[name]
         entry = config.plugins.get(name)
@@ -72,7 +65,7 @@ def _enabled_ui_declarations(*, home: Path) -> list[tuple[str, Path, dict[str, A
                 detail=f"plugin {name!r} has an invalid meiva-plugin.json: {e}",
             ) from e
         ui = manifest.contributions.get("ui")
-        if not _is_str_any_dict(ui):
+        if not is_object_dict(ui):
             continue
         declarations.append((name, plugin_dir, ui))
     return declarations
@@ -84,7 +77,7 @@ def get_ui_contributions(request: Request) -> UiContributionsResponse:
     themes: list[UiThemeContribution] = []
     nav: list[UiNavContribution] = []
     stats: list[UiStatContribution] = []
-    home = request.app.state.gateway_process.home
+    home = gateway_state(request).gateway_process.home
     for plugin, plugin_dir, ui in _enabled_ui_declarations(home=home):
         for theme in _dict_list(ui.get("themes", [])):
             # Absent darkTokens is carried as None, not as an empty map: the

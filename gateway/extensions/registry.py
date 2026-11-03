@@ -14,6 +14,7 @@ from fastapi import Path as PathParam
 from pydantic import BaseModel, Field
 
 from base.packages.extensions import registry
+from gateway.http.config import gateway_state
 
 router = APIRouter()
 
@@ -75,7 +76,7 @@ def put_extension(
             raise HTTPException(status_code=422, detail=f"unusable archive: {exc}") from exc
         try:
             digest = registry.register_tree(
-                request.app.state.db_pool,
+                gateway_state(request).db_pool,
                 root=root,
                 name=name,
                 kind=kind,
