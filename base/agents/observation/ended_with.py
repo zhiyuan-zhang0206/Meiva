@@ -12,9 +12,14 @@
 # external event — has to answer first; the object is required) and `deferred:time` (the
 # work was pushed to the clock; the declaration must carry a one-sentence reason).
 #
-# A value outside that set is an invalid record, not free text: `validate` refuses it where
-# a declaration enters the turn's state, and the loop itself only ever writes these
-# constants.
+# A value outside that set is an invalid record, not free text. A declaration the record
+# cannot use is recorded as `invalid` — distinct from a turn that declared nothing, whose
+# field is simply absent — and it never aborts the turn. That is a deliberate exception to
+# the repository's fail-fast rule (AGENTS.md, unknown enum values): a field that measures
+# the agent must not fail the work it measures, or the instrument turns into a fuse and the
+# measured failure rate becomes a function of the model's phrasing. `problem` says why a
+# declaration was refused; the exec boundary records the marker and reports the rejected
+# text as `turn_end_declaration_rejected`.
 # meiva:link agent/graph/llm/docs/turn-records.meiva.okf.md
 
 from __future__ import annotations
@@ -24,30 +29,28 @@ DONE = "done"
 BUDGET = "budget"
 DEFERRED_TIME = "deferred:time"
 WAITING_PREFIX = "waiting:"
+INVALID = "invalid"
 
 _VALUES = (NO_INPUT, DONE, BUDGET, DEFERRED_TIME, WAITING_PREFIX)
 
 
 # meiva:note
-# Return `value` as one of the five turn-end values, or raise ValueError. Called at the
-# boundary where a declaration enters the state, so an out-of-set value never reaches a
-# record. The paired `reason` is part of the contract: `deferred:time` is the
-# dependency-free delay that has to be attributable, so it cannot be recorded without one.
-def validate(value: object, *, reason: object = None) -> str:
+# Why `value` is not a usable declaration, or None when it is one. Called where a
+# declaration enters the turn's state; a refusal is recorded (`INVALID`) and reported, never
+# raised, so a rejected declaration costs the turn nothing. The paired `reason` is part of
+# the contract: `deferred:time` is the dependency-free delay that has to be attributable, so
+# it cannot be recorded without one.
+def problem(value: object, *, reason: object = None) -> str | None:
     if not isinstance(value, str) or not value.startswith(_VALUES):
-        raise ValueError(
-            f"ended_with must be one of {NO_INPUT!r}, {DONE!r}, {BUDGET!r}, "
-            f"{DEFERRED_TIME!r}, or {WAITING_PREFIX!r} plus the object it waits on "
-            f"(e.g. 'waiting:ci:8341'); got {value!r}"
+        return (
+            f"not one of the turn-end values: {value!r}; accepted are {NO_INPUT}, {DONE}, "
+            f"{BUDGET}, {DEFERRED_TIME}, and {WAITING_PREFIX}<object>"
         )
     if value == WAITING_PREFIX:
-        raise ValueError(
-            "ended_with 'waiting:' needs the object it waits on after the colon "
-            "(a person, a CI run, an external event), e.g. 'waiting:peer:6107'"
+        return (
+            "names no object to wait on: write 'waiting:<object>' — the person, CI run or "
+            "external event that has to answer first"
         )
     if value == DEFERRED_TIME and (not isinstance(reason, str) or not reason.strip()):
-        raise ValueError(
-            "ended_with 'deferred:time' needs a one-sentence reason for pushing the work "
-            "to the clock; pass it as ended_with_reason"
-        )
-    return value
+        return "carries no reason: pass ended_with_reason, one sentence"
+    return None

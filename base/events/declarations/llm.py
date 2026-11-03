@@ -38,8 +38,10 @@ class LlmUsage(TypedDict):
 # `base/agents/observation/ended_with.py`: `no_input` and `budget` are the loop's own
 # decision, `done` / `waiting:<object>` / `deferred:time` the agent's declaration. It is
 # absent when the loop could not name a reason (a turn that continued past its halt, a
-# terminate or restart, an aborted call), and a value outside the set makes the record
-# invalid rather than free text. Absent is an unlabelled turn, never "nothing to defer":
+# terminate or restart, an aborted call). A declaration the set cannot hold is recorded as
+# `invalid` instead — made and refused, not absent — and the turn continues
+# (`turn_end_declaration_rejected` carries the text). Absent is an unlabelled turn, never
+# "nothing to defer":
 # no production agent is asked to declare yet, so production records read `no_input` and
 # `budget` only — count the unlabelled share before reading any other one.
 # meiva:link agent/graph/llm/docs/turn-records.meiva.okf.md
@@ -48,6 +50,18 @@ class TurnEnd(TypedDict):
     duration_seconds: float
     ended_with: NotRequired[str]
     ended_with_reason: NotRequired[str]
+
+
+# meiva:note
+# An agent declared how its turn ended and the record could not use the value: the turn
+# carries on and its record says `invalid` instead of the declaration, while the text the
+# agent wrote rides here. A rising count is feedback on the vocabulary — the set does not
+# cover what agents want to say — not noise to be suppressed.
+# meiva:link agent/graph/llm/docs/turn-records.meiva.okf.md
+class TurnEndDeclarationRejected(TypedDict):
+    raw_ended_with: str
+    raw_ended_with_reason: str | None
+    problem: str
 
 
 class LlmUsageMeteringFailed(TypedDict):
@@ -87,6 +101,13 @@ class CompactionCompleted(TypedDict):
 EVENTS: dict[str, EventSpec] = {
     "llm_usage": telemetry_event("llm_usage", "LLM call metering", payload=LlmUsage, persist=True),
     "turn_end": telemetry_event("turn_end", "one turn finished", payload=TurnEnd, persist=True),
+    "turn_end_declaration_rejected": telemetry_event(
+        "turn_end_declaration_rejected",
+        "an agent's turn-end declaration was refused (recorded as invalid); the turn continued",
+        payload=TurnEndDeclarationRejected,
+        tier="anomaly",
+        persist=True,
+    ),
     "llm_usage_metering_failed": telemetry_event(
         "llm_usage_metering_failed",
         "direct model call accounting failed (the call ran; its llm_usage row is dropped)",

@@ -1,6 +1,7 @@
 # meiva:note
-# The turn-end vocabulary is a closed set: a declaration outside it is refused where it
-# enters the state, so no record can carry free text.
+# The turn-end vocabulary is a closed set. A declaration outside it is refused where it
+# enters the state — refused, never raised: a field that measures the agent must not fail the
+# work it measures, so the exec boundary records `invalid` and the turn carries on.
 # meiva:link agent/graph/llm/docs/turn-records.meiva.okf.md
 from __future__ import annotations
 
@@ -21,21 +22,25 @@ from base.agents.observation import ended_with
     ],
 )
 def test_accepts_every_value_of_the_closed_set(value: str, reason: str | None) -> None:
-    assert ended_with.validate(value, reason=reason) == value
+    assert ended_with.problem(value, reason=reason) is None
 
 
 @pytest.mark.parametrize(
     ("value", "reason", "match"),
     [
-        ("finished", None, "ended_with must be one of"),
-        ("", None, "ended_with must be one of"),
-        ("deferred", None, "ended_with must be one of"),
-        ("Waiting:ci", None, "ended_with must be one of"),
-        ("waiting:", None, "needs the object"),
-        ("deferred:time", None, "one-sentence reason"),
-        ("deferred:time", "   ", "one-sentence reason"),
+        ("finished", None, "not one of the turn-end values"),
+        ("", None, "not one of the turn-end values"),
+        ("deferred", None, "not one of the turn-end values"),
+        ("Waiting:ci", None, "not one of the turn-end values"),
+        (7, None, "not one of the turn-end values"),
+        ("waiting:", None, "names no object"),
+        ("deferred:time", None, "carries no reason"),
+        ("deferred:time", "   ", "carries no reason"),
     ],
 )
-def test_refuses_anything_outside_it(value: str, reason: str | None, match: str) -> None:
-    with pytest.raises(ValueError, match=match):
-        ended_with.validate(value, reason=reason)
+def test_states_why_a_declaration_is_unusable(
+    value: object, reason: str | None, match: str
+) -> None:
+    problem = ended_with.problem(value, reason=reason)
+    assert problem is not None
+    assert match in problem

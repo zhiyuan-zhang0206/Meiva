@@ -187,6 +187,32 @@ async def _exec_with_node_shield(
         )
 
 
+# meiva:note
+# Refuse a turn-end declaration the record cannot use, without failing the turn: the marker
+# `invalid` says a declaration was made and rejected (an absent field says none was made),
+# and the rejected text goes out as `turn_end_declaration_rejected`, so a high invalid rate
+# reads as an enum that does not fit what agents want to say, not as noise to be deleted.
+def _refuse_unusable_turn_end(state_update: dict[str, Any], *, agent_id: int) -> None:
+    if state_update.get("ended_with") is None:
+        return
+    reason = state_update.get("ended_with_reason")
+    problem = ended_with.problem(state_update["ended_with"], reason=reason)
+    if problem is None:
+        return
+    logger.warning(
+        "[{label}] {body}",
+        label="turn-end",
+        event="turn_end_declaration_rejected",
+        agent_id=agent_id,
+        body=f"declaration rejected — {problem}",
+        problem=problem,
+        raw_ended_with=str(state_update["ended_with"]),
+        raw_ended_with_reason=None if reason is None else str(reason),
+    )
+    state_update["ended_with"] = ended_with.INVALID
+    state_update["ended_with_reason"] = None
+
+
 async def run_agent_code(
     state: _state.AgentState,
     ctx: MeivaContext,
@@ -242,10 +268,7 @@ async def run_agent_code(
         raise TypeError(payload.state_update_error)
     delta = payload.state_update if payload is not None else None
     plugin_state_update = validate_plugin_state_keys(dict(delta), state.__class__) if delta else {}
-    if "ended_with" in plugin_state_update:
-        ended_with.validate(
-            plugin_state_update["ended_with"], reason=plugin_state_update.get("ended_with_reason")
-        )
+    _refuse_unusable_turn_end(plugin_state_update, agent_id=agent_id)
     attachments = plugin_state_update.pop("attach", None)
     sdk_calls = payload.sdk_calls if payload is not None else None
     return result, plugin_state_update, exec_ms, attachments, sdk_calls
