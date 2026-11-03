@@ -15,10 +15,6 @@ import pytest
 
 from meizel.language import no_script_sibling_imports as _lint
 
-# Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
-# pyright: reportUnknownMemberType = warning
-# pyright: reportUnknownArgumentType = warning
-
 
 @pytest.fixture()
 def scan_tmp(tmp_path: Path) -> Path:
@@ -55,7 +51,7 @@ def _script(imports: str, guard: str = "") -> str:
     )
 
 
-def test_unguarded_sibling_import_in_script_is_rejected(scan_tmp) -> None:
+def test_unguarded_sibling_import_in_script_is_rejected(scan_tmp: Path) -> None:
     _write(scan_tmp, "tools/helper.py", "VALUE = 1\n")
     errs = _errors(scan_tmp, "tools/runner.py", _script("from helper import VALUE"))
     assert len(errs) == 1
@@ -64,7 +60,7 @@ def test_unguarded_sibling_import_in_script_is_rejected(scan_tmp) -> None:
     assert "sys.path.insert" in errs[0]
 
 
-def test_meiva_builtins_sibling_import_points_at_a_package_not_a_guard(scan_tmp) -> None:
+def test_meiva_builtins_sibling_import_points_at_a_package_not_a_guard(scan_tmp: Path) -> None:
     """Under meiva_builtins/ a guard is refused by structure Rule 6, so the hint names a package."""
     _write(scan_tmp, "meiva_builtins/skills/demo/reference/helper.py", "VALUE = 1\n")
     errs = _errors(
@@ -77,7 +73,7 @@ def test_meiva_builtins_sibling_import_points_at_a_package_not_a_guard(scan_tmp)
     assert "sys.path.insert" not in errs[0]
 
 
-def test_guard_before_import_is_accepted(scan_tmp) -> None:
+def test_guard_before_import_is_accepted(scan_tmp: Path) -> None:
     _write(scan_tmp, "tools/helper.py", "VALUE = 1\n")
     guard = (
         "import os\n"
@@ -90,7 +86,7 @@ def test_guard_before_import_is_accepted(scan_tmp) -> None:
     assert errs == []
 
 
-def test_guard_after_import_is_rejected(scan_tmp) -> None:
+def test_guard_after_import_is_rejected(scan_tmp: Path) -> None:
     _write(scan_tmp, "tools/helper.py", "VALUE = 1\n")
     body = textwrap.dedent(
         """\
@@ -112,7 +108,7 @@ def test_guard_after_import_is_rejected(scan_tmp) -> None:
     assert len(errs) == 1
 
 
-def test_guard_inside_top_level_if_is_accepted(scan_tmp) -> None:
+def test_guard_inside_top_level_if_is_accepted(scan_tmp: Path) -> None:
     """feed.py pattern: `if str(_HERE) not in sys.path: sys.path.insert(...)`."""
     _write(scan_tmp, "mail/_imap.py", "VALUE = 1\n")
     body = textwrap.dedent(
@@ -137,7 +133,7 @@ def test_guard_inside_top_level_if_is_accepted(scan_tmp) -> None:
     assert errs == []
 
 
-def test_in_function_guard_before_in_function_import_is_accepted(scan_tmp) -> None:
+def test_in_function_guard_before_in_function_import_is_accepted(scan_tmp: Path) -> None:
     """aggregate.py pattern: the guard immediately precedes the import, in-function."""
     _write(scan_tmp, "tools/helper.py", "VALUE = 1\n")
     body = textwrap.dedent(
@@ -159,7 +155,7 @@ def test_in_function_guard_before_in_function_import_is_accepted(scan_tmp) -> No
     assert errs == []
 
 
-def test_module_only_file_is_not_flagged(scan_tmp) -> None:
+def test_module_only_file_is_not_flagged(scan_tmp: Path) -> None:
     _write(scan_tmp, "mail/_imap.py", "VALUE = 1\n")
     errs = _errors(
         scan_tmp,
@@ -174,7 +170,7 @@ def test_module_only_file_is_not_flagged(scan_tmp) -> None:
     assert errs == []
 
 
-def test_shebang_script_without_guard_is_rejected(scan_tmp) -> None:
+def test_shebang_script_without_guard_is_rejected(scan_tmp: Path) -> None:
     _write(scan_tmp, "tools/helper.py", "VALUE = 1\n")
     body = textwrap.dedent(
         """\
@@ -189,7 +185,7 @@ def test_shebang_script_without_guard_is_rejected(scan_tmp) -> None:
     assert "tools/probe.py:2" in errs[0]
 
 
-def test_uv_script_shebang_is_script_mode(scan_tmp) -> None:
+def test_uv_script_shebang_is_script_mode(scan_tmp: Path) -> None:
     _write(scan_tmp, "tools/helper.py", "VALUE = 1\n")
     body = textwrap.dedent(
         """\
@@ -203,7 +199,7 @@ def test_uv_script_shebang_is_script_mode(scan_tmp) -> None:
     assert len(errs) == 1
 
 
-def test_dotted_from_sibling_file_is_not_flagged(scan_tmp) -> None:
+def test_dotted_from_sibling_file_is_not_flagged(scan_tmp: Path) -> None:
     """`from ops.controllers.respawn import X` with a sibling ops.py FILE resolves
     to the top-level ops package, not the sibling — a file cannot be a package."""
     _write(scan_tmp, "health/ops.py", "VALUE = 1\n")
@@ -213,7 +209,7 @@ def test_dotted_from_sibling_file_is_not_flagged(scan_tmp) -> None:
     assert errs == []
 
 
-def test_bare_import_of_sibling_file_is_flagged_even_when_stdlib_shadows(scan_tmp) -> None:
+def test_bare_import_of_sibling_file_is_flagged_even_when_stdlib_shadows(scan_tmp: Path) -> None:
     """`import platform` with a sibling platform.py resolves to the sibling in
     script mode — the conservative direction is to flag it."""
     _write(scan_tmp, "tools/platform.py", "VALUE = 1\n")
@@ -221,7 +217,7 @@ def test_bare_import_of_sibling_file_is_flagged_even_when_stdlib_shadows(scan_tm
     assert len(errs) == 1
 
 
-def test_sibling_package_import_is_rejected(scan_tmp) -> None:
+def test_sibling_package_import_is_rejected(scan_tmp: Path) -> None:
     _write(scan_tmp, "tools/pkg/__init__.py", "\n")
     _write(scan_tmp, "tools/pkg/mod.py", "VALUE = 1\n")
     errs = _errors(scan_tmp, "tools/runner.py", _script("from pkg.mod import VALUE"))
@@ -229,7 +225,7 @@ def test_sibling_package_import_is_rejected(scan_tmp) -> None:
     assert "pkg" in errs[0]
 
 
-def test_type_checking_sibling_import_is_not_flagged(scan_tmp) -> None:
+def test_type_checking_sibling_import_is_not_flagged(scan_tmp: Path) -> None:
     _write(scan_tmp, "tools/helper.py", "VALUE = 1\n")
     body = textwrap.dedent(
         """\
@@ -251,7 +247,9 @@ def test_type_checking_sibling_import_is_not_flagged(scan_tmp) -> None:
     assert errs == []
 
 
-def test_out_of_repo_path_does_not_crash(scan_tmp, tmp_path_factory) -> None:
+def test_out_of_repo_path_does_not_crash(
+    scan_tmp: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
     """A target outside _REPO_ROOT must not crash the run (bare relative_to used
     to raise ValueError; the lint reports it by absolute path instead)."""
     outside = tmp_path_factory.mktemp("outside")
@@ -271,7 +269,7 @@ def test_out_of_repo_path_does_not_crash(scan_tmp, tmp_path_factory) -> None:
     assert _lint.main([str(bad)]) == 1
 
 
-def test_main_returns_nonzero_on_violation(scan_tmp) -> None:
+def test_main_returns_nonzero_on_violation(scan_tmp: Path) -> None:
     _write(scan_tmp, "tools/helper.py", "VALUE = 1\n")
     bad = _write(scan_tmp, "tools/runner.py", _script("from helper import VALUE"))
     assert _lint.main([str(bad)]) == 1
@@ -289,7 +287,7 @@ def test_main_returns_nonzero_on_violation(scan_tmp) -> None:
 
 
 def test_explicit_missing_target_is_an_error(
-    scan_tmp, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    scan_tmp: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A typo'd explicit path must fail the gate, not pass as a silent empty scan."""
     good = _write(scan_tmp, "tools/clean.py", "VALUE = 1\n")
@@ -299,7 +297,7 @@ def test_explicit_missing_target_is_an_error(
     assert _lint.main([str(good), str(missing)]) == 1
 
 
-def test_a_sibling_file_that_is_not_utf8_is_still_a_sibling(scan_tmp) -> None:
+def test_a_sibling_file_that_is_not_utf8_is_still_a_sibling(scan_tmp: Path) -> None:
     binary = scan_tmp / "tools" / "helper.py"
     binary.parent.mkdir(parents=True)
     binary.write_bytes(b"\xff\xfe not utf-8")
@@ -310,7 +308,7 @@ def test_a_sibling_file_that_is_not_utf8_is_still_a_sibling(scan_tmp) -> None:
 
 # meiva:note
 # A `helper.py` that does not resolve is not a module a script can import.
-def test_a_broken_symlink_sibling_is_not_a_module(scan_tmp) -> None:
+def test_a_broken_symlink_sibling_is_not_a_module(scan_tmp: Path) -> None:
     (scan_tmp / "tools").mkdir(parents=True)
     broken = scan_tmp / "tools" / "helper.py"
     broken.symlink_to(scan_tmp / "tools" / "missing.py")
@@ -319,7 +317,7 @@ def test_a_broken_symlink_sibling_is_not_a_module(scan_tmp) -> None:
 
 # meiva:note
 # A `helper.pyi` types a module; it is not one a script can import.
-def test_a_type_stub_sibling_is_not_a_module(scan_tmp) -> None:
+def test_a_type_stub_sibling_is_not_a_module(scan_tmp: Path) -> None:
     _write(scan_tmp, "tools/helper.pyi", "VALUE: int\n")
     assert _errors(scan_tmp, "tools/runner.py", _script("import helper")) == []
 
@@ -327,7 +325,7 @@ def test_a_type_stub_sibling_is_not_a_module(scan_tmp) -> None:
 # meiva:note
 # The rule decides the precedence between a module file and a package of the same name, not the
 # order the directory listed its entries in.
-def test_a_file_and_a_package_of_the_same_name_resolve_to_the_file(scan_tmp) -> None:
+def test_a_file_and_a_package_of_the_same_name_resolve_to_the_file(scan_tmp: Path) -> None:
     _write(scan_tmp, "tools/helper.py", "VALUE = 1\n")
     _write(scan_tmp, "tools/helper/__init__.py", "\n")
     assert _errors(scan_tmp, "tools/runner.py", _script("from helper.sub import VALUE")) == []
@@ -337,7 +335,7 @@ def test_a_file_and_a_package_of_the_same_name_resolve_to_the_file(scan_tmp) -> 
 # meiva:note
 # A test file is pytest-managed: the same body that a rule file fails passes through the scan, and
 # the file-level reader still reports it.
-def test_the_scan_skips_the_paths_the_rule_does_not_judge(scan_tmp) -> None:
+def test_the_scan_skips_the_paths_the_rule_does_not_judge(scan_tmp: Path) -> None:
     _write(scan_tmp, "pkg/helper.py", "VALUE = 1\n")
     _write(scan_tmp, "tests/helper.py", "VALUE = 1\n")
     judged = _write(scan_tmp, "pkg/runner.py", _script("import helper"))

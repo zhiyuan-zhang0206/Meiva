@@ -22,10 +22,6 @@ from meizel.owners import clock_lattice
 from meizel.owners import clock_lattice_cli as _lint
 from meizel.owners.clock_lattice_cli import SCAN_DIRS as _SCAN_DIRS
 
-# Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
-# pyright: reportUnknownMemberType = warning
-# pyright: reportUnknownArgumentType = warning
-
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _TEST_CLOCKS = frozenset({"NO_PROGRESS_TIMEOUT_S"})
 _FAMILY = ("base/deploy/timing.py", "base/native_process/stop_timing.py")
@@ -68,7 +64,7 @@ def _errors(scan_tmp: Path, rel: str, body: str) -> list[str]:
     return _lint.scan_file(p, repo_root=scan_tmp, lattice=_TEST_LATTICE)
 
 
-def test_bare_lattice_clock_outside_family_is_rejected(scan_tmp) -> None:
+def test_bare_lattice_clock_outside_family_is_rejected(scan_tmp: Path) -> None:
     errs = _errors(
         scan_tmp,
         "ops/somewhere.py",
@@ -81,7 +77,7 @@ def test_bare_lattice_clock_outside_family_is_rejected(scan_tmp) -> None:
     assert "_SOME_REAP_GRACE_S" in errs[0]
 
 
-def test_family_module_definition_is_allowed(scan_tmp) -> None:
+def test_family_module_definition_is_allowed(scan_tmp: Path) -> None:
     errs = _errors(
         scan_tmp,
         "base/deploy/timing.py",
@@ -92,7 +88,7 @@ def test_family_module_definition_is_allowed(scan_tmp) -> None:
     assert errs == []
 
 
-def test_alias_of_registered_clock_is_allowed(scan_tmp) -> None:
+def test_alias_of_registered_clock_is_allowed(scan_tmp: Path) -> None:
     errs = _errors(
         scan_tmp,
         "ops/controllers/stalled_rollout.py",
@@ -103,7 +99,7 @@ def test_alias_of_registered_clock_is_allowed(scan_tmp) -> None:
     assert errs == []
 
 
-def test_exempt_clock_is_allowed(scan_tmp) -> None:
+def test_exempt_clock_is_allowed(scan_tmp: Path) -> None:
     errs = _errors(
         scan_tmp,
         "base/host/proc.py",
@@ -114,7 +110,7 @@ def test_exempt_clock_is_allowed(scan_tmp) -> None:
     assert errs == []
 
 
-def test_independent_clock_without_lattice_vocabulary_is_allowed(scan_tmp) -> None:
+def test_independent_clock_without_lattice_vocabulary_is_allowed(scan_tmp: Path) -> None:
     errs = _errors(
         scan_tmp,
         "meiva/mcps/_oauth.py",
@@ -125,7 +121,7 @@ def test_independent_clock_without_lattice_vocabulary_is_allowed(scan_tmp) -> No
     assert errs == []
 
 
-def test_settings_field_in_class_body_is_not_scanned(scan_tmp) -> None:
+def test_settings_field_in_class_body_is_not_scanned(scan_tmp: Path) -> None:
     errs = _errors(
         scan_tmp,
         "base/config/domains/gateway.py",
@@ -139,7 +135,7 @@ def test_settings_field_in_class_body_is_not_scanned(scan_tmp) -> None:
     assert errs == []
 
 
-def test_unknown_clock_alias_is_rejected(scan_tmp) -> None:
+def test_unknown_clock_alias_is_rejected(scan_tmp: Path) -> None:
     """An alias must reference a clock that is actually registered — a typo'd
     name must not ride the alias rule."""
     errs = _errors(
@@ -307,7 +303,7 @@ def test_full_scan_fails_on_a_stale_family_module(
 # ── values bound to a clock name ──────────────────────────────────────────────
 
 
-def test_a_dataclass_default_that_is_a_literal_is_a_definition(scan_tmp) -> None:
+def test_a_dataclass_default_that_is_a_literal_is_a_definition(scan_tmp: Path) -> None:
     errs = _errors(
         scan_tmp,
         "services/derived/thing.py",
@@ -337,7 +333,7 @@ def test_a_dataclass_default_that_is_a_literal_is_a_definition(scan_tmp) -> None
         "grace_s: float = 7.0\n",
     ],
 )
-def test_every_way_of_binding_a_literal_counts(scan_tmp, body: str) -> None:
+def test_every_way_of_binding_a_literal_counts(scan_tmp: Path, body: str) -> None:
     assert _errors(scan_tmp, "ops/bound.py", body), body
 
 
@@ -353,11 +349,13 @@ def test_every_way_of_binding_a_literal_counts(scan_tmp, body: str) -> None:
         "def go(cfg):\n    return cfg(grace_s='soon', stall_s=True)\n",
     ],
 )
-def test_a_reference_a_missing_default_or_another_word_defines_nothing(scan_tmp, body: str) -> None:
+def test_a_reference_a_missing_default_or_another_word_defines_nothing(
+    scan_tmp: Path, body: str
+) -> None:
     assert _errors(scan_tmp, "ops/not_bound.py", body) == [], body
 
 
-def test_a_family_module_may_bind_literals(scan_tmp) -> None:
+def test_a_family_module_may_bind_literals(scan_tmp: Path) -> None:
     body = "from dataclasses import dataclass\n\n@dataclass\nclass StopTimingConfig:\n    cancel_unwind_grace_s: float = 5.0\n"
     assert _errors(scan_tmp, "base/native_process/stop_timing.py", body) == []
 
@@ -442,7 +440,9 @@ def _run_lint(root: Path) -> int:
     )
 
 
-def test_a_violation_created_between_two_runs_is_reported(tmp_path: Path, capsys) -> None:
+def test_a_violation_created_between_two_runs_is_reported(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     root = _admitted_root(tmp_path)
     assert _run_lint(root) == 0
     capsys.readouterr()
@@ -453,7 +453,9 @@ def test_a_violation_created_between_two_runs_is_reported(tmp_path: Path, capsys
     assert "pkg/bad.py" in capsys.readouterr().err
 
 
-def test_a_touched_unrelated_file_keeps_the_verdict(tmp_path: Path, capsys) -> None:
+def test_a_touched_unrelated_file_keeps_the_verdict(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     root = _admitted_root(tmp_path)
     assert _run_lint(root) == 0
     capsys.readouterr()
