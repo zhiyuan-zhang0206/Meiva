@@ -216,7 +216,7 @@ class ModuleWatch:
         is watched from the pass after its import finished (`__spec__._initializing` is False).
         """
         specs = map(_module_spec, dicts)
-        importing = list(map(getattr, specs, repeat("_initializing"), repeat(False)))
+        importing = [getattr(spec, "_initializing", False) for spec in specs]
         self._importing = list(compress(found, importing))
         if not self._importing:
             return found, dicts
