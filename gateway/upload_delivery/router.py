@@ -35,9 +35,26 @@ from gateway.http.auth.request_principal import (
     AuthPrincipal,
     principal_key,
 )
-from gateway.http.config import gateway_clock, gateway_config
+from gateway.http.config import (
+    GatewayAppState,
+    gateway_clock,
+    gateway_config,
+    gateway_state,
+    state_as,
+)
+from gateway.upload_delivery.worker import UploadRecovery
 
 router = APIRouter()
+
+
+# meiva:note
+# The upload recovery owner the app root builds; this module's routes are its only readers.
+class UploadAppState(GatewayAppState):
+    upload_recovery: UploadRecovery
+
+
+def _recovery(request: Request) -> UploadRecovery:
+    return state_as(request, UploadAppState).upload_recovery
 
 
 class UploadSendRequest(BaseModel):
@@ -77,9 +94,9 @@ async def stage_upload(
         )
     file_id = UUID(int=config.rng.getrandbits(128), version=4).hex
     try:
-        return await request.app.state.upload_recovery.native(
+        return await _recovery(request).native(
             staging.stage,
-            request.app.state.db_pool,
+            gateway_state(request).db_pool,
             key,
             agent_id,
             raw_name=raw_name,
@@ -87,8 +104,8 @@ async def stage_upload(
             content_type=file.content_type or "application/octet-stream",
             file_id=file_id,
             upload_root=config.upload_staging_root,
-            local_machine=request.app.state.machine.name(),
-            home=request.app.state.gateway_process.home,
+            local_machine=gateway_state(request).machine.name(),
+            home=gateway_state(request).gateway_process.home,
             max_bytes=config.max_agent_upload_bytes,
             max_files=config.max_agent_upload_files,
         )
@@ -107,13 +124,13 @@ async def discard_staged_upload(
     request: Request,
 ) -> Response:
     try:
-        await request.app.state.upload_recovery.native(
+        await _recovery(request).native(
             staging.discard,
-            request.app.state.db_pool,
+            gateway_state(request).db_pool,
             agent_id,
             file_id,
-            local_machine=request.app.state.machine.name(),
-            home=request.app.state.gateway_process.home,
+            local_machine=gateway_state(request).machine.name(),
+            home=gateway_state(request).gateway_process.home,
         )
     except UploadDeliveryConflictError as exc:
         raise HTTPException(409, str(exc)) from exc
@@ -131,9 +148,9 @@ async def upload(
     batch_id = UUID(int=config.rng.getrandbits(128), version=4).hex
     sent_at = gateway_clock(request).now()
     try:
-        accepted = await request.app.state.upload_recovery.native(
+        accepted = await _recovery(request).native(
             source.send,
-            request.app.state.db_pool,
+            gateway_state(request).db_pool,
             key,
             agent_id,
             file_ids=body.file_ids,
@@ -141,8 +158,8 @@ async def upload(
             provenance=request_inbound_provenance(request),
             sent_at=sent_at,
             batch_id=batch_id,
-            local_machine=request.app.state.machine.name(),
-            home=request.app.state.gateway_process.home,
+            local_machine=gateway_state(request).machine.name(),
+            home=gateway_state(request).gateway_process.home,
             upload_root=config.upload_staging_root,
         )
     except UploadDeliveryConflictError as exc:
@@ -151,7 +168,7 @@ async def upload(
         raise HTTPException(413, str(exc)) from exc
     except ValidationError as exc:
         raise HTTPException(422, "invalid immutable upload manifest") from exc
-    request.app.state.upload_recovery.nudge()
+    _recovery(request).nudge()
     return accepted
 
 
@@ -161,8 +178,8 @@ async def status(
     request: Request,
     batch_id: Annotated[str, Path(pattern=BATCH_ID_PATTERN)],
 ) -> DeliveryStatus:
-    return await request.app.state.upload_recovery.native(
-        source.status, request.app.state.db_pool, agent_id, batch_id
+    return await _recovery(request).native(
+        source.status, gateway_state(request).db_pool, agent_id, batch_id
     )
 
 
@@ -174,14 +191,14 @@ async def object_file(
     ordinal: Annotated[int, Path(ge=0)],
 ) -> FileResponse:
     try:
-        path, item = await request.app.state.upload_recovery.native(
+        path, item = await _recovery(request).native(
             source.served_object,
-            request.app.state.db_pool,
+            gateway_state(request).db_pool,
             agent_id,
             batch_id,
             ordinal,
-            local_machine=request.app.state.machine.name(),
-            home=request.app.state.gateway_process.home,
+            local_machine=gateway_state(request).machine.name(),
+            home=gateway_state(request).gateway_process.home,
         )
     except UploadDeliveryConflictError as exc:
         raise HTTPException(409, str(exc)) from exc

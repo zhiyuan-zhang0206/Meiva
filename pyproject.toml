@@ -674,6 +674,11 @@ reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "gateway/upload_delivery"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "gateway/cluster"
 reportAny = "error"
 reportExplicitAny = "error"

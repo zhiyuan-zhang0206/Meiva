@@ -132,6 +132,9 @@ def plan_heartbeat(state: HeartbeatState, cadence: HeartbeatCadence) -> Heartbea
     idle_clock = state.impersonation_since or state.last_active_at
     idle_due_at = idle_clock + timedelta(seconds=cadence.idle_threshold_s + jitter_s)
     level = 0 if state.impersonation_since is not None else state.backoff_level
+    # meiva:note
+    # `1 << level`, not `2**level`: typeshed types `int ** int` with a non-literal exponent as
+    # `Any`, and `level` is never negative, so the two are equal. Keep the shift.
     reminder_interval_s = min(cadence.interval_s * (1 << level), cadence.backoff_max_interval_s)
     reminder_due_at = (
         state.last_heartbeat_at + timedelta(seconds=reminder_interval_s)

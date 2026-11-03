@@ -1,6 +1,7 @@
 exports = ["router.py", "worker.py"]
 
 [uses]
+"router.py" = ["worker.py"]
 "tests" = ["failure_plan.py"]
 "worker.py" = ["failure_plan.py"]
 
