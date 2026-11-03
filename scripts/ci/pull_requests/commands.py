@@ -105,7 +105,7 @@ def _diagnose_command(
 
 
 def main(
-    argv: list[str] | None = None,
+    argv: list[str],
     *,
     host: Host,
     clock: Clock,

@@ -8,7 +8,7 @@ exports = ["diff_checks.py", "diff_checks_pytest.py", "tests"]
 "tests" = ["diff_checks.py", "diff_checks_cache.py"]
 
 [roots]
-"diff_checks.py" = { kinds = ["environ", "pid"], why = "receipt entry point composes what each judged child inherits: it reads the launcher's environment once in main() and hands every child the CI contract (that environment minus MEIVA_*), because a child that inherits the operator's shell reports the shell's state as if it were the change's (#5907); it also names its own interpreter (sys.executable) for the command it builds" }
+"diff_checks.py" = { kinds = ["environ", "pid", "argv"], why = "receipt entry point composes what each judged child inherits: it reads the launcher's environment once in main() and hands every child the CI contract (that environment minus MEIVA_*), because a child that inherits the operator's shell reports the shell's state as if it were the change's (#5907); it also names its own interpreter (sys.executable) for the command it builds; the __main__ guard reads argv[1:] once and hands it to main" }
 
 [debt.ambient-read]
 "diff_checks_plan.py#environ shutil.which()" = { count = 2, owner = "#8237", until = "waits for the module's top level to take the program path, or the search path, from its caller: it asks PATH for the program itself" }

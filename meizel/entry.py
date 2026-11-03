@@ -31,7 +31,7 @@ def open_repository(root: Path) -> GitRepo:
 
 # meiva:note
 # Run one checker command from argv and return the process exit status.
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     args = cli.build_parser().parse_args(argv)
     if args.jobs is None:
         # meiva:note

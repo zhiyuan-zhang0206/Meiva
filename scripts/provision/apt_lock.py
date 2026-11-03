@@ -93,7 +93,7 @@ def wait_for_lock(path: Path, timeout: float, interval: float) -> tuple[bool, fl
         waited += interval
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Wait for the dpkg frontend lock, bounded.")
     parser.add_argument("--lock", type=Path, default=DEFAULT_LOCK)
     parser.add_argument("--timeout", type=float, default=120.0)
@@ -124,4 +124,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

@@ -70,6 +70,7 @@ class _Frame:
     wrapper: bool
     reads: tuple[Acquisition, ...] = ()
     caller: frozenset[str] = frozenset()
+    optional: frozenset[str] = frozenset()
 
 
 def _called_name(callee: ast.expr) -> str:
@@ -176,6 +177,38 @@ def _caller_names(function: ast.FunctionDef | ast.AsyncFunctionDef) -> frozenset
 
 
 # meiva:note
+# The parameters of one function that default to `None` and that its body never rebinds. Such a
+# name is the process's command line in disguise when it is handed on to a parser:
+# `def main(argv=None): parser.parse_args(argv)` makes argparse read `sys.argv[1:]` itself. A name
+# the body binds again (`argv = [] if argv is None else argv`) is not followed, because the
+# analysis does not know what it holds afterwards.
+def _optional_parameters(function: ast.FunctionDef | ast.AsyncFunctionDef) -> frozenset[str]:
+    args = function.args
+    positional = [*args.posonlyargs, *args.args]
+    optional = {
+        argument.arg
+        for argument, default in zip(
+            positional[len(positional) - len(args.defaults) :], args.defaults, strict=True
+        )
+        if _is_none(default)
+    }
+    optional |= {
+        argument.arg
+        for argument, default in zip(args.kwonlyargs, args.kw_defaults, strict=True)
+        if default is not None and _is_none(default)
+    }
+    if not optional:
+        return frozenset()
+    rebound = {
+        node.id
+        for statement in _own_nodes(function)
+        for node in ast.walk(statement)
+        if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load)
+    }
+    return frozenset(optional - rebound)
+
+
+# meiva:note
 # The names every method receives as its receiver; the analysis follows no attributes.
 _RECEIVERS = frozenset({"self", "cls"})
 
@@ -257,6 +290,7 @@ class AmbientRecorder:
                 calls,
                 wrapper=False,
                 caller=_caller_names(function) if expands else frozenset(),
+                optional=_optional_parameters(function),
             )
         )
         self._reads.append([])
@@ -328,6 +362,22 @@ class AmbientRecorder:
             self._add(call.lineno, judgment.kind, f"{callee}()")
 
     # meiva:note
+    # Whether the value that spares an argument-vector read is the function's own parameter that
+    # defaults to `None`: `parse_args(argv)` in `def main(argv=None)` hands argparse a value that
+    # may be absent, and argparse then reads `sys.argv[1:]`, so the call is the same acquisition as
+    # `parse_args()`. Only the facts of this one function are used; whether any caller passes the
+    # list is not asked.
+    def _optional_argument(self, kind: KindName, unless: Unless | None, call: ast.Call) -> bool:
+        if kind != AmbientKind.ARGV or unless is None or not self._open:
+            return False
+        handed = next(
+            (keyword.value for keyword in call.keywords if keyword.arg == unless.parameter), None
+        )
+        if handed is None and unless.position is not None and len(call.args) > unless.position:
+            handed = call.args[unless.position]
+        return isinstance(handed, ast.Name) and handed.id in self._open[-1].optional
+
+    # meiva:note
     # A method call on a receiver of no resolved type, judged by its name (`parser.parse_args()`,
     # `moment.astimezone()`, `Path("~").expanduser()`): the call that is given nothing reads the world.
     # A path built from the function's own parameters is the caller's value, not a read.
@@ -336,7 +386,11 @@ class AmbientRecorder:
         if callee is not None or not isinstance(func, ast.Attribute):
             return
         method = METHOD_READS.get(func.attr)
-        if method is None or _spares(call, method.unless):
+        if method is None:
+            return
+        if _spares(call, method.unless) and not self._optional_argument(
+            method.kind, method.unless, call
+        ):
             return
         if method.caller_exempt and self._from_caller(func.value):
             return

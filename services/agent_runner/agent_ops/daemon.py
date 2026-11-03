@@ -676,7 +676,7 @@ async def serve_ops_daemon(
         boot.remove_pidfile(config, runtime=runtime_dir)
 
 
-def main(*, argv: list[str] | None = None) -> None:
+def main(*, argv: list[str]) -> None:
     argparse.ArgumentParser(description=__doc__).parse_args(argv)
     image = LoadedCommit.capture()
     home = paths.meiva_home()
@@ -768,4 +768,4 @@ def main(*, argv: list[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
-    main(argv=[])
+    main(argv=sys.argv[1:])

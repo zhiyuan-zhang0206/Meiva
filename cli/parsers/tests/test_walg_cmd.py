@@ -85,6 +85,19 @@ def test_the_parser_reaches_every_verb() -> None:
     assert status.func.__name__ == "_h_backup_walg_status"
 
 
+# meiva:note
+# `--user` is the OS user that ran initdb on the source cluster, a property of the database and not
+# of the operator who restores it, so the verb never guesses it from the current user.
+def test_restore_without_the_user_of_the_source_cluster_is_a_usage_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as stopped:
+        build_parser().parse_args(["backup", "walg", "restore", "--dir", "/srv/restored"])
+
+    assert stopped.value.code == 2
+    assert "the following arguments are required: --user" in capsys.readouterr().err
+
+
 _STAMPED = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z \S")
 
 

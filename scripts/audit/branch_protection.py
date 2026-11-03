@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -89,7 +90,7 @@ def _audit(
 
 
 def main(
-    argv: list[str] | None = None,
+    argv: list[str],
     *,
     run_gh_fn: Callable[[list[str]], str] = run_gh,
 ) -> int:
@@ -129,4 +130,4 @@ def main(
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

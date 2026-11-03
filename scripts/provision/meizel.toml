@@ -4,5 +4,7 @@ exports = ["apt_lock.py", "check_git_hooks.py", "prepush_branch_diff.py", "prepu
 "tests" = ["apt_lock.py"]
 
 [roots]
+"apt_lock.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
+"check_git_hooks.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 "prepush_branch_diff.py" = { kinds = ["argv"], why = "Pre-push script entry: its __main__ block raises SystemExit with main(sys.argv)" }
 "prepush_frontend.py" = { kinds = ["argv"], why = "Pre-push script entry: its __main__ block takes the `--base` form or the check name from sys.argv" }

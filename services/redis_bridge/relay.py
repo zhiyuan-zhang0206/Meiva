@@ -423,7 +423,7 @@ def run_service(service: RelayService) -> None:
         service.stop()
 
 
-def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--listen-host", required=True)
     parser.add_argument("--listen-port", required=True, type=int)
@@ -432,7 +432,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: Sequence[str] | None = None) -> None:
+def main(argv: Sequence[str]) -> None:
     args = _parse_args(argv)
     service = RelayService(
         (args.listen_host, args.listen_port), (args.backend_host, args.backend_port)
@@ -454,4 +454,4 @@ def main(argv: Sequence[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

@@ -33,7 +33,7 @@ def _lines(path: Path) -> Iterator[str]:
         yield from stream
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=_DESCRIPTION)
     parser.add_argument("events", nargs="+", type=Path, help="JSONL event mirror files")
     parser.add_argument("--start", required=True, type=timestamp)
@@ -51,4 +51,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

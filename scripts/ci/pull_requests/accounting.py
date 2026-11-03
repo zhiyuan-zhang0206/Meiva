@@ -403,7 +403,7 @@ def _print_entries(entries: list[dict[str, Any]]) -> None:
 
 
 # meiva:link scripts/ci/pull_requests/docs/ci-usage.meiva.okf.md
-def main(argv: list[str] | None = None, *, host: Host) -> int:
+def main(argv: list[str], *, host: Host) -> int:
     parser = argparse.ArgumentParser(description="CI usage attribution and ledger")
     parser.add_argument(
         "--repo", default=DEFAULT_REPO, help=f"owner/repo (default: {DEFAULT_REPO})"
@@ -444,4 +444,4 @@ def main(argv: list[str] | None = None, *, host: Host) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(host=Host.system(environ=os.environ)))
+    sys.exit(main(sys.argv[1:], host=Host.system(environ=os.environ)))

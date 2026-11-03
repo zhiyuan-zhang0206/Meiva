@@ -17,7 +17,7 @@ from scripts.model_registry.plugin_price_sync import lattice_drift
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         description="Compare built-in provider prices with the archive."
     )
@@ -41,4 +41,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

@@ -7,4 +7,4 @@ exports = ["relay.py"]
 "__init__.py" = "strict"
 
 [roots]
-"relay.py" = { kinds = ["clock"], why = "The relay is a whole process in one stdlib-only file (the root supervisor runs it under /usr/bin/python3, so it imports nothing from the project): it timestamps its own log lines with the wall clock, once per message, and composes nothing else" }
+"relay.py" = { kinds = ["clock", "argv"], why = "The relay is a whole process in one stdlib-only file (the root supervisor runs it under /usr/bin/python3, so it imports nothing from the project): it timestamps its own log lines with the wall clock, once per message, and composes nothing else; the __main__ guard reads argv[1:] once and hands it to main" }

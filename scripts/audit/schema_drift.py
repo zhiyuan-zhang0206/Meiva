@@ -50,7 +50,7 @@ def _allow_text(allow: Path | None) -> str:
     return allow_text or ""
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     args = _parse_args(argv)
     if args.dsn is not None:
         dsn = str(args.dsn)
@@ -74,4 +74,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

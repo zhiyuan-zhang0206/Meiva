@@ -435,7 +435,7 @@ def plan(
     return render_plan(change, groups, skip_tests=skip_tests, mode=mode)
 
 
-def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", default="origin/main", help="the commit to compare HEAD with")
     parser.add_argument(
@@ -468,7 +468,7 @@ def _validated_mode(raw: object) -> CheckMode:
     raise ValueError(f"unsupported diff_checks mode: {raw!r}")
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str]) -> int:
     arguments = parse_args(argv)
     mode = _validated_mode(arguments.mode)
     root = arguments.repo_root.resolve()
@@ -507,4 +507,4 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

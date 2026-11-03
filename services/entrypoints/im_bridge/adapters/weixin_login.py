@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -183,7 +184,7 @@ async def qr_login(
             await client.aclose()
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     """CLI entry: ``python -m services.entrypoints.im_bridge.adapters.weixin_login --login``."""
     parser = argparse.ArgumentParser(
         prog="python -m services.entrypoints.im_bridge.adapters.weixin_login",
@@ -206,4 +207,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

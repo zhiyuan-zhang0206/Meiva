@@ -500,8 +500,10 @@ def emit_events(snapshot: dict[str, Any], *, pipeline: EventPipeline, home: Path
     telemetry.sync()
 
 
-def main(argv: list[str] | None = None, *, run_process: GhProcess, home: Path) -> int:
-    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
+def main(argv: list[str], *, run_process: GhProcess, home: Path) -> int:
+    parser = argparse.ArgumentParser(
+        description="Sample the repository's pull-request merge flow into OTLP gauges."
+    )
     parser.add_argument("--repo", default=DEFAULT_REPO, help="owner/name to sample")
     parser.add_argument(
         "--window-days",
@@ -589,4 +591,4 @@ def main(argv: list[str] | None = None, *, run_process: GhProcess, home: Path) -
 if __name__ == "__main__":
     from base.paths import meiva_home
 
-    sys.exit(main(run_process=subprocess.run, home=meiva_home()))
+    sys.exit(main(sys.argv[1:], run_process=subprocess.run, home=meiva_home()))

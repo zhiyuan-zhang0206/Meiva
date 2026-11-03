@@ -366,7 +366,7 @@ def dispatch_parsed(
 
 
 def main(
-    argv: list[str] | None = None,
+    argv: list[str],
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> int:
@@ -407,7 +407,7 @@ def operator_producer(
 # Run one command; `producer_factory(database_factory, machine, home)` builds its producer and
 # `open_database(config, gate, direct_url)` every database handle of the command.
 def run_command(
-    argv: list[str] | None,
+    argv: list[str],
     *,
     retained_children: list[subprocess.Popen[bytes]] | None,
     producer_factory: ProducerFactory,
@@ -418,7 +418,6 @@ def run_command(
     # it to the end of the log, out of order against its children's unbuffered output.
     ensure_line_buffered_stdio()
     normalize_process_profile()
-    args_in = sys.argv[1:] if argv is None else argv
     # meiva:note
     # The home this command acts on is read here, once, before anything else. `declared` is the
     # path as the environment spells it (a symlinked home is refused when it is created); `home`
@@ -433,15 +432,15 @@ def run_command(
     from cli.preflight import check_own_checkout
 
     checkout = Path(__file__).resolve().parents[1]
-    rc = check_own_checkout(args_in, checkout, home=declared)
+    rc = check_own_checkout(argv, checkout, home=declared)
     if rc is not None:
         return rc
-    if args_in and args_in[0] in _LITE_VERBS:
-        opt_into_lite_config(args_in, environ=os.environ, home=declared)
-    args = parse_command_args(args_in, retained_children=retained_children)
+    if argv and argv[0] in _LITE_VERBS:
+        opt_into_lite_config(argv, environ=os.environ, home=declared)
+    args = parse_command_args(argv, retained_children=retained_children)
     return dispatch_parsed(
         args,
-        args_in,
+        argv,
         declared=declared,
         checkout=checkout,
         producer_factory=producer_factory,
@@ -454,7 +453,7 @@ def entry() -> int:
     from base.log import prepare_process_logging
 
     prepare_process_logging()
-    return main()
+    return main(sys.argv[1:])
 
 
 if __name__ == "__main__":

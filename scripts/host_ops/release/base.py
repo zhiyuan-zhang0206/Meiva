@@ -88,7 +88,7 @@ def verify_release_base(
     return Verdict(ok=False, reason="no-gated-ancestor")
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(
         description="Verify that a revision descends from a certified release tag."
     )
@@ -141,4 +141,4 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

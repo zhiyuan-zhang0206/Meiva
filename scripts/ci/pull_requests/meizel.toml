@@ -8,15 +8,15 @@ exports = ["accounting.py", "classify_paths.py", "commands.py", "export_process.
 "pr_flow_export.py" = ["export_process.py", "gh_process.py"]
 "runs_api.py" = ["gh_process.py"]
 "runs_export.py" = ["export_process.py", "gh_process.py", "runs_api.py"]
-"tests" = ["accounting.py", "commands.py", "diagnose.py", "export_process.py", "gh_process.py", "job_rerun.py", "monitor.py", "runs_api.py", "runs_export.py", "status.py"]
+"tests" = ["accounting.py", "commands.py", "diagnose.py", "export_process.py", "gh_process.py", "job_rerun.py", "monitor.py", "pr_flow_export.py", "runs_api.py", "runs_export.py", "status.py"]
 "watch_pr.py" = ["status.py"]
 
 [roots]
-"accounting.py" = { kinds = ["clock", "environ", "platform"], why = "CLI entrypoint resolves the current UTC timestamp for --report rollups; builds the host of this process with Host.system(), handing it the process environment" }
+"accounting.py" = { kinds = ["clock", "environ", "platform", "argv"], why = "CLI entrypoint resolves the current UTC timestamp for --report rollups; builds the host of this process with Host.system(), handing it the process environment; the __main__ guard reads argv[1:] once and hands it to main" }
 "classify_paths.py" = { kinds = ["cwd", "argv"], why = "CI classify entrypoint resolves the checked-out repository root from cwd; it also reads its command line (argv) in its `__main__` guard, as the process entry" }
 "commands.py" = { kinds = ["environ"], why = "CLI entrypoint hands the process environment to the owner-operations dispatch; it is not deployment configuration" }
 "export_process.py" = { kinds = ["db", "settings"], why = "Tool entry composes its process resources from the launch configuration" }
 "plan_file_shards.py" = { kinds = ["argv"], why = "CI script entry: its __main__ block raises SystemExit with main(sys.argv[1:])" }
-"pr_flow_export.py" = { kinds = ["clock", "home", "settings"], why = "CLI entrypoint resolves the current UTC timestamp, builds the process clock from the settings, resolves the home it operates once in its __main__ block" }
-"runs_export.py" = { kinds = ["clock", "home", "settings"], why = "CLI entrypoint resolves the current UTC timestamp for trailing-window sampling, builds the process clock from the settings and resolves the home it operates once in its __main__ block, for its state directory and the event writer" }
+"pr_flow_export.py" = { kinds = ["clock", "home", "settings", "argv"], why = "CLI entrypoint resolves the current UTC timestamp, builds the process clock from the settings, resolves the home it operates once in its __main__ block; the __main__ guard reads argv[1:] once and hands it to main" }
+"runs_export.py" = { kinds = ["clock", "home", "settings", "argv"], why = "CLI entrypoint resolves the current UTC timestamp for trailing-window sampling, builds the process clock from the settings and resolves the home it operates once in its __main__ block, for its state directory and the event writer; the __main__ guard reads argv[1:] once and hands it to main" }
 "watch_pr.py" = { kinds = ["environ", "home", "platform", "settings"], why = "watcher template resolves the home once to place the verdict file in the launching agent's workspace; builds the process clock from the settings; builds the host of this process with Host.system(), handing it the process environment" }

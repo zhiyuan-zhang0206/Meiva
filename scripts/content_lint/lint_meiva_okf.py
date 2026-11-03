@@ -529,7 +529,7 @@ def _report(all_errors: dict[str, list[LintError]], repo_root: Path, n_files: in
     return error_count
 
 
-def main(argv: Sequence[str] | None = None, *, check_layer: bool = True):
+def main(argv: Sequence[str], *, check_layer: bool = True):
     parser = argparse.ArgumentParser(description="Lint Meiva OKF document format")
     parser.add_argument(
         "paths", nargs="*", help="Files or directories to lint (default: repo root)"
@@ -565,4 +565,4 @@ def main(argv: Sequence[str] | None = None, *, check_layer: bool = True):
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])

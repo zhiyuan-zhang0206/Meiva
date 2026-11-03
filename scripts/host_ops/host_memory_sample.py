@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import shutil
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -126,7 +127,7 @@ def default_cgroup_root() -> Path:
     return Path("/sys/fs/cgroup/user.slice") / f"user-{os.getuid()}.slice"
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Append one host memory sample as JSON.")
     parser.add_argument("--cgroup-root", default=str(default_cgroup_root()))
     parser.add_argument("--pressure", default="/proc/pressure/memory")
@@ -151,4 +152,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

@@ -440,7 +440,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(
-    argv: list[str] | None = None,
+    argv: list[str],
     *,
     read_member: MemberReader = _gh_text,
     read_commit: CommitReader = _gh_pull_requests_of,
@@ -696,4 +696,4 @@ def _append(path: Path, text: str) -> None:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

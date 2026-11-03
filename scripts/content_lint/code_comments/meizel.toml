@@ -10,4 +10,5 @@
 "typescript_index.py" = ["check.py", "model.py"]
 
 [roots]
+"__main__.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 "cli.py" = { kinds = ["cwd", "pid"], why = "CLI entrypoint resolves the enclosing Git checkout from the current working directory when --repo is omitted; it also reads its standard input" }

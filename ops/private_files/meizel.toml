@@ -10,4 +10,4 @@
 "verdicts.py" = "strict"
 
 [roots]
-"__main__.py" = { kinds = ["home"], why = "Operator entry of the private-files check resolves the home it verifies when no --root is given" }
+"__main__.py" = { kinds = ["home", "argv"], why = "Operator entry of the private-files check resolves the home it verifies when no --root is given; the __main__ guard reads argv[1:] once and hands it to main" }

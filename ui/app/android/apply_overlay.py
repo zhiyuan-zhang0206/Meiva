@@ -259,7 +259,7 @@ def apply(overlay_dir: Path, gen_dir: Path) -> None:
     )
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     overlay_dir = Path(__file__).resolve().parent
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -274,4 +274,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

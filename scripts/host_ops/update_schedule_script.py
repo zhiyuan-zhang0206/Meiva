@@ -182,7 +182,7 @@ def positive_id(value: str) -> int:
     return result
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("schedule_id", type=positive_id)
     parser.add_argument("--home", required=True, type=Path)
@@ -212,4 +212,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

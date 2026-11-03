@@ -158,7 +158,7 @@ def _parse_args(argv: Sequence[str] | None) -> CliArgs:
 # meiva:note
 # The operator command (`python -m ops.private_files verify`) over the home its entry resolved; the
 # home matters only when no `--root` was given.
-def main(argv: Sequence[str] | None = None, *, home: Path) -> int:
+def main(argv: Sequence[str], *, home: Path) -> int:
     args = _parse_args(argv)
     root = args.root if args.root is not None else home / "source"
     outcomes = verify(root, args.manifest)

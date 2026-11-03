@@ -33,6 +33,15 @@ Three kinds of entry carry more than a kind:
   `parser.parse_args()` reads `sys.argv`, `moment.astimezone()` the host's zone,
   `path.absolute()` and `Path("~").expanduser()` the working directory and the home. A path built
   from the function's own parameters is the caller's value, so it reads nothing.
+- An argument-vector method handed a parameter that defaults to `None` is the same read as one
+  handed nothing: `def main(argv=None): parser.parse_args(argv)` makes argparse fall back to
+  `sys.argv[1:]`, so the call is an `argv` acquisition. Only the function's own facts decide: the
+  first argument is a `Name` that is a parameter of the enclosing function with a `None` default
+  and the body never binds it again (`argv = [] if argv is None else argv` is a decision the
+  analysis does not follow, so that form records nothing). A required parameter
+  (`def main(argv: list[str])`) records nothing, and no caller is asked. This is the rule that
+  `main(argv)` is required at every entry: a `None` that argparse turns into the process command
+  line counts like the `sys.argv[1:] if argv is None else argv` it hides.
 
 
 ## Closed by construction

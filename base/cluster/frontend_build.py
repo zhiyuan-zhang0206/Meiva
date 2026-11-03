@@ -160,7 +160,7 @@ def ensure_build(
             assert_never(decision.action)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="base.cluster.frontend_build")
     sub = parser.add_subparsers(dest="command", required=True)
     ensure = sub.add_parser("ensure", help="build the frontend unless its inputs are unchanged")
@@ -178,4 +178,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

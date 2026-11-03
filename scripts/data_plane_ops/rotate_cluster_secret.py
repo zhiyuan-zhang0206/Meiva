@@ -211,7 +211,7 @@ def _save(home: Path) -> Callable[[Rotation], None]:
     return save
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     from base.paths import meiva_home
 
     parser = argparse.ArgumentParser(description="Rotate the gateway's MEIVA_CLUSTER_SECRET.")
@@ -246,4 +246,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

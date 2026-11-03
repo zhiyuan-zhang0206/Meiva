@@ -15,5 +15,6 @@ exports = ["check_model_updates.py", "check_plugin_price_drift.py", "update_mode
 "update_model_pricing.py" = ["plugin_price_sync.py"]
 
 [roots]
-"check_model_updates.py" = { kinds = ["environ", "home"], why = "tracker selects provider API-key aliases dynamically and must prefer the live process env before its `.env` fallback; main() resolves the home once for the tracker state directory and the model catalog" }
-"update_model_pricing.py" = { kinds = ["clock"], why = "CLI entrypoint stamps provisional pricing updates and selects the active archive period against current UTC time" }
+"check_model_updates.py" = { kinds = ["environ", "home", "argv"], why = "tracker selects provider API-key aliases dynamically and must prefer the live process env before its `.env` fallback; main() resolves the home once for the tracker state directory and the model catalog; the __main__ guard reads argv[1:] once and hands it to main" }
+"check_plugin_price_drift.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
+"update_model_pricing.py" = { kinds = ["clock", "argv"], why = "CLI entrypoint stamps provisional pricing updates and selects the active archive period against current UTC time; the __main__ guard reads argv[1:] once and hands it to main" }

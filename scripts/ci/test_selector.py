@@ -677,7 +677,7 @@ def _forced_full(classes: dict[str, PathClass], full_estimate: float) -> Selecti
     return None
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str]) -> int:
     """Run the selector CLI and print either JSON or a concise audit summary."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--changed-files", type=Path)
@@ -773,4 +773,4 @@ def _plugin_files(repo_root: Path) -> set[str]:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

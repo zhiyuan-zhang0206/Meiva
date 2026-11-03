@@ -11,6 +11,7 @@ import json
 import os
 import re
 import socket
+import sys
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from functools import partial
@@ -741,7 +742,7 @@ def _write_report(directory: Path, markdown: str, payload: dict[str, object]) ->
 
 
 def main(
-    argv: list[str] | None = None,
+    argv: list[str],
     *,
     env_lookup: Callable[[str], str | None] | None = None,
     model_fetcher: Callable[[SourceDescriptor, str], list[str]] | None = None,
@@ -795,4 +796,4 @@ def main(
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

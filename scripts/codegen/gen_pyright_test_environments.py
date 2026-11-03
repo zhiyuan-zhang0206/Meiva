@@ -189,7 +189,7 @@ def _tracked_python_files(repo_root: Path) -> list[str]:
     return [path for path in result.stdout.split("\0") if path]
 
 
-def main(argv: list[str] | None = None, *, repo_root: Path = _REPO_ROOT) -> int:
+def main(argv: list[str], *, repo_root: Path = _REPO_ROOT) -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n", 1)[0])
     parser.add_argument(
         "--check", action="store_true", help="exit 1 if pyproject.toml is stale; write nothing"
@@ -213,4 +213,4 @@ def main(argv: list[str] | None = None, *, repo_root: Path = _REPO_ROOT) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))
