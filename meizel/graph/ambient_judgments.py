@@ -26,13 +26,24 @@ __all__ = [
 
 
 # meiva:note
-# What reading a name is, and why: `kind` None is "not an ambient read".
+# What reading a name is, and why: no `kinds` is "not an ambient read". A call that reads several
+# channels (`email.utils.make_msgid` the clock, the process id, entropy and the host name) lists
+# every one of them, and each is acquired at the call. An `unless` clause spares the call as a
+# whole, so it is written only where the parameter spares every kind the entry lists.
 @dataclass(frozen=True, slots=True)
 class Judgment:
-    kind: AmbientKind | None
+    kinds: tuple[AmbientKind, ...]
     why: str
     unless: Unless | None = None
     interval: bool = False
+
+    def __post_init__(self) -> None:
+        if len(set(self.kinds)) != len(self.kinds):
+            raise ValueError(f"a kind is listed twice in {self.kinds!r}")
+        if self.interval and self.kinds != (AmbientKind.CLOCK,):
+            raise ValueError("an interval clock reads the clock and nothing else")
+        if self.unless is not None and not self.kinds:
+            raise ValueError("an `unless` clause spares a read, and this name reads nothing")
 
 
 # meiva:note
@@ -47,16 +58,22 @@ class Group:
 K = AmbientKind
 
 
+# meiva:note
+# A group of names with one judgment. `kind` is the one kind the names read, `None` when they read
+# nothing, or a tuple of two or more kinds when one call reads several channels.
 def g(
     module: str,
     names: str,
-    kind: AmbientKind | None,
+    kind: AmbientKind | tuple[AmbientKind, ...] | None,
     why: str,
     *,
     unless: Unless | None = None,
     interval: bool = False,
 ) -> Group:
-    return Group(module, tuple(names.split()), Judgment(kind, why, unless, interval))
+    if isinstance(kind, tuple) and len(kind) < 2:
+        raise ValueError("a judgment of one kind is spelled as the kind, not as a tuple")
+    kinds = () if kind is None else kind if isinstance(kind, tuple) else (kind,)
+    return Group(module, tuple(names.split()), Judgment(kinds, why, unless, interval))
 
 
 def later(position: int, parameter: str) -> Unless:

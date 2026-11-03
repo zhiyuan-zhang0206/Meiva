@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import ctypes.util
 import datetime
 import email.utils
 import fileinput
@@ -36,9 +37,11 @@ import threading
 import time
 import types
 import uuid
+import webbrowser
 import zoneinfo
 
 _MODULES: dict[str, types.ModuleType] = {
+    "ctypes.util": ctypes.util,
     "datetime": datetime,
     "email.utils": email.utils,
     "fileinput": fileinput,
@@ -65,6 +68,7 @@ _MODULES: dict[str, types.ModuleType] = {
     "threading": threading,
     "time": time,
     "uuid": uuid,
+    "webbrowser": webbrowser,
     "zoneinfo": zoneinfo,
 }
 

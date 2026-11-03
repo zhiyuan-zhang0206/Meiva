@@ -4,4 +4,4 @@ exports = ["transcribe.py"]
 "transcribe_plan.py" = "strict"
 
 [roots]
-"transcribe.py" = { kinds = ["settings", "argv", "environ"], why = "Audio transcription CLI script reads platform configuration at entry; it also reads its command line (argv) once, as the process entry, finds a program on PATH, and creates scratch space under the temporary directory (TMPDIR)" }
+"transcribe.py" = { kinds = ["settings", "argv", "environ", "random"], why = "Audio transcription CLI script reads platform configuration at entry; it also reads its command line (argv) once, as the process entry, finds a program on PATH, and creates scratch space under a random name in the temporary directory (TMPDIR)" }

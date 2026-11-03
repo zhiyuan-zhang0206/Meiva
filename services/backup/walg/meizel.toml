@@ -26,3 +26,4 @@ exports = ["archive.py", "check.py", "config.py", "probe.py", "restore.py", "sta
 
 [debt.ambient-read]
 "check.py#environ tempfile.TemporaryDirectory()" = { count = 1, owner = "#8237", until = "waits for `_storage_round_trip` to take the parent of its scratch directory from its caller: it creates it where TMPDIR points" }
+"check.py#random tempfile.TemporaryDirectory()" = { count = 1, owner = "#8237", until = "waits for `_storage_round_trip` to take the parent of its scratch directory from its caller: it creates it under a random name wherever TMPDIR points" }

@@ -13,4 +13,6 @@ exports = ["feed.py"]
 "smtp.py" = { kinds = ["clock"], why = "SMTP draft helper stamps IMAP APPEND internaldate with current epoch time" }
 
 [debt.ambient-read]
+"smtp.py#pid email.utils.make_msgid" = { count = 1, owner = "#8237", until = "waits for `_compose` to take the message id from its caller: it asks `email.utils.make_msgid` for one" }
+"smtp.py#platform email.utils.make_msgid" = { count = 1, owner = "#8237", until = "waits for `_compose` to take the message id from its caller: it asks `email.utils.make_msgid` for one (the host name is recorded although `domain` is given, because the table cannot spare one kind of an entry)" }
 "smtp.py#random email.utils.make_msgid" = { count = 1, owner = "#8237", until = "waits for `_compose` to take the message id from its caller: it asks `email.utils.make_msgid` for one" }

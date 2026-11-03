@@ -12,23 +12,32 @@ tags:
 `ambient_surface.py` holds, for the modules that carry the channels (`CHANNEL_MODULES`: `os`,
 `os.path`, `sys`, `time`, `datetime`, `platform`, `socket`, `getpass`, `pwd`, `grp`, `tempfile`,
 `shutil`, `locale`, `uuid`, `random`, `secrets`, `threading`, `multiprocessing`, `resource`,
-`sysconfig`, `pathlib`, `zoneinfo`, `fileinput`, `site`, `email.utils`, `netrc`, `ssl`), one judgment for every
-public name, in groups of names that share a reason. The builtin `input` is judged as the name
+`sysconfig`, `pathlib`, `zoneinfo`, `fileinput`, `site`, `email.utils`, `netrc`, `ssl`, `ctypes.util`,
+`webbrowser`), one judgment for every public name, in groups of names that share a reason. The builtin `input` is judged as the name
 `builtins.input` (the scanner spells an unshadowed `input` that way); `builtins` is not a channel
 module, because its other names read nothing. A judgment is a kind, or `None` with the reason the name is not a read of the
 world: a type, a constant, an effect on files the purity layer judges, a function of its inputs.
 The scanner looks a dotted name up by its longest judged prefix (`os.environ.get` is judged as
 `os.environ`, `datetime.datetime.now` as itself).
 
-Three kinds of entry carry more than a kind:
+A call that reads several channels lists every kind (a tuple in `g(...)`) and is one acquisition per
+kind at the same line; the debt key `file#kind target` is unchanged, so one call is several keys. How
+an entry lists them, and the names that do, are in
+[[meizel/docs/ambient-surface-multiple-kinds.meiva.okf.md|the multiple kinds node]].
+
+Three forms of entry carry more than a kind:
 
 - A name with an `unless` clause (`tempfile.mkdtemp`, `shutil.which`, `time.strftime`,
   `datetime.fromtimestamp`) reads the world only when the call does not give the parameter a
   value. It is the clause a policy reader uses, read for the call: `mkdtemp(dir=base)` reads
   nothing, `mkdtemp()` reads `TMPDIR`, and an explicit `None` is still a read. A reference to the
-  name without a call acquires nothing.
+  name without a call acquires nothing. The clause spares the call as a whole, every kind the entry
+  lists: `mkdtemp(dir=base)` still draws a random name and records nothing, because the caller has
+  no argument that could hand that name in; `make_msgid(domain=...)` is spared only the host name,
+  so the entry has no clause and the host name is over-recorded
+  ([[meizel/docs/ambient-surface-multiple-kinds.meiva.okf.md|the multiple kinds node]] gives both).
 - An interval clock (`interval`) is the plain use of `time` for a deadline, a duration or a TTL; it
-  is a window onto the world only in a function that also waits ([[meizel/docs/ambient-kinds.meiva.okf.md|the ambient kinds node]] describes when).
+  is a window onto the world only in a function that also waits ([[meizel/docs/ambient-kinds-calls.meiva.okf.md|the node on what a call depends on]] describes when).
 - A method whose receiver the analysis cannot resolve, because it has no types (`METHOD_READS`):
   `parser.parse_args()` reads `sys.argv`, `moment.astimezone()` the host's zone,
   `path.absolute()` and `Path("~").expanduser()` the working directory and the home. A path built
@@ -64,8 +73,8 @@ never looked at:
   prefix pattern (`os.O_*`, `socket.AF_*`), because its members differ in nothing that matters,
   but a function a module gains later must be listed by hand, so that it cannot inherit a kind
   nobody chose.
-- A second test pins every name that carries a kind (`_READS`, 249 names written out by
-  hand, not derived from the table): moving `socket.if_nametoindex` into the network group, or
+- A second test pins every name that carries a kind, and the kinds it carries (`_READS`, written out
+  by hand, not derived from the table; a name of several kinds is listed under each): moving `socket.if_nametoindex` into the network group, or
   dropping it from the host group, turns it red, which the completeness test alone would not do
   when the name stays judged by some entry. The names each module defines are read from a child
   that runs `channel_module_names.py`, a script that imports the standard library only, in a

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import builtins
+import ctypes.util
 import datetime
 import email.utils
 import fileinput
@@ -32,6 +33,7 @@ import threading
 import time
 import types
 import uuid
+import webbrowser
 import zoneinfo
 from collections import Counter
 from functools import cache
@@ -40,6 +42,7 @@ from pathlib import Path
 import basedpyright
 import pytest
 
+from meizel.graph.ambient_judgments import Judgment, g, later
 from meizel.graph.ambient_surface import (
     CHANNEL_MODULES,
     INTERVAL_CLOCKS,
@@ -53,6 +56,7 @@ from meizel.graph.model import AmbientKind
 # meiva:note
 # The channel modules as objects, spelled with static imports.
 _MODULES: dict[str, types.ModuleType] = {
+    "ctypes.util": ctypes.util,
     "datetime": datetime,
     "email.utils": email.utils,
     "fileinput": fileinput,
@@ -79,6 +83,7 @@ _MODULES: dict[str, types.ModuleType] = {
     "threading": threading,
     "time": time,
     "uuid": uuid,
+    "webbrowser": webbrowser,
     "zoneinfo": zoneinfo,
 }
 
@@ -225,24 +230,33 @@ def test_no_channel_module_is_judged_by_a_bare_wildcard() -> None:
 
 
 # meiva:note
-# Every name the table judges a read, with the kind that was chosen for it, written out here by
+# Every name the table judges a read, with the kinds that were chosen for it, written out here by
 # hand and not derived from the table: moving a name to another group, dropping it from the group
-# that carries its kind, or adding a read the table's author did not mean fails here. The
-# completeness test alone would stay green when a name only changed groups.
+# that carries its kind, or adding a read the table's author did not mean fails here. A name that
+# reads several channels is listed under each of its kinds. The completeness test alone would stay
+# green when a name only changed groups.
 _READS: dict[AmbientKind, list[str]] = {
     AmbientKind.ARGV: (
         [
             "fileinput.FileInput",
             "fileinput.input",
+            "locale.getpreferredencoding",
+            "site.ENABLE_USER_SITE",
+            "site.check_enableusersite",
             "sys._xoptions",
             "sys.argv",
             "sys.flags",
             "sys.orig_argv",
             "sys.warnoptions",
+            "uuid.main",
+            "webbrowser.main",
         ]
     ),
     AmbientKind.ENVIRON: (
         [
+            "ctypes.util.find_library",
+            "ctypes.util.test",
+            "getpass.getuser",
             "locale.getdefaultlocale",
             "locale.getencoding",
             "locale.getlocale",
@@ -260,13 +274,24 @@ _READS: dict[AmbientKind, list[str]] = {
             "os.putenv",
             "os.reload_environ",
             "os.unsetenv",
+            "shutil.get_terminal_size",
             "shutil.which",
             "site.ENABLE_USER_SITE",
+            "site.USER_BASE",
+            "site.USER_SITE",
             "site.check_enableusersite",
+            "site.gethistoryfile",
+            "site.getuserbase",
+            "site.getusersitepackages",
             "ssl.create_default_context",
             "ssl.get_default_verify_paths",
             "sys.getfilesystemencodeerrors",
             "sys.getfilesystemencoding",
+            "sysconfig.get_config_var",
+            "sysconfig.get_config_vars",
+            "sysconfig.get_path",
+            "sysconfig.get_paths",
+            "sysconfig.get_platform",
             "tempfile.NamedTemporaryFile",
             "tempfile.SpooledTemporaryFile",
             "tempfile.TemporaryDirectory",
@@ -276,6 +301,14 @@ _READS: dict[AmbientKind, list[str]] = {
             "tempfile.mkdtemp",
             "tempfile.mkstemp",
             "tempfile.mktemp",
+            "webbrowser.get",
+            "webbrowser.main",
+            "webbrowser.open",
+            "webbrowser.open_new",
+            "webbrowser.open_new_tab",
+            "webbrowser.register",
+            "webbrowser.register_X_browsers",
+            "webbrowser.register_standard_browsers",
             "zoneinfo.TZPATH",
         ]
     ),
@@ -289,6 +322,7 @@ _READS: dict[AmbientKind, list[str]] = {
             "datetime.datetime.utcnow",
             "email.utils.formatdate",
             "email.utils.localtime",
+            "email.utils.make_msgid",
             "email.utils.mktime_tz",
             "os.times",
             "time.altzone",
@@ -313,6 +347,10 @@ _READS: dict[AmbientKind, list[str]] = {
             "time.time_ns",
             "time.timezone",
             "time.tzname",
+            "uuid.main",
+            "uuid.uuid1",
+            "uuid.uuid6",
+            "uuid.uuid7",
         ]
     ),
     AmbientKind.HOME: (
@@ -328,6 +366,10 @@ _READS: dict[AmbientKind, list[str]] = {
             "site.gethistoryfile",
             "site.getuserbase",
             "site.getusersitepackages",
+            "sysconfig.get_config_var",
+            "sysconfig.get_config_vars",
+            "sysconfig.get_path",
+            "sysconfig.get_paths",
         ]
     ),
     AmbientKind.CWD: (
@@ -346,6 +388,7 @@ _READS: dict[AmbientKind, list[str]] = {
     ),
     AmbientKind.PLATFORM: (
         [
+            "email.utils.make_msgid",
             "multiprocessing.cpu_count",
             "os.confstr",
             "os.cpu_count",
@@ -395,11 +438,18 @@ _READS: dict[AmbientKind, list[str]] = {
             "time.get_clock_info",
             "time.pthread_getcpuclockid",
             "uuid.getnode",
+            "uuid.main",
+            "uuid.uuid1",
+            "uuid.uuid6",
         ]
     ),
     AmbientKind.PID: (
         [
             "builtins.input",
+            "ctypes.util.dllist",
+            "email.utils.make_msgid",
+            "fileinput.FileInput",
+            "fileinput.input",
             "getpass.fallback_getpass",
             "getpass.getpass",
             "getpass.getuser",
@@ -411,6 +461,7 @@ _READS: dict[AmbientKind, list[str]] = {
             "multiprocessing.active_children",
             "multiprocessing.current_process",
             "multiprocessing.parent_process",
+            "netrc.netrc",
             "os.ctermid",
             "os.device_encoding",
             "os.get_terminal_size",
@@ -441,7 +492,9 @@ _READS: dict[AmbientKind, list[str]] = {
             "resource.getrusage",
             "resource.prlimit",
             "shutil.get_terminal_size",
+            "site.ENABLE_USER_SITE",
             "site.PREFIXES",
+            "site.check_enableusersite",
             "site.getsitepackages",
             "sys.__stdin__",
             "sys.base_exec_prefix",
@@ -452,6 +505,8 @@ _READS: dict[AmbientKind, list[str]] = {
             "sys.stderr.isatty",
             "sys.stdin",
             "sys.stdout.isatty",
+            "sysconfig.get_config_var",
+            "sysconfig.get_config_vars",
             "sysconfig.get_path",
             "sysconfig.get_paths",
             "threading.activeCount",
@@ -504,6 +559,15 @@ _READS: dict[AmbientKind, list[str]] = {
             "ssl.RAND_bytes",
             "ssl.RAND_pseudo_bytes",
             "ssl.RAND_status",
+            "tempfile.NamedTemporaryFile",
+            "tempfile.SpooledTemporaryFile",
+            "tempfile.TemporaryDirectory",
+            "tempfile.TemporaryFile",
+            "tempfile.mkdtemp",
+            "tempfile.mkstemp",
+            "tempfile.mktemp",
+            "uuid.getnode",
+            "uuid.main",
             "uuid.uuid1",
             "uuid.uuid4",
             "uuid.uuid6",
@@ -544,27 +608,84 @@ _NOT_READS: list[str] = [
 def test_a_name_is_judged_the_kind_that_was_chosen_for_it(dotted: str, kind: AmbientKind) -> None:
     reading = judged(dotted)
     assert reading is not None and reading.name == dotted
-    assert reading.judgment.kind is kind
+    assert kind in reading.judgment.kinds
+
+
+def _pinned_kinds() -> dict[str, frozenset[AmbientKind]]:
+    pinned: dict[str, set[AmbientKind]] = {}
+    for kind, names in _READS.items():
+        for name in names:
+            pinned.setdefault(name, set()).add(kind)
+    return {name: frozenset(kinds) for name, kinds in pinned.items()}
 
 
 def test_the_pinned_reads_are_exactly_the_reads_of_the_table() -> None:
     judged_as_reads = {
-        f"{group.module}.{name}"
+        f"{group.module}.{name}": frozenset(group.judgment.kinds)
         for group in groups()
-        if group.judgment.kind is not None
+        if group.judgment.kinds
         for name in group.names
     }
-    pinned = {name for names in _READS.values() for name in names}
-    assert sorted(judged_as_reads - pinned) == [], "pin these names in `_READS`"
-    assert sorted(pinned - judged_as_reads) == [], "these pinned names are no longer reads"
-    assert sum(len(names) for names in _READS.values()) == len(pinned), "a name is pinned twice"
+    pinned = _pinned_kinds()
+    assert sorted(judged_as_reads.keys() - pinned.keys()) == [], "pin these names in `_READS`"
+    assert sorted(pinned.keys() - judged_as_reads.keys()) == [], "these names are no longer reads"
+    assert {name for name in pinned if pinned[name] != judged_as_reads[name]} == set(), (
+        "these names read other kinds than the ones pinned"
+    )
+    assert sum(len(names) for names in _READS.values()) == sum(
+        len(kinds) for kinds in pinned.values()
+    ), "a name is pinned twice under one kind"
+
+
+# meiva:note
+# The calls that read several channels at once, with every channel written out: a caller that pays
+# one of them back still owes the others, and a table that records one kind per name loses them.
+_MULTIPLE: dict[str, frozenset[AmbientKind]] = {
+    "email.utils.make_msgid": frozenset(
+        {AmbientKind.CLOCK, AmbientKind.PID, AmbientKind.RANDOM, AmbientKind.PLATFORM}
+    ),
+    "tempfile.mkdtemp": frozenset({AmbientKind.ENVIRON, AmbientKind.RANDOM}),
+    "tempfile.mkstemp": frozenset({AmbientKind.ENVIRON, AmbientKind.RANDOM}),
+    "tempfile.NamedTemporaryFile": frozenset({AmbientKind.ENVIRON, AmbientKind.RANDOM}),
+    "getpass.getuser": frozenset({AmbientKind.ENVIRON, AmbientKind.PID}),
+    "uuid.uuid1": frozenset({AmbientKind.CLOCK, AmbientKind.PLATFORM, AmbientKind.RANDOM}),
+    "shutil.get_terminal_size": frozenset({AmbientKind.ENVIRON, AmbientKind.PID}),
+    "site.getuserbase": frozenset({AmbientKind.ENVIRON, AmbientKind.HOME}),
+    "sysconfig.get_path": frozenset({AmbientKind.PID, AmbientKind.ENVIRON, AmbientKind.HOME}),
+    "sysconfig.get_config_vars": frozenset(
+        {AmbientKind.PID, AmbientKind.ENVIRON, AmbientKind.HOME}
+    ),
+    "fileinput.input": frozenset({AmbientKind.ARGV, AmbientKind.PID}),
+    "netrc.netrc": frozenset({AmbientKind.HOME, AmbientKind.PID}),
+}
+
+
+@pytest.mark.parametrize(("dotted", "kinds"), sorted(_MULTIPLE.items()))
+def test_a_call_that_reads_several_channels_is_judged_every_one_of_them(
+    dotted: str, kinds: frozenset[AmbientKind]
+) -> None:
+    reading = judged(dotted)
+    assert reading is not None and reading.name == dotted
+    assert frozenset(reading.judgment.kinds) == kinds
+    assert len(reading.judgment.kinds) == len(kinds), "a kind is listed twice"
+
+
+def test_a_judgment_that_lists_a_kind_twice_or_reads_nothing_under_a_clause_is_refused() -> None:
+    with pytest.raises(ValueError, match="listed twice"):
+        Judgment((AmbientKind.CLOCK, AmbientKind.CLOCK), "twice")
+    with pytest.raises(ValueError, match="spelled as the kind"):
+        g("time", "time", (AmbientKind.CLOCK,), "a tuple of one kind")
+    with pytest.raises(ValueError, match="reads nothing"):
+        g("time", "time", None, "a clause on a name that reads nothing", unless=later(0, "x"))
+    with pytest.raises(ValueError, match="nothing else"):
+        g("time", "time", (AmbientKind.CLOCK, AmbientKind.PID), "two kinds", interval=True)
 
 
 @pytest.mark.parametrize("dotted", _NOT_READS)
 def test_a_representative_name_that_reads_nothing_is_judged_so(dotted: str) -> None:
     reading = judged(dotted)
     assert reading is not None and reading.name == dotted
-    assert reading.judgment.kind is None
+    assert reading.judgment.kinds == ()
 
 
 @pytest.mark.parametrize(
@@ -579,13 +700,13 @@ def test_a_representative_name_that_reads_nothing_is_judged_so(dotted: str) -> N
         ("os.path.abspath", "os.path.abspath", AmbientKind.CWD),
         ("platform.machine", "platform.machine", AmbientKind.PLATFORM),
         ("random.random", "random.random", AmbientKind.RANDOM),
-        ("getpass.getuser", "getpass.getuser", AmbientKind.PID),
+        ("getpass.getpass", "getpass.getpass", AmbientKind.PID),
     ],
 )
 def test_the_longest_judged_prefix_decides(dotted: str, name: str, kind: AmbientKind) -> None:
     reading = judged(dotted)
     assert reading is not None
-    assert (reading.name, reading.judgment.kind) == (name, kind)
+    assert (reading.name, reading.judgment.kinds) == (name, (kind,))
 
 
 @pytest.mark.parametrize(
@@ -601,7 +722,7 @@ def test_the_longest_judged_prefix_decides(dotted: str, name: str, kind: Ambient
 def test_a_name_that_reads_nothing_is_judged_not_ambient(dotted: str) -> None:
     reading = judged(dotted)
     assert reading is not None
-    assert reading.judgment.kind is None
+    assert reading.judgment.kinds == ()
 
 
 @pytest.mark.parametrize(

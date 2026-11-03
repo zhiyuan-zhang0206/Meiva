@@ -13,7 +13,8 @@
 # The channels that are not ambient kinds are judged by the other layers: the contents of files and
 # the network are effects (`impure-call`), and a name that only converts or compares values reads
 # nothing. A call that reads the world only when it is not handed a value carries an `unless` clause,
-# the one mechanism a policy reader uses.
+# the one mechanism a policy reader uses. A call that reads several channels at once lists every
+# kind (`kinds`), so that a caller which pays one of the reads back still has the others on its books.
 
 from __future__ import annotations
 
@@ -75,6 +76,7 @@ class MethodReading:
 # is `ambient-unjudged`. A module that is not here may still carry an entry (`psutil.Process`).
 CHANNEL_MODULES = frozenset(
     {
+        "ctypes.util",
         "datetime",
         "email.utils",
         "fileinput",
@@ -101,6 +103,7 @@ CHANNEL_MODULES = frozenset(
         "threading",
         "time",
         "uuid",
+        "webbrowser",
         "zoneinfo",
     }
 )
@@ -176,16 +179,29 @@ _HOST = (
         None,
         "a process, pool, queue, lock or start-method setting: an effect or a constructor",
     ),
-    g("uuid", "getnode", K.PLATFORM, "the host's hardware address"),
     g(
         "uuid",
-        "uuid1 uuid4 uuid6 uuid7 uuid8",
-        K.RANDOM,
-        "a version of UUID that draws from the clock, the host or entropy",
+        "getnode",
+        (K.PLATFORM, K.RANDOM),
+        "the host's hardware address, which is a random 48-bit number when the host yields none",
     ),
     g(
         "uuid",
-        "uuid3 uuid5 UUID SafeUUID NAMESPACE_* RESERVED_* RFC_4122 NIL MAX Enum bytes_ int_ main",
+        "uuid1 uuid6",
+        (K.CLOCK, K.PLATFORM, K.RANDOM),
+        "the current time, the host's hardware address and a random clock sequence",
+    ),
+    g("uuid", "uuid7", (K.CLOCK, K.RANDOM), "the current time and random bytes"),
+    g("uuid", "uuid4 uuid8", K.RANDOM, "random bytes drawn from operating-system entropy"),
+    g(
+        "uuid",
+        "main",
+        (K.ARGV, K.CLOCK, K.PLATFORM, K.RANDOM),
+        "the command-line entry of the module: reads sys.argv and prints any version it is asked for",
+    ),
+    g(
+        "uuid",
+        "uuid3 uuid5 UUID SafeUUID NAMESPACE_* RESERVED_* RFC_4122 NIL MAX Enum bytes_ int_",
         None,
         "a name-derived UUID, a type or a constant: it reads nothing but its input",
     ),
@@ -202,16 +218,24 @@ _HOST = (
         None,
         "changes a limit or is a type or constant",
     ),
-    g("sysconfig", "get_platform", K.PLATFORM, "the platform the interpreter was built for"),
     g(
         "sysconfig",
-        "get_path get_paths",
-        K.PID,
-        "the interpreter's install paths, derived from its prefix and the user base",
+        "get_platform",
+        (K.PLATFORM, K.ENVIRON),
+        "the platform the interpreter was built for, unless `_PYTHON_HOST_PLATFORM` names another "
+        "(a cross-compilation override) or, on macOS, `ARCHFLAGS` names the architectures",
     ),
     g(
         "sysconfig",
-        "get_config_var get_config_vars get_path_names get_scheme_names "
+        "get_path get_paths get_config_var get_config_vars",
+        (K.PID, K.ENVIRON, K.HOME),
+        "the interpreter's install paths and configuration variables, derived from its prefix, and "
+        "from the user base that the first call computes for every variable (`PYTHONUSERBASE`, else "
+        "a path under the user's home directory) and, on macOS, from CC, CFLAGS and ARCHFLAGS",
+    ),
+    g(
+        "sysconfig",
+        "get_path_names get_scheme_names "
         "get_default_scheme get_preferred_scheme get_python_version get_makefile_filename "
         "get_config_h_filename is_python_build parse_config_h expand_makefile_vars realpath",
         None,
@@ -240,9 +264,16 @@ _HOST = (
 _IDENTITY = (
     g(
         "getpass",
-        "getuser getpass fallback_getpass unix_getpass win_getpass",
+        "getuser",
+        (K.ENVIRON, K.PID),
+        "who the process runs as: LOGNAME, USER, LNAME or USERNAME, else the account database "
+        "entry of the process's own user id",
+    ),
+    g(
+        "getpass",
+        "getpass fallback_getpass unix_getpass win_getpass",
         K.PID,
-        "who the process runs as, or what the controlling terminal answers",
+        "what the controlling terminal answers",
     ),
     g("getpass", "GetPassWarning", None, TYPE),
     g(
@@ -297,27 +328,34 @@ _ANCHORS = (
         "tempfile",
         "gettempdir gettempdirb",
         K.ENVIRON,
-        "the temporary directory, taken from TMPDIR",
+        "the temporary directory, taken from TMPDIR; the last resort of its search, the working "
+        "directory, is reached only when no system directory is writable",
     ),
     g(
         "tempfile",
         "mkdtemp mkstemp mktemp TemporaryDirectory",
-        K.ENVIRON,
-        "creates it in the temporary directory taken from TMPDIR unless it is given a directory",
+        (K.ENVIRON, K.RANDOM),
+        "creates it under a random name, in the temporary directory taken from TMPDIR, unless it is "
+        "given a directory; the `unless` clause spares the call as a whole, so a call that names "
+        "its directory still draws the random name and records nothing",
         unless=later(2, "dir"),
     ),
     g(
         "tempfile",
         "NamedTemporaryFile TemporaryFile",
-        K.ENVIRON,
-        "creates it in the temporary directory taken from TMPDIR unless it is given a directory",
+        (K.ENVIRON, K.RANDOM),
+        "creates it under a random name (where the platform has no anonymous files), in the "
+        "temporary directory taken from TMPDIR, unless it is given a directory; as for `mkdtemp`, "
+        "a call that names its directory records nothing",
         unless=later(6, "dir"),
     ),
     g(
         "tempfile",
         "SpooledTemporaryFile",
-        K.ENVIRON,
-        "rolls over into the temporary directory taken from TMPDIR unless it is given a directory",
+        (K.ENVIRON, K.RANDOM),
+        "rolls over into a file of a random name in the temporary directory taken from TMPDIR "
+        "unless it is given a directory; as for `mkdtemp`, a call that names its directory "
+        "records nothing",
         unless=later(7, "dir"),
     ),
     g(
@@ -336,8 +374,9 @@ _ANCHORS = (
     g(
         "shutil",
         "get_terminal_size",
-        K.PID,
-        "the size of the terminal the process is attached to, from the environment and the device",
+        (K.ENVIRON, K.PID),
+        "the size of the terminal: COLUMNS and LINES, else the device the process's standard output "
+        "is attached to",
     ),
     g(
         "shutil",
@@ -356,8 +395,14 @@ _ANCHORS = (
     ),
     g(
         "locale",
-        "getlocale getdefaultlocale getpreferredencoding getencoding setlocale "
-        "resetlocale nl_langinfo localeconv",
+        "getpreferredencoding",
+        (K.ENVIRON, K.ARGV),
+        "the locale's encoding, taken from the environment variables LC_*, LANG and the operating "
+        "system, unless the interpreter was started in UTF-8 mode (`-X utf8`), which answers first",
+    ),
+    g(
+        "locale",
+        "getlocale getdefaultlocale getencoding setlocale resetlocale nl_langinfo localeconv",
         K.ENVIRON,
         "the locale, taken from the environment variables LC_*, LANG and the operating system",
     ),
@@ -435,8 +480,9 @@ _FED = (
     g(
         "fileinput",
         "input FileInput",
-        K.ARGV,
-        "reads the files named in sys.argv[1:], or standard input, unless it is given the files",
+        (K.ARGV, K.PID),
+        "reads the files named in sys.argv[1:], and standard input when there are none, unless it "
+        "is given the files",
         unless=later(0, "files"),
     ),
     g(
@@ -450,14 +496,16 @@ _FED = (
     g(
         "site",
         "getuserbase getusersitepackages gethistoryfile USER_BASE USER_SITE",
-        K.HOME,
-        "the user's base directory, taken from the home directory and PYTHONUSERBASE",
+        (K.ENVIRON, K.HOME),
+        "the user's base directory: PYTHONUSERBASE (PYTHON_HISTORY for the history file), else a "
+        "path under the home directory",
     ),
     g(
         "site",
         "ENABLE_USER_SITE check_enableusersite",
-        K.ENVIRON,
-        "whether the user site is on: the interpreter's flags and PYTHONNOUSERSITE",
+        (K.ENVIRON, K.ARGV, K.PID),
+        "whether the user site is on: the interpreter's flags (`-s`, and PYTHONNOUSERSITE which "
+        "sets the same flag) and whether the real and effective user and group ids agree",
     ),
     g(
         "site",
@@ -490,10 +538,10 @@ _FED = (
     g(
         "email.utils",
         "make_msgid",
-        K.RANDOM,
+        (K.CLOCK, K.PID, K.RANDOM, K.PLATFORM),
         "draws a message id from the clock, the process id, a random number and, without a "
-        "`domain`, the host name: four kinds of read, of which the table records one per name, "
-        "`random` as it does for `uuid.uuid1`",
+        "`domain`, the host name; a call that gives a `domain` still reads the other three, and "
+        "the clause cannot spare the host name alone, so the host name is recorded for it too",
     ),
     g(
         "email.utils",
@@ -515,8 +563,9 @@ _FOUND = (
     g(
         "netrc",
         "netrc",
-        K.HOME,
-        "reads `~/.netrc` unless it is given the file",
+        (K.HOME, K.PID),
+        "reads `~/.netrc` unless it is given the file, and refuses the default file when another "
+        "user owns it: the comparison reads the process's user id",
         unless=later(0, "file"),
     ),
     g("netrc", "NetrcParseError", None, TYPE),
@@ -588,6 +637,49 @@ _FOUND = (
 )
 
 # meiva:note
+# Lookups of the environment that a library call hides: where a shared library is searched for
+# (`LD_LIBRARY_PATH`, `PATH`), and which browser opens a page (`BROWSER`, `DISPLAY`,
+# `WAYLAND_DISPLAY`, `TERM`, `PATH`). The call itself starts a process, an effect the purity layer
+# judges; the lookup is the part that reads the process's own environment.
+_LOOKUPS = (
+    g(
+        "ctypes.util",
+        "find_library test",
+        K.ENVIRON,
+        "searches for a shared library along LD_LIBRARY_PATH and PATH (`test` is a demonstration "
+        "that calls it)",
+    ),
+    g("ctypes.util", "find_msvcrt", None, "names the runtime of a Windows build and reads nothing"),
+    g(
+        "ctypes.util",
+        "dllist",
+        K.PID,
+        "the shared libraries loaded into the process: what the process says about itself",
+    ),
+    g(
+        "webbrowser",
+        "get open open_new open_new_tab register register_standard_browsers register_X_browsers",
+        K.ENVIRON,
+        "chooses the browser from BROWSER, DISPLAY, WAYLAND_DISPLAY, TERM and PATH the first time "
+        "any of them is used",
+    ),
+    g(
+        "webbrowser",
+        "main",
+        (K.ARGV, K.ENVIRON),
+        "the command-line entry of the module: reads sys.argv and opens the page in the browser "
+        "the environment chooses",
+    ),
+    g(
+        "webbrowser",
+        "BackgroundBrowser BaseBrowser Chrome Chromium Edge Elinks Epiphany Error GenericBrowser "
+        "Galeon Grail Konqueror MacOSX MacOSXOSAScript Mozilla Opera UnixBrowser WindowsDefault",
+        None,
+        TYPE,
+    ),
+)
+
+# meiva:note
 # The non-standard-library readers that are judged because the repository uses them as the standard
 # library's: they carry no closure.
 _THIRD_PARTY = (
@@ -603,6 +695,7 @@ def groups() -> tuple[Group, ...]:
         *_ANCHORS,
         *_FED,
         *_FOUND,
+        *_LOOKUPS,
         *_THIRD_PARTY,
     )
 

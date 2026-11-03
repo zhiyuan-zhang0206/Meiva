@@ -329,11 +329,12 @@ class AmbientRecorder:
         reading = judged(dotted)
         if reading is not None:
             judgment = reading.judgment
-            if judgment.kind is not None and judgment.unless is None:
+            if judgment.kinds and judgment.unless is None:
                 if judgment.interval:
                     self._interval(line, reading.name)
                 else:
-                    self._add(line, judgment.kind, reading.name)
+                    for kind in judgment.kinds:
+                        self._add(line, kind, reading.name)
                 return
         elif unjudged(dotted):
             self._unjudged.add((line, dotted))
@@ -348,18 +349,15 @@ class AmbientRecorder:
     # meiva:note
     # A judged call that reads the world only when it is not handed the value that spares the read
     # (`tempfile.mkdtemp()` without a `dir`, `time.strftime(fmt)` without a time): the call is the
-    # acquisition, and a reference to the name alone is not.
+    # acquisition, one for each kind the entry lists, and a reference to the name alone is not.
     def _conditional(self, callee: str | None, call: ast.Call) -> None:
         reading = None if callee is None else judged(callee)
         if reading is None or reading.name != callee:
             return
         judgment = reading.judgment
-        if (
-            judgment.kind is not None
-            and judgment.unless is not None
-            and not _spares(call, judgment.unless)
-        ):
-            self._add(call.lineno, judgment.kind, f"{callee}()")
+        if judgment.kinds and judgment.unless is not None and not _spares(call, judgment.unless):
+            for kind in judgment.kinds:
+                self._add(call.lineno, kind, f"{callee}()")
 
     # meiva:note
     # Whether the value that spares an argument-vector read is the function's own parameter that

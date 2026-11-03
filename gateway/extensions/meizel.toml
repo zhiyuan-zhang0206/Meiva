@@ -14,3 +14,4 @@ exports = ["inventory.py", "notification_categories.py", "packages.py", "plugin_
 
 [debt.ambient-read]
 "registry.py#environ tempfile.TemporaryDirectory()" = { count = 1, owner = "#8237", until = "waits for `put_extension` to take the parent of its scratch directory from its caller: it creates it where TMPDIR points" }
+"registry.py#random tempfile.TemporaryDirectory()" = { count = 1, owner = "#8237", until = "waits for `put_extension` to take the parent of its scratch directory from its caller: it creates it under a random name wherever TMPDIR points" }

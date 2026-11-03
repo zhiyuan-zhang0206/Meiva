@@ -19,3 +19,4 @@ exports = ["base.py", "bisect_train.py", "certify.py", "git_tags.py", "nightly.p
 [debt.ambient-read]
 "bisect_train.py#environ tempfile.TemporaryDirectory()" = { count = 2, owner = "#8237", until = "waits for `_run_probe` and `_execute_bisect` to take the parent of its scratch directory from its caller: it creates it where TMPDIR points" }
 "bisect_train.py#pid sys.executable" = { count = 2, owner = "#8237", until = "waits for `_default_pytest_python` and `_execute_bisect` to take the interpreter path from its caller: it reads `sys.executable` itself" }
+"bisect_train.py#random tempfile.TemporaryDirectory()" = { count = 2, owner = "#8237", until = "waits for `_run_probe` and `_execute_bisect` to take the parent of its scratch directory from its caller: it creates it under a random name wherever TMPDIR points" }

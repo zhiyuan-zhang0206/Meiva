@@ -11,3 +11,4 @@ exports = ["artifact.py", "plan.py"]
 
 [debt.ambient-read]
 "artifact.py#environ tempfile.TemporaryDirectory()" = { count = 1, owner = "#8237", until = "waits for `download_and_verify` and `install_binary` to take the parent of its scratch directory from its caller: it creates it where TMPDIR points" }
+"artifact.py#random tempfile.TemporaryDirectory()" = { count = 1, owner = "#8237", until = "waits for `download_and_verify` and `install_binary` to take the parent of its scratch directory from its caller: it creates it under a random name wherever TMPDIR points" }
