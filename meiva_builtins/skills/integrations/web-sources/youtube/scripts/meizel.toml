@@ -10,4 +10,4 @@ exports = ["feed.py"]
 "yt_run.py" = { kinds = ["clock", "environ"], why = "YouTube sync runner stamps fetched items with current UTC time and creates scratch space under the temporary directory (TMPDIR)" }
 
 [debt.ambient-read]
-"yt_run.py#random tempfile.TemporaryDirectory()" = { count = 1, owner = "#8237", until = "waits for `fetch_transcript` to take the parent of its scratch directory from its caller: it creates it under a random name wherever TMPDIR points" }
+"yt_run.py#random tempfile.TemporaryDirectory()" = { count = 1, owner = "#8237", until = "waits for nothing that can arrive: `fetch_transcript` names the scratch directory it hands `yt-dlp` for one caption track and reads the `.vtt` back out of it; the name is minted by the OS so two fetches in one process cannot write over each other, and the skill's entry (`feed.py`) hands `yt_run` a `YoutubeConfig` — the `yt-dlp` name, the audio-transcribe command and the mirror root, never a directory to write in" }

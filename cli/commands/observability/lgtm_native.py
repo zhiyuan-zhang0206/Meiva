@@ -243,14 +243,18 @@ def _copy_tar_member(archive: Path, member: str, target: Path) -> None:
 
 
 def _extract_member(name: str, archive: Path, destination: Path, member: str) -> None:
-    with tempfile.TemporaryDirectory() as temporary_dir:
+    # meiva:note
+    # Staged where the result lands, so the move below is a rename on one filesystem rather than a
+    # copy of the whole binary — the same reason `collector.install_binary` stages inside the
+    # destination it replaces.
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=destination.parent) as temporary_dir:
         extracted = Path(temporary_dir) / name
         copy = _copy_zip_member if archive.suffix == ".zip" else _copy_tar_member
         try:
             copy(archive, member, extracted)
         except KeyError as exc:
             raise RuntimeError(f"native LGTM {name} archive has no {member} member") from exc
-        destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(extracted), destination)
     destination.chmod(0o755)
 
@@ -258,7 +262,10 @@ def _extract_member(name: str, archive: Path, destination: Path, member: str) ->
 # meiva:note
 # Install a release archive tree after stripping its top-level directory.
 def _extract_tree(name: str, archive: Path, destination: Path) -> None:
-    with tempfile.TemporaryDirectory() as temporary_dir:
+    # meiva:note
+    # Unpacked beside the tree it replaces, so the final move is a rename; see `_extract_member`.
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=destination.parent) as temporary_dir:
         extracted = Path(temporary_dir) / "extracted"
         extracted.mkdir()
         with tarfile.open(archive) as bundle:
@@ -268,7 +275,6 @@ def _extract_tree(name: str, archive: Path, destination: Path) -> None:
             raise RuntimeError(f"native LGTM {name} archive must have one top-level directory")
         if destination.exists():
             shutil.rmtree(destination)
-        destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(roots[0]), destination)
 
 
