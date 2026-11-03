@@ -138,6 +138,14 @@ def test_learning_without_source_fails() -> None:
     assert "source_ids must be a non-empty list" in res.stdout
 
 
+def test_claims_source_ids_must_be_a_list() -> None:
+    state = _good_state()
+    state["claims"][0]["source_ids"] = 7
+    result = _run(state)
+    assert result.returncode == 1
+    assert "claims[0]: source_ids must be a list" in result.stdout
+
+
 def test_dangling_source_id_fails() -> None:
     state = _good_state()
     state["learnings"][0]["source_ids"] = [1, 99]

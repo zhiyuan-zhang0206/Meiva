@@ -29,10 +29,10 @@ import argparse
 import json
 import re
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import datetime
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
 CONFIDENCE = {"consensus", "single", "contradicted", "unverified"}
 VERIFICATION = {"formal", "process", "rubric", "self"}
@@ -43,7 +43,10 @@ _CODE_FENCE_RE = re.compile(r"```.*?```", re.S)
 _INLINE_CODE_RE = re.compile(r"`[^`]*`")
 
 
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+# meiva:note
+# A decoded JSON object: its values stay `object` until a check below narrows one. JSON object keys
+# are strings once `json.loads` has decoded them, which is what the annotation claims.
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict)
 
 
@@ -51,16 +54,48 @@ def _is_object_list(value: object) -> TypeGuard[list[object]]:
     return isinstance(value, list)
 
 
-def _load(path: str) -> dict[str, Any]:
-    data: object = json.loads(Path(path).read_text(encoding="utf-8"))
-    if not _is_str_dict(data):
+# meiva:note
+# `json.loads` answers `Any`. This script ships inside a skill and runs on a bare `python3` (see the
+# module docstring), so it cannot borrow `base.host.boundary.untyped.object_of`; this binding states
+# the same widening once. It narrows the return type only — the decoder is still `json.loads`
+# itself, there is no parsing logic here — and every field read below is narrowed with `isinstance`.
+_DECODE: Callable[[str], object] = json.loads
+
+
+def _load(path: str) -> dict[str, object]:
+    data = _DECODE(Path(path).read_text(encoding="utf-8"))
+    if not _is_object_dict(data):
         raise TypeError(f"{path}: top level must be a JSON object")
     return data
 
 
-def _check_question_plan(state: dict[str, Any], out: list[str]) -> None:
-    question: object = state["question"]
-    if not _is_str_dict(question):
+# meiva:note
+# The source ids the state declares, for the report's citation check: a source entry counts only
+# when it is an object carrying an integer `id`.
+def _source_ids(state: dict[str, object]) -> set[int]:
+    sources = state.get("sources")
+    if not _is_object_list(sources):
+        return set()
+    ids: set[int] = set()
+    for source in sources:
+        if not _is_object_dict(source):
+            continue
+        sid = source.get("id")
+        if isinstance(sid, int):
+            ids.add(sid)
+    return ids
+
+
+# meiva:note
+# How many entries a required section holds, for the closing summary line.
+def _section_len(state: dict[str, object], section: str) -> int:
+    rows = state.get(section)
+    return len(rows) if _is_object_list(rows) else 0
+
+
+def _check_question_plan(state: dict[str, object], out: list[str]) -> None:
+    question = state["question"]
+    if not _is_object_dict(question):
         out.append("question must be an object")
     else:
         for field in ("three_part", "so_what"):
@@ -68,31 +103,31 @@ def _check_question_plan(state: dict[str, Any], out: list[str]) -> None:
             if not isinstance(value, str) or not value:
                 out.append(f"question.{field} must be a non-empty string")
 
-    plan: object = state["plan"]
+    plan = state["plan"]
     if not _is_object_list(plan) or not plan:
         out.append("plan must be a non-empty list of sub-questions")
         return
     for i, sub in enumerate(plan):
-        if not _is_str_dict(sub) or not sub.get("sub_question"):
+        if not _is_object_dict(sub) or not sub.get("sub_question"):
             out.append(f"plan[{i}]: missing sub_question")
 
 
 def _object_rows(
     rows: list[object], section: str, out: list[str]
-) -> Iterator[tuple[int, dict[str, Any]]]:
+) -> Iterator[tuple[int, dict[str, object]]]:
     for i, row in enumerate(rows):
-        if not _is_str_dict(row):
+        if not _is_object_dict(row):
             out.append(f"{section}[{i}]: must be an object")
             continue
         yield i, row
 
 
-def _check_sources(state: dict[str, Any], out: list[str]) -> dict[int, dict[str, Any]]:
-    sources: object = state["sources"]
+def _check_sources(state: dict[str, object], out: list[str]) -> dict[int, dict[str, object]]:
+    sources = state["sources"]
     if not _is_object_list(sources):
         out.append("sources must be a list")
         return {}
-    source_by_id: dict[int, dict[str, Any]] = {}
+    source_by_id: dict[int, dict[str, object]] = {}
     urls: set[str] = set()
     for i, s in _object_rows(sources, "sources", out):
         sid = s.get("id")
@@ -124,9 +159,9 @@ def _check_sources(state: dict[str, Any], out: list[str]) -> dict[int, dict[str,
 
 
 def _check_learnings(
-    state: dict[str, Any], source_by_id: dict[int, dict[str, Any]], out: list[str]
+    state: dict[str, object], source_by_id: dict[int, dict[str, object]], out: list[str]
 ) -> None:
-    learnings: object = state["learnings"]
+    learnings = state["learnings"]
     if not _is_object_list(learnings):
         out.append("learnings must be a list")
         return
@@ -150,7 +185,7 @@ def _check_learnings(
             out.append(f"learnings[{i}]: consensus requires >= 2 distinct sources")
 
 
-def _check_budget(state: dict[str, Any], out: list[str]) -> None:
+def _check_budget(state: dict[str, object], out: list[str]) -> None:
     """Invariant 8: unique sources must not exceed the pre-registered fetch cap.
 
     Sources are URL-deduped (invariant 5) and every source was fetched
@@ -160,11 +195,13 @@ def _check_budget(state: dict[str, Any], out: list[str]) -> None:
     #1108 failure mode, and this is the audit-side enforcement of the
     per-worker caps the orchestrator distributes.
     """
-    budget = state.get("meta", {}).get("budget", {})
-    max_fetches = budget.get("max_fetches")
+    meta = state.get("meta")
+    budget = meta.get("budget") if _is_object_dict(meta) else None
+    max_fetches = budget.get("max_fetches") if _is_object_dict(budget) else None
     if not isinstance(max_fetches, int):
         return  # no pre-registered cap — nothing to enforce
-    n_sources = len(state.get("sources", []))
+    sources = state.get("sources")
+    n_sources = len(sources) if _is_object_list(sources) else 0
     if n_sources > max_fetches:
         out.append(
             f"budget exceeded: {n_sources} unique sources > "
@@ -174,9 +211,9 @@ def _check_budget(state: dict[str, Any], out: list[str]) -> None:
 
 
 def _check_claims(
-    state: dict[str, Any], source_by_id: dict[int, dict[str, Any]], out: list[str]
+    state: dict[str, object], source_by_id: dict[int, dict[str, object]], out: list[str]
 ) -> None:
-    claims: object = state.get("claims")
+    claims = state.get("claims")
     if claims is None:
         return
     if not _is_object_list(claims):
@@ -188,12 +225,16 @@ def _check_claims(
         ver = c.get("verification")
         if ver not in VERIFICATION:
             out.append(f"claims[{i}]: verification {ver!r} not in {sorted(VERIFICATION)}")
-        for sid in c.get("source_ids", []):
+        ids = c.get("source_ids", [])
+        if not _is_object_list(ids):
+            out.append(f"claims[{i}]: source_ids must be a list")
+            continue
+        for sid in ids:
             if not isinstance(sid, int) or sid not in source_by_id:
                 out.append(f"claims[{i}]: source_id {sid!r} not in sources")
 
 
-def _problems(state: dict[str, Any]) -> list[str]:
+def _problems(state: dict[str, object]) -> list[str]:
     out: list[str] = []
     for section in REQUIRED_SECTIONS:
         if section not in state:
@@ -214,7 +255,13 @@ def _report_problems(report_path: str, source_ids: set[int]) -> list[str]:
     text = _CODE_FENCE_RE.sub(" ", text)
     text = _INLINE_CODE_RE.sub(" ", text)
     cited: set[int] = set()
-    for num_list in CITATION_RE.findall(text):
+    # meiva:note
+    # `findall`/`group` answer `Any` for a pattern with a group; the match is read one group at a
+    # time and checked, so no unchecked value reaches the citation set.
+    for match in CITATION_RE.finditer(text):
+        num_list = match.group(1)
+        if not isinstance(num_list, str):
+            continue
         for part in num_list.split(","):
             cited.add(int(part.strip()))
     return [
@@ -224,11 +271,20 @@ def _report_problems(report_path: str, source_ids: set[int]) -> list[str]:
     ]
 
 
+# meiva:note
+# The flags this entry reads. The script ships inside a skill and runs on a bare `python3` (see the
+# module docstring), so it cannot import `base.host.boundary.options`; the annotated `Namespace`
+# subclass is the substitute for a stdlib-only entry — argparse fills exactly these attributes.
+class _Arguments(argparse.Namespace):
+    state: str
+    report: str | None
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state", required=True, help="path to research_state.json")
     parser.add_argument("--report", help="path to the derived report (markdown)")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=_Arguments())
 
     try:
         state = _load(args.state)
@@ -239,10 +295,7 @@ def main(argv: list[str]) -> int:
     try:
         problems = _problems(state)
         if args.report:
-            problems += _report_problems(
-                args.report,
-                {s["id"] for s in state.get("sources", []) if isinstance(s.get("id"), int)},
-            )
+            problems += _report_problems(args.report, _source_ids(state))
     except (OSError, TypeError, AttributeError, KeyError, ValueError) as e:
         print(f"error: malformed state or report: {e}", file=sys.stderr)
         return 2
@@ -252,8 +305,8 @@ def main(argv: list[str]) -> int:
         for p in problems:
             print(f"  - {p}")
         return 1
-    n_sources = len(state.get("sources", []))
-    n_learnings = len(state.get("learnings", []))
+    n_sources = _section_len(state, "sources")
+    n_learnings = _section_len(state, "learnings")
     print(f"OK: {n_sources} sources, {n_learnings} learnings, all invariants hold")
     return 0
 
