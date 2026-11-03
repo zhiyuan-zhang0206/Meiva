@@ -98,3 +98,16 @@ clients use the same validator after parsing the numbered first line. Numbers in
 answer without validating against later state; new expired-question answers fail.
 Legacy operation normalization omits absent question/answer fields so old accepted
 receipt requests retain their equality across this additive schema upgrade.
+
+## Provenance of a notice write
+
+`agent_notices.source_verified_by` records the credential the auth middleware
+verified for the request that wrote the row — the same fact vocabulary inbound
+messages already store (`cluster_bearer`, `machine_token:<class>`,
+`user_session`, `machine_session:runner`, `trusted_network`). The path's
+`agent_id` is the caller's own claim and is deliberately not copied there; the
+row therefore answers "which credential posted this" rather than "which agent
+the caller said it was". In-process writers that present no credential at all
+(task maintenance) write the literal `internal`, and rows written before the
+column existed keep `NULL`. The value rides the notice feed
+(`GET /api/notices`, `/open`, `/live`) and `meiva notices list`.

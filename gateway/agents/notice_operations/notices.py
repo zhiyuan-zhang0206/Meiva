@@ -52,7 +52,8 @@ _log = logging.getLogger(__name__)
 _SELECT = (
     "SELECT n.id, n.agent_id, t.label, n.title, n.content, n.priority, "
     "n.require_response, n.blocking, n.created_at, n.updated_at, "
-    "n.resolved_at, n.resolution, n.reply, n.task_id, n.expire_at, n.question, n.answer "
+    "n.resolved_at, n.resolution, n.reply, n.task_id, n.expire_at, n.question, n.answer, "
+    "n.source_verified_by "
     "FROM agent_notices n JOIN agents t ON t.id = n.agent_id "
 )
 
@@ -99,6 +100,7 @@ def _row_to_item(r: tuple[Any, ...]) -> NoticeItem:
         expire_at=r[14],
         question=r[15],
         answer=r[16],
+        source_verified_by=r[17],
     )
 
 
@@ -390,6 +392,10 @@ async def post_notice_create(
     request_body: dict[str, object] = body.model_dump(
         mode="json", exclude={"question"} if body.question is None else set()
     )
+    # meiva:note
+    # The server's own record of the credential it verified, never the caller's claim:
+    # the path's agent_id says who the caller claims to be, this says what proved it.
+    source_verified_by = request_inbound_provenance(request).source_verified_by
 
     def _create(
         pool: ConnectionPool,
@@ -454,9 +460,10 @@ async def post_notice_create(
             # Insert the new notice with the agent's next local id.
             cur.execute(
                 "INSERT INTO agent_notices "
-                "(agent_id, local_id, title, content, priority, require_response, blocking, task_id, expire_at, question) "
+                "(agent_id, local_id, title, content, priority, require_response, blocking, "
+                "task_id, expire_at, question, source_verified_by) "
                 "VALUES (%s, COALESCE((SELECT MAX(local_id) FROM agent_notices "
-                "WHERE agent_id = %s), -1) + 1, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "WHERE agent_id = %s), -1) + 1, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
                 "RETURNING id, local_id",
                 (
                     agent_id,
@@ -471,6 +478,7 @@ async def post_notice_create(
                     Jsonb(body.question.model_dump(mode="json"))
                     if body.question is not None
                     else None,
+                    source_verified_by,
                 ),
             )
             row = cur.fetchone()

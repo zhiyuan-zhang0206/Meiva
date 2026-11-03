@@ -275,6 +275,11 @@ CREATE TABLE agent_notices (
     -- The FK to agent_tasks is added by ALTER after that table is defined below
     -- (agent_notices is declared first, so an inline REFERENCES would forward-ref).
     task_id         BIGINT,
+    -- The credential fact the server verified for the request that wrote this
+    -- row (see the 2026-11-02 migration of the same name): never a caller's
+    -- claim, and `internal` for the in-process writers that present none.
+    -- NULL = written before the column existed.
+    source_verified_by TEXT,
     expire_at       TIMESTAMPTZ NOT NULL,
     CONSTRAINT agent_notices_question_requires_response
         CHECK (question IS NULL OR (jsonb_typeof(question) = 'object' AND require_response)),
@@ -2592,6 +2597,7 @@ INSERT INTO schema_migrations (name) VALUES ('20261031T172218_machine-placed-sch
 INSERT INTO schema_migrations (name) VALUES ('20261101T050900_unified-file-upload');
 INSERT INTO schema_migrations (name) VALUES ('20261101T081023_harness-switch-and-external-messages');
 INSERT INTO schema_migrations (name) VALUES ('20261101T091332_retire-display-and-timeline-settings');
+INSERT INTO schema_migrations (name) VALUES ('20261102T140800_add-notice-source-verified-by');
 
 CREATE OR REPLACE FUNCTION mark_impersonation_terminal_notice() RETURNS trigger AS $$
 BEGIN

@@ -169,6 +169,12 @@ class NoticeItem(BaseModel):
     answer: NoticeAnswer | None = None
     # The task this notice belongs to, or None — lets the feed group by task.
     task_id: int | None = None
+    # meiva:note
+    # The credential fact the server verified for the request that wrote this row:
+    # cluster_bearer / machine_token:<class> / user_session / internal. None on rows
+    # written before the column existed — never a caller's own claim.
+    # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
+    source_verified_by: str | None = None
     expire_at: datetime
 
 
