@@ -8,6 +8,7 @@ import shutil
 import stat as stat_module
 import sys
 import time
+import typing
 from pathlib import Path
 
 _DEFAULTED = re.compile(r"\$\{(\w+):-([^}]*)\}")
@@ -96,9 +97,24 @@ def op_append(request: dict[str, object]) -> dict[str, object]:
     return {"path": str(path)}
 
 
+# meiva:note
+# `typing.TypeGuard` appears only in annotations, which `from __future__ import annotations` never
+# evaluates: the interpreter on the target may predate 3.10, where the name does not exist.
+def _is_object_list(value: object) -> typing.TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_raw_dict(value: object) -> typing.TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_dict(value: object) -> typing.TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+
+
 def _paths(request: dict[str, object]) -> list[object]:
     paths = request.get("paths")
-    if not isinstance(paths, list):
+    if not _is_object_list(paths):
         raise TypeError("request is missing a 'paths' list")
     return paths
 
@@ -118,7 +134,7 @@ OPERATIONS = {
 
 def main() -> int:
     request = globals().get("__REQUEST__")
-    if not isinstance(request, dict):
+    if not _is_object_dict(request):
         print(json.dumps({"error": "no __REQUEST__ literal was appended"}))
         return 1
     operation = OPERATIONS.get(str(request.get("op")))

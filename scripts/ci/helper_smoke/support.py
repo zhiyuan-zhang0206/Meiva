@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, NoReturn, TypeGuard
 
 from base.clock import Timers
+from base.host.permissions_helper.client import PermissionsHelperClient
 
 ROOT_SOCKET = "meiva-root.sock"
 ROOT_WAIT_S = 30.0
@@ -124,7 +125,9 @@ def run(
     return proc
 
 
-def wait_for(what: str, predicate, timeout: float, phase: str, *, timers: Timers):
+def wait_for[T](
+    what: str, predicate: Callable[[], T | None], timeout: float, phase: str, *, timers: Timers
+) -> T:
     deadline = timers.monotonic() + timeout
     while timers.monotonic() < deadline:
         result = predicate()
@@ -198,14 +201,16 @@ def refusal(call: Callable[[], object]) -> str:
 _NOT_ANSWERING = (OSError, ValueError, RuntimeError)
 
 
-def ping_or_none(helper_client):
+def ping_or_none(helper_client: PermissionsHelperClient) -> bool | None:
     try:
         return helper_client.ping()["pong"]
     except _NOT_ANSWERING:
         return None
 
 
-def status_if_running(root_status, *, excluding: int | None = None):
+def status_if_running(
+    root_status: Callable[[], dict[str, Any]], *, excluding: int | None = None
+) -> dict[str, Any] | None:
     try:
         status = root_status()
     except _NOT_ANSWERING:
@@ -218,7 +223,9 @@ def status_if_running(root_status, *, excluding: int | None = None):
     return None
 
 
-def status_if_keeper_running(helper_root_status):
+def status_if_keeper_running(
+    helper_root_status: Callable[[], dict[str, Any]],
+) -> dict[str, Any] | None:
     try:
         status = helper_root_status()
     except _NOT_ANSWERING:
@@ -228,7 +235,9 @@ def status_if_keeper_running(helper_root_status):
     return None
 
 
-def status_if_conflict(helper_root_status):
+def status_if_conflict(
+    helper_root_status: Callable[[], dict[str, Any]],
+) -> dict[str, Any] | None:
     try:
         status = helper_root_status()
     except _NOT_ANSWERING:
@@ -243,7 +252,7 @@ def relaunched_helper(label: str, old_pid: int):
     return pid
 
 
-def unit_entry(status: dict, unit_id: str) -> dict:
+def unit_entry(status: dict[str, Any], unit_id: str) -> dict[str, Any]:
     for entry in status["units"]:
         if entry["id"] == unit_id and isinstance(entry["pid"], int):
             return entry
@@ -255,8 +264,12 @@ def ppid_of(pid: int) -> int:
     return int(proc.stdout.strip())
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
 def is_object_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict) and all(isinstance(key, str) for key in value)
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
 
 
 def root_call(run_dir: Path, verb: str) -> dict[str, Any]:

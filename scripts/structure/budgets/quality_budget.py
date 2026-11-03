@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ast
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -43,7 +43,7 @@ def function_nodes(tree: ast.AST, path: str) -> dict[str, ast.FunctionDef | ast.
     return result
 
 
-def _block_scores(blocks: list[Class | Function]) -> dict[tuple[int, str], int]:
+def _block_scores(blocks: Sequence[Class | Function]) -> dict[tuple[int, str], int]:
     """Include methods, closures and inner classes without double-counting methods."""
     result: dict[tuple[int, str], int] = {}
     for block in blocks:

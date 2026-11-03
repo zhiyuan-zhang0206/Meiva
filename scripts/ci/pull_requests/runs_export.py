@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as day_time
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 from zoneinfo import ZoneInfo
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -169,13 +169,21 @@ def trunk_merge_pr_number(branch: object) -> int | None:
     return int(match[1]) if match else None
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+
+
 def load_cache(path: Path) -> dict[str, Any]:
     """Load one repository cache; absent or corrupt cache heals via a cold walk."""
     try:
         cached = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {"runs": {}, "prs": {}, "last_fetch_end": None}
-    if not isinstance(cached, dict):
+    if not _is_object_dict(cached):
         return {"runs": {}, "prs": {}, "last_fetch_end": None}
     return {
         "runs": cached["runs"] if isinstance(cached.get("runs"), dict) else {},
@@ -199,8 +207,12 @@ def merge_cache(
     fetched_end: datetime,
 ) -> dict[str, Any]:
     """Merge updated API records by stable id and prune only old cache state."""
-    runs = {str(key): value for key, value in cache["runs"].items() if isinstance(value, dict)}
-    prs = {str(key): value for key, value in cache["prs"].items() if isinstance(value, dict)}
+    runs: dict[str, dict[str, Any]] = {
+        str(key): value for key, value in cache["runs"].items() if isinstance(value, dict)
+    }
+    prs: dict[str, dict[str, Any]] = {
+        str(key): value for key, value in cache["prs"].items() if isinstance(value, dict)
+    }
     for run in fresh_runs:
         runs[str(run["id"])] = run
     for pr in fresh_prs:

@@ -100,8 +100,12 @@ def tests_roots(tracked: Iterable[str], hosts: tuple[str, ...]) -> list[str]:
     return sorted(roots)
 
 
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def _is_str_list(value: object) -> TypeGuard[list[str]]:
-    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+    return _is_object_list(value) and all(isinstance(item, str) for item in value)
 
 
 def _toml_value(value: object) -> str:

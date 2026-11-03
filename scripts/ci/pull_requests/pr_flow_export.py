@@ -60,7 +60,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 from zoneinfo import ZoneInfo
 
 # Script-mode path guard (PYTHONSAFEPATH=1 removed the implicit script-dir
@@ -89,6 +89,28 @@ MAX_TIMELINE_PAGES = 3
 _PAGE_SIZE = 100
 
 _STATE_DIR_RELATIVE = Path("state") / "pr-flow"
+
+
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_raw_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
+
+
+def _is_dict_list(value: object) -> TypeGuard[list[dict[str, Any]]]:
+    return _is_raw_list(value) and all(_is_object_dict(item) for item in value)
+
+
+def _is_entry_map(value: object) -> TypeGuard[dict[str, dict[str, Any]]]:
+    return _is_raw_dict(value) and all(
+        isinstance(key, str) and _is_object_dict(entry) for key, entry in value.items()
+    )
 
 
 class PrFlowError(RuntimeError):
@@ -204,7 +226,7 @@ def fetch_closed_prs(
         )
         stats.gh_api_calls += 1
         batch = json.loads(out)
-        if not isinstance(batch, list):
+        if not _is_dict_list(batch):
             raise PrFlowError(f"unexpected pulls payload on page {page}")
         prs.extend(batch)
         if len(batch) < _PAGE_SIZE:
@@ -242,7 +264,7 @@ def fetch_timeline(
         )
         stats.gh_api_calls += 1
         batch = json.loads(out)
-        if not isinstance(batch, list):
+        if not _is_dict_list(batch):
             raise PrFlowError(f"unexpected timeline payload for PR #{number}")
         events.extend(batch)
         if len(batch) < _PAGE_SIZE:
@@ -344,8 +366,8 @@ def load_cache(path: Path) -> dict[str, dict[str, Any]]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
-    entries = data.get("prs") if isinstance(data, dict) else None
-    return entries if isinstance(entries, dict) else {}
+    entries = data.get("prs") if _is_object_dict(data) else None
+    return entries if _is_entry_map(entries) else {}
 
 
 def save_json(path: Path, payload: dict[str, Any]) -> None:

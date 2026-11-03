@@ -244,6 +244,10 @@ def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
     return isinstance(value, dict)
 
 
+def _is_raw_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def _is_table(value: object) -> TypeGuard[dict[str, object]]:
     return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
 
@@ -282,10 +286,10 @@ MARKER_SELECTION = "-m requires_host"
 
 def job_runs_marker(body: dict[str, object]) -> bool:
     steps = body.get("steps")
-    if not isinstance(steps, list):
+    if not _is_raw_list(steps):
         return False
     for step in steps:
-        if not isinstance(step, dict):
+        if not _is_raw_dict(step):
             continue
         run = step.get("run")
         if isinstance(run, str) and MARKER_SELECTION in run.replace('"', "").replace("'", ""):

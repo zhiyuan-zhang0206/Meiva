@@ -31,6 +31,7 @@ from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier
 from base.lm.registry import ModelSpec
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
+from scripts.model_registry.json_guards import is_object_dict, is_object_list, is_str_list
 
 _USER_AGENT = "Meiva model-update tracker"
 _TIMEOUT_SECONDS, _QWEN_PAGE_SIZE = 30, 100
@@ -118,7 +119,7 @@ def _environment_value(alias: str) -> str | None:
 
 
 def _response_object(value: object, name: str) -> dict[str, Any]:
-    if not isinstance(value, dict):
+    if not is_object_dict(value):
         raise TypeError(f"{name} response must be a JSON object")
     return value
 
@@ -186,10 +187,10 @@ class PinnedIPHTTPSAdapter(HTTPAdapter):
 def _first_real_doh_address(value: object, endpoint: str, host: str) -> str:
     payload = _response_object(value, endpoint)
     answers = payload["Answer"]
-    if not isinstance(answers, list):
+    if not is_object_list(answers):
         raise TypeError(f"{endpoint} Answer must be a list")
     for answer in answers:
-        if not isinstance(answer, dict):
+        if not is_object_dict(answer):
             raise TypeError(f"{endpoint} Answer entries must be objects")
         address = answer.get("data")
         if answer.get("type") in (1, "1") and isinstance(address, str) and not _is_fake_ip(address):
@@ -243,11 +244,11 @@ def _session_for_host(
 
 
 def _id_rows(value: object, field: str, source: str) -> list[str]:
-    if not isinstance(value, list):
+    if not is_object_list(value):
         raise TypeError(f"{source} {field} must be a list")
     ids: list[str] = []
     for row in value:
-        if not isinstance(row, dict) or field not in row or not isinstance(row[field], str):
+        if not is_object_dict(row) or field not in row or not isinstance(row[field], str):
             raise ValueError(f"{source} {field} entries must carry a string id")
         model_id = row[field]
         if not model_id:
@@ -536,7 +537,7 @@ def _valid_status(value: object) -> str:
 
 
 def _loaded_pending(pending: object) -> dict[str, object]:
-    if not isinstance(pending, dict) or "status" not in pending or "rounds" not in pending:
+    if not is_object_dict(pending) or "status" not in pending or "rounds" not in pending:
         raise ValueError("model tracker state pending must carry status and rounds")
     rounds = pending["rounds"]
     if not isinstance(rounds, int) or rounds < 1:
@@ -547,16 +548,15 @@ def _loaded_pending(pending: object) -> dict[str, object]:
 def _loaded_provider(entry: dict[str, Any]) -> dict[str, object]:
     if "reported" not in entry or "status" not in entry:
         raise ValueError("model tracker state provider is missing reported or status")
-    if not isinstance(entry["reported"], list) or not all(
-        isinstance(model_id, str) for model_id in entry["reported"]
-    ):
+    reported = entry["reported"]
+    if not is_object_list(reported) or not all(isinstance(model_id, str) for model_id in reported):
         raise ValueError("model tracker state reported must be a list of strings")
     status = _valid_status(entry["status"])
     # `announced` postdates the first state files: a file written before
     # the field existed baselines on the status it was left in, so the
     # upgrade itself never announces anything.
     loaded: dict[str, object] = {
-        "reported": entry["reported"],
+        "reported": reported,
         "status": status,
         "announced": _valid_status(entry.get("announced", status)),
     }
@@ -569,11 +569,12 @@ def _load_state(path: Path) -> dict[str, dict[str, dict[str, object]]]:
     if not path.exists():
         return {"providers": {}}
     raw = _response_object(json.loads(path.read_text()), "model tracker state")
-    if "providers" not in raw or not isinstance(raw["providers"], dict):
+    raw_providers = raw.get("providers")
+    if not is_object_dict(raw_providers):
         raise ValueError("model tracker state is missing providers")
     providers: dict[str, dict[str, object]] = {}
-    for provider, entry in raw["providers"].items():
-        if not isinstance(provider, str) or not isinstance(entry, dict):
+    for provider, entry in raw_providers.items():
+        if not isinstance(provider, str) or not is_object_dict(entry):
             raise TypeError("model tracker state has an invalid provider entry")
         providers[provider] = _loaded_provider(entry)
     return {"providers": providers}
@@ -623,7 +624,7 @@ def _record_status(entry: dict[str, object], status: str) -> bool:
         return False
     rounds = 1
     pending = entry.get("pending")
-    if isinstance(pending, dict):
+    if is_object_dict(pending):
         pending_status = pending.get("status")
         prior = pending.get("rounds")
         if (
@@ -669,8 +670,8 @@ def check_sources(
             )
             continue
         raw = entry["reported"]
-        if not isinstance(raw, list):
-            raise TypeError("model tracker state reported must be a list")
+        if not is_str_list(raw):
+            raise TypeError("model tracker state reported must be a list of strings")
         reported = set(raw)
         actionable = [model_id for model_id in comparison.candidates if model_id not in reported]
         entry["reported"] = sorted(reported | set(actionable) | set(comparison.suppressed))

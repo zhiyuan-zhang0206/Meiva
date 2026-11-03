@@ -30,7 +30,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 
-def _samples() -> dict[str, dict]:
+def _samples() -> dict[str, dict[str, object]]:
     """One sample dict per event — field values only need to be type- and
     business-correct, not real.
 

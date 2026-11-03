@@ -86,9 +86,14 @@ def collect_probe(host: Host, checkout: str, interpreter: str) -> list[dict[str,
         )
     for line in result.stdout.splitlines():
         if line.startswith("__PROBE__"):
-            rows = json.loads(line[len("__PROBE__") :])
-            if isinstance(rows, list):
-                return rows
+            rows: object = json.loads(line[len("__PROBE__") :])
+            if _is_object_list(rows):
+                probes = [row for row in rows if _is_str_object_dict(row)]
+                if len(probes) != len(rows):
+                    raise RuntimeError(
+                        f"{host}: the harness probe printed a row that is not an object"
+                    )
+                return probes
     raise RuntimeError(f"{host}: the harness probe printed no rows")
 
 
@@ -490,7 +495,7 @@ def match_version(
 
 
 def version_key(text: str) -> tuple[int, ...]:
-    keys = []
+    keys: list[int] = []
     for chunk in text.split("."):
         digits = "".join(character for character in chunk if character.isdigit())
         keys.append(int(digits) if digits else 0)
