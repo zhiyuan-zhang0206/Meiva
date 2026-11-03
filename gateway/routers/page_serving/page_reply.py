@@ -26,7 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from gateway.agents.inbound_provenance import request_inbound_provenance
 from gateway.http.auth.request_principal import require_human_credential
-from gateway.http.config import gateway_rpc
+from gateway.http.config import gateway_rpc, gateway_state
 from gateway.routers.page_serving.pages import parse_page_key
 from ops.agents import get_agent_status
 from ops.lifecycle.delivery import deliver_chat_inbound
@@ -117,7 +117,7 @@ async def post_page_reply(page_key: str, body: PageReplyIn, request: Request) ->
         )
     agent_id, name = parsed
 
-    pool = request.app.state.db_pool
+    pool = gateway_state(request).db_pool
     is_open = await asyncio.to_thread(page_is_open, pool, agent_id, name)
     if not is_open:
         raise HTTPException(status_code=404, detail=f"page {name!r} is not open (agent {agent_id})")
@@ -128,18 +128,18 @@ async def post_page_reply(page_key: str, body: PageReplyIn, request: Request) ->
             status_code=422, detail="a reply carries at least one choice or some text"
         )
 
-    await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id)
+    await asyncio.to_thread(get_agent_status, gateway_state(request).db, agent_id)
     delivery = await deliver_chat_inbound(
         pool,
-        request.app.state.db,
-        request.app.state.bus,
+        gateway_state(request).db,
+        gateway_state(request).bus,
         agent_id,
         prepare=lambda _conn: content,
         source=f"ui:page:{name}",
         payload=None,
         client_message_id=None,
         provenance=request_inbound_provenance(request),
-        local_machine=request.app.state.machine.name(),
+        local_machine=gateway_state(request).machine.name(),
         rpc=gateway_rpc(request),
     )
     return PageReplyAccepted(inbound_id=delivery.inbound_id, status=str(delivery.status))

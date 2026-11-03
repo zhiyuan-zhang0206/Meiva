@@ -23,25 +23,41 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated, Any, LiteralString, NamedTuple
+from typing import Annotated, LiteralString, NamedTuple
 
 from fastapi import APIRouter, Query, Request
+from psycopg.rows import class_row
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 from redis.exceptions import RedisError
 
+from base.api_contracts.agent_contract import AgentStatus, LivenessState
 from base.clock import Clock
 from base.events.live.bus import EventBus
 from base.events.reads import audit_rows
 from base.log import logger
-from gateway.http.config import gateway_clock, gateway_config
+from gateway.http.config import (
+    GatewayAppState,
+    gateway_clock,
+    gateway_config,
+    gateway_state,
+    state_as,
+)
 from gateway.lgtm.telemetry_staleness import TelemetryStaleness
 from gateway.routers.fleet.fleet_tokens import AgentTokens, agent_tokens
 from gateway.schemas import FleetGraphEdge, FleetGraphNode, FleetGraphResponse
 from gateway.schemas.stats import StatsWindowHours, window_delta
 
 router = APIRouter()
+
+
+# meiva:note
+# The telemetry staleness tracker the app root builds; the fleet graph route is its only reader.
+class FleetGraphAppState(GatewayAppState):
+    telemetry_staleness: TelemetryStaleness
+
 
 # meiva:note
 # The fleet view polls every 30s while the underlying data moves slowly
@@ -77,7 +93,7 @@ def _read_cached_graph(bus: EventBus, key: str) -> FleetGraphResponse | None:
 # meiva:note
 # Cache a successful graph while reporting heartbeat health separately.
 def _finalize_graph_response(
-    pool: ConnectionPool[Any],
+    pool: ConnectionPool,
     *,
     bus: EventBus,
     staleness: TelemetryStaleness,
@@ -114,9 +130,22 @@ def _finalize_graph_response(
 
 
 # meiva:note
+# One agent's node columns; `status` and `liveness_state` are the stored strings, converted to their
+# enums where the node is built.
+@dataclass(frozen=True)
+class _NodeRow:
+    agent_id: int
+    label: str | None
+    status: str
+    liveness_state: str
+    spawner: str
+    machine: str | None
+
+
+# meiva:note
 # The DB-bound graph phase, kept separate from upstream telemetry work.
 class _PgGraphData(NamedTuple):
-    node_rows: list[tuple[Any, ...]]
+    node_rows: list[_NodeRow]
     edges: list[FleetGraphEdge]
     tokens: dict[int, AgentTokens]
 
@@ -151,7 +180,7 @@ def _edges_from(
 # Edges connect two live endpoints unless terminated agents are included; the
 # live set is the node set just read.
 def _fetch_pg_graph(
-    pool: ConnectionPool[Any],
+    pool: ConnectionPool,
     *,
     not_terminated: LiteralString,
     include_terminated: bool,
@@ -159,7 +188,7 @@ def _fetch_pg_graph(
     now: datetime,
     decay_lambda: float,
 ) -> _PgGraphData:
-    with pool.connection() as conn, conn.cursor() as cur:
+    with pool.connection() as conn, conn.cursor(row_factory=class_row(_NodeRow)) as cur:
         # meiva:note
         # Bound the PG phase so a stalled read fails fast instead of holding a sync
         # route worker for the pool's normal 60-second limit.
@@ -169,17 +198,17 @@ def _fetch_pg_graph(
             # S608: the terminated filter is the only spliced fragment and it
             # is a fixed internal literal (not caller input).
             "SELECT "
-            "    a.id, "
+            "    a.id AS agent_id, "
             "    t.label, "
             "    a.status, "
             "    a.liveness_state, "
-            "    a.born_spawner, "
+            "    a.born_spawner AS spawner, "
             "    a.machine "
             "FROM agents_meta a "
             "JOIN agents t ON t.id = a.id " + not_terminated + " ORDER BY a.id"
         )
         node_rows = cur.fetchall()
-        live_ids = None if include_terminated else {int(row[0]) for row in node_rows}
+        live_ids = None if include_terminated else {row.agent_id for row in node_rows}
         edge_rows = audit_rows.edge_weights(
             conn, live_ids=live_ids, win_start=win_start, now=now, decay_lambda=decay_lambda
         )
@@ -189,23 +218,23 @@ def _fetch_pg_graph(
 
 # meiva:note
 # Build graph nodes; an agent without token rows scores zero.
-def _build_nodes(
-    node_rows: list[tuple[Any, ...]], tokens: dict[int, AgentTokens]
-) -> list[FleetGraphNode]:
+def _build_nodes(node_rows: list[_NodeRow], tokens: dict[int, AgentTokens]) -> list[FleetGraphNode]:
     none = AgentTokens(0.0, 0.0, 0.0, 0.0)
     return [
         FleetGraphNode(
-            agent_id=r[0],
-            label=r[1],
-            status=r[2],
-            liveness_state=r[3],
-            spawner=r[4],
-            machine=r[5],
+            agent_id=r.agent_id,
+            label=r.label,
+            status=AgentStatus(r.status),
+            liveness_state=LivenessState(r.liveness_state),
+            spawner=r.spawner,
+            machine=r.machine,
             total_tokens=round(
-                tokens.get(r[0], none).in_retained + tokens.get(r[0], none).out_retained
+                tokens.get(r.agent_id, none).in_retained + tokens.get(r.agent_id, none).out_retained
             ),
             node_score=round(
-                tokens.get(r[0], none).in_window * 0.1 + tokens.get(r[0], none).out_window, 2
+                tokens.get(r.agent_id, none).in_window * 0.1
+                + tokens.get(r.agent_id, none).out_window,
+                2,
             ),
         )
         for r in node_rows
@@ -239,13 +268,13 @@ def get_fleet_graph(
     win_start = now - window_delta(hours) if hours is not None else None
 
     key = cache_key(include_terminated=include_terminated, hours=hours, decay_lambda=decay_lambda)
-    bus: EventBus = request.app.state.bus
+    bus: EventBus = gateway_state(request).bus
     cached = _read_cached_graph(bus, key)
     if cached is not None:
         return cached
 
     pg_data = _fetch_pg_graph(
-        request.app.state.db_pool,
+        gateway_state(request).db_pool,
         not_terminated=not_terminated,
         include_terminated=include_terminated,
         win_start=win_start,
@@ -256,9 +285,9 @@ def get_fleet_graph(
     nodes = _build_nodes(pg_data.node_rows, pg_data.tokens)
 
     return _finalize_graph_response(
-        request.app.state.db_pool,
+        gateway_state(request).db_pool,
         bus=bus,
-        staleness=request.app.state.telemetry_staleness,
+        staleness=state_as(request, FleetGraphAppState).telemetry_staleness,
         clock=clock,
         key=key,
         nodes=nodes,

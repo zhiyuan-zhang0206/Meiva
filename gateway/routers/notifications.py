@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -12,7 +12,7 @@ from base.events.notifications.audit import run_audit
 from base.events.notifications.publish import announce_sync, deliver_sync
 from base.events.notifications.store import latest_id_sync, read_overrides_sync, recent_sync
 from gateway.extensions.notification_categories import declared_categories
-from gateway.http.config import gateway_clock
+from gateway.http.config import gateway_clock, gateway_state
 
 router = APIRouter()
 
@@ -113,9 +113,9 @@ class NotificationDeliveriesResponse(BaseModel):
 # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
 @router.get("/api/notifications/categories")
 async def get_notification_categories(request: Request) -> NotificationCategoriesResponse:
-    pool = request.app.state.db_pool
+    pool = gateway_state(request).db_pool
     catalog = await asyncio.to_thread(
-        declared_categories, home=request.app.state.gateway_process.home
+        declared_categories, home=gateway_state(request).gateway_process.home
     )
     switches = await asyncio.to_thread(read_overrides_sync, pool)
     return NotificationCategoriesResponse(
@@ -140,10 +140,10 @@ async def get_notification_categories(request: Request) -> NotificationCategorie
 @router.post("/api/agents/{agent_id}/notifications", status_code=201)
 async def post_notification(
     agent_id: int, body: NotificationCreateIn, request: Request
-) -> dict[str, Any]:
-    pool = request.app.state.db_pool
+) -> dict[str, object]:
+    pool = gateway_state(request).db_pool
     catalog = await asyncio.to_thread(
-        declared_categories, home=request.app.state.gateway_process.home
+        declared_categories, home=gateway_state(request).gateway_process.home
     )
     if body.category not in catalog:
         raise HTTPException(
@@ -165,7 +165,7 @@ async def post_notification(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if record is None:
         return {"delivered": False, "id": None}
-    await asyncio.to_thread(announce_sync, pool, request.app.state.bus, record.id)
+    await asyncio.to_thread(announce_sync, pool, gateway_state(request).bus, record.id)
     return {"delivered": True, "id": record.id}
 
 
@@ -184,7 +184,7 @@ async def get_notifications(
     after_id: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 10,
 ) -> NotificationDeliveriesResponse:
-    pool = request.app.state.db_pool
+    pool = gateway_state(request).db_pool
     rows, latest_id = await asyncio.gather(
         asyncio.to_thread(recent_sync, pool, after_id=after_id, limit=limit),
         asyncio.to_thread(latest_id_sync, pool),
@@ -192,14 +192,14 @@ async def get_notifications(
     return NotificationDeliveriesResponse(
         notifications=[
             NotificationDeliveryItem(
-                id=int(row[0]),
-                category=row[1],
-                subject=row[2],
-                body=row[3],
-                href=row[4],
-                importance=row[5],
-                agent_id=int(row[6]),
-                created_at=row[7],
+                id=row.id,
+                category=row.category,
+                subject=row.subject,
+                body=row.body,
+                href=row.href,
+                importance=row.importance,
+                agent_id=row.agent_id,
+                created_at=row.created_at,
             )
             for row in rows
         ],
@@ -232,9 +232,9 @@ async def get_notification_audit(
     if now is not None and now.tzinfo is None:
         raise HTTPException(status_code=422, detail="now needs a UTC offset")
     tz_name, audit_now = _audit_clock_inputs(tz, now, gateway_clock(request))
-    pool = request.app.state.db_pool
+    pool = gateway_state(request).db_pool
     catalog = await asyncio.to_thread(
-        declared_categories, home=request.app.state.gateway_process.home
+        declared_categories, home=gateway_state(request).gateway_process.home
     )
     try:
         report = await asyncio.to_thread(

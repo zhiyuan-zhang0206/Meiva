@@ -154,7 +154,15 @@ _log = logging.getLogger(__name__)
 # What this root serves with: the base `GatewayAppState` and every directory's subclass of it, so
 # each directory's typed read (`state_as(request, ThatSubclass)`) finds its attributes on the one
 # object the root assigns them to.
-class GatewayServerState(CatalogAppState):
+class GatewayServerState(
+    CatalogAppState,
+    fleet_graph_router.FleetGraphAppState,
+    frontend_telemetry_router.FrontendTelemetryAppState,
+    grafana_router.GrafanaAppState,
+    insights_router.InsightsAppState,
+    memory_router.MemoryAppState,
+    pages_router.PageServingAppState,
+):
     pass
 
 

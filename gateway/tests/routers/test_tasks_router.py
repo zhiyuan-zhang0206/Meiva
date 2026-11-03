@@ -18,17 +18,18 @@ owned-task invariants at the HTTP boundary:
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 from uuid import uuid4
 
 import httpx2
 import psycopg
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from base.api_contracts.idempotency import keyed_headers
+from gateway.http.config import GatewayAppState
 from gateway.routers.tasks import get_tasks
 from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.support.runner_ops.ops_stub import completed, runner_ops
@@ -437,7 +438,7 @@ class _TaskQueryRecordingCursor:
     def __exit__(self, *_args: object) -> None:
         return None
 
-    def execute(self, query: str) -> None:
+    def execute(self, query: str, params: object = None) -> None:
         self.query = query
 
     def fetchall(self) -> list[tuple[object, ...]]:
@@ -454,7 +455,7 @@ class _TaskQueryRecordingConnection:
     def __exit__(self, *_args: object) -> None:
         return None
 
-    def cursor(self) -> _TaskQueryRecordingCursor:
+    def cursor(self, *, row_factory: object = None) -> _TaskQueryRecordingCursor:
         return self.recording_cursor
 
 
@@ -560,10 +561,9 @@ class TestGetTaskFields:
 
     def test_summary_projection_selects_only_metadata_columns(self) -> None:
         pool = _TaskQueryRecordingPool()
-        request = cast(
-            Request,
-            SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(db_pool=pool))),
-        )
+        app = FastAPI()
+        app.state = GatewayAppState({"db_pool": pool})
+        request = Request({"type": "http", "app": app, "headers": []})
         response = get_tasks(request, window="all", fields="summary")
 
         assert response.tasks == []

@@ -859,11 +859,15 @@ reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "gateway/routers/configuration/tests"
+reportAny = "error"
+reportExplicitAny = "error"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "gateway/routers/tests"
+reportAny = "error"
+reportExplicitAny = "error"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
 
@@ -1175,6 +1179,18 @@ reportUnknownParameterType = "error"
 reportMissingParameterType = "error"
 reportUnknownLambdaType = "error"
 reportMissingTypeArgument = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "gateway/routers"
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+reportUnknownVariableType = "error"
+reportUnknownParameterType = "error"
+reportMissingParameterType = "error"
+reportUnknownLambdaType = "error"
+reportMissingTypeArgument = "error"
+reportAny = "error"
+reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "gateway"

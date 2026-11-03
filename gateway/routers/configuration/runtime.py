@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from psycopg_pool import ConnectionPool
@@ -36,7 +35,7 @@ from base.packages.plugin_config_admin import (
 )
 from base.packages.plugin_config_images import PluginConfigChangedError, PluginConfigOwner
 from base.packages.plugins.plugin_errors import InvalidConfigOverlay
-from gateway.http.config import gateway_config, gateway_rpc
+from gateway.http.config import gateway_config, gateway_rpc, gateway_state
 from gateway.http.model_catalog import require_model_catalog
 from gateway.routers.configuration import write_plan
 from gateway.routers.refusal import HttpFailure
@@ -192,7 +191,7 @@ async def _dispatch_config_audit_read(
 
 async def _dispatch_config_write(
     target: str,
-    overrides: dict[str, Any],
+    overrides: dict[str, object],
     *,
     db: Database,
     rpc: RpcClient,
@@ -262,30 +261,31 @@ async def get_config(request: Request, machine: str | None = None) -> ConfigView
 
     await asyncio.to_thread(
         check_env_integrity,
-        env_path=request.app.state.config_authority.env_path,
-        machine_name=request.app.state.machine.name(),
+        env_path=gateway_state(request).config_authority.env_path,
+        machine_name=gateway_state(request).machine.name(),
     )
-    target = machine or request.app.state.machine.name()
+    target = machine or gateway_state(request).machine.name()
     await asyncio.to_thread(
         _assert_machine_known,
         target,
-        request.app.state.db_pool,
-        local_machine_name=request.app.state.machine.name(),
+        gateway_state(request).db_pool,
+        local_machine_name=gateway_state(request).machine.name(),
     )
     read = await _dispatch_config_read(
         target,
-        db=request.app.state.db,
+        db=gateway_state(request).db,
         rpc=gateway_rpc(request),
-        authority=request.app.state.config_authority,
-        local_machine=request.app.state.machine,
-        host=request.app.state.host,
-        home=request.app.state.gateway_process.home,
+        authority=gateway_state(request).config_authority,
+        local_machine=gateway_state(request).machine,
+        host=gateway_state(request).host,
+        home=gateway_state(request).gateway_process.home,
     )
     host_fields = read.host_fields
 
     fields: list[ConfigFieldView] = []
     for meta in panel_metadata(
-        authority=request.app.state.config_authority, home=request.app.state.gateway_process.home
+        authority=gateway_state(request).config_authority,
+        home=gateway_state(request).gateway_process.home,
     ):
         if meta.scope == "host":
             hf = host_fields[meta.name]
@@ -340,9 +340,9 @@ async def get_config(request: Request, machine: str | None = None) -> ConfigView
 
     raw_overrides = (
         panel_overrides(
-            authority=request.app.state.config_authority,
+            authority=gateway_state(request).config_authority,
             local=True,
-            home=request.app.state.gateway_process.home,
+            home=gateway_state(request).gateway_process.home,
         )
         if machine is None
         else read.raw_overrides
@@ -353,8 +353,8 @@ async def get_config(request: Request, machine: str | None = None) -> ConfigView
         raw_overrides=raw_overrides,
         machine_capabilities=_target_capabilities(
             target,
-            request.app.state.db,
-            local_machine=request.app.state.machine,
+            gateway_state(request).db,
+            local_machine=gateway_state(request).machine,
         ),
     )
 
@@ -373,37 +373,37 @@ async def get_config_audit(
         last if last is not None else gateway_config(request).display.config_audit_default_last
     )
     if machine == "all":
-        runners = await asyncio.to_thread(list_agent_runners, request.app.state.db)
+        runners = await asyncio.to_thread(list_agent_runners, gateway_state(request).db)
         names = [name for name, _url in runners]
-        if request.app.state.machine.name() not in names:
-            names.append(request.app.state.machine.name())
+        if gateway_state(request).machine.name() not in names:
+            names.append(gateway_state(request).machine.name())
         results = await asyncio.gather(
             *(
                 _dispatch_config_audit_read(
                     name,
                     effective_last,
-                    db=request.app.state.db,
+                    db=gateway_state(request).db,
                     rpc=gateway_rpc(request),
-                    local_machine=request.app.state.machine,
+                    local_machine=gateway_state(request).machine,
                 )
                 for name in names
             )
         )
     else:
-        target = machine or request.app.state.machine.name()
+        target = machine or gateway_state(request).machine.name()
         await asyncio.to_thread(
             _assert_machine_known,
             target,
-            request.app.state.db_pool,
-            local_machine_name=request.app.state.machine.name(),
+            gateway_state(request).db_pool,
+            local_machine_name=gateway_state(request).machine.name(),
         )
         results = [
             await _dispatch_config_audit_read(
                 target,
                 effective_last,
-                db=request.app.state.db,
+                db=gateway_state(request).db,
                 rpc=gateway_rpc(request),
-                local_machine=request.app.state.machine,
+                local_machine=gateway_state(request).machine,
             )
         ]
 
@@ -431,8 +431,8 @@ def get_resolved_config(request: Request, model: str | None = None) -> ResolvedC
     metas = {
         m.name: m
         for m in panel_metadata(
-            authority=request.app.state.config_authority,
-            home=request.app.state.gateway_process.home,
+            authority=gateway_state(request).config_authority,
+            home=gateway_state(request).gateway_process.home,
         )
     }
     per_agent = per_agent_field_names()
@@ -547,7 +547,7 @@ async def _put_plugin(
     plan: ConfigPatchPlan,
     metas: dict[str, ConfigFieldMeta],
     *,
-    db_pool: ConnectionPool[Any] | None = None,
+    db_pool: ConnectionPool | None = None,
     home: Path | None = None,
 ) -> ConfigWriteResult:
 
@@ -593,26 +593,26 @@ async def put_config(
     request: Request, body: dict[str, object], machine: str | None = None
 ) -> ConfigWriteResult:
 
-    target = machine or request.app.state.machine.name()
+    target = machine or gateway_state(request).machine.name()
     actor, trace_id = request_actor(request)
     await asyncio.to_thread(
         _assert_machine_known,
         target,
-        request.app.state.db_pool,
-        local_machine_name=request.app.state.machine.name(),
+        gateway_state(request).db_pool,
+        local_machine_name=gateway_state(request).machine.name(),
     )
 
     metas = {
         m.name: m
         for m in panel_metadata(
-            authority=request.app.state.config_authority,
-            home=request.app.state.gateway_process.home,
+            authority=gateway_state(request).config_authority,
+            home=gateway_state(request).gateway_process.home,
         )
     }
     plan = ConfigPatchPlan.parse(body, metas, is_remote=machine is not None)
     _refuse(write_plan.plan_rejection(plan))
     try:
-        owner = patch_owner(set(body), home=request.app.state.gateway_process.home)
+        owner = patch_owner(set(body), home=gateway_state(request).gateway_process.home)
     except InvalidConfigOverlay as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
     if owner is not None and machine is None:
@@ -620,8 +620,8 @@ async def put_config(
             owner,
             plan,
             metas,
-            db_pool=request.app.state.db_pool,
-            home=request.app.state.gateway_process.home,
+            db_pool=gateway_state(request).db_pool,
+            home=gateway_state(request).gateway_process.home,
         )
     has_cluster_patch = bool(plan.cluster_writes or plan.cluster_removals)
     if has_cluster_patch:
@@ -632,28 +632,28 @@ async def put_config(
             target,
             plan,
             metas,
-            db=request.app.state.db,
+            db=gateway_state(request).db,
             rpc=gateway_rpc(request),
-            authority=request.app.state.config_authority,
+            authority=gateway_state(request).config_authority,
             has_cluster_patch=has_cluster_patch,
             actor=actor,
             trace_id=trace_id,
-            local_machine=request.app.state.machine,
-            host=request.app.state.host,
-            home=request.app.state.gateway_process.home,
+            local_machine=gateway_state(request).machine,
+            host=gateway_state(request).host,
+            home=gateway_state(request).gateway_process.home,
         )
     else:
         host_result = await _dispatch_config_write(
             target,
             plan.host_body,
-            db=request.app.state.db,
+            db=gateway_state(request).db,
             rpc=gateway_rpc(request),
-            authority=request.app.state.config_authority,
+            authority=gateway_state(request).config_authority,
             actor=actor,
             trace_id=trace_id,
-            local_machine=request.app.state.machine,
-            host=request.app.state.host,
-            home=request.app.state.gateway_process.home,
+            local_machine=gateway_state(request).machine,
+            host=gateway_state(request).host,
+            home=gateway_state(request).gateway_process.home,
         )
         restart_required = host_result.restart_required
 

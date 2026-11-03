@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Request
 from base.host.permissions_helper.grants import checklist
 from base.host.permissions_helper.grants.gate import GateReport
 from base.sessions.helperproc import helper_for
-from gateway.http.config import gateway_clock, gateway_config
+from gateway.http.config import gateway_clock, gateway_config, gateway_state
 from gateway.schemas import HostPermissionsPayload, PermissionItemRow
 from services.desktop.permissions_helper.onboarding import GateService, gate_host
 
@@ -20,7 +20,7 @@ router = APIRouter()
 # uploads live under); its passes are stamped by the app's clock, which also supplies the waits for
 # the probe children, and named from the app's generator.
 def gate_service(request: Request) -> GateService:
-    process = request.app.state.gateway_process
+    process = gateway_state(request).gateway_process
     config = gateway_config(request)
     clock = gateway_clock(request)
     return GateService(

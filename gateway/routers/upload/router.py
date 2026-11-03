@@ -26,6 +26,7 @@ from base.api_contracts.agent_contract import AgentNotFound
 from base.cluster.machine import gateway_auth_headers
 from base.cluster.machines import MachineGatewayUrlMissing, MachineNotRegistered, lookup
 from base.db import agent_exists
+from gateway.http.config import gateway_state
 
 router = APIRouter()
 
@@ -64,14 +65,14 @@ async def serve_delivered_upload(
 ) -> Response:
     try:
         target, _directory, item = await asyncio.to_thread(
-            source.accepted_object, request.app.state.db_pool, agent_id, batch_id, ordinal
+            source.accepted_object, gateway_state(request).db_pool, agent_id, batch_id, ordinal
         )
     except (AgentNotFound, UploadDeliveryConflictError) as exc:
         raise HTTPException(status_code=404, detail="upload not found") from exc
-    access = request.app.state.gateway_access
+    access = gateway_state(request).gateway_access
     query = ObjectReadRequest(agent_id=agent_id, batch_id=batch_id, ordinal=ordinal)
     try:
-        ops_url = await asyncio.to_thread(lookup, request.app.state.db, target.machine)
+        ops_url = await asyncio.to_thread(lookup, gateway_state(request).db, target.machine)
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(30, connect=3), trust_env=False
         ) as client:
@@ -94,13 +95,15 @@ async def serve_delivered_upload(
 
 @router.get("/api/agents/{agent_id}/uploads/{filename}")
 def serve_upload(agent_id: int, filename: str, request: Request) -> FileResponse:
-    with request.app.state.db_pool.connection() as conn:
+    with gateway_state(request).db_pool.connection() as conn:
         if not agent_exists(conn, agent_id):
             raise AgentNotFound(agent_id)
     try:
         path = resolve_upload_path(
             agent_upload_dir(
-                agent_id, create=False, root=request.app.state.gateway_config.upload_staging_root
+                agent_id,
+                create=False,
+                root=gateway_state(request).gateway_config.upload_staging_root,
             ),
             filename,
         )

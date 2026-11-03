@@ -10,13 +10,16 @@ URL, so a remote runner's shells are captured exactly like a local one's.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from psycopg_pool import ConnectionPool
 
-from gateway.http.config import gateway_config, gateway_rpc
+from gateway.http.config import gateway_config, gateway_rpc, gateway_state
+from gateway.http.db_rows import query_one
+from gateway.http.json_values import is_object_list
 from gateway.schemas import ShellCaptureResponse
 from ops.cluster import rpc as cluster_rpc
 
@@ -65,11 +68,13 @@ async def get_agent_shell(
     """
     if lines is None:
         lines = gateway_config(request).display.shell_capture_default_lines
-    machine = await asyncio.to_thread(_agent_machine_blocking, request.app.state.db_pool, agent_id)
+    machine = await asyncio.to_thread(
+        _agent_machine_blocking, gateway_state(request).db_pool, agent_id
+    )
 
     try:
         result = await gateway_rpc(request).dispatch_to_machine(
-            request.app.state.db,
+            gateway_state(request).db,
             machine,
             "shell_capture",
             {"agent_id": agent_id, "session_id": session_id, "lines": lines},
@@ -93,21 +98,37 @@ async def get_agent_shell(
     created_at = _parse_created_at(result.get("created_at"))
     expires_at, renewals, last_renewed_at = await asyncio.to_thread(
         _shell_ttl_row_blocking,
-        request.app.state.db_pool,
+        gateway_state(request).db_pool,
         agent_id,
         session_id,
     )
     return ShellCaptureResponse(
         agent_id=agent_id,
         session_id=session_id,
-        session_name=result["session_name"],
-        lines=result["lines"],
+        session_name=_capture_text(result.get("session_name"), "session_name"),
+        lines=_capture_lines(result.get("lines")),
         created_at=created_at,
         uptime_seconds=int(result.get("uptime_seconds") or 0),
         expires_at=expires_at,
         renewals=renewals,
         last_renewed_at=last_renewed_at,
     )
+
+
+# meiva:note
+# A string field of the capture op's answer, which is decoded JSON from another machine.
+def _capture_text(value: object, name: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"shell_capture answered a non-string {name}")
+    return value
+
+
+# meiva:note
+# The `lines` field of the capture op's answer: a list of strings.
+def _capture_lines(value: object) -> list[str]:
+    if not is_object_list(value) or not all(isinstance(line, str) for line in value):
+        raise TypeError("shell_capture answered a `lines` that is not a list of strings")
+    return [line for line in value if isinstance(line, str)]
 
 
 def _parse_created_at(value: object) -> datetime | None:
@@ -118,6 +139,22 @@ def _parse_created_at(value: object) -> datetime | None:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
+
+
+# meiva:note
+# A shell session's gateway-owned TTL facts.
+@dataclass(frozen=True)
+class _ShellTtlRow:
+    expires_at: datetime | None
+    renewals: int
+    last_renewed_at: datetime | None
+
+
+# meiva:note
+# The machine an agent lives on.
+@dataclass(frozen=True)
+class _MachineRow:
+    machine: str
 
 
 def _shell_ttl_row_blocking(
@@ -132,23 +169,25 @@ def _shell_ttl_row_blocking(
     Page and schedule sessions have their own lifecycle and no shell TTL row.
     The table lives in the gateway's own Postgres, so the merge happens here,
     mirroring the inspector's shell list enrichment."""
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
+    with pool.connection() as conn:
+        row = query_one(
+            conn,
+            _ShellTtlRow,
             "SELECT expires_at, renewals, last_renewed_at FROM agent_shell_ttls "
             "WHERE agent_id = %s AND session_id = %s",
             (agent_id, session_id),
         )
-        row = cur.fetchone()
     if row is not None:
-        return row[0], row[1], row[2]
+        return row.expires_at, row.renewals, row.last_renewed_at
     return None, 0, None
 
 
 def _agent_machine_blocking(pool: ConnectionPool, agent_id: int) -> str:
     """Sync home-machine lookup — via to_thread (404 when unknown)."""
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT machine FROM agents_meta WHERE id = %s", (agent_id,))
-        row = cur.fetchone()
-        if row is None:
-            raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
-    return row[0]
+    with pool.connection() as conn:
+        row = query_one(
+            conn, _MachineRow, "SELECT machine FROM agents_meta WHERE id = %s", (agent_id,)
+        )
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
+    return row.machine

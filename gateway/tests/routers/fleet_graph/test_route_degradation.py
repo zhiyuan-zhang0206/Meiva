@@ -42,6 +42,7 @@ def app(database: Database) -> Iterator[FastAPI]:
 
     redis.get.side_effect = get
     app = FastAPI()
+    app.state = fg.FleetGraphAppState()
     app.include_router(fg.router)
     app.middleware("http")(request_trace_middleware(_rng()))
     app.add_exception_handler(Exception, unhandled_exception_handler)
