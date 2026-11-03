@@ -104,7 +104,7 @@ class ValidateCwdAfterInitHook(Hook):
         runtime: Runtime[MeivaContext],
         _config: object,
         /,
-    ) -> dict[str, str] | None:
+    ) -> dict[str, object] | None:
         initialized = "meiva_code__cwd" in state.model_fields_set
         cwd = Path(state_handle().view(state).cwd)
         home = runtime.context.require_meiva_home()

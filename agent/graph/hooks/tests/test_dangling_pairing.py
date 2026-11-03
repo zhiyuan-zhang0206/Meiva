@@ -30,6 +30,7 @@ from agent.hooks.repair import (
 from base.agents.context import MeivaContext
 from base.agents.messages.kwargs import ExecStatus
 from base.clock import Clock
+from base.host.boundary.json_values import is_object_list
 
 _CREATED_AT = datetime(2026, 10, 1, tzinfo=UTC)
 _RUNTIME = Runtime(context=MeivaContext(clock_factory=Clock.from_settings))
@@ -396,8 +397,10 @@ async def test_hook_returns_none_when_history_valid() -> None:
 async def test_hook_returns_messages_update_for_buried_dangling() -> None:
     state = _FakeState([_ai_tool_use("c1"), HumanMessage(content="buried")])
     update = await repair_dangling_tool_pairing(state, _RUNTIME, _CONFIG)  # type: ignore[arg-type]
-    assert update is not None and set(update) == {"messages", "pending_exec_notes"}  # pyright: ignore[reportUnknownArgumentType]
-    assert isinstance(update["messages"][0], RemoveMessage)
+    assert update is not None and set(update) == {"messages", "pending_exec_notes"}
+    written = update["messages"]
+    assert is_object_list(written)
+    assert isinstance(written[0], RemoveMessage)
 
 
 async def test_hook_synthesizes_unknown_result_for_dangling_tail() -> None:

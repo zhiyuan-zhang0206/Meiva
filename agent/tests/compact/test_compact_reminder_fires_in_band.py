@@ -47,6 +47,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.tests.live_capture import LiveEvents
+from base.host.boundary.json_values import is_object_list
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.log.tests.log_records import LogRecords
@@ -74,7 +75,9 @@ async def test_compact_reminder_fires_in_band(
     )
 
     assert result is not None
-    note = result["messages"][0]
+    written = result["messages"]
+    assert is_object_list(written)
+    note = written[0]
     assert isinstance(note, HumanMessage)
     assert note.additional_kwargs["meiva_msg_type"] == "system_note"
     assert note.additional_kwargs["meiva_note_tag"] == "compact_reminder"
@@ -173,7 +176,9 @@ async def test_compact_reminder_is_not_starved_by_agent_inbounds(
         fake_config(),
     )
     assert result is not None
-    note = result["messages"][0]
+    written = result["messages"]
+    assert is_object_list(written)
+    note = written[0]
     assert isinstance(note, HumanMessage)
     assert "meiva.self.compact(summary)" in note.text
 
