@@ -793,10 +793,16 @@ jobs:
             exit 0
           fi
 
+          # Files named on the command line are checked wherever they sit, so keep only what
+          # the full run's `[tool.pyright].include` / `exclude` would check; the filter reports
+          # what it dropped.
+          scoped_file="$RUNNER_TEMP/pyright-scoped.txt"
+          uv run python scripts/ci/pull_requests/pyright_scope.py "$impacted_file" > "$scoped_file"
+
           targets=()
           while IFS= read -r mod; do
             [[ -n "$mod" && -f "$mod" ]] && targets+=("$mod")
-          done < "$impacted_file"
+          done < "$scoped_file"
 
           if [[ "${#targets[@]}" -eq 0 ]]; then
             echo "No Python modules in meizel impacted closure; skipping basedpyright."
