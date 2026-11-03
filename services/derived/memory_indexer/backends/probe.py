@@ -27,11 +27,17 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import httpx
+from psycopg.rows import class_row
 
 from base.db import Database
 from services.derived.memory_indexer.backends.base import EMBEDDING_SPACE_HEADER, INDEX_API_PREFIX
 
 _PROBE_TIMEOUT_S = 3.0
+
+
+@dataclass(frozen=True)
+class _CountRow:
+    n: int
 
 
 @dataclass(frozen=True)
@@ -96,10 +102,12 @@ def _probe_pgvector(database: Database, uri: str, fingerprint: str | None) -> Pr
 
     try:
         with database.connect() as conn:
-            row = conn.execute(
-                "SELECT count(*) FROM pg_available_extensions WHERE name = 'vector'"
-            ).fetchone()
-        if row is not None and int(row[0]) > 0:
+            row = (
+                conn.cursor(row_factory=class_row(_CountRow))
+                .execute("SELECT count(*) AS n FROM pg_available_extensions WHERE name = 'vector'")
+                .fetchone()
+            )
+        if row is not None and row.n > 0:
             return ProbeResult(message=None)
         return ProbeResult(
             message=(

@@ -1,4 +1,4 @@
-exports = ["derive.py", "jobs.py", "model.py", "reader.py", "source.py"]
+exports = ["derive.py", "jobs.py", "model.py", "reader.py", "rows.py", "source.py"]
 
 [purity]
 "backfill.py" = { mode = "none", why = "the operator command that prepares the projection of the named agents: it boots the configuration, opens the database and drains index_next for each agent; what it accepts is decided by request_rules.py" }
@@ -6,6 +6,7 @@ exports = ["derive.py", "jobs.py", "model.py", "reader.py", "source.py"]
 "jobs.py" = "strict"
 "model.py" = "strict"
 "nodes.py" = "strict"
+"rows.py" = "strict"
 "source.py" = "strict"
 "store.py" = "strict"
 
@@ -15,8 +16,8 @@ exports = ["derive.py", "jobs.py", "model.py", "reader.py", "source.py"]
 "jobs.py" = ["derive.py", "source.py", "store.py"]
 "nodes.py" = ["model.py"]
 "reader.py" = ["derive.py", "jobs.py", "model.py", "nodes.py", "source.py", "store.py"]
-"source.py" = ["model.py"]
-"store.py" = ["model.py"]
+"source.py" = ["model.py", "rows.py"]
+"store.py" = ["model.py", "rows.py"]
 
 [roots]
 "backfill.py" = { kinds = ["clock", "settings", "argv"], why = "Service or operator process entry boots configuration before composing its resources; builds the process clock from SYSTEM_TIMERS; it also reads its command line (argv) once, as the process entry" }

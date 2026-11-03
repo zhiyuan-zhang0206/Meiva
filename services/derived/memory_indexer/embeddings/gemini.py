@@ -40,11 +40,12 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
-from typing import Any
 
 import httpx
 import numpy as np
+from pydantic import BaseModel, Field, ValidationError
 
+from base.host.boundary.untyped import object_of
 from base.host.net.resilience import (
     MAX_RETRY_AFTER_RESPECT_S,
     ExponentialBackoff,
@@ -56,7 +57,7 @@ from base.host.net.resilience import (
     retry_sleep,
 )
 from base.lm.catalog import ModelCatalog
-from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
+from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError, row_vectors
 from services.derived.memory_indexer.embeddings.sync_call import run_sync
 
 MODEL_ID = "gemini-embedding-2"
@@ -130,7 +131,7 @@ def _api_key(api_key: str | None) -> str:
     return api_key
 
 
-def _payload(texts: list[str], task_type: str) -> dict[str, Any]:
+def _payload(texts: list[str], task_type: str) -> dict[str, object]:
     """The batchEmbedContents request body — one request per text."""
     return {
         "requests": [
@@ -145,19 +146,35 @@ def _payload(texts: list[str], task_type: str) -> dict[str, Any]:
     }
 
 
-def _vectors_from_body(body: dict[str, Any], texts: list[str]) -> np.ndarray:
+class _Embedding(BaseModel):
+    values: list[float]
+
+
+class _EmbedResponse(BaseModel):
+    embeddings: list[_Embedding] | None = None
+
+
+class _Usage(BaseModel):
+    prompt_tokens: int | None = Field(default=None, alias="promptTokenCount")
+
+
+class _BillingView(BaseModel):
+    usage: _Usage | None = Field(default=None, alias="usageMetadata")
+
+
+def _vectors_from_body(body: object, texts: list[str]) -> np.ndarray:
     """Validate the response shape and return (N, DIM) float32."""
-    embeddings: list[dict[str, Any]] = body.get("embeddings") or []
     try:
-        vectors = np.array([e["values"] for e in embeddings], dtype=np.float32)
-    except (KeyError, TypeError, ValueError) as exc:
+        response = _EmbedResponse.model_validate(body)
+        vectors = np.array([e.values for e in response.embeddings or []], dtype=np.float32)
+    except (ValidationError, ValueError) as exc:
         raise EmbeddingAPIError(f"malformed embed response: {exc!r}") from exc
     if vectors.shape != (len(texts), DIM):
         raise EmbeddingAPIError(f"unexpected shape {vectors.shape}, expected ({len(texts)}, {DIM})")
     return vectors
 
 
-def _emit_billing(body: dict[str, Any], *, catalog: ModelCatalog) -> None:
+def _emit_billing(body: object, *, catalog: ModelCatalog) -> None:
     """Account for a completed request before validating its vectors.
 
     Gemini bills malformed-but-successful responses too. Accounting failures
@@ -166,8 +183,11 @@ def _emit_billing(body: dict[str, Any], *, catalog: ModelCatalog) -> None:
     """
     from base.lm.usage import UsageFields, log_usage_fields
 
-    usage: dict[str, Any] = body.get("usageMetadata") or {}
-    tok_in = int(usage.get("promptTokenCount") or 0)
+    try:
+        usage = _BillingView.model_validate(body).usage
+    except ValidationError as exc:
+        raise EmbeddingAPIError(f"malformed embed response: {exc!r}") from exc
+    tok_in = (usage.prompt_tokens if usage is not None else None) or 0
     log_usage_fields(
         model=MODEL_ID,
         fields=UsageFields(tok_in=tok_in, tok_out=0),
@@ -181,8 +201,8 @@ async def post_attempt_once(
     endpoint: str,
     timeout_s: float,
     headers: dict[str, str],
-    payload: dict[str, Any],
-) -> dict[str, Any]:
+    payload: dict[str, object],
+) -> object:
     """Run one HTTP attempt under the shared cancellation deadline."""
     try:
         async with asyncio.timeout(timeout_s):
@@ -195,7 +215,7 @@ async def post_attempt_once(
                         request=response.request,
                         response=response,
                     )
-                return json.loads(await response.aread())
+                return object_of(json.loads, await response.aread())
     except TimeoutError as exc:
         # The HTTP classifier retries transport errors, not builtin TimeoutError.
         raise httpx.ReadTimeout(f"embed attempt exceeded the deadline of {timeout_s}s") from exc
@@ -235,11 +255,11 @@ def embed(
     headers = {"x-goog-api-key": _api_key(api_key)}
     payload = _payload(texts, task_type)
 
-    async def _attempt() -> dict[str, Any]:
+    async def _attempt() -> object:
         async with httpx.AsyncClient(timeout=timeout_s, transport=transport) as client:
             return await post_attempt_once(client, endpoint, timeout_s, headers, payload)
 
-    def _call() -> dict[str, Any]:
+    def _call() -> object:
         return run_sync(_attempt)
 
     try:
@@ -284,7 +304,7 @@ async def embed_async(
     try:
         async with client:
 
-            async def _call() -> dict[str, Any]:
+            async def _call() -> object:
                 return await post_attempt_once(client, endpoint, timeout_s, headers, payload)
 
             body = await aretry(policy, asleep=asleep)(_call)
@@ -349,7 +369,7 @@ class GeminiEmbeddingProvider:
 
     def embed_query(self, text: str) -> np.ndarray:
         """Embed single query for search. (DIM,) float32."""
-        return embed(
+        embedded = embed(
             [text],
             task_type="RETRIEVAL_QUERY",
             catalog=self._catalog,
@@ -359,20 +379,20 @@ class GeminiEmbeddingProvider:
             policy=QUERY_EMBED_POLICY,
             transport=self._transport,
             sleep=self._sleep,
-        )[0]
+        )
+        return row_vectors(embedded)[0]
 
     async def embed_query_async(self, text: str) -> np.ndarray:
         """Async embed of a single query for search. (DIM,) float32."""
-        return (
-            await embed_async(
-                [text],
-                task_type="RETRIEVAL_QUERY",
-                catalog=self._catalog,
-                timeout_s=self._timeout_s,
-                api_key=self._api_key,
-                endpoint=self._endpoint,
-                policy=QUERY_EMBED_POLICY,
-                transport=self._transport,
-                asleep=self._asleep,
-            )
-        )[0]
+        embedded = await embed_async(
+            [text],
+            task_type="RETRIEVAL_QUERY",
+            catalog=self._catalog,
+            timeout_s=self._timeout_s,
+            api_key=self._api_key,
+            endpoint=self._endpoint,
+            policy=QUERY_EMBED_POLICY,
+            transport=self._transport,
+            asleep=self._asleep,
+        )
+        return row_vectors(embedded)[0]

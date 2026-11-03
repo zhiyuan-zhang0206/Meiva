@@ -18,6 +18,7 @@ from collections.abc import Sequence
 
 import httpx
 import numpy as np
+from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 from services.derived.memory_indexer.backends.base import (
     BATCH_COMMIT_TIMEOUT_S,
@@ -28,16 +29,32 @@ from services.derived.memory_indexer.backends.base import (
 )
 
 
-def _hits_of(body: dict[str, list[dict[str, object]]]) -> list[ChunkHit]:
+# meiva:note
+# The memory_search service's wire shapes as this client reads them: the `/search` hits and the
+# `/meta` rows (path -> mtime, content hash, provider fingerprint).
+class _Hit(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    path: str
+    kind: str
+    chunk_idx: int
+    score: float
+
+
+class _Hits(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    hits: tuple[_Hit, ...]
+
+
+_META = TypeAdapter(dict[str, tuple[float, str, str]])
+
+
+def _hits_of(content: bytes) -> list[ChunkHit]:
     """The `/search` response body as `ChunkHit`s (the service's wire shape)."""
     return [
-        ChunkHit(
-            path=str(hit["path"]),
-            kind=str(hit["kind"]),
-            chunk_idx=int(str(hit["chunk_idx"])),
-            score=float(str(hit["score"])),
-        )
-        for hit in body["hits"]
+        ChunkHit(path=hit.path, kind=hit.kind, chunk_idx=hit.chunk_idx, score=hit.score)
+        for hit in _Hits.model_validate_json(content).hits
     ]
 
 
@@ -158,10 +175,7 @@ class NumPyBackend:
         `backends.base`."""
         resp = self._require_client().get(f"{INDEX_API_PREFIX}/meta")
         resp.raise_for_status()
-        return {
-            path: (float(mtime), str(hash_), str(fingerprint))
-            for path, (mtime, hash_, fingerprint) in resp.json().items()
-        }
+        return _META.validate_json(resp.content)
 
     def search_topk(self, query_vector: np.ndarray, k: int) -> list[ChunkHit]:
         """Exact cosine top-k files, each with its best chunk row — see `backends.base`."""
@@ -170,7 +184,7 @@ class NumPyBackend:
             json={"vector": query_vector.astype(np.float32).tolist(), "k": k},
         )
         resp.raise_for_status()
-        return _hits_of(resp.json())
+        return _hits_of(resp.content)
 
     async def search_topk_async(
         self, query_vector: np.ndarray, k: int, *, timeout: float
@@ -185,4 +199,4 @@ class NumPyBackend:
                 json={"vector": query_vector.astype(np.float32).tolist(), "k": k},
             )
             resp.raise_for_status()
-            return _hits_of(resp.json())
+            return _hits_of(resp.content)

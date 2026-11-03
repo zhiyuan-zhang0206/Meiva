@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Coroutine
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, override
+from typing import override
 
 
 class _DetachedExecutor(ThreadPoolExecutor):
@@ -21,7 +21,7 @@ def _attempt_loop() -> asyncio.AbstractEventLoop:
     return loop
 
 
-def run_sync[T](operation: Callable[[], Coroutine[Any, Any, T]]) -> T:
+def run_sync[T](operation: Callable[[], Coroutine[object, None, T]]) -> T:
     # meiva:note
     # Run an async HTTP operation from a thread without a running event loop.
     try:

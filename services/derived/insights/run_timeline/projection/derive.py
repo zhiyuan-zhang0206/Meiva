@@ -61,8 +61,15 @@ def _facts(view: HistoryView, start: int, offset: int, before: Totals) -> list[F
         context += record.context_tokens or 0
         known += record.context_tokens is not None
         estimated += record.context_tokens is not None and record.source != "exact"
+        spent = usage.prefix(idx - start + 1)
         after = Totals(
-            **vars(usage.prefix(idx - start + 1)),
+            calls=spent.calls,
+            input=spent.input,
+            cache_read=spent.cache_read,
+            output=spent.output,
+            cache_write=spent.cache_write,
+            cost_usd=spent.cost_usd,
+            cost_calls=spent.cost_calls,
             context=context,
             known=known,
             estimated=estimated,

@@ -17,6 +17,7 @@ from base.config import settings
 from services.derived.insights.config import InsightsConfig
 from services.derived.insights.run_timeline import router as route
 from services.derived.insights.run_timeline.history import HistoryView
+from services.derived.insights.run_timeline.tests.app_request import app_request
 
 _TIMELINE_SOURCE = TimestampSource(
     clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
@@ -63,7 +64,7 @@ class Views:
 
 
 def request(messages: list[BaseMessage]) -> Request:
-    state = SimpleNamespace(
+    return app_request(
         timeline_timestamps=_TIMELINE_SOURCE,
         run_timeline_reader=Views(messages),
         insights_config=InsightsConfig(
@@ -71,7 +72,6 @@ def request(messages: list[BaseMessage]) -> Request:
             default_model="claude-opus-5",
         ),
     )
-    return Request({"type": "http", "app": SimpleNamespace(state=state)})
 
 
 def test_a_range_returns_those_messages_in_order() -> None:

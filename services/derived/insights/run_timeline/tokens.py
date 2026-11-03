@@ -164,7 +164,7 @@ def timeline_units(view: HistoryView, start: datetime, end: datetime) -> list[Ru
                 estimated=tokens.estimated,
                 session=context.session,
                 context_total=context.context_total,
-                request=RunTimelineUsage(**vars(context.request))
+                request=RunTimelineUsage.model_validate(context.request, from_attributes=True)
                 if context.request is not None
                 else None,
             )

@@ -14,10 +14,15 @@ import logging
 import time
 from collections.abc import Sequence
 from pathlib import Path
+from typing import NamedTuple, TypeGuard
 from zipfile import BadZipFile
 
 import numpy as np
+from numpy.lib.npyio import NpzFile
+from numpy.typing import NDArray
 
+from base.host.boundary.json_values import is_object_list
+from base.host.boundary.untyped import object_of
 from services.derived.memory_indexer.backends.base import KIND_BODY, ChunkHit, pk_of
 
 _log = logging.getLogger("services.derived.memory_search.store")
@@ -43,6 +48,57 @@ _NPZ_KEYS = frozenset(
         _NPZ_EMBEDDERS,
     }
 )
+
+
+# meiva:note
+# `np.load` types its answer `Any`; an opened npz archive is a mapping of named arrays.
+def _is_npz(value: object) -> TypeGuard[NpzFile[np.generic]]:
+    return isinstance(value, NpzFile)
+
+
+# meiva:note
+# The items of a 1-D array as python values, still `object` until a reader narrows each.
+def _items(array: NDArray[np.generic]) -> list[object]:
+    items = object_of(array.tolist)
+    if not is_object_list(items):
+        raise ValueError("a 1-D array lists its items")
+    return items
+
+
+def _number(value: object) -> float:
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return float(value)
+    raise ValueError("an array item is not a number")
+
+
+# meiva:note
+# The columns of a cache archive, each converted to its Python type; a column that does not convert
+# raises ValueError, so the caller commits all of them or none.
+class _Columns(NamedTuple):
+    pks: list[str]
+    paths: list[str]
+    kinds: list[str]
+    chunk_idx: list[int]
+    mtimes: list[float]
+    hashes: list[str]
+    matrix: NDArray[np.float32]
+    embedders: list[str]
+
+
+def _columns_of(data: NpzFile[np.generic]) -> _Columns:
+    matrix = data[_NPZ_VECTORS].astype(np.float32)
+    if matrix.ndim == 1:
+        matrix = matrix.reshape(1, -1)
+    return _Columns(
+        pks=[str(p) for p in _items(data[_NPZ_PKS])],
+        paths=[str(p) for p in _items(data[_NPZ_PATHS])],
+        kinds=[str(k) for k in _items(data[_NPZ_KINDS])],
+        chunk_idx=[int(_number(i)) for i in _items(data[_NPZ_CHUNK_IDX])],
+        mtimes=[_number(m) for m in _items(data[_NPZ_MTIMES])],
+        hashes=[str(h) for h in _items(data[_NPZ_HASHES])],
+        matrix=matrix,
+        embedders=[str(e) for e in _items(data[_NPZ_EMBEDDERS])],
+    )
 
 
 class MemoryStore:
@@ -89,7 +145,13 @@ class MemoryStore:
         if not self._data_file.exists():
             return
         try:
-            with np.load(self._data_file) as data:
+            opened = object_of(np.load, self._data_file)
+            if not _is_npz(opened):
+                _log.warning(
+                    "[memory_search] %s is not an npz archive — starting empty", self._data_file
+                )
+                return
+            with opened as data:
                 missing = _NPZ_KEYS - set(data.files)
                 if missing:
                     # A torn/foreign file is a broken cache — start empty and let
@@ -100,23 +162,13 @@ class MemoryStore:
                         sorted(missing),
                     )
                     return
-                pks = [str(p) for p in data[_NPZ_PKS].tolist()]
-                paths = [str(p) for p in data[_NPZ_PATHS].tolist()]
-                kinds = [str(k) for k in data[_NPZ_KINDS].tolist()]
-                chunk_idx = [int(i) for i in data[_NPZ_CHUNK_IDX].tolist()]
-                mtimes = [float(m) for m in data[_NPZ_MTIMES].tolist()]
-                hashes = [str(h) for h in data[_NPZ_HASHES].tolist()]
-                matrix = data[_NPZ_VECTORS].astype(np.float32)
-                if matrix.ndim == 1:
-                    matrix = matrix.reshape(1, -1)
-                embedders = [str(e) for e in data[_NPZ_EMBEDDERS].tolist()]
-                if not self._cache_matches_space(matrix, embedders):
-                    _log.warning(
-                        "[memory_search] %s cache has an incompatible vector space — starting empty",
-                        self._data_file,
-                    )
-                    return
-                pk_index = {pk: idx for idx, pk in enumerate(pks)}
+                columns = _columns_of(data)
+            if not self._cache_matches_space(columns.matrix, columns.embedders):
+                _log.warning(
+                    "[memory_search] %s cache has an incompatible vector space — starting empty",
+                    self._data_file,
+                )
+                return
         except (OSError, ValueError, EOFError, KeyError, BadZipFile) as exc:
             # np.load raises ValueError / EOFError on foreign bytes, BadZipFile
             # (a plain Exception subclass, not OSError) on a truncated zip,
@@ -135,15 +187,15 @@ class MemoryStore:
         # Every column converted — commit all-or-nothing, so a mid-file
         # failure can never leave a half-loaded store (a few columns
         # populated, the rest empty).
-        self._pks = pks
-        self._paths = paths
-        self._kinds = kinds
-        self._chunk_idx = chunk_idx
-        self._mtimes = mtimes
-        self._hashes = hashes
-        self._embedders = embedders
-        self._matrix = matrix
-        self._pk_index = pk_index
+        self._pks = columns.pks
+        self._paths = columns.paths
+        self._kinds = columns.kinds
+        self._chunk_idx = columns.chunk_idx
+        self._mtimes = columns.mtimes
+        self._hashes = columns.hashes
+        self._embedders = columns.embedders
+        self._matrix = columns.matrix
+        self._pk_index = {pk: idx for idx, pk in enumerate(columns.pks)}
         _log.info("[memory_search] loaded %d rows from %s", len(self._pks), self._data_file)
 
     def save(self) -> None:
@@ -316,13 +368,13 @@ class MemoryStore:
                 first.setdefault(path, row)
             return [self._hit(row, 0.0) for row in list(first.values())[:k]]
         row_norms = np.linalg.norm(self._matrix, axis=1)
-        cos = self._matrix @ query / (row_norms * q_norm)
+        scores = [_number(c) for c in _items(self._matrix @ query / (row_norms * q_norm))]
         best: dict[str, int] = {}
         for row, path in enumerate(self._paths):
-            if path not in best or float(cos[row]) > float(cos[best[path]]):
+            if path not in best or scores[row] > scores[best[path]]:
                 best[path] = row
-        ranked = sorted(best.values(), key=lambda row: float(cos[row]), reverse=True)[:k]
-        return [self._hit(row, float(cos[row])) for row in ranked]
+        ranked = sorted(best.values(), key=lambda row: scores[row], reverse=True)[:k]
+        return [self._hit(row, scores[row]) for row in ranked]
 
     def _hit(self, row: int, score: float) -> ChunkHit:
         return ChunkHit(self._paths[row], self._kinds[row], self._chunk_idx[row], score)

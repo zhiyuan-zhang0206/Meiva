@@ -16,9 +16,11 @@ import sys
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypeGuard
 
 from base.config import ConfigBoot
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.options import options
+from base.host.boundary.untyped import object_of
 
 CASES_PATH = Path(__file__).resolve().parent / "tests" / "recall_cases.jsonl"
 RECALL = "recall"
@@ -69,6 +71,17 @@ def injection_policy(config: ConfigBoot) -> tuple[float, int]:
     return memory.memory_recall_inject_threshold, memory.memory_recall_inject_max
 
 
+# meiva:note
+# The command line, parsed: the results file, the fixture to evaluate against, and the optional
+# overrides of the agent config's injection threshold and cap.
+@dataclass(frozen=True)
+class _Arguments:
+    results: Path
+    cases: Path
+    threshold: float | None
+    cap: int | None
+
+
 def _text(value: object) -> str:
     return value if isinstance(value, str) else str(value)
 
@@ -79,19 +92,11 @@ def _number(value: object) -> float:
     return float(value)
 
 
-def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
-    return isinstance(value, dict)
-
-
-def _is_object_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
-
-
 def _case_of(row: object) -> Case:
-    if not _is_object_dict(row):
+    if not is_object_dict(row):
         raise TypeError("each case must be a JSON object")
     expect = row["expect"]
-    if not _is_object_dict(expect):
+    if not is_object_dict(expect):
         raise TypeError(f"case {row.get('id')!r}: expect must be an object")
     path = expect.get("path")
     rank = expect.get("baseline_rank")
@@ -111,7 +116,7 @@ def _case_of(row: object) -> Case:
 
 def load_cases(path: Path = CASES_PATH) -> list[Case]:
     lines = path.read_text(encoding="utf-8").splitlines()
-    cases = [_case_of(json.loads(line)) for line in lines if line.strip()]
+    cases = [_case_of(object_of(json.loads, line)) for line in lines if line.strip()]
     seen: set[str] = set()
     for case in cases:
         if case.id in seen:
@@ -198,11 +203,11 @@ def report(outcomes: Iterable[Outcome], *, threshold: float, cap: int) -> str:
 
 
 def _ranked_from(entry: object) -> list[tuple[str, float]]:
-    if not _is_object_list(entry):
+    if not is_object_list(entry):
         raise TypeError("each results entry must be a list of {path, score} objects")
     ranked: list[tuple[str, float]] = []
     for item in entry:
-        if not _is_object_dict(item):
+        if not is_object_dict(item):
             raise TypeError("each match must be an object with path and score")
         ranked.append((_text(item["path"]), _number(item["score"])))
     return ranked
@@ -226,15 +231,15 @@ def main(argv: Sequence[str], *, config: ConfigBoot) -> int:
         "--threshold", type=float, default=None, help="defaults to the agent config"
     )
     parser.add_argument("--cap", type=int, default=None, help="defaults to the agent config")
-    args = parser.parse_args(argv)
+    args = options(parser.parse_args(argv), _Arguments)
     threshold, cap = injection_policy(config)
     if args.threshold is not None:
         threshold = args.threshold
     if args.cap is not None:
         cap = args.cap
 
-    payload: object = json.loads(args.results.read_text(encoding="utf-8"))
-    if not _is_object_dict(payload):
+    payload = object_of(json.loads, args.results.read_text(encoding="utf-8"))
+    if not is_object_dict(payload):
         raise SystemExit("results must be a JSON object mapping case id to ranked matches")
     cases = load_cases(args.cases)
     missing = [case.id for case in cases if case.id not in payload]

@@ -328,6 +328,17 @@ def test_load_corrupted_file_starts_empty(tmp_path: Path) -> None:
     assert store.all_meta() == {}
 
 
+# meiva:note
+# A readable numpy file that is not an npz archive is a broken cache too.
+def test_load_plain_array_file_starts_empty(tmp_path: Path) -> None:
+    with (tmp_path / "vectors.npz").open("wb") as handle:
+        np.save(handle, np.zeros(3))
+    store = _store(tmp_path)
+    store.load()
+    assert len(store) == 0
+    assert store.all_meta() == {}
+
+
 def test_load_truncated_zip_starts_empty(tmp_path: Path) -> None:
     """BadZipFile path: a zip header without a real archive."""
     data_file = tmp_path / "vectors.npz"

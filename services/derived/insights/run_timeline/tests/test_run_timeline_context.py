@@ -9,7 +9,7 @@ from typing import Any
 
 import psycopg
 import pytest
-from fastapi import HTTPException, Request
+from fastapi import HTTPException
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
@@ -36,6 +36,7 @@ from services.derived.insights.run_timeline.history import HistoryView
 from services.derived.insights.run_timeline.projection.derive import segment_view
 from services.derived.insights.run_timeline.request_rules import TimelineRequestError
 from services.derived.insights.run_timeline.schemas import RunTimelineContext
+from services.derived.insights.run_timeline.tests.app_request import app_request
 from services.derived.insights.run_timeline.tokens import BlockContext, BlockContexts
 
 _TIMELINE_INPUTS = TimestampPolicy.from_clock(
@@ -283,7 +284,7 @@ def call(
     default_model: str = "claude-opus-5",
     agent_id: int = 7,
 ) -> RunTimelineContext:
-    app_state = SimpleNamespace(
+    request = app_request(
         db_pool=pool,
         run_timeline_reader=Views(view),
         catalog=catalog,
@@ -292,7 +293,6 @@ def call(
             default_model=default_model,
         ),
     )
-    request = Request({"type": "http", "app": SimpleNamespace(state=app_state)})
     return router.get_run_timeline_context(request, agent_id, at)
 
 

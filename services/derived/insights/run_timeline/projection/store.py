@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import LiteralString
+from typing import LiteralString, NamedTuple
 
 from base.db.protocols import SyncConnection
 from services.derived.insights.run_timeline.projection.model import (
@@ -12,6 +12,7 @@ from services.derived.insights.run_timeline.projection.model import (
     Projection,
     Segment,
 )
+from services.derived.insights.run_timeline.projection.rows import rows_as
 from services.derived.insights.run_timeline.schemas import RunTimelineUnit
 
 _INSERT_SEGMENT: LiteralString = (
@@ -22,7 +23,7 @@ _INSERT_SEGMENT: LiteralString = (
 )
 
 _COUNT_BLOCKS: LiteralString = (
-    "SELECT count(*) FROM run_timeline_blocks"
+    "SELECT count(*) AS n FROM run_timeline_blocks"
     " WHERE agent_id = %s AND version = %s AND session < %s AND start_ts <= %s AND end_ts >= %s"
 )
 
@@ -32,6 +33,23 @@ _SELECT_BLOCKS: LiteralString = (
     " ORDER BY session, ordinal"
 )
 
+
+class _IndexRow(NamedTuple):
+    idx: int
+
+
+class _CountRow(NamedTuple):
+    n: int
+
+
+class _PayloadRow(NamedTuple):
+    payload: bytes
+
+
+class _NodeJsonRow(NamedTuple):
+    node: object
+
+
 _NODES = """
 WITH tail AS MATERIALIZED (
     SELECT * FROM jsonb_to_recordset(%s::jsonb) AS f(
@@ -39,7 +57,7 @@ WITH tail AS MATERIALIZED (
         before_totals jsonb, after_totals jsonb
     )
 )
-SELECT to_jsonb(q) FROM (
+SELECT to_jsonb(q) AS node FROM (
     SELECT n.id, n.depth, n.parent_id, n.span_start, n.span_end, n.text, n.job_id, n.check_key,
            coalesce(a.start_ts, ta.start_ts) AS start,
            coalesce(b.end_ts, tb.end_ts) AS end,
@@ -123,17 +141,20 @@ def node_index_bounds(
     start: datetime,
     end: datetime,
 ) -> tuple[int | None, int | None]:
-    low = conn.execute(
-        "SELECT idx FROM run_timeline_message_facts WHERE agent_id = %s AND version = %s"
-        " AND session < %s AND end_ts >= %s ORDER BY end_ts, idx LIMIT 1",
-        (agent_id, VERSION, sessions, start),
-    ).fetchone()
-    high = conn.execute(
-        "SELECT idx FROM run_timeline_message_facts WHERE agent_id = %s AND version = %s"
-        " AND session < %s AND start_ts <= %s ORDER BY start_ts DESC, idx DESC LIMIT 1",
-        (agent_id, VERSION, sessions, end),
-    ).fetchone()
-    return (int(low[0]) if low else None, int(high[0]) if high else None)
+    with conn.cursor(row_factory=rows_as(_IndexRow)) as cur:
+        cur.execute(
+            "SELECT idx FROM run_timeline_message_facts WHERE agent_id = %s AND version = %s"
+            " AND session < %s AND end_ts >= %s ORDER BY end_ts, idx LIMIT 1",
+            (agent_id, VERSION, sessions, start),
+        )
+        low = cur.fetchone()
+        cur.execute(
+            "SELECT idx FROM run_timeline_message_facts WHERE agent_id = %s AND version = %s"
+            " AND session < %s AND start_ts <= %s ORDER BY start_ts DESC, idx DESC LIMIT 1",
+            (agent_id, VERSION, sessions, end),
+        )
+        high = cur.fetchone()
+    return (low.idx if low else None, high.idx if high else None)
 
 
 def window_node_rows(
@@ -146,23 +167,25 @@ def window_node_rows(
 ) -> list[NodeRow]:
     sessions, count, tail = cut
     tail_json = "[" + ",".join(f.model_dump_json() for f in tail) + "]"
-    rows = conn.execute(
-        _NODES,
-        (
-            tail_json,
-            VERSION,
-            sessions,
-            VERSION,
-            sessions,
-            agent_id,
-            bounds[1],
-            bounds[0],
-            count,
-            end,
-            start,
-        ),
-    ).fetchall()
-    return [NodeRow.model_validate(row[0]) for row in rows]
+    with conn.cursor(row_factory=rows_as(_NodeJsonRow)) as cur:
+        cur.execute(
+            _NODES,
+            (
+                tail_json,
+                VERSION,
+                sessions,
+                VERSION,
+                sessions,
+                agent_id,
+                bounds[1],
+                bounds[0],
+                count,
+                end,
+                start,
+            ),
+        )
+        rows = cur.fetchall()
+    return [NodeRow.model_validate(row.node) for row in rows]
 
 
 def window_blocks(
@@ -175,12 +198,16 @@ def window_blocks(
     allowance: int | None,
 ) -> tuple[list[RunTimelineUnit], int]:
     args = (agent_id, VERSION, sessions, end, start)
-    row = conn.execute(_COUNT_BLOCKS, args).fetchone()
-    count = int(row[0]) if row else 0
+    with conn.cursor(row_factory=rows_as(_CountRow)) as cur:
+        cur.execute(_COUNT_BLOCKS, args)
+        counted = cur.fetchone()
+    count = counted.n if counted else 0
     if allowance is not None and count > allowance:
         return [], count
-    rows = conn.execute(_SELECT_BLOCKS, args).fetchall()
-    return [RunTimelineUnit.model_validate_json(bytes(row[0])) for row in rows], count
+    with conn.cursor(row_factory=rows_as(_PayloadRow)) as cur:
+        cur.execute(_SELECT_BLOCKS, args)
+        rows = cur.fetchall()
+    return [RunTimelineUnit.model_validate_json(row.payload) for row in rows], count
 
 
 def segments_for_span(

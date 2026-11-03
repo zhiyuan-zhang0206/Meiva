@@ -74,10 +74,13 @@ def build_run_timeline_context(
         catalog=catalog,
         default_model=default_model,
     )
-    return RunTimelineContext(
-        **breakdown.model_dump(),
-        request=resolved.idx,
-        session=resolved.session,
-        sessions=resolved.sessions,
-        ts=resolved.ts,
+    fields: dict[str, object] = breakdown.model_dump()
+    return RunTimelineContext.model_validate(
+        {
+            **fields,
+            "request": resolved.idx,
+            "session": resolved.session,
+            "sessions": resolved.sessions,
+            "ts": resolved.ts,
+        }
     )

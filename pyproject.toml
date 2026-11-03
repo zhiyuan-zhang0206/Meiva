@@ -713,6 +713,27 @@ root = "scripts/model_registry/tests"
 root = "scripts/verify/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "services/derived/insights/run_timeline/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/derived/insights/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/derived/labeler/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/derived/memory_indexer/backends/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/derived/memory_indexer/embeddings/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/derived/memory_indexer/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/derived/memory_search/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "services/entrypoints/gate/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -752,6 +773,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "scripts/verify"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/derived"
 reportAny = "error"
 reportExplicitAny = "error"
 

@@ -32,6 +32,7 @@ from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
+from base.host.boundary.options import options
 from base.host.exit_codes import hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -155,10 +156,7 @@ def parse_arguments(argv: Sequence[str]) -> ReconcileArguments:
         action="store_true",
         help="allow writable backend connects after typing exact 'yes' interactively",
     )
-    parsed = parser.parse_args(list(argv))
-    return ReconcileArguments(
-        a=parsed.a, b=parsed.b, limit=parsed.limit, k=parsed.k, allow_write=parsed.allow_write
-    )
+    return options(parser.parse_args(list(argv)), ReconcileArguments)
 
 
 # meiva:note
