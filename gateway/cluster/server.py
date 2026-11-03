@@ -27,10 +27,11 @@ from base.host.net.auth import require_cluster_secret
 from base.host.system.hostport import Host
 from base.native_process.os_platform import raise_fd_limit
 from base.telemetry.process_logging import init_gateway_process
-from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
+from gateway.cluster.process_boot import LOADED_IMAGE
 from gateway.cluster.serve_plan import ServePlan, serve_plan
 from gateway.cluster.startup_warnings import startup_warnings
 from gateway.http.middleware import stopping
+from gateway.http.process import GatewayProcess
 
 _log = logging.getLogger(__name__)
 _GATEWAY_UVICORN_WORKERS = 1

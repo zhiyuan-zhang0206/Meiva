@@ -16,6 +16,7 @@ from base.host.permissions_helper.grants.catalog import PING_KEYS, PREFLIGHT_SER
 from base.host.permissions_helper.grants.probe import ProbeResult
 from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
 from base.sessions.helperproc import helper_client
+from gateway.http.config import GatewayAppState
 from gateway.routers import host_permissions
 from services.desktop.permissions_helper.onboarding import gate_host
 
@@ -62,6 +63,7 @@ class FakeGate:
 @pytest.fixture
 def app() -> FastAPI:
     built = FastAPI()
+    built.state = GatewayAppState()
     built.include_router(host_permissions.router)
     return built
 

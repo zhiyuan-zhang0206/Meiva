@@ -30,8 +30,9 @@ from base.paths import meiva_home
 from base.telemetry import DrainStatus
 from gateway import app as gateway_app
 from gateway.cluster import server
-from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
+from gateway.cluster.process_boot import LOADED_IMAGE
 from gateway.http.model_catalog import load_model_catalog
+from gateway.http.process import GatewayProcess
 from gateway.tests.auth.gateway_config import (
     gateway_config_of,
     gateway_test_app,

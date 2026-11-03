@@ -25,7 +25,8 @@ def gateway_unit(
     in-process gateway app, role='gateway'.
     """
     from base import paths
-    from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
+    from gateway.cluster.process_boot import LOADED_IMAGE
+    from gateway.http.process import GatewayProcess
 
     config = snapshot_process_config()
     config.boot()

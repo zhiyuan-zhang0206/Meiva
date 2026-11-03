@@ -29,8 +29,9 @@ from base.host.system.tests.fake_crontab import FakeCrontab
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home, repo_root
 from gateway import app as gateway_app
-from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
+from gateway.cluster.process_boot import LOADED_IMAGE
 from gateway.http.model_catalog import load_model_catalog
+from gateway.http.process import GatewayProcess
 from gateway.tests.auth.gateway_config import (
     gateway_config_of,
     gateway_test_app,

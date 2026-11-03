@@ -25,9 +25,10 @@ from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
 from base.packages.plugin_providers import build_model_catalog
 from gateway.app import create_app
-from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
+from gateway.cluster.process_boot import LOADED_IMAGE
 from gateway.http.config import GatewayConfig, gateway_config_from_boot
 from gateway.http.model_catalog import load_model_catalog
+from gateway.http.process import GatewayProcess
 from gateway.tests.auth.gateway_auth import gateway_credentials
 from ops.cluster.rpc import RpcClient
 

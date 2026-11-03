@@ -57,7 +57,7 @@ from gateway.cluster import status as status_router
 from gateway.cluster.harness_probe import HarnessProbeCache
 from gateway.cluster.monitor import alert_classes as alert_classes_router
 from gateway.cluster.monitor import ops_monitor as ops_monitor_router
-from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
+from gateway.cluster.process_boot import LOADED_IMAGE
 from gateway.cluster.roster.roster_probe import IdentityMismatchLog
 from gateway.cluster.server import main as _run_gateway
 from gateway.cluster.status import StatusCache
@@ -80,7 +80,11 @@ from gateway.http.auth import router as auth_router
 from gateway.http.auth.login_password_store import LoginPasswords
 from gateway.http.auth.request_principal import TRUSTED_NETWORK_FACT, SessionKeys
 from gateway.http.auth.session_store import SessionStore, SessionTouchThrottle, touch_session
-from gateway.http.config import GatewayConfig, gateway_config_from_boot, placeholder_config
+from gateway.http.config import (
+    GatewayConfig,
+    gateway_config_from_boot,
+    placeholder_config,
+)
 from gateway.http.middleware import latency, runtime_metrics
 from gateway.http.middleware.cors import request_host
 from gateway.http.middleware.error_envelope import error_response, request_trace_middleware
@@ -92,10 +96,12 @@ from gateway.http.middleware.error_handlers import (
     unhandled_exception_handler,
 )
 from gateway.http.model_catalog import (
+    CatalogAppState,
     CatalogLoadFailure,
     ModelCatalogUnavailableError,
     load_model_catalog,
 )
+from gateway.http.process import GatewayProcess
 from gateway.inspect import okf_graph as okf_graph_router
 from gateway.inspect import router as inspect_router
 from gateway.lgtm.telemetry_staleness import TelemetryStaleness
@@ -142,6 +148,14 @@ from gateway.upload_delivery.worker import UploadRecovery
 from ops.cluster.rpc import RpcClient
 
 _log = logging.getLogger(__name__)
+
+
+# meiva:note
+# What this root serves with: the base `GatewayAppState` and every directory's subclass of it, so
+# each directory's typed read (`state_as(request, ThatSubclass)`) finds its attributes on the one
+# object the root assigns them to.
+class GatewayServerState(CatalogAppState):
+    pass
 
 
 # meiva:note
@@ -543,6 +557,7 @@ def create_app(
         redoc_url=None,
         openapi_url=None,
     )
+    app.state = GatewayServerState()
     app.state.gateway_config = config
     app.state.clock = Clock(config.clock, timers=SYSTEM_TIMERS)
     app.state.catalog = catalog

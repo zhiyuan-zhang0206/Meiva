@@ -5,10 +5,14 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, get_args, get_type_hints
+from typing import Annotated, Literal, get_args, get_type_hints
 from urllib.parse import urlsplit
 
-from fastapi import Request
+from fastapi import Depends, Request
+from psycopg_pool import ConnectionPool
+from starlette.applications import Starlette
+from starlette.datastructures import State
+from starlette.requests import HTTPConnection
 
 from base import paths
 from base.agents.upload_delivery.paths import (
@@ -18,12 +22,24 @@ from base.agents.upload_delivery.paths import (
 )
 from base.clock import Clock, ClockConfig
 from base.clock.configuration import clock_config_from_boot
+from base.cluster.machine import GatewayAccess, MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
+from base.cluster.rate_limit import LoginRateLimiter
 from base.config import ConfigBoot
+from base.config.service_read import ConfigAuthority
+from base.daemon.endpoints import ServiceEndpoints
+from base.db import Database
+from base.events.live.bus import EventBus
+from base.host.db_authority.api import AcceptanceCache
 from base.host.env.health_ports import health_port
+from base.host.system.hostport import Host
+from base.native_process.loaded_commit import LoadedCommit
+from base.packages.composer_commands import CommandCatalog
+from base.sessions.protocol import SessionBackend
 from base.telemetry.alerts import frontend_base_url
 from base.telemetry.observability import cluster_label
 from gateway.http.middleware.cors import cors_allowed_origins, trusted_request_hosts
+from gateway.http.process import GatewayProcess
 from ops.cluster.rpc import RpcClient
 from services.derived.memory_indexer.embeddings import factory as embedding_factory
 from services.derived.memory_indexer.embeddings.embeddinggemma import EmbeddingGemmaConfig
@@ -466,17 +482,76 @@ def placeholder_config() -> GatewayConfig:
 
 
 # meiva:note
+# What the gateway app serves with, as the handlers read it: the typed shape of `app.state`.
+#
+# Starlette's `State` answers any attribute with `Any`, so a read of `request.app.state.x` carries no
+# type. This class declares each attribute the app root assigns, so `gateway_state(request).x` does.
+# It declares names only, never a value: the root assigns every one before the app serves, and a test
+# that swaps one (`client.app.state.bus = ...`) still reaches the handlers, which read it afresh.
+# Declare no default here: `State` keeps its attributes in a dict, so a class attribute would shadow
+# the assigned value.
+#
+# This class holds the attributes whose types any directory may import. An attribute whose type is
+# owned by one directory is declared by that directory, on a subclass of this class, and the root's
+# state class inherits every such subclass; `state_as` reaches the subclass.
+class GatewayAppState(State):
+    gateway_config: GatewayConfig
+    clock: Clock
+    gateway_process: GatewayProcess
+    machine: MachineIdentityReader
+    host: Host
+    process_image: LoadedCommit
+    config_authority: ConfigAuthority
+    rpc: RpcClient
+    started_at: float
+    db: Database
+    bus: EventBus
+    db_pool: ConnectionPool
+    control_db_pool: ConnectionPool
+    machine_token_acceptance: AcceptanceCache
+    gateway_access: GatewayAccess
+    login_limiter: LoginRateLimiter
+    service_endpoints: ServiceEndpoints
+    command_catalog: CommandCatalog
+    shell_backend: SessionBackend
+
+
+# meiva:note
+# The app's state as `kind`, which is `GatewayAppState` or a directory's subclass of it. The one
+# place the untyped `app` is narrowed: a state of any other class is a wiring error (an app built
+# without the gateway root), so it fails here rather than as a missing attribute in a handler.
+def app_state_as[S: GatewayAppState](app: object, kind: type[S]) -> S:
+    state = app.state if isinstance(app, Starlette) else None
+    if not isinstance(state, kind):
+        raise TypeError(f"the app's state is not a {kind.__name__}; build the app with create_app")
+    return state
+
+
+# meiva:note
+# The state of the app serving this request or websocket, as `kind`.
+def state_as[S: GatewayAppState](connection: HTTPConnection, kind: type[S]) -> S:
+    return app_state_as(connection.scope.get("app"), kind)
+
+
+def gateway_state(connection: HTTPConnection) -> GatewayAppState:
+    return state_as(connection, GatewayAppState)
+
+
+GatewayStateDep = Annotated[GatewayAppState, Depends(gateway_state)]
+
+
+# meiva:note
 # The config the gateway app was built with: the one frozen value a handler reads its settings
 # from.
 def gateway_config(request: Request) -> GatewayConfig:
-    return request.app.state.gateway_config
+    return gateway_state(request).gateway_config
 
 
 # meiva:note
 # The clock the gateway app was built with: its configured timezone over the system timers. The
 # app root builds it once beside the config, so a handler asks for time instead of creating a clock.
 def gateway_clock(request: Request) -> Clock:
-    return request.app.state.clock
+    return gateway_state(request).clock
 
 
 # meiva:note
@@ -484,7 +559,7 @@ def gateway_clock(request: Request) -> Clock:
 # root resolves it once from the home its boot handed in (`GatewayProcess.home`) and publishes
 # both; a handler asks for the label instead of resolving a home of its own.
 def gateway_cluster(request: Request) -> str:
-    return cluster_label(request.app.state.gateway_process.home)
+    return cluster_label(gateway_state(request).gateway_process.home)
 
 
 # meiva:note
@@ -493,4 +568,4 @@ def gateway_cluster(request: Request) -> str:
 # after the configuration is booted (a cold app, as the schema document builds, has none), so a
 # handler asks for the client instead of creating one from process settings.
 def gateway_rpc(request: Request) -> RpcClient:
-    return request.app.state.rpc
+    return gateway_state(request).rpc
