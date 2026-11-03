@@ -32,6 +32,7 @@ import psycopg
 
 from base import telemetry
 from base.db import Database
+from base.db.rows import query_one
 from base.log import logger
 
 _WINDOW_START_HOUR = 5
@@ -91,7 +92,18 @@ class CheckpointTableSizes:
     writes_live: int
 
 
-def _checkpoint_state(cur: psycopg.Cursor) -> tuple[CheckpointTableSizes, int]:
+@dataclass(frozen=True)
+class _StateRow:
+    blobs_bytes: int
+    checkpoints_bytes: int
+    writes_bytes: int
+    blobs_live: int
+    checkpoints_live: int
+    writes_live: int
+    dead: int
+
+
+def _checkpoint_state(conn: psycopg.Connection) -> tuple[CheckpointTableSizes, int]:
     """Checkpoint-table physical sizes, live tuple counts, and
     ``checkpoint_blobs`` dead tuples.
 
@@ -101,30 +113,34 @@ def _checkpoint_state(cur: psycopg.Cursor) -> tuple[CheckpointTableSizes, int]:
     than one row — a CardinalityViolation that the daemon misreads as schema
     drift and crash-loops on (2026-08-12 incident).
     """
-    cur.execute(
+    row = query_one(
+        conn,
+        _StateRow,
         """
-        SELECT pg_total_relation_size('public.checkpoint_blobs'::regclass),
-               pg_total_relation_size('public.checkpoints'::regclass),
-               pg_total_relation_size('public.checkpoint_writes'::regclass),
-               COALESCE(pg_stat_get_live_tuples('public.checkpoint_blobs'::regclass), 0),
-               COALESCE(pg_stat_get_live_tuples('public.checkpoints'::regclass), 0),
-               COALESCE(pg_stat_get_live_tuples('public.checkpoint_writes'::regclass), 0),
+        SELECT pg_total_relation_size('public.checkpoint_blobs'::regclass) AS blobs_bytes,
+               pg_total_relation_size('public.checkpoints'::regclass) AS checkpoints_bytes,
+               pg_total_relation_size('public.checkpoint_writes'::regclass) AS writes_bytes,
+               COALESCE(pg_stat_get_live_tuples('public.checkpoint_blobs'::regclass), 0)
+                   AS blobs_live,
+               COALESCE(pg_stat_get_live_tuples('public.checkpoints'::regclass), 0)
+                   AS checkpoints_live,
+               COALESCE(pg_stat_get_live_tuples('public.checkpoint_writes'::regclass), 0)
+                   AS writes_live,
                COALESCE((SELECT n_dead_tup FROM pg_stat_user_tables
                          WHERE schemaname = 'public'
-                           AND relname = 'checkpoint_blobs'), 0)
-        """
+                           AND relname = 'checkpoint_blobs'), 0) AS dead
+        """,
     )
-    row = cur.fetchone()
     assert row is not None  # noqa: S101 — aggregate over a fixed table always returns one row
     sizes = CheckpointTableSizes(
-        blobs_bytes=int(row[0]),
-        checkpoints_bytes=int(row[1]),
-        writes_bytes=int(row[2]),
-        blobs_live=int(row[3]),
-        checkpoints_live=int(row[4]),
-        writes_live=int(row[5]),
+        blobs_bytes=row.blobs_bytes,
+        checkpoints_bytes=row.checkpoints_bytes,
+        writes_bytes=row.writes_bytes,
+        blobs_live=row.blobs_live,
+        checkpoints_live=row.checkpoints_live,
+        writes_live=row.writes_live,
     )
-    return sizes, int(row[6])
+    return sizes, row.dead
 
 
 def _sizes_attributes(sizes: CheckpointTableSizes) -> dict[str, int]:
@@ -139,7 +155,7 @@ def _sizes_attributes(sizes: CheckpointTableSizes) -> dict[str, int]:
     }
 
 
-def emit_checkpoint_table_sizes(cur: psycopg.Cursor) -> CheckpointTableSizes | None:
+def emit_checkpoint_table_sizes(conn: psycopg.Connection) -> CheckpointTableSizes | None:
     """Sample the checkpoint tables and emit the size/row-count gauge.
 
     The gauge feeds the meiva-ops checkpoint high-water rules and the growth
@@ -152,7 +168,7 @@ def emit_checkpoint_table_sizes(cur: psycopg.Cursor) -> CheckpointTableSizes | N
     the maintenance daemon (its error handler exits the daemon).
     """
     try:
-        sizes, _ = _checkpoint_state(cur)
+        sizes, _ = _checkpoint_state(conn)
     except psycopg.errors.UndefinedTable:
         logger.info(
             "[events-maintenance] checkpoint size sample skipped: checkpoint tables"
@@ -182,11 +198,10 @@ def vacuum_checkpoint_tables(conn: psycopg.Connection) -> VacuumResult:
     """
     from base.cluster.authority import vacuum_or_fail
 
-    with conn.cursor() as cur:
-        before, _ = _checkpoint_state(cur)
-        for table in _TABLES:
-            vacuum_or_fail(conn, table)
-        after, dead = _checkpoint_state(cur)
+    before, _ = _checkpoint_state(conn)
+    for table in _TABLES:
+        vacuum_or_fail(conn, table)
+    after, dead = _checkpoint_state(conn)
     result = VacuumResult(ran=True, total_bytes=after.blobs_bytes, dead_tuples=dead)
     telemetry.emit("telemetry", "checkpoint_table_sizes", attributes=_sizes_attributes(after))
     logger.info(

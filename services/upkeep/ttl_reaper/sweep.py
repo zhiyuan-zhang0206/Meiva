@@ -41,6 +41,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -56,6 +57,7 @@ from base.agents.impersonation.maintenance import (
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
+from base.db.rows import query_all
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
@@ -78,6 +80,26 @@ _log = logging.getLogger(__name__)
 FIRE_LOG_PASS_BATCH = 50_000
 
 
+@dataclass(frozen=True)
+class _NoticeRow:
+    id: int
+    agent_id: int
+    local_id: int
+    title: str
+    require_response: bool
+    created_at: datetime
+    expire_at: datetime
+    replied: bool
+
+
+@dataclass(frozen=True)
+class _PageRow:
+    id: int
+    agent_id: int
+    name: str
+    serve_dir: str | None
+
+
 def reap_expired_notices_blocking(
     pool: ConnectionPool,
     db: Database,
@@ -87,50 +109,40 @@ def reap_expired_notices_blocking(
     now: datetime,
 ) -> list[tuple[int, int, lifecycle.NoticeResolutionFacts]]:
     with write_transaction(pool) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, agent_id, local_id, title, require_response, created_at, "
-                "expire_at, reply, answer "
-                "FROM agent_notices WHERE expire_at <= now() AND resolved_at IS NULL "
-                "ORDER BY expire_at, id LIMIT %s "
-                "FOR UPDATE SKIP LOCKED",
-                (PASS_BATCH,),
-            )
-            rows = cur.fetchall()
+        rows = query_all(
+            conn,
+            _NoticeRow,
+            "SELECT id, agent_id, local_id, title, require_response, created_at, "
+            "expire_at, (reply IS NOT NULL OR answer IS NOT NULL) AS replied "
+            "FROM agent_notices WHERE expire_at <= now() AND resolved_at IS NULL "
+            "ORDER BY expire_at, id LIMIT %s "
+            "FOR UPDATE SKIP LOCKED",
+            (PASS_BATCH,),
+        )
         if not rows:
             return []
         reaped: list[tuple[int, int, lifecycle.NoticeResolutionFacts]] = []
         updated_agents: set[int] = set()
         queued: list[OwnerMessage] = []
         today = now.astimezone(zone).date()
-        for (
-            nid,
-            agent_id,
-            local_id,
-            title,
-            require_response,
-            created_at,
-            expire_at,
-            reply,
-            answer,
-        ) in rows:
+        for notice in rows:
             with conn.cursor() as cur:
                 cur.execute(
                     "UPDATE agent_notices SET resolved_at = now(), resolution = 'expired' "
                     "WHERE id = %s AND resolved_at IS NULL",
-                    (nid,),
+                    (notice.id,),
                 )
                 if cur.rowcount == 0:
                     continue
-            if require_response:
-                updated_agents.add(agent_id)
+            if notice.require_response:
+                updated_agents.add(notice.agent_id)
             message = notify_owner(
                 conn,
-                agent_id,
+                notice.agent_id,
                 owner_text.notice_expired_message(
-                    local_id,
-                    title,
-                    owner_text.wall_clock(expire_at, zone=zone, today=today),
+                    notice.local_id,
+                    notice.title,
+                    owner_text.wall_clock(notice.expire_at, zone=zone, today=today),
                 ),
                 source="system:notice-expire",
                 queue_when_terminated=True,
@@ -139,14 +151,14 @@ def reap_expired_notices_blocking(
                 queued.append(message)
             reaped.append(
                 (
-                    agent_id,
-                    nid,
+                    notice.agent_id,
+                    notice.id,
                     lifecycle.notice_resolution_facts(
                         "expired",
-                        require_response=bool(require_response),
-                        created_at=created_at,
+                        require_response=notice.require_response,
+                        created_at=notice.created_at,
                         now=now,
-                        replied=reply is not None or answer is not None,
+                        replied=notice.replied,
                     ),
                 )
             )
@@ -166,18 +178,19 @@ def reap_expired_pages_blocking(
     reaper pass wins the race instead of double-terminalizing.
     """
     with write_transaction(pool) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, agent_id, name, serve_dir FROM agent_pages "
-                "WHERE expires_at IS NOT NULL AND expires_at <= now() "
-                "AND closed_at IS NULL AND expired_at IS NULL "
-                "ORDER BY id LIMIT %s",
-                (PASS_BATCH,),
-            )
-            rows = cur.fetchall()
+        rows = query_all(
+            conn,
+            _PageRow,
+            "SELECT id, agent_id, name, serve_dir FROM agent_pages "
+            "WHERE expires_at IS NOT NULL AND expires_at <= now() "
+            "AND closed_at IS NULL AND expired_at IS NULL "
+            "ORDER BY id LIMIT %s",
+            (PASS_BATCH,),
+        )
         reaped: list[tuple[int, str, int]] = []
         queued: list[OwnerMessage] = []
-        for page_id, agent_id, name, serve_dir in rows:
+        for page in rows:
+            page_id, agent_id, name = page.id, page.agent_id, page.name
             with conn.cursor() as cur:
                 cur.execute(
                     "UPDATE agent_pages SET expired_at = now() "
@@ -190,7 +203,9 @@ def reap_expired_pages_blocking(
             message = notify_owner(
                 conn,
                 agent_id,
-                owner_text.page_expired_message(name, agent_id, shown_by_agent=serve_dir is None),
+                owner_text.page_expired_message(
+                    name, agent_id, shown_by_agent=page.serve_dir is None
+                ),
             )
             if message is not None:
                 queued.append(message)

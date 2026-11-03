@@ -198,8 +198,8 @@ def run_maintenance(
     # each blob vacuum, but the vacuum only runs inside the 05:00-08:00
     # cluster-time window — emitting here on every pass keeps the series dense
     # enough for growth-curve and rate queries the rest of the day.
-    with pool.connection() as conn, conn.cursor() as cur:
-        emit_checkpoint_table_sizes(cur)
+    with pool.connection() as conn:
+        emit_checkpoint_table_sizes(conn)
     progress.beat()
     # Incremental physical reclamation: a plain VACUUM (no lock) over the
     # checkpoint tables, only inside the measured agent-lowest window

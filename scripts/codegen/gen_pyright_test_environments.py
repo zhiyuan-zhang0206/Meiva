@@ -100,6 +100,7 @@ TESTS_OWING_ANY: tuple[str, ...] = (
     "services/entrypoints",
     "services/supervision",
     "services/wake",
+    "services/upkeep",
 )
 
 

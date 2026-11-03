@@ -31,10 +31,10 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 import psycopg
-from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
+from base.db.rows import query_all
 from services.upkeep.events_maintenance.config import EventsMaintenanceConfig
 
 _log = logging.getLogger("services.upkeep.events_maintenance.resolution")
@@ -47,6 +47,9 @@ _AUTO_SLICE = timedelta(hours=6)
 _MAX_RECORD_LAG = timedelta(minutes=15)
 
 
+# meiva:note
+# Also the row shape of the two class queries: its fields are the column names, so the reads
+# build it directly and the identity cannot drift from the columns it is keyed by.
 @dataclass(frozen=True)
 class EventClass:
     """The immutable-event resolution identity (per-agent scope is reserved).
@@ -80,6 +83,28 @@ class Dismissal:
 
 
 @dataclass(frozen=True)
+class _ClassCountRow:
+    category: str
+    level: str
+    event_name: str
+    source: str
+    process: str
+    n: int
+
+
+@dataclass(frozen=True)
+class _DismissalRow:
+    id: int
+    category: str
+    level: str
+    event_name: str
+    source: str
+    process: str
+    dismissed_by: int
+    note: str
+
+
+@dataclass(frozen=True)
 class ResolutionResult:
     """One successful resolution pass, useful for logging and direct tests."""
 
@@ -105,6 +130,8 @@ class LevelSplit:
     net: int
 
 
+# meiva:note
+# Also the row shape of `alert_classes`: the select aliases every aggregate to a field name.
 @dataclass(frozen=True)
 class AlertClass:
     """One warning/error class over a window: the dismissal identity plus its tally.
@@ -152,20 +179,26 @@ def class_counts(
     Read from `telemetry_events`; `category` is always telemetry or log there. The level
     predicate is a literal so the partial index on those levels applies.
     """
-    rows = conn.execute(
+    rows = query_all(
+        conn,
+        _ClassCountRow,
         """
-        SELECT category, level, event_name, source, process, count(*)
+        SELECT category, level, event_name, source, process, count(*) AS n
         FROM telemetry_events
         WHERE level IN ('warning', 'error', 'critical')
           AND ts > %s AND ts <= %s
         GROUP BY category, level, event_name, source, process
         """,
         (start, end),
-    ).fetchall()
+    )
     return {
         EventClass(
-            category=row[0], level=row[1], event_name=row[2], source=row[3], process=row[4]
-        ): int(row[5])
+            category=row.category,
+            level=row.level,
+            event_name=row.event_name,
+            source=row.source,
+            process=row.process,
+        ): row.n
         for row in rows
     }
 
@@ -181,7 +214,8 @@ def alert_classes(
     that cluster and the rows with no label, the acceptance of every dashboard read.
     """
     query = """
-        SELECT level, event_name, source, process, max(category), count(*), min(ts), max(ts)
+        SELECT level, event_name, source, process, max(category) AS category,
+               count(*) AS count, min(ts) AS first_seen, max(ts) AS last_seen
         FROM telemetry_events
         WHERE level IN ('warning', 'error', 'critical')
           AND ts > %s AND ts <= %s
@@ -191,19 +225,7 @@ def alert_classes(
         query += " AND (cluster = %s OR cluster = '')"
         params.append(cluster)
     query += " GROUP BY level, event_name, source, process ORDER BY count(*) DESC, event_name, source, process, level"
-    return [
-        AlertClass(
-            level=row[0],
-            event_name=row[1],
-            source=row[2],
-            process=row[3],
-            category=row[4],
-            count=int(row[5]),
-            first_seen=row[6],
-            last_seen=row[7],
-        )
-        for row in conn.execute(query, params).fetchall()
-    ]
+    return query_all(conn, AlertClass, query, params)
 
 
 def active_dismissals(conn: psycopg.Connection) -> list[Dismissal]:
@@ -217,28 +239,27 @@ def active_dismissals(conn: psycopg.Connection) -> list[Dismissal]:
     grows that dimension.
     """
 
-    with conn.cursor(row_factory=dict_row) as cur:
-        cur.execute(
-            """
-            SELECT id, category, level, event_name, source, process, agent_id,
-                   dismissed_by, note
-            FROM event_dismissals
-            WHERE status = 'dismissed' AND agent_id IS NULL
-            """
-        )
-        rows = cur.fetchall()
+    rows = query_all(
+        conn,
+        _DismissalRow,
+        """
+        SELECT id, category, level, event_name, source, process, dismissed_by, note
+        FROM event_dismissals
+        WHERE status = 'dismissed' AND agent_id IS NULL
+        """,
+    )
     return [
         Dismissal(
-            id=row["id"],
+            id=row.id,
             event_class=EventClass(
-                category=row["category"],
-                level=row["level"],
-                event_name=row["event_name"],
-                source=row["source"],
-                process=row["process"],
+                category=row.category,
+                level=row.level,
+                event_name=row.event_name,
+                source=row.source,
+                process=row.process,
             ),
-            dismissed_by=row["dismissed_by"],
-            note=row["note"],
+            dismissed_by=row.dismissed_by,
+            note=row.note,
         )
         for row in rows
     ]
@@ -305,20 +326,20 @@ def stable_auto_classes(
         return set()
 
     slots = config.events_auto_dismiss_days * 4
-    rows = conn.execute(
-        """
-        SELECT category, level, event_name, source, process
-        FROM telemetry_events
-        WHERE level IN ('warning', 'error', 'critical') AND ts > %s AND ts <= %s
-        GROUP BY category, level, event_name, source, process
-        HAVING count(DISTINCT floor(extract(epoch FROM (%s::timestamptz - ts)) / %s)) = %s
-        """,
-        (now - slots * _AUTO_SLICE, now, now, _AUTO_SLICE.total_seconds(), slots),
-    ).fetchall()
-    stable = {
-        EventClass(category=r[0], level=r[1], event_name=r[2], source=r[3], process=r[4])
-        for r in rows
-    }
+    stable = set(
+        query_all(
+            conn,
+            EventClass,
+            """
+            SELECT category, level, event_name, source, process
+            FROM telemetry_events
+            WHERE level IN ('warning', 'error', 'critical') AND ts > %s AND ts <= %s
+            GROUP BY category, level, event_name, source, process
+            HAVING count(DISTINCT floor(extract(epoch FROM (%s::timestamptz - ts)) / %s)) = %s
+            """,
+            (now - slots * _AUTO_SLICE, now, now, _AUTO_SLICE.total_seconds(), slots),
+        )
+    )
     cadence.scanned(now)
     return stable & {event_class for event_class, count in current.items() if count > 0}
 

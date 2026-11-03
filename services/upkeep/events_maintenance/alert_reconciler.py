@@ -17,7 +17,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime
-from typing import Any
 
 import httpx
 import psycopg
@@ -30,6 +29,7 @@ from base.clock import Clock
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.events.live.bus import EventBus
+from base.host.boundary.untyped import object_of
 from base.telemetry.alerts import AlertKey, parse_ts
 from ops.alerts import publish_alert_rows
 from services.upkeep.events_maintenance.config import EventsMaintenanceConfig
@@ -89,7 +89,7 @@ def reconcile_open_grafana_alerts(
     *,
     snapshot_started_at: datetime,
     resolved_at: datetime,
-) -> list[dict[str, Any]]:
+) -> list[dict[str, object]]:
     """Resolve stored instances absent from one complete snapshot.
 
     Every row belongs to Grafana's evaluator (the webhook is the only writer),
@@ -136,7 +136,7 @@ def _reconcile_from_pool(
     active_keys: set[AlertKey],
     snapshot_started_at: datetime,
     resolved_at: datetime,
-) -> list[dict[str, Any]]:
+) -> list[dict[str, object]]:
     """Borrow + commit wrapper kept off the event loop by the caller."""
 
     with db_pool.connection() as conn:
@@ -173,7 +173,7 @@ async def reconcile_once(
     )
     response.raise_for_status()
     try:
-        payload: object = response.json()
+        payload = object_of(response.json)
     except ValueError as exc:
         raise GrafanaSnapshotError("Grafana active-alert response is not JSON") from exc
     active_keys = grafana_active_alert_keys(payload)

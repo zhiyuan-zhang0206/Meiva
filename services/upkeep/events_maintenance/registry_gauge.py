@@ -24,17 +24,24 @@ through the service's `TaskGroup`, the process (the supervisor restarts it).
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
+from base.db.rows import query_one
 
 # One sample per minute — bounded row rate, same cadence as the auth-401 and
 # latency flushers. A 60s gauge is plenty for a growth curve that changes
 # only when agents are spawned.
 FLUSH_INTERVAL_S = 60.0
+
+
+@dataclass(frozen=True)
+class _MaxRow:
+    max_id: int | None
 
 
 def read_max_agent_id_blocking(pool: ConnectionPool) -> int | None:
@@ -44,11 +51,9 @@ def read_max_agent_id_blocking(pool: ConnectionPool) -> int | None:
     ``asyncio.to_thread`` from the loop). Returns ``None`` when the table
     is empty; an empty registry is not a number worth emitting.
     """
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT max(id) FROM agents")
-        row = cur.fetchone()
-    value = row[0] if row is not None else None
-    return int(value) if value is not None else None
+    with pool.connection() as conn:
+        row = query_one(conn, _MaxRow, "SELECT max(id) AS max_id FROM agents")
+    return None if row is None else row.max_id
 
 
 def emit_max_agent_id(max_id: int) -> None:
