@@ -34,12 +34,14 @@ import shlex
 import shutil
 import sys
 import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 import meiva
 from base.api_contracts.agent_contract import AgentNotFound, AgentStatus, GatewayUnavailable
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
+from base.host.boundary.options import options
 from base.paths.expand import expand_home
 from base.sessions import coding_session_owner
 from base.sessions.backend import get_shell_backend
@@ -285,6 +287,34 @@ def _launch(workspace: Path, prompt: str, ttl_seconds: float) -> int:
     return 0
 
 
+# meiva:note
+# The flags this entry reads, as real types: `options` checks every field against the annotation
+# here, so nothing past `parse_args` carries an `argparse.Namespace` attribute's `Any`. `mode` stays
+# `str` — `announce_capability` takes the string argparse already narrowed to its choices.
+@dataclass(frozen=True)
+class DshOptions:
+    workspace: str
+    ttl_seconds: float
+    status: bool
+    cancel_generation: str | None
+    prompt: str | None
+    mode: str
+    force_mode: bool
+
+
+# meiva:note
+# Each verb computes its own key rather than one key being built above the control branch: argparse
+# keeps `--status` and `--cancel-generation` mutually exclusive, so exactly one verb runs and the
+# workspace resolution plus the cluster read still happen once per run — while neither verb holds a
+# key, or a `None` standing in for the other verb's key, that it never uses.
+def _workspace_key(workspace: str, *, user_home: Path) -> coding_session_owner.CodingSessionKey:
+    return coding_session_owner.canonical_key(
+        _placed(workspace, user_home=user_home).resolve(),
+        tool="dsh",
+        cluster=meiva.context.require_meiva_home(),
+    )
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         description="Launch DeepSeek Harness in a persistent shell session."
@@ -293,8 +323,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--ttl-seconds",
         type=float,
-        default=_DEFAULT_TTL_SECONDS,
-        help="Hard expiry of the shell session, up to one day (default: %(default)s).",
+        default=float(_DEFAULT_TTL_SECONDS),
+        help="Hard expiry of the shell session, up to one day (default: %(default)g).",
     )
     action = parser.add_mutually_exclusive_group()
     action.add_argument(
@@ -312,25 +342,24 @@ def main(argv: list[str]) -> int:
     )
     add_lineage_arguments(parser)
     add_capability_arguments(parser)
-    args = parser.parse_args(argv)
+    parsed = parser.parse_args(argv)
+    opts = options(parsed, DshOptions)
     user_home = Path.home()
-    if args.status or args.cancel_generation:
-        if args.prompt is not None:
-            parser.error("--prompt requires a new launch")
-        key = coding_session_owner.canonical_key(
-            _placed(args.workspace, user_home=user_home).resolve(),
-            tool="dsh",
-            cluster=meiva.context.require_meiva_home(),
-        )
-        return _status(key) if args.status else _cancel(key, args.cancel_generation)
-    if args.prompt is None or not args.prompt.strip():
+    if opts.prompt is not None and (opts.status or opts.cancel_generation):
+        parser.error("--prompt requires a new launch")
+    if opts.status:
+        return _status(_workspace_key(opts.workspace, user_home=user_home))
+    if opts.cancel_generation is not None:
+        return _cancel(_workspace_key(opts.workspace, user_home=user_home), opts.cancel_generation)
+    prompt_text = opts.prompt
+    if prompt_text is None or not prompt_text.strip():
         parser.error("new dsh launch requires a non-empty --prompt")
-    workspace = _resolve_dir(args.workspace, user_home=user_home)
-    refusal = announce_capability("dsh", mode=args.mode, force=args.force_mode)
+    workspace = _resolve_dir(opts.workspace, user_home=user_home)
+    refusal = announce_capability("dsh", mode=opts.mode, force=opts.force_mode)
     if refusal:
         return refusal
     prompt = (
-        f"{require_lineage(parser, args, now=datetime.now(UTC), takeover=True)}\n\n{args.prompt}"
+        f"{require_lineage(parser, parsed, now=datetime.now(UTC), takeover=True)}\n\n{prompt_text}"
     )
     from meiva.sdk_surface.agent_identity import require_agent_id
 
@@ -338,7 +367,7 @@ def main(argv: list[str]) -> int:
     return _launch(
         workspace,
         prompt,
-        args.ttl_seconds,
+        opts.ttl_seconds,
     )
 
 

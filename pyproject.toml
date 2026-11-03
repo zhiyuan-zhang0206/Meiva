@@ -728,6 +728,9 @@ root = "meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/test
 root = "meiva_builtins/skills/coordination/meiva-dynamic-workflow/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/skills/platform/meiva-guide/external-agents/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/skills/platform/meiva-self-evolution/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -961,6 +964,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/skills/integrations/gmail"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/skills/platform/meiva-guide"
 reportAny = "error"
 reportExplicitAny = "error"
 

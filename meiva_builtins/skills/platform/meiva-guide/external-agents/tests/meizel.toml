@@ -1,3 +1,0 @@
-[loads]
-"test_coding_session_resume.py" = ["meiva_builtins/skills/platform/meiva-guide/external-agents"]
-"test_impersonation_launch.py" = ["meiva_builtins/skills"]

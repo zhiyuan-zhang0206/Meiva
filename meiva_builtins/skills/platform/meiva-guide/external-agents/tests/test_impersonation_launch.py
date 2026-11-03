@@ -1,6 +1,5 @@
 """Launcher and impersonator-guide contracts for external coding agents."""
 
-import importlib.util
 import json
 import subprocess
 from pathlib import Path
@@ -12,6 +11,7 @@ from base.sessions import coding_session_owner
 from base.sessions.coding_session_owner_record import CodingSessionStatus
 from meiva.sdk_surface import process_context
 from meiva.shell.coding_tools import codex
+from meiva_builtins.skills.tests.skill_script import load_skill_script
 
 _REPO = Path(__file__).parents[6]
 _SKILL_DIR = Path(__file__).parents[1]
@@ -172,12 +172,14 @@ def test_app_server_command_executes_in_an_interactive_bash(tmp_path: Path) -> N
 def test_launch_rejects_missing_workspace_without_creating_it(
     provider: str, tmp_path: Path
 ) -> None:
-    spec = importlib.util.spec_from_file_location(
-        f"takeover_spawn_{provider}", _SKILL_DIR / "scripts" / f"spawn_{provider}.py"
+    module = load_skill_script(
+        "platform",
+        "meiva-guide",
+        "external-agents",
+        "scripts",
+        f"spawn_{provider}.py",
+        name=f"takeover_spawn_{provider}",
     )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
     target = tmp_path / "must-not-be-created"
     with pytest.raises(SystemExit):
         module.main([str(target), "--prompt", "hi"])
@@ -185,12 +187,14 @@ def test_launch_rejects_missing_workspace_without_creating_it(
 
 
 def test_dsh_launcher_boots_headless_with_the_relay_plugin_as_its_runner(tmp_path: Path) -> None:
-    spec = importlib.util.spec_from_file_location(
-        "takeover_spawn_dsh", _SKILL_DIR / "scripts" / "spawn_dsh.py"
+    module = load_skill_script(
+        "platform",
+        "meiva-guide",
+        "external-agents",
+        "scripts",
+        "spawn_dsh.py",
+        name="takeover_spawn_dsh",
     )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
     plugin = _SKILL_DIR / "scripts" / "meiva-relay-dsh" / "meiva-relay.mjs"
     assert plugin == module._PLUGIN and plugin.is_file()
     patch = module._patch(plugin, tmp_path / "launch.txt")
@@ -210,12 +214,14 @@ def test_dsh_launcher_boots_headless_with_the_relay_plugin_as_its_runner(tmp_pat
 def test_dsh_launcher_reaches_the_shell_sessions_of_the_bound_contexts_home(
     tmp_path: Path, unit_home: Path
 ) -> None:
-    spec = importlib.util.spec_from_file_location(
-        "takeover_spawn_dsh_home", _SKILL_DIR / "scripts" / "spawn_dsh.py"
+    module = load_skill_script(
+        "platform",
+        "meiva-guide",
+        "external-agents",
+        "scripts",
+        "spawn_dsh.py",
+        name="takeover_spawn_dsh_home",
     )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
     home = tmp_path / "context-home"
     home.mkdir()
     assert home != unit_home

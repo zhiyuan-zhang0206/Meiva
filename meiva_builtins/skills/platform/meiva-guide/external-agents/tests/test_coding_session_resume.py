@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 
 import pytest
@@ -8,8 +7,8 @@ import pytest
 from meiva.shell.coding_tools.plans.claude_launch import claude_command
 from meiva.shell.coding_tools.plans.claude_screen import claude_ui_ready
 from meiva.shell.coding_tools.plans.launch_request import worker_bootstrap
+from meiva_builtins.skills.tests.skill_script import load_skill_script
 
-_SKILL_DIR = Path(__file__).parents[1]
 _SESSION = "01a0e1ac-adc7-7d33-bd13-8ce2c6a686c5"
 
 
@@ -52,12 +51,14 @@ def test_a_fresh_worker_message_does_not_mention_an_interruption(tmp_path: Path)
 def test_resume_takes_a_session_uuid_and_excludes_status(
     script: str, extra: list[str], tmp_path: Path
 ) -> None:
-    spec = importlib.util.spec_from_file_location(
-        f"resume_{script}", _SKILL_DIR / "scripts" / f"{script}.py"
+    module = load_skill_script(
+        "platform",
+        "meiva-guide",
+        "external-agents",
+        "scripts",
+        f"{script}.py",
+        name=f"resume_{script}",
     )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
 
     with pytest.raises(SystemExit) as excinfo:
         module.main([str(tmp_path), *extra])
