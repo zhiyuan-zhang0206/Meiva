@@ -8,7 +8,7 @@ exports = ["accounting.py", "classify_paths.py", "commands.py", "export_process.
 "pr_flow_export.py" = ["export_process.py", "gh_process.py"]
 "runs_api.py" = ["gh_process.py"]
 "runs_export.py" = ["export_process.py", "gh_process.py", "runs_api.py"]
-"tests" = ["accounting.py", "commands.py", "diagnose.py", "export_process.py", "gh_process.py", "job_rerun.py", "monitor.py", "pr_flow_export.py", "runs_api.py", "runs_export.py", "status.py"]
+"tests" = ["accounting.py", "commands.py", "diagnose.py", "export_process.py", "gh_process.py", "job_rerun.py", "monitor.py", "pr_flow_export.py", "pyright_scope.py", "runs_api.py", "runs_export.py", "status.py"]
 "watch_pr.py" = ["status.py"]
 
 [roots]
@@ -18,5 +18,6 @@ exports = ["accounting.py", "classify_paths.py", "commands.py", "export_process.
 "export_process.py" = { kinds = ["db", "settings"], why = "Tool entry composes its process resources from the launch configuration" }
 "plan_file_shards.py" = { kinds = ["argv"], why = "CI script entry: its __main__ block raises SystemExit with main(sys.argv[1:])" }
 "pr_flow_export.py" = { kinds = ["clock", "home", "settings", "argv"], why = "CLI entrypoint resolves the current UTC timestamp, builds the process clock from the settings, resolves the home it operates once in its __main__ block; the __main__ guard reads argv[1:] once and hands it to main" }
+"pyright_scope.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 "runs_export.py" = { kinds = ["clock", "home", "settings", "argv"], why = "CLI entrypoint resolves the current UTC timestamp for trailing-window sampling, builds the process clock from the settings and resolves the home it operates once in its __main__ block, for its state directory and the event writer; the __main__ guard reads argv[1:] once and hands it to main" }
 "watch_pr.py" = { kinds = ["environ", "home", "platform", "settings"], why = "watcher template resolves the home once to place the verdict file in the launching agent's workspace; builds the process clock from the settings; builds the host of this process with Host.system(), handing it the process environment" }
