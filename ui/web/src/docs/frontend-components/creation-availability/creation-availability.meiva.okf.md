@@ -11,7 +11,10 @@ tags:
 Creation lives behind the sidebar header's `+`. The form lists agents only on
 online, non-paused agent-runner machines with `agent_host_online=true`; the host
 verdict keeps its pidfile meaning, and a false or absent verdict leaves that row
-disabled with its reason.
+disabled with its reason. While cluster status is loading on cold cache, the
+form presents a compact checking status; if the cold status query fails without
+cached data, it shows cluster status unavailable instead of reporting no runners.
+Background status refetch errors retain cached data (stale-while-error).
 
 Creation is one table, read left to right: **Machine, Harness, Model, Effort**.
 The machine comes first: harness availability belongs to a machine.
