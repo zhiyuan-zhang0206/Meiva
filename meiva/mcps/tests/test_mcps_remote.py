@@ -220,9 +220,11 @@ def test_request_ids_increment(stub_daemon: Start) -> None:
     ids=["stale-response", "notification"],
 )
 def test_foreign_lines_before_the_response_are_skipped(stub_daemon: Start, foreign: bytes) -> None:
-    daemon = stub_daemon(lambda request: [foreign, ok_line(request, "fresh")])
+    daemon = stub_daemon(lambda request: [foreign, ok_line(request, {"marker": "fresh"})])
     client = remote_mod.RemoteMCPClient(daemon.path, timers=SYSTEM_TIMERS)
-    assert client.call_tool("srv", "t", {}, timeout_seconds=5.0, agent_id=None) == "fresh"
+    assert client.call_tool("srv", "t", {}, timeout_seconds=5.0, agent_id=None) == {
+        "marker": "fresh"
+    }
 
 
 # meiva:note
@@ -232,11 +234,13 @@ def test_stale_response_and_notification_together_are_skipped(stub_daemon: Start
         lambda request: [
             line({"id": 7, "ok": True, "result": "very stale"})
             + line({"method": "notifications/progress", "params": {}})
-            + ok_line(request, "mine")
+            + ok_line(request, {"marker": "mine"})
         ]
     )
     client = remote_mod.RemoteMCPClient(daemon.path, timers=SYSTEM_TIMERS)
-    assert client.call_tool("srv", "t", {}, timeout_seconds=5.0, agent_id=None) == "mine"
+    assert client.call_tool("srv", "t", {}, timeout_seconds=5.0, agent_id=None) == {
+        "marker": "mine"
+    }
 
 
 # meiva:note

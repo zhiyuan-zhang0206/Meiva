@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import sys
 import types
-from typing import Any
 
 from base.agents.lifecycle import (
     release_agent_chrome_pages as release_agent_chrome_pages,
 )
+from base.host.boundary.json_values import is_object_dict
 from meiva.mcps import _tools
 from meiva.mcps._clients import McpClients
 from meiva.mcps.config import (
@@ -58,7 +58,7 @@ def _source() -> _tools.ToolSource:
     )
 
 
-def load_config() -> dict[str, dict[str, Any]]:
+def load_config() -> dict[str, dict[str, object]]:
     """Merged MCP server map (machine `$MEIVA_HOME/mcp.json` + plugin-bundled `.mcp.json`).
 
     Returns an empty dict when nothing is configured.
@@ -80,7 +80,15 @@ def description(server: str) -> str | None:
     config = load_config()
     if server not in config:
         raise MCPServerNotFound(f"meiva.mcps has no server {server!r} (have: {sorted(config)})")
-    return config[server].get("description")
+    entry = config[server]
+    if not is_object_dict(entry):
+        raise TypeError(f"{server}: the server entry must be an object")
+    description = entry.get("description")
+    if description is None:
+        return None
+    if not isinstance(description, str):
+        raise TypeError(f"{server}: description must be a string, got {type(description).__name__}")
+    return description
 
 
 def __getattr__(name: str) -> _tools.ServerProxy:

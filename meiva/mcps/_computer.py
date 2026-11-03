@@ -13,12 +13,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import AsyncExitStack, suppress
-from typing import Any
 
 from mcp.types import CallToolResult, ListToolsResult, Tool
 
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from base.host.net.resilience import Policy, aretry, retry_asleep
 
 # Snapshot results stay small (PNG metadata), but keep the same generous line
@@ -69,7 +70,7 @@ class ComputerLineSession:
         self._writer = writer
         self._id = 0
 
-    async def _request(self, payload: dict[str, Any], *, with_agent: bool) -> object:
+    async def _request(self, payload: Mapping[str, object], *, with_agent: bool) -> object:
         self._id += 1
         if with_agent:
             payload = {"id": self._id, **payload, "agent_id": self.client_agent_id}
@@ -81,13 +82,19 @@ class ComputerLineSession:
         if not line:
             raise ConnectionError("computer-mcp daemon closed the connection")
         try:
-            resp = json.loads(line)
+            resp = object_of(json.loads, line)
         except json.JSONDecodeError as e:
             await self._reconnect()
             raise RuntimeError(
                 f"computer-mcp daemon returned a corrupted line; "
                 f"connection rebuilt — retry the call: {e}"
             ) from e
+        if not is_object_dict(resp):
+            await self._reconnect()
+            raise RuntimeError(
+                "computer-mcp daemon returned a response that is not an object; "
+                "connection rebuilt — retry the call"
+            )
         if resp.get("id") != self._id:
             req_id = self._id
             await self._reconnect()
@@ -100,14 +107,17 @@ class ComputerLineSession:
         return resp["result"]
 
     async def list_tools(self) -> ListToolsResult:
-        result: Any = await self._request({"method": "list_tools"}, with_agent=False)
-        return ListToolsResult(tools=[Tool.model_validate(t) for t in result])
+        result = await self._request({"method": "list_tools"}, with_agent=False)
+        if not is_object_list(result):
+            raise RuntimeError("computer-mcp daemon returned a tool list that is not a list")
+        return ListToolsResult(tools=[Tool.model_validate(entry) for entry in result])
 
-    async def call_tool(self, name: str, args: dict[str, Any]) -> CallToolResult:
-        result: Any = await self._request(
-            {"method": "call_tool", "tool": name, "args": args}, with_agent=True
+    async def call_tool(self, name: str, args: Mapping[str, object]) -> CallToolResult:
+        return CallToolResult.model_validate(
+            await self._request(
+                {"method": "call_tool", "tool": name, "args": args}, with_agent=True
+            )
         )
-        return CallToolResult.model_validate(result)
 
 
 async def _close_writer(writer: asyncio.StreamWriter) -> None:

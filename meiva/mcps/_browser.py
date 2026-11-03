@@ -16,16 +16,17 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import AsyncExitStack, suppress
 from pathlib import Path
-from typing import Any
 
 from mcp.types import CallToolResult, ListToolsResult, Tool
 
 from base.agents.lifecycle import (
     release_agent_chrome_pages as release_agent_chrome_pages,
 )
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from base.host.net.resilience import Policy, aretry, retry_asleep
 
 # A single tool result (screenshot / DOM snapshot) can be multi-MB on one
@@ -95,7 +96,7 @@ class BrowserLineSession:
         self._writer = writer
         self._id = 0
 
-    async def _request(self, payload: dict[str, Any]) -> object:
+    async def _request(self, payload: Mapping[str, object]) -> object:
         self._id += 1
         payload = {"id": self._id, **payload}
         self._writer.write((json.dumps(payload, ensure_ascii=False) + "\n").encode())
@@ -104,7 +105,7 @@ class BrowserLineSession:
         if not line:
             raise ConnectionError("browser-mcp daemon closed the connection")
         try:
-            resp = json.loads(line)
+            resp = object_of(json.loads, line)
         except json.JSONDecodeError as e:
             # A corrupt line means the stream is no longer line-aligned; no
             # amount of waiting realigns it. Rebuild and fail loud.
@@ -113,6 +114,15 @@ class BrowserLineSession:
                 f"browser-mcp daemon returned a corrupted line; "
                 f"connection rebuilt — retry the call: {e}"
             ) from e
+        # meiva:note
+        # A line that parses but is not an object is the same class of desync as a corrupt one:
+        # the stream cannot be trusted, so the connection is rebuilt here too.
+        if not is_object_dict(resp):
+            await self._reconnect()
+            raise RuntimeError(
+                "browser-mcp daemon returned a response that is not an object; "
+                "connection rebuilt — retry the call"
+            )
         # One connection = one in-flight request (the service serves each
         # connection serially), so ids must arrive in order; a mismatch means
         # the stream desynced — fail loud, never hand back another call's
@@ -134,15 +144,16 @@ class BrowserLineSession:
         # The service returns a bare tool-dict list (the wrapper validates each
         # entry the same way); wrap it in the SDK result shape the daemon's
         # request loop consumes (.tools).
-        result: Any = await self._request({"method": "list_tools"})
-        return ListToolsResult(tools=[Tool.model_validate(t) for t in result])
+        result = await self._request({"method": "list_tools"})
+        if not is_object_list(result):
+            raise RuntimeError("browser-mcp daemon returned a tool list that is not a list")
+        return ListToolsResult(tools=[Tool.model_validate(entry) for entry in result])
 
-    async def call_tool(self, name: str, args: dict[str, Any]) -> CallToolResult:
-        payload: dict[str, Any] = {"method": "call_tool", "tool": name, "args": args}
+    async def call_tool(self, name: str, args: Mapping[str, object]) -> CallToolResult:
+        payload: dict[str, object] = {"method": "call_tool", "tool": name, "args": args}
         if self.client_agent_id is not None:
             payload["agent_id"] = self.client_agent_id
-        result: Any = await self._request(payload)
-        return CallToolResult.model_validate(result)
+        return CallToolResult.model_validate(await self._request(payload))
 
 
 async def _close_writer(writer: asyncio.StreamWriter) -> None:

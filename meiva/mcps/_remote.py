@@ -14,11 +14,41 @@ from __future__ import annotations
 import json
 import socket
 import threading
+from collections.abc import Mapping
 from contextlib import suppress
-from typing import Any
 
 from base.clock import Timers
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from meiva.mcps.config import MCPCallError, MCPConnectError, ToolInfo
+
+
+# meiva:note
+# One entry of the daemon's `list_tools` reply: `name` is required, `description` and `input_schema`
+# may be absent (an explicit null reads as absent), and a field of the wrong type is a broken reply
+# rather than a value to default. `optional_*_field` reads a wrong type as absent on purpose, so the
+# checks are explicit here.
+def _tool_entry(entry: object) -> ToolInfo:
+    if not is_object_dict(entry):
+        raise MCPConnectError("MCP daemon returned a tool entry that is not an object")
+    name = entry.get("name")
+    if not isinstance(name, str):
+        raise MCPConnectError(f"MCP daemon returned a tool with no string name: {name!r}")
+    description = entry.get("description")
+    if description is None:
+        description = ""
+    elif not isinstance(description, str):
+        raise MCPConnectError(
+            f"MCP daemon returned a tool whose description is not a string: {description!r}"
+        )
+    schema = entry.get("input_schema")
+    if schema is None:
+        schema = {}
+    elif not is_object_dict(schema):
+        raise MCPConnectError(
+            f"MCP daemon returned a tool whose input_schema is not an object: {schema!r}"
+        )
+    return ToolInfo(name=name, description=description, input_schema=schema)
 
 
 class RemoteMCPClient:
@@ -59,7 +89,12 @@ class RemoteMCPClient:
         return sock
 
     def _request(
-        self, method: str, params: dict[str, Any], *, timeout_seconds: float, agent_id: int | None
+        self,
+        method: str,
+        params: Mapping[str, object],
+        *,
+        timeout_seconds: float,
+        agent_id: int | None,
     ) -> object:
         with self._lock:
             self._req_id += 1
@@ -106,7 +141,7 @@ class RemoteMCPClient:
 
     def _read_response(
         self, sock: socket.socket, req_id: int, *, timeout_seconds: float
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         """Read response lines until the one whose id matches `req_id`.
 
         Response-id matching: only the line whose id equals this request's id
@@ -138,37 +173,36 @@ class RemoteMCPClient:
                 line = parts[0]
                 buf = parts[1]
                 try:
-                    parsed = json.loads(line.decode("utf-8"))
+                    parsed = object_of(json.loads, line.decode("utf-8"))
                 except json.JSONDecodeError:
                     raise MCPConnectError("MCP daemon returned a malformed response line") from None
+                if not is_object_dict(parsed):
+                    raise MCPConnectError(
+                        "MCP daemon returned a response line that is not an object"
+                    )
                 if parsed.get("id") == req_id:
                     return parsed
 
     def list_tools(
         self, server: str, *, timeout_seconds: float, agent_id: int | None
     ) -> list[ToolInfo]:
-        result: Any = self._request(
+        result = self._request(
             "list_tools", {"server": server}, timeout_seconds=timeout_seconds, agent_id=agent_id
         )
-        return [
-            {
-                "name": t["name"],
-                "description": t.get("description", ""),
-                "input_schema": t.get("input_schema", {}),
-            }
-            for t in result
-        ]
+        if not is_object_list(result):
+            raise MCPConnectError("MCP daemon returned a tool list that is not a list")
+        return [_tool_entry(entry) for entry in result]
 
     def call_tool(
         self,
         server: str,
         tool: str,
-        args: dict[str, Any],
+        args: Mapping[str, object],
         *,
         timeout_seconds: float,
         agent_id: int | None,
-    ) -> dict[str, Any]:
-        result: Any = self._request(
+    ) -> dict[str, object]:
+        result = self._request(
             "call_tool",
             {
                 "server": server,
@@ -178,6 +212,8 @@ class RemoteMCPClient:
             timeout_seconds=timeout_seconds,
             agent_id=agent_id,
         )
+        if not is_object_dict(result):
+            raise MCPCallError(f"MCP tool result for {server}.{tool} is not an object")
         return result
 
 

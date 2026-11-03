@@ -5,7 +5,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
+
+from base.host.boundary.json_values import is_object_dict, is_object_list
 
 
 # meiva:note
@@ -46,11 +48,10 @@ def unmet_requirement(requires: Mapping[str, bool], *, display_available: bool) 
 
 
 def _strings(server: str, field_name: str, value: object) -> list[str]:
-    items: Any = value
-    if not isinstance(value, (list, tuple)):
+    if not is_object_list(value):
         raise TypeError(f"Server {server!r}: {field_name} must be a list of strings, got {value!r}")
     result: list[str] = []
-    for item in items:
+    for item in value:
         if not isinstance(item, str):
             raise TypeError(
                 f"Server {server!r}: {field_name} must be a list of strings, got {value!r}"
@@ -60,18 +61,17 @@ def _strings(server: str, field_name: str, value: object) -> list[str]:
 
 
 def _string_map(server: str, field_name: str, value: object) -> dict[str, str]:
-    raw: Any = value
-    if not isinstance(value, dict):
+    if not is_object_dict(value):
         raise TypeError(
             f"Server {server!r}: {field_name} must map strings to strings, got {value!r}"
         )
     result: dict[str, str] = {}
-    for k, v in raw.items():
-        if not isinstance(k, str) or not isinstance(v, str):
+    for key, entry in value.items():
+        if not isinstance(entry, str):
             raise TypeError(
                 f"Server {server!r}: {field_name} must map strings to strings, got {value!r}"
             )
-        result[k] = v
+        result[key] = entry
     return result
 
 

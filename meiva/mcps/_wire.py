@@ -11,6 +11,8 @@ from collections.abc import Iterable, Mapping
 
 from mcp.types import CallToolResult, Tool
 
+from base.host.boundary.untyped import object_of
+
 
 # meiva:note
 # The reply to the watchdog's liveness probe; it opens no session, so a slow MCP server can never make a busy daemon look dead.
@@ -52,7 +54,7 @@ def call_response(req_id: object, result: CallToolResult) -> dict[str, object]:
         "result": {
             "content": content,
             "isError": result.is_error,
-            "structuredContent": result.structured_content,
+            "structuredContent": object_of(getattr, result, "structured_content"),
         },
     }
 

@@ -9,6 +9,7 @@ from typing import Any
 
 import psutil
 import pytest
+from mcp import ClientSession
 
 import meiva.mcps._daemon as daemon_mod
 from meiva.mcps.tests.daemon.daemon_support import (
@@ -210,7 +211,12 @@ async def test_buckets_close_releases_every_stack_even_when_one_fails() -> None:
     stacks["a"].push_async_callback(closes, "a")
     stacks["b"].push_async_callback(fails_to_close)
     stacks["c"].push_async_callback(closes, "c")
-    buckets = daemon_mod.Buckets(sessions={"a": "sa", "b": "sb", "c": "sc"}, stacks=stacks)
+    # meiva:note
+    # Only the stacks are exercised: `close()` walks them and clears both maps, so the session
+    # values are never read, and an uninitialized `ClientSession` fills the map the field types.
+    session = object.__new__(ClientSession)
+    sessions: dict[str, daemon_mod.ManagedSession] = dict.fromkeys("abc", session)
+    buckets = daemon_mod.Buckets(sessions=sessions, stacks=stacks)
 
     await buckets.close()
 
