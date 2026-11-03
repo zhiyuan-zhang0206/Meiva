@@ -17,8 +17,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from decimal import Decimal
 
 import psycopg
 
@@ -31,6 +32,21 @@ from base.events.contract import (
     family_events,
 )
 from base.telemetry.metrics.event_sql import numeric
+from gateway.cluster.schemas import (
+    LlmBucket,
+    LlmReport,
+    LlmTotals,
+    OpsMonitorMeta,
+    OpsMonitorReport,
+    RestartBucket,
+    RestartReport,
+    RestartTotals,
+    ServiceRestartRow,
+    SseDropBucket,
+    SseReport,
+    SseTotals,
+)
+from gateway.http.db_rows import query_all
 
 # meiva:note
 # Window -> (seconds, bucket seconds). Bucket count per window is fixed:
@@ -62,12 +78,63 @@ def _round1(v: float | None) -> float | None:
     return round(v, 1) if v is not None else None
 
 
+def _as_float(v: Decimal | None) -> float | None:
+    return float(v) if v is not None else None
+
+
 # meiva:note
-# Run a query assembled from integers and the registered payload-key constants.
-def _execute(
-    conn: psycopg.Connection[Any], query: str, params: tuple[Any, ...]
-) -> psycopg.Cursor[Any]:
-    return conn.execute(query, params)  # pyright: ignore[reportArgumentType, reportCallIssue]
+# Run a query assembled from integers and the registered payload-key constants; every row comes
+# back as `row_class`, whose fields are named as the query's columns.
+def _rows[RowT](
+    conn: psycopg.Connection, row_class: type[RowT], query: str, params: tuple[object, ...]
+) -> list[RowT]:
+    return query_all(conn, row_class, query, params)  # pyright: ignore[reportArgumentType]
+
+
+# meiva:note
+# One bucket's SSE / event-log drop counts.
+@dataclass(frozen=True)
+class _SseRow:
+    bkt: int
+    queue_full: int
+    publish_error: int
+    event_log_drop: int
+
+
+# meiva:note
+# One bucket's LLM profile, or the whole-window row (`is_total` set by `grouping(bkt)`). The sums are
+# numeric (`Decimal`), the percentiles double precision, and the latencies NULL when no row of the
+# group carried one.
+@dataclass(frozen=True)
+class _LlmRow:
+    bkt: int | None
+    calls: int
+    tokens_in: Decimal
+    tokens_out: Decimal
+    tokens_reasoning: Decimal
+    lat_sum: Decimal
+    lat_max: Decimal | None
+    p50: float | None
+    p95: float | None
+    errors: int
+    is_total: int
+
+
+# meiva:note
+# One bucket's service start count.
+@dataclass(frozen=True)
+class _RestartRow:
+    bkt: int
+    starts: int
+
+
+# meiva:note
+# One service's start count and latest start inside the window.
+@dataclass(frozen=True)
+class _ServiceRow:
+    service: str
+    starts: int
+    last_start: datetime
 
 
 # meiva:note
@@ -95,58 +162,63 @@ class _Window:
 
 # meiva:note
 # keys come from the registered payload constants.
-def _sse_series(conn: psycopg.Connection[Any], window: _Window) -> dict[str, Any]:
+def _sse_series(conn: psycopg.Connection, window: _Window) -> SseReport:
     kind = f"COALESCE({SSE_DROP_KEYS['kind']}, '')"
-    rows = _execute(
+    rows = _rows(
         conn,
+        _SseRow,
         f"""
         SELECT {window.bucket_sql} AS bkt,
-               count(*) FILTER (WHERE event_name = 'sse_drop' AND {kind} = 'queue_full'),
+               count(*) FILTER (WHERE event_name = 'sse_drop' AND {kind} = 'queue_full')
+                 AS queue_full,
                count(*) FILTER (WHERE event_name = 'sse_drop'
-                                AND {kind} NOT IN ('', 'queue_full')),
-               count(*) FILTER (WHERE event_name = 'event_log_drop')
+                                AND {kind} NOT IN ('', 'queue_full')) AS publish_error,
+               count(*) FILTER (WHERE event_name = 'event_log_drop') AS event_log_drop
         FROM telemetry_events
         WHERE event_name IN ('sse_drop', 'event_log_drop') AND ts >= %s AND ts < %s
         GROUP BY bkt
         """,  # noqa: S608
         (window.start, window.end),
-    ).fetchall()
-    by_bucket = {int(r[0]): (int(r[1]), int(r[2]), int(r[3])) for r in rows}
-    cells = window.fill(by_bucket, (0, 0, 0))
-    queue_full, publish_error, event_log_drop = (
-        list(column) for column in zip(*cells, strict=True)
     )
-    return {
-        "series": [
-            {"bucket": i, "queue_full": q, "publish_error": p, "event_log_drop": e}
-            for i, (q, p, e) in enumerate(
-                zip(queue_full, publish_error, event_log_drop, strict=True)
+    by_bucket = {r.bkt: r for r in rows}
+    empty = _SseRow(0, 0, 0, 0)
+    cells = window.fill(by_bucket, empty)
+    return SseReport(
+        series=[
+            SseDropBucket(
+                bucket=i,
+                queue_full=c.queue_full,
+                publish_error=c.publish_error,
+                event_log_drop=c.event_log_drop,
             )
+            for i, c in enumerate(cells)
         ],
-        "totals": {
-            "queue_full": sum(queue_full),
-            "publish_error": sum(publish_error),
-            "event_log_drop": sum(event_log_drop),
-        },
-    }
+        totals=SseTotals(
+            queue_full=sum(c.queue_full for c in cells),
+            publish_error=sum(c.publish_error for c in cells),
+            event_log_drop=sum(c.event_log_drop for c in cells),
+        ),
+    )
 
 
 # meiva:note
 # keys come from the registered payload constants.
-def _llm_series(conn: psycopg.Connection[Any], window: _Window) -> dict[str, Any]:
+def _llm_series(conn: psycopg.Connection, window: _Window) -> LlmReport:
     latency = numeric(LLM_USAGE_KEYS["latency_ms"])
     usage = "event_name = 'llm_usage'"
-    rows = _execute(
+    rows = _rows(
         conn,
+        _LlmRow,
         f"""
         SELECT bkt,
-               count(*) FILTER (WHERE {usage}),
-               COALESCE(sum(tin), 0), COALESCE(sum(tout), 0), COALESCE(sum(treason), 0),
-               COALESCE(sum(lat), 0), max(lat),
-               percentile_cont(0.5) WITHIN GROUP (ORDER BY lat),
-               percentile_cont(0.95) WITHIN GROUP (ORDER BY lat),
-               count(*) FILTER (WHERE event_name = ANY(%s)),
-               grouping(bkt)
+               count(*) FILTER (WHERE {usage}) AS calls,
+               COALESCE(sum(tin), 0) AS tokens_in, COALESCE(sum(tout), 0) AS tokens_out,
+               COALESCE(sum(treason), 0) AS tokens_reasoning,
+               COALESCE(sum(lat), 0) AS lat_sum, max(lat) AS lat_max,
+               percentile_cont(0.5) WITHIN GROUP (ORDER BY lat) AS p50,
+               percentile_cont(0.95) WITHIN GROUP (ORDER BY lat) AS p95,
+               count(*) FILTER (WHERE event_name = ANY(%s)) AS errors,
+               grouping(bkt) AS is_total
         FROM (
           SELECT {window.bucket_sql} AS bkt, event_name,
                  CASE WHEN {usage} THEN {numeric(LLM_USAGE_KEYS["in_total"])} END AS tin,
@@ -159,121 +231,121 @@ def _llm_series(conn: psycopg.Connection[Any], window: _Window) -> dict[str, Any
         GROUP BY GROUPING SETS ((bkt), ())
         """,  # noqa: S608
         (_LLM_ERROR_EVENTS, _LLM_ERROR_EVENTS, window.start, window.end),
-    ).fetchall()
-    per_bucket: dict[int, tuple[Any, ...]] = {}
-    total: tuple[Any, ...] | None = None
+    )
+    per_bucket: dict[int, _LlmRow] = {}
+    total: _LlmRow | None = None
     for row in rows:
-        if row[10]:
+        if row.is_total:
             total = row
-        else:
-            per_bucket[int(row[0])] = row
-    empty: tuple[Any, ...] = (0, 0, 0, 0, 0, 0, None, None, None, 0, 0)
+        elif row.bkt is not None:
+            per_bucket[row.bkt] = row
+    empty = _LlmRow(None, 0, Decimal(0), Decimal(0), Decimal(0), Decimal(0), None, None, None, 0, 0)
+    cells = window.fill(per_bucket, empty)
+    series = [_llm_bucket(i, cell) for i, cell in enumerate(cells)]
+    return LlmReport(series=series, totals=_llm_totals(cells, series, total))
 
-    def column(index: int, *, count: bool = False) -> list[Any]:
-        values = [per_bucket.get(i, empty)[index] for i in range(window.n)]
-        return [round(v) if count and v is not None else v for v in values]
 
-    calls = [int(v) for v in column(1)]
-    tokens_in = column(2, count=True)
-    tokens_out = column(3, count=True)
-    tokens_reasoning = column(4, count=True)
-    lat_sum = column(5, count=True)
-    lat_max = column(6)
-    p50 = column(7)
-    p95 = column(8)
-    errors = [int(v) for v in column(9)]
+# meiva:note
+# One bucket's LLM profile: counts as stored, token and latency sums rounded to whole numbers,
+# `tps` = tokens per second of summed latency (None without latency data).
+def _llm_bucket(index: int, cell: _LlmRow) -> LlmBucket:
+    tokens_in = round(cell.tokens_in)
+    tokens_out = round(cell.tokens_out)
+    tokens_reasoning = round(cell.tokens_reasoning)
+    lat_sum = round(cell.lat_sum)
+    tps = None
+    if lat_sum:
+        tps = _round1((tokens_in + tokens_out + tokens_reasoning) / (lat_sum / 1000.0))
+    return LlmBucket(
+        bucket=index,
+        calls=cell.calls,
+        latency_p50_ms=_round1(cell.p50),
+        latency_p95_ms=_round1(cell.p95),
+        latency_max_ms=_round1(_as_float(cell.lat_max)),
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
+        tps=tps,
+        errors=cell.errors,
+    )
 
-    series: list[dict[str, Any]] = []
-    for i in range(window.n):
-        tps = None
-        if lat_sum[i]:
-            tps = _round1(
-                (tokens_in[i] + tokens_out[i] + tokens_reasoning[i]) / (lat_sum[i] / 1000.0)
-            )
-        series.append(
-            {
-                "bucket": i,
-                "calls": calls[i],
-                "latency_p50_ms": _round1(p50[i]),
-                "latency_p95_ms": _round1(p95[i]),
-                "latency_max_ms": _round1(lat_max[i]),
-                "tokens_in": tokens_in[i],
-                "tokens_out": tokens_out[i],
-                "tps": tps,
-                "errors": errors[i],
-            }
-        )
-    t_tokens = sum(tokens_in) + sum(tokens_out) + sum(tokens_reasoning)
-    t_lat = sum(lat_sum)
-    return {
-        "series": series,
-        "totals": {
-            "calls": sum(calls),
-            "latency_p50_ms": _round1(total[7]) if total else None,
-            "latency_p95_ms": _round1(total[8]) if total else None,
-            "latency_max_ms": _round1(total[6]) if total else None,
-            "tokens_in": sum(tokens_in),
-            "tokens_out": sum(tokens_out),
-            "tps": _round1(t_tokens / (t_lat / 1000.0)) if t_lat else None,
-            "errors": sum(errors),
-        },
-    }
+
+# meiva:note
+# The whole-window profile: sums of the buckets, latency percentiles and max from the
+# grouping-set total row.
+def _llm_totals(cells: list[_LlmRow], series: list[LlmBucket], total: _LlmRow | None) -> LlmTotals:
+    t_tokens = sum(b.tokens_in + b.tokens_out for b in series) + sum(
+        round(c.tokens_reasoning) for c in cells
+    )
+    t_lat = sum(round(c.lat_sum) for c in cells)
+    return LlmTotals(
+        calls=sum(c.calls for c in cells),
+        latency_p50_ms=_round1(total.p50) if total else None,
+        latency_p95_ms=_round1(total.p95) if total else None,
+        latency_max_ms=_round1(_as_float(total.lat_max)) if total else None,
+        tokens_in=sum(b.tokens_in for b in series),
+        tokens_out=sum(b.tokens_out for b in series),
+        tps=_round1(t_tokens / (t_lat / 1000.0)) if t_lat else None,
+        errors=sum(c.errors for c in cells),
+    )
 
 
 # meiva:note
 # the bucket expression is built from integers.
 # keys come from the registered payload constants.
-def _restart_series(conn: psycopg.Connection[Any], window: _Window) -> dict[str, Any]:
-    rows = _execute(
+def _restart_series(conn: psycopg.Connection, window: _Window) -> RestartReport:
+    rows = _rows(
         conn,
+        _RestartRow,
         f"""
-        SELECT {window.bucket_sql} AS bkt, count(*)
+        SELECT {window.bucket_sql} AS bkt, count(*) AS starts
         FROM telemetry_events
         WHERE event_name = 'service_started' AND ts >= %s AND ts < %s
         GROUP BY bkt
         """,  # noqa: S608
         (window.start, window.end),
-    ).fetchall()
-    cells = window.fill({int(r[0]): int(r[1]) for r in rows}, 0)
+    )
+    cells = window.fill({r.bkt: r.starts for r in rows}, 0)
 
     name = f"btrim(COALESCE({SERVICE_STARTED_KEYS['name']}, ''))"
-    services: list[dict[str, Any]] = [
-        {"name": r[0], "starts": int(r[1]), "last_start": r[2].astimezone(UTC).isoformat()}
-        for r in _execute(
+    services = [
+        ServiceRestartRow(
+            name=r.service, starts=r.starts, last_start=r.last_start.astimezone(UTC).isoformat()
+        )
+        for r in _rows(
             conn,
+            _ServiceRow,
             f"""
-            SELECT {name} AS service, count(*), max(ts)
+            SELECT {name} AS service, count(*) AS starts, max(ts) AS last_start
             FROM telemetry_events
             WHERE event_name = 'service_started' AND ts >= %s AND ts < %s AND {name} <> ''
             GROUP BY service ORDER BY count(*) DESC, service
             """,  # noqa: S608
             (window.start, window.end),
-        ).fetchall()
+        )
     ]
-    return {
-        "series": [{"bucket": i, "service_starts": s} for i, s in enumerate(cells)],
-        "services": services,
-        "totals": {"service_starts": sum(cells)},
-    }
+    return RestartReport(
+        series=[RestartBucket(bucket=i, service_starts=s) for i, s in enumerate(cells)],
+        services=services,
+        totals=RestartTotals(service_starts=sum(cells)),
+    )
 
 
 # meiva:note
-# Run every registered ops series for `window` and return the full report
-# dict — meta + the three groups — ready for `OpsMonitorReport(**data)`.
+# Run every registered ops series for `window` and return the full report: meta + the three groups.
 def fetch_ops_series(
-    conn: psycopg.Connection[Any], window: str, *, anchor: datetime
-) -> dict[str, Any]:
+    conn: psycopg.Connection, window: str, *, anchor: datetime
+) -> OpsMonitorReport:
     window_s, bucket_s = WINDOWS[window]
     bucket_starts = bucket_start_times(anchor, window_s, bucket_s)
     grid = _Window(bucket_starts, bucket_s)
-    return {
-        "meta": {
-            "window": window,
-            "bucket_seconds": bucket_s,
-            "generated_at": anchor.isoformat(),
-            "bucket_starts": [b.isoformat() for b in bucket_starts],
-        },
-        "sse": _sse_series(conn, grid),
-        "llm": _llm_series(conn, grid),
-        "restarts": _restart_series(conn, grid),
-    }
+    return OpsMonitorReport(
+        meta=OpsMonitorMeta(
+            window=window,
+            bucket_seconds=bucket_s,
+            generated_at=anchor.isoformat(),
+            bucket_starts=[b.isoformat() for b in bucket_starts],
+        ),
+        sse=_sse_series(conn, grid),
+        llm=_llm_series(conn, grid),
+        restarts=_restart_series(conn, grid),
+    )

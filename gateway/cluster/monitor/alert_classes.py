@@ -13,11 +13,11 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated
 
 import psycopg
 from fastapi import APIRouter, HTTPException, Query, Request
-from psycopg.rows import dict_row
+from psycopg.rows import class_row
 
 from gateway.cluster.monitor.stats_events import set_statement_timeout
 from gateway.cluster.schemas import (
@@ -27,7 +27,7 @@ from gateway.cluster.schemas import (
     AlertClassSamples,
     AlertLevel,
 )
-from gateway.http.config import GatewayConfig, gateway_clock, gateway_cluster
+from gateway.http.config import GatewayConfig, gateway_clock, gateway_cluster, gateway_state
 from gateway.schemas.stats import StatsWindowHours, window_delta
 from services.upkeep.events_maintenance import resolution
 
@@ -37,7 +37,7 @@ router = APIRouter()
 # meiva:note
 # Every warning/error class over `(start, end]` for the home cluster, most frequent first.
 def read_alert_classes(
-    conn: psycopg.Connection[Any], *, cluster: str, start: datetime, end: datetime
+    conn: psycopg.Connection, *, cluster: str, start: datetime, end: datetime
 ) -> list[AlertClassRow]:
     active = resolution.active_dismissals(conn)
     rows: list[AlertClassRow] = []
@@ -77,9 +77,9 @@ def get_alert_classes(
     hours: Annotated[StatsWindowHours, Query()] = StatsWindowHours.H24,
 ) -> AlertClassesResponse:
     now = gateway_clock(request).now()
-    config: GatewayConfig = request.app.state.gateway_config
+    config: GatewayConfig = gateway_state(request).gateway_config
     try:
-        with request.app.state.db_pool.connection() as conn:
+        with gateway_state(request).db_pool.connection() as conn:
             set_statement_timeout(conn, config.stats_statement_timeout_ms)
             classes = read_alert_classes(
                 conn,
@@ -111,11 +111,11 @@ def get_alert_class_samples(
     hours: Annotated[StatsWindowHours, Query()] = StatsWindowHours.H24,
 ) -> AlertClassSamples:
     now = gateway_clock(request).now()
-    config: GatewayConfig = request.app.state.gateway_config
+    config: GatewayConfig = gateway_state(request).gateway_config
     try:
         with (
-            request.app.state.db_pool.connection() as conn,
-            conn.cursor(row_factory=dict_row) as cur,
+            gateway_state(request).db_pool.connection() as conn,
+            conn.cursor(row_factory=class_row(AlertClassSample)) as cur,
         ):
             set_statement_timeout(cur, config.stats_statement_timeout_ms)
             cur.execute(
@@ -143,4 +143,4 @@ def get_alert_class_samples(
             rows = cur.fetchall()
     except psycopg.errors.QueryCanceled as exc:
         raise HTTPException(status_code=503, detail="alert samples read timed out; retry") from exc
-    return AlertClassSamples(samples=[AlertClassSample(**row) for row in rows])
+    return AlertClassSamples(samples=rows)

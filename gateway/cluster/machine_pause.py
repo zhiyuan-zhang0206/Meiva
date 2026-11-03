@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request
@@ -27,7 +28,8 @@ from base.events.live.bus import EventBus
 from base.log import logger
 from gateway.agents.launch import forward
 from gateway.cluster.schemas import MachinePauseRequest, MachinePauseResponse, MachineResumeResponse
-from gateway.http.config import gateway_clock, gateway_rpc
+from gateway.http.config import gateway_clock, gateway_rpc, gateway_state
+from gateway.http.db_rows import query_all, query_one
 from ops.lifecycle import force_mark_terminated
 
 router = APIRouter()
@@ -41,15 +43,36 @@ router = APIRouter()
 _MACHINE_PAUSE_DRAIN_OWNER = 405
 
 
+# meiva:note
+# A machine's pause state: when it was paused and why, both NULL while it is not.
+@dataclass(frozen=True)
+class _PauseStateRow:
+    paused_at: datetime | None
+    pause_reason: str | None
+
+
+# meiva:note
+# An in-progress task owned by a live agent of the machine, with its results text to append to.
+@dataclass(frozen=True)
+class _DrainedTaskRow:
+    task_id: int
+    owner_id: int
+    results: str | None
+
+
 def _read_machine_row(pool: ConnectionPool, name: str) -> tuple[bool, datetime | None, str | None]:
     """Sync row read — via to_thread: does the machine exist, and what is its
     pause state?"""
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT paused_at, pause_reason FROM machines WHERE name = %s", (name,))
-        row = cur.fetchone()
+    with pool.connection() as conn:
+        row = query_one(
+            conn,
+            _PauseStateRow,
+            "SELECT paused_at, pause_reason FROM machines WHERE name = %s",
+            (name,),
+        )
     if row is None:
         return False, None, None
-    return True, row[0], row[1]
+    return True, row.paused_at, row.pause_reason
 
 
 def _drain_tasks_blocking(pool: ConnectionPool, name: str, clock: Clock) -> int:
@@ -65,24 +88,25 @@ def _drain_tasks_blocking(pool: ConnectionPool, name: str, clock: Clock) -> int:
     cleanup's business).
     """
     with write_transaction(pool) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT t.id, a.id, t.results FROM agent_tasks t "
-                "JOIN agents_meta a ON t.owner = a.id "
-                "WHERE a.machine = %s AND a.status != 'terminated' "
-                "AND t.status = 'in_progress'",
-                (name,),
-            )
-            rows = cur.fetchall()
-        for task_id, owner_id, results in rows:
+        rows = query_all(
+            conn,
+            _DrainedTaskRow,
+            "SELECT t.id AS task_id, a.id AS owner_id, t.results FROM agent_tasks t "
+            "JOIN agents_meta a ON t.owner = a.id "
+            "WHERE a.machine = %s AND a.status != 'terminated' "
+            "AND t.status = 'in_progress'",
+            (name,),
+        )
+        for row in rows:
+            task_id = row.task_id
             line = task_note_line(
-                f"machine {name} paused \u2014 owner agent #{owner_id} "
+                f"machine {name} paused \u2014 owner agent #{row.owner_id} "
                 f"terminated; task reassigned to drain owner #{_MACHINE_PAUSE_DRAIN_OWNER} "
                 f"(see `meiva cluster resume {name}`)",
                 clock=clock,
                 now=clock.now(),
             )
-            current: str = results or ""
+            current = row.results or ""
             prefix = (current.rstrip("\n") + "\n\n") if current else ""
             with conn.cursor() as cur:
                 cur.execute(
@@ -170,19 +194,19 @@ async def pause_cluster_machine(
     Refuses (400) to pause the gateway's own machine — the gateway host must
     stay a cluster member for the cluster to answer anything.
     """
-    if name == request.app.state.machine.name():
+    if name == gateway_state(request).machine.name():
         raise HTTPException(
             status_code=400,
             detail=f"refusing to pause this gateway's own machine ({name!r}); the "
             "cluster needs its gateway host online. Pause agent-runner machines only.",
         )
-    pool = request.app.state.db_pool
+    pool = gateway_state(request).db_pool
     exists, paused_at, pause_reason = await asyncio.to_thread(_read_machine_row, pool, name)
     if not exists:
         raise HTTPException(status_code=404, detail=f"no machine named {name!r}")
 
     if paused_at is None:
-        machines.pause(request.app.state.db, name, reason=req.reason)
+        machines.pause(gateway_state(request).db, name, reason=req.reason)
         exists, paused_at, pause_reason = await asyncio.to_thread(_read_machine_row, pool, name)
 
     clock = gateway_clock(request)
@@ -198,11 +222,11 @@ async def pause_cluster_machine(
         # departing host anyway, so force-mark its row terminated in the DB.
         try:
             await forward.enqueue_lifecycle(
-                request.app.state.db,
+                gateway_state(request).db,
                 name,
                 f"/api/agents/{agent_id}/terminate",
                 {"force": True, "source": "machine-pause"},
-                config=request.app.state.gateway_config,
+                config=gateway_state(request).gateway_config,
                 rpc=gateway_rpc(request),
             )
             if was_live:
@@ -216,8 +240,8 @@ async def pause_cluster_machine(
             )
             await asyncio.to_thread(
                 _force_mark_terminated_blocking,
-                request.app.state.db,
-                request.app.state.bus,
+                gateway_state(request).db,
+                gateway_state(request).bus,
                 pool,
                 agent_id,
             )
@@ -251,9 +275,9 @@ def resume_cluster_machine(name: str, request: Request) -> MachineResumeResponse
     404 when the row does not exist; idempotent (resumed=False) when the
     machine was not paused.
     """
-    pool = request.app.state.db_pool
+    pool = gateway_state(request).db_pool
     exists, _paused_at, _pause_reason = _read_machine_row(pool, name)
     if not exists:
         raise HTTPException(status_code=404, detail=f"no machine named {name!r}")
-    resumed = machines.resume(request.app.state.db, name)
+    resumed = machines.resume(gateway_state(request).db, name)
     return MachineResumeResponse(name=name, resumed=resumed)

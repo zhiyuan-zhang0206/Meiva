@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import (
     BaseModel,
@@ -351,7 +351,7 @@ class AlertClassSample(BaseModel):
     machine: str
     trace_id: str | None
     message: str | None
-    attributes: dict[str, Any]
+    attributes: dict[str, object]
 
 
 class AlertClassSamples(BaseModel):

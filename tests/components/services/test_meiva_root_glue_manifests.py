@@ -239,6 +239,7 @@ def test_gateway_window_follows_the_drain_budget_the_launch_hands_uvicorn() -> N
                 factory=True,
                 config=snapshot_process_config(),
             )["timeout_graceful_shutdown"]
+            assert launched is not None
             assert launched == drain
             assert window > launched + gen.STOP_MARGIN_S  # room left for the lifespan cleanup
     finally:

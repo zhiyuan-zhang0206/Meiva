@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
 
 from gateway.cluster.roster.roster_rows import ProbedFacts
 from ops.cluster import rpc as cluster_rpc
@@ -28,7 +27,7 @@ _log = logging.getLogger(__name__)
 # reads from ``gateway.status_probe_timeout_seconds``.
 async def dispatch_status_probe(
     name: str, ops_url: str, *, timeout_s: float, rpc: cluster_rpc.RpcClient
-) -> dict[str, Any]:
+) -> dict[str, object]:
     try:
         async with asyncio.timeout(timeout_s):
             return await rpc.dispatch_to_url(

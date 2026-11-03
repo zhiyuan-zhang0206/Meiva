@@ -4,6 +4,7 @@ from fastapi import APIRouter, Header, HTTPException, Request
 
 from base.packages.plugins.config_registration import plugin_bootstrap_config
 from gateway.http.auth.request_principal import cluster_credential
+from gateway.http.config import gateway_state
 from gateway.http.model_catalog import require_model_catalog
 
 router = APIRouter()
@@ -17,23 +18,23 @@ def get_bootstrap(
     request: Request, authorization: str | None = Header(default=None)
 ) -> dict[str, str]:
 
-    secret = request.app.state.gateway_config.cluster_secret
+    secret = gateway_state(request).gateway_config.cluster_secret
     if (
         cluster_credential(
             authorization,
             secret,
-            home=request.app.state.gateway_process.home,
-            cache=request.app.state.machine_token_acceptance,
+            home=gateway_state(request).gateway_process.home,
+            cache=gateway_state(request).machine_token_acceptance,
         )
         is None
     ):
         raise HTTPException(status_code=401, detail="machine API token required")
     catalog = require_model_catalog(request)
     try:
-        return request.app.state.config_authority.bootstrap_config_values(
+        return gateway_state(request).config_authority.bootstrap_config_values(
             provider_key_envs=catalog.key_envs,
             plugin_cluster_config=plugin_bootstrap_config(
-                home=request.app.state.gateway_process.home
+                home=gateway_state(request).gateway_process.home
             ),
         )
     except ValueError as exc:

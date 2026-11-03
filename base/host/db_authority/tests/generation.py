@@ -2,12 +2,13 @@
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import pytest
 
+from base.host.db_authority.model import GenerationSecret
 
-def seed_active_generation(home: Path) -> Any:
+
+def seed_active_generation(home: Path) -> GenerationSecret:
     """Record an active write generation in `home`'s private ledger, no database.
 
     The same ledger, pending mint and activation `meiva start` performs at birth, minus
@@ -27,7 +28,7 @@ def seed_active_generation(home: Path) -> Any:
 
 
 @pytest.fixture
-def seed_write_generation() -> Callable[[Path], Any]:
+def seed_write_generation() -> Callable[[Path], GenerationSecret]:
     """`seed_active_generation` as a fixture.
 
     For code that only READS the ledger (launch delivery, bootstrap projection,

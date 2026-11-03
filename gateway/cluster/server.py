@@ -5,6 +5,7 @@ from __future__ import annotations
 import atexit
 import faulthandler
 import logging
+import math
 import os
 import signal
 import socket
@@ -12,7 +13,7 @@ import sys
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 
 import uvicorn
 from fastapi import FastAPI
@@ -52,7 +53,24 @@ class GatewayServer(uvicorn.Server):
         await super().shutdown(sockets)
 
 
-def serve(kwargs: dict[str, Any]) -> None:
+# meiva:note
+# The uvicorn launch parameters of the gateway: the app (an instance, or the import path of its
+# factory), the bind address and port, hot reload, no uvicorn logging config, one worker and the
+# graceful-shutdown budget in whole seconds (uvicorn takes an int; the configured budget is rounded
+# up). A TypedDict, so a dropped field is a type error where it is dropped.
+class ServeKwargs(TypedDict):
+    app: FastAPI | str
+    factory: bool
+    host: str
+    port: int
+    reload: bool
+    reload_dirs: list[str] | None
+    log_config: None
+    workers: int
+    timeout_graceful_shutdown: int | None
+
+
+def serve(kwargs: ServeKwargs) -> None:
     """`uvicorn.run` with the gateway's own server class.
 
     `uvicorn.run` always builds the stock `Server`, so this is its single-worker
@@ -192,7 +210,7 @@ def _serve_process(
 
 def serve_kwargs(
     *, host: str, app: FastAPI | str, factory: bool, config: ConfigBoot
-) -> dict[str, Any]:
+) -> ServeKwargs:
     """Assemble the uvicorn launch parameters for the gateway ASGI server.
 
     The single assembly point of the launch contract: ``main()`` hands the dict
@@ -230,5 +248,7 @@ def serve_kwargs(
         # with the session — now it reaches gateway.log and the events pipeline.
         "log_config": None,
         "workers": _GATEWAY_UVICORN_WORKERS,
-        "timeout_graceful_shutdown": config.view.gateway.gateway_graceful_shutdown_timeout_seconds,
+        "timeout_graceful_shutdown": math.ceil(
+            config.view.gateway.gateway_graceful_shutdown_timeout_seconds
+        ),
     }

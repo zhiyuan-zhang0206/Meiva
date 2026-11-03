@@ -60,7 +60,7 @@ def test_serve_kwargs_pin_one_worker_and_the_drain_budget() -> None:
     # meiva:note
     # the rate limiters are process-local
     assert kwargs["workers"] == 1
-    assert kwargs["timeout_graceful_shutdown"] == 7.5
+    assert kwargs["timeout_graceful_shutdown"] == 8
     assert kwargs["port"] == 18123
     assert kwargs["log_config"] is None
     assert (kwargs["reload"], kwargs["reload_dirs"]) == (False, None)

@@ -21,7 +21,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from gateway.cluster.monitor.ops_series import fetch_ops_series
 from gateway.cluster.monitor.stats_events import set_statement_timeout
 from gateway.cluster.schemas import OpsMonitorReport
-from gateway.http.config import GatewayConfig, gateway_clock
+from gateway.http.config import GatewayConfig, gateway_clock, gateway_state
 
 router = APIRouter()
 
@@ -34,11 +34,11 @@ def get_ops_monitor(
     request: Request,
     window: Annotated[Literal["1h", "6h", "24h", "7d"], Query()] = "24h",
 ) -> OpsMonitorReport:
-    config: GatewayConfig = request.app.state.gateway_config
+    config: GatewayConfig = gateway_state(request).gateway_config
     try:
-        with request.app.state.db_pool.connection() as conn:
+        with gateway_state(request).db_pool.connection() as conn:
             set_statement_timeout(conn, config.stats_statement_timeout_ms)
-            data = fetch_ops_series(conn, window, anchor=gateway_clock(request).now())
+            report = fetch_ops_series(conn, window, anchor=gateway_clock(request).now())
     except psycopg.errors.QueryCanceled as exc:
         raise HTTPException(status_code=503, detail="ops monitor read timed out; retry") from exc
-    return OpsMonitorReport(**data)
+    return report

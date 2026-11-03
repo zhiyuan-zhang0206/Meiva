@@ -6,11 +6,11 @@ from collections.abc import Callable, Iterator
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import TypeAdapter
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from base import config
@@ -18,6 +18,7 @@ from base.config import Settings
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import snapshot_process_config
 from base.host.db_authority.api import AcceptanceCache
+from base.host.db_authority.model import GenerationSecret
 from base.host.env import bootstrap
 from base.host.env.boot_policy import BootstrapFetch
 from base.host.net.auth import bearer_header
@@ -63,6 +64,9 @@ def served_authority(unit_home: Path) -> ConfigAuthority:
     return ConfigAuthority(boot.view, complete, unit_home / ".env")
 
 
+_SERVED = TypeAdapter(dict[str, str])
+
+
 @pytest.fixture
 def gateway_home(tmp_path: Path) -> Path:
     """The root the gateway process serves: its generation ledger lives here."""
@@ -74,7 +78,7 @@ def gateway_home(tmp_path: Path) -> Path:
 @pytest.fixture
 def runner_token(
     gateway_home: Path,
-    seed_write_generation: Callable[[Path], Any],
+    seed_write_generation: Callable[[Path], GenerationSecret],
 ) -> str:
     """The gateway's active write generation's runner API token, which a runner process is
     delivered: a runner never holds the human secret."""
@@ -119,7 +123,7 @@ def test_bootstrap_serves_turn_limit_verbatim(
     params = {"role": role} if role else {}
     response = gateway_client.get("/api/bootstrap", params=params, headers=bearer_header(_SECRET))
     assert response.status_code == 200
-    served = response.json()
+    served = _SERVED.validate_json(response.text)
     assert served[_TURN_LIMIT] == (raw if raw is not None else "0")
     assert served["MEIVA_HOST_DB_POOL_MAX_SIZE"] == "64"
     assert served["MEIVA_HOST_CONTROL_POOL_MAX_SIZE"] == "8"
@@ -144,7 +148,9 @@ class _RecordingApp:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http":
-            self.queries.append(scope["query_string"])
+            query = scope.get("query_string")
+            if isinstance(query, bytes):
+                self.queries.append(query)
         await self.app(scope, receive, send)
 
 
