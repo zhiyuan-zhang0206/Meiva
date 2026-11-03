@@ -25,6 +25,12 @@ _LIFECYCLE_EVENTS = ("lifecycle_request", "lifecycle_result")
 _DEFAULT_HOURS = 24
 _DEFAULT_LIMIT = 200
 _NO_VALUE = "-"
+# meiva:note
+# A lifecycle_result row is written on the orchestrating side and carries no caller block, so the
+# machine it ran on is unknown. Counting that bucket as a host once reported a six-host window for
+# a five-machine fleet (2026-11-03); the window is per-operation, not per-host, so an unattributed
+# row must not add one.
+_UNATTRIBUTED_MACHINE = "?"
 
 
 def _is_obj(value: object) -> TypeGuard[dict[str, Any]]:
@@ -51,7 +57,7 @@ class OperationRow:
     def machine(self) -> str:
         caller = self.attributes.get("caller")
         value = caller.get("machine") if _is_obj(caller) else None
-        return value if isinstance(value, str) else "?"
+        return value if isinstance(value, str) else _UNATTRIBUTED_MACHINE
 
     def _text(self, key: str) -> str | None:
         value = self.attributes.get(key)
@@ -94,7 +100,7 @@ class Operation:
 
     @property
     def hosts(self) -> list[str]:
-        return sorted({row.machine for row in self.rows})
+        return sorted({row.machine for row in self.rows if row.machine != _UNATTRIBUTED_MACHINE})
 
     @property
     def verbs(self) -> list[str]:
