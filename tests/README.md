@@ -108,6 +108,13 @@ Each test file should cover:
 - `TYPE_CHECKING` blocks
 - `@abstractmethod` declarations
 
+## Typing a gateway test helper
+
+`gateway` tests build their client from `httpx2`, so a helper that returns it annotates
+`-> httpx2.Response`. `httpx.Response` is a different class at the type level and produces
+`httpx2._models.Response is not assignable to httpx._models.Response` — thirteen errors the first
+time it was tried. Precedent: `gateway/tests/auth/gateway_config.py`.
+
 ## Fixture Usage
 
 ### DB Tests
