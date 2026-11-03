@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -52,60 +52,12 @@ EVENT_LOOP_LAG_BUCKETS_MS = (
 )
 
 
-class _LogExporter(Protocol):
-    @property
-    def export(self) -> Callable[..., Any]: ...
-
-    def shutdown(self) -> None: ...
-
-
 class MetricsResource(Protocol):
     @property
     def attributes(self) -> Mapping[str, Any]: ...
 
     @property
     def schema_url(self) -> str: ...
-
-
-class EventDimensionResourceExporter:
-    """Give each event its own OTLP resource dimensions before serialization.
-
-    A ``LoggerProvider`` has one static Resource, but Loki indexes resource
-    attributes and the OTLP encoder groups a batch by that Resource. Rewriting
-    a shared resource downstream therefore makes the last record's dimensions
-    describe every record in the batch. This wrapper keeps one bounded SDK
-    exporter worker while handing the encoder a resource that matches each
-    individual record; the encoder then emits resource-homogeneous groups.
-    """
-
-    def __init__(self, exporter: _LogExporter) -> None:
-        self._exporter: Any = exporter
-
-    def export(self, batch: Sequence[Any]) -> object:
-        from opentelemetry.sdk._logs import ReadableLogRecord
-        from opentelemetry.sdk.resources import Resource
-
-        resource_tagged: list[Any] = []
-        for record in batch:
-            dimensions = dict(record.resource.attributes)
-            attributes = record.log_record.attributes
-            dimensions["event_name"] = attributes["event_name"]
-            if "agent_id" in attributes:
-                dimensions["agent_id"] = attributes["agent_id"]
-            if "cluster" in attributes:
-                dimensions["cluster"] = attributes["cluster"]
-            resource_tagged.append(
-                ReadableLogRecord(
-                    log_record=record.log_record,
-                    resource=Resource(dimensions, schema_url=record.resource.schema_url),
-                    instrumentation_scope=record.instrumentation_scope,
-                    limits=record.limits,
-                )
-            )
-        return self._exporter.export(resource_tagged)
-
-    def shutdown(self) -> None:
-        self._exporter.shutdown()
 
 
 def metric_views() -> list[Any]:
@@ -193,6 +145,7 @@ def build_providers(
     from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 
     from base.telemetry.delivery.loss import install_exporter_drop_observer
+    from base.telemetry.otlp.event_resource_exporter import EventDimensionResourceExporter
 
     install_exporter_drop_observer(mirror_dir=mirror_dir)
     plan = provider_build_plan(
@@ -212,7 +165,7 @@ def build_providers(
     logs = LoggerProvider(shutdown_on_exit=plan.shutdown_on_exit)
     if keep_logs is not None:
         keep_logs(logs)
-    log_exporter: Any = EventDimensionResourceExporter(
+    log_exporter = EventDimensionResourceExporter(
         OTLPLogExporter(endpoint=plan.logs_endpoint, timeout=plan.http_timeout_s)
     )
     logs.add_log_record_processor(

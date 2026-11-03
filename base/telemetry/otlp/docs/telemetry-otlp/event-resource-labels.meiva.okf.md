@@ -13,7 +13,7 @@ tags:
 
 ## What it is
 
-`_EventDimensionResourceExporter` gives each event log record a Resource whose
+`EventDimensionResourceExporter` (`base/telemetry/otlp/event_resource_exporter.py`, a `LogRecordExporter` that wraps the OTLP one) gives each event log record a Resource whose
 `event_name`, optional `agent_id`, and `cluster` equal the record's attributes.
 The standard OTLP encoder partitions a batch by Resource, so every resulting
 `ResourceLogs` group is homogeneous and Loki's resource-derived index labels
