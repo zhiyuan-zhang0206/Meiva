@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import re
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from meizel import allowances
@@ -46,7 +47,7 @@ class SymbolMove:
 _EXTENSIONS = (".py", ".ts", ".tsx", ".mts", ".cts")
 
 
-def parse_symbol_moves(specs: list[str]) -> list[SymbolMove]:
+def parse_symbol_moves(specs: Sequence[str]) -> list[SymbolMove]:
     moves: list[SymbolMove] = []
     for spec in specs:
         head, _, new = spec.partition("=")

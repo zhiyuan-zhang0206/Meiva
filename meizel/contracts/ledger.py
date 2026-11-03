@@ -456,11 +456,19 @@ def _scan(lines: list[str]) -> _Scan:
 # it is not one when it is not: a bare count or an inline table, and any complaint about it — an
 # unknown field, a count that is not positive — refuses the merge. A misspelt `owner` must not read as
 # "no owner" here either, so the person resolving the conflict is told which field was wrong.
+# meiva:note
+# `tomllib.loads` answers `dict[str, Any]`; this states the shape the debt reader wants — string keys,
+# values still `object` until `read_entry` checks them — so the `Any` never reaches the entry reader.
+def _decoded(text: str) -> Mapping[str, object]:
+    return tomllib.loads(text)
+
+
 def _value(raw: str) -> tuple[DebtEntry | None, str]:
     try:
-        parsed = tomllib.loads(f"v = {raw}")["v"]
+        document = _decoded(f"v = {raw}")
     except tomllib.TOMLDecodeError:
         return None, "it is not TOML"
+    parsed = document["v"]
     problems: list[str] = []
     entry = read_entry(parsed, "", problems.append)
     return entry, "; ".join(message.removeprefix(": ") for message in problems)

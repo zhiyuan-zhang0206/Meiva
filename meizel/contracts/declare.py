@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import tomllib
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TypeGuard
 
 from meizel.contracts.analysis import Analysis, analyze
 from meizel.contracts.manifest import first, manifest_path, within
@@ -31,6 +32,29 @@ class Plan:
     exports: dict[str, set[str]] = field(default_factory=dict[str, set[str]])
     lines: list[str] = field(default_factory=list[str])
     left: list[str] = field(default_factory=list[str])
+
+
+# meiva:note
+# `tomllib.loads` answers `dict[str, Any]`; these three state the shapes the re-read manifest must
+# show before it is written — a mapping, a table of string keys, a list of strings — so the check
+# below compares declarations instead of indexing an unchecked value.
+def _decoded(text: str) -> Mapping[str, object]:
+    return tomllib.loads(text)
+
+
+def _is_table(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _is_str_list(value: object) -> TypeGuard[list[str]]:
+    return isinstance(value, list)
+
+
+# meiva:note
+# Whether the written `[uses]` entry lists every edge the plan declares: a value that is not a list of
+# names covers nothing, which is what makes the write refuse rather than drop a declaration.
+def _covers(entry: object, expected: Iterable[str]) -> bool:
+    return _is_str_list(entry) and set(expected) <= set(entry)
 
 
 def changed_files(repo: Checkout) -> list[str]:
@@ -186,11 +210,14 @@ def plan_declare_writes(root: Path, texts: Mapping[str, str], plan: Plan) -> Edi
             after = add_uses(after, uses)
         if exports:
             after = add_exports(after, exports)
-        parsed = tomllib.loads(after)
-        written = parsed.get("uses", {})
-        if any(
-            not set(cts) <= set(written.get(cf, ())) for cf, cts in uses.items()
-        ) or not exports <= set(parsed.get("exports", ())):
+        parsed = _decoded(after)
+        declared_uses = parsed.get("uses")
+        written = declared_uses if _is_table(declared_uses) else {}
+        declared_exports = parsed.get("exports")
+        listed = declared_exports if _is_str_list(declared_exports) else []
+        if any(not _covers(written.get(cf), cts) for cf, cts in uses.items()) or not (
+            exports <= set(listed)
+        ):
             raise MeizelError(f"{rel}: the declarations cannot be written; edit by hand")
         writes[root / rel] = after
     return EditPlan(writes=writes)

@@ -49,10 +49,17 @@ __all__ = [
 Baselines = dict[str, DebtTable]
 
 
+# meiva:note
+# `tomllib.loads` answers `dict[str, Any]`; this states the shape this reader wants — string keys,
+# values still `object` until `parse_debt` checks them — so no `Any` reaches the debt reader.
+def _decoded(text: str) -> Mapping[str, object]:
+    return tomllib.loads(text)
+
+
 def _parse(text: str, where: str) -> DebtTable:
     problems: list[str] = []
     try:
-        document = tomllib.loads(text)
+        document = _decoded(text)
     except tomllib.TOMLDecodeError as error:
         raise MeizelError(f"{where}: invalid TOML: {error}") from error
     table = parse_debt(document[TABLE_KEY], problems.append) if TABLE_KEY in document else {}

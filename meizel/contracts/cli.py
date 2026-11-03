@@ -1,23 +1,26 @@
 from __future__ import annotations
 
 import argparse
+import collections.abc
+import dataclasses
 import json
 import sys
+import types
+import typing
 from collections import Counter
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, TypeGuard
 
 from meizel.contracts import enumerations
 from meizel.contracts.analysis import Analysis, analyze
-from meizel.contracts.bootstrap import bootstrap
-from meizel.contracts.debt_carry import renames_since, run_debt
-from meizel.contracts.debt_sites import propagation
-from meizel.contracts.explain import explain
-from meizel.contracts.policy import Surface, load_policy, policy_at
+from meizel.contracts.bootstrap import Bootstrap, bootstrap
+from meizel.contracts.debt_carry import DebtBase, DebtPaths, renames_since, run_debt
+from meizel.contracts.explain import Explain, explain
+from meizel.contracts.policy import PolicyQuery, Surface, load_policy, policy_at
 from meizel.contracts.policy import changes as policy_changes
-from meizel.contracts.sync import sync_manifests
+from meizel.contracts.sync import Sync, sync_manifests
 from meizel.graph import ReachabilityScope, python_reverse_closure, reachability_analysis
 from meizel.graph.model import Diagnostic, MeizelError
 from meizel.graph.universe import Checkout
@@ -32,6 +35,10 @@ __all__ = ["CommandDeps", "build_parser", "dispatch"]
 _DESCRIPTION = (
     "Command line: check, explain, impacted, tests, sync --prune, bootstrap, debt and roles."
 )
+
+# meiva:note
+# The debt modes whose parser declares a `paths` operand; the reader refuses a missing attribute.
+_DEBT_MODES_WITH_PATHS = frozenset({"record", "resolve", "sites"})
 
 
 # meiva:note
@@ -130,14 +137,114 @@ def _untracked_for_targets(
     ]
 
 
-def _run_check(repo: Repository, root: Path, base: Path, args: argparse.Namespace) -> int:
-    raw_paths: list[str] = args.paths
-    changed: list[str] | None = args.changed
+# meiva:note
+# The items of a container annotation's value: a `str` is a `Sequence[str]` whose items are `str`, so a
+# flag answered with one string where a list was declared is a parser bug, not a one-item list.
+def _is_items(value: object) -> TypeGuard[collections.abc.Collection[object]]:
+    return isinstance(value, collections.abc.Collection) and not isinstance(value, str | bytes)
+
+
+# meiva:note
+# Whether `value` is of the container `kind` a generic annotation names; stated over `object` so the
+# check does not narrow the caller's value to an unknown item type.
+def _is_kind(value: object, kind: type) -> bool:
+    return isinstance(value, kind)
+
+
+# meiva:note
+# Whether `value` can stand for `hint`: `object` takes anything (an opaque value the handler narrows
+# itself), a union takes any member, a one-argument collection checks its elements, and `int` refuses
+# a `bool`, because a flag answered `True` for a count is a parser bug rather than a number.
+# `Literal`/`Annotated` are not read here on purpose: a shape that asks for one is refused, not guessed.
+def _accepts(value: object, hint: object) -> bool:
+    if hint is object:
+        return True
+    if hint is None or hint is type(None):
+        return value is None
+    origin: object = typing.get_origin(hint)
+    arguments: tuple[object, ...] = typing.get_args(hint)
+    if origin is types.UnionType or origin is typing.Union:
+        return any(_accepts(value, member) for member in arguments)
+    if origin is not None:
+        return _accepts_container(value, origin, arguments)
+    if not isinstance(hint, type):
+        raise MeizelError(f"unsupported option annotation {hint!r}")
+    return _accepts_plain(value, hint)
+
+
+# meiva:note
+# A one-argument collection annotation (`Sequence[str]`, `frozenset[str]`): the value must be of that
+# container kind and every element must fit the argument. An annotation with another arity is not a
+# shape this reader promises to check.
+def _accepts_container(value: object, origin: object, arguments: tuple[object, ...]) -> bool:
+    return (
+        isinstance(origin, type)
+        and len(arguments) == 1
+        and _is_kind(value, origin)
+        and _is_items(value)
+        and all(_accepts(item, arguments[0]) for item in value)
+    )
+
+
+# meiva:note
+# A plain annotation: `int` refuses a `bool` (a flag answered `True` for a count is a parser bug), and
+# every other class is its own `isinstance` test.
+def _accepts_plain(value: object, hint: type) -> bool:
+    if hint is int:
+        return isinstance(value, int) and not isinstance(value, bool)
+    return isinstance(value, hint)
+
+
+# meiva:note
+# The attributes `shape` declares, read once off the parsed namespace and checked against their
+# annotations; the namespace may carry attributes the shape does not name, which are ignored.
+# This is the checker's own twin of `base.host.boundary.options.options`, and it is a twin only
+# because the repository's root `meizel.toml` declares no cross-package `[uses]` entry for `meizel`:
+# a bare checkout has no `base` to import, so the same rules are written twice, by hand. They must
+# agree — a missing attribute and a wrong-typed one are one error naming every bad field, an
+# attribute the shape does not name is ignored, and a `bool` is not a whole number.
+# `meizel/tests/test_commands.py` pins those rules for this reader alone: the base side has its own
+# cases, and neither suite turns red for a change on the other.
+def read_args[T](args: argparse.Namespace, shape: type[T]) -> T:
+    if not dataclasses.is_dataclass(shape):
+        raise MeizelError(f"{shape.__name__} is not a dataclass")
+    carried: dict[str, object] = vars(args)
+    hints: dict[str, object] = typing.get_type_hints(shape)
+    values: dict[str, object] = {}
+    problems: list[str] = []
+    for field in dataclasses.fields(shape):
+        if field.name not in carried:
+            problems.append(f"{field.name} is missing")
+            continue
+        value = carried[field.name]
+        if _accepts(value, hints[field.name]):
+            values[field.name] = value
+        else:
+            problems.append(f"{field.name} is {type(value).__name__}, not {hints[field.name]}")
+    if problems:
+        raise MeizelError(f"{shape.__name__}: " + "; ".join(problems))
+    return shape(**values)
+
+
+# meiva:note
+# The flags are `Sequence`, not `list`: `frozen` here means this carrier is never rewritten, not that
+# it is hashable — argparse hands over the list it built and nobody hashes it.
+@dataclass(frozen=True)
+class Check:
+    paths: Sequence[str]
+    changed: Sequence[str] | None
+    jobs: int | None
+    limit: int | None
+
+
+def _run_check(repo: Repository, root: Path, base: Path, opts: Check) -> int:
+    raw_paths = opts.paths
+    changed = opts.changed
     if changed is not None and raw_paths:
         raise MeizelError("--changed judges the files it names; it cannot be combined with paths")
     targets = [_relative_target(root, base, p) for p in raw_paths]
     only = None if changed is None else frozenset(_relative_target(root, base, p) for p in changed)
-    analysis = analyze(repo.universe(), jobs=args.jobs, changed=only)
+    analysis = analyze(repo.universe(), jobs=opts.jobs, changed=only)
     known = analysis.universe
     untracked = _untracked_for_targets(repo.untracked_files(), targets, known.dirs)
     if untracked:
@@ -155,7 +262,7 @@ def _run_check(repo: Repository, root: Path, base: Path, args: argparse.Namespac
         if _reports(manifest, targets, known.dirs):
             print(warning, file=sys.stderr)
     if diagnostics:
-        _print_verdict(diagnostics, args.limit)
+        _print_verdict(diagnostics, opts.limit)
         return 1
     print(analysis.ok_line())
     return 0
@@ -417,11 +524,15 @@ def _add_debt_parser(commands: argparse._SubParsersAction[argparse.ArgumentParse
     )
 
 
-def _run_impacted(
-    repo: Repository, root: Path, base: Path, raw_paths: list[str], jobs: int | None
-) -> int:
-    targets = [_relative_target(root, base, p) for p in raw_paths]
-    reached = python_reverse_closure(repo.universe(), targets, jobs=jobs)
+@dataclass(frozen=True)
+class Impacted:
+    paths: Sequence[str]
+    jobs: int | None
+
+
+def _run_impacted(repo: Repository, root: Path, base: Path, opts: Impacted) -> int:
+    targets = [_relative_target(root, base, p) for p in opts.paths]
+    reached = python_reverse_closure(repo.universe(), targets, jobs=opts.jobs)
     if reached is None:
         raise MeizelError(
             "cannot compute impacted Python files: a tracked Python file could not be read or parsed"
@@ -434,29 +545,32 @@ def _run_impacted(
 # meiva:note
 # `meizel debt ...`: the commands that read or write recorded debt, and the one that measures the
 # world reads a baseline cannot hold. Kept out of `_dispatch` so the dispatch stays a list of commands.
+# The mode shapes live in `debt_carry` with their handlers, so this function hands that module the
+# one thing it cannot own — the namespace boundary — as a reader, and reads only the two things it
+# needs here: which mode runs, and the paths operand the three modes that take one declare.
 def _run_debt(
     repo: Repository, root: Path, base: Path, args: argparse.Namespace, deps: CommandDeps
 ) -> int:
-    if args.debt_mode == "propagation":
-        analysis = analyze(repo.universe(), jobs=args.jobs)
-        print(
-            propagation(analysis.universe, analysis.manifests, analysis.scans).render(top=args.top)
-        )
-        return 0
-    targets = [_relative_target(root, base, p) for p in getattr(args, "paths", ())]
-    return run_debt(repo, targets, args, args.jobs, deps.today)
+    def read[T](shape: type[T]) -> T:
+        return read_args(args, shape)
+
+    debt = read(DebtBase)
+    targets: list[str] = []
+    if debt.debt_mode in _DEBT_MODES_WITH_PATHS:
+        targets = [_relative_target(root, base, path) for path in read(DebtPaths).paths]
+    return run_debt(repo, targets, read, deps.today)
 
 
-def _run_sync(repo: Repository, root: Path, base: Path, args: argparse.Namespace) -> int:
-    if not (args.prune or args.declare):
+def _run_sync(repo: Repository, root: Path, base: Path, opts: Sync) -> int:
+    if not (opts.prune or opts.declare):
         raise MeizelError("sync needs --prune or --declare")
-    if args.paths and not args.declare:
+    if opts.paths and not opts.declare:
         raise MeizelError("paths narrow --declare only")
-    targets = [_relative_target(root, base, p) for p in args.paths] if args.paths else None
+    targets = [_relative_target(root, base, p) for p in opts.paths] if opts.paths else None
     untracked = repo.untracked_files()
     if untracked:
         print(_untracked_warning(untracked), file=sys.stderr)
-    lines, left = sync_manifests(repo, targets, args.jobs, do_declare=bool(args.declare))
+    lines, left = sync_manifests(repo, targets, opts.jobs, do_declare=opts.declare)
     for line in lines:
         print(line)
     for line in left:
@@ -481,25 +595,23 @@ def _run_surface(repo: Repository, against: str) -> int:
     return 0
 
 
-def _run_policy(repo: Repository, args: argparse.Namespace) -> int:
-    if args.policy_mode == "surface":
-        return _run_surface(repo, args.against)
+def _run_policy(repo: Repository, opts: PolicyQuery) -> int:
+    if opts.policy_mode == "surface":
+        return _run_surface(repo, opts.against)
     universe = repo.universe()
-    for line in policy_changes(policy_at(universe, args.against), load_policy(universe)[0]):
+    for line in policy_changes(policy_at(universe, opts.against), load_policy(universe)[0]):
         print(line)
     return 0
 
 
-def _run_explain(
-    repo: Repository, root: Path, base: Path, args: argparse.Namespace, deps: CommandDeps
-) -> int:
-    analysis = analyze(repo.universe(), jobs=args.jobs)
-    node = _relative_target(root, base, args.path)
+def _run_explain(repo: Repository, root: Path, base: Path, opts: Explain, deps: CommandDeps) -> int:
+    analysis = analyze(repo.universe(), jobs=opts.jobs)
+    node = _relative_target(root, base, opts.path)
     report = load_report(
         Evidence(root=root, tool=deps.tool_root),
         set(analysis.universe.files),
         node,
-        args.typescript_index,
+        opts.typescript_index,
     )
     print(explain(analysis, node, report))
     return 0
@@ -574,35 +686,54 @@ def _print_selection_query(
     return 0
 
 
-def _run_tests(
-    repo: Repository, root: Path, base: Path, args: argparse.Namespace, deps: CommandDeps
-) -> int:
-    lane: str | None = args.lane
-    raw_changed: list[str] | None = args.changed
-    changed_file: str | None = args.changed_files
-    if lane is None and raw_changed is None and changed_file is None:
+# meiva:note
+# What `meizel tests` reads from argv, checked once at the dispatch boundary: `--changed` is
+# `nargs="*"`, so a bare `--changed` arrives as an empty list rather than as "not asked".
+@dataclass(frozen=True)
+class Tests:
+    lane: str | None
+    changed: Sequence[str] | None
+    changed_files: str | None
+    base_ref: str | None
+    as_json: bool
+
+
+def _run_tests(repo: Repository, root: Path, base: Path, opts: Tests, deps: CommandDeps) -> int:
+    if opts.lane is None and opts.changed is None and opts.changed_files is None:
         raise MeizelError("tests requires --lane, --changed, or --changed-files")
-    if raw_changed is None and changed_file is None:
-        return _print_lane_query(repo, str(lane), as_json=bool(args.as_json))
-    rel_changed = _read_changed_targets(root, base, raw_changed, changed_file, read=deps.read_text)
+    if opts.changed is None and opts.changed_files is None:
+        return _print_lane_query(repo, str(opts.lane), as_json=opts.as_json)
+    rel_changed = _read_changed_targets(
+        root, base, opts.changed, opts.changed_files, read=deps.read_text
+    )
     return _print_selection_query(
         repo,
         rel_changed,
-        base_ref=args.base_ref,
-        lane=lane,
-        as_json=bool(args.as_json),
+        base_ref=opts.base_ref,
+        lane=opts.lane,
+        as_json=opts.as_json,
     )
 
 
-def _run_reachability(repo: Repository, root: Path, base: Path, args: argparse.Namespace) -> int:
-    raw_paths: list[str] = args.paths
-    targets = [_relative_target(root, base, p) for p in raw_paths]
+@dataclass(frozen=True)
+class Reachability:
+    paths: Sequence[str]
+    as_json: bool
+    check: bool
+    roots: Sequence[str] | None
+    include_inits: bool
+    limit: int | None
+    jobs: int | None
+
+
+def _run_reachability(repo: Repository, root: Path, base: Path, opts: Reachability) -> int:
+    targets = [_relative_target(root, base, p) for p in opts.paths]
     universe = repo.universe()
-    analysis = analyze(universe, jobs=args.jobs)
+    analysis = analyze(universe, jobs=opts.jobs)
     scope = ReachabilityScope(
-        explicit_roots=args.roots,
+        explicit_roots=opts.roots,
         target_paths=targets if targets else None,
-        include_inits=bool(getattr(args, "include_inits", False)),
+        include_inits=opts.include_inits,
     )
     report = reachability_analysis(
         universe,
@@ -610,21 +741,29 @@ def _run_reachability(repo: Repository, root: Path, base: Path, args: argparse.N
         manifests=analysis.manifests,
         scope=scope,
     )
-    if args.as_json:
+    if opts.as_json:
         print(json.dumps(report.to_dict(), indent=2))
-        return 1 if (args.check and not report.is_clean) else 0
+        return 1 if (opts.check and not report.is_clean) else 0
 
     print(report.summary_line())
-    shown = report.diagnostics if args.limit is None else report.diagnostics[: args.limit]
+    shown = report.diagnostics if opts.limit is None else report.diagnostics[: opts.limit]
     for diagnostic in shown:
         print(diagnostic.render())
-    if args.limit is not None and len(report.diagnostics) > len(shown):
+    if opts.limit is not None and len(report.diagnostics) > len(shown):
         omitted = len(report.diagnostics) - len(shown)
         print(f"meizel: ({omitted} diagnostics not shown)", file=sys.stderr)
 
-    if args.check and report.diagnostics:
+    if opts.check and report.diagnostics:
         return 1
     return 0
+
+
+# meiva:note
+# The subcommand the entry parsed. Read first, because every command below reads its own shape and
+# only this one decides which shape that is.
+@dataclass(frozen=True)
+class Command:
+    command: str
 
 
 # meiva:note
@@ -634,26 +773,27 @@ def _run_reachability(repo: Repository, root: Path, base: Path, args: argparse.N
 def dispatch(
     repo: Repository, root: Path, base: Path, args: argparse.Namespace, deps: CommandDeps
 ) -> int:
-    cmd = str(args.command)
+    cmd = read_args(args, Command).command
     if cmd == "check":
-        return _run_check(repo, root, base, args)
+        return _run_check(repo, root, base, read_args(args, Check))
     if cmd == "debt":
         return _run_debt(repo, root, base, args, deps)
     if cmd == "policy":
-        return _run_policy(repo, args)
+        return _run_policy(repo, read_args(args, PolicyQuery))
     if cmd == "explain":
-        return _run_explain(repo, root, base, args, deps)
+        return _run_explain(repo, root, base, read_args(args, Explain), deps)
     if cmd == "impacted":
-        return _run_impacted(repo, root, base, args.paths, args.jobs)
+        return _run_impacted(repo, root, base, read_args(args, Impacted))
     if cmd == "tests":
-        return _run_tests(repo, root, base, args, deps)
+        return _run_tests(repo, root, base, read_args(args, Tests), deps)
     if cmd == "reachability":
-        return _run_reachability(repo, root, base, args)
+        return _run_reachability(repo, root, base, read_args(args, Reachability))
     if cmd == "roles":
-        return enumerations.run_roles(
-            repo, deps.read_roles(repo), args.mode, tuple(getattr(args, "role_names", ()))
-        )
+        roles = read_args(args, enumerations.RolesQuery)
+        named = read_args(args, enumerations.RolesList).role_names if roles.mode == "list" else ()
+        return enumerations.run_roles(repo, deps.read_roles(repo), roles.mode, tuple(named))
     if cmd == "sync":
-        return _run_sync(repo, root, base, args)
-    print(bootstrap(repo, args.out, args.jobs))
+        return _run_sync(repo, root, base, read_args(args, Sync))
+    seed = read_args(args, Bootstrap)
+    print(bootstrap(repo, seed.out, seed.jobs))
     return 0

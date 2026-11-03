@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from pathlib import Path
 
 from meizel.contracts.analysis import Analysis
 from meizel.contracts.manifest import first
@@ -11,7 +12,17 @@ from meizel.language.fixtures import FixtureFunction, FixtureIndex, FixtureReque
 from meizel.language.scan import FileScan
 from meizel.source_evidence import TsReport, render_ts_report
 
-__all__ = ["explain"]
+__all__ = ["Explain", "explain"]
+
+
+# meiva:note
+# What `meizel explain` reads from argv, checked once at the dispatch boundary: the handler below
+# holds a `str` node, a `Path` or nothing, and an `int` or nothing, instead of `Any` attributes.
+@dataclass(frozen=True)
+class Explain:
+    path: str
+    typescript_index: Path | None
+    jobs: int | None
 
 
 @dataclass(frozen=True, slots=True)

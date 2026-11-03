@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from meizel.allowances import POLICY, RETIRED_AMBIENT_SECTIONS, Policy, load_snapshot, parse
@@ -201,6 +202,17 @@ def _refuse_untracked(repo: Checkout) -> None:
         f"(e.g. {sample}) invisible to git-indexed analysis; "
         f"run 'git add -N {untracked[0]}' first so declarations for new files are not pruned"
     )
+
+
+# meiva:note
+# What `meizel sync` reads from argv, checked once at the dispatch boundary: the handler below holds
+# `bool`/`Sequence`/`int` instead of `argparse.Namespace` attributes, which are `Any`.
+@dataclass(frozen=True)
+class Sync:
+    prune: bool
+    declare: bool
+    paths: Sequence[str]
+    jobs: int | None
 
 
 def sync_manifests(

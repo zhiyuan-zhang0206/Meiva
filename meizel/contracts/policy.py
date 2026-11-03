@@ -34,6 +34,16 @@ __all__ = [
 ]
 
 
+# meiva:note
+# What `meizel policy` reads from argv, checked once at the dispatch boundary: the mode and the ref it
+# compares against are `str` below instead of `Any` attributes. Named `PolicyQuery` because `Policy`
+# in this module is the allowance table itself.
+@dataclass(frozen=True)
+class PolicyQuery:
+    policy_mode: str
+    against: str
+
+
 def parse_policy(text: str) -> tuple[Policy, list[Diagnostic]]:
     policy, problems = parse(text)
     return policy, [Diagnostic(POLICY, 1, Code.POLICY_SYNTAX, message) for message in problems]
