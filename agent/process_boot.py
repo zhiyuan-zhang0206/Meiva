@@ -3,10 +3,18 @@ from __future__ import annotations
 from collections.abc import Callable, MutableMapping, Sequence
 from functools import partial
 from pathlib import Path
-from typing import TypeGuard
+from typing import TYPE_CHECKING, TypeGuard
 from uuid import UUID
 
-from langchain_core.language_models import BaseChatModel
+if TYPE_CHECKING:
+    # meiva:note
+    # Annotation-only: this module is on the exec child's start path
+    # (`agent/tests/execution/test_lazy_child_imports.py` probes that importing
+    # it leaves the LM stack unloaded), while `boot_agent_scope`'s answer is the
+    # caller's `AgentRuntime.llm`. The model itself is built by
+    # `base.lm.factory` at the call site. Registered in
+    # `[type-checking.files]`.
+    from langchain_core.language_models import BaseChatModel
 
 import meiva
 from base.api_contracts.agent_contract import Harness
