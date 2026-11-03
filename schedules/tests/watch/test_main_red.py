@@ -12,7 +12,6 @@ from schedules.plans.watch.main_red import (
     GATE_CHECK_STEPS,
     FAILURE_TEST,
     NIGHTLY_STALE_AFTER,
-    RELEASE_GATE_STALE_AFTER,
     STATE_CONFIRMED,
     STATE_SUSPECTED,
     Entry,
@@ -186,10 +185,10 @@ def test_the_schedule_alert_names_the_schedule_not_the_code() -> None:
     now = datetime(2026, 11, 2, 12, 0, tzinfo=UTC)
 
     quiet = liveness_alert(
-        "release-gate", now - timedelta(hours=5), now, stale_after=RELEASE_GATE_STALE_AFTER
+        "nightly", now - timedelta(hours=5), now, stale_after=NIGHTLY_STALE_AFTER
     )
     stale = liveness_alert(
-        "release-gate", now - timedelta(hours=12), now, stale_after=RELEASE_GATE_STALE_AFTER
+        "nightly", now - timedelta(hours=30), now, stale_after=NIGHTLY_STALE_AFTER
     )
     missing = liveness_alert("nightly", None, now, stale_after=NIGHTLY_STALE_AFTER)
 

@@ -26,7 +26,7 @@ from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.paths.home import resolve_meiva_home
 from schedules.jobs.entry import cluster_timezone, open_schedule_entry
 from schedules.jobs.loop import CronSchedule, Trigger, run_loop
-from schedules.jobs.watch.main_red_watch import LivenessStream, STATE_FILE, watch_once
+from schedules.jobs.watch.main_red_watch import LivenessStream, STATE_FILE, slot_round, watch_once
 from schedules.jobs.telemetry_event import emit_system_event
 from schedules.plans.schedule_identity import parse_schedule_id
 from schedules.jobs.watch.main_red_liveness import liveness_once
@@ -35,9 +35,9 @@ from schedules.plans.watch.main_red import (
     Failure,
     GATE_CHECK_STEPS,
     NIGHTLY_STALE_AFTER,
-    RELEASE_GATE_STALE_AFTER,
     RunFacts,
 )
+from schedules.plans.watch.release_gate_slot import SlotFacts
 
 RunProcess = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -207,6 +207,53 @@ def _last_run_start(workflow: str, run_process: RunProcess) -> datetime | None:
     return datetime.fromisoformat(runs[0]["created_at"].replace("Z", "+00:00"))
 
 
+# meiva:note
+# The slot check reads the cron's own runs, not the workflow's newest run: a make-up dispatch is a
+# `workflow_dispatch` run, and counting it would let the repair hide the outage it repaired.
+def _last_schedule_start(workflow: str, run_process: RunProcess) -> datetime | None:
+    import json
+
+    listing = json.loads(_api(_runs_path(workflow, 20), run_process))
+    for run in listing.get("workflow_runs", []):
+        if run.get("event") == "schedule":
+            return datetime.fromisoformat(run["created_at"].replace("Z", "+00:00"))
+    return None
+
+
+# meiva:note
+# A workflow that is queued or running is about to say something, so its slot is not missing yet:
+# dispatching over it would stack two full suites on the same runner pool.
+def _workflow_busy(workflow: str, run_process: RunProcess) -> bool:
+    import json
+
+    listing = json.loads(_api(_runs_path(workflow, 20), run_process))
+    return any(
+        run.get("status") in ("queued", "in_progress") for run in listing.get("workflow_runs", [])
+    )
+
+
+# meiva:note
+# How far `channel/latest` trails `main`: the gate skips a slot when nothing is uncertified, and
+# that skip is harmless. Reading the distance is what separates a harmless skip from a gap that
+# leaves commits unchecked. An unreadable compare returns None, and the card then says so rather
+# than claiming there is work waiting.
+def _uncertified_commits(run_process: RunProcess) -> tuple[int | None, str | None]:
+    import json
+
+    try:
+        payload = json.loads(
+            _api(f"repos/{_REPO}/compare/channel/latest...main?per_page=1", run_process)
+        )
+    except RuntimeError:
+        return None, None
+    if not is_object_dict(payload):
+        return None, None
+    latest = payload.get("base_commit")
+    ahead = payload.get("ahead_by")
+    sha = latest.get("sha") if is_object_dict(latest) else None
+    return (ahead if isinstance(ahead, int) else None), (sha if isinstance(sha, str) else None)
+
+
 def _open_card(card: Card, report_agent: int) -> int:
     return int(
         meiva.tasks.create(
@@ -252,11 +299,25 @@ def watch_round(
         ),
         workflows=(_RELEASE_GATE, _NIGHTLY, _CI_NIGHTLY, _MAIN_PUSH),
         liveness=(
-            LivenessStream("release-gate", _RELEASE_GATE, RELEASE_GATE_STALE_AFTER),
             LivenessStream("nightly", _NIGHTLY, NIGHTLY_STALE_AFTER),
             LivenessStream("nightly-full", _CI_NIGHTLY, NIGHTLY_STALE_AFTER),
         ),
     )
+    uncertified, channel_latest = _uncertified_commits(run_process)
+    slot_note = slot_round(
+        state_path=state_path,
+        now=datetime.now(UTC),
+        facts=SlotFacts(
+            last_schedule_start=_last_schedule_start(_RELEASE_GATE, run_process),
+            busy=_workflow_busy(_RELEASE_GATE, run_process),
+            uncertified_commits=uncertified,
+            channel_latest=channel_latest,
+        ),
+        open_card=partial(_open_card, report_agent=report_agent),
+        close_card=_close_card,
+    )
+    if slot_note is not None:
+        line = f"{line} | {slot_note}"
     print(f"[{datetime.now(UTC).isoformat()}] {line}", flush=True)
 
 

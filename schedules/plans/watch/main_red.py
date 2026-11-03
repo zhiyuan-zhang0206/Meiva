@@ -23,7 +23,6 @@ __all__ = [
     "FAILURE_INFRA",
     "FAILURE_TEST",
     "NIGHTLY_STALE_AFTER",
-    "RELEASE_GATE_STALE_AFTER",
     "STATE_CONFIRMED",
     "STATE_INFRA",
     "STATE_SUSPECTED",
@@ -78,11 +77,10 @@ _INFRA_MARKERS = (
 )
 
 # meiva:note
-# How long `main` may go without a new post-merge start before a round reports the schedule
-# instead of the code. Nine hours is one six-hour slot plus three hours of known GitHub schedule
-# delay: on 2026-11-01 the scheduled runs appeared at 17:56Z and 22:05Z, and by 12:12Z the next
-# day the 00:17Z slot had still not started.
-RELEASE_GATE_STALE_AFTER = timedelta(hours=9)
+# How long a stream may go without a new run before a round reports the schedule instead of the
+# code. The release gate is not here: a six-hourly cron that stopped arriving is a missing slot
+# with a make-up run to dispatch, which `release_gate_slot` owns, and one threshold for that one
+# workflow should not live in two modules.
 NIGHTLY_STALE_AFTER = timedelta(hours=27)
 
 _CANDIDATE_LIMIT = 20
