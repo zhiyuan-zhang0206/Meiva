@@ -1,21 +1,12 @@
 # meiva:note
-# Narrowing for decoded JSON: provider responses and the tracker state file are `object` until checked.
+# Narrowing for the tracker's decoded state: a list of strings (the object and list guards live in
+# `base.host.boundary.json_values`).
 
 from __future__ import annotations
 
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
-
-def is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
-    return isinstance(value, dict)
-
-
-def is_object_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return is_raw_dict(value) and all(isinstance(key, str) for key in value)
-
-
-def is_object_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
+from base.host.boundary.json_values import is_object_list
 
 
 def is_str_list(value: object) -> TypeGuard[list[str]]:

@@ -29,16 +29,21 @@ import json
 import re
 import sys
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 import requests
 from bs4 import BeautifulSoup
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
+from base.host.boundary.fields import str_field
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.options import options
+from base.host.boundary.untyped import object_of
 from scripts.model_registry.plugin_price_sync import PluginSyncResult
 from scripts.model_registry.plugin_price_sync import sync_plugin_rates as _sync_plugin_rates
 
@@ -157,10 +162,12 @@ def _usd(cell: str) -> Decimal:
 
 
 def _peak_windows(page_text: str) -> tuple[tuple[str, str], ...]:
-    peak_hour_matches = _PEAK_HOURS.findall(page_text)
+    peak_hour_matches = list(_PEAK_HOURS.finditer(page_text))
     if len(peak_hour_matches) != 1:
         raise ValueError("DeepSeek must publish exactly one recognized peak-hour statement")
-    clocks = peak_hour_matches[0]
+    clocks = peak_hour_matches[0].groups()
+    if not all(isinstance(clock, str) for clock in clocks):
+        raise ValueError("DeepSeek peak-hour statement must name four clock times")
     return tuple((f"{clocks[index]}:00", f"{clocks[index + 1]}:00") for index in range(0, 4, 2))
 
 
@@ -296,22 +303,38 @@ def parse_deepseek_pricing(html: str) -> DeepSeekCatalog:
     )
 
 
-def _catalog_rates(raw: dict[str, str]) -> Rates:
+type JsonObject = dict[str, object]
+
+
+def _object(value: object, what: str) -> JsonObject:
+    if not is_object_dict(value):
+        raise TypeError(f"{what} must be a JSON object")
+    return value
+
+
+def _objects(value: object, what: str) -> list[JsonObject]:
+    if not is_object_list(value):
+        raise TypeError(f"{what} must be a JSON array")
+    return [_object(item, f"{what} entry") for item in value]
+
+
+def _catalog_rates(raw: object) -> Rates:
+    rates = _object(raw, "catalog rates")
     try:
         return Rates(
-            input=Decimal(raw["input"]),
-            cache_read=Decimal(raw["cache_read"]),
-            output=Decimal(raw["output"]),
+            input=Decimal(str_field(rates, "input")),
+            cache_read=Decimal(str_field(rates, "cache_read")),
+            output=Decimal(str_field(rates, "output")),
         )
-    except (InvalidOperation, KeyError) as exc:
+    except (InvalidOperation, TypeError) as exc:
         raise ValueError("catalog rates must contain decimal input/cache_read/output") from exc
 
 
 def _period_deepseek_prices(
-    period: dict[str, Any],
+    period: JsonObject,
 ) -> tuple[DeepSeekPrices, tuple[tuple[str, str], ...]]:
     """Read one catalog period back into fetched-shape prices and windows."""
-    tiers = period["tiers"]
+    tiers = _objects(period["tiers"], "catalog tiers")
     if (
         len(tiers) != 1
         or tiers[0]["input_tokens_min"] != 0
@@ -319,8 +342,10 @@ def _period_deepseek_prices(
     ):
         raise ValueError("DeepSeek pricing must have one unbounded token tier")
     tier = tiers[0]
-    overrides = tier["utc_daily_overrides"]
-    windows = tuple((override["start"], override["end"]) for override in overrides)
+    overrides = _objects(tier["utc_daily_overrides"], "catalog overrides")
+    windows = tuple(
+        (str_field(override, "start"), str_field(override, "end")) for override in overrides
+    )
     if not windows:
         raise ValueError("DeepSeek pricing must carry UTC peak windows")
     peak_rates = {_catalog_rates(override["rates"]) for override in overrides}
@@ -331,9 +356,13 @@ def _period_deepseek_prices(
 
 
 def _current_deepseek_prices(
-    entry: dict[str, Any],
+    entry: JsonObject,
 ) -> tuple[DeepSeekPrices, tuple[tuple[str, str], ...]]:
-    current = [period for period in entry["periods"] if period["effective_until"] is None]
+    current = [
+        period
+        for period in _objects(entry["periods"], "catalog periods")
+        if period["effective_until"] is None
+    ]
     if len(current) != 1:
         raise ValueError("DeepSeek catalog entry must have exactly one current period")
     return _period_deepseek_prices(current[0])
@@ -351,7 +380,7 @@ def _new_deepseek_period(
     prices: DeepSeekPrices,
     effective_from: str,
     peak_windows: tuple[tuple[str, str], ...],
-) -> dict[str, Any]:
+) -> JsonObject:
     return {
         "effective_from": effective_from,
         "effective_until": None,
@@ -370,7 +399,7 @@ def _new_deepseek_period(
 
 
 def _append_reviewed_period(
-    entry: dict[str, Any],
+    entry: JsonObject,
     prices: DeepSeekPrices,
     peak_windows: tuple[tuple[str, str], ...],
     detected_at: str,
@@ -379,9 +408,16 @@ def _append_reviewed_period(
     current_prices, current_windows = _current_deepseek_prices(entry)
     if current_prices == prices and current_windows == peak_windows:
         return False
-    current = next(period for period in entry["periods"] if period["effective_until"] is None)
+    periods = entry["periods"]
+    if not is_object_list(periods):
+        raise TypeError("catalog periods must be a JSON array")
+    current = next(
+        period
+        for period in _objects(periods, "catalog periods")
+        if period["effective_until"] is None
+    )
     current["effective_until"] = detected_at
-    entry["periods"].append(_new_deepseek_period(prices, detected_at, peak_windows))
+    periods.append(_new_deepseek_period(prices, detected_at, peak_windows))
     entry["source_checked_at"] = detected_at[:10]
     return True
 
@@ -437,11 +473,11 @@ def _require_reviewed_annotations(fetched: DeepSeekCatalog) -> None:
 # verify it against the provider announcement before merge, and retaining the prior period makes
 # that correction a one-field edit instead of rewriting price history.
 def reconcile_deepseek_catalog(
-    catalog: dict[str, Any],
+    catalog: JsonObject,
     fetched: DeepSeekCatalog,
     *,
     detected_at: str,
-) -> dict[str, Any] | None:
+) -> JsonObject | None:
     instant = datetime.fromisoformat(detected_at.replace("Z", "+00:00"))
     if instant.tzinfo is None or instant.utcoffset() is None or not detected_at.endswith("Z"):
         raise ValueError("detected_at must be an ISO-8601 UTC instant ending in Z")
@@ -453,7 +489,7 @@ def reconcile_deepseek_catalog(
     changed = False
     for column, reviewed in sorted(_DEEPSEEK_COLUMNS.items()):
         for model in reviewed.models:
-            entry = updated["models"][model]
+            entry = _object(_object(updated["models"], "catalog models")[model], f"catalog {model}")
             appended = _append_reviewed_period(
                 entry, fetched.models[column], fetched.peak_windows, detected_at
             )
@@ -509,6 +545,17 @@ def _run_sync_plugins(
     return 0
 
 
+@dataclass(frozen=True)
+class Options:
+    write: bool
+    check: bool
+    sync_plugins: bool
+    source_file: Path | None
+    catalog: Path | None
+    repo_root: Path | None
+    detected_at: str | None
+
+
 def main(argv: list[str], *, now: datetime | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Compare Meiva's reviewed catalog with official provider pricing."
@@ -545,7 +592,7 @@ def main(argv: list[str], *, now: datetime | None = None) -> int:
         default=None,
         help="provisional UTC effective instant (default: current time)",
     )
-    args = parser.parse_args(argv)
+    args = options(parser.parse_args(argv), Options)
 
     current_now = datetime.now(UTC) if now is None else now
     repo_root = args.repo_root or _REPO_ROOT
@@ -564,7 +611,7 @@ def main(argv: list[str], *, now: datetime | None = None) -> int:
         if args.source_file is not None
         else _fetch_deepseek_html()
     )
-    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    catalog = _object(object_of(json.loads, catalog_path.read_text(encoding="utf-8")), "catalog")
     detected_at = args.detected_at or _detected_at(current_now)
     updated = reconcile_deepseek_catalog(
         catalog,

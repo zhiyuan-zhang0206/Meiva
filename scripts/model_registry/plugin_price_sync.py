@@ -20,6 +20,7 @@ from datetime import UTC, datetime, time
 from pathlib import Path
 from typing import NamedTuple, TypeGuard
 
+from base.host.boundary.untyped import object_of
 from scripts.model_registry.plugin_price_rates import (
     FlatRates,
     archive_rates,
@@ -497,7 +498,7 @@ def _plugin_targets(
 # The loop still reports every provider, so one run names everything that is wrong instead of
 # one file per run.
 def _load_archive_models(archive: Path) -> dict[str, dict[str, object]]:
-    raw: object = json.loads(archive.read_text(encoding="utf-8"))
+    raw = object_of(json.loads, archive.read_text(encoding="utf-8"))
     if not _is_table(raw):
         raise TypeError("pricing archive must be a JSON object")
     raw_models = raw.get("models")

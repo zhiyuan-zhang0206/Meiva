@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from scripts.model_registry.check_model_updates import SOURCES, compare_models
+
+
+@dataclass(frozen=True)
+class _Spec:
+    provider: str
 
 
 def test_gpt_6_1_sol_is_a_newer_same_series_candidate() -> None:
     source = SOURCES["gpt"]
-    registry = {"gpt-6-sol": type("Spec", (), {"provider": "gpt"})()}
+    registry = {"gpt-6-sol": _Spec("gpt")}
 
     comparison = compare_models(source, ["gpt-6.1-sol"], registry)
 

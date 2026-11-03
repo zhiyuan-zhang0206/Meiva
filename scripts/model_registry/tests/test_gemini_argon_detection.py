@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from scripts.model_registry.check_model_updates import SOURCES, compare_models
+
+
+@dataclass(frozen=True)
+class _Spec:
+    provider: str
 
 
 def test_gemini_4_argon_is_classified_not_dropped_as_other() -> None:
     source = SOURCES["gemini"]
-    registry = {"gemini-4-argon": type("Spec", (), {"provider": "gemini"})()}
+    registry = {"gemini-4-argon": _Spec("gemini")}
 
     comparison = compare_models(
         source,
@@ -21,7 +28,7 @@ def test_gemini_4_argon_is_classified_not_dropped_as_other() -> None:
 
 def test_gemini_argon_preview_is_its_own_series() -> None:
     source = SOURCES["gemini"]
-    registry = {"gemini-4-argon": type("Spec", (), {"provider": "gemini"})()}
+    registry = {"gemini-4-argon": _Spec("gemini")}
 
     comparison = compare_models(source, ["gemini-4.1-argon-preview"], registry)
 
