@@ -411,7 +411,8 @@ class TestSchedulerIntegration:
 def test_only_legacy_history_pins_bypass_execution_validation(
     model_catalog: ModelCatalog, harness: Harness, version: object, accepted: bool
 ) -> None:
-    pins: dict[str, object] = {"llm_model": "deepseek-flash", "reasoning_effort": "max"}
+    decision_model = next(iter(model_catalog.decision_models))
+    pins: dict[str, object] = {"llm_model": decision_model, "reasoning_effort": "max"}
     stats = HostStats()
     rejected: dict[int, str] = {}
     stored = StoredConfig(
@@ -438,3 +439,37 @@ def test_only_legacy_history_pins_bypass_execution_validation(
     )
     assert stats.config_rejected == (0 if accepted else 1)
     assert bool(rejected) is not accepted
+
+
+@pytest.mark.parametrize(
+    "harness",
+    [Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY, Harness.KIMI_CODE],
+)
+def test_admit_stored_model_accepts_uncatalogued_external_cli_models(
+    model_catalog: ModelCatalog, harness: Harness
+) -> None:
+    pins: dict[str, object] = {"llm_model": "gpt-oss-120b", "reasoning_effort": "medium"}
+    stats = HostStats()
+    stored = StoredConfig(
+        machine="test",
+        status="idling",
+        harness=harness.value,
+        config_overlay=None,
+        birth_config={**pins, "harness_model_selection": 1},
+    )
+    assert (
+        admit_stored_model(
+            dict(pins),
+            agent_id=72,
+            stored=stored,
+            stats=stats,
+            rejected={},
+            normalized={},
+            catalog=model_catalog,
+            keys=ProviderKeys({}),
+            llm_override="",
+            default_model="deepseek-flash",
+        )
+        is True
+    )
+    assert stats.config_rejected == 0

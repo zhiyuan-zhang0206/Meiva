@@ -41,6 +41,7 @@ from ops.cluster_status import (
 )
 from ops.rpc_schemas import (
     AgentSkillViewResult,
+    HarnessModelOption,
     HarnessProbeResult,
     HarnessProbeRow,
     OpsCommandItem,
@@ -102,15 +103,12 @@ def cluster_status_op(
 # meiva:note
 # The runner-side half of `GET /api/cluster/machines/{name}/harnesses`: the gateway
 # dispatches this op to the machine an agent would be born on, because an install
-# directory and a login live on that box, not on the gateway's. `reason` passes
-# through unchanged — the probe already separates not installed, installed outside
-# PATH, not signed in and sign-in state unknown, and that sentence is what the form
-# shows. The probe asks each CLI with a bounded timeout (`claude auth status`,
-# `codex login status`, `agy models` — the last one fetches the catalogue, measured
-# 2-5s) and never starts a session or spends model quota; it runs on the daemon's
-# worker thread because a slow CLI, like a stalled network mount, would block the
-# event loop that serves spawn and lifecycle. The gateway caches one answer per
-# machine for 30 seconds, so a repeat read of the form does not reach this op.
+# directory, login state and CLI model catalogue live on that box, not on the gateway's.
+# `reason` passes through unchanged — the probe separates not installed, installed outside
+# PATH, not signed in and sign-in/catalogue state unknown, and that sentence is what the form
+# shows. The probe asks each CLI under bounded timeouts for both login state and live model
+# options + reasoning-effort ladders without starting an agent turn or spending model quota;
+# it runs on the daemon's worker thread so a slow CLI never blocks the event loop.
 # meiva:link base/agents/docs/harness/harness.meiva.okf.md
 def harness_probe_op(machine: str, *, now: datetime) -> HarnessProbeResult:
     return HarnessProbeResult(
@@ -122,6 +120,15 @@ def harness_probe_op(machine: str, *, now: datetime) -> HarnessProbeResult:
                 reason=row.reason,
                 binary=row.binary,
                 on_path=row.on_path,
+                models=[
+                    HarnessModelOption(
+                        id=model.id,
+                        reasoning_effort_options=list(model.reasoning_effort_options),
+                        reasoning_effort_default=model.reasoning_effort_default,
+                    )
+                    for model in row.models
+                ],
+                default_model=row.default_model,
             )
             for row in probe_local_harnesses(now=now)
         ],

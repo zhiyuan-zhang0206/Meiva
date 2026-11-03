@@ -29,6 +29,7 @@ _SURFACE: dict[str, list[str]] = {
         "Neighbor",
         "OpenTaskRow",
         "OpenTasksHint",
+        "ProbedHarnessModel",
         "RestartResult",
         "ResurrectResult",
         "ShellSessionKillTiming",

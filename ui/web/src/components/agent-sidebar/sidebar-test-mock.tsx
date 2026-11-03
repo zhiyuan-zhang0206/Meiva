@@ -389,7 +389,6 @@ function defaultModels(): ModelsResponse {
     models: {
       "deepseek-v4-pro": {
         provider: "deepseek",
-        harnesses: ["meiva"],
         context_window: 128_000,
         reasoning_effort_options: ["high", "max"],
         reasoning_effort_default: "max",

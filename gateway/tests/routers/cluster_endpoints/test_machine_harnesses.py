@@ -33,6 +33,14 @@ _WIRE: dict[str, Any] = {
             "reason": "signed-in account recorded in ~/.claude.json",
             "binary": "/usr/local/bin/claude",
             "on_path": True,
+            "models": [
+                {
+                    "id": "claude-sonnet-5-5",
+                    "reasoning_effort_options": ["low", "medium", "high"],
+                    "reasoning_effort_default": "high",
+                }
+            ],
+            "default_model": "claude-sonnet-5-5",
         },
         {
             "harness": "codex",
@@ -143,6 +151,8 @@ def test_route_serves_the_cached_rows(set_machine_identity: MachineIdentitySette
             "reason": "seeded",
             "launchable": True,
             "billing": "api",
+            "models": [],
+            "default_model": None,
         }
     ]
 

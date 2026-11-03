@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { groupedModels, isSuperseded, modelLabel, providerLabel, reasoningEffortLabel, runsOnHarness } from "./models";
+import { groupedModels, isSuperseded, modelLabel, providerLabel, reasoningEffortLabel } from "./models";
 import type { ModelsResponse } from "./types";
 
 function modelsResponse(
@@ -16,7 +16,6 @@ function modelsResponse(
           {
             provider,
             context_window: 128_000,
-            harnesses: ["meiva"],
             ...(input === undefined
               ? {}
               : { pricing: { input, cache_read: input / 10, output: input * 2 } }),
@@ -183,19 +182,16 @@ describe("isSuperseded", () => {
       "deepseek-v4-pro": {
         provider: "deepseek",
         context_window: 128_000,
-        harnesses: ["meiva"],
         superseded_by: "deepseek-flash",
       },
       "deepseek-flash": {
         provider: "deepseek",
         context_window: 128_000,
-        harnesses: ["meiva"],
         superseded_by: null,
       },
       "deepseek-v4-legacy": {
         provider: "deepseek",
         context_window: 128_000,
-        harnesses: ["meiva"],
       },
     },
     default: "deepseek-flash",
@@ -213,34 +209,5 @@ describe("isSuperseded", () => {
   it("returns false when the model metadata or catalog is absent", () => {
     expect(isSuperseded(response, "deepseek-v4-unknown")).toBe(false);
     expect(isSuperseded(undefined, "deepseek-v4-pro")).toBe(false);
-  });
-});
-
-describe("runsOnHarness", () => {
-  const data: ModelsResponse = {
-    providers: { deepseek: ["deepseek-v4-pro"], gpt: ["gpt-5.6"] },
-    models: {
-      "deepseek-v4-pro": { provider: "deepseek", context_window: 128_000, harnesses: ["meiva", "codex"] },
-      "gpt-5.6": { provider: "gpt", context_window: 128_000, harnesses: ["meiva"] },
-    },
-    default: "deepseek-v4-pro",
-  };
-
-  it("answers from the harnesses the registry published for the model", () => {
-    expect(runsOnHarness(data, "deepseek-v4-pro", "meiva")).toBe(true);
-    expect(runsOnHarness(data, "deepseek-v4-pro", "codex")).toBe(true);
-    expect(runsOnHarness(data, "deepseek-v4-pro", "claude_code")).toBe(false);
-    expect(runsOnHarness(data, "deepseek-v4-pro", "antigravity")).toBe(false);
-    expect(runsOnHarness(data, "gpt-5.6", "codex")).toBe(false);
-  });
-
-  it("reads a catalog entry written before the field as the built-in runtime alone", () => {
-    const legacy = {
-      providers: { deepseek: ["deepseek-v4-pro"] },
-      models: { "deepseek-v4-pro": { provider: "deepseek", context_window: 128_000 } },
-      default: "deepseek-v4-pro",
-    } as unknown as ModelsResponse;
-    expect(runsOnHarness(legacy, "deepseek-v4-pro", "meiva")).toBe(true);
-    expect(runsOnHarness(legacy, "deepseek-v4-pro", "codex")).toBe(false);
   });
 });

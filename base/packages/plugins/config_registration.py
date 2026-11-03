@@ -316,8 +316,12 @@ _FRAMEWORK_RANGE_VALIDATORS: dict[str, Callable[[object], str | None]] = {
 }
 
 
-def _validate_framework_overlay_ranges(updates: dict[str, object]) -> None:
+def _validate_framework_overlay_ranges(
+    updates: dict[str, object], *, check_native_effort: bool = True
+) -> None:
     for field, value in updates.items():
+        if not check_native_effort and field == "reasoning_effort":
+            continue
         validator = _FRAMEWORK_RANGE_VALIDATORS.get(field)
         if validator is None:
             continue
@@ -328,7 +332,11 @@ def _validate_framework_overlay_ranges(updates: dict[str, object]) -> None:
 
 # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
 def validate_config_overlay_shape(
-    overlay: dict[str, object], configs: Mapping[str, BaseModel] | None = None, *, home: Path
+    overlay: dict[str, object],
+    configs: Mapping[str, BaseModel] | None = None,
+    *,
+    home: Path,
+    check_native_effort: bool = True,
 ) -> None:
     targets = resolve_overlay_targets(overlay, configs, home=home)
     grouped: dict[str | None, dict[str, object]] = {}
@@ -361,27 +369,15 @@ def validate_config_overlay_shape(
             ) from e
 
     if None in grouped:
-        _validate_framework_overlay_ranges(grouped[None])
+        _validate_framework_overlay_ranges(grouped[None], check_native_effort=check_native_effort)
 
 
 _DECISION_MODEL_FIELDS = ("skill_recall_model",)
 
 
-def validate_config_overlay(
-    overlay: dict[str, object],
-    configs: Mapping[str, BaseModel] | None = None,
-    *,
-    models: Mapping[str, object],
-    decision_models: Mapping[str, object] | None = None,
-    prices: Collection[str] | None = None,
-    home: Path,
+def _validate_decision_model_fields(
+    overlay: Mapping[str, object], decision_models: Mapping[str, object] | None
 ) -> None:
-    validate_config_overlay_shape(overlay, configs, home=home)
-    if "llm_model" in overlay:
-        error = _validate_model_membership(overlay["llm_model"], models)
-        if error is not None:
-            raise InvalidConfigOverlay(f"overlay key 'llm_model' {error}")
-        _require_priced(overlay["llm_model"], models, prices)
     for field in _DECISION_MODEL_FIELDS:
         if field in overlay:
             if decision_models is None:
@@ -394,6 +390,38 @@ def validate_config_overlay(
             )
             if error is not None:
                 raise InvalidConfigOverlay(f"overlay key {field!r} {error}")
+
+
+def validate_config_overlay(
+    overlay: dict[str, object],
+    configs: Mapping[str, BaseModel] | None = None,
+    *,
+    models: Mapping[str, object] | None,
+    decision_models: Mapping[str, object] | None = None,
+    prices: Collection[str] | None = None,
+    home: Path,
+) -> None:
+    validate_config_overlay_shape(
+        overlay, configs, home=home, check_native_effort=(models is not None)
+    )
+    if "llm_model" in overlay:
+        raw_model = overlay["llm_model"]
+        if models is not None:
+            error = _validate_model_membership(raw_model, models)
+            if error is not None:
+                raise InvalidConfigOverlay(f"overlay key 'llm_model' {error}")
+            _require_priced(raw_model, models, prices)
+        else:
+            if not isinstance(raw_model, str) or not raw_model.strip():
+                raise InvalidConfigOverlay(
+                    f"overlay key 'llm_model' value {raw_model!r} must be a non-empty model id"
+                )
+            if decision_models is not None and raw_model in decision_models:
+                raise InvalidConfigOverlay(
+                    f"overlay key 'llm_model' names decision model {raw_model!r}, "
+                    "which cannot be used as an agent chat model"
+                )
+    _validate_decision_model_fields(overlay, decision_models)
 
 
 # meiva:note

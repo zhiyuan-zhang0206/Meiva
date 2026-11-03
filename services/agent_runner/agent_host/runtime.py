@@ -262,7 +262,7 @@ def admit_stored_model(
             )
         return False
     rejected.pop(agent_id, None)
-    if "llm_model" in pins:
+    if Harness(stored.harness) is Harness.MEIVA and "llm_model" in pins:
         pinned_model = pins["llm_model"]
         resolved_model = resolve_available_model(pinned_model, models=catalog.models)
         if resolved_model != pinned_model:
@@ -431,11 +431,8 @@ async def build_runtime(
     model = None
     effort = None
     if harness is not Harness.MEIVA and uses_harness_model_selection(birth_config):
-        model, effort = catalog.models[slices.brain.llm_model].harness_model(
-            slices.brain.llm_model,
-            harness,
-            slices.overrides.reasoning_effort,
-        )
+        model = slices.brain.llm_model
+        effort = slices.overrides.reasoning_effort or None
     return AgentRuntime(
         fingerprint=fingerprint,
         llm=llm,

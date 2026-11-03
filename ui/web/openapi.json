@@ -12371,6 +12371,24 @@
           },
           "billing": {
             "$ref": "#/components/schemas/HarnessBilling"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/HarnessModelOption"
+            },
+            "type": "array",
+            "title": "Models"
+          },
+          "default_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Model"
           }
         },
         "type": "object",
@@ -12391,8 +12409,12 @@
         ],
         "title": "HarnessBilling"
       },
-      "HarnessModelInfo": {
+      "HarnessModelOption": {
         "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
           "reasoning_effort_options": {
             "items": {
               "type": "string"
@@ -12401,16 +12423,22 @@
             "title": "Reasoning Effort Options"
           },
           "reasoning_effort_default": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Reasoning Effort Default"
           }
         },
         "type": "object",
         "required": [
-          "reasoning_effort_options",
-          "reasoning_effort_default"
+          "id"
         ],
-        "title": "HarnessModelInfo"
+        "title": "HarnessModelOption"
       },
       "HeartbeatInfo": {
         "properties": {
@@ -14055,30 +14083,12 @@
               }
             ],
             "title": "Superseded By"
-          },
-          "harnesses": {
-            "items": {
-              "$ref": "#/components/schemas/Harness"
-            },
-            "type": "array",
-            "title": "Harnesses"
-          },
-          "harness_settings": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/HarnessModelInfo"
-            },
-            "propertyNames": {
-              "$ref": "#/components/schemas/Harness"
-            },
-            "type": "object",
-            "title": "Harness Settings"
           }
         },
         "type": "object",
         "required": [
           "provider",
-          "context_window",
-          "harnesses"
+          "context_window"
         ],
         "title": "ModelInfo",
         "description": "Per-model metadata surfaced in the spawn picker."

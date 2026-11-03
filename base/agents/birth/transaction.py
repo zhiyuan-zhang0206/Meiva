@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -136,6 +137,23 @@ def _insert_agent_identity(cur: psycopg.Cursor[Any], label: str | None) -> int:
     return new_id
 
 
+def _apply_birth_harness_defaults(
+    config: dict[str, object] | None, harness_defaults: Mapping[str, object]
+) -> tuple[dict[str, object] | None, dict[str, object]]:
+    cleaned = (
+        {
+            k: v
+            for k, v in config.items()
+            if not (k in ("llm_model", "reasoning_effort") and v in (None, ""))
+        }
+        if config
+        else config
+    )
+    overlay_keys = set(cleaned or {})
+    inherited = {key: val for key, val in harness_defaults.items() if key not in overlay_keys}
+    return cleaned, inherited
+
+
 def _resolve_birth_overlay(
     cur: psycopg.Cursor[Any],
     config: dict[str, object] | None,
@@ -144,6 +162,7 @@ def _resolve_birth_overlay(
     catalog: ModelCatalog,
     authority: ConfigAuthority,
     harness: str,
+    harness_defaults: Mapping[str, object] | None = None,
 ) -> tuple[dict[str, object] | None, dict[str, object]]:
     # THE spawn boundary is this INSERT — every spawn in the system funnels
     # through it (SDK / frontend / scripts all POST /api/keyed/v1/agents, which
@@ -151,11 +170,18 @@ def _resolve_birth_overlay(
     # the frozen-field stamp is taken. A fork carries its parent's stamp over
     # verbatim: a fork is the same identity continuing, so it must not silently
     # re-resolve its brain against today's cluster defaults.
+    from base.api_contracts.agent_contract import Harness, InvalidModelConfig
+    from base.config.agent_pins import resolve_agent_config_pins
+    from base.lm.factory import validate_model_config
+
+    harness_enum = Harness(harness)
     inherited: dict[str, object] | None = None
     if fork_from is not None:
         cur.execute("SELECT birth_config FROM agents_meta WHERE id = %s", (fork_from,))
         inherited = fetch_one(cur, "spawn: read fork source birth_config")[0]
-    if config:
+    elif harness_defaults:
+        config, inherited = _apply_birth_harness_defaults(config, harness_defaults)
+    if config and harness_enum is Harness.MEIVA:
         # Last-mile settlement (task #4306): the gateway preflight already
         # normalized + reported a withdrawn llm_model; keeping the rewrite
         # at the row itself means a withdrawn id never lands in
@@ -174,16 +200,13 @@ def _resolve_birth_overlay(
     birth_config = resolve_birth_config(
         cur, config, inherited=inherited, catalog=catalog, authority=authority
     )
-    from base.api_contracts.agent_contract import Harness, InvalidModelConfig
-    from base.config.agent_pins import resolve_agent_config_pins
-    from base.lm.factory import validate_model_config
 
     try:
         pins = resolve_agent_config_pins(config, birth_config)
-        validate_model_config(catalog=catalog, config=pins, harness=Harness(harness))
+        validate_model_config(catalog=catalog, config=pins, harness=harness_enum)
     except ValueError as exc:
         raise InvalidModelConfig(str(exc)) from exc
-    if Harness(harness) is not Harness.MEIVA:
+    if harness_enum is not Harness.MEIVA:
         birth_config[HARNESS_MODEL_SELECTION_KEY] = HARNESS_MODEL_SELECTION_VERSION
     return config, birth_config
 
@@ -236,6 +259,7 @@ def insert_agent_birth(
     prompt_source: str | None = None,
     fork_tail_skills: list[str] | None = None,
     harness: str | None = None,
+    harness_defaults: Mapping[str, object] | None = None,
     creation_key: str | None = None,
     creation_request_hash: str | None = None,
 ) -> AgentBirth:
@@ -268,7 +292,13 @@ def insert_agent_birth(
     born_harness = resolve_birth_harness(cur, harness, fork_from)
     new_id = _insert_agent_identity(cur, label)
     config, birth_config = _resolve_birth_overlay(
-        cur, config, fork_from, catalog=catalog, authority=authority, harness=born_harness
+        cur,
+        config,
+        fork_from,
+        catalog=catalog,
+        authority=authority,
+        harness=born_harness,
+        harness_defaults=harness_defaults,
     )
     # For a fork, spawner records the fork SOURCE — the lineage parent
     # (user ruling 2026-08-28, task #1879). The executor who triggered the

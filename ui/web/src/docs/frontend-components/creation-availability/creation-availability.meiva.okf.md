@@ -21,20 +21,24 @@ Each column narrows the next, selecting one row on entry.
 The harness column speaks for the selected
 machine, and a stored or picked harness that machine cannot start falls through
 to the first one it can (the pick itself is left alone, so switching back
-restores it). The model column keeps only the models whose published
-`harnesses` name the chosen harness (`GET /api/models`, `ModelInfo.harnesses`;
-the built-in `meiva` runtime runs every spawnable model and is always listed
-first), ordered by provider without repeating provider headings above the model
-names, excluding superseded catalog entries.
-Hidden models and providers filter native API execution only; external CLI
-choices remain selectable without changing those preferences.
-Which harness runs which model is the registry's declaration, not a frontend
-table. Model and Effort select actual execution settings in both layouts.
+restores it). The model column splits cleanly by harness source: for the built-in `meiva`
+runtime it lists the spawnable models from `GET /api/models` ordered by provider
+without repeating provider headings above the model names, excluding superseded
+catalog entries and Control-hidden models or providers; for external harnesses
+it lists `selectedHarnessRow.models` (`HarnessModelOption[]`) directly from the
+selected machine's `GET /api/cluster/machines/{name}/harnesses` snapshot in
+probed order, including CLI-only models absent from `/api/models` and unaffected
+by native `superseded_by` or Control visibility preferences.
+Model and Effort select actual execution settings in both layouts.
 Native uses the model's `reasoning_effort_options` and
-`reasoning_effort_default`; external harnesses use that harness's entry in
-`harness_settings`. An unsupported stored effort falls back to the selected
-harness binding's concrete default, never the native model default. External harnesses expose no history-model or summary-effort settings: their
+`reasoning_effort_default`; external harnesses use the selected probed model's
+`reasoning_effort_options` and `reasoning_effort_default` (falling back to
+`selectedHarnessRow.default_model` when the stored model is unsupported on that
+harness). An unsupported stored effort falls back to the selected model's
+concrete default, never another harness's default. External harnesses expose no history-model or summary-effort settings: their
 CLI owns context and compaction, and Meiva retains a basic timeline projection.
+`/api/models` query errors block only the native `meiva` runtime; external
+harnesses remain usable from their probed snapshot.
 The action rail puts `Refresh` immediately above `Spawn`. Spawn is disabled with
 the first refusal that applies (a down host, then a harness the machine cannot
 start).

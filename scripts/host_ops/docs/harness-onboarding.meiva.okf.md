@@ -48,10 +48,11 @@ own, so no command is re-parsed by a second shell.
 
 `doctor` asks the platform probe (`base/agents/birth/harness.py`) on every
 machine. That probe asks the CLI for its login state (`claude auth status` with
-`--json`, `codex login status`, `agy models`) under a bounded timeout and falls
-back to the stored credential when the CLI cannot answer: it starts no session
-and spends no quota, and a sign-in it cannot prove stays `unknown` rather than a
-guess.
+`--json`, `codex login status`, `agy models`) and live model/effort catalogue
+(`claude --input-format stream-json`, `codex app-server` `model/list`,
+`agy models`) under bounded timeouts: it starts no billing turn and
+spends no model quota, and a sign-in or model catalogue it cannot prove stays
+`unknown` rather than a guess.
 
 `--verify` adds the checks the probe does not make: whether the installed file
 actually executes (`<binary> --version`) and what the CLI says about its login

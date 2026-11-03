@@ -16,6 +16,8 @@ from base.agents.birth.harness import (
     probe_local_harnesses,
     resolve_birth_harness,
 )
+from base.agents.birth.harness_model_probe import probe_cli_models
+from base.agents.model.harness_models import CatalogProbeResult
 from base.api_contracts.agent_contract import (
     DEFAULT_HARNESS,
     ErrorReason,
@@ -23,6 +25,7 @@ from base.api_contracts.agent_contract import (
     Harness,
     HarnessNotLaunchable,
     MeivaAgentError,
+    ProbedHarnessModel,
 )
 
 _BIN_DIRS = (".local/bin", "bin")
@@ -84,9 +87,36 @@ def _silent_cli(
     return subprocess.CompletedProcess(argv, 1, stdout="", stderr="")
 
 
-def _probe(home: Path, *, cli_runner: Any = _silent_cli) -> dict[Harness, HarnessProbe]:
+def _stub_model_prober(
+    harness: Harness,
+    binary: str,
+    *,
+    home: Path,
+    environment: dict[str, str],
+    agy_stdout: str | None = None,
+) -> CatalogProbeResult:
+    del harness, binary, home, environment, agy_stdout
+    model = ProbedHarnessModel(
+        id="stub-model",
+        reasoning_effort_options=("low", "high"),
+        reasoning_effort_default="high",
+    )
+    return CatalogProbeResult(models=(model,), default_model="stub-model")
+
+
+def _probe(
+    home: Path,
+    *,
+    cli_runner: Any = _silent_cli,
+    model_prober: Any = _stub_model_prober,
+) -> dict[Harness, HarnessProbe]:
     rows = probe_local_harnesses(
-        home, str(home / "empty-bin"), _BIN_DIRS, now=_NOW, cli_runner=cli_runner
+        home,
+        str(home / "empty-bin"),
+        _BIN_DIRS,
+        now=_NOW,
+        cli_runner=cli_runner,
+        model_prober=model_prober,
     )
     return {row.harness: row for row in rows}
 
@@ -190,7 +220,14 @@ def test_a_path_install_is_reported_as_on_path(tmp_path: Path) -> None:
     (tmp_path / ".codex" / "auth.json").write_text(
         json.dumps({"tokens": {"access_token": "token"}}), encoding="utf-8"
     )
-    rows = probe_local_harnesses(tmp_path, str(binary.parent), _BIN_DIRS, now=_NOW)
+    rows = probe_local_harnesses(
+        tmp_path,
+        str(binary.parent),
+        _BIN_DIRS,
+        now=_NOW,
+        cli_runner=_silent_cli,
+        model_prober=_stub_model_prober,
+    )
     row = {candidate.harness: candidate for candidate in rows}[Harness.CODEX]
     assert row.status == "available"
     assert row.on_path is True
@@ -274,11 +311,55 @@ def test_an_antigravity_catalogue_means_a_login(tmp_path: Path) -> None:
     _external_cli(tmp_path, ".local/bin", "agy")
 
     row = _probe(
-        tmp_path, cli_runner=_answering_cli(stdout="gemini-4-argon-high\tGemini 4 Argon (High)\n")
+        tmp_path,
+        cli_runner=_answering_cli(stdout="gemini-4-argon-high\tGemini 4 Argon (High)\n"),
+        model_prober=probe_cli_models,
     )[Harness.ANTIGRAVITY]
 
     assert row.status == "available"
     assert "agy models" in row.reason
+    assert row.default_model == "gemini-4-argon"
+    assert row.models == (
+        ProbedHarnessModel(
+            id="gemini-4-argon",
+            reasoning_effort_options=("high",),
+            reasoning_effort_default="high",
+        ),
+    )
+
+
+def test_a_signed_in_harness_whose_catalogue_probe_fails_is_unknown(tmp_path: Path) -> None:
+    _external_cli(tmp_path, ".local/bin", "codex")
+
+    def failing_prober(*_args: object, **_kwargs: object) -> CatalogProbeResult:
+        return CatalogProbeResult(error="codex app-server timed out")
+
+    row = _probe(
+        tmp_path,
+        cli_runner=_answering_cli(stderr="Logged in using ChatGPT"),
+        model_prober=failing_prober,
+    )[Harness.CODEX]
+
+    assert row.status == "unknown"
+    assert row.models == ()
+    assert "codex login status" in row.reason
+    assert "model catalogue probe failed: codex app-server timed out" in row.reason
+
+
+def test_an_antigravity_stored_token_without_catalogue_stdout_is_unknown(tmp_path: Path) -> None:
+    _external_cli(tmp_path, ".local/bin", "agy")
+    _antigravity_token(
+        tmp_path,
+        relative=".gemini/antigravity-cli/antigravity-oauth-token",
+        expiry=timedelta(hours=1),
+    )
+
+    row = _probe(tmp_path, cli_runner=_silent_after_timeout(), model_prober=probe_cli_models)[
+        Harness.ANTIGRAVITY
+    ]
+
+    assert row.status == "unknown"
+    assert "model catalogue probe failed" in row.reason
 
 
 def test_an_antigravity_sign_in_request_is_unavailable(tmp_path: Path) -> None:
@@ -394,3 +475,92 @@ def test_harness_not_launchable_is_a_wire_error() -> None:
     assert issubclass(HarnessNotLaunchable, MeivaAgentError)
     assert HarnessNotLaunchable.reason is ErrorReason.HARNESS_NOT_LAUNCHABLE
     assert HarnessNotLaunchable.http_status == 400
+
+
+def test_probe_cli_models_codex_strips_openai_api_key_and_reads_model_list(tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_runner(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        captured["argv"] = argv
+        captured["env"] = kwargs["env"]
+        captured["input"] = kwargs["input"]
+        reply = {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "result": {
+                "data": [
+                    {
+                        "id": "gpt-6.1-terra",
+                        "isDefault": True,
+                        "defaultReasoningEffort": "low",
+                        "supportedReasoningEfforts": [
+                            {"reasoningEffort": "low"},
+                            {"reasoningEffort": "ultra"},
+                        ],
+                    }
+                ]
+            },
+        }
+        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(reply) + "\n", stderr="")
+
+    result = probe_cli_models(
+        Harness.CODEX,
+        "/usr/local/bin/codex",
+        home=tmp_path,
+        environment={"OPENAI_API_KEY": "sk-native", "PATH": "/usr/local/bin"},
+        runner=fake_runner,
+    )
+    assert "OPENAI_API_KEY" not in captured["env"]
+    assert "model/list" in captured["input"]
+    assert result.default_model == "gpt-6.1-terra"
+    assert result.models == (
+        ProbedHarnessModel(
+            id="gpt-6.1-terra",
+            reasoning_effort_options=("low", "ultra"),
+            reasoning_effort_default="low",
+        ),
+    )
+
+
+def test_probe_cli_models_claude_blanks_secret_env_and_reads_initialize(tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_runner(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        captured["argv"] = argv
+        captured["env"] = kwargs["env"]
+        reply = {
+            "type": "control_response",
+            "response": {
+                "subtype": "success",
+                "response": {
+                    "models": [
+                        {
+                            "value": "default",
+                            "resolvedModel": "claude-opus-4-6",
+                            "supportsEffort": True,
+                            "supportedEffortLevels": ["low", "medium", "high"],
+                            "defaultEffort": "high",
+                        }
+                    ]
+                },
+            },
+        }
+        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(reply) + "\n", stderr="")
+
+    result = probe_cli_models(
+        Harness.CLAUDE_CODE,
+        "/usr/local/bin/claude",
+        home=tmp_path,
+        environment={"ANTHROPIC_API_KEY": "sk-ant", "CLAUDECODE": "1", "PATH": "/usr/local/bin"},
+        runner=fake_runner,
+    )
+    assert captured["env"]["ANTHROPIC_API_KEY"] == ""
+    assert "CLAUDECODE" not in captured["env"]
+    assert result.default_model == "claude-opus-4-6"
+    assert result.models == (
+        ProbedHarnessModel(
+            id="claude-opus-4-6",
+            reasoning_effort_options=("low", "medium", "high"),
+            reasoning_effort_default="high",
+        ),
+    )

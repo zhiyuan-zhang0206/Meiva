@@ -18,7 +18,7 @@ import { useState } from "react";
 import { DEFAULT_HARNESS, HARNESSES, harnessRows, type Harness } from "@/lib/harness/harness";
 import { useHarnessAvailabilityByMachine, useRefreshHarnessAvailability } from "@/lib/harness/use-harness-availability";
 import { SpawnStack, SpawnTable, type SpawnMachine } from "./spawn-table";
-import { groupedModels, isSuperseded, runsOnHarness } from "@/lib/contracts/models";
+import { groupedModels, isSuperseded } from "@/lib/contracts/models";
 import { useUserSettings } from "@/lib/state/use-user-settings";
 import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
@@ -175,31 +175,40 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
     tableHarnessRows.find((row) => row.harness === pickedHarness)?.launchable
       ? pickedHarness
       : (tableHarnessRows.find((row) => row.launchable)?.harness ?? pickedHarness);
-  const harnessBlocked = !tableHarnessRows.find((row) => row.harness === selectedHarness)?.launchable;
+  const selectedHarnessRow = tableHarnessRows.find((row) => row.harness === selectedHarness);
+  const harnessBlocked = !selectedHarnessRow?.launchable;
 
   // meiva:note
-  // API visibility preferences apply to native execution. External CLI catalogs
-  // remain selectable when their API providers or models are hidden.
+  // Native execution draws from `/api/models` and honors visibility/supersession
+  // preferences; external harnesses draw their model roster, default model, and
+  // per-model reasoning-effort ladders directly from the machine's live harness
+  // probe snapshot, independent of native catalog membership or hiding.
   // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
   const hiddenModels = readStringList(settings, "models.hidden");
   const hiddenProviders = readStringList(settings, "models.hidden_providers");
-  const modelGroups = groupedModels(
+  const nativeModelGroups = groupedModels(
     modelsData,
     (m) =>
       !isSuperseded(modelsData, m) &&
-      (selectedHarness !== DEFAULT_HARNESS ||
-        (!hiddenModels.includes(m) && !hiddenProviders.includes(modelsData?.models[m]?.provider ?? ""))) &&
-      runsOnHarness(modelsData, m, selectedHarness),
+      !hiddenModels.includes(m) &&
+      !hiddenProviders.includes(modelsData?.models[m]?.provider ?? ""),
   );
-  const defaultModel = modelsData?.default;
+  const probedModels = selectedHarnessRow?.models ?? [];
+  const visibleModels =
+    selectedHarness === DEFAULT_HARNESS
+      ? nativeModelGroups.flatMap(([, models]) => models)
+      : probedModels.map((item) => item.id);
+  const defaultModel =
+    selectedHarness === DEFAULT_HARNESS
+      ? modelsData?.default
+      : (selectedHarnessRow?.default_model ?? undefined);
 
   // meiva:note
   // The model the next agent will be born on: the stored choice while the chosen
-  // harness can run it, else this harness's first model (the stored value stays,
-  // so switching the harness back restores it). Undefined only when the catalog
-  // offers nothing for that harness.
+  // harness can run it, else this harness's default or first model (the stored
+  // value stays, so switching the harness back restores it). Undefined only when
+  // the active roster offers nothing for that harness.
   // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
-  const visibleModels = modelGroups.flatMap(([, models]) => models);
   const effectiveModel: string | undefined =
     selectedModel !== undefined && visibleModels.includes(selectedModel)
       ? selectedModel
@@ -207,10 +216,10 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
         ? defaultModel
         : visibleModels[0];
 
-  const selectedModelInfo = effectiveModel ? modelsData?.models[effectiveModel] : undefined;
-  const executionSettings = selectedHarness === DEFAULT_HARNESS
-    ? selectedModelInfo
-    : selectedModelInfo?.harness_settings?.[selectedHarness];
+  const executionSettings =
+    selectedHarness === DEFAULT_HARNESS
+      ? (effectiveModel ? modelsData?.models[effectiveModel] : undefined)
+      : (effectiveModel ? probedModels.find((item) => item.id === effectiveModel) : undefined);
   // meiva:note
   // The effort ladder this model offers, with all three "no ladder" shapes
   // collapsed into one empty list: the model carries no effort knob (wire null),
@@ -288,9 +297,11 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
 
   const target = machines.find((row) => row.name === selectedMachine);
   const refreshMachines = machines.filter((row) => row.reason === undefined).map((row) => row.name);
+  const modelsBlocked =
+    selectedHarness === DEFAULT_HARNESS ? Boolean(modelsQuery.error) : visibleModels.length === 0;
   const spawnReason = target?.reason ?? (harnessBlocked
     ? t("harnessStatus.unavailable")
-    : modelsQuery.error ? t("modelsUnavailable") : undefined);
+    : modelsBlocked ? t("modelsUnavailable") : undefined);
   const refreshNotice = refresh.isError
     ? t("refreshFailed")
     : !harnessByMachine.get(selectedMachine ?? "")?.length ? t("refreshNeeded") : undefined;

@@ -21,6 +21,7 @@ from gateway.http.config import (
     GatewayConfig,
     gateway_clock,
     gateway_config,
+    gateway_ensure_harnesses,
     gateway_rpc,
     gateway_state,
 )
@@ -669,6 +670,7 @@ async def guarded_draft_schedule(
         clock=gateway_clock(request),
         rpc=gateway_rpc(request),
         creation_identity=body.model_dump(mode="json"),
+        ensure_harnesses=gateway_ensure_harnesses(request),
     )
     return ScheduleDraftResponse(agent_id=spawned.id)
 

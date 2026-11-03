@@ -3,6 +3,7 @@ import {
   HARNESSES,
   type Harness,
   type HarnessAvailability,
+  type HarnessModelOption,
   type HarnessStatus,
 } from "../contracts/models";
 
@@ -11,6 +12,7 @@ export {
   HARNESSES,
   type Harness,
   type HarnessAvailability,
+  type HarnessModelOption,
   type HarnessStatus,
 };
 
@@ -46,5 +48,7 @@ export function harnessRows(rows: HarnessAvailability[]): HarnessAvailability[] 
     // fallback can leave selectable, and it is metered.
     // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
     billing: "api",
+    models: [],
+    default_model: null,
   });
 }

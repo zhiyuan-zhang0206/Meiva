@@ -3,13 +3,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import LiteralString, Protocol, TypeGuard
 
+from base.agents.model.harness_models import resolve_probed_harness_selection
 from base.api_contracts.agent_contract import (
     AgentNotFound,
     Harness,
     InvalidModelConfig,
+    ProbedHarnessModel,
     coerce_harness,
 )
 from base.lm.catalog import ModelCatalog
@@ -58,19 +61,59 @@ def _resolve_and_check_model(
 def _validate_model_effort_and_harness(
     spec: object, model: str, harness: Harness, effort_str: str | None
 ) -> None:
-    harness_model_fn = getattr(spec, "harness_model", None)
     effort_levels = getattr(spec, "effort_levels", ()) or ()
-    if harness is Harness.MEIVA:
-        if effort_str is not None:
-            try:
-                validate_effort(effort_str, effort_levels, target=model)
-            except ValueError as exc:
-                raise InvalidModelConfig(str(exc)) from exc
-    elif callable(harness_model_fn):
+    if harness is Harness.MEIVA and effort_str is not None:
         try:
-            harness_model_fn(model, harness, effort_str)
+            validate_effort(effort_str, effort_levels, target=model)
         except ValueError as exc:
             raise InvalidModelConfig(str(exc)) from exc
+
+
+@dataclass(frozen=True)
+class RestartHarnessTarget:
+    harness: Harness
+    probed_models: Sequence[ProbedHarnessModel] | None = None
+    probed_default_model: str | None = None
+
+
+def _reject_decision_model_id(candidate: str, catalog: ModelCatalog) -> None:
+    if candidate in catalog.decision_models:
+        raise InvalidModelConfig(
+            f"{candidate!r} is a decision model, not a chat model — it cannot be used as an "
+            "agent or chat model; call base.lm.decision.call.decide() instead"
+        )
+
+
+def _validate_external_restart_pins(
+    pins: Mapping[str, object],
+    *,
+    catalog: ModelCatalog,
+    default_model: str,
+    effort_str: str | None,
+    target: RestartHarnessTarget,
+) -> tuple[str, str | None] | None:
+    raw_model = pins.get("llm_model")
+    if raw_model is not None and not isinstance(raw_model, str):
+        raise InvalidModelConfig("llm_model must be a string")
+    candidate = raw_model if isinstance(raw_model, str) and raw_model else None
+    if candidate is not None:
+        _reject_decision_model_id(candidate, catalog)
+    if target.probed_models is not None:
+        resolved_model, resolved_effort = resolve_probed_harness_selection(
+            target.harness,
+            target.probed_models,
+            target.probed_default_model,
+            requested_model=candidate,
+            requested_effort=effort_str,
+        )
+        _reject_decision_model_id(resolved_model, catalog)
+        return (resolved_model, resolved_effort)
+    if not candidate and not default_model:
+        raise InvalidModelConfig(
+            "no model configured — set llm_model in cluster config or pass "
+            "config.llm_model in the spawn request"
+        )
+    return None
 
 
 def validate_restart_model_config_pins(
@@ -78,27 +121,37 @@ def validate_restart_model_config_pins(
     *,
     catalog: ModelCatalog,
     default_model: str,
-    harness: Harness = Harness.MEIVA,
-) -> None:
-    effective_model = _resolve_and_check_model(pins, catalog, default_model)
+    target: RestartHarnessTarget | None = None,
+) -> tuple[str, str | None] | None:
     effort = pins.get("reasoning_effort")
     if effort is not None and effort != "" and not isinstance(effort, str):
         raise InvalidModelConfig("reasoning_effort must be a string")
     effort_str = effort if isinstance(effort, str) and effort else None
+
+    if target is not None and target.harness is not Harness.MEIVA:
+        return _validate_external_restart_pins(
+            pins,
+            catalog=catalog,
+            default_model=default_model,
+            effort_str=effort_str,
+            target=target,
+        )
+    effective_harness = Harness.MEIVA
+
+    effective_model = _resolve_and_check_model(pins, catalog, default_model)
     spec = catalog.models[effective_model]
-    _validate_model_effort_and_harness(spec, effective_model, harness, effort_str)
+    _validate_model_effort_and_harness(spec, effective_model, effective_harness, effort_str)
+    return (effective_model, effort_str)
 
 
-def _validate_effective_pins(
-    pins: Mapping[str, object],
-    *,
-    catalog: ModelCatalog,
-    default_model: str,
-    harness: Harness = Harness.MEIVA,
-) -> None:
-    validate_restart_model_config_pins(
-        pins, catalog=catalog, default_model=default_model, harness=harness
-    )
+def _resolve_target_harness(
+    target: RestartHarnessTarget | None, overlay: Mapping[str, object], stored_harness: object
+) -> Harness:
+    if target is not None:
+        return target.harness
+    if "harness" in overlay:
+        return coerce_harness(overlay["harness"])
+    return coerce_harness(stored_harness)
 
 
 # meiva:note
@@ -106,6 +159,8 @@ def _validate_effective_pins(
 #
 # The caller holds a writable transaction through its overlay and restart
 # writes. Provider credentials are checked on launch, not on this config edit.
+# When switching onto a different harness, prior-harness model/effort pins do
+# not carry over unless the caller explicitly names them in `overlay`.
 def validate_restart_model_config(
     cur: RestartConfigCursor,
     agent_id: int,
@@ -113,10 +168,10 @@ def validate_restart_model_config(
     *,
     catalog: ModelCatalog,
     default_model: str,
-    harness: Harness | None = None,
-) -> None:
+    target: RestartHarnessTarget | None = None,
+) -> tuple[str, str | None] | None:
     if not {"llm_model", "reasoning_effort", "harness"}.intersection(overlay):
-        return
+        return None
     cur.execute(
         "SELECT config_overlay,birth_config,harness FROM agents_meta WHERE id=%s FOR UPDATE",
         (agent_id,),
@@ -124,13 +179,20 @@ def validate_restart_model_config(
     row = cur.fetchone()
     if row is None:
         raise AgentNotFound(f"agent {agent_id} does not exist")
-    if harness is not None:
-        effective_harness = harness
-    elif "harness" in overlay:
-        effective_harness = coerce_harness(overlay["harness"])
+    current_harness = coerce_harness(row[2])
+    effective_harness = _resolve_target_harness(target, overlay, row[2])
+    if effective_harness != current_harness:
+        effective_pins: Mapping[str, object] = overlay
     else:
-        effective_harness = coerce_harness(row[2])
-    merged = {**_as_mapping(row[1]), **_as_mapping(row[0]), **overlay}
-    _validate_effective_pins(
-        merged, catalog=catalog, default_model=default_model, harness=effective_harness
+        effective_pins = {**_as_mapping(row[1]), **_as_mapping(row[0]), **overlay}
+    resolved_target = (
+        target
+        if target is not None and target.harness is effective_harness
+        else RestartHarnessTarget(effective_harness)
+    )
+    return validate_restart_model_config_pins(
+        effective_pins,
+        catalog=catalog,
+        default_model=default_model,
+        target=resolved_target,
     )

@@ -575,6 +575,12 @@ class InventoryWriteOpResult(BaseModel):
     applied: bool
 
 
+class HarnessModelOption(BaseModel):
+    id: str
+    reasoning_effort_options: list[str] = Field(default_factory=list)
+    reasoning_effort_default: str | None = None
+
+
 # meiva:note
 # The probe reports what one machine can run, never what it will run: `status` is
 # what the filesystem could prove about install and sign-in, `binary` the
@@ -589,6 +595,8 @@ class HarnessProbeRow(BaseModel):
     reason: str
     binary: str | None = None
     on_path: bool = False
+    models: list[HarnessModelOption] = Field(default_factory=list)
+    default_model: str | None = None
 
 
 class HarnessProbeResult(BaseModel):

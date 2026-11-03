@@ -53,9 +53,10 @@ from services.agent_runner.agent_host.tests.runtime.observation import served_mo
 @pytest.mark.parametrize(
     ("harness", "model", "effort"),
     [
-        (Harness.CLAUDE_CODE, "claude-opus-5-5", "low"),
-        (Harness.CODEX, "gpt-6-astra", "ultra"),
-        (Harness.ANTIGRAVITY, "gemini-4-argon", "low"),
+        (Harness.CLAUDE_CODE, "claude-opus-4-6", "low"),
+        (Harness.CLAUDE_CODE, "claude-haiku-4-5-20251001", ""),
+        (Harness.CODEX, "gpt-6.1-terra", "ultra"),
+        (Harness.ANTIGRAVITY, "gpt-oss-120b", "medium"),
     ],
 )
 @pytest.mark.parametrize("selection", [False, True])

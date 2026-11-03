@@ -19,7 +19,6 @@ from base.api_contracts.agent_contract import (
     Harness,
     RestartResult,
     ResurrectResult,
-    ShellSessionKillTiming,
     TerminateResult,
 )
 from base.api_contracts.agent_contract import (
@@ -37,10 +36,21 @@ from base.api_contracts.agent_contract import HarnessNotLaunchable as HarnessNot
 from base.api_contracts.agent_contract import HarnessStatus as HarnessStatus
 from base.api_contracts.agent_contract import InvalidModelConfig as InvalidModelConfig
 from base.api_contracts.agent_contract import MachineNotRegistered as MachineNotRegistered
+from base.api_contracts.agent_contract import ProbedHarnessModel as ProbedHarnessModel
 from base.api_contracts.agent_contract import ResurrectError as ResurrectError
+from base.api_contracts.agent_contract import (
+    ShellSessionKillTiming as ShellSessionKillTiming,
+)
 from base.api_contracts.agent_contract import SpawnTargetNotAgentRunner as SpawnTargetNotAgentRunner
 from meiva import gateway_client
 from meiva.agents import peers, row_text
+from meiva.agents.contracts import (
+    CommandInfo,
+    HarnessAvailability,
+    Machine,
+    Neighbor,
+    ShellSessionsKill,
+)
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
 
@@ -56,6 +66,7 @@ __all_for_meiva__ = [
     "Neighbor",
     "OpenTaskRow",
     "OpenTasksHint",
+    "ProbedHarnessModel",
     "RestartResult",
     "ResurrectResult",
     "ShellSessionKillTiming",
@@ -80,57 +91,6 @@ __all_for_meiva__ = [
     "spawn",
     "terminate",
 ]
-
-
-@dataclass
-class CommandInfo:
-    name: str
-    description: str
-    instruction_hint: str
-
-    def __str__(self) -> str:
-        hint = f" {self.instruction_hint}" if self.instruction_hint else ""
-        desc = f"  — {self.description}" if self.description else ""
-        return f"/{self.name}{hint}{desc}"
-
-
-@dataclass
-class HarnessAvailability:
-    """One harness's availability on the machine you are running on.
-
-    harness: which harness the row describes.
-    status: "available" (installed and signed in), "unavailable" (not installed,
-        or installed but not signed in), or "unknown" (installed, but the sign-in
-        state cannot be read here).
-    reason: one readable sentence explaining the status.
-    binary: the executable this machine would run, or None when the harness has no
-        CLI of its own or none was found.
-    on_path: whether the executable was found through PATH; False means only a
-        conventional install directory held it, so a process started with a
-        trimmed PATH may not see it.
-    """
-
-    harness: Harness
-    status: HarnessStatus
-    reason: str
-    binary: str | None
-    on_path: bool
-
-    def __str__(self) -> str:
-        location = self.binary if self.binary is not None else "built in"
-        return f"{self.harness.value}  [{self.status}]  {location}  {self.reason}"
-
-
-@dataclass
-class Machine:
-    name: str
-    description: str | None
-    live: bool
-
-    def __str__(self) -> str:
-        state = "live" if self.live else "offline"
-        desc = f"  {self.description}" if self.description else ""
-        return f"{self.name}  [{state}]{desc}"
 
 
 @dataclass
@@ -178,26 +138,6 @@ class AgentDirectoryPage:
     next_cursor: int | None
 
 
-@dataclass
-class Neighbor:
-    """`depth`: hops from the queried agent (1 = direct) — out along ties for
-    neighbors, up the spawn chain for ancestors; `score`: tie strength.
-    Terminated agents are included."""
-
-    agent_id: int
-    label: str | None
-    status: AgentStatus
-    depth: int
-    score: float
-
-    def __str__(self) -> str:
-        label_part = f"{self.label} " if self.label else ""
-        return (
-            f"#{self.agent_id} {label_part} {self.status.value}  "
-            f"depth={self.depth}  score={self.score:.4g}"
-        )
-
-
 def _relative_time(dt: datetime) -> str:
     """Convert a datetime into a human-readable relative time string."""
     from meiva.sdk_surface.settings import clock
@@ -237,20 +177,6 @@ class OpenTasksHint:
         if self.more:
             lines.append(f"... and {self.more} more")
         return "\n".join(lines)
-
-
-@dataclass
-class ShellSessionsKill:
-    """What `kill_all_shell_sessions=True` did. `when` is "now" when the shell
-    sessions are already gone — `killed` lists their ids, empty when the agent
-    had none — or "at_exit" when they are killed right before the agent stops,
-    after its last step (`killed` stays empty)."""
-
-    when: ShellSessionKillTiming
-    killed: list[int]
-
-    def __post_init__(self) -> None:
-        self.when = ShellSessionKillTiming(self.when)
 
 
 class TerminateOutcome(str):
@@ -408,6 +334,8 @@ def harness_availability() -> list[HarnessAvailability]:
             reason=row.reason,
             binary=row.binary,
             on_path=row.on_path,
+            models=row.models,
+            default_model=row.default_model,
         )
         for row in probe_local_harnesses(now=sdk_settings.clock().now())
     ]
@@ -579,13 +507,26 @@ def spawn_impl(
         from meiva.sdk_surface.installation import installed
 
         installation = installed()
-        catalog = sdk_settings.model_catalog()
+        effective_harness = coerced_harness or Harness.MEIVA
+        if effective_harness is Harness.MEIVA:
+            catalog = sdk_settings.model_catalog()
+            models_map = catalog.models
+            decision_models = catalog.decision_models
+            prices = catalog.prices
+        else:
+            models_map = None
+            decision_models = (
+                None
+                if installation is None or installation.catalog is None
+                else installation.catalog.decision_models
+            )
+            prices = None
         validate_config_overlay(
             config,
             None if installation is None else installation.configs,
-            models=catalog.models,
-            decision_models=catalog.decision_models,
-            prices=catalog.prices,
+            models=models_map,
+            decision_models=decision_models,
+            prices=prices,
             home=process_context.current_context().require_meiva_home(),
         )
     return gateway_client.spawn(

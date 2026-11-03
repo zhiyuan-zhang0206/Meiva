@@ -9,7 +9,11 @@ from pathlib import Path
 from base.api_contracts.agent_contract import Harness
 from base.host.env.harness_binaries import resolve_harness_binary, with_harness_path
 from base.host.env.registry import process_environment
-from base.lm.harness.antigravity import AgySession, AntigravityConfig
+from base.lm.harness.antigravity import (
+    AgySession,
+    AntigravityConfig,
+    resolve_antigravity_cli_model,
+)
 from base.lm.harness.antigravity import build_handoff as antigravity_handoff
 from base.lm.harness.base_session import SessionBinding, SessionClock
 from base.lm.harness.bridge import HarnessBridge, HarnessSession, ScopedSessionRegistry
@@ -92,7 +96,10 @@ def open_session(
     if harness is Harness.ANTIGRAVITY:
         antigravity_config = AntigravityConfig(cwd=cwd, skip_permissions=skip_permissions)
         if model is not None:
-            antigravity_config = replace(antigravity_config, model=model)
+            antigravity_config = replace(
+                antigravity_config,
+                model=resolve_antigravity_cli_model(model, reasoning_effort),
+            )
         return AgySession(
             antigravity_config,
             environ=environ,

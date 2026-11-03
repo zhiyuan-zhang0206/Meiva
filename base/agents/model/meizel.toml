@@ -1,10 +1,12 @@
-exports = ["birth_config.py", "model_config.py", "model_overrides.py", "restart_config.py"]
+exports = ["birth_config.py", "harness_models.py", "model_config.py", "model_overrides.py", "restart_config.py"]
 
 [uses]
-"model_config.py" = ["birth_config.py", "restart_config.py"]
-"tests" = ["birth_config.py", "model_config.py"]
+"model_config.py" = ["birth_config.py", "harness_models.py", "restart_config.py"]
+"restart_config.py" = ["harness_models.py"]
+"tests" = ["birth_config.py", "harness_models.py", "model_config.py"]
 
 [purity]
 "__init__.py" = "strict"
+"harness_models.py" = "strict"
 "model_overrides.py" = "strict"
 "restart_config.py" = "strict"

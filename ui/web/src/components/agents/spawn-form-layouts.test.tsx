@@ -110,7 +110,6 @@ const modelsWithEffort = (): ModelsResponse => ({
   models: {
     "deepseek-v4-pro": {
       provider: "deepseek",
-      harnesses: ["meiva"],
       context_window: 128_000,
       reasoning_effort_options: ["high", "max"],
       reasoning_effort_default: "max",
@@ -118,7 +117,6 @@ const modelsWithEffort = (): ModelsResponse => ({
     },
     "claude-opus-4-8": {
       provider: "claude",
-      harnesses: ["meiva", "claude_code"],
       context_window: 200_000,
       reasoning_effort_options: null,
       reasoning_effort_default: null,
@@ -132,15 +130,12 @@ const modelsWithTwoLadders = (): ModelsResponse => ({
   models: {
     "deepseek-v4-pro": {
       provider: "deepseek",
-      harnesses: ["meiva"],
       context_window: 128_000,
       reasoning_effort_options: ["high", "max"],
       reasoning_effort_default: "max",
     },
     "gpt-5.6": {
       provider: "gpt",
-      harnesses: ["meiva", "codex"],
-      harness_settings: { codex: { reasoning_effort_options: ["low", "medium", "high"], reasoning_effort_default: "medium" } },
       context_window: 400_000,
       reasoning_effort_options: ["minimal", "low", "medium", "high"],
       reasoning_effort_default: "medium",
@@ -149,14 +144,44 @@ const modelsWithTwoLadders = (): ModelsResponse => ({
   default: "deepseek-v4-pro",
 });
 
-const harnessAllAvailable = () =>
-  (["meiva", "claude_code", "codex", "antigravity"] as const).map((harness) => ({
-    harness,
-    status: "available" as const,
+const harnessAllAvailable = (): HarnessAvailability[] => [
+  {
+    harness: "meiva",
+    status: "available",
     reason: "",
     launchable: true,
-    billing: harness === "meiva" ? ("api" as const) : ("subscription" as const),
-  }));
+    billing: "api",
+    models: [],
+    default_model: null,
+  },
+  {
+    harness: "claude_code",
+    status: "available",
+    reason: "",
+    launchable: true,
+    billing: "subscription",
+    models: [{ id: "claude-opus-4-8", reasoning_effort_options: [], reasoning_effort_default: null }],
+    default_model: "claude-opus-4-8",
+  },
+  {
+    harness: "codex",
+    status: "available",
+    reason: "",
+    launchable: true,
+    billing: "subscription",
+    models: [{ id: "gpt-5.6", reasoning_effort_options: ["low", "medium", "high"], reasoning_effort_default: "medium" }],
+    default_model: "gpt-5.6",
+  },
+  {
+    harness: "antigravity",
+    status: "available",
+    reason: "",
+    launchable: true,
+    billing: "subscription",
+    models: [{ id: "gemini-4-argon", reasoning_effort_options: ["low", "medium", "high"], reasoning_effort_default: "high" }],
+    default_model: "gemini-4-argon",
+  },
+];
 
 const MACHINE_COLUMN = "Machine";
 const HARNESS_COLUMN = "Harness";
@@ -264,9 +289,9 @@ describe("spawn table model & effort columns", () => {
     transport.getModels.mockResolvedValue({
       providers: { deepseek: ["deepseek-v4-pro", "deepseek-flash", "deepseek-legacy"] },
       models: {
-        "deepseek-v4-pro": { provider: "deepseek", harnesses: ["meiva"], context_window: 128_000, superseded_by: "deepseek-flash" },
-        "deepseek-flash": { provider: "deepseek", harnesses: ["meiva"], context_window: 128_000, superseded_by: null },
-        "deepseek-legacy": { provider: "deepseek", harnesses: ["meiva"], context_window: 1, superseded_by: null },
+        "deepseek-v4-pro": { provider: "deepseek", context_window: 128_000, superseded_by: "deepseek-flash" },
+        "deepseek-flash": { provider: "deepseek", context_window: 128_000, superseded_by: null },
+        "deepseek-legacy": { provider: "deepseek", context_window: 1, superseded_by: null },
       },
       default: "deepseek-flash",
     });
@@ -304,7 +329,7 @@ describe("spawn table model & effort columns", () => {
 });
 
 describe("unavailable model catalog", () => {
-  it("keeps refresh available while preventing a spawn without the catalog", async () => {
+  it("keeps refresh available while preventing a native spawn without the catalog", async () => {
     transport.getSystemStatus.mockResolvedValue(
       statusWith([{ name: "runner-a", online: true, paused: false, agentHostOnline: true }]),
     );
@@ -313,6 +338,23 @@ describe("unavailable model catalog", () => {
     expect(await screen.findByText("Models unavailable")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Spawn" }).hasAttribute("disabled")).toBe(true);
     expect(screen.getByRole("button", { name: "Refresh" })).toBeTruthy();
+  });
+
+  it("allows an external harness spawn from live probed models even when /api/models fails", async () => {
+    transport.getSystemStatus.mockResolvedValue(singleMachineStatus());
+    transport.getModels.mockRejectedValue(new Error("catalog down"));
+    setMockSetting("behavior.spawn_harness", "codex");
+    const { onSpawn } = wrap();
+    const form = await table();
+    await waitFor(() => expect(selected(form, MODEL_COLUMN, /gpt-5.6/)).toBe(true));
+    expect(screen.queryByText("Models unavailable")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Spawn" }));
+    expect(onSpawn).toHaveBeenCalledWith({
+      machine: "test-host",
+      harness: "codex",
+      model: "gpt-5.6",
+      reasoning_effort: "medium",
+    });
   });
 });
 
@@ -335,13 +377,21 @@ describe.each(["table", "stack"] as const)("%s API model visibility", (layout) =
     catalog.providers[provider] = [model];
     catalog.models[model] = {
       provider,
-      harnesses: ["meiva", harness],
       context_window: 128_000,
-      harness_settings: {
-        [harness]: { reasoning_effort_options: ["low", "medium"], reasoning_effort_default: "medium" },
-      },
+      superseded_by: "deepseek-v4-pro",
     };
     transport.getModels.mockResolvedValue(catalog);
+    transport.getHarnessAvailability.mockResolvedValue(
+      harnessAllAvailable().map((entry) =>
+        entry.harness === harness
+          ? {
+              ...entry,
+              models: [{ id: model, reasoning_effort_options: ["low", "medium"], reasoning_effort_default: "medium" }],
+              default_model: model,
+            }
+          : entry,
+      ),
+    );
     setMockSetting("behavior.spawn_harness", harness);
     setMockSetting("models.hidden", [model]);
     setMockSetting("models.hidden_providers", [provider]);
@@ -421,11 +471,24 @@ describe("stacked picker", () => {
 
   it("sends the model and effort selected for an external harness on mobile", async () => {
     transport.getSystemStatus.mockResolvedValue(singleMachineStatus());
-    const catalog = modelsWithTwoLadders();
-    catalog.models["gpt-5.6"].harness_settings = {
-      codex: { reasoning_effort_options: ["low", "medium", "ultra"], reasoning_effort_default: "medium" },
-    };
-    transport.getModels.mockResolvedValue(catalog);
+    transport.getModels.mockResolvedValue(modelsWithTwoLadders());
+    transport.getHarnessAvailability.mockResolvedValue(
+      harnessAllAvailable().map((entry) =>
+        entry.harness === "codex"
+          ? {
+              ...entry,
+              models: [
+                {
+                  id: "gpt-5.6",
+                  reasoning_effort_options: ["low", "medium", "ultra"],
+                  reasoning_effort_default: "medium",
+                },
+              ],
+              default_model: "gpt-5.6",
+            }
+          : entry,
+      ),
+    );
     setMockSetting("behavior.spawn_harness", "codex");
     const { onSpawn } = wrap("stack");
     const form = await stack();
@@ -502,8 +565,16 @@ describe.each(["table", "stack"] as const)("manual harness refresh (%s)", (layou
 
   it("opening and reopening only reads snapshots; an explicit click checks all ready machines", async () => {
     transport.refreshHarnessAvailability.mockResolvedValue([
-      { harness: "meiva", status: "available", reason: "", launchable: true, billing: "api" },
-      { harness: "codex", status: "available", reason: "", launchable: true, billing: "subscription" },
+      { harness: "meiva", status: "available", reason: "", launchable: true, billing: "api", models: [], default_model: null },
+      {
+        harness: "codex",
+        status: "available",
+        reason: "",
+        launchable: true,
+        billing: "subscription",
+        models: [{ id: "gpt-5.6", reasoning_effort_options: ["low", "high"], reasoning_effort_default: "high" }],
+        default_model: "gpt-5.6",
+      },
     ]);
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const view = () => render(<QueryClientProvider client={qc}><SpawnForm onSpawn={vi.fn()} onDone={vi.fn()} layout={layout} /></QueryClientProvider>);
@@ -539,7 +610,15 @@ describe.each(["table", "stack"] as const)("manual harness refresh (%s)", (layou
 
   it("keeps previous choices and shows a failed refresh without retrying automatically", async () => {
     transport.getHarnessAvailability.mockResolvedValue([
-      { harness: "codex", status: "available", reason: "", launchable: true, billing: "subscription" },
+      {
+        harness: "codex",
+        status: "available",
+        reason: "",
+        launchable: true,
+        billing: "subscription",
+        models: [{ id: "gpt-5.6", reasoning_effort_options: ["low", "high"], reasoning_effort_default: "low" }],
+        default_model: "gpt-5.6",
+      },
     ]);
     resetMockSettings({ "behavior.spawn_harness": "codex", "behavior.spawn_model": "gpt-5.6", "behavior.spawn_reasoning_effort": "high" });
     transport.refreshHarnessAvailability.mockRejectedValue(new Error("offline"));
@@ -595,8 +674,16 @@ describe.each(["table", "stack"] as const)("manual harness refresh (%s)", (layou
     pick(form, MACHINE_COLUMN, "b-host");
     pendingA.resolve(harnessAllAvailable());
     pendingB.resolve([
-      { harness: "meiva", status: "available", reason: "", launchable: true, billing: "api" },
-      { harness: "codex", status: "available", reason: "", launchable: true, billing: "subscription" },
+      { harness: "meiva", status: "available", reason: "", launchable: true, billing: "api", models: [], default_model: null },
+      {
+        harness: "codex",
+        status: "available",
+        reason: "",
+        launchable: true,
+        billing: "subscription",
+        models: [{ id: "gpt-5.6", reasoning_effort_options: ["low", "high"], reasoning_effort_default: "high" }],
+        default_model: "gpt-5.6",
+      },
     ]);
     await waitFor(() => expect(qc.getQueryData(["harness-availability", "a-host"])).toEqual(harnessAllAvailable()));
     await waitFor(() => expect(qc.getQueryData(["harness-availability", "b-host"])).toMatchObject([

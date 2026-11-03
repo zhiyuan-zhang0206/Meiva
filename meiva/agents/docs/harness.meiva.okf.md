@@ -47,15 +47,19 @@ a new agent or switch harness via restart after creation.
 for the machine the caller runs on:
 
 - `harness`: which harness the row describes.
-- `status`: `available` (installed, and the CLI or the store shows a live
-  sign-in), `unavailable` (not installed, no sign-in, or credentials that cannot
-  renew and have expired), or `unknown` (installed, but no login state could be
-  read here — an account recorded in a config file is not a login).
+- `status`: `available` (installed, signed in, and live model options read),
+  `unavailable` (not installed, no sign-in, or credentials that cannot renew and
+  have expired), or `unknown` (installed, but login state or live model options
+  could not be read here — an account recorded in a config file is not a login).
 - `reason`: one readable sentence explaining that status.
 - `binary` and `on_path`: the executable this machine would start (the path
   PATH resolved, which is the symlink itself when there is one, not its target),
   and whether PATH led to it. `on_path=false` means only a conventional install
   directory held it, so a process started with a trimmed PATH may not find it.
+- `models` and `default_model`: live `ProbedHarnessModel` entries (`id`,
+  `reasoning_effort_options`, `reasoning_effort_default`) and the CLI's default
+  model when `status="available"` on an external harness (empty for `meiva`,
+  which uses the shared model catalog).
 
 The check asks the CLI for its login state under a bounded timeout and falls back
 to the stored credential when the CLI cannot answer: it starts no session and

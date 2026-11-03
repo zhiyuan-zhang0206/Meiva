@@ -4,24 +4,15 @@
 
 from __future__ import annotations
 
-from base.api_contracts.agent_contract import Harness
-from base.lm.effort import HarnessModelSpec
 from base.lm.registry import ModelSpec, ModelTuning
 
 # meiva:note
 # Effort vocabulary shared by GPT-5.6 and GPT-6 Sol/Luna; Astra differs.
 EFFORT_LEVELS = ("none", "low", "medium", "high", "xhigh", "max")
 
-# meiva:note
-# Codex app-server model/list publishes these execution efforts independently of API tuning.
-# meiva:link base/agents/docs/harness/harness-models.meiva.okf.md
-CODEX_EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
-CODEX_ULTRA_EFFORT_LEVELS = (*CODEX_EFFORT_LEVELS, "ultra")
-
 MODELS = {
     "gpt-6-astra": ModelSpec(
         provider="gpt",
-        external_harnesses={Harness.CODEX: HarnessModelSpec(CODEX_ULTRA_EFFORT_LEVELS, "medium")},
         spawnable=True,
         context_window=1_050_000,
         knowledge_cutoff="2026-04",
@@ -35,7 +26,6 @@ MODELS = {
     ),
     "gpt-5.6-sol": ModelSpec(
         provider="gpt",
-        external_harnesses={Harness.CODEX: HarnessModelSpec(CODEX_ULTRA_EFFORT_LEVELS, "low")},
         spawnable=True,
         # meiva:note
         # Display-superseded only; existing configs remain valid (2026-09-25).
@@ -57,7 +47,6 @@ MODELS = {
     ),
     "gpt-5.6-terra": ModelSpec(
         provider="gpt",
-        external_harnesses={Harness.CODEX: HarnessModelSpec(CODEX_ULTRA_EFFORT_LEVELS, "medium")},
         spawnable=True,
         superseded_by="gpt-6.1-terra",
         context_window=1_050_000,
@@ -71,7 +60,6 @@ MODELS = {
     ),
     "gpt-5.6-luna": ModelSpec(
         provider="gpt",
-        external_harnesses={Harness.CODEX: HarnessModelSpec(CODEX_EFFORT_LEVELS, "medium")},
         spawnable=True,
         # meiva:note
         # Display-superseded only; existing configs remain valid (2026-09-25).
@@ -84,7 +72,6 @@ MODELS = {
     ),
     "gpt-6-sol": ModelSpec(
         provider="gpt",
-        external_harnesses={Harness.CODEX: HarnessModelSpec(CODEX_ULTRA_EFFORT_LEVELS, "medium")},
         spawnable=True,
         # meiva:note
         # Display-only supersession: existing agent configs remain valid.
@@ -97,7 +84,6 @@ MODELS = {
     ),
     "gpt-6.1-sol": ModelSpec(
         provider="gpt",
-        external_harnesses={Harness.CODEX: HarnessModelSpec(CODEX_EFFORT_LEVELS, "medium")},
         spawnable=True,
         context_window=1_050_000,
         knowledge_cutoff="2026-04",
@@ -109,7 +95,6 @@ MODELS = {
     ),
     "gpt-6.1-terra": ModelSpec(
         provider="gpt",
-        external_harnesses={Harness.CODEX: HarnessModelSpec(CODEX_EFFORT_LEVELS, "medium")},
         spawnable=True,
         context_window=1_050_000,
         knowledge_cutoff="2026-06",
@@ -119,7 +104,6 @@ MODELS = {
     ),
     "gpt-6-luna": ModelSpec(
         provider="gpt",
-        external_harnesses={Harness.CODEX: HarnessModelSpec(CODEX_EFFORT_LEVELS, "medium")},
         spawnable=True,
         context_window=1_050_000,
         knowledge_cutoff="2026-05",

@@ -51,8 +51,14 @@ def test_sdk_fork_without_a_harness_keeps_the_source_harness(
 
 @pytest.mark.usefixtures("sdk_model_owner")
 def test_sdk_fork_of_an_external_harness_raises_fork_harness_mismatch(
-    wire: AppTransport, db_conn: psycopg.Connection, sdk_environment: object
+    wire: AppTransport,
+    runner: object,
+    db_conn: psycopg.Connection,
+    sdk_environment: object,
 ) -> None:
+    from gateway.tests.support.runner_ops.ops_stub import RunnerOps
+
+    assert isinstance(runner, RunnerOps)
     source = meiva.agents.spawn(
         prompt="one goal",
         machine="local-test",
@@ -60,6 +66,7 @@ def test_sdk_fork_of_an_external_harness_raises_fork_harness_mismatch(
         config_overlay={"llm_model": "gpt-6-astra", "reasoning_effort": "ultra"},
         idempotency_key="sdk-ext-harness-source",
     )
+    assert len(runner.calls_of("harness_probe")) == 1
     _checkpoint(db_conn, source)
     with pytest.raises(ForkHarnessMismatch, match="only supported on the native 'meiva' harness"):
         meiva.agents.spawn(

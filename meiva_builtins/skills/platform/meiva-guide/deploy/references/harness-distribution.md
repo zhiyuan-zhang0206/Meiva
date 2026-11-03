@@ -48,7 +48,7 @@ whose output directory is on that list.
 | Harness | Official installer | Pinned | Lands at | Needs |
 |---|---|---|---|---|
 | `claude` | vendor script `https://claude.ai/install.sh`, takes the version as its argument | 2.1.290 | `~/.local/share/claude/versions/<v>` + `~/.local/bin/claude` | curl |
-| `codex` | `npm install -g @openai/codex@<version>` | 0.163.0 | npm global prefix (`/opt/homebrew/bin/codex`, `/usr/bin/codex`) | node + npm |
+| `codex` | `npm install -g @openai/codex@<version>` | 0.166.0 | npm global prefix (`/opt/homebrew/bin/codex`, `/usr/bin/codex`) | node + npm |
 | `agy` | vendor script `https://antigravity.google/cli/install.sh`, takes only a target directory | 1.4.2 | `~/.local/bin/agy` (self-updating single binary) | curl |
 | `dsh` | `npm install -g @deepseek-ai/dsh@<version>` | 0.1.5-rc.3 | npm global prefix | node + npm |
 

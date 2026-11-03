@@ -11,6 +11,13 @@ from pathlib import Path
 DEFAULT_MODEL = "gemini-4-argon-high"
 
 
+def resolve_antigravity_cli_model(model: str, reasoning_effort: str | None = None) -> str:
+    if not reasoning_effort:
+        return model
+    suffix = f"-{reasoning_effort}"
+    return model if model.endswith(suffix) else f"{model}{suffix}"
+
+
 # meiva:note
 # Everything the adapter decides about one `agy` process. Bounds carry their
 # reason in the component doc; a limit without one is a defect.

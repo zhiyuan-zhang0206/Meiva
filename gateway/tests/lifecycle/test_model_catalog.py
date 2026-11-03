@@ -1,4 +1,3 @@
-from base.api_contracts.agent_contract import Harness
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway.schemas.models import ModelsResponse
@@ -60,30 +59,11 @@ def test_picker_exposes_served_service_cache_write_rates(
     assert openai_standard.cache_write_5m is None
 
 
-def test_picker_publishes_each_models_harnesses(
+def test_picker_omits_static_harness_fields_from_native_model_catalog(
     *, gateway_data_plane: None, machine_identity: MachineIdentityReader
 ) -> None:
     catalog = get_models(local_machine=machine_identity)
-    assert catalog.models["claude-sonnet-5-5"].harnesses == [
-        Harness.MEIVA,
-        Harness.CLAUDE_CODE,
-        Harness.ANTIGRAVITY,
-    ]
-    assert catalog.models["gpt-5.6-sol"].harnesses == [Harness.MEIVA, Harness.CODEX]
-    assert catalog.models["gemini-3.8-flash"].harnesses == [
-        Harness.MEIVA,
-        Harness.ANTIGRAVITY,
-    ]
-    assert catalog.models["kimi-k3.1-pro"].harnesses == [Harness.MEIVA]
-    assert catalog.models["deepseek-flash"].harnesses == [Harness.MEIVA]
-    wire = catalog.model_dump(mode="json")
-    assert wire["models"]["claude-sonnet-5-5"]["harnesses"] == [
-        "meiva",
-        "claude_code",
-        "antigravity",
-    ]
-    settings = catalog.models["gemini-4-argon"].harness_settings[Harness.ANTIGRAVITY]
-    assert settings.reasoning_effort_options == ["low", "medium", "high"]
-    assert settings.reasoning_effort_default == "high"
     assert catalog.models["gemini-4-argon"].reasoning_effort_default == "medium"
-    assert catalog.models["gpt-6.1-sol-fast"].harnesses == [Harness.MEIVA]
+    wire = catalog.model_dump(mode="json")
+    assert "harnesses" not in wire["models"]["claude-sonnet-5-5"]
+    assert "harness_settings" not in wire["models"]["gemini-4-argon"]

@@ -135,6 +135,27 @@ def coerce_harness(value: object) -> Harness:
 HarnessStatus = Literal["available", "unavailable", "unknown"]
 
 
+# meiva:note
+# One model option and its reasoning-effort ladder as reported live by an
+# external harness CLI probe. `reasoning_effort_options` is empty when the CLI
+# model accepts no effort control (`reasoning_effort_default` is then `None`).
+# meiva:link base/agents/docs/harness/harness-models.meiva.okf.md
+@dataclass(frozen=True)
+class ProbedHarnessModel:
+    id: str
+    reasoning_effort_options: tuple[str, ...] = ()
+    reasoning_effort_default: str | None = None
+
+    def __str__(self) -> str:
+        if not self.reasoning_effort_options:
+            return self.id
+        levels = "/".join(self.reasoning_effort_options)
+        default = (
+            f", default={self.reasoning_effort_default}" if self.reasoning_effort_default else ""
+        )
+        return f"{self.id} ({levels}{default})"
+
+
 class TerminationSource(StrEnum):
     """WHO/WHAT wrote `agents_meta.status='terminated'` — stamped by EVERY code path
     that writes it, so a corpse always records how it died.

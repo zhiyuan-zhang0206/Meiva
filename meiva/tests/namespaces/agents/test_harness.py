@@ -94,9 +94,30 @@ def test_fork_refuses_an_external_harness_before_the_request(no_gateway_http: No
         )
 
 
+@pytest.mark.usefixtures("sdk_model_owner")
+def test_spawn_accepts_uncatalogued_model_on_external_harness(
+    gateway_requests: list[httpx.Request],
+) -> None:
+    assert (
+        agents.spawn(
+            harness="antigravity",
+            config_overlay={"llm_model": "gpt-oss-120b", "reasoning_effort": "medium"},
+            machine="test-machine",
+            idempotency_key="intent",
+        )
+        == 42
+    )
+    [request] = gateway_requests
+    body = _body(request)
+    assert body["harness"] == "antigravity"
+    assert body["config"] == {"llm_model": "gpt-oss-120b", "reasoning_effort": "medium"}
+
+
 def test_harness_availability_reports_every_harness() -> None:
     rows = agents.harness_availability()
     assert [row.harness for row in rows] == list(agents.Harness)
     assert all(row.reason for row in rows)
     assert rows[0].status == "available"
     assert rows[0].harness is agents.Harness.MEIVA
+    assert rows[0].models == ()
+    assert rows[0].default_model is None

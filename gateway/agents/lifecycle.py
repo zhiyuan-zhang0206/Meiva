@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal
 
@@ -19,14 +19,23 @@ from base.api_contracts.agent_contract import (
     AgentNotFound,
     AgentStatus,
     Harness,
+    HarnessNotLaunchable,
+    ProbedHarnessModel,
 )
 from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from gateway.agents.launch.forward import forward_to_home_machine
-from gateway.http.config import GatewayConfig, gateway_config, gateway_rpc
+from gateway.http.config import (
+    GatewayConfig,
+    gateway_config,
+    gateway_ensure_harnesses,
+    gateway_rpc,
+    gateway_state,
+)
 from gateway.http.model_catalog import require_model_catalog
+from gateway.schemas.models import HarnessAvailability
 from ops.cluster.rpc import RpcClient
 from ops.rpc_schemas import (
     CancelAgentResponse,
@@ -256,15 +265,27 @@ def _verify_restart_preconditions(
         )
 
 
-def _validate_post_agent_restart_blocking(
+def _prepare_restart_validation_blocking(
     pool: ConnectionPool,
     agent_id: int,
     body: RestartAgentRequest,
     *,
     catalog: ModelCatalog,
-    default_model: str,
     home: Path,
-) -> None:
+) -> tuple[Harness, Harness, str]:
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT status, harness, machine FROM agents_meta WHERE id=%s",
+            (agent_id,),
+        ).fetchone()
+        if row is None:
+            raise AgentNotFound(f"agent {agent_id} does not exist")
+        status = str(row[0])
+        current_harness = coerce_harness(row[1])
+        machine = str(row[2])
+        target_harness = _resolve_restart_target_harness(body.config_overlay, current_harness)
+        _verify_restart_preconditions(conn, agent_id, status, current_harness, target_harness)
+
     overlay_without_harness = (
         {k: v for k, v in body.config_overlay.items() if k != "harness"}
         if body.config_overlay
@@ -277,36 +298,75 @@ def _validate_post_agent_restart_blocking(
         try:
             validate_config_overlay(
                 overlay_without_harness,
-                models=catalog.models,
+                models=catalog.models if target_harness is Harness.MEIVA else None,
                 decision_models=catalog.decision_models,
-                prices=catalog.prices,
+                prices=catalog.prices if target_harness is Harness.MEIVA else None,
                 home=home,
             )
         except InvalidConfigOverlay as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return current_harness, target_harness, machine
 
-    from base.agents.model.restart_config import validate_restart_model_config
 
-    with pool.connection() as conn:
-        row = conn.execute(
-            "SELECT status, harness, birth_config, config_overlay FROM agents_meta WHERE id=%s",
-            (agent_id,),
-        ).fetchone()
-        if row is None:
-            raise AgentNotFound(f"agent {agent_id} does not exist")
-        status = str(row[0])
-        current_harness = coerce_harness(row[1])
-        target_harness = _resolve_restart_target_harness(body.config_overlay, current_harness)
-        _verify_restart_preconditions(conn, agent_id, status, current_harness, target_harness)
-        with conn.cursor() as cur:
-            validate_restart_model_config(
-                cur,
-                agent_id,
-                body.config_overlay or {},
-                catalog=catalog,
-                default_model=default_model,
+async def _resolve_restart_harness_probe(
+    request: Request,
+    target_harness: Harness,
+    machine: str,
+    overlay: Mapping[str, object] | None,
+) -> tuple[tuple[ProbedHarnessModel, ...] | None, str | None]:
+    if target_harness is Harness.MEIVA or not {
+        "llm_model",
+        "reasoning_effort",
+        "harness",
+    }.intersection(overlay or {}):
+        return None, None
+    rows: Sequence[HarnessAvailability] = await gateway_ensure_harnesses(request)(machine)
+    row = next((item for item in rows if item.harness is target_harness), None)
+    if row is None or not row.launchable:
+        detail = row.reason if row is not None else "missing probe row"
+        raise HarnessNotLaunchable(
+            f"harness {target_harness.value!r} is not launchable on {machine!r}: {detail}"
+        )
+    return row.to_probed_models(), row.default_model
+
+
+def _validate_restart_model_blocking(
+    pool: ConnectionPool,
+    agent_id: int,
+    body: RestartAgentRequest,
+    *,
+    catalog: ModelCatalog,
+    default_model: str,
+    current_harness: Harness,
+    target_harness: Harness,
+    probed_models: Sequence[ProbedHarnessModel] | None,
+    probed_default_model: str | None,
+) -> dict[str, Any]:
+    from base.agents.model.restart_config import (
+        RestartHarnessTarget,
+        validate_restart_model_config,
+    )
+
+    with pool.connection() as conn, conn.cursor() as cur:
+        resolved = validate_restart_model_config(
+            cur,
+            agent_id,
+            body.config_overlay or {},
+            catalog=catalog,
+            default_model=default_model,
+            target=RestartHarnessTarget(
                 harness=target_harness,
-            )
+                probed_models=probed_models,
+                probed_default_model=probed_default_model,
+            ),
+        )
+    payload = body.model_dump()
+    if resolved is not None and target_harness != current_harness:
+        overlay_copy = dict(payload.get("config_overlay") or {})
+        overlay_copy["llm_model"] = resolved[0]
+        overlay_copy["reasoning_effort"] = resolved[1] or ""
+        payload["config_overlay"] = overlay_copy
+    return payload
 
 
 @router.post(
@@ -321,20 +381,36 @@ async def post_agent_restart(
     if not body.message or not body.message.strip():
         raise HTTPException(status_code=422, detail="Restart requires a non-empty message")
 
-    await asyncio.to_thread(
-        _validate_post_agent_restart_blocking,
-        request.app.state.db_pool,
+    catalog = require_model_catalog(request)
+    state = gateway_state(request)
+    current_harness, target_harness, machine = await asyncio.to_thread(
+        _prepare_restart_validation_blocking,
+        state.db_pool,
         agent_id,
         body,
-        catalog=require_model_catalog(request),
+        catalog=catalog,
+        home=state.gateway_process.home,
+    )
+    probed_models, probed_default_model = await _resolve_restart_harness_probe(
+        request, target_harness, machine, body.config_overlay
+    )
+    forwarded_payload = await asyncio.to_thread(
+        _validate_restart_model_blocking,
+        state.db_pool,
+        agent_id,
+        body,
+        catalog=catalog,
         default_model=gateway_config(request).models.llm_model,
-        home=request.app.state.gateway_process.home,
+        current_harness=current_harness,
+        target_harness=target_harness,
+        probed_models=probed_models,
+        probed_default_model=probed_default_model,
     )
 
     forwarded = await forward_to_home_machine(
         agent_id,
         f"/api/agents/{agent_id}/restart",
-        body.model_dump(),
+        forwarded_payload,
         db=request.app.state.db,
         pool=request.app.state.db_pool,
         config=request.app.state.gateway_config,
