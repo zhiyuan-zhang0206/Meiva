@@ -455,3 +455,63 @@ def test_a_dynamic_attrs_site_needs_the_policy_to_list_it(make_repo: RepoFactory
     [found] = diagnostics(make_repo(files), "unlisted-allowance")
     assert found.message == "[dynamic-attrs] app/surface.py is not listed in meizel.policy.toml"
     assert found.path == "app/meizel.toml"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "def f(o, name):\n    return call(getattr, o, name)\n",
+        "def f(o, name):\n    return call(getattr, o, name, None)\n",
+        "def f(o, name, v):\n    return call(setattr, o, name, v)\n",
+        "def f(o, name):\n    return call(hasattr, o, name)\n",
+        "def f(o, name):\n    return call(delattr, o, name)\n",
+        "import builtins\n\ndef f(o, name):\n    return call(builtins.getattr, o, name)\n",
+        "from builtins import getattr as peek\n\ndef f(o, name):\n    return call(peek, o, name)\n",
+        "def f(o, name):\n    return call(1, getattr, o, name)\n",
+        "def f(o, *rest):\n    return call(getattr, o, *rest)\n",
+        "def f(os, names):\n    return list(map(getattr, os, names))\n",
+    ],
+)
+def test_a_builtin_handed_to_a_call_with_a_computed_name_is_restricted(
+    make_repo: RepoFactory, source: str
+) -> None:
+    assert [
+        d.line for d in diagnostics(make_repo({**LIB, "app/run.py": source}), "restricted-python")
+    ], source
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "def f(o):\n    return call(getattr, o, 'name')\n",
+        "def f(o):\n    return call(getattr, o, 'a' + 'b', None)\n",
+        "NAME = '__marker__'\n\ndef f(o):\n    return call(getattr, o, NAME)\n",
+        "from lib.m import NAME\n\ndef f(o):\n    return call(getattr, o, NAME)\n",
+        "def f(o):\n    return call(getattr, o)\n",
+        "def f(o):\n    return partial(getattr, o)\n",
+        "def f(getattr, o, name):\n    return call(getattr, o, name)\n",
+        "def getattr(o, name): ...\n\ndef f(o, name):\n    return call(getattr, o, name)\n",
+        "from lib.m import getattr\n\ndef f(o, name):\n    return call(getattr, o, name)\n",
+        "def f(o, name):\n    return call(o.getattr, o, name)\n",
+        "def f(o, name):\n    return call(print, o, name)\n",
+    ],
+)
+def test_a_handed_builtin_with_a_stated_name_or_a_lookalike_is_not_restricted(
+    make_repo: RepoFactory, source: str
+) -> None:
+    files = {**LIB, "lib/m.py": "NAME = '__plugin__'\ngetattr = print\n", "app/run.py": source}
+    assert diagnostics(make_repo(files), "restricted-python") == [], source
+
+
+def test_a_handed_builtin_is_exempt_for_an_owner_and_makes_it_not_stale(
+    make_repo: RepoFactory,
+) -> None:
+    files = {
+        **LIB,
+        "app/__init__.py": "",
+        "app/surface.py": "def f(o, name):\n    return call(getattr, o, name)\n",
+        "app/meizel.toml": '[dynamic-attrs]\n"surface.py" = "walks the names a script writes"\n',
+    }
+    root = make_repo(files)
+    assert verdict(root) == set()
+    assert diagnostics(root, "stale-dynamic-attrs") == []

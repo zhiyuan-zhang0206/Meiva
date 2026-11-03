@@ -108,11 +108,22 @@ class RestrictedForms(ImportAccess):
     # `getattr`/`hasattr`/`setattr`/`delattr` of the builtins (through an alias too) whose name is
     # not a string the source states: a literal, or a name bound once to one, here or in a first-party
     # module. Which attribute the call touches is then a run-time fact, not one the checker can read.
+    # The builtin may also be handed to another call as an argument (`object_of(getattr, obj, name)`):
+    # the arguments after it are then the object and the name, and the call is judged the same way.
     def attribute_name_call(self, node: ast.Call) -> None:
-        if not self.is_attribute_builtin(node.func):
-            return
-        spread = any(isinstance(arg, ast.Starred) for arg in node.args[:2])
-        if spread or (len(node.args) >= 2 and self.stated_name(node.args[1]) is None):
+        if self.is_attribute_builtin(node.func):
+            rest = node.args
+        else:
+            handed = [
+                i
+                for i, arg in enumerate(node.args)
+                if isinstance(arg, ast.Name | ast.Attribute) and self.is_attribute_builtin(arg)
+            ]
+            if not handed:
+                return
+            rest = node.args[handed[0] + 1 :]
+        spread = any(isinstance(arg, ast.Starred) for arg in rest[:2])
+        if spread or (len(rest) >= 2 and self.stated_name(rest[1]) is None):
             self.restrict(node.lineno, DYNAMIC_NAME)
 
     def is_attribute_builtin(self, func: ast.expr) -> bool:

@@ -30,7 +30,10 @@ Three more forms leave a dependency to the run instead of the source, all report
   argument is not a string the source states. A literal, a literal sum, a name bound once to a
   literal in the same file, and a name imported from a first-party module that binds it once to a
   literal (followed through re-exports) are stated; a parameter, a loop variable, an f-string, a
-  conditional and `getattr(*args)` are not.
+  conditional and `getattr(*args)` are not. The builtin handed to another call is judged the same
+  way: in `object_of(getattr, target, name)` the arguments after `getattr` are the object and the
+  name, so `name` must be stated (`functools.partial(getattr, target)` gives no name yet and is
+  not judged).
 - **module `__getattr__`**: a module-level `def __getattr__` (PEP 562), the module that answers for
   names it does not bind.
 - **class `__getattr__`**: a `__getattr__` or `__getattribute__` defined in a class body, the class
