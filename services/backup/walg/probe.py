@@ -38,11 +38,11 @@ from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
 
 import psycopg
 
 from base.cluster.dataplane import pg_admin
+from base.db.rows import query_one
 from base.log import logger
 from services.backup.walg import config as walg_config
 from services.backup.walg import state as walg_state
@@ -102,7 +102,7 @@ class ArchiverState:
 # meiva:note
 # The home's administrator over its owner-only socket, bound to its postmaster.
 @contextmanager
-def admin_connection_to(target: PgTarget) -> Generator[psycopg.Connection[Any]]:
+def admin_connection_to(target: PgTarget) -> Generator[psycopg.Connection]:
     with pg_admin.connect(
         target.admin_url,
         expected_data_dir=target.data_dir,
@@ -116,36 +116,63 @@ def admin_connection_to(target: PgTarget) -> Generator[psycopg.Connection[Any]]:
 # meiva:note
 # `admin_connection_to` this home's locally owned Postgres, resolved from its settings.
 @contextmanager
-def admin_connection(*, home: Path) -> Generator[psycopg.Connection[Any]]:
+def admin_connection(*, home: Path) -> Generator[psycopg.Connection]:
     with admin_connection_to(pg_target(home=home)) as conn:
         yield conn
 
 
-def read_archiver_state(conn: psycopg.Connection[Any]) -> ArchiverState:
-    settings_row = conn.execute(
-        "SELECT current_setting('archive_mode'), current_setting('archive_command'), "
-        "(SELECT setting::int FROM pg_settings WHERE name = 'archive_timeout')"
-    ).fetchone()
-    archiver_row = conn.execute(
+@dataclass(frozen=True)
+class _SettingsRow:
+    archive_mode: str
+    archive_command: str
+    archive_timeout_s: int
+
+
+@dataclass(frozen=True)
+class _ArchiverRow:
+    failing_now: bool
+    archived_count: int
+    failed_count: int
+
+
+@dataclass(frozen=True)
+class _PendingRow:
+    oldest_age_s: float | None
+
+
+def read_archiver_state(conn: psycopg.Connection) -> ArchiverState:
+    settings_row = query_one(
+        conn,
+        _SettingsRow,
+        "SELECT current_setting('archive_mode') AS archive_mode, "
+        "current_setting('archive_command') AS archive_command, "
+        "(SELECT setting::int FROM pg_settings WHERE name = 'archive_timeout') "
+        "AS archive_timeout_s",
+    )
+    archiver_row = query_one(
+        conn,
+        _ArchiverRow,
         # last_archived_time is NULL until the first success; last_failed_time is NULL
         # until the first failure. A failure counts only while it is the newer event.
-        "SELECT coalesce(last_failed_time > coalesce(last_archived_time, '-infinity'), false), "
-        "archived_count, failed_count FROM pg_stat_archiver"
-    ).fetchone()
-    pending_row = conn.execute(
-        "SELECT extract(epoch FROM now() - min(modification))::float8 "
-        "FROM pg_ls_archive_statusdir() WHERE name LIKE '%.ready'"
-    ).fetchone()
+        "SELECT coalesce(last_failed_time > coalesce(last_archived_time, '-infinity'), false) "
+        "AS failing_now, archived_count, failed_count FROM pg_stat_archiver",
+    )
+    pending_row = query_one(
+        conn,
+        _PendingRow,
+        "SELECT extract(epoch FROM now() - min(modification))::float8 AS oldest_age_s "
+        "FROM pg_ls_archive_statusdir() WHERE name LIKE '%.ready'",
+    )
     if settings_row is None or archiver_row is None or pending_row is None:
         raise RuntimeError("Postgres returned no archiver state")
     return ArchiverState(
-        archive_mode=str(settings_row[0]),
-        archive_command=str(settings_row[1]),
-        archive_timeout_s=int(settings_row[2]),
-        failing_now=bool(archiver_row[0]),
-        archived_count=int(archiver_row[1]),
-        failed_count=int(archiver_row[2]),
-        oldest_pending_age_s=None if pending_row[0] is None else float(pending_row[0]),
+        archive_mode=settings_row.archive_mode,
+        archive_command=settings_row.archive_command,
+        archive_timeout_s=settings_row.archive_timeout_s,
+        failing_now=archiver_row.failing_now,
+        archived_count=archiver_row.archived_count,
+        failed_count=archiver_row.failed_count,
+        oldest_pending_age_s=pending_row.oldest_age_s,
     )
 
 
@@ -248,7 +275,7 @@ def tick_failure(now: datetime, *, home: Path) -> str | None:
 # configuration is usable.
 def failure_on(
     path: Path | None,
-    admin: AbstractContextManager[psycopg.Connection[Any]],
+    admin: AbstractContextManager[psycopg.Connection],
     *,
     now: datetime,
     rpo_objective_s: float = RPO_OBJECTIVE_S,

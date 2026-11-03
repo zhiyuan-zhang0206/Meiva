@@ -55,6 +55,8 @@ from base.cluster.dataplane.pg_admin import local_owner_authority
 from base.cluster.dataplane.pg_tools import has_pg_tool as has_pg_tool
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.db import Database, connect_url
+from base.db.rows import query_one
+from base.host.boundary.options import options
 from base.host.private_storage import ensure_private_file
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from base.paths.private_dir import ensure_private_dir
@@ -354,25 +356,37 @@ def prune_after_publish(target: Path, *, tree: BackupTree, keep: int) -> None:
 # carries its own growth baseline. Best-effort: a failure (e.g. a fresh
 # cluster missing the tables) degrades to "unavailable" and never fails the
 # backup. `db_url` is the same database the dump reads.
+@dataclass(frozen=True)
+class _Sizes:
+    total: int
+    blobs: int
+    checkpoints: int
+    writes: int
+
+
 def db_size_breakdown(db_url: str) -> str:
     try:
         with connect_url(
             db_url, autocommit=True, connect_timeout=_BREAKDOWN_CONNECT_TIMEOUT_S
         ) as conn:
-            row = conn.execute(
+            row = query_one(
+                conn,
+                _Sizes,
                 """
-                SELECT pg_database_size(current_database()),
-                       COALESCE(pg_total_relation_size(to_regclass('public.checkpoint_blobs')), 0),
-                       COALESCE(pg_total_relation_size(to_regclass('public.checkpoints')), 0),
+                SELECT pg_database_size(current_database()) AS total,
+                       COALESCE(pg_total_relation_size(to_regclass('public.checkpoint_blobs')), 0)
+                           AS blobs,
+                       COALESCE(pg_total_relation_size(to_regclass('public.checkpoints')), 0)
+                           AS checkpoints,
                        COALESCE(pg_total_relation_size(to_regclass('public.checkpoint_writes')), 0)
-                """
-            ).fetchone()
+                           AS writes
+                """,
+            )
     except psycopg.Error:
         _log.warning("[backup] db size breakdown unavailable", exc_info=True)
         return "unavailable"
     assert row is not None  # noqa: S101 — aggregate over fixed tables always returns one row
-    total, blobs, checkpoints, writes = (int(v) for v in row)
-    return size_breakdown(total, blobs, checkpoints, writes)
+    return size_breakdown(row.total, row.blobs, row.checkpoints, row.writes)
 
 
 def _log_written(target: Path, removed: list[Path]) -> None:
@@ -475,6 +489,14 @@ def _dump_and_encrypt(
             key_file.unlink(missing_ok=True)
 
 
+# meiva:note
+# The publisher's command line, parsed.
+@dataclass(frozen=True)
+class _PublishArguments:
+    publish_offsite: Path | None
+    offsite_root: str
+
+
 def run_offsite_publisher(argv: list[str]) -> int:
     """Run the detached, best-effort off-site backup publisher."""
     # Standalone runs leave the module's INFO records to lastResort (WARNING+
@@ -492,7 +514,7 @@ def run_offsite_publisher(argv: list[str]) -> int:
         metavar="PREFIX",
         help=f"object-name prefix of the off-site namespace (default {REMOTE_ROOT})",
     )
-    args = parser.parse_args(argv)
+    args = options(parser.parse_args(argv), _PublishArguments)
     if args.publish_offsite is None:
         parser.error("--publish-offsite is required")
     artifact = args.publish_offsite

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TypeGuard
 
 from base.clock import Timers
+from base.host.boundary.untyped import object_of
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from services.backup.scheduler.operation.staging import (
     OperationBusyError,
@@ -57,7 +58,7 @@ def worker_request(argv: list[str]) -> tuple[dict[str, object], Path]:
         # A launch with no request never reaches the worker body: the controller
         # writes it before the child starts.
         raise SystemExit("usage: python -m <operation worker> REQUEST RESULT")
-    value: object = json.loads(request_path.read_text())
+    value = object_of(json.loads, request_path.read_text())
     if not _is_object_dict(value):
         raise TypeError("operation request must be an object")
     return dict(value), result_path
@@ -65,7 +66,7 @@ def worker_request(argv: list[str]) -> tuple[dict[str, object], Path]:
 
 def _result_object(path: Path) -> dict[str, object]:
     try:
-        value: object = json.loads(path.read_text())
+        value = object_of(json.loads, path.read_text())
     except (OSError, ValueError) as exc:
         raise RuntimeError("operation result is missing or invalid") from exc
     if not _is_object_dict(value):

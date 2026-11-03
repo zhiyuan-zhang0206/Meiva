@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TypeGuard
 
+from base.host.boundary.untyped import object_of
 from base.host.private_storage import write_private_bytes
 
 
@@ -35,7 +36,7 @@ def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
 
 
 def _parse_success_marker(value: str) -> datetime:
-    parsed: object = json.loads(value)
+    parsed = object_of(json.loads, value)
     if not _is_object_dict(parsed):
         raise TypeError("invalid marker shape")
     if set(parsed) != {"completed_at"}:

@@ -41,6 +41,7 @@ from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypeGuard
 
 import psycopg
 
@@ -48,6 +49,8 @@ from base.clock import Timers
 from base.cluster.dataplane.pg_foreground import start_foreground_postgres, stop_foreground_postgres
 from base.cluster.dataplane.pg_tools import pg_shm_args, pg_start_env, pg_tool, pg_tz_args
 from base.db import connect_url
+from base.db.rows import query_one
+from base.host.boundary.untyped import object_of
 from base.native_process.child_env import filter_daemon_env
 from services.backup.walg.archive import postgres_command
 from services.backup.walg.runner import WalgCommandError, run_walg
@@ -131,11 +134,24 @@ class RestoredInstance:
         return f"postgresql://{self.user}@/{database}?host={self.socket_dir}&port={self.port}"
 
 
+def _is_tuple(value: object) -> TypeGuard[tuple[object, ...]]:
+    return isinstance(value, tuple)
+
+
+@dataclass(frozen=True)
+class _RecoveryRow:
+    recovered: bool
+    timeline_id: int
+
+
 def _free_port() -> int:
     # Only names the socket file in a directory nobody else uses; there is no TCP listener.
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])
+        address = object_of(probe.getsockname)
+    if not _is_tuple(address) or len(address) < 2 or not isinstance(address[1], int):
+        raise TypeError("the probe socket has no port")
+    return address[1]
 
 
 def _log_tail(log: Path) -> str:
@@ -239,12 +255,14 @@ def _wait_promoted(
             )
         try:
             with connect_url(instance.url("postgres"), autocommit=True, connect_timeout=2) as conn:
-                row = conn.execute(
-                    "SELECT NOT pg_is_in_recovery(), "
-                    "(SELECT timeline_id FROM pg_control_checkpoint())"
-                ).fetchone()
-                if row is not None and row[0]:
-                    return int(row[1])
+                row = query_one(
+                    conn,
+                    _RecoveryRow,
+                    "SELECT NOT pg_is_in_recovery() AS recovered, "
+                    "(SELECT timeline_id FROM pg_control_checkpoint()) AS timeline_id",
+                )
+                if row is not None and row.recovered:
+                    return row.timeline_id
         except psycopg.OperationalError as exc:
             # Starting up, replaying WAL and a socket that is not there yet all mean "wait".
             # A refusal by the server (no such role, authentication) never changes: ending

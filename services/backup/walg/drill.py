@@ -59,6 +59,7 @@ from base.cluster.dataplane.pg_throwaway_base import (
     select_throwaway_base,
 )
 from base.db import Database, connect_url
+from base.db.rows import query_one
 from base.log import logger
 from services.backup.walg.backups import Backup
 from services.backup.walg.config import WalgConfigError
@@ -153,6 +154,14 @@ class SourceFacts:
     data_bytes: int
 
 
+@dataclass(frozen=True)
+class _SourceRow:
+    last_archived_wal: str | None
+    segment_bytes: int
+    max_wal_size_bytes: int
+    data_bytes: int | None
+
+
 def read_source_facts(target: PgTarget) -> SourceFacts:
     with pg_admin.connect(
         target.admin_url,
@@ -160,18 +169,22 @@ def read_source_facts(target: PgTarget) -> SourceFacts:
         autocommit=True,
         connect_timeout=_CONNECT_TIMEOUT_S,
     ) as conn:
-        row = conn.execute(
-            "SELECT last_archived_wal, pg_size_bytes(current_setting('wal_segment_size')), "
-            "pg_size_bytes(current_setting('max_wal_size')), "
-            "(SELECT sum(pg_database_size(datname)) FROM pg_database) FROM pg_stat_archiver"
-        ).fetchone()
+        row = query_one(
+            conn,
+            _SourceRow,
+            "SELECT last_archived_wal, "
+            "pg_size_bytes(current_setting('wal_segment_size'))::bigint AS segment_bytes, "
+            "pg_size_bytes(current_setting('max_wal_size'))::bigint AS max_wal_size_bytes, "
+            "(SELECT sum(pg_database_size(datname)) FROM pg_database)::bigint AS data_bytes "
+            "FROM pg_stat_archiver",
+        )
     if row is None:
         raise RuntimeError("Postgres returned no archiver state")
     return SourceFacts(
-        last_archived_wal=None if row[0] is None else str(row[0]),
-        segment_bytes=int(row[1]),
-        max_wal_size_bytes=int(row[2]),
-        data_bytes=max(int(row[3] or 0), 0),
+        last_archived_wal=row.last_archived_wal,
+        segment_bytes=row.segment_bytes,
+        max_wal_size_bytes=row.max_wal_size_bytes,
+        data_bytes=max(row.data_bytes or 0, 0),
     )
 
 
