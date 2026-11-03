@@ -63,7 +63,6 @@
 
 
 from collections.abc import Callable, Mapping
-from typing import Any
 
 from pydantic import BaseModel
 
@@ -96,6 +95,8 @@ from base.agents.context.external_attachment.state_schema import (
     resolve_reducer,
     validate_plugin_state_keys,
 )
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 AttachEntry = _AttachEntry
 _BASE_FIELDS: frozenset[str] = frozenset(BaseAgentState.model_fields.keys())
@@ -156,7 +157,7 @@ class PluginStateHandle[T: BaseModel]:
         # (including Annotated reducer; plugin_state_schema already
         # validates), so extracting what the plugin wrote gives the same
         # reducer as base; no need to look up base separately.
-        self._reducers: dict[str, Callable[[Any, Any], Any]] = {
+        self._reducers: dict[str, Callable[..., object]] = {
             name: resolve_reducer(field) for name, field in cls.model_fields.items()
         }
 
@@ -168,10 +169,11 @@ class PluginStateHandle[T: BaseModel]:
         may declare. Pure: reads only `state`.
         """
         return self._cls.model_construct(
-            **{f: getattr(state, self._channel_keys[f]) for f in self._cls.model_fields}
+            None,
+            **{f: object_of(getattr, state, self._channel_keys[f]) for f in self._cls.model_fields},
         )
 
-    def delta(self, update: Mapping[str, Any]) -> dict[str, Any]:
+    def delta(self, update: Mapping[str, object]) -> dict[str, object]:
         """The graph-state update dict for plugin-local `update` — what a hook returns.
 
         Keys are plugin-local field names (no prefix); the result is keyed by the actual
@@ -180,7 +182,7 @@ class PluginStateHandle[T: BaseModel]:
         Raises:
             ValueError: `update` has a key outside the BaseModel schema (plugin author typo).
         """
-        out: dict[str, Any] = {}
+        out: dict[str, object] = {}
         for field, value in update.items():
             if field not in self._cls.model_fields:
                 raise ValueError(
@@ -196,17 +198,18 @@ class PluginStateHandle[T: BaseModel]:
         Raises:
             PluginStateOutsideTurnError: not inside an exec turn (`meiva.state` is unbound).
         """
-        import meiva  # lazy import: avoid circular (meiva imports agent.state via plugin loading)
+        # lazy import: avoid circular (meiva imports agent.state via plugin loading)
+        from meiva.sdk_surface import process_context
         from meiva.sdk_surface.agent_identity import validate_external_identity
 
         validate_external_identity()
 
-        slot = meiva.state
+        slot = process_context.get_state()
         return self._cls.model_validate(
-            {f: getattr(slot, self._channel_keys[f]) for f in self._cls.model_fields}
+            {f: object_of(getattr, slot, self._channel_keys[f]) for f in self._cls.model_fields}
         )
 
-    def update(self, delta: dict[str, Any]) -> None:
+    def update(self, delta: Mapping[str, object]) -> None:
         """Apply field updates inside an exec turn. Same API shape as LangGraph Command(update=dict).
 
         Each field's reducer merges `current ⊕ delta`; the result is written
@@ -223,14 +226,14 @@ class PluginStateHandle[T: BaseModel]:
             TypeError: the exec code replaced `meiva.state_update` with a non-dict.
             ValueError: delta contains a key outside the BaseModel schema (plugin author typo).
         """
-        import meiva
+        from meiva.sdk_surface import process_context
         from meiva.sdk_surface.agent_identity import validate_external_identity
 
         validate_external_identity()
 
-        slot = meiva.state
-        accumulated = meiva.state_update
-        if not isinstance(accumulated, dict):
+        slot = process_context.get_state()
+        accumulated = process_context.get_state_update()
+        if not is_object_dict(accumulated):
             raise TypeError(
                 f"meiva.state_update must stay a dict, got {type(accumulated).__name__} "
                 f"(PluginStateHandle[{self._cls.__name__}].update)"
@@ -242,7 +245,7 @@ class PluginStateHandle[T: BaseModel]:
                     f"{field!r} (schema declares {sorted(self._cls.model_fields)})"
                 )
             channel_key = self._channel_keys[field]
-            current = getattr(slot, channel_key)
+            current = object_of(getattr, slot, channel_key)
             merged = self._reducers[field](current, new)
             setattr(slot, channel_key, merged)  # working copy synchronously visible
             # Accumulate the raw delta into meiva.state_update: overwriting it dropped every
@@ -267,12 +270,15 @@ def compact_version() -> int:
     Raises:
         PluginStateOutsideTurnError: not inside an exec turn (`meiva.state` is unbound).
     """
-    import meiva
+    from meiva.sdk_surface import process_context
     from meiva.sdk_surface.agent_identity import validate_external_identity
 
     validate_external_identity()
 
-    return meiva.state.compact.version
+    slot = process_context.get_state()
+    if not isinstance(slot, BaseAgentState):
+        raise TypeError("the exec turn holds no agent state to read its compaction counter")
+    return slot.compact.version
 
 
 __all__ = [

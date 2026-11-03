@@ -12,27 +12,29 @@ import base64
 import contextlib
 import random
 from collections.abc import Awaitable, Callable, Mapping
-from datetime import datetime
+from dataclasses import dataclass
 from pathlib import Path
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
+from pydantic import TypeAdapter
 
 from agent import impersonation_handoff as _handoff
 from agent import state as _state
 from agent.nodes import END, NodeName
 from agent.takeover.gate import (
     GateVerdict,
-    LeasePhase,
     SettleStep,
     delta_plan,
     gate_verdict,
-    handoff_due,
     settle_step,
     start_brief,
 )
+from agent.takeover.lease import handoff_owed as handoff_owed
+from agent.takeover.lease import lease_phase as lease_phase
+from agent.takeover.lease import lease_view
 from agent.takeover.process import spawn_relay
 from agent.takeover.relay import (
     ADOPTED_RELAY_DOWN_REASON,
@@ -42,7 +44,6 @@ from agent.takeover.relay import (
     STALE_RELAY_REASON,
     UNBOUND_REASON,
     ChildView,
-    LeaseView,
     Poll,
     RelayBinding,
     RelayRoute,
@@ -88,14 +89,31 @@ from base.agents.observation.relay_supervision import terminate_relay as termina
 from base.clock import Clock
 from base.db import Database
 from base.db.protocols import DatabaseLike
+from base.db.rows import ExistsRow, aquery_one
 from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
 from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_mapping
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.paths import workspaces_root
 
 RELAY_WAIT = RelayWait()
+
+# meiva:note
+# The receipt `apply_plugin_deltas` and `delta_plan` exchange: the lease it belongs to and the
+# plugin-state version it recorded. The checkpoint stores it as JSON, so it is validated on the way
+# back in instead of being read as `Any`.
+_DELTA_RECEIPT = TypeAdapter(dict[str, str | int])
+
+
+# meiva:note
+# The two facts the marker-clear UPDATE answers: the reject streak that decides whether the row is
+# eligible for the heartbeat again, and whether its heartbeat is paused past now.
+@dataclass(frozen=True)
+class _MarkerRow:
+    streak: int
+    paused: bool
 
 
 # meiva:note
@@ -136,26 +154,6 @@ def _held(
     if session is None or incarnation is None:
         raise RuntimeError("a lease decision needs the admitted native runtime that read it")
     return session, incarnation
-
-
-def lease_phase(session: Mapping[str, object] | None) -> LeasePhase | None:
-    if session is None:
-        return None
-    match session["status"]:
-        case ImpersonationStatus.REQUESTED:
-            return LeasePhase.REQUESTED
-        case ImpersonationStatus.ACCEPTED:
-            return LeasePhase.ACCEPTED
-        case ImpersonationStatus.ACTIVE:
-            return LeasePhase.ACTIVE
-        case (
-            ImpersonationStatus.RELEASED
-            | ImpersonationStatus.REJECTED
-            | ImpersonationStatus.EXPIRED
-        ):
-            return LeasePhase.ENDED
-        case unknown:
-            raise ValueError(f"unknown impersonation lease status: {unknown!r}")
 
 
 async def native_status(
@@ -304,7 +302,9 @@ async def apply_plugin_deltas(
         lease_id=session["id"],
         applied_version=session["applied_version"],
         delta_version=session["delta_version"],
-        receipt=snapshot.values.get("impersonation_applied", {}),
+        receipt=_DELTA_RECEIPT.validate_python(
+            object_mapping(snapshot.values).get("impersonation_applied", {})
+        ),
     )
     for step in plan:
         if step.apply:
@@ -327,16 +327,17 @@ async def apply_plugin_deltas(
 # meiva:link docs/conventions/agents/agent-impersonation.md
 async def handoff_landed(pool: AsyncConnectionPool, agent_id: int) -> bool:
     async with pool.connection() as conn:
-        cur = await conn.execute(
+        row = await aquery_one(
+            conn,
+            ExistsRow,
             "SELECT EXISTS (SELECT 1 FROM agent_impersonations "
             "WHERE agent_id = %s AND status IN ('released','rejected','expired') "
-            "AND handoff_applied_at IS NULL)",
+            "AND handoff_applied_at IS NULL) AS found",
             (agent_id,),
         )
-        row = await cur.fetchone()
     if row is None:
         raise RuntimeError("an EXISTS query always returns one row")
-    return not row[0]
+    return not row.found
 
 
 # meiva:note
@@ -363,7 +364,9 @@ async def handoff_landed(pool: AsyncConnectionPool, agent_id: int) -> bool:
 # meiva:link docs/conventions/agents/agent-impersonation.md
 async def clear_turn_fatal(pool: AsyncConnectionPool, incarnation: RuntimeIncarnation) -> bool:
     async with async_write_transaction(pool) as conn:
-        cur = await conn.execute(
+        row = await aquery_one(
+            conn,
+            _MarkerRow,
             "UPDATE agents_meta SET last_turn_fatal_at = NULL "
             "WHERE id = %s AND runtime_generation = %s AND runtime_owner = %s "
             "AND last_turn_fatal_at IS NOT NULL "
@@ -371,13 +374,14 @@ async def clear_turn_fatal(pool: AsyncConnectionPool, incarnation: RuntimeIncarn
             "  WHERE owed.agent_id = agents_meta.id "
             "    AND owed.status IN ('released','rejected','expired') "
             "    AND owed.handoff_applied_at IS NULL) "
-            "RETURNING permanent_reject_streak, heartbeat_paused_until > now()",
+            "RETURNING permanent_reject_streak AS streak, "
+            "heartbeat_paused_until > now() AS paused",
             (incarnation.agent_id, incarnation.generation, incarnation.owner),
         )
-        row = await cur.fetchone()
     if row is None:
         return False
-    streak, paused = row
+    streak = row.streak
+    paused = row.paused
     logger.info(
         "a crash marker cleared by the wake that settled the row",
         event="hosted_turn_corpse_marker_cleared",
@@ -392,15 +396,6 @@ async def clear_turn_fatal(pool: AsyncConnectionPool, incarnation: RuntimeIncarn
             heartbeat_paused=bool(paused),
         )
     return True
-
-
-def handoff_owed(session: Mapping[str, object] | None) -> bool:
-    phase = lease_phase(session)
-    return (
-        session is not None
-        and phase is not None
-        and handoff_due(phase, receipt_written=session["handoff_applied_at"] is not None)
-    )
 
 
 async def settle_checkpoint(
@@ -641,20 +636,6 @@ def _roll_back_relay_failure(
     return False
 
 
-def _lease_view(session: PublicLease, *, now: datetime) -> LeaseView | None:
-    phase = lease_phase(session)
-    if phase is None:
-        return None
-    minted_at = session.get("relay_minted_at")
-    return LeaseView(
-        lease_id=session["id"],
-        generation=session["relay_generation"],
-        phase=phase,
-        heartbeat_fresh=_heartbeat_fresh(session["relay_heartbeat_at"], now=now),
-        minted_age_s=None if minted_at is None else (now - minted_at).total_seconds(),
-    )
-
-
 # meiva:note
 # Observe relay delivery, end takeovers whose relay died, retire the children. An
 # exited relay this host spawned ends its takeover: nothing can push inbound
@@ -685,7 +666,7 @@ async def supervise_relay(
             exited=relay_exited(child),
             age_s=monotonic - child.spawned_at,
         ),
-        None if session is None else _lease_view(session, now=now),
+        None if session is None else lease_view(session, now=now),
         native_held=incarnation is not None,
         wait=RELAY_WAIT,
     )

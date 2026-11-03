@@ -123,14 +123,18 @@ async def ensure_start_marker(
     """Repair a crash between accepting the request and saving its timeline anchor."""
     config: RunnableConfig = {"configurable": {"thread_id": str(session["agent_id"])}}
     snapshot = await graph.aget_state(config)
-    introduced = snapshot.values.get("impersonation_introduced", False)
+    # meiva:note
+    # The checkpoint as the state model, not as `dict[str, Any]`: the two facts this repair reads
+    # (`impersonation_introduced`, the ids already in `messages`) are declared there, and
+    # `handoff_resume_pending` below already reads a snapshot this way.
+    state = BaseAgentState.model_validate(snapshot.values)
     update = start_update(
         session,
-        introduced=introduced,
+        introduced=state.impersonation_introduced,
         stamp=note_stamp_of(notes),
-        existing_ids={message.id for message in snapshot.values.get("messages", [])},
+        existing_ids={message.id for message in state.messages if message.id is not None},
     )
-    if update["messages"] or not introduced:
+    if update["messages"] or not state.impersonation_introduced:
         await graph.aupdate_state(config, update)
     await flush_graph_checkpoint(graph, session["agent_id"])
 
@@ -148,7 +152,7 @@ def resume_note_pending(state: BaseAgentState) -> bool:
     messages = state.messages
     if receipt is None or not messages:
         return False
-    return getattr(messages[-1], "id", None) == handoff_note_id(receipt)
+    return messages[-1].id == handoff_note_id(receipt)
 
 
 # meiva:note
