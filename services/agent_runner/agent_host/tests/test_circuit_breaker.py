@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import psycopg
 import pytest
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import claim_node
@@ -35,6 +35,7 @@ from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
+from base.log.tests.log_records import LogRecords
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
@@ -49,7 +50,7 @@ from services.agent_runner.agent_host.tests.circuit_breaker.provider_failures im
 
 
 async def test_fatal_provider_error_opens_circuit_breaker(
-    loguru_records, *, database_gate: ProcessDbGate
+    loguru_records: LogRecords, *, database_gate: ProcessDbGate
 ) -> None:
     """A permanent context-overflow rejection opens the breaker with the
     context_overflow reason and keeps halted=True — the next wake must not
@@ -71,8 +72,8 @@ async def test_fatal_provider_error_opens_circuit_breaker(
     assert circuit.open is True
     assert circuit.reason == "context_overflow"
     assert circuit.opened_at is not None
-    records = [r for r in loguru_records if r["extra"].get("event") == "circuit_breaker_open"]  # pyright: ignore[reportUnknownMemberType]
-    assert len(records) == 1  # pyright: ignore[reportUnknownArgumentType]
+    records = loguru_records.events("circuit_breaker_open")
+    assert len(records) == 1
     assert records[0]["extra"]["reason"] == "context_overflow"
 
 
@@ -413,13 +414,14 @@ async def test_chat_cobatched_with_open_breaker_heartbeat_reaches_llm(
     )
 
     assert cmd.goto == "before_llm"
-    assert cmd.update["halted"] is False  # pyright: ignore[reportOptionalSubscript, reportUnknownArgumentType]
-    messages = cmd.update["messages"]  # pyright: ignore[reportOptionalSubscript, reportUnknownArgumentType]
-    assert len(messages) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert cmd.update is not None
+    assert cmd.update["halted"] is False
+    messages = cast("list[BaseMessage]", cmd.update["messages"])
+    assert len(messages) == 1
     assert isinstance(messages[0], HumanMessage)
-    assert "real user work" in messages[0].content  # pyright: ignore[reportUnknownMemberType]
-    assert messages[0].additional_kwargs["meiva_inbound_id"] == inbound_ids["chat"]  # pyright: ignore[reportUnknownMemberType]
-    assert "Heartbeat." not in messages[0].content  # pyright: ignore[reportUnknownMemberType]
+    assert "real user work" in messages[0].content
+    assert messages[0].additional_kwargs["meiva_inbound_id"] == inbound_ids["chat"]
+    assert "Heartbeat." not in messages[0].content
     fake_llm.bind_tools.return_value.ainvoke.assert_not_called()
 
 
@@ -456,7 +458,8 @@ async def test_claim_parks_idle_while_breaker_open(
     )
 
     assert cmd.goto == "__end__"
-    assert cmd.update["turn_idle"] is True  # pyright: ignore[reportOptionalSubscript, reportUnknownMemberType]
+    assert cmd.update is not None
+    assert cmd.update["turn_idle"] is True
 
 
 async def test_claim_does_not_park_while_breaker_closed(
@@ -519,9 +522,10 @@ async def test_heartbeat_normal_when_breaker_closed(
     )
 
     fake_llm.bind_tools.return_value.ainvoke.assert_not_called()
-    msgs = cmd.update["messages"]  # pyright: ignore[reportOptionalSubscript, reportUnknownMemberType]
-    assert len(msgs) == 2  # pyright: ignore[reportUnknownArgumentType]
-    assert "Heartbeat." in msgs[0].content  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    assert cmd.update is not None
+    msgs = cast("list[BaseMessage]", cmd.update["messages"])
+    assert len(msgs) == 2
+    assert "Heartbeat." in msgs[0].content
     wake_note = cast(HumanMessage, msgs[1])
     assert read_meiva_kwargs(wake_note).get("meiva_note_tag") == "non_human_wake"
     assert cmd.goto == "before_llm"

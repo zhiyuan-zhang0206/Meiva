@@ -9,7 +9,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from multiprocessing.connection import Connection
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from redis.asyncio.client import PubSub
@@ -25,8 +25,9 @@ from services.agent_runner.agent_ops.to_user_watch import watch_to_user
 # Forward live events from the Redis pub/sub channel into an in-memory queue so assertions stay non-blocking.
 async def _pump_events(subscriber: PubSub, events: asyncio.Queue[ToUserChanged]) -> None:
     while True:
-        message: dict[str, Any] | None = await subscriber.get_message(
-            ignore_subscribe_messages=True, timeout=1.0
+        message = cast(
+            "dict[str, Any] | None",
+            await subscriber.get_message(ignore_subscribe_messages=True, timeout=1.0),
         )
         if message:
             payload = message["data"]

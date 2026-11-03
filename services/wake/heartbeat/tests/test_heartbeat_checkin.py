@@ -581,12 +581,12 @@ class TestConsecutiveFailureBackoff:
         d1 = backoff_deadlines({1: 1}, THRESHOLD_S, now=time.time())
         d2 = backoff_deadlines({1: 2}, THRESHOLD_S, now=time.time())
         d10 = backoff_deadlines({1: 10}, THRESHOLD_S, now=time.time())
-        assert d1[1] - time.time() == pytest.approx(2 * THRESHOLD_S, abs=1.0)  # pyright: ignore[reportUnknownMemberType]
-        assert d2[1] - d1[1] == pytest.approx(2 * THRESHOLD_S, abs=1.0)  # pyright: ignore[reportUnknownMemberType]
-        assert d10[1] - d2[1] == pytest.approx((BACKOFF_MAX_WINDOWS - 4) * THRESHOLD_S, abs=1.0)  # pyright: ignore[reportUnknownMemberType]
+        assert d1[1] - time.time() == pytest.approx(2 * THRESHOLD_S, abs=1.0)
+        assert d2[1] - d1[1] == pytest.approx(2 * THRESHOLD_S, abs=1.0)
+        assert d10[1] - d2[1] == pytest.approx((BACKOFF_MAX_WINDOWS - 4) * THRESHOLD_S, abs=1.0)
 
 
-def _mirror_event(agent_id: int, event_name: str) -> dict | None:
+def _mirror_event(agent_id: int, event_name: str) -> dict[str, object] | None:
     """The latest mirror line for (agent, event), or None while the drain
     thread has not landed it."""
     import json
@@ -610,7 +610,9 @@ def _mirror_event(agent_id: int, event_name: str) -> dict | None:
     return None
 
 
-def _poll_mirror(agent_id: int, event_name: str, timeout_s: float = 2.0) -> dict | None:
+def _poll_mirror(
+    agent_id: int, event_name: str, timeout_s: float = 2.0
+) -> dict[str, object] | None:
     deadline = time.monotonic() + timeout_s
     ev = None
     while time.monotonic() < deadline:

@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import random
 from collections.abc import AsyncIterator, Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import MagicMock
 
 import anthropic
@@ -45,6 +45,11 @@ from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
+
+if TYPE_CHECKING:
+    from langchain_core.language_models.chat_models import BaseChatModel
+
+    from base.events.live.publisher import AgentEventPublisher
 
 
 # meiva:note
@@ -167,8 +172,8 @@ def test_get_meiva_overview_advertises_installed_plugin_namespace() -> None:
 def make_runtime(
     *,
     resources: HostedTurnResources,
-    llm=None,
-    event_publisher=None,
+    llm: object | None = None,
+    event_publisher: object | None = None,
     execution_info: ExecutionInfo | None = None,
     database_gate: ProcessDbGate,
     pins: Mapping[str, Any] | None = None,
@@ -181,8 +186,10 @@ def make_runtime(
     ctx = MeivaContext(
         hosted_resources=resources,
         ops_pool=ops_pool,
-        llm=llm,  # pyright: ignore[reportUnknownArgumentType]
-        event_publisher=event_publisher if event_publisher is not None else MagicMock(),  # pyright: ignore[reportUnknownArgumentType]
+        llm=cast("BaseChatModel", llm),
+        event_publisher=cast(
+            "AgentEventPublisher", event_publisher if event_publisher is not None else MagicMock()
+        ),
         agent=AgentSlices.resolve(pins, default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),

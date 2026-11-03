@@ -15,6 +15,7 @@ from __future__ import annotations
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from typing import cast
 
 import psycopg
 import pytest
@@ -162,7 +163,7 @@ def _mirror_nudged(agent_id: int) -> tuple[str, str, int] | None:
 # ───────────── consecutive-failure backoff (Task #1928) ─────────────
 
 
-def _mirror_event(agent_id: int, event_name: str) -> dict | None:
+def _mirror_event(agent_id: int, event_name: str) -> dict[str, object] | None:
     """The latest mirror line for (agent, event), or None while the drain
     thread has not landed it."""
     import json
@@ -186,7 +187,9 @@ def _mirror_event(agent_id: int, event_name: str) -> dict | None:
     return None
 
 
-def _poll_mirror(agent_id: int, event_name: str, timeout_s: float = 2.0) -> dict | None:
+def _poll_mirror(
+    agent_id: int, event_name: str, timeout_s: float = 2.0
+) -> dict[str, object] | None:
     deadline = time.monotonic() + timeout_s
     ev = None
     while time.monotonic() < deadline:
@@ -282,8 +285,9 @@ class TestNudgeBackoffB7:
             assert row[0] == 1
         ev = _poll_mirror(aid, "heartbeat_backoff_raised")
         assert ev is not None
-        assert ev["attributes"]["level"] == 1
-        assert ev["attributes"]["interval_seconds"] == 600
+        attributes = cast("dict[str, object]", ev["attributes"])
+        assert attributes["level"] == 1
+        assert attributes["interval_seconds"] == 600
 
     def test_reconcile_clears_streak_on_real_inbound(
         self,
@@ -447,8 +451,9 @@ class TestNudgeBackoffB7:
             assert row[0] == 0
         ev = _poll_mirror(aid, "heartbeat_backoff_reset")
         assert ev is not None
-        assert ev["attributes"]["previous_level"] == 2
-        assert ev["attributes"]["reason"] == "real_inbound"
+        attributes = cast("dict[str, object]", ev["attributes"])
+        assert attributes["previous_level"] == 2
+        assert attributes["reason"] == "real_inbound"
 
     @pytest.mark.usefixtures("event_pipeline")
     def test_sweep_leaves_level_without_engagement(

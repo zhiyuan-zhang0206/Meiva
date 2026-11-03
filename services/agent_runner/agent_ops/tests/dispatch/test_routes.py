@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import cast
 
 import pytest
 from psycopg_pool import ConnectionPool
@@ -71,8 +72,8 @@ async def test_config_audit_read_returns_the_last_records_newest_first(ops: Ops)
     status, result = await ops.dispatch("config_audit_read", {"last": 2})
 
     assert status == "completed"
-    records = result["records"]
-    assert isinstance(records, list)
+    assert isinstance(result["records"], list)
+    records = cast("list[dict[str, object]]", result["records"])
     assert [record["trace_id"] for record in records] == ["audit-2", "audit-1"]
 
 

@@ -5,6 +5,7 @@ import subprocess
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -332,7 +333,7 @@ def test_helper_ping_settles_until_cold_start_answers() -> None:
         if isinstance(reply, Exception):
             raise reply
         assert isinstance(reply, dict)
-        return reply
+        return cast("dict[str, object]", reply)
 
     helper = ScriptedHelper(ping=ping)
 

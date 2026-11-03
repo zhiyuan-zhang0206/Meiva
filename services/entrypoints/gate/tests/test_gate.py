@@ -417,10 +417,10 @@ def _write_v2(path: Path, *, kind: str = "rollout") -> None:
     )
 
 
-def test_authenticated_proxies_app(servers) -> None:
+def test_authenticated_proxies_app(servers: Servers) -> None:
     FakeGateway.authenticated = True
     FakeGateway.down = False
-    status, body = _get(servers["gate"] + "/fleet")  # pyright: ignore[reportUnknownArgumentType]
+    status, body = _get(servers["gate"] + "/fleet")
     assert status == 200
     assert body == "APP-PAGE /fleet"
 
@@ -578,7 +578,7 @@ def test_app_proxy_rejects_invalid_browser_origin_headers(servers: Servers) -> N
     ]
 
 
-def test_app_404_passes_through_not_updating_page(servers) -> None:
+def test_app_404_passes_through_not_updating_page(servers: Servers) -> None:
     """The app answering 404 means the app is UP and the resource is gone — the
     gate must pass the 404 through. A browser probing /favicon.ico relies on
     the 404 to drop its cached icon; an updating page instead would keep the
@@ -587,7 +587,7 @@ def test_app_404_passes_through_not_updating_page(servers) -> None:
     FakeGateway.down = False
     FakeApp.not_found_paths.add("/favicon.ico")
     try:
-        status, body = _get(servers["gate"] + "/favicon.ico")  # pyright: ignore[reportUnknownArgumentType]
+        status, body = _get(servers["gate"] + "/favicon.ico")
         assert status == 404
         assert body == "NOT-FOUND /favicon.ico"
         assert "System updating" not in body
@@ -595,10 +595,10 @@ def test_app_404_passes_through_not_updating_page(servers) -> None:
         FakeApp.not_found_paths.clear()
 
 
-def test_unauthenticated_serves_static_login(servers) -> None:
+def test_unauthenticated_serves_static_login(servers: Servers) -> None:
     FakeGateway.authenticated = False
     FakeGateway.down = False
-    status, body = _get(servers["gate"] + "/")  # pyright: ignore[reportUnknownArgumentType]
+    status, body = _get(servers["gate"] + "/")
     assert status == 200
     assert "Sign in" in body
     assert "login" in body.lower()
@@ -624,31 +624,33 @@ def test_a_leftover_update_marker_never_owns_the_entry(servers: Servers) -> None
     assert (status, body) == (200, "APP-PAGE /__meiva/deploy-state")
 
 
-def test_gateway_503_without_flag_serves_down_page(servers) -> None:
+def test_gateway_503_without_flag_serves_down_page(servers: Servers) -> None:
     """Gateway 503, no flag: the machine itself is not answering — the down page,
     and its copy must NOT promise an update."""
     FakeGateway.authenticated = True
     FakeGateway.down = True
-    assert not servers["flag"].exists()  # pyright: ignore[reportUnknownMemberType]
-    status, body = _get(servers["gate"] + "/")  # pyright: ignore[reportUnknownArgumentType]
+    assert not servers["flag"].exists()
+    status, body = _get(servers["gate"] + "/")
     assert status == 503
     assert "Service unavailable" in body
     assert "System updating" not in body
 
 
-def test_gateway_refused_without_flag_serves_down_page(servers) -> None:
+def test_gateway_refused_without_flag_serves_down_page(servers: Servers) -> None:
     """Connection refused, no flag: the machine is down (powered off / crashed),
     not mid-update."""
     FakeGateway.authenticated = True
-    servers["gw"].shutdown()  # pyright: ignore[reportUnknownMemberType]
-    assert not servers["flag"].exists()  # pyright: ignore[reportUnknownMemberType]
-    status, body = _get(servers["gate"] + "/")  # pyright: ignore[reportUnknownArgumentType]
+    servers["gw"].shutdown()
+    assert not servers["flag"].exists()
+    status, body = _get(servers["gate"] + "/")
     assert status == 503
     assert "Service unavailable" in body
     assert "System updating" not in body
 
 
-def test_app_transport_failure_without_active_marker_is_service_unavailable(servers) -> None:
+def test_app_transport_failure_without_active_marker_is_service_unavailable(
+    servers: Servers,
+) -> None:
     """Gateway-up/app-down is the exact recovery gap observed in production.
 
     It must reuse the request's inactive snapshot; app transport failure cannot
@@ -656,10 +658,10 @@ def test_app_transport_failure_without_active_marker_is_service_unavailable(serv
     """
     FakeGateway.authenticated = True
     FakeGateway.down = False
-    assert not servers["flag"].exists()  # pyright: ignore[reportUnknownMemberType]
-    servers["app"].shutdown()  # pyright: ignore[reportUnknownMemberType]
+    assert not servers["flag"].exists()
+    servers["app"].shutdown()
 
-    status, body = _get(servers["gate"] + "/")  # pyright: ignore[reportUnknownArgumentType]
+    status, body = _get(servers["gate"] + "/")
     assert status == 503
     assert "Service unavailable" in body
     assert "System updating" not in body
@@ -667,7 +669,7 @@ def test_app_transport_failure_without_active_marker_is_service_unavailable(serv
 
 
 @pytest.mark.parametrize("page", ["login_page", "down_page"])
-def test_pages_ship_self_contained(servers, page: str) -> None:
+def test_pages_ship_self_contained(servers: Servers, page: str) -> None:
     """Every page carries its own styling and theme bootstrap.
 
     The gate answers one page per request and has no route to serve a second
@@ -675,7 +677,7 @@ def test_pages_ship_self_contained(servers, page: str) -> None:
     unsubstituted — would render bare exactly when the app is down. Both the
     inlining and the absence of any outbound reference are load-bearing.
     """
-    body = getattr(servers["gate_server"].gate, page)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    body = getattr(servers["gate_server"].gate, page)
     assert "/*__THEME_" not in body, "a theme marker survived load"
     assert "--background:" in body, "design tokens not inlined"
     assert "prefers-color-scheme" in body, "theme bootstrap not inlined"

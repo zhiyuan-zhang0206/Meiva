@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from base.host.permissions_helper.client import PermissionsHelperClient
+from services.desktop.permissions_helper.tests.test_permissions_helper import (
+    HelperStarter,
+)
 from services.desktop.permissions_helper.tests.test_permissions_helper import (
     fake_helper as fake_helper,
 )
@@ -13,7 +15,7 @@ _SWIFT = (Path(__file__).parents[1] / "helper" / "main.swift").read_text()
 
 
 def _recording_client(
-    start_server: Callable[..., str],
+    start_server: HelperStarter,
 ) -> tuple[PermissionsHelperClient, list[tuple[str, dict[str, Any]]]]:
     seen: list[tuple[str, dict[str, Any]]] = []
 
@@ -26,7 +28,7 @@ def _recording_client(
 
 
 def test_ax_tree_request_carries_the_bounds_and_omits_an_absent_scope(
-    fake_helper: Callable[..., str],
+    fake_helper: HelperStarter,
 ) -> None:
     helper, seen = _recording_client(fake_helper)
     helper.ax_tree("Finder")
@@ -43,7 +45,7 @@ def test_ax_tree_request_carries_the_bounds_and_omits_an_absent_scope(
     assert args["enable_ax"] is True
 
 
-def test_ax_tree_request_forwards_a_scope(fake_helper: Callable[..., str]) -> None:
+def test_ax_tree_request_forwards_a_scope(fake_helper: HelperStarter) -> None:
     helper, seen = _recording_client(fake_helper)
     helper.ax_tree("Finder", scope=12, scope_fp="abc", max_nodes=50)
     assert (seen[0][1]["scope"], seen[0][1]["scope_fp"]) == (12, "abc")
@@ -51,7 +53,7 @@ def test_ax_tree_request_forwards_a_scope(fake_helper: Callable[..., str]) -> No
 
 
 def test_ax_act_request_carries_the_value_only_when_given(
-    fake_helper: Callable[..., str],
+    fake_helper: HelperStarter,
 ) -> None:
     helper, seen = _recording_client(fake_helper)
     helper.ax_act("Mail", 7, "press")

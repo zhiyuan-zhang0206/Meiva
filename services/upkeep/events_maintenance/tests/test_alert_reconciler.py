@@ -4,7 +4,7 @@ import json
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import psycopg
@@ -55,7 +55,12 @@ def _alerts_published(bus: EventBus) -> Generator[Callable[[], list[dict[str, An
             # meiva:note
             # redis-py's PubSub.get_message has partially unknown member typing under strict mode.
             frames: list[dict[str, Any]] = []
-            while (message := pubsub.get_message(timeout=0.5)) is not None:  # pyright: ignore[reportUnknownMemberType]
+            while (
+                message := cast(
+                    "dict[str, Any] | None",
+                    pubsub.get_message(timeout=0.5),
+                )
+            ) is not None:
                 data = message["data"]
                 if isinstance(data, str | bytes):
                     frames.append(json.loads(data))

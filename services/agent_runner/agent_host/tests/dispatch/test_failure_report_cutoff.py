@@ -3,7 +3,7 @@ import random
 from collections.abc import Generator
 from contextlib import contextmanager
 from functools import partial
-from typing import LiteralString
+from typing import LiteralString, cast
 from uuid import uuid4
 
 import psycopg
@@ -167,8 +167,11 @@ async def test_error_visible_after_cutoff_allows_immediate_new_chat(
             async def react_to_error() -> None:
                 async with asyncio.timeout(5):
                     while len(received) < 2:
-                        message = await subscription.get_message(
-                            ignore_subscribe_messages=True, timeout=1
+                        message = cast(
+                            "dict[str, object] | None",
+                            await subscription.get_message(
+                                ignore_subscribe_messages=True, timeout=1
+                            ),
                         )
                         if message is None:
                             continue
