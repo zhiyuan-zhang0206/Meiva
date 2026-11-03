@@ -109,3 +109,18 @@ def test_last_peer_text_stops_at_the_last_assistant_turn() -> None:
         _inbound("user"),
     ]
     assert last_agent_inbound_text(tail) is None
+
+
+def test_a_non_string_source_stops_the_scan_naming_the_message() -> None:
+    corrupted = HumanMessage(
+        content="hello",
+        additional_kwargs={"meiva_msg_type": "inbound", "meiva_source": 7, "meiva_inbound_id": 42},
+    )
+    with pytest.raises(TypeError, match=r"meiva_source is int, not str .*meiva_inbound_id=42"):
+        last_agent_inbound_text([AIMessage(content="prev", id="a0"), corrupted])
+
+
+def test_a_missing_source_still_raises_the_key_error() -> None:
+    corrupted = HumanMessage(content="hello", additional_kwargs={"meiva_msg_type": "inbound"})
+    with pytest.raises(KeyError, match="meiva_source is missing"):
+        last_agent_inbound_text([corrupted])
