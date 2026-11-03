@@ -2,7 +2,12 @@ from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage
-from langchain_openai.chat_models.base import _create_usage_metadata_responses
+
+# meiva:note
+# The pinned SDK leaves this private helper's dict parameter unparameterized.
+from langchain_openai.chat_models.base import (
+    _create_usage_metadata_responses,  # pyright: ignore[reportUnknownVariableType]
+)
 
 from base.lm.catalog import ModelCatalog
 from base.lm.pricing import CacheTokens, quote

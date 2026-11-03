@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, cast
 
+import psycopg
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg_pool import AsyncConnectionPool
@@ -23,9 +25,9 @@ def _db(database_gate: ProcessDbGate) -> Database:
 
 def _put_checkpoint(
     thread_id: str,
-    messages: list,
+    messages: Sequence[BaseMessage],
     *,
-    metadata: dict | None = None,
+    metadata: dict[str, object] | None = None,
     version: str = "1",
 ) -> str:
     ckpt = empty_checkpoint()
@@ -46,7 +48,9 @@ def _put_checkpoint(
     return str(cfg["checkpoint_id"])
 
 
-def test_load_by_trace_resolves_checkpoint(db_conn, database_gate: ProcessDbGate) -> None:
+def test_load_by_trace_resolves_checkpoint(
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate
+) -> None:
     msgs = [HumanMessage(content="system prompt"), AIMessage(content="hi")]
     thread = "42"
     ckpt_id = _put_checkpoint(thread, msgs)
@@ -97,7 +101,9 @@ async def test_attach_trace_to_checkpoint_stamps_metadata(
     assert row == ("d" * 32,)
 
 
-def test_load_by_trace_picks_newest_when_multiple(db_conn, database_gate: ProcessDbGate) -> None:
+def test_load_by_trace_picks_newest_when_multiple(
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate
+) -> None:
     thread = "9"
     older = _put_checkpoint(
         thread, [HumanMessage(content="v1")], metadata={"trace_id": "e" * 32}, version="1"

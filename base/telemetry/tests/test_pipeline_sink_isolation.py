@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, cast
 
 import psycopg
 import pytest
@@ -19,6 +19,11 @@ from base.telemetry.otlp import telemetry_otlp
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from base.telemetry.tests.otlp.identity_inputs import machine_identity
+
+
+class _MirroringExporter(Protocol):
+    _home: Path
+    _mirror_dir: Path
 
 
 def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
@@ -107,8 +112,11 @@ def test_the_pipeline_builds_its_exporter_over_its_own_home(tmp_path: Path) -> N
         otlp_endpoint=lambda: "http://127.0.0.1:4318",
     )
     try:
-        exporter = pipeline._exporter  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-        assert exporter._home == home  # pyright: ignore[reportUnknownMemberType]
-        assert exporter._mirror_dir == logs_path(home)  # pyright: ignore[reportUnknownMemberType]
+        exporter = cast(
+            "_MirroringExporter",
+            pipeline._exporter,  # pyright: ignore[reportAttributeAccessIssue]
+        )
+        assert exporter._home == home
+        assert exporter._mirror_dir == logs_path(home)
     finally:
         pipeline.stop(timeout=2)

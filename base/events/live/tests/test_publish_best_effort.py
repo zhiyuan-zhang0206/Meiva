@@ -28,6 +28,7 @@ from base.events.live.redis_client import (
 )
 from base.events.live.redis_resilience import AuthRetryPolicy, should_warn_publish_failure
 from base.events.live.tests.fakes import async_redis_factory, sync_redis_factory
+from base.log.tests.log_records import LogRecords
 
 _FAST_RETRY = AuthRetryPolicy(initial_delay_s=0.0005, delay_cap_s=0.002, window_s=1.0)
 
@@ -95,7 +96,7 @@ class TestPublishBestEffortSync:
 
     def test_never_raises_and_debug_logs_on_transient(
         self,
-        loguru_records: list[dict],
+        loguru_records: LogRecords,
     ) -> None:
         """A transient failure (redis down) is swallowed → None, logged at DEBUG."""
         bus = _bus_with(
@@ -107,7 +108,7 @@ class TestPublishBestEffortSync:
             r for r in loguru_records if "skipped" in r["message"] and "meiva:x" in r["message"]
         ]
         assert hits, "expected a best-effort DEBUG skip line"
-        assert all(r["level"].no < 30 for r in hits), "transient failure must be DEBUG, not WARNING"  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        assert all(r["level"].no < 30 for r in hits), "transient failure must be DEBUG, not WARNING"
 
     def test_non_transport_failure_propagates(self) -> None:
         bus = _bus_with(
@@ -118,7 +119,7 @@ class TestPublishBestEffortSync:
 
     def test_never_raises_and_warns_on_noperm(
         self,
-        loguru_records: list[dict],
+        loguru_records: LogRecords,
     ) -> None:
         """A ResponseError (redis NOPERM — ACL misconfig) is swallowed → None, but
         logged at WARNING because it silently disables live updates fleet-wide."""
@@ -128,13 +129,12 @@ class TestPublishBestEffortSync:
         result = bus.publish_best_effort_sync("{}", channel="meiva:noperm-sync", context="unit")
         assert result is None
         assert any(
-            "rejected by redis" in r["message"] and r["level"].no >= 30  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-            for r in loguru_records
+            "rejected by redis" in r["message"] and r["level"].no >= 30 for r in loguru_records
         ), "a NOPERM publish must be logged at WARNING"
 
     def test_noperm_warning_is_rate_limited(
         self,
-        loguru_records: list[dict],
+        loguru_records: LogRecords,
     ) -> None:
         """A persistent NOPERM outage warns once per channel then drops repeats to
         DEBUG — one event funnels the whole fleet through here, so the WARNING must
@@ -146,12 +146,10 @@ class TestPublishBestEffortSync:
         for _ in range(4):
             assert bus.publish_best_effort_sync("{}", channel=channel, context="unit") is None
         warnings = [
-            r
-            for r in loguru_records
-            if "rejected by redis" in r["message"] and r["level"].no >= 30  # pyright: ignore[reportUnknownMemberType]
+            r for r in loguru_records if "rejected by redis" in r["message"] and r["level"].no >= 30
         ]
-        assert len(warnings) == 1, f"expected exactly one WARNING, got {len(warnings)}"  # pyright: ignore[reportUnknownArgumentType]
-        assert any("rate-limited" in r["message"] and r["level"].no < 30 for r in loguru_records), (  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        assert len(warnings) == 1, f"expected exactly one WARNING, got {len(warnings)}"
+        assert any("rate-limited" in r["message"] and r["level"].no < 30 for r in loguru_records), (
             "suppressed repeats must drop to a DEBUG rate-limited line"
         )
 
@@ -163,20 +161,20 @@ class TestPublishBestEffortAsync:
 
     async def test_never_raises_and_debug_logs_on_transient(
         self,
-        loguru_records: list[dict],
+        loguru_records: LogRecords,
     ) -> None:
         bus = _bus_with(
             open_async=async_redis_factory(lambda: _BoomAsyncClient(RedisConnectionError("down")))
         )
         result = await bus.publish_best_effort("{}", channel="meiva:x", context="unit")
         assert result is None
-        assert any("skipped" in r["message"] and r["level"].no < 30 for r in loguru_records), (  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        assert any("skipped" in r["message"] and r["level"].no < 30 for r in loguru_records), (
             "expected a best-effort DEBUG skip line"
         )
 
     async def test_never_raises_and_warns_on_noperm(
         self,
-        loguru_records: list[dict],
+        loguru_records: LogRecords,
     ) -> None:
         bus = _bus_with(
             open_async=async_redis_factory(lambda: _BoomAsyncClient(NoPermissionError("NOPERM")))
@@ -184,8 +182,7 @@ class TestPublishBestEffortAsync:
         result = await bus.publish_best_effort("{}", channel="meiva:noperm-async", context="unit")
         assert result is None
         assert any(
-            "rejected by redis" in r["message"] and r["level"].no >= 30  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-            for r in loguru_records
+            "rejected by redis" in r["message"] and r["level"].no >= 30 for r in loguru_records
         )
 
     async def test_reports_live_receiver_count(self, event_bus: EventBus) -> None:

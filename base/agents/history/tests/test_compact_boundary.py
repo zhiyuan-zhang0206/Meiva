@@ -25,10 +25,6 @@ from psycopg_pool import AsyncConnectionPool
 from base.agents.history.closing_request import ClosingRequest
 from base.agents.history.compact_boundary import mark_compact_boundary
 
-# Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
-# pyright: reportUnknownMemberType = warning
-# pyright: reportUnknownArgumentType = warning
-
 
 def _saver(pool: AsyncConnectionPool) -> AsyncPostgresSaver:
     # Same cast as prod (agent/loop.py): the saver opens every cursor with its
@@ -67,15 +63,18 @@ def _delta_app(saver: AsyncPostgresSaver, *, snapshot_frequency: int = 1000):
             "n": n + 1,
         }
 
+    # meiva:note
+    # langgraph's `add_node` and `compile` signatures carry `CachePolicy[Unknown]` and
+    # `BaseCheckpointSaver[Unknown]`, so both calls stay partially unknown whatever this test types.
     graph = StateGraph(S)
-    graph.add_node("step", step)
+    graph.add_node("step", step)  # pyright: ignore[reportUnknownMemberType]
     graph.add_edge(START, "step")
 
     def route(state: S) -> str:
         return "step" if state["n"] < state["target"] else END
 
     graph.add_conditional_edges("step", route)
-    return graph.compile(checkpointer=saver)
+    return graph.compile(checkpointer=saver)  # pyright: ignore[reportUnknownMemberType]
 
 
 def _config(thread_id: str, checkpoint_id: str | None = None) -> RunnableConfig:
@@ -96,7 +95,7 @@ async def _put_turns(pool: AsyncConnectionPool, thread_id: str, n_turns: int) ->
     ids: list[str] = []
     parent: str | None = None
     msg_version = None
-    messages: list = []
+    messages: list[HumanMessage] = []
     for turn in range(n_turns):
         messages = [*messages, HumanMessage(content=f"turn {turn}")]
         msg_version = saver.get_next_version(msg_version, None)
@@ -125,7 +124,7 @@ async def test_mark_compact_boundary_stamps_newest(aops_pool: AsyncConnectionPoo
             ("1",),
         )
         rows = await cur.fetchall()
-    stamped = [r[0] for r in rows if (r[1] or {}).get("compact_boundary")]
+    stamped = [r[0] for r in rows if (r[1] or dict[str, object]()).get("compact_boundary")]
     assert stamped == [ids[-1]]  # exactly the newest, stamped once
 
 

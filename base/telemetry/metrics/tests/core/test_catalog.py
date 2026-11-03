@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from base.api_contracts.metric_spec import OutputSurface
 from base.telemetry.metrics.core import catalog
 from base.telemetry.metrics.plugin_metrics import (
     DuplicateMetric,
@@ -15,8 +16,14 @@ from base.telemetry.metrics.plugin_metrics import (
 )
 
 
-def _spec(name: str = "core_test", **overrides) -> MetricSpec:
-    query = overrides.pop("query", None) or (  # pyright: ignore[reportUnknownMemberType]
+def _spec(
+    name: str = "core_test",
+    *,
+    query: str | None = None,
+    targets: list[str] | None = None,
+    output: list[OutputSurface] | None = None,
+) -> MetricSpec:
+    query = query or (
         "SELECT count(*) AS n FROM agents_meta WHERE event_name = 'turn_end' AND category = 'telemetry'"
     )
     return MetricSpec(
@@ -24,8 +31,9 @@ def _spec(name: str = "core_test", **overrides) -> MetricSpec:
         title="Core Test",
         event_name="turn_end",
         category="telemetry",
-        query=query,  # pyright: ignore[reportUnknownArgumentType]
-        **overrides,  # pyright: ignore[reportUnknownArgumentType]
+        query=query,
+        targets=targets,
+        output=["grafana"] if output is None else output,
     )
 
 

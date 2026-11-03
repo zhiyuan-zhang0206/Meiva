@@ -36,6 +36,7 @@ from base.events.live.tests.wait_bounds import (
     await_wait_one,
     hang_guard_s,
 )
+from base.log.tests.log_records import LogRecords
 
 
 async def _publish_inbound(
@@ -352,7 +353,7 @@ class TestWaitOneBudgetAndCancel:
 
     async def test_wait_one_returns_within_budget_when_open_wedges(
         self,
-        loguru_records: list[dict],
+        loguru_records: LogRecords,
     ) -> None:
         """When open/subscribe wedges (a connect into a black-holed network sits
         in kernel SYN retries far past any caller timeout), `wait_one` must still
@@ -378,7 +379,7 @@ class TestWaitOneBudgetAndCancel:
     @pytest.mark.usefixtures("redis_url")
     async def test_wait_one_abandons_and_warns_when_consume_never_ticks(
         self,
-        loguru_records: list[dict],
+        loguru_records: LogRecords,
     ) -> None:
         """A consume that never starts its own get_message timer (parked before
         it can tick) is abandoned within budget + `_CONSUME_ABANDON_GRACE`, with a
@@ -449,7 +450,7 @@ class TestWakeHealth:
     @pytest.mark.usefixtures("redis_url")
     async def test_clean_idle_timeout_stays_healthy(
         self,
-        loguru_records: list[dict],
+        loguru_records: LogRecords,
     ) -> None:
         """An ordinary idle timeout does not start a wake-degradation episode.
 
@@ -652,7 +653,7 @@ class TestAclScopedChannel:
 
     async def test_listener_degrades_when_subscribe_denied(
         self,
-        loguru_records: list[dict],
+        loguru_records: LogRecords,
     ) -> None:
         """When subscribe is NOPERM (the ACL grants a DIFFERENT prefix), neither
         `ensure_listening` nor `wait_one` raises `NoPermissionError` — the listener
@@ -737,7 +738,7 @@ class TestDeadTransportSurvival:
 
     async def test_wait_one_treats_typeerror_as_conn_lost(
         self,
-        loguru_records: list[dict],
+        loguru_records: LogRecords,
     ) -> None:
         """Defence in depth: even if redis-py surfaces the dead-transport
         TypeError again (the is_connected check -> write race window),

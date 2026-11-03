@@ -25,6 +25,7 @@ from collections.abc import Iterator
 import pytest
 
 from base.log import FIRST_PARTY_LOGGER_NAMES, install_stdlib_intercept
+from base.log.tests.log_records import LogRecords
 
 
 @pytest.fixture(autouse=True)
@@ -43,7 +44,7 @@ def _reset_touched_logger_levels() -> Iterator[None]:
     logging.getLogger("httpx").setLevel(logging.NOTSET)
 
 
-def test_first_party_controller_debug_reaches_loguru(loguru_records: list[dict]) -> None:
+def test_first_party_controller_debug_reaches_loguru(loguru_records: LogRecords) -> None:
     """A DEBUG record from a stdlib logger under a first-party namespace
     (e.g. `ops.controllers.respawn`) now flows through to loguru — the exact
     shape of the dropped "gateway not healthy, deferring respawn" line."""
@@ -58,7 +59,7 @@ def test_first_party_controller_debug_reaches_loguru(loguru_records: list[dict])
 
 
 @pytest.mark.parametrize("prefix", FIRST_PARTY_LOGGER_NAMES)
-def test_every_first_party_prefix_passes_debug(prefix: str, loguru_records: list[dict]) -> None:
+def test_every_first_party_prefix_passes_debug(prefix: str, loguru_records: LogRecords) -> None:
     """Every listed first-party namespace gets the same DEBUG passthrough —
     not just ops.controllers.*, but services / base / gateway / agent /
     meiva_builtins daemons and controllers."""
@@ -70,7 +71,7 @@ def test_every_first_party_prefix_passes_debug(prefix: str, loguru_records: list
     )
 
 
-def test_third_party_logger_debug_still_gated(loguru_records: list[dict]) -> None:
+def test_third_party_logger_debug_still_gated(loguru_records: LogRecords) -> None:
     """A non-first-party stdlib logger (httpx stand-in) stays gated at DEBUG —
     the noise the INFO floor exists to keep out. A long-lived gateway.log
     already grew unbounded once from unfiltered volume (see

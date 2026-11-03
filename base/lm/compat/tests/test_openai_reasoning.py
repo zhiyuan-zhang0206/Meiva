@@ -10,6 +10,8 @@ endpoint needed.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from langchain_core.messages import AIMessageChunk, message_chunk_to_message
 from pydantic import SecretStr
 
@@ -25,7 +27,7 @@ def _mimo() -> ReasoningContentChatModel:
     )
 
 
-def _raw(delta: dict) -> dict:
+def _raw(delta: Mapping[str, object]) -> dict[str, object]:
     """A raw OpenAI-style stream chunk carrying one delta."""
     return {
         "id": "chatcmpl-x",
@@ -34,8 +36,8 @@ def _raw(delta: dict) -> dict:
     }
 
 
-def _convert(m: ReasoningContentChatModel, delta: dict) -> AIMessageChunk:
-    gen = m._convert_chunk_to_generation_chunk(_raw(delta), AIMessageChunk, {})  # pyright: ignore[reportUnknownArgumentType]
+def _convert(m: ReasoningContentChatModel, delta: Mapping[str, object]) -> AIMessageChunk:
+    gen = m._convert_chunk_to_generation_chunk(_raw(delta), AIMessageChunk, {})
     assert gen is not None
     msg = gen.message
     assert isinstance(msg, AIMessageChunk)
@@ -45,13 +47,13 @@ def _convert(m: ReasoningContentChatModel, delta: dict) -> AIMessageChunk:
 def test_reasoning_content_becomes_thinking_block():
     """A `reasoning_content` delta → a canonical thinking block at index 0."""
     msg = _convert(_mimo(), {"reasoning_content": "Let me think"})
-    assert msg.content == [{"type": "thinking", "thinking": "Let me think", "index": 0}]  # pyright: ignore[reportUnknownMemberType]
+    assert msg.content == [{"type": "thinking", "thinking": "Let me think", "index": 0}]
 
 
 def test_text_content_becomes_text_block():
     """A plain `content` delta → a text block at index 1 (after reasoning)."""
     msg = _convert(_mimo(), {"content": "The answer is 391"})
-    assert msg.content == [{"type": "text", "text": "The answer is 391", "index": 1}]  # pyright: ignore[reportUnknownMemberType]
+    assert msg.content == [{"type": "text", "text": "The answer is 391", "index": 1}]
 
 
 def test_tool_only_chunk_has_empty_content_and_keeps_tool_chunks():
@@ -68,7 +70,7 @@ def test_tool_only_chunk_has_empty_content_and_keeps_tool_chunks():
         ]
     }
     msg = _convert(m, delta)
-    assert msg.content == []  # pyright: ignore[reportUnknownMemberType]
+    assert msg.content == []
     assert msg.tool_call_chunks
     assert msg.tool_call_chunks[0]["args"] == '{"code":"x"}'
 
@@ -77,7 +79,7 @@ def test_empty_delta_yields_empty_content():
     """A boundary/role chunk (no reasoning, no text) → empty content list, so
     accumulation stays uniformly list-of-blocks (no str/list mixing)."""
     msg = _convert(_mimo(), {"role": "assistant"})
-    assert msg.content == []  # pyright: ignore[reportUnknownMemberType]
+    assert msg.content == []
 
 
 def test_accumulation_merges_reasoning_then_text_by_index():
@@ -96,7 +98,7 @@ def test_accumulation_merges_reasoning_then_text_by_index():
     for c in chunks[1:]:
         acc = acc + c
     final = message_chunk_to_message(acc)
-    assert final.content == [  # pyright: ignore[reportUnknownMemberType]
+    assert final.content == [
         {"type": "thinking", "thinking": "17*23 = 391.", "index": 0},
         {"type": "text", "text": "It is 391.", "index": 1},
     ]

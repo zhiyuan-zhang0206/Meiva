@@ -614,7 +614,7 @@ def assert_root_once_with_child_parented_under_it(spans: list[Any], root: Any) -
 # --- trace v2: content stripping --------------------------------------------
 
 
-def otlp_with_attrs(attrs: dict[str, str]) -> dict:
+def otlp_with_attrs(attrs: dict[str, str]) -> dict[str, Any]:
     """Build a minimal OTLP export request with one span carrying the given
     attributes (keys -> string values)."""
     return {

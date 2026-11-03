@@ -47,7 +47,7 @@ import re
 import subprocess
 import sys
 import tomllib
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from pathlib import Path
 from typing import Any, TypeGuard
 
@@ -75,7 +75,7 @@ OTHER_RULES = (
 # Roots whose tests directories already meet the production rung (all seven rules at `error`
 # through the package's own entry): they need no tests entry. Promote a root here only after
 # zeroing the five tests-rung rules in every one of its tests directories.
-PROMOTED_ROOTS: tuple[str, ...] = ("scripts",)
+PROMOTED_ROOTS: tuple[str, ...] = ("scripts", "base")
 # What every test file is held to: the tests ladder rung, wherever the file sits.
 TESTS_STANDARD = {
     **dict.fromkeys(CALL_SIGNATURE_RULES, "error"),
@@ -167,13 +167,18 @@ def _region(text: str) -> re.Match[str]:
     return match
 
 
-def generate(pyproject_text: str, tracked: Iterable[str]) -> str:
+def generate(
+    pyproject_text: str,
+    tracked: Iterable[str],
+    *,
+    promoted_roots: Collection[str] = PROMOTED_ROOTS,
+) -> str:
     """`pyproject_text` with its generated region rewritten for the tracked tests directories."""
     region = _region(pyproject_text)
     handwritten = pyproject_text[: region.start()] + pyproject_text[region.end() :]
     config = tomllib.loads(handwritten)["tool"]["pyright"]
     roots = tests_roots(tracked, pytest_test_hosts(handwritten))
-    promoted = [root for root in roots if root.split("/", 1)[0] in PROMOTED_ROOTS]
+    promoted = [root for root in roots if root.split("/", 1)[0] in promoted_roots]
     unheld = [root for root in promoted if set(effective_rules(config, root).values()) != {"error"}]
     if unheld:
         raise SystemExit(
@@ -211,7 +216,12 @@ def _tracked_python_files(repo_root: Path) -> list[str]:
     return [path for path in result.stdout.split("\0") if path]
 
 
-def main(argv: list[str], *, repo_root: Path = _REPO_ROOT) -> int:
+def main(
+    argv: list[str],
+    *,
+    repo_root: Path = _REPO_ROOT,
+    promoted_roots: Collection[str] = PROMOTED_ROOTS,
+) -> int:
     parser = argparse.ArgumentParser(
         description="Generate the pyright executionEnvironments entries for package-level tests directories."
     )
@@ -221,7 +231,7 @@ def main(argv: list[str], *, repo_root: Path = _REPO_ROOT) -> int:
     args = parser.parse_args(argv)
     pyproject = repo_root / "pyproject.toml"
     current = pyproject.read_text(encoding="utf-8")
-    fresh = generate(current, _tracked_python_files(repo_root))
+    fresh = generate(current, _tracked_python_files(repo_root), promoted_roots=promoted_roots)
     if fresh == current:
         return 0
     if args.check:

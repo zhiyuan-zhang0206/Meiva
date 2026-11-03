@@ -61,6 +61,8 @@ def test_composed_up_since_is_the_max_over_live_units(
     (gateway_unit,) = read_unit_up_since("max-host", "~/.meiva_gateway")
     (runner_unit,) = read_unit_up_since("max-host", "~/.meiva")
     (composed,) = read_up_since("max-host")
+    assert gateway_unit is not None
+    assert runner_unit is not None
     assert composed == max(gateway_unit, runner_unit)
 
 

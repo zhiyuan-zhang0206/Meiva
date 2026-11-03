@@ -2,5 +2,7 @@ exports = ["log_records.py", "stdlib_logging.py"]
 
 [uses]
 "conftest.py" = ["log_records.py"]
+"test_genai_no_parts_warning_filter.py" = ["log_records.py"]
 "test_log_records.py" = ["log_records.py"]
+"test_stdlib_first_party_debug.py" = ["log_records.py"]
 "test_stdlib_logging_isolation.py" = ["stdlib_logging.py"]

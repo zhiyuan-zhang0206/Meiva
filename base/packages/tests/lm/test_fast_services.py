@@ -1,5 +1,6 @@
 """Fast IDs preserve selection, vendor requests and actual-service accounting."""
 
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import cast
@@ -17,6 +18,12 @@ from base.lm.pricing import Rates, rates_at, tally_tokens
 from base.lm.reasoning import extract_reasoning_tokens
 from base.lm.registry import ModelSpec, validate_models
 from base.lm.usage import log_usage_from_message, usage_model
+
+
+def _section(payload: Mapping[str, object], key: str) -> Mapping[str, object]:
+    value = payload[key]
+    assert isinstance(value, Mapping)
+    return cast("Mapping[str, object]", value)
 
 
 def test_additive_service_fields_preserve_plugin_positional_constructor() -> None:
@@ -58,10 +65,13 @@ def test_openai_wire_model_and_service_tier(
     )
     assert isinstance(model, ChatOpenAI)
     # The pinned SDK leaves this private payload method's dict unparameterized.
-    payload = model._get_request_payload([HumanMessage(content="Hello")])  # pyright: ignore[reportUnknownMemberType]
+    payload = cast(
+        "dict[str, object]",
+        model._get_request_payload([HumanMessage(content="Hello")]),  # pyright: ignore[reportUnknownMemberType]
+    )
     assert payload["model"] == "gpt-6.1-sol"
     assert payload["service_tier"] == ("fast" if fast else "default")
-    assert payload["reasoning"]["effort"] == "medium"
+    assert _section(payload, "reasoning")["effort"] == "medium"
 
 
 @pytest.mark.parametrize("fast", [False, True])
@@ -77,12 +87,15 @@ def test_anthropic_wire_model_speed_and_beta(
     )
     assert isinstance(model, ThinkingTokensChatAnthropic)
     # Exercise the SDK's actual wire conversion despite its incomplete typing.
-    payload = model._get_request_payload([HumanMessage(content="Hello")])  # pyright: ignore[reportUnknownMemberType]
+    payload = cast(
+        "dict[str, object]",
+        model._get_request_payload([HumanMessage(content="Hello")]),  # pyright: ignore[reportUnknownMemberType]
+    )
     assert payload["model"] == "claude-opus-5-5"
-    assert payload["output_config"]["effort"] == "medium"
+    assert _section(payload, "output_config")["effort"] == "medium"
     if fast:
         assert payload["speed"] == "fast"
-        assert "fast-mode-2026-02-01" in payload["betas"]
+        assert "fast-mode-2026-02-01" in cast("list[str]", payload["betas"])
     else:
         assert "speed" not in payload
 
