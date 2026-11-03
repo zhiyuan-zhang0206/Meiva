@@ -512,20 +512,27 @@ async def has_pending_interrupt(pool: AsyncConnectionSource, agent_id: int) -> b
 #     external interrupts (user / admin / peer) need the in-flight abort; the
 #     self row is still dispatched normally at claim.
 # meiva:note
-# The kind and source of the first pending external abort the interrupt poll reads.
-@dataclass(frozen=True)
-class _InterruptRow:
-    kind: str
-    source: str
+# The reason a pending external abort names. The poll runs through pools a test fakes (the cancel
+# watcher's), so the row is read positionally rather than through `class_row`: a fake cursor
+# answers with a tuple and needs no `row_factory`, and a row of another shape fails here instead
+# of being unpacked blind.
+def _interrupt_reason(row: tuple[object, ...] | None) -> InterruptReason | None:
+    if row is None:
+        return None
+    kind = row[0]
+    source = row[1]
+    if not isinstance(kind, str) or not isinstance(source, str):
+        raise TypeError("a pending interrupt row has columns of unexpected types")
+    if kind == "restart":
+        return InterruptReason.RESTART
+    return InterruptReason.USER if source == "user" else InterruptReason.SYSTEM
 
 
 async def pending_interrupt_reason(
     pool: AsyncConnectionSource, agent_id: int
 ) -> InterruptReason | None:
-    async with pool.connection() as conn:
-        row = await aquery_one(
-            conn,
-            _InterruptRow,
+    async with pool.connection() as conn, conn.cursor() as cur:
+        await cur.execute(
             "SELECT i.kind, i.source FROM inbound_messages i WHERE i.agent_id=%s "
             "AND i.source <> 'self' AND i.status='pending' AND (i.kind IN ('cancel','terminate') "
             "OR (i.kind='restart' "
@@ -533,8 +540,4 @@ async def pending_interrupt_reason(
             "ORDER BY i.id LIMIT 1",
             (agent_id, RESTART_INTERRUPT_GRACE_S),
         )
-    if row is None:
-        return None
-    if row.kind == "restart":
-        return InterruptReason.RESTART
-    return InterruptReason.USER if row.source == "user" else InterruptReason.SYSTEM
+        return _interrupt_reason(await cur.fetchone())
