@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from typing import TypeGuard
 
 from .plan.host_commands import PROBE, helper_probe_command
 from .plan.host_probe import facts_of, was_serving
@@ -21,6 +22,7 @@ from .plan.release_target import (
     resolve_update_target,
 )
 from .session import RefusedError, Session
+from .untyped import object_of
 
 
 def git_in_repo(*args: str, repo: Path) -> subprocess.CompletedProcess[str]:
@@ -126,11 +128,23 @@ def probe_helper(s: Session, alias: str, new: str) -> dict[str, str]:
     return facts_of(s.run(alias, helper_probe_command(new), effect=False))
 
 
+def _is_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, str]]:
+    return _is_dict(value) and all(
+        isinstance(key, str) and isinstance(item, str) for key, item in value.items()
+    )
+
+
 # meiva:note
 # The identity this fleet records for each host, read from the tracked table at call time: the
 # table is data a pull request changes, never something a window writes.
 def baselines(repo: Path) -> dict[str, str]:
-    table: dict[str, str] = json.loads(
-        (repo / "deploy" / "fleet" / "helper-identities.json").read_text()
+    table = object_of(
+        json.loads, (repo / "deploy" / "fleet" / "helper-identities.json").read_text()
     )
+    if not _is_str_dict(table):
+        raise ValueError("helper-identities.json must map host names to identities")
     return table

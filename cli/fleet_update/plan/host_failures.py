@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TypeGuard
 
+from ..untyped import object_of
+
 # meiva:note
 # Exit code 2 already means "refused before doing anything"; a run where some hosts came up and
 # others did not is its own outcome, so automation can tell a partial up from a rejected one.
@@ -63,7 +65,7 @@ def start_failure(
     window: tuple[datetime, datetime],
 ) -> HostFailure:
     try:
-        recorded: object = json.loads(incomplete or "")
+        recorded = object_of(json.loads, incomplete or "")
         if not _is_object_dict(recorded):
             raise TypeError("incomplete converge record must be a mapping")
         step = str(recorded["step"])

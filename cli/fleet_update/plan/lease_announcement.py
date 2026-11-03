@@ -11,6 +11,8 @@ import json
 from dataclasses import dataclass
 from typing import TypeGuard
 
+from ..untyped import object_of
+
 
 def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict)
@@ -60,7 +62,7 @@ def _lease(item: object) -> Lease:
 def read_leases(output: str) -> LeaseReading:
     lines = output.splitlines()
     try:
-        parsed: object = json.loads([ln for ln in lines if ln.startswith("{")][-1])
+        parsed = object_of(json.loads, [ln for ln in lines if ln.startswith("{")][-1])
         if not _is_object_dict(parsed):
             raise TypeError("leases payload must be a mapping")
         listed = parsed["leases"]

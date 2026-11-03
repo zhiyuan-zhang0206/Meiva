@@ -14,10 +14,12 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeGuard
 
 from .plan.release_target import Channel, TargetRequest, parse_release_tag
+from .untyped import object_of
 
 # meiva:note
 # The checkout this module runs from: the operator's code, which lists the services a stop can
@@ -40,8 +42,8 @@ def _seconds(text: str) -> int:
 # meiva:note
 # Before any host: names must be in this checkout's roster; shells and browser have own choices.
 def _service_problems(args: argparse.Namespace, env: Mapping[str, str]) -> list[str]:
-    named = {n for flag in _NAMED for n in vars(args).get(flag[2:].replace("-", "_")) or ()}
-    own = sorted(set(getattr(args, "keep_service", None) or ()) & {"pty-sessions", "browser"})
+    named = {n for flag in _NAMED for n in _strings(args, flag[2:].replace("-", "_"))}
+    own = sorted(set(_strings(args, "keep_service")) & {"pty-sessions", "browser"})
     problems = [f"--keep-service {name}: it has its own keep/stop choice" for name in own]
     if not named:
         return problems
@@ -176,8 +178,21 @@ def _is_object_list(value: object) -> TypeGuard[list[object]]:
     return isinstance(value, list)
 
 
+# meiva:note
+# The attribute `name` of the parsed namespace as an `object` (`None` when argparse never made it).
+def _attr(args: argparse.Namespace, name: str) -> object:
+    return object_of(vars(args).get, name)
+
+
+# meiva:note
+# The attribute `name` as a list of strings: a repeated flag's values, empty when unset.
+def _strings(args: argparse.Namespace, name: str) -> list[str]:
+    raw = _attr(args, name)
+    return [str(item) for item in raw] if _is_object_list(raw) else []
+
+
 def _value(args: argparse.Namespace, flag: str) -> object:
-    return vars(args)[flag[2:].replace("-", "_")]
+    return _attr(args, flag[2:].replace("-", "_"))
 
 
 def _value_problems(args: argparse.Namespace, scope: str) -> list[str]:
@@ -192,10 +207,9 @@ def _value_problems(args: argparse.Namespace, scope: str) -> list[str]:
 
 
 def _resolve_message_choice(args: argparse.Namespace) -> str | None:
-    raw_texts: object = getattr(args, "message_values", None)
+    raw_texts = _attr(args, "message_values")
     texts = raw_texts if _is_object_list(raw_texts) else []
-    raw_flags: object = getattr(args, "message", None)
-    flag_items = [str(item) for item in raw_flags] if _is_object_list(raw_flags) else []
+    flag_items = _strings(args, "message")
     given = (["--message"] * len(texts)) + flag_items
     if len(given) != 1:
         return "exactly one of " + " | ".join(_PAIRS["message"])
@@ -214,7 +228,7 @@ def _resolve_pair_choice(args: argparse.Namespace, dest: str) -> str | None:
     if dest == "message":
         return _resolve_message_choice(args)
     given = [f for f in _PAIRS[dest] if f in _NAMED and _value(args, f)]
-    given += vars(args).get(dest) or []
+    given += _strings(args, dest)
     if len(given) != 1:
         return "exactly one of " + " | ".join(_PAIRS[dest])
     vars(args)[dest] = given[0]
@@ -250,11 +264,6 @@ def _resolve_branch_choice(
     if problems or branch is None:
         return None, problems
     return TargetRequest(target_mode="track-branch", branch=branch, commit_rev=pin), []
-
-
-def _arg_strings(args: argparse.Namespace, name: str) -> list[str]:
-    raw: object = vars(args).get(name)
-    return [str(item) for item in raw] if _is_object_list(raw) else []
 
 
 def _parse_channel_name(raw: str) -> Channel | None:
@@ -315,10 +324,10 @@ def _select_target_mode(
 
 
 def _resolve_target_choice(args: argparse.Namespace) -> list[str]:
-    channels = _arg_strings(args, "channel")
-    releases = _arg_strings(args, "release")
-    branches = _arg_strings(args, "track_branch")
-    commits = _arg_strings(args, "new")
+    channels = _strings(args, "channel")
+    releases = _strings(args, "release")
+    branches = _strings(args, "track_branch")
+    commits = _strings(args, "new")
     if not (channels or releases or branches or commits):
         return [_TARGET_SUMMARY]
     if any(len(items) > 1 for items in (channels, releases, branches, commits)):
@@ -336,54 +345,160 @@ def _resolve_target_choice(args: argparse.Namespace) -> list[str]:
 
 
 def _missing_choices(args: argparse.Namespace, env: Mapping[str, str]) -> list[str]:
-    problems = [] if bool(args.runner) != args.no_runners else ["--runner ALIAS... | --no-runners"]
+    half = _text(args, "half")
+    has_runners = bool(_strings(args, "runner"))
+    problems = (
+        []
+        if has_runners != (_attr(args, "no_runners") is True)
+        else ["--runner ALIAS... | --no-runners"]
+    )
     args.message_text = None
     args.target_request = None
-    if args.half != "up":
+    if half != "up":
         problems += _resolve_target_choice(args)
-    for scope in _SCOPES[args.half]:
+    for scope in _SCOPES[half]:
         for dest in _HALF_PAIRS[scope]:
             if problem := _resolve_pair_choice(args, dest):
                 problems.append(problem)
         problems += _value_problems(args, scope)
-    if args.half != "up" and args.mode not in (None, "smooth", "force"):
+    if half != "up" and _attr(args, "mode") not in (None, "smooth", "force"):
         problems.append("--mode smooth|force")
     return problems + _service_problems(args, env)
 
 
-def forwarded_flags(args: argparse.Namespace, chosen: str) -> list[str]:
+# meiva:note
+# The choices of the `down` half, as the operator made them: each flag of a pair is the one
+# chosen (`--keep-infra`), each value is the validated number or text, and `kept` is the
+# `--keep-service`/`--keep-no-services` choice whose named services travel in `FleetArgs.named`.
+@dataclass(frozen=True)
+class DownChoices:
+    shell: str
+    browser: str
+    extras: str
+    infra: str
+    kept: str
+    mode: str
+    stop_timeout: int
+    silence_hours: float
+    lease_confirm_seconds: int
+    python: str
+    red: str
+
+
+# meiva:note
+# Everything a window reads from its command line, validated and typed. `down` is present for the
+# `run` and `down` halves, `roster_timeout` for `run` and `up`. `named` maps each repeated service
+# flag (`--only-service`, `--disable-service`, `--keep-service`) to the names it was given.
+@dataclass(frozen=True)
+class FleetArgs:
+    half: str
+    gateway: str
+    runner: tuple[str, ...]
+    log_dir: Path
+    dry_run: bool
+    selection: str
+    named: Mapping[str, tuple[str, ...]]
+    start_timeout: int
+    roster_timeout: int | None
+    target_request: TargetRequest | None
+    message_text: str | None
+    rebuild_extras: bool
+    down: DownChoices | None
+
+
+def forwarded_flags(args: FleetArgs, chosen: str) -> list[str]:
     if chosen in _NAMED:
-        values = _value(args, chosen)
-        items = values if _is_object_list(values) else []
-        return [f"{chosen} {shlex.quote(str(name))}" for name in items]
+        return [f"{chosen} {shlex.quote(name)}" for name in args.named[chosen]]
     return [chosen]
 
 
-def message_flag(args: argparse.Namespace) -> str:
+def message_flag(args: FleetArgs) -> str:
     if args.message_text is not None:
         return f"--message {shlex.quote(args.message_text)}"
     return "--no-message"
 
 
-def start_flags(args: argparse.Namespace) -> str:
+def start_flags(args: FleetArgs) -> str:
     return " ".join(forwarded_flags(args, args.selection))
+
+
+def _text(args: argparse.Namespace, name: str) -> str:
+    value = _attr(args, name)
+    if not isinstance(value, str):
+        raise TypeError(f"--{name.replace('_', '-')} is {type(value).__name__}, not text")
+    return value
+
+
+def _whole(args: argparse.Namespace, name: str) -> int:
+    value = _attr(args, name)
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise TypeError(f"--{name.replace('_', '-')} is {type(value).__name__}, not a whole number")
+    return value
+
+
+def _optional_whole(args: argparse.Namespace, name: str) -> int | None:
+    return None if _attr(args, name) is None else _whole(args, name)
+
+
+def _real(args: argparse.Namespace, name: str) -> float:
+    value = _attr(args, name)
+    if not isinstance(value, int | float) or isinstance(value, bool):
+        raise TypeError(f"--{name.replace('_', '-')} is {type(value).__name__}, not a number")
+    return float(value)
+
+
+def _down_choices(args: argparse.Namespace) -> DownChoices:
+    return DownChoices(
+        shell=_text(args, "shell"),
+        browser=_text(args, "browser"),
+        extras=_text(args, "extras"),
+        infra=_text(args, "infra"),
+        kept=_text(args, "kept"),
+        mode=_text(args, "mode"),
+        stop_timeout=_whole(args, "stop_timeout"),
+        silence_hours=_real(args, "silence_hours"),
+        lease_confirm_seconds=_whole(args, "lease_confirm_seconds"),
+        python=_text(args, "python"),
+        red=_text(args, "red"),
+    )
+
+
+def _fleet_args(args: argparse.Namespace) -> FleetArgs:
+    target = _attr(args, "target_request")
+    message = _attr(args, "message_text")
+    log_dir = _attr(args, "log_dir")
+    if not isinstance(log_dir, Path):
+        raise TypeError("--log-dir is not a path")
+    return FleetArgs(
+        half=_text(args, "half"),
+        gateway=_text(args, "gateway"),
+        runner=tuple(_strings(args, "runner")),
+        log_dir=log_dir,
+        dry_run=_attr(args, "execution") == "--dry-run",
+        selection=_text(args, "selection"),
+        named={flag: tuple(_strings(args, flag[2:].replace("-", "_"))) for flag in _NAMED},
+        start_timeout=_whole(args, "start_timeout"),
+        roster_timeout=_optional_whole(args, "roster_timeout"),
+        target_request=target if isinstance(target, TargetRequest) else None,
+        message_text=message if isinstance(message, str) else None,
+        rebuild_extras=_attr(args, "rebuild_extras") is True,
+        down=None if _text(args, "half") == "up" else _down_choices(args),
+    )
 
 
 # meiva:note
 # Parse and validate the whole argv. A refusal exits 2 with every missing or conflicting choice
 # listed at once, before any host is touched.
-def parse(argv: list[str], env: Mapping[str, str]) -> argparse.Namespace:
+def parse(argv: list[str], env: Mapping[str, str]) -> FleetArgs:
     parser = _parser()
     args = parser.parse_args(argv)
     if problems := _missing_choices(args, env):
         listed = "".join(f"\n  {problem}" for problem in problems)
         parser.exit(2, f"refused: every choice is explicit; missing or conflicting:{listed}\n")
-    if getattr(args, "rebuild_extras", False) and getattr(args, "extras", None) == "--keep-extras":
+    if _attr(args, "rebuild_extras") is True and _attr(args, "extras") == "--keep-extras":
         parser.exit(
             2,
             "refused: --rebuild-extras retires and rebuilds the helper; it excludes "
             "--keep-extras\n",
         )
-    args.runner = args.runner or []
-    args.dry_run = args.execution == "--dry-run"
-    return args
+    return _fleet_args(args)

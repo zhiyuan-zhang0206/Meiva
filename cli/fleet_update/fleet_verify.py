@@ -7,8 +7,7 @@
 
 from __future__ import annotations
 
-import argparse
-
+from .choices import FleetArgs
 from .plan.gateway_commands import (
     drift_command,
     machine_name_command,
@@ -49,12 +48,15 @@ def machine_names(s: Session, aliases: tuple[str, ...]) -> dict[str, str]:
 # meiva:link cli/docs/fleet-update.meiva.okf.md
 def roster(
     s: Session,
-    args: argparse.Namespace,
+    args: FleetArgs,
     names: dict[str, str],
     gateway_stdin: str,
     *,
     expect_offline: frozenset[str],
 ) -> tuple[tuple[RosterRow, ...], str]:
+    timeout = args.roster_timeout
+    if timeout is None:
+        raise FailedError("refused: no --roster-timeout for the roster wait")
     wanted = frozenset(names.values())
     started = s.timers.monotonic()
     while True:
@@ -70,13 +72,11 @@ def roster(
             for line in unlisted_lines(rows, wanted):
                 s.say(line)
             return seen.listed, seen.commit
-        delay = poll_delay(
-            s.timers.monotonic() - started, args.roster_timeout, s.pacing.roster_poll_s
-        )
+        delay = poll_delay(s.timers.monotonic() - started, timeout, s.pacing.roster_poll_s)
         if delay is None:
             for line in unlisted_lines(rows, wanted):
                 s.say(line)
-            raise FailedError(timeout_message(args.roster_timeout, seen))
+            raise FailedError(timeout_message(timeout, seen))
         s.timers.sleep(delay)
 
 
@@ -109,7 +109,7 @@ def run_drift_checks(s: Session, gateway: str, hosts: tuple[str, ...]) -> list[H
 
 def verify(
     s: Session,
-    args: argparse.Namespace,
+    args: FleetArgs,
     *,
     hosts: tuple[str, ...],
     started: frozenset[str],

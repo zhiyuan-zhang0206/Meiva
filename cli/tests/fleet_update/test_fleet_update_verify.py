@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import json
 import time
 from collections.abc import Callable
@@ -8,6 +7,7 @@ from typing import cast
 
 import pytest
 
+from cli.fleet_update.choices import parse
 from cli.fleet_update.fleet_verify import roster
 from cli.fleet_update.plan.host_failures import PARTIAL_FAILURE_EXIT
 from cli.fleet_update.session import FailedError, Pacing, Session
@@ -126,7 +126,23 @@ def test_the_roster_wait_is_spent_on_the_sessions_clock() -> None:
             _UNSETTLED_ROSTER, Pacing(roster_poll_s=0.5, lease_tick_s=0.5), timers, most_reads=5
         ),
     )
-    args = argparse.Namespace(gateway="gw", roster_timeout=2, dry_run=False)
+    args = parse(
+        [
+            "up",
+            "--gateway",
+            "gw",
+            "--no-runners",
+            "--log-dir",
+            "logs",
+            "--execute",
+            "--all-services",
+            "--start-timeout",
+            "60",
+            "--roster-timeout",
+            "2",
+        ],
+        {},
+    )
     started = time.monotonic()
 
     with pytest.raises(FailedError):

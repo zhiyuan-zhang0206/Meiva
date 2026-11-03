@@ -12,6 +12,8 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from typing import TypeGuard
 
+from ..untyped import object_of
+
 
 def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict)
@@ -72,7 +74,7 @@ def parse_roster(output: str) -> tuple[RosterRow, ...]:
     if not lines:
         raise ValueError("the roster program printed nothing")
     try:
-        decoded: object = json.loads(lines[-1])
+        decoded = object_of(json.loads, lines[-1])
         if not _is_object_list(decoded):
             raise TypeError("roster payload must be a list")
         return tuple(_row(item) for item in decoded)
