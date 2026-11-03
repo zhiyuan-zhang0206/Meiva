@@ -985,8 +985,9 @@ reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "meiva"
-extraPaths = [".agents/skills/meiva-self-development/reference"]
+root = "meiva/web"
+reportAny = "error"
+reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/skills/coordination"
@@ -1056,6 +1057,10 @@ reportExplicitAny = "error"
 root = "meizel/contracts"
 reportAny = "error"
 reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva"
+extraPaths = [".agents/skills/meiva-self-development/reference"]
 
 [tool.mutmut]
 # Mutation testing exploratory config (mutmut).

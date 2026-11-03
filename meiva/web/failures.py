@@ -8,7 +8,14 @@ from __future__ import annotations
 import json
 from typing import TypeGuard
 
-__all__ = ["connection_failed_message", "http_failed_message", "non_json_message"]
+from base.host.boundary.untyped import object_of
+
+__all__ = [
+    "connection_failed_message",
+    "http_failed_message",
+    "non_json_message",
+    "non_object_message",
+]
 
 _DETAIL_MAX = 200
 
@@ -19,7 +26,7 @@ def _is_str_dict(val: object) -> TypeGuard[dict[str, object]]:
 
 def _provider_message(detail: str) -> str:
     try:
-        parsed: object = json.loads(detail)
+        parsed = object_of(json.loads, detail)
     except json.JSONDecodeError:
         return detail[:_DETAIL_MAX]
     error = parsed.get("error") if _is_str_dict(parsed) else None
@@ -40,3 +47,10 @@ def connection_failed_message(label: str, reason: object) -> str:
 
 def non_json_message(label: str, error: json.JSONDecodeError) -> str:
     return f"{label} returned non-JSON: {error}"
+
+
+# meiva:note
+# A body that parses as JSON but is not an object: the provider answered a list, a number or a
+# string where every reader expects named fields.
+def non_object_message(label: str, kind: str) -> str:
+    return f"{label} returned a JSON {kind}, not an object"

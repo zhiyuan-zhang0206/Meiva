@@ -48,6 +48,69 @@ def test_the_real_configuration_holds_all_seven_rules_at_error_globally() -> Non
     assert {rule: _PYRIGHT.get(rule) for rule in _SEVEN} == dict.fromkeys(_SEVEN, "error")
 
 
+# meiva:note
+# The first entry whose root contains a file decides that file's rules, so an entry is weakened when
+# an earlier one covers the same directory without every Any rule it holds: those files keep the
+# earlier, narrower set and the debt ledger says more than the configuration enforces. Comparing
+# rule *sets* rather than "has a gate" matters once the two entries carry different rules — a
+# package entry holding only `reportAny` would silently drop a child's `reportExplicitAny`.
+# `root = "meiva"` is one such parent (it carries only `extraPaths`), which is why it now sits last.
+def _shadowed(environments: list[dict[str, Any]]) -> list[tuple[str, str, str]]:
+    shadowed: list[tuple[str, str, str]] = []
+    for index, environment in enumerate(environments):
+        held = _any_rules(environment)
+        if not held:
+            continue
+        for earlier in environments[:index]:
+            if earlier["root"] == environment["root"]:
+                continue
+            if not _root_covers(earlier["root"], environment["root"]):
+                continue
+            for rule in sorted(held - _any_rules(earlier)):
+                shadowed.append((earlier["root"], environment["root"], rule))
+    return shadowed
+
+
+def _any_rules(environment: dict[str, Any]) -> frozenset[str]:
+    return frozenset(
+        rule for rule in ("reportAny", "reportExplicitAny") if environment.get(rule) == "error"
+    )
+
+
+def _root_covers(root: str, directory: str) -> bool:
+    return directory == root or directory.startswith(f"{root}/")
+
+
+def test_no_entry_is_shadowed_by_an_earlier_weaker_environment() -> None:
+    assert _shadowed(_PYRIGHT["executionEnvironments"]) == []
+
+
+# meiva:note
+# The check above is only worth its line if it fails on the shape it guards: a parent holding fewer
+# Any rules placed before the child that holds more. Both halves are exercised here, on configs
+# built for the question rather than on today's file.
+def test_the_shadowing_check_flags_a_weaker_parent_and_accepts_a_stronger_one() -> None:
+    def entry(root: str, *rules: str) -> dict[str, Any]:
+        return {"root": root, **dict.fromkeys(rules, "error")}
+
+    weaker_parent = [
+        entry("meiva", "reportAny"),
+        entry("meiva/web", "reportAny", "reportExplicitAny"),
+    ]
+    equal_parent = [
+        entry("meiva", "reportAny", "reportExplicitAny"),
+        entry("meiva/web", "reportAny", "reportExplicitAny"),
+    ]
+    child_first = [
+        entry("meiva/web", "reportAny", "reportExplicitAny"),
+        entry("meiva", "reportAny"),
+    ]
+
+    assert _shadowed(weaker_parent) == [("meiva", "meiva/web", "reportExplicitAny")]
+    assert _shadowed(equal_parent) == []
+    assert _shadowed(child_first) == []
+
+
 def _tracked_test_directories() -> list[str]:
     result = subprocess.run(  # noqa: S603 - fixed git query in this repository
         ["git", "-C", str(_REPO_ROOT), "ls-files", "-z", "--", "*.py"],
