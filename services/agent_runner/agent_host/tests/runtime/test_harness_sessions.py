@@ -219,7 +219,7 @@ async def test_the_builtin_meiva_loop_never_records_a_zero(tmp_path: Path) -> No
 # asserts the recorded value is that status rather than NULL (task #5616).
 class TransportBackedEngine:
     def __init__(self, connection: AcpConnection) -> None:
-        self.harness = Harness.KIMI_CODE
+        self.harness = Harness.CODEX
         self.model = None
         self._connection = connection
         self.closed = False

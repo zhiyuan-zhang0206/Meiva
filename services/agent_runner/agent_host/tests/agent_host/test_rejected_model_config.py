@@ -403,7 +403,7 @@ class TestSchedulerIntegration:
 
 @pytest.mark.parametrize(
     "harness",
-    [Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY, Harness.KIMI_CODE],
+    [Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY],
 )
 @pytest.mark.parametrize(
     ("version", "accepted"), [(None, True), (1, False), (2, False), (False, False)]

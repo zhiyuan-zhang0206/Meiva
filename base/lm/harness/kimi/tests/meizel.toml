@@ -1,6 +1,0 @@
-exports = []
-
-[uses]
-"support.py" = ["fake_acp.py"]
-"test_session.py" = ["support.py"]
-"test_unsolicited.py" = ["support.py"]

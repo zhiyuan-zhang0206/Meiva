@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-import tomllib
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -146,17 +145,6 @@ def _epoch_ms(value: object) -> datetime | None:
         return None
     try:
         return datetime.fromtimestamp(float(value) / 1000, UTC)
-    except (OverflowError, OSError, ValueError):
-        return None
-
-
-def _epoch_seconds(value: object) -> datetime | None:
-    if isinstance(value, str):
-        return _iso_timestamp(value)
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    try:
-        return datetime.fromtimestamp(float(value), UTC)
     except (OverflowError, OSError, ValueError):
         return None
 
@@ -309,71 +297,11 @@ def _antigravity_login(home: Path) -> _LoginEvidence:
     )
 
 
-def _kimi_credentials_file_login(path: Path, *, where: str, now: datetime) -> _LoginEvidence:
-    record = _read_json(path)
-    if not _is_object_dict(record):
-        return _LoginEvidence(signed_in=None, detail=f"{where} is unreadable")
-    data = record
-    has_access = _has_value(data, "access_token")
-    has_refresh = _has_value(data, "refresh_token")
-    if not has_access and not has_refresh:
-        return _LoginEvidence(signed_in=False, detail=f"{where} holds no credentials")
-    expires_at = _epoch_seconds(data.get("expires_at") or data.get("expiresAt"))
-    if has_refresh:
-        refresh_expires = _epoch_seconds(
-            data.get("refresh_expires_at") or data.get("refreshTokenExpiresAt")
-        )
-        if refresh_expires is not None:
-            return _session_deadline(refresh_expires, where=where, now=now)
-        return _renewable_credential(expires_at, where=where, credential="access token")
-    return _session_deadline(expires_at, where=where, now=now)
-
-
-def _kimi_config_login(path: Path, *, where: str) -> _LoginEvidence:
-    try:
-        parsed = tomllib.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
-        return _LoginEvidence(signed_in=None, detail=f"{where} is unreadable")
-    providers = parsed.get("providers")
-    if not _is_object_dict(providers):
-        return _LoginEvidence(signed_in=False, detail=f"{where} holds no credentials")
-    for raw_entry in providers.values():
-        if not _is_object_dict(raw_entry):
-            continue
-        entry = raw_entry
-        if _has_value(entry, "api_key"):
-            return _LoginEvidence(signed_in=True, detail=f"an API key is stored in {where}")
-        oauth = _nested(entry, "oauth")
-        if _has_value(oauth, "access_token") or _has_value(oauth, "refresh_token"):
-            return _LoginEvidence(signed_in=True, detail=f"OAuth credentials are stored in {where}")
-    return _LoginEvidence(signed_in=False, detail=f"{where} holds no credentials")
-
-
-def _kimi_code_login(home: Path, *, now: datetime) -> _LoginEvidence:
-    for rel in (
-        Path(".kimi-code/credentials/kimi-code.json"),
-        Path(".kimi/credentials/kimi-code.json"),
-    ):
-        path = home / rel
-        if path.is_file():
-            return _kimi_credentials_file_login(path, where=f"~/{rel}", now=now)
-    for rel in (Path(".kimi-code/config.toml"), Path(".kimi/config.toml")):
-        path = home / rel
-        if path.is_file():
-            return _kimi_config_login(path, where=f"~/{rel}")
-    return _LoginEvidence(
-        signed_in=None,
-        detail="no Kimi Code credentials found at ~/.kimi-code/credentials/kimi-code.json",
-    )
-
-
 # meiva:note
 # The harnesses whose stored credential can answer when their CLI does not. Which check runs is
 # a `match` rather than a table because only some of them decide an expiry, and those need the
 # caller's instant: a table would force every entry to accept one it does not use.
-_LOGIN_CHECKED = frozenset(
-    {Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY, Harness.KIMI_CODE}
-)
+_LOGIN_CHECKED = frozenset({Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY})
 
 
 def _stored_login(harness: Harness, home: Path, *, now: datetime) -> _LoginEvidence:
@@ -384,8 +312,6 @@ def _stored_login(harness: Harness, home: Path, *, now: datetime) -> _LoginEvide
             return _codex_login(home)
         case Harness.ANTIGRAVITY:
             return _antigravity_login(home)
-        case Harness.KIMI_CODE:
-            return _kimi_code_login(home, now=now)
         case Harness.MEIVA:
             raise AssertionError("the built-in runtime has no stored credential to read")
 
@@ -394,7 +320,6 @@ _BINARIES = {
     Harness.CLAUDE_CODE: "claude",
     Harness.CODEX: "codex",
     Harness.ANTIGRAVITY: "agy",
-    Harness.KIMI_CODE: "kimi",
 }
 
 _UNPROBED = set(Harness) - {Harness.MEIVA} - set(_BINARIES) - _LOGIN_CHECKED
@@ -417,7 +342,6 @@ _CLI_STATUS_ARGS: dict[Harness, tuple[str, ...]] = {
     Harness.CLAUDE_CODE: ("auth", "status", "--json"),
     Harness.CODEX: ("login", "status"),
     Harness.ANTIGRAVITY: ("models",),
-    Harness.KIMI_CODE: ("doctor",),
 }
 
 # meiva:note
@@ -429,7 +353,6 @@ _CLI_TIMEOUT_S: dict[Harness, float] = {
     Harness.CLAUDE_CODE: 8.0,
     Harness.CODEX: 8.0,
     Harness.ANTIGRAVITY: 12.0,
-    Harness.KIMI_CODE: 8.0,
 }
 
 CliRunner = Callable[..., "subprocess.CompletedProcess[str]"]
@@ -481,25 +404,10 @@ def _answered_agy(done: subprocess.CompletedProcess[str]) -> _LoginEvidence:
     return _LoginEvidence(signed_in=None, detail="agy models reported no login state")
 
 
-def _answered_kimi(done: subprocess.CompletedProcess[str]) -> _LoginEvidence:
-    said = f"{done.stdout}\n{done.stderr}".lower()
-    if any(
-        token in said
-        for token in ("not logged in", "login required", "no credentials", "unauthorized")
-    ):
-        return _LoginEvidence(signed_in=False, detail="kimi doctor reports no login")
-    if done.returncode == 0 and any(
-        token in said for token in ("logged in", "authenticated", "credentials valid")
-    ):
-        return _LoginEvidence(signed_in=True, detail="kimi doctor reports a login")
-    return _LoginEvidence(signed_in=None, detail="kimi doctor reported no login state")
-
-
 _CLI_ANSWERS: dict[Harness, Callable[[subprocess.CompletedProcess[str]], _LoginEvidence]] = {
     Harness.CLAUDE_CODE: _answered_claude,
     Harness.CODEX: _answered_codex,
     Harness.ANTIGRAVITY: _answered_agy,
-    Harness.KIMI_CODE: _answered_kimi,
 }
 
 

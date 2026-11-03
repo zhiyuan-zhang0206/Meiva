@@ -620,6 +620,14 @@ class TestRunnability:
         assert wake_screening.is_runnable(
             "macmini", 1, stored, launchable=frozenset({Harness.MEIVA, Harness.ANTIGRAVITY})
         )
+        retired = StoredConfig(
+            machine="macmini",
+            status="idling",
+            harness="kimi_code",
+            config_overlay=None,
+            birth_config=None,
+        )
+        assert wake_screening.is_runnable("macmini", 1, retired) is False
 
     async def test_a_missing_row_is_skipped(self, wired: Build) -> None:
         host, graph, _ = wired({})

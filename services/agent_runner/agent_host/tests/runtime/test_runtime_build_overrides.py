@@ -56,7 +56,6 @@ from services.agent_runner.agent_host.tests.runtime.observation import served_mo
         (Harness.CLAUDE_CODE, "claude-opus-5-5", "low"),
         (Harness.CODEX, "gpt-6-astra", "ultra"),
         (Harness.ANTIGRAVITY, "gemini-4-argon", "low"),
-        (Harness.KIMI_CODE, "kimi-k3.1-pro", "max"),
     ],
 )
 @pytest.mark.parametrize("selection", [False, True])

@@ -67,13 +67,31 @@ def _check_values(table: str, column: str) -> set[str]:
     return {v.strip().strip("'") for v in clause.group(1).split(",") if v.strip()}
 
 
+# meiva:note
+# Expand-contract phase 1 values: retired from the Python enum so no new birth,
+# overlay or wire response accepts them, while kept in `db/schema.sql`'s CHECK
+# until a later contract migration drops them (`db/docs/migrations.md` rule 2:
+# narrowing the CHECK immediately would fail on deployments with historical rows
+# or require lossily rewriting stored provenance).
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+_RETIRED_DB_CHECK_VALUES: dict[tuple[str, str], frozenset[str]] = {
+    ("agents_meta", "harness"): frozenset({"kimi_code"}),
+}
+
+
 @pytest.mark.parametrize(("table", "column"), list(_CASES))
 def test_python_value_set_matches_db_check(table: str, column: str) -> None:
     python_set = _CASES[(table, column)]
+    retired = _RETIRED_DB_CHECK_VALUES.get((table, column), frozenset())
+    assert python_set.isdisjoint(retired), (
+        f"{table}.{column}: {sorted(python_set & retired)} is still in the Python enum "
+        f"while listed in _RETIRED_DB_CHECK_VALUES"
+    )
     db_set = _check_values(table, column)
-    assert python_set == db_set, (
-        f"{table}.{column}: the Python source-of-truth {sorted(python_set)} != the "
-        f"db/schema.sql CHECK {sorted(db_set)}. A value in one but not the other "
-        f"means an INSERT/UPDATE of it fails the constraint (or a dead CHECK entry). "
-        f"Sync both sides + ship a migration ALTERing the live constraint."
+    expected_db_set = python_set | retired
+    assert expected_db_set == db_set, (
+        f"{table}.{column}: expected DB CHECK {sorted(expected_db_set)} "
+        f"(Python {sorted(python_set)} + retired {sorted(retired)}) != "
+        f"db/schema.sql CHECK {sorted(db_set)}. Sync both sides + ship a "
+        f"migration ALTERing the live constraint."
     )

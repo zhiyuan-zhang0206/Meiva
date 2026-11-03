@@ -19,7 +19,6 @@ from base.lm.harness.codex import CodexConfig
 from base.lm.harness.codex.session import CodexSession
 from base.lm.harness.events import UnsolicitedSink
 from base.lm.harness.handoff import ClusterFact, Handoff, HarnessContribution
-from base.lm.harness.kimi import KimiConfig, KimiSession
 from base.lm.harness.registration import HANDLE_ENV, RegistrationStore, SecureRandom
 from base.lm.harness.registry import SessionRegistry
 
@@ -96,18 +95,6 @@ def open_session(
             antigravity_config = replace(antigravity_config, model=model)
         return AgySession(
             antigravity_config,
-            environ=environ,
-            binding=SessionBinding(agent_id, registry),
-            clock=clock,
-        )
-    if harness is Harness.KIMI_CODE:
-        return KimiSession(
-            KimiConfig(
-                cwd=cwd,
-                model=model,
-                reasoning_effort=reasoning_effort,
-                skip_permissions=skip_permissions,
-            ),
             environ=environ,
             binding=SessionBinding(agent_id, registry),
             clock=clock,

@@ -40,7 +40,6 @@ from base.lm.harness import (
 from base.lm.harness.antigravity import AgySession
 from base.lm.harness.claude.session import ClaudeSession
 from base.lm.harness.codex.session import CodexSession
-from base.lm.harness.kimi import KimiSession
 from base.lm.harness.registration import SecureRandom
 from base.lm.harness.tests.roots import bridge_root_values
 from base.lm.harness.wiring import HANDOFF_INSTRUCTION, bridge_for, open_session
@@ -374,7 +373,6 @@ async def test_close_closes_the_session_and_refuses_later_turns() -> None:
         (Harness.CLAUDE_CODE, "claude-opus-5-5", "low"),
         (Harness.CODEX, "gpt-6.1-sol", "xhigh"),
         (Harness.ANTIGRAVITY, "gemini-4-argon-low", "low"),
-        (Harness.KIMI_CODE, "kimi-k3.1-pro", "max"),
     ],
 )
 def test_execution_selection_reaches_the_adapter(
@@ -399,7 +397,7 @@ def test_execution_selection_reaches_the_adapter(
         model=model,
         reasoning_effort=effort,
     )
-    assert isinstance(session, (ClaudeSession, CodexSession, AgySession, KimiSession))
+    assert isinstance(session, (ClaudeSession, CodexSession, AgySession))
     assert session.config.model == model
     if isinstance(session, AgySession):
         command = session.config.command(resume=None)
@@ -487,34 +485,6 @@ def test_an_antigravity_session_is_built_with_the_skip_flag_it_was_given() -> No
     )
     assert isinstance(plain, AgySession)
     assert plain.config.skip_permissions is False
-
-
-def test_a_kimi_code_session_is_built_with_the_skip_flag_it_was_given() -> None:
-    session = open_session(
-        Harness.KIMI_CODE,
-        agent_id=1,
-        cwd=Path("/agents/6984"),
-        registry=FileSessionRegistry(Path("/registry")),
-        skip_permissions=True,
-        environ={},
-        clock=system_clock(),
-    )
-    assert isinstance(session, KimiSession)
-    assert session.config.skip_permissions is True
-    assert session.config.permission_mode == "allow"
-
-    plain = open_session(
-        Harness.KIMI_CODE,
-        agent_id=1,
-        cwd=Path("/agents/6984"),
-        registry=FileSessionRegistry(Path("/registry")),
-        skip_permissions=False,
-        environ={},
-        clock=system_clock(),
-    )
-    assert isinstance(plain, KimiSession)
-    assert plain.config.skip_permissions is False
-    assert plain.config.permission_mode == "ask"
 
 
 def record(harness: str = "meiva") -> SessionRecord:

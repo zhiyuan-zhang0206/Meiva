@@ -150,7 +150,7 @@ const modelsWithTwoLadders = (): ModelsResponse => ({
 });
 
 const harnessAllAvailable = () =>
-  (["meiva", "claude_code", "codex", "antigravity", "kimi_code"] as const).map((harness) => ({
+  (["meiva", "claude_code", "codex", "antigravity"] as const).map((harness) => ({
     harness,
     status: "available" as const,
     reason: "",
@@ -329,7 +329,6 @@ describe.each(["table", "stack"] as const)("%s API model visibility", (layout) =
     { harness: "claude_code", label: "Claude Code", provider: "claude", model: "claude-sonnet-5-5" },
     { harness: "codex", label: "Codex", provider: "gpt", model: "gpt-6-astra" },
     { harness: "antigravity", label: "Antigravity", provider: "gemini", model: "gemini-4-argon" },
-    { harness: "kimi_code", label: "Kimi Code", provider: "kimi", model: "kimi-k2.6" },
   ] as const)("keeps $harness execution selectable while its API model is hidden", async ({ harness, label, provider, model }) => {
     transport.getSystemStatus.mockResolvedValue(singleMachineStatus());
     const catalog = modelsWithEffort();

@@ -42,7 +42,6 @@ _WIRE: dict[str, Any] = {
             "on_path": False,
         },
         {"harness": "antigravity", "status": "unavailable", "reason": "not installed"},
-        {"harness": "kimi_code", "status": "unavailable", "reason": "not installed"},
     ],
 }
 

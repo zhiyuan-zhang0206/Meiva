@@ -19,7 +19,7 @@ owns no provider table or effort conversion.
 
 `meiva` runs every spawnable model through its configured API keys.
 `harnesses_for` therefore implies the native runtime. External bindings name
-only executable selections: Claude Code, Codex and Kimi use the registered
+only executable selections: Claude Code and Codex use the registered
 model ID; Antigravity's Gemini 4 Argon, Gemini 3.8 Flash, Claude Opus 5.5 and
 Claude Sonnet 5.5 bindings translate low/medium/high into the exact observed
 `agy models` IDs ending in that effort. Antigravity offers only these declared
@@ -37,8 +37,8 @@ unsupported selection.
 The stored `llm_model` and `reasoning_effort` select the execution session.
 The runner resolves that binding and passes it through `bridge_for` and
 `open_session`. Claude receives SDK model/effort options; Codex receives them
-on every `turn/start`, including after thread resume; Kimi receives ACP config
-options; Antigravity receives the resolved full model ID on its command line.
+on every `turn/start`, including after thread resume; Antigravity receives the
+resolved full model ID on its command line.
 External agents use the CLI's authentication and do not construct a native
 chat model or require its provider API key.
 

@@ -62,7 +62,6 @@ class Harness(StrEnum):
     CLAUDE_CODE = "claude_code"
     CODEX = "codex"
     ANTIGRAVITY = "antigravity"
-    KIMI_CODE = "kimi_code"
 
 
 # meiva:note
@@ -83,7 +82,6 @@ HARNESS_BILLING: dict[Harness, HarnessBilling] = {
     Harness.CLAUDE_CODE: HarnessBilling.SUBSCRIPTION,
     Harness.CODEX: HarnessBilling.SUBSCRIPTION,
     Harness.ANTIGRAVITY: HarnessBilling.SUBSCRIPTION,
-    Harness.KIMI_CODE: HarnessBilling.SUBSCRIPTION,
 }
 if set(HARNESS_BILLING) != set(Harness):
     raise RuntimeError(
@@ -107,7 +105,6 @@ LAUNCHABLE_HARNESSES: frozenset[Harness] = frozenset(
         Harness.CLAUDE_CODE,
         Harness.CODEX,
         Harness.ANTIGRAVITY,
-        Harness.KIMI_CODE,
     )
 )
 
