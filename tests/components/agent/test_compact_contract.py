@@ -3,6 +3,8 @@
 import pytest
 
 from agent.graph.hooks.compact import COMPACTION_INSTRUCTION
+from agent.hooks import Hook
+from agent.state import AgentState
 from base.packages.plugins.extensions import EMPTY
 
 
@@ -18,7 +20,9 @@ def meiva_compact_loaded():
     return build_agent_state(EMPTY), compact_reminder
 
 
-def test_compact_triggers_point_at_the_contract(meiva_compact_loaded):
+def test_compact_triggers_point_at_the_contract(
+    meiva_compact_loaded: tuple[type[AgentState], Hook],
+) -> None:
     """Each compaction trigger (forced/auto instruction, the reminder nudge, the
     /compact command) names the `meiva.self.compact` contract. Forced compaction
     appends the SDK-owned text; other triggers can discover it on demand."""

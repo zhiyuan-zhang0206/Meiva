@@ -6,6 +6,7 @@ import os
 import re
 import shlex
 import subprocess
+from collections.abc import Iterable
 from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -89,7 +90,7 @@ def run_fixture(
     return result
 
 
-def assert_sources_covered(sources, pattern):
+def assert_sources_covered(sources: Iterable[str], pattern: str) -> None:
     missing = sorted(path for path in sources if not re.search(pattern, path))
     assert not missing, f"Uncovered codegen source modules: {missing}"
 

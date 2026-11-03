@@ -183,3 +183,11 @@ fixture/incident scope.
 - **evidence**: base tests read private names the dependencies and the telemetry pipeline do not type, each with a `# pyright: ignore` and a `meiva:note`: langchain_openai 1.6.2 private helpers `_create_usage_metadata_responses` (`base/packages/tests/lm/providers/test_openai_cache_write_pricing.py:9`), `_construct_lc_result_from_responses_api` and `_convert_responses_chunk_to_generation_chunk` (`base/packages/tests/lm/providers/test_openai_fast.py:7`, `:8`), their unparameterized `dict` parameters; the `_get_request_payload` method of ChatOpenAI and ChatAnthropic (`base/packages/tests/lm/test_fast_services.py:70`, `:92`); and the telemetry pipeline's `_exporter` attribute (`base/telemetry/tests/test_pipeline_sink_isolation.py:117`). The tests exercise the real wire conversion, which has no public entry. Revive when a public conversion entry exists or the pipeline exposes its exporter; each site is then a typed call.
 - **first-seen**: 2026-11-03 (PR #8274)
 - **last-verified**: 2026-11-03
+
+
+### boundary:tests-leak-guard-raw-signal-module
+- **class**: boundary
+- **status**: open
+- **evidence**: `tests/fixtures/leak_guard.py` reads signal handlers through the C module `_signal.getsignal` directly (the `signal.getsignal` wrapper costs three Python frames per signal and per read, and the guard reads them around every test). The `_signal` module ships no stub, so the import carries its original `# pyright: ignore[reportMissingImports]` and the callable is typed by a cast (`_getsignal = cast("Callable[[int], Any]", _signal.getsignal)`). Revive when the stdlib stubs cover `_signal`, or when the guard's read is cheap enough to go through `signal.getsignal`; the ignore then goes.
+- **first-seen**: 2026-11-03 (top-level tests/ promotion)
+- **last-verified**: 2026-11-03

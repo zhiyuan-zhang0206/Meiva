@@ -46,7 +46,7 @@ _OVERRIDE_BASE_URL = os.environ.get("MEIVA_MOBILE_TEST_BASE_URL")
 # Minimal SystemStatus body — frontend SpawnButton only reads
 # `cluster.machines`; the rest of `/api/status` (scheduler / services / shells)
 # is not consulted by the picker so plausible empty defaults are enough.
-_STUB_STATUS_BODY = {
+_STUB_STATUS_BODY: dict[str, object] = {
     "cluster": {
         "machines": [
             {

@@ -2,10 +2,11 @@
 
 from collections.abc import Callable
 from dataclasses import replace
+from typing import cast
 
 import psycopg
 import pytest
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import AnyMessage, SystemMessage
 from langgraph.graph import END
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
@@ -137,8 +138,9 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
     )
 
     assert cmd.goto == "before_llm"
-    assert cmd.update["halted"] is False  # type: ignore[index]
-    contents = [m.content for m in cmd.update["messages"]]  # type: ignore[index]
+    assert cmd.update is not None
+    assert cmd.update["halted"] is False
+    contents = [str(m.content) for m in cast("list[AnyMessage]", cmd.update["messages"])]
     assert any("You have been resurrected by user" in c for c in contents)
     assert any("are you there?" in c for c in contents)  # chat not swallowed
     assert not any("Termination was accepted" in c for c in contents)

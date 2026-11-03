@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
-from typing import Any
 
 import psycopg
 import pytest
@@ -16,6 +15,7 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.events.tests.pubsub_view import messages
 from base.lm.catalog import ModelCatalog
 from ops.agents import wake
 
@@ -27,15 +27,15 @@ def wakes(event_bus: EventBus) -> Iterator[Callable[[], list[tuple[int, str]]]]:
     prefix = f"{event_bus.channel}:inbound:"
     redis = event_bus.sync_redis(decode_responses=True)
     pubsub = redis.pubsub()  # pyright: ignore[reportUnknownMemberType]
-    pubsub.psubscribe(f"{prefix}*")  # pyright: ignore[reportUnknownMemberType]
-    assert pubsub.get_message(timeout=5)["type"] == "psubscribe"  # pyright: ignore[reportUnknownMemberType, reportOptionalSubscript]
+    pubsub.psubscribe(f"{prefix}*")
+    assert pubsub.get_message(timeout=5)["type"] == "psubscribe"  # pyright: ignore[reportOptionalSubscript]
     captured: list[tuple[int, str]] = []
 
     def drain() -> list[tuple[int, str]]:
         while True:
             # meiva:note
-            # The redis-py pubsub client is untyped; drain published resurrection wakes ("0").
-            message: dict[str, Any] | None = pubsub.get_message(timeout=0.05)  # pyright: ignore[reportUnknownMemberType, reportAssignmentType]
+            # Drain published resurrection wakes ("0").
+            message = messages(pubsub).get_message(timeout=0.05)
             if message is None:
                 return list(captured)
             if message["type"] == "pmessage" and str(message["data"]) == "0":
@@ -45,7 +45,7 @@ def wakes(event_bus: EventBus) -> Iterator[Callable[[], list[tuple[int, str]]]]:
     try:
         yield drain
     finally:
-        pubsub.close()  # pyright: ignore[reportUnknownMemberType]
+        pubsub.close()
         redis.close()
 
 

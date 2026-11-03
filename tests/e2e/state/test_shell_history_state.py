@@ -138,7 +138,10 @@ def _settle(page: Page, read_js: str, timeout_s: float = 20.0) -> None:
             and cast("dict[str, object]", cur).get("st") is not None
         ):
             return
-        prev = cur
+        # meiva:note
+        # The `isinstance(cur, dict)` test above leaves `cur` narrowed to `dict[Unknown, Unknown]`
+        # on this path (reportUnknownVariableType); the cast widens it back to the declared type.
+        prev = cast("object", cur)
         page.wait_for_timeout(500)
 
 
