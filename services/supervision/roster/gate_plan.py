@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, assert_never
 
@@ -17,12 +18,47 @@ __all__ = [
     "FlagFact",
     "GateFact",
     "GateKind",
+    "GateSettings",
     "StationFact",
     "gate_kind",
     "gate_reason",
 ]
 
 GateKind = Literal["flag", "browser", "computer-mcp", "station", "collector", "bridge", "none"]
+
+
+# meiva:note
+# The settings every gate of the roster reads: the enablement flag of each optional session, the
+# browser's binary, and the two data-plane urls the relay gate asks about. The roster's assembly
+# collects them once (`composition.gate_settings`) and hands the value to `spec.gate_reason`, so a
+# gate is a decision over facts and the settings those facts start from, never a configuration
+# read of its own.
+@dataclass(frozen=True)
+class GateSettings:
+    browser_enabled: bool
+    chrome_binary: str
+    permissions_helper_enabled: bool
+    heartbeat_enabled: bool
+    delivery_watchdog_enabled: bool
+    im_bridge_enabled: bool
+    db_url: str
+    redis_url: str
+
+    # meiva:note
+    # The reader is required and has no default: a default would let this module read the
+    # process's own settings, which is the ambient read `spec.py` no longer carries.
+    @classmethod
+    def from_fields(cls, read_field: Callable[[str], object]) -> GateSettings:
+        return cls(
+            browser_enabled=bool(read_field("browser_enabled")),
+            chrome_binary=str(read_field("chrome_binary")),
+            permissions_helper_enabled=bool(read_field("permissions_helper_enabled")),
+            heartbeat_enabled=bool(read_field("heartbeat_enabled")),
+            delivery_watchdog_enabled=bool(read_field("delivery_watchdog_enabled")),
+            im_bridge_enabled=bool(read_field("im_bridge_enabled")),
+            db_url=str(read_field("db_url")),
+            redis_url=str(read_field("redis_url")),
+        )
 
 
 # meiva:note

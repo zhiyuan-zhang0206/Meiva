@@ -2,7 +2,7 @@ exports = ["__main__.py", "composition.py", "healthz.py", "plugin_services.py", 
 
 [uses]
 "__init__.py" = ["healthz.py", "service_spec.py"]
-"composition.py" = ["healthz.py", "plugin_services.py", "service_spec.py"]
+"composition.py" = ["gate_plan.py", "healthz.py", "plugin_services.py", "service_spec.py"]
 "__main__.py" = ["composition.py"]
 "healthz.py" = ["service_spec.py"]
 "plugin_services.py" = ["service_spec.py"]
@@ -17,5 +17,4 @@ exports = ["__main__.py", "composition.py", "healthz.py", "plugin_services.py", 
 
 [roots]
 "__main__.py" = { kinds = ["home"], why = "`python -m services.supervision.roster` resolves the home whose plugins declare the services it prints" }
-"composition.py" = { kinds = ["settings"], why = "assembles the roster at use time: reads the machine host, the database and Redis urls and the gateway settings that the service specs take, and builds the health-endpoint table from those port fields and the home its caller names" }
-"spec.py" = { kinds = ["settings"], why = "reads the enablement settings (browser, helper, heartbeat and others) that gate each roster entry when its spec is asked" }
+"composition.py" = { kinds = ["settings"], why = "assembles the roster at use time: reads the machine host, the database and Redis urls, the gateway settings that the service specs take, and the enablement flags the roster gates judge (through `gate_settings()`, which `spec.gate_reason` takes as a value), and builds the health-endpoint table from those port fields and the home its caller names" }

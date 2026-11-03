@@ -23,6 +23,7 @@ def test_only_an_agent_runner_host_runs_exec_host(
         s.session
         for s in spec.services_for_capabilities(
             frozenset({"agent-runner"}),
+            settings=composition.gate_settings(),
             machine=machine_identity,
             host=fake_host(),
             home=meiva_home(),
@@ -31,7 +32,11 @@ def test_only_an_agent_runner_host_runs_exec_host(
     gateway_started = {
         s.session
         for s in spec.services_for_capabilities(
-            frozenset({"gateway"}), machine=machine_identity, host=fake_host(), home=meiva_home()
+            frozenset({"gateway"}),
+            settings=composition.gate_settings(),
+            machine=machine_identity,
+            host=fake_host(),
+            home=meiva_home(),
         )
     }
     assert "exec-host" in runner_started

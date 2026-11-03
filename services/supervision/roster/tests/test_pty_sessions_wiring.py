@@ -24,7 +24,11 @@ def test_both_a_gateway_host_and_a_runner_host_run_the_service(
         started = {
             s.session
             for s in spec.services_for_capabilities(
-                frozenset({role}), machine=machine_identity, host=fake_host(), home=meiva_home()
+                frozenset({role}),
+                settings=composition.gate_settings(),
+                machine=machine_identity,
+                host=fake_host(),
+                home=meiva_home(),
             )
         }
         assert "pty-sessions" in started, role

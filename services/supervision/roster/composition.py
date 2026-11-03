@@ -21,6 +21,7 @@ from base.host.net.url_secret import names_foreign_host
 from base.native_process.stop_timing import HOST_STOP_CEILING_S, OPS_STOP_CEILING_S
 from base.paths import otel_collector_binary, otel_collector_config, run_dir
 from services.supervision.roster import plugin_services
+from services.supervision.roster.gate_plan import GateSettings
 from services.supervision.roster.healthz import healthz_daemon
 from services.supervision.roster.service_spec import AGENT_RUNNER, BOTH, GATEWAY, ServiceSpec
 
@@ -65,6 +66,15 @@ def redis_bridge_command(home: Path) -> tuple[str, str, int]:
     except RedisBridgeUnconfiguredError:
         endpoint = None
     return redis_bridge_launch(endpoint)
+
+
+# meiva:note
+# The settings the roster's gates read, collected once here: this assembly is the roster's one
+# settings reader, and `spec.gate_reason` takes the value instead of reading configuration when a
+# gate is asked. The two data-plane urls are the same pair `redis_bridge_command` reads for the
+# relay's listen address — one option, read by the process that assembles the roster.
+def gate_settings() -> GateSettings:
+    return GateSettings.from_fields(get_field)
 
 
 # meiva:note

@@ -65,6 +65,7 @@ from cli.database.lifecycle_audit import operator_lifecycle_audit
 from cli.database.runtime import CommandRuntime
 from cli.start_identity import mark_phase, read_intent
 from cli.start_runtime import StartRuntime
+from services.supervision.roster.composition import gate_settings
 from services.supervision.roster.service_spec import ServiceSpec
 from services.supervision.roster.spec import services_for_capabilities_annotated
 
@@ -202,7 +203,9 @@ def launch_roster(
     # meiva:note
     # The launch roster of the caller's explicit service selection: exactly one selection form
     # (`resolve_selection` refuses anything else), minus the units this host gates out.
-    annotated = services_for_capabilities_annotated(roles, machine=machine, host=host, home=home)
+    annotated = services_for_capabilities_annotated(
+        roles, settings=gate_settings(), machine=machine, host=host, home=home
+    )
     launch_skip = resolve_selection(
         {spec.session for spec, _reason in annotated},
         only=only_services,
