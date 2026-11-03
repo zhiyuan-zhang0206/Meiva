@@ -14,6 +14,7 @@ from base.agents.context.clients import DatabaseFactory
 from base.host.atomic_io import write_text_atomic
 from base.log import logger
 from base.telemetry import EventPipeline
+from cli.boundary.json_body import loads, response_value
 from cli.commands.converge.rendered_file import write_rendered_guarded
 from cli.commands.observability.plans.lgtm.dashboard_checks import (
     GrafanaReply,
@@ -182,7 +183,7 @@ def _is_object_list(value: object) -> TypeGuard[list[object]]:
 # silently.
 def dashboard_document(path: Path) -> dict[str, object]:
     try:
-        document: object = json.loads(path.read_text(encoding="utf-8"))
+        document = loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         logger.warning(
             "dashboard {path} could not be read ({err}); it is not provisioned this pass",
@@ -323,7 +324,7 @@ def _prune_ghost_hashes(dest_dir: Path, hashes_path: Path) -> None:
 
 def _recorded_hashes(hashes_path: Path) -> dict[str, object]:
     try:
-        recorded: object = json.loads(hashes_path.read_text(encoding="utf-8"))
+        recorded = loads(hashes_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     return recorded if _is_object_dict(recorded) else {}
@@ -336,7 +337,7 @@ def _grafana_get(url: str) -> GrafanaReply:
     except httpx.HTTPError as exc:
         return GrafanaReply(0, f"{type(exc).__name__}: {exc}")
     try:
-        return GrafanaReply(response.status_code, response.json())
+        return GrafanaReply(response.status_code, response_value(response))
     except ValueError:
         return GrafanaReply(response.status_code, None)
 

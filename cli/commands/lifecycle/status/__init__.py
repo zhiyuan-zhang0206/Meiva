@@ -19,7 +19,7 @@ import json
 import sys
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, assert_never
+from typing import assert_never
 
 import httpx
 
@@ -209,7 +209,7 @@ def print_converge_section(home: Path) -> None:
 # prints: `meiva status` is the command to run on a host whose root is misbehaving.
 def root_tree_units(
     home: Path, *, environ: Mapping[str, str], pid: int
-) -> dict[str, dict[str, Any]]:
+) -> dict[str, dict[str, object]]:
     try:
         snapshot = root_driver.root_status(root_driver.root_client(home, environ=environ, pid=pid))
     except root_driver.RootDriverError as exc:
@@ -221,7 +221,7 @@ def root_tree_units(
 
 
 def _print_service_rows(
-    table: ServiceTable, specs: tuple[ServiceSpec, ...], root_units: dict[str, dict[str, Any]]
+    table: ServiceTable, specs: tuple[ServiceSpec, ...], root_units: dict[str, dict[str, object]]
 ) -> None:
     print(table.header)
     print(table.rule)
@@ -283,7 +283,7 @@ def read_gateway_outcome(config: ConfigBoot) -> GatewayOutcome:
 
 # meiva:note
 # Read the `GET /api/cluster/status` body; a body that is not a ClusterStatus raises.
-def gateway_report_from_body(body: dict[str, object]) -> GatewayReport:
+def gateway_report_from_body(body: Mapping[str, object]) -> GatewayReport:
     status = ClusterStatus.model_validate(body)
     return GatewayReport(
         machine_name=status.machine_name,

@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TypeGuard
 
+from cli.boundary.json_text import loads
+
 # meiva:note
 # A converge that aborts leaves this marker in the home it was converging. It
 # exists because the failure is invisible otherwise: `meiva start` brings the
@@ -36,7 +38,7 @@ def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
 
 def read_incomplete(meiva_home: Path) -> IncompleteConverge | None:
     try:
-        raw: object = json.loads(state_path(meiva_home).read_text(encoding="utf-8"))
+        raw = loads(state_path(meiva_home).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     data = raw if _is_object_dict(raw) else {}

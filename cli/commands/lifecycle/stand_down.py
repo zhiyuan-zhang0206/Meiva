@@ -22,6 +22,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TypeGuard
 
+from cli.boundary.json_text import loads
+
 _STEM = "stand-down.json"
 
 
@@ -97,7 +99,7 @@ def read(home: Path) -> StandDown | None:
     except OSError:
         return _unreadable()
     try:
-        loaded: object = json.loads(text)
+        loaded = loads(text)
     except ValueError:
         return _unreadable()
     if not _is_object_dict(loaded):

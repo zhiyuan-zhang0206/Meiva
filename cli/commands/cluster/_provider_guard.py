@@ -15,14 +15,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TypeGuard
 
 import httpx
 import psycopg
+from psycopg.rows import class_row
 
 from base.agents.context.clients import DatabaseFactory
 from base.agents.recovery.breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
 from base.config import ConfigBoot
+from cli.boundary.json_body import response_value
 from cli.commands.cluster.plans.provider_verdicts import (
     BalancePayload,
     BalanceUnreadable,
@@ -93,10 +94,6 @@ def _read_balance(guard: ProviderGuardConfig) -> NoProviderKey | BalanceUnreadab
     return fetch_balance(guard.balance_url, guard.deepseek_api_key, guard.balance_timeout_s)
 
 
-def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
-    return isinstance(value, dict)
-
-
 # meiva:note
 # One authenticated read of the provider balance endpoint. Any failure is a value with a
 # sanitized reason: an HTTP status, an exception class, or the shape of the answer, never a
@@ -109,14 +106,19 @@ def fetch_balance(url: str, key: str, timeout_s: float) -> BalancePayload | Bala
             timeout=timeout_s,
         )
         response.raise_for_status()
-        payload: object = response.json()
+        payload = response_value(response)
     except httpx.HTTPStatusError as exc:
         return BalanceUnreadable(f"HTTP {exc.response.status_code}")
     except (httpx.HTTPError, ValueError) as exc:
         return BalanceUnreadable(type(exc).__name__)
-    if not _is_object_dict(payload):
+    if not isinstance(payload, dict):
         return BalanceUnreadable("response is not a JSON object")
     return BalancePayload(payload)
+
+
+@dataclass(frozen=True)
+class _Count:
+    halted: int
 
 
 # meiva:note
@@ -129,9 +131,12 @@ def fetch_balance(url: str, key: str, timeout_s: float) -> BalancePayload | Bala
 # reports "cannot judge" and passes, never a guessed healthy verdict.
 def halted_agents_count(window_hours: float, *, database_factory: DatabaseFactory) -> int | None:
     try:
-        with database_factory().connect() as conn, conn.cursor() as cur:
+        with (
+            database_factory().connect() as conn,
+            conn.cursor(row_factory=class_row(_Count)) as cur,
+        ):
             cur.execute(
-                "SELECT count(*) FROM agents_meta"
+                "SELECT count(*) AS halted FROM agents_meta"
                 " WHERE permanent_reject_streak >= %s"
                 "   AND last_turn_fatal_at > now() - make_interval(secs => %s)",
                 (HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS, window_hours * 3600.0),
@@ -139,4 +144,4 @@ def halted_agents_count(window_hours: float, *, database_factory: DatabaseFactor
             row = cur.fetchone()
     except (psycopg.Error, OSError):
         return None
-    return int(row[0]) if row is not None else None
+    return row.halted if row is not None else None

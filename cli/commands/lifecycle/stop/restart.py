@@ -30,6 +30,7 @@ from base.native_process.root_control.ipc import ResponsePayload
 from base.paths.home import home_checkout_error
 from base.sessions.hosting import hosting_supervised_session
 from base.telemetry import EventPipeline
+from cli.boundary.untyped import object_of
 from cli.commands import _repo
 from cli.commands.lifecycle import root_driver, root_readiness, start
 from cli.commands.lifecycle.root_control.snapshot import root_units
@@ -188,7 +189,11 @@ class _Tee:
         self._stream.flush()
 
     def __getattr__(self, name: str) -> object:
-        return getattr(self._stream, name)
+        absent = object()
+        found = object_of(getattr, self._stream, name, absent)
+        if found is absent:
+            raise AttributeError(name)
+        return found
 
 
 # meiva:note

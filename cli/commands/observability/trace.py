@@ -23,6 +23,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 import httpx
+from pydantic import TypeAdapter
 
 from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
@@ -47,6 +48,7 @@ from cli.commands.observability.plans.trace_ship.target import (
 from cli.commands.observability.url_split import split_url
 
 _WATERMARK_NAME = ".ship-watermark.json"
+_WATERMARK: TypeAdapter[dict[str, int]] = TypeAdapter(dict[str, int])
 
 
 # meiva:note
@@ -91,7 +93,7 @@ def load_watermark(*, traces_dir: Path) -> dict[str, int]:
     path = traces_dir / _WATERMARK_NAME
     if not path.exists():
         return {}
-    marks: dict[str, int] = json.loads(path.read_text(encoding="utf-8"))
+    marks = _WATERMARK.validate_json(path.read_text(encoding="utf-8"))
     return live_watermarks(marks, present=frozenset(entry.name for entry in traces_dir.iterdir()))
 
 

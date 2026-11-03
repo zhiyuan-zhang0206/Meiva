@@ -17,6 +17,7 @@ from base.cluster.dataplane import pooler
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.host.system.boot_unit import systemd_running
 from base.host.system.hostport import Host
+from cli.boundary.process import stdout_text
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.host_dependencies.diagnosis import (
     Absent,
@@ -81,7 +82,7 @@ def _node_reading(probing: Probing, name: str) -> Reading:
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return ProbeFailed(str(exc))
-    return NodeVersion(result.stdout.strip())
+    return NodeVersion(stdout_text(result).strip())
 
 
 def _redis_reading(probing: Probing, scope: StartScope, probe: Probe) -> Reading:

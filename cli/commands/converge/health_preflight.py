@@ -41,6 +41,7 @@ from base.cluster import get_record, port_free
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.host.git.gitenv import git_env
 from base.host.proc import run_bounded
+from cli.boundary.process import stdout_text
 from cli.commands.converge.spec import ConvergeCtx
 
 # Bounded git + network probes: a preflight must never hang a start, and the
@@ -130,7 +131,7 @@ def _git_ro(repo: Path, *args: str, environ: Mapping[str, str]) -> str | None:
         return None
     if result.returncode != 0:
         return None
-    return result.stdout.strip() or None
+    return stdout_text(result).strip() or None
 
 
 def data_plane_warnings(ctx: ConvergeCtx) -> list[str]:

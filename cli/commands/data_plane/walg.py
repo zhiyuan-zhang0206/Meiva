@@ -8,9 +8,9 @@ from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from functools import partial
 from pathlib import Path
-from typing import Any
 
 import psycopg
+from psycopg.rows import TupleRow
 
 from base.clock import Clock, Timers
 from base.cluster.dataplane import walg_binary
@@ -304,7 +304,7 @@ def cmd_walg_status(plane: DataPlaneConfig, *, home: Path, system: str, machine:
 # not a failure: the health probe is the alert.
 def warn_archive_inactive_on(
     walg_config_file: Path | None,
-    admin: AbstractContextManager[psycopg.Connection[Any]],
+    admin: AbstractContextManager[psycopg.Connection[TupleRow]],
     *,
     home: Path,
 ) -> None:

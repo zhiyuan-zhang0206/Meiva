@@ -8,9 +8,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import psycopg
+from psycopg.rows import TupleRow
 
 from base.cluster.checkpoint_schema import CheckpointSchema, PostgresCheckpointSchema
 from base.cluster.machine import MachineIdentityReader
@@ -79,7 +79,7 @@ def cmd_migrations_apply(
 
 
 def _apply(
-    conn: psycopg.Connection[Any], *, machine: MachineIdentityReader, home: Path
+    conn: psycopg.Connection[TupleRow], *, machine: MachineIdentityReader, home: Path
 ) -> list[str]:
     from base.deploy.schema.migrations import apply_pending_migrations
 

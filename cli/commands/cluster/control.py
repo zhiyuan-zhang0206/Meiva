@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
+from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from base.api_contracts.status import MachineStatus
 from base.cluster.machine import (
@@ -32,6 +33,7 @@ from base.host.env.dotenv_file import env_file_path, read_env_aliases
 from base.host.net.http_dial import get as dial_get
 from base.host.net.http_dial import post as dial_post
 from base.paths.expand import expand_home
+from cli.boundary.json_body import response_object
 from cli.commands.cluster.plans.db_authority_replies import (
     IssuedReport,
     failure_line,
@@ -56,6 +58,7 @@ from cli.commands.cluster.unit_join import join_gateway
 from cli.database.runtime import CommandRuntime
 from cli.start_identity import require_initialized, stored_values
 
+_ROSTER: TypeAdapter[list[MachineStatus]] = TypeAdapter(list[MachineStatus])
 _MACHINE_VERB_TIMEOUT_S = 8.0
 _PAUSE_TIMEOUT_S = 60.0
 _STATUS_READ_TIMEOUT_S = 10.0
@@ -95,6 +98,20 @@ def cmd_cluster_mark_staging(name: str, *, is_staging: bool, access: GatewayAcce
 
 
 # meiva:note
+# The gateway's answer to a pause, as far as the report reads it.
+class _PauseAnswer(BaseModel):
+    paused_at: str
+    pause_reason: str | None = None
+    terminated_agents: int
+    force_marked_agents: int
+    reassigned_tasks: int
+
+
+class _ResumeAnswer(BaseModel):
+    resumed: bool
+
+
+# meiva:note
 # `meiva cluster pause NAME [--reason ...]`: temporarily pull a machine out of the cluster.
 #
 # POSTs /api/cluster/machines/{name}/pause on the gateway, which drains (reassigns
@@ -116,16 +133,16 @@ def cmd_cluster_pause(name: str, *, reason: str | None, access: GatewayAccess) -
         print(not_registered_line(name), file=sys.stderr)
         return 1
     if resp.status_code == 400:
-        print(resp.json().get("detail", "pause refused"), file=sys.stderr)
+        print(response_object(resp).get("detail", "pause refused"), file=sys.stderr)
         return 1
     resp.raise_for_status()
-    body = resp.json()
+    body = _PauseAnswer.model_validate_json(resp.content)
     reply = PauseReply(
-        paused_at=str(body["paused_at"]),
-        pause_reason=str(body.get("pause_reason") or ""),
-        terminated_agents=int(body["terminated_agents"]),
-        force_marked_agents=int(body["force_marked_agents"]),
-        reassigned_tasks=int(body["reassigned_tasks"]),
+        paused_at=body.paused_at,
+        pause_reason=body.pause_reason or "",
+        terminated_agents=body.terminated_agents,
+        force_marked_agents=body.force_marked_agents,
+        reassigned_tasks=body.reassigned_tasks,
     )
     for line in pause_lines(name, reply):
         print(line)
@@ -147,7 +164,7 @@ def cmd_cluster_resume(name: str, *, access: GatewayAccess) -> int:
         print(not_registered_line(name), file=sys.stderr)
         return 1
     resp.raise_for_status()
-    for line in resume_lines(name, resumed=bool(resp.json()["resumed"])):
+    for line in resume_lines(name, resumed=_ResumeAnswer.model_validate_json(resp.content).resumed):
         print(line)
     return 0
 
@@ -197,7 +214,7 @@ def cmd_cluster_status(
             file=sys.stderr,
         )
         return 1
-    roster = [MachineStatus.model_validate(m) for m in resp.json()]
+    roster = _ROSTER.validate_json(resp.content)
     if not roster:
         print("(machines table empty — no host has run `meiva start` yet)")
         return 0
@@ -213,11 +230,11 @@ def cmd_cluster_status(
 # endpoint is authenticated, like every `/api/cluster/*`) so a healthy-but-authed gateway
 # reads as up instead of a false `401 unreachable`. Fails fast (`raise_for_status()`) on any
 # HTTP error rather than masking an unreachable gateway.
-def fetch_gateway_cluster_status(access: GatewayAccess) -> dict[str, object]:
+def fetch_gateway_cluster_status(access: GatewayAccess) -> dict[str, JsonValue]:
     url = f"{gateway_api_base(access.gateway_url)}/api/cluster/status"
     resp = dial_get(url, timeout=_STATUS_READ_TIMEOUT_S, headers=gateway_auth_headers(access))
     resp.raise_for_status()
-    return resp.json()
+    return response_object(resp)
 
 
 # meiva:note

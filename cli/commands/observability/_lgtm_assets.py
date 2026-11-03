@@ -8,6 +8,7 @@ from typing import TypeGuard
 import yaml
 
 from base.telemetry.lgtm_local import NATIVE_SERVICES
+from cli.boundary.untyped import object_of
 
 NATIVE_CONSTANTS = NATIVE_SERVICES
 
@@ -18,7 +19,9 @@ def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
 
 def load_versions(repo: Path, tag: str) -> dict[str, dict[str, str]]:
     """Read the same pinned versions with platform-specific verified archives."""
-    raw = yaml.safe_load((repo / "deploy/lgtm/native/versions.yml").read_text(encoding="utf-8"))
+    raw = object_of(
+        yaml.safe_load, (repo / "deploy/lgtm/native/versions.yml").read_text(encoding="utf-8")
+    )
     if not _is_object_dict(raw):
         raise TypeError("deploy/lgtm/native/versions.yml must contain a mapping")
     entries = raw

@@ -125,10 +125,28 @@ _SETUP_FIELDS: tuple[SetupField, ...] = (
 )
 
 
+# meiva:note
+# The typed read of each setup value: the field name a `SetupField` or `_Capability` carries to the
+# configuration domain attribute that holds it. A name that is not here is a programming error
+# (`KeyError`), not an empty value.
+_CAPABILITY_READS: dict[str, Callable[[ConfigBoot], bool | None]] = {
+    "machine_serve_gateway": lambda config: config.view.general.machine_serve_gateway,
+    "machine_serve_agent_runner": lambda config: config.view.general.machine_serve_agent_runner,
+    "machine_serve_observability_station": (
+        lambda config: config.view.general.machine_serve_observability_station
+    ),
+}
+_TEXT_READS: dict[str, Callable[[ConfigBoot], str]] = {
+    "machine_name": lambda config: config.view.general.machine_name,
+    "machine_description": lambda config: config.view.general.machine_description,
+    "memory_remote": lambda config: config.view.general.memory_remote,
+    "gateway_url": lambda config: config.view.gateway.gateway_url,
+}
+
+
 def _resolve_capability(cap: _Capability, config: ConfigBoot) -> bool:
     """The capability's settings bool; unset means the capability is off."""
-    env_val: bool | None = config.get_field(cap.settings_attr)
-    return bool(env_val)
+    return bool(_CAPABILITY_READS[cap.settings_attr](config))
 
 
 def resolve_setup_field(field: SetupField, config: ConfigBoot) -> str | None:
@@ -136,7 +154,7 @@ def resolve_setup_field(field: SetupField, config: ConfigBoot) -> str | None:
 
     The field's validator gates the value; an invalid one raises immediately.
     """
-    value = config.get_field(field.name).strip()
+    value = _TEXT_READS[field.name](config).strip()
     if not value:
         return None
     if field.validator:

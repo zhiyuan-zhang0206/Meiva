@@ -23,10 +23,11 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
-from typing import Any, assert_never
+from typing import assert_never
 
 import psycopg
 from psycopg.conninfo import make_conninfo
+from psycopg.rows import TupleRow
 
 from base import cluster
 from base.clock import Timers
@@ -83,7 +84,7 @@ READONLY_GRANTEES = ("grafana_ro",)
 @contextmanager
 def admin_session(
     rec: ClusterRecord, database: str, *, home: Path
-) -> Generator[psycopg.Connection[Any]]:
+) -> Generator[psycopg.Connection[TupleRow]]:
     url = make_conninfo(pg_admin.pg_admin_url(rec.ports["postgres"], home=home), dbname=database)
     data = instance.pg_data_dir(home)
     with pg_admin.connect(url, expected_data_dir=data, autocommit=True) as conn:
@@ -163,7 +164,7 @@ def adopt_gateway_login(
 # meiva:note
 # Birth: groups, monitor, ledger, generation 0. The database and its schema owner share one
 # identifier.
-def _birth_generation(conn: psycopg.Connection[Any], home: Path, database: str) -> Generation:
+def _birth_generation(conn: psycopg.Connection[TupleRow], home: Path, database: str) -> Generation:
     owner = database
     groups = model.Groups(gateway=model.GATEWAY_GROUP, runner=model.RUNNER_GROUP)
     authority.ensure_groups(conn, owner=owner, database=database, groups=groups)
@@ -180,7 +181,7 @@ def _birth_generation(conn: psycopg.Connection[Any], home: Path, database: str) 
 # meiva:note
 # Ordinary start: re-grant after migrations, converge the monitor, then the invariant holds.
 def _admitted_generation(
-    conn: psycopg.Connection[Any], home: Path, database: str, *, refresh: bool
+    conn: psycopg.Connection[TupleRow], home: Path, database: str, *, refresh: bool
 ) -> Generation:
     current = ledger.load_ledger(home)
     if current is None:
@@ -221,7 +222,7 @@ class _LocalPlane:
 # starts from; none of it is changed in place.
 @dataclass(frozen=True)
 class _Stage:
-    conn: psycopg.Connection[Any] | None = None
+    conn: psycopg.Connection[TupleRow] | None = None
     generation: Generation | None = None
 
 
@@ -262,7 +263,7 @@ class _Completion:
         return record
 
     @staticmethod
-    def _admin(stage: _Stage) -> psycopg.Connection[Any]:
+    def _admin(stage: _Stage) -> psycopg.Connection[TupleRow]:
         if stage.conn is None:
             raise RuntimeError("the administrator session is not open")
         return stage.conn

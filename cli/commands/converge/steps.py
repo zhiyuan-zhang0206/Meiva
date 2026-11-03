@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from base.host.private_storage import converge_private_tree, ensure_private_file
+from cli.boundary.process import stdout_text
 from cli.commands.converge.plans.checkout_warnings import hook_scan_argv, hook_scan_warnings
 from cli.commands.converge.plans.shell_rc import rc_file_name, with_path_block
 from cli.commands.converge.spec import ConvergeCtx
@@ -112,7 +113,7 @@ def ensure_local_git_hooks(ctx: ConvergeCtx) -> None:
         )
     except (OSError, subprocess.SubprocessError):
         return
-    for line in hook_scan_warnings(result.returncode, result.stdout):
+    for line in hook_scan_warnings(result.returncode, stdout_text(result)):
         print(line, file=sys.stderr)
 
 

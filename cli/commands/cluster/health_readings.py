@@ -19,6 +19,7 @@ from pathlib import Path
 import httpx
 import psycopg
 import redis.exceptions
+from psycopg.rows import class_row
 
 from base.agents.context.clients import DatabaseFactory
 from base.clock import Timers
@@ -71,8 +72,15 @@ from services.supervision.meiva_root_glue.manifests import launched_services
 from services.supervision.roster.spec import services_for_capabilities_annotated
 
 _GATEWAY_TIMEOUT_S = 10.0
+
+
+@dataclass(frozen=True)
+class _LiveAgents:
+    live: int
+
+
 _LIVE_AGENTS = (
-    "SELECT COUNT(*) FROM agents_meta WHERE status IN ('running', 'idling') "
+    "SELECT COUNT(*) AS live FROM agents_meta WHERE status IN ('running', 'idling') "
     "AND liveness_state <> 'offline'"
 )
 
@@ -181,14 +189,17 @@ def read_launch_record(home: Path) -> LaunchRecord:
 # is effectively dead.
 def read_population(database_factory: DatabaseFactory, launched: LaunchRecord) -> PopulationReading:
     try:
-        with database_factory().connect(autocommit=True) as conn, conn.cursor() as cur:
+        with (
+            database_factory().connect(autocommit=True) as conn,
+            conn.cursor(row_factory=class_row(_LiveAgents)) as cur,
+        ):
             cur.execute(_LIVE_AGENTS)
             row = cur.fetchone()
     except (psycopg.Error, OSError):
         return PopulationReading(PopulationRead.DB_UNREACHABLE, 0, launched)
     if row is None:
         return PopulationReading(PopulationRead.NO_ROW, 0, launched)
-    return PopulationReading(PopulationRead.COUNTED, int(row[0]), launched)
+    return PopulationReading(PopulationRead.COUNTED, row.live, launched)
 
 
 # meiva:note

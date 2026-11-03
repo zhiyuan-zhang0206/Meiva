@@ -3,10 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import dataclass
 
 from base.clock import Clock
 from base.host.permissions_helper.grants import checklist
 from base.host.permissions_helper.grants.gate import GateReport, GateState
+from cli.boundary.options import options
+from cli.database.runtime import runtime_of
 from services.desktop.permissions_helper import onboarding
 from services.desktop.permissions_helper.onboarding import GateHost
 
@@ -15,11 +18,27 @@ from services.desktop.permissions_helper.onboarding import GateHost
 # The `meiva permissions` verbs for this invocation. The host the gate runs on is described from the
 # invocation's own facts (the home, the account home, the environment the configuration reads now,
 # and the helper the platform decided); `restart-helper` prints a sentence and needs none of them.
+@dataclass(frozen=True)
+class _Verb:
+    permissions_cmd: str
+
+
+@dataclass(frozen=True)
+class _StatusOptions:
+    json: bool
+
+
+@dataclass(frozen=True)
+class _OnboardOptions:
+    json: bool
+    timeout: float | None
+
+
 def run(args: argparse.Namespace) -> int:
-    if args.permissions_cmd == "restart-helper":
+    if options(args, _Verb).permissions_cmd == "restart-helper":
         print(onboarding.restart_helper())
         return 0
-    runtime = args.runtime
+    runtime = runtime_of(args)
     host = onboarding.gate_host(
         home=runtime.home,
         user_home=runtime.session.user_home,
@@ -31,22 +50,30 @@ def run(args: argparse.Namespace) -> int:
 
 
 def dispatch(args: argparse.Namespace, *, host: GateHost, clock: Clock, run_id: str) -> int:
-    verb = args.permissions_cmd
+    verb = options(args, _Verb).permissions_cmd
     if verb == "status":
         return _report(
-            onboarding.check(host=host, now=clock.now(), run_id=run_id), as_json=args.json
+            onboarding.check(host=host, now=clock.now(), run_id=run_id),
+            as_json=options(args, _StatusOptions).json,
         )
     if verb == "onboard":
+        onboard = options(args, _OnboardOptions)
         return _report(
             onboarding.onboard(
                 host=host,
                 clock=clock,
                 run_id=run_id,
                 automatic=False,
-                timeout_s=args.timeout,
+                # meiva:note
+                # The parser cannot give `--timeout` a default: importing the onboarding module
+                # there would load the desktop permissions helper into every `meiva` invocation,
+                # so an unset flag parses to None and this handler applies the onboarding default.
+                timeout_s=(
+                    onboarding.REQUEST_TIMEOUT_S if onboard.timeout is None else onboard.timeout
+                ),
                 progress=sys.stderr,
             ),
-            as_json=args.json,
+            as_json=onboard.json,
         )
     if verb == "defer":
         onboarding.defer(host=host, now=clock.now())

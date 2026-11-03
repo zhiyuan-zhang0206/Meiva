@@ -18,6 +18,7 @@ from typing import TypeGuard
 
 from base.agents.context.clients import DatabaseFactory
 from base.host.atomic_io import write_text_atomic
+from cli.boundary.json_text import loads
 from cli.commands.observability._lgtm_provisioning import record_rendered_hash
 from cli.commands.observability.plans.lgtm.dashboard_plan import RENDERED_DASHBOARD_REL
 
@@ -47,11 +48,21 @@ def _digest(content: str) -> str:
 
 
 # meiva:note
+# How many panels the rendered dashboard JSON declares.
+def _panel_count(rendered: str) -> int:
+    document = loads(rendered)
+    panels = document.get("panels") if isinstance(document, dict) else None
+    if not isinstance(panels, list):
+        raise TypeError("the rendered dashboard has no panels list")
+    return len(panels)
+
+
+# meiva:note
 # Panel id and title mapped to the panel JSON for one dashboard file; None when the content is not
 # parseable as a dashboard (reported by the caller, not crashed on).
 def _panels_by_identity(content: str) -> dict[str, object] | None:
     try:
-        data: object = json.loads(content)
+        data = loads(content)
     except json.JSONDecodeError:
         return None
     if not _is_object_dict(data):
@@ -122,7 +133,7 @@ def cmd_grafana_render(
     if current == rendered:
         record_rendered_hash(_hashes_path(home), RENDERED_DASHBOARD_REL, _digest(rendered))
         print(
-            f"{target.name}: in sync ({len(json.loads(rendered)['panels'])} entries, sha256 {_digest(rendered)[:12]})"
+            f"{target.name}: in sync ({_panel_count(rendered)} entries, sha256 {_digest(rendered)[:12]})"
         )
         return 0
 
@@ -138,7 +149,5 @@ def cmd_grafana_render(
         target, rendered, encoding="utf-8", mode=0o644, sync_file=False, sync_parent=False
     )
     record_rendered_hash(_hashes_path(home), RENDERED_DASHBOARD_REL, _digest(rendered))
-    print(
-        f"{target}: written ({len(json.loads(rendered)['panels'])} entries, sha256 {_digest(rendered)[:12]})"
-    )
+    print(f"{target}: written ({_panel_count(rendered)} entries, sha256 {_digest(rendered)[:12]})")
     return 0
