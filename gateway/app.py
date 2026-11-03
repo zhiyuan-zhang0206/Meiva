@@ -126,6 +126,7 @@ from gateway.routers.configuration import default_model as default_model_router
 from gateway.routers.configuration import runtime as config_router
 from gateway.routers.fleet import fleet_graph as fleet_graph_router
 from gateway.routers.memory_api import memory as memory_router
+from gateway.routers.page_serving import page_reply as page_reply_router
 from gateway.routers.page_serving import page_target
 from gateway.routers.page_serving import pages as pages_router
 from gateway.routers.proxies import grafana as grafana_router
@@ -599,6 +600,7 @@ def create_app(
         system_router.router,
         host_permissions_router.router,
         pages_router.router,
+        page_reply_router.router,
         notices_router.router,
         guarded_notices_router.router,
         cluster_router.router,

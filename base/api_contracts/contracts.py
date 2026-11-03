@@ -252,6 +252,10 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/pages"): RouteContract(),
     ("GET", "/pages/{page_key}"): RouteContract(note="page reverse proxy"),
     ("GET", "/pages/{page_key}/{rest:path}"): RouteContract(note="page reverse proxy"),
+    ("POST", "/pages/{page_key}/reply"): RouteContract(
+        Idempotency.NON_IDEMPOTENT,
+        note="one submitted page answer is one message; a repeat is a second message, not a repair",
+    ),
     ("POST", "/api/keyed/v1/agents/{agent_id}/pages"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,
         note="versioned page registration commits replacement and original acceptance together",
