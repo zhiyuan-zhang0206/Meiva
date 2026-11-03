@@ -2,9 +2,11 @@ import argparse
 import json
 import sys
 from collections import Counter
-from dataclasses import asdict
+from collections.abc import Sequence
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from base.host.boundary.options import attribute, options
 from meizel.checkout import load_universe, toplevel
 from meizel.graph.model import MeizelError
 from scripts.content_lint.code_comments import corpus as corpus_module
@@ -13,7 +15,7 @@ from scripts.content_lint.code_comments.check import SOURCE_SUFFIXES, Repository
 from scripts.content_lint.code_comments.typescript_index import load_index
 
 
-def selected_paths(repo: Repository, raw: list[str]) -> frozenset[str]:
+def selected_paths(repo: Repository, raw: Sequence[str]) -> frozenset[str]:
     if not raw:
         return frozenset(path for path in repo.files if path.endswith(SOURCE_SUFFIXES))
     selected: set[str] = set()
@@ -69,6 +71,79 @@ def report_result(
     print(f"code comments: {result.notes} notes; {scope}; {counts}")
 
 
+# meiva:note
+# What every subcommand takes (the flags before the subcommand name). The subcommand's own flags are
+# read by the dataclass below that names them, only on the path that runs it.
+@dataclass(frozen=True)
+class CommonOptions:
+    repo: Path | None
+    json: bool
+    typescript_index: str | None
+
+
+@dataclass(frozen=True)
+class CheckOptions:
+    paths: list[str]
+
+
+@dataclass(frozen=True)
+class ChangedOptions:
+    base: str | None
+    from_ref: str | None
+    to_ref: str | None
+    worktree: bool
+
+
+@dataclass(frozen=True)
+class CorpusOptions:
+    format: str
+    output: Path | None
+
+
+# meiva:note
+# The notes a `changed` run judges: those the Git comparison its flags describe adds or rewrites.
+def _changed_notes(repo: Repository, args: argparse.Namespace) -> dict[str, frozenset[int]]:
+    changed = options(args, ChangedOptions)
+    return incremental_notes(
+        repo,
+        changed.base,
+        from_ref=changed.from_ref,
+        to_ref=changed.to_ref,
+        worktree=changed.worktree,
+    )
+
+
+# meiva:note
+# The files a run checks strictly: the changed sources of a `changed` run, the paths a `check` names
+# (every source file when none), every source file for `inventory`, and none for `validate`/`corpus`.
+def _selection(
+    repo: Repository, args: argparse.Namespace, notes: dict[str, frozenset[int]] | None
+) -> frozenset[str] | None:
+    if notes is not None:
+        return frozenset(notes)
+    command = attribute(args, "command", str)
+    if command == "check":
+        return selected_paths(repo, options(args, CheckOptions).paths)
+    if command == "inventory":
+        return selected_paths(repo, [])
+    return None
+
+
+def _write_corpus(repo: Repository, result: Result, corpus: CorpusOptions) -> int:
+    rows = corpus_module.entries(repo)
+    content = (
+        corpus_module.jsonl(rows) if corpus.format == "jsonl" else corpus_module.markdown(rows)
+    )
+    if corpus.output is not None:
+        corpus_module.write(corpus.output, content)
+        print(f"code comments: {len(rows)} notes written to {corpus.output}", file=sys.stderr)
+    else:
+        print(content, end="")
+    for finding in result.findings:
+        print(finding.render(), file=sys.stderr)
+    return int(bool(result.findings))
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         description="Parseable source notes with links to tracked repository files"
@@ -102,56 +177,29 @@ def main(argv: list[str]) -> int:
     dump.add_argument("--format", choices=["jsonl", "markdown"], default="jsonl")
     dump.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
+    common = options(args, CommonOptions)
+    command = attribute(args, "command", str)
     try:
-        root = args.repo.resolve() if args.repo is not None else toplevel(Path.cwd())
+        root = common.repo.resolve() if common.repo is not None else toplevel(Path.cwd())
         repo = Repository(root, load_universe(root).files)
-        if args.typescript_index is not None:
+        if common.typescript_index is not None:
             content = (
                 sys.stdin.read()
-                if args.typescript_index == "-"
-                else Path(args.typescript_index).read_text(encoding="utf-8")
+                if common.typescript_index == "-"
+                else Path(common.typescript_index).read_text(encoding="utf-8")
             )
             load_index(repo, content)
-        notes = (
-            incremental_notes(
-                repo,
-                args.base,
-                from_ref=args.from_ref,
-                to_ref=args.to_ref,
-                worktree=args.worktree,
-            )
-            if args.command == "changed"
-            else None
-        )
-        paths = (
-            frozenset(notes)
-            if notes is not None
-            else selected_paths(repo, getattr(args, "paths", []))
-            if args.command in {"check", "inventory"}
-            else None
-        )
+        notes = _changed_notes(repo, args) if command == "changed" else None
+        paths = _selection(repo, args, notes)
         result = check(
             repo,
             scan=frozenset(notes) if notes is not None else None,
             strict_paths=paths,
             strict_notes=notes,
         )
-        if args.command == "corpus":
-            rows = corpus_module.entries(repo)
-            content = (
-                corpus_module.jsonl(rows)
-                if args.format == "jsonl"
-                else corpus_module.markdown(rows)
-            )
-            if args.output is not None:
-                corpus_module.write(args.output, content)
-                print(f"code comments: {len(rows)} notes written to {args.output}", file=sys.stderr)
-            else:
-                print(content, end="")
-            for finding in result.findings:
-                print(finding.render(), file=sys.stderr)
-            return int(bool(result.findings))
-        report_result(result, args.command, paths, notes, json_output=args.json)
+        if command == "corpus":
+            return _write_corpus(repo, result, options(args, CorpusOptions))
+        report_result(result, command, paths, notes, json_output=common.json)
         return int(bool(result.findings))
     except (OSError, ValueError, TypeError, SyntaxError, MeizelError) as error:
         print(f"code comments: cannot complete check: {error}", file=sys.stderr)

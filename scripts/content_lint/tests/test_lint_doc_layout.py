@@ -2,7 +2,9 @@ from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import BaseModel
 
+from base.host.boundary.untyped import object_of
 from base.host.proc import run_bounded
 from scripts.audit.analysis.frozen import is_frozen
 from scripts.content_lint import (
@@ -13,6 +15,19 @@ from scripts.content_lint import (
 )
 
 _REPO = Path(__file__).resolve().parents[3]
+
+
+class _Hook(BaseModel):
+    id: str
+    files: str | None = None
+
+
+class _HookRepo(BaseModel):
+    hooks: list[_Hook]
+
+
+class _PreCommitConfig(BaseModel):
+    repos: list[_HookRepo]
 
 
 def test_procedural_scan_roots_follow_relocated_conventions() -> None:
@@ -44,13 +59,15 @@ def test_relocated_history_is_exempt_but_live_docs_still_fail(tmp_path: Path, ax
 def test_relocated_conventions_trigger_procedural_hooks() -> None:
     import re
 
-    config = yaml.safe_load((_REPO / ".pre-commit-config.yaml").read_text())
-    hooks = {hook["id"]: hook for repo in config["repos"] for hook in repo["hooks"]}
-    assert re.search(
-        hooks["lint-doc-roster"]["files"], "services/supervision/roster/docs/service-roster.md"
+    config = _PreCommitConfig.model_validate(
+        object_of(yaml.safe_load, (_REPO / ".pre-commit-config.yaml").read_text())
     )
-    assert re.search(
-        hooks["lint-doc-roster"]["files"], "services/supervision/roster/composition.py"
-    )
+    hooks = {hook.id: hook for repo in config.repos for hook in repo.hooks}
+    roster_files = hooks["lint-doc-roster"].files
+    assert roster_files is not None
+    assert re.search(roster_files, "services/supervision/roster/docs/service-roster.md")
+    assert re.search(roster_files, "services/supervision/roster/composition.py")
     for hook_id in ("lint-doc-symbols", "lint-doc-anchors"):
-        assert re.search(hooks[hook_id]["files"], "docs/conventions/runbook.md")
+        hook_files = hooks[hook_id].files
+        assert hook_files is not None
+        assert re.search(hook_files, "docs/conventions/runbook.md")

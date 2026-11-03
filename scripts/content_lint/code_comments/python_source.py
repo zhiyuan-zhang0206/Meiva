@@ -30,8 +30,8 @@ def assignment_name(node: ast.stmt) -> str | None:
     return None
 
 
-def attribute_docs(body: list[ast.stmt]) -> list[tuple[str, ast.Expr]]:
-    result: list[tuple[str, ast.Expr]] = []
+def attribute_docs(body: list[ast.stmt]) -> list[tuple[str, ast.Expr, str]]:
+    result: list[tuple[str, ast.Expr, str]] = []
     for previous, node in pairwise(body):
         name = assignment_name(previous)
         if (
@@ -40,7 +40,7 @@ def attribute_docs(body: list[ast.stmt]) -> list[tuple[str, ast.Expr]]:
             and isinstance(node.value, ast.Constant)
             and isinstance(node.value.value, str)
         ):
-            result.append((name, node))
+            result.append((name, node, node.value.value))
     return result
 
 
@@ -95,10 +95,9 @@ class SymbolCollector(ast.NodeVisitor):
                     raw_text=ast.get_source_segment(self.text, first) or "",
                 )
             )
-        for attribute, expression in attribute_docs(node.body):
+        for attribute, expression, text in attribute_docs(node.body):
             self.docstrings.add(id(expression))
             owner = ".".join([*self.scope, attribute])
-            text = ast.literal_eval(expression.value)
             self.notes.append(
                 Note(
                     NoteKind.DOCSTRING,

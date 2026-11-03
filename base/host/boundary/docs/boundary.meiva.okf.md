@@ -32,7 +32,8 @@ root on `sys.path`.
   and the repository scripts both use it (`docs/conventions/engineering/cli-argument-discipline.md`).
 - `process`: `stdout_text` / `stderr_text` read a finished child's stream as the `str` a
   `text=True` caller asked for (`Host.run` and `run_bounded` return `CompletedProcess[Any]`); a
-  bytes stream is a `TypeError`.
+  bytes stream is a `TypeError`. `stdout_bytes` / `stderr_bytes` are the same reading for a call
+  made without `text=` (raw bytes, no newline translation); a text stream is a `TypeError`.
 
 When the shape is known, prefer a pydantic model or a module-level `TypeAdapter` over these
 helpers; they are for the value whose shape the reader checks by hand.

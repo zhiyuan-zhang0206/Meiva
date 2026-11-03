@@ -74,7 +74,11 @@ def check_skill_catalog() -> list[str]:
 def check_im_command_set() -> list[str]:
     core = (ROOT / "services/entrypoints/im_bridge/core.py").read_text(errors="replace")
     cmds = sorted(
-        set(re.findall(r'cmd == "/([a-z]+)"', core) + re.findall(r'startswith\("/([a-z]+)"', core))
+        {
+            str(match[1])
+            for pattern in (r'cmd == "/([a-z]+)"', r'startswith\("/([a-z]+)"')
+            for match in re.finditer(pattern, core)
+        }
     )
     doc_path = ROOT / "services/docs/gateway_side/im_bridge/im_bridge.meiva.okf.md"
     doc = doc_path.read_text(errors="replace")

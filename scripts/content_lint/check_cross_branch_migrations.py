@@ -45,6 +45,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from base.host.boundary.process import stderr_text, stdout_text
 from base.host.git.gitenv import git_env
 from base.host.system.hostport import Host
 
@@ -74,9 +75,11 @@ def remote_branches(*, host: Host, timeout: float = 60) -> list[str]:
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError(f"git ls-remote timed out after {timeout:g}s") from exc
     if proc.returncode != 0:
-        raise RuntimeError(f"git ls-remote failed (rc={proc.returncode}): {proc.stderr.strip()}")
+        raise RuntimeError(
+            f"git ls-remote failed (rc={proc.returncode}): {stderr_text(proc).strip()}"
+        )
     names: list[str] = []
-    for line in proc.stdout.splitlines():
+    for line in stdout_text(proc).splitlines():
         _sha, _, ref = line.partition("\t")
         if ref.startswith("refs/heads/"):
             names.append(ref[len("refs/heads/") :])

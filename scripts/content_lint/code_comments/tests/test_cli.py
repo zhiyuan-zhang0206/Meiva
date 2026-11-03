@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from base.host.boundary.untyped import object_of
 from scripts.content_lint.code_comments.cli import main, selected_paths
 from scripts.content_lint.code_comments.tests.cases import (
     DOC,
@@ -71,7 +72,7 @@ def test_the_json_report_exposes_the_scope_and_the_findings(
     )
     git_repository(tmp_path, source)
     assert cli(tmp_path, "--json", "validate") == 1
-    report = json.loads(capsys.readouterr().out)
+    report = object_of(json.loads, capsys.readouterr().out)
     assert report == {
         "mode": "validate",
         "notes": 1,
