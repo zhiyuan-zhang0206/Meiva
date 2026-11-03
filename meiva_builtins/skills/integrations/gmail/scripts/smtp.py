@@ -16,17 +16,19 @@ import email.utils
 import imaplib
 import mimetypes
 import smtplib
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from email.message import EmailMessage
 from functools import cache as _cache
 from pathlib import Path
-from typing import Any
 
 from gmail_auth import AuthSources, GmailError, GmailInputError
 from gmail_compose import msg_summary, plan_forward, plan_reply, recipient_list, sent_summary
 from gmail_queries import message_query
 from gmail_wire import ALL_MAIL, parse_drafts_folder
 from imap import account, app_password, connection, fetch_full, search_ids
+
+from base.host.boundary.untyped import object_of
 
 SMTP_HOST = "smtp.gmail.com"
 
@@ -41,7 +43,7 @@ SMTP_PORT = 587
 # maintype/subtype is guessed from the filename, falling back to application/octet-stream. A
 # path that is not a readable file raises rather than sending a message with a
 # silently-missing attachment.
-def _attach_files(msg: EmailMessage, paths: list[str]) -> None:
+def _attach_files(msg: EmailMessage, paths: Sequence[str]) -> None:
     for p in paths:
         path = Path(p).expanduser()
         if not path.is_file():
@@ -67,7 +69,7 @@ def _compose(
     cc: list[str] | None = None,
     in_reply_to: str | None = None,
     references: str | None = None,
-    attachments: list[str] | None = None,
+    attachments: Sequence[str] | None = None,
 ) -> EmailMessage:
     acct = account(auth)
     msg = EmailMessage()
@@ -119,10 +121,10 @@ def send(
     body: str,
     *,
     cc: str | list[str] | None = None,
-    attach: list[str] | None = None,
+    attach: Sequence[str] | None = None,
     dry_run: bool = False,
     now_ts: float,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     to_list = recipient_list(to)
     if not to_list:
         raise GmailInputError("send needs at least one recipient")
@@ -164,10 +166,10 @@ def reply(
     body: str,
     *,
     reply_all: bool = False,
-    attach: list[str] | None = None,
+    attach: Sequence[str] | None = None,
     dry_run: bool = False,
     now_ts: float,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     orig = _original(auth, message_id)
     plan = plan_reply(orig, message_id, account(auth), reply_all)
     msg = _compose(
@@ -191,7 +193,10 @@ def reply(
 # inline parts alike, as Gmail's own forward does).
 def _carry_attachments(msg: EmailMessage, orig: EmailMessage) -> None:
     for i, part in enumerate(orig.iter_attachments()):
-        payload = part.get_content()
+        # meiva:note
+        # `get_content` answers `Any` (a part's payload may be bytes, a nested message or text), so
+        # the value is read as an object and encoded when it is not already bytes.
+        payload = object_of(part.get_content)
         data = payload if isinstance(payload, (bytes, bytearray)) else str(payload).encode()
         maintype, _, subtype = part.get_content_type().partition("/")
         msg.add_attachment(
@@ -212,10 +217,10 @@ def forward(
     *,
     body: str = "",
     cc: str | list[str] | None = None,
-    attach: list[str] | None = None,
+    attach: Sequence[str] | None = None,
     dry_run: bool = False,
     now_ts: float,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     to_list = recipient_list(to)
     if not to_list:
         raise GmailInputError("forward needs at least one recipient")
@@ -264,10 +269,10 @@ def draft(
     body: str,
     *,
     cc: str | list[str] | None = None,
-    attach: list[str] | None = None,
+    attach: Sequence[str] | None = None,
     dry_run: bool = False,
     now_ts: float,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     to_list = recipient_list(to)
     if not to_list:
         raise GmailInputError("draft needs at least one recipient")
@@ -297,7 +302,7 @@ def draft(
 # Selects the Drafts folder read-write (the only write-mode select in this module), flags
 # every copy `\Deleted`, expunges, then re-selects All Mail read-only to restore the
 # connection's usual state. Raises when no draft carries that Message-Id.
-def draft_delete(auth: AuthSources, message_id: str) -> dict[str, Any]:
+def draft_delete(auth: AuthSources, message_id: str) -> dict[str, object]:
     mid = message_id.strip().strip("<>")
     folder = _drafts_folder(auth)
     conn = connection(auth)

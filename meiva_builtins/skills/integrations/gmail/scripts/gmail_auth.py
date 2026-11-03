@@ -82,7 +82,14 @@ def account_from_keychain_dump(dump: str) -> str:
     m = _RE_KEYCHAIN_ACCOUNT.search(dump)
     if not m:
         raise GmailError(f"Keychain entry {KEYCHAIN_SERVICE!r} has no account (acct) attribute")
-    return m.group(1)
+    # meiva:note
+    # `Match.group` is typed `str | Any` — the stub cannot see the pattern's groups, and a union
+    # carrying `Any` is one `reportAny` leaves alone — so the capture is a `str` only after this
+    # guard.
+    account = m.group(1)
+    if not isinstance(account, str):
+        raise GmailError(f"Keychain entry {KEYCHAIN_SERVICE!r} has no account (acct) attribute")
+    return account
 
 
 # meiva:note

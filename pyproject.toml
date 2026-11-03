@@ -769,6 +769,11 @@ root = "meiva_builtins/skills/coordination"
 reportAny = "error"
 reportExplicitAny = "error"
 
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/skills/integrations/gmail"
+reportAny = "error"
+reportExplicitAny = "error"
+
 # A sub-skill's script reaches its parent skill's scripts/ only through the
 # runtime `__file__`-derived sys.path guard (Structure Rule 6) — pyright does
 # not execute that guard, so it needs the same directory named explicitly to

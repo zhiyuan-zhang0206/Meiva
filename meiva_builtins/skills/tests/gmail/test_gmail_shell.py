@@ -206,6 +206,9 @@ def test_a_missing_credential_fails_before_any_connection(keychain: Keychain) ->
         imap.connection(sources)
 
 
+# meiva:note
+# A post in the shape `fetch` writes: every key of the mirrored document, and an attachment row
+# carrying all five fields the manifest records.
 def _post(message_id: str = "abc@example.com") -> dict[str, Any]:
     return {
         "platform": "gmail",
@@ -216,13 +219,43 @@ def _post(message_id: str = "abc@example.com") -> dict[str, Any]:
         "text": "Body text",
         "author": {"id": "news.example.com", "name": "News"},
         "published_at": "2026-06-21T15:30:00Z",
+        "list_unsubscribe": None,
         "attachments": [
-            {"content_type": "image/png", "path": "/m/a.png"},
-            {"content_type": "application/pdf", "path": "/m/a.pdf"},
+            {
+                "filename": "a.png",
+                "content_type": "image/png",
+                "disposition": "inline",
+                "size": 3,
+                "path": "/m/a.png",
+            },
+            {
+                "filename": "a.pdf",
+                "content_type": "application/pdf",
+                "disposition": "attachment",
+                "size": 4,
+                "path": "/m/a.pdf",
+            },
         ],
         "fetched_at": "2026-06-22T00:00:00Z",
         "fetched_via": "gmail",
     }
+
+
+# meiva:note
+# A post read back from the mirror is the post that was written: `sync` reuses the file instead of
+# re-fetching, and the S1 item it builds has to be the same one either way.
+def test_a_post_read_back_from_the_mirror_is_the_post_that_was_written(tmp_path: Path) -> None:
+    post = _post()
+    assert imap._post_from_mirror(post, tmp_path / "post.json") == post
+
+
+# meiva:note
+# A mirror file whose shape is wrong fails naming the file: `sync` walks a whole window of them, so
+# "message_id is missing" alone would leave an operator hunting for the broken mirror.
+def test_a_malformed_mirror_file_fails_naming_the_file(tmp_path: Path) -> None:
+    path = tmp_path / "post.json"
+    with pytest.raises(imap.GmailError, match=r"post\.json"):
+        imap._post_from_mirror({**_post(), "message_id": 7}, path)
 
 
 def test_save_writes_the_raw_message_the_post_and_a_markdown_rendering(tmp_path: Path) -> None:

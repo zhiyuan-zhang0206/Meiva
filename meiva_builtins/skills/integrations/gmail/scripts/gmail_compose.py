@@ -10,7 +10,9 @@ from dataclasses import dataclass
 from email.message import EmailMessage
 
 from gmail_auth import GmailError
-from gmail_headers import addr_list, body_text
+from gmail_headers import addr_list, body_text, header
+
+from base.host.boundary.untyped import object_of
 
 
 # meiva:note
@@ -48,7 +50,7 @@ def _prefixed(subject: str, prefix: str) -> str:
 def _reply_all_cc(orig: EmailMessage, to: list[str], account: str) -> list[str]:
     cc: list[str] = []
     seen = {a.lower() for a in to} | {account.lower()}
-    for addr in addr_list(orig["To"]) + addr_list(orig["Cc"]):
+    for addr in addr_list(header(orig, "To")) + addr_list(header(orig, "Cc")):
         if addr.lower() not in seen:
             cc.append(addr)
             seen.add(addr.lower())
@@ -60,16 +62,18 @@ def _reply_all_cc(orig: EmailMessage, to: list[str], account: str) -> list[str]:
 # (`Reply-To` if set, else `From`), threads with In-Reply-To and References, and prefixes the
 # subject `Re:`; `reply_all` adds the original To+Cc minus our own address.
 def plan_reply(orig: EmailMessage, message_id: str, account: str, reply_all: bool) -> ReplyPlan:
-    to = addr_list(orig["Reply-To"]) or addr_list(orig["From"])
+    to = addr_list(header(orig, "Reply-To")) or addr_list(header(orig, "From"))
     if not to:
         raise GmailError(f"cannot reply to {message_id!r}: original has no Reply-To/From address")
     cc = _reply_all_cc(orig, to, account) if reply_all else []
-    orig_mid = (orig["Message-Id"] or "").strip()
-    references = " ".join(p for p in [(orig["References"] or "").strip(), orig_mid] if p) or None
+    orig_mid = (header(orig, "Message-Id") or "").strip()
+    references = (
+        " ".join(p for p in [(header(orig, "References") or "").strip(), orig_mid] if p) or None
+    )
     return ReplyPlan(
         to=tuple(to),
         cc=tuple(cc),
-        subject=_prefixed(orig["Subject"] or "", "Re:"),
+        subject=_prefixed(header(orig, "Subject") or "", "Re:"),
         in_reply_to=orig_mid or None,
         references=references,
     )
@@ -82,16 +86,16 @@ def plan_forward(orig: EmailMessage, note: str) -> ForwardPlan:
     quoted = "\n".join(
         [
             "---------- Forwarded message ----------",
-            f"From: {(orig['From'] or '').strip()}",
-            f"Date: {(orig['Date'] or '').strip()}",
-            f"Subject: {(orig['Subject'] or '').strip()}",
-            f"To: {(orig['To'] or '').strip()}",
+            f"From: {(header(orig, 'From') or '').strip()}",
+            f"Date: {(header(orig, 'Date') or '').strip()}",
+            f"Subject: {(header(orig, 'Subject') or '').strip()}",
+            f"To: {(header(orig, 'To') or '').strip()}",
             "",
             body_text(orig),
         ]
     )
     body = (note.strip() + "\n\n" + quoted) if note.strip() else quoted
-    return ForwardPlan(subject=_prefixed(orig["Subject"] or "", "Fwd:"), body=body)
+    return ForwardPlan(subject=_prefixed(header(orig, "Subject") or "", "Fwd:"), body=body)
 
 
 # meiva:note
@@ -100,14 +104,16 @@ def plan_forward(orig: EmailMessage, note: str) -> ForwardPlan:
 def msg_summary(msg: EmailMessage) -> dict[str, object]:
     body_part = msg.get_body(preferencelist=("plain",))
     return {
-        "message_id": (msg["Message-Id"] or "").strip().strip("<>") or None,
-        "from": msg["From"],
-        "to": msg["To"],
-        "cc": msg["Cc"],
-        "subject": msg["Subject"],
-        "in_reply_to": (msg["In-Reply-To"] or "").strip().strip("<>") or None,
+        "message_id": (header(msg, "Message-Id") or "").strip().strip("<>") or None,
+        "from": header(msg, "From"),
+        "to": header(msg, "To"),
+        "cc": header(msg, "Cc"),
+        "subject": header(msg, "Subject"),
+        "in_reply_to": (header(msg, "In-Reply-To") or "").strip().strip("<>") or None,
         "attachments": [a.get_filename() for a in msg.iter_attachments()],
-        "body": (body_part.get_content() if body_part else "").strip(),
+        # meiva:note
+        # `get_content` answers `Any`; the summary reports the composed body as text.
+        "body": str(object_of(body_part.get_content)).strip() if body_part else "",
     }
 
 

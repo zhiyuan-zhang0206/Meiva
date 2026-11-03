@@ -46,11 +46,11 @@ def test_parse_list_id(raw: str | None, expected: str | None) -> None:
 
 
 def test_html_to_text_plain() -> None:
-    assert headers.html_to_text("Hello world") == "Hello world"
+    assert headers._html_to_text("Hello world") == "Hello world"
 
 
 def test_html_to_text_strips_tags() -> None:
-    result = headers.html_to_text("<p>Hello <b>world</b></p>")
+    result = headers._html_to_text("<p>Hello <b>world</b></p>")
     assert "Hello" in result
     assert "world" in result
     assert "<p>" not in result
@@ -58,26 +58,26 @@ def test_html_to_text_strips_tags() -> None:
 
 
 def test_html_to_text_strips_scripts() -> None:
-    result = headers.html_to_text("<html><script>alert('x')</script><body>Content</body></html>")
+    result = headers._html_to_text("<html><script>alert('x')</script><body>Content</body></html>")
     assert "Content" in result
     assert "alert" not in result
 
 
 def test_html_to_text_handles_entities() -> None:
-    result = headers.html_to_text("Price: &euro;5 &amp; &lt;free&gt;")
+    result = headers._html_to_text("Price: &euro;5 &amp; &lt;free&gt;")
     assert "€5" in result
     assert "&" in result or "&amp;" not in result
 
 
 def test_html_to_text_collapses_whitespace() -> None:
-    result = headers.html_to_text("<div>a</div>   <div>b</div>")
+    result = headers._html_to_text("<div>a</div>   <div>b</div>")
     # meiva:note
     # Whitespace should be normalized — no double spaces
     assert "  " not in result or result.count("\n") >= 1
 
 
 def test_html_to_text_empty() -> None:
-    assert headers.html_to_text("") == ""
+    assert headers._html_to_text("") == ""
 
 
 def test_body_text_prefers_the_plain_part() -> None:
