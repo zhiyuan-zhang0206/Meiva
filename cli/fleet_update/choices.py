@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import shlex
 import subprocess
-import sys
 import tempfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -41,7 +40,10 @@ def _seconds(text: str) -> int:
 
 # meiva:note
 # Before any host: names must be in this checkout's roster; shells and browser have own choices.
-def _service_problems(args: argparse.Namespace, env: Mapping[str, str]) -> list[str]:
+# The roster is this checkout's own module, run by the interpreter the entry point named.
+def _service_problems(
+    args: argparse.Namespace, env: Mapping[str, str], *, python: str
+) -> list[str]:
     named = {n for flag in _NAMED for n in _strings(args, flag[2:].replace("-", "_"))}
     own = sorted(set(_strings(args, "keep_service")) & {"pty-sessions", "browser"})
     problems = [f"--keep-service {name}: it has its own keep/stop choice" for name in own]
@@ -49,7 +51,7 @@ def _service_problems(args: argparse.Namespace, env: Mapping[str, str]) -> list[
         return problems
     with tempfile.TemporaryDirectory() as home:
         roster_env = {**env, "MEIVA_HOME": home, "MEIVA_CONFIG_FETCH": "skip"}
-        run = [sys.executable, "-m", "services.supervision.roster"]
+        run = [python, "-m", "services.supervision.roster"]
         done = subprocess.run(
             run, cwd=CODE_ROOT, env=roster_env, capture_output=True, text=True, check=False
         )
@@ -344,7 +346,7 @@ def _resolve_target_choice(args: argparse.Namespace) -> list[str]:
     return problems
 
 
-def _missing_choices(args: argparse.Namespace, env: Mapping[str, str]) -> list[str]:
+def _missing_choices(args: argparse.Namespace, env: Mapping[str, str], *, python: str) -> list[str]:
     half = _text(args, "half")
     has_runners = bool(_strings(args, "runner"))
     problems = (
@@ -363,7 +365,7 @@ def _missing_choices(args: argparse.Namespace, env: Mapping[str, str]) -> list[s
         problems += _value_problems(args, scope)
     if half != "up" and _attr(args, "mode") not in (None, "smooth", "force"):
         problems.append("--mode smooth|force")
-    return problems + _service_problems(args, env)
+    return problems + _service_problems(args, env, python=python)
 
 
 # meiva:note
@@ -489,10 +491,10 @@ def _fleet_args(args: argparse.Namespace) -> FleetArgs:
 # meiva:note
 # Parse and validate the whole argv. A refusal exits 2 with every missing or conflicting choice
 # listed at once, before any host is touched.
-def parse(argv: list[str], env: Mapping[str, str]) -> FleetArgs:
+def parse(argv: list[str], env: Mapping[str, str], *, python: str) -> FleetArgs:
     parser = _parser()
     args = parser.parse_args(argv)
-    if problems := _missing_choices(args, env):
+    if problems := _missing_choices(args, env, python=python):
         listed = "".join(f"\n  {problem}" for problem in problems)
         parser.exit(2, f"refused: every choice is explicit; missing or conflicting:{listed}\n")
     if _attr(args, "rebuild_extras") is True and _attr(args, "extras") == "--keep-extras":

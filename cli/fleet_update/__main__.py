@@ -38,5 +38,6 @@ if __name__ == "__main__":
             timers=ProcessTimers(),
             operation_id=uuid4().hex,
             initiator=_initiator(),
+            python=sys.executable,
         )
     )

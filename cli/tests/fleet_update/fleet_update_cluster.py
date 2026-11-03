@@ -241,6 +241,7 @@ class Cluster:
                 timers=ProcessTimers(),
                 operation_id=f"op-{self.invocations:04d}",
                 initiator="user:test@test-host",
+                python=sys.executable,
             )
         finally:
             self._adopt(json.loads(self.state_path.read_text()))
