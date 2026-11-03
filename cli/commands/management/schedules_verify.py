@@ -156,12 +156,25 @@ def _builtin_templates() -> dict[str, str]:
 # the template that `up` will install rather than the previous release's stored snapshot;
 # non-manifest (agent-created) schedules keep their exact stored script.
 def _read_rows_file(path: str) -> list[tuple[int, str, str]]:
+    from base.daemon.schedules.builtin_schedules import (
+        MANIFEST_PATH,
+        load_manifest,
+        template_for_schedule_name,
+    )
+
     data: Any = json.loads(Path(path).read_text(encoding="utf-8"))
-    builtins = _builtin_templates()
+    manifest = load_manifest(MANIFEST_PATH)
+    schedules_dir = MANIFEST_PATH.parent
     rows: list[tuple[int, str, str]] = []
     for row in data:
         row_id, name, script = int(row[0]), str(row[1]), str(row[2])
-        rows.append((row_id, name, builtins.get(name, script)))
+        template = template_for_schedule_name(name, manifest)
+        resolved_script = (
+            (schedules_dir / template.script).read_text(encoding="utf-8")
+            if template is not None
+            else script
+        )
+        rows.append((row_id, name, resolved_script))
     return rows
 
 

@@ -16,13 +16,16 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from base.host.env.harness.catalog import CATALOG
+from base.host.system.tests.fake_commands import FakeCommands, Reply, fake_host
 from base.packages.extensions import install_registry
 from base.packages.extensions import registry as reg
 from base.paths import meiva_home
 from base.telemetry import EventPipeline
+from cli.commands.converge.harness_clis import ensure_external_harness_clis
 from cli.commands.converge.incomplete import read_incomplete
 from cli.commands.converge.plans.shell_rc import PATH_BEGIN
-from cli.commands.lifecycle.converge_host import cmd_converge
+from cli.commands.lifecycle.converge_host import CONVERGE_STEPS, cmd_converge
 from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime, UserSession
 from cli.database.tests.cli_tests import operator_database as operator_database
@@ -75,7 +78,15 @@ def converge(
         "---\nname: converge-demo\ndescription: A skill the converge test lands.\n---\n\nBody.\n"
     )
     session = UserSession(user_home=default_home, login_shell="/bin/zsh", interactive=False)
-    command = replace(command_runtime, home=home, session=session)
+    fc = FakeCommands()
+    for h in CATALOG.values():
+        fc.on(
+            lambda argv, b=h.binary: b in " ".join(argv) and "--version" in " ".join(argv),
+            Reply(stdout=f"{h.cli} {h.pinned_version}\n", returncode=0),
+            repeat=True,
+        )
+    host = fake_host(commands=fc)
+    command = replace(command_runtime, home=home, session=session, host=host)
     command.machine.set(role="agent-runner")
     command.config.set_field("os_jobs_enabled", False)
     return _Converge(default_home, home, checkout, command, operator_database, operator_pipeline)
@@ -209,3 +220,11 @@ def test_converge_adopts_what_this_machine_installed_before_the_registry(
 
     assert converge.run() == 0
     assert "adopted into the cluster" not in capsys.readouterr().out
+
+
+def test_external_harness_clis_step_registered() -> None:
+    (step,) = [s for s in CONVERGE_STEPS if s.name == "external harness CLIs"]
+    assert step.apply is ensure_external_harness_clis
+    assert step.roles == frozenset({"agent-runner"})
+    assert step.requires_unit_config is True
+    assert step.host_global is True

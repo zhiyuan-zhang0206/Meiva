@@ -1,4 +1,4 @@
-exports = ["agent_env.py", "agent_slices.py", "boot_actions.py", "boot_policy.py", "bootstrap.py", "config_lite_table.py", "dotenv_boot.py", "dotenv_content.py", "dotenv_file.py", "harness_binaries.py", "health_ports.py", "port_lease.py", "port_table.py", "process_profile.py", "registry.py", "tests"]
+exports = ["agent_env.py", "agent_slices.py", "boot_actions.py", "boot_policy.py", "bootstrap.py", "config_lite_table.py", "dotenv_boot.py", "dotenv_content.py", "dotenv_file.py", "harness", "harness_binaries.py", "health_ports.py", "port_lease.py", "port_table.py", "process_profile.py", "registry.py", "tests"]
 
 [uses]
 "agent_env.py" = ["config_lite_table.py"]
@@ -7,9 +7,10 @@ exports = ["agent_env.py", "agent_slices.py", "boot_actions.py", "boot_policy.py
 "bootstrap.py" = ["boot_policy.py", "process_profile.py", "registry.py"]
 "dotenv_boot.py" = ["boot_policy.py", "bootstrap.py", "dotenv_file.py", "registry.py"]
 "dotenv_file.py" = ["dotenv_content.py"]
+"harness" = ["harness_binaries.py"]
 "health_ports.py" = ["port_table.py", "registry.py"]
 "registry.py" = ["agent_env.py", "config_lite_table.py", "process_profile.py"]
-"tests" = ["agent_env.py", "boot_actions.py", "boot_policy.py", "bootstrap.py", "dotenv_content.py", "dotenv_file.py", "harness_binaries.py", "port_lease.py", "port_table.py", "registry.py"]
+"tests" = ["agent_env.py", "boot_actions.py", "boot_policy.py", "bootstrap.py", "dotenv_content.py", "dotenv_file.py", "harness", "harness_binaries.py", "port_lease.py", "port_table.py", "registry.py"]
 
 [roots]
 "dotenv_file.py" = { kinds = ["clock"], why = "the .env backup name carries the HOST clock by decision (docs/decisions/data/backup/2026-09-28-env-backup-names-use-the-host-clock.md): the writer runs before first-start identity, so asking a cluster Clock would mean loading runtime Settings to name a file, and the name must stay this machine's local time" }

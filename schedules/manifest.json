@@ -83,6 +83,15 @@
       "command": "python trace-ship-tempo-schedule.py"
     },
     {
+      "name": "harness-cli-update",
+      "class": "product",
+      "default_enabled": true,
+      "description": "Per-machine daily update of installed external harness CLIs at 04:30 cluster time.",
+      "script": "jobs/harness/harness-cli-update-schedule.py",
+      "command": "python jobs/harness/harness-cli-update-schedule.py",
+      "placement": "per_machine"
+    },
+    {
       "name": "db-write-stall-watch",
       "class": "operator",
       "default_enabled": false,

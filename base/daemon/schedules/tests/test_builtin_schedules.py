@@ -34,6 +34,7 @@ class TestLoadManifest:
             "memory-arbiter": "product",
             "model-update-tracker": "product",
             "trace-ship-tempo": "product",
+            "harness-cli-update": "product",
             "db-write-stall-watch": "operator",
             "sched-dry-import-weekly": "operator",
             "log-cred-mask-monthly": "operator",
@@ -50,6 +51,7 @@ class TestLoadManifest:
             "memory-arbiter",
             "model-update-tracker",
             "trace-ship-tempo",
+            "harness-cli-update",
             "main-red-watch",
         }
 
@@ -68,6 +70,41 @@ class TestLoadManifest:
         )
         with pytest.raises(ManifestError, match="unknown class"):
             load_manifest(path)
+
+    def test_unknown_placement_fails_fast(self, tmp_path: Path) -> None:
+        path = _manifest(
+            tmp_path,
+            [
+                {
+                    "name": "x",
+                    "class": "product",
+                    "default_enabled": True,
+                    "script": "x.py",
+                    "command": "python x.py",
+                    "placement": "unsupported",
+                }
+            ],
+        )
+        with pytest.raises(ManifestError, match="unknown placement"):
+            load_manifest(path)
+
+    def test_placement_per_machine(self) -> None:
+        scheds = load_manifest()
+        by_name = {s.name: s for s in scheds}
+        assert by_name["harness-cli-update"].placement == "per_machine"
+        assert by_name["c9-daily-report"].placement == "gateway"
+
+    def test_template_for_schedule_name(self) -> None:
+        from base.daemon.schedules.builtin_schedules import template_for_schedule_name
+
+        manifest = load_manifest()
+        harness_sched = template_for_schedule_name("harness-cli-update:runner-1", manifest)
+        assert harness_sched is not None
+        assert harness_sched.name == "harness-cli-update"
+        c9_sched = template_for_schedule_name("c9-daily-report", manifest)
+        assert c9_sched is not None
+        assert c9_sched.name == "c9-daily-report"
+        assert template_for_schedule_name("unknown-schedule", manifest) is None
 
     def test_missing_script_file_fails(self, tmp_path: Path) -> None:
         path = tmp_path / "manifest.json"

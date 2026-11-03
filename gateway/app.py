@@ -396,7 +396,12 @@ async def _background_lifetime(
                 name="gateway-notification-outbox",
             )
             plugin_schedules_reconciler = background.create_task(
-                run_plugin_schedules_reconciler(app.state.db_pool, app.state.gateway_process.home),
+                run_plugin_schedules_reconciler(
+                    app.state.db_pool,
+                    app.state.gateway_process.home,
+                    resolve_machine=app.state.gateway_process.machine.name,
+                    provision_builtins=app.state.gateway_process.config.view.gateway.provision_builtin_schedules,
+                ),
                 name="gateway-plugin-schedules-reconciler",
             )
             if config.upload_recovery_enabled:

@@ -14,6 +14,7 @@ _SCHEDULES = Path(__file__).resolve().parents[3] / "schedules"
 _CLUSTER_CLOCK_TEMPLATES = {
     "debt-sweep-daily-schedule.py": "TZ",
     "dev-ci-metrics-schedule.py": "TZ",
+    "jobs/harness/harness-cli-update-schedule.py": "TZ",
     "memory-steward-schedule.py": "TIMEZONE",
     "model-update-tracker-schedule.py": "TZ",
     "self-evolution-daily-schedule.py": "TZ",
