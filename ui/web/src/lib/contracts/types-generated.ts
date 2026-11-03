@@ -975,6 +975,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/pages/{page_key}/reply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["post_page_reply_pages__page_key__reply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/notices/open": {
         parameters: {
             query?: never;
@@ -3474,6 +3490,15 @@ export interface components {
             title?: string | null;
             serve_dir?: string | null;
             ttl_seconds?: number | null;
+        };
+        PageReplyAccepted: {
+            inbound_id: number | null;
+            status: string;
+        };
+        PageReplyIn: {
+            kind: "choice" | "confirm" | "compare" | "form" | "reply";
+            choices?: string[];
+            text: string;
         };
         PageRow: {
             id: number;
@@ -6050,6 +6075,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_page_reply_pages__page_key__reply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                page_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PageReplyIn"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageReplyAccepted"];
                 };
             };
             422: {

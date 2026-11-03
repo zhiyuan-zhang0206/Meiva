@@ -2931,6 +2931,56 @@
         }
       }
     },
+    "/pages/{page_key}/reply": {
+      "post": {
+        "summary": "Post Page Reply",
+        "description": "Submit the answer a served page asked for.\n\nThe body is a bounded envelope (`kind`, `choices`, `text`); the gateway renders it into one chat message to the page's agent, with `source=ui:page:<name>`. Unknown fields are rejected (422) and the page must still be open (404).\n\nRequires the viewer's own credential — a machine token is refused — so the inbound records the same auth fact as a message typed into the UI.",
+        "operationId": "post_page_reply_pages__page_key__reply_post",
+        "parameters": [
+          {
+            "name": "page_key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Page Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PageReplyIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageReplyAccepted"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/notices/open": {
       "get": {
         "summary": "Get Open Notices",
@@ -15258,6 +15308,64 @@
         ],
         "title": "PageRegisterRequest",
         "description": "POST /api/keyed/v1/agents/{aid}/pages request body — SDK meiva.ui.show / .serve call.\n\n`host`: the agent-runner's reachable address (the agent self-reports\n    it) — where the gateway's reverse proxy dials the page server\n    (loopback on a single box). Never appears in any URL.\n`port`: port that the agent process's HTTP server is listening on\n    (bound on the runner's reachable host, never 0.0.0.0). 1-65535.\n`title`: optional human-readable title shown in the frontend\n    tab/header; falls back to name when not given.\n`serve_dir`: directory the page server serves, recorded by\n    meiva.ui.serve() so agent boot can re-serve a dead\n    page server after resurrect/restart; absent for meiva.ui.show()\n    pages (the agent manages those servers itself)."
+      },
+      "PageReplyAccepted": {
+        "properties": {
+          "inbound_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inbound Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "inbound_id",
+          "status"
+        ],
+        "title": "PageReplyAccepted"
+      },
+      "PageReplyIn": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "choice",
+              "confirm",
+              "compare",
+              "form",
+              "reply"
+            ],
+            "title": "Kind",
+            "default": "reply"
+          },
+          "choices": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Choices"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 8000,
+            "title": "Text",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "PageReplyIn"
       },
       "PageRow": {
         "properties": {
