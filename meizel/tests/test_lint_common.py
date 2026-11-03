@@ -7,6 +7,13 @@ from pathlib import Path
 import pytest
 
 from meizel import lint_common
+from meizel.frontend_deps import (
+    FrontendDeps,
+    FrontendDepsError,
+    FrontendObservation,
+    classify,
+    refusal,
+)
 from meizel.roles import pytest_test_hosts
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -290,3 +297,94 @@ def test_a_nul_past_the_first_block_is_text() -> None:
 
 def test_undecodable_bytes_are_not_source() -> None:
     assert lint_common.decode_source(b"caf\xe9") is None
+
+
+LOCK = "lockfileVersion: '9.0'\n"
+
+
+def install(frontend: Path, *, metadata: bool, installed_lock: str | None) -> None:
+    node_modules = frontend / "node_modules"
+    node_modules.mkdir(parents=True, exist_ok=True)
+    if metadata:
+        (node_modules / ".modules.yaml").write_text("{}\n", encoding="utf-8")
+    if installed_lock is not None:
+        (node_modules / ".pnpm").mkdir(parents=True, exist_ok=True)
+        (node_modules / ".pnpm" / "lock.yaml").write_text(installed_lock, encoding="utf-8")
+
+
+def shapes(tmp_path: Path) -> dict[FrontendDeps, Path]:
+    found: dict[FrontendDeps, Path] = {}
+    missing = tmp_path / "missing"
+    (missing).mkdir()
+    (missing / "pnpm-lock.yaml").write_text(LOCK, encoding="utf-8")
+    found[FrontendDeps.MISSING] = missing
+
+    npm_era = tmp_path / "npm-era"
+    npm_era.mkdir()
+    (npm_era / "pnpm-lock.yaml").write_text(LOCK, encoding="utf-8")
+    install(npm_era, metadata=False, installed_lock=None)
+    found[FrontendDeps.NPM_ERA] = npm_era
+
+    changed = tmp_path / "lock-changed"
+    changed.mkdir()
+    (changed / "pnpm-lock.yaml").write_text(LOCK, encoding="utf-8")
+    install(changed, metadata=True, installed_lock=LOCK + "# stale\n")
+    found[FrontendDeps.LOCK_CHANGED] = changed
+
+    ready = tmp_path / "ready"
+    ready.mkdir()
+    (ready / "pnpm-lock.yaml").write_text(LOCK, encoding="utf-8")
+    install(ready, metadata=True, installed_lock=LOCK)
+    found[FrontendDeps.READY] = ready
+    return found
+
+
+@pytest.mark.parametrize(
+    ("observation", "expected"),
+    [
+        (FrontendObservation(False, False, None, "sha"), FrontendDeps.MISSING),
+        (FrontendObservation(True, False, None, "sha"), FrontendDeps.NPM_ERA),
+        (FrontendObservation(True, True, None, "sha"), FrontendDeps.LOCK_CHANGED),
+        (FrontendObservation(True, True, "sha", "other"), FrontendDeps.LOCK_CHANGED),
+        (FrontendObservation(True, True, "sha", "sha"), FrontendDeps.READY),
+    ],
+)
+def test_each_observation_shape_has_one_verdict(
+    observation: FrontendObservation, expected: FrontendDeps
+) -> None:
+    assert classify(observation) is expected
+
+
+@pytest.mark.parametrize(
+    ("state", "remedy"),
+    [
+        (FrontendDeps.MISSING, "bash scripts/setup-worktree.sh"),
+        (FrontendDeps.NPM_ERA, "pnpm install --frozen-lockfile"),
+        (FrontendDeps.LOCK_CHANGED, "pnpm install --frozen-lockfile"),
+    ],
+)
+def test_a_refusal_names_the_command_that_fixes_it(state: FrontendDeps, remedy: str) -> None:
+    assert remedy in refusal(state)
+
+
+def test_a_refusal_is_not_defined_for_a_ready_tree() -> None:
+    with pytest.raises(ValueError, match="not a refusal"):
+        refusal(FrontendDeps.READY)
+
+
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        (FrontendDeps.MISSING, "bash scripts/setup-worktree.sh"),
+        (FrontendDeps.NPM_ERA, "#8085"),
+        (FrontendDeps.LOCK_CHANGED, "different lockfile"),
+    ],
+)
+def test_the_analyzer_refuses_before_it_starts_node(
+    tmp_path: Path, state: FrontendDeps, expected: str
+) -> None:
+    frontend = shapes(tmp_path)[state]
+    with pytest.raises(FrontendDepsError, match=expected):
+        lint_common.run_node_analyzer(
+            Path("producer-that-does-not-exist.mjs"), "{}", frontend=frontend
+        )

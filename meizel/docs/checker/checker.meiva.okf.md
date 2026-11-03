@@ -101,6 +101,13 @@ Dynamic imports, `exec`/`compile`, non-literal Python subprocesses, string patch
 on first-party code, and `sys.modules` writes are governed by
 [[meizel/docs/checker/restricted/restricted.meiva.okf.md|restricted Python, `[loads]`, and `[external]`]].
 
+## Frontend dependencies
+
+The TypeScript analyzer answers only from a frontend tree this checkout installed from its own
+lockfile; a tree that is missing, was installed by the retired npm path, or belongs to another
+lockfile is refused before node starts. States, remedies and exit code:
+[[meizel/docs/frontend-deps.meiva.okf.md|frontend dependencies]].
+
 ## Manifest
 
 `meizel.toml` keys are `purity` / `[purity]` ([[meizel/docs/checker/purity.meiva.okf.md|purity]]),

@@ -118,10 +118,14 @@ errors.
 
 **A hook that cannot start has not passed.** The same failure shape hides in the pre-push
 stage: `check-code-comments` runs in a throwaway checkout under `/tmp`, which has no
-`ui/web/node_modules`, so on a host without the frontend dependencies it stops at
-`Cannot find module 'typescript'` and reports nothing. Twenty-nine free-comment
+`ui/web/node_modules`, so on a host without the frontend dependencies it used to stop at
+`Cannot find module 'typescript'` and report nothing. Twenty-nine free-comment
 violations accumulated on one branch that way, and CI was the first place they showed.
-Point the hook at a checkout that has them:
+The all-tree index now classifies the frontend tree first and refuses with the state it
+found — missing, an npm-era install from before the pnpm migration (#8085), or a tree
+installed for another lockfile — naming the command that fixes it and exiting 3, so a
+hook that could not start says so instead of reporting a pass. Point the hook at a
+checkout whose tree was installed from its own lockfile:
 
 ```bash
 NODE_PATH=<any-checkout>/ui/web/node_modules git push

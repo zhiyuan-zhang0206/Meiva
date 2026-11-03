@@ -12,6 +12,7 @@ from pathlib import Path
 
 from meizel.checkout import GitRepo, read_roles, read_text, toplevel
 from meizel.contracts import cli
+from meizel.frontend_deps import FrontendDepsError
 from meizel.graph.model import MeizelError
 
 __all__ = ["main", "open_repository"]
@@ -51,6 +52,9 @@ def main(argv: list[str]) -> int:
             today=datetime.now(UTC).date().isoformat(),
         )
         return cli.dispatch(repo, repo.root.resolve(), base, args, deps)
+    except FrontendDepsError as error:
+        print(f"meizel: {error}", file=sys.stderr)
+        return 3
     except MeizelError as error:
         print(f"meizel: {error}", file=sys.stderr)
         return 2
