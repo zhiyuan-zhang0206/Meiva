@@ -22,7 +22,7 @@ from meizel.graph import ReachabilityScope, python_reverse_closure, reachability
 from meizel.graph.model import Diagnostic, MeizelError
 from meizel.graph.universe import Checkout
 from meizel.source_evidence import Evidence, load_report
-from meizel.test_graph.model import CutoffBase, TestLanes, TestSelection
+from meizel.test_graph.model import TestLanes, TestSelection
 
 __all__ = ["CommandDeps", "build_parser", "dispatch"]
 
@@ -45,7 +45,7 @@ class Repository(Checkout, Protocol):
         self,
         changed_paths: Sequence[str],
         *,
-        base: CutoffBase | None = None,
+        base: str | None = None,
     ) -> TestSelection: ...
 
 
@@ -545,10 +545,7 @@ def _print_selection_query(
     lane: str | None,
     as_json: bool,
 ) -> int:
-    base = None
-    if base_ref is not None:
-        base = CutoffBase(base_ref, load_policy(repo.universe())[0].public_surface)
-    selection = repo.select_tests(rel_changed, base=base)
+    selection = repo.select_tests(rel_changed, base=base_ref)
     selected = list(selection.tests)
     if lane is not None:
         lanes = repo.test_lanes()

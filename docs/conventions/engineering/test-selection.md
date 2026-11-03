@@ -163,45 +163,28 @@ otherwise a `tests` directory beside an ancestor counts. A path with no nearer
 owner falls back to the top-level tests/ directory. A file's transitive runtime consumers are
 added to its package tests.
 
-### Interface early cutoff for strict modules (`meizel tests` only)
+### No interface cutoff in selection
 
-`python -m meizel tests --changed <paths> --base-ref <ref>` still offers this narrowing for a
-local run. CI does not use it: `scripts/ci/test_selector.py` stopped applying the cutoff in
-#8250, after #8154 showed the inference is wrong - a test asserts behavior, not a signature -
-and `meizel impacted`, which CI uses to scope basedpyright, never applied it (it is a plain
-reverse import closure).
+Selection never infers that a change is unobservable because a module's public signature is
+unchanged. That inference - a changed `PACKAGE` module whose public AST interface fingerprint
+matched the base selected only its own package's tests - is gone from both selectors:
 
-In that CLI path, a changed `PACKAGE` Python source file cuts off transitive cross-package
-consumer propagation and selects only its owning package's internal tests (plus the pinned
-tree-scan gates) when all of these hold in both base and head:
+- `scripts/ci/test_selector.py` stopped applying it in #8250. It saved about 1.2 s of CI across a
+  hundred merged pull requests and cost one red on `main`: #8154 changed what
+  `expected_checks()` returns without touching its signature, its contract test was pruned, every
+  required check went green, and the red landed;
+- `python -m meizel tests --base-ref` kept it until #6054, and `meizel impacted` - the file closure
+  CI uses to scope basedpyright - never applied it, being a reverse import closure.
 
-- the file has effective `purity = "strict"` in `meizel.toml`, carries no recorded
-  `[debt.*]` entry in any ancestor `meizel.toml`, and its directory's manifest boundary
-  declarations (`exports`, `loads`, `external`, `state`, `roots`) are unchanged;
-- its public AST interface fingerprint (`meizel.test_graph.cutoff.module_interface_unchanged`)
-  is unchanged: every public function, class, public or dunder method, public field,
-  module-level public constant or type alias, `__all__` / `__all_for_meiva__`, and
-  imported symbol referenced by a public signature or re-export is identical, with no
-  top-level control flow;
-- its owning package has a package-local `<pkg>/**/tests/` directory (not the top-level
-  `tests/` fallback) and at least one collectable test in that package reaches the file
-  in the runtime import graph.
+An unchanged fingerprint is not a claim about behavior, which is why it does not come back. Of
+twenty-nine application modules whose public signature did not change in a hundred merged pull
+requests, twenty-five changed executable code. Among the type-visible edits it called "unchanged"
+are an attribute type assigned inside `__init__` and the bound of a private `TypeVar` (or a private
+alias) named by a public annotation; both change what a type checker reports for a consumer.
 
-The fingerprint reads names, signatures, annotations as written, defaults, decorators, bases,
-class-level fields and re-exports. It does not read function or method bodies, so it cannot see
-an attribute type assigned inside one (`self.items: list[str]` in `__init__`), or the bound of a
-private `TypeVar` - or a private alias - that a public annotation names. Both change what a type
-checker sees while the fingerprint reports "unchanged", so a selection made through this cutoff
-drops the consumer that would have caught them. Treat it as a local shortcut, not as a claim
-about what a diff can affect.
-
-Any change to a public parameter name (`backoff_ms` to `backoff_s`), annotation,
-default value, return type, decorator, class field, public constant or re-export
-changes the fingerprint and runs the full transitive consumer closure.
-
-`--base-ref` also gives selection the base tree for deleted-path recovery: without it, a deleted
-path has an unknown impact and reports FULL (`incomplete-impact`). Base facts are read from a
-temporary Git archive, never from an unrelated working checkout.
+`--base-ref` remains, for a different job: a deleted path has no head tree to read, so selection
+takes the base listing, and without it the selection widens to FULL (`incomplete-impact`). Base
+facts are read from a temporary Git archive, never from an unrelated working checkout.
 
 ## Decision rules
 

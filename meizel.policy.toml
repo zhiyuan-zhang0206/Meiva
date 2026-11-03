@@ -106,12 +106,6 @@ bus = [
     "EventBus.from_settings()",
 ]
 
-# public-surface (meizel/test_graph/cutoff.py): the module-level names, besides `__all__`, whose list
-# value names what a module exports. The strict interface cutoff follows the names such a list
-# exports, so a change to the list is a change to the interface.
-[public-surface]
-names = ["__all_for_meiva__"]
-
 # ambient-readers (meizel/contracts/ambient_read.py): repository functions and objects that read the
 # world on their caller's behalf, by kind. A call to one (or, without parentheses, an import or
 # attribute read of one) is an acquisition of that kind at the use, so a wrapper around `os.environ`,

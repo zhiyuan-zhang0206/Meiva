@@ -7,13 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from meizel.allowances import parse
 from meizel.entry import open_repository
 from meizel.graph import ReachabilityScope, reachability_analysis
 from meizel.graph import universe as model
 from meizel.graph.graphs import feedback_edges, strongly_connected, unneeded_back_edges
 from meizel.graph.model import Code
-from meizel.test_graph.cutoff import module_interface_unchanged
 from meizel.tests.synthetic import RepoFactory, commit, run, write
 
 PYPROJECT = '[tool.pytest.ini_options]\ntestpaths = ["tests", "pkg/**/tests", "app/**/tests", "base/**/tests"]\n'
@@ -283,7 +281,7 @@ def test_sqlite_cache_persists_lanes_and_invalidates_on_dirty_or_untracked_edits
     assert with_untracked.native == frozenset({"pkg/tests/test_unit.py"})
 
 
-def test_cli_tests_subcommand_reports_lanes_and_strict_cutoff_selection(
+def test_cli_tests_subcommand_reports_lanes_and_selects_every_consumer(
     make_repo: RepoFactory,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -328,10 +326,17 @@ def test_cli_tests_subcommand_reports_lanes_and_strict_cutoff_selection(
             )
         },
     )
+    # meiva:note
+    # A body-only change keeps the consumer: #6054 deleted the interface cutoff, so selection no
+    # longer infers "signature unchanged" means "the consumer cannot observe it" (#8154).
     assert run(root, "tests", "--changed", "pkg/calc.py", "--base-ref", "HEAD", "--json") == 0
-    cutoff_payload = json.loads(capsys.readouterr().out)
-    assert cutoff_payload["decision"] == "SELECTED"
-    assert cutoff_payload["tests"] == ["pkg/tests/test_calc.py", "tests/test_lint_tree.py"]
+    body_only = json.loads(capsys.readouterr().out)
+    assert body_only["decision"] == "SELECTED"
+    assert body_only["tests"] == [
+        "app/tests/test_app_native.py",
+        "pkg/tests/test_calc.py",
+        "tests/test_lint_tree.py",
+    ]
 
     write(
         root,
@@ -364,49 +369,38 @@ def test_cli_tests_subcommand_reports_lanes_and_strict_cutoff_selection(
 
 
 # meiva:note
-# `meizel tests --base-ref` reads the surface names from the policy of the tree it judges: the same
-# edit to an import behind an `__exports__` list reaches the downstream tests only where the policy
-# declares `__exports__` a public-surface name.
-@pytest.mark.parametrize(
-    ("policy", "downstream_selected"),
-    [
-        ('[public-surface]\nnames = ["__exports__"]\n', True),
-        ("", False),
-        ('[public-surface]\nnames = ["__other__"]\n', False),
-    ],
-)
-def test_cli_tests_subcommand_follows_the_surface_names_the_policy_declares(
+# Swapping an import behind an `__exports__` list used to be pruned by the interface cutoff wherever
+# the policy did not declare that name a public surface. #6054 deleted that inference, so the
+# downstream reader is selected whatever the policy says.
+def test_cli_tests_subcommand_selects_a_downstream_reader_of_a_reexported_name(
     make_repo: RepoFactory,
     capsys: pytest.CaptureFixture[str],
-    policy: str,
-    downstream_selected: bool,
 ) -> None:
-    files = {
-        "pyproject.toml": PYPROJECT,
-        "meizel.toml": '[uses]\n"app" = ["pkg"]\n"tests" = ["app", "pkg"]\n\n' + ROLES,
-        "pkg/__init__.py": "",
-        "pkg/meizel.toml": 'exports = ["m.py"]\npurity = "strict"\n',
-        "pkg/a.py": "def foo() -> int:\n    return 1\n",
-        "pkg/b.py": "def foo() -> int:\n    return 1\n",
-        "pkg/m.py": 'from pkg.a import foo\n__exports__ = ["foo"]\n',
-        "pkg/tests/test_m.py": (
-            "from pkg.m import foo\ndef test_m() -> None:\n    assert foo() == 1\n"
-        ),
-        "app/__init__.py": "",
-        "app/tests/test_app.py": (
-            "from pkg.m import foo\ndef test_app() -> None:\n    assert foo() == 1\n"
-        ),
-        "tests/test_lint_tree.py": "def test_tree() -> None: pass\n",
-    }
-    if policy:
-        files["meizel.policy.toml"] = policy
-    root = make_repo(files)
+    root = make_repo(
+        {
+            "pyproject.toml": PYPROJECT,
+            "meizel.toml": '[uses]\n"app" = ["pkg"]\n"tests" = ["app", "pkg"]\n\n' + ROLES,
+            "pkg/__init__.py": "",
+            "pkg/meizel.toml": 'exports = ["m.py"]\npurity = "strict"\n',
+            "pkg/a.py": "def foo() -> int:\n    return 1\n",
+            "pkg/b.py": "def foo() -> int:\n    return 1\n",
+            "pkg/m.py": 'from pkg.a import foo\n__exports__ = ["foo"]\n',
+            "pkg/tests/test_m.py": (
+                "from pkg.m import foo\ndef test_m() -> None:\n    assert foo() == 1\n"
+            ),
+            "app/__init__.py": "",
+            "app/tests/test_app.py": (
+                "from pkg.m import foo\ndef test_app() -> None:\n    assert foo() == 1\n"
+            ),
+            "tests/test_lint_tree.py": "def test_tree() -> None: pass\n",
+        }
+    )
     commit(root, "initial")
     write(root, {"pkg/m.py": 'from pkg.b import foo\n__exports__ = ["foo"]\n'})
 
     assert run(root, "tests", "--changed", "pkg/m.py", "--base-ref", "HEAD", "--json") == 0
     selected = json.loads(capsys.readouterr().out)["tests"]
-    assert ("app/tests/test_app.py" in selected) is downstream_selected
+    assert "app/tests/test_app.py" in selected
     assert "pkg/tests/test_m.py" in selected
 
 
@@ -571,25 +565,3 @@ def test_reachability_cli_execution_and_gating(
 
     assert run(root, "reachability", "pkg/dead.py", "--check") == 1
     assert run(root, "reachability", "app/main.py", "--check") == 0
-
-
-# meiva:note
-# A module that lists its exports under a name of its own: the import of an exported name is part of
-# the interface only where that name is a declared public-surface name (`__all__` always is).
-@pytest.mark.parametrize(
-    ("surface_name", "declared", "unchanged"),
-    [
-        ("__all__", (), False),
-        ("__exports__", (), True),
-        ("__exports__", ("__exports__",), False),
-        ("__exports__", ("__other__",), True),
-    ],
-)
-def test_an_exported_name_follows_the_surface_names_the_policy_declares(
-    surface_name: str, declared: tuple[str, ...], unchanged: bool
-) -> None:
-    base = f'from a import foo\n{surface_name} = ["foo"]\n'
-    head = f'from b import foo\n{surface_name} = ["foo"]\n'
-    names = ", ".join(f'"{name}"' for name in declared)
-    surface = parse(f"[public-surface]\nnames = [{names}]\n")[0].public_surface
-    assert module_interface_unchanged("pkg/m.py", base, head, surface) is unchanged

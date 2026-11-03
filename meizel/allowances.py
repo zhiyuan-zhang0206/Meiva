@@ -168,14 +168,6 @@ class Policy:
     state_kinds: tuple[str, ...] = ()
 
     # meiva:note
-    # The module-level names whose list value names what a module exports: the language's `__all__`
-    # and the names `[public-surface]` declares. The strict interface cutoff follows what such a
-    # list exports.
-    @property
-    def public_surface(self) -> frozenset[str]:
-        return frozenset({"__all__", *self.names("public-surface", "names")})
-
-    # meiva:note
     # Every kind a reader may be listed under: the standard library's and the declared ones.
     @property
     def reader_kinds(self) -> tuple[str, ...]:

@@ -16,7 +16,7 @@ exports = ["__main__.py", "allowances.py", "budgets", "checkout.py", "contracts"
 "source_text.py" = []
 "state" = ["allowances.py", "checkout.py", "lint_common.py", "roles.py"]
 "test_graph" = ["roles.py"]
-"tests" = ["allowances.py", "contracts", "entry.py", "graph", "language", "lint_common.py", "roles.py", "test_graph"]
+"tests" = ["allowances.py", "contracts", "entry.py", "graph", "language", "lint_common.py", "roles.py"]
 
 [roots]
 "__main__.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
