@@ -152,15 +152,28 @@ def jina_article(raw: str, url: str, host: str | None) -> Article:
 
 
 # meiva:note
+# The first capture of every match of `pattern`, guarded into a `str`. `findall` answers
+# `list[Any]` whatever the pattern is, and `Match.group` is typed `str | Any` -- a union carrying
+# `Any` is one `reportAny` leaves alone -- so the guard is what makes each capture the text it was.
+def _captures(pattern: re.Pattern[str], text: str) -> list[str]:
+    found: list[str] = []
+    for match in pattern.finditer(text):
+        value = match.group(1)
+        if isinstance(value, str):
+            found.append(value)
+    return found
+
+
+# meiva:note
 # The raw hrefs on a list page: `href="..."` from HTML (the curl rung, with HTML entities
 # decoded so `?mod=view&amp;aid=1` still matches a `&aid=` pattern) or the markdown
 # `[text](url)` links of a Jina render (already plain).
 def raw_links(content: str, fmt: PageFormat) -> tuple[str, ...]:
     match fmt:
         case "html":
-            return tuple(html.unescape(href) for href in _RE_HREF.findall(content))
+            return tuple(html.unescape(href) for href in _captures(_RE_HREF, content))
         case "markdown":
-            return tuple(_RE_MD_LINK.findall(content))
+            return tuple(_captures(_RE_MD_LINK, content))
         case _:
             assert_never(fmt)
 

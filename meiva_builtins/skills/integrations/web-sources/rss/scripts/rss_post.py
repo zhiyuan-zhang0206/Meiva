@@ -11,12 +11,15 @@ import calendar
 import html
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, TypedDict, TypeGuard
+from typing import TypedDict
 
 import feedparser
 from feedparser.exceptions import ThingsNobodyCaresAboutButMe
+
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 
 _RE_TAG = re.compile(r"<[^>]+>")
 _RE_WS = re.compile(r"[ \t]*\n[ \t]*")
@@ -142,24 +145,60 @@ def _iso(struct: time.struct_time) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", struct)
 
 
-def _entry(raw: dict[str, Any]) -> Entry:
-    published = raw.get("published_parsed") or raw.get("updated_parsed")
-    link = raw.get("link")
-    content = raw.get("content")
-    body = content[0]["value"] if content and content[0].get("value") else raw.get("summary", "")
+# meiva:note
+# The text `raw[key]`, or None when the field is absent or is not text. A parsed feed is a decoded
+# mapping, so each field this module keeps is narrowed here rather than trusted.
+def _text(raw: Mapping[str, object], key: str) -> str | None:
+    value = raw.get(key)
+    return value if isinstance(value, str) else None
+
+
+# meiva:note
+# The JSON array `raw[key]`, or none when the field is absent or is another type.
+def _items(raw: Mapping[str, object], key: str) -> list[object]:
+    value = raw.get(key)
+    return value if is_object_list(value) else []
+
+
+# meiva:note
+# The JSON object `raw[key]`, or an empty one when the field is absent or is another type.
+def _fields(raw: Mapping[str, object], key: str) -> dict[str, object]:
+    value = raw.get(key)
+    return value if is_object_dict(value) else {}
+
+
+# meiva:note
+# The body a feed entry carries: the first `content` item's `value` (content:encoded, the full
+# HTML) when the feed sends one, else its summary, else "".
+def _body_html(raw: Mapping[str, object]) -> str:
+    content = _items(raw, "content")
+    first = content[0] if content else None
+    value = _text(first, "value") if is_object_dict(first) else None
+    return value or _text(raw, "summary") or ""
+
+
+# meiva:note
+# feedparser's `*_parsed` answer as the `struct_time` it is (already UTC), or None when the entry
+# carries no usable date -- the field is decoded JSON, so it is narrowed rather than trusted.
+def _published(value: object) -> time.struct_time | None:
+    return value if isinstance(value, time.struct_time) else None
+
+
+# meiva:note
+# One parsed entry, read field by field: every value feedparser hands back is untyped, so each
+# field this adapter keeps is taken through the boundary readers.
+def _entry(raw: Mapping[str, object]) -> Entry:
+    published = _published(raw.get("published_parsed") or raw.get("updated_parsed"))
+    link = _text(raw, "link")
     return Entry(
-        id=raw.get("id") or link or raw.get("title"),
-        title=raw.get("title"),
+        id=_text(raw, "id") or link or _text(raw, "title"),
+        title=_text(raw, "title"),
         url=link,
         published_ts=calendar.timegm(published) if published else None,
         published_at=_iso(published) if published else None,
-        body_html=body,
-        author=raw.get("author"),
+        body_html=_body_html(raw),
+        author=_text(raw, "author"),
     )
-
-
-def _is_parse_fn(value: object) -> TypeGuard[Callable[[bytes], dict[str, Any]]]:
-    return callable(value)
 
 
 # meiva:note
@@ -171,13 +210,29 @@ def _is_parse_fn(value: object) -> TypeGuard[Callable[[bytes], dict[str, Any]]]:
 # (``bozo`` is set but the exception is not a benign ``ThingsNobodyCaresAboutButMe`` like
 # ``CharacterEncodingOverride`` — the feed is still valid, just has encoding quirks).
 def parse_feed(data: bytes, feed_url: str) -> Feed:
+    # meiva:note
+    # `feedparser` ships no type information at all, and the local name is what keeps pyright out
+    # of it: `getattr(feedparser, "parse")` with the literal resolves to the untyped attribute's
+    # `Any` (a `reportAny` finding), and `feedparser.parse(data)` draws `reportUnknownMemberType`,
+    # a global error. A NON-literal name is what makes `getattr` answer `Any`, which `object_of`
+    # then hands on as an `object` -- not a `cast`, which would assert the type without checking.
     parse_attr = "parse"
-    parse: object = getattr(feedparser, parse_attr)
-    if not _is_parse_fn(parse):
+    parse_value = object_of(getattr, feedparser, parse_attr)
+    return _parse_with(parse_value, data, feed_url)
+
+
+# meiva:note
+# Parse `data` with `parse_value` into a `Feed`. Split out from `parse_feed` so the guards are
+# testable without a feedparser: a value that is not callable, and a callable that answers
+# something other than a feed mapping, both fail here by name instead of surfacing as a `KeyError`
+# on a field the answer never had.
+def _parse_with(parse_value: object, data: bytes, feed_url: str) -> Feed:
+    if not callable(parse_value):
         raise TypeError("feedparser.parse is not callable")
-    parsed = parse(data)
-    feed_meta: dict[str, Any] = parsed["feed"]
-    entries: list[Any] = parsed["entries"]
+    parsed = parse_value(data)
+    if not is_object_dict(parsed):
+        raise RssError(f"not a parsed feed: {type(parsed).__name__}")
+    entries = _items(parsed, "entries")
     if not entries:
         cause = parsed.get("bozo_exception")
         fatal_bozo = parsed.get("bozo") and not isinstance(cause, ThingsNobodyCaresAboutButMe)
@@ -185,8 +240,14 @@ def parse_feed(data: bytes, feed_url: str) -> Feed:
             raise RssError(
                 f"not recognized as a feed: {feed_url!r}" + (f" ({cause})" if cause else "")
             )
-    title: str = feed_meta.get("title") or feed_url
-    return Feed(url=feed_url, title=title, entries=tuple(_entry(e) for e in entries))
+    feed_meta = _fields(parsed, "feed")
+    title = _text(feed_meta, "title") or feed_url
+    read: list[Entry] = []
+    for entry in entries:
+        if not is_object_dict(entry):
+            raise RssError(f"not a feedparser entry mapping: {entry!r}")
+        read.append(_entry(entry))
+    return Feed(url=feed_url, title=title, entries=tuple(read))
 
 
 # meiva:note
