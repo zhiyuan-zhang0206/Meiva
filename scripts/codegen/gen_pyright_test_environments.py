@@ -27,6 +27,12 @@
 #   tests directories get no entry: they inherit the package entry's seven `error` rules. The
 #   generator refuses a promoted root whose package entry does not hold all seven at `error`,
 #   so a promotion cannot silently leave its tests unchecked.
+# * `reportAny` and `reportExplicitAny` in a package entry gate that package's production code.
+#   A generated tests entry never repeats them (`ANY_RULES`). A tests directory under a promoted
+#   root inherits every rule of its covering entry, Any rules included, so an entry that holds
+#   them also holds its tests, unless the entry's root is listed in `TESTS_OWING_ANY`: then each
+#   tests directory under it gets an entry of its own with the seven rules at `error` and no Any
+#   rule, until that debt is repaid and the root leaves the list (the ratchet only tightens).
 # * A tests directory inside a hand-written entry that carries more than rules (the
 #   `extraPaths` of `meiva_builtins/skills/integrations/web-ai`) repeats those settings, because the
 #   generated entry takes precedence and would otherwise drop them.
@@ -86,6 +92,16 @@ PROMOTED_ROOTS: tuple[str, ...] = (
     "cli",
     "meiva_builtins",
 )
+# meiva:note
+# The two basedpyright rules a package holds at `error` once its Any debt is repaid. They gate
+# production code only: a tests directory under a package entry that sets them does not repeat
+# them, so its tests stay at the global level until their own Any debt is repaid.
+ANY_RULES = ("reportAny", "reportExplicitAny")
+# meiva:note
+# Roots of hand-written entries that hold the Any rules in production code while the tests under
+# them have not repaid their own Any debt. Add the root in the pull request that adds the entry;
+# remove it when its tests are clean.
+TESTS_OWING_ANY: tuple[str, ...] = ()
 # What every test file is held to: the tests ladder rung, wherever the file sits.
 TESTS_STANDARD = {
     **dict.fromkeys(CALL_SIGNATURE_RULES, "error"),
@@ -140,18 +156,51 @@ def _toml_value(value: object) -> str:
     )
 
 
-def _entries(config: dict[str, Any], roots: list[str]) -> list[dict[str, Any]]:
-    """One entry per root that the hand-written `config` does not already hold to the standard."""
+# meiva:note
+# The non-rule settings of the entry covering `root` (`extraPaths` and the like).
+def _inherited(config: dict[str, Any], root: str) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in _covering_environment(config, root).items()
+        if key != "root" and key not in TESTS_STANDARD and key not in ANY_RULES
+    }
+
+
+# meiva:note
+# One entry per root that the hand-written `config` does not already hold to the standard.
+#
+# A root in `promoted` is held to all seven rules by its package entry and needs no entry, unless
+# the entry that covers it is listed in `owing_any`: that entry holds the Any rules for production
+# code while its tests have not repaid theirs, so the tests directory gets an entry of its own that
+# repeats the seven rules at `error` and leaves the Any rules out.
+def _entries(
+    config: dict[str, Any],
+    roots: list[str],
+    *,
+    promoted: Collection[str] = (),
+    owing_any: Collection[str] = (),
+) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
     for root in roots:
+        if root in promoted:
+            if _covering_environment(config, root).get("root") in owing_any:
+                entries.append(
+                    {
+                        "root": root,
+                        **_inherited(config, root),
+                        **dict.fromkeys(TESTS_STANDARD, "error"),
+                    }
+                )
+            continue
         if effective_rules(config, root) == TESTS_STANDARD:
             continue
-        inherited = {
-            key: value
-            for key, value in _covering_environment(config, root).items()
-            if key != "root" and key not in TESTS_STANDARD
-        }
-        entries.append({"root": root, **inherited, **dict.fromkeys(CALL_SIGNATURE_RULES, "error")})
+        entries.append(
+            {
+                "root": root,
+                **_inherited(config, root),
+                **dict.fromkeys(CALL_SIGNATURE_RULES, "error"),
+            }
+        )
     return entries
 
 
@@ -182,6 +231,7 @@ def generate(
     tracked: Iterable[str],
     *,
     promoted_roots: Collection[str] = PROMOTED_ROOTS,
+    owing_any: Collection[str] = TESTS_OWING_ANY,
 ) -> str:
     """`pyproject_text` with its generated region rewritten for the tracked tests directories."""
     region = _region(pyproject_text)
@@ -195,7 +245,7 @@ def generate(
             f"promoted tests directories are not held to all seven rules at error: {unheld}. "
             "Give their package a hand-written entry, or drop the root from PROMOTED_ROOTS."
         )
-    rendered = _render(_entries(config, [root for root in roots if root not in promoted]))
+    rendered = _render(_entries(config, roots, promoted=promoted, owing_any=owing_any))
     return pyproject_text[: region.start()] + rendered + pyproject_text[region.end() :]
 
 
