@@ -6,10 +6,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import psycopg
 
+from base.host.boundary.options import options
 from meizel import lint_common
 from meizel.checkout import apply_plan
 from meizel.graph.universe import EditPlan
@@ -25,7 +27,15 @@ def _live_rows(conn: psycopg.Connection) -> list[tuple[str, str, str, str | None
         return list(cur.fetchall())
 
 
-def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+@dataclass(frozen=True)
+class Options:
+    schema: Path
+    dsn: str | None
+    json: Path | None
+    allow: Path | None
+
+
+def _parse_args(argv: list[str] | None) -> Options:
     parser = argparse.ArgumentParser(description="Compare live columns against db/schema.sql.")
     parser.add_argument("--schema", type=Path, default=Path("db/schema.sql"))
     parser.add_argument(
@@ -38,7 +48,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=None,
         help="file listing table names and table.column entries to ignore",
     )
-    return parser.parse_args(argv)
+    return options(parser.parse_args(argv), Options)
 
 
 def _allow_text(allow: Path | None) -> str:

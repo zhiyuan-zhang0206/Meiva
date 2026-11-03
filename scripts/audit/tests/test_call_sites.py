@@ -6,10 +6,10 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
+from pydantic import BaseModel
 
 from scripts.audit import call_sites as _shell
 from scripts.audit.analysis.calls import (
@@ -232,13 +232,18 @@ def test_enforce_does_not_fail_on_an_unproven_call(
     assert "unproven: 1" in capsys.readouterr().out
 
 
+class _Payload(BaseModel):
+    checked: int
+    findings: list[dict[str, object]]
+
+
 def test_json_output_carries_the_counts_and_the_verdicts(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     assert _shell.main(["--root", str(_tree(tmp_path)), "--spec", "build:home", "--json"]) == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["checked"] == 1
-    assert payload["findings"] == [
+    payload = _Payload.model_validate_json(capsys.readouterr().out)
+    assert payload.checked == 1
+    assert payload.findings == [
         {
             "path": "caller/go.py",
             "line": 2,

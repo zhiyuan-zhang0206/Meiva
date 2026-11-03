@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
+from pydantic import BaseModel
 
 from scripts.audit.sdk_usage import main
 from scripts.audit.sdk_usage_report import CallEvent, read_calls, report, timestamp
@@ -63,6 +64,11 @@ def test_mirrors_deduplicate_and_reject_conflicting_event_ids() -> None:
         read_calls([mirror(raw, raw, conflicting)])
 
 
+class _Counts(BaseModel):
+    observed_events: int
+    weighted_calls: int
+
+
 def test_the_entry_reports_a_duplicated_mirror_once(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -71,8 +77,8 @@ def test_the_entry_reports_a_duplicated_mirror_once(
     path.write_text(json.dumps(raw) + "\n")
     code = main([str(path), str(path), "--start", START.isoformat(), "--end", END.isoformat()])
     assert code == 0
-    data = json.loads(capsys.readouterr().out)
-    assert (data["observed_events"], data["weighted_calls"]) == (1, 1)
+    data = _Counts.model_validate_json(capsys.readouterr().out)
+    assert (data.observed_events, data.weighted_calls) == (1, 1)
 
 
 def test_the_entry_splits_lines_at_newlines_only(

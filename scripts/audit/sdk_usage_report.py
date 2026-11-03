@@ -7,9 +7,25 @@ import json
 from collections import Counter, defaultdict
 from collections.abc import Collection, Iterable
 from datetime import datetime
-from typing import Any, TypedDict
+from typing import TypedDict
 
 from pydantic import AwareDatetime, BaseModel, Field
+
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
+
+
+class ModuleRow(TypedDict):
+    module: str
+    weighted_calls: int
+    observed_agents: int
+    expandable: bool
+    cumulative_eligible_pct: float | None
+
+
+class MethodRow(TypedDict):
+    method: str
+    weighted_calls: int
 
 
 class _SdkUsageReport(TypedDict):
@@ -22,8 +38,8 @@ class _SdkUsageReport(TypedDict):
     coverage_target_pct: float
     selected_sdk_modules: list[str]
     suggested_meiva_sdk_expand: str | None
-    modules: list[dict[str, Any]]
-    methods: list[dict[str, Any]]
+    modules: list[ModuleRow]
+    methods: list[MethodRow]
     limitations: str
 
 
@@ -48,6 +64,13 @@ def timestamp(value: str) -> datetime:
     return result
 
 
+def _event_object(line: str) -> dict[str, object]:
+    raw = object_of(json.loads, line)
+    if not is_object_dict(raw):
+        raise TypeError("an SDK event line must be a JSON object")
+    return raw
+
+
 # meiva:note
 # Recorded call events from the mirrors the entry read, as `(name, lines)` pairs, deduplicating copied
 # mirrors by event identity. Reading the files is the entry's.
@@ -58,7 +81,7 @@ def read_calls(mirrors: Iterable[tuple[str, Iterable[str]]]) -> list[CallEvent]:
             if not line.strip():
                 continue
             try:
-                raw = json.loads(line)
+                raw = _event_object(line)
                 if raw["event_name"] != "sdk_call":
                     continue
                 event = CallEvent.model_validate(raw)
@@ -75,7 +98,7 @@ def read_calls(mirrors: Iterable[tuple[str, Iterable[str]]]) -> list[CallEvent]:
 # Group methods at the module boundary and choose cumulative coverage.
 def _rank_modules(
     counts: Counter[str], agents: dict[str, set[int]], coverage: float
-) -> tuple[list[str], int, list[dict[str, Any]]]:
+) -> tuple[list[str], int, list[ModuleRow]]:
     modules: Counter[str] = Counter()
     module_agents: dict[str, set[int]] = defaultdict(set)
     for fn, count in counts.items():
@@ -86,7 +109,7 @@ def _rank_modules(
     eligible = sum(n for m, n in modules.items() if m not in {"skills", "mcps"})
     cumulative = 0
     selected: list[str] = []
-    ranking: list[dict[str, Any]] = []
+    ranking: list[ModuleRow] = []
     for module, count in sorted(modules.items(), key=lambda item: (-item[1], item[0])):
         expandable = module not in {"skills", "mcps"}
         if expandable:
@@ -94,13 +117,13 @@ def _rank_modules(
                 selected.append(module)
             cumulative += count
         ranking.append(
-            {
-                "module": module,
-                "weighted_calls": count,
-                "observed_agents": len(module_agents[module]),
-                "expandable": expandable,
-                "cumulative_eligible_pct": 100 * cumulative / eligible if eligible else None,
-            }
+            ModuleRow(
+                module=module,
+                weighted_calls=count,
+                observed_agents=len(module_agents[module]),
+                expandable=expandable,
+                cumulative_eligible_pct=100 * cumulative / eligible if eligible else None,
+            )
         )
     return selected, eligible, ranking
 
@@ -149,7 +172,7 @@ def report(
         "suggested_meiva_sdk_expand": ",".join(selected) if selected else None,
         "modules": ranking,
         "methods": [
-            {"method": fn, "weighted_calls": n}
+            MethodRow(method=fn, weighted_calls=n)
             for fn, n in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
         ],
         "limitations": "Recorded events only; sampling and missing mirrors limit coverage. "

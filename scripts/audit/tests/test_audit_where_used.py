@@ -1,8 +1,7 @@
-import json
 from pathlib import Path
-from typing import Any, cast
 
 import pytest
+from pydantic import BaseModel, TypeAdapter
 
 from base.host.proc import run_bounded
 from scripts.audit import analysis as finder
@@ -307,9 +306,19 @@ def test_output_caps_files_per_group_but_json_and_all_are_complete() -> None:
     assert sum(line.startswith("  user") for line in capped) == 3
     assert any("12 MORE FILES HIDDEN" in line and "user" in line for line in capped)
     assert full.count("use.py:1") == 15
-    groups = cast("dict[str, dict[str, Any]]", as_json(report)["groups"])
-    assert groups["imports"]["files"] == 15
-    assert len(groups["imports"]["hits"]) == 15
+    groups = TypeAdapter(dict[str, _Group]).validate_python(as_json(report)["groups"])
+    assert groups["imports"].files == 15
+    assert len(groups["imports"].hits) == 15
+
+
+class _Group(BaseModel):
+    files: int
+    hits: list[dict[str, object]]
+
+
+class _Report(BaseModel):
+    target: dict[str, object]
+    groups: dict[str, _Group]
 
 
 def test_main_reports_a_real_symbol_as_json_and_exits_2_on_an_unknown_target(
@@ -317,10 +326,10 @@ def test_main_reports_a_real_symbol_as_json_and_exits_2_on_an_unknown_target(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     assert shell.main(["pkg.engine:run", "--json"], repo_root=audit_checkout) == 0
-    payload = json.loads(capsys.readouterr().out)
-    imports = {hit["path"] for hit in payload[0]["groups"]["imports"]["hits"]}
+    payload = TypeAdapter(list[_Report]).validate_json(capsys.readouterr().out)
+    imports = {hit["path"] for hit in payload[0].groups["imports"].hits}
 
-    assert payload[0]["target"]["name"] == "run"
+    assert payload[0].target["name"] == "run"
     assert "app/main.py" in imports
 
     with pytest.raises(SystemExit) as exit_info:
@@ -334,7 +343,7 @@ def test_an_absolute_path_inside_the_explicit_checkout_is_made_relative(
 ) -> None:
     absolute = str(audit_checkout / "pkg" / "engine.py") + suffix
     assert shell.main([absolute, "--json"], repo_root=audit_checkout) == 0
-    target = json.loads(capsys.readouterr().out)[0]["target"]
+    target = TypeAdapter(list[_Report]).validate_json(capsys.readouterr().out)[0].target
     assert target["path"] == "pkg/engine.py"
     assert target["raw"] == "pkg/engine.py" + suffix
 

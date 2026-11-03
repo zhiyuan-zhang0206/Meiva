@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from pydantic import TypeAdapter
 
 from base.host.proc import run_bounded
 from scripts.audit.analysis.refusal_loss import (
@@ -244,7 +244,9 @@ def test_the_json_report_carries_every_finding_as_an_object(debt_checkout: Path)
         debt='[debt.first-party-patch]\n"a.py#x" = 1\n',
         message="pay debt down and drop the guard",
     )
-    reported = json.loads(_run_gate(debt_checkout, "--base", "HEAD~1", "--json").stdout)
+    reported = TypeAdapter(list[dict[str, object]]).validate_json(
+        _run_gate(debt_checkout, "--base", "HEAD~1", "--json").stdout
+    )
     assert [(entry["lens"], entry["blocks_deletion"], entry["path"]) for entry in reported] == [
         ("dropped-refusal", True, "base/boot.py")
     ]
