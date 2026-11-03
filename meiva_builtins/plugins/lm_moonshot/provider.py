@@ -7,7 +7,7 @@ blocks. The streaming fan-out and timeline both consume that shape.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     # Annotation-only (`build` return): keeps the chat-model stack off the
@@ -46,22 +46,24 @@ def build(ctx: BuildContext) -> BaseChatModel:
         logger.warning(
             f"{ctx.model} cannot disable thinking; thinking={{'type': 'disabled'}} ignored"
         )
-    kimi_kwargs: dict[str, Any] = {}
-    if ctx.resolved_effort:
-        kimi_kwargs["extra_body"] = {
+    extra_body = (
+        {
             "reasoning_effort": validate_effort(
                 ctx.resolved_effort,
                 ctx.effort_levels if ctx.effort_levels is not None else _KIMI_EFFORT_LEVELS,
                 target="kimi",
             )
         }
+        if ctx.resolved_effort
+        else None
+    )
     return ChatMoonshot(
         model=ctx.model,  # type: ignore[call-arg]
         api_key=api_key,  # type: ignore[arg-type]
         stream_usage=True,
         disable_streaming=ctx.disable_streaming,
         timeout=ctx.timeout,
-        **kimi_kwargs,
+        extra_body=extra_body,
     )
 
 

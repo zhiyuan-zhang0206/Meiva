@@ -1,2 +1,5 @@
 [purity]
 "plugin.py" = "strict"
+
+[uses]
+"tests" = ["provider.py"]
