@@ -31,7 +31,6 @@ import yaml
 
 from meizel.roles import pytest_test_hosts
 from scripts.ci import test_selector
-from scripts.codegen import gen_pyright_test_environments as gen
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _PYPROJECT_TEXT = (_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
@@ -376,13 +375,10 @@ def _scratch_scope_config(testpaths: str) -> str:
         f"testpaths = {testpaths}\n"
         f"python_files = {_PYTEST['python_files']!r}\n"
         'addopts = ["--import-mode=importlib"]\n'
-        "[tool.pyright]\n"
-        + "".join(f'{rule} = "warning"\n' for rule in gen.TESTS_STANDARD)
-        + f"{gen.BEGIN}\n{gen.END}\n"
     )
 
 
-def test_new_test_host_joins_generation_selection_and_collection(tmp_path: Path) -> None:
+def test_new_test_host_joins_selection_and_collection(tmp_path: Path) -> None:
     config = _scratch_scope_config('["tests", "new_component/**/tests"]')
     (tmp_path / "pyproject.toml").write_text(config, encoding="utf-8")
     paths = [
@@ -394,10 +390,6 @@ def test_new_test_host_joins_generation_selection_and_collection(tmp_path: Path)
         path = tmp_path / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("def test_it() -> None:\n    pass\n", encoding="utf-8")
-    generated = tomllib.loads(gen.generate(config, paths))["tool"]["pyright"]
-    assert [env["root"] for env in generated["executionEnvironments"]] == [
-        "new_component/nested/tests"
-    ]
     selected = test_selector.collectable_test_paths(tmp_path)
     assert selected == set(paths[:2])
     assert test_selector.select_tests([paths[1]], repo_root=tmp_path).tests == (paths[1],)
@@ -422,8 +414,6 @@ def test_test_scope_consumers_reject_invalid_patterns(tmp_path: Path, testpaths:
     config = _scratch_scope_config(testpaths)
     (tmp_path / "pyproject.toml").write_text(config, encoding="utf-8")
     with pytest.raises((ValueError, TypeError), match="pytest testpaths"):
-        gen.generate(config, [])
-    with pytest.raises((ValueError, TypeError), match="pytest testpaths"):
         test_selector.collectable_test_paths(tmp_path)
 
 
@@ -431,12 +421,10 @@ def test_test_scope_consumers_require_the_pytest_configuration(tmp_path: Path) -
     config = _scratch_scope_config('["tests"]').replace("[tool.pytest.ini_options]", "[tool.other]")
     (tmp_path / "pyproject.toml").write_text(config, encoding="utf-8")
     with pytest.raises(ValueError, match="must configure"):
-        gen.generate(config, [])
-    with pytest.raises(ValueError, match="must configure"):
         test_selector.collectable_test_paths(tmp_path)
 
 
-def test_schedules_tests_share_pytest_selection_and_type_checking_scope() -> None:
+def test_schedules_tests_share_pytest_selection() -> None:
     schedule_tests = {
         path for path in _tracked("schedules/**/test_*.py") if "tests" in path.split("/")[:-1]
     }
@@ -445,8 +433,3 @@ def test_schedules_tests_share_pytest_selection_and_type_checking_scope() -> Non
     assert not _collection_problems(
         sorted(schedule_tests), roots=_resolved_roots(), python_files=_PYTEST["python_files"]
     )
-    for path in schedule_tests:
-        assert (
-            gen.effective_rules(_PYPROJECT["tool"]["pyright"], str(Path(path).parent))
-            == gen.TESTS_STANDARD
-        )

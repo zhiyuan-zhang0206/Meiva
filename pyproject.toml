@@ -531,19 +531,21 @@ directory = "htmlcov"
 # "strict" mode: catches real bugs (un-unwrapped Optional, parameter type mismatch, missing
 # attribute, wrong call signature) + enforces type annotation completeness in this repo.
 # Every strict rule that produces actionable signal here stays at error level and blocks merge.
-# The reportUnknown*/reportMissing* family is run on a LADDER (see reportUnknown* block below):
-# "warning" globally + "error" on every package root (base, ops, services, agent, cli, gateway,
-# meizel, meiva, meiva_builtins) via executionEnvironments.
-# Measured with basedpyright 1.40.2 on main 4fff0542f (2026-11-03), whole repo, via CI:
-#   reportUnknown*/reportMissing*   2952 warnings, all under <pkg>/**/tests, scripts/ and the top-level
-#                                   tests/ (the package roots themselves are at 0)
-#   reportAny                      30684 (13181 outside tests dirs; base 1998, cli 2368, gateway 3532,
-#                                   services 1878, scripts 1471, meiva_builtins 1141, meiva 313,
-#                                   agent 209, meizel 186, ops 85)
-#   reportExplicitAny               6783 (2461 outside tests dirs; base 896, services 460, gateway 225)
-#   reportUnusedCallResult         18234 (3219 outside tests dirs)
-#   reportUnreachable (40), reportUnsafeMultipleInheritance (33), reportIgnoreCommentWithoutRule (1):
-#   fixed, now 0 and at "error".
+# The seven reportUnknown*/reportMissing* rules are global errors: the whole repository, tests
+# included, is at 0 (measured with basedpyright on 2026-11-03, whole repo, via the CI run of #8303
+# at 857e6f3ae). The remaining basedpyright-only rules are a ladder of their own:
+#   reportAny                      25702 (8553 outside tests dirs; base 1957, scripts 1474,
+#                                   services 1298, cli 1173, meiva_builtins 1130, gateway 772,
+#                                   meiva 278, agent 207, meizel 185, ops 79)
+#   reportExplicitAny               6589 (2329 outside tests dirs; base 877, services 457,
+#                                   scripts 248, meiva_builtins 234, meiva 138, agent 136,
+#                                   cli 132, gateway 83, ops 13, meizel 11)
+#   reportUnusedCallResult         18291 (3212 outside tests dirs; base 726, scripts 595,
+#                                   services 573, cli 474, meiva_builtins 299, gateway 171)
+# They stay at "warning" globally and are raised to "error" directory by directory through the
+# executionEnvironments below, as each directory's count reaches 0.
+#   reportUnreachable, reportUnsafeMultipleInheritance, reportIgnoreCommentWithoutRule:
+#   fixed, 0 and at "error".
 # reportUnnecessaryIsInstance stays fully OFF (see its own note below).
 typeCheckingMode = "strict"
 pythonVersion = "3.12"
@@ -590,17 +592,15 @@ reportMissingModuleSource = false
 # etc.) for unit tests, not as implementation users.
 reportPrivateUsage = "none"
 reportUnusedFunction = "none"
-# Ladder (see the [tool.pyright] header for counts): the global "warning" keeps the remaining
-# Unknown/Missing findings visible in the IDE and CI logs without gating merge; the package-root
-# executionEnvironments below raise these same seven rules to "error" where the findings have been
-# annotated away. The residue sits in tests, scripts/ and the top-level tests/.
-reportUnknownMemberType = "warning"
-reportUnknownArgumentType = "warning"
-reportUnknownVariableType = "warning"
-reportUnknownParameterType = "warning"
-reportMissingParameterType = "warning"
-reportUnknownLambdaType = "warning"
-reportMissingTypeArgument = "warning"
+# The unknown/missing-annotation family: any finding is an error everywhere, so a new untyped
+# function or an unparameterized generic cannot land.
+reportUnknownMemberType = "error"
+reportUnknownArgumentType = "error"
+reportUnknownVariableType = "error"
+reportUnknownParameterType = "error"
+reportMissingParameterType = "error"
+reportUnknownLambdaType = "error"
+reportMissingTypeArgument = "error"
 # defensive isinstance/issubclass at dispatch entry points (e.g. plugin author passed a non-
 # BaseModel / env-loaded factory return / plugin-tampered meiva.state_update) is a
 # fail-fast guard, pulling "caller error" forward to an entrypoint TypeError, not dead code.
@@ -620,244 +620,57 @@ reportAny = "warning"
 reportExplicitAny = "warning"
 reportUnusedCallResult = "warning"
 
-# A package's own tests (`<pkg>/**/tests/`) are held to the tests rung below wherever they sit:
-# reportUnknownMemberType and reportUnknownArgumentType at "error", the other five at "warning".
-# pyright takes the FIRST environment whose root contains a file, and a root is a plain directory
-# (no globs). So a tests directory under base/, ops/, services/, agent/, cli/, gateway/, meizel/,
-# meiva/ or meiva_builtins/ needs its own entry, listed HERE, above the package entries:
-# without one it inherits the package's seven "error" rules or the global "warning".
-# The roots listed in PROMOTED_ROOTS in the generator are the exception: their tests have paid off
-# the five tests-rung rules too, so they get no entry and inherit their package entry's seven
-# "error" rules.
-#
-# Those entries are GENERATED, one per tests directory, sorted by root: run
+# The seven reportUnknown*/reportMissing* rules are global errors, so every file is held to them
+# wherever it sits. A directory entry below that also holds reportAny / reportExplicitAny would
+# hold the tests under it to them too; while a root's tests still owe their Any debt, the root is
+# listed in TESTS_OWING_ANY (scripts/codegen/gen_pyright_test_environments.py) and each tests
+# directory under it gets a generated entry of its own that carries no Any rule. pyright takes the
+# FIRST entry whose root contains a file and a root is a plain directory (no globs), so that is
+# the only way to exempt a tests directory from its covering entry. The entries are GENERATED, one
+# per tests directory, sorted by root: run
 # `.venv/bin/python scripts/codegen/gen_pyright_test_environments.py` after adding, moving or
-# removing a tests directory (the pre-commit hook `lint-pyright-test-environments` and
-# tests/ci/test_pyright_test_environments.py fail until you do). Do not edit between the markers.
-# Two changes that add entries collide only where their roots are neighbors in this order;
-# resolve by running the script again.
-# A package entry's `reportAny` / `reportExplicitAny` gate production code; a generated tests entry
-# never repeats them. A promoted root's tests directories inherit the covering entry's rules, Any
-# included, unless the entry's root is listed in `TESTS_OWING_ANY` in the generator: then each
-# tests directory under it gets its own entry (the seven rules, no Any rule) until its Any debt is
-# repaid and the root leaves the list.
+# removing a tests directory under a listed root (the pre-commit hook
+# `lint-pyright-test-environments` and tests/ci/test_pyright_test_environments.py fail until you
+# do). Do not edit between the markers. The generator and this region go when the last root
+# leaves TESTS_OWING_ANY, that is when reportAny is a global error.
 # BEGIN GENERATED pyright tests environments (scripts/codegen/gen_pyright_test_environments.py; edit nothing between the markers)
-[[tool.pyright.executionEnvironments]]
-root = "ops/agent_transfer/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ops/agents/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ops/cluster_status/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ops/env_audit/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ops/inventory/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ops/lifecycle/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ops/private_files/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ops/pty_close_notices/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ops/rpc_schemas/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ops/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ops/upload_delivery/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "schedules/tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
 # END GENERATED pyright tests environments
 
-# Ladder rung: raise the reportUnknown*/reportMissing* family to "error" on the highest-signal core
-# layers, gating merge there while the rest of the tree stays at the global "warning".
-[[tool.pyright.executionEnvironments]]
-root = "base"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-reportUnknownVariableType = "error"
-reportUnknownParameterType = "error"
-reportMissingParameterType = "error"
-reportUnknownLambdaType = "error"
-reportMissingTypeArgument = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "ops"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-reportUnknownVariableType = "error"
-reportUnknownParameterType = "error"
-reportMissingParameterType = "error"
-reportUnknownLambdaType = "error"
-reportMissingTypeArgument = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "services"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-reportUnknownVariableType = "error"
-reportUnknownParameterType = "error"
-reportMissingParameterType = "error"
-reportUnknownLambdaType = "error"
-reportMissingTypeArgument = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "agent"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-reportUnknownVariableType = "error"
-reportUnknownParameterType = "error"
-reportMissingParameterType = "error"
-reportUnknownLambdaType = "error"
-reportMissingTypeArgument = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "cli"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-reportUnknownVariableType = "error"
-reportUnknownParameterType = "error"
-reportMissingParameterType = "error"
-reportUnknownLambdaType = "error"
-reportMissingTypeArgument = "error"
-
+# Directory entries that raise reportAny / reportExplicitAny to "error" once a directory's count is
+# 0. Their tests directories follow them unless the root is listed in TESTS_OWING_ANY.
 [[tool.pyright.executionEnvironments]]
 root = "gateway/routers"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-reportUnknownVariableType = "error"
-reportUnknownParameterType = "error"
-reportMissingParameterType = "error"
-reportUnknownLambdaType = "error"
-reportMissingTypeArgument = "error"
 reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "gateway/http"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-reportUnknownVariableType = "error"
-reportUnknownParameterType = "error"
-reportMissingParameterType = "error"
-reportUnknownLambdaType = "error"
-reportMissingTypeArgument = "error"
 reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "gateway/schedules"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-reportUnknownVariableType = "error"
-reportUnknownParameterType = "error"
-reportMissingParameterType = "error"
-reportUnknownLambdaType = "error"
-reportMissingTypeArgument = "error"
 reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "gateway/agents"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-reportUnknownVariableType = "error"
-reportUnknownParameterType = "error"
-reportMissingParameterType = "error"
-reportUnknownLambdaType = "error"
-reportMissingTypeArgument = "error"
 reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "gateway/events"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-reportUnknownVariableType = "error"
-reportUnknownParameterType = "error"
-reportMissingParameterType = "error"
-reportUnknownLambdaType = "error"
-reportMissingTypeArgument = "error"
 reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "gateway/cluster"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-reportUnknownVariableType = "error"
-reportUnknownParameterType = "error"
-reportMissingParameterType = "error"
-reportUnknownLambdaType = "error"
-reportMissingTypeArgument = "error"
 reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "gateway"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-reportUnknownVariableType = "error"
-reportUnknownParameterType = "error"
-reportMissingParameterType = "error"
-reportUnknownLambdaType = "error"
-reportMissingTypeArgument = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "meizel"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-reportUnknownVariableType = "error"
-reportUnknownParameterType = "error"
-reportMissingParameterType = "error"
-reportUnknownLambdaType = "error"
-reportMissingTypeArgument = "error"
-
-[[tool.pyright.executionEnvironments]]
 root = "meiva"
 extraPaths = [".agents/skills/meiva-self-development/reference"]
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-reportUnknownVariableType = "error"
-reportUnknownParameterType = "error"
-reportMissingParameterType = "error"
-reportUnknownLambdaType = "error"
-reportMissingTypeArgument = "error"
 
 # A sub-skill's script reaches its parent skill's scripts/ only through the
 # runtime `__file__`-derived sys.path guard (Structure Rule 6) — pyright does
@@ -865,64 +678,14 @@ reportMissingTypeArgument = "error"
 # resolve the sibling import statically. Each skill's own scripts/ resolves
 # its OWN same-directory siblings without help (a file's containing directory
 # is always on pyright's implicit search path); only the parent-reaching case
-# needs extraPaths. Listed before `root = "meiva_builtins"` because pyright
-# takes the first matching executionEnvironment.
+# needs extraPaths.
 [[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/skills/integrations/web-ai"
 extraPaths = ["meiva_builtins/skills/integrations/web-ai/scripts"]
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-reportUnknownVariableType = "error"
-reportUnknownParameterType = "error"
-reportMissingParameterType = "error"
-reportUnknownLambdaType = "error"
-reportMissingTypeArgument = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/skills/integrations/web-sources"
 extraPaths = ["meiva_builtins/skills/integrations/web-sources/scripts"]
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-reportUnknownVariableType = "error"
-reportUnknownParameterType = "error"
-reportMissingParameterType = "error"
-reportUnknownLambdaType = "error"
-reportMissingTypeArgument = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "meiva_builtins"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-reportUnknownVariableType = "error"
-reportUnknownParameterType = "error"
-reportMissingParameterType = "error"
-reportUnknownLambdaType = "error"
-reportMissingTypeArgument = "error"
-
-# scripts/ holds repository tooling and is held to the same rung as the packages above. Each
-# `scripts/**/tests` directory has its own generated entry earlier in this file, so only the
-# tooling code itself falls through to this one.
-[[tool.pyright.executionEnvironments]]
-root = "scripts"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-reportUnknownVariableType = "error"
-reportUnknownParameterType = "error"
-reportMissingParameterType = "error"
-reportUnknownLambdaType = "error"
-reportMissingTypeArgument = "error"
-
-# The top-level tests/ tree is held to the same rung as the packages above: one entry covers
-# integration, e2e, components, skills, path_scoped, ci and fixtures.
-[[tool.pyright.executionEnvironments]]
-root = "tests"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-reportUnknownVariableType = "error"
-reportUnknownParameterType = "error"
-reportMissingParameterType = "error"
-reportUnknownLambdaType = "error"
-reportMissingTypeArgument = "error"
 
 [tool.mutmut]
 # Mutation testing exploratory config (mutmut).
