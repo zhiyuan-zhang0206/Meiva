@@ -10,6 +10,7 @@ fallback).
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import subprocess
@@ -157,7 +158,7 @@ def test_main_aborts_on_backend_failure_and_leaves_file_alone(tmp_path: Path) ->
         _suite_arguments(argv, cwd, check)
         return subprocess.CompletedProcess(argv, 1)
 
-    assert refresh.main(target_path=target, run_process=_fail) == 1
+    assert refresh.main(python=sys.executable, target_path=target, run_process=_fail) == 1
     assert target.read_text() == '{"tests/a::test_x": 1.5}\n'
 
 
@@ -176,7 +177,7 @@ def test_main_keeps_previous_e2e_entries_when_e2e_records_nothing(tmp_path: Path
         e2e_data={},
     )
 
-    assert refresh.main(target_path=target, run_process=fake) == 0
+    assert refresh.main(python=sys.executable, target_path=target, run_process=fake) == 0
     data = json.loads(target.read_text())
     assert data == {
         "tests/components/agent/test_a.py::test_one": 1.1,
@@ -192,7 +193,7 @@ def test_main_merges_both_suite_durations(tmp_path: Path) -> None:
         e2e_data={"tests/e2e/test_b.py::test_two": 0.5},
     )
 
-    assert refresh.main(target_path=target, run_process=fake) == 0
+    assert refresh.main(python=sys.executable, target_path=target, run_process=fake) == 0
     data = json.loads(target.read_text())
     assert data == {
         "tests/components/agent/test_a.py::test_one": 1.1,
@@ -242,6 +243,7 @@ def test_measure_backend_retries_and_reseeds_the_ci_durations(tmp_path: Path) ->
             ["measure", "backend", "--group", "3", "--output", str(output)],
             target_path=source,
             run_process=_fail_once_then_record,
+            python=sys.executable,
         )
         == 0
     )
@@ -282,6 +284,7 @@ def test_measure_e2e_uses_the_ci_pytest_arguments(tmp_path: Path) -> None:
             ["measure", "e2e", "--group", "2", "--output", str(output)],
             target_path=source,
             run_process=_record_e2e_arguments,
+            python=sys.executable,
         )
         == 0
     )
@@ -320,6 +323,7 @@ def test_measure_static_uses_the_ci_pytest_arguments_and_coverage(tmp_path: Path
             ["measure", "static", "--group", "5", "--output", str(output)],
             target_path=source,
             run_process=_record_static_arguments,
+            python=sys.executable,
         )
         == 0
     )
@@ -355,6 +359,7 @@ def test_merge_refuses_incomplete_shard_measurements_without_overwriting(tmp_pat
             ["merge", "--durations-dir", str(durations_dir)],
             target_path=target,
             run_process=_forbid_process,
+            python=sys.executable,
         )
         == 1
     )
@@ -375,6 +380,7 @@ def test_merge_refuses_empty_shard_measurement_without_overwriting(tmp_path: Pat
             ["merge", "--durations-dir", str(durations_dir)],
             target_path=target,
             run_process=_forbid_process,
+            python=sys.executable,
         )
         == 1
     )
@@ -397,6 +403,7 @@ def test_merge_refuses_duplicate_shard_measurement_without_overwriting(tmp_path:
             ["merge", "--durations-dir", str(durations_dir)],
             target_path=target,
             run_process=_forbid_process,
+            python=sys.executable,
         )
         == 1
     )
@@ -419,6 +426,7 @@ def test_merge_all_ci_shards_writes_the_compact_combined_durations(tmp_path: Pat
             ["merge", "--durations-dir", str(durations_dir)],
             target_path=target,
             run_process=_forbid_process,
+            python=sys.executable,
         )
         == 0
     )
@@ -545,7 +553,36 @@ def test_measure_writes_junit_only_for_the_first_attempt(tmp_path: Path) -> None
             ],
             target_path=source,
             run_process=_fail_once_then_record,
+            python=sys.executable,
         )
         == 0
     )
     assert junit_arguments == [f"--junit-xml={junit}", None]
+
+
+# meiva:note
+# Every suite the refresh measures is started by the interpreter the entry named. A stand-in path
+# that no process could run still reaches the command line, because the runner is the caller's:
+# a `sys.executable` inside `run_suite` would put the real interpreter there instead.
+def test_the_measured_suites_run_on_the_interpreter_the_entry_named(tmp_path: Path) -> None:
+    target = tmp_path / ".test_durations"
+    target.write_text("{}")
+    seen: list[str] = []
+
+    def _record(
+        argv: Sequence[str], *, cwd: Path, check: Literal[False]
+    ) -> subprocess.CompletedProcess[bytes]:
+        seen.append(argv[0])
+        return subprocess.CompletedProcess(argv, 1)
+
+    assert refresh.main(python="/opt/stand-in/python", target_path=target, run_process=_record) == 1
+    assert seen == ["/opt/stand-in/python"]
+
+
+# meiva:note
+# The interpreter is the caller's to name. A default would let a run that forgot the argument
+# measure the suites on whatever interpreter this process happens to be, silently.
+def test_the_refresh_entry_names_its_own_interpreter() -> None:
+    parameter = inspect.signature(refresh.main).parameters["python"]
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    assert "python" not in (refresh.main.__kwdefaults__ or {})
