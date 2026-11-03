@@ -11,6 +11,10 @@ if [[ "${1:-}" == changed ]]; then
   # repository. Every other mode here visits the tree.
   exec .venv/bin/python -m scripts.content_lint.code_comments "$@"
 fi
+# The whole-tree TypeScript index loads the compiler from ui/web/node_modules; a checkout whose
+# frontend tree is missing or was installed for another lockfile cannot answer, and node would report
+# that as a module-not-found stack instead. Classify first, exit 3 with the remedy.
+.venv/bin/python -m meizel.frontend_deps || exit 3
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 git ls-files -z | node scripts/content_lint/code_comments/typescript.mjs > "$scratch/typescript.json"

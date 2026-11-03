@@ -8,7 +8,8 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from meizel import is_repo_test_file, is_test_path, restrict, split_only
-from meizel.checkout import roles_at, tracked_files
+from meizel.checkout import frontend_observation, roles_at, tracked_files
+from meizel.frontend_deps import FrontendDeps, FrontendDepsError, classify, refusal
 from meizel.graph.model import MeizelError
 from meizel.roles import pytest_test_hosts, select_packages
 from meizel.source_text import decode_source
@@ -263,8 +264,16 @@ def _missing_frontend_dependencies(stderr: str) -> str | None:
 # meiva:note
 # This I/O boundary starts one tool-owned analyzer with JSON stdin and bounded heap/time.
 # Successful fact production is not a semantic purity proof of the scanned code.
-# meiva:link meizel/docs/checker/typescript.meiva.okf.md
-def run_node_analyzer(producer: Path, payload: str) -> str:
+# meiva:link meizel/docs/frontend-deps.meiva.okf.md
+def run_node_analyzer(producer: Path, payload: str, *, frontend: Path | None = None) -> str:
+    # meiva:note
+    # A frontend tree this checkout did not install from its own lockfile answers for a graph the
+    # lockfile does not describe, so the refusal happens before node starts and names the fix.
+    # meiva:link meizel/docs/frontend-deps.meiva.okf.md
+    if frontend is not None:
+        state = classify(frontend_observation(frontend))
+        if state is not FrontendDeps.READY:
+            raise FrontendDepsError(refusal(state))
     try:
         result = subprocess.run(  # noqa: S603
             ["node", "--max-old-space-size=4096", str(producer)],

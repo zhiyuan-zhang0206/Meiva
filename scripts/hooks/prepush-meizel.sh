@@ -19,10 +19,22 @@ while IFS= read -r -d '' path; do
     esac
 done < "$path_file"
 
+# meizel exits 3 when the checkout's frontend dependencies are missing or stale: the checker could
+# not answer a TypeScript question, which is a property of this tree, not of the push.
+run_meizel() {
+    local rc=0
+    .venv/bin/python -m meizel check "$@" || rc=$?
+    if [[ "$rc" -eq 3 ]]; then
+        echo "WARNING: PRE-PUSH SKIPPED [meizel]: frontend dependencies are not ready for the TypeScript analyzer (reason above). CI must pass before merge." >&2
+        return 0
+    fi
+    return "$rc"
+}
+
 if [[ "$full" == true ]]; then
-    .venv/bin/python -m meizel check
+    run_meizel
 elif [[ "${#changed[@]}" -gt 0 ]]; then
-    .venv/bin/python -m meizel check --changed "${changed[@]}"
+    run_meizel --changed "${changed[@]}"
 else
     echo 'pre-push: no Python, manifest or role-list input changed; skipping meizel'
 fi

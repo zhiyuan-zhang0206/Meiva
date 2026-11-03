@@ -22,6 +22,13 @@ from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
 
+from meizel.frontend_deps import (
+    NODE_MODULES,
+    PNPM_METADATA,
+    SOURCE_LOCK,
+    TREE_LOCK,
+    FrontendObservation,
+)
 from meizel.graph import project_metadata_paths, python_reverse_closure, standalone_projects
 from meizel.graph.model import MeizelError
 from meizel.graph.universe import MANIFEST, SOURCE_EXTENSIONS, Checkout, EditPlan, Universe
@@ -94,6 +101,30 @@ def python_reverse_closure_at(
 # The UTF-8 text of `rel` under `root`.
 def read_text(root: Path, rel: str) -> str:
     return (root / rel).read_bytes().decode("utf-8")
+
+
+# meiva:note
+# The four facts that decide whether this checkout may be asked a TypeScript question, read once
+# here because the tree is the shell's: whether node_modules exists, whether pnpm installed it, and
+# the digests of the lockfile it installed against and of the lockfile the checkout carries.
+# meiva:link meizel/docs/frontend-deps.meiva.okf.md
+def frontend_observation(frontend: Path) -> FrontendObservation:
+    return FrontendObservation(
+        node_modules=(frontend / NODE_MODULES).is_dir(),
+        pnpm_metadata=frontend.joinpath(*PNPM_METADATA).is_file(),
+        installed_lock=_digest(frontend.joinpath(*TREE_LOCK)),
+        source_lock=_digest(frontend / SOURCE_LOCK),
+    )
+
+
+# meiva:note
+# The digest of one file, or None when it is not there: an absent lockfile and an unreadable one are
+# the same answer to "was this tree installed for the lockfile the checkout carries".
+def _digest(path: Path) -> str | None:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
 
 
 # meiva:note
