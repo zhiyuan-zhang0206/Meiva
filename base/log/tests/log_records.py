@@ -27,10 +27,10 @@ class LogRecords(list[dict[str, Any]]):
         return [r["message"] for r in self if level is None or r["level"].name == level]
 
     # meiva:note
-    # The `extra` mapping of every record, optionally only those logged with `event=<event>`
-    # and/or at the level named `level` (as `messages` selects).
+    # The `extra` mapping of every record, optionally only those logged with `event=<event>`,
+    # at the level named `level` (as `messages` selects) and/or whose message contains `message`.
     def extras(
-        self, *, event: str | None = None, level: str | None = None
+        self, *, event: str | None = None, level: str | None = None, message: str | None = None
     ) -> list[dict[str, object]]:
         found: list[dict[str, object]] = []
         for record in self:
@@ -38,8 +38,10 @@ class LogRecords(list[dict[str, Any]]):
             if not _is_extra(extra):
                 continue
             level_name = getattr(record.get("level"), "name", None)
-            if (level is None or level_name == level) and (
-                event is None or extra.get("event") == event
+            if (
+                (level is None or level_name == level)
+                and (event is None or extra.get("event") == event)
+                and (message is None or message in str(record.get("message", "")))
             ):
                 found.append(extra)
         return found

@@ -51,8 +51,8 @@ def _queried_by_sql() -> tuple[dict[str, Path], dict[str, Path]]:
         for match in _EQUALS.finditer(text):
             names[match[1]] = path
         for match in _IN_LIST.finditer(text):
-            for quoted in _QUOTED.findall(match[1]):
-                names[quoted] = path
+            for quoted in _QUOTED.finditer(match[1]):
+                names[quoted[1]] = path
         for match in _STARTS_WITH.finditer(text):
             prefixes[match[1]] = path
     return names, prefixes
@@ -67,7 +67,13 @@ def _self_evolution_names() -> set[str]:
             and any(isinstance(t, ast.Name) and t.id == "_EXEC_FAIL_EVENTS" for t in node.targets)
             and isinstance(node.value, ast.Call)
         ):
-            failures = set(ast.literal_eval(node.value.args[0]))
+            declared = node.value.args[0]
+            assert isinstance(declared, ast.Set)
+            failures = {
+                element.value
+                for element in declared.elts
+                if isinstance(element, ast.Constant) and isinstance(element.value, str)
+            }
     assert failures, "record.py no longer declares _EXEC_FAIL_EVENTS"
     return {"llm_usage", "turn_end", "code", "exec", "plugin_activation", *failures}
 
@@ -97,8 +103,8 @@ def _inspector_names() -> set[str]:
             continue
         names.add(spec.event_name)
         for query in [spec.query, *(spec.targets or [])]:
-            for group in _LOGQL_NAMES.findall(str(query)):
-                names.update(group.split("|"))
+            for group in _LOGQL_NAMES.finditer(str(query)):
+                names.update(str(group[1]).split("|"))
     names.discard("{event_name}")
     return names
 

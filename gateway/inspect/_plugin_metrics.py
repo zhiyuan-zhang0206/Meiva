@@ -29,7 +29,6 @@ import re
 from collections.abc import Collection, Sequence
 from datetime import timedelta
 from pathlib import Path
-from typing import Any
 
 import psycopg
 from fastapi import HTTPException
@@ -206,7 +205,7 @@ def _as_float(value: object) -> float | None:
 # was established by validate_metric_sql, not by psycopg.
 # meiva:link gateway/inspect/docs/inspect.meiva.okf.md
 def _execute_metric(
-    conn: Connection[Any], cur: Cursor, spec: MetricSpec, query: str, *, clock: Clock
+    conn: Connection, cur: Cursor, spec: MetricSpec, query: str, *, clock: Clock
 ) -> PluginMetricResult:
     base = PluginMetricResult(
         name=spec.name,
@@ -221,7 +220,7 @@ def _execute_metric(
     try:
         with conn.transaction():
             cur.execute(query)  # pyright: ignore[reportArgumentType, reportCallIssue]
-            rows = cur.fetchmany(_MAX_METRIC_ROWS + 1)
+            rows: list[tuple[object, ...]] = cur.fetchmany(_MAX_METRIC_ROWS + 1)
     except psycopg.Error as exc:
         return base.model_copy(update={"error": f"query failed: {exc}"})
     if spec.panel == "stat":
@@ -233,7 +232,7 @@ def _execute_metric(
     if any(len(row) < 2 for row in rows):
         return base.model_copy(update={"error": "timeseries query must return (ts, value) columns"})
     series = [
-        MetricPoint(ts=row[0], value=v)
+        MetricPoint.model_validate({"ts": row[0], "value": v})
         for row in rows[:_MAX_METRIC_ROWS]
         if (v := _as_float(row[1])) is not None
     ]
@@ -241,7 +240,7 @@ def _execute_metric(
 
 
 def _execute_metric_logql(
-    conn: Connection[Any], spec: MetricSpec, query: str, *, clock: Clock
+    conn: Connection, spec: MetricSpec, query: str, *, clock: Clock
 ) -> PluginMetricResult:
     """Evaluate one rendered LogQL template on the event record and fold the points into a
     PluginMetricResult.
@@ -274,7 +273,7 @@ def _execute_metric_logql(
 
 
 def metrics_for_agent(
-    pool: ConnectionPool[Any],
+    pool: ConnectionPool,
     agent_id: int,
     *,
     registry: Sequence[MetricSpec],

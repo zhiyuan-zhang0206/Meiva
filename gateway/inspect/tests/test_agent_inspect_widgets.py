@@ -20,7 +20,6 @@ import json
 import sys
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
 
 import psycopg
 import pytest
@@ -28,14 +27,19 @@ from fastapi import HTTPException
 from psycopg_pool import ConnectionPool
 
 import meiva_builtins.plugins as shipped_plugins
+from base.agents.tasks.priority import Priority
 from base.db import Database
+from base.log.tests.log_records import LogRecords
 from base.packages.plugins.data_registry import DeclaredFace, build_data_registry
 from base.packages.plugins.extensions import PluginContributions
 from base.packages.plugins.surface.inspector import DuplicateInspectWidget, InspectWidgetSpec
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
+from gateway.http.db_rows import query_one
 from gateway.inspect import _plugin_widgets
 from gateway.inspect._plugin_faces import SHIPPED_PLUGINS_DIR, enabled_plugin_names
+from gateway.inspect.schemas import InspectWidgetResult, InspectWidgetTask
+from gateway.inspect.tests.rows import IdRow, returned_id
 
 
 @pytest.fixture
@@ -45,15 +49,16 @@ def pool(database: Database) -> Iterator[ConnectionPool]:
         yield opened
 
 
-def _widget(**over: Any) -> InspectWidgetSpec:
-    data: dict[str, Any] = {
+def _widget(**over: object) -> InspectWidgetSpec:
+    data: dict[str, object] = {
         "id": "today-tasks",
         "kind": "taskList",
         "order": 250,
     }
     data.update(over)
     face = DeclaredFace(
-        "meiva_fleet", PluginContributions(inspect_widgets=(InspectWidgetSpec(**data),))
+        "meiva_fleet",
+        PluginContributions(inspect_widgets=(InspectWidgetSpec.model_validate(data),)),
     )
     registry, refused = build_data_registry([face])
     assert refused == []
@@ -63,11 +68,7 @@ def _widget(**over: Any) -> InspectWidgetSpec:
 def _insert_agent(db: psycopg.Connection, label: str = "t") -> int:
     """INSERT an agents row + its agents_meta row (the /inspect family checks
     agents_meta; a bare `agents` row would 404)."""
-    with db.cursor() as cur:
-        cur.execute("INSERT INTO agents (label) VALUES (%s) RETURNING id", (label,))
-        row = cur.fetchone()
-    assert row is not None
-    tid = row[0]
+    tid = returned_id(db, "INSERT INTO agents (label) VALUES (%s) RETURNING id", (label,))
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'user', 'running')",
@@ -79,17 +80,14 @@ def _insert_agent(db: psycopg.Connection, label: str = "t") -> int:
 def _root_task_id(db: psycopg.Connection) -> int:
     """The system root's id for use as a parent (the throwaway test DB may or
     may not carry the seeded root row)."""
-    with db.cursor() as cur:
-        cur.execute("SELECT id FROM agent_tasks WHERE is_root = TRUE LIMIT 1")
-        row = cur.fetchone()
-        if row is None:
-            cur.execute(
-                "INSERT INTO agent_tasks (title, description, status, created_by, is_root) "
-                "VALUES ('Root', 'd', 'in_progress', 'system', TRUE) RETURNING id"
-            )
-            row = cur.fetchone()
-    assert row is not None
-    return row[0]
+    root = query_one(db, IdRow, "SELECT id FROM agent_tasks WHERE is_root = TRUE LIMIT 1")
+    if root is not None:
+        return root.id
+    return returned_id(
+        db,
+        "INSERT INTO agent_tasks (title, description, status, created_by, is_root) "
+        "VALUES ('Root', 'd', 'in_progress', 'system', TRUE) RETURNING id",
+    )
 
 
 def _insert_task(
@@ -102,31 +100,27 @@ def _insert_task(
     updated_seconds_ago: float = 0,
     priority: str = "P2",
 ) -> int:
-    with db.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_tasks "
-            "(parent_id, title, description, status, owner, created_by, updated_at, priority) "
-            "VALUES (%s, %s, 'd', %s, %s, %s, now() - make_interval(secs => %s), %s) RETURNING id",
-            (
-                parent_id,
-                title,
-                status,
-                owner,
-                str(owner) if owner is not None else "user",
-                updated_seconds_ago,
-                priority,
-            ),
-        )
-        row = cur.fetchone()
-    assert row is not None
-    return row[0]
+    return returned_id(
+        db,
+        "INSERT INTO agent_tasks "
+        "(parent_id, title, description, status, owner, created_by, updated_at, priority) "
+        "VALUES (%s, %s, 'd', %s, %s, %s, now() - make_interval(secs => %s), %s) RETURNING id",
+        (
+            parent_id,
+            title,
+            status,
+            owner,
+            str(owner) if owner is not None else "user",
+            updated_seconds_ago,
+            priority,
+        ),
+    )
 
 
 # meiva:note
 # The inspector widgets of `aid` for these registry rows, as the route serializes them.
-def _get(pool: ConnectionPool, aid: int, *specs: InspectWidgetSpec) -> list[dict[str, Any]]:
-    results = _plugin_widgets.widgets_for_agent(pool, aid, specs=specs)
-    return [result.model_dump(mode="json") for result in results]
+def _get(pool: ConnectionPool, aid: int, *specs: InspectWidgetSpec) -> list[InspectWidgetResult]:
+    return list(_plugin_widgets.widgets_for_agent(pool, aid, specs=specs))
 
 
 # ── empty registry / unknown agent ────────────────────────────────────────────
@@ -177,15 +171,15 @@ def test_lists_only_the_agents_active_tasks(
     body = _get(pool, aid, _widget())
     assert len(body) == 1
     widget = body[0]
-    assert (widget["plugin"], widget["id"], widget["kind"], widget["order"]) == (
+    assert (widget.plugin, widget.id, widget.kind, widget.order) == (
         "meiva_fleet",
         "today-tasks",
         "taskList",
         250,
     )
     # One rung (the default P2): id ascending — recency is no order key.
-    assert [t["id"] for t in widget["tasks"]] == [older, newer, mid]
-    assert widget["tasks"][0] == {"id": older, "title": "older", "priority": "P2"}
+    assert [t.id for t in widget.tasks] == [older, newer, mid]
+    assert widget.tasks[0] == InspectWidgetTask(id=older, title="older", priority=Priority.P2)
 
 
 def test_task_list_shows_every_active_task(
@@ -201,10 +195,10 @@ def test_task_list_shows_every_active_task(
     ]
     db_conn.commit()
 
-    tasks = _get(pool, aid, _widget())[0]["tasks"]
+    tasks = _get(pool, aid, _widget())[0].tasks
     assert len(tasks) == 11
     # One rung (the default P2): id ascending — the complete list, no cap.
-    assert [t["id"] for t in tasks] == ids
+    assert [t.id for t in tasks] == ids
 
 
 def test_task_rows_carry_their_own_priority(
@@ -230,11 +224,11 @@ def test_task_rows_carry_their_own_priority(
     )
     db_conn.commit()
 
-    tasks = _get(pool, aid, _widget())[0]["tasks"]
+    tasks = _get(pool, aid, _widget())[0].tasks
     # P0 first, then the P1 pair in id order — p1b ("next-b") is the more
     # RECENT update but carries the later id, so a recency tie-break would
     # flip them; then the newest-row P3.
-    assert [(row["id"], row["priority"]) for row in tasks] == [
+    assert [(row.id, row.priority) for row in tasks] == [
         (p0, "P0"),
         (p1, "P1"),
         (p1b, "P1"),
@@ -255,8 +249,15 @@ def test_widgets_keep_registration_order(pool: ConnectionPool, db_conn: psycopg.
     db_conn.commit()
 
     body = _get(pool, aid, _widget(id="second", order=750), _widget(id="first", order=10))
-    assert [w["id"] for w in body] == ["second", "first"]
-    assert [w["order"] for w in body] == [750, 10]
+    assert [w.id for w in body] == ["second", "first"]
+    assert [w.order for w in body] == [750, 10]
+
+
+# meiva:note
+# Whether a loguru record's `exception` (a tuple-like of type, value and traceback, or None) holds
+# the duplicate-widget refusal.
+def _raised_duplicate_widget(exception: object) -> bool:
+    return isinstance(getattr(exception, "value", None), DuplicateInspectWidget)
 
 
 def _widget_source(widget_id: str) -> str:
@@ -349,7 +350,7 @@ def test_enabled_modules_skips_a_disabled_plugin(unit_home: Path) -> None:
 
 def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
     tmp_path: Path,
-    loguru_records: list[dict[str, Any]],
+    loguru_records: LogRecords,
     emitted_events: EmittedEvents,
 ) -> None:
     """Fail-soft (user ruling 2026-09-11): a broken inspector.py is reported
@@ -381,14 +382,14 @@ def test_loader_skips_a_plugin_whose_inspector_fails_to_import(
     # loud: the plugin_load_failed event carrying the plugin + the exception
     attrs = emitted_events.attributes("plugin_load_failed")
     assert [a["plugin"] for a in attrs] == ["fx_broken_plugin"]
-    assert "ModuleNotFoundError" in str(attrs[0]["error"])
+    assert "ModuleNotFoundError" in str(attrs[0].get("error"))
 
     # every plugin broken -> still no raise, an empty registry
     assert _plugin_widgets.load_inspect_widgets(tmp_path, {"fx_broken_plugin"}) == []
 
 
 def test_loader_skips_a_failing_inspector_and_recovers(
-    tmp_path: Path, loguru_records: list[dict[str, Any]]
+    tmp_path: Path, loguru_records: LogRecords
 ) -> None:
     """An inspector.py that raises contributes nothing: a declaration is
     admitted whole or not at all, so a fixed file recovers on the next request
@@ -413,7 +414,7 @@ def test_loader_skips_a_failing_inspector_and_recovers(
 
 
 def test_loader_refuses_a_plugin_declaring_a_widget_id_twice(
-    tmp_path: Path, loguru_records: list[dict[str, Any]]
+    tmp_path: Path, loguru_records: LogRecords
 ) -> None:
     """A widget id repeated within one plugin refuses that plugin whole (none
     of its widgets serve); another plugin's widgets are untouched."""
@@ -428,9 +429,7 @@ def test_loader_refuses_a_plugin_declaring_a_widget_id_twice(
     specs = _plugin_widgets.load_inspect_widgets(tmp_path, {"fx_twice", "fx_fine"})
     assert [(s.plugin, s.id) for s in specs] == [("fx_fine", "fine")]
     assert any(
-        "fx_twice" in r["message"]
-        and r["exception"] is not None
-        and isinstance(r["exception"].value, DuplicateInspectWidget)
+        "fx_twice" in r["message"] and _raised_duplicate_widget(r.get("exception"))
         for r in loguru_records
     )
 

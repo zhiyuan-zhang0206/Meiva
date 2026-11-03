@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 from fastapi import HTTPException
 from psycopg import sql as pgsql
@@ -13,6 +14,8 @@ from base.agents.messages.inbound import not_passive_inbound
 from base.agents.observation.evidence import AgentObservation, observation
 from base.agents.observation.snapshot import OpenNotice
 from base.api_contracts.agent_contract import AgentStatus, Harness, LivenessState
+from gateway.http.db_rows import query_one
+from gateway.http.json_values import is_object_dict
 from gateway.inspect._heartbeat import HeartbeatCadence, HeartbeatState, plan_heartbeat
 from gateway.inspect.schemas import HeartbeatInfo, HeartbeatLastPause
 from services.wake.heartbeat import STALE_PENDING_S
@@ -32,7 +35,7 @@ class InspectDbRows(NamedTuple):
     spawned_at: datetime
     paused_until: datetime | None
     pending_inbound: bool
-    config_overlay: dict[str, Any]
+    config_overlay: dict[str, object]
     liveness_state: LivenessState
     last_probe_at: datetime | None
     observation: AgentObservation
@@ -40,70 +43,105 @@ class InspectDbRows(NamedTuple):
     impersonation_since: datetime | None
 
 
-def db_rows_blocking(pool: ConnectionPool[Any], agent_id: int) -> InspectDbRows:
+# meiva:note
+# One `agents_meta` row with the live facts the inspector needs; `config_overlay` is the stored
+# jsonb and `harness` NULL for a row born before the column existed.
+@dataclass(frozen=True)
+class _AgentLiveRow:
+    config_overlay: object
+    machine: str
+    status: str
+    last_active_at: datetime
+    last_heartbeat_at: datetime | None
+    spawned_at: datetime
+    paused_until: datetime | None
+    liveness_state: str
+    last_probe_at: datetime | None
+    machine_probed_at: datetime | None
+    harness: str | None
+    observed_model: str | None
+    heartbeat_backoff_level: int | None
+    impersonation_since: datetime | None
+
+
+# meiva:note
+# Whether a fresh pending inbound exists.
+@dataclass(frozen=True)
+class _PendingRow:
+    pending: bool
+
+
+def db_rows_blocking(pool: ConnectionPool, agent_id: int) -> InspectDbRows:
     """Read agents_meta and the fresh pending-inbound flag in one DB borrow."""
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
+    with pool.connection() as conn:
+        row = query_one(
+            conn,
+            _AgentLiveRow,
             "SELECT config_overlay, machine, status, last_active_at, last_heartbeat_at, "
             "       spawned_at, "
-            "       CASE WHEN heartbeat_paused_until > now() THEN heartbeat_paused_until END, "
+            "       CASE WHEN heartbeat_paused_until > now() THEN heartbeat_paused_until END "
+            "         AS paused_until, "
             "       liveness_state, last_probe_at, "
             "       (SELECT mp.last_probe_at FROM machine_probe mp "
-            "        WHERE mp.machine_name = agents_meta.machine), "
+            "        WHERE mp.machine_name = agents_meta.machine) AS machine_probed_at, "
             "       harness, "
             "       (SELECT amo.model FROM agent_metric_observations amo "
             "        WHERE amo.agent_id = agents_meta.id AND amo.model IS NOT NULL "
-            "        ORDER BY amo.occurred_at DESC LIMIT 1), "
+            "        ORDER BY amo.occurred_at DESC LIMIT 1) AS observed_model, "
             "       heartbeat_backoff_level, "
             "       (SELECT COALESCE(lease.activated_at, lease.created_at) "
             "        FROM agent_impersonations lease "
             "        WHERE lease.agent_id = agents_meta.id AND lease.status = 'active' "
-            "        AND lease.expires_at > now()) "
+            "        AND lease.expires_at > now()) AS impersonation_since "
             "FROM agents_meta WHERE id = %s",
             (agent_id,),
         )
-        row = cur.fetchone()
         if row is None:
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
-        cur.execute(
+        pending_row = query_one(
+            conn,
+            _PendingRow,
             pgsql.SQL(
                 "SELECT EXISTS (SELECT 1 FROM inbound_messages "
                 "WHERE agent_id = %s AND status = 'pending' "
                 "AND {not_passive} "
-                "AND created_at >= now() - make_interval(secs => %s))"
+                "AND created_at >= now() - make_interval(secs => %s)) AS pending"
             ).format(not_passive=pgsql.SQL(not_passive_inbound())),
             (agent_id, STALE_PENDING_S),
         )
-        pending_row = cur.fetchone()
         assert pending_row is not None  # noqa: S101 — EXISTS always returns one row
-        overlay: dict[str, Any] = dict(row[0]) if row[0] is not None else {}
-        if len(row) > 11 and row[10] != Harness.MEIVA and isinstance(row[11], str) and row[11]:
-            overlay["llm_model"] = row[11]
+        overlay: dict[str, object] = (
+            dict(row.config_overlay) if is_object_dict(row.config_overlay) else {}
+        )
+        if row.harness != Harness.MEIVA and row.observed_model:
+            overlay["llm_model"] = row.observed_model
         return InspectDbRows(
-            machine=row[1],
-            status=AgentStatus(row[2]),
-            last_active_at=row[3],
-            last_heartbeat_at=row[4],
-            spawned_at=row[5],
-            paused_until=row[6],
-            pending_inbound=bool(pending_row[0]),
+            machine=row.machine,
+            status=AgentStatus(row.status),
+            last_active_at=row.last_active_at,
+            last_heartbeat_at=row.last_heartbeat_at,
+            spawned_at=row.spawned_at,
+            paused_until=row.paused_until,
+            pending_inbound=pending_row.pending,
             config_overlay=overlay,
-            liveness_state=LivenessState(row[7]),
-            last_probe_at=row[8],
-            observation=observation(row[9]),
-            backoff_level=int(row[12] or 0),
-            impersonation_since=row[13],
+            liveness_state=LivenessState(row.liveness_state),
+            last_probe_at=row.last_probe_at,
+            observation=observation(row.machine_probed_at),
+            backoff_level=int(row.heartbeat_backoff_level or 0),
+            impersonation_since=row.impersonation_since,
         )
 
 
-def notice_blocking(pool: ConnectionPool[Any], agent_id: int) -> OpenNotice | None:
+def notice_blocking(pool: ConnectionPool, agent_id: int) -> OpenNotice | None:
     """Read the agent's single unexpired open notice, if one exists.
 
     The full row, including `task_id` — the inspector widget resolver
     (`gateway/inspect/_plugin_widgets.py`) reads the same notice to decide
     whether the agent's task button has a target."""
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
+    with pool.connection() as conn:
+        return query_one(
+            conn,
+            OpenNotice,
             "SELECT id, title, content, priority, require_response, blocking, created_at, expire_at, "
             "task_id, question "
             "FROM agent_notices "
@@ -112,21 +150,6 @@ def notice_blocking(pool: ConnectionPool[Any], agent_id: int) -> OpenNotice | No
             "ORDER BY created_at DESC LIMIT 1",
             (agent_id,),
         )
-        row = cur.fetchone()
-    if row is None:
-        return None
-    return OpenNotice(
-        id=row[0],
-        title=row[1],
-        content=row[2],
-        priority=row[3],
-        require_response=row[4],
-        blocking=row[5],
-        created_at=row[6],
-        expire_at=row[7],
-        task_id=row[8],
-        question=row[9],
-    )
 
 
 # meiva:note

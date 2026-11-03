@@ -9,16 +9,16 @@ turns. Source loss remains explicit and is never repaired by a synchronous log s
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
-from typing import Any
 
 from psycopg import Connection
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from base.clock import Clock
+from gateway.http.json_values import is_object_dict
 from gateway.inspect._metrics_health import note_inspect_metrics_coverage
 from gateway.inspect.schemas import (
     AgentActivity,
@@ -47,8 +47,6 @@ _SUM_FIELDS = (
     "active_seconds",
     "exec_seconds",
 )
-_COST_FIELDS = _SUM_FIELDS[:8]
-_TURN_FIELDS = _SUM_FIELDS[8:13]
 
 
 @dataclass(frozen=True)
@@ -92,15 +90,46 @@ def _weighted_quantile(q: float, values: list[tuple[float, int]]) -> float:
     return low_value + (high_value - low_value) * (rank - lower)
 
 
-def _rows(conn: Connection[Any], query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
+# meiva:note
+# One result row by column name. The values are what psycopg adapted (numeric -> `Decimal`, bigint
+# -> `int`, date -> `date`, jsonb -> `dict`), still `object` here; the `_as_*` readers below
+# narrow the one column a caller needs.
+Row = dict[str, object]
+
+
+def _rows(conn: Connection, query: str, params: tuple[object, ...]) -> list[Row]:
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(query, params)  # pyright: ignore[reportArgumentType] -- fixed internal SQL
         return list(cur.fetchall())
 
 
+def _as_int(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int | float | Decimal):
+        raise TypeError(f"expected a number, got {value!r}")
+    return int(value)
+
+
+def _as_float(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float | Decimal):
+        raise TypeError(f"expected a number, got {value!r}")
+    return float(value)
+
+
+def _as_day(value: object) -> date:
+    if not isinstance(value, date) or isinstance(value, datetime):
+        raise TypeError(f"expected a date, got {value!r}")
+    return value
+
+
+def _as_moment(value: object) -> datetime:
+    if not isinstance(value, datetime):
+        raise TypeError(f"expected a timestamp, got {value!r}")
+    return value
+
+
 def _observed_days(
-    conn: Connection[Any], agent_id: int, start: datetime, end: datetime
-) -> dict[date, dict[str, Any]]:
+    conn: Connection, agent_id: int, start: datetime, end: datetime
+) -> dict[date, Row]:
     """Read full-day summaries and reduce only the at-most-two boundary days."""
     full_from = _midnight(start)
     if full_from < start:
@@ -138,16 +167,16 @@ def _observed_days(
                 (agent_id, lo, hi),
             )
         )
-    return {row["day"]: row for row in days}
+    return {_as_day(row["day"]): row for row in days}
 
 
 def _legacy_days(
-    conn: Connection[Any],
+    conn: Connection,
     agent_id: int,
     start: datetime,
     end: datetime,
     cutover: date,
-) -> tuple[dict[date, dict[str, Any]], dict[date, dict[str, Any]]]:
+) -> tuple[dict[date, Row], dict[date, Row]]:
     """Read historical evidence without allowing the old writer to own new dates."""
     params = (agent_id, start.date(), min(end.date(), cutover))
     costs = _rows(
@@ -169,8 +198,8 @@ def _legacy_days(
         params,
     )
     return (
-        {row["day"]: row for row in costs if _full_day(row["day"], start, end)},
-        {row["day"]: row for row in turns if _full_day(row["day"], start, end)},
+        {_as_day(row["day"]): row for row in costs if _full_day(_as_day(row["day"]), start, end)},
+        {_as_day(row["day"]): row for row in turns if _full_day(_as_day(row["day"]), start, end)},
     )
 
 
@@ -193,7 +222,7 @@ def _evidence(
 
 
 def _alive_seconds(
-    conn: Connection[Any],
+    conn: Connection,
     agent_id: int,
     start: datetime,
     end: datetime,
@@ -206,11 +235,11 @@ def _alive_seconds(
         "WHERE agent_id=%s AND started_at<%s AND COALESCE(ended_at,%s)>%s",
         (end, end, start, agent_id, end, end, start),
     )
-    return float(rows[0]["seconds"]), bool(rows[0]["intervals"])
+    return _as_float(rows[0]["seconds"]), bool(rows[0]["intervals"])
 
 
 def inspect_snapshot(
-    pool: ConnectionPool[Any],
+    pool: ConnectionPool,
     agent_id: int,
     hours: StatsWindowHours | None,
     *,
@@ -228,9 +257,9 @@ def inspect_snapshot(
         conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         conn.execute("SET LOCAL statement_timeout = '2s'")
         conn.execute("SET LOCAL lock_timeout = '200ms'")
-        collection = _rows(conn, "SELECT started_at FROM agent_metric_collection", ())[0][
-            "started_at"
-        ]
+        collection = _as_moment(
+            _rows(conn, "SELECT started_at FROM agent_metric_collection", ())[0]["started_at"]
+        )
         snapshot = read_snapshot(conn, agent_id, start, sampled_at, spawned_at, collection)
     # Outside the read transaction: the coverage note is a diagnostic side
     # channel (background log + event; task #3869) and never joins
@@ -239,48 +268,84 @@ def inspect_snapshot(
     return snapshot
 
 
+# meiva:note
+# The window's additive totals: counts as integers, durations as seconds, cost as an exact decimal.
+@dataclass
+class _Totals:
+    usage_calls: int = 0
+    unpriced_calls: int = 0
+    tokens_in: int = 0
+    tokens_out: int = 0
+    tokens_cached: int = 0
+    tokens_cache_input: int = 0
+    tokens_reasoning: int = 0
+    cost_usd: Decimal = field(default_factory=lambda: Decimal(0))
+    turn_total: int = 0
+    turn_ok: int = 0
+    turn_duration_sum: float = 0.0
+    exec_ok: int = 0
+    exec_failed: int = 0
+    active_seconds: float = 0.0
+    exec_seconds: float = 0.0
+
+
 def _sum_days(
-    observed: dict[date, dict[str, Any]],
-    costs: dict[date, dict[str, Any]],
-    turns: dict[date, dict[str, Any]],
-) -> tuple[dict[str, Any], list[float]]:
+    observed: dict[date, Row], costs: dict[date, Row], turns: dict[date, Row]
+) -> tuple[_Totals, list[float]]:
     """Choose one cost and turn source per day before additive reduction."""
-    totals: dict[str, Any] = dict.fromkeys(_SUM_FIELDS, 0)
-    totals["cost_usd"] = Decimal(0)
+    totals = _Totals()
     extrema: list[float] = []
     for day in observed.keys() | costs.keys() | turns.keys():
         raw = observed.get(day, {})
-        for keys, selected in (
-            (_COST_FIELDS, costs.get(day, raw)),
-            (_TURN_FIELDS, turns.get(day, raw)),
-        ):
-            for key in keys:
-                value = selected.get(key, 0)
-                if key == "tokens_cache_input" and value is None:
-                    value = selected["tokens_in"]
-                totals[key] += (
-                    Decimal(str(value))
-                    if key == "cost_usd"
-                    else float(value)
-                    if key == "turn_duration_sum"
-                    else int(value)
-                )
-        for key in ("active_seconds", "exec_seconds"):
-            totals[key] += float(raw.get(key, 0))
+        cost_row = costs.get(day, raw)
+        turn_row = turns.get(day, raw)
+        totals.usage_calls += _as_int(cost_row.get("usage_calls", 0))
+        totals.unpriced_calls += _as_int(cost_row.get("unpriced_calls", 0))
+        totals.tokens_in += _as_int(cost_row.get("tokens_in", 0))
+        totals.tokens_out += _as_int(cost_row.get("tokens_out", 0))
+        totals.tokens_cached += _as_int(cost_row.get("tokens_cached", 0))
+        cache_input = cost_row.get("tokens_cache_input", 0)
+        totals.tokens_cache_input += _as_int(
+            cost_row["tokens_in"] if cache_input is None else cache_input
+        )
+        totals.tokens_reasoning += _as_int(cost_row.get("tokens_reasoning", 0))
+        totals.cost_usd += Decimal(str(cost_row.get("cost_usd", 0)))
+        totals.turn_total += _as_int(turn_row.get("turn_total", 0))
+        totals.turn_ok += _as_int(turn_row.get("turn_ok", 0))
+        totals.turn_duration_sum += _as_float(turn_row.get("turn_duration_sum", 0))
+        totals.exec_ok += _as_int(turn_row.get("exec_ok", 0))
+        totals.exec_failed += _as_int(turn_row.get("exec_failed", 0))
+        totals.active_seconds += _as_float(raw.get("active_seconds", 0))
+        totals.exec_seconds += _as_float(raw.get("exec_seconds", 0))
         for key in ("turn_duration_min", "turn_duration_max"):
-            value = turns.get(day, raw).get(key)
+            value = turn_row.get(key)
             if value is not None:
-                extrema.append(float(value))
+                extrema.append(_as_float(value))
     return totals, extrema
 
 
+# meiva:note
+# The (seconds, count) samples of the days whose exact durations are not trusted, read from their
+# daily histograms, and whether any histogram was non-empty.
+def _histogram_samples(bucket_days: dict[date, Row]) -> tuple[list[tuple[float, int]], bool]:
+    samples: list[tuple[float, int]] = []
+    bucketed = False
+    for row in bucket_days.values():
+        histogram = row["turn_dur_hist"]
+        if not is_object_dict(histogram):
+            raise TypeError("turn_dur_hist must be a JSON object")
+        bucketed |= bool(histogram)
+        samples.extend((float(value), _as_int(count)) for value, count in histogram.items())
+    return samples, bucketed
+
+
 def _duration_distribution(
-    conn: Connection[Any],
+    conn: Connection,
     agent_id: int,
     start: datetime,
     end: datetime,
-    observed: dict[date, dict[str, Any]],
-    turns: dict[date, dict[str, Any]],
+    observed: dict[date, Row],
+    turns: dict[date, Row],
 ) -> tuple[list[tuple[float, int]], str]:
     # Group exact samples once. An old daily histogram remains authoritative
     # until all of its turn duration observations survive replay; equal event
@@ -296,7 +361,8 @@ def _duration_distribution(
     )
     duration_counts: dict[date, int] = {}
     for row in exact_rows:
-        duration_counts[row["day"]] = duration_counts.get(row["day"], 0) + int(row["n"])
+        day = _as_day(row["day"])
+        duration_counts[day] = duration_counts.get(day, 0) + _as_int(row["n"])
     bucket_days = {
         day: row
         for day, row in turns.items()
@@ -304,19 +370,16 @@ def _duration_distribution(
         or observed[day]["turn_total"] != row["turn_total"]
         or duration_counts.get(day, 0) != row["turn_total"]
     }
-    exact = [row for row in exact_rows if row["day"] not in bucket_days]
-    distribution = [(float(row["duration"]), int(row["n"])) for row in exact]
-    bucketed = False
-    for row in bucket_days.values():
-        histogram = row["turn_dur_hist"]
-        bucketed |= bool(histogram)
-        distribution.extend((float(value), int(count)) for value, count in histogram.items())
+    exact = [row for row in exact_rows if _as_day(row["day"]) not in bucket_days]
+    distribution = [(_as_float(row["duration"]), _as_int(row["n"])) for row in exact]
+    buckets, bucketed = _histogram_samples(bucket_days)
+    distribution.extend(buckets)
     precision = "mixed" if bucketed and exact else "one_second_buckets" if bucketed else "exact"
     return distribution, precision
 
 
 def _cost_and_turns(
-    totals: dict[str, Any],
+    totals: _Totals,
     extrema: list[float],
     distribution: list[tuple[float, int]],
     cost_evidence: MetricEvidence,
@@ -327,47 +390,45 @@ def _cost_and_turns(
         None
         if cost_evidence.availability == "unavailable"
         else AgentCost(
-            cost_usd=float(round(totals["cost_usd"], 4)),
-            unpriced_calls=int(totals["unpriced_calls"]),
-            llm_calls=int(totals["usage_calls"]),
-            tokens_in=int(totals["tokens_in"]),
-            tokens_out=int(totals["tokens_out"]),
-            tokens_cached=int(totals["tokens_cached"]),
-            tokens_reasoning=int(totals["tokens_reasoning"]),
-            cache_hit_pct=min(
-                100, round(totals["tokens_cached"] / totals["tokens_cache_input"] * 100, 2)
-            )
-            if totals["tokens_cache_input"]
-            else (None if totals["tokens_in"] else 0),
+            cost_usd=float(round(totals.cost_usd, 4)),
+            unpriced_calls=totals.unpriced_calls,
+            llm_calls=totals.usage_calls,
+            tokens_in=totals.tokens_in,
+            tokens_out=totals.tokens_out,
+            tokens_cached=totals.tokens_cached,
+            tokens_reasoning=totals.tokens_reasoning,
+            cache_hit_pct=min(100, round(totals.tokens_cached / totals.tokens_cache_input * 100, 2))
+            if totals.tokens_cache_input
+            else (None if totals.tokens_in else 0),
         )
     )
     stats = (
         None
         if turn_evidence.availability == "unavailable"
         else AgentStats(
-            turn_total=int(totals["turn_total"]),
-            turn_ok=int(totals["turn_ok"]),
+            turn_total=totals.turn_total,
+            turn_ok=totals.turn_ok,
             turn_p50_seconds=round(_weighted_quantile(0.5, distribution), 2)
-            if distribution or not totals["turn_total"]
+            if distribution or not totals.turn_total
             else None,
             turn_p90_seconds=round(_weighted_quantile(0.9, distribution), 2)
-            if distribution or not totals["turn_total"]
+            if distribution or not totals.turn_total
             else None,
             turn_min_seconds=round(min(extrema, default=0), 2)
-            if extrema or not totals["turn_total"]
+            if extrema or not totals.turn_total
             else None,
             turn_max_seconds=round(max(extrema, default=0), 2)
-            if extrema or not totals["turn_total"]
+            if extrema or not totals.turn_total
             else None,
-            exec_ok=int(totals["exec_ok"]),
-            exec_failed=int(totals["exec_failed"]),
+            exec_ok=totals.exec_ok,
+            exec_failed=totals.exec_failed,
         )
     )
     return cost, stats
 
 
 def _throughput_and_activity(
-    totals: dict[str, Any],
+    totals: _Totals,
     cost: AgentCost | None,
     stats: AgentStats | None,
     *,
@@ -384,23 +445,23 @@ def _throughput_and_activity(
     if cost is not None and stats is not None:
         tps = AgentTps(
             lm_stage_tps=(
-                round(totals["tokens_out"] / totals["turn_duration_sum"], 2)
-                if totals["turn_duration_sum"]
+                round(totals.tokens_out / totals.turn_duration_sum, 2)
+                if totals.turn_duration_sum
                 else 0
             )
             if durations_known
             else None,
-            agent_lifecycle_tps=(round(totals["tokens_out"] / whole_alive, 2) if whole_alive else 0)
+            agent_lifecycle_tps=(round(totals.tokens_out / whole_alive, 2) if whole_alive else 0)
             if metadata.lifecycle.availability == "observed"
             else None,
         )
     if not historical and metadata.activity.availability != "unavailable":
         activity = AgentActivity(
-            active_seconds=round(totals["active_seconds"], 2),
+            active_seconds=round(totals.active_seconds, 2),
             alive_seconds=round(alive, 2),
-            active_rate=min(1, round(totals["active_seconds"] / alive, 4)) if alive else 0,
-            llm_seconds=round(totals["turn_duration_sum"], 2) if durations_known else None,
-            exec_seconds=round(totals["exec_seconds"], 2),
+            active_rate=min(1, round(totals.active_seconds / alive, 4)) if alive else 0,
+            llm_seconds=round(totals.turn_duration_sum, 2) if durations_known else None,
+            exec_seconds=round(totals.exec_seconds, 2),
         )
     return tps, activity
 
@@ -408,8 +469,8 @@ def _throughput_and_activity(
 def _turn_evidence(
     *,
     historical: bool,
-    turns: dict[date, dict[str, Any]],
-    observed: dict[date, dict[str, Any]],
+    turns: dict[date, Row],
+    observed: dict[date, Row],
     distribution: list[tuple[float, int]],
     precision: str,
     durations_known: bool,
@@ -435,7 +496,7 @@ def _turn_evidence(
 
 
 def read_snapshot(
-    conn: Connection[Any],
+    conn: Connection,
     agent_id: int,
     start: datetime,
     end: datetime,
@@ -451,7 +512,7 @@ def read_snapshot(
     )
     totals, extrema = _sum_days(observed, costs, turns)
     distribution, precision = _duration_distribution(conn, agent_id, start, end, observed, turns)
-    durations_known = sum(count for _, count in distribution) == totals["turn_total"]
+    durations_known = sum(count for _, count in distribution) == totals.turn_total
     historical = max(start, spawned_at) < collection
     cost_evidence = _evidence(
         historical=historical,
@@ -479,7 +540,9 @@ def read_snapshot(
         window_end=end,
         sampled_at=end,
         collection_started_at=collection,
-        last_observed_at=max((r["last_observed_at"] for r in observed.values()), default=None),
+        last_observed_at=max(
+            (_as_moment(r["last_observed_at"]) for r in observed.values()), default=None
+        ),
         cost=cost_evidence,
         turns=turn_evidence,
         activity=activity_evidence,
