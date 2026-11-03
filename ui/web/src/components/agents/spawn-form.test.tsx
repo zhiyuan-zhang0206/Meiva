@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SpawnForm } from "./spawn-form";
 import { USER_SETTING_DEFAULTS, type ModelsResponse, type SystemStatus } from "@/lib/contracts/types";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
+import { SYSTEM_STATUS_QUERY_KEY } from "@/lib/notifications/use-cluster-health";
 import { renderWithApi as render } from "@/test-support/render";
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {
@@ -66,7 +67,7 @@ function wrap(layout?: "table" | "stack") {
       <SpawnForm onSpawn={onSpawn} onDone={onDone} layout={layout} />
     </QueryClientProvider>,
   );
-  return { onSpawn, onDone };
+  return { onSpawn, onDone, qc };
 }
 
 function statusWith(
@@ -238,6 +239,52 @@ beforeEach(() => {
   transport.getHarnessAvailability.mockResolvedValue(harnessAllAvailable());
 });
 
+describe("status loading and error states", () => {
+  it("pending getSystemStatus() renders loading state without noReadyRunner, then resolves to table", async () => {
+    let resolveStatus!: (status: SystemStatus) => void;
+    transport.getSystemStatus.mockImplementation(
+      () => new Promise((resolve) => { resolveStatus = resolve; }),
+    );
+    transport.getModels.mockResolvedValue(modelsDefault());
+    wrap();
+
+    const loadingStatus = screen.getByRole("status");
+    expect(loadingStatus.textContent).toContain("Checking available runners…");
+    expect(screen.queryByText("No agent runner with an available host")).toBeNull();
+    expect(screen.queryByTestId("spawn-table")).toBeNull();
+
+    resolveStatus(singleMachineStatus());
+    expect(await screen.findByTestId("spawn-table")).toBeTruthy();
+    expect(screen.queryByText("Checking available runners…")).toBeNull();
+    expect(screen.queryByText("No agent runner with an available host")).toBeNull();
+  });
+
+  it("rejected getSystemStatus() on cold cache renders statusUnavailable without noReadyRunner", async () => {
+    transport.getSystemStatus.mockRejectedValue(new Error("network failure"));
+    transport.getModels.mockResolvedValue(modelsDefault());
+    wrap();
+
+    expect(await screen.findByText("Couldn’t load cluster status")).toBeTruthy();
+    expect(screen.queryByText("No agent runner with an available host")).toBeNull();
+    expect(screen.queryByTestId("spawn-table")).toBeNull();
+  });
+
+  it("rejected background refetch with cached status preserves spawn table (stale-while-error)", async () => {
+    transport.getSystemStatus.mockResolvedValue(singleMachineStatus());
+    transport.getModels.mockResolvedValue(modelsDefault());
+    const { qc } = wrap();
+
+    expect(await screen.findByTestId("spawn-table")).toBeTruthy();
+
+    transport.getSystemStatus.mockRejectedValue(new Error("transient poll error"));
+    await qc.refetchQueries({ queryKey: SYSTEM_STATUS_QUERY_KEY }).catch(() => undefined);
+
+    expect(screen.getByTestId("spawn-table")).toBeTruthy();
+    expect(screen.queryByText("Couldn’t load cluster status")).toBeNull();
+    expect(screen.queryByText("No agent runner with an available host")).toBeNull();
+  });
+});
+
 describe("no spawnable agent host", () => {
   it("a reachable runner with a down host says so instead of showing the table", async () => {
     transport.getSystemStatus.mockResolvedValue(
@@ -260,6 +307,8 @@ describe("no spawnable agent host", () => {
     transport.getSystemStatus.mockResolvedValue(statusWith([{ name: "cloud", online: true }]));
     wrap();
     expect(await screen.findByText("No agent runner with an available host")).toBeTruthy();
+    expect(screen.queryByText("Checking available runners…")).toBeNull();
+    expect(screen.queryByText("Couldn’t load cluster status")).toBeNull();
   });
 });
 

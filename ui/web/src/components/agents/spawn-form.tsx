@@ -11,7 +11,7 @@
 // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 
 import { useIsMutating, useQuery } from "@tanstack/react-query";
-import { Plus, RefreshCw } from "lucide-react";
+import { Loader2, Plus, RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
@@ -20,6 +20,7 @@ import { useHarnessAvailabilityByMachine, useRefreshHarnessAvailability } from "
 import { SpawnStack, SpawnTable, type SpawnMachine } from "./spawn-table";
 import { groupedModels, isSuperseded } from "@/lib/contracts/models";
 import { useUserSettings } from "@/lib/state/use-user-settings";
+import { SYSTEM_STATUS_QUERY_KEY } from "@/lib/notifications/use-cluster-health";
 import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 import { useApi } from "@/lib/transport/transport-context";
@@ -79,11 +80,13 @@ interface Props {
 export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   const client = useApi();
   const t = useTranslations("spawn");
-  const { data: statusData } = useQuery({
-    queryKey: ["status"],
+  const statusQuery = useQuery({
+    queryKey: SYSTEM_STATUS_QUERY_KEY,
     queryFn: () => client.getSystemStatus(),
     refetchInterval: 15_000,
+    staleTime: 15_000,
   });
+  const statusData = statusQuery.data;
   const modelsQuery = useQuery({
     queryKey: ["models"],
     queryFn: () => client.getModels(),
@@ -286,6 +289,27 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
     rememberSpawnedConfig();
     onSpawn(buildOpts(machine));
     onDone();
+  }
+
+  // meiva:note
+  // Status check loading and cold failure states must not read as zero runners.
+  // Stale cached data is preserved during background refetch errors (stale-while-error).
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
+  if (statusQuery.isPending) {
+    return (
+      <div role="status" className={cn("items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground", FLEX)}>
+        <Loader2 className="size-3.5 animate-spin" />
+        <span>{t("loadingStatus")}</span>
+      </div>
+    );
+  }
+
+  if (statusQuery.error && !statusData) {
+    return (
+      <div role="status" className="px-3 py-2 text-xs text-muted-foreground">
+        {t("statusUnavailable")}
+      </div>
+    );
   }
 
   if (spawnable.length === 0) {
