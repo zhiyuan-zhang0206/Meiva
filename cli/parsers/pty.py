@@ -1,15 +1,31 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
+
+from cli.options import options
+
+
+@dataclass(frozen=True)
+class _FreezeOptions:
+    holder: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class _ResumeOptions:
+    generation: str
 
 
 def _h_pty_freeze(args: argparse.Namespace) -> int:
     from cli.commands.agents.pty import cmd_pty_freeze
+    from cli.database.runtime import runtime_of
 
-    runtime = args.runtime
+    opts = options(args, _FreezeOptions)
+    runtime = runtime_of(args)
     return cmd_pty_freeze(
-        holder=args.holder,
-        reason=args.reason,
+        holder=opts.holder,
+        reason=opts.reason,
         home=runtime.home,
         clock=runtime.clock,
         rng=runtime.rng,
@@ -18,14 +34,17 @@ def _h_pty_freeze(args: argparse.Namespace) -> int:
 
 def _h_pty_status(args: argparse.Namespace) -> int:
     from cli.commands.agents.pty import cmd_pty_status
+    from cli.database.runtime import runtime_of
 
-    return cmd_pty_status(home=args.runtime.home)
+    return cmd_pty_status(home=runtime_of(args).home)
 
 
 def _h_pty_resume(args: argparse.Namespace) -> int:
     from cli.commands.agents.pty import cmd_pty_resume
+    from cli.database.runtime import runtime_of
 
-    return cmd_pty_resume(generation=args.generation, home=args.runtime.home)
+    opts = options(args, _ResumeOptions)
+    return cmd_pty_resume(generation=opts.generation, home=runtime_of(args).home)
 
 
 def add_pty_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:

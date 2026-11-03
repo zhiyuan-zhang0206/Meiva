@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import random
 import sys
@@ -19,6 +20,7 @@ from base.host.permissions_helper.client import HelperFactory
 from base.host.system.hostport import Host
 from base.paths import repo_root
 from base.sessions.helperproc import helper_for
+from cli.options import attribute
 
 __all__ = [
     "CommandRuntime",
@@ -26,6 +28,7 @@ __all__ = [
     "Terminal",
     "UserSession",
     "delivered_config",
+    "runtime_of",
 ]
 
 
@@ -226,3 +229,9 @@ class CommandRuntime:
             checkout=repo_root(),
             terminal=Terminal.current(),
         )
+
+
+# meiva:note
+# The runtime `cli.main` bound to the parsed command (`args.runtime`), as the class it is.
+def runtime_of(args: argparse.Namespace) -> CommandRuntime:
+    return attribute(args, "runtime", CommandRuntime)
