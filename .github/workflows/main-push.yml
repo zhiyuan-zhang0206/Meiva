@@ -1,0 +1,61 @@
+# The narrow gate on `main` itself.
+#
+# A pull request's CI runs the tests its diff selects, so two changes that are each green can
+# merge into a tree neither of them tested, and a change can break something outside its own
+# selection. Both happened on 2026-11-03: `#8330` left `main` red for 42 minutes and `#8339` for
+# 13, each by editing a hook payload under `scripts/` that no diff-based selection reached.
+#
+# This gate runs the two checks whose verdict cannot depend on a diff, on every push to `main`,
+# in about two minutes: the full-graph `meizel check` (a moved module leaves a dangling import
+# somewhere; the graph names it) and the hook-script scratch-home test (an import order that
+# breaks a pre-commit payload). It is not the full suite — the nightly `ci.yml` schedule runs
+# that, and `main-red-watch` turns a red of either into a card.
+#
+# The job lives here rather than in `ci.yml` because every job there is keyed on
+# `github.event_name != 'pull_request'`: adding a `push` trigger there would run the whole
+# matrix on every merge unless all of those conditions changed at once.
+
+name: main push gate
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One run per merge, and a later merge never cancels an earlier run's verdict: the card the
+  # watch opens names the commit it came from.
+  group: main-push-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  # Sentinel ports: a test that quietly reached a real data plane fails loudly instead.
+  MEIVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
+  MEIVA_REDIS_URL: redis://127.0.0.1:1/0
+
+jobs:
+  gate:
+    name: main push gate (locality graph + hook scripts)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: 0.13.1
+          enable-cache: true
+
+      - name: Install Python deps
+        uses: ./.github/actions/uv-sync
+
+      - name: Locality gate (full meizel check)
+        run: env -u VIRTUAL_ENV uv run python -m meizel check
+
+      - name: Every hook script enters a scratch home before application code
+        run: >-
+          env -u VIRTUAL_ENV uv run python -m pytest --test-environment=static -q
+          scripts/tests/test_hooks_scratch_home.py

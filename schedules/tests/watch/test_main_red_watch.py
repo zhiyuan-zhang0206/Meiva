@@ -18,15 +18,29 @@ from schedules.plans.watch.main_red import FAILURE_TEST, Card, RunFacts
 
 
 def _red(
-    workflow: str, sha: str, when: datetime, test_id: str = "pkg/tests/test_a.py::test_x"
+    workflow: str,
+    sha: str,
+    when: datetime,
+    test_id: str = "pkg/tests/test_a.py::test_x",
+    *,
+    full_suite: bool = True,
+    title: str = "",
 ) -> RunFacts:
     from schedules.plans.watch.main_red import Failure
 
-    return RunFacts(workflow, sha, when, "failure", (Failure(test_id, FAILURE_TEST),))
+    return RunFacts(
+        workflow,
+        sha,
+        when,
+        "failure",
+        (Failure(test_id, FAILURE_TEST),),
+        covers_full_suite=full_suite,
+        head_title=title,
+    )
 
 
-def _green(workflow: str, sha: str, when: datetime) -> RunFacts:
-    return RunFacts(workflow, sha, when, "success", ())
+def _green(workflow: str, sha: str, when: datetime, *, full_suite: bool = True) -> RunFacts:
+    return RunFacts(workflow, sha, when, "success", (), covers_full_suite=full_suite)
 
 
 def _watch(
@@ -37,6 +51,7 @@ def _watch(
     closed: list[tuple[int, str]],
     heartbeats: list[dict[str, object]],
     now: datetime | None = None,
+    workflows: tuple[str, ...] = ("release-gate.yml",),
 ) -> str:
     def fetch(_workflow: str) -> tuple[RunFacts, ...]:
         return tuple(runs)
@@ -58,9 +73,10 @@ def _watch(
         open_card=open_card,
         close_card=close_card,
         emit=emit,
-        workflows=("release-gate.yml",),
+        workflows=workflows,
         release_gate_last_start=(now or datetime(2026, 11, 2, 12, tzinfo=UTC)) - timedelta(hours=1),
         nightly_last_start=(now or datetime(2026, 11, 2, 12, tzinfo=UTC)) - timedelta(hours=2),
+        ci_nightly_last_start=(now or datetime(2026, 11, 2, 12, tzinfo=UTC)) - timedelta(hours=3),
     )
 
 
@@ -161,6 +177,7 @@ def test_a_stale_schedule_is_reported_in_the_round_line(tmp_path: Path) -> None:
         workflows=("release-gate.yml",),
         release_gate_last_start=now - timedelta(hours=12),
         nightly_last_start=now - timedelta(hours=2),
+        ci_nightly_last_start=now - timedelta(hours=2),
     )
 
     assert "no new run" not in line
@@ -251,3 +268,123 @@ def test_a_watch_with_no_round_on_record_opens_nothing() -> None:
     )
 
     assert opened == []
+
+
+# meiva:note
+# The nightly full run of `ci.yml` is its own stream, not a shade of the duration refresh: a red in
+# either reaches the lead, and either schedule going quiet is said out loud. Without the second half
+# a nightly that stopped being triggered reads exactly like a `main` that stayed green.
+def test_a_red_nightly_full_run_opens_a_card_and_its_silence_is_reported(tmp_path: Path) -> None:
+    opened: list[Card] = []
+    first = datetime(2026, 11, 1, 18, tzinfo=UTC)
+    second = datetime(2026, 11, 2, 18, tzinfo=UTC)
+
+    _watch(
+        tmp_path,
+        [_red("ci.yml", "sha1", first)],
+        opened=opened,
+        closed=[],
+        heartbeats=[],
+        now=second,
+    )
+    assert opened == []
+
+    line = _watch(
+        tmp_path,
+        [_red("ci.yml", "sha2", second)],
+        opened=opened,
+        closed=[],
+        heartbeats=[],
+        now=second,
+    )
+    assert len(opened) == 1
+    assert "ci.yml" in opened[0].fingerprint
+    assert "opened card 900" in line
+
+    silent = watch_once(
+        state_path=tmp_path / "other" / STATE_FILE,
+        now=second,
+        fetch=lambda _w: (),
+        open_card=lambda _c: 1,
+        close_card=lambda _t, _r: None,
+        emit=lambda _p: None,
+        workflows=(),
+        release_gate_last_start=second - timedelta(hours=1),
+        nightly_last_start=second - timedelta(hours=2),
+        ci_nightly_last_start=second - timedelta(hours=30),
+    )
+
+    assert "nightly-full" in silent
+    assert "no new run" in silent
+
+
+# meiva:note
+# A card names the merge it points at: the sha alone sends a reader to `git log` before they can
+# tell whether the change is theirs. The subject is read for a failing run only.
+def test_a_card_carries_the_commit_subject_of_the_failing_run(tmp_path: Path) -> None:
+    opened: list[Card] = []
+    first = datetime(2026, 11, 1, 6, tzinfo=UTC)
+    second = datetime(2026, 11, 1, 12, tzinfo=UTC)
+
+    _watch(
+        tmp_path,
+        [_red("release-gate.yml", "sha1aaaaaaa", first, title="chore(x): first merge")],
+        opened=opened,
+        closed=[],
+        heartbeats=[],
+    )
+    _watch(
+        tmp_path,
+        [_red("release-gate.yml", "sha2bbbbbbb", second, title="feat(y): second merge")],
+        opened=opened,
+        closed=[],
+        heartbeats=[],
+    )
+
+    assert len(opened) == 1
+    assert "sha2bbbbbbb" in opened[0].body
+    assert "feat(y): second merge" in opened[0].body
+
+
+# meiva:note
+# The push gate runs two checks, so its green run says nothing about a test the nightly found: it
+# must not close that card. This is the line most likely to be "simplified" into closing every
+# green run, and that would silently drop a real red from the board.
+def test_a_green_narrow_gate_does_not_close_a_card_the_nightly_opened(tmp_path: Path) -> None:
+    opened: list[Card] = []
+    closed: list[tuple[int, str]] = []
+    first = datetime(2026, 11, 1, 12, tzinfo=UTC)
+    second = datetime(2026, 11, 1, 18, tzinfo=UTC)
+
+    _watch(
+        tmp_path,
+        [
+            _red("ci.yml", "sha1", first),
+            _red("ci.yml", "sha2", second),
+        ],
+        opened=opened,
+        closed=closed,
+        heartbeats=[],
+        workflows=("ci.yml",),
+    )
+    assert len(opened) == 1
+
+    _watch(
+        tmp_path,
+        [_green("main-push.yml", "sha3", second, full_suite=False)],
+        opened=opened,
+        closed=closed,
+        heartbeats=[],
+        workflows=("main-push.yml",),
+    )
+    assert closed == []
+
+    _watch(
+        tmp_path,
+        [_green("ci.yml", "sha4", second + timedelta(hours=1))],
+        opened=opened,
+        closed=closed,
+        heartbeats=[],
+        workflows=("ci.yml",),
+    )
+    assert closed and closed[0][0] == 900

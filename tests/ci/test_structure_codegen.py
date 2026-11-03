@@ -495,12 +495,24 @@ def test_shallow_checkout_needs_the_deepen_before_resolving_head_parent(
     assert git("rev-parse", "HEAD^1", cwd=checkout) == base
 
 
-def test_manual_structure_guard_resolves_shallow_source_ancestry(tmp_path: Path) -> None:
+# meiva:note
+# The ancestry step is found by what it runs, not by its display name: the name is presentation,
+# and a rename must not be able to turn this contract into a `KeyError` (it did on 2026-11-03,
+# when the step stopped being manual-only).
+def _ancestry_step() -> dict[str, object]:
+    for step in STEPS.values():
+        if "git fetch --unshallow" in str(step.get("run", "")):
+            return step
+    raise AssertionError("no step resolves the comparison ancestry for the structure guard")
 
-    step = STEPS["Fetch comparison ancestry for manual structure guard"]
-    assert step["if"] == "github.event_name == 'workflow_dispatch'"
+
+def test_structure_guard_resolves_shallow_source_ancestry_outside_pull_requests(
+    tmp_path: Path,
+) -> None:
+    step = _ancestry_step()
+    assert step["if"] == "github.event_name != 'pull_request'"
     names = list(STEPS)
-    assert names.index(step["name"]) < names.index(LINT["name"])
+    assert names.index(str(step["name"])) < names.index(LINT["name"])
     source = tmp_path / "source"
     source.mkdir()
 
@@ -521,7 +533,7 @@ def test_manual_structure_guard_resolves_shallow_source_ancestry(tmp_path: Path)
     assert git("rev-parse", "--is-shallow-repository", cwd=checkout) == "true"
     output = tmp_path / "env"
     run_fixture(
-        ["bash", "-e", "-c", step["run"]],
+        ["bash", "-e", "-c", str(step["run"])],
         cwd=checkout,
         env={**os.environ, "GITHUB_ENV": str(output)},
         check=True,

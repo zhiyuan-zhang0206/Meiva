@@ -63,9 +63,12 @@ _FAILED_LINE = re.compile(r"^\s*FAILED\s+(?P<test_id>[^\s(]+)", re.MULTILINE)
 
 # meiva:note
 # Evidence that the run broke around the suite rather than in it: a container that never pulled
-# its image, a disk that filled, a step that never started. Without this the first runner OOM
+# its image, a disk that filled, a step that never started, an action the runner could not fetch
+# (2026-11-03: a codeload failure killed a job in eight seconds with no test having run). Without this the first runner OOM
 # wakes someone to hunt a regression that does not exist, which is how a watch loses its reader.
 _INFRA_MARKERS = (
+    "an action could not be found at the uri",
+    "failed to download archive",
     "no space left on device",
     "unable to locate executable",
     "error response from daemon",
@@ -107,6 +110,7 @@ class RunFacts:
     html_url: str | None = None
     job_names: tuple[str, ...] = ()
     covers_full_suite: bool = True
+    head_title: str = ""
 
 
 # meiva:note
@@ -192,7 +196,26 @@ def _infrastructure_marker(log_text: str) -> str | None:
     return None
 
 
-def parse_failures(log_text: str, *, job_name: str, suite_step_failed: bool) -> tuple[Failure, ...]:
+# meiva:note
+# The steps of the push gate that are themselves the checks. A gate run cannot report a JUnit
+# failure for `meizel check` — it prints no `FAILED <test>` line — so the step that failed has to
+# name the red, or a real violation would be read as an infra fault and open no card.
+GATE_CHECK_STEPS = frozenset(
+    {
+        "Locality gate (full meizel check)",
+        "Every hook script enters a scratch home before application code",
+    }
+)
+
+
+def parse_failures(
+    log_text: str,
+    *,
+    job_name: str,
+    suite_step_failed: bool,
+    failed_steps: tuple[str, ...] = (),
+    check_steps: frozenset[str] = frozenset(),
+) -> tuple[Failure, ...]:
     marker = _infrastructure_marker(log_text)
     if marker is not None:
         return (Failure(f"{job_name} runner: {marker}", FAILURE_INFRA),)
@@ -202,6 +225,13 @@ def parse_failures(log_text: str, *, job_name: str, suite_step_failed: bool) -> 
     )
     if found:
         return found
+    # meiva:note
+    # A named check step failing is a red of that check, not of the runner. Only a workflow that
+    # names its check steps gets here: for the full-suite workflows an unnamed failure stays infra,
+    # because their steps include installs that fail for reasons that are nobody's regression.
+    for step in failed_steps:
+        if step in check_steps:
+            return (Failure(f"{job_name} / {step}", FAILURE_TEST),)
     if suite_step_failed:
         return (Failure(f"{job_name}: unnamed failure", FAILURE_INFRA),)
     return ()
