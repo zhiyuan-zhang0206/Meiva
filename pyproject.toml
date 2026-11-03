@@ -865,6 +865,15 @@ root = "services/supervision/meiva_root_glue/tests"
 [[tool.pyright.executionEnvironments]]
 root = "services/supervision/roster/tests"
 
+[[tool.pyright.executionEnvironments]]
+root = "services/wake/delivery_watchdog/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/wake/heartbeat/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/wake/schedule_manager/tests"
+
 # END GENERATED pyright tests environments
 
 # Directory entries that raise reportAny / reportExplicitAny to "error" once a directory's count is
@@ -976,6 +985,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "services/supervision"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/wake"
 reportAny = "error"
 reportExplicitAny = "error"
 

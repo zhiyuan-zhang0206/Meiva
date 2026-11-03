@@ -22,13 +22,15 @@ import logging
 import math
 import threading
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, assert_never
+from typing import assert_never
 
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.cluster import session_name
+from base.db.rows import query_all
 from base.db.transaction import write_transaction
 from base.deploy.lifecycle import start_serving
 from base.deploy.schedule_timing import SCHEDULE_STALL_ALERT_AFTER_S
@@ -75,6 +77,12 @@ INTERRUPTED_HOST_REPLACED = "interrupted (session host replaced)"
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
+@dataclass(frozen=True)
+class _StallRow:
+    id: int
+    stalled_seconds: float
+
+
 # meiva:note
 # The reconcile logic for the ``schedules`` table. One per cluster, owned by
 # the ``schedule-manager`` service, whose loops call `reconcile` and
@@ -89,7 +97,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 class ScheduleManager:
     def __init__(
         self,
-        db_pool: ConnectionPool[Any],
+        db_pool: ConnectionPool,
         *,
         backend: SessionBackend,
         repo_root: Path,
@@ -399,27 +407,30 @@ class ScheduleManager:
         schedule has both cleared, which rearms a later outage."""
         eligible = {sid for sid, status in status_by_id.items() if status != "completed"}
         missing = sorted(eligible - live_ids)
-        with write_transaction(self._pool) as conn, conn.cursor() as cur:
-            cur.execute(
+        with write_transaction(self._pool) as conn:
+            conn.execute(
                 "UPDATE schedules SET not_live_since = NULL, stall_alerted_at = NULL "
                 "WHERE machine = %s AND NOT (id = ANY(%s)) "
                 "AND (not_live_since IS NOT NULL OR stall_alerted_at IS NOT NULL)",
                 (self._machine_name, missing),
             )
-            cur.execute(
+            conn.execute(
                 "UPDATE schedules SET not_live_since = clock_timestamp() "
                 "WHERE machine = %s AND id = ANY(%s) AND not_live_since IS NULL",
                 (self._machine_name, missing),
             )
-            cur.execute(
+            alerts = query_all(
+                conn,
+                _StallRow,
                 "UPDATE schedules SET stall_alerted_at = clock_timestamp() "
                 "WHERE machine = %s AND id = ANY(%s) AND stall_alerted_at IS NULL "
                 "AND not_live_since < clock_timestamp() - make_interval(secs => %s) "
-                "RETURNING id, EXTRACT(EPOCH FROM clock_timestamp() - not_live_since)",
+                "RETURNING id, EXTRACT(EPOCH FROM clock_timestamp() - not_live_since)::float8 "
+                "AS stalled_seconds",
                 (self._machine_name, missing, STALL_ALERT_AFTER_S),
             )
-            alerts = [(int(r[0]), float(r[1])) for r in cur.fetchall()]
-        for schedule_id, stalled_seconds in alerts:
+        for alert in alerts:
+            schedule_id, stalled_seconds = alert.id, alert.stalled_seconds
             rounded_seconds = round(stalled_seconds, 3)
             status = status_by_id[schedule_id]
             _log.warning(

@@ -1,13 +1,14 @@
 """Durable desired revisions and live PTY command provenance for convergence."""
 
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from psycopg_pool import ConnectionPool
 
 from base.cluster import session_name
+from base.db.rows import query_all, query_one
 from base.db.transaction import write_transaction
 from base.paths import run_dir
 from base.sessions.pty import client
@@ -15,8 +16,35 @@ from base.sessions.pty.paths import service_socket_path
 from services.wake.schedule_manager.convergence import Desired, revision_in
 
 
+@dataclass(frozen=True)
+class _LockRow:
+    locked: bool
+
+
+@dataclass(frozen=True)
+class _DesiredRow:
+    enabled: bool
+    status: str
+    desired_revision: int
+    applied_revision: int
+    launch_generation: str | None
+    secret_env_vars: Sequence[str]
+    owner_agent_id: int | None
+
+
+@dataclass(frozen=True)
+class _HomeRow:
+    home: str
+
+
+@dataclass(frozen=True)
+class _StatusRow:
+    id: int
+    status: str
+
+
 @contextmanager
-def claim_convergence(pool: ConnectionPool[Any], schedule_id: int) -> Generator[bool, None, None]:
+def claim_convergence(pool: ConnectionPool, schedule_id: int) -> Generator[bool, None, None]:
     """One manager owns this schedule's process effects across independent processes.
 
     The advisory transaction survives inner desired/applied commits but is
@@ -24,40 +52,46 @@ def claim_convergence(pool: ConnectionPool[Any], schedule_id: int) -> Generator[
     their conditional revision writes prevent this owner acknowledging newer work.
     """
     with write_transaction(pool) as conn:
-        row = conn.execute(
-            "SELECT pg_try_advisory_xact_lock(hashtextextended('meiva.schedule-convergence:' || %s::text, 0))",
+        row = query_one(
+            conn,
+            _LockRow,
+            "SELECT pg_try_advisory_xact_lock(hashtextextended('meiva.schedule-convergence:' || %s::text, 0)) AS locked",
             (schedule_id,),
-        ).fetchone()
+        )
         assert row is not None  # noqa: S101 — SELECT always returns one boolean
-        yield bool(row[0])
+        yield row.locked
 
 
 def desired(
-    pool: ConnectionPool[Any], schedule_id: int, *, machine: str | None = None
+    pool: ConnectionPool, schedule_id: int, *, machine: str | None = None
 ) -> Desired | None:
     with pool.connection() as conn:
         if machine is not None:
-            row = conn.execute(
+            row = query_one(
+                conn,
+                _DesiredRow,
                 "SELECT enabled, status, desired_revision, applied_revision, launch_generation, "
                 "secret_env_vars, owner_agent_id FROM schedules WHERE id = %s AND machine = %s",
                 (schedule_id, machine),
-            ).fetchone()
+            )
         else:
-            row = conn.execute(
+            row = query_one(
+                conn,
+                _DesiredRow,
                 "SELECT enabled, status, desired_revision, applied_revision, launch_generation, "
                 "secret_env_vars, owner_agent_id FROM schedules WHERE id = %s",
                 (schedule_id,),
-            ).fetchone()
+            )
     if row is None:
         return None
     return Desired(
-        enabled=bool(row[0]),
-        status=row[1],
-        revision=row[2],
-        applied=row[3],
-        launch_generation=row[4],
-        secret_env_vars=tuple(row[5] or ()),
-        owner_agent_id=row[6],
+        enabled=row.enabled,
+        status=row.status,
+        revision=row.desired_revision,
+        applied=row.applied_revision,
+        launch_generation=row.launch_generation,
+        secret_env_vars=tuple(row.secret_env_vars),
+        owner_agent_id=row.owner_agent_id,
     )
 
 
@@ -75,7 +109,7 @@ def launched_revision(home: Path, schedule_id: int) -> int | None:
 
 
 def mark_applied(
-    pool: ConnectionPool[Any], schedule_id: int, revision: int, *, machine: str | None = None
+    pool: ConnectionPool, schedule_id: int, revision: int, *, machine: str | None = None
 ) -> None:
     with write_transaction(pool) as conn:
         if machine is not None:
@@ -95,22 +129,22 @@ def mark_applied(
 # for machine_name, the elected unit (serve_gateway=True or lowest home path)
 # is active; stopped or un-elected units yield. When machine_units has no active rows
 # (e.g. standalone tests), proceed normally.
-def is_active_unit(pool: ConnectionPool[Any], machine_name: str, home: Path) -> bool:
+def is_active_unit(pool: ConnectionPool, machine_name: str, home: Path) -> bool:
     with pool.connection() as conn:
-        rows = conn.execute(
+        rows = query_all(
+            conn,
+            _HomeRow,
             "SELECT home FROM machine_units WHERE machine_name = %s AND stopped_at IS NULL ORDER BY serve_gateway DESC, home ASC",
             (machine_name,),
-        ).fetchall()
+        )
     if not rows:
         return True
-    homes = [str(Path(r[0]).resolve()) for r in rows]
+    homes = [str(Path(r.home).resolve()) for r in rows]
     my_home = str(Path(home).resolve())
     return my_home == homes[0]
 
 
-def close_null_runs(
-    pool: ConnectionPool[Any], schedule_id: int, *, note: str = "interrupted"
-) -> None:
+def close_null_runs(pool: ConnectionPool, schedule_id: int, *, note: str = "interrupted") -> None:
     with write_transaction(pool) as conn:
         conn.execute(
             "UPDATE schedule_runs SET ok = false, note = %s WHERE schedule_id = %s AND ok IS NULL",
@@ -119,7 +153,7 @@ def close_null_runs(
 
 
 def claim_launch(
-    pool: ConnectionPool[Any],
+    pool: ConnectionPool,
     schedule_id: int,
     revision: int,
     epoch: str | None,
@@ -144,16 +178,18 @@ def claim_launch(
         )
 
 
-def load_enabled(pool: ConnectionPool[Any], machine_name: str) -> dict[int, str]:
+def load_enabled(pool: ConnectionPool, machine_name: str) -> dict[int, str]:
     with pool.connection() as conn:
-        rows = conn.execute(
+        rows = query_all(
+            conn,
+            _StatusRow,
             "SELECT id, status FROM schedules WHERE enabled AND machine = %s",
             (machine_name,),
-        ).fetchall()
-    return {row[0]: row[1] for row in rows}
+        )
+    return {row.id: row.status for row in rows}
 
 
-def set_status(pool: ConnectionPool[Any], schedule_id: int, status: str, machine_name: str) -> bool:
+def set_status(pool: ConnectionPool, schedule_id: int, status: str, machine_name: str) -> bool:
     with write_transaction(pool) as conn:
         return (
             conn.execute(
@@ -165,7 +201,7 @@ def set_status(pool: ConnectionPool[Any], schedule_id: int, status: str, machine
 
 
 def mark_running(
-    pool: ConnectionPool[Any],
+    pool: ConnectionPool,
     schedule_id: int,
     revision: int,
     epoch: str | None,
@@ -182,7 +218,7 @@ def mark_running(
 
 
 def mark_lost(
-    pool: ConnectionPool[Any],
+    pool: ConnectionPool,
     schedule_id: int,
     revision: int,
     machine_name: str,

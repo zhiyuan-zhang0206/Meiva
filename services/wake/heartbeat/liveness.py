@@ -42,9 +42,8 @@
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
 
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
@@ -57,6 +56,7 @@ from base.agents.observation.evidence import (
 )
 from base.cluster.machines import list_agent_runners, list_roster_agent_runners
 from base.db import Database
+from base.db.rows import query_all, query_one
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
@@ -90,7 +90,7 @@ class ProbeOutcome:
 
     reached: bool
     host_online: bool | None
-    status: dict[str, Any] | None
+    status: Mapping[str, object] | None
 
 
 _UNREACHED = ProbeOutcome(reached=False, host_online=None, status=None)
@@ -135,6 +135,30 @@ async def probe_machine(
         return _UNREACHED
 
 
+@dataclass(frozen=True)
+class _LoadRow:
+    agent_count: int | None
+    carries_service: bool
+
+
+@dataclass(frozen=True)
+class _FailuresRow:
+    consecutive_failures: int
+
+
+@dataclass(frozen=True)
+class _LivenessRow:
+    id: int
+    old_liveness_state: str
+    new_liveness_state: str
+
+
+@dataclass(frozen=True)
+class _StoppedRow:
+    name: str
+    stopped_for_s: int
+
+
 # meiva:note
 # What a machine was carrying when its probe failed — the two facts the offline
 # rules grade on (task #5520). Read here, at failure time, because the row is
@@ -150,9 +174,11 @@ async def probe_machine(
 # `carries_service` is true when the machines row lists any role besides
 # `agent-runner` (gateway, observability-station): those hosts are expected to
 # be up regardless of how many agents sit on them.
-def _carried_load(pool: ConnectionPool, name: str) -> dict[str, Any]:
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
+def _carried_load(pool: ConnectionPool, name: str) -> dict[str, object]:
+    with pool.connection() as conn:
+        row = query_one(
+            conn,
+            _LoadRow,
             "SELECT CASE WHEN jsonb_typeof(s.status->'agent_count') = 'number' "
             "            THEN (s.status->>'agent_count')::int END AS agent_count, "
             "       EXISTS (SELECT 1 FROM unnest(COALESCE(m.role, '{}'::text[])) AS r "
@@ -162,11 +188,9 @@ def _carried_load(pool: ConnectionPool, name: str) -> dict[str, Any]:
             "WHERE m.name = %s",
             (name,),
         )
-        row = cur.fetchone()
     if row is None:
         return {"agent_count": None, "carries_service": False}
-    agent_count, carries_service = row
-    return {"agent_count": agent_count, "carries_service": bool(carries_service)}
+    return {"agent_count": row.agent_count, "carries_service": row.carries_service}
 
 
 async def _record_probe(
@@ -175,8 +199,10 @@ async def _record_probe(
     """UPSERT one probe outcome into machine_probe, bumping the consecutive
     failure count on failure and resetting it on success; a failed probe also
     emits the `machine_probe_failed` signal."""
-    with write_transaction(pool) as conn, conn.cursor() as cur:
-        cur.execute(
+    with write_transaction(pool) as conn:
+        row = query_one(
+            conn,
+            _FailuresRow,
             "INSERT INTO machine_probe "
             "(machine_name, online, agent_host_online, consecutive_failures, last_probe_at) "
             "VALUES (%s, %s, %s, CASE WHEN %s THEN 0 ELSE 1 END, now()) "
@@ -189,9 +215,8 @@ async def _record_probe(
             "RETURNING consecutive_failures",
             (name, ok, host_online, ok),
         )
-        row = cur.fetchone()
         assert row is not None  # noqa: S101 — UPSERT RETURNING always yields one row
-        consecutive_failures = int(row[0])
+        consecutive_failures = row.consecutive_failures
     if not ok:
         telemetry.emit(
             "telemetry",
@@ -217,8 +242,10 @@ async def _record_probe(
 # behaviour: rows start 'unknown' and only ever flip to offline on real
 # probe failures.
 def merge_liveness(pool: ConnectionPool) -> list[int]:
-    with write_transaction(pool) as conn, conn.cursor() as cur:
-        cur.execute(
+    with write_transaction(pool) as conn:
+        rows = query_all(
+            conn,
+            _LivenessRow,
             "WITH probe AS ("
             "  SELECT m.name AS machine_name,"
             "         mp.consecutive_failures AS cf, mp.last_probe_at AS observed_at"
@@ -243,16 +270,16 @@ def merge_liveness(pool: ConnectionPool) -> list[int]:
             "RETURNING a.id, d.old_liveness_state, d.new_liveness_state",
             (OFFLINE_AFTER_FAILURES,),
         )
-        rows = cur.fetchall()
     # `unknown` is already rendered conservatively as online, so the first
     # judgement unknown -> online is not a user-visible edge and must not emit
     # a fleet-sized startup burst. Broadcast only edges entering/leaving the
     # offline state; one snapshot per changed agent lets the existing R4 fold
     # update mounted clients without inventing a second liveness transport.
     return [
-        int(agent_id)
-        for agent_id, old_state, new_state in rows
-        if old_state != new_state and (old_state == "offline" or new_state == "offline")
+        row.id
+        for row in rows
+        if row.old_liveness_state != row.new_liveness_state
+        and "offline" in (row.old_liveness_state, row.new_liveness_state)
     ]
 
 
@@ -296,9 +323,11 @@ async def _record_snapshot(pool: ConnectionPool, name: str, outcome: ProbeOutcom
 # stopped" from the stream, so no second signal is needed to resolve.
 # meiva:link services/docs/gateway_side/heartbeat-stopped-too-long.meiva.okf.md
 def report_stopped_too_long(db: Database) -> list[str]:
-    with db.connect() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT name, EXTRACT(EPOCH FROM (now() - stopped_at))::bigint "
+    with db.connect() as conn:
+        rows = query_all(
+            conn,
+            _StoppedRow,
+            "SELECT name, EXTRACT(EPOCH FROM (now() - stopped_at))::bigint AS stopped_for_s "
             "FROM machines "
             "WHERE stopped_at IS NOT NULL "
             "  AND now() - stopped_at > make_interval(secs => %s) "
@@ -308,15 +337,15 @@ def report_stopped_too_long(db: Database) -> list[str]:
             "ORDER BY name",
             (MACHINE_STOPPED_TOO_LONG_S,),
         )
-        rows = cur.fetchall()
     reported: list[str] = []
-    for name, stopped_for_s in rows:
+    for stopped in rows:
+        name, stopped_for_s = stopped.name, stopped.stopped_for_s
         telemetry.emit(
             "telemetry",
             "machine_stopped_too_long",
             level="warning",
             source="system",
-            attributes={"machine": name, "stopped_for_s": int(stopped_for_s)},
+            attributes={"machine": name, "stopped_for_s": stopped_for_s},
         )
         reported.append(name)
     return reported
