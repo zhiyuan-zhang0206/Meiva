@@ -13,7 +13,7 @@ Alert is fully separate from Notice — nothing here touches agent_notices.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -52,7 +52,7 @@ class AlertWebhookAlert(BaseModel):
     ends_at: str = Field(default="", alias="endsAt")
     fingerprint: str = ""
     generator_url: str = Field(default="", alias="generatorURL")
-    values: dict[str, Any] | None = None
+    values: dict[str, object] | None = None
 
 
 class AlertWebhookPayload(BaseModel):
@@ -71,12 +71,12 @@ class AlertWebhookPayload(BaseModel):
     status: WebhookStatus | None = None
     alerts: list[AlertWebhookAlert] = Field(default_factory=list[AlertWebhookAlert])
 
-    def flattened(self) -> list[dict[str, Any]]:
+    def flattened(self) -> list[dict[str, object]]:
         """Each alert as the plain dict base/telemetry/alerts/__init__.py consumes, with the
         top-level status as the per-alert fallback (the Grafana-managed
         webhook carries status only at the top level)."""
 
-        out: list[dict[str, Any]] = []
+        out: list[dict[str, object]] = []
         for alert in self.alerts:
             d = alert.model_dump(mode="json")
             if self.status is not None and not d.get("status"):

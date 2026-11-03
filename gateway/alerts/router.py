@@ -32,12 +32,14 @@ Auth split by consumer:
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any
+from typing import LiteralString
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from psycopg.rows import dict_row
+from psycopg import Cursor
+from psycopg.rows import class_row, kwargs_row
 from pydantic import TypeAdapter
 
 from base.db.transaction import write_transaction
@@ -58,10 +60,26 @@ from gateway.alerts.schemas import (
 from gateway.events.sse import event_stream
 from gateway.events.sse_frames import SseCadence
 from gateway.http.auth.webhook import authenticate_webhook
-from gateway.http.config import gateway_clock, gateway_config
+from gateway.http.config import gateway_clock, gateway_config, gateway_state
 from ops.alerts import ALERTS_CHANNEL, AlertRow, AlertSeverity, AlertStatus, publish_alert_rows
 
 router = APIRouter()
+
+
+# meiva:note
+# The `n` of a `SELECT count(*) AS n` statement.
+@dataclass(frozen=True)
+class _CountRow:
+    n: int
+
+
+def _count(cur: Cursor[_CountRow]) -> int:
+    row = cur.fetchone()
+    if row is None:
+        raise RuntimeError("count(*) returned no row")
+    return row.n
+
+
 _log = logging.getLogger(__name__)
 
 _WINDOWS = {
@@ -111,12 +129,12 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
         raise HTTPException(status_code=401, detail="unauthorized webhook caller")
 
     inserted = updated = notified = 0
-    rows: list[dict[str, Any]] = []
+    rows: list[dict[str, object]] = []
     alert_settings = gateway_config(request).alerts
     style = AlertMessageStyle(
         zone=gateway_clock(request).zone(), base_url=alert_settings.frontend_base_url
     )
-    with write_transaction(request.app.state.db_pool) as conn:
+    with write_transaction(gateway_state(request).db_pool) as conn:
         lang = display_language(conn)
         alerts = body.flattened()
         shadow = AlertShadowBatch(
@@ -140,16 +158,16 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
         shadow.freeze()
         conn.commit()
 
-    publish_alert_rows(request.app.state.bus, rows)
+    publish_alert_rows(gateway_state(request).bus, rows)
 
     if alert_settings.im_notify_enabled:
         for group_id in sorted(shadow.native_ids):
             notify_alert_group(
                 group_id,
                 bridge_url=alert_settings.im_bridge_url,
-                access=request.app.state.gateway_access,
+                access=gateway_state(request).gateway_access,
             )
-    with request.app.state.db_pool.connection() as conn:
+    with gateway_state(request).db_pool.connection() as conn:
         notified = native_sent_count(conn, shadow.native_ids)
 
     return AlertIngestResult(
@@ -173,7 +191,7 @@ async def get_alerts_stream(request: Request) -> StreamingResponse:
 
     return StreamingResponse(
         event_stream(
-            request.app.state.bus,
+            gateway_state(request).bus,
             0,
             request,
             channel=ALERTS_CHANNEL,
@@ -218,10 +236,10 @@ def list_alerts(
         limit if limit is not None else gateway_config(request).display.alerts_default_limit
     )
     since = gateway_clock(request).now() - _WINDOWS[window]
-    params: list[Any] = [since]
+    params: list[object] = [since]
     # Live problems never age out. The window limits recovery history, including
     # long-running incidents that ended recently.
-    where = ["(status = 'unresolved' OR COALESCE(ends_at, starts_at) > %s)"]
+    where: list[LiteralString] = ["(status = 'unresolved' OR COALESCE(ends_at, starts_at) > %s)"]
     if status is not None:
         where.append("status = %s")
         params.append(status)
@@ -234,12 +252,15 @@ def list_alerts(
     # - unresolved: every live instance in the severity scope. Trivially
     #   0 when the caller already scopes to resolved.
     # - total: rows matching the filters before the limit.
-    with request.app.state.db_pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+    with (
+        gateway_state(request).db_pool.connection() as conn,
+        conn.cursor(row_factory=class_row(_CountRow)) as cur,
+    ):
         if status == "resolved":
             unresolved_count = 0
         else:
-            base = ["status = 'unresolved'"]
-            base_params: list[Any] = []
+            base: list[LiteralString] = ["status = 'unresolved'"]
+            base_params: list[object] = []
             if severity is not None:
                 base.append("severity = %s")
                 base_params.append(severity)
@@ -247,9 +268,9 @@ def list_alerts(
                 f"SELECT count(*) AS n FROM alerts WHERE {' AND '.join(base)}",  # noqa: S608 — fixed fragments
                 base_params,
             )
-            unresolved_count = cur.fetchone()["n"]
+            unresolved_count = _count(cur)
         cur.execute(f"SELECT count(*) AS n FROM alerts WHERE {where_sql}", params)  # noqa: S608 — fixed fragments
-        total = cur.fetchone()["n"]
+        total = _count(cur)
 
         select_sql = (
             "SELECT id, status, severity, alertname, labels, annotations, starts_at, ends_at,"  # noqa: S608 — where_sql built from fixed fragments only
@@ -257,8 +278,9 @@ def list_alerts(
             f"  FROM alerts WHERE {where_sql}"
             " ORDER BY (status = 'unresolved') DESC, starts_at DESC LIMIT %s"
         )
-        cur.execute(select_sql, (*params, effective_limit))
-        rows = [AlertRow(**r) for r in cur.fetchall()]
+        with conn.cursor(row_factory=kwargs_row(AlertRow)) as rows_cur:
+            rows_cur.execute(select_sql, (*params, effective_limit))
+            rows = rows_cur.fetchall()
 
     return AlertsListResponse(
         alerts=rows,
