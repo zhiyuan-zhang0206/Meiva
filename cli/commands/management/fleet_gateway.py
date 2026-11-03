@@ -9,10 +9,19 @@ from __future__ import annotations
 import json
 import sys
 
+from pydantic import JsonValue
+
 from base.cluster.machine import gateway_api_base, gateway_auth_headers
 from base.cluster.machine.boot import gateway_access_from_boot
 from base.config import ConfigBoot
 from base.host.net.http_dial import get
+from cli.boundary.json_body import JsonShapeError, response_list
+
+
+def _field(row: JsonValue, key: str) -> JsonValue:
+    if not isinstance(row, dict):
+        raise JsonShapeError(f"a roster row is {type(row).__name__}, not an object")
+    return row[key]
 
 
 def main(argv: list[str]) -> int:
@@ -31,7 +40,8 @@ def main(argv: list[str]) -> int:
         "running_sha",
         "serve_agent_runner",
     )
-    print(json.dumps([{key: row[key] for key in keep} for row in rows.json()]))
+    roster = response_list(rows)
+    print(json.dumps([{key: _field(row, key) for key in keep} for row in roster]))
     return 0
 
 

@@ -24,15 +24,66 @@ from __future__ import annotations
 import argparse
 import contextlib
 import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import httpx
+from pydantic import BaseModel, TypeAdapter
 
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import GatewayAccess
+from cli.boundary.json_body import response_object
+from cli.boundary.options import options
+from cli.database import database_factory_of
+from cli.database.runtime import runtime_of
 
 _TIMEOUT_S = 15.0
+
+
+# meiva:note
+# One schedule as the gateway lists it, with the fields the CLI prints. `script` is present only
+# on the single-schedule read. Other fields of the answer are ignored.
+class _Schedule(BaseModel):
+    id: int
+    name: str
+    command: str | None = None
+    enabled: bool
+    status: str
+    description: str | None = None
+    machine: str | None = None
+    owner_plugin: str | None = None
+    placement_status: str | None = None
+    placement_reason: str | None = None
+    last_error: str | None = None
+    script: str | None = None
+
+
+# meiva:note
+# One row of `GET /api/schedules/{id}/runs`.
+class _Run(BaseModel):
+    ran_at: str
+    ok: bool | None
+    agent_id: int | None
+    note: str | None
+
+
+_SCHEDULES = TypeAdapter(list[_Schedule])
+_RUNS = TypeAdapter(list[_Run])
+
+
+# meiva:note
+# The answer of `GET /api/schedules/{id}/logs`.
+class _LogsView(BaseModel):
+    source: str
+    lines: list[str] = []
+
+
+def _schedule(resp: httpx.Response) -> _Schedule:
+    return _Schedule.model_validate_json(resp.content)
+
+
+def _schedules(resp: httpx.Response) -> list[_Schedule]:
+    return _SCHEDULES.validate_json(resp.content)
 
 
 def _gateway_base(access: GatewayAccess) -> str:
@@ -63,27 +114,27 @@ def cmd_schedules_ls(access: GatewayAccess) -> int:
         f"{_gateway_base(access)}/api/schedules", timeout=_TIMEOUT_S, headers=_headers(access)
     )
     resp.raise_for_status()
-    rows = resp.json()
+    rows = _schedules(resp)
 
     if not rows:
         print("(no schedules)")
         return 0
 
-    id_w = max(len("id"), *(len(str(r["id"])) for r in rows))
-    status_w = max(len("status"), *(len(r["status"]) for r in rows))
-    machine_w = max(len("machine"), *(len(str(r.get("machine", ""))) for r in rows))
-    placement_w = max(len("placement"), *(len(str(r.get("placement_status", ""))) for r in rows))
+    id_w = max(len("id"), *(len(str(r.id)) for r in rows))
+    status_w = max(len("status"), *(len(r.status) for r in rows))
+    machine_w = max(len("machine"), *(len(r.machine or "") for r in rows))
+    placement_w = max(len("placement"), *(len(r.placement_status or "") for r in rows))
     print(
         f"{'id'.rjust(id_w)}  {'on':<3}  {'status'.ljust(status_w)}  "
         f"{'machine'.ljust(machine_w)}  {'placement'.ljust(placement_w)}  name"
     )
     for r in rows:
-        on = "yes" if r["enabled"] else "no"
-        m_str = str(r.get("machine", ""))
-        p_str = str(r.get("placement_status", ""))
+        on = "yes" if r.enabled else "no"
+        m_str = r.machine or ""
+        p_str = r.placement_status or ""
         print(
-            f"{str(r['id']).rjust(id_w)}  {on:<3}  {r['status'].ljust(status_w)}  "
-            f"{m_str.ljust(machine_w)}  {p_str.ljust(placement_w)}  {r['name']}"
+            f"{str(r.id).rjust(id_w)}  {on:<3}  {r.status.ljust(status_w)}  "
+            f"{m_str.ljust(machine_w)}  {p_str.ljust(placement_w)}  {r.name}"
         )
     return 0
 
@@ -149,8 +200,8 @@ def cmd_schedules_create(
         print(_detail(resp), file=sys.stderr)
         return 1
     _die_on_unexpected_error(resp)
-    row = resp.json()
-    print(f"  ✓ created schedule #{row['id']} ({row['name']})")
+    row = _schedule(resp)
+    print(f"  ✓ created schedule #{row.id} ({row.name})")
     _print_schedule(row, with_script=False)
     return 0
 
@@ -220,8 +271,8 @@ def cmd_schedules_update(
         print(_detail(resp), file=sys.stderr)
         return 1
     _die_on_unexpected_error(resp)
-    row = resp.json()
-    print(f"  ✓ updated schedule #{row['id']} ({row['name']})")
+    row = _schedule(resp)
+    print(f"  ✓ updated schedule #{row.id} ({row.name})")
     _print_schedule(row, with_script=False)
     return 0
 
@@ -279,8 +330,8 @@ def _control(access: GatewayAccess, identifier: str, verb: str, idempotency_key:
         print(_detail(resp), file=sys.stderr)
         return 1
     _die_on_unexpected_error(resp)
-    row = resp.json()
-    print(f"  ✓ schedule #{row['id']} {verb}: enabled={row['enabled']} status={row['status']}")
+    row = _schedule(resp)
+    print(f"  ✓ schedule #{row.id} {verb}: enabled={row.enabled} status={row.status}")
     return 0
 
 
@@ -325,12 +376,12 @@ def cmd_schedules_logs(access: GatewayAccess, identifier: str, lines: int) -> in
         print(f"schedule {schedule_id} not found", file=sys.stderr)
         return 1
     resp.raise_for_status()
-    view = resp.json()
-    if view["source"] == "none":
+    view = _LogsView.model_validate_json(resp.content)
+    if view.source == "none":
         print("(no output yet — no live session and no recorded error)")
         return 0
-    print(f"── source: {view['source']} ──")
-    for line in view["lines"]:
+    print(f"── source: {view.source} ──")
+    for line in view.lines:
         print(line)
     return 0
 
@@ -353,16 +404,16 @@ def cmd_schedules_runs(access: GatewayAccess, identifier: str, limit: int) -> in
         print(f"schedule {schedule_id} not found", file=sys.stderr)
         return 1
     resp.raise_for_status()
-    rows = resp.json()
+    rows = _RUNS.validate_json(resp.content)
     if not rows:
         print("(no runs yet)")
         return 0
     print(f"{'ran_at':<28}  {'ok':<5}  {'agent':<6}  note")
     for r in rows:
-        ok = "-" if r["ok"] is None else ("yes" if r["ok"] else "no")
-        agent = "-" if r["agent_id"] is None else str(r["agent_id"])
-        head, *rest = (r["note"] or "").splitlines() or [""]
-        print(f"{r['ran_at']:<28}  {ok:<5}  {agent:<6}  {head}")
+        ok = "-" if r.ok is None else ("yes" if r.ok else "no")
+        agent = "-" if r.agent_id is None else str(r.agent_id)
+        head, *rest = (r.note or "").splitlines() or [""]
+        print(f"{r.ran_at:<28}  {ok:<5}  {agent:<6}  {head}")
         for line in rest:  # a crashed run's traceback follows its first line
             print(f"    {line}")
     return 0
@@ -445,14 +496,14 @@ def _resolve_id(access: GatewayAccess, identifier: str) -> int | None:
         f"{_gateway_base(access)}/api/schedules", timeout=_TIMEOUT_S, headers=_headers(access)
     )
     resp.raise_for_status()
-    match = next((r for r in resp.json() if r["name"] == identifier), None)
+    match = next((r for r in _schedules(resp) if r.name == identifier), None)
     if match is None:
         print(f"schedule named {identifier!r} not found", file=sys.stderr)
         return None
-    return int(match["id"])
+    return match.id
 
 
-def _fetch(access: GatewayAccess, identifier: str) -> dict[str, Any] | None:
+def _fetch(access: GatewayAccess, identifier: str) -> _Schedule | None:
     """GET one full schedule (with script) by name or id."""
     from base.host.net.http_dial import get as dial_get
 
@@ -468,15 +519,15 @@ def _fetch(access: GatewayAccess, identifier: str) -> dict[str, Any] | None:
         print(f"schedule {schedule_id} not found", file=sys.stderr)
         return None
     resp.raise_for_status()
-    return resp.json()
+    return _schedule(resp)
 
 
 def _detail(resp: httpx.Response) -> str:
     """The gateway's `detail` string, falling back to the raw body — the
     actionable part of a 400/404/409 (syntax error line, name clash, ...)."""
     with contextlib.suppress(ValueError, TypeError):
-        payload: dict[str, Any] = resp.json()
-        if isinstance(payload, dict) and "detail" in payload:
+        payload = response_object(resp)
+        if "detail" in payload:
             return str(payload["detail"])
     return str(resp.text)
 
@@ -493,40 +544,92 @@ def _die_on_unexpected_error(resp: httpx.Response) -> None:
     resp.raise_for_status()
 
 
-def _print_schedule(row: dict[str, Any], *, with_script: bool) -> None:
+def _print_schedule(row: _Schedule, *, with_script: bool) -> None:
     """Pretty-print a schedule row. `with_script` includes the (potentially
     large) script body — on for `get`, off for the create/update echo."""
-    print(f"  id:          {row['id']}")
-    print(f"  name:        {row['name']}")
-    if row.get("description"):
-        print(f"  description: {row['description']}")
-    print(f"  command:     {row['command']}")
-    print(f"  enabled:     {row['enabled']}")
-    print(f"  status:      {row['status']}")
-    if row.get("machine"):
-        print(f"  machine:     {row['machine']}")
-    if row.get("owner_plugin"):
-        print(f"  owner_plugin: {row['owner_plugin']}")
-    if row.get("placement_status"):
-        p_str = row["placement_status"]
-        if row.get("placement_reason"):
-            p_str += f" ({row['placement_reason']})"
+    print(f"  id:          {row.id}")
+    print(f"  name:        {row.name}")
+    if row.description:
+        print(f"  description: {row.description}")
+    print(f"  command:     {row.command}")
+    print(f"  enabled:     {row.enabled}")
+    print(f"  status:      {row.status}")
+    if row.machine:
+        print(f"  machine:     {row.machine}")
+    if row.owner_plugin:
+        print(f"  owner_plugin: {row.owner_plugin}")
+    if row.placement_status:
+        p_str = row.placement_status
+        if row.placement_reason:
+            p_str += f" ({row.placement_reason})"
         print(f"  placement:   {p_str}")
-    if row.get("last_error"):
-        print(f"  last_error:  {row['last_error'].splitlines()[-1]}")
+    if row.last_error:
+        print(f"  last_error:  {row.last_error.splitlines()[-1]}")
     if with_script:
         print("  script:")
-        for line in row["script"].splitlines():
+        for line in (row.script or "").splitlines():
             print(f"    {line}")
 
 
 # ── argparse handlers (wired by the cli/parsers tree) ──
 
 
+@dataclass(frozen=True)
+class _Identifier:
+    identifier: str
+
+
+@dataclass(frozen=True)
+class _CreateOptions:
+    name: str
+    script: str | None
+    script_file: str | None
+    command: str | None
+    description: str | None
+    machine: str | None
+    disabled: bool
+
+
+@dataclass(frozen=True)
+class _UpdateOptions:
+    identifier: str
+    name: str | None
+    script: str | None
+    script_file: str | None
+    command: str | None
+    description: str | None
+    machine: str | None
+    enable: bool
+    disable: bool
+
+
+@dataclass(frozen=True)
+class _DeleteOptions:
+    identifier: str
+    force: bool
+
+
+@dataclass(frozen=True)
+class _LogsOptions:
+    identifier: str
+    lines: int
+
+
+@dataclass(frozen=True)
+class _RunsOptions:
+    identifier: str
+    limit: int
+
+
+@dataclass(frozen=True)
+class _ProvisionOptions:
+    machine: str | None
+
+
 def _access(args: argparse.Namespace) -> GatewayAccess:
     from base.cluster.machine.boot import gateway_access_from_boot
 
-    return gateway_access_from_boot(args.runtime.config)
+    return gateway_access_from_boot(runtime_of(args).config)
 
 
 def h_schedules_ls(args: argparse.Namespace) -> int:
@@ -534,75 +637,88 @@ def h_schedules_ls(args: argparse.Namespace) -> int:
 
 
 def h_schedules_get(args: argparse.Namespace) -> int:
-    return cmd_schedules_get(_access(args), args.identifier)
+    return cmd_schedules_get(_access(args), options(args, _Identifier).identifier)
 
 
 def h_schedules_create(args: argparse.Namespace) -> int:
+    opts = options(args, _CreateOptions)
     return cmd_schedules_create(
         _access(args),
-        args.name,
-        args.script,
-        args.script_file,
-        args.command,
-        args.description,
-        machine=getattr(args, "machine", None),
-        disabled=args.disabled,
-        idempotency_key=args.runtime.new_id(),
+        opts.name,
+        opts.script,
+        opts.script_file,
+        opts.command,
+        opts.description,
+        machine=opts.machine,
+        disabled=opts.disabled,
+        idempotency_key=runtime_of(args).new_id(),
     )
 
 
 def h_schedules_update(args: argparse.Namespace) -> int:
+    opts = options(args, _UpdateOptions)
     # --enable / --disable are one tri-state: None = leave the flag alone.
-    enabled = True if args.enable else (False if args.disable else None)
+    enabled = True if opts.enable else (False if opts.disable else None)
     return cmd_schedules_update(
         _access(args),
-        args.identifier,
-        args.name,
-        args.script,
-        args.script_file,
-        args.command,
-        args.description,
-        machine=getattr(args, "machine", None),
+        opts.identifier,
+        opts.name,
+        opts.script,
+        opts.script_file,
+        opts.command,
+        opts.description,
+        machine=opts.machine,
         enabled=enabled,
-        idempotency_key=args.runtime.new_id(),
+        idempotency_key=runtime_of(args).new_id(),
     )
 
 
 def h_schedules_delete(args: argparse.Namespace) -> int:
-    return cmd_schedules_delete(_access(args), args.identifier, force=args.force)
+    opts = options(args, _DeleteOptions)
+    return cmd_schedules_delete(_access(args), opts.identifier, force=opts.force)
 
 
 def h_schedules_start(args: argparse.Namespace) -> int:
     return cmd_schedules_start(
-        _access(args), args.identifier, idempotency_key=args.runtime.new_id()
+        _access(args),
+        options(args, _Identifier).identifier,
+        idempotency_key=runtime_of(args).new_id(),
     )
 
 
 def h_schedules_stop(args: argparse.Namespace) -> int:
-    return cmd_schedules_stop(_access(args), args.identifier, idempotency_key=args.runtime.new_id())
+    return cmd_schedules_stop(
+        _access(args),
+        options(args, _Identifier).identifier,
+        idempotency_key=runtime_of(args).new_id(),
+    )
 
 
 def h_schedules_restart(args: argparse.Namespace) -> int:
     return cmd_schedules_restart(
-        _access(args), args.identifier, idempotency_key=args.runtime.new_id()
+        _access(args),
+        options(args, _Identifier).identifier,
+        idempotency_key=runtime_of(args).new_id(),
     )
 
 
 def h_schedules_logs(args: argparse.Namespace) -> int:
-    return cmd_schedules_logs(_access(args), args.identifier, args.lines)
+    opts = options(args, _LogsOptions)
+    return cmd_schedules_logs(_access(args), opts.identifier, opts.lines)
 
 
 def h_schedules_runs(args: argparse.Namespace) -> int:
-    return cmd_schedules_runs(_access(args), args.identifier, args.limit)
+    opts = options(args, _RunsOptions)
+    return cmd_schedules_runs(_access(args), opts.identifier, opts.limit)
 
 
 def h_schedules_provision(args: argparse.Namespace) -> int:
-    machine = getattr(args, "machine", None)
-    if machine is None and hasattr(args, "runtime") and hasattr(args.runtime, "machine"):
-        machine = args.runtime.machine.name()
-    home = getattr(args.runtime, "home", None) if hasattr(args, "runtime") else None
+    runtime = runtime_of(args)
+    machine = options(args, _ProvisionOptions).machine
+    if machine is None:
+        machine = runtime.machine.name()
     return cmd_schedules_provision(
-        database_factory=args.database_factory,
+        database_factory=database_factory_of(args),
         machine=machine or "gateway",
-        home=home,
+        home=runtime.home,
     )

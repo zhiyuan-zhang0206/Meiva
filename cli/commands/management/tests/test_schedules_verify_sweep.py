@@ -200,7 +200,11 @@ def test_a_rows_file_overlays_builtin_templates_while_keeping_custom_rows_verbat
 
 @pytest.mark.parametrize(
     ("content", "error"),
-    [("not json", "JSONDecodeError"), (None, "FileNotFoundError"), ('[[1, "x"]]', "IndexError")],
+    [
+        ("not json", "ValidationError"),
+        (None, "FileNotFoundError"),
+        ('[[1, "x"]]', "ValidationError"),
+    ],
 )
 def test_a_rows_file_that_cannot_be_read_is_a_tool_error(
     tmp_path: Path,

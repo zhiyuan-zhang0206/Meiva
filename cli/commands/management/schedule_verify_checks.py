@@ -26,7 +26,8 @@ import inspect
 import types
 from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
-from typing import Any
+
+from cli.boundary.untyped import object_of
 
 __all__ = ["call_site_problems", "is_repo_source", "undefined_name_problems"]
 
@@ -83,18 +84,26 @@ def _is_sdk(target: object) -> bool:
 # The object a callee chain names, and (when a module lost the attribute) the missing name.
 def _resolve(
     namespace: Mapping[str, object], chain: tuple[str, list[str]]
-) -> tuple[Any, str | None]:
-    target: Any = namespace[chain[0]]
+) -> tuple[object, str | None]:
+    target = namespace[chain[0]]
     for attr in chain[1]:
         if _is_sdk(target):
             return None, None
         if isinstance(target, types.ModuleType) and not hasattr(target, attr):
             return None, f"{target.__name__} has no `{attr}`"
         try:
-            target = getattr(target, attr)
+            target = _attribute(target, attr)
         except AttributeError:
             return None, None
     return target, None
+
+
+def _attribute(target: object, name: str) -> object:
+    absent = object()
+    found = object_of(getattr, target, name, absent)
+    if found is absent:
+        raise AttributeError(name)
+    return found
 
 
 # meiva:note
