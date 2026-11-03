@@ -17,7 +17,7 @@ from gateway.agents.notice_operations.notices import (
     publish_response_required_hint,
 )
 from gateway.agents.schemas import AgentMessageEnqueued, NoticeItem, ResolveNoticeIn
-from gateway.http.config import gateway_clock
+from gateway.http.config import gateway_clock, gateway_state
 from ops import lifecycle
 
 router = APIRouter()
@@ -50,14 +50,16 @@ async def edit_current(
 ) -> NoticeItem:
     """Return the immutable acceptance of an observed global notice edit."""
     acceptance = await asyncio.to_thread(
-        mutate, request.app.state.db_pool, request.url.path, key, agent_id, body
+        mutate, gateway_state(request).db_pool, request.url.path, key, agent_id, body
     )
     record = acceptance.record
     if not acceptance.replayed:
         if record.require_response:
-            await asyncio.to_thread(publish_response_required_hint, request.app.state.bus, agent_id)
+            await asyncio.to_thread(
+                publish_response_required_hint, gateway_state(request).bus, agent_id
+            )
         await lifecycle.publish_notice_posted(
-            request.app.state.bus,
+            gateway_state(request).bus,
             agent_id,
             record.id,
             record.priority,
@@ -77,14 +79,16 @@ async def dismiss_current(
 ) -> NoticeItem:
     """Withdraw only the observed global row and replay its original acceptance."""
     acceptance = await asyncio.to_thread(
-        mutate, request.app.state.db_pool, request.url.path, key, agent_id, body
+        mutate, gateway_state(request).db_pool, request.url.path, key, agent_id, body
     )
     record = acceptance.record
     if not acceptance.replayed and not acceptance.already_closed:
         if record.require_response:
-            await asyncio.to_thread(publish_response_required_hint, request.app.state.bus, agent_id)
+            await asyncio.to_thread(
+                publish_response_required_hint, gateway_state(request).bus, agent_id
+            )
         await lifecycle.publish_notice_resolved(
-            request.app.state.bus,
+            gateway_state(request).bus,
             agent_id,
             record.id,
             facts=lifecycle.notice_resolution_facts(

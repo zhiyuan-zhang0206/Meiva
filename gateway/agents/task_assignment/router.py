@@ -1,5 +1,4 @@
 import asyncio
-from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from psycopg_pool import ConnectionPool
@@ -31,9 +30,10 @@ from gateway.agents.task_assignment.schemas import (
     TaskAssignmentIn,
     TaskAssignmentResult,
 )
-from gateway.http.config import gateway_clock, gateway_rpc
+from gateway.http.config import gateway_clock, gateway_rpc, gateway_state
 from gateway.http.model_catalog import (
     CatalogLoadFailure,
+    request_catalog,
     request_default_model,
     require_catalog,
     require_model_catalog,
@@ -46,16 +46,16 @@ PATH = "/api/keyed/v1/task-assignments"
 
 
 def lookup_assignment(
-    pool: ConnectionPool, key: str, request: dict[str, Any]
+    pool: ConnectionPool, key: str, request: dict[str, object]
 ) -> TaskAssignmentResult | None:
-    with write_transaction(pool) as conn, conn.cursor() as cur:
-        return existing_assignment(cur, key, request)
+    with write_transaction(pool) as conn:
+        return existing_assignment(conn, key, request)
 
 
 def commit_assignment(
     pool: ConnectionPool,
     key: str,
-    request: dict[str, Any],
+    request: dict[str, object],
     body: TaskAssignmentIn,
     spawn: SpawnAgentRequest,
     target: str,
@@ -65,7 +65,7 @@ def commit_assignment(
 ) -> tuple[TaskAssignmentResult, list[telemetry.Event]]:
 
     with write_transaction(pool) as conn, conn.cursor() as cur:
-        result = existing_assignment(cur, key, request)
+        result = existing_assignment(conn, key, request)
         if result is not None:
             return result, []
         try:
@@ -98,7 +98,7 @@ def commit_assignment(
             agent_id=birth.agent_id,
             launch_attempt_id=birth.launch_attempt_id,
         )
-        save_assignment(cur, key, request, result)
+        save_assignment(conn, key, request, result)
         events = [task_event, *notes]
         if birth.birth_event is not None:
             events.insert(0, birth.birth_event)
@@ -123,7 +123,7 @@ async def observe_launch(
     db: Database,
     bus: EventBus,
     key: str,
-    request: dict[str, Any],
+    request: dict[str, object],
     result: TaskAssignmentResult,
     *,
     catalog: ModelCatalog | CatalogLoadFailure,
@@ -136,7 +136,7 @@ async def observe_launch(
         with pool.connection() as conn:
             return find_creation(conn, key, creation_request_hash(request))
 
-    response = TaskAssignmentAccepted(**result.model_dump())
+    response = TaskAssignmentAccepted.model_validate(result.model_dump())
     try:
         existing = await asyncio.to_thread(current)
         if existing is None or existing.launch_attempt_id != result.launch_attempt_id:
@@ -177,14 +177,18 @@ async def post_task_assignment(
     if idempotency_scope != PRINCIPAL_SCOPE:
         raise HTTPException(status_code=422, detail="task assignment requires principal-v1 scope")
     key = scoped_creation_key(request, idempotency_key, operation_path=PATH)
-    pool, db, bus = request.app.state.db_pool, request.app.state.db, request.app.state.bus
+    pool, db, bus = (
+        gateway_state(request).db_pool,
+        gateway_state(request).db,
+        gateway_state(request).bus,
+    )
     raw = body.model_dump(mode="json")
     result = await asyncio.to_thread(lookup_assignment, pool, key, raw)
     if result is None:
         target = (
             body.agent.machine
             if body.agent.machine is not None
-            else request.app.state.machine.name()
+            else gateway_state(request).machine.name()
         )
         spawn = SpawnAgentRequest(
             spawner=f"agent:{body.actor_agent_id}",
@@ -203,7 +207,7 @@ async def post_task_assignment(
                 pool,
                 catalog=catalog,
                 keys=keys,
-                authority=request.app.state.config_authority,
+                authority=gateway_state(request).config_authority,
             )
         except Exception:
             result = await asyncio.to_thread(lookup_assignment, pool, key, raw)
@@ -219,7 +223,7 @@ async def post_task_assignment(
                 spawn,
                 target,
                 catalog=catalog,
-                authority=request.app.state.config_authority,
+                authority=gateway_state(request).config_authority,
             )
             if events:
                 await asyncio.to_thread(
@@ -232,7 +236,7 @@ async def post_task_assignment(
         key,
         raw,
         result,
-        catalog=request.app.state.catalog,
+        catalog=request_catalog(request),
         default_model=request_default_model(request),
         clock=gateway_clock(request),
         rpc=gateway_rpc(request),

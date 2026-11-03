@@ -18,7 +18,7 @@ from gateway.http.auth.request_principal import (
     PrincipalScopeError,
     request_key,
 )
-from gateway.http.config import gateway_config, gateway_rpc
+from gateway.http.config import gateway_config, gateway_rpc, gateway_state
 from ops.agents.launch_retry import RetryLaunchConflictError, accept_retry_launch
 from ops.cluster import rpc
 
@@ -50,7 +50,7 @@ async def retry_launch(
     try:
         target, accepted = await asyncio.to_thread(
             accept_retry_launch,
-            request.app.state.db_pool,
+            gateway_state(request).db_pool,
             scoped,
             agent_id,
             body,
@@ -60,7 +60,7 @@ async def retry_launch(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     try:
         await gateway_rpc(request).dispatch_to_machine(
-            request.app.state.db,
+            gateway_state(request).db,
             target_machine=target,
             kind="launch-reconcile",
             payload=LaunchReconcileRequest(launch_attempt_id=accepted.launch_attempt_id).model_dump(

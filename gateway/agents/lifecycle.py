@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 import psycopg
 from fastapi import APIRouter, Body, HTTPException, Request
@@ -34,6 +36,7 @@ from gateway.http.config import (
     gateway_rpc,
     gateway_state,
 )
+from gateway.http.db_rows import query_all, query_one
 from gateway.http.model_catalog import require_model_catalog
 from gateway.schemas.models import HarnessAvailability
 from ops.cluster.rpc import RpcClient
@@ -84,9 +87,9 @@ async def post_force_expire_impersonation(
     try:
         status = await asyncio.to_thread(
             force_expire_impersonation,
-            request.app.state.db_pool,
-            request.app.state.db,
-            request.app.state.bus,
+            gateway_state(request).db_pool,
+            gateway_state(request).db,
+            gateway_state(request).bus,
             agent_id,
             body.session_id,
             actor,
@@ -109,9 +112,9 @@ async def post_agent_terminate(
     return await terminate_agent_with_open_tasks(
         agent_id,
         body,
-        request.app.state.db_pool,
-        db=request.app.state.db,
-        config=request.app.state.gateway_config,
+        gateway_state(request).db_pool,
+        db=gateway_state(request).db,
+        config=gateway_state(request).gateway_config,
         rpc=gateway_rpc(request),
     )
 
@@ -171,22 +174,53 @@ async def _drop_killed_shell_ttls(pool: ConnectionPool, agent_id: int, killed: l
         )
 
 
+# meiva:note
+# An in-progress task the agent owns, as the restart hint lists it.
+@dataclass(frozen=True)
+class _OpenTaskDbRow:
+    id: int
+    title: str
+    status: Literal["in_progress"]
+    updated_at: datetime
+
+
+# meiva:note
+# The agent's status and stored harness; `harness` is NULL for a row born before the column.
+@dataclass(frozen=True)
+class _AgentRunRow:
+    status: str
+    harness: object
+
+
+# meiva:note
+# The agent's status, stored harness and home machine, as a restart validates against them.
+@dataclass(frozen=True)
+class _RestartMetaRow:
+    status: str
+    harness: object
+    machine: str
+
+
 def _open_tasks_hint_blocking(pool: ConnectionPool, agent_id: int) -> OpenTasksHint | None:
 
     with pool.connection() as conn:
-        rows = conn.execute(
+        rows = query_all(
+            conn,
+            _OpenTaskDbRow,
             "SELECT id, title, status, updated_at FROM agent_tasks "
             "WHERE owner = %s AND status = 'in_progress' "
             "ORDER BY updated_at DESC, id DESC",
             (agent_id,),
-        ).fetchall()
+        )
     if not rows:
         return None
     shown = rows[:_OPEN_TASKS_SHOWN]
     return OpenTasksHint(
         count=len(rows),
         tasks=[
-            OpenTaskRow(id=row[0], title=row[1], status=row[2], updated_at=row[3].isoformat())
+            OpenTaskRow(
+                id=row.id, title=row.title, status=row.status, updated_at=row.updated_at.isoformat()
+            )
             for row in shown
         ],
         more=len(rows) - len(shown),
@@ -207,9 +241,9 @@ async def post_agent_resurrect(
         agent_id,
         f"/api/agents/{agent_id}/resurrect-explicit",
         body.model_dump(),
-        db=request.app.state.db,
-        pool=request.app.state.db_pool,
-        config=request.app.state.gateway_config,
+        db=gateway_state(request).db,
+        pool=gateway_state(request).db_pool,
+        config=gateway_state(request).gateway_config,
         rpc=gateway_rpc(request),
     )
     return ResurrectAgentResponse.model_validate(forwarded)
@@ -239,7 +273,7 @@ def _resolve_restart_target_harness(
 
 
 def _verify_restart_preconditions(
-    conn: psycopg.Connection[Any],
+    conn: psycopg.Connection,
     agent_id: int,
     status: str,
     current_harness: Harness,
@@ -274,15 +308,17 @@ def _prepare_restart_validation_blocking(
     home: Path,
 ) -> tuple[Harness, Harness, str]:
     with pool.connection() as conn:
-        row = conn.execute(
+        row = query_one(
+            conn,
+            _RestartMetaRow,
             "SELECT status, harness, machine FROM agents_meta WHERE id=%s",
             (agent_id,),
-        ).fetchone()
+        )
         if row is None:
             raise AgentNotFound(f"agent {agent_id} does not exist")
-        status = str(row[0])
-        current_harness = coerce_harness(row[1])
-        machine = str(row[2])
+        status = row.status
+        current_harness = coerce_harness(row.harness)
+        machine = row.machine
         target_harness = _resolve_restart_target_harness(body.config_overlay, current_harness)
         _verify_restart_preconditions(conn, agent_id, status, current_harness, target_harness)
 
@@ -341,7 +377,7 @@ def _validate_restart_model_blocking(
     target_harness: Harness,
     probed_models: Sequence[ProbedHarnessModel] | None,
     probed_default_model: str | None,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     from base.agents.model.restart_config import (
         RestartHarnessTarget,
         validate_restart_model_config,
@@ -360,9 +396,9 @@ def _validate_restart_model_blocking(
                 probed_default_model=probed_default_model,
             ),
         )
-    payload = body.model_dump()
+    payload: dict[str, object] = body.model_dump()
     if resolved is not None and target_harness != current_harness:
-        overlay_copy = dict(payload.get("config_overlay") or {})
+        overlay_copy = dict(body.config_overlay or {})
         overlay_copy["llm_model"] = resolved[0]
         overlay_copy["reasoning_effort"] = resolved[1] or ""
         payload["config_overlay"] = overlay_copy
@@ -411,9 +447,9 @@ async def post_agent_restart(
         agent_id,
         f"/api/agents/{agent_id}/restart",
         forwarded_payload,
-        db=request.app.state.db,
-        pool=request.app.state.db_pool,
-        config=request.app.state.gateway_config,
+        db=gateway_state(request).db,
+        pool=gateway_state(request).db_pool,
+        config=gateway_state(request).gateway_config,
         rpc=gateway_rpc(request),
     )
     return RestartAgentResponse.model_validate(forwarded)
@@ -429,9 +465,9 @@ async def post_agent_cancel(agent_id: int, request: Request) -> CancelAgentRespo
         agent_id,
         f"/api/agents/{agent_id}/cancel",
         {},
-        db=request.app.state.db,
-        pool=request.app.state.db_pool,
-        config=request.app.state.gateway_config,
+        db=gateway_state(request).db,
+        pool=gateway_state(request).db_pool,
+        config=gateway_state(request).gateway_config,
         rpc=gateway_rpc(request),
     )
     return CancelAgentResponse.model_validate(forwarded)
@@ -445,9 +481,9 @@ async def post_agent_compact(agent_id: int, request: Request) -> CompactAgentRes
 
     return await asyncio.to_thread(
         _request_compaction_blocking,
-        request.app.state.db_pool,
-        request.app.state.db,
-        request.app.state.bus,
+        gateway_state(request).db_pool,
+        gateway_state(request).db,
+        gateway_state(request).bus,
         agent_id,
     )
 
@@ -456,12 +492,15 @@ def _request_compaction_blocking(
     pool: ConnectionPool, db: Database, bus: EventBus, agent_id: int
 ) -> CompactAgentResponse:
     with pool.connection() as conn:
-        row = conn.execute(
-            "SELECT status, harness FROM agents_meta WHERE id=%s", (agent_id,)
-        ).fetchone()
+        row = query_one(
+            conn,
+            _AgentRunRow,
+            "SELECT status, harness FROM agents_meta WHERE id=%s",
+            (agent_id,),
+        )
         if row is None:
             raise AgentNotFound(f"agent {agent_id} does not exist")
-        harness = coerce_harness(row[1])
+        harness = coerce_harness(row.harness)
         if harness is not Harness.MEIVA:
             raise HTTPException(
                 status_code=400,
@@ -470,7 +509,7 @@ def _request_compaction_blocking(
                     f"the external CLI owns its own context window."
                 ),
             )
-        if row[0] == AgentStatus.TERMINATED:
+        if row.status == AgentStatus.TERMINATED:
             raise HTTPException(status_code=409, detail=f"agent {agent_id} is terminated")
         inbound_id = insert_compact_request_inbound(conn, agent_id, database=db, bus=bus)
     return CompactAgentResponse(inbound_id=inbound_id)

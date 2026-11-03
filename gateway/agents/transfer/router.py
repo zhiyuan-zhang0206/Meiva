@@ -32,6 +32,15 @@ from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
 from base.telemetry.audit_events import prepare_event_log, record_audit
 from gateway.agents.transfer.bundle_store import TransferBundleStore
+from gateway.agents.transfer.rows import (
+    AgentMetaRow,
+    ImpersonationRow,
+    LifecycleRow,
+    MachineRow,
+    PageNameRow,
+    TargetGateRow,
+    UploadBatchRow,
+)
 from gateway.agents.transfer.transfer_plan import (
     AgentRowFacts,
     AgentTransferSnapshot,
@@ -48,7 +57,8 @@ from gateway.agents.transfer.transfer_plan import (
     evaluate_precheck,
     verify_cutover_cas,
 )
-from gateway.http.config import gateway_rpc
+from gateway.http.config import GatewayAppState, gateway_rpc, state_as
+from gateway.http.db_rows import query_all, query_one
 from ops.agent_transfer import (
     MAX_BUNDLE_STREAM_BYTES,
     WorkspaceTransferCorruptError,
@@ -93,8 +103,15 @@ class TransferDeps:
     rng: random.Random
 
 
+# meiva:note
+# The staging store the app root builds for in-flight transfer bundles; this directory's route
+# serves from it, so the directory declares it.
+class TransferAppState(GatewayAppState):
+    agent_transfer_bundles: TransferBundleStore
+
+
 def _deps_from_request(request: Request) -> TransferDeps:
-    state = request.app.state
+    state = state_as(request, TransferAppState)
     return TransferDeps(
         db_pool=state.db_pool,
         db=state.db,
@@ -107,92 +124,96 @@ def _deps_from_request(request: Request) -> TransferDeps:
 
 
 def _query_agent_facts(
-    cur: psycopg.Cursor, agent_id: int, *, for_update: bool
+    conn: psycopg.Connection, agent_id: int, *, for_update: bool
 ) -> AgentRowFacts | None:
     query = (
         "SELECT machine, status, harness FROM agents_meta WHERE id = %s FOR UPDATE"
         if for_update
         else "SELECT machine, status, harness FROM agents_meta WHERE id = %s"
     )
-    cur.execute(query, (agent_id,))
-    row = cur.fetchone()
+    row = query_one(conn, AgentMetaRow, query, (agent_id,))
     if row is None:
         return None
     return AgentRowFacts(
-        agent_id=agent_id, machine=str(row[0]), status=str(row[1]), harness=str(row[2])
+        agent_id=agent_id, machine=row.machine, status=row.status, harness=row.harness
     )
 
 
 def _query_blocking_facts(
-    cur: psycopg.Cursor, agent_id: int
+    conn: psycopg.Connection, agent_id: int
 ) -> tuple[PendingLifecycleFact | None, ImpersonationConflictFact | None, PendingUploadFact | None]:
-    cur.execute(
+    lc = query_one(
+        conn,
+        LifecycleRow,
         "SELECT kind, status FROM inbound_messages "
         "WHERE agent_id = %s AND kind IN ('restart', 'terminate') "
         "AND status IN ('pending', 'claimed') ORDER BY id LIMIT 1",
         (agent_id,),
     )
-    lc = cur.fetchone()
-    pending_lc = PendingLifecycleFact(kind=str(lc[0]), status=str(lc[1])) if lc else None
+    pending_lc = PendingLifecycleFact(kind=lc.kind, status=lc.status) if lc else None
 
-    cur.execute(
-        "SELECT session_id, status, delta_version > applied_version, handoff_applied_at IS NULL "
+    imp = query_one(
+        conn,
+        ImpersonationRow,
+        "SELECT session_id, status, delta_version > applied_version AS delta_unapplied, "
+        "handoff_applied_at IS NULL AS handoff_unapplied "
         "FROM agent_impersonations WHERE agent_id = %s AND ("
         "  status IN ('requested', 'accepted', 'active') "
         "  OR delta_version > applied_version OR handoff_applied_at IS NULL"
         ") ORDER BY session_id DESC LIMIT 1",
         (agent_id,),
     )
-    imp = cur.fetchone()
     imp_conflict = (
         ImpersonationConflictFact(
-            session_id=int(imp[0]),
-            status=str(imp[1]),
-            delta_unapplied=bool(imp[2]),
-            handoff_unapplied=bool(imp[3]),
+            session_id=imp.session_id,
+            status=imp.status,
+            delta_unapplied=imp.delta_unapplied,
+            handoff_unapplied=imp.handoff_unapplied,
         )
         if imp
         else None
     )
 
-    cur.execute(
+    up = query_one(
+        conn,
+        UploadBatchRow,
         "SELECT batch_id, state FROM upload_delivery_batches "
         "WHERE agent_id = %s AND state IN ('receiving', 'pending') ORDER BY batch_id LIMIT 1",
         (agent_id,),
     )
-    up = cur.fetchone()
-    pending_up = PendingUploadFact(batch_id=str(up[0]), state=str(up[1])) if up else None
+    pending_up = PendingUploadFact(batch_id=up.batch_id, state=up.state) if up else None
     return pending_lc, imp_conflict, pending_up
 
 
-def _query_machine_facts(cur: psycopg.Cursor, name: str) -> MachineFacts | None:
-    cur.execute(
-        "SELECT gateway_url, role, paused_at IS NOT NULL, stopped_at IS NOT NULL "
-        "FROM machines WHERE name = %s",
+def _query_machine_facts(conn: psycopg.Connection, name: str) -> MachineFacts | None:
+    row = query_one(
+        conn,
+        MachineRow,
+        "SELECT gateway_url, role, paused_at IS NOT NULL AS paused, "
+        "stopped_at IS NOT NULL AS stopped FROM machines WHERE name = %s",
         (name,),
     )
-    row = cur.fetchone()
     if row is None:
         return None
     return MachineFacts(
         name=name,
-        gateway_url=row[0],
-        roles=tuple(str(r) for r in (row[1] or ())),
-        paused=bool(row[2]),
-        stopped=bool(row[3]),
+        gateway_url=row.gateway_url,
+        roles=tuple(row.role or ()),
+        paused=row.paused,
+        stopped=row.stopped,
     )
 
 
 def _precheck_blocking(
     pool: ConnectionPool, agent_id: int, to_machine: str
 ) -> TransferPlan | TransferRefusal:
-    with pool.connection() as conn, conn.cursor() as cur:
-        agent = _query_agent_facts(cur, agent_id, for_update=False)
+    with pool.connection() as conn:
+        agent = _query_agent_facts(conn, agent_id, for_update=False)
         if agent is None:
             return evaluate_precheck(
                 TransferPrecheckFacts(agent=None, agent_id=agent_id, to_machine=to_machine)
             )
-        pending_lc, imp_conflict, pending_up = _query_blocking_facts(cur, agent_id)
+        pending_lc, imp_conflict, pending_up = _query_blocking_facts(conn, agent_id)
         return evaluate_precheck(
             TransferPrecheckFacts(
                 agent=agent,
@@ -201,8 +222,8 @@ def _precheck_blocking(
                 pending_lifecycle=pending_lc,
                 impersonation=imp_conflict,
                 pending_upload=pending_up,
-                source_machine=_query_machine_facts(cur, agent.machine),
-                target_machine=_query_machine_facts(cur, to_machine),
+                source_machine=_query_machine_facts(conn, agent.machine),
+                target_machine=_query_machine_facts(conn, to_machine),
             )
         )
 
@@ -210,8 +231,8 @@ def _precheck_blocking(
 def _guard_idling_pre_termination_blocking(
     pool: ConnectionPool, agent_id: int, from_machine: str
 ) -> list[str]:
-    with write_transaction(pool) as conn, conn.cursor() as cur:
-        agent = _query_agent_facts(cur, agent_id, for_update=True)
+    with write_transaction(pool) as conn:
+        agent = _query_agent_facts(conn, agent_id, for_update=True)
         if agent is None:
             raise HTTPException(404, f"agent {agent_id} does not exist")
         if agent.machine != from_machine:
@@ -223,7 +244,7 @@ def _guard_idling_pre_termination_blocking(
         if isinstance(state_refusal, TransferRefusal):
             raise HTTPException(state_refusal.status_code, state_refusal.detail)
 
-        pending_lc, imp_conflict, pending_up = _query_blocking_facts(cur, agent_id)
+        pending_lc, imp_conflict, pending_up = _query_blocking_facts(conn, agent_id)
         activity_refusal = check_blocking_activity(
             TransferPrecheckFacts(
                 agent=agent,
@@ -237,12 +258,16 @@ def _guard_idling_pre_termination_blocking(
         if activity_refusal is not None:
             raise HTTPException(activity_refusal.status_code, activity_refusal.detail)
 
-        cur.execute(
-            "SELECT name FROM agent_pages WHERE agent_id = %s AND closed_at IS NULL",
-            (agent_id,),
-        )
-        open_pages = [str(r[0]) for r in cur.fetchall()]
-        cur.execute(
+        open_pages = [
+            row.name
+            for row in query_all(
+                conn,
+                PageNameRow,
+                "SELECT name FROM agent_pages WHERE agent_id = %s AND closed_at IS NULL",
+                (agent_id,),
+            )
+        ]
+        conn.execute(
             "UPDATE agents_meta SET status = 'terminated', termination_source = 'user', "
             "heartbeat_paused_until = NULL WHERE id = %s",
             (agent_id,),
@@ -320,28 +345,30 @@ def commit_cutover_blocking(
 ) -> tuple[list[str], list[int], telemetry.Event]:
     s1_closed = step1_closed_pages or []
     s1_shells = step1_killed_shells or []
-    with write_transaction(pool) as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT paused_at IS NOT NULL, stopped_at IS NOT NULL, 'agent-runner' = ANY(role) "
+    with write_transaction(pool) as conn:
+        target_row = query_one(
+            conn,
+            TargetGateRow,
+            "SELECT paused_at IS NOT NULL AS paused, stopped_at IS NOT NULL AS stopped, "
+            "'agent-runner' = ANY(role) AS runs_agents "
             "FROM machines WHERE name = %s FOR SHARE",
             (body.to_machine,),
         )
-        target_row = cur.fetchone()
-        if target_row is None or not target_row[2]:
+        if target_row is None or not target_row.runs_agents:
             raise CutoverConflictError(
                 f"target machine {body.to_machine!r} is no longer an active agent-runner"
             )
-        if target_row[0] or target_row[1]:
+        if target_row.paused or target_row.stopped:
             raise CutoverConflictError(
                 f"target machine {body.to_machine!r} became paused or stopped during transfer"
             )
 
-        current = _query_agent_facts(cur, snapshot.agent_id, for_update=True)
+        current = _query_agent_facts(conn, snapshot.agent_id, for_update=True)
         cas_error = verify_cutover_cas(snapshot, current)
         if cas_error is not None:
             raise CutoverConflictError(cas_error)
 
-        pending_lc, imp_conflict, pending_up = _query_blocking_facts(cur, snapshot.agent_id)
+        pending_lc, imp_conflict, pending_up = _query_blocking_facts(conn, snapshot.agent_id)
         if pending_lc is not None:
             raise CutoverConflictError(
                 f"agent {snapshot.agent_id} queued a {pending_lc.kind!r} command during transfer"
@@ -362,15 +389,15 @@ def commit_cutover_blocking(
         # meiva:note
         # Unlink only pages tied to the current status_changed_at so resurrect on to_machine
         # does not reopen host-local pages from from_machine, preserving older history.
-        cur.execute(
+        conn.execute(
             "UPDATE agent_pages SET closed_at = closed_at - interval '1 millisecond' "
             "WHERE agent_id = %s AND closed_at = ("
             "  SELECT status_changed_at FROM agents_meta WHERE id = %s"
             ")",
             (snapshot.agent_id, snapshot.agent_id),
         )
-        cur.execute("DELETE FROM agent_shell_ttls WHERE agent_id = %s", (snapshot.agent_id,))
-        cur.execute(
+        conn.execute("DELETE FROM agent_shell_ttls WHERE agent_id = %s", (snapshot.agent_id,))
+        conn.execute(
             "UPDATE agents_meta SET machine = %s, runtime_owner = NULL, "
             "runtime_generation = NULL, liveness_state = 'unknown', last_probe_at = NULL "
             "WHERE id = %s",
@@ -724,7 +751,7 @@ async def get_staged_transfer_bundle(
     transfer_id: Annotated[str, Path(pattern=r"^[0-9a-f]{32}$")],
     request: Request,
 ) -> Response:
-    bundles: TransferBundleStore = request.app.state.agent_transfer_bundles
+    bundles = state_as(request, TransferAppState).agent_transfer_bundles
     content = bundles.get(transfer_id)
     if content is None:
         raise HTTPException(404, "staged transfer bundle not found")

@@ -38,6 +38,7 @@ def test_each_query_gets_its_own_row_class_in_one_transaction(db_conn: psycopg.C
 
 def test_object_guards_accept_only_objects_and_lists() -> None:
     assert is_object_dict({"a": 1})
+    assert not is_object_dict({1: "a"})
     assert not is_object_dict([("a", 1)])
     assert is_object_list([1, "a"])
     assert not is_object_list(("a",))

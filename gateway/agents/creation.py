@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import Header, HTTPException, Request
@@ -48,6 +50,7 @@ from gateway.http.auth.request_principal import (
     request_key,
 )
 from gateway.http.config import EnsureHarnesses
+from gateway.http.db_rows import query_one
 from ops.cluster.rpc import RpcClient
 from ops.lifecycle.launch import spawn_prechecks_blocking
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
@@ -448,6 +451,15 @@ def _mark_launch_failure(
         publish_agent_updated_sync(bus, agent_id)
 
 
+# meiva:note
+# The launch bookkeeping columns of one agent.
+@dataclass(frozen=True)
+class _LaunchStateRow:
+    status: str
+    last_admission_at: datetime | None
+    last_launch_attempt_id: object
+
+
 def _clear_launch_failure(
     pool: ConnectionPool, bus: EventBus, agent_id: int, attempt_id: UUID
 ) -> None:
@@ -469,19 +481,21 @@ def _read_launch_state(
     catalog: ModelCatalog,
     default_model: str,
 ) -> launch_state.LaunchState:
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
+    with pool.connection() as conn:
+        row = query_one(
+            conn,
+            _LaunchStateRow,
             "SELECT status, last_admission_at, last_launch_attempt_id FROM agents_meta WHERE id=%s",
             (agent_id,),
         )
-        row = cur.fetchone()
         snapshot = snapshot_module.select_one(
             conn, agent_id, catalog=catalog, default_model=default_model
         )
     if row is None or snapshot is None:
         return launch_state.launch_state(None, None, None, None)
-    status, admission_at, attempt_id = row
-    return launch_state.launch_state(status, admission_at, attempt_id, snapshot.availability)
+    return launch_state.launch_state(
+        row.status, row.last_admission_at, row.last_launch_attempt_id, snapshot.availability
+    )
 
 
 async def _dispatch_committed_launch(

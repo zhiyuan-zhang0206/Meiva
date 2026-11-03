@@ -18,9 +18,10 @@ from base.telemetry.audit_events import prepare_event_log, record_audit
 from gateway.agents.creation import create_and_launch_agent, scoped_creation_key
 from gateway.agents.schemas import AgentRow, LabelPatchRequest
 from gateway.http.auth.request_principal import PRINCIPAL_SCOPE, SCOPE_HEADER
-from gateway.http.config import gateway_clock, gateway_ensure_harnesses, gateway_rpc
+from gateway.http.config import gateway_clock, gateway_ensure_harnesses, gateway_rpc, gateway_state
 from gateway.http.model_catalog import (
     catalog_for_observation,
+    request_catalog,
     request_default_model,
     require_model_catalog,
 )
@@ -44,9 +45,9 @@ async def patch_agent(agent_id: int, body: LabelPatchRequest, request: Request) 
 
     new_label: str | None = body.label if body.label else None
     await asyncio.to_thread(
-        _patch_label_blocking, request.app.state.db_pool, agent_id, new_label, body.source
+        _patch_label_blocking, gateway_state(request).db_pool, agent_id, new_label, body.source
     )
-    await publish_label_updated(request.app.state.bus, agent_id, new_label)
+    await publish_label_updated(gateway_state(request).bus, agent_id, new_label)
     return Response(status_code=204)
 
 
@@ -95,9 +96,9 @@ def get_models(request: Request) -> ModelsResponse:
                 superseded_by=spec.superseded_by,
             )
 
-    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
+    with gateway_state(request).db_pool.connection() as conn, conn.cursor() as cur:
         default_model = resolve_default_model(
-            cur, catalog=catalog, authority=request.app.state.config_authority
+            cur, catalog=catalog, authority=gateway_state(request).config_authority
         ).model
     return ModelsResponse(
         providers=dict(catalog.supported_models),
@@ -118,10 +119,10 @@ def get_agents(
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
 ) -> roster.AgentDirectoryPage:
 
-    with request.app.state.db_pool.connection() as conn:
+    with gateway_state(request).db_pool.connection() as conn:
         return roster.list_directory(
             conn,
-            catalog=catalog_for_observation(request.app.state.catalog),
+            catalog=catalog_for_observation(request_catalog(request)),
             scope=scope,
             query=query,
             before_id=before_id,
@@ -136,10 +137,10 @@ def get_agents(
 )
 def get_agent_roster(request: Request) -> roster.AgentRoster:
 
-    with request.app.state.db_pool.connection() as conn:
+    with gateway_state(request).db_pool.connection() as conn:
         return roster.select_roster(
             conn,
-            catalog=catalog_for_observation(request.app.state.catalog),
+            catalog=catalog_for_observation(request_catalog(request)),
             default_model=request_default_model(request),
         )
 
@@ -187,16 +188,16 @@ async def post_guarded_agents(
     if idempotency_scope != PRINCIPAL_SCOPE:
         raise HTTPException(status_code=422, detail="guarded creation requires principal-v1 scope")
     key = scoped_creation_key(request, idempotency_key, operation_path="/api/keyed/v1/agents")
-    target = body.machine if body.machine is not None else request.app.state.machine.name()
+    target = body.machine if body.machine is not None else gateway_state(request).machine.name()
     try:
         return await create_and_launch_agent(
             body,
             target,
-            request.app.state.db_pool,
-            request.app.state.db,
-            request.app.state.bus,
+            gateway_state(request).db_pool,
+            gateway_state(request).db,
+            gateway_state(request).bus,
             catalog=require_model_catalog(request),
-            authority=request.app.state.config_authority,
+            authority=gateway_state(request).config_authority,
             creation_key=key,
             clock=gateway_clock(request),
             rpc=gateway_rpc(request),
@@ -212,11 +213,11 @@ async def post_guarded_agents(
 )
 def get_agent(agent_id: int, request: Request) -> AgentRow:
 
-    with request.app.state.db_pool.connection() as conn:
+    with gateway_state(request).db_pool.connection() as conn:
         snap = snapshot_module.select_one(
             conn,
             agent_id,
-            catalog=catalog_for_observation(request.app.state.catalog),
+            catalog=catalog_for_observation(request_catalog(request)),
             default_model=request_default_model(request),
         )
     if snap is None:
@@ -230,15 +231,15 @@ def get_agent(agent_id: int, request: Request) -> AgentRow:
 )
 def get_agent_born_chain(agent_id: int, request: Request) -> BornChainResponse:
 
-    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
+    with gateway_state(request).db_pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT 1 FROM agents_meta WHERE id = %s", (agent_id,))
         if cur.fetchone() is None:
             raise AgentNotFound(f"agent {agent_id} does not exist")
-    chain = neighbors.born_chain(request.app.state.db_pool, root=agent_id)
+    chain = neighbors.born_chain(gateway_state(request).db_pool, root=agent_id)
     detail: dict[int, tuple[str | None, str, str | None]] = {}
     ids = [r[0] for r in chain]
     if ids:
-        with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
+        with gateway_state(request).db_pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 SELECT t.id, t.label, m.status, m.machine

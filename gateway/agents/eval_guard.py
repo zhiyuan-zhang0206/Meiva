@@ -5,6 +5,8 @@ from __future__ import annotations
 from fastapi import HTTPException, Request
 from psycopg_pool import ConnectionPool
 
+from gateway.http.config import gateway_state
+
 
 def _caller_agent_id(caller: str) -> int | None:
     """Return the agent id in an ``agent:<id>`` caller marker, if present."""
@@ -40,7 +42,7 @@ def deny_isolated_result_read(request: Request) -> None:
     caller_agent_id = _caller_agent_id(request.query_params.get("caller", ""))
     if caller_agent_id is None:
         return
-    if not caller_eval_isolation(request.app.state.db_pool, caller_agent_id):
+    if not caller_eval_isolation(gateway_state(request).db_pool, caller_agent_id):
         return
     surface = "last-message" if request.url.path.endswith("/last-message") else "result"
     raise HTTPException(

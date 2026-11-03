@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from types import MappingProxyType
-from typing import Any
+from typing import TypedDict, Unpack
 
 import psycopg
 from langchain_core.language_models import BaseChatModel
@@ -125,6 +125,17 @@ def default_policy() -> ReplySuggestionPolicy:
 
 
 # meiva:note
+# The `ReplySuggestionPolicy` fields a test overrides on its harness.
+class PolicyChanges(TypedDict, total=False):
+    enabled: bool
+    model: str
+    gate_model: str
+    gate_threshold: float
+    max_input_tokens: int
+    max_candidates: int
+
+
+# meiva:note
 # One idle agent whose newest message is a question, plus a service wired to the gate wire and
 # the drafting provider the test gave it.
 class Harness:
@@ -176,7 +187,7 @@ class Harness:
         )
         self.db_conn.commit()
 
-    def configure(self, **changes: Any) -> None:
+    def configure(self, **changes: Unpack[PolicyChanges]) -> None:
         self.policy = replace(self.policy, **changes)
 
     async def suggest(self, agent_id: int | None = None) -> ReplySuggestionResponse:

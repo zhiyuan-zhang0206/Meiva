@@ -7,11 +7,13 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated, Any, TypeGuard
+from typing import Annotated, TypeGuard
 
 import psycopg
 from fastapi import APIRouter, Header, HTTPException, Query, Request
+from psycopg.rows import class_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
@@ -42,15 +44,64 @@ from gateway.agents.schemas import (
     ResolveNoticeIn,
 )
 from gateway.http.auth.request_principal import PrincipalScopeError, request_key
-from gateway.http.config import gateway_clock, gateway_config, gateway_rpc
+from gateway.http.config import gateway_clock, gateway_config, gateway_rpc, gateway_state
+from gateway.http.json_values import is_object_dict
 from ops import lifecycle as _ops
 from ops.agents import get_agent_status
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
 
+
+# meiva:note
+# The columns a resolution reads under `FOR UPDATE`; `question` is the stored jsonb, parsed by
+# `resolution_answer`.
+@dataclass(frozen=True)
+class _ResolveTarget:
+    title: str
+    require_response: bool
+    resolved_at: datetime | None
+    question: object
+    expire_at: datetime
+    created_at: datetime
+
+
+# meiva:note
+# The oldest open notice's local id and title, for the refusal that names it.
+@dataclass(frozen=True)
+class _OpenNotice:
+    local_id: int
+    title: str
+
+
+# meiva:note
+# The ids a notice insert returns.
+@dataclass(frozen=True)
+class _NoticeIds:
+    id: int
+    local_id: int
+
+
+# meiva:note
+# One entry of the pending-notices list a creation receipt carries.
+@dataclass(frozen=True)
+class _PendingNotice:
+    id: int
+    title: str
+    created_at: datetime
+    priority: str
+
+
+# meiva:note
+# A notice operation's stored request and receipt, both `jsonb`.
+@dataclass(frozen=True)
+class _StoredReceipt:
+    request: object
+    receipt: object
+
+
 _SELECT = (
-    "SELECT n.id, n.agent_id, t.label, n.title, n.content, n.priority, "
+    "SELECT n.id, n.agent_id, t.label AS agent_label, n.title, n.content, n.priority, "
     "n.require_response, n.blocking, n.created_at, n.updated_at, "
     "n.resolved_at, n.resolution, n.reply, n.task_id, n.expire_at, n.question, n.answer, "
     "n.source_verified_by "
@@ -81,34 +132,11 @@ def publish_response_required_hint(bus: EventBus, agent_id: int) -> None:
         )
 
 
-def _row_to_item(r: tuple[Any, ...]) -> NoticeItem:
-    return NoticeItem(
-        id=r[0],
-        agent_id=r[1],
-        agent_label=r[2],
-        title=r[3],
-        content=r[4],
-        priority=r[5],
-        require_response=r[6],
-        blocking=r[7],
-        created_at=r[8],
-        updated_at=r[9],
-        resolved_at=r[10],
-        resolution=r[11],
-        reply=r[12],
-        task_id=r[13],
-        expire_at=r[14],
-        question=r[15],
-        answer=r[16],
-        source_verified_by=r[17],
-    )
-
-
 def _open_notices_blocking(
     pool: ConnectionPool, limit: int, *, agent_id: int | None = None
-) -> list[tuple[Any, ...]]:
+) -> list[NoticeItem]:
     # meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
-    with pool.connection() as conn, conn.cursor() as cur:
+    with pool.connection() as conn, conn.cursor(row_factory=class_row(NoticeItem)) as cur:
         agent_clause = "" if agent_id is None else "AND n.agent_id = %s "
         params = (limit,) if agent_id is None else (agent_id, limit)
         cur.execute(
@@ -129,8 +157,8 @@ def _resolved_notices_blocking(
     *,
     before_at: datetime | None = None,
     before_id: int | None = None,
-) -> list[tuple[Any, ...]]:
-    with pool.connection() as conn, conn.cursor() as cur:
+) -> list[NoticeItem]:
+    with pool.connection() as conn, conn.cursor(row_factory=class_row(NoticeItem)) as cur:
         if before_at is not None:
             cur.execute(
                 _SELECT
@@ -158,18 +186,17 @@ async def get_open_notices(
     # meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
     if limit is None:
         limit = gateway_config(request).display.notices_open_default_limit
-    rows = await asyncio.to_thread(
+    return await asyncio.to_thread(
         _open_notices_blocking,
-        request.app.state.db_pool,
+        gateway_state(request).db_pool,
         limit,
         agent_id=agent_id,
     )
-    return [_row_to_item(r) for r in rows]
 
 
-def _notices_after_blocking(pool: ConnectionPool, after: int, limit: int) -> list[tuple[Any, ...]]:
+def _notices_after_blocking(pool: ConnectionPool, after: int, limit: int) -> list[NoticeItem]:
     # meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
-    with pool.connection() as conn, conn.cursor() as cur:
+    with pool.connection() as conn, conn.cursor(row_factory=class_row(NoticeItem)) as cur:
         cur.execute(
             _SELECT
             + "WHERE n.id > %s AND n.resolved_at IS NULL AND n.require_response "
@@ -188,8 +215,9 @@ async def get_notices_live(
     # meiva:link gateway/routers/docs/frontend-ui-data.meiva.okf.md
     if limit is None:
         limit = gateway_config(request).display.notices_open_default_limit
-    rows = await asyncio.to_thread(_notices_after_blocking, request.app.state.db_pool, after, limit)
-    return [_row_to_item(r) for r in rows]
+    return await asyncio.to_thread(
+        _notices_after_blocking, gateway_state(request).db_pool, after, limit
+    )
 
 
 @router.get("/api/notices")
@@ -205,7 +233,7 @@ async def get_notices_feed(
         raise HTTPException(
             status_code=422, detail="before_at and before_id must be supplied together"
         )
-    pool = request.app.state.db_pool
+    pool = gateway_state(request).db_pool
     if limit is None:
         limit = gateway_config(request).display.notices_open_default_limit
     if resolved_limit is None:
@@ -220,7 +248,7 @@ async def get_notices_feed(
             before_id=before_id,
         ),
     )
-    resolved_page = [_row_to_item(r) for r in resolved_rows]
+    resolved_page = resolved_rows
     next_cursor = None
     if len(resolved_page) == resolved_limit:
         last = resolved_page[-1]
@@ -228,7 +256,7 @@ async def get_notices_feed(
             next_cursor = NoticesCursor(before_at=last.resolved_at, before_id=last.id)
     return NoticesFeed(
         open=[],
-        awaiting=[_row_to_item(r) for r in awaiting_rows],
+        awaiting=awaiting_rows,
         resolved_page=resolved_page,
         next_cursor=next_cursor,
     )
@@ -257,38 +285,37 @@ async def post_notice_resolve(
             raise HTTPException(
                 status_code=422, detail="notices require a reply or an explicit dismissal"
             )
-        with conn.cursor() as cur:
+        with conn.cursor(row_factory=class_row(_ResolveTarget)) as cur:
             cur.execute(
                 "SELECT title, require_response, resolved_at, question, expire_at, created_at "
                 "FROM agent_notices WHERE id = %s AND agent_id = %s FOR UPDATE",
                 (notice_id, agent_id),
             )
-            row = cur.fetchone()
-            if row is None:
+            target = cur.fetchone()
+            if target is None:
                 raise HTTPException(
                     status_code=409,
                     detail=f"notice {notice_id} does not exist for agent {agent_id}",
                 )
-            title, require_response, resolved_at, raw_question, expire_at, created_at = row
-            if raw_question is not None and question_expired(
-                expire_at, now=gateway_clock(request).now()
+            if target.question is not None and question_expired(
+                target.expire_at, now=gateway_clock(request).now()
             ):
                 raise HTTPException(status_code=409, detail="this question has expired")
-            resolved_answer = resolution_answer(body, raw_question)
+            resolved_answer = resolution_answer(body, target.question)
             reply = resolved_answer.reply
             resolution = _ops.notice_resolution_facts(
                 _ACTION_RESOLUTION[action],
-                require_response=bool(require_response),
-                created_at=created_at,
+                require_response=target.require_response,
+                created_at=target.created_at,
                 now=gateway_clock(request).now(),
                 replied=reply is not None or resolved_answer.answer is not None,
             )
-            if resolved_at is not None:
+            if target.resolved_at is not None:
                 raise HTTPException(
                     status_code=409,
                     detail=f"notice {notice_id} is already resolved for agent {agent_id}",
                 )
-            if not require_response:
+            if not target.require_response:
                 raise HTTPException(status_code=409, detail="legacy FYI entries are not notices")
             if action == "answer" and reply is None:
                 raise HTTPException(status_code=422, detail="action 'answer' requires a reply")
@@ -304,7 +331,7 @@ async def post_notice_resolve(
                     notice_id,
                 ),
             )
-        return resolution_inbound(title, action, resolved_answer.reply)
+        return resolution_inbound(target.title, action, resolved_answer.reply)
 
     # meiva:note
     # Every notice resolution rides the notice-system source (reply / dismiss); the claim node
@@ -317,7 +344,7 @@ async def post_notice_resolve(
     )
     receipt = await asyncio.to_thread(
         resolve_once,
-        request.app.state.db_pool,
+        gateway_state(request).db_pool,
         request.url.path,
         idempotency_key,
         body.model_dump(mode="json", exclude={"answer"} if body.answer is None else set()),
@@ -332,8 +359,8 @@ async def post_notice_resolve(
             raise TypeError("notice inbound receipt must be an integer")
         await asyncio.to_thread(
             publish_inbound_wake,
-            request.app.state.db,
-            request.app.state.bus,
+            gateway_state(request).db,
+            gateway_state(request).bus,
             agent_id,
             str(inbound_id),
         )
@@ -341,7 +368,7 @@ async def post_notice_resolve(
         if not isinstance(content, str):
             raise TypeError("notice inbound content must be a string")
         await _ops.publish_inbound_arrived(
-            request.app.state.bus,
+            gateway_state(request).bus,
             agent_id,
             inbound_id,
             "chat",
@@ -349,17 +376,19 @@ async def post_notice_resolve(
             content,
         )
         status = await _ops.resurrect_if_terminated(
-            request.app.state.db,
-            request.app.state.bus,
+            gateway_state(request).db,
+            gateway_state(request).bus,
             agent_id,
             trigger_inbound_id=inbound_id,
             trigger_inbound_kind=InboundKind.CHAT,
-            local_machine=request.app.state.machine.name(),
+            local_machine=gateway_state(request).machine.name(),
             rpc=gateway_rpc(request),
         )
     else:
-        status = await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id)
-    await _ops.publish_notice_resolved(request.app.state.bus, agent_id, notice_id, facts=resolution)
+        status = await asyncio.to_thread(get_agent_status, gateway_state(request).db, agent_id)
+    await _ops.publish_notice_resolved(
+        gateway_state(request).bus, agent_id, notice_id, facts=resolution
+    )
     return AgentMessageEnqueued(status=status, inbound_id=inbound_id)
 
 
@@ -386,7 +415,7 @@ async def post_notice_create(
     body: NoticeCreateIn,
     request: Request,
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
-) -> dict[str, Any]:
+) -> dict[str, object]:
     # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md
     idempotency_key = notice_key(request, idempotency_key)
     request_body: dict[str, object] = body.model_dump(
@@ -406,7 +435,7 @@ async def post_notice_create(
         bool,
         int | None,
     ]:
-        with write_transaction(pool) as conn, conn.cursor() as cur:
+        with write_transaction(pool) as conn, conn.cursor(row_factory=class_row(_NoticeIds)) as cur:
             previous = existing_receipt(
                 conn,
                 request.url.path,
@@ -431,20 +460,20 @@ async def post_notice_create(
             # Legacy FYI rows (require_response false, unwritable since
             # 2026-10-19) are not notices and never block a poster.
             # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md
-            cur.execute(
-                "SELECT id, local_id, title FROM agent_notices "
-                "WHERE agent_id = %s AND resolved_at IS NULL AND require_response "
-                "ORDER BY created_at DESC, local_id DESC LIMIT 1",
-                (agent_id,),
-            )
-            open_notice = cur.fetchone()
+            with conn.cursor(row_factory=class_row(_OpenNotice)) as open_cur:
+                open_cur.execute(
+                    "SELECT local_id, title FROM agent_notices "
+                    "WHERE agent_id = %s AND resolved_at IS NULL AND require_response "
+                    "ORDER BY created_at DESC, local_id DESC LIMIT 1",
+                    (agent_id,),
+                )
+                open_notice = open_cur.fetchone()
             if open_notice is not None:
-                open_local_id = int(open_notice[1])
                 raise HTTPException(
                     status_code=409,
                     detail=(
                         f"agent {agent_id} already holds an open notice "
-                        f"#{open_local_id} ({open_notice[2]!r}); an agent holds one "
+                        f"#{open_notice.local_id} ({open_notice.title!r}); an agent holds one "
                         f"notice at a time. Close it first with meiva.ui.dismiss_notice() "
                         f"(or answer it in the console), or rewrite it in place with "
                         f'meiva.ui.edit_notice(content="..."), then post the new one.'
@@ -486,20 +515,26 @@ async def post_notice_create(
             # RETURNING always yields a row; the branch only guards the driver contract.
             if row is None:
                 raise RuntimeError("notice insert returned no row")
-            notice_global_id, notice_local_id = int(row[0]), int(row[1])
+            notice_global_id, notice_local_id = row.id, row.local_id
             notification_id = stage_notice_notification(
                 conn, agent_id=agent_id, notice_id=notice_global_id
             )
-            cur.execute(
-                "SELECT local_id AS id, title, created_at, priority "
-                "FROM agent_notices WHERE agent_id = %s AND resolved_at IS NULL "
-                "ORDER BY created_at DESC, local_id DESC",
-                (agent_id,),
-            )
-            pending: list[dict[str, object]] = [
-                {"id": int(r[0]), "title": r[1], "created_at": r[2].isoformat(), "priority": r[3]}
-                for r in cur.fetchall()
-            ]
+            with conn.cursor(row_factory=class_row(_PendingNotice)) as pending_cur:
+                pending_cur.execute(
+                    "SELECT local_id AS id, title, created_at, priority "
+                    "FROM agent_notices WHERE agent_id = %s AND resolved_at IS NULL "
+                    "ORDER BY created_at DESC, local_id DESC",
+                    (agent_id,),
+                )
+                pending: list[dict[str, object]] = [
+                    {
+                        "id": r.id,
+                        "title": r.title,
+                        "created_at": r.created_at.isoformat(),
+                        "priority": r.priority,
+                    }
+                    for r in pending_cur.fetchall()
+                ]
             save_receipt(
                 conn,
                 request.url.path,
@@ -517,7 +552,7 @@ async def post_notice_create(
             # query; a pre-commit AgentUpdated would preserve the stale view.
             conn.commit()
             if body.require_response:
-                publish_response_required_hint(request.app.state.bus, agent_id)
+                publish_response_required_hint(gateway_state(request).bus, agent_id)
             return (
                 notice_global_id,
                 notice_local_id,
@@ -526,7 +561,7 @@ async def post_notice_create(
                 notification_id,
             )
 
-    pool = request.app.state.db_pool
+    pool = gateway_state(request).db_pool
     (
         notice_global_id,
         notice_local_id,
@@ -540,7 +575,7 @@ async def post_notice_create(
     # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
     if not replayed:
         await _ops.publish_notice_posted(
-            request.app.state.bus,
+            gateway_state(request).bus,
             agent_id,
             notice_global_id,
             body.priority,
@@ -548,7 +583,9 @@ async def post_notice_create(
             body.task_id,
         )
     else:
-        await asyncio.to_thread(publish_response_required_hint, request.app.state.bus, agent_id)
+        await asyncio.to_thread(
+            publish_response_required_hint, gateway_state(request).bus, agent_id
+        )
     await announce_notice_delivery(request, notification_id)
     return {
         "id": int(notice_local_id),
@@ -603,7 +640,7 @@ async def announce_notice_delivery(request: Request, notification_id: int | None
     if notification_id is None:
         return
     await asyncio.to_thread(
-        announce_sync, request.app.state.db_pool, request.app.state.bus, notification_id
+        announce_sync, gateway_state(request).db_pool, gateway_state(request).bus, notification_id
     )
 
 
@@ -617,7 +654,7 @@ def existing_receipt(
     *,
     legacy_body: dict[str, object] | None = None,
 ) -> dict[str, object] | None:
-    with conn.cursor() as cur:
+    with conn.cursor(row_factory=class_row(_StoredReceipt)) as cur:
         cur.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (path + ":" + key,))
         cur.execute(
             "SELECT request, receipt FROM notice_operation_receipts "
@@ -627,11 +664,13 @@ def existing_receipt(
         row = cur.fetchone()
     if row is None:
         return None
-    if row[0] != body and row[0] != legacy_body:
+    if row.request not in (body, legacy_body):
         raise HTTPException(
             status_code=409, detail="idempotency key identifies a different notice operation"
         )
-    return row[1]
+    if not is_object_dict(row.receipt):
+        raise TypeError("stored notice operation receipt is not an object")
+    return row.receipt
 
 
 # meiva:note

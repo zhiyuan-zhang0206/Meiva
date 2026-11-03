@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import mimetypes
+from dataclasses import dataclass
 from typing import Annotated
 from urllib.parse import quote
 
@@ -13,7 +14,8 @@ from base.agents.to_user import ToUserDocument, ToUserReadFailure, ToUserReadReq
 from base.cluster.machine import gateway_auth_headers
 from base.cluster.machines import MachineGatewayUrlMissing, MachineNotRegistered, lookup
 from gateway.agents.eval_guard import deny_isolated_result_read
-from gateway.http.config import gateway_config, gateway_rpc
+from gateway.http.config import gateway_config, gateway_rpc, gateway_state
+from gateway.http.db_rows import query_one
 from gateway.http.middleware.error_envelope import error_response
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable
 
@@ -55,14 +57,22 @@ class PanelReadFailed(Exception):  # noqa: N818
         )
 
 
+# meiva:note
+# The machine an agent lives on.
+@dataclass(frozen=True)
+class _MachineRow:
+    machine: str
+
+
 def home_machine(request: Request, agent_id: int) -> str:
     deny_isolated_result_read(request)
-    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT machine FROM agents_meta WHERE id = %s", (agent_id,))
-        row = cur.fetchone()
+    with gateway_state(request).db_pool.connection() as conn:
+        row = query_one(
+            conn, _MachineRow, "SELECT machine FROM agents_meta WHERE id = %s", (agent_id,)
+        )
     if row is None:
         raise HTTPException(404, "Agent not found")
-    return row[0]
+    return row.machine
 
 
 def resource_request(agent_id: int, references: list[str], *, max_depth: int) -> ToUserReadRequest:
@@ -77,7 +87,7 @@ def resource_request(agent_id: int, references: list[str], *, max_depth: int) ->
 async def read_snapshot(request: Request, query: ToUserReadRequest, machine: str) -> ToUserDocument:
     try:
         result = await gateway_rpc(request).dispatch_to_machine(
-            request.app.state.db,
+            gateway_state(request).db,
             target_machine=machine,
             kind="to_user_read",
             payload=query.model_dump(),
@@ -201,9 +211,9 @@ async def get_resource(
     )
     if resource is None:
         raise HTTPException(404, "The document no longer references this resource")
-    access = request.app.state.gateway_access
+    access = gateway_state(request).gateway_access
     try:
-        ops_url = await asyncio.to_thread(lookup, request.app.state.db, machine)
+        ops_url = await asyncio.to_thread(lookup, gateway_state(request).db, machine)
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(30, connect=3), trust_env=False
         ) as client:

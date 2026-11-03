@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, TypedDict, TypeGuard
+from typing import TypedDict, TypeGuard
 
 from langchain_core.messages import AIMessage
 
@@ -65,7 +65,17 @@ class ReplySuggestionConfigurationError(ValueError):
 # How the drafting model is built: reasoning off (DeepSeek defaults to maximum effort,
 # which makes a one-line draft run for tens of seconds), a bounded wait, and no metering of
 # its own (the service logs the usage).
-def draft_model_options(llm_override: str) -> dict[str, Any]:
+class DraftModelOptions(TypedDict):
+    reasoning_effort: str
+    timeout: float
+    meter: bool
+    llm_override: str
+    overrides: ModelOverrides
+
+
+# meiva:note
+# How the drafting model is built; see `DraftModelOptions`.
+def draft_model_options(llm_override: str) -> DraftModelOptions:
     return {
         "reasoning_effort": ReasoningEffort.NONE,
         "timeout": DRAFT_TIMEOUT_S,

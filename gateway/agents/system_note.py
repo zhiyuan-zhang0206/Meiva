@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import psycopg
 from fastapi import HTTPException
 from psycopg.errors import UniqueViolation
@@ -16,6 +18,7 @@ from base.api_contracts.caller_identity import caller_payload
 from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
+from gateway.http.db_rows import query_one
 
 
 def system_note_blocking(
@@ -71,6 +74,18 @@ def system_note_blocking(
     return inbound_id
 
 
+# meiva:note
+# The inbound a client message id already identifies; `payload` is the stored jsonb.
+@dataclass(frozen=True)
+class _StoredNote:
+    id: int
+    agent_id: int
+    content: str
+    kind: str
+    source: str
+    payload: object
+
+
 def _existing_receipt(
     conn: psycopg.Connection,
     key: str,
@@ -80,17 +95,23 @@ def _existing_receipt(
     payload: dict[str, object],
 ) -> int | None:
     """Serialize same-key inserts and replay before mutable task validation."""
-    with conn.cursor() as cur:
-        cur.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (key,))
-        cur.execute(
-            "SELECT id, agent_id, content, kind, source, payload "
-            "FROM inbound_messages WHERE client_message_id = %s",
-            (key,),
-        )
-        previous = cur.fetchone()
+    conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (key,))
+    previous = query_one(
+        conn,
+        _StoredNote,
+        "SELECT id, agent_id, content, kind, source, payload "
+        "FROM inbound_messages WHERE client_message_id = %s",
+        (key,),
+    )
     if previous is None:
         return None
-    if previous[1:] != (
+    if (
+        previous.agent_id,
+        previous.content,
+        previous.kind,
+        previous.source,
+        previous.payload,
+    ) != (
         agent_id,
         content,
         InboundKind.SYSTEM_NOTE.value,
@@ -100,7 +121,7 @@ def _existing_receipt(
         raise HTTPException(
             status_code=409, detail="idempotency key identifies a different system note"
         )
-    return int(previous[0])
+    return previous.id
 
 
 def _validate_task_owner(conn: psycopg.Connection, task_id: int, agent_id: int) -> None:

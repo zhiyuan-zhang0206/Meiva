@@ -164,6 +164,8 @@ class GatewayServerState(
     pages_router.PageServingAppState,
     cluster_router.HarnessAppState,
     status_router.StatusAppState,
+    reply_suggestion_router.ReplySuggestionAppState,
+    agents_transfer_router.TransferAppState,
 ):
     pass
 
