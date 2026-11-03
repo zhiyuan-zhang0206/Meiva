@@ -330,7 +330,7 @@ def _reconstruct_created_row(
         maintenance_reason=placement.maintenance_reason,
         online=placement.online,
         consecutive_failures=placement.consecutive_failures,
-        owner_agent_id=body.owner_agent_id,
+        owner_agent_id=None,
     )
 
 
@@ -354,8 +354,8 @@ def create_blocking(
                 return _reconstruct_created_row(conn, created, body, machine)
             cur.execute(
                 "INSERT INTO schedules "
-                "(name, description, script, command, enabled, machine, owner_agent_id) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                "(name, description, script, command, enabled, machine) "
+                "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
                 (
                     body.name,
                     body.description,
@@ -363,7 +363,6 @@ def create_blocking(
                     body.command,
                     body.enabled,
                     machine,
-                    body.owner_agent_id,
                 ),
             )
             inserted = cur.fetchone()

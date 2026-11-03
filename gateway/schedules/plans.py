@@ -26,7 +26,7 @@ __all__ = [
     "select_declared_secrets",
 ]
 
-UPDATABLE = ("name", "description", "script", "command", "enabled", "machine", "owner_agent_id")
+UPDATABLE = ("name", "description", "script", "command", "enabled", "machine")
 
 # meiva:note
 # A logs request always asks the session for at least this many lines, so a small window still
@@ -52,7 +52,8 @@ class ControlPlan:
 
 # meiva:note
 # The requested fields that differ from the stored row (name, description, script, command,
-# enabled, machine).
+# enabled, machine). `owner_agent_id` is absent on purpose: it is assigned by provisioning
+# (`scripts/host_ops/set_schedule_owner.py`), never by an edit.
 def changed_fields(previous: ScheduleStoreRow, fields: Mapping[str, object]) -> dict[str, object]:
     current: dict[str, object] = {
         "name": previous.name,
@@ -61,7 +62,6 @@ def changed_fields(previous: ScheduleStoreRow, fields: Mapping[str, object]) -> 
         "command": previous.command,
         "enabled": previous.enabled,
         "machine": previous.machine,
-        "owner_agent_id": previous.owner_agent_id,
     }
     return {col: fields[col] for col in UPDATABLE if col in fields and fields[col] != current[col]}
 

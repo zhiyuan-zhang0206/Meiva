@@ -1268,7 +1268,7 @@ COMMENT ON COLUMN schedules.machine IS
 COMMENT ON COLUMN schedules.owner_plugin IS
     'Plugin directory name that owns and declared this schedule; NULL for operator-created and core builtin schedules.';
 COMMENT ON COLUMN schedules.owner_agent_id IS
-    'Agent this schedule speaks as; NULL for an operator-created schedule that only runs a command. Written into the launched session''s MEIVA_AGENT_ID and into the runner''s bound AgentIdentity, and stamped on schedule_runs.agent_id. Not a privilege boundary: the session token is the cluster agent token either way.';
+    'Agent this schedule speaks as; NULL for an operator-created schedule that only runs a command. Assigned only through provisioning (scripts/host_ops/set_schedule_owner.py), never through the API. Written into the launched session''s MEIVA_AGENT_ID and into the runner''s bound AgentIdentity, and stamped on schedule_runs.agent_id. Not a privilege boundary: the session token is the cluster agent token either way, and the owner grants no authority a shell session lacks; it decides only who the schedule speaks as.';
 COMMENT ON COLUMN schedules.secret_env_vars IS
     'Environment variable names injected into this schedule''s session at launch.';
 CREATE INDEX ON schedules (enabled);
@@ -1306,6 +1306,21 @@ COMMENT ON TABLE schedule_sync_requests IS
     'Pending desired-state convergence. Matching revision/session provenance is adopted. The consumer deletes a row after convergence, only if requested_at is unchanged.';
 COMMENT ON COLUMN schedule_sync_requests.machine IS
     'Target machine where the schedule convergence or session reaping should be performed.';
+
+CREATE TABLE schedule_owner_changes (
+    id           BIGSERIAL PRIMARY KEY,
+    schedule_id  BIGINT NOT NULL REFERENCES schedules(id) ON DELETE CASCADE,
+    old_owner_id BIGINT REFERENCES agents(id),
+    new_owner_id BIGINT REFERENCES agents(id),
+    source       TEXT NOT NULL CONSTRAINT schedule_owner_changes_source_nonempty CHECK (btrim(source) <> ''),
+    reason       TEXT NOT NULL CONSTRAINT schedule_owner_changes_reason_nonempty CHECK (btrim(reason) <> ''),
+    changed_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX schedule_owner_changes_schedule_idx ON schedule_owner_changes (schedule_id, changed_at DESC);
+COMMENT ON TABLE schedule_owner_changes IS
+    'Append-only record of owner assignments made through scripts/host_ops/set_schedule_owner.py: old and new owner, the operator host that ran it, the reason typed, and when. The API cannot change an owner, so this is the only audit surface for one.';
+COMMENT ON COLUMN schedule_owner_changes.source IS
+    'Who made the assignment: `ops:<hostname>` from the machine that ran the provisioning tool.';
 
 CREATE TABLE schedule_versions (
     id          BIGSERIAL PRIMARY KEY,
