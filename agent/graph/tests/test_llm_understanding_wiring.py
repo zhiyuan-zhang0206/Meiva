@@ -1,7 +1,3 @@
-# pyright: reportUnknownMemberType = warning
-# pyright: reportUnknownArgumentType = warning
-# pyright: reportUnknownLambdaType = warning
-# pyright: reportUnknownVariableType = warning
 """The llm node carries the understanding cut on whichever command ends the turn."""
 
 import random

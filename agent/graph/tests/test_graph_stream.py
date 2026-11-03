@@ -15,11 +15,11 @@ if any side field changes, the other side test will turn red."""
 import random
 from collections.abc import AsyncIterator, Mapping
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import MagicMock
 
 import psycopg
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, AnyMessage, BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command
@@ -51,6 +51,11 @@ from base.paths import meiva_home, resolve_meiva_home
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from meiva.tests.fixtures.pin_agent import snapshot_clients
 
+if TYPE_CHECKING:
+    from langchain_core.language_models.chat_models import BaseChatModel
+
+    from base.events.live.publisher import AgentEventPublisher
+
 
 # meiva:note
 # A fresh seeded generator for each use, so no test sees another's draws.
@@ -67,8 +72,8 @@ def _rng() -> random.Random:
 def _make_runtime(
     hosted_resources: HostedTurnResources,
     *,
-    llm=None,
-    event_publisher=None,
+    llm: object | None = None,
+    event_publisher: object | None = None,
     database_gate: ProcessDbGate,
     ops_pool: AsyncConnectionPool | None = None,
     agent_id: int = 7,
@@ -82,8 +87,10 @@ def _make_runtime(
         meiva_home=resolve_meiva_home(),
         hosted_resources=hosted_resources,
         ops_pool=ops_pool,
-        llm=llm,  # pyright: ignore[reportUnknownArgumentType]
-        event_publisher=event_publisher if event_publisher is not None else MagicMock(),  # pyright: ignore[reportUnknownArgumentType]
+        llm=cast("BaseChatModel", llm),
+        event_publisher=cast(
+            "AgentEventPublisher", event_publisher if event_publisher is not None else MagicMock()
+        ),
         agent=AgentSlices.resolve(default_reader=defaults(**(config_defaults or {}))),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
@@ -445,9 +452,9 @@ async def test_llm_node_preserves_usage_metadata(
     )
 
     assert isinstance(result, Command)
-    msg = result.update["messages"][0]
-    assert msg.content == "print(1)"  # pyright: ignore[reportUnknownMemberType]
-    assert msg.usage_metadata == {"input_tokens": 42, "output_tokens": 7, "total_tokens": 49}  # pyright: ignore[reportUnknownMemberType]
+    msg = cast("list[AIMessage]", result.update["messages"])[0]
+    assert msg.content == "print(1)"
+    assert msg.usage_metadata == {"input_tokens": 42, "output_tokens": 7, "total_tokens": 49}
 
 
 async def test_exec_node_publishes_exec_start_and_output(
@@ -507,20 +514,21 @@ async def test_exec_node_output_uses_wrap_code_output_envelope(
     )
 
     assert isinstance(result, Command)
-    msg = result.update["messages"][0]
-    content = msg.content  # pyright: ignore[reportUnknownMemberType]
+    msg = cast("list[BaseMessage]", result.update["messages"])[0]
+    assert isinstance(msg.content, str)
+    content = msg.content
     # New format
-    assert content.startswith("Code execution output"), (  # pyright: ignore[reportUnknownMemberType]
+    assert content.startswith("Code execution output"), (
         f"expected wrap_code_output format, got: {content[:60]!r}"
     )
     assert "envelope_test" in content
     assert "[exit" not in content
     # exec wall-clock captured (drives the 'ran in Xs' chip); a real run is
     # non-negative ms — just assert the contract that the field is populated.
-    assert isinstance(msg.additional_kwargs["meiva_exec_ms"], int)  # pyright: ignore[reportUnknownMemberType]
-    assert msg.additional_kwargs["meiva_exec_ms"] >= 0  # pyright: ignore[reportUnknownMemberType]
+    assert isinstance(msg.additional_kwargs["meiva_exec_ms"], int)
+    assert msg.additional_kwargs["meiva_exec_ms"] >= 0
     # Old format should not appear
-    assert not content.startswith("[exec output]")  # pyright: ignore[reportUnknownMemberType]
+    assert not content.startswith("[exec output]")
 
 
 async def test_exec_node_protects_archives_referenced_by_its_current_state(
@@ -550,7 +558,7 @@ async def test_exec_node_protects_archives_referenced_by_its_current_state(
         config,
         process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
-    prior_output = first.update["messages"][0]
+    prior_output = cast("list[AnyMessage]", first.update["messages"])[0]
     directory = overflow_dir(7, home=resolve_meiva_home())
     archive = next(directory.glob("crop_*.txt"))
     state = AgentState(

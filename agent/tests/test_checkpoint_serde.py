@@ -68,13 +68,13 @@ def _warning_messages(caplog: pytest.LogCaptureFixture) -> list[str]:
         SkillRecallState(prompted={"web-ai:deep-research"}, window=2),
     ],
 )
-def test_allowlist_round_trip_is_silent(state, caplog) -> None:
+def test_allowlist_round_trip_is_silent(state: object, caplog: pytest.LogCaptureFixture) -> None:
     serde = _allowlist_serde()
-    with caplog.at_level(logging.WARNING, logger=_SERDE_LOGGER):  # pyright: ignore[reportUnknownMemberType]
+    with caplog.at_level(logging.WARNING, logger=_SERDE_LOGGER):
         restored = serde.loads_typed(serde.dumps_typed(state))
-    assert type(restored) is type(state)  # pyright: ignore[reportUnknownArgumentType]
+    assert type(restored) is type(state)
     assert restored == state
-    assert _warning_messages(caplog) == []  # pyright: ignore[reportUnknownArgumentType]
+    assert _warning_messages(caplog) == []
 
 
 # meiva:note
@@ -87,7 +87,7 @@ def test_allowlist_round_trip_is_silent(state, caplog) -> None:
 # Issue #156 split: freshly-written checkpoints carry the models' real module
 # (`agent.state_channels`); the legacy `agent.state` names only appear in checkpoints written
 # before the split.
-def test_default_permissive_serde_warns_for_same_types(caplog) -> None:
+def test_default_permissive_serde_warns_for_same_types(caplog: pytest.LogCaptureFixture) -> None:
     import langgraph.checkpoint.serde.jsonplus as _jsonplus
 
     _jsonplus._warned_unregistered_types.clear()
@@ -100,10 +100,10 @@ def test_default_permissive_serde_warns_for_same_types(caplog) -> None:
         CompactState(),
         MemoryState(),
     ]
-    with caplog.at_level(logging.WARNING, logger=_SERDE_LOGGER):  # pyright: ignore[reportUnknownMemberType]
+    with caplog.at_level(logging.WARNING, logger=_SERDE_LOGGER):
         for s in states:
             serde.loads_typed(serde.dumps_typed(s))
-    msgs = _warning_messages(caplog)  # pyright: ignore[reportUnknownArgumentType]
+    msgs = _warning_messages(caplog)
     assert len(msgs) == 6
     for name in (
         "AttachEntry",
@@ -208,28 +208,28 @@ def test_static_allowlist_covers_all_nested_substates() -> None:
 # ── unknown types degrade to raw dict under the allowlist (documented) ────
 
 
-def test_allowlist_blocks_unregistered_type_to_dict(caplog) -> None:
+def test_allowlist_blocks_unregistered_type_to_dict(caplog: pytest.LogCaptureFixture) -> None:
     class UnknownState(BaseModel):
         x: int = 1
 
     serde = _allowlist_serde()
-    with caplog.at_level(logging.WARNING, logger=_SERDE_LOGGER):  # pyright: ignore[reportUnknownMemberType]
+    with caplog.at_level(logging.WARNING, logger=_SERDE_LOGGER):
         restored = serde.loads_typed(serde.dumps_typed(UnknownState(x=5)))
     # blocked → the raw kwargs dict, plus a "Blocked deserialization" warning
     assert restored == {"x": 5}
-    assert any("Blocked deserialization" in m for m in _warning_messages(caplog))  # pyright: ignore[reportUnknownArgumentType]
+    assert any("Blocked deserialization" in m for m in _warning_messages(caplog))
 
 
 # ── safe types are untouched by the allowlist ─────────────────────────────
 
 
-def test_allowlist_keeps_set_and_messages(caplog) -> None:
+def test_allowlist_keeps_set_and_messages(caplog: pytest.LogCaptureFixture) -> None:
     serde = _allowlist_serde()
-    with caplog.at_level(logging.WARNING, logger=_SERDE_LOGGER):  # pyright: ignore[reportUnknownMemberType]
+    with caplog.at_level(logging.WARNING, logger=_SERDE_LOGGER):
         restored_set = serde.loads_typed(serde.dumps_typed({"a", "b"}))
         restored_msgs = serde.loads_typed(
             serde.dumps_typed([HumanMessage(content="hi"), AIMessage(content="yo")])
         )
     assert restored_set == {"a", "b"}
     assert [type(m) for m in restored_msgs] == [HumanMessage, AIMessage]
-    assert _warning_messages(caplog) == []  # pyright: ignore[reportUnknownArgumentType]
+    assert _warning_messages(caplog) == []

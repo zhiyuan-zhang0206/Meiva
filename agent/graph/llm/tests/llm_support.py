@@ -27,6 +27,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
+from base.events.tests.async_pubsub_view import async_messages
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 
@@ -152,7 +153,9 @@ async def published_payloads(
             yield publisher, payloads
             await publisher.aclose()
         while (
-            message := await subscription.get_message(ignore_subscribe_messages=True, timeout=0.5)
+            message := await async_messages(subscription).get_message(
+                ignore_subscribe_messages=True, timeout=0.5
+            )
         ) is not None:
             data = message["data"]
             if isinstance(data, str):

@@ -28,6 +28,7 @@ from base.config.tests.configuration import defaults
 from base.db.code_version_gate import ProcessDbGate
 from base.host.env.agent_slices import AgentSlices
 from base.lm.errors import is_retryable_provider_error
+from base.log.tests.log_records import LogRecords
 from base.native_process.turn_identity import HostedTurnResources
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
@@ -40,7 +41,7 @@ def _rng() -> random.Random:
 
 async def test_llm_node_billing_error_logs_billing_vendor_and_model(
     hosted_resources: HostedTurnResources,
-    loguru_records,
+    loguru_records: LogRecords,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -67,8 +68,8 @@ async def test_llm_node_billing_error_logs_billing_vendor_and_model(
 
     assert "out of credit or quota" in str(exc_info.value)
     assert "vendor=deepseek" in str(exc_info.value)
-    classify_logs = [r for r in loguru_records if r["extra"].get("event") == "llm_provider_error"]  # pyright: ignore[reportUnknownMemberType]
-    assert len(classify_logs) == 1  # pyright: ignore[reportUnknownArgumentType]
+    classify_logs = [r for r in loguru_records if r["extra"].get("event") == "llm_provider_error"]
+    assert len(classify_logs) == 1
     extra = classify_logs[0]["extra"]
     assert extra["billing"] is True
     assert extra["status"] == 402
@@ -139,7 +140,7 @@ async def test_llm_node_configured_fatal_error_type_fails_fast(
 
 async def test_retried_llm_node_records_total_retry_duration(
     hosted_resources: HostedTurnResources,
-    loguru_records,
+    loguru_records: LogRecords,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -169,9 +170,7 @@ async def test_retried_llm_node_records_total_retry_duration(
     )
 
     retry_logs = [
-        record
-        for record in loguru_records
-        if record["extra"].get("event") == "llm_retry"  # pyright: ignore[reportUnknownMemberType]
+        record for record in loguru_records if record["extra"].get("event") == "llm_retry"
     ]
     assert retry_logs[-1]["extra"]["outcome"] == "succeeded"
     assert retry_logs[-1]["extra"]["duration_seconds"] >= 3.0
@@ -292,7 +291,7 @@ def test_is_fatal_provider_error_type_no_body(**changes: Any) -> None:
 
 async def test_llm_usage_event_carries_latency_ms(
     hosted_resources: HostedTurnResources,
-    loguru_records,
+    loguru_records: LogRecords,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -327,8 +326,8 @@ async def test_llm_usage_event_carries_latency_ms(
         rng=_rng(),
     )
 
-    usage = [r for r in loguru_records if r["extra"].get("event") == "llm_usage"]  # pyright: ignore[reportUnknownMemberType]
-    assert len(usage) == 1, "exactly one llm_usage record per completed call"  # pyright: ignore[reportUnknownArgumentType]
+    usage = [r for r in loguru_records if r["extra"].get("event") == "llm_usage"]
+    assert len(usage) == 1, "exactly one llm_usage record per completed call"
     lat = usage[0]["extra"]["latency_ms"]
     assert lat is not None and lat > 0, f"latency_ms should be a positive ms float, got {lat!r}"
     assert usage[0]["extra"]["model"] == "deepseek-flash"

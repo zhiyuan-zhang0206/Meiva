@@ -16,6 +16,7 @@ from langchain_core.messages import AIMessage
 
 from agent.llm.usage import log_llm_usage
 from base.host.proc import run_bounded
+from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
 
@@ -28,11 +29,11 @@ def _load_provider_plugins() -> None:
     build_model_catalog(home=meiva_home())
 
 
-def _msgs(records: list[dict]) -> str:
-    return "\n".join(r["message"] for r in records)  # pyright: ignore[reportUnknownArgumentType]
+def _msgs(records: LogRecords) -> str:
+    return "\n".join(r["message"] for r in records)
 
 
-def test_deepseek_shape_logs(loguru_records):
+def test_deepseek_shape_logs(loguru_records: LogRecords):
     msg = AIMessage(
         content="",
         usage_metadata={
@@ -46,7 +47,7 @@ def test_deepseek_shape_logs(loguru_records):
     log_llm_usage(
         msg, agent_id=7, model="deepseek-v4-pro", catalog=build_model_catalog(home=meiva_home())
     )
-    out = _msgs(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
+    out = _msgs(loguru_records)
     assert "in=1000 cached=800" in out
     assert "(80%)" in out
     assert "out=100 reason=70" in out
@@ -58,7 +59,7 @@ def test_deepseek_shape_logs(loguru_records):
     assert loguru_records[0]["extra"]["agent_id"] == 7
 
 
-def test_anthropic_shape_logs(loguru_records):
+def test_anthropic_shape_logs(loguru_records: LogRecords):
     """When usage_metadata has no output_token_details (e.g. no thinking
     enabled), reason=0 is still logged. With ThinkingTokensChatAnthropic,
     thinking-enabled calls surface thinking_tokens as output_token_details.reasoning."""
@@ -75,12 +76,12 @@ def test_anthropic_shape_logs(loguru_records):
     log_llm_usage(
         msg, agent_id=7, model="claude-opus-5", catalog=build_model_catalog(home=meiva_home())
     )
-    out = _msgs(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
+    out = _msgs(loguru_records)
     assert "in=2000 cached=1500" in out
     assert "out=50 reason=0" in out
 
 
-def test_zero_input_no_pct(loguru_records):
+def test_zero_input_no_pct(loguru_records: LogRecords):
     msg = AIMessage(
         content="",
         usage_metadata={
@@ -92,12 +93,12 @@ def test_zero_input_no_pct(loguru_records):
     log_llm_usage(
         msg, agent_id=7, model="claude-opus-5", catalog=build_model_catalog(home=meiva_home())
     )
-    out = _msgs(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
+    out = _msgs(loguru_records)
     assert "in=0" in out
     assert "%" not in out
 
 
-def test_latency_ms_rides_payload(loguru_records):
+def test_latency_ms_rides_payload(loguru_records: LogRecords):
     """latency_ms goes into the event payload (extra) so the ops monitor panel
     can read it back — not into the message string. None -> payload null."""
     msg = AIMessage(
@@ -111,11 +112,11 @@ def test_latency_ms_rides_payload(loguru_records):
         latency_ms=1234.5,
         catalog=build_model_catalog(home=meiva_home()),
     )
-    out = _msgs(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
+    out = _msgs(loguru_records)
     assert "in=100" in out
     assert "latency" not in out  # never in the human-readable line
     assert loguru_records[0]["extra"]["latency_ms"] == 1234.5
-    loguru_records.clear()  # pyright: ignore[reportUnknownMemberType]
+    loguru_records.clear()
     second = AIMessage(
         content="",
         usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
@@ -126,7 +127,7 @@ def test_latency_ms_rides_payload(loguru_records):
     assert loguru_records[0]["extra"]["latency_ms"] is None
 
 
-def test_decode_ms_rides_payload(loguru_records):
+def test_decode_ms_rides_payload(loguru_records: LogRecords):
     """decode_ms goes into the event payload (extra) — the generation-stage
     TPS panel sums it per bucket — never into the human-readable line.
     None -> payload null (non-streaming fallback / pre-instrumentation rows)."""
@@ -142,12 +143,12 @@ def test_decode_ms_rides_payload(loguru_records):
         decode_ms=800.0,
         catalog=build_model_catalog(home=meiva_home()),
     )
-    out = _msgs(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
+    out = _msgs(loguru_records)
     assert "in=100" in out
     assert "decode" not in out  # never in the human-readable line
     assert loguru_records[0]["extra"]["decode_ms"] == 800.0
     assert loguru_records[0]["extra"]["latency_ms"] == 1234.5
-    loguru_records.clear()  # pyright: ignore[reportUnknownMemberType]
+    loguru_records.clear()
     second = AIMessage(
         content="",
         usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
@@ -162,7 +163,7 @@ def test_decode_ms_rides_payload(loguru_records):
     assert loguru_records[0]["extra"]["decode_ms"] is None
 
 
-def test_usage_has_no_task_attribution(loguru_records) -> None:
+def test_usage_has_no_task_attribution(loguru_records: LogRecords) -> None:
     """Task notes do not claim ownership of an agent's token consumption."""
     msg = AIMessage(
         content="", usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110}
@@ -173,7 +174,7 @@ def test_usage_has_no_task_attribution(loguru_records) -> None:
     assert "task_id" not in loguru_records[0]["extra"]
 
 
-def test_no_usage_metadata_silent(loguru_records):
+def test_no_usage_metadata_silent(loguru_records: LogRecords):
     msg = AIMessage(content="")
     log_llm_usage(
         msg, agent_id=7, model="claude-opus-5", catalog=build_model_catalog(home=meiva_home())
@@ -181,7 +182,7 @@ def test_no_usage_metadata_silent(loguru_records):
     assert loguru_records == []
 
 
-def test_price_snapshot_rides_payload(loguru_records):
+def test_price_snapshot_rides_payload(loguru_records: LogRecords):
     """The usage-time price snapshot (user principle, task #1273): cost_usd
     plus the three per-1M rates ride the event payload at write time, so the
     read side never re-prices against the current catalog. At the fixed
@@ -204,7 +205,7 @@ def test_price_snapshot_rides_payload(loguru_records):
         catalog=build_model_catalog(home=meiva_home()),
     )
     extra = loguru_records[0]["extra"]
-    assert extra["cost_usd"] == pytest.approx(0.0003476)  # pyright: ignore[reportUnknownMemberType]
+    assert extra["cost_usd"] == pytest.approx(0.0003476)
     assert extra["price_miss"] == 0.66
     assert extra["price_hit"] == 0.022
     assert extra["price_out"] == 1.98
@@ -252,7 +253,7 @@ def test_log_llm_usage_skips_billing_when_usage_metadata_is_incomplete(tmp_path:
 
 
 def test_price_snapshot_absent_for_unpriced_model(
-    loguru_records: list[dict[str, Any]],
+    loguru_records: LogRecords,
 ) -> None:
     """A model with no known price emits NO snapshot fields — absent means
     unpriced (the readers count such calls as unpriced_calls instead of
@@ -298,7 +299,7 @@ _EVENT_KEYS = (
 )
 
 
-def test_message_is_stamped_with_exactly_the_logged_figures(loguru_records):
+def test_message_is_stamped_with_exactly_the_logged_figures(loguru_records: LogRecords):
     msg = AIMessage(
         content="",
         usage_metadata={
@@ -316,7 +317,7 @@ def test_message_is_stamped_with_exactly_the_logged_figures(loguru_records):
     log_llm_usage(
         msg, agent_id=7, model="claude-opus-5", catalog=build_model_catalog(home=meiva_home())
     )
-    event = cast("dict[str, Any]", loguru_records[0]["extra"])  # pyright: ignore[reportUnknownArgumentType]
+    event = cast("dict[str, Any]", loguru_records[0]["extra"])
     stamped: dict[str, Any] = msg.additional_kwargs["meiva_usage"]
     assert stamped["cost_usd"] > 0
     assert (stamped["cache_write_5m"], stamped["cache_write_1h"]) == (400, 100)
@@ -325,7 +326,7 @@ def test_message_is_stamped_with_exactly_the_logged_figures(loguru_records):
     assert set(stamped) <= set(_EVENT_KEYS) | {"unpriced"}
 
 
-def test_non_agent_logging_does_not_stamp(loguru_records):
+def test_non_agent_logging_does_not_stamp(loguru_records: LogRecords):
     from base.lm.usage import log_usage_from_message
 
     msg = AIMessage(
@@ -357,7 +358,7 @@ def test_main_conversation_usage_refuses_missing_identity() -> None:
 
 @pytest.mark.parametrize("cached", [None, 0, 800])
 def test_missing_cache_metering_differs_from_a_measured_zero(
-    cached: int | None, loguru_records: list[dict[str, Any]]
+    cached: int | None, loguru_records: LogRecords
 ) -> None:
     msg = AIMessage(
         content="",

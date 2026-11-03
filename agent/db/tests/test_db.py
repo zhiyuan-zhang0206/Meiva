@@ -144,18 +144,22 @@ class TestFatalProviderReport:
         assert row == (root, "system_note", "system")
 
 
-def test_inbound_messages_table_exists(db_conn):
+def test_inbound_messages_table_exists(db_conn: psycopg.Connection):
     """After schema rename, the inbound_messages table is available."""
-    with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
-        cur.execute("INSERT INTO agents (label) VALUES ('t1') RETURNING id")  # pyright: ignore[reportUnknownMemberType]
-        agent_id = cur.fetchone()[0]  # pyright: ignore[reportUnknownMemberType]
-        cur.execute(  # pyright: ignore[reportUnknownMemberType]
+    with db_conn.cursor() as cur:
+        cur.execute("INSERT INTO agents (label) VALUES ('t1') RETURNING id")
+        row = cur.fetchone()
+        assert row is not None
+        agent_id = row[0]
+        cur.execute(
             "INSERT INTO inbound_messages (agent_id, content, kind, source) "
             "VALUES (%s, 'hi', 'chat', 'kernel') RETURNING id",
             (agent_id,),
         )
-        assert cur.fetchone()[0] is not None  # pyright: ignore[reportUnknownMemberType]
-    db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+        row = cur.fetchone()
+        assert row is not None
+        assert row[0] is not None
+    db_conn.commit()
 
 
 class TestFinalizeClaimedInbounds:
@@ -176,7 +180,9 @@ class TestFinalizeClaimedInbounds:
                 "now() - %s::interval, now() - %s::interval) RETURNING id",
                 (agent_id, content, age, age),
             )
-            row_id = cur.fetchone()[0]  # type: ignore[index]
+            row = cur.fetchone()
+            assert row is not None
+            row_id: int = row[0]
         db_conn.commit()
         return row_id
 

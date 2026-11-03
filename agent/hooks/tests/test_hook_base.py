@@ -24,7 +24,7 @@ class _OkHook(Hook):
         runtime: Runtime[MeivaContext],
         config: RunnableConfig,
         /,
-    ) -> dict | None:
+    ) -> dict[str, object] | None:
         return {"halted": True}
 
 
@@ -39,7 +39,7 @@ class _NamedHook(Hook):
         runtime: Runtime[MeivaContext],
         config: RunnableConfig,
         /,
-    ) -> dict | None:
+    ) -> dict[str, object] | None:
         return None
 
 

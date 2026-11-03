@@ -1,10 +1,11 @@
 """The claim node's chat dispatch, short path, inbound-committed publishes and container mode."""
 
 from collections.abc import Callable
+from typing import cast
 
 import psycopg
 import pytest
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 from langgraph.graph import END
 from langgraph.types import Command
 from psycopg_pool import AsyncConnectionPool
@@ -192,14 +193,15 @@ async def test_claim_chat_kind_appends_humanmessage_with_envelope(
 
     assert isinstance(cmd, Command)
     assert cmd.goto == "before_llm"
-    msgs = cmd.update["messages"]  # type: ignore[index]
+    assert cmd.update is not None
+    msgs = cast("list[AnyMessage]", cmd.update["messages"])
     # Claim appends the batch and nothing else — the standing head (SystemMessage
     # plus the context notes) is laid down by `init_context` before claim runs.
-    assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert len(msgs) == 1
     assert isinstance(msgs[0], HumanMessage)
     # User envelope: a bare "[ts]" header (base/agents/messages/envelope.py).
-    assert msgs[0].content.startswith("[")  # pyright: ignore[reportUnknownMemberType]
-    assert "hello" in msgs[0].content  # pyright: ignore[reportUnknownMemberType]
+    assert str(msgs[0].content).startswith("[")
+    assert "hello" in msgs[0].content
     assert cmd.update["halted"] is False  # type: ignore[index]
 
 
@@ -273,10 +275,12 @@ async def test_claim_multiple_chat_inbounds_all_appended_in_fifo_order(
         ),
     )
 
-    msgs = cmd.update["messages"]  # type: ignore[index]
+    assert cmd.update is not None
+
+    msgs = cast("list[AnyMessage]", cmd.update["messages"])
     # Claim appends the batch alone — the head is `init_context`'s.
-    assert len(msgs) == 3  # pyright: ignore[reportUnknownArgumentType]
-    contents = [m.content for m in msgs]  # pyright: ignore[reportUnknownMemberType]
+    assert len(msgs) == 3
+    contents = [m.content for m in msgs]
     assert "first" in contents[0]
     assert "second" in contents[1]
     assert "third" in contents[2]
@@ -477,7 +481,7 @@ async def test_claim_mixed_batch_publishes_only_chat_ids(
     )
 
     committed = await committed_publishes(live_events)
-    assert len(committed) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert len(committed) == 1
     assert committed[0]["inbound_id"] == chat_id
 
 
@@ -600,7 +604,7 @@ async def test_claim_chat_only_publishes_chat_id_not_lifecycle_in_mixed_batch(
     )
 
     committed = await committed_publishes(live_events)
-    assert len(committed) == 1, f"should emit only 1 InboundCommitted (chat), got {len(committed)}"  # pyright: ignore[reportUnknownArgumentType]
+    assert len(committed) == 1, f"should emit only 1 InboundCommitted (chat), got {len(committed)}"
     assert committed[0]["inbound_id"] == chat_id
 
 
@@ -634,10 +638,11 @@ async def test_claim_chat_message_carries_source_metadata(
             tid,
         ),
     )
-    msgs = cmd.update["messages"]  # type: ignore[index]
+    assert cmd.update is not None
+    msgs = cast("list[AnyMessage]", cmd.update["messages"])
     chat_msg = msgs[0]
     assert isinstance(chat_msg, HumanMessage)
-    assert chat_msg.additional_kwargs.get("meiva_source") == "user"  # pyright: ignore[reportUnknownMemberType]
+    assert chat_msg.additional_kwargs.get("meiva_source") == "user"
 
 
 async def test_claim_node_wrapper_returns_underlying_command(

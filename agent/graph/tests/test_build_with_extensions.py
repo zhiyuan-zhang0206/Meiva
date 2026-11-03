@@ -18,6 +18,7 @@ import pytest
 from base import paths
 from base.agents.context.clients import ClientSet
 from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
+from base.log.tests.log_records import LogRecords
 from base.packages.plugins.enable_config import write_local
 from base.paths import meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
@@ -363,7 +364,7 @@ def _make_external_plugin_with(home: Path, name: str, body: str) -> None:
 
 
 def test_broken_external_plugin_skipped_and_others_load(
-    loguru_records: list[dict], emitted_events: EmittedEvents, unit_home: Path
+    loguru_records: LogRecords, emitted_events: EmittedEvents, unit_home: Path
 ) -> None:
     """Fail-soft contract: a plugin whose plugin.py raises at import is skipped
     with a loud warning; the load proceeds; other plugins load.

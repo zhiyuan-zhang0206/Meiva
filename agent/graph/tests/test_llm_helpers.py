@@ -20,7 +20,7 @@ import httpx2
 import openai
 import psycopg
 import pytest
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import ExecutionInfo, Runtime
 from langgraph.types import Command
@@ -41,6 +41,7 @@ from base.events.live.bus import EventBus
 from base.events.live.projection import Cancelled
 from base.events.live.tests.live_capture import LiveEvents
 from base.host.env.agent_slices import AgentSlices, LlmCallPolicy
+from base.log.tests.log_records import LogRecords
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
@@ -110,18 +111,18 @@ def test_capture_meiva_overview_surfaces_public_sdk_index() -> None:
     )
 
 
-def test_capture_meiva_overview_is_pure_no_stdout_leak(capsys) -> None:
+def test_capture_meiva_overview_is_pure_no_stdout_leak(capsys: pytest.CaptureFixture[str]) -> None:
     """`redirect_stdout(buf)` must capture all meiva.help output into buf, **not**
     leak to main stdout. Lock that the line `with contextlib.redirect_stdout(buf):`
     was not changed to `with contextlib.redirect_stdout(sys.stdout):` — such a mutation
     would make meiva.help actually print to stdout, then capsys.readouterr().out would not be empty."""
-    capsys.readouterr()  # clear any prior output  # pyright: ignore[reportUnknownMemberType]
+    capsys.readouterr()
     overview = capture_meiva_overview()
-    captured = capsys.readouterr()  # pyright: ignore[reportUnknownMemberType]
+    captured = capsys.readouterr()
 
     assert overview, "overview is empty"
-    assert captured.out == "", (  # pyright: ignore[reportUnknownMemberType]
-        f"redirect_stdout ineffective, meiva.help content leaked to main stdout: {captured.out[:200]!r}"  # pyright: ignore[reportUnknownMemberType]
+    assert captured.out == "", (
+        f"redirect_stdout ineffective, meiva.help content leaked to main stdout: {captured.out[:200]!r}"
     )
 
 
@@ -357,8 +358,8 @@ async def test_reasoning_tokens_without_action_end_the_turn(
     assert isinstance(result, Command)
     assert result.goto == "after_exec"
     assert result.update["halted"] is True
-    msgs = result.update["messages"]
-    assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
+    msgs = cast("list[BaseMessage]", result.update["messages"])
+    assert len(msgs) == 1
     assert isinstance(msgs[0], AIMessage)
 
 
@@ -366,7 +367,7 @@ async def test_reasoning_tokens_without_action_end_the_turn(
 # A valid empty completion ends the turn and emits one ordinary halt record.
 async def test_empty_completed_response_ends_normally(
     hosted_resources: HostedTurnResources,
-    loguru_records: list[dict[str, Any]],
+    loguru_records: LogRecords,
     database_gate: ProcessDbGate,
 ) -> None:
     async def _empty_complete() -> AsyncIterator[AIMessageChunk]:
@@ -526,8 +527,8 @@ async def test_thinking_blocks_without_action_end_the_turn(
     assert isinstance(result, Command)
     assert result.goto == "after_exec"
     assert result.update["halted"] is True
-    msgs = result.update["messages"]
-    assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
+    msgs = cast("list[BaseMessage]", result.update["messages"])
+    assert len(msgs) == 1
     assert isinstance(msgs[0], AIMessage)
 
 
@@ -563,8 +564,8 @@ async def test_deepseek_reasoning_content_without_action_ends_the_turn(
     assert isinstance(result, Command)
     assert result.goto == "after_exec"
     assert result.update["halted"] is True
-    msgs = result.update["messages"]
-    assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
+    msgs = cast("list[BaseMessage]", result.update["messages"])
+    assert len(msgs) == 1
     assert isinstance(msgs[0], AIMessage)
 
 
@@ -596,7 +597,7 @@ def astream_raising(exc: Exception) -> AsyncIterator[AIMessageChunk]:
 
 async def test_llm_node_permanent_provider_error_fails_fast_with_structured_fields(
     hosted_resources: HostedTurnResources,
-    loguru_records,
+    loguru_records: LogRecords,
     database_gate: ProcessDbGate,
 ) -> None:
     """A PERMANENT provider error (HTTP 400 — bad request / context length /
@@ -626,8 +627,8 @@ async def test_llm_node_permanent_provider_error_fails_fast_with_structured_fiel
 
     assert exc_info.value.error_class == "permanent"
     assert exc_info.value.status == 400
-    classify_logs = [r for r in loguru_records if r["extra"].get("event") == "llm_provider_error"]  # pyright: ignore[reportUnknownMemberType]
-    assert len(classify_logs) == 1, "exactly one structured classification log per failed call"  # pyright: ignore[reportUnknownArgumentType]
+    classify_logs = [r for r in loguru_records if r["extra"].get("event") == "llm_provider_error"]
+    assert len(classify_logs) == 1, "exactly one structured classification log per failed call"
     assert classify_logs[0]["extra"]["error_class"] == "permanent"
     assert classify_logs[0]["extra"]["status"] == 400
     assert classify_logs[0]["extra"]["fatal"] is True

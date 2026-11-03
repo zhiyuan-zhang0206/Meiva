@@ -1,4 +1,4 @@
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -37,6 +37,7 @@ from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
 from base.events.live.tests.live_capture import LiveEvents
 from base.host.env.agent_slices import AgentSlices
+from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
 from base.paths import meiva_home, resolve_meiva_home
@@ -200,7 +201,7 @@ async def test_auto_compact_hook_returns_none_when_under_threshold(database_gate
 
 
 async def test_auto_compact_hook_clears_history_and_parks_summary(
-    loguru_records: list[dict[str, Any]],
+    loguru_records: LogRecords,
     database_gate: ProcessDbGate,
 ):
     slices = compact_slices(auto_compact_tokens=1)
@@ -414,9 +415,16 @@ async def test_compact_reminder_increments_from_existing(
     assert result["compact"].version == 6
 
 
-def reminder_state(state_cls, *, version=0, shown=False, seen=0, messages=None):
+def reminder_state(
+    state_cls: type[AgentState],
+    *,
+    version: int = 0,
+    shown: bool = False,
+    seen: int = 0,
+    messages: Sequence[AnyMessage] | None = None,
+) -> AgentState:
     return state_cls(
-        messages=_over_threshold_messages() if messages is None else messages,
+        messages=_over_threshold_messages() if messages is None else list(messages),
         halted=False,
         compact=CompactState(version=version, reminder_shown=shown, reminder_seen_version=seen),
     )

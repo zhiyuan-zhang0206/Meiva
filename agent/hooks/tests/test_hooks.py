@@ -7,7 +7,6 @@ config)` (instance is callable). Plugins declare hooks through `PluginContributi
 own come from `framework_hooks()`.
 """
 
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -52,11 +51,13 @@ def _runner(*hooks: Hook, plugin: str | None = None, name: str = "before_llm"):
 class _ReturnHook(Hook):
     """Returns a fixed update dict (or None) every call."""
 
-    def __init__(self, result: dict | None) -> None:
-        self._result = result  # pyright: ignore[reportUnknownMemberType]
+    def __init__(self, result: dict[str, object] | None) -> None:
+        self._result = result
 
-    async def __call__(self, state, runtime, config, /) -> dict | None:
-        return self._result  # pyright: ignore[reportUnknownMemberType]
+    async def __call__(
+        self, state: AgentState, runtime: Runtime[MeivaContext], config: RunnableConfig, /
+    ) -> dict[str, object] | None:
+        return self._result
 
 
 class _RecordHook(Hook):
@@ -66,7 +67,9 @@ class _RecordHook(Hook):
         self._tag = tag
         self._calls = calls
 
-    async def __call__(self, state, runtime, config, /) -> dict | None:
+    async def __call__(
+        self, state: AgentState, runtime: Runtime[MeivaContext], config: RunnableConfig, /
+    ) -> dict[str, object] | None:
         self._calls.append(self._tag)
         return None
 
@@ -118,11 +121,15 @@ async def test_runner_same_key_co_write_raises(database_gate: ProcessDbGate):
     """Two hooks write same key in one pass — fail-loud RuntimeError, naming both hooks (each `Hook.name`, default class name) + conflict key. Old last-wins silent merge would let one hook's `messages` silently overwrite another's (compaction full replace swallowing sibling's note is concrete scenario), so changed to raise; hooks sharing a node must sequence themselves (sibling defers when the other wants to write)."""
 
     class _HookFirst(Hook):
-        async def __call__(self, state, runtime, config, /) -> dict | None:
+        async def __call__(
+            self, state: AgentState, runtime: Runtime[MeivaContext], config: RunnableConfig, /
+        ) -> dict[str, object] | None:
             return {"halted": True}
 
     class _HookSecond(Hook):
-        async def __call__(self, state, runtime, config, /) -> dict | None:
+        async def __call__(
+            self, state: AgentState, runtime: Runtime[MeivaContext], config: RunnableConfig, /
+        ) -> dict[str, object] | None:
             return {"halted": False}  # same key co-write -> raise
 
     with pytest.raises(RuntimeError, match=r"both wrote key 'halted'") as exc:
@@ -197,7 +204,9 @@ async def test_runner_propagates_hook_exceptions(database_gate: ProcessDbGate):
     """fail-fast — hook raises error lets graph explode, no catch."""
 
     class _BoomHook(Hook):
-        async def __call__(self, state, runtime, config, /) -> dict | None:
+        async def __call__(
+            self, state: AgentState, runtime: Runtime[MeivaContext], config: RunnableConfig, /
+        ) -> dict[str, object] | None:
             raise RuntimeError("plugin bug")
 
     runner = _runner(_BoomHook())
@@ -239,7 +248,9 @@ async def test_hook_can_read_agent_id_from_config(database_gate: ProcessDbGate):
     seen: list[int] = []
 
     class _CaptureTid(Hook):
-        async def __call__(self, state, runtime, config, /) -> dict | None:
+        async def __call__(
+            self, state: AgentState, runtime: Runtime[MeivaContext], config: RunnableConfig, /
+        ) -> dict[str, object] | None:
             seen.append(agent_id_from_config(config))
             return None
 
@@ -343,7 +354,7 @@ async def test_activation_key_matches_the_ledger_entry(
 
 
 async def test_runner_emits_one_hook_timing_event_per_pass(
-    loguru_records: list[dict[str, Any]], database_gate: ProcessDbGate
+    loguru_records: LogRecords, database_gate: ProcessDbGate
 ):
     """Every hook-runner pass logs one `hook_timing` event carrying per-hook
     durations — the sub-span replacement that makes a slow before_llm /
@@ -364,7 +375,7 @@ async def test_runner_emits_one_hook_timing_event_per_pass(
 
 
 async def test_runner_skips_hook_timing_on_empty_pass(
-    loguru_records: list[dict[str, Any]], database_gate: ProcessDbGate
+    loguru_records: LogRecords, database_gate: ProcessDbGate
 ):
     """No hooks → no `hook_timing` event (an empty pass has nothing
     to attribute; the event would be pure noise)."""

@@ -135,7 +135,7 @@ def _install_skill(name: str, description: str) -> None:
 
 
 def _tags(msgs: list[AnyMessage]) -> list[str | None]:
-    return [m.additional_kwargs.get("meiva_note_tag") for m in msgs]  # pyright: ignore[reportUnknownMemberType]
+    return [m.additional_kwargs.get("meiva_note_tag") for m in msgs]
 
 
 @pytest.fixture
@@ -162,9 +162,11 @@ async def test_empty_window_lays_down_system_prompt_then_notes(
         _config(tid),
     )
 
-    msgs = cmd.update["messages"]  # type: ignore[index]
+    assert cmd.update is not None
+
+    msgs = cast("list[AnyMessage]", cmd.update["messages"])
     assert isinstance(msgs[0], SystemMessage)
-    assert str(msgs[0].content) != ""  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    assert str(msgs[0].content) != ""
     assert msgs[1:] == notes
     assert cmd.goto == "claim"
 
@@ -232,7 +234,7 @@ async def test_a_broken_sdk_expand_entry_is_named_once_in_the_head(
     msgs: list[AnyMessage] = head.update["messages"]
     tags = _tags(msgs)
     assert "sdk_expand" in tags
-    content = str(msgs[tags.index("sdk_expand")].content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    content = str(msgs[tags.index("sdk_expand")].content)
     assert "meiva.context" in content
     assert "meiva.shell" not in content
 
@@ -280,7 +282,9 @@ async def test_parked_tail_lands_behind_the_head(
         _config(tid),
     )
 
-    msgs = cmd.update["messages"]  # type: ignore[index]
+    assert cmd.update is not None
+
+    msgs = cast("list[AnyMessage]", cmd.update["messages"])
     assert isinstance(msgs[0], SystemMessage)
     assert msgs[1:3] == notes
     assert msgs[3] is summary
@@ -324,8 +328,10 @@ async def test_container_mode_head_is_the_bare_prompt(
         AgentState(), _runtime(None, registry, database_gate=database_gate), _config(tid)
     )
 
-    msgs = cmd.update["messages"]  # type: ignore[index]
-    assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert cmd.update is not None
+
+    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    assert len(msgs) == 1
     assert isinstance(msgs[0], SystemMessage)
 
 
@@ -365,15 +371,20 @@ async def test_head_is_identical_whether_or_not_the_window_had_history(
         _config(tid),
     )
 
-    cold_msgs = cold.update["messages"]  # type: ignore[index]
-    compact_msgs = post_compact.update["messages"]  # type: ignore[index]
-    assert _tags(cold_msgs) == [None, *tags]  # pyright: ignore[reportUnknownArgumentType]
-    assert _tags(compact_msgs) == [  # pyright: ignore[reportUnknownArgumentType]
+    assert cold.update is not None
+
+    cold_msgs = cast("list[AnyMessage]", cold.update["messages"])
+    assert post_compact.update is not None
+    compact_msgs = cast("list[AnyMessage]", post_compact.update["messages"])
+    assert _tags(cold_msgs) == [None, *tags]
+    # meiva:note
+    # Same head, then the summary.
+    assert _tags(compact_msgs) == [
         None,
         *tags,
         None,
-    ]  # same head, then the summary  # pyright: ignore[reportUnknownArgumentType]
-    assert "preloaded_skills" in _tags(compact_msgs)  # pyright: ignore[reportUnknownArgumentType]
+    ]
+    assert "preloaded_skills" in _tags(compact_msgs)
 
 
 @pytest.mark.usefixtures("skills_unit")
@@ -434,12 +445,13 @@ async def test_a_skill_installed_after_establishment_reaches_the_next_turn(
         ),
         _config(tid),
     )
-    head = established.update["messages"]  # type: ignore[index]
+    assert established.update is not None
+    head = cast("list[AnyMessage]", established.update["messages"])
 
     _install_skill("beta", "Beta desc")
 
     # The rendered prompt is frozen — this is the bug, and it stays true.
-    assert "beta" not in str(head[0].content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    assert "beta" not in str(head[0].content)
 
     state = AgentState(messages=head, capabilities=established.update["capabilities"])  # type: ignore[index]
     drift_hook = framework_hooks()["before_llm"][-1]  # the capability-index drift check runs last
@@ -456,8 +468,8 @@ async def test_a_skill_installed_after_establishment_reaches_the_next_turn(
 
     assert update is not None
     (note,) = update["messages"]
-    assert "- `meiva.skills.beta` — Beta desc" in note.content  # pyright: ignore[reportUnknownMemberType]
-    assert update["capabilities"].indexed == {"alpha", "beta"}  # pyright: ignore[reportUnknownMemberType]
+    assert "- `meiva.skills.beta` — Beta desc" in note.content
+    assert update["capabilities"].indexed == {"alpha", "beta"}
 
 
 @pytest.mark.usefixtures("skills_unit")
@@ -570,13 +582,15 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
         _config(tid),
     )
 
-    msgs = reestablished.update["messages"]  # type: ignore[index]
+    assert reestablished.update is not None
+
+    msgs = cast("list[AnyMessage]", reestablished.update["messages"])
     assert isinstance(msgs[0], SystemMessage)
     # The rebuilt index carries the skill the deferred note would have named —
     # which is why deferring costs nothing.
-    assert "- `meiva.skills.beta` — Beta desc" in str(msgs[0].content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    assert "- `meiva.skills.beta` — Beta desc" in str(msgs[0].content)
     # And the compaction's summary made it into the new window.
-    assert summary_text in str(msgs[-1].content)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    assert summary_text in str(msgs[-1].content)
 
 
 # ── checkpoint round-trip ──

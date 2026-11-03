@@ -4,7 +4,6 @@ import os
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 from unittest.mock import AsyncMock
 
 import psycopg
@@ -50,6 +49,7 @@ from base.events.live.bus import EventBus
 from base.events.live.tests.live_capture import LiveEvents
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
+from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
 from base.paths import meiva_home, resolve_meiva_home
@@ -193,7 +193,9 @@ async def test_compact_reminder_silent_when_no_conversation(
     assert result is None
 
 
-async def test_compact_contract_reaches_request_without_resident_self(meiva_compact_loaded):
+async def test_compact_contract_reaches_request_without_resident_self(
+    meiva_compact_loaded: tuple[type[AgentState], Hook],
+) -> None:
     from agent.graph.prompt.system_prompt import build_system_prompt
     from meiva.self import compact
 
@@ -314,7 +316,7 @@ async def test_compact_summary_emits_compact_done(
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    loguru_records: list[dict[str, Any]],
+    loguru_records: LogRecords,
     live_events: LiveEvents,
     *,
     model_catalog: ModelCatalog,

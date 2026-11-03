@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timedelta
-from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -21,6 +20,7 @@ from agent.graph.exec.node import dispatch_exec_result
 from agent.graph.exec.output import OutputLimits, format_elapsed, wrap_code_output
 from base.agents.messages.inbound import InterruptReason
 from base.events.live.tests.live_capture import idle_publisher
+from base.log.tests.log_records import LogRecords
 
 _TIMESTAMP = "[2026-05-06 14:32:05]"
 _TS = _TIMESTAMP  # shorthand
@@ -409,7 +409,7 @@ def test_dispatch_crash_with_output_keeps_the_output(
 
 
 def test_dispatch_boot_crash_emits_the_boot_failed_event(
-    loguru_records: list[dict[str, Any]], limits: OutputLimits, output_now: datetime
+    loguru_records: LogRecords, limits: OutputLimits, output_now: datetime
 ) -> None:
     """P2 #2102: a boot-phase failure (code_reached=False) emits the WARNING
     exec_child_boot_failed event the alert rule reads; the unknown case does not."""

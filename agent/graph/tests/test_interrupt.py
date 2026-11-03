@@ -57,14 +57,14 @@ class TestHasPendingInterrupt:
     async def test_reason_retains_first_pending_command(
         self,
         hosted_resources: HostedTurnResources,
-        db_conn,
+        db_conn: psycopg.Connection,
         aops_pool: AsyncConnectionPool,
         source: str,
         reason: InterruptReason,
     ):
-        tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        _insert(db_conn, tid, "cancel", source=source)  # pyright: ignore[reportUnknownArgumentType]
-        _insert(db_conn, tid, "cancel", source="user")  # pyright: ignore[reportUnknownArgumentType]
+        tid = create_agent(db_conn)
+        _insert(db_conn, tid, "cancel", source=source)
+        _insert(db_conn, tid, "cancel", source="user")
         assert await pending_interrupt_reason(aops_pool, tid) is reason
         async with subscribe_interrupt(aops_pool, tid, resources=hosted_resources) as event:
             await asyncio.wait_for(event.wait(), timeout=_TIMEOUT_S)
@@ -73,70 +73,88 @@ class TestHasPendingInterrupt:
                 InterruptReason.SYSTEM if reason is InterruptReason.USER else InterruptReason.USER
             )
             assert event.reason is reason
-        assert db_conn.execute(  # pyright: ignore[reportUnknownMemberType]
+        assert db_conn.execute(
             "SELECT status,claimed_at FROM inbound_messages WHERE agent_id=%s ORDER BY id",
             (tid,),
         ).fetchall() == [("pending", None), ("pending", None)]
 
-    async def test_false_when_empty(self, db_conn, aops_pool: AsyncConnectionPool):
-        tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    async def test_false_when_empty(
+        self, db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    ):
+        tid = create_agent(db_conn)
         assert await has_pending_interrupt(aops_pool, tid) is False
 
-    async def test_true_on_cancel(self, db_conn, aops_pool: AsyncConnectionPool):
-        tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        _insert(db_conn, tid, "cancel")  # pyright: ignore[reportUnknownArgumentType]
+    async def test_true_on_cancel(
+        self, db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    ):
+        tid = create_agent(db_conn)
+        _insert(db_conn, tid, "cancel")
         assert await has_pending_interrupt(aops_pool, tid) is True
 
-    async def test_true_on_terminate(self, db_conn, aops_pool: AsyncConnectionPool):
-        tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        _insert(db_conn, tid, "terminate")  # pyright: ignore[reportUnknownArgumentType]
+    async def test_true_on_terminate(
+        self, db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    ):
+        tid = create_agent(db_conn)
+        _insert(db_conn, tid, "terminate")
         assert await has_pending_interrupt(aops_pool, tid) is True
 
-    async def test_false_on_chat_only(self, db_conn, aops_pool: AsyncConnectionPool):
-        tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        _insert(db_conn, tid, "chat")  # pyright: ignore[reportUnknownArgumentType]
+    async def test_false_on_chat_only(
+        self, db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    ):
+        tid = create_agent(db_conn)
+        _insert(db_conn, tid, "chat")
         assert await has_pending_interrupt(aops_pool, tid) is False
 
-    async def test_ignores_other_agent(self, db_conn, aops_pool: AsyncConnectionPool):
-        mine = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        other = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        _insert(db_conn, other, "cancel")  # pyright: ignore[reportUnknownArgumentType]
+    async def test_ignores_other_agent(
+        self, db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    ):
+        mine = create_agent(db_conn)
+        other = create_agent(db_conn)
+        _insert(db_conn, other, "cancel")
         assert await has_pending_interrupt(aops_pool, mine) is False
 
-    async def test_ignores_self_initiated_terminate(self, db_conn, aops_pool: AsyncConnectionPool):
+    async def test_ignores_self_initiated_terminate(
+        self, db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    ):
         # meiva.self.terminate() inserts a terminate row source='self' then raises
         # AgentTermination in-thread; the in-flight watcher must NOT fire on it
         # (it would inject a KeyboardInterrupt into the self-terminating thread,
         # racing the clean lifecycle exit). claim still dispatches the row.
-        tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        _insert(db_conn, tid, "terminate", source="self")  # pyright: ignore[reportUnknownArgumentType]
+        tid = create_agent(db_conn)
+        _insert(db_conn, tid, "terminate", source="self")
         assert await has_pending_interrupt(aops_pool, tid) is False
 
-    async def test_external_terminate_still_fires(self, db_conn, aops_pool: AsyncConnectionPool):
+    async def test_external_terminate_still_fires(
+        self, db_conn: psycopg.Connection, aops_pool: AsyncConnectionPool
+    ):
         # a peer / admin / user terminate (non-self source) does interrupt mid-turn
-        tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
-        _insert(db_conn, tid, "terminate", source="agent:9")  # pyright: ignore[reportUnknownArgumentType]
+        tid = create_agent(db_conn)
+        _insert(db_conn, tid, "terminate", source="agent:9")
         assert await has_pending_interrupt(aops_pool, tid) is True
 
     async def test_false_on_unmarked_maintenance_restart(
-        self, db_conn, aops_pool: AsyncConnectionPool, *, machine_identity: MachineIdentityReader
+        self,
+        db_conn: psycopg.Connection,
+        aops_pool: AsyncConnectionPool,
+        *,
+        machine_identity: MachineIdentityReader,
     ):
         # meiva:note
         # The drain waits for the turn boundary: a restart younger than its grace never
         # aborts in-flight work.
-        tid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+        tid = create_agent(db_conn)
         _insert(
-            db_conn,  # pyright: ignore[reportUnknownArgumentType]
+            db_conn,
             tid,
             "restart",
             source="system:restart",
             payload=_MAINTENANCE_PAYLOAD,
         )
-        db_conn.execute(  # pyright: ignore[reportUnknownMemberType]
+        db_conn.execute(
             "INSERT INTO agents_meta(id,status,machine) VALUES(%s,'running',%s)",
             (tid, machine_identity.name()),
         )
-        db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+        db_conn.commit()
         assert await has_pending_interrupt(aops_pool, tid) is False
 
 
