@@ -10,12 +10,13 @@ own come from `framework_hooks()`.
 from unittest.mock import MagicMock
 
 import pytest
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent.hooks import Hook, make_hook_runner
+from agent.nodes import NodeName
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.clock import SYSTEM_TIMERS, Clock
@@ -24,6 +25,7 @@ from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.env.agent_slices import AgentSlices
 from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
@@ -72,6 +74,26 @@ class _RecordHook(Hook):
     ) -> dict[str, object] | None:
         self._calls.append(self._tag)
         return None
+
+
+# meiva:note
+# A runner pass's update, narrowed: LangGraph types `Command.update` as `Any`, and a hook update is
+# `dict[str, object]` (the channel values differ by key).
+def _state_update(cmd: Command[NodeName]) -> dict[str, object]:
+    update = cmd.update
+    assert is_object_dict(update)
+    return update
+
+
+# meiva:note
+# The `messages` arm of an update as messages. `add_messages` answers whatever the hooks wrote, so
+# each element is checked rather than assumed.
+def _messages_of(update: dict[str, object]) -> list[BaseMessage]:
+    written = update["messages"]
+    assert is_object_list(written)
+    messages = [message for message in written if isinstance(message, BaseMessage)]
+    assert len(messages) == len(written)
+    return messages
 
 
 def _empty_state() -> AgentState:
@@ -150,11 +172,8 @@ async def test_runner_reducer_key_co_write_allowed(database_gate: ProcessDbGate)
 
     cmd = await runner(_empty_state(), _empty_runtime(database_gate=database_gate), _empty_config())
     # Both messages should be in the update (reducer merged them)
-    assert cmd.update is not None
-    msgs = cmd.update.get("messages", [])
-    assert len(msgs) == 2
-    assert msgs[0].content == "from hook a"
-    assert msgs[1].content == "from hook b"
+    msgs = _messages_of(_state_update(cmd))
+    assert [m.content for m in msgs] == ["from hook a", "from hook b"]
 
 
 async def test_runner_no_reducer_key_co_write_still_raises(database_gate: ProcessDbGate):
@@ -175,10 +194,10 @@ async def test_runner_co_write_unknown_key_raises(database_gate: ProcessDbGate):
 
 async def test_runner_disjoint_keys_merge(database_gate: ProcessDbGate):
     """Two hooks write disjoint keys — normally merge into one update, no raise."""
-    runner = _runner(_ReturnHook({"halted": True}), _ReturnHook({"goto": "custom"}))
+    runner = _runner(_ReturnHook({"halted": True}), _ReturnHook({"goto": "exec"}))
 
     cmd = await runner(_empty_state(), _empty_runtime(database_gate=database_gate), _empty_config())
-    assert cmd.goto == "custom"
+    assert cmd.goto == "exec"
     assert cmd.update == {"halted": True}
 
 
@@ -193,10 +212,10 @@ async def test_runner_skips_none_returns(database_gate: ProcessDbGate):
 async def test_hook_can_override_goto(database_gate: ProcessDbGate):
     """hook update sets 'goto' → runner uses it instead of default_next.
     'goto' does not enter update fields (popped), used only for routing."""
-    runner = _runner(_ReturnHook({"goto": "custom_target", "halted": True}))
+    runner = _runner(_ReturnHook({"goto": "claim", "halted": True}))
 
     cmd = await runner(_empty_state(), _empty_runtime(database_gate=database_gate), _empty_config())
-    assert cmd.goto == "custom_target"
+    assert cmd.goto == "claim"
     assert cmd.update == {"halted": True}  # goto was popped, only halted remains
 
 
@@ -301,7 +320,7 @@ async def test_each_hook_is_attributed_to_the_plugin_it_was_paired_with(
         "before_llm",
         "llm",
         [
-            ("alpha", _ReturnHook({"goto": "x"})),
+            ("alpha", _ReturnHook({"goto": "exec"})),
             (None, _ReturnHook({"halted": True})),
             ("beta", _ReturnHook({"messages": []})),
         ],
@@ -364,12 +383,12 @@ async def test_runner_emits_one_hook_timing_event_per_pass(
 
     await runner(_empty_state(), _empty_runtime(database_gate=database_gate), _empty_config())
 
-    timing = [r for r in loguru_records if r["extra"].get("event") == "hook_timing"]
+    timing = loguru_records.extras(event="hook_timing")
     assert len(timing) == 1
-    assert "hook before_llm" in timing[0]["message"]
-    assert "_RecordHook" in timing[0]["message"]
-    assert "_ReturnHook" in timing[0]["message"]
-    hook_ms = timing[0]["extra"]["hook_ms"]
+    for fragment in ("hook before_llm", "_RecordHook", "_ReturnHook"):
+        assert len(loguru_records.extras(event="hook_timing", message=fragment)) == 1
+    hook_ms = timing[0]["hook_ms"]
+    assert is_object_dict(hook_ms)
     assert set(hook_ms) == {"_RecordHook", "_ReturnHook"}
     assert all(isinstance(ms, float) and ms >= 0 for ms in hook_ms.values())
 
@@ -381,4 +400,4 @@ async def test_runner_skips_hook_timing_on_empty_pass(
     to attribute; the event would be pure noise)."""
     await _runner()(_empty_state(), _empty_runtime(database_gate=database_gate), _empty_config())
 
-    assert not [r for r in loguru_records if r["extra"].get("event") == "hook_timing"]
+    assert loguru_records.extras(event="hook_timing") == []

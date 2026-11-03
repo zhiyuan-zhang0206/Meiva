@@ -10,6 +10,7 @@ from agent.state_channels import CompactState
 from base.agents.history.hierarchy.chunk_plan import plan_replay
 from base.agents.history.hierarchy.chunks import chunk_threshold
 from base.config import settings
+from base.host.boundary.untyped import object_of
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import UnknownModelWindowError, resolve_context_budget
@@ -61,10 +62,11 @@ def test_an_unknown_model_fails_loudly(*, model_catalog: ModelCatalog) -> None:
 
 @pytest.mark.parametrize("ratio", [0, -0.1, 1.01])
 def test_the_ratio_setting_is_bounded_to_zero_exclusive_one_inclusive(ratio: float) -> None:
-    field = type(settings.agent).model_fields[
-        "MEIVA_UNDERSTANDING_CHUNK_RATIO" and "understanding_chunk_ratio"
-    ]
-    assert field.default == 0.5
+    field = type(settings.agent).model_fields["understanding_chunk_ratio"]
+    # meiva:note
+    # `FieldInfo.default` is `Any` in pydantic's annotations; read it as `object` and narrow.
+    default = object_of(getattr, field, "default")
+    assert isinstance(default, float) and default == 0.5
     with pytest.raises(ValueError):
         type(settings.agent).model_validate({"MEIVA_UNDERSTANDING_CHUNK_RATIO": ratio})
     type(settings.agent).model_validate({"MEIVA_UNDERSTANDING_CHUNK_RATIO": 1})

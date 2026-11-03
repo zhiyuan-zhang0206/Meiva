@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import MagicMock
 
 from langgraph.runtime import Runtime
+from psycopg_pool import AsyncConnectionPool
 
 from base.agents.context import MeivaContext
 from base.clock import SYSTEM_TIMERS, Clock
@@ -17,12 +17,12 @@ from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home, resolve_meiva_home
 
 
-def make_fake_ops_pool() -> None:
+def make_fake_ops_pool() -> AsyncConnectionPool | None:
     return None
 
 
 def placeholder_runtime(
-    ops_pool: Any = None, *, database_gate: ProcessDbGate
+    ops_pool: AsyncConnectionPool | None = None, *, database_gate: ProcessDbGate
 ) -> Runtime[MeivaContext]:
     ctx = MeivaContext(
         meiva_home=resolve_meiva_home(),

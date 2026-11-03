@@ -14,8 +14,6 @@ reads the graph state it is handed.
 
 from __future__ import annotations
 
-from typing import Any
-
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Overwrite
@@ -40,7 +38,7 @@ class _DeliverSecurityFindingsHook(Hook):
         _runtime: Runtime[MeivaContext],
         _config: RunnableConfig,
         /,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, object] | None:
         findings = state.security_findings
         if not findings:
             return None

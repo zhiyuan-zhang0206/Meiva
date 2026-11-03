@@ -48,16 +48,18 @@ from __future__ import annotations
 
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable, Sequence
-from typing import Any
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command
+from pydantic.fields import FieldInfo
 
 from agent import state as _state
-from agent.nodes import NodeName
+from agent.nodes import NodeName, node_name
 from base.agents.context import MeivaContext
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_sequence
 from base.log import logger
 from base.packages.plugins import activation
 from base.packages.plugins.extensions import GraphHook, HookPoint
@@ -91,7 +93,7 @@ class Hook(ABC):
         runtime: Runtime[MeivaContext],
         config: RunnableConfig,
         /,
-    ) -> dict[str, Any] | None: ...
+    ) -> dict[str, object] | None: ...
 
     @property
     def name(self) -> str:
@@ -100,12 +102,17 @@ class Hook(ABC):
         return type(self).__name__
 
 
-def _field_reducer(model_fields: dict[str, Any], key: str) -> Callable[[Any, Any], Any] | None:
-    """The non-trivial reducer the state schema declares for `key`, if any."""
+# meiva:note
+# The non-trivial reducer the state schema declares for `key`, if any. `FieldInfo.metadata` is
+# `list[Any]` in pydantic's own annotations, so the entries are read through `object_sequence`: the
+# `Any` is never bound to a name, and `callable` / `is_messages_reducer_form` narrow each entry. The
+# answer is a callable of whatever arity the schema's channel reducer takes (`add_messages` and the
+# delta form differ), so its parameters stay unconstrained; both call sites pass `(left, right)`.
+def _field_reducer(model_fields: Mapping[str, FieldInfo], key: str) -> Callable[..., object] | None:
     field_info = model_fields.get(key)
     if field_info is None:
         return None
-    for m in field_info.metadata:
+    for m in object_sequence(field_info.metadata):
         if callable(m) and not isinstance(m, type):
             return m
         if _state.is_messages_reducer_form(m):
@@ -118,12 +125,12 @@ def _field_reducer(model_fields: dict[str, Any], key: str) -> Callable[[Any, Any
 
 
 def merge_result(
-    update: dict[str, Any],
+    update: dict[str, object],
     key_writer: dict[str, str],
-    result: dict[str, Any],
+    result: dict[str, object],
     hook_label: str,
     hook_name: HookName,
-    model_fields: dict[str, Any],
+    model_fields: Mapping[str, FieldInfo],
 ) -> None:
     """Fold one hook's update into the pass's update, reducer-aware on same-key co-writes."""
     for key, value in result.items():
@@ -216,7 +223,7 @@ def make_hook_runner(
         runtime: Runtime[MeivaContext],
         config: RunnableConfig,
     ) -> Command[NodeName]:
-        update: dict[str, Any] = {}
+        update: dict[str, object] = {}
         key_writer: dict[str, str] = {}  # key -> name of the hook that set it
         # Snapshot state schema's model_fields once for reducer lookup during
         # co-write detection.  Keys with a non-trivial reducer (e.g. messages →
@@ -230,8 +237,20 @@ def make_hook_runner(
         timings: list[tuple[str, float]] = []
         for plugin, hook in hooks:
             started = time.monotonic()
-            result = await hook(state, runtime, config)
+            returned: object = await hook(state, runtime, config)
             timings.append((hook.name, time.monotonic() - started))
+            # meiva:note
+            # The hook protocol answers `Any` (base/packages/plugins), so the update is narrowed
+            # here rather than trusted: a hook that returns a non-dict is a plugin bug, and this is
+            # the boundary that turns it into one named failure instead of a downstream attribute
+            # error inside the merge.
+            if returned is None:
+                continue
+            if not is_object_dict(returned):
+                raise RuntimeError(
+                    f"{hook.name} returned {type(returned).__name__}, not a state update dict"
+                )
+            result = returned
             if not result:
                 continue
             # Activation telemetry (philosophy §6): a plugin hook that
@@ -243,13 +262,13 @@ def make_hook_runner(
                 plugin,
                 "hooks",
                 hook_name,
-                detail=f"{hook.name} wrote {','.join(sorted(result))}",  # pyright: ignore[reportUnknownArgumentType]
+                detail=f"{hook.name} wrote {','.join(sorted(result))}",
                 model=runtime.context.require_agent().brain.llm_model,
             )
             merge_result(update, key_writer, result, hook.name, hook_name, model_fields)
         _log_hook_timings(hook_name, timings)
         if "goto" in update:
-            next_node = update.pop("goto")
+            next_node = node_name(update.pop("goto"))
         elif callable(default_next):
             next_node = default_next(state)
         else:
