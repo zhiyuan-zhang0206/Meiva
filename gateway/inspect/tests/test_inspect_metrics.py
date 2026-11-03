@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from base.clock.tests.fakes import system_clock
 from base.db import Database
 from base.telemetry.metrics.observed_metrics import MetricObservation, write_observations
+from gateway.http.config import GatewayAppState
 from gateway.inspect import _metrics
 from gateway.inspect.router import build_query_cache, router
 
@@ -32,6 +33,7 @@ def app(database: Database) -> Iterator[FastAPI]:
             await queries.aclose()
 
     application = FastAPI(lifespan=lifespan)
+    application.state = GatewayAppState()
     application.include_router(router)
     application.state.clock = system_clock()
     with database.pool(max_size=2) as pool:

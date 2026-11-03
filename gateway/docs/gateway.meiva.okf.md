@@ -69,7 +69,7 @@ single-module routers. [[agent/db/docs/db.meiva.okf.md]]: Postgres pool.
 
 ## Entry Points
 
-- Inventories: [[entry-points.meiva.okf.md]], [[idempotency/idempotency.meiva.okf.md]].
+- Inventories: [[entry-points.meiva.okf.md]], [[app-state.meiva.okf.md]], [[idempotency/idempotency.meiva.okf.md]].
 
 ## Notes
 

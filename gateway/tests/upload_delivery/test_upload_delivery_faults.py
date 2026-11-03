@@ -10,7 +10,6 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
-from starlette.datastructures import State
 
 from base.agents.upload_delivery import source
 from base.agents.upload_delivery.models import (
@@ -29,6 +28,7 @@ from base.db.tests.lost_ack import LostAckPool
 from base.host.system.tests.fake_commands import fake_host
 from base.paths import resolve_meiva_home, run_dir
 from gateway.app import cluster_auth_middleware
+from gateway.http.config import GatewayAppState
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from gateway.tests.support.db_faults.insert_fault import failing_insert
 from gateway.tests.support.db_faults.update_fault import failing_update
@@ -93,7 +93,7 @@ def test_source_ready_lost_commit_ack_recovers(
     # Assemble the real upload router with its failing ConnectionSource from the start. Borrow
     # the live gateway's native worker and authentication resources; never rewire its pool.
     app = FastAPI()
-    app.state = State(
+    app.state = GatewayAppState(
         {
             "db_pool": LostAckPool(
                 client.app.state.db_pool, lose_on=2, message="source ready response lost"

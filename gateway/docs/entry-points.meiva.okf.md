@@ -10,7 +10,7 @@ tags: []
 ## Entry points
 
 - `gateway/app.py` — FastAPI application factories (`create_app`, `create_app_from_environment`), cold `openapi_schema()`, lifespan, middleware, route mounting
-- `gateway/http/config.py` — frozen `GatewayConfig` (`gateway_config_from_boot`, the one place the root reads settings for handlers; the root also hands it the account home, the memory directory under it and the `rng` every request id, attempt id, upload batch id and session key is drawn from) shared across app assembly, auth, CORS, memory reads, and lifespan; its groups (`display`, `models`, `sse`, `alerts`, `pages`, `memory_search`, ...) carry the tunables a route reads, and `gateway_config(request)` hands it to a handler
+- `gateway/http/config.py` — frozen `GatewayConfig` (`gateway_config_from_boot`, the one place the root reads settings for handlers; the root also hands it the account home, the memory directory under it and the `rng` every request id, attempt id, upload batch id and session key is drawn from) shared across app assembly, auth, CORS, memory reads, and lifespan; its groups (`display`, `models`, `sse`, `alerts`, `pages`, `memory_search`, ...) carry the tunables a route reads, and `gateway_config(request)` hands it to a handler; the same module declares `GatewayAppState`, the typed shape of `app.state`, and `gateway_state(request)` (or the `GatewayStateDep` dependency) is how a handler reads it ([[app-state.meiva.okf.md]])
 - `gateway/__main__.py` — `.venv/bin/python -m gateway` → uvicorn
 - `gateway/cluster/server.py` — the process root `main(home=..., config=..., build_app=...)`: it reads three facts from the booted config and executes the plan `gateway/cluster/serve_plan.py` returns
 - `services/wake/schedule_manager/engine.py` — the schedule execution engine; the ScheduleManager launches `services/wake/schedule_manager/runner.py` to compose the SDK in an independent process
@@ -30,7 +30,7 @@ real `main` in a child process against the throwaway Postgres
 
 `cluster/process_boot.py` owns one immutable first-module-load image shared by
 the Python entry and the ASGI factory entry (`gateway.app:create_app_from_environment`).
-Each root creates its own `GatewayProcess`: its `CodeVersion` and `ProcessDbGate`
+Each root creates its own `GatewayProcess` (`http/process.py`): its `CodeVersion` and `ProcessDbGate`
 are shared by logging and all database handles, never stored as module state.
 The Python entry lends its root to `create_app(..., process_ownership="borrowed")`;
 the ASGI factory entry passes `process_ownership="owned"` so the lifespan closes its root.
@@ -81,7 +81,7 @@ Every owner the process builds reads that value — the event writer and the bus
 (`event_bus_config_from_config`), the config authority's `<home>/.env`, the insights
 socket, the skills load dir, a deleted schedule's work dir, the health identity, the
 generation ledger and session key behind `cluster_credential` / `session_mints`. Request paths read
-`app.state.gateway_process.home`; none resolves the process default again, so a second
+`gateway_state(request).gateway_process.home`; none resolves the process default again, so a second
 app in one process reads none of the first root's files. `GatewayProcess.home` keeps the
 entry's unresolved string, so `/api/health` still reports the exact `$MEIVA_HOME` that
 `probe_unit_home` compares against; owners that take a filesystem path resolve it

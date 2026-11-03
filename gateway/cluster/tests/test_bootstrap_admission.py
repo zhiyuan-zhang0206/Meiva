@@ -25,6 +25,7 @@ from base.host.net.tests.local_http import serve_asgi
 from base.lm.catalog import ModelCatalog
 from gateway.cluster.bootstrap import router
 from gateway.http.config import placeholder_config
+from gateway.http.model_catalog import CatalogAppState
 
 _SECRET = "bootstrap-admission-test"  # noqa: S105 — isolated test credential
 _TURN_LIMIT = "MEIVA_HOST_MAX_CONCURRENT_TURNS"
@@ -87,15 +88,19 @@ def gateway_client(
     """Own the isolated router's admission cache without a full Gateway lifespan."""
     app = FastAPI()
     machine_token_acceptance: AcceptanceCache = {}
-    app.state.machine_token_acceptance = machine_token_acceptance
-    app.state.config_authority = served_authority
-    app.state.catalog = model_catalog
-    app.state.gateway_process = SimpleNamespace(home=gateway_home)
-    app.state.gateway_config = replace(
-        placeholder_config(),
-        cluster_secret=_SECRET,
-        memory_root=gateway_home / "memory",
-        user_home=gateway_home,
+    app.state = CatalogAppState(
+        {
+            "machine_token_acceptance": machine_token_acceptance,
+            "config_authority": served_authority,
+            "catalog": model_catalog,
+            "gateway_process": SimpleNamespace(home=gateway_home),
+            "gateway_config": replace(
+                placeholder_config(),
+                cluster_secret=_SECRET,
+                memory_root=gateway_home / "memory",
+                user_home=gateway_home,
+            ),
+        }
     )
     app.include_router(router)
     with TestClient(app) as client:

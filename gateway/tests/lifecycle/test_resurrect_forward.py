@@ -26,7 +26,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from gateway.agents import lifecycle as lifecycle_module
 from gateway.agents.launch import forward
-from gateway.http.config import GatewayConfig
+from gateway.http.config import GatewayAppState, GatewayConfig
 from gateway.tests.auth.gateway_config import (
     gateway_test_client,
     gateway_test_config,
@@ -299,6 +299,7 @@ def test_resurrect_needs_only_the_serving_apps_resources(
         database.pool(max_size=2) as pool,
     ):
         serving_app = FastAPI()
+        serving_app.state = GatewayAppState()
         serving_app.state.db = database
         serving_app.state.db_pool = pool
         serving_app.state.gateway_config = gateway_test_config()
