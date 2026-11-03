@@ -32,14 +32,12 @@ Auth split by consumer:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from datetime import timedelta
 from typing import LiteralString
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from psycopg import Cursor
-from psycopg.rows import class_row, kwargs_row
+from psycopg.rows import kwargs_row
 from pydantic import TypeAdapter
 
 from base.db.transaction import write_transaction
@@ -61,23 +59,10 @@ from gateway.events.sse import event_stream
 from gateway.events.sse_frames import SseCadence
 from gateway.http.auth.webhook import authenticate_webhook
 from gateway.http.config import gateway_clock, gateway_config, gateway_state
+from gateway.http.db_rows import count_one
 from ops.alerts import ALERTS_CHANNEL, AlertRow, AlertSeverity, AlertStatus, publish_alert_rows
 
 router = APIRouter()
-
-
-# meiva:note
-# The `n` of a `SELECT count(*) AS n` statement.
-@dataclass(frozen=True)
-class _CountRow:
-    n: int
-
-
-def _count(cur: Cursor[_CountRow]) -> int:
-    row = cur.fetchone()
-    if row is None:
-        raise RuntimeError("count(*) returned no row")
-    return row.n
 
 
 _log = logging.getLogger(__name__)
@@ -252,10 +237,7 @@ def list_alerts(
     # - unresolved: every live instance in the severity scope. Trivially
     #   0 when the caller already scopes to resolved.
     # - total: rows matching the filters before the limit.
-    with (
-        gateway_state(request).db_pool.connection() as conn,
-        conn.cursor(row_factory=class_row(_CountRow)) as cur,
-    ):
+    with gateway_state(request).db_pool.connection() as conn:
         if status == "resolved":
             unresolved_count = 0
         else:
@@ -264,13 +246,12 @@ def list_alerts(
             if severity is not None:
                 base.append("severity = %s")
                 base_params.append(severity)
-            cur.execute(
+            unresolved_count = count_one(
+                conn,
                 f"SELECT count(*) AS n FROM alerts WHERE {' AND '.join(base)}",  # noqa: S608 — fixed fragments
                 base_params,
             )
-            unresolved_count = _count(cur)
-        cur.execute(f"SELECT count(*) AS n FROM alerts WHERE {where_sql}", params)  # noqa: S608 — fixed fragments
-        total = _count(cur)
+        total = count_one(conn, f"SELECT count(*) AS n FROM alerts WHERE {where_sql}", params)  # noqa: S608 — fixed fragments
 
         select_sql = (
             "SELECT id, status, severity, alertname, labels, annotations, starts_at, ends_at,"  # noqa: S608 — where_sql built from fixed fragments only
