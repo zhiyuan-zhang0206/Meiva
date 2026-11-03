@@ -20,6 +20,7 @@ from agent.graph.llm_errors import (
     FatalLLMStreamError,
     FatalProviderError,
     LLMRetryBudgetExceededError,
+    LLMStreamTruncatedError,
 )
 from agent.graph.node_log import StallConfig, node_lifecycle
 from agent.graph.tool_calls import code_from_args
@@ -29,6 +30,7 @@ from agent.nodes import AFTER_EXEC, BEFORE_EXEC
 from agent.state_channels import CircuitState
 from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.messages.kwargs import read_meiva_kwargs
+from base.agents.observation.ended_with import BUDGET
 from base.events.live.projection import TokenUsage
 from base.events.live.publisher import AgentEventPublisher
 from base.lm.catalog import ModelCatalog
@@ -179,7 +181,22 @@ def _note_failed_attempt(
 
 
 # meiva:note
-# Every turn_end record carries its owning agent's id, passed explicitly at the emit site: the process-wide log binding is the no-agent sentinel and the Inspector activity projection drops unattributed records.
+# `_model_halted` decides which attempts hold their record for the turn boundary: the ones
+# that stopped the model loop themselves. A cancelled attempt returns halted too, but commits
+# no message — its partial generation was discarded — so it is not a turn-end decision and
+# keeps the plain record.
+def _model_halted(update: dict[str, object] | None) -> bool:
+    return bool(update) and update.get("halted") is True and "messages" in update
+
+
+# meiva:note
+# Whether a budget rail, rather than a provider or a code fault, ended the turn.
+def _spent_budget(exc: BaseException) -> bool:
+    return isinstance(exc, (LLMRetryBudgetExceededError, LLMStreamTruncatedError))
+
+
+# meiva:note
+# Every turn_end record carries its owning agent's id, passed explicitly at the emit site: the process-wide log binding is the no-agent sentinel and the Inspector activity projection drops unattributed records. The record of an attempt that halts the model loop is emitted by the turn boundary instead (claim), which is the only place that knows whether the turn ended there and the reason it ended with.
 # meiva:link agent/graph/llm/docs/turn-records.meiva.okf.md
 async def llm_attempt(
     state: _state.AgentState,
@@ -220,6 +237,7 @@ async def llm_attempt(
                 agent_id=agent_id,
                 duration_seconds=time.monotonic() - turn_start,
                 ok=False,
+                **({"ended_with": BUDGET} if _spent_budget(exc) else {}),
             )
             raise
         else:
@@ -228,14 +246,21 @@ async def llm_attempt(
                 outcome="succeeded",
                 now=runtime.context.require_clock().now().timestamp(),
             )
-            logger.info(
-                "turn ended in {duration_seconds:.2f}s ok=True",
-                event="turn_end",
-                agent_id=agent_id,
-                duration_seconds=time.monotonic() - turn_start,
-                ok=True,
-            )
             update = result.update
+            if update is not None and _model_halted(update):
+                # meiva:note
+                # The model stopped on its own, so this attempt's record belongs to the turn
+                # boundary: only claim knows whether the turn ends here, and only the agent
+                # knows why it stopped. Hold the measured call; the boundary emits it once.
+                update["turn_end_held_seconds"] = time.monotonic() - turn_start
+            else:
+                logger.info(
+                    "turn ended in {duration_seconds:.2f}s ok=True",
+                    event="turn_end",
+                    agent_id=agent_id,
+                    duration_seconds=time.monotonic() - turn_start,
+                    ok=True,
+                )
             if state.circuit.open and update is not None and "messages" in update:
                 update["circuit"] = CircuitState()
                 logger.info(

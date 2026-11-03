@@ -33,9 +33,19 @@ class LlmUsage(TypedDict):
     source: NotRequired[str]
 
 
+# meiva:note
+# `ended_with` is why the turn ended, from the closed set in
+# `base/agents/observation/ended_with.py`: `no_input` and `budget` are the loop's own
+# decision, `done` / `waiting:<object>` / `deferred:time` the agent's declaration. It is
+# absent when the loop could not name a reason (a turn that continued past its halt, a
+# terminate or restart, an aborted call), and a value outside the set makes the record
+# invalid rather than free text.
+# meiva:link agent/graph/llm/docs/turn-records.meiva.okf.md
 class TurnEnd(TypedDict):
     ok: bool
     duration_seconds: float
+    ended_with: NotRequired[str]
+    ended_with_reason: NotRequired[str]
 
 
 class LlmUsageMeteringFailed(TypedDict):

@@ -38,6 +38,15 @@ from base.telemetry.audit_events import prepare_event_log, record_audit_reported
 # rail").
 _RECURSION_LIMIT_INF = 2**31 - 1
 
+# meiva:note
+# A turn aborted by a fatal error ends without a turn_end value; dropping the fields here
+# keeps a declaration from the aborted turn out of the next one.
+_NO_TURN_END: dict[str, object] = {
+    "ended_with": None,
+    "ended_with_reason": None,
+    "turn_end_held_seconds": None,
+}
+
 
 def emit_error_event(
     ctx: MeivaContext,
@@ -456,7 +465,11 @@ async def settle_turn_failure(
                 emit_reports=emit_reports,
                 deferred=pending.errors,
             )
-    await graph.aupdate_state(config, pending.prepared_update)
+    # meiva:note
+    # The failed attempt already reported its own ok=False record, so an aborted turn writes
+    # no turn_end value: a declaration it carried is dropped here instead of being inherited
+    # by the next turn (`agent/graph/claim/turn_end.py`).
+    await graph.aupdate_state(config, {**pending.prepared_update, **_NO_TURN_END})
     from agent.impersonation_handoff import flush_checkpoint
 
     await flush_checkpoint(checkpointer, agent_id)
