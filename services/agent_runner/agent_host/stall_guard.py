@@ -29,9 +29,10 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 
 from agent.state import BaseAgentState
-from agent.turn.runloop import emit_error_event
+from agent.turn.runloop import emit_error_event, is_settled_invocation_abort
 from base.agents.context import MeivaContext
 from base.log import logger
+from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
 from services.agent_runner.agent_host.runtime import StallTiming
 
 _Graph = CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState]
@@ -55,6 +56,25 @@ class TurnStallTimeoutError(RuntimeError):
     ``HostRestartRequiredError``, which is raised when the cancel refuses to
     unwind: the daemon there must exit, here it must not.
     """
+
+
+# meiva:note
+# Retrieve a finished foreground invocation's result, recording only unsettled errors into
+# `HostedServiceResources` so handled turn aborts do not fail daemon shutdown.
+# meiva:link services/docs/agent_runner_side/agent_runner_side.meiva.okf.md
+def _unwrap_invocation_result(
+    service: HostedServiceResources,
+    scope: HostedTurnResources,
+    invoke_task: asyncio.Task[dict[str, object]],
+) -> dict[str, object]:
+    try:
+        return invoke_task.result()
+    except asyncio.CancelledError:
+        raise
+    except BaseException as error:
+        if not is_settled_invocation_abort(error):
+            service.record_failure(scope, error, name=invoke_task.get_name())
+        raise
 
 
 # meiva:note
@@ -84,9 +104,10 @@ async def run_invocation_with_stall_guard(
     timing: StallTiming,
 ) -> dict[str, object]:
     ctx.turn_progress.reset(agent_id)
-    if ctx.hosted_resources is None:
+    scope = ctx.hosted_resources
+    if scope is None:
         raise RuntimeError("a hosted invocation requires its original resource scope")
-    service = ctx.hosted_resources.require_service()
+    service = scope.require_service()
     invoke_task = asyncio.create_task(
         graph.ainvoke(  # pyright: ignore[reportUnknownMemberType, reportAssignmentType]
             input_update,  # pyright: ignore[reportArgumentType, reportUnknownMemberType]
@@ -95,7 +116,7 @@ async def run_invocation_with_stall_guard(
         ),
         name=f"turn-ainvoke-{agent_id}",
     )
-    service.retain_task(ctx.hosted_resources, invoke_task)
+    service.hold_task(scope, invoke_task)
     try:
         while True:
             done, _pending = await asyncio.wait(
@@ -103,38 +124,47 @@ async def run_invocation_with_stall_guard(
                 timeout=timing.scan_interval_s,
             )
             if invoke_task in done:
-                return invoke_task.result()
+                return _unwrap_invocation_result(service, scope, invoke_task)
             age = ctx.turn_progress.age_s(agent_id)
             if age is not None and age >= timing.no_progress_timeout_s:
                 return await _abort_stalled_invocation(
-                    agent_id, ctx, invoke_task, age, unwind_timeout_s=timing.unwind_timeout_s
+                    agent_id,
+                    ctx,
+                    service,
+                    scope,
+                    invoke_task,
+                    age,
+                    unwind_timeout_s=timing.unwind_timeout_s,
                 )
     except asyncio.CancelledError:
         if not invoke_task.done():
             invoke_task.cancel()
             done, _ = await asyncio.wait({invoke_task}, timeout=timing.unwind_timeout_s)
             if invoke_task not in done:
+                service.retain_task(scope, invoke_task)
                 raise HostRestartRequiredError("graph did not unwind after cancellation") from None
-            if not invoke_task.cancelled():
-                invoke_task.result()
+        if not invoke_task.cancelled():
+            _unwrap_invocation_result(service, scope, invoke_task)
         raise
 
 
+# meiva:note
+# Cancel a stalled invocation, emit one best-effort SSE `Error` event so the frontend shows the
+# abort instead of silence, and classify the unwind using `asyncio.wait` (never
+# `asyncio.wait_for(asyncio.shield(...))`, whose outer shield hangs when the inner task cancels):
+# returns the result if the invocation finished before the cancel landed, raises
+# `TurnStallTimeoutError` when it unwound cancelled, and retains the straggler via `retain_task`
+# before raising `HostRestartRequiredError` when it refused to unwind.
 async def _abort_stalled_invocation(
     agent_id: int,
     ctx: MeivaContext,
+    service: HostedServiceResources,
+    scope: HostedTurnResources,
     invoke_task: asyncio.Task[dict[str, object]],
     age_s: float,
     *,
     unwind_timeout_s: float,
 ) -> dict[str, object]:
-    """Cancel a stalled invocation and classify the outcome.
-
-    Returns the result only in the narrow race where the invocation finished
-    on its own between the stall decision and the cancel landing. Raises
-    `TurnStallTimeoutError` when it unwound cancelled — the abort — and
-    `HostRestartRequiredError` when it refused to unwind.
-    """
     logger.error(
         "hosted turn for agent {agent_id} made no progress for "
         "{no_progress_s:.0f}s — aborting the invocation; the next wake "
@@ -143,9 +173,6 @@ async def _abort_stalled_invocation(
         agent_id=agent_id,
         no_progress_s=age_s,
     )
-    # The "turn result failed to land" half of the mandate: one Error event on
-    # this agent's SSE — the frontend shows the abort instead of silence.
-    # Best-effort by design (emit_error_event suppresses).
     emit_error_event(
         ctx,
         agent_id,
@@ -153,13 +180,9 @@ async def _abort_stalled_invocation(
         "Send a new message to start new work.",
     )
     invoke_task.cancel()
-    # `asyncio.wait`, NOT `asyncio.wait_for(asyncio.shield(...))`: a shield
-    # wrapping a task that gets cancelled never completes its own future —
-    # the bounded unwind would hang (verified by reproduction; see the test's
-    # refuses-to-unwind case for the intended refusal shape). `asyncio.wait`
-    # reports the straggler instead, and never cancels the task itself.
     done, _pending = await asyncio.wait({invoke_task}, timeout=unwind_timeout_s)
     if invoke_task not in done:
+        service.retain_task(scope, invoke_task)
         logger.error(
             "hosted turn for agent {agent_id} did not unwind within the "
             "bounded window after a stall-cancel — the daemon must exit; "
@@ -171,6 +194,6 @@ async def _abort_stalled_invocation(
             f"hosted turn for agent {agent_id} did not unwind after a stall-cancel"
         ) from None
     try:
-        return invoke_task.result()
+        return _unwrap_invocation_result(service, scope, invoke_task)
     except asyncio.CancelledError:
         raise TurnStallTimeoutError(agent_id) from None

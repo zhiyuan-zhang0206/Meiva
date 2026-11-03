@@ -33,7 +33,7 @@ class FatalLLMStreamError(LLMStreamError):
 # names WHAT bound expired — "ttft" (no first chunk), "mid-stream" (gap after at
 # least one chunk) or "total" (the per-attempt duration ceiling); it rides the
 # exception for diagnostics without parsing the message.
-# meiva:link agent/graph/llm/docs/llm.meiva.okf.md
+# meiva:link agent/graph/llm/docs/failures-and-retry.meiva.okf.md
 class LLMStreamStallTimeoutError(FatalLLMStreamError):
     def __init__(self, message: str, *, stage: str = "unknown") -> None:
         super().__init__(message)
@@ -167,48 +167,66 @@ def classify_and_log_provider_error(
     )
 
 
-class LLMStreamCorruptedError(LLMStreamError):
-    """LLM stream accumulated to final_msg but with incomplete protocol fields (upstream drift).
+# meiva:note
+# Exhausted transient provider retries in `llm_node` become a `FatalLLMStreamError` at the
+# hosted invocation boundary (`PendingTurnFailure.from_invocation_error`) so `llm_node`
+# keeps re-raising the original transient exception while the host settles the turn with
+# `halted=True` and structured `(error_class, provider, status)` diagnostics without opening
+# the permanent heartbeat circuit breaker.
+# meiva:link agent/graph/llm/docs/failures-and-retry.meiva.okf.md
+class LLMRetryExhaustedError(FatalLLMStreamError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_class: str | None = None,
+        provider: str | None = None,
+        status: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.error_class = error_class
+        self.provider = provider
+        self.status = status
 
-    Covers terminal-frame drift:
-    - terminal reason missing from response_metadata — validator cannot determine
-      whether the model stopped the turn normally; fallthrough must not treat
-      it as idle.
-    - terminal reason claims a tool call but no tool_calls survived (bug 169).
 
-    Validate immediately after chunks assemble final_msg. Missing fields raise
-    once through the graph failure path without automatically re-streaming.
-
-    The thinking-block drift (#167/#168: signature_delta sent but thinking_delta
-    missed) is no longer in this class — `_sanitize_thinking_blocks` repairs it
-    in place. A signature-only block filled with `thinking=""` round-trips the
-    DeepSeek endpoint (probed 2026-07-25: 200; the key-missing shape 400s with
-    "missing field `thinking`"), so the turn keeps its text/tool blocks instead
-    of aborting into a doubled re-request.
-    """
+# meiva:link agent/graph/llm/docs/failures-and-retry.meiva.okf.md
+def retry_exhausted_error(exc: Exception) -> LLMRetryExhaustedError:
+    classification = classify_error(exc)
+    error = LLMRetryExhaustedError(
+        f"LLM transient provider retries exhausted "
+        f"(HTTP {classification.status}, provider={classification.provider}): {exc}",
+        error_class=classification.error_class.value,
+        provider=classification.provider,
+        status=classification.status,
+    )
+    error.__cause__ = exc
+    return error
 
 
-class LLMStreamUnexpectedStopReasonError(LLMStreamError):
-    """LLM stream finished but the terminal reason is not in the normal-completion set.
+# meiva:note
+# LLM stream accumulated to `final_msg` with incomplete protocol fields (upstream drift):
+# - terminal reason missing from `response_metadata` — validator cannot determine whether
+#   the model stopped normally and must not fall through as idle.
+# - terminal reason claims a tool call while `final_msg.tool_calls` is empty (bug 169).
+# - `final_msg.usage_metadata` missing on an otherwise normal terminal frame (agent 113).
+#
+# Subclasses `FatalLLMStreamError` so hosted invocations settle the turn abort (`halted=True`
+# plus the user-visible `Error` event) without re-streaming or crashing the turn.
+# Thinking-block drift (#167/#168: `signature_delta` without `thinking_delta`) is repaired in
+# place by `sanitize_thinking_blocks` rather than raised here.
+# meiva:link agent/graph/llm/docs/failures-and-retry.meiva.okf.md
+class LLMStreamCorruptedError(FatalLLMStreamError):
+    pass
 
-    All non-normal terminal reasons are non-idle abnormal states. With no
-    continuation contract, raise once through turn_end ok=False and Error event
-    publication; do not automatically re-stream the request.
 
-    Known non-normal terminal reasons (across providers):
-    - truncation: server output budget exhausted. See subclass `LLMStreamTruncatedError`.
-    - safety / content_filter / recitation: model declined; should surface to user.
-    - provider-specific abnormal values (stop_sequence, pause_turn, etc.): raise
-      to surface; framework has no continuation protocol for them.
-
-    Catching the parent class catches all "abnormal stop turns"; subclass for
-    distinguishing truncation.
-
-    `stop_reason` is exposed as an attribute via `__init__` (not just stuffed
-    in f-string), so the catch site can programmatically dispatch without
-    regex-parsing the message.
-    """
-
+# meiva:note
+# LLM stream finished with a non-normal terminal reason (truncation via subclass
+# `LLMStreamTruncatedError`, safety/content_filter/recitation, or provider-specific
+# `stop_sequence` / `pause_turn`). Subclasses `FatalLLMStreamError` so the turn settles once
+# with `halted=True` and a user-visible `Error` event without automatic re-streaming, while
+# exposing `stop_reason` and `output_tokens` directly as attributes.
+# meiva:link agent/graph/llm/docs/failures-and-retry.meiva.okf.md
+class LLMStreamUnexpectedStopReasonError(FatalLLMStreamError):
     def __init__(
         self,
         message: str,

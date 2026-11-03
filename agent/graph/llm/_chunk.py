@@ -124,44 +124,29 @@ def validate_stop_reason(final_msg: AIMessage, *, catalog: ModelCatalog) -> None
         )
 
 
+# meiva:note
+# Fold streamed chunks into one `AIMessage` (`message_chunk_to_message` narrows chat-model
+# chunks whose langchain stubs remain untyped), repair missing `thinking` keys in place
+# (#167/#168 DeepSeek drift), validate the terminal stop reason first so an SSE stream cut off
+# before its terminal frame reports missing-terminal-reason diagnostics, and then reject a
+# missing `usage_metadata` on an otherwise normal terminal frame as `LLMStreamCorruptedError`
+# (agent 113 metadata-loss guard).
+# meiva:link agent/graph/llm/docs/failures-and-retry.meiva.okf.md
 def assemble_final_message(chunks: list[AIMessageChunk], *, catalog: ModelCatalog) -> AIMessage:
-    """Fold streamed chunks into a single AIMessage + fail-fast validation.
-
-    Accumulation via chunk addition merges content + usage_metadata;
-    `message_chunk_to_message` converts to AIMessage. Then the guards:
-    usage_metadata must exist at stream end (agent 113 metadata-loss
-    incident), thinking blocks missing the `thinking` field are repaired in
-    place (167/168 DeepSeek drift), and the terminal stop reason is validated
-    (missing / truncated / unexpected → fail-fast).
-    """
     accumulated = chunks[0]
     for c in chunks[1:]:
         accumulated = accumulated + c
     final_msg = message_chunk_to_message(accumulated)
-    assert isinstance(final_msg, AIMessage)  # noqa: S101 — chunks from chat model are always AIMessage
-    # fail-fast: agent 113 once hit "final_msg entered state with all metadata
-    # empty" (additional_kwargs={}, usage_metadata=None, response_metadata={}),
-    # but content + tool_calls intact. The next turn DeepSeek server 400'd
-    # the process because of missing reasoning_content. At the time we could
-    # not locate which path produced it (cancel? hook? saver?); adding this
-    # assert is so the next collision raises immediately on site, traceback
-    # pointing at the culprit. usage_metadata must exist at stream end
-    # (providers emit it in the final chunk); missing = abnormal state
-    # (agent 113 metadata-loss incident).
-    _ak_keys = list(final_msg.additional_kwargs.keys())  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    _rm_keys = list((final_msg.response_metadata or {}).keys())  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    _content_len = len(final_msg.content) if isinstance(final_msg.content, str) else -1  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    _tool_calls_len = len(final_msg.tool_calls)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    assert final_msg.usage_metadata is not None, (  # noqa: S101
-        f"final_msg.usage_metadata is None — abnormal state (additional_kwargs={_ak_keys}, "
-        f"response_metadata={_rm_keys}, content_len={_content_len}, tool_calls={_tool_calls_len})"
-    )
-    # Repair thinking blocks missing the `thinking` field (167 / 168 DeepSeek
-    # drift: signature_delta sent but thinking_delta missed) BEFORE final_msg
-    # enters state.messages — the key-missing shape 400s the next turn's
-    # request, while the filled `thinking=""` shape round-trips (probed
-    # 2026-07-25). In-place repair keeps the turn's text/tool blocks instead
-    # of aborting into a doubled re-request.
+    assert isinstance(final_msg, AIMessage)  # noqa: S101
     sanitize_thinking_blocks(final_msg)
     validate_stop_reason(final_msg, catalog=catalog)
+    if final_msg.usage_metadata is None:
+        ak_keys = list(final_msg.additional_kwargs.keys())  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+        rm_keys = list((final_msg.response_metadata or {}).keys())  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+        content_len = len(final_msg.content) if isinstance(final_msg.content, str) else -1  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+        tool_calls_len = len(final_msg.tool_calls)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+        raise LLMStreamCorruptedError(
+            f"final_msg.usage_metadata is None — abnormal state (additional_kwargs={ak_keys}, "
+            f"response_metadata={rm_keys}, content_len={content_len}, tool_calls={tool_calls_len})"
+        )
     return final_msg

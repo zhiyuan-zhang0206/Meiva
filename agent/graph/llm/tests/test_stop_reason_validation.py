@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import time
 
+import anthropic
+import httpx2
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langchain_core.runnables import RunnableConfig
 
 from agent.graph.llm._backoff import Attempt
-from agent.graph.llm._chunk import validate_stop_reason
+from agent.graph.llm._chunk import assemble_final_message, validate_stop_reason
 from agent.graph.llm.node import llm_attempt
 from agent.graph.llm.tests.llm_support import (
     ScriptedModel,
@@ -16,10 +18,13 @@ from agent.graph.llm.tests.llm_support import (
     published_payloads,
 )
 from agent.graph.llm_errors import (
+    FatalLLMStreamError,
+    LLMRetryExhaustedError,
     LLMStreamCorruptedError,
     LLMStreamError,
     LLMStreamTruncatedError,
     LLMStreamUnexpectedStopReasonError,
+    retry_exhausted_error,
 )
 from agent.state import AgentState
 from base.db.code_version_gate import ProcessDbGate
@@ -235,13 +240,65 @@ async def test_llm_node_validator_wired(
 
 
 def test_exception_hierarchy() -> None:
+    assert issubclass(LLMStreamUnexpectedStopReasonError, FatalLLMStreamError)
     assert issubclass(LLMStreamUnexpectedStopReasonError, LLMStreamError)
+    assert issubclass(LLMStreamCorruptedError, FatalLLMStreamError)
     assert issubclass(LLMStreamCorruptedError, LLMStreamError)
     assert issubclass(LLMStreamTruncatedError, LLMStreamUnexpectedStopReasonError)
+    assert issubclass(LLMStreamTruncatedError, FatalLLMStreamError)
+    assert issubclass(LLMRetryExhaustedError, FatalLLMStreamError)
     msg = AIMessage(
         content="", response_metadata={"model_provider": "anthropic", "stop_reason": "max_tokens"}
     )
     with pytest.raises(LLMStreamError):
         validate_stop_reason(msg, catalog=build_model_catalog(home=meiva_home()))
+    with pytest.raises(FatalLLMStreamError):
+        validate_stop_reason(msg, catalog=build_model_catalog(home=meiva_home()))
     with pytest.raises(LLMStreamUnexpectedStopReasonError):
         validate_stop_reason(msg, catalog=build_model_catalog(home=meiva_home()))
+
+
+def test_assemble_final_message_eof_drop_without_stop_reason_or_usage_raises_corrupted() -> None:
+    chunks = [
+        AIMessageChunk(
+            content="partial output",
+            response_metadata={"model_provider": "anthropic"},
+        )
+    ]
+    with pytest.raises(LLMStreamCorruptedError, match=r"terminal reason missing") as exc_info:
+        assemble_final_message(chunks, catalog=build_model_catalog(home=meiva_home()))
+    assert isinstance(exc_info.value, FatalLLMStreamError)
+
+
+def test_assemble_final_message_end_turn_without_usage_metadata_raises_corrupted() -> None:
+    chunks = [
+        AIMessageChunk(
+            content="hello",
+            response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
+        )
+    ]
+    with pytest.raises(
+        LLMStreamCorruptedError,
+        match=r"final_msg\.usage_metadata is None.*additional_kwargs=.*response_metadata=.*content_len=5.*tool_calls=0",
+    ) as exc_info:
+        assemble_final_message(chunks, catalog=build_model_catalog(home=meiva_home()))
+    assert isinstance(exc_info.value, FatalLLMStreamError)
+
+
+def test_retry_exhausted_error_preserves_transient_503_classification_and_cause() -> None:
+    response = httpx2.Response(503, request=httpx2.Request("POST", "https://audit.invalid"))
+    raw = anthropic.InternalServerError(
+        "Service unavailable",
+        response=response,
+        body={
+            "type": "error",
+            "error": {"type": "service_unavailable_error", "message": "Service unavailable"},
+        },
+    )
+    wrapped = retry_exhausted_error(raw)
+    assert isinstance(wrapped, LLMRetryExhaustedError)
+    assert isinstance(wrapped, FatalLLMStreamError)
+    assert wrapped.error_class == "transient"
+    assert wrapped.provider == "anthropic"
+    assert wrapped.status == 503
+    assert wrapped.__cause__ is raw

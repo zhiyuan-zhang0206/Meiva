@@ -29,9 +29,14 @@ handles, clients and pools until the daemon's existing hard exit; expiry is not
 resource settlement. Successful join precedes client and database pool closure.
 Hosted work, invocation and settlement register their original child Tasks in
 this same service span. Registration keeps each result and exception intact;
-it neither wraps the Task nor makes a failed invocation quiescent. A retained
-turn may register its necessary settlement after service stop starts, and the
-same remaining join deadline still applies.
+it neither wraps the Task nor makes a failed invocation quiescent. Foreground
+callers that classify their own child outcome register with `hold_task` (keeping
+the child in `_pending` across the join deadline and recording only unsettled
+exceptions or uncancellable stragglers), while `retain_task(..., settled=...)`
+excludes bounded caller-settled aborts from `failures` and retains every
+unknown or late failure for service stop/join. A retained turn may register its
+necessary settlement after service stop starts, and the same remaining join
+deadline still applies.
 Direct graph embedders with a database interrupt pool must create this service,
 obtain a turn scope, pass it as `MeivaContext.hosted_resources`, and join the service
 before closing their clients. `pool=None` subscriptions need no watcher owner.
