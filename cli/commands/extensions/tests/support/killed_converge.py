@@ -14,13 +14,18 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from base.paths.private_dir import ensure_private_dir
 from cli.commands.extensions import external_skills as bridge
 from cli.commands.extensions.external_skill_host import filesystem as bridge_fs
 from cli.commands.extensions.external_skill_host.cleanup import quarantine_path, transaction_path
 from cli.commands.extensions.external_skill_host.ledger import FORMAT, load_ledger, write_ledger
+from cli.commands.extensions.external_skill_host.records import (
+    Claim,
+    CleanupItem,
+    Ledger,
+    Transaction,
+)
 
 __all__ = [
     "Site",
@@ -51,7 +56,7 @@ class Site:
         return self.skills_root / self.skill
 
 
-def _ledger(site: Site) -> dict[str, Any]:
+def _ledger(site: Site) -> Ledger:
     ledger = load_ledger(site.ledger_path, site.client_key)
     if ledger is not None:
         return ledger
@@ -66,8 +71,14 @@ def _ledger(site: Site) -> dict[str, Any]:
     }
 
 
-def _path(site: Site, kind: str, ledger: dict[str, Any]) -> Path:
-    generation_id = ledger["transaction"]["generation_id"]
+def _transaction(ledger: Ledger) -> Transaction:
+    transaction = ledger["transaction"]
+    assert transaction is not None, "the ledger has no open transaction"
+    return transaction
+
+
+def _path(site: Site, kind: str, ledger: Ledger) -> Path:
+    generation_id = _transaction(ledger)["generation_id"]
     return transaction_path(site.skills_root, kind, generation_id, skill_name=site.skill)
 
 
@@ -75,7 +86,7 @@ def _path(site: Site, kind: str, ledger: dict[str, Any]) -> Path:
 # Snapshot the source and take the bridge's first step: the staged copy is prepared, verified,
 # published beside the target and recorded as `published`. Returns the ledger with its open
 # transaction.
-def stage(site: Site) -> dict[str, Any]:
+def stage(site: Site) -> Ledger:
     ensure_private_dir(site.ledger_path.parent)
     site.skills_root.mkdir(exist_ok=True)
     ledger = _ledger(site)
@@ -96,8 +107,8 @@ def stage(site: Site) -> dict[str, Any]:
 # meiva:note
 # The ledger as a process killed after it renamed the prepared copy into place, and before it
 # wrote that down, leaves it: the stage exists and the record still says `publishing`.
-def forget_publication(site: Site, ledger: dict[str, Any]) -> None:
-    ledger["transaction"]["stage_state"] = "publishing"
+def forget_publication(site: Site, ledger: Ledger) -> None:
+    _transaction(ledger)["stage_state"] = "publishing"
     write_ledger(site.ledger_path, ledger)
 
 
@@ -105,8 +116,8 @@ def forget_publication(site: Site, ledger: dict[str, Any]) -> None:
 # The activation's first step, up to the move: the claim is written ahead as `claiming`, then the
 # managed target is renamed aside to its transaction-owned `previous` path. A process killed here
 # leaves the move done and the record at `claiming`.
-def claim_target(site: Site, ledger: dict[str, Any]) -> Path:
-    ledger["transaction"]["claim_state"] = "claiming"
+def claim_target(site: Site, ledger: Ledger) -> Path:
+    _transaction(ledger)["claim_state"] = "claiming"
     write_ledger(site.ledger_path, ledger)
     previous = _path(site, "previous", ledger)
     bridge_fs.rename_no_replace(site.target, previous)
@@ -115,15 +126,15 @@ def claim_target(site: Site, ledger: dict[str, Any]) -> Path:
 
 # meiva:note
 # The record that follows the claim's move.
-def record_claim(site: Site, ledger: dict[str, Any]) -> None:
-    ledger["transaction"]["claim_state"] = "claimed"
+def record_claim(site: Site, ledger: Ledger) -> None:
+    _transaction(ledger)["claim_state"] = "claimed"
     write_ledger(site.ledger_path, ledger)
 
 
 # meiva:note
 # The activation's last move: the staged copy is renamed onto the target. The ledger still holds
 # the open transaction, because committing it is the step after.
-def land_stage(site: Site, ledger: dict[str, Any]) -> None:
+def land_stage(site: Site, ledger: Ledger) -> None:
     bridge_fs.rename_no_replace(_path(site, "stage", ledger), site.target)
 
 
@@ -131,8 +142,8 @@ def land_stage(site: Site, ledger: dict[str, Any]) -> None:
 # Commit the activation the way the bridge does once the staged copy is live: the new copy
 # becomes the installed one, the transaction closes and the superseded copy is queued as garbage.
 # Returns that garbage item, whose location is `source` until a cleanup claims it.
-def commit(site: Site, ledger: dict[str, Any], previous: Path) -> dict[str, Any]:
-    bridge.commit_activation(site.ledger_path, ledger, ledger["transaction"], previous)
+def commit(site: Site, ledger: Ledger, previous: Path) -> CleanupItem:
+    bridge.commit_activation(site.ledger_path, ledger, _transaction(ledger), previous)
     return ledger["garbage"][-1]
 
 
@@ -142,7 +153,7 @@ def commit(site: Site, ledger: dict[str, Any], previous: Path) -> dict[str, Any]
 # quarantine path. A process killed between the rename and the record leaves `claiming`
 # (`record=False`).
 def claim_cleanup_root(
-    site: Site, ledger: dict[str, Any], item: dict[str, Any], *, record: bool = True
+    site: Site, ledger: Ledger, item: CleanupItem, *, record: bool = True
 ) -> Path:
     source = transaction_path(
         site.skills_root, item["kind"], item["path_generation_id"], skill_name=site.skill
@@ -164,9 +175,9 @@ def claim_cleanup_root(
 # (`record=False`).
 def claim_cleanup_file(
     site: Site,
-    ledger: dict[str, Any],
+    ledger: Ledger,
     quarantine: Path,
-    claim: dict[str, str],
+    claim: Claim,
     *,
     record: bool = True,
 ) -> Path:

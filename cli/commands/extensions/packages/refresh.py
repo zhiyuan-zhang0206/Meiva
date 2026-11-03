@@ -43,6 +43,7 @@ from base.host.system.hostport import Host
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from base.packages.extensions import install_registry
 from base.packages.skills.names import match_key
+from cli.boundary.process import stderr_text, stdout_text
 from cli.commands.extensions.packages.refresh_git_plan import (
     core_fetch,
     core_listing,
@@ -296,7 +297,7 @@ class Pass:
         )
         if result.returncode != 0:
             return None
-        remote = result.stdout.strip()
+        remote = stdout_text(result).strip()
         return remote or None
 
     def _ls_remote(self, remote: str, ref: str) -> tuple[str | None, str | None]:
@@ -320,8 +321,8 @@ class Pass:
         except (OSError, subprocess.SubprocessError) as exc:
             return None, f"ls-remote failed: {exc}"
         if result.returncode != 0:
-            return None, f"ls-remote failed: {_tail(result.stderr)}"
-        sha = core_head_from_ls_remote(result.stdout, ref)
+            return None, f"ls-remote failed: {_tail(stderr_text(result))}"
+        sha = core_head_from_ls_remote(stdout_text(result), ref)
         if sha is not None:
             return sha, None
         return None, f"ref {ref!r} not found on {remote}"
@@ -347,7 +348,7 @@ class Pass:
         except (OSError, subprocess.SubprocessError) as exc:
             return f"fetch failed: {exc}"
         if result.returncode != 0:
-            return f"fetch failed: {_tail(result.stderr)}"
+            return f"fetch failed: {_tail(stderr_text(result))}"
         return None
 
     def _fail_core(
@@ -509,7 +510,7 @@ class Pass:
             env=git_env(self.host.environ),
             timeout=_LOCAL_GIT_TIMEOUT_S,
         )
-        return result.returncode, result.stdout
+        return result.returncode, stdout_text(result)
 
     def _stage_core(
         self, pkg: install_registry.InstalledPackage, head: str, src_rel: str
@@ -535,7 +536,7 @@ class Pass:
                 timeout=_LOCAL_GIT_TIMEOUT_S,
             )
             if result.returncode != 0 or not tarpath.is_file():
-                return None, f"git archive failed: {_tail(result.stderr)}"
+                return None, f"git archive failed: {_tail(stderr_text(result))}"
             extracted = tmp / "x"
             extracted.mkdir()
             with tarfile.open(tarpath) as tf:
@@ -604,8 +605,8 @@ class Pass:
         except (OSError, subprocess.SubprocessError) as exc:
             return None, False, f"ls-remote failed: {exc}"
         if result.returncode != 0:
-            return None, False, f"ls-remote failed: {_tail(result.stderr)}"
-        return git_head_from_ls_remote(result.stdout, ref, source)
+            return None, False, f"ls-remote failed: {_tail(stderr_text(result))}"
+        return git_head_from_ls_remote(stdout_text(result), ref, source)
 
     def _note_applied(
         self, pkg: install_registry.InstalledPackage, result: str, new_hash: str | None, sha: str
@@ -672,7 +673,7 @@ class Pass:
                 acquired = acquire_source(source, pkg.ref)
             except (subprocess.CalledProcessError, SourcePathNotFoundError) as exc:
                 detail = (
-                    exc.stderr.strip()
+                    stderr_text(exc).strip()
                     if isinstance(exc, subprocess.CalledProcessError)
                     else str(exc)
                 )

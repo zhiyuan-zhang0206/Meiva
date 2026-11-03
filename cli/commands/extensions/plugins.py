@@ -35,6 +35,7 @@ from datetime import datetime
 from pathlib import Path
 
 from base.cluster.machine import MachineIdentityReader
+from cli.boundary.process import stderr_text
 from cli.commands.extensions._claude_code_plugin import Materialized
 from cli.commands.extensions._manifest_gate import gate_refuses
 from cli.commands.extensions.plans.source_binding import SourceBinding
@@ -346,7 +347,7 @@ def cmd_plugins_install(
     try:
         cloned = clone_git(url, ref)
     except subprocess.CalledProcessError as e:
-        print(f"[meiva plugins install] git failed: {e.stderr.strip()}", file=sys.stderr)
+        print(f"[meiva plugins install] git failed: {stderr_text(e).strip()}", file=sys.stderr)
         return 1
 
     try:
@@ -497,7 +498,7 @@ def cmd_plugins_upgrade(name: str, *, binding: SourceBinding, home: Path, now: d
     try:
         cloned = clone_git(pkg.source, pkg.ref)
     except subprocess.CalledProcessError as e:
-        print(f"[meiva plugins upgrade] git failed: {e.stderr.strip()}", file=sys.stderr)
+        print(f"[meiva plugins upgrade] git failed: {stderr_text(e).strip()}", file=sys.stderr)
         return 1
 
     try:

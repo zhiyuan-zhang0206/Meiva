@@ -4,21 +4,26 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import TypeGuard
+
+from pydantic import TypeAdapter
 
 from base.host.private_storage import write_private_bytes
+from cli.boundary.json_text import loads
 from cli.commands.extensions.external_skill_host.filesystem import (
     ClientConflictError,
     exists,
     manifest_digest,
     read_regular,
 )
+from cli.commands.extensions.external_skill_host.records import FileEntry, Ledger, ManifestEntry
 
 FORMAT = 6
 _MARKER_NAME = ".meiva-managed.json"
 SKILL_NAME = "operating-meiva-cluster"
 _HEX = re.compile(r"^[0-9a-f]{64}$")
 _ID = re.compile(r"^[0-9a-f]{32}$")
+_LEDGER: TypeAdapter[Ledger] = TypeAdapter(Ledger)
 
 
 def ownership_marker(
@@ -45,19 +50,11 @@ def ownership_marker(
     ).encode()
 
 
-def stage_manifest(source_manifest: list[dict[str, Any]], marker: bytes) -> list[dict[str, Any]]:
-    return sorted(
-        [
-            *source_manifest,
-            {
-                "kind": "file",
-                "mode": 0o600,
-                "path": _MARKER_NAME,
-                "sha256": hashlib.sha256(marker).hexdigest(),
-            },
-        ],
-        key=lambda item: str(item["path"]),
+def stage_manifest(source_manifest: list[ManifestEntry], marker: bytes) -> list[ManifestEntry]:
+    marker_entry: ManifestEntry = FileEntry(
+        kind="file", mode=0o600, path=_MARKER_NAME, sha256=hashlib.sha256(marker).hexdigest()
     )
+    return sorted([*source_manifest, marker_entry], key=lambda item: item["path"])
 
 
 def _is_object_list(value: object) -> TypeGuard[list[object]]:
@@ -68,19 +65,15 @@ def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict)
 
 
-def _is_any_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
-
-
-def parse_record(path: Path) -> dict[str, Any] | None:
+def parse_record(path: Path) -> dict[str, object] | None:
     if not exists(path):
         return None
     data, _ = read_regular(path, source=False)
     try:
-        value: object = json.loads(data)
+        value = loads(data)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise ClientConflictError("Meiva ownership ledger is invalid") from exc
-    if not _is_any_dict(value):
+    if not _is_object_dict(value):
         raise ClientConflictError("Meiva ownership ledger is invalid")
     return value
 
@@ -93,7 +86,7 @@ def _valid_digest(value: object) -> bool:
     return isinstance(value, str) and _HEX.fullmatch(value) is not None
 
 
-def _valid_manifest_item(item: dict[str, Any], paths: set[str]) -> bool:
+def _valid_manifest_item(item: dict[str, object], paths: set[str]) -> bool:
     kind = item.get("kind")
     if kind == "file":
         required = {"kind", "mode", "path", "sha256"}
@@ -114,16 +107,16 @@ def _valid_manifest_item(item: dict[str, Any], paths: set[str]) -> bool:
     )
 
 
-def _valid_manifest(value: object) -> bool:
+def _valid_manifest(value: object) -> TypeGuard[list[ManifestEntry]]:
     if not _is_object_list(value):
         return False
     paths: set[str] = set()
     for item_value in value:
-        if not _is_any_dict(item_value):
+        if not _is_object_dict(item_value):
             return False
         if not _valid_manifest_item(item_value, paths):
             return False
-        paths.add(item_value["path"])
+        paths.add(str(item_value["path"]))
     for item_value in value:
         if (
             _is_object_dict(item_value)
@@ -193,7 +186,7 @@ def _all_claims_retained(value: object) -> bool:
 
 
 def _valid_cleanup_item(value: object, *, retained: bool) -> bool:
-    if not _is_any_dict(value):
+    if not _is_object_dict(value):
         return False
     allowed_locations = {"retained"} if retained else {"source", "claiming", "quarantine"}
     claims = value.get("file_claims")
@@ -209,7 +202,7 @@ def _valid_cleanup_item(value: object, *, retained: bool) -> bool:
 
 
 def _check_installed(installed_value: object) -> None:
-    if not _is_any_dict(installed_value):
+    if not _is_object_dict(installed_value):
         raise ClientConflictError("Meiva ownership ledger is invalid")
     if (
         set(installed_value) != {"digest", "generation_id", "manifest", "source_digest"}
@@ -222,7 +215,7 @@ def _check_installed(installed_value: object) -> None:
 
 
 def _check_transaction(transaction_value: object, *, has_installed: bool) -> None:
-    if not _is_any_dict(transaction_value):
+    if not _is_object_dict(transaction_value):
         raise ClientConflictError("Meiva ownership ledger is invalid")
     if (
         set(transaction_value)
@@ -251,7 +244,7 @@ def _check_transaction(transaction_value: object, *, has_installed: bool) -> Non
         raise ClientConflictError("Meiva ownership ledger is invalid")
 
 
-def load_ledger(path: Path, client_key: str) -> dict[str, Any] | None:
+def load_ledger(path: Path, client_key: str) -> Ledger | None:
     record = parse_record(path)
     if record is None:
         return None
@@ -281,8 +274,8 @@ def load_ledger(path: Path, client_key: str) -> dict[str, Any] | None:
         for item_value in items:
             if not _valid_cleanup_item(item_value, retained=retained):
                 raise ClientConflictError("Meiva ownership ledger is invalid")
-    return record
+    return _LEDGER.validate_python(record)
 
 
-def write_ledger(path: Path, ledger: dict[str, Any]) -> None:
+def write_ledger(path: Path, ledger: Ledger) -> None:
     write_private_bytes(path, (json.dumps(ledger, indent=2, sort_keys=True) + "\n").encode())

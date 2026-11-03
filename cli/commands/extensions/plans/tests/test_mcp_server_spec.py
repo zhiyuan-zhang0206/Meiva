@@ -51,7 +51,7 @@ def test_input_that_is_not_one_server_entry_is_refused(
 
 
 def test_malformed_json_is_a_value_error_too() -> None:
-    with pytest.raises(ValueError, match="Expecting"):
+    with pytest.raises(ValueError, match="Invalid JSON"):
         build_server_spec("{not json}", None, [], [])
 
 

@@ -9,8 +9,11 @@
 
 from __future__ import annotations
 
-import json
 from typing import TypeGuard
+
+from pydantic import JsonValue
+
+from cli.boundary.json_text import loads
 
 __all__ = ["build_server_spec", "derive_server_name", "parse_env_pairs", "server_summary"]
 
@@ -45,21 +48,21 @@ def parse_env_pairs(env_pairs: list[str]) -> dict[str, str]:
 # server object.
 def build_server_spec(
     json_spec: str | None, command: str | None, args: list[str], env_pairs: list[str]
-) -> dict[str, object]:
+) -> dict[str, JsonValue]:
     if json_spec is not None and command is not None:
         raise ValueError("pass either --json or --command, not both")
     if json_spec is not None:
-        parsed: object = json.loads(json_spec)
-        if not _is_object_dict(parsed):
+        parsed = loads(json_spec)
+        if not isinstance(parsed, dict):
             raise ValueError(f"--json must be a server object (got {type(parsed).__name__})")
         return parsed
     if command is not None:
-        spec: dict[str, object] = {"command": command}
+        spec: dict[str, JsonValue] = {"command": command}
         if args:
-            spec["args"] = args
+            spec["args"] = list[JsonValue](args)
         env = parse_env_pairs(env_pairs)
         if env:
-            spec["env"] = env
+            spec["env"] = dict[str, JsonValue](env)
         return spec
     raise ValueError("need --json '<server object>' or --command CMD")
 

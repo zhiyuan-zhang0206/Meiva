@@ -16,6 +16,7 @@ from base.config import ConfigBoot
 from base.deploy.git.memory_repo import MemoryBranchMismatch
 from base.host.net.http_dial import post as dial_post
 from base.packages.plugins.loading.scaffold import ScaffoldFacts
+from cli.boundary.json_body import response_object, response_value
 from cli.commands.extensions._plugin_scaffold import (
     ScaffoldResult as ScaffoldResult,
 )
@@ -64,7 +65,7 @@ def _refresh_index(access: GatewayAccess) -> None:
     try:
         resp = dial_post(url, timeout=_TIMEOUT_S, headers=gateway_auth_headers(access))
         resp.raise_for_status()
-        data = resp.json()
+        data = response_object(resp)
         print(f"  index refreshed: {data.get('status', 'ok')}")
     except httpx.HTTPError as exc:
         print(f"  ✗ refresh failed: {exc}", file=sys.stderr)
@@ -94,5 +95,5 @@ def cmd_memory_search(query: str, *, limit: int, json_output: bool, access: Gate
     if resp.status_code >= 400:
         print(resp.text, file=sys.stderr)
     resp.raise_for_status()
-    print(render_results(resp.json(), json_output=json_output))
+    print(render_results(response_value(resp), json_output=json_output))
     return 0

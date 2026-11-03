@@ -1,6 +1,7 @@
-exports = ["mcp_server_spec.py", "memory_search.py", "source_binding.py"]
+exports = ["mcp_autodetect.py", "mcp_server_spec.py", "memory_search.py", "source_binding.py"]
 
 [uses]
+"mcp_autodetect.py" = ["mcp_server_spec.py"]
 "tests" = ["mcp_server_spec.py", "memory_search.py", "source_binding.py"]
 
 [purity]

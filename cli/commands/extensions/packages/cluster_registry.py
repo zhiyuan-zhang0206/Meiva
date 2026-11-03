@@ -18,6 +18,7 @@ from base.cluster.machine import (
 )
 from base.host.net import http_dial
 from base.packages.extensions.registry import ExtensionKind, pack_tree
+from cli.boundary.json_body import response_value
 from cli.commands.extensions.skill_package import ExtensionRegistryError
 
 _TIMEOUT_S = 60.0
@@ -62,7 +63,7 @@ def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
 
 def _detail(response: httpx.Response) -> str:
     try:
-        payload: object = response.json()
+        payload = response_value(response)
     except ValueError:
         return response.text
     if _is_object_dict(payload):

@@ -13,7 +13,6 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from base.host.system.hostport import Host
 from base.native_process.os_platform import LockTimeoutError, file_lock
@@ -47,6 +46,12 @@ from cli.commands.extensions.external_skill_host.ledger import (
     parse_record,
     stage_manifest,
     write_ledger,
+)
+from cli.commands.extensions.external_skill_host.records import (
+    Installed,
+    Ledger,
+    ManifestEntry,
+    Transaction,
 )
 
 SKILL_NAMES: tuple[str, ...] = ("meiva-guide", "impersonator-guide")
@@ -135,7 +140,7 @@ def _warn(label: str, reason: str) -> None:
 
 def _cleanup_garbage(
     ledger_path: Path,
-    ledger: dict[str, Any],
+    ledger: Ledger,
     skills_root: Path,
     label: str,
     *,
@@ -147,10 +152,10 @@ def _cleanup_garbage(
 
 def stage_copy(
     snapshot: SourceSnapshot,
-    source_manifest: list[dict[str, Any]],
+    source_manifest: list[ManifestEntry],
     skills_root: Path,
     ledger_path: Path,
-    ledger: dict[str, Any],
+    ledger: Ledger,
     source_digest: str,
     *,
     skill_name: str = SKILL_NAME,
@@ -163,14 +168,14 @@ def stage_copy(
         ledger["installation_id"], generation_id, source_digest, skill_name=skill_name
     )
     expected_manifest = stage_manifest(source_manifest, marker)
-    transaction = {
-        "claim_state": "idle",
-        "expected_digest": manifest_digest(expected_manifest),
-        "expected_manifest": expected_manifest,
-        "generation_id": generation_id,
-        "source_digest": source_digest,
-        "stage_state": "preparing",
-    }
+    transaction = Transaction(
+        claim_state="idle",
+        expected_digest=manifest_digest(expected_manifest),
+        expected_manifest=expected_manifest,
+        generation_id=generation_id,
+        source_digest=source_digest,
+        stage_state="preparing",
+    )
     ledger["transaction"] = transaction
     write_ledger(ledger_path, ledger)
     prepared = _prepared_stage_path(ledger_path, generation_id)
@@ -190,13 +195,13 @@ def stage_copy(
 
 def _abandon_transaction(
     ledger_path: Path,
-    ledger: dict[str, Any],
+    ledger: Ledger,
     skills_root: Path,
     *,
     skill_name: str = SKILL_NAME,
 ) -> bool:
     """Move every remaining residue pointer to durable cleanup state."""
-    transaction: dict[str, Any] | None = ledger["transaction"]
+    transaction = ledger["transaction"]
     if transaction is None:
         return True
     generation_id = transaction["generation_id"]
@@ -227,8 +232,8 @@ def _abandon_transaction(
 
 def _restore_claimed_previous(
     ledger_path: Path,
-    ledger: dict[str, Any],
-    transaction: dict[str, Any],
+    ledger: Ledger,
+    transaction: Transaction,
     previous: Path,
     target: Path,
     *,
@@ -255,17 +260,17 @@ def _restore_claimed_previous(
 
 def commit_activation(
     ledger_path: Path,
-    ledger: dict[str, Any],
-    transaction: dict[str, Any],
+    ledger: Ledger,
+    transaction: Transaction,
     previous: Path,
 ) -> None:
     old = ledger["installed"]
-    ledger["installed"] = {
-        "digest": transaction["expected_digest"],
-        "generation_id": transaction["generation_id"],
-        "manifest": transaction["expected_manifest"],
-        "source_digest": transaction["source_digest"],
-    }
+    ledger["installed"] = Installed(
+        digest=transaction["expected_digest"],
+        generation_id=transaction["generation_id"],
+        manifest=transaction["expected_manifest"],
+        source_digest=transaction["source_digest"],
+    )
     ledger["transaction"] = None
     if exists(previous) and old is not None:
         queue_garbage(
@@ -279,13 +284,15 @@ def commit_activation(
 
 def _activate(
     ledger_path: Path,
-    ledger: dict[str, Any],
+    ledger: Ledger,
     skills_root: Path,
     target: Path,
     *,
     rename: Callable[[Path, Path], None] = rename_no_replace,
 ) -> str:
-    transaction: dict[str, Any] = ledger["transaction"]
+    transaction = ledger["transaction"]
+    if transaction is None:
+        raise ClientConflictError("no Meiva transaction to activate")
     generation_id = transaction["generation_id"]
     stage = transaction_path(skills_root, "stage", generation_id, skill_name=target.name)
     previous = transaction_path(skills_root, "previous", generation_id, skill_name=target.name)
@@ -375,27 +382,27 @@ def _skills_root_of(client_home: Path, client: _Client) -> Path:
     return skills_root
 
 
-def _ledger_for(ledger_path: Path, client_key: str, target: Path) -> dict[str, Any]:
+def _ledger_for(ledger_path: Path, client_key: str, target: Path) -> Ledger:
     """The client's ownership ledger, minted fresh when none exists (an unmanaged target refuses)."""
     ledger = load_ledger(ledger_path, client_key)
     if ledger is None:
         if exists(target):
             raise ClientConflictError("unmanaged target was preserved")
-        fresh: dict[str, Any] = {
-            "client": client_key,
-            "format": FORMAT,
-            "garbage": [],
-            "installation_id": uuid.uuid4().hex,
-            "installed": None,
-            "retained": [],
-            "transaction": None,
-        }
+        fresh = Ledger(
+            client=client_key,
+            format=FORMAT,
+            garbage=[],
+            installation_id=uuid.uuid4().hex,
+            installed=None,
+            retained=[],
+            transaction=None,
+        )
         write_ledger(ledger_path, fresh)
         return fresh
     return ledger
 
 
-def _managed_target_current(ledger: dict[str, Any], target: Path, source_digest: str) -> bool:
+def _managed_target_current(ledger: Ledger, target: Path, source_digest: str) -> bool:
     """True when the managed copy is intact and already at `source_digest`.
 
     Refuses a missing, user-modified or unmanaged target; False means a (re)install is due.
@@ -417,7 +424,7 @@ def _managed_target_current(ledger: dict[str, Any], target: Path, source_digest:
 
 def _converge_locked(
     snapshot: SourceSnapshot,
-    source_manifest: list[dict[str, Any]],
+    source_manifest: list[ManifestEntry],
     source_digest: str,
     client: _Client,
     client_home: Path,

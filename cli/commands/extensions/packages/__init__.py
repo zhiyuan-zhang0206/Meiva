@@ -16,7 +16,7 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
 from base.config import ConfigBoot
 from base.host.system.hostport import Host
@@ -177,7 +177,7 @@ def _status_payload(
     host_bare: str | None,
     host_display: str | None,
     home: Path,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     return {
         "host": {
             "version": host_bare,

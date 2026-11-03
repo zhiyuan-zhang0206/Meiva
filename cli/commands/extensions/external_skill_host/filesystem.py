@@ -10,9 +10,14 @@ import os
 import stat
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from base.native_process.os_platform import is_linux, is_macos
+from cli.boundary.untyped import object_of
+from cli.commands.extensions.external_skill_host.records import (
+    DirectoryEntry,
+    FileEntry,
+    ManifestEntry,
+)
 
 _MARKER_NAME = ".meiva-managed.json"
 
@@ -39,25 +44,21 @@ class SourceSnapshot:
     directories: tuple[tuple[str, int], ...]
     files: tuple[_SourceFile, ...]
 
-    def manifest(self) -> list[dict[str, Any]]:
-        return sorted(
-            [
-                *(
-                    {"kind": "directory", "mode": mode, "path": path}
-                    for path, mode in self.directories
-                ),
-                *(
-                    {
-                        "kind": "file",
-                        "mode": item.mode,
-                        "path": item.path,
-                        "sha256": hashlib.sha256(item.data).hexdigest(),
-                    }
-                    for item in self.files
-                ),
-            ],
-            key=lambda item: str(item["path"]),
-        )
+    def manifest(self) -> list[ManifestEntry]:
+        directories: list[ManifestEntry] = [
+            DirectoryEntry(kind="directory", mode=mode, path=path)
+            for path, mode in self.directories
+        ]
+        files: list[ManifestEntry] = [
+            FileEntry(
+                kind="file",
+                mode=item.mode,
+                path=item.path,
+                sha256=hashlib.sha256(item.data).hexdigest(),
+            )
+            for item in self.files
+        ]
+        return sorted([*directories, *files], key=lambda item: item["path"])
 
 
 def attributes_reparse(current: os.stat_result) -> bool:
@@ -196,26 +197,22 @@ def tree_digest(
     return manifest_digest(tree_manifest(root, source=source, ignore_root_names=ignore_root_names))
 
 
-def manifest_digest(manifest: list[dict[str, Any]]) -> str:
+def manifest_digest(manifest: list[ManifestEntry]) -> str:
     encoded = json.dumps(manifest, separators=(",", ":"), sort_keys=True).encode()
     return hashlib.sha256(encoded).hexdigest()
 
 
 def tree_manifest(
     root: Path, *, source: bool = False, ignore_root_names: frozenset[str] = frozenset()
-) -> list[dict[str, Any]]:
+) -> list[ManifestEntry]:
     """Describe each path Meiva may later verify or reclaim."""
     inspect = source_lstat if source else lstat
     error = SourceIntegrityError if source else ClientConflictError
     root_before = inspect(root)
     if not stat.S_ISDIR(root_before.st_mode):
         raise error("operator skill tree root is not a directory")
-    manifest: list[dict[str, Any]] = [
-        {
-            "kind": "directory",
-            "mode": stat.S_IMODE(root_before.st_mode),
-            "path": ".",
-        }
+    manifest: list[ManifestEntry] = [
+        DirectoryEntry(kind="directory", mode=stat.S_IMODE(root_before.st_mode), path=".")
     ]
 
     def visit(directory: Path) -> None:
@@ -231,22 +228,20 @@ def tree_manifest(
             relative = child.relative_to(root).as_posix()
             if stat.S_ISDIR(current.st_mode):
                 manifest.append(
-                    {
-                        "kind": "directory",
-                        "mode": stat.S_IMODE(current.st_mode),
-                        "path": relative,
-                    }
+                    DirectoryEntry(
+                        kind="directory", mode=stat.S_IMODE(current.st_mode), path=relative
+                    )
                 )
                 visit(child)
             elif stat.S_ISREG(current.st_mode):
                 data, mode = read_regular(child, source=source)
                 manifest.append(
-                    {
-                        "kind": "file",
-                        "mode": mode,
-                        "path": relative,
-                        "sha256": hashlib.sha256(data).hexdigest(),
-                    }
+                    FileEntry(
+                        kind="file",
+                        mode=mode,
+                        path=relative,
+                        sha256=hashlib.sha256(data).hexdigest(),
+                    )
                 )
             else:
                 raise error("operator skill tree contains an unsupported entry")
@@ -258,40 +253,43 @@ def tree_manifest(
     after = inspect(root)
     if _signature(after) != _signature(root_before):
         raise error("operator skill tree changed while being inspected")
-    return sorted(manifest, key=lambda item: str(item["path"]))
+    return sorted(manifest, key=lambda item: item["path"])
 
 
-def validate_manifest_subset(current: list[dict[str, Any]], expected: list[dict[str, Any]]) -> None:
-    expected_by_path = {str(item["path"]): item for item in expected}
+def validate_manifest_subset(current: list[ManifestEntry], expected: list[ManifestEntry]) -> None:
+    expected_by_path = {item["path"]: item for item in expected}
     for item in current:
-        path = str(item["path"])
-        wanted = expected_by_path.get(path)
+        wanted = expected_by_path.get(item["path"])
         if wanted is None or item["kind"] != wanted["kind"]:
             raise ClientConflictError("transaction residue contains an unexpected entry")
-        expected_mode = int(wanted["mode"])
+        expected_mode = wanted["mode"]
         cleanup_mode = expected_mode | stat.S_IRWXU
         allowed_modes = {expected_mode, cleanup_mode}
         if item["kind"] == "directory":
             allowed_modes.add(stat.S_IRWXU)
-        if int(item["mode"]) not in allowed_modes:
+        if item["mode"] not in allowed_modes:
             raise ClientConflictError("transaction residue metadata was modified")
-        if item["kind"] == "file" and item["sha256"] != wanted["sha256"]:
+        if (
+            item["kind"] == "file"
+            and wanted["kind"] == "file"
+            and item["sha256"] != wanted["sha256"]
+        ):
             raise ClientConflictError("transaction residue content was modified")
 
 
-def verify_cleanup_file(path: Path, expected: dict[str, Any]) -> None:
+def verify_cleanup_file(path: Path, expected: FileEntry) -> None:
     data, mode = read_regular(path, source=False)
-    if hashlib.sha256(data).hexdigest() != expected["sha256"] or mode != int(expected["mode"]):
+    if hashlib.sha256(data).hexdigest() != expected["sha256"] or mode != expected["mode"]:
         raise ClientConflictError("transaction residue file changed during cleanup")
 
 
-def remove_manifest_subset(root: Path, expected: list[dict[str, Any]]) -> None:
+def remove_manifest_subset(root: Path, expected: list[ManifestEntry]) -> None:
     """Refuse path-based deletion after validating the caller's preservation candidate."""
     current = tree_manifest(root)
     validate_manifest_subset(current, expected)
     for item in current:
         if item["kind"] == "file":
-            verify_cleanup_file(root / str(item["path"]), item)
+            verify_cleanup_file(root / item["path"], item)
     raise ClientConflictError("path-bound deletion is unsupported; residue was preserved")
 
 
@@ -315,7 +313,7 @@ def rename_no_replace(source: Path, destination: Path) -> None:
     destination_bytes = os.fsencode(destination)
     if is_macos():
         rename_exclusive = 0x00000004
-        result = library.renamex_np(source_bytes, destination_bytes, rename_exclusive)
+        result = object_of(library.renamex_np, source_bytes, destination_bytes, rename_exclusive)
     elif is_linux():
         at_current_working_directory = -100
         rename_no_replace = 1
@@ -323,7 +321,8 @@ def rename_no_replace(source: Path, destination: Path) -> None:
             renameat2 = library.renameat2
         except AttributeError as exc:
             raise OSError(errno.ENOTSUP, "atomic no-replace rename is unavailable") from exc
-        result = renameat2(
+        result = object_of(
+            renameat2,
             at_current_working_directory,
             source_bytes,
             at_current_working_directory,
