@@ -158,7 +158,31 @@ jobs:
           # pasted into the description carries the line, and reading it would let a documentation
           # change announce a task it never touched.
           outside_fences() {
-            awk '/^[[:space:]]*(```|~~~)/ { fence = !fence; next } !fence { print }'
+            awk '
+              # The run of backticks or tildes that starts the line, or "" when the line is not a
+              # fence: the character and the length both matter, because CommonMark closes a fence
+              # only with the same character and a run at least as long as the one that opened it.
+              function fence_run(line,    rest, char, count) {
+                rest = line
+                sub(/^[[:space:]]*/, "", rest)
+                char = substr(rest, 1, 1)
+                if (char != "`" && char != "~") return ""
+                count = 0
+                while (substr(rest, count + 1, 1) == char) count++
+                if (count < 3) return ""
+                return char count
+              }
+              {
+                run = fence_run($0)
+                if (run != "") {
+                  char = substr(run, 1, 1)
+                  length_of_run = substr(run, 2) + 0
+                  if (open_char == "") { open_char = char; open_length = length_of_run }
+                  else if (char == open_char && length_of_run >= open_length) { open_char = ""; open_length = 0 }
+                  next
+                }
+                if (open_char == "") print
+              }'
           }
 
           # The values on matching lines, normalized, one per line. Two different values are an

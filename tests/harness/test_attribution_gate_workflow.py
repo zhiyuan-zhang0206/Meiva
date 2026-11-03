@@ -501,3 +501,19 @@ def test_the_same_closes_line_twice_is_one_statement(tmp_path: Path) -> None:
         body="What changed.\n\nCloses-task: #6076\nCloses-task: #6076\nCo-authored-by: Meiva #7317\n",
     )
     assert closes_comments(run) == []
+
+
+# meiva:note
+# CommonMark closes a fence only with the same character and a run at least as long as the opener, so
+# a `~~~` line inside a ``` block does not end it. A description that quotes an example of both kinds
+# would otherwise announce the task its example names.
+def test_a_tilde_line_inside_a_backtick_fence_does_not_close_it(tmp_path: Path) -> None:
+    body = "What changed.\n\n````markdown\n~~~\nCloses-task: #1234\n```\n````\n"
+    run = run_gate(tmp_path, body=body)
+    assert len(closes_comments(run)) == 1
+
+
+def test_a_shorter_run_does_not_close_the_fence(tmp_path: Path) -> None:
+    body = "What changed.\n\n````text\nCloses-task: #1234\n```\n````\n"
+    run = run_gate(tmp_path, body=body)
+    assert len(closes_comments(run)) == 1
