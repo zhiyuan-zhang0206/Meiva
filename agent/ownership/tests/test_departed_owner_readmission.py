@@ -5,7 +5,6 @@
 # row. Nothing wakes such an agent until a message arrives, so after a host restart it
 # stays in exactly that state; the next host's admission claims it under its own owner.
 
-from typing import Any
 from uuid import uuid4
 
 import psycopg
@@ -18,8 +17,8 @@ from base.db import Database, create_agent
 
 
 async def test_an_idle_agent_with_a_departed_owner_is_readmitted_by_a_new_owner(
-    db_conn: psycopg.Connection[Any],
-    aops_pool: AsyncConnectionPool[Any],
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
     database: Database,
     machine_identity: MachineIdentityReader,
 ) -> None:

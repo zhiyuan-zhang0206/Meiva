@@ -947,6 +947,11 @@ reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "agent/ownership"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/agents"
 reportAny = "error"
 reportExplicitAny = "error"

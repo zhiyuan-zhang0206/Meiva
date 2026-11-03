@@ -18,6 +18,8 @@ from agent.ownership.tests.ownership_support import BusTap
 from base.cluster.machine import MachineIdentityReader
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_mapping
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
@@ -156,7 +158,7 @@ async def test_admission_does_not_lock_deployment_state(
 
 
 def _marker(db_conn: psycopg.Connection, agent_id: int) -> object:
-    row = db_conn.execute(
+    row: tuple[object, ...] | None = db_conn.execute(
         "SELECT last_turn_fatal_at FROM agents_meta WHERE id = %s", (agent_id,)
     ).fetchone()
     assert row is not None, f"agents_meta row {agent_id} missing"
@@ -435,9 +437,16 @@ async def test_replacement_admission_submits_the_interrupted_lease_notice_once(
     assert row == ("expired", "aborted: native runtime restarted")
     turns = [message for message in app_server.received if message.get("method") == "turn/start"]
     assert len(turns) == 1
-    payload = turns[0]["params"]
-    assert payload["threadId"] == thread_id
-    assert str(lease_id) in payload["input"][0]["text"]
+    params = object_mapping(turns[0])["params"]
+    assert is_object_dict(params)
+    assert params["threadId"] == thread_id
+    inputs = params["input"]
+    assert is_object_list(inputs) and inputs
+    first_input = inputs[0]
+    assert is_object_dict(first_input)
+    text = first_input["text"]
+    assert isinstance(text, str)
+    assert str(lease_id) in text
 
 
 # meiva:note
