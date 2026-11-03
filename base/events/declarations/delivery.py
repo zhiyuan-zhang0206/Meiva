@@ -34,6 +34,15 @@ class TurnFaultLostInbound(TypedDict):
     reason: str
 
 
+# meiva:note
+# The note that should have recorded a lost turn could not be written. The turn's own failure still
+# propagates (that is the caller's contract), so this event is the only trace that the conversation
+# has no record of the inbound that died with it.
+class TurnFaultNoteFailed(TypedDict):
+    agent_id: int
+    turn_key: str
+
+
 class InboundConsumedUnknown(TypedDict):
     inbound_id: int
     kind: str
@@ -49,6 +58,15 @@ EVENTS: dict[str, EventSpec] = {
         payload=TurnFaultLostInbound,
         tier="anomaly",
         site="agent/graph/claim/harness_turn.py:_report_lost_turn",
+    ),
+    "turn_fault_note_failed": telemetry_event(
+        "turn_fault_note_failed",
+        "a lost turn could not be recorded in the conversation: the note append raised, the "
+        "original fault propagates anyway, and the inbound that died leaves no trace the reader "
+        "can see",
+        payload=TurnFaultNoteFailed,
+        tier="anomaly",
+        site="agent/graph/claim/lost_turn.py:report_lost_turn",
     ),
     "inbound_consumed_unknown": telemetry_event(
         "inbound_consumed_unknown",
