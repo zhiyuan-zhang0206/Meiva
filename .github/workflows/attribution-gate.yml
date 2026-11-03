@@ -59,9 +59,9 @@ jobs:
           trailer='co-authored-by:[[:space:]]*meiva[[:space:]]*#[0-9]+'
           # A standalone line, so a description that merely mentions the exit does not use it.
           human_exit='^[[:space:]]*meiva:[[:space:]]*none[[:space:]]*$'
-          # The task this change belongs to, or the word for "none". `Closes-task:` is a second,
-          # optional line the reader uses; it never stands in for this one.
-          task_line='^[[:space:]]*task:[[:space:]]*(#[0-9]+|none)[[:space:]]*$'
+          # The task the merge closes, or the word for "none". Intent, not a reference: `Task:`
+          # alone cannot tell a finished task from one this change only touches.
+          closes_line='^[[:space:]]*closes-task:[[:space:]]*(#[0-9]+|none)[[:space:]]*$'
 
           body="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.body // ""')"
 
