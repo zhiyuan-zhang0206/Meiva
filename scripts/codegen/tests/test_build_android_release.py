@@ -4,11 +4,19 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Any
 
 import pytest
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from scripts.codegen import build_android_release as release
+
+
+def _object(text: str) -> dict[str, object]:
+    decoded = object_of(json.loads, text)
+    if not is_object_dict(decoded):
+        raise AssertionError(f"expected a JSON object, got {type(decoded).__name__}")
+    return decoded
 
 
 def _apk(directory: Path) -> Path:
@@ -38,7 +46,7 @@ def test_version_code_rejects_a_missing_run_number(run_number: int) -> None:
 
 
 def test_tauri_config_pins_the_identity_and_disables_auto_increment() -> None:
-    overlay = json.loads(release.tauri_config(version_name="0.4.2", version_code=1_000_007))
+    overlay = _object(release.tauri_config(version_name="0.4.2", version_code=1_000_007))
 
     assert overlay == {
         "version": "0.4.2",
@@ -112,8 +120,8 @@ def test_manifest_defaults_built_at_to_utc_now(tmp_path: Path) -> None:
     )
 
     assert exit_code == 0
-    manifest = json.loads(out.read_text(encoding="utf-8"))
-    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", manifest["builtAt"])
+    manifest = _object(out.read_text(encoding="utf-8"))
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", str(manifest["builtAt"]))
 
 
 @pytest.mark.parametrize(
@@ -130,18 +138,27 @@ def test_manifest_defaults_built_at_to_utc_now(tmp_path: Path) -> None:
 def test_manifest_rejects_identity_values_it_cannot_publish(
     tmp_path: Path, field: str, value: str
 ) -> None:
-    arguments: dict[str, Any] = {
-        "version_code": 1_000_010,
-        "version_name": "0.4.2",
-        "apk": _apk(tmp_path),
-        "commit": "d" * 40,
-        "repo": "owner/Meiva",
-        "built_at": "2026-10-17T03:04:05Z",
-    }
-    arguments[field] = value
+    overrides = {field: value}
 
     with pytest.raises(ValueError):
-        release.build_manifest(**arguments)
+        _build(tmp_path, **overrides)
+
+
+def _build(
+    directory: Path,
+    *,
+    commit: str = "d" * 40,
+    repo: str = "owner/Meiva",
+    version_name: str = "0.4.2",
+) -> release.AndroidManifest:
+    return release.build_manifest(
+        version_code=1_000_010,
+        version_name=version_name,
+        apk=_apk(directory),
+        commit=commit,
+        repo=repo,
+        built_at="2026-10-17T03:04:05Z",
+    )
 
 
 def test_manifest_requires_a_built_at_offset(tmp_path: Path) -> None:
@@ -212,6 +229,6 @@ def test_cli_writes_the_manifest(tmp_path: Path, capsys: pytest.CaptureFixture[s
     )
 
     assert exit_code == 0
-    written = json.loads(out.read_text(encoding="utf-8"))
+    written = _object(out.read_text(encoding="utf-8"))
     assert written["versionCode"] == 1_000_012
     assert capsys.readouterr().out == out.read_text(encoding="utf-8")

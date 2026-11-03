@@ -15,7 +15,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 from urllib.parse import quote
 
 _TAG = re.compile(r"app-v(?P<version>\d+\.\d+\.\d+)\Z")
@@ -44,7 +44,26 @@ def _platform_entry(repo: str, tag: str, archive: Path, signature: str) -> dict[
     }
 
 
-def build_manifest(*, tag: str, artifacts: Path, repo: str) -> dict[str, Any]:
+class AppUpdateManifest(TypedDict):
+    # meiva:note
+    # Tauri's updater reads exactly these keys from the manifest; naming them as a TypedDict makes a renamed or dropped key fail type checking in the builder instead of at a user's update check.
+
+    version: str
+    platforms: dict[str, dict[str, str]]
+
+
+# meiva:note
+# The parsed flags as a typed namespace. The release workflow runs this file with the runner's bare
+# `python3`, so it takes no project import: the flags are read through the namespace's own
+# annotations, which argparse fills.
+class _Arguments(argparse.Namespace):
+    tag: str
+    artifacts: Path
+    repo: str
+    out: Path
+
+
+def build_manifest(*, tag: str, artifacts: Path, repo: str) -> AppUpdateManifest:
     match = _TAG.fullmatch(tag)
     if match is None:
         raise ValueError(f"'{tag}' is not an app-v<major>.<minor>.<patch> tag")
@@ -63,7 +82,7 @@ def build_manifest(*, tag: str, artifacts: Path, repo: str) -> dict[str, Any]:
         platforms["darwin-aarch64"] = entry
         platforms["darwin-x86_64"] = entry
 
-    return {"version": match.group("version"), "platforms": platforms}
+    return AppUpdateManifest(version=match.group("version"), platforms=platforms)
 
 
 def main(argv: list[str]) -> int:
@@ -72,7 +91,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--artifacts", required=True, type=Path)
     parser.add_argument("--repo", required=True)
     parser.add_argument("--out", required=True, type=Path)
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=_Arguments())
 
     manifest = build_manifest(tag=args.tag, artifacts=args.artifacts, repo=args.repo)
     args.out.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")

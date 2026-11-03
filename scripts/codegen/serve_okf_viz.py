@@ -8,6 +8,7 @@ import http.server
 import os
 import socket
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent.parent
@@ -15,6 +16,9 @@ TEMPLATE = REPO / "scripts" / "codegen" / "okf-d3-template.html"
 
 sys.path.insert(0, str(REPO))
 
+# meiva:note
+# The checkout root is on `sys.path` above, so the project imports follow it.
+from base.host.boundary.options import options  # noqa: E402
 from base.packages.docs.okf_graph import (  # noqa: E402
     OkfGraphData,
     build_graph_data,
@@ -48,12 +52,19 @@ def serve(d: Path, port: int, *, host: str) -> None:
         srv.shutdown()
 
 
+@dataclass(frozen=True)
+class Options:
+    port: int
+    output: str
+    no_serve: bool
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Build and serve OKF D3 viz")
     ap.add_argument("--port", type=int, default=8899)
     ap.add_argument("--output", default="okf-d3.html")
     ap.add_argument("--no-serve", action="store_true")
-    a = ap.parse_args()
+    a = options(ap.parse_args(), Options)
     print("Building...", file=sys.stderr)
     d = build()
     n = len(d["nodes"])

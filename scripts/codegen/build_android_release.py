@@ -6,9 +6,10 @@ import hashlib
 import json
 import re
 import sys
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import TypedDict, TypeGuard
 from urllib.parse import quote
 
 BUILD_NUMBER_BASE = 1_000_000
@@ -40,6 +41,43 @@ def tauri_config(*, version_name: str, version_code: int) -> str:
     )
 
 
+class AndroidManifest(TypedDict):
+    # meiva:note
+    # The Android client reads `android-latest.json` for these keys to decide whether an update exists; naming them as a TypedDict makes a renamed or dropped key fail type checking in the builder instead of in the client.
+
+    versionCode: int
+    versionName: str
+    apkUrl: str
+    sha256: str
+    commit: str
+    builtAt: str
+
+
+# meiva:note
+# The parsed flags as a typed namespace. The release workflow runs this file with the runner's
+# bare `python3`, so it takes no project import: each field is the flag a subcommand declares
+# (`required=True` unless noted) and exists exactly on the namespaces of the subcommands that declare
+# it, which read only their own.
+class _Arguments(argparse.Namespace):
+    command: str
+    run_number: int
+    version_name: str
+    version_code: int
+    current: Path
+    apk: Path
+    commit: str
+    repo: str
+    built_at: str | None
+    out: Path
+
+
+# meiva:note
+# The object `decode(text)` returns, read as `object`: `json` types its answer `Any`, and a parameter
+# typed `Callable[[str], object]` takes the decoder without naming the `Any`.
+def _decoded(decode: Callable[[str], object], text: str) -> object:
+    return decode(text)
+
+
 def build_manifest(
     *,
     version_code: int,
@@ -48,7 +86,7 @@ def build_manifest(
     commit: str,
     repo: str,
     built_at: str,
-) -> dict[str, Any]:
+) -> AndroidManifest:
     if _COMMIT.fullmatch(commit) is None:
         raise ValueError(f"'{commit}' is not a full commit SHA")
     parts = repo.split("/")
@@ -58,17 +96,17 @@ def build_manifest(
         raise ValueError(f"apk does not exist: {apk}")
     with apk.open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
-    return {
-        "versionCode": _checked_version_code(version_code),
-        "versionName": _checked_version_name(version_name),
-        "apkUrl": (
+    return AndroidManifest(
+        versionCode=_checked_version_code(version_code),
+        versionName=_checked_version_name(version_name),
+        apkUrl=(
             f"https://github.com/{repo}/releases/download/{LATEST_RELEASE_TAG}/"
             f"{quote(apk.name, safe='')}"
         ),
-        "sha256": digest,
-        "commit": commit,
-        "builtAt": _utc_timestamp(built_at),
-    }
+        sha256=digest,
+        commit=commit,
+        builtAt=_utc_timestamp(built_at),
+    )
 
 
 def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
@@ -80,7 +118,7 @@ def _is_str_object_dict(value: object) -> TypeGuard[dict[str, object]]:
 
 
 def assert_version_code_advances(*, current: Path, version_code: int) -> None:
-    body: object = json.loads(current.read_text(encoding="utf-8"))
+    body = _decoded(json.loads, current.read_text(encoding="utf-8"))
     if not _is_str_object_dict(body):
         raise TypeError(f"{current} is not a manifest object")
     previous = body.get("versionCode")
@@ -144,7 +182,7 @@ def main(argv: list[str]) -> int:
     manifest_parser.add_argument("--built-at", help="ISO-8601 timestamp with offset (default: now)")
     manifest_parser.add_argument("--out", type=Path, required=True)
 
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=_Arguments())
     if args.command == "version-code":
         print(build_version_code(args.run_number))
         return 0

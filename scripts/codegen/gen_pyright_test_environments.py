@@ -39,15 +39,29 @@ import re
 import subprocess
 import sys
 import tomllib
-from collections.abc import Collection, Iterable
+from collections.abc import Collection, Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from meizel.roles import pytest_test_hosts  # noqa: E402 - standalone script
+# meiva:note
+# A pre-commit hook runs this file, so it enters a scratch home before its first application import
+# (`scripts/tests/test_hooks_scratch_home.py`); the imports that follow stand on the checkout root put
+# on `sys.path` above.
+from base.host.env.boot_actions import enter_scratch_home  # noqa: E402
+
+if __name__ == "__main__":
+    enter_scratch_home()
+
+from base.host.boundary.fields import str_field  # noqa: E402
+from base.host.boundary.json_values import is_object_dict, is_object_list  # noqa: E402
+from base.host.boundary.options import options  # noqa: E402
+from base.host.boundary.untyped import object_of  # noqa: E402
+from meizel.roles import pytest_test_hosts  # noqa: E402
 
 BEGIN = (
     "# BEGIN GENERATED pyright tests environments "
@@ -86,10 +100,13 @@ def _covers(root: str, directory: str) -> bool:
 
 # meiva:note
 # The first `executionEnvironments` entry whose root contains `directory`, else {}.
-def covering_environment(config: dict[str, Any], directory: str) -> dict[str, Any]:
-    environments: list[dict[str, Any]] = config.get("executionEnvironments", [])
-    none: dict[str, Any] = {}
-    return next((env for env in environments if _covers(env["root"], directory)), none)
+def covering_environment(config: Mapping[str, object], directory: str) -> dict[str, object]:
+    raw = config.get("executionEnvironments", [])
+    if not is_object_list(raw) or not all(is_object_dict(env) for env in raw):
+        raise SystemExit("[tool.pyright].executionEnvironments must be an array of tables")
+    environments = [env for env in raw if is_object_dict(env)]
+    none: dict[str, object] = {}
+    return next((env for env in environments if _covers(str_field(env, "root"), directory)), none)
 
 
 def tests_roots(tracked: Iterable[str], hosts: tuple[str, ...]) -> list[str]:
@@ -124,7 +141,7 @@ def _toml_value(value: object) -> str:
 
 # meiva:note
 # The non-rule settings of the entry covering `root` (`extraPaths` and the like).
-def _inherited(config: dict[str, Any], root: str) -> dict[str, Any]:
+def _inherited(config: Mapping[str, object], root: str) -> dict[str, object]:
     return {
         key: value
         for key, value in covering_environment(config, root).items()
@@ -138,8 +155,8 @@ def _inherited(config: dict[str, Any], root: str) -> dict[str, Any]:
 # have not repaid theirs. The entry repeats the covering entry's other settings and leaves the Any
 # rules out.
 def _entries(
-    config: dict[str, Any], roots: list[str], *, owing_any: Collection[str]
-) -> list[dict[str, Any]]:
+    config: Mapping[str, object], roots: list[str], *, owing_any: Collection[str]
+) -> list[dict[str, object]]:
     return [
         {"root": root, **_inherited(config, root)}
         for root in roots
@@ -148,7 +165,7 @@ def _entries(
     ]
 
 
-def _render(entries: list[dict[str, Any]]) -> str:
+def _render(entries: list[dict[str, object]]) -> str:
     blocks = [
         "[[tool.pyright.executionEnvironments]]\n"
         + "".join(f"{key} = {_toml_value(value)}\n" for key, value in entry.items())
@@ -179,7 +196,11 @@ def generate(
     """`pyproject_text` with its generated region rewritten for the tracked tests directories."""
     region = _region(pyproject_text)
     handwritten = pyproject_text[: region.start()] + pyproject_text[region.end() :]
-    config = tomllib.loads(handwritten)["tool"]["pyright"]
+    document = object_of(tomllib.loads, handwritten)
+    tool = document.get("tool") if is_object_dict(document) else None
+    config = tool.get("pyright") if is_object_dict(tool) else None
+    if not is_object_dict(config):
+        raise SystemExit("pyproject.toml has no [tool.pyright] table")
     roots = tests_roots(tracked, pytest_test_hosts(handwritten))
     rendered = _render(_entries(config, roots, owing_any=owing_any))
     return pyproject_text[: region.start()] + rendered + pyproject_text[region.end() :]
@@ -212,6 +233,11 @@ def _tracked_python_files(repo_root: Path) -> list[str]:
     return [path for path in result.stdout.split("\0") if path]
 
 
+@dataclass(frozen=True)
+class Options:
+    check: bool
+
+
 def main(
     argv: list[str],
     *,
@@ -224,7 +250,7 @@ def main(
     parser.add_argument(
         "--check", action="store_true", help="exit 1 if pyproject.toml is stale; write nothing"
     )
-    args = parser.parse_args(argv)
+    args = options(parser.parse_args(argv), Options)
     pyproject = repo_root / "pyproject.toml"
     current = pyproject.read_text(encoding="utf-8")
     fresh = generate(current, _tracked_python_files(repo_root), owing_any=owing_any)
