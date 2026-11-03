@@ -11,19 +11,25 @@ tags: []
 owns the hosted checkpoint persistence boundary. Each `aput`, `aput_writes`, and
 `adelete_thread` borrows one exclusive pool connection and enters a PostgreSQL transaction.
 
-Before writing checkpoint, blob or intermediate write rows, the write transaction
-atomically verifies the runner's ownership against `agents_meta`:
+In `aput` and `aput_writes`, the transaction streams checkpoint, blob, and intermediate
+write rows first and verifies the runner's ownership against `agents_meta` immediately
+before commit (`adelete_thread` verifies ownership before deleting thread rows):
 ```sql
 SELECT machine, runtime_owner, status FROM agents_meta WHERE id = %s FOR SHARE
 ```
-The row lock (`FOR SHARE`) prevents concurrent takeover or status transition from
-completing until the write commits. When configured with `expected_owner`, the saver
-verifies that the row's `runtime_owner` matches `expected_owner`. If another host daemon
-took over the agent row, or if the agent was reassigned to another machine, the transaction
-raises `StaleIncarnationError` and rolls back immediately, persisting zero rows to
-`checkpoints`, `checkpoint_blobs`, or `checkpoint_writes`. Writes to terminated agents
-are rejected. Unbound savers (`expected_owner=None`), idle agents on this machine before
-first turn, and non-agent threads pass through cleanly.
+Acquiring `FOR SHARE` at the pre-commit boundary rather than before payload upload avoids
+holding a shared row lock on `agents_meta` across multi-second WAN writes while LangGraph
+runs background saves (`durability="async"`) concurrently with the foreground turn's
+`FOR UPDATE` inbound claims and status updates. Once acquired, `FOR SHARE` blocks any
+concurrent takeover or status transition until `COMMIT` completes. When configured with
+`expected_owner`, the saver verifies that the row's `runtime_owner` matches
+`expected_owner` under PostgreSQL `READ COMMITTED` visibility. If another host daemon
+took over the agent row before or during the upload, or if the agent was reassigned to
+another machine, `_verify_owner` raises `StaleIncarnationError` and rolls back the entire
+uncommitted transaction atomically, persisting zero rows to `checkpoints`,
+`checkpoint_blobs`, or `checkpoint_writes`. Writes to terminated agents are rejected
+(`adelete_thread` remains permitted). Unbound savers (`expected_owner=None`), idle agents
+on this machine before first turn, and non-agent threads pass through cleanly.
 
 Within the same transaction, a config naming a parent must find that exact
 `(thread_id, checkpoint_ns, checkpoint_id)` row. The `FOR KEY SHARE` lock remains
