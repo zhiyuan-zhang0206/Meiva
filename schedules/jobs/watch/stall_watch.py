@@ -19,6 +19,8 @@ from typing import NoReturn
 from zoneinfo import ZoneInfo
 
 import meiva
+from base.daemon.schedules.heartbeat import write_round_beat
+from base.deploy.schedule_timing import SCHEDULE_FIRST_ROUND_BUDGET_S
 from schedules.plans.watch.stall_rule import StallSample, WatchState, parse_stats, plan_poll
 
 __all__ = ["StallWatch", "initial_state", "poll_once", "run_watch"]
@@ -46,6 +48,11 @@ class StallWatch:
     zone: ZoneInfo
     report_agents: tuple[int, ...]
     poll_seconds: float = 60.0
+    # meiva:note
+    # Where the round beat goes. Both stay None for a stored script written before these parameters
+    # existed, and then this loop reports nothing about itself -- unchanged behaviour, not a fault.
+    home: Path | None = None
+    schedule_id: int | None = None
 
 
 def _stamp(now: float, zone: ZoneInfo) -> str:
@@ -135,14 +142,29 @@ def poll_once(watch: StallWatch, state: WatchState, now: float) -> WatchState:
     return plan.state
 
 
+# meiva:note
+# Every round promises the next one: the beat is written after the poll and before the sleep, and its
+# budget is the slowest round this loop has actually taken. Without it a stalled poll and an idle
+# watch are the same picture -- nothing printed, nothing recorded -- and this sentinel's whole job is
+# to be believed while it says nothing.
 def run_watch(watch: StallWatch, clock: Callable[[], float]) -> NoReturn:
     state = initial_state(watch)
+    budget = SCHEDULE_FIRST_ROUND_BUDGET_S
     while True:
-        now = clock()
+        began = clock()
         try:
-            state = poll_once(watch, state, now)
+            state = poll_once(watch, state, began)
         except Exception as exc:
             print(
-                f"{_stamp(now, watch.zone)} probe failed: {type(exc).__name__}: {exc}", flush=True
+                f"{_stamp(began, watch.zone)} probe failed: {type(exc).__name__}: {exc}", flush=True
             )
+        ended = clock()
+        budget = max(budget, ended - began)
+        write_round_beat(
+            watch.home,
+            watch.schedule_id,
+            now=datetime.fromtimestamp(ended, UTC),
+            sleep_s=watch.poll_seconds,
+            budget_s=budget,
+        )
         time.sleep(watch.poll_seconds)

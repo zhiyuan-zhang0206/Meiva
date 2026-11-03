@@ -27,6 +27,8 @@ from typing import NoReturn
 from zoneinfo import ZoneInfo
 
 import meiva
+from base.daemon.schedules.heartbeat import write_round_beat
+from base.deploy.schedule_timing import SCHEDULE_FIRST_ROUND_BUDGET_S
 from schedules.plans.watch.keepalive_rule import (
     KeepaliveState,
     RoundContext,
@@ -122,6 +124,11 @@ class Keepalive:
     hint: str
     blind_hint: str
     poll_seconds: float = 600.0
+    # meiva:note
+    # Where the round beat goes. Both stay None for a stored script written before these parameters
+    # existed, and then this loop reports nothing about itself -- unchanged behaviour, not a fault.
+    home: Path | None = None
+    schedule_id: int | None = None
 
 
 # meiva:note
@@ -259,6 +266,10 @@ def round_once(
     return plan.state, plan
 
 
+# meiva:note
+# Every round promises the next one, including a round that could not be configured: an unconfigured
+# site is a legitimate state, and a keeper that reports nothing about itself cannot be told from one
+# that stopped running. The budget is the slowest round this loop has actually taken.
 def run_keepalive(keepalive: Keepalive, clock: Callable[[], datetime]) -> NoReturn:
     first = clock()
     print(
@@ -266,24 +277,33 @@ def run_keepalive(keepalive: Keepalive, clock: Callable[[], datetime]) -> NoRetu
         flush=True,
     )
     state = load_state(keepalive, instant=first)
+    budget = SCHEDULE_FIRST_ROUND_BUDGET_S
     while True:
-        instant = clock()
+        began = clock()
         try:
             settings = Settings.from_environ(keepalive.env)
         except RuntimeError as exc:
-            print(f"{_stamp(instant, keepalive.zone)} not configured: {exc}", flush=True)
-            time.sleep(keepalive.poll_seconds)
-            continue
-        try:
-            state = _round(keepalive, settings, state, instant)
-        # meiva:note
-        # A round that raises is this keeper's own defect, not a fact about the watched site:
-        # print it and keep the loop alive rather than letting one bad round end the watch.
-        except Exception as exc:
-            print(
-                f"{_stamp(instant, keepalive.zone)} round failed: {type(exc).__name__}: {exc}",
-                flush=True,
-            )
+            print(f"{_stamp(began, keepalive.zone)} not configured: {exc}", flush=True)
+        else:
+            try:
+                state = _round(keepalive, settings, state, began)
+            # meiva:note
+            # A round that raises is this keeper's own defect, not a fact about the watched site:
+            # print it and keep the loop alive rather than letting one bad round end the watch.
+            except Exception as exc:
+                print(
+                    f"{_stamp(began, keepalive.zone)} round failed: {type(exc).__name__}: {exc}",
+                    flush=True,
+                )
+        ended = clock()
+        budget = max(budget, (ended - began).total_seconds())
+        write_round_beat(
+            keepalive.home,
+            keepalive.schedule_id,
+            now=ended,
+            sleep_s=keepalive.poll_seconds,
+            budget_s=budget,
+        )
         time.sleep(keepalive.poll_seconds)
 
 

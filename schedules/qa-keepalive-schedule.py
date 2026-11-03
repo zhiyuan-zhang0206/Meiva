@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 from base.paths.home import resolve_meiva_home
 from schedules.jobs.entry import cluster_timezone
 from schedules.jobs.watch.qa_keepalive import Keepalive, run_keepalive
+from schedules.plans.schedule_identity import parse_schedule_id
 
 HINT = (
     "Recovery: 1) reopen the page and check /health; 2) relaunch the inbound watcher; "
@@ -38,6 +39,8 @@ if __name__ == "__main__":
             zone=ZoneInfo(cluster_timezone()),
             hint=HINT,
             blind_hint=BLIND_HINT,
+            home=home,
+            schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
         ),
         clock=lambda: datetime.now(UTC),
     )

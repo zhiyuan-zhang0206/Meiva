@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from base.agents.context import MeivaContext
+from base.daemon.schedules.heartbeat import read_beat
 from meiva.gateway_client import use_client
 from schedules.jobs.watch.stall_watch import StallWatch, initial_state, poll_once
 from schedules.plans.watch.stall_rule import StallSample, WatchState, parse_stats, plan_poll
@@ -199,7 +200,9 @@ def test_the_watch_loop_reads_the_log_and_keeps_its_state_file(tmp_path: Path) -
     log = tmp_path / "pgbouncer.log"
     state = tmp_path / "state.json"
     log.write_text("\n".join(_line(m, *_HEALTHY) for m in (1, 2)) + "\n")
-    child = subprocess.Popen([sys.executable, "-I", str(_CHILD), str(log), str(state)])
+    child = subprocess.Popen(
+        [sys.executable, "-I", str(_CHILD), str(log), str(state), str(tmp_path), "39"]
+    )
     try:
         deadline = time.monotonic() + 30
         while not state.exists() and time.monotonic() < deadline:
@@ -209,6 +212,31 @@ def test_the_watch_loop_reads_the_log_and_keeps_its_state_file(tmp_path: Path) -
         child.wait(timeout=10)
 
     assert json.loads(state.read_text())["last_sample"] == "2026-10-24 11:02:03.456"
+
+
+# meiva:note
+# The sentinel's value is that silence means healthy, which is only true while the loop can be seen
+# to have taken another round. This pins the promise the loop itself writes, from the child process
+# that runs it.
+def test_the_watch_loop_promises_its_next_round(tmp_path: Path) -> None:
+    log = tmp_path / "pgbouncer.log"
+    state = tmp_path / "state.json"
+    log.write_text("\n".join(_line(m, *_HEALTHY) for m in (1, 2)) + "\n")
+    child = subprocess.Popen(
+        [sys.executable, "-I", str(_CHILD), str(log), str(state), str(tmp_path), "39"]
+    )
+    try:
+        deadline = time.monotonic() + 30
+        beat = read_beat(tmp_path, 39)
+        while beat is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+            beat = read_beat(tmp_path, 39)
+    finally:
+        child.terminate()
+        child.wait(timeout=10)
+
+    assert beat is not None
+    assert beat.alive_by > beat.written_at
 
 
 def test_every_new_minute_lands_in_the_history_file(tmp_path: Path) -> None:
