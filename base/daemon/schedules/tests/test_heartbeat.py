@@ -62,3 +62,21 @@ def test_alert_marks_round_trip_and_land_at_a_documented_path(tmp_path: Path) ->
 
     assert alert_marks_path(tmp_path) == tmp_path / "state/schedules/progress-alerts.json"
     assert read_alert_marks(tmp_path) == {"42": "2026-11-03T19:00:00+00:00"}
+
+
+# meiva:note
+# The budget is written for the question "why did this alert come late": the promise only widens,
+# so one slow round raises every later deadline, and the number that did it must be readable
+# without the loop's logs. It is not part of `Beat`, so a reader that predates it is unaffected.
+def test_the_measured_budget_rides_along_without_changing_the_contract(tmp_path: Path) -> None:
+    path = write_beat(
+        tmp_path, 55, written_at=NOW, alive_by=NOW + timedelta(hours=1), budget_s=640.5
+    )
+    loaded = json.loads(path.read_text())
+
+    assert loaded["round_budget_s"] == 640.5
+    beat = read_beat(tmp_path, 55)
+    assert beat is not None and beat.alive_by == NOW + timedelta(hours=1)
+
+    plain = write_beat(tmp_path, 56, written_at=NOW, alive_by=NOW)
+    assert "round_budget_s" not in json.loads(plain.read_text())

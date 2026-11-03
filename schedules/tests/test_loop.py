@@ -9,15 +9,20 @@
 
 from __future__ import annotations
 
+import ast
+import json
 import multiprocessing
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import psycopg
 import pytest
 
+from base.daemon.schedules.heartbeat import beat_path, read_beat
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.deploy.schedule_timing import SCHEDULE_FIRST_ROUND_BUDGET_S
 from schedules.jobs.catchup import Fired
 from schedules.jobs.loop import CronSchedule, LoopTick, Trigger, loop_once, run_loop
 from schedules.plans.loop_plan import (
@@ -312,7 +317,11 @@ def test_a_failing_callback_leaves_the_slot_claimed(
 
 
 def _run_until_killed(
-    schedule_id: int, started_at: datetime, outcomes: Any, database_gate: ProcessDbGate
+    schedule_id: int,
+    started_at: datetime,
+    outcomes: Any,
+    database_gate: ProcessDbGate,
+    home: Path,
 ) -> None:
     def fire(slot: datetime, trigger: str | None) -> None:
         outcomes.put((slot, trigger))
@@ -324,11 +333,12 @@ def _run_until_killed(
         schedule_id=schedule_id,
         started_at=started_at,
         clock=lambda: datetime.now(UTC),
+        home=home,
     )
 
 
 def test_run_loop_claims_a_due_slot_in_its_own_process(
-    db_conn: psycopg.Connection, database_gate: ProcessDbGate
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate, tmp_path: Path
 ) -> None:
     assert database_gate.min_read_due(), "spawn copies a fresh admission budget"
     schedule_id = _schedule_row(db_conn)
@@ -337,7 +347,7 @@ def test_run_loop_claims_a_due_slot_in_its_own_process(
     worker = context.Process(
         target=_run_until_killed,
         args=(schedule_id, datetime.now(UTC) - timedelta(minutes=10), outcomes),
-        kwargs={"database_gate": database_gate},
+        kwargs={"database_gate": database_gate, "home": tmp_path},
     )
 
     worker.start()
@@ -349,3 +359,56 @@ def test_run_loop_claims_a_due_slot_in_its_own_process(
 
     assert trigger == "every-minute"
     assert claimed_slots(db_conn, schedule_id) == [slot]
+
+
+# meiva:note
+# The loop writes the heartbeat the manager reads, without any schedule script asking it to: a
+# process that dies stops refreshing the promise, and the manager's round clock is the only fast
+# one that exists. The child process proves the file lands; the budget test states the promise the
+# file carries, which is what makes a missed round visible instead of merely quiet.
+def test_run_loop_writes_the_round_heartbeat_its_manager_reads(
+    db_conn: psycopg.Connection, database_gate: ProcessDbGate, tmp_path: Path
+) -> None:
+    schedule_id = _schedule_row(db_conn)
+    context = multiprocessing.get_context("spawn")
+    outcomes = context.Queue()
+    worker = context.Process(
+        target=_run_until_killed,
+        args=(schedule_id, datetime.now(UTC) - timedelta(minutes=10), outcomes),
+        kwargs={"database_gate": database_gate, "home": tmp_path},
+    )
+
+    worker.start()
+    try:
+        outcomes.get(timeout=60)
+    finally:
+        worker.terminate()
+        worker.join(timeout=10)
+
+    beat = read_beat(tmp_path, schedule_id)
+    assert beat is not None, "the loop must leave the heartbeat its manager reads"
+    assert beat.schedule_id == schedule_id
+    assert beat.alive_by - beat.written_at >= timedelta(seconds=SCHEDULE_FIRST_ROUND_BUDGET_S)
+    payload = json.loads(beat_path(tmp_path, schedule_id).read_text())
+    assert payload["round_budget_s"] >= SCHEDULE_FIRST_ROUND_BUDGET_S
+
+
+# meiva:note
+# Every template hands the loop its home. The default exists only for a stored script that predates
+# the parameter, so a template that forgot it would run without a heartbeat and nothing would say
+# so -- the exact silence this loop change exists to end. The scan reads the repository's own
+# templates: no database, no process.
+def test_every_schedule_template_passes_its_home_to_the_loop() -> None:
+    root = Path(__file__).resolve().parents[2]
+    missing: list[str] = []
+    for path in sorted(root.glob("schedules/**/*.py")):
+        if "tests" in path.parts:
+            continue
+        for node in ast.walk(ast.parse(path.read_text())):
+            if not isinstance(node, ast.Call):
+                continue
+            if getattr(node.func, "id", "") != "run_loop":
+                continue
+            if not any(keyword.arg == "home" for keyword in node.keywords):
+                missing.append(f"{path.relative_to(root)}:{node.lineno}")
+    assert missing == [], f"templates that would run without a heartbeat: {missing}"

@@ -56,6 +56,7 @@ if __name__ == "__main__":
             schedule,
             partial(collect_ci_metrics, job=job, inputs=inputs),
             schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
+            home=inputs.home,
             started_at=datetime.now(UTC),
             clock=lambda: datetime.now(UTC),
         )

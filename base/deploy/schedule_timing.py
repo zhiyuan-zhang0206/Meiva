@@ -32,3 +32,12 @@ SCHEDULE_STALL_ALERT_AFTER_S = 2 * 60 * 60
 # this constant would only hide slow rounds behind a bigger number instead of making the
 # schedule declare them.
 SCHEDULE_PROGRESS_SKEW_S = 60.0
+
+# meiva:note
+# What a resident loop promises before it has measured a round of its own. The first beat says only
+# "the next round starts at once and will be reported within this budget"; every later beat replaces
+# it with the slowest round the loop has actually taken, so no schedule has to declare a number a
+# reader must then trust. Five minutes keeps a long first round -- a daily job that happens to fire
+# on the same restart that launched the loop -- from reporting itself late, while a process that
+# died before its second beat is still named inside the hour.
+SCHEDULE_FIRST_ROUND_BUDGET_S = 5 * 60

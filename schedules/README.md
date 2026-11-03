@@ -237,6 +237,20 @@ Every schedule row records a target `machine` (defaulting to the gateway machine
   commits before the callback, so concurrent runners cannot execute a slot
   twice. A crash after claiming may lose that slot. Callbacks receive the
   claimed UTC slot and payload for report windows.
+- **A resident loop writes the round heartbeat its supervisor reads.**
+  `run_loop()` writes `state/schedules/<id>.heartbeat.json` before its first
+  round and again after each one, promising the next beat by `now + sleep + the
+  slowest round it has measured` (starting from
+  `SCHEDULE_FIRST_ROUND_BUDGET_S`, five minutes). The schedule manager turns a
+  passed `alive_by` into `schedule_not_progressing` within its 60-second skew, so
+  a loop whose process died is named inside the hour instead of waiting for the
+  two-hour sessionless clock. The file also carries `round_budget_s`, the term
+  the promise currently adds: the budget only grows, so a single slow round
+  widens every later deadline, and the number behind a late alert is readable
+  there rather than in the loop's logs. A schedule script does not have to write the file
+  itself; it only has to pass `home=` to `run_loop`. The argument defaults to
+  `None` for a stored copy written before it existed — `meiva schedules
+  provision` (or the next manager start) refreshes those from these templates.
 - **A template change reaches a running cluster at the next `schedule-manager`
   start** (see "How built-ins get created"), or at once through
   `meiva schedules provision`. A resynced **enabled** schedule is relaunched onto the
