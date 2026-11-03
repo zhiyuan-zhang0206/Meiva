@@ -39,7 +39,9 @@ class LlmUsage(TypedDict):
 # decision, `done` / `waiting:<object>` / `deferred:time` the agent's declaration. It is
 # absent when the loop could not name a reason (a turn that continued past its halt, a
 # terminate or restart, an aborted call), and a value outside the set makes the record
-# invalid rather than free text.
+# invalid rather than free text. Absent is an unlabelled turn, never "nothing to defer":
+# no production agent is asked to declare yet, so production records read `no_input` and
+# `budget` only — count the unlabelled share before reading any other one.
 # meiva:link agent/graph/llm/docs/turn-records.meiva.okf.md
 class TurnEnd(TypedDict):
     ok: bool
