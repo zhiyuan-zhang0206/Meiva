@@ -568,3 +568,63 @@ def test_probe_cli_models_claude_blanks_secret_env_and_reads_initialize(tmp_path
             reasoning_effort_default="high",
         ),
     )
+
+
+# meiva:note
+# The probe runs the CLI under `child_env`, which blanks every credential, so its "no login" answer
+# describes the probe's environment rather than the launcher's. When this process holds a credential
+# the probe strips, the honest row is `unknown` — never `available`, and no longer `unavailable`
+# (#6150: a claude_code agent ran a real turn with a key the probe had already called absent).
+def test_a_credential_the_probe_cannot_see_is_unknown_not_a_logout(tmp_path: Path) -> None:
+    _external_cli(tmp_path, "bin", "claude")
+
+    def runner(
+        argv: list[str], *, capture_output: bool, text: bool, timeout: float, env: dict[str, str]
+    ) -> Any:
+        assert "ANTHROPIC_API_KEY" not in env, "the probe is supposed to run without the credential"
+        return subprocess.CompletedProcess(
+            argv, 0, stdout=json.dumps({"loggedIn": False}), stderr=""
+        )
+
+    rows = probe_local_harnesses(
+        tmp_path,
+        str(tmp_path / "empty-bin"),
+        _BIN_DIRS,
+        now=_NOW,
+        environ={"ANTHROPIC_API_KEY": "sk-not-forwarded"},
+        cli_runner=runner,
+        model_prober=_stub_model_prober,
+    )
+    row = {candidate.harness: candidate for candidate in rows}[Harness.CLAUDE_CODE]
+
+    assert row.status == "unknown"
+    assert "ANTHROPIC_API_KEY" in row.reason
+    assert "not signed in" not in row.reason
+
+
+# meiva:note
+# The positive control: the same CLI answer with nothing withheld is still a logout, so the rule
+# above narrows one row rather than weakening every probe.
+def test_the_same_answer_without_a_withheld_credential_is_still_unavailable(tmp_path: Path) -> None:
+    _external_cli(tmp_path, "bin", "claude")
+
+    def runner(
+        argv: list[str], *, capture_output: bool, text: bool, timeout: float, env: dict[str, str]
+    ) -> Any:
+        return subprocess.CompletedProcess(
+            argv, 0, stdout=json.dumps({"loggedIn": False}), stderr=""
+        )
+
+    rows = probe_local_harnesses(
+        tmp_path,
+        str(tmp_path / "empty-bin"),
+        _BIN_DIRS,
+        now=_NOW,
+        environ={},
+        cli_runner=runner,
+        model_prober=_stub_model_prober,
+    )
+    row = {candidate.harness: candidate for candidate in rows}[Harness.CLAUDE_CODE]
+
+    assert row.status == "unavailable"
+    assert "not signed in" in row.reason

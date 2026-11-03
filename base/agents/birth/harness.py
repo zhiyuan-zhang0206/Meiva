@@ -362,6 +362,53 @@ _CLI_TIMEOUT_S: dict[Harness, float] = {
 
 CliRunner = Callable[..., "subprocess.CompletedProcess[str]"]
 
+# meiva:note
+# The variables a harness CLI reads its own credential from. The launcher passes the configured one
+# through (`base/lm/harness/claude/auth.py:build_env`), but the probe runs the CLI under
+# `child_env`, which blanks every credential — so a CLI that answers "no login" while one of these
+# is set in this process has answered a different question from the one the launch faces. Reading
+# that answer as "signed out" is a claim the probe cannot support; it reports `unknown` instead
+# (#6150: a claude_code agent ran a real turn with a key this probe had already declared absent).
+_CREDENTIAL_ENV_NAMES = (
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "OPENAI_API_KEY",
+)
+
+
+# meiva:note
+# Which answer decides the row. A CLI that says "no login" while this process holds a credential the
+# probe stripped has described the probe's environment, not the launcher's: `unknown` is the honest
+# answer, `available` would be a claim nobody verified, and `unavailable` is what the row used to
+# say. Otherwise the CLI's own answer wins, and the stored credential is read only when it had none.
+def _login_evidence(
+    harness: Harness,
+    cli_evidence: _LoginEvidence,
+    withheld: Sequence[str],
+    *,
+    home: Path,
+    now: datetime,
+) -> _LoginEvidence:
+    if cli_evidence.signed_in is False and withheld:
+        names = ", ".join(withheld)
+        return _LoginEvidence(
+            signed_in=None,
+            detail=f"{names} is set in this process but the CLI probe does not see it, and "
+            f"{cli_evidence.detail}",
+        )
+    return _stored_login(harness, home, now=now) if cli_evidence.signed_in is None else cli_evidence
+
+
+def _withheld_credentials(
+    environ: Mapping[str, str], probe_environment: Mapping[str, str]
+) -> tuple[str, ...]:
+    return tuple(
+        name
+        for name in _CREDENTIAL_ENV_NAMES
+        if environ.get(name) and not probe_environment.get(name)
+    )
+
 
 def _cli_environment(environ: Mapping[str, str]) -> dict[str, str]:
     from base.host.env.registry import child_env
@@ -468,10 +515,9 @@ def _probe_external(
         )
     installed = f"installed at {path}" if on_path else f"installed at {path} (not on PATH)"
     env = _cli_environment(environ)
+    withheld = _withheld_credentials(environ, env)
     cli_evidence = _cli_login(harness, path, runner=cli_runner, environment=env)
-    evidence = (
-        _stored_login(harness, home, now=now) if cli_evidence.signed_in is None else cli_evidence
-    )
+    evidence = _login_evidence(harness, cli_evidence, withheld, home=home, now=now)
     if evidence.signed_in is True:
         if (
             harness is Harness.ANTIGRAVITY
