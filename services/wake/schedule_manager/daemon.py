@@ -56,6 +56,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
+from base.host.boundary.untyped import object_of
 from base.host.env.dotenv_file import read_env_aliases
 from base.host.exit_codes import hard_exit
 from base.host.exit_codes import hard_exit as _hard_exit
@@ -164,7 +165,7 @@ def _fetch_gateway_launch_secrets(
     try:
         resp = dial_get(url, timeout=5.0, headers=bearer_header(bearer))
         if resp.status_code == 200:
-            remote_secrets: object = resp.json()
+            remote_secrets = object_of(resp.json)
             if _is_dict(remote_secrets):
                 for k in missing_names:
                     remote_val = remote_secrets.get(k)

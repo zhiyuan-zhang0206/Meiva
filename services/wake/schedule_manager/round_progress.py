@@ -15,9 +15,9 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from psycopg_pool import ConnectionPool
 
@@ -29,6 +29,7 @@ from base.daemon.schedules.heartbeat import (
     read_beat,
     write_alert_marks,
 )
+from base.db.rows import query_one
 from base.deploy.schedule_timing import SCHEDULE_PROGRESS_SKEW_S
 
 __all__ = ["report_late_rounds"]
@@ -37,7 +38,7 @@ _log = logging.getLogger(__name__)
 
 
 def report_late_rounds(
-    pool: ConnectionPool[Any],
+    pool: ConnectionPool,
     *,
     home: Path,
     status_by_id: Mapping[int, str],
@@ -89,10 +90,14 @@ def _emit(schedule_id: int, status: str, beat: Beat, now: datetime) -> None:
     )
 
 
-def _database_clock(pool: ConnectionPool[Any]) -> datetime:
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT clock_timestamp()")
-        row = cur.fetchone()
+@dataclass(frozen=True)
+class _ClockRow:
+    now: datetime
+
+
+def _database_clock(pool: ConnectionPool) -> datetime:
+    with pool.connection() as conn:
+        row = query_one(conn, _ClockRow, "SELECT clock_timestamp() AS now")
     if row is None:
         raise RuntimeError("clock_timestamp() returned no row")
-    return row[0]
+    return row.now

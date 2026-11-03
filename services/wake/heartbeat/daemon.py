@@ -49,6 +49,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
+from base.db.rows import query_all, query_one
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 from base.host.exit_codes import hard_exit
@@ -227,9 +228,27 @@ def send_heartbeat_checkin(
     publish_inbound_wake(db, bus, agent_id, "0")
 
 
+@dataclass(frozen=True)
+class _AgentRow:
+    status: str
+    idle_minutes: float
+    level: int
+    paused: bool
+    real_inbound: bool
+    impersonated: bool
+
+
+@dataclass(frozen=True)
+class _ResetRow:
+    id: int
+    level: int
+    paused: bool
+    real_inbound: bool
+
+
 def _reconcile_agent(
     pool: ConnectionPool,
-    cur: psycopg.Cursor,
+    conn: psycopg.Connection,
     agent_id: int,
     *,
     pending_checkin: dict[int, float],
@@ -240,37 +259,35 @@ def _reconcile_agent(
     threshold: int,
 ) -> None:
     """Judge one tracked agent's last check-in: update its failure and no-op streaks."""
-    cur.execute(
+    row = query_one(
+        conn,
+        _AgentRow,
         pgsql.SQL(
             "SELECT status, "
-            "(EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0)::double precision, "
-            "heartbeat_backoff_level, "
-            "(heartbeat_paused_until IS NOT NULL AND heartbeat_paused_until > now()), "
+            "(EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0)::double precision "
+            "AS idle_minutes, "
+            "heartbeat_backoff_level AS level, "
+            "(heartbeat_paused_until IS NOT NULL AND heartbeat_paused_until > now()) AS paused, "
             "(last_heartbeat_at IS NOT NULL AND EXISTS ("
             "  SELECT 1 FROM inbound_messages im "
             "  WHERE im.agent_id = agents_meta.id AND im.kind <> 'heartbeat' "
             "    AND {not_passive} "
-            "    AND im.created_at > agents_meta.last_heartbeat_at)) "
+            "    AND im.created_at > agents_meta.last_heartbeat_at)) AS real_inbound "
             ", EXISTS (SELECT 1 FROM agent_impersonations lease "
-            "WHERE lease.agent_id=agents_meta.id AND lease.status='active') "
+            "WHERE lease.agent_id=agents_meta.id AND lease.status='active') AS impersonated "
             "FROM agents_meta WHERE id = %s"
         ).format(not_passive=pgsql.SQL(not_passive_inbound("im"))),
         (agent_id,),
     )
-    row = cur.fetchone()
     sent_at = pending_checkin.pop(agent_id, None)
-    if row is None or row[0] not in ("idling", "running") or bool(row[5]):
+    if row is None or row.status not in ("idling", "running") or row.impersonated:
         # External progress is not measured by native turns; never penalize it.
         failure_streak.pop(agent_id, None)
         noop_streak.pop(agent_id, None)
         return
-    idle_minutes = row[1]
-    advanced = (
-        sent_at is not None
-        and idle_minutes is not None
-        and idle_minutes < sent_at - _ADVANCE_SLACK_MINUTES
-    )
-    recovered = advanced or (idle_minutes is not None and idle_minutes < idle_threshold_s / 60.0)
+    idle_minutes = row.idle_minutes
+    advanced = sent_at is not None and idle_minutes < sent_at - _ADVANCE_SLACK_MINUTES
+    recovered = advanced or idle_minutes < idle_threshold_s / 60.0
     if recovered:
         failure_streak.pop(agent_id, None)
     elif sent_at is not None:
@@ -279,12 +296,10 @@ def _reconcile_agent(
     # its previously assigned backoff deadline.
 
     # B7 no-op nudge streak — independent of the failure streak above.
-    if bool(row[3]) or bool(row[4]):
+    if row.paused or row.real_inbound:
         noop_streak.pop(agent_id, None)
     elif sent_at is not None:
-        _count_noop_nudge(
-            pool, agent_id, int(row[2] or 0), noop_streak, heartbeat_interval_s, threshold
-        )
+        _count_noop_nudge(pool, agent_id, row.level, noop_streak, heartbeat_interval_s, threshold)
 
 
 def _count_noop_nudge(
@@ -350,11 +365,11 @@ def reconcile_checkin_outcomes(
     tracked = set(pending_checkin) | set(failure_streak) | set(noop_streak)
     if not tracked:
         return
-    with pool.connection() as conn, conn.cursor() as cur:
+    with pool.connection() as conn:
         for agent_id in tracked:
             _reconcile_agent(
                 pool,
-                cur,
+                conn,
                 agent_id,
                 pending_checkin=pending_checkin,
                 failure_streak=failure_streak,
@@ -369,9 +384,12 @@ def _raise_backoff_level(
     pool: ConnectionPool, agent_id: int, new_level: int, interval_s: float
 ) -> None:
     """Persist a raised B7 backoff level and emit its event."""
+    # meiva:note
+    # `1 << n` is `2**n`: the stubs type `int ** int` as Any. The level is never negative
+    # (`heartbeat_backoff_level` carries a CHECK of 0..16), so the shift is the same value.
     stretched_s = int(
         min(
-            interval_s * (2**new_level),
+            interval_s * (1 << new_level),
             settings.daemon.heartbeat_backoff_max_interval_seconds,
         )
     )
@@ -394,22 +412,25 @@ def _raise_backoff_level(
 
 
 def sweep_backoff_resets(pool: ConnectionPool) -> None:
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
+    with pool.connection() as conn:
+        rows = query_all(
+            conn,
+            _ResetRow,
             pgsql.SQL(
-                "SELECT id, heartbeat_backoff_level, "
-                "(heartbeat_paused_until IS NOT NULL AND heartbeat_paused_until > now()), "
+                "SELECT id, heartbeat_backoff_level AS level, "
+                "(heartbeat_paused_until IS NOT NULL AND heartbeat_paused_until > now()) "
+                "AS paused, "
                 "(last_heartbeat_at IS NOT NULL AND EXISTS ("
                 "  SELECT 1 FROM inbound_messages im "
                 "  WHERE im.agent_id = agents_meta.id AND im.kind <> 'heartbeat' "
                 "    AND {not_passive} "
-                "    AND im.created_at > agents_meta.last_heartbeat_at)) "
+                "    AND im.created_at > agents_meta.last_heartbeat_at)) AS real_inbound "
                 "FROM agents_meta WHERE heartbeat_backoff_level > 0"
-            ).format(not_passive=pgsql.SQL(not_passive_inbound("im")))
+            ).format(not_passive=pgsql.SQL(not_passive_inbound("im"))),
         )
-        rows = cur.fetchall()
-    for agent_id, level, paused, real_inbound in rows:
-        if not paused and not real_inbound:
+    for reset in rows:
+        agent_id, level, paused = reset.id, reset.level, reset.paused
+        if not paused and not reset.real_inbound:
             continue
         with write_transaction(pool) as conn, conn.cursor() as cur:
             cur.execute(
@@ -423,7 +444,7 @@ def sweep_backoff_resets(pool: ConnectionPool) -> None:
                 agent_id=agent_id,
                 source="system",
                 attributes={
-                    "previous_level": int(level),
+                    "previous_level": level,
                     "reason": "paused" if paused else "real_inbound",
                 },
             )
@@ -446,12 +467,14 @@ def backoff_deadlines(
     deadline_state = {} if deadline_state is None else deadline_state
     for agent_id in deadline_state.keys() - failure_streak.keys():
         del deadline_state[agent_id]
+    # meiva:note
+    # `1 << streak` is `2**streak`, as in `_raise_backoff_level`; a streak counts up from zero.
     for agent_id, streak in failure_streak.items():
         previous = deadline_state.get(agent_id)
         if previous is None or previous[0] != streak:
             deadline_state[agent_id] = (
                 streak,
-                now + min(2**streak, BACKOFF_MAX_WINDOWS) * idle_threshold_s,
+                now + min(1 << streak, BACKOFF_MAX_WINDOWS) * idle_threshold_s,
             )
     return {agent_id: deadline for agent_id, (_, deadline) in deadline_state.items()}
 

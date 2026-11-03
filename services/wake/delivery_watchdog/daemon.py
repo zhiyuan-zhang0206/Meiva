@@ -8,6 +8,7 @@ import signal
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
@@ -32,6 +33,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
+from base.db.rows import query_all
 from base.events.live.bus import EventBus
 from base.host.exit_codes import hard_exit
 from base.host.exit_codes import hard_exit as _hard_exit
@@ -95,6 +97,14 @@ _STRANDED_WAKE_ROUND_MARGIN_S = 60.0
 _POOL_MAX_SIZE = 2
 
 
+@dataclass(frozen=True)
+class _StaleRow:
+    id: int
+    agent_id: int
+    label: str | None
+    age_s: float
+
+
 # meiva:note
 # Chat inbounds still `pending` past the threshold, as
 # `(inbound_id, agent_id, agent_label, age_seconds)`, oldest first.
@@ -123,10 +133,12 @@ def select_stale_pending(
     pool: ConnectionPool,
     threshold_s: float,
 ) -> list[tuple[int, int, str | None, float]]:
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
+    with pool.connection() as conn:
+        rows = query_all(
+            conn,
+            _StaleRow,
             "SELECT m.id, m.agent_id, a.label, "  # noqa: S608
-            "       EXTRACT(EPOCH FROM (now() - m.created_at)) AS age_s "
+            "       EXTRACT(EPOCH FROM (now() - m.created_at))::float8 AS age_s "
             "FROM inbound_messages m "
             "LEFT JOIN agents a ON a.id = m.agent_id "
             "JOIN agents_meta ON agents_meta.id = m.agent_id "
@@ -138,7 +150,7 @@ def select_stale_pending(
             "ORDER BY m.created_at ASC",
             (threshold_s,),
         )
-        return [(r[0], r[1], r[2], float(r[3])) for r in cur.fetchall()]
+    return [(r.id, r.agent_id, r.label, r.age_s) for r in rows]
 
 
 def select_pending_ids(pool: ConnectionPool) -> set[int]:

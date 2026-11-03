@@ -36,6 +36,7 @@ from base.agents.messages.inbound import WakeTriggerKind, validate_wake_trigger_
 from base.agents.recovery.breaker import RECOVERY_BREAKER_CLEAR, SUPPRESS_REASON_PERMANENT_REJECT
 from base.api_contracts.agent_contract import AgentStatus
 from base.db import Database
+from base.db.rows import IdRow, query_all
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 from ops.cluster.rpc import RpcClient
@@ -74,6 +75,13 @@ class StrandedOwner:
     trigger_kind: WakeTriggerKind
 
 
+@dataclass(frozen=True)
+class _StrandedRow:
+    agent_id: int
+    id: int
+    kind: str
+
+
 # meiva:note
 # One row per terminated owner: the oldest pending row that passes the shared
 # wake fence (mandatory — an involuntary death is never woken for leftover work),
@@ -95,8 +103,10 @@ class StrandedOwner:
 # is a read-only candidate pass; concurrency is serialized downstream by `claim_stranded`'s
 # atomic UPDATE ... RETURNING id.
 def select_stranded(pool: ConnectionPool, age_bound_s: float) -> list[StrandedOwner]:
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
+    with pool.connection() as conn:
+        rows = query_all(
+            conn,
+            _StrandedRow,
             sql.SQL(
                 "SELECT DISTINCT ON (m.agent_id) m.agent_id, m.id, m.kind "
                 "FROM inbound_messages m "
@@ -121,10 +131,9 @@ def select_stranded(pool: ConnectionPool, age_bound_s: float) -> list[StrandedOw
             ),
             (age_bound_s,),
         )
-        return [
-            StrandedOwner(int(agent_id), int(inbound_id), validate_wake_trigger_kind(str(kind)))
-            for agent_id, inbound_id, kind in cur.fetchall()
-        ]
+    return [
+        StrandedOwner(row.agent_id, row.id, validate_wake_trigger_kind(row.kind)) for row in rows
+    ]
 
 
 # meiva:note
@@ -142,8 +151,10 @@ def claim_stranded(
 ) -> list[int]:
     if not agent_ids or max_per_round < 1:
         return []
-    with write_transaction(pool) as conn, conn.cursor() as cur:
-        cur.execute(
+    with write_transaction(pool) as conn:
+        claimed = query_all(
+            conn,
+            IdRow,
             sql.SQL(
                 "UPDATE agents_meta "
                 "SET wake_suppressed_until = clock_timestamp() + make_interval(secs => %s), "
@@ -165,7 +176,7 @@ def claim_stranded(
                 max_per_round,
             ),
         )
-        return sorted(int(row[0]) for row in cur.fetchall())
+    return sorted(row.id for row in claimed)
 
 
 # meiva:note

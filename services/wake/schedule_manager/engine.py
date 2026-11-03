@@ -45,6 +45,7 @@ import threading
 import time
 import traceback
 from dataclasses import dataclass
+from operator import attrgetter
 from pathlib import Path
 from types import FrameType
 
@@ -58,6 +59,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
+from base.host.boundary.untyped import object_of
 from meiva import boot
 from meiva.sdk_surface import process_context
 from services.wake.schedule_manager.guard_admission import (
@@ -312,15 +314,17 @@ def _called_name(frame: FrameType) -> str:
     if call is None or call.positions is None:
         return ""
     target = (call.positions.lineno, call.positions.col_offset)
-    loads = [
-        ins.argval
-        for ins in instructions
-        if ins.offset < call.offset
-        and ins.positions is not None
-        and (ins.positions.lineno, ins.positions.col_offset) == target
-        and ins.opname.startswith("LOAD_")
-        and isinstance(ins.argval, str)
-    ]
+    loads: list[str] = []
+    for ins in instructions:
+        if (
+            ins.offset < call.offset
+            and ins.positions is not None
+            and (ins.positions.lineno, ins.positions.col_offset) == target
+            and ins.opname.startswith("LOAD_")
+        ):
+            argval = object_of(attrgetter("argval"), ins)
+            if isinstance(argval, str):
+                loads.append(argval)
     return loads[-1] if loads else ""
 
 

@@ -6,12 +6,22 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from psycopg import sql as pgsql
 from psycopg_pool import ConnectionPool
 
 from base.agents.messages.inbound import not_passive_inbound
+from base.db.rows import query_all
 from base.deploy.progress_timeout import CORPSE_REAP_GRACE_S
 from services.wake.heartbeat import STALE_PENDING_S
+
+
+@dataclass(frozen=True)
+class _DueRow:
+    id: int
+    idle_minutes: float
+    reason: str | None
 
 
 def select_idle_agents_needing_heartbeat(
@@ -157,9 +167,9 @@ def select_idle_agents_needing_heartbeat(
         backoff_max_interval_s,
         STALE_PENDING_S,
     ]
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(sql, params)
-        rows = cur.fetchall()
+    with pool.connection() as conn:
+        found = query_all(conn, _DueRow, sql, params)
+    rows = [(row.id, row.idle_minutes, row.reason) for row in found]
     # meiva:note
     # Consecutive-failure backoff: skip agents whose absolute backoff deadline
     # has not arrived — a wedged agent must not be poked on the normal cadence.
