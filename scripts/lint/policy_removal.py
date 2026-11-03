@@ -45,6 +45,8 @@ from typing import TypeGuard
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT))
 
+from base.host.boundary.options import options  # noqa: E402
+from base.host.boundary.untyped import object_of  # noqa: E402
 from meizel.allowances import (  # noqa: E402
     POLICY,
     Declaration,
@@ -121,7 +123,7 @@ def _gh_text(number: int) -> str | None:
     if done.returncode != 0:
         return None
     try:
-        payload: object = json.loads(done.stdout)
+        payload = object_of(json.loads, done.stdout)
     except json.JSONDecodeError:
         return None
     found = _object(payload)
@@ -440,13 +442,26 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+# meiva:note
+# The flags `_parser` declares, read once so `_run` holds `str` and `str | None` values instead of the parser's `Any`.
+@dataclass(frozen=True)
+class Options:
+    repo: str
+    against: str
+    on_removal: str
+    record: str | None
+    event: str | None
+    summary: str | None
+    record_out: str | None
+
+
 def main(
     argv: list[str],
     *,
     read_member: MemberReader = _gh_text,
     read_commit: CommitReader = _gh_pull_requests_of,
 ) -> int:
-    args = _parser().parse_args(argv)
+    args = options(_parser().parse_args(argv), Options)
     try:
         return _run(args, read_member, read_commit)
     except (MeizelError, ValueError) as error:
@@ -454,7 +469,7 @@ def main(
         return 2
 
 
-def _run(args: argparse.Namespace, read_member: MemberReader, read_commit: CommitReader) -> int:
+def _run(args: Options, read_member: MemberReader, read_commit: CommitReader) -> int:
     repo = GitRepo(toplevel(Path(args.repo)))
     before, after = _policies(repo, args.against)
     request = _pull_request(args.event)
@@ -522,7 +537,7 @@ def _pull_request(event: str | None) -> dict[str, object]:
     if not event:
         return {}
     try:
-        payload: object = json.loads(Path(event).read_text(encoding="utf-8"))
+        payload = object_of(json.loads, Path(event).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
     return _object(_object(payload).get("pull_request"))

@@ -22,6 +22,12 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 sys.path.insert(0, str(_REPO_ROOT))
 
+from base.host.env.boot_actions import enter_scratch_home  # noqa: E402
+
+if __name__ == "__main__":
+    enter_scratch_home()
+
+from base.host.boundary.untyped import object_of  # noqa: E402
 from meizel import lint_common  # noqa: E402
 from meizel.checkout import roles_at  # noqa: E402
 from meizel.roles import select_packages  # noqa: E402
@@ -313,7 +319,7 @@ def _read_baseline(root: Path) -> dict[str, int]:
     path = root / BASELINE
     if not path.is_file():
         return {}
-    raw: object = json.loads(path.read_text(encoding="utf-8"))
+    raw = object_of(json.loads, path.read_text(encoding="utf-8"))
     if not _is_str_dict(raw):
         raise SystemExit(f"{BASELINE}: expected a JSON object of read -> count")
     counts: dict[str, int] = {}
@@ -406,7 +412,7 @@ def _read_exemptions(root: Path) -> tuple[int, dict[str, str]]:
     path = root / EXEMPTIONS
     if not path.is_file():
         return 0, {}
-    raw: object = json.loads(path.read_text(encoding="utf-8"))
+    raw = object_of(json.loads, path.read_text(encoding="utf-8"))
     if not _is_str_dict(raw):
         raise SystemExit(f"{EXEMPTIONS}: expected {{'allowed': int, 'exemptions': {{...}}}}")
     allowed = raw.get("allowed")

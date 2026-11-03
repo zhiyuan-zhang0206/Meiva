@@ -317,7 +317,8 @@ def module_doc_child_reference_violations(
         line_no = base_line + offset
         if 0 < line_no <= len(source_lines) and "lint-docstring: ok" in source_lines[line_no - 1]:
             continue
-        for span in _CODE_SPAN_RE.findall(line):
+        for span_match in _CODE_SPAN_RE.finditer(line):
+            span = span_match[0]
             hit = next((n for n in child_names if re.search(rf"\b{re.escape(n)}\b", span)), None)
             if hit is not None:
                 violations.append(

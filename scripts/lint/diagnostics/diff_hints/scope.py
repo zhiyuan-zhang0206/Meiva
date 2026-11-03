@@ -45,14 +45,27 @@ def classify(path: str, roles: Roles) -> FileKind:
 def _own_line(node: ast.AST) -> int | None:
     if isinstance(node, ast.match_case):
         return node.pattern.lineno
-    return getattr(node, "lineno", None)
+    if isinstance(
+        node,
+        ast.stmt
+        | ast.expr
+        | ast.excepthandler
+        | ast.arg
+        | ast.keyword
+        | ast.alias
+        | ast.pattern
+        | ast.type_param,
+    ):
+        return node.lineno
+    return None
 
 
-def _holds(node: ast.AST, lines: list[int]) -> bool:
-    start = min(
-        [getattr(node, "lineno", 0), *(d.lineno for d in getattr(node, "decorator_list", ()))]
-    )
-    end = getattr(node, "end_lineno", None) or start
+def _holds(
+    node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Call, lines: list[int]
+) -> bool:
+    decorators = [] if isinstance(node, ast.Call) else node.decorator_list
+    start = min([node.lineno, *(d.lineno for d in decorators)])
+    end = node.end_lineno or start
     at = bisect_left(lines, start)
     return at < len(lines) and lines[at] <= end
 
