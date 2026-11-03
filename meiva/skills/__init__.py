@@ -6,9 +6,9 @@ import sys
 import types
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
-from base.packages.skills.tree import Skill, flatten, identifier
+from base.packages.skills.tree import Skill, Tree, flatten, identifier
 from base.paths import skills_dir
 from meiva.sdk_surface import process_context, skill_sources
 from meiva.skills.skill_proxies import Namespace, SkillProxy, consumed_text, node_to_obj
@@ -95,7 +95,7 @@ def _provider_roots() -> list[Path]:
 # The full namespace tree of `home`: its `skills/` (install-registry gated) plus the provider
 # roots; the scan itself is `skill_index.scan_tree`, which takes all three as arguments. The agent
 # host, which holds no process context, scans with the home its turn context carries.
-def scan_under(home: Path, *, environ: Mapping[str, str]) -> dict[str, Any]:
+def scan_under(home: Path, *, environ: Mapping[str, str]) -> Tree:
     from base.packages.extensions.install_registry import loadable_skill_names
     from meiva.skills.skill_index import scan_tree
 
@@ -114,7 +114,7 @@ def names_under(home: Path, *, environ: Mapping[str, str]) -> list[Skill]:
 
 # meiva:note
 # The full namespace tree of the bound context's home.
-def _scan_tree() -> dict[str, Any]:
+def _scan_tree() -> Tree:
     context = process_context.current_context()
     return scan_under(context.require_meiva_home(), environ=context.require_environ())
 
@@ -175,7 +175,7 @@ def record_skill_invoked_by_path(path: str | Path) -> bool:
     return False
 
 
-def _is_state_dict(value: object) -> TypeGuard[dict[str, Any]]:
+def _is_state_dict(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict)
 
 
@@ -187,16 +187,20 @@ def _note_skill_read(skill_identifier: str) -> None:
     The same single point as the `skill_invoked` audit, so every way of reading a body is
     covered. Plain strings only: this runs in the exec child, which must not import the
     agent state classes or the model stack. Outside an exec turn there is no state update to
-    carry it and the read is not noted."""
+    carry it and the read is not noted; a `skill_reads` value that is not a list — agent code
+    wrote the channel by hand — drops the note too, because a skill read must hand the body
+    over whatever the state channel holds."""
 
     if not process_context.in_exec_turn():
         return
     update = process_context.get_state_update()
     if not _is_state_dict(update):
         return  # agent code replaced the slot; the exec child reports that at exit
-    reads: list[str] = update.setdefault("skill_reads", [])
+    reads = update.get("skill_reads", [])
+    if not isinstance(reads, list):
+        return
     if skill_identifier not in reads:
-        reads.append(skill_identifier)
+        update["skill_reads"] = [*reads, skill_identifier]
 
 
 def _record_skill_invoked(skill: Skill) -> None:
