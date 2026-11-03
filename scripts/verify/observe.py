@@ -33,9 +33,13 @@ import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import NotRequired, TypedDict
 
 import httpx
+
+from base.host.boundary.fields import int_field, str_field
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 
 IS_MACOS = sys.platform == "darwin"
 SERVICES = frozenset({"gateway", "frontend", "ops", "agent-host"})
@@ -59,7 +63,35 @@ AGENT_DEADLINE_S = 120
 # The timeline items kept as evidence; the system prompt alone is tens of kilobytes.
 EVIDENCE_KINDS = frozenset({"agent_reasoning", "agent_code", "code_output", "agent_chat"})
 
-Detail = dict[str, Any]
+Detail = dict[str, object]
+
+
+class CheckOutcome(TypedDict):
+    # meiva:note
+    # One check's record in the report: whether it passed, its detail or its error, and how long it took.
+
+    ok: bool
+    detail: NotRequired[Detail]
+    error: NotRequired[str]
+    seconds: NotRequired[float]
+
+
+def _object(value: object, what: str) -> Detail:
+    if not is_object_dict(value):
+        raise RuntimeError(f"{what} is {type(value).__name__}, not an object")
+    return value
+
+
+def _objects(value: object, what: str) -> list[Detail]:
+    if not is_object_list(value):
+        raise RuntimeError(f"{what} is {type(value).__name__}, not an array")
+    return [_object(item, f"{what} item") for item in value]
+
+
+# meiva:note
+# The JSON object a gateway answered.
+def _answer(response: httpx.Response) -> Detail:
+    return _object(object_of(response.json), "the gateway answer")
 
 
 def _out(argv: list[str]) -> str:
@@ -69,11 +101,12 @@ def _out(argv: list[str]) -> str:
 
 
 def _ports(home: Path) -> dict[str, int]:
-    record = json.loads((home / "start-intent.json").read_text())["record"]
-    return record["ports"]
+    document = _object(object_of(json.loads, (home / "start-intent.json").read_text()), "intent")
+    ports = _object(_object(document["record"], "intent record")["ports"], "intent ports")
+    return {name: int_field(ports, name) for name in ports}
 
 
-def _toolchain_linux() -> Detail:
+def _toolchain_linux() -> tuple[dict[str, str], str]:
     versions = {
         "arch": _out(["uname", "-m"]),
         "python": _out([sys.executable, "--version"]),
@@ -85,10 +118,10 @@ def _toolchain_linux() -> Detail:
     }
     if not Path("/usr/share/postgresql/17/extension/vector.control").is_file():
         raise RuntimeError("pgvector is not installed for PostgreSQL 17")
-    return {"versions": versions, "pgvector": "installed"}
+    return versions, "installed"
 
 
-def _toolchain_macos(home: Path) -> Detail:
+def _toolchain_macos(home: Path) -> tuple[dict[str, str], str]:
     """The Homebrew kegs, resolved the way the start resolves them."""
     from base.cluster.dataplane.pg_tools import pg_tool
     from base.cluster.dataplane.pooler import pgbouncer_bin
@@ -114,17 +147,16 @@ def _toolchain_macos(home: Path) -> Detail:
     )
     if not control.is_file():
         raise RuntimeError(f"pgvector is not installed for PostgreSQL 17: no {control}")
-    return {"versions": versions, "pgvector": str(control)}
+    return versions, str(control)
 
 
 def check_toolchain(home: Path, _source: Path) -> Detail:
-    detail = _toolchain_macos(home) if IS_MACOS else _toolchain_linux()
-    versions = detail["versions"]
+    versions, pgvector = _toolchain_macos(home) if IS_MACOS else _toolchain_linux()
     if not re.search(r"\bv=8\.2\.\d+$", versions["redis"]):
         raise RuntimeError(f"Redis is not on the approved 8.2 series: {versions['redis']}")
     if "(PostgreSQL) 17." not in versions["postgres"]:
         raise RuntimeError(f"PostgreSQL is not 17: {versions['postgres']}")
-    return detail
+    return {"versions": versions, "pgvector": pgvector}
 
 
 def check_source(_home: Path, source: Path) -> Detail:
@@ -180,7 +212,9 @@ def login(client: httpx.Client, home: Path) -> None:
         "/api/auth/login-ticket", headers={"Authorization": f"Bearer {human_secret(home)}"}
     )
     issued.raise_for_status()
-    opened = client.post("/api/auth/login-ticket/redeem", json={"ticket": issued.json()["ticket"]})
+    opened = client.post(
+        "/api/auth/login-ticket/redeem", json={"ticket": str_field(_answer(issued), "ticket")}
+    )
     opened.raise_for_status()
 
 
@@ -194,21 +228,21 @@ def check_cors(home: Path, _source: Path) -> Detail:
         seen = {
             "allow_origin": response.headers.get("access-control-allow-origin"),
             "allow_credentials": response.headers.get("access-control-allow-credentials"),
-            "authenticated": response.json()["authenticated"],
+            "authenticated": _answer(response)["authenticated"],
         }
     if seen != {"allow_origin": origin, "allow_credentials": "true", "authenticated": True}:
         raise RuntimeError(f"the gateway does not answer the frontend origin {origin}: {seen}")
     return {"origin": origin, **seen}
 
 
-def execution_completed(items: list[dict[str, Any]], reply: str) -> bool:
+def execution_completed(items: list[Detail], reply: str) -> bool:
     """Judge the executed body, never a digit in its timestamp or a model claim."""
-    code = [i["payload"].strip() for i in items if i["kind"] == "agent_code"]
+    code = [str_field(i, "payload").strip() for i in items if i["kind"] == "agent_code"]
     replies = [i["payload"] for i in items if i["kind"] == "agent_chat"]
     outputs = [i for i in items if i["kind"] == "code_output"]
     if code != ["print(1 + 2)"] or reply not in replies or len(outputs) != 1:
         return False
-    header, separator, body = outputs[0]["payload"].partition("\n\n")
+    header, separator, body = str_field(outputs[0], "payload").partition("\n\n")
     return bool(
         separator
         and body.strip() == "3"
@@ -230,12 +264,12 @@ def check_scripted_agent(home: Path, _source: Path) -> Detail:
             headers={"Idempotency-Key": uuid.uuid4().hex, SCOPE_HEADER: PRINCIPAL_SCOPE},
         )
         created.raise_for_status()
-        agent = created.json()["id"]
-        items: list[dict[str, Any]] = []
+        agent = _answer(created)["id"]
+        items: list[Detail] = []
         for _ in range(AGENT_DEADLINE_S):
             timeline = client.get(f"/api/agents/{agent}/timeline?limit=1000")
             timeline.raise_for_status()
-            items = timeline.json()["items"]
+            items = _objects(_answer(timeline)["items"], "the timeline")
             if execution_completed(items, REPLY_TEXT):
                 return {
                     "agent": agent,
@@ -270,23 +304,24 @@ def process_chain(pid: int) -> list[Detail]:
     import psutil
 
     process = psutil.Process(pid)
-    chain = [{"pid": p.pid, "name": p.name()} for p in (process, *process.parents())]
+    chain: list[Detail] = [{"pid": p.pid, "name": p.name()} for p in (process, *process.parents())]
     return chain[: [row["pid"] for row in chain].index(1) + 1]
 
 
 def _tree_problems(
-    status: Detail, root_pid: int, helper_pid: int, chains: dict[str, Any]
+    status: Detail, root_pid: int, helper_pid: int, chains: dict[str, list[Detail]]
 ) -> list[str]:
     """What is wrong with the root's units: each must run, sit under root and helper, and
     together they must be exactly the verification profile's services. Fills `chains`."""
     problems: list[str] = []
-    for unit in status["units"]:
+    for unit in _objects(status["units"], "the root's units"):
+        unit_id = str_field(unit, "id")
         if unit["state"] != "running":
-            problems.append(f"unit {unit['id']} is {unit['state']}")
+            problems.append(f"unit {unit_id} is {unit['state']}")
             continue
-        chains[unit["id"]] = process_chain(unit["pid"])
-        problems.append(ancestry_problem(chains[unit["id"]], [root_pid, helper_pid]) or "")
-    units = frozenset(unit["id"] for unit in status["units"])
+        chains[unit_id] = process_chain(int_field(unit, "pid"))
+        problems.append(ancestry_problem(chains[unit_id], [root_pid, helper_pid]) or "")
+    units = frozenset(str_field(unit, "id") for unit in _objects(status["units"], "the units"))
     if units != SERVICES:
         problems.append(f"the root runs units {sorted(units)}, expected {sorted(SERVICES)}")
     return [problem for problem in problems if problem]
@@ -325,15 +360,16 @@ def check_helper_chain(home: Path, _source: Path) -> Detail:
     seen = {key: ping[key] for key in HELPER_PING}
     if seen != HELPER_PING:
         raise RuntimeError(f"the helper's ping is {seen}, expected {HELPER_PING}")
-    helper_pid = ping["pid"]
+    helper_pid = int_field(ping, "pid")
     keeper: Detail = dict(helper.root_status())
-    root_pid = keeper["pid"]
+    root_pid = int_field(keeper, "pid")
     if keeper["state"] != "running" or keeper["run_dir"] != str(root_run_dir(home)):
         raise RuntimeError(f"the helper does not keep this home's running root: {keeper}")
     reply: Detail = dict(RootClient(root_run_dir(home) / "meiva-root.sock", timeout=10).status())
-    status: Detail = reply["result"]
-    if status["root"]["pid"] != root_pid:
-        raise RuntimeError(f"the helper keeps root {root_pid}, the root reports {status['root']}")
+    status = _object(reply["result"], "the root's status")
+    root = _object(status["root"], "the root's status root")
+    if root["pid"] != root_pid:
+        raise RuntimeError(f"the helper keeps root {root_pid}, the root reports {root}")
     chains = {"helper": process_chain(helper_pid), "root": process_chain(root_pid)}
     problems = [
         ancestry_problem(chains["helper"], [helper_pid]),
@@ -396,25 +432,35 @@ def memory_report() -> Detail:
     }
 
 
-def observe(home: Path, source: Path) -> Detail:
+class Report(TypedDict):
+    at: float
+    platform: str
+    result: str
+    memory: Detail
+    checks: dict[str, CheckOutcome]
+    not_applicable: dict[str, str]
+
+
+def observe(home: Path, source: Path) -> Report:
     """Run every applicable check, recording each outcome; never stop at the first failure."""
     runnable, not_applicable = applicable_checks(macos=IS_MACOS)
-    checks: dict[str, Detail] = {}
+    checks: dict[str, CheckOutcome] = {}
     for name, check in runnable.items():
         started = time.monotonic()
         try:
-            checks[name] = {"ok": True, "detail": check(home, source)}
+            outcome = CheckOutcome(ok=True, detail=check(home, source))
         except Exception as error:
-            checks[name] = {"ok": False, "error": f"{type(error).__name__}: {error}"}
-        checks[name]["seconds"] = round(time.monotonic() - started, 3)
-    return {
-        "at": time.time(),
-        "platform": sys.platform,
-        "result": "passed" if all(row["ok"] for row in checks.values()) else "failed",
-        "memory": memory_report(),
-        "checks": checks,
-        "not_applicable": not_applicable,
-    }
+            outcome = CheckOutcome(ok=False, error=f"{type(error).__name__}: {error}")
+        outcome["seconds"] = round(time.monotonic() - started, 3)
+        checks[name] = outcome
+    return Report(
+        at=time.time(),
+        platform=sys.platform,
+        result="passed" if all(row["ok"] for row in checks.values()) else "failed",
+        memory=memory_report(),
+        checks=checks,
+        not_applicable=not_applicable,
+    )
 
 
 def main() -> int:

@@ -30,6 +30,7 @@ import tempfile
 import time
 import uuid
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType
 
@@ -37,9 +38,20 @@ RECIPE = Path(__file__).resolve().parent
 REPO = RECIPE.parents[1]
 sys.path.insert(0, str(REPO))
 
-from scripts.verify.boundary import (  # noqa: E402 — standalone script
+# meiva:note
+# Standalone script: the checkout root goes on `sys.path` above, so the project imports follow it.
+from base.host.boundary.fields import int_field, str_field  # noqa: E402
+from base.host.boundary.json_values import (  # noqa: E402
+    is_object_dict,
+    is_object_list,
+)
+from base.host.boundary.options import options  # noqa: E402
+from base.host.boundary.untyped import object_of  # noqa: E402
+from scripts.verify.boundary import (  # noqa: E402
     START_ARGV,
     Evidence,
+    ImageInfo,
+    RunResult,
     git,
     init_argv,
     profile_text,
@@ -159,9 +171,8 @@ def _exec(container: str, argv: list[str], *, stdin: bool = False) -> list[str]:
 def build_image(evidence: Evidence) -> str:
     """The image for the current provisioning inputs; built once, reused after."""
     tag = f"{IMAGE}:{context_digest(REPO)}"
-    if _docker("image", "inspect", tag, check=False).returncode == 0:
-        evidence.result["image"] = {"tag": tag, "built": False}
-    else:
+    built = _docker("image", "inspect", tag, check=False).returncode != 0
+    if built:
         evidence.step(
             "image-build",
             [
@@ -175,15 +186,19 @@ def build_image(evidence: Evidence) -> str:
                 str(REPO),
             ],
         )
-        evidence.result["image"] = {"tag": tag, "built": True}
-    info = json.loads(_docker("image", "inspect", tag).stdout)[0]
+    listed = object_of(json.loads, _docker("image", "inspect", tag).stdout)
+    if not is_object_list(listed) or not listed or not is_object_dict(listed[0]):
+        raise RuntimeError(f"`docker image inspect {tag}` did not answer an image")
+    info = listed[0]
     base = _docker("image", "inspect", "ubuntu:24.04", "--format", "{{index .RepoDigests 0}}")
-    evidence.result["image"] |= {
-        "id": info["Id"],
-        "architecture": info["Architecture"],
-        "size_bytes": info["Size"],
-        "base": base.stdout.strip(),
-    }
+    evidence.result["image"] = ImageInfo(
+        tag=tag,
+        built=built,
+        id=str_field(info, "Id"),
+        architecture=str_field(info, "Architecture"),
+        size_bytes=int_field(info, "Size"),
+        base=base.stdout.strip(),
+    )
     return tag
 
 
@@ -229,7 +244,7 @@ def run(ref: str, evidence_root: Path, memory: str, shm: str, *, home: Path, sta
     objects = git_objects_dir(REPO, home=home)
     evidence = Evidence(
         evidence_root / f"{stamp}-{commit[:8]}",
-        {"ref": ref, "commit": commit, "recipe_repo": str(REPO), "steps": [], "result": "running"},
+        RunResult(ref=ref, commit=commit, recipe_repo=str(REPO), steps=[], result="running"),
         TIMEOUTS,
     )
     evidence.root.mkdir(parents=True, mode=0o700)
@@ -253,12 +268,10 @@ def run(ref: str, evidence_root: Path, memory: str, shm: str, *, home: Path, sta
         evidence.result["removed"] = not _docker(
             "ps", "-a", "-q", "--filter", f"name=^{container}$"
         ).stdout.strip()
-        observer = evidence.root / "observer.json"
         passed = (
             failure is None
-            and observer.is_file()
-            and json.loads(observer.read_text())["result"] == "passed"
-            and evidence.result["removed"]
+            and evidence.observer_passed()
+            and evidence.result.get("removed") is True
         )
         evidence.result["result"] = "passed" if passed else "failed"
         evidence.save()
@@ -272,6 +285,14 @@ def _interrupted(_signum: int, _frame: FrameType | None) -> None:
     raise SystemExit(143)
 
 
+@dataclass(frozen=True)
+class Options:
+    ref: str
+    evidence_root: Path
+    memory: str
+    shm_size: str
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ref", required=True, help="branch, tag or commit of this repository")
@@ -283,7 +304,7 @@ def main() -> int:
     )
     parser.add_argument("--memory", default="8g", help="container memory limit")
     parser.add_argument("--shm-size", default="1g", help="container /dev/shm size")
-    args = parser.parse_args()
+    args = options(parser.parse_args(), Options)
     signal.signal(signal.SIGTERM, _interrupted)
     args.evidence_root.mkdir(parents=True, exist_ok=True)
     return run(

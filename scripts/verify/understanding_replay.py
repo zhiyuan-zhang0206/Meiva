@@ -8,12 +8,15 @@ import argparse
 import asyncio
 import sys
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
 from langchain_core.messages import BaseMessage  # noqa: E402
+from psycopg.rows import class_row  # noqa: E402
 from psycopg_pool import AsyncConnectionPool  # noqa: E402
 
 from agent.llm import execute_code  # noqa: E402
@@ -38,6 +41,7 @@ from base.clock.configuration import clock_config_from_boot  # noqa: E402
 from base.config import ConfigBoot  # noqa: E402
 from base.db import Database  # noqa: E402
 from base.db.code_version_gate import ProcessDbGate  # noqa: E402
+from base.host.boundary.options import options  # noqa: E402
 from base.host.exit_codes import hard_exit  # noqa: E402
 from base.lm.catalog import ModelCatalog  # noqa: E402
 from base.lm.context_budget import resolve_context_budget  # noqa: E402
@@ -230,15 +234,36 @@ async def _consume(
     _report_jobs(db, agent_id)
 
 
+@dataclass(frozen=True)
+class _CallRow:
+    job_id: int
+    round: int
+    attempt: int
+    input_tokens: int | None
+    cache_read: int | None
+    output_tokens: int | None
+    think_chars: int | None
+    text_chars: int | None
+    seconds: float | None
+    error: str | None
+
+
+@dataclass(frozen=True)
+class _JobCount:
+    compact_version: int
+    status: str
+    jobs: int
+
+
 def _report_jobs(db: Database, agent_id: int) -> None:
-    with db.connect(autocommit=True) as conn:
-        rows = conn.execute(
-            "SELECT compact_version, status, count(*) FROM understanding_chunk_jobs"
+    with db.connect(autocommit=True) as conn, conn.cursor(row_factory=class_row(_JobCount)) as cur:
+        rows = cur.execute(
+            "SELECT compact_version, status, count(*) AS jobs FROM understanding_chunk_jobs"
             " WHERE agent_id = %s GROUP BY 1, 2 ORDER BY 1, 2",
             (agent_id,),
         ).fetchall()
-    for segment, status, count in rows:
-        print(f"  segment {segment}: {count} {status}")
+    for row in rows:
+        print(f"  segment {row.compact_version}: {row.jobs} {row.status}")
 
 
 async def _regroup(
@@ -311,28 +336,45 @@ def print_replay_report(db: Database, agent_id: int) -> None:
             "(the provider does not split reasoning out of output_tokens; think_chars is the thinking block's length)"
         )
         tot = [0, 0, 0, 0, 0, 0.0]
-        for r in conn.execute(
-            "SELECT job_id, round, attempt,"
-            " (usage_metadata->>'input_tokens')::int,"
-            " coalesce((usage_metadata->'input_token_details'->>'cache_read')::int, 0),"
-            " (usage_metadata->>'output_tokens')::int,"
-            " coalesce((SELECT sum(length(b->>'thinking')) FROM jsonb_array_elements(content) b), 0),"
-            " coalesce((SELECT sum(length(b->>'text')) FROM jsonb_array_elements(content) b), 0),"
-            " duration_ms / 1000.0, error"
-            " FROM understanding_chunk_calls WHERE agent_id = %s ORDER BY id",
-            (agent_id,),
-        ).fetchall():
-            vals = [x or 0 for x in r[3:9]]
+        with conn.cursor(row_factory=class_row(_CallRow)) as calls:
+            call_rows = calls.execute(
+                "SELECT job_id, round, attempt,"
+                " (usage_metadata->>'input_tokens')::int AS input_tokens,"
+                " coalesce((usage_metadata->'input_token_details'->>'cache_read')::int, 0) AS cache_read,"
+                " (usage_metadata->>'output_tokens')::int AS output_tokens,"
+                " coalesce((SELECT sum(length(b->>'thinking')) FROM jsonb_array_elements(content) b), 0) AS think_chars,"
+                " coalesce((SELECT sum(length(b->>'text')) FROM jsonb_array_elements(content) b), 0) AS text_chars,"
+                " duration_ms / 1000.0 AS seconds, error"
+                " FROM understanding_chunk_calls WHERE agent_id = %s ORDER BY id",
+                (agent_id,),
+            ).fetchall()
+        for r in call_rows:
+            vals = [
+                r.input_tokens or 0,
+                r.cache_read or 0,
+                r.output_tokens or 0,
+                r.think_chars or 0,
+                r.text_chars or 0,
+                r.seconds or 0.0,
+            ]
             for k in range(6):
                 tot[k] += vals[k]
             print(
-                f"  {r[0]:>5} {r[1]:>3} {r[2]:>3} {vals[0]:>8} {vals[1]:>8} {vals[2]:>7}"
-                f" {vals[3]:>7} {vals[4]:>7} {vals[5]:>7.1f}  {r[9] or ''}"
+                f"  {r.job_id:>5} {r.round:>3} {r.attempt:>3} {vals[0]:>8} {vals[1]:>8} {vals[2]:>7}"
+                f" {vals[3]:>7} {vals[4]:>7} {vals[5]:>7.1f}  {r.error or ''}"
             )
         print(
             f"total: input={tot[0]} cache_read={tot[1]} output={tot[2]} think_chars={tot[3]}"
             f" text_chars={tot[4]} seconds={tot[5]:.1f}"
         )
+
+
+@dataclass(frozen=True)
+class Options:
+    command: Literal["plan", "enqueue", "consume", "report", "regroup"]
+    agent_id: int
+    ratio: float | None
+    threshold_tokens: int | None
 
 
 def main(argv: Sequence[str], *, dockerenv: Path = DOCKERENV) -> None:
@@ -349,7 +391,7 @@ def main(argv: Sequence[str], *, dockerenv: Path = DOCKERENV) -> None:
         type=int,
         help="explicit chunk threshold in tokens (overrides --ratio)",
     )
-    args = parser.parse_args(argv)
+    args = options(parser.parse_args(argv), Options)
     require_preview(dockerenv)
     config = ConfigBoot()
     config.boot()
