@@ -6,18 +6,25 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import threading
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any
 
 from base.clock import Timers
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.host.net.resilience import Policy, retry
 from meiva.web.errors import WebError
-from meiva.web.failures import connection_failed_message, http_failed_message, non_json_message
+from meiva.web.failures import (
+    connection_failed_message,
+    http_failed_message,
+    non_json_message,
+    non_object_message,
+)
 from meiva.web.pacing import reserve
 from meiva.web.policy import WEB_READ_POLICY
 from meiva.web.wire import HttpRequest
@@ -64,11 +71,23 @@ def _url(request: HttpRequest) -> str:
 # here: each provider's default is an https literal and an operator may point it at a relay.
 # The page URL of a reader request is quoted so spaces and non-ASCII query text survive; the
 # safe set keeps common URL characters to avoid double encoding.
+# meiva:note
+# `urlopen` is declared `-> Any` by typeshed, and an http(s) endpoint answers with an
+# `HTTPResponse`; the answer is narrowed here, once, so `_read` holds a type it can read. An
+# endpoint that answers something else is a configuration mistake, not a transient failure, so it
+# is reported as a `WebError` naming the object rather than retried.
+def _open(prepared: urllib.request.Request, timeout_s: float) -> http.client.HTTPResponse:
+    raw = object_of(urllib.request.urlopen, prepared, timeout=timeout_s)
+    if not isinstance(raw, http.client.HTTPResponse):
+        raise WebError(f"the request answered {type(raw).__name__}, not an HTTP response")
+    return raw
+
+
 def _read(request: HttpRequest, timeout_s: float) -> bytes:
     prepared = urllib.request.Request(  # noqa: S310
         _url(request), data=request.data, headers=dict(request.headers), method=request.method
     )
-    with urllib.request.urlopen(prepared, timeout=timeout_s) as response:  # noqa: S310
+    with _open(prepared, timeout_s) as response:
         return response.read()
 
 
@@ -86,14 +105,14 @@ def send_json(
     provider_json: bool,
     pacer: RateLimiter | None,
     policy: Policy = WEB_READ_POLICY,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     def attempt() -> bytes:
         if pacer is not None:
             pacer.acquire()
         return _read(request, timeout_s)
 
     try:
-        data: dict[str, Any] = json.loads(retry(policy)(attempt))
+        answer = object_of(json.loads, retry(policy)(attempt))
     except urllib.error.HTTPError as e:
         detail = e.read().decode(errors="replace")
         _log.warning(
@@ -116,4 +135,6 @@ def send_json(
         raise error_type(connection_failed_message(label, e.reason)) from e
     except json.JSONDecodeError as e:
         raise error_type(non_json_message(label, e)) from e
-    return data
+    if not is_object_dict(answer):
+        raise error_type(non_object_message(label, type(answer).__name__))
+    return answer
