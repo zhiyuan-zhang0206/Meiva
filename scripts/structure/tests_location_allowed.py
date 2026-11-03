@@ -169,6 +169,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "keeps the install paths that read scripts/provision/database.sh on one Redis series",
     ),
+    "tests/ci/test_schedule_identity.py": (
+        "contract",
+        "scans the tracked Python sources under schedules/ for an identity a script asserted for itself",
+    ),
     "tests/ci/test_shard_counts.py": (
         "contract",
         "checks .github/workflows/ci.yml against scripts/ci/shard_counts.py",
