@@ -57,8 +57,7 @@ def test_test_label_ids_matches_prefix_only(collect_mod: Any, db_conn: psycopg.C
         )
     db_conn.commit()
 
-    with db_conn.cursor() as cur:
-        ids = collect_mod._test_label_ids(cur, [9001, 9002, 9003, 99999])
+    ids = collect_mod._test_label_ids(db_conn, [9001, 9002, 9003, 99999])
 
     assert ids == {9001}
 
@@ -78,8 +77,7 @@ def test_test_label_ids_excludes_direct_children_of_test_orchestrators(
         )
     db_conn.commit()
 
-    with db_conn.cursor() as cur:
-        ids = collect_mod._test_label_ids(cur, [9010, 9011, 9012])
+    ids = collect_mod._test_label_ids(db_conn, [9010, 9011, 9012])
 
     assert ids == {9010, 9011}
 

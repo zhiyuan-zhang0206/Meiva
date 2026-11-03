@@ -69,6 +69,7 @@ TESTS_OWING_ANY: tuple[str, ...] = (
     "cli",
     "gateway/tests",
     "meiva_builtins/skills/coordination",
+    "meiva_builtins/skills/platform/meiva-self-evolution",
     "scripts/ci",
     "scripts/host_ops",
     "scripts/model_registry",

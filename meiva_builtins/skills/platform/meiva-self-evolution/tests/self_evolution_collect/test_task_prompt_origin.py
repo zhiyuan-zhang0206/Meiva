@@ -37,9 +37,9 @@ def _insert_inbound(
     )
 
 
-def _fetch(collect_mod: Any, cur: psycopg.Cursor, agent_ids: list[int]) -> Any:
+def _fetch(collect_mod: Any, conn: psycopg.Connection, agent_ids: list[int]) -> Any:
     now = datetime.now(UTC)
-    return collect_mod._inbounds_by_agent(cur, agent_ids, now - timedelta(days=1), now)
+    return collect_mod._inbounds_by_agent(conn, agent_ids, now - timedelta(days=1), now)
 
 
 def _build(
@@ -72,8 +72,7 @@ def test_spawn_brief_older_than_the_window_is_the_task_prompt(
         _insert_inbound(cur, 8, "agent:1", "ancient spawn brief", "10 days")
     db_conn.commit()
 
-    with db_conn.cursor() as cur:
-        inbounds = _fetch(collect_mod, cur, [8])
+    inbounds = _fetch(collect_mod, db_conn, [8])
 
     rec = _build(8, inbounds[8], "agent:1")
 
@@ -92,8 +91,7 @@ def test_shell_notice_does_not_shadow_the_spawn_brief(
         _insert_inbound(cur, 10, "agent:1", "spawn brief", "2 days")
     db_conn.commit()
 
-    with db_conn.cursor() as cur:
-        inbounds = _fetch(collect_mod, cur, [10])
+    inbounds = _fetch(collect_mod, db_conn, [10])
 
     rec = _build(10, inbounds[10], "agent:1")
 
@@ -111,8 +109,7 @@ def test_shell_session_notice_is_never_the_task_prompt(
         )
     db_conn.commit()
 
-    with db_conn.cursor() as cur:
-        inbounds = _fetch(collect_mod, cur, [11])
+    inbounds = _fetch(collect_mod, db_conn, [11])
 
     rec = _build(11, inbounds.get(11, []), "agent:1")
 
@@ -128,8 +125,7 @@ def test_resurrect_wake_contributes_no_task_inbound(
         _insert_inbound(cur, 12, "user", "", "1 hour", kind="resurrect")
     db_conn.commit()
 
-    with db_conn.cursor() as cur:
-        inbounds = _fetch(collect_mod, cur, [12])
+    inbounds = _fetch(collect_mod, db_conn, [12])
 
     rec = _build(12, inbounds.get(12, []), "agent:1", status="terminated")
 
@@ -146,9 +142,8 @@ def test_window_bounds_come_from_the_collection_window(
     db_conn.commit()
 
     now = datetime.now(UTC)
-    with db_conn.cursor() as cur:
-        out = collect_mod._inbounds_by_agent(
-            cur, [13], now - timedelta(days=13), now - timedelta(days=12)
-        )
+    out = collect_mod._inbounds_by_agent(
+        db_conn, [13], now - timedelta(days=13), now - timedelta(days=12)
+    )
 
     assert [message["content"] for message in out[13]] == ["task brief"]

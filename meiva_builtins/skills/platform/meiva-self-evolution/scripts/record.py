@@ -11,9 +11,9 @@ import contextlib
 import sys
 import warnings
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, NamedTuple, TypeGuard
+from typing import NamedTuple, TypedDict
 
 from langchain_core.messages import BaseMessage
 
@@ -22,11 +22,20 @@ sys.path.insert(0, str(Path(__file__).parent))
 from audit import LeakPaths, invalidated, scan
 from label import label
 from record_inputs import AgentMeta as AgentMeta
-from record_inputs import EventFact, InboundFact, RunInputs, TaskReceipts, TranscriptRow
+from record_inputs import (
+    EventFact,
+    InboundFact,
+    RunInputs,
+    TaskReceipts,
+    TranscriptLine,
+    TranscriptRow,
+)
 from record_inputs import event_facts as event_facts
 from record_inputs import inbound_facts as inbound_facts
 from record_inputs import transcript_facts as transcript_facts
+from record_shape import Evidence, LeakAuditEntry, PeerFeedback, Record, RecordBody
 
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.lm.system_note import SYSTEM_NOTE_OPEN
 
 CN_CORRECTION_KEYWORDS = (
@@ -160,25 +169,13 @@ def _is_exec_fail(event: str) -> bool:
     return event in _EXEC_FAIL_EVENTS
 
 
-def _is_object_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
-
-
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
-
-
-def _is_transcript_rows(value: object) -> TypeGuard[Sequence[Mapping[str, str]]]:
-    return isinstance(value, Sequence) and not isinstance(value, (str, bytes))
-
-
 def _msg_text(content: object) -> str:
     if isinstance(content, str):
         return content
-    if _is_object_list(content):
+    if is_object_list(content):
         parts: list[str] = []
         for block in content:
-            if _is_str_dict(block):
+            if is_object_dict(block):
                 if block.get("type") in {"thinking", "tool_use"}:
                     continue
                 parts.append(str(block.get("text") or block.get("type") or ""))
@@ -191,7 +188,7 @@ def _msg_text(content: object) -> str:
 # meiva:note
 # The transcript rows of a checkpoint's messages, in conversation order: the message type and its human-visible text.
 # `collect.py` reads the checkpoint and passes these rows in, so the record is built from values alone.
-def transcript_rows(messages: Sequence[BaseMessage]) -> list[dict[str, str]]:
+def transcript_rows(messages: Sequence[BaseMessage]) -> list[TranscriptLine]:
     return [{"type": message.type, "content": _msg_text(message.content)} for message in messages]
 
 
@@ -248,21 +245,19 @@ def _task_prompt(
 
 
 # meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/collection.meiva.okf.md
-def task_prompt_of(record: Mapping[str, object]) -> str:
-    raw_prompt = record.get("task_prompt")
-    if isinstance(raw_prompt, str) and raw_prompt.strip():
+def task_prompt_of(record: RecordBody) -> str:
+    raw_prompt = record["task_prompt"]
+    if raw_prompt.strip():
         return raw_prompt
-    raw_rows = record.get("transcript")
-    rows: Sequence[Mapping[str, str]] = raw_rows if _is_transcript_rows(raw_rows) else ()
-    return _first_human_message(transcript_facts(rows))
+    return _first_human_message(transcript_facts(record["transcript"]))
 
 
-def _peer_feedback(spawner: str, agent_messages: Sequence[InboundFact]) -> list[dict[str, Any]]:
+def _peer_feedback(spawner: str, agent_messages: Sequence[InboundFact]) -> list[PeerFeedback]:
     spawner_id: int | None = None
     if spawner.startswith("agent:"):
         with contextlib.suppress(IndexError, ValueError):
             spawner_id = int(spawner.split(":", 1)[1])
-    peer_feedback: list[dict[str, Any]] = []
+    peer_feedback: list[PeerFeedback] = []
     for message in agent_messages:
         try:
             from_agent = int(message.source.split(":", 1)[1])
@@ -323,20 +318,31 @@ def _event_stats(events: Sequence[EventFact]) -> _EventStats:
     )
 
 
-def _leak_fields(code_bodies: list[str], agent_id: int, leak_paths: LeakPaths) -> dict[str, Any]:
+def _leak_fields(
+    code_bodies: list[str], agent_id: int, leak_paths: LeakPaths
+) -> tuple[list[LeakAuditEntry], bool]:
     findings = scan(code_bodies, agent_id=agent_id, leak_paths=leak_paths)
-    return {
-        "leak_audit": [
-            {"surface": finding.surface, "evidence": finding.evidence, "tool": finding.tool}
-            for finding in findings
-        ],
-        "invalidated": invalidated(findings),
-    }
+    audit = [
+        LeakAuditEntry(surface=finding.surface, evidence=finding.evidence, tool=finding.tool)
+        for finding in findings
+    ]
+    return audit, invalidated(findings)
+
+
+# meiva:note
+# The task prompt and its source, the follow-ups and corrections the user sent, and the peer
+# messages the label counts as corrective. `RecordBody` carries them as record fields.
+class PromptFields(TypedDict):
+    task_prompt: str
+    task_prompt_source: str
+    followup_prompts: list[str]
+    corrections: list[str]
+    peer_feedback: list[PeerFeedback]
 
 
 def _prompt_fields(
     spawner: str, inbounds: Sequence[InboundFact], transcript: Sequence[TranscriptRow]
-) -> dict[str, Any]:
+) -> PromptFields:
     per_agent = [message for message in inbounds if not message.is_broadcast]
     human_messages = [message.content for message in per_agent if message.source in HUMAN_SOURCES]
     agent_messages = [message for message in per_agent if message.source.startswith("agent:")]
@@ -351,7 +357,7 @@ def _prompt_fields(
     }
 
 
-def _grade(ev: dict[str, Any]) -> tuple[str, str | None]:
+def _grade(ev: Evidence) -> tuple[str, str | None]:
     if ev["telemetry_events"] == 0:
         return "none", "no_telemetry"
     if ev["tokens_in"] + ev["tokens_out"] == 0:
@@ -364,8 +370,8 @@ def _grade(ev: dict[str, Any]) -> tuple[str, str | None]:
 
 
 def _evidence_block(
-    run: RunInputs, stats: _EventStats, prompts: dict[str, Any], final_output: str
-) -> dict[str, Any]:
+    run: RunInputs, stats: _EventStats, prompts: PromptFields, final_output: str
+) -> Evidence:
     receipts = run.task_receipts if run.task_receipts is not None else TaskReceipts(0, 0, 0, 0)
     return {
         "telemetry_events": len(run.events),
@@ -390,7 +396,7 @@ def _evidence_block(
     }
 
 
-def build_record(run: RunInputs) -> dict[str, object]:
+def build_record(run: RunInputs) -> Record:
     agent_id = run.agent_id
     spawner, status, last_message_text = run.meta
     prompts = _prompt_fields(spawner, run.inbounds, run.transcript)
@@ -400,7 +406,7 @@ def build_record(run: RunInputs) -> dict[str, object]:
 
     plugins_activated, plugins_activated_skipped = _plugins_activated(run.events)
 
-    record: dict[str, Any] = {
+    record: RecordBody = {
         "agent_id": agent_id,
         "week": run.week,
         "spawner": spawner,
@@ -423,9 +429,11 @@ def build_record(run: RunInputs) -> dict[str, object]:
         "duration_s": stats.duration_s,
     }
     if run.leak_paths is not None:
-        record.update(_leak_fields(stats.code_bodies, agent_id, run.leak_paths))
-    record["evidence"] = _evidence_block(run, stats, prompts, record["final_output"])
-    record["evidence_grade"], record["unknown_reason"] = _grade(record["evidence"])
+        record["leak_audit"], record["invalidated"] = _leak_fields(
+            stats.code_bodies, agent_id, run.leak_paths
+        )
+    evidence = _evidence_block(run, stats, prompts, record["final_output"])
+    record["evidence"] = evidence
+    record["evidence_grade"], record["unknown_reason"] = _grade(evidence)
     record["schema_version"] = 2
-    record["label"] = label(record)
-    return record
+    return Record(**record, label=label(record))

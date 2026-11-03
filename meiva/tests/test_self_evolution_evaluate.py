@@ -32,6 +32,11 @@ def _evaluate_module() -> ModuleType:
         spec = importlib.util.spec_from_file_location("test_evaluate", path)
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
+        # meiva:note
+        # `evaluate.py` defines a dataclass (`_StatusRow`), and `dataclasses` resolves a class's
+        # module through `sys.modules`: register the module before running it, as
+        # `load_skill_script` does for the skill's own tests.
+        sys.modules[spec.name] = module
         spec.loader.exec_module(module)
     finally:
         sys.path[:] = previous_path
@@ -120,7 +125,7 @@ def test_verify_replay(
 ) -> None:
     evaluate = _evaluate_module()
 
-    ok, _reason = evaluate.verify_replay(original, replayed)
+    ok, _reason = evaluate.verify_replay(original["tools_called"], replayed)
 
     assert ok is expected
 
@@ -131,6 +136,7 @@ def _record(**overrides: Any) -> dict[str, Any]:
         "task_prompt": "Inspect the output",
         "turns": 1,
         "final_output": "done",
+        "transcript": [],
         "tools_called": {},
         "exec_ok": 1,
         "exec_failed": 0,

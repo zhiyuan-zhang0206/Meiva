@@ -22,7 +22,7 @@ optional safe replay to `references/evaluation-loop.md`, and method explanation
 to `references/method-context.md`. Replay remains optional, with the existing
 read/compute safety and evidence constraints; schedules retain their own
 authorization scope.
-Output data lands in `$MEIVA_HOME/self_evolution/` (per-deployment private), not in the repo. Triggered by a weekly cron job spawn; the skill directory name contains hyphens, so `scripts/` itself cannot be a package — all of it (the CLI entry points `daily_scan.py` / `evaluate.py` / `mine.py` / `aggregate.py` / `collect.py` / `render_report.py`, plus the shared collection/scoring/report modules they import as flat siblings, `record.py` / `window_records.py` / `events_window.py` / `scan_report.py` / `audit.py` / `label.py` / `rubric.py`) runs only via `.venv/bin/python`, importing each other through a one-line `__file__`-derived `sys.path` guard (structure Rule 6's endorsed within-skill exception). `render_report.py`'s template lives beside it in `assets/report_template.html`.
+Output data lands in `$MEIVA_HOME/self_evolution/` (per-deployment private), not in the repo. Triggered by a weekly cron job spawn; the skill directory name contains hyphens, so `scripts/` itself cannot be a package — all of it (the CLI entry points `daily_scan.py` / `evaluate.py` / `mine.py` / `aggregate.py` / `collect.py` / `render_report.py`, plus the shared collection/scoring/report modules they import as flat siblings, `record.py` / `record_shape.py` / `record_inputs.py` / `window_records.py` / `events_window.py` / `scan_report.py` / `audit.py` / `label.py` / `rubric.py`) runs only via `.venv/bin/python`, importing each other through a one-line `__file__`-derived `sys.path` guard (structure Rule 6's endorsed within-skill exception). `render_report.py`'s template lives beside it in `assets/report_template.html`.
 
 ## Record assembly
 
@@ -32,7 +32,8 @@ inbounds may be read for it, is the [collection contract](collection.meiva.okf.m
 
 The decisions are `strict` modules over values: `events_window.py` (the window and
 how the events API is paged), `window_records.py` (which agents become records and
-the records themselves), `record.py` (one record and its evidence grade),
+the records themselves), `record_shape.py` (the record's shape, one owner for the
+producer and every reader of it), `record.py` (one record and its evidence grade),
 `scan_report.py` (what the daily report says and whether the scan alerts), `audit.py`
 and `label.py`. The shells (`collect.py`, `daily_scan.py`) read the database, the
 gateway and the clock and hand the values in; a process root (`process_env`) builds

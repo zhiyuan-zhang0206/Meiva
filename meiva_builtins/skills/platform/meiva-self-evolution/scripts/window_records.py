@@ -21,10 +21,12 @@ from record_inputs import (
     Inbound,
     RunInputs,
     TaskReceipts,
+    TranscriptLine,
     event_facts,
     inbound_facts,
     transcript_facts,
 )
+from record_shape import Record
 
 _BUILTIN_HELP_CALL_RE = re.compile(r"(?<![a-zA-Z0-9_.])help\s*\(")
 _BUILTIN_HELP_ON_MEIVA_RE = re.compile(r"(?<![a-zA-Z0-9_.])help\s*\(\s*meiva\.")
@@ -74,7 +76,7 @@ def subprocess_call_count(events: Sequence[EventFact]) -> int:
 
 # meiva:note
 # The record of one run with the code-body counters added: builtin `help()` calls, the subset aimed at `meiva.*` objects, and raw subprocess calls.
-def annotated_record(run: RunInputs) -> dict[str, object]:
+def annotated_record(run: RunInputs) -> Record:
     record = build_record(run)
     record["builtin_help_calls"], record["builtin_help_on_meiva"] = _builtin_help_counts(run.events)
     record["subprocess_calls"] = subprocess_call_count(run.events)
@@ -112,13 +114,13 @@ class WindowRows:
     inbounds: Mapping[int, list[Inbound]]
     meta: Mapping[int, AgentMeta]
     receipts: Mapping[int, TaskReceipts]
-    transcripts: Mapping[int, list[dict[str, str]]]
+    transcripts: Mapping[int, list[TranscriptLine]]
     skills: Mapping[int, list[str]]
 
 
 # meiva:note
 # One annotated record per selected agent, in the order given.
-def window_records(selected: Sequence[int], week: str, rows: WindowRows) -> list[dict[str, object]]:
+def window_records(selected: Sequence[int], week: str, rows: WindowRows) -> list[Record]:
     return [
         annotated_record(
             RunInputs(

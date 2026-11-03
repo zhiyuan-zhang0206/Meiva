@@ -9,13 +9,14 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NamedTuple, TypeGuard
+from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 import label
 import rubric
 from record import task_prompt_of
+from record_shape import Record
 
 ORCHESTRATION_SKILLS = ("meiva-workflow", "meiva-dynamic-workflow", "meiva-goal")
 
@@ -37,7 +38,7 @@ class ScanView:
 
 # meiva:note
 # Human-readable signals explaining a non-ok label. Display-only; the label itself remains label.py's contract.
-def _why(rec: dict[str, Any]) -> list[str]:
+def _why(rec: Record) -> list[str]:
     why: list[str] = []
     if rec.get("corrections"):
         why.append(f"{len(rec['corrections'])} user correction(s)")
@@ -62,7 +63,7 @@ def _why(rec: dict[str, Any]) -> list[str]:
 
 # meiva:note
 # One bad run as counter tokens, the compact fallback for a bad list over BAD_LIST_MAX_CHARS (task text stays in the persisted full report). Tokens mirror _why(): rep=re-prompts, c=corrections, pf=peer feedback, ef=exec failures, last=last exec failed, cp=compactions, term=terminated without output.
-def _compact_bad_line(rec: dict[str, Any]) -> str:
+def _compact_bad_line(rec: Record) -> str:
     parts: list[str] = []
     if rec.get("followup_prompts"):
         parts.append(f"rep{len(rec['followup_prompts'])}")
@@ -87,7 +88,7 @@ def _compact_bad_line(rec: dict[str, Any]) -> str:
 
 # meiva:note
 # True when the window is empty only because the TEST- filter removed every run the source produced: a quiet day, not an outage.
-def _is_test_only_window(records: list[dict[str, Any]], counts: Mapping[str, int] | None) -> bool:
+def _is_test_only_window(records: Sequence[Record], counts: Mapping[str, int] | None) -> bool:
     if records:
         return False
     return bool(counts and counts["seen"] > 0 and counts["excluded_test"] == counts["seen"])
@@ -98,19 +99,8 @@ class Alert(NamedTuple):
     reason: str | None
 
 
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
-
-
 def alert_verdict(
-    records: Sequence[Mapping[str, object]], counts: Mapping[str, int] | None, coverage_floor: float
-) -> Alert:
-    rows = [r if _is_str_dict(r) else dict(r) for r in records]
-    return _verdict(rows, counts, coverage_floor)
-
-
-def _verdict(
-    records: list[dict[str, Any]], counts: Mapping[str, int] | None, coverage_floor: float
+    records: Sequence[Record], counts: Mapping[str, int] | None, coverage_floor: float
 ) -> Alert:
     if not records:
         if _is_test_only_window(records, counts):
@@ -137,7 +127,7 @@ class _Totals(NamedTuple):
     scored: int
 
     @classmethod
-    def of(cls, records: list[dict[str, Any]]) -> _Totals:
+    def of(cls, records: Sequence[Record]) -> _Totals:
         return cls(
             Counter(r["label"] for r in records),
             sum(len(r["corrections"]) for r in records),
@@ -200,28 +190,24 @@ def _label_counts(totals: _Totals) -> str:
     )
 
 
-def _builtin_help_line(records: list[dict[str, Any]]) -> str:
+def _builtin_help_line(records: list[Record]) -> str:
     calls = sum(r.get("builtin_help_calls", 0) for r in records)
     agents = sum(bool(r.get("builtin_help_calls", 0)) for r in records)
     on_meiva = sum(r.get("builtin_help_on_meiva", 0) for r in records)
     return f"builtin help(): {calls} calls across {agents} agents ({on_meiva} on meiva.* targets)"
 
 
-def _subprocess_line(records: list[dict[str, Any]]) -> str:
+def _subprocess_line(records: list[Record]) -> str:
     calls = sum(r.get("subprocess_calls", 0) for r in records)
     line = f"subprocess calls: {calls}"
-    if any("tools_called" in r for r in records):
-        shell_run_calls = sum(
-            r["tools_called"].get("meiva.shell.run", 0) for r in records if "tools_called" in r
-        )
+    if records:
+        shell_run_calls = sum(r.get("tools_called", {}).get("meiva.shell.run", 0) for r in records)
         line += f" (shell.run {shell_run_calls})"
     return line
 
 
-def _header_lines(records: list[dict[str, Any]], view: ScanView, totals: _Totals) -> list[str]:
-    skill_counts = Counter(
-        skill for r in records if "skills_touched" in r for skill in r["skills_touched"]
-    )
+def _header_lines(records: list[Record], view: ScanView, totals: _Totals) -> list[str]:
+    skill_counts = Counter(skill for r in records for skill in r.get("skills_touched", []))
     top_skills = (
         ", ".join(f"{skill} {count}" for skill, count in skill_counts.most_common(5)) or "none"
     )
@@ -242,7 +228,7 @@ def _header_lines(records: list[dict[str, Any]], view: ScanView, totals: _Totals
     ]
 
 
-def _no_runs_line(records: list[dict[str, Any]], counts: Mapping[str, int] | None) -> str:
+def _no_runs_line(records: list[Record], counts: Mapping[str, int] | None) -> str:
     if counts is not None and _is_test_only_window(records, counts):
         return (
             "0 production runs — all "
@@ -253,7 +239,7 @@ def _no_runs_line(records: list[dict[str, Any]], counts: Mapping[str, int] | Non
 
 
 def _bad_run_lines(
-    records: list[dict[str, Any]], *, report_path: Path | None, compact_bad: bool
+    records: list[Record], *, report_path: Path | None, compact_bad: bool
 ) -> list[str]:
     bad = [r for r in records if r["label"] in label.REGRESSION_LABELS]
     if not bad:
@@ -284,18 +270,17 @@ def _bad_run_lines(
 # meiva:note
 # Render the scan report. With `report_path` set the output closes with a summary line and a pointer to the persisted full report. `compact_bad` may replace an oversized bad list (> BAD_LIST_MAX_CHARS chars) with one counter line per run, but only when `report_path` is set: compaction needs a stored report, whose closing pointer keeps the dropped task text one hop away and survives tail truncation, and without one the rich lines are the only copy of the details.
 def render(
-    records: Sequence[Mapping[str, object]],
+    records: Sequence[Record],
     view: ScanView,
     *,
     report_path: Path | None = None,
     compact_bad: bool = False,
 ) -> str:
-    rows = [r if _is_str_dict(r) else dict(r) for r in records]
-    return _render(rows, view, report_path=report_path, compact_bad=compact_bad)
+    return _render(list(records), view, report_path=report_path, compact_bad=compact_bad)
 
 
 def _render(
-    records: list[dict[str, Any]], view: ScanView, *, report_path: Path | None, compact_bad: bool
+    records: list[Record], view: ScanView, *, report_path: Path | None, compact_bad: bool
 ) -> str:
     totals = _Totals.of(records)
     lines = _header_lines(records, view, totals)

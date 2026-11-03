@@ -40,9 +40,9 @@ def collect_mod() -> Any:
     return load_skill_script("platform", "meiva-self-evolution", "scripts", "collect.py")
 
 
-def _fetch(collect_mod: Any, cur: psycopg.Cursor, agent_ids: list[int]) -> Any:
+def _fetch(collect_mod: Any, conn: psycopg.Connection, agent_ids: list[int]) -> Any:
     now = datetime.now(UTC)
-    return collect_mod._inbounds_by_agent(cur, agent_ids, now - timedelta(days=1), now)
+    return collect_mod._inbounds_by_agent(conn, agent_ids, now - timedelta(days=1), now)
 
 
 # meiva:note
@@ -81,8 +81,7 @@ def test_old_history_collapses_to_task_prompt(
         world.insert_inbound(cur, 2, "agent:99", "old peer ping \u522b\u5fd8\u4e86", "29 days")
     db_conn.commit()
 
-    with db_conn.cursor() as cur:
-        out = _fetch(collect_mod, cur, [1, 2])
+    out = _fetch(collect_mod, db_conn, [1, 2])
 
     assert [m["content"] for m in out[1]] == ["task prompt", "window follow-up"]
     assert [m["content"] for m in out[2]] == ["task prompt 2"]
@@ -97,8 +96,7 @@ def test_fresh_worker_uses_in_window_spawner_prompt(
         world.insert_inbound(cur, 9, "agent:1", "fresh spawn brief", "2 hours")
     db_conn.commit()
 
-    with db_conn.cursor() as cur:
-        inbounds = _fetch(collect_mod, cur, [9])
+    inbounds = _fetch(collect_mod, db_conn, [9])
 
     rec = _record(
         agent_id=9,
@@ -119,8 +117,7 @@ def test_first_ever_inside_window_not_duplicated(
         world.insert_inbound(cur, 3, "user", "follow-up", "1 hour")
     db_conn.commit()
 
-    with db_conn.cursor() as cur:
-        out = _fetch(collect_mod, cur, [3])
+    out = _fetch(collect_mod, db_conn, [3])
 
     assert [m["content"] for m in out[3]] == ["spawn prompt", "follow-up"]
 
@@ -143,8 +140,7 @@ def test_inbounds_mark_same_instruction_sent_to_multiple_agents_as_broadcast(
         world.insert_inbound(cur, 5, "user", "wrong: use the requested path", "30 minutes")
     db_conn.commit()
 
-    with db_conn.cursor() as cur:
-        out = _fetch(collect_mod, cur, [5, 6])
+    out = _fetch(collect_mod, db_conn, [5, 6])
 
     agent_five = {m["content"]: m["is_broadcast"] for m in out[5]}
     assert agent_five["task prompt 5"] is False
@@ -157,8 +153,7 @@ def test_agent_without_inbounds_absent(collect_mod: Any, db_conn: psycopg.Connec
         world.insert_agent(cur, 4)
     db_conn.commit()
 
-    with db_conn.cursor() as cur:
-        out = _fetch(collect_mod, cur, [4])
+    out = _fetch(collect_mod, db_conn, [4])
 
     assert out.get(4, []) == []
 
@@ -695,8 +690,7 @@ def test_task_receipts_by_agent_counts_notes_states_and_changes(
             )
     db_conn.commit()
 
-    with db_conn.cursor() as cur:
-        counts = collect_mod._task_receipts_by_agent(cur, [7001, 7002, 7999])
+    counts = collect_mod._task_receipts_by_agent(db_conn, [7001, 7002, 7999])
 
     assert counts[7001] == record_mod.TaskReceipts(2, 5, 1, 3)
     assert counts[7002] == record_mod.TaskReceipts(1, 0, 0, 0)

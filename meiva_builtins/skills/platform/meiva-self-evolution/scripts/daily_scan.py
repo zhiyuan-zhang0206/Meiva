@@ -40,9 +40,10 @@ import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 from base.db import Database
+from base.host.boundary.options import options
 
 # `collect` is a sibling in this skill's own scripts/ dir,
 # not an importable package (PYTHONSAFEPATH=1 keeps a script's own directory
@@ -54,6 +55,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import collect
 import scan_report
 from events_window import resolve_window, week_label
+from record_shape import Record
 
 from base.host.atomic_io import write_text_atomic
 
@@ -61,7 +63,7 @@ from base.host.atomic_io import write_text_atomic
 class ScanResult(NamedTuple):
     """One scan's output."""
 
-    records: list[dict[str, Any]]
+    records: list[Record]
     path: Path
     counts: dict[str, int]
 
@@ -105,7 +107,15 @@ class ScanEnv:
     coverage_floor: float
 
 
-def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
+# meiva:note
+# The two flags this entry reads: the window size and whether TEST- spawns count.
+@dataclass(frozen=True)
+class ScanOptions:
+    days: int
+    include_test: bool
+
+
+def _parse_args(argv: Sequence[str]) -> ScanOptions:
     p = argparse.ArgumentParser(
         description="Daily incremental self-evolution scan — collect the past day's runs, "
         "report, alert (exit 2) on bad runs.",
@@ -117,25 +127,25 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
         action="store_true",
         help="include TEST- prefixed benchmark/probe spawns (measurement only; default excludes)",
     )
-    return p.parse_args(list(argv))
+    return options(p.parse_args(list(argv)), ScanOptions)
 
 
 # meiva:note
 # Run the scan and return its exit code. The full report is published atomically (a unique temporary file, then a rename), so a reader never sees a partial report and a failed rerun leaves the previous file in place; when it cannot be written the compact view is not used, because the rich lines are then the only copy of the details.
 def main(argv: Sequence[str], env: ScanEnv, *, database: Database) -> int:
-    args = _parse_args(argv)
-    if args.days < 1:
+    opts = _parse_args(argv)
+    if opts.days < 1:
         print("error: --days must be >= 1", file=sys.stderr)
         return 1
     result = scan(
-        args.days,
+        opts.days,
         week_label(env.collection.now),
         env=env.collection,
         database=database,
-        include_test=args.include_test,
+        include_test=opts.include_test,
     )
     view = scan_report.ScanView(
-        result.path, args.days, result.counts, env.collection.now, env.coverage_floor
+        result.path, opts.days, result.counts, env.collection.now, env.coverage_floor
     )
     report_path: Path | None = result.path.with_suffix(".report.txt")
     try:

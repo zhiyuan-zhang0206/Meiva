@@ -3,8 +3,7 @@
 # meiva:link meiva_builtins/skills/platform/meiva-self-evolution/docs/evidence-block-and-grading.meiva.okf.md
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any, TypeGuard
+from record_shape import RecordBody
 
 LABELS = ("ok", "fumbled", "failed", "unknown")
 REGRESSION_LABELS = ("failed", "fumbled")
@@ -16,22 +15,14 @@ FUMBLE_MIN_EXEC_FAILURES = 3
 FUMBLE_TURNS_PER_EXEC_FAILURE = 10
 
 
-def _is_any_mapping(value: object) -> TypeGuard[Mapping[str, Any]]:
-    return isinstance(value, Mapping)
-
-
-def label(rec: Mapping[str, object]) -> str:
-    if not _is_any_mapping(rec):
-        raise TypeError("record must be a mapping")
+def label(rec: RecordBody) -> str:
     grade = rec.get("evidence_grade")
-    if grade is None:
-        return _rule_label(rec)
-    if grade != "complete":
+    if grade is not None and grade != "complete":
         return "unknown"
     return _rule_label(rec)
 
 
-def _rule_label(rec: Mapping[str, Any]) -> str:
+def _rule_label(rec: RecordBody) -> str:
     if _is_failed(rec):
         return "failed"
     if _is_fumbled(rec):
@@ -39,7 +30,7 @@ def _rule_label(rec: Mapping[str, Any]) -> str:
     return "ok"
 
 
-def _delivered_via_side_channel(rec: Mapping[str, Any]) -> bool:
+def _delivered_via_side_channel(rec: RecordBody) -> bool:
     """True when the agent delivered results through send_message, notify,
     serve, or a result file (files.write / files.append) — even though
     final_output may be empty.
@@ -48,17 +39,17 @@ def _delivered_via_side_channel(rec: Mapping[str, Any]) -> bool:
     writes its result JSON and terminates without a report string. Without
     it, completed workers are mislabeled `failed` (2026-08-03 weekly run:
     9 of 25 failed runs were file-delivering workers)."""
-    tc = rec["tools_called"]
+    tools_called = rec["tools_called"]
     return (
-        tc.get("meiva.agents.send_message", 0) > 0
-        or tc.get("meiva.ui.notify", 0) > 0
-        or tc.get("meiva.ui.serve", 0) > 0
-        or tc.get("meiva.files.write", 0) > 0
-        or tc.get("meiva.files.append", 0) > 0
+        tools_called.get("meiva.agents.send_message", 0) > 0
+        or tools_called.get("meiva.ui.notify", 0) > 0
+        or tools_called.get("meiva.ui.serve", 0) > 0
+        or tools_called.get("meiva.files.write", 0) > 0
+        or tools_called.get("meiva.files.append", 0) > 0
     )
 
 
-def _is_failed(rec: Mapping[str, Any]) -> bool:
+def _is_failed(rec: RecordBody) -> bool:
     delivered = _delivered_via_side_channel(rec)
     # A 0-turn agent was spawned but never scheduled to run — not a real
     # failure of the agent itself.  Also exempt agents that delivered via
@@ -69,17 +60,17 @@ def _is_failed(rec: Mapping[str, Any]) -> bool:
     return bool(rec["last_exec_failed"])
 
 
-def _is_fumbled(rec: Mapping[str, Any]) -> bool:
+def _is_fumbled(rec: RecordBody) -> bool:
     # User re-prompts (neutral follow-ups) — 2+ = fumbled.
     if len(rec["followup_prompts"]) >= FUMBLE_MIN_REPROMPTS:
         return True
     # User corrections — even one is a stronger signal than re-prompts.
     # The user had to redirect/correct the agent; treat as fumbled.
-    if len(rec.get("corrections", [])) > 0:
+    if len(rec["corrections"]) > 0:
         return True
     # Peer feedback — another agent had to step in and correct.
     # Also a fumble signal: the agent needed external correction.
-    if len(rec.get("peer_feedback", [])) > 0:
+    if len(rec["peer_feedback"]) > 0:
         return True
     # A few execution failures are normal exploratory work. Keep the
     # three-failure floor for short workers, then require one failure per ten
