@@ -31,8 +31,19 @@ the closed vocabulary of `base/agents/observation/ended_with.py`:
 
 A value outside that set is an invalid record, not free text: `deferred:time` is the
 dependency-free delay this field exists to measure, so it cannot be recorded without the
-one-sentence reason that makes it attributable, and `validate` refuses anything else where
-the declaration enters the state.
+one-sentence reason that makes it attributable.
+
+A declaration the record cannot use — any of those three — is recorded as `invalid`, and the
+turn continues: the text the agent wrote goes out as `turn_end_declaration_rejected` with the
+reason it was refused.
+This is a deliberate exception to the repository's fail-fast rule for unknown enum values
+(AGENTS.md): a field that measures the agent must not fail the work it measures, or the
+instrument becomes a fuse and the measured behaviour turns into a function of the model's
+phrasing. `invalid` is not the same fact as an absent field — absent is a turn that declared
+nothing (it is measured), `invalid` is a declaration that was made and refused (the
+vocabulary's fault, not the turn's) — so the two are counted apart, and a rising `invalid`
+share reads as a set that does not cover what agents want to say. Report it beside the
+declaration rate, never merged into it.
 
 A turn that continues past its halt, and a turn ended by terminate or restart, carry no
 `ended_with`: the loop did not end those by running out of input, and it does not guess.

@@ -33,6 +33,7 @@ from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
 from base.events.live.tests.live_capture import LiveEvents, idle_publisher
 from base.host.env.agent_slices import AgentSlices
+from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 from base.paths import meiva_home, resolve_meiva_home
@@ -360,16 +361,43 @@ async def test_a_turn_end_declaration_reaches_the_state(database_gate: ProcessDb
     assert result["ended_with_reason"] == "night, continue after 09:00"
 
 
-async def test_a_turn_end_declaration_outside_the_set_aborts_the_turn(
-    database_gate: ProcessDbGate,
+# meiva:note
+# A refused declaration costs the turn nothing — that is the approved exception to fail-fast
+# for this field (`base/agents/observation/ended_with.py`): the record says `invalid` (made
+# and refused, not absent) and the text the agent wrote rides the rejection event.
+async def test_a_turn_end_declaration_outside_the_set_is_recorded_invalid(
+    loguru_records: LogRecords, database_gate: ProcessDbGate
 ) -> None:
-    with pytest.raises(ValueError, match="ended_with must be one of"):
-        await _run_calls(
-            _state("import meiva\nmeiva.state_update['ended_with'] = 'finished for today'\n"),
-            _runtime(database_gate),
-            _config(),
-            process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
-        )
+    result = await _run_calls(
+        _state("import meiva\nmeiva.state_update['ended_with'] = 'finished for today'\n"),
+        _runtime(database_gate),
+        _config(),
+        process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
+    )
+
+    assert result["ended_with"] == "invalid"
+    assert [m.type for m in result["messages"]] == ["ai", "tool"], "the turn must run to the end"
+    (record,) = [r["extra"] for r in loguru_records.events("turn_end_declaration_rejected")]
+    assert record["raw_ended_with"] == "finished for today"
+    assert record["problem"] is not None
+
+
+# meiva:note
+# `waiting:` with no object is the same path as an out-of-set value: refused, not fatal.
+async def test_a_waiting_declaration_without_its_object_is_recorded_invalid(
+    loguru_records: LogRecords, database_gate: ProcessDbGate
+) -> None:
+    result = await _run_calls(
+        _state("import meiva\nmeiva.state_update['ended_with'] = 'waiting:'\n"),
+        _runtime(database_gate),
+        _config(),
+        process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
+    )
+
+    assert result["ended_with"] == "invalid"
+    (record,) = [r["extra"] for r in loguru_records.events("turn_end_declaration_rejected")]
+    assert record["raw_ended_with"] == "waiting:"
+    assert "names no object" in str(record["problem"])
 
 
 async def test_unknown_tool_does_not_consume_sibling_code() -> None:

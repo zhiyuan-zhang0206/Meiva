@@ -46,6 +46,18 @@ def test_held_call_becomes_no_input_at_the_turn_end(loguru_records: LogRecords) 
     )
 
 
+# meiva:note
+# `invalid` is a fact of its own: a declaration was made and refused. It must reach the
+# record as `invalid` rather than collapsing into the `no_input` default.
+def test_a_refused_declaration_reaches_the_record_as_invalid(loguru_records: LogRecords) -> None:
+    state = _state(turn_end_held_seconds=4.0, ended_with="invalid")
+
+    settle_turn_end(state, Command(goto=END), agent_id=7)
+
+    (record,) = _records(loguru_records)
+    assert record["ended_with"] == "invalid"
+
+
 def test_a_declared_reason_wins_over_the_boundary_default(loguru_records: LogRecords) -> None:
     state = _state(
         turn_end_held_seconds=9.0,
