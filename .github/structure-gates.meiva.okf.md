@@ -13,13 +13,13 @@ tags: [ci, lint]
   diff against the four hooks' `files:` regexes in `.pre-commit-config.yaml`.
   Source-note validation also checks the committed change against the fetched
   merge base, using the installed TypeScript parser. Manual dispatch runs codegen;
-  the queue rechecks its combined tree. See the
+  see the
   [runbook CI section](../docs/conventions/runbook.md#ci-continuous-integration).
 
 The comment checker runs against the actual checked-out merge tree and its
-fetched base revision, including Trunk's combined changes. Missing comparison
-ancestry fails the check. The ordinary staged-file hook also remains available
-locally, where pre-commit isolates unstaged edits.
+fetched base revision. Missing comparison ancestry fails the check. The ordinary
+staged-file hook also remains available locally, where pre-commit isolates
+unstaged edits.
 
 Node and locked frontend dependencies are installed before structural checks,
 because the TypeScript compiler parses source notes on every run.

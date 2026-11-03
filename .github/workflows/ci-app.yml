@@ -71,10 +71,10 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: ui/app/src-tauri
-          # Only main saves. A cache written on a PR merge ref (Trunk's draft
-          # PRs included) is unreadable by any other PR or queue run, and the
-          # ~1.9 GB set per ref crowds the repository's 10 GB cache cap. PR runs
-          # still restore main's entry, or its prefix match when the key is new.
+          # Only main saves. A cache written on a PR merge ref is unreadable by
+          # any other PR, and the ~1.9 GB set per ref crowds the repository's
+          # 10 GB cache cap. PR runs still restore main's entry, or its prefix
+          # match when the key is new.
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Rust format
@@ -129,10 +129,10 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: ui/app/src-tauri
-          # Only main saves. A cache written on a PR merge ref (Trunk's draft
-          # PRs included) is unreadable by any other PR or queue run, and the
-          # ~1.9 GB set per ref crowds the repository's 10 GB cache cap. PR runs
-          # still restore main's entry, or its prefix match when the key is new.
+          # Only main saves. A cache written on a PR merge ref is unreadable by
+          # any other PR, and the ~1.9 GB set per ref crowds the repository's
+          # 10 GB cache cap. PR runs still restore main's entry, or its prefix
+          # match when the key is new.
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install the Tauri CLI
