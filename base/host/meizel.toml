@@ -9,6 +9,7 @@ exports = ["atomic_io.py", "brew_pin.py", "config_validators.py", "converge", "d
 "git" = ["proc.py"]
 "net" = ["__init__.py"]
 "permissions_helper" = ["converge", "net"]
+"runtime_interpreter.py" = ["verified_file"]
 "system" = ["atomic_io.py", "brew_pin.py", "env", "proc.py", "runtime_interpreter.py"]
 "tests" = ["atomic_io.py", "config_validators.py", "env", "private_storage.py", "proc.py", "resource", "system", "verified_file"]
 
@@ -22,6 +23,3 @@ exports = ["atomic_io.py", "brew_pin.py", "config_validators.py", "converge", "d
 "runtime_interpreter.py#argv sys.flags" = { count = 1, owner = "#8237", until = "waits for nothing that can arrive: `loaded_runtime` reports the launch this interpreter is already running under (`sys.flags.isolated` and `dont_write_bytecode`), and the only way a caller could name those flags is to read the same startup flags of the same interpreter back to it" }
 "runtime_interpreter.py#pid sys.executable" = { count = 1, owner = "#8237", until = "waits for nothing that can arrive: `loaded_runtime` has to name the binary executing this file, and it is also where `LoadedRuntimeError` is raised when the imported modules belong to another installation; a caller could only hand back the path it read from this same interpreter, and a wrong one would describe a runtime the process never ran on" }
 "runtime_interpreter.py#pid sys.prefix" = { count = 1, owner = "#8237", until = "waits for nothing that can arrive: `loaded_runtime` reports the environment prefix this interpreter resolves its imports from, which `verify_loaded_source` compares against the package root to refuse a checkout that lives inside the environment; a prefix passed in from outside would decide that comparison by assertion instead of by reading" }
-
-[debt.restricted-python]
-"runtime_interpreter.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }

@@ -105,8 +105,13 @@ def archive_rates(raw: object, *, context: str) -> FlatRates:
 
 def cache_write_lines(rates: FlatRates, indent: str, *, quoted: bool = True) -> list[str]:
     """Render only the cache-write rates declared by the reviewed archive."""
+    declared = {
+        "cache_write_5m": rates.cache_write_5m,
+        "cache_write_1h": rates.cache_write_1h,
+        "cache_write_30m": rates.cache_write_30m,
+    }
     return [
         f"{indent}{key}={json.dumps(str(value)) if quoted else str(value)},"
-        for key in ("cache_write_5m", "cache_write_1h", "cache_write_30m")
-        if (value := getattr(rates, key)) is not None
+        for key, value in declared.items()
+        if value is not None
     ]

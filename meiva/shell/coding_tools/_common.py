@@ -283,33 +283,36 @@ def new_generation(
 
 # meiva:note
 # The fields of an owner record each tool's `--status` and `--cancel` print, in order, after `status=`.
-_OWNER_FIELDS: dict[str, tuple[str, ...]] = {
-    "claude": (
-        "generation",
-        "owner_agent_id",
-        "session_id",
-        "session_name",
-        "state_dir",
-        "tasks_file",
-        "work_file",
-    ),
-    "codex": (
-        "generation",
-        "owner_agent_id",
-        "session_id",
-        "session_name",
-        "supervisor_session_id",
-        "supervisor_session_name",
-        "tasks_file",
-        "work_file",
-    ),
-}
+def _owner_fields(
+    owner: coding_session_owner.CodingSessionOwner, tool: str
+) -> list[tuple[str, object]]:
+    if tool == "claude":
+        return [
+            ("generation", owner.generation),
+            ("owner_agent_id", owner.owner_agent_id),
+            ("session_id", owner.session_id),
+            ("session_name", owner.session_name),
+            ("state_dir", owner.state_dir),
+            ("tasks_file", owner.tasks_file),
+            ("work_file", owner.work_file),
+        ]
+    if tool == "codex":
+        return [
+            ("generation", owner.generation),
+            ("owner_agent_id", owner.owner_agent_id),
+            ("session_id", owner.session_id),
+            ("session_name", owner.session_name),
+            ("supervisor_session_id", owner.supervisor_session_id),
+            ("supervisor_session_name", owner.supervisor_session_name),
+            ("tasks_file", owner.tasks_file),
+            ("work_file", owner.work_file),
+        ]
+    raise KeyError(tool)
 
 
 def print_owner(owner: coding_session_owner.CodingSessionOwner, tool: str) -> None:
     print(f"status={owner.status}")
-    for name in _OWNER_FIELDS[tool]:
-        value = getattr(owner, name)
+    for name, value in _owner_fields(owner, tool):
         if value is not None:
             print(f"{name}={value}")
 

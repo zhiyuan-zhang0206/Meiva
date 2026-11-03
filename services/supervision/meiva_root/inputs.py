@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-_STABLE_STAT = ("st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns")
+from base.host.verified_file.plan import stat_changed
 
 
 class InputChangedError(OSError):
@@ -30,7 +30,7 @@ def _member_digest(path: Path) -> str:
     else:
         raise InputChangedError(f"service input must be a regular file or directory: {path}")
     after = path.lstat()
-    if any(getattr(before, key) != getattr(after, key) for key in _STABLE_STAT):
+    if stat_changed(before, after):
         raise InputChangedError(f"service input changed while reading: {path}")
     return hashlib.sha256(json.dumps(value, separators=(",", ":")).encode()).hexdigest()
 

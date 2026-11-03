@@ -153,15 +153,18 @@ def _assigned(scope: Scope, node: ast.Assign | ast.AnnAssign) -> None:
     _assigned_value(scope, node)
 
 
+# meiva:note
+# The compound statements whose statement lists run in the enclosing scope (`ast.Match` is read
+# whole; function and class bodies are scopes of their own).
 _NESTED_BODIES = (
-    (ast.If, ("body", "orelse")),
-    (ast.While, ("body", "orelse")),
-    (ast.For, ("body", "orelse")),
-    (ast.AsyncFor, ("body", "orelse")),
-    (ast.With, ("body",)),
-    (ast.AsyncWith, ("body",)),
-    (ast.Try, ("body", "orelse", "finalbody")),
-    (ast.TryStar, ("body", "orelse", "finalbody")),
+    ast.If,
+    ast.While,
+    ast.For,
+    ast.AsyncFor,
+    ast.With,
+    ast.AsyncWith,
+    ast.Try,
+    ast.TryStar,
 )
 
 
@@ -197,15 +200,11 @@ def collect_scope(
 def _collect_compound(
     scope: Scope, node: ast.AST, stack: list[ast.AST], package: list[str]
 ) -> None:
-    for kinds, fields in _NESTED_BODIES:
-        if isinstance(node, kinds):
-            for field in fields:
-                stack.extend(getattr(node, field))
-            break
-    else:
-        if isinstance(node, ast.Match):
-            _collect_everything(scope, [node], package)
-            return
+    if isinstance(node, _NESTED_BODIES):
+        stack.extend(child for child in ast.iter_child_nodes(node) if isinstance(child, ast.stmt))
+    elif isinstance(node, ast.Match):
+        _collect_everything(scope, [node], package)
+        return
     if isinstance(node, ast.For | ast.AsyncFor):
         bind_target(scope, node.target)
     elif isinstance(node, ast.With | ast.AsyncWith):

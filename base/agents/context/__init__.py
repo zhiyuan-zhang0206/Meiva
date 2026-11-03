@@ -485,5 +485,8 @@ class MeivaContext:
     # handles contain. Printing the context is routine (a debug line, `meiva.help(context)`) and
     # the generated dataclass repr put the whole process environment in every such line.
     def __repr__(self) -> str:
-        held = ", ".join(f"{f.name}={_printed_value(getattr(self, f.name))}" for f in fields(self))
+        named = {f.name for f in fields(self)}
+        held = ", ".join(
+            f"{name}={_printed_value(value)}" for name, value in vars(self).items() if name in named
+        )
         return f"MeivaContext({held})"

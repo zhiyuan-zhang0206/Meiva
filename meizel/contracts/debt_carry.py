@@ -416,7 +416,7 @@ def run_debt(
         print(summarize(repo, as_json=args.json, unowned_list=args.unowned))
         return 0
     for flag in ("json", "unowned"):
-        if getattr(args, flag, False):
+        if vars(args).get(flag, False):
             raise MeizelError(f"--{flag} belongs to the summary: `meizel debt --{flag}`")
     if mode == "prune":
         for line in prune_debt(repo, jobs):

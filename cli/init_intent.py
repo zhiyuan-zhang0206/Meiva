@@ -154,7 +154,7 @@ def _first_time_examples(checkout: Path) -> str:
 def _inputs(args: argparse.Namespace, site: HomeSite, caller: CallerHost) -> IdentityInput:
     home = site.home
     stored = stored_values(home)
-    explicit = {cap: getattr(args, flag) for cap, flag in CAP_ARGS.items()}
+    explicit = {cap: vars(args)[flag] for cap, flag in CAP_ARGS.items()}
     try:
         roles = capability_roles(stored, explicit)
     except ValueError as exc:
@@ -215,7 +215,7 @@ def _apply_identity_options(
     checkout: Path,
 ) -> None:
     for field in IDENTITY_FIELDS:
-        explicit = getattr(args, field)
+        explicit = vars(args)[field]
         key = "MEIVA_" + field.upper()
         if explicit is not None:
             if key in stored and stored[key] != explicit:
@@ -231,7 +231,7 @@ def _apply_identity_options(
 
 
 def _given_flags(args: argparse.Namespace) -> list[str]:
-    return ["--" + name.replace("_", "-") for name in _FLAGS if getattr(args, name) is not None]
+    return ["--" + name.replace("_", "-") for name in _FLAGS if vars(args)[name] is not None]
 
 
 def initialize_home(args: argparse.Namespace, site: HomeSite, caller: CallerHost) -> str:

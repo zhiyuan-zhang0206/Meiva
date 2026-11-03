@@ -470,8 +470,7 @@ def _value(raw: str) -> tuple[DebtEntry | None, str]:
 # What both sides agree one entry is: the lower count, and the metadata either side names — a real
 # disagreement about who owns the debt is a decision, so it is refused rather than picked.
 def _merged_side(mine: DebtEntry, other: DebtEntry) -> DebtEntry | None:
-    for field in ("owner", "until"):
-        left, right = getattr(mine, field), getattr(other, field)
+    for left, right in ((mine.owner, other.owner), (mine.until, other.until)):
         if left and right and left != right:
             return None
     return DebtEntry(

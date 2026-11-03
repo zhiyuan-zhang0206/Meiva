@@ -12,6 +12,3 @@ exports = ["agent_runtime.py", "plugin.py"]
 
 [roots]
 "_state.py" = { kinds = ["home"], why = "Plugin state factory resolves current agent workspace or user home as default logical cwd" }
-
-[debt.restricted-python]
-"_prompt_sections.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }

@@ -34,6 +34,3 @@ exports = ["boot_autostart", "backend.py", "boot_policy.py", "boot_unit.py", "cr
 "boot_unit.py#pid pwd.getpwuid" = { count = 1, owner = "#8237", until = "waits for nothing that can arrive: `unit_context` turns the uid the `Host` port already holds into the account the unit runs as — its name, home and gid — and no caller of that port knows the account database better than the process reading it here" }
 "boot_unit.py#random tempfile.mkstemp()" = { count = 1, owner = "#8237", until = "waits for `install` to take the parent of its scratch directory from its caller: it creates it under a random name wherever TMPDIR points" }
 "hostport.py#platform base.native_process.os_platform.Platform.current" = { count = 1, owner = "#5816", until = "permanently: Host.system() builds the host of the process that calls it, platform included; a platform handed in would describe a machine the code is not running on" }
-
-[debt.restricted-python]
-"job_values.py#dynamic attribute name" = { count = 2, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }

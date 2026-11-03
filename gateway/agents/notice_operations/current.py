@@ -46,8 +46,8 @@ class GuardedNoticeEdit(NoticeEditIn, ObservedNotice):
             raise ValueError("edit needs at least one field to change")
         if "title" in changes and (not self.title or not self.title.strip()):
             raise ValueError("title must be non-empty")
-        for name in ("priority", "blocking"):
-            if name in changes and getattr(self, name) is None:
+        for name, value in (("priority", self.priority), ("blocking", self.blocking)):
+            if name in changes and value is None:
                 raise ValueError(f"{name} cannot be null")
         return self
 

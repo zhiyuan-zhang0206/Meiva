@@ -38,11 +38,15 @@ def project_nodes(
     out: list[RunTimelineNode] = []
     for row in rows:
         before, after = row.before, row.after
-        usage = {
-            name: getattr(after, name) - getattr(before, name)
-            for name in RunTimelineUsage.model_fields
-        }
-        usage["cost_usd"] = round(usage["cost_usd"], 9)
+        usage = RunTimelineUsage(
+            calls=after.calls - before.calls,
+            input=after.input - before.input,
+            cache_read=after.cache_read - before.cache_read,
+            output=after.output - before.output,
+            cache_write=after.cache_write - before.cache_write,
+            cost_usd=round(after.cost_usd - before.cost_usd, 9),
+            cost_calls=after.cost_calls - before.cost_calls,
+        )
         generation = (
             jobs.get(row.job_id)
             if row.depth == 1 and row.job_id is not None
@@ -61,7 +65,7 @@ def project_nodes(
                 span_start=row.span_start,
                 span_end=row.span_end,
                 summary=row.text,
-                usage=RunTimelineUsage.model_validate(usage),
+                usage=usage,
                 generation=generation,
                 context_tokens=after.context - before.context if known else None,
                 estimated=after.estimated > before.estimated if known else None,

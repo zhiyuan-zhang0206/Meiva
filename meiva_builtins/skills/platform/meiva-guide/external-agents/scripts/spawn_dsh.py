@@ -162,8 +162,13 @@ def _owner_terminated(agent_id: int) -> bool:
 
 def _print_owner(owner: coding_session_owner.CodingSessionOwner) -> None:
     print(f"status={owner.status}")
-    for field in ("generation", "owner_agent_id", "session_id", "session_name", "state_dir"):
-        value = getattr(owner, field)
+    for field, value in (
+        ("generation", owner.generation),
+        ("owner_agent_id", owner.owner_agent_id),
+        ("session_id", owner.session_id),
+        ("session_name", owner.session_name),
+        ("state_dir", owner.state_dir),
+    ):
         if value is not None:
             print(f"{field}={value}")
 

@@ -356,8 +356,7 @@ class Scanner(AmbientAccess):
 
     def children(self, node: ast.AST) -> None:
         handlers = self._handlers
-        for name in node._fields:
-            value = getattr(node, name, None)
+        for _, value in ast.iter_fields(node):
             if _is_object_list(value):
                 for child in value:
                     if isinstance(child, ast.AST) and type(child) not in _LEAVES:

@@ -17,6 +17,3 @@ exports = ["grafana_render.py", "inputs.py", "lgtm.py", "lgtm_native.py", "logs.
 [debt.ambient-read]
 "lgtm_native.py#environ tempfile.TemporaryDirectory()" = { count = 3, owner = "#8237", until = "waits for `_extract_member`, `_extract_tree` and `download_and_verify` to take the parent of its scratch directory from its caller: it creates it where TMPDIR points" }
 "lgtm_native.py#random tempfile.TemporaryDirectory()" = { count = 3, owner = "#8237", until = "waits for `_extract_member`, `_extract_tree` and `download_and_verify` to take the parent of its scratch directory from its caller: it creates it under a random name wherever TMPDIR points" }
-
-[debt.restricted-python]
-"trace.py#dynamic attribute name" = { count = 2, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }

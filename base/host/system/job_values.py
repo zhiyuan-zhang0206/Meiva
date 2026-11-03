@@ -28,11 +28,9 @@ class JobRoots:
     user_home: Path
 
     def __post_init__(self) -> None:
-        for name in ("home", "repo", "user_home"):
-            if not getattr(self, name).is_absolute():
-                raise ValueError(
-                    f"JobRoots.{name} must be an absolute path, got {getattr(self, name)!r}"
-                )
+        for name, path in (("home", self.home), ("repo", self.repo), ("user_home", self.user_home)):
+            if not path.is_absolute():
+                raise ValueError(f"JobRoots.{name} must be an absolute path, got {path!r}")
 
 
 @dataclass(frozen=True)

@@ -40,7 +40,7 @@ def _seconds(text: str) -> int:
 # meiva:note
 # Before any host: names must be in this checkout's roster; shells and browser have own choices.
 def _service_problems(args: argparse.Namespace, env: Mapping[str, str]) -> list[str]:
-    named = {n for flag in _NAMED for n in getattr(args, flag[2:].replace("-", "_"), None) or ()}
+    named = {n for flag in _NAMED for n in vars(args).get(flag[2:].replace("-", "_")) or ()}
     own = sorted(set(getattr(args, "keep_service", None) or ()) & {"pty-sessions", "browser"})
     problems = [f"--keep-service {name}: it has its own keep/stop choice" for name in own]
     if not named:
@@ -177,7 +177,7 @@ def _is_object_list(value: object) -> TypeGuard[list[object]]:
 
 
 def _value(args: argparse.Namespace, flag: str) -> object:
-    return getattr(args, flag[2:].replace("-", "_"))
+    return vars(args)[flag[2:].replace("-", "_")]
 
 
 def _value_problems(args: argparse.Namespace, scope: str) -> list[str]:
@@ -214,10 +214,10 @@ def _resolve_pair_choice(args: argparse.Namespace, dest: str) -> str | None:
     if dest == "message":
         return _resolve_message_choice(args)
     given = [f for f in _PAIRS[dest] if f in _NAMED and _value(args, f)]
-    given += getattr(args, dest, None) or []
+    given += vars(args).get(dest) or []
     if len(given) != 1:
         return "exactly one of " + " | ".join(_PAIRS[dest])
-    setattr(args, dest, given[0])
+    vars(args)[dest] = given[0]
     return None
 
 
@@ -253,7 +253,7 @@ def _resolve_branch_choice(
 
 
 def _arg_strings(args: argparse.Namespace, name: str) -> list[str]:
-    raw: object = getattr(args, name, None)
+    raw: object = vars(args).get(name)
     return [str(item) for item in raw] if _is_object_list(raw) else []
 
 

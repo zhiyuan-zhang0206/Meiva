@@ -26,6 +26,23 @@ def read_limit(max_bytes: int) -> int:
 
 
 # meiva:note
+# Whether a path's stats moved between two reads of it: device, inode, type and mode, size, and
+# both timestamps. The check that a file read in two steps was not rewritten under the reader.
+def stat_changed(before: os.stat_result, after: os.stat_result) -> bool:
+    def identity(info: os.stat_result) -> tuple[int, ...]:
+        return (
+            info.st_dev,
+            info.st_ino,
+            info.st_mode,
+            info.st_size,
+            info.st_mtime_ns,
+            info.st_ctime_ns,
+        )
+
+    return identity(before) != identity(after)
+
+
+# meiva:note
 # Why an entry is not read before it is opened: it is not a regular file, or it is over the budget.
 def refusal_before_open(path: Path, info: os.stat_result, max_bytes: int) -> str | None:
     if not stat.S_ISREG(info.st_mode):

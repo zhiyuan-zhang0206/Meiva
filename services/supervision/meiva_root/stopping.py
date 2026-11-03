@@ -86,10 +86,8 @@ class SupervisorConfig:
             raise ValueError("rewrite_startup_window_s must be finite and positive")
         if self.rewrite_retire_after_failures < 1:
             raise ValueError("rewrite_retire_after_failures must be at least 1")
-        for name in ("stop_kill_reap_s",):
-            value = getattr(self, name)
-            if not math.isfinite(value) or value <= 0:
-                raise ValueError(f"{name} must be finite and positive")
+        if not math.isfinite(self.stop_kill_reap_s) or self.stop_kill_reap_s <= 0:
+            raise ValueError("stop_kill_reap_s must be finite and positive")
 
 
 # meiva:note

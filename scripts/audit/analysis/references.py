@@ -309,12 +309,15 @@ def _bindings(tree: ast.Module) -> Iterator[tuple[str, int]]:
 def _inner_bodies(stmt: ast.stmt) -> list[Sequence[ast.stmt]]:
     # meiva:note
     # The statement lists nested directly in a compound statement.
-    bodies: list[Sequence[ast.stmt]] = [
-        getattr(stmt, field, ()) for field in ("body", "orelse", "finalbody")
-    ]
-    bodies += [handler.body for handler in getattr(stmt, "handlers", ())]
-    bodies += [case.body for case in getattr(stmt, "cases", ())]
-    return bodies
+    if isinstance(stmt, ast.If | ast.For | ast.AsyncFor | ast.While):
+        return [stmt.body, stmt.orelse]
+    if isinstance(
+        stmt, ast.With | ast.AsyncWith | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+    ):
+        return [stmt.body]
+    if isinstance(stmt, ast.Try | ast.TryStar):
+        return [stmt.body, stmt.orelse, stmt.finalbody, *(h.body for h in stmt.handlers)]
+    return [case.body for case in stmt.cases] if isinstance(stmt, ast.Match) else []
 
 
 def _statements(

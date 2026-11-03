@@ -14,6 +14,7 @@ from typing import Literal, Self
 
 from pydantic import model_validator
 
+from base.host.verified_file.plan import stat_changed
 from base.native_process.evidence import Digest, EvidenceModel
 
 
@@ -35,9 +36,6 @@ def external_plugin_read_root(*, home: Path) -> Path:
 
 class LoadedRuntimeError(ValueError):
     """The loaded modules are not one canonical installation of this checkout."""
-
-
-_STABLE_STAT = ("st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns")
 
 
 def source_digest(repo: Path) -> str:
@@ -69,7 +67,7 @@ def source_digest(repo: Path) -> str:
         else:
             raise RuntimeError(f"unsupported development source member: {path}")
         after = path.lstat()
-        if any(getattr(before, key) != getattr(after, key) for key in _STABLE_STAT):
+        if stat_changed(before, after):
             raise RuntimeError(f"development source changed while reading: {path}")
         digest.update(str(mode).encode() + b"\0" + hashlib.sha256(content).digest())
     if (
