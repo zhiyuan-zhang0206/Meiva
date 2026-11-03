@@ -19,6 +19,10 @@ exports = ["agents", "boot.py", "boot_external.py", "files.py", "gateway_client"
 "watcher" = ["sdk_surface", "shell"]
 "web" = ["sdk_surface", "security.py"]
 
+[dynamic-attrs]
+"__init__.py" = "the meiva package hook serves the settings constants and the names plugins contribute; the plugin names are known only after the plugins load, and a missing name triggers that load"
+"ui.py" = "plugin members land on meiva.ui through a declared SdkMember; they are absent until the plugins load, so the module hook triggers the load and retries the name"
+
 [roots]
 "boot_external.py" = { kinds = ["clock", "environ", "home", "random"], why = "An external process's boot reads the account home, the environment it was launched with (a shell session or a watcher it starts inherits it) and the system generator once, and builds the clock over SYSTEM_TIMERS, for the attachment context it then binds; the takeover and the harness must not differ in how that process around them is built" }
 "boot.py" = { kinds = ["clock", "environ", "home", "random", "settings"], why = "SDK process bootstrap: reads the launch environment (MEIVA_AGENT_ID is the only channel by which a child process, such as a shell session or a watcher, discovers its parent agent), reads the account's home and the Meiva home once for the contexts it builds, builds the process's random generator that the sampling owner draws from, and constructs and binds the process-owned configuration owner and context; builds the process clock from SYSTEM_TIMERS" }

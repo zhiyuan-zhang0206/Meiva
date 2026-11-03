@@ -10,6 +10,9 @@ exports = ["config.py", "fleet_gateway.py", "fleet_leases.py", "schedules.py", "
 [external]
 "schedule_verify_child.py" = "dry-runs the imports of a user-written schedule script and checks its syntax"
 
+[dynamic-attrs]
+"schedule_verify_checks.py" = "resolves the callee chains a user-written schedule script names against the live SDK namespace; the names are the script author's"
+
 [roots]
 "fleet_leases.py" = { kinds = ["home"], why = "Standalone program the window pipes to a host, where it runs under that host's older checkout (see `cli/fleet_update/plan/host_commands.py` and `fleet_pre_verify.sh`): the installed `CommandRuntime.create` takes the resolved home only from the version that added the parameter, so on an older one the program resolves the home itself and passes it nowhere. Delete the probe and this declaration together once the oldest installation these programs reach resolves the home itself" }
 "schedules_verify_read_rows.py" = { kinds = ["home", "argv"], why = "Standalone program the window pipes to a host, where it runs under that host's older checkout (see `cli/fleet_update/plan/host_commands.py` and `fleet_pre_verify.sh`): the installed `CommandRuntime.create` takes the resolved home only from the version that added the parameter, so on an older one the program resolves the home itself and passes it nowhere. Delete the probe and this declaration together once the oldest installation these programs reach resolves the home itself; it also reads its command line (argv) once, as the process entry" }

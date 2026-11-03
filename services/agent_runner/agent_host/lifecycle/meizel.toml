@@ -10,3 +10,6 @@ exports = ["cleanup_failures.py", "configuration.py", "graceful_exit.py", "insta
 
 [roots]
 "configuration.py" = { kinds = ["clock", "settings"], why = "Agent host bootstrap constructs the process configuration owner and the process clock (from SYSTEM_TIMERS) the host stamps handoffs and group checks with; the entry hands it the home and the process-disable list it read" }
+
+[debt.restricted-python]
+"configuration.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }

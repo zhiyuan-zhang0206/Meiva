@@ -1,5 +1,11 @@
 exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains", "env_changed.py", "profiles.py", "runtime_config.py", "service_read.py", "tests"]
 
+[dynamic-attrs]
+"__init__.py" = "module __getattr__ forwards the eager-only names (Settings, the metadata and service-read re-exports) through the boot-lite gate; which names exist is decided by the build that installs them at run time"
+"_full.py" = "the Settings aggregate omits the domains its process profile does not construct; __getattr__ turns a read of an absent domain into a named error, so the attribute set depends on the profile chosen at run time"
+"_lite.py" = "the boot-lite configuration views forward any domain or field read to whichever backend (lite snapshot or full Settings) is live; the backend is chosen at run time"
+"service_read.py" = "_DeferredReadModel forwards every attribute read to the model it builds on first use, and the reader helpers read domain fields by registry name from whichever model is live"
+
 [purity]
 "agent_pins.py" = "strict"
 "base.py" = "strict-to-be"
@@ -41,3 +47,6 @@ exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains",
 
 [debt.impure-edge]
 "base.py#base/paths/home.py" = { count = 1, owner = "#7240", until = "permanently: unit_home() is a pydantic default_factory that runs while a sub-model is constructed, before any settings object exists to carry the home — the home is the input that locates the .env the settings are built from, which is the same boundary base/paths declares with [roots] kinds=[environ, home]" }
+
+[debt.restricted-python]
+"config_registry.py#module __getattr__" = { count = 1, owner = "#8266", until = "waits for the lazy re-export to import its fixed names explicitly: the module serves a few names written in the source, so none of them is known only at run time" }

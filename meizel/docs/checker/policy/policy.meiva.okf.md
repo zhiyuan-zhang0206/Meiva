@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "meizel/ — The Policy File"
-description: "meizel.policy.toml is the single closed list of allowances (external sites, dynamic loads, default-argument injections, and the exemptions of the lint rules); what a manifest may and may not grant, how the lints read their tables, and how a change is reported."
+description: "meizel.policy.toml is the single closed list of allowances (external sites, dynamic-attribute owners, dynamic loads, default-argument injections, and the exemptions of the lint rules); what a manifest may and may not grant, how the lints read their tables, and how a change is reported."
 tags:
   - locality
   - tool
@@ -13,7 +13,8 @@ tags:
 
 Some forms are legitimate only where a person decided they are: a file that loads
 code at run time (`[loads]`), a file that runs code from outside the repository
-(`[external]`), and default-argument injection. A manifest used to grant these by
+(`[external]`), a file that owns an attribute name only the run knows (`[dynamic-attrs]`), and
+default-argument injection. A manifest used to grant these by
 itself, with a reason in free text. A reason in prose stops nothing, so the grant
 moved out: `meizel.policy.toml` at the repository root is the one place that lists
 every allowance, and the only hard-coded one.
@@ -21,6 +22,9 @@ every allowance, and the only hard-coded one.
 ```toml
 [external]
 "app/runner.py" = "executes the schedule script the user wrote"
+
+[dynamic-attrs]
+"app/proxy.py" = "forwards every attribute to the connection it builds on first use"
 
 [loads]
 "app/loader.py" = ["meiva_builtins"]
@@ -72,7 +76,7 @@ removing an entry is judged against the whole repository.
 
 ## What is checked
 
-- A manifest `[external]` site, or a `[loads]` site with its directories, that the
+- A manifest `[external]` or `[dynamic-attrs]` site, or a `[loads]` site with its directories, that the
   policy does not list is `unlisted-allowance`. The reason written in a manifest
   has no effect. Where the policy lists nothing, nothing is allowed.
 - A malformed policy, an unknown table or section, or an entry of the wrong shape is

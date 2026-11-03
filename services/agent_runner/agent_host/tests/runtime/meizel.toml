@@ -7,3 +7,6 @@ exports = ["host_support.py", "hosted_resources.py", "shutdown", "test_resource_
 "test_policy_inputs.py" = ["host_support.py"]
 "test_runtime_build_overrides.py" = ["host_support.py", "observation.py"]
 "test_settlement_reconciles.py" = ["host_support.py"]
+
+[debt.restricted-python]
+"observation.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

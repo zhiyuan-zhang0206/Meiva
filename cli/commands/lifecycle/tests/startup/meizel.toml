@@ -11,3 +11,7 @@ exports = ["start_harness.py"]
 "test_start_generation.py" = ["child_loaded_verifier_import.py"]
 "test_start_health_port_gate.py" = ["start_harness.py"]
 "test_start_live_path.py" = ["start_harness.py"]
+
+[debt.restricted-python]
+"config_read_facts.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }
+"test_gateway_consumer_guard.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

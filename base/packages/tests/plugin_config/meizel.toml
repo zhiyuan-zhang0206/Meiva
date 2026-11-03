@@ -3,3 +3,6 @@ exports = ["test_plugin_config.py"]
 [uses]
 "gateway_profile.py" = ["gateway_profile_child.py"]
 "test_plugin_config.py" = ["gateway_profile.py"]
+
+[debt.restricted-python]
+"test_plugin_config.py#dynamic attribute name" = { count = 6, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

@@ -2,3 +2,6 @@ exports = []
 
 [uses]
 "test_template_validate.py" = ["child_note_cap.py"]
+
+[debt.restricted-python]
+"test_template_validate.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

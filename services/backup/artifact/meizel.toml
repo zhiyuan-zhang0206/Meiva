@@ -10,3 +10,6 @@ exports = ["intermediates.py", "names.py", "offsite.py", "offsite_plan.py", "pas
 
 [roots]
 "passphrase.py" = { kinds = ["random"], why = "Mints a random 256-bit logical-backup passphrase at home birth" }
+
+[debt.restricted-python]
+"offsite.py#dynamic attribute name" = { count = 3, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }

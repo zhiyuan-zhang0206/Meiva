@@ -13,3 +13,6 @@ exports = ["daemon"]
 "test_meiva_root_supervisor_reaping.py" = ["child_unit.py", "slices.py"]
 "test_meiva_root_wiring.py" = ["child_unit.py", "slices.py"]
 "test_root_work_ownership.py" = ["child_unit.py", "slices.py"]
+
+[debt.restricted-python]
+"test_meiva_root_wiring.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

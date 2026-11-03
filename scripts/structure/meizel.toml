@@ -15,5 +15,3 @@ exports = ["baseline_shards.py", "budgets", "imports", "lazy_modules.py", "local
 "platform_lane_coverage.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 "skip_sites.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 "tests_location.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
-
-[debt.ambient-read]

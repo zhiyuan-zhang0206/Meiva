@@ -9,6 +9,10 @@ exports = ["config.py", "tests"]
 "_tools.py" = ["_clients.py", "config.py"]
 "tests" = ["__init__.py", "_browser.py", "_clients.py", "_computer.py", "_daemon.py", "_guards.py", "_oauth.py", "_plan.py", "_policy.py", "_remote.py", "_startup.py", "_tools.py", "_wire.py", "config.py"]
 
+[dynamic-attrs]
+"__init__.py" = "meiva.mcps.<server> returns a proxy for a configured MCP server; the server names come from the operator's MCP configuration"
+"_tools.py" = "ServerProxy exposes <server>.<tool> for the tools the MCP server itself lists; the tool names are the server's"
+
 [purity]
 "_plan.py" = "strict"
 "_policy.py" = "strict"

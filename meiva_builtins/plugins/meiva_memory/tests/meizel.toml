@@ -2,3 +2,7 @@
 "test_memory_write_wraps.py" = ["child_face_boundary.py"]
 "test_meiva_memory_pool_ops_home.py" = ["child_pool_ops.py"]
 "test_process_boot.py" = ["child_eval_isolation.py"]
+
+[debt.restricted-python]
+"test_memory.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }
+"test_memory_write_check_hook.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

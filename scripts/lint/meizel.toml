@@ -16,5 +16,3 @@ exports = ["async_no_sync_blocking.py", "meiva_root_scope.py", "diagnostics", "f
 "pool_keepalives.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 "termination_source.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 "turn_scoped_config.py" = { kinds = ["argv"], why = "Lint script entry: its __main__ block exits with main(sys.argv[1:])" }
-
-[debt.ambient-read]

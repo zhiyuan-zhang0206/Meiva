@@ -25,3 +25,6 @@ exports = ["__main__.py", "commands", "database", "fleet_update", "main.py", "pa
 [debt.ambient-read]
 "start_runtime.py#cwd pathlib.Path.absolute" = { count = 1, owner = "#8237", until = "unreviewed: recorded by #8237 on 2026-11-03" }
 "start_runtime.py#pid sys.executable" = { count = 1, owner = "#8237", until = "unreviewed: recorded by #8237 on 2026-11-03" }
+
+[debt.restricted-python]
+"init_intent.py#dynamic attribute name" = { count = 3, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }

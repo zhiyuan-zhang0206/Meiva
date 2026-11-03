@@ -5,3 +5,6 @@
 "test_events_maintenance_daemon.py" = ["db_faults.py", "service_probe.py", "slices.py", "test_events_maintenance_resolution.py"]
 "test_events_maintenance_resolution.py" = ["db_faults.py", "slices.py"]
 "test_registry_gauge.py" = ["db_faults.py"]
+
+[debt.restricted-python]
+"test_events_maintenance_config.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

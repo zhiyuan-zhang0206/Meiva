@@ -43,7 +43,7 @@ def policy(readers: dict[str, list[str]]) -> str:
         f"[ambient-readers.{kind}]\n" + "".join(f'"{name}" = "reads the world"\n' for name in names)
         for kind, names in readers.items()
     ]
-    return render_policy({}, {}) + "\n" + "\n".join(sections)
+    return render_policy({}, {}, {}) + "\n" + "\n".join(sections)
 
 
 def repo(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter, defaultdict
+from collections.abc import Mapping
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
@@ -51,7 +52,7 @@ def render_manifest(
     exports: set[str],
     uses: dict[str, set[str]],
     loads: dict[str, tuple[str, ...]],
-    external: dict[str, str],
+    reasons: Mapping[str, dict[str, str]],
     debt: DebtTable | None = None,
     roles: dict[str, tuple[str, ...]] | None = None,
 ) -> str:
@@ -67,9 +68,11 @@ def render_manifest(
     if loads:
         rows = "\n".join(f'"{src}" = {listing(sorted(loads[src]))}' for src in sorted(loads))
         blocks.append(f"[loads]\n{rows}")
-    if external:
-        rows = "\n".join(f'"{src}" = {json.dumps(external[src])}' for src in sorted(external))
-        blocks.append(f"[external]\n{rows}")
+    for table in ("external", "dynamic-attrs"):
+        entries = reasons.get(table, {})
+        if entries:
+            rows = "\n".join(f'"{src}" = {json.dumps(entries[src])}' for src in sorted(entries))
+            blocks.append(f"[{table}]\n{rows}")
     if roles:
         rows = "\n".join(f"{role} = {listing(list(names))}" for role, names in roles.items())
         blocks.append(f"[roles]\n{rows}")
@@ -197,11 +200,18 @@ def plan_bootstrap(analysis: Analysis, out: Path) -> tuple[EditPlan, str]:
     exports, _ = _exports(analysis.projections)
     carried = {d: m.loads for d, m in analysis.manifests.items() if m.loads}
     externals = {d: m.external for d, m in analysis.manifests.items() if m.external}
+    owners = {d: m.dynamic_attrs for d, m in analysis.manifests.items() if m.dynamic_attrs}
     debts = {d: m.debt for d, m in analysis.manifests.items() if m.debt}
     roles = {d: m.roles for d, m in analysis.manifests.items() if m.roles}
     writes: dict[Path, str] = {}
     for directory in sorted(
-        set(grouped) | set(exports) | set(carried) | set(externals) | set(debts) | set(roles)
+        set(grouped)
+        | set(exports)
+        | set(carried)
+        | set(externals)
+        | set(owners)
+        | set(debts)
+        | set(roles)
     ):
         uses: dict[str, set[str]] = defaultdict(set)
         for cf, ct in grouped.get(directory, {}):
@@ -211,7 +221,7 @@ def plan_bootstrap(analysis: Analysis, out: Path) -> tuple[EditPlan, str]:
             exports.get(directory, set()),
             uses,
             carried.get(directory, {}),
-            externals.get(directory, {}),
+            {"external": externals.get(directory, {}), "dynamic-attrs": owners.get(directory, {})},
             debts.get(directory),
             roles.get(directory),
         )

@@ -163,6 +163,22 @@ def test_policy_diff_lists_added_removed_and_changed_entries(
     assert "- [loads] app/loader.py = [lib]" in out
 
 
+def test_policy_diff_lists_the_dynamic_attrs_table_and_reads_it_as_an_exemption(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = repo(make_repo, POLICY + '\n[dynamic-attrs]\n"app/old.py" = "gone"\n')
+    commit(root)
+    write(root, {"meizel.policy.toml": POLICY + '\n[dynamic-attrs]\n"app/new.py" = "added"\n'})
+    assert run(root, "policy", "diff", "--against", "HEAD") == 0
+    out = capsys.readouterr().out.splitlines()
+    assert "+ [dynamic-attrs] app/new.py = added" in out
+    assert "- [dynamic-attrs] app/old.py = gone" in out
+    assert run(root, "policy", "surface", "--against", "HEAD") == 0
+    report = capsys.readouterr().out
+    assert "app/new.py" in report
+    assert "Narrower" in report
+
+
 def test_policy_diff_is_silent_when_nothing_changed(
     make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -501,7 +517,7 @@ def test_third_party_imports_fail_closed_unless_in_pure_third_party(
 ) -> None:
     root = make_repo(
         {
-            "meizel.policy.toml": render_policy({}, {})
+            "meizel.policy.toml": render_policy({}, {}, {})
             + '\n[purity]\npure-third-party = ["pydantic"]\n',
             "pkg/__init__.py": "",
             "pkg/allowed.py": "import pydantic\n",

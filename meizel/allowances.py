@@ -37,7 +37,7 @@ __all__ = [
 ]
 
 POLICY = "meizel.policy.toml"
-CHECKER_TABLES = ("external", "loads", "default-arguments")
+CHECKER_TABLES = ("external", "dynamic-attrs", "loads", "default-arguments")
 _KIND_NAME = re.compile(r"[a-z][a-z0-9_]*")
 
 # meiva:note
@@ -146,6 +146,7 @@ def _sections(rule: str, source: _PolicySource, state: Sequence[str]) -> dict[st
 @dataclass(frozen=True, slots=True)
 class Policy:
     external: dict[str, str] = field(default_factory=dict[str, str])
+    dynamic_attrs: dict[str, str] = field(default_factory=dict[str, str])
     loads: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
     default_arguments: tuple[str, ...] = ()
     listed: dict[tuple[str, str], dict[str, str]] = field(
@@ -388,21 +389,28 @@ def _rule(
 
 def _checker(
     document: dict[str, object], problems: list[str]
-) -> tuple[dict[str, str], dict[str, tuple[str, ...]], tuple[str, ...]]:
+) -> tuple[dict[str, str], dict[str, str], dict[str, tuple[str, ...]], tuple[str, ...]]:
     external = document.get("external", {})
+    dynamic_attrs = document.get("dynamic-attrs", {})
     loads = document.get("loads", {})
     defaults = document.get("default-arguments", {})
-    if not (_is_table(external) and _is_table(loads) and _is_table(defaults)):
+    if not (
+        _is_table(external)
+        and _is_table(dynamic_attrs)
+        and _is_table(loads)
+        and _is_table(defaults)
+    ):
         problems.append("every table must be a table")
-        return {}, {}, ()
+        return {}, {}, {}, ()
     parsed_external = _reasons(external, "[external]", problems)
+    parsed_dynamic = _reasons(dynamic_attrs, "[dynamic-attrs]", problems)
     parsed_loads: dict[str, tuple[str, ...]] = {}
     for path, targets in loads.items():
         if _is_str_list(targets):
             parsed_loads[path] = tuple(targets)
         else:
             problems.append(f"[loads] {path!r} must be a list of directories")
-    return parsed_external, parsed_loads, tuple(defaults)
+    return parsed_external, parsed_dynamic, parsed_loads, tuple(defaults)
 
 
 # meiva:note
@@ -419,7 +427,7 @@ def _parse(text: str, source: _PolicySource) -> tuple[Policy, list[str]]:
         if name not in CHECKER_TABLES and name not in RULES:
             tables = ", ".join((*CHECKER_TABLES, *RULES))
             found.problems.append(f"unknown table {name!r}; the tables are {tables}")
-    external, loads, default_arguments = _checker(document, found.problems)
+    external, dynamic_attrs, loads, default_arguments = _checker(document, found.problems)
     state = _state_kinds(document, found.problems)
     for rule in RULES:
         if rule in document:
@@ -427,6 +435,7 @@ def _parse(text: str, source: _PolicySource) -> tuple[Policy, list[str]]:
     return (
         Policy(
             external=external,
+            dynamic_attrs=dynamic_attrs,
             loads=loads,
             default_arguments=default_arguments,
             listed=found.listed,
@@ -556,6 +565,8 @@ def _declarations(policy: Policy) -> dict[str, Declaration]:
 
     for path, reason in policy.external.items():
         keep("external", path, f"{path} = {reason}")
+    for path, reason in policy.dynamic_attrs.items():
+        keep("dynamic-attrs", path, f"{path} = {reason}")
     for path, targets in policy.loads.items():
         for target in targets:
             keep("loads", f"{path} -> {target}", f"{path} = [{target}]")

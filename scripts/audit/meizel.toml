@@ -16,6 +16,9 @@ exports = ["analysis", "branch_protection.py", "ensure_plugins_loaded_context_ce
 [external]
 "module_moves.py" = "imports the old and new module names the operator passes on the command line"
 
+[dynamic-attrs]
+"module_moves.py" = "checks that every name a module-move map references exists on the moved module; the names are the data being audited"
+
 [roots]
 "branch_protection.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 "call_sites.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }

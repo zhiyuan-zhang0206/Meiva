@@ -7,3 +7,6 @@
 "spawn_codex.py" = { kinds = ["clock", "home", "argv"], why = "External-agent launcher script entry: reads the operator's home once to expand a typed --workspace/--tasks-file/--work-file, and stamps the dispatch provenance block with the current UTC time; it also reads its command line (argv) once, as the process entry" }
 "spawn_dsh.py" = { kinds = ["clock", "home", "argv", "environ"], why = "External-agent launcher script entry: reads the operator's home once to expand a typed --workspace, tracks polling deadlines with epoch clock and stamps the dispatch provenance block with the current UTC time; it also reads its command line (argv) once, as the process entry, and finds a program on PATH" }
 "watch_work.py" = { kinds = ["clock", "random"], why = "External-agent watcher script stamps log output, tracks monotonic deadlines, and generates idempotency keys" }
+
+[debt.restricted-python]
+"spawn_dsh.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }

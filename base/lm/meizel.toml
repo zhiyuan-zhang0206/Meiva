@@ -1,5 +1,8 @@
 exports = ["attach", "call.py", "catalog", "compat", "content.py", "context_budget.py", "decision", "effort.py", "errors.py", "factory.py", "harness", "pricing", "provider_api.py", "reasoning.py", "registry.py", "system_note.py", "tests", "usage"]
 
+[dynamic-attrs]
+"factory.py" = "resolves the 'module:factory_name' reference in MEIVA_LLM_OVERRIDE; the attribute name is operator input"
+
 [purity]
 "__init__.py" = "strict"
 "content.py" = "strict"
@@ -31,3 +34,6 @@ exports = ["attach", "call.py", "catalog", "compat", "content.py", "context_budg
 [debt.ambient-read]
 "call.py#random base.host.net.resilience.jittered" = { count = 1, owner = "#5816", until = "permanently: the retry delay is jittered so parallel callers do not retry in lockstep, and a shared source is what makes them queue" }
 "factory.py#environ base.host.env.registry.process_environment" = { count = 1, owner = "#5816", until = "waits for its four callers to hand the environment: process_provider_keys(catalog) resolves API keys from the declared env registry, and its callers (meiva/boot.py, the labeler daemon, agent_host configuration, the verify scripts) all hold a boot or a config view to take the mapping from" }
+
+[debt.restricted-python]
+"registry.py#dynamic attribute name" = { count = 4, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }

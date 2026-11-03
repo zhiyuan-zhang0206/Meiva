@@ -8,6 +8,10 @@ exports = ["core.py", "nodes.py", "plugin_state_codec.py", "state_channels.py", 
 "state_channels.py" = ["nodes.py"]
 "state_schema.py" = ["state_channels.py"]
 
+[dynamic-attrs]
+"plugin_state_codec.py" = "applies a plugin's state delta by plugin-declared field name; the state classes are built from plugin declarations at run time"
+"state_schema.py" = "builds the meiva.state.<plugin> namespace from the fields each plugin declares; the plugins and their fields are known only at run time"
+
 [purity]
 "identity.py" = "strict"
 "nodes.py" = "strict"

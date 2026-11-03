@@ -6,7 +6,7 @@ from meizel.contracts.analysis import render_policy
 from meizel.tests.synthetic import RepoFactory, analysis_of, diagnostics
 
 POLICY = (
-    render_policy({}, {})
+    render_policy({}, {}, {})
     + """
 [ambient]
 db = ["connect()", "pool()", "async_pool()", "Database.from_settings()"]

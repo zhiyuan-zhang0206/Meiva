@@ -78,6 +78,7 @@ def _is_str_list(value: object) -> TypeGuard[list[str]]:
 def listed_allowances(files: Mapping[str, str]) -> str:
     """A policy listing every `[loads]` and `[external]` site the given manifests declare."""
     external: dict[str, str] = {}
+    dynamic_attrs: dict[str, str] = {}
     loads: dict[str, tuple[str, ...]] = {}
     for rel, text in files.items():
         if rel.rsplit("/", 1)[-1] != "meizel.toml":
@@ -88,15 +89,18 @@ def listed_allowances(files: Mapping[str, str]) -> str:
         except tomllib.TOMLDecodeError:
             continue  # a malformed manifest is the test's subject, not an allowance
         external_table: object = document.get("external", {})
+        dynamic_table: object = document.get("dynamic-attrs", {})
         loads_table: object = document.get("loads", {})
-        if not _is_table(external_table) or not _is_table(loads_table):
+        if not (_is_table(external_table) and _is_table(dynamic_table) and _is_table(loads_table)):
             continue
         for name, reason in external_table.items():
             external[f"{directory}/{name}" if directory else name] = str(reason)
+        for name, reason in dynamic_table.items():
+            dynamic_attrs[f"{directory}/{name}" if directory else name] = str(reason)
         for name, targets in loads_table.items():
             if _is_str_list(targets):
                 loads[f"{directory}/{name}" if directory else name] = tuple(targets)
-    return render_policy(external, loads)
+    return render_policy(external, loads, dynamic_attrs)
 
 
 def build_repo(base: Path, files: Mapping[str, str]) -> Path:

@@ -23,3 +23,6 @@ exports = ["runner.py"]
 
 [roots]
 "runner.py" = { kinds = ["clock", "environ", "home", "platform"], why = "Schedule runner entrypoint for meiva_usage collectors: reads local clock, platform, home and process environment to execute usage probes" }
+
+[debt.restricted-python]
+"default_config.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }

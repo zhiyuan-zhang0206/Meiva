@@ -13,7 +13,7 @@ BASE = {
 GOOD = '[uses]\n"a.py" = ["b.py"]\n'
 # meiva:note
 # The state kinds this fixture repository declares: the checker has none of its own.
-KINDS = render_policy({}, {}) + '\n[ambient]\nsettings = ["settings"]\ndb = ["connect()"]\n'
+KINDS = render_policy({}, {}, {}) + '\n[ambient]\nsettings = ["settings"]\ndb = ["connect()"]\n'
 
 
 def code_for(
@@ -130,7 +130,7 @@ def test_state_and_roots_are_read_into_the_manifest(make_repo: RepoFactory) -> N
     }
 
 
-NONE = render_policy({}, {})
+NONE = render_policy({}, {}, {})
 
 
 @pytest.mark.parametrize(

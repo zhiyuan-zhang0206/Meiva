@@ -19,3 +19,6 @@ exports = ["fixtures"]
 "test_self_evolution_evaluate.py" = ["fixtures"]
 "test_turn_identity_meiva.py" = ["fixtures"]
 "test_validation_meiva.py" = ["fixtures"]
+
+[debt.restricted-python]
+"test_agent_identity.py#dynamic attribute name" = { count = 2, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

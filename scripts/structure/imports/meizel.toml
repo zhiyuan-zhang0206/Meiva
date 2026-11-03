@@ -10,3 +10,6 @@ exports = ["bindings.py", "cache.py", "executed.py", "facts.py", "fixture_scopes
 "resource_members.py" = ["bindings.py"]
 "style.py" = ["__init__.py"]
 "tests" = ["__init__.py", "bindings.py", "executed.py", "fixture_scopes.py", "style.py"]
+
+[debt.restricted-python]
+"facts.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }

@@ -65,7 +65,6 @@ class PatchForms(PythonCommands):
         self.test_file = fixtures.is_test_file(path)
         self.purity_state = purity.make_state(universe, path=path)
         self.patches: list[Patch] = []
-        self.binding_files: set[str] = set()
 
     # meiva:note
     # The call forms that replace something: `mock.patch`, `monkeypatch`, the builtin

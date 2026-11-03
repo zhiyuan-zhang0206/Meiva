@@ -3,6 +3,10 @@ exports = ["skill_index.py", "skill_proxies.py"]
 [uses]
 "__init__.py" = ["skill_index.py", "skill_proxies.py"]
 
+[dynamic-attrs]
+"__init__.py" = "meiva.skills.<name> returns the skill or namespace node of the installed skill tree; skill names come from the skills installed on the machine"
+"skill_proxies.py" = "Namespace descends the installed skill tree by attribute; skill names come from the skills installed on the machine"
+
 [purity]
 "skill_index.py" = { mode = "none", why = "the lazily imported door of the skill scan: it re-exports the scan_tree and skills_in shells of base.packages.skills, and the facade imports it inside functions so that loading the facade loads no scanner" }
 "skill_proxies.py" = "strict"

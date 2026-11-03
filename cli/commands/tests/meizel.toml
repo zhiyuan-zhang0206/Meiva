@@ -4,3 +4,6 @@ exports = ["health_port_guard.py", "test_single_box.py"]
 "test_service_probe_ports.py" = ["roster_probe_child.py"]
 "test_single_box.py" = ["test_single_box_static.py"]
 "test_unit_capability_commands.py" = ["test_single_box.py"]
+
+[debt.restricted-python]
+"test_single_box.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

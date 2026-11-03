@@ -12,7 +12,7 @@ def entropy(make_repo: RepoFactory, source: str, path: str = "app/mod.py") -> li
     root = make_repo(
         {
             "meizel.toml": ROOT,
-            "meizel.policy.toml": render_policy({}, {}),
+            "meizel.policy.toml": render_policy({}, {}, {}),
             "app/__init__.py": "",
             "tests/__init__.py": "",
             path: source,
@@ -241,7 +241,7 @@ def test_a_use_is_debt_a_new_one_fails_and_a_strict_file_has_none(make_repo: Rep
     root = make_repo(
         {
             "meizel.toml": ROOT,
-            "meizel.policy.toml": render_policy({}, {}),
+            "meizel.policy.toml": render_policy({}, {}, {}),
             "app/__init__.py": "",
             "tests/__init__.py": "",
             "app/meizel.toml": "",

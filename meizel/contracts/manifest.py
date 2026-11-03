@@ -41,6 +41,7 @@ _TOP_KEYS = (
     "uses",
     "loads",
     "external",
+    "dynamic-attrs",
     "roles",
     "purity",
     "state",
@@ -95,6 +96,7 @@ class Manifest:
     uses: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
     loads: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
     external: dict[str, str] = field(default_factory=dict[str, str])
+    dynamic_attrs: dict[str, str] = field(default_factory=dict[str, str])
     roles: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
     purity_default: str | None = None
     purity: dict[str, str] = field(default_factory=dict[str, str])
@@ -221,6 +223,7 @@ class _Reader:
         self.uses: dict[str, tuple[str, ...]] = {}
         self.loads: dict[str, tuple[str, ...]] = {}
         self.external: dict[str, str] = {}
+        self.dynamic_attrs: dict[str, str] = {}
         self.roles: dict[str, tuple[str, ...]] = {}
         self.purity_default: str | None = None
         self.purity: dict[str, str] = {}
@@ -277,7 +280,8 @@ class _Reader:
         self.read_exports(document.get("exports", []))
         self.uses = self.read_table(document.get("uses", {}), "uses", self.read_use)
         self.loads = self.read_table(document.get("loads", {}), "loads", self.read_load)
-        self.external = self.read_external(document.get("external", {}))
+        self.external = self.read_reasons("external", document.get("external", {}))
+        self.dynamic_attrs = self.read_reasons("dynamic-attrs", document.get("dynamic-attrs", {}))
         if "roles" in document:
             self.read_roles(document["roles"])
         if "purity" in document:
@@ -298,6 +302,7 @@ class _Reader:
             uses=self.uses,
             loads=self.loads,
             external=self.external,
+            dynamic_attrs=self.dynamic_attrs,
             roles=self.roles,
             purity_default=self.purity_default,
             purity=self.purity,
@@ -342,32 +347,38 @@ class _Reader:
                     "declare it under [roles]",
                 )
 
-    def read_external(self, table: object) -> dict[str, str]:
-        """`[external]`: files that run code from outside the repository, each with a reason."""
+    # meiva:note
+    # `[external]` (files that run code from outside the repository) and `[dynamic-attrs]` (files
+    # that own an attribute name only the run knows): a source file of this directory and a reason.
+    def read_reasons(self, section: str, table: object) -> dict[str, str]:
         if not _is_table(table):
             self.report(
-                self.manifest.line_of("external"),
+                self.manifest.line_of(section),
                 Code.MANIFEST_SYNTAX,
-                "[external] must be a table",
+                f"[{section}] must be a table",
             )
             return {}
         result: dict[str, str] = {}
+        extensions = (".py",) if section == "dynamic-attrs" else SOURCE_EXTENSIONS
         for key, reason in table.items():
             line = self.manifest.line_of(key)
-            if not key.endswith(SOURCE_EXTENSIONS):
+            if not key.endswith(extensions):
                 self.report(
                     line,
                     Code.MANIFEST_CHILD,
-                    f"[external] key {key!r} must be a Python or TypeScript file",
+                    f"[{section}] key {key!r} must be a "
+                    + (
+                        "Python file" if section == "dynamic-attrs" else "Python or TypeScript file"
+                    ),
                 )
-            elif not self.child(key, "[external]", line):
-                self.dangling.append(("external", key, None))
+            elif not self.child(key, f"[{section}]", line):
+                self.dangling.append((section, key, None))
                 continue
             elif not isinstance(reason, str) or not reason.strip():
                 self.report(
                     line,
                     Code.MANIFEST_SYNTAX,
-                    f"[external] {key!r} needs a non-empty reason string",
+                    f"[{section}] {key!r} needs a non-empty reason string",
                 )
             else:
                 result[key] = reason.strip()
