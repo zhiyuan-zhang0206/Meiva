@@ -21,7 +21,7 @@ from base.events.live.projection import GLOBAL_ROLES, SYSTEM_ROLES
 from gateway.events.merged import parse_agents
 from gateway.events.sse import event_stream, throttled_event_stream
 from gateway.events.sse_frames import SseCadence
-from gateway.http.config import gateway_config
+from gateway.http.config import gateway_config, gateway_state
 
 router = APIRouter()
 
@@ -37,7 +37,7 @@ async def get_system_broadcast(request: Request) -> StreamingResponse:
     """
     return StreamingResponse(
         event_stream(
-            request.app.state.bus,
+            gateway_state(request).bus,
             0,  # agent_id is ignored in broadcast mode
             request,
             role_filter=GLOBAL_ROLES,
@@ -63,7 +63,7 @@ async def get_system_events(agent_id: int, request: Request) -> StreamingRespons
     """
     return StreamingResponse(
         event_stream(
-            request.app.state.bus,
+            gateway_state(request).bus,
             agent_id,
             request,
             role_filter=SYSTEM_ROLES,
@@ -86,7 +86,7 @@ async def get_all_events(request: Request, agents: str | None = None) -> Streami
     agent_filter = parse_agents(agents)
     return StreamingResponse(
         throttled_event_stream(
-            request.app.state.bus,
+            gateway_state(request).bus,
             request,
             throttle_rate=gateway_config(request).sse.throttle_rate,
             cadence=SseCadence(),

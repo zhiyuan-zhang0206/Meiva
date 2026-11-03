@@ -11,6 +11,7 @@ table, under a statement timeout (503 on timeout).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Annotated
 
 import psycopg
@@ -22,11 +23,20 @@ from base.telemetry.metrics.aggregate import (
     fetch_aggregate,
 )
 from gateway.events.schemas import AgentMetricsItem, AgentMetricsReport, MetricsMeta, MetricsReport
-from gateway.http.config import gateway_clock, gateway_config
+from gateway.http.config import gateway_clock, gateway_config, gateway_state
+from gateway.http.db_rows import query_all
 
 router = APIRouter()
 
 _READ_TIMEOUT = "SET LOCAL statement_timeout = '20s'"
+
+
+# meiva:note
+# An agent's id and display label (NULL while unnamed).
+@dataclass(frozen=True)
+class _AgentLabelRow:
+    id: int
+    label: str | None
 
 
 @router.get("/api/metrics")
@@ -53,13 +63,13 @@ def get_metrics(
         days = int(gateway_config(request).display.metrics_default_window_days)
     now = gateway_clock(request).now()
     try:
-        with request.app.state.db_pool.connection() as conn:
+        with gateway_state(request).db_pool.connection() as conn:
             conn.execute(_READ_TIMEOUT)
             agg = fetch_aggregate(conn, days, agent, now=now, since_compact=since_compact)
     except psycopg.errors.QueryCanceled as exc:
         raise HTTPException(status_code=503, detail="metrics read timed out; retry") from exc
     _, data = build_report_from_aggregate(agg, days, agent, now=now, since_compact=since_compact)
-    return MetricsReport(**data)
+    return MetricsReport.model_validate(data)
 
 
 @router.get("/api/metrics/agents")
@@ -82,22 +92,25 @@ def get_metrics_agents(
         days = int(gateway_config(request).display.metrics_default_window_days)
     now = gateway_clock(request).now()
     try:
-        with request.app.state.db_pool.connection() as conn:
+        with gateway_state(request).db_pool.connection() as conn:
             conn.execute(_READ_TIMEOUT)
             total_events, rollups = fetch_agent_rollups(
                 conn, days, now=now, since_compact=since_compact
             )
             labels: dict[int, str | None] = {}
             if rollups:
-                rows = conn.execute(
-                    "SELECT id, label FROM agents WHERE id = ANY(%s)", (list(rollups),)
-                ).fetchall()
-                labels = dict(rows)
+                labelled = query_all(
+                    conn,
+                    _AgentLabelRow,
+                    "SELECT id, label FROM agents WHERE id = ANY(%s)",
+                    (list(rollups),),
+                )
+                labels = {row.id: row.label for row in labelled}
     except psycopg.errors.QueryCanceled as exc:
         raise HTTPException(status_code=503, detail="metrics read timed out; retry") from exc
     items = [
         # telemetry_events.agent_id has no FK: a deleted agent's rows keep their id, label None.
-        AgentMetricsItem(agent_id=aid, label=labels.get(aid), **rollup)
+        AgentMetricsItem.model_validate({**rollup, "agent_id": aid, "label": labels.get(aid)})
         for aid, rollup in rollups.items()
     ]
     items.sort(key=lambda item: (-item.cost_usd, item.agent_id))

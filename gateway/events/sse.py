@@ -26,7 +26,6 @@ gets the same ``{role, agent_id, content, ...}`` shape.
 import logging
 import time
 from collections.abc import AsyncGenerator, Mapping, Sequence
-from typing import Any
 
 import redis
 from fastapi import Request
@@ -46,6 +45,7 @@ from gateway.events.sse_frames import (
     warm_frame,
 )
 from gateway.http.middleware import runtime_metrics, stopping
+from ops.alerts import AlertRow
 
 _log = logging.getLogger(__name__)
 
@@ -69,8 +69,13 @@ def _error_payload(agent_id: int, exc: Exception) -> str:
 
 
 def _matches_filter(
-    event: Event, agent_id: int, *, broadcast: bool, role_filter: frozenset[str] | None
+    event: Event | AlertRow, agent_id: int, *, broadcast: bool, role_filter: frozenset[str] | None
 ) -> bool:
+    if isinstance(event, AlertRow):
+        # meiva:note
+        # An alert frame carries neither an agent nor a role: only an unfiltered broadcast
+        # forwards it.
+        return broadcast and not role_filter
     return (broadcast or event.agent_id == agent_id) and (
         not role_filter or event.role in role_filter
     )
@@ -170,13 +175,13 @@ async def event_stream(
     channel: str | None = None,
     role_filter: frozenset[str] | None = None,
     broadcast: bool = False,
-    validator: TypeAdapter[Any] = EVENT_ADAPTER,
+    validator: TypeAdapter[Event] | TypeAdapter[AlertRow] = EVENT_ADAPTER,
     poll_s: float,
     cadence: SseCadence,
 ) -> AsyncGenerator[bytes, None]:
     _channel = channel if channel is not None else bus.channel
     client = bus.open_async_redis()
-    pubsub: Any = client.pubsub()  # pyright: ignore[reportUnknownMemberType]
+    pubsub: PubSub = client.pubsub()  # pyright: ignore[reportUnknownMemberType]
     # Attach/detach bracket: a reconnect storm (client watchdog cycling) or a
     # subscriber that never detaches is invisible without the pair; the detach
     # line carries duration + frames so a half-open stream is distinguishable
@@ -208,15 +213,12 @@ async def event_stream(
             try:
                 if await request.is_disconnected():
                     return
+                # meiva:note
+                # Client disconnect-detection polling window; deltas shorter than this are
+                # negligible compared to network RTT. env override:
+                # `MEIVA_SSE_DISCONNECT_POLL_SECONDS`.
                 msg = await retry_auth_failures_async(
-                    lambda: pubsub.get_message(
-                        ignore_subscribe_messages=True,
-                        # Client disconnect-detection polling window; deltas shorter
-                        # than this are negligible compared to network RTT. env
-                        # override: `MEIVA_SSE_DISCONNECT_POLL_SECONDS`.
-                        timeout=poll_s,
-                    ),
-                    auth_retry=bus.auth_retry,
+                    lambda: get_pubsub_message(pubsub, poll_s), auth_retry=bus.auth_retry
                 )
             except REDIS_IO_ERRORS + REDIS_ACL_ERRORS as exc:
                 _log.warning("sse pubsub read failed: %r agent_id=%s", exc, agent_id)
@@ -224,16 +226,17 @@ async def event_stream(
                 return
 
             now = time.monotonic()
-            if msg is not None and isinstance(msg["data"], str):
+            data = msg["data"] if msg is not None else None
+            if isinstance(data, str):
                 try:
-                    event = validator.validate_json(msg["data"])
+                    event = validator.validate_json(data)
                 except ValidationError:
-                    yield f": dropped unparseable payload ({len(msg['data'])} bytes)\n\n".encode()
+                    yield f": dropped unparseable payload ({len(data)} bytes)\n\n".encode()
                     last_comment = now
                     continue
                 # broadcast mode: do not filter by agent_id
                 if _matches_filter(event, agent_id, broadcast=broadcast, role_filter=role_filter):
-                    yield sse_frame(msg["data"])
+                    yield sse_frame(data)
                     data_frames += 1
                     last_data_frame = now
                     last_comment = now
@@ -351,7 +354,7 @@ async def throttled_event_stream(
 ) -> AsyncGenerator[bytes, None]:
     _channel = channel if channel is not None else bus.channel
     client = bus.open_async_redis()
-    pubsub: Any = client.pubsub()  # pyright: ignore[reportUnknownMemberType]
+    pubsub: PubSub = client.pubsub()  # pyright: ignore[reportUnknownMemberType]
     opened = time.monotonic()
     data_frames = 0
     total_events = 0
@@ -412,15 +415,7 @@ async def throttled_event_stream(
             data_frames,
             total_events,
         )
-        for step, coro_fn in (
-            ("unsubscribe", lambda: pubsub.unsubscribe(_channel)),  # pyright: ignore[reportUnknownMemberType]
-            ("pubsub.aclose", pubsub.aclose),
-            ("client.aclose", client.aclose),
-        ):
-            try:
-                await coro_fn()
-            except Exception as exc:
-                _log.warning("sse throttle cleanup %s failed: %r", step, exc)
+        await close_pubsub(pubsub, client, _channel)
 
 
 __all__ = [

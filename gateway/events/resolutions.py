@@ -8,10 +8,10 @@ to publish the unresolved gauges. There is deliberately no PG event write-back.
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
-from psycopg.rows import dict_row
+from psycopg.rows import class_row
 
 from base import telemetry
 from base.db.transaction import write_transaction
@@ -21,29 +21,30 @@ from gateway.events.schemas import (
     EventResolutionRow,
     EventResolutionStatus,
 )
+from gateway.http.config import gateway_state
 
 router = APIRouter()
 
 
-def _resolution_attributes(row: dict[str, Any]) -> dict[str, object]:
+def _resolution_attributes(row: EventResolutionRow) -> dict[str, object]:
     """The immutable class attributes shared by resolved/reopened markers."""
 
     return {
-        "category": row["category"],
-        "level": row["level"],
-        "event_name": row["event_name"],
-        "source": row["source"],
-        "process": row["process"],
-        "agent_id": row["agent_id"],
-        "dismissed_by": row["dismissed_by"],
-        "note": row["note"],
+        "category": row.category,
+        "level": row.level,
+        "event_name": row.event_name,
+        "source": row.source,
+        "process": row.process,
+        "agent_id": row.agent_id,
+        "dismissed_by": row.dismissed_by,
+        "note": row.note,
     }
 
 
-def _marker_name(row: dict[str, Any], action: str) -> str:
+def _marker_name(row: EventResolutionRow, action: str) -> str:
     """Critical target classes share the error marker family with errors."""
 
-    prefix = "warning" if row["level"] == "warning" else "error"
+    prefix = "warning" if row.level == "warning" else "error"
     return f"{prefix}_{action}"
 
 
@@ -61,8 +62,8 @@ def create_event_resolution(body: EventResolutionCreate, request: Request) -> Ev
     """
 
     with (
-        write_transaction(request.app.state.db_pool) as conn,
-        conn.cursor(row_factory=dict_row) as cur,
+        write_transaction(gateway_state(request).db_pool) as conn,
+        conn.cursor(row_factory=class_row(EventResolutionRow)) as cur,
     ):
         cur.execute(
             """
@@ -96,7 +97,7 @@ def create_event_resolution(body: EventResolutionCreate, request: Request) -> Ev
         source="gateway",
         attributes=_resolution_attributes(row),
     )
-    return EventResolutionRow(**row)
+    return row
 
 
 @router.get("/api/event-resolutions", response_model=EventResolutionListResponse)
@@ -106,7 +107,10 @@ def list_event_resolutions(
 ) -> EventResolutionListResponse:
     """List active dismissals or reopened history for the ops review cycle."""
 
-    with request.app.state.db_pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+    with (
+        gateway_state(request).db_pool.connection() as conn,
+        conn.cursor(row_factory=class_row(EventResolutionRow)) as cur,
+    ):
         if status is None:
             cur.execute(
                 """
@@ -130,7 +134,7 @@ def list_event_resolutions(
                 (status,),
             )
         rows = cur.fetchall()
-    return EventResolutionListResponse(resolutions=[EventResolutionRow(**row) for row in rows])
+    return EventResolutionListResponse(resolutions=rows)
 
 
 @router.post(
@@ -141,8 +145,8 @@ def reopen_event_resolution(dismissal_id: int, request: Request) -> EventResolut
     """Manually reopen one active dismissal and emit its transition marker."""
 
     with (
-        write_transaction(request.app.state.db_pool) as conn,
-        conn.cursor(row_factory=dict_row) as cur,
+        write_transaction(gateway_state(request).db_pool) as conn,
+        conn.cursor(row_factory=class_row(EventResolutionRow)) as cur,
     ):
         cur.execute(
             """
@@ -168,4 +172,4 @@ def reopen_event_resolution(dismissal_id: int, request: Request) -> EventResolut
         source="gateway",
         attributes=attributes,
     )
-    return EventResolutionRow(**row)
+    return row

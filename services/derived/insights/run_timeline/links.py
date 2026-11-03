@@ -17,7 +17,7 @@ from typing import TypeGuard, get_args
 from base.agents.messages.envelope import validate_source
 from base.db.protocols import DatabaseLike as Database
 from base.db.protocols import SyncConnection
-from base.events.reads import AuditFilter, query_audit_rows
+from base.events.reads import AuditFilter, EventRecord, query_audit_rows
 from services.derived.insights.run_timeline.request_rules import TimelineRequestError
 from services.derived.insights.run_timeline.schemas import (
     LinkKind,
@@ -51,7 +51,7 @@ def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict)
 
 
-def _message_inbound(row: dict[str, object]) -> int | None:
+def _message_inbound(row: EventRecord) -> int | None:
     attrs = row.get("attributes")
     if _is_str_dict(attrs):
         return _int(attrs.get("inbound_id"))
@@ -60,7 +60,7 @@ def _message_inbound(row: dict[str, object]) -> int | None:
 
 # meiva:note
 # The ids among the page's messages whose inbound row is a chat (a task assignment is a system note).
-def _chat_inbounds(conn: SyncConnection, page: Sequence[dict[str, object]]) -> set[int]:
+def _chat_inbounds(conn: SyncConnection, page: Sequence[EventRecord]) -> set[int]:
     ids = [
         inbound
         for row in page
@@ -74,7 +74,7 @@ def _chat_inbounds(conn: SyncConnection, page: Sequence[dict[str, object]]) -> s
     return {int(r[0]) for r in rows}
 
 
-def _link(row: dict[str, object]) -> RunTimelineLink | None:
+def _link(row: EventRecord) -> RunTimelineLink | None:
     drawn, sender = sender_of(str(row["source"]))
     receiver = _int(row["agent_id"])
     # An event an agent did to itself is not between agents.

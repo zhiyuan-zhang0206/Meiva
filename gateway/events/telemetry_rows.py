@@ -14,14 +14,18 @@ Loki line: the table does not keep the line bytes.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
-from typing import Any, LiteralString
+from typing import LiteralString
 
 import psycopg
 from psycopg import sql
+from psycopg.rows import class_row
 
 from base.events.contract import TIER_BY_EVENT, EventTier
+from base.events.reads import EventRecord
+from gateway.http.db_rows import query_one
 
 _LEVELS = ("debug", "info", "warning", "error", "critical")
 _ANOMALY_LEVELS = ("warning", "error", "critical")
@@ -37,24 +41,41 @@ def _stream_id(event_uid: int) -> int:
     return event_uid + (1 << 64) if event_uid < 0 else event_uid
 
 
-def _row(record: tuple[Any, ...]) -> dict[str, Any]:
-    (
-        event_uid,
-        ts,
-        trace_id,
-        span_id,
-        agent_id,
-        machine,
-        cluster,
-        process,
-        category,
-        event_name,
-        level,
-        source,
-        target_agent_id,
-        attributes,
-    ) = record
-    ts = ts.astimezone(UTC)
+# meiva:note
+# One `telemetry_events` row as `_COLUMNS` selects it; `event_uid` is signed, `attributes` the jsonb.
+@dataclass(frozen=True)
+class _TelemetryRecord:
+    event_uid: int
+    ts: datetime
+    trace_id: str | None
+    span_id: str | None
+    agent_id: int | None
+    machine: str
+    cluster: str
+    process: str
+    category: str
+    event_name: str
+    level: str
+    source: str
+    target_agent_id: int | None
+    attributes: dict[str, object]
+
+
+def _row(record: _TelemetryRecord) -> EventRecord:
+    event_uid = record.event_uid
+    trace_id = record.trace_id
+    span_id = record.span_id
+    agent_id = record.agent_id
+    machine = record.machine
+    cluster = record.cluster
+    process = record.process
+    category = record.category
+    event_name = record.event_name
+    level = record.level
+    source = record.source
+    target_agent_id = record.target_agent_id
+    attributes = record.attributes
+    ts = record.ts.astimezone(UTC)
     digest = json.dumps(
         [
             ts.isoformat(),
@@ -93,11 +114,18 @@ def _row(record: tuple[Any, ...]) -> dict[str, Any]:
     }
 
 
+# meiva:note
+# The answer of a `SELECT count(*)`.
+@dataclass(frozen=True)
+class _CountRow:
+    n: int
+
+
 def _names(tier: EventTier) -> list[str]:
     return sorted(name for name, declared in TIER_BY_EVENT.items() if declared == tier)
 
 
-def _tier_clause(tiers: list[EventTier]) -> tuple[sql.Composable, list[Any]] | None:
+def _tier_clause(tiers: list[EventTier]) -> tuple[sql.Composable, list[object]] | None:
     """The predicate for a union of tiers, mirroring `base.events.contract.tier_for`.
 
     Every row here is non-audit, so a row is an anomaly from warning up or when its name is
@@ -105,7 +133,7 @@ def _tier_clause(tiers: list[EventTier]) -> tuple[sql.Composable, list[Any]] | N
     `business` tier is the audit category's and matches nothing here.
     """
     clauses: list[sql.Composable] = []
-    params: list[Any] = []
+    params: list[object] = []
     levels = list(_ANOMALY_LEVELS)
     for tier in tiers:
         if tier == "business":
@@ -129,7 +157,7 @@ def _tier_clause(tiers: list[EventTier]) -> tuple[sql.Composable, list[Any]] | N
     return sql.SQL("(") + sql.SQL(" OR ").join(clauses) + sql.SQL(")"), params
 
 
-_Clause = tuple[LiteralString, tuple[Any, ...]]
+_Clause = tuple[LiteralString, tuple[object, ...]]
 
 
 def _agent_clause(
@@ -171,10 +199,10 @@ def _where(
     attribute_filters: dict[str, str] | None,
     from_: datetime | None,
     to: datetime | None,
-) -> tuple[sql.Composable, list[Any]] | None:
+) -> tuple[sql.Composable, list[object]] | None:
     """The WHERE clause and parameters, or None when the filters exclude every row."""
     clauses: list[sql.Composable] = []
-    params: list[Any] = []
+    params: list[object] = []
     if tiers is not None:
         tier = _tier_clause(tiers)
         if tier is None:
@@ -235,7 +263,7 @@ def query_events(
     limit: int = 100,
     offset: int = 0,
     direction: str = "backward",
-) -> tuple[list[dict[str, Any]], bool]:
+) -> tuple[list[EventRecord], bool]:
     """Slice of the telemetry and log record, newest first (`backward`) or oldest first (`forward`).
 
     Returns `(rows, has_more)`; `has_more` comes from a one-row lookahead, as in the Loki
@@ -266,7 +294,9 @@ def query_events(
         "SELECT {columns} FROM telemetry_events WHERE {where} "
         "ORDER BY ts {order}, id {order} LIMIT %s OFFSET %s"
     ).format(columns=sql.SQL(_COLUMNS), where=clause, order=order)
-    records = conn.execute(query, [*params, limit + 1, offset]).fetchall()
+    with conn.cursor(row_factory=class_row(_TelemetryRecord)) as cur:
+        cur.execute(query, [*params, limit + 1, offset])
+        records = cur.fetchall()
     return [_row(record) for record in records[:limit]], len(records) > limit
 
 
@@ -310,7 +340,7 @@ def count_events(
     if where is None:
         return 0
     clause, params = where
-    query = sql.SQL("SELECT count(*) FROM telemetry_events WHERE {where}").format(where=clause)
-    row = conn.execute(query, params).fetchone()
+    query = sql.SQL("SELECT count(*) AS n FROM telemetry_events WHERE {where}").format(where=clause)
+    row = query_one(conn, _CountRow, query, params)
     assert row is not None  # noqa: S101 — an aggregate always returns one row
-    return int(row[0])
+    return row.n
