@@ -199,6 +199,29 @@ def test_the_schedule_alert_names_the_schedule_not_the_code() -> None:
 
 
 # meiva:note
+# A stream nobody has seen run yet is not a stopped schedule: a newly added nightly has no run on
+# record until its first cron comes round, and one threshold has to pass before that silence says
+# anything. A stream older than the watch passes no `since` and keeps reporting at once.
+def test_a_stream_not_yet_observed_for_a_threshold_is_not_reported() -> None:
+    now = datetime(2026, 11, 2, 12, 0, tzinfo=UTC)
+    since = now - timedelta(hours=1)
+
+    assert (
+        liveness_alert("nightly-full", None, now, stale_after=NIGHTLY_STALE_AFTER, since=since)
+        is None
+    )
+    overdue = liveness_alert(
+        "nightly-full",
+        None,
+        now + NIGHTLY_STALE_AFTER,
+        stale_after=NIGHTLY_STALE_AFTER,
+        since=since,
+    )
+    assert overdue is not None and "never started" in overdue
+    assert since.isoformat() in overdue
+
+
+# meiva:note
 # The push gate's checks print no JUnit line, so a failed check step is the only thing that can name
 # its red. Without this a `meizel check` violation would read as an unnamed failure — infra — and
 # open no card, which is the case the gate exists for.

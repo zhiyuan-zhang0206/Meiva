@@ -26,11 +26,18 @@ from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.paths.home import resolve_meiva_home
 from schedules.jobs.entry import cluster_timezone, open_schedule_entry
 from schedules.jobs.loop import CronSchedule, Trigger, run_loop
-from schedules.jobs.watch.main_red_watch import STATE_FILE, watch_once
+from schedules.jobs.watch.main_red_watch import LivenessStream, STATE_FILE, watch_once
 from schedules.jobs.telemetry_event import emit_system_event
 from schedules.plans.schedule_identity import parse_schedule_id
 from schedules.jobs.watch.main_red_liveness import liveness_once
-from schedules.plans.watch.main_red import Card, Failure, GATE_CHECK_STEPS, RunFacts
+from schedules.plans.watch.main_red import (
+    Card,
+    Failure,
+    GATE_CHECK_STEPS,
+    NIGHTLY_STALE_AFTER,
+    RELEASE_GATE_STALE_AFTER,
+    RunFacts,
+)
 
 RunProcess = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -231,6 +238,7 @@ def watch_round(
         state_path=state_path,
         now=datetime.now(UTC),
         fetch=partial(fetch_runs, run_process=run_process),
+        last_start=partial(_last_run_start, run_process=run_process),
         open_card=partial(_open_card, report_agent=report_agent),
         close_card=_close_card,
         emit=lambda payload: emit_system_event(
@@ -243,9 +251,11 @@ def watch_round(
             home=inputs.home,
         ),
         workflows=(_RELEASE_GATE, _NIGHTLY, _CI_NIGHTLY, _MAIN_PUSH),
-        release_gate_last_start=_last_run_start(_RELEASE_GATE, run_process),
-        nightly_last_start=_last_run_start(_NIGHTLY, run_process),
-        ci_nightly_last_start=_last_run_start(_CI_NIGHTLY, run_process),
+        liveness=(
+            LivenessStream("release-gate", _RELEASE_GATE, RELEASE_GATE_STALE_AFTER),
+            LivenessStream("nightly", _NIGHTLY, NIGHTLY_STALE_AFTER),
+            LivenessStream("nightly-full", _CI_NIGHTLY, NIGHTLY_STALE_AFTER),
+        ),
     )
     print(f"[{datetime.now(UTC).isoformat()}] {line}", flush=True)
 

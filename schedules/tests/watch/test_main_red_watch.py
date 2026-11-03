@@ -13,8 +13,28 @@ from typing import cast
 
 from base.db import Database
 from schedules.jobs.watch.main_red_liveness import liveness_once
-from schedules.jobs.watch.main_red_watch import STATE_FILE, load_state, watch_once
-from schedules.plans.watch.main_red import FAILURE_TEST, Card, RunFacts
+from schedules.jobs.watch.main_red_watch import (
+    LivenessStream,
+    STATE_FILE,
+    load_state,
+    watch_once,
+)
+from schedules.plans.watch.main_red import (
+    FAILURE_TEST,
+    NIGHTLY_STALE_AFTER,
+    RELEASE_GATE_STALE_AFTER,
+    Card,
+    RunFacts,
+)
+
+# meiva:note
+# The three streams whose silence is reported, as the schedule entry wires them: the helper below
+# drives the same table so a test cannot pass against a shape production does not use.
+_LIVENESS = (
+    LivenessStream("release-gate", "release-gate.yml", RELEASE_GATE_STALE_AFTER),
+    LivenessStream("nightly", "refresh-test-durations.yml", NIGHTLY_STALE_AFTER),
+    LivenessStream("nightly-full", "ci.yml", NIGHTLY_STALE_AFTER),
+)
 
 
 def _red(
@@ -52,6 +72,7 @@ def _watch(
     heartbeats: list[dict[str, object]],
     now: datetime | None = None,
     workflows: tuple[str, ...] = ("release-gate.yml",),
+    starts: Mapping[str, datetime | None] | None = None,
 ) -> str:
     def fetch(_workflow: str) -> tuple[RunFacts, ...]:
         return tuple(runs)
@@ -66,17 +87,23 @@ def _watch(
     def emit(payload: Mapping[str, object]) -> None:
         heartbeats.append(dict(payload))
 
+    clock = now or datetime(2026, 11, 2, 12, tzinfo=UTC)
+
+    def last_start(workflow: str) -> datetime | None:
+        if starts is not None:
+            return starts[workflow]
+        return clock - timedelta(hours=1)
+
     return watch_once(
         state_path=tmp_path / STATE_FILE,
-        now=now or datetime(2026, 11, 2, 12, tzinfo=UTC),
+        now=clock,
         fetch=fetch,
+        last_start=last_start,
         open_card=open_card,
         close_card=close_card,
         emit=emit,
         workflows=workflows,
-        release_gate_last_start=(now or datetime(2026, 11, 2, 12, tzinfo=UTC)) - timedelta(hours=1),
-        nightly_last_start=(now or datetime(2026, 11, 2, 12, tzinfo=UTC)) - timedelta(hours=2),
-        ci_nightly_last_start=(now or datetime(2026, 11, 2, 12, tzinfo=UTC)) - timedelta(hours=3),
+        liveness=_LIVENESS,
     )
 
 
@@ -96,7 +123,7 @@ def test_a_first_red_opens_no_card_and_still_leaves_a_heartbeat(tmp_path: Path) 
     assert opened == []
     assert heartbeats and heartbeats[0]["confirmed"] == 0
     assert "confirmed=0" in line
-    entries, _ = load_state(tmp_path / STATE_FILE)
+    entries = load_state(tmp_path / STATE_FILE).entries
     assert len(entries) == 1
 
 
@@ -125,7 +152,7 @@ def test_the_second_red_on_another_commit_opens_one_card_and_the_third_opens_non
     )
 
     assert len(opened) == 1
-    entries, _ = load_state(tmp_path / STATE_FILE)
+    entries = load_state(tmp_path / STATE_FILE).entries
     (entry,) = entries.values()
     assert entry.red_count == 3
     assert entry.task_id == 900
@@ -153,7 +180,7 @@ def test_a_green_run_closes_the_card(tmp_path: Path) -> None:
     )
 
     assert closed and closed[0][0] == 900
-    entries, _ = load_state(tmp_path / STATE_FILE)
+    entries = load_state(tmp_path / STATE_FILE).entries
     assert entries == {}
 
 
@@ -167,17 +194,21 @@ def test_a_stale_schedule_is_reported_in_the_round_line(tmp_path: Path) -> None:
         heartbeats=[],
         now=now,
     )
+
+    def last_start(workflow: str) -> datetime | None:
+        quiet_hours = 12 if workflow == "release-gate.yml" else 2
+        return now - timedelta(hours=quiet_hours)
+
     late = watch_once(
         state_path=tmp_path / STATE_FILE,
         now=now,
         fetch=lambda _w: (),
+        last_start=last_start,
         open_card=lambda _c: 1,
         close_card=lambda _t, _r: None,
         emit=lambda _p: None,
         workflows=("release-gate.yml",),
-        release_gate_last_start=now - timedelta(hours=12),
-        nightly_last_start=now - timedelta(hours=2),
-        ci_nightly_last_start=now - timedelta(hours=2),
+        liveness=_LIVENESS,
     )
 
     assert "no new run" not in line
@@ -308,10 +339,9 @@ def test_a_red_nightly_full_run_opens_a_card_and_its_silence_is_reported(tmp_pat
         open_card=lambda _c: 1,
         close_card=lambda _t, _r: None,
         emit=lambda _p: None,
+        last_start=lambda workflow: second - timedelta(hours=30) if workflow == "ci.yml" else None,
         workflows=(),
-        release_gate_last_start=second - timedelta(hours=1),
-        nightly_last_start=second - timedelta(hours=2),
-        ci_nightly_last_start=second - timedelta(hours=30),
+        liveness=(LivenessStream("nightly-full", "ci.yml", NIGHTLY_STALE_AFTER),),
     )
 
     assert "nightly-full" in silent
@@ -388,3 +418,92 @@ def test_a_green_narrow_gate_does_not_close_a_card_the_nightly_opened(tmp_path: 
         workflows=("ci.yml",),
     )
     assert closed and closed[0][0] == 900
+
+
+# meiva:note
+# A stream the watch has only just met has no run on record because its cron has not come round --
+# the first night of a new `ci.yml` schedule is exactly that, and reporting it would be a card about
+# a schedule that is on time. Silence is reported once one threshold has passed since the watch
+# first saw the stream.
+def test_a_stream_first_seen_now_is_not_reported_until_a_threshold_passes(tmp_path: Path) -> None:
+    first = datetime(2026, 11, 3, 18, tzinfo=UTC)
+
+    def round_at(now: datetime) -> str:
+        return watch_once(
+            state_path=tmp_path / STATE_FILE,
+            now=now,
+            fetch=lambda _w: (),
+            last_start=lambda _w: None,
+            open_card=lambda _c: 1,
+            close_card=lambda _t, _r: None,
+            emit=lambda _p: None,
+            workflows=(),
+            liveness=(LivenessStream("nightly-full", "ci.yml", NIGHTLY_STALE_AFTER),),
+        )
+
+    assert "never started" not in round_at(first)
+    assert "never started" not in round_at(first + NIGHTLY_STALE_AFTER - timedelta(minutes=1))
+    assert "never started" in round_at(first + NIGHTLY_STALE_AFTER + timedelta(minutes=1))
+    assert "no new run" not in round_at(first + timedelta(days=3))
+
+
+# meiva:note
+# One unreadable stream is a note, never the end of the round: the failure this was written for was
+# a single `gh api .../jobs` 502 that took the other three streams down with it and stopped the
+# process, so nothing reported the outage for twelve hours.
+def test_one_unreadable_stream_leaves_the_others_read_and_the_round_whole(tmp_path: Path) -> None:
+    opened: list[Card] = []
+    closed: list[tuple[int, str]] = []
+    heartbeats: list[dict[str, object]] = []
+    asked: list[str] = []
+
+    def fetch(workflow: str) -> tuple[RunFacts, ...]:
+        asked.append(workflow)
+        if workflow == "main-push.yml":
+            raise RuntimeError(
+                "gh api repos/o/r/actions/runs/1/jobs failed: gh: Server Error (HTTP 502)"
+            )
+        return (_red("release-gate.yml", "sha1", datetime(2026, 11, 1, 6, tzinfo=UTC)),)
+
+    line = watch_once(
+        state_path=tmp_path / STATE_FILE,
+        now=datetime(2026, 11, 2, 12, tzinfo=UTC),
+        fetch=fetch,
+        last_start=lambda _w: datetime(2026, 11, 2, 11, tzinfo=UTC),
+        open_card=lambda card: opened.append(card) or 899,
+        close_card=lambda task_id, reason: closed.append((task_id, reason)),
+        emit=lambda payload: heartbeats.append(dict(payload)),
+        workflows=("release-gate.yml", "main-push.yml"),
+        liveness=(LivenessStream("release-gate", "release-gate.yml", RELEASE_GATE_STALE_AFTER),),
+    )
+
+    assert asked == ["release-gate.yml", "main-push.yml"]
+    assert "stream main-push.yml unreadable" in line
+    assert "HTTP 502" in line
+    assert heartbeats == [{"fingerprints": 1, "confirmed": 0, "infra": 0, "stale": 1}]
+    assert len(load_state(tmp_path / STATE_FILE).entries) == 1
+
+
+# meiva:note
+# The liveness read is a stream read too: a 502 while asking when a schedule last started must not
+# take the round down either.
+def test_an_unreadable_liveness_stream_does_not_stop_the_round(tmp_path: Path) -> None:
+    heartbeats: list[dict[str, object]] = []
+
+    def last_start(workflow: str) -> datetime | None:
+        raise RuntimeError(f"gh api repos/o/r/actions/workflows/{workflow}/runs failed: HTTP 502")
+
+    line = watch_once(
+        state_path=tmp_path / STATE_FILE,
+        now=datetime(2026, 11, 2, 12, tzinfo=UTC),
+        fetch=lambda _w: (),
+        last_start=last_start,
+        open_card=lambda _c: 1,
+        close_card=lambda _t, _r: None,
+        emit=lambda payload: heartbeats.append(dict(payload)),
+        workflows=(),
+        liveness=(LivenessStream("nightly", "refresh-test-durations.yml", NIGHTLY_STALE_AFTER),),
+    )
+
+    assert "stream refresh-test-durations.yml unreadable" in line
+    assert heartbeats == [{"fingerprints": 0, "confirmed": 0, "infra": 0, "stale": 1}]
