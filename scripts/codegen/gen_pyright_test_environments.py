@@ -10,16 +10,16 @@
 # directory under such a root therefore needs an entry of its own, listed before the covering
 # entry, to opt out of its Any rules until its tests have paid that debt.
 #
-# This script owns those entries. `TESTS_OWING_ANY` lists the roots of the hand-written entries
-# whose tests still owe Any debt; for every tracked `<pkg>/**/tests/` directory (read from the
-# test hosts of pytest `testpaths`) under a listed root it writes one entry into the region of
-# `pyproject.toml` fenced by the BEGIN/END comments below, carrying the covering entry's other
-# settings (`extraPaths` and the like) and no Any rule. Everything outside the region is
+# This script owns those entries. `TESTS_OWING_ANY` lists the path prefixes of tests that still owe
+# Any debt; for every tracked `<pkg>/**/tests/` directory (read from the test hosts of pytest
+# `testpaths`) under a listed prefix whose covering entry holds the Any rules it writes one entry
+# into the region of `pyproject.toml` fenced by the BEGIN/END comments below, carrying the
+# covering entry's other settings (`extraPaths` and the like) and no Any rule. Everything outside the region is
 # hand-written and left byte-for-byte alone. The region is sorted by root, one block per
 # directory, so two changes collide only where their roots are neighbors in that order; run this
 # script again to resolve.
 #
-# Add a root to the list in the pull request that adds the covering entry; remove it when its
+# Add a prefix to the list in the pull request that adds the covering entry; remove it when its
 # tests are clean (the ratchet only tightens). This script, its hook and its tests go when
 # the last root leaves the list, that is when `reportAny` is a global error.
 #
@@ -61,10 +61,11 @@ END = "# END GENERATED pyright tests environments"
 # them, so its tests stay at the global level until their own Any debt is repaid.
 ANY_RULES = ("reportAny", "reportExplicitAny")
 # meiva:note
-# Roots of hand-written entries that hold the Any rules in production code while the tests under
-# them have not repaid their own Any debt. Add the root in the pull request that adds the entry;
-# remove it when its tests are clean.
-TESTS_OWING_ANY: tuple[str, ...] = ("cli",)
+# Path prefixes of tests that have not repaid their Any debt while the entry covering them holds the
+# Any rules in production code. A tests directory under a listed prefix gets a generated entry only
+# when its covering entry holds those rules (otherwise there is nothing to opt out of). Add the
+# prefix in the pull request that adds the covering entry; remove it when the tests are clean.
+TESTS_OWING_ANY: tuple[str, ...] = ("cli", "gateway/tests")
 
 
 def _covers(root: str, directory: str) -> bool:
@@ -120,16 +121,18 @@ def _inherited(config: dict[str, Any], root: str) -> dict[str, Any]:
 
 
 # meiva:note
-# One entry per tests directory that sits under a root in `owing_any`: the covering entry holds
-# the Any rules for production code, and the tests under it have not repaid theirs. The entry
-# repeats the covering entry's other settings and leaves the Any rules out.
+# One entry per tests directory that sits under a prefix in `owing_any` and whose covering entry
+# holds the Any rules: the covering entry holds them for production code, and the tests under it
+# have not repaid theirs. The entry repeats the covering entry's other settings and leaves the Any
+# rules out.
 def _entries(
     config: dict[str, Any], roots: list[str], *, owing_any: Collection[str]
 ) -> list[dict[str, Any]]:
     return [
         {"root": root, **_inherited(config, root)}
         for root in roots
-        if covering_environment(config, root).get("root") in owing_any
+        if any(_covers(prefix, root) for prefix in owing_any)
+        and covering_environment(config, root).keys() & set(ANY_RULES)
     ]
 
 

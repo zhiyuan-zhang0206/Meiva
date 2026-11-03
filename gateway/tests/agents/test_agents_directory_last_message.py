@@ -6,8 +6,8 @@ import psycopg
 import pytest
 
 from base.api_contracts.agent_contract import Harness
-from gateway.app import openapi_schema
 from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
+from gateway.tests.support.openapi_document.document import openapi_document
 
 _DIRECTORY_CARD_KEYS = frozenset(
     {
@@ -166,8 +166,9 @@ class TestList:
         assert response.status_code == 422
 
     def test_directory_has_one_card_contract(self) -> None:
-        parameters = openapi_schema()["paths"]["/api/agents"]["get"]["parameters"]
-        assert {parameter["name"] for parameter in parameters} == {
+        operation = openapi_document().paths["/api/agents"].get
+        assert operation is not None
+        assert {parameter.name for parameter in operation.parameters} == {
             "scope",
             "query",
             "before_id",

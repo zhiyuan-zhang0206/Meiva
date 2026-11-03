@@ -38,6 +38,7 @@ from gateway.tests.auth.gateway_config import (
     gateway_test_app,
     gateway_test_client,
 )
+from gateway.tests.support.openapi_document.document import Document
 
 _CHILD = Path(__file__).with_name("child_gateway_scenarios.py")
 
@@ -230,8 +231,7 @@ def test_asgi_health_keeps_its_explicit_entry_image(
 def test_openapi_schema_is_cold() -> None:
     config = ConfigBoot()
     schema = gateway_app.openapi_schema_of(config, home=meiva_home())
-    assert isinstance(schema, dict)
-    assert "/api/health" in schema["paths"]
+    assert "/api/health" in Document.model_validate(schema).paths
     assert config.boot_state() == _NEVER_READ
 
 

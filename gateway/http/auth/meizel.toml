@@ -1,6 +1,7 @@
-exports = ["login_password.py", "login_password_store.py", "rejection_log.py", "request_principal.py", "router.py", "session_store.py", "webhook.py"]
+exports = ["cluster_middleware.py", "login_password.py", "login_password_store.py", "rejection_log.py", "request_principal.py", "router.py", "session_store.py", "webhook.py"]
 
 [uses]
+"cluster_middleware.py" = ["request_principal.py", "router.py", "session_store.py"]
 "login_password_store.py" = ["login_password.py"]
 "rejection_log.py" = ["rejection_policy.py"]
 "request_principal.py" = ["login_password.py", "login_password_store.py", "session_store.py"]
