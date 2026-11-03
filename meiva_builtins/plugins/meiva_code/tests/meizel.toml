@@ -4,4 +4,4 @@
 "test_meiva_code_plugin.py" = ["surface_support.py"]
 
 [debt.restricted-python]
-"surface_support.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }
+"surface_support.py#dynamic attribute name" = { count = 1, owner = "#6082", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

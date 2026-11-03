@@ -8,4 +8,4 @@ exports = []
 "test_config_boot_race.py" = ["config_boot_child.py"]
 
 [debt.restricted-python]
-"config_boot_child.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }
+"config_boot_child.py#dynamic attribute name" = { count = 1, owner = "#6082", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

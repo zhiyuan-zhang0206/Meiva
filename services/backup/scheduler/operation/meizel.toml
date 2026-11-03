@@ -16,4 +16,4 @@ exports = ["cleanup_plan.py", "staging.py", "worker_bootstrap.py", "worker_proce
 "worker_bootstrap.py" = { kinds = ["argv"], why = "Worker process entry: main() takes the code root and the module to run from sys.argv[1] and sys.argv[2]" }
 
 [debt.ambient-read]
-"worker_process.py#pid sys.executable" = { count = 1, owner = "#8237", until = "waits for `_launch` to take the interpreter path from its caller: it reads `sys.executable` itself" }
+"worker_process.py#pid sys.executable" = { count = 1, owner = "#5816", until = "waits for `_launch` to take the interpreter path from its caller: it reads `sys.executable` itself" }

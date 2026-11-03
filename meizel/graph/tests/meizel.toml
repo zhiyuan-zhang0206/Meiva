@@ -2,5 +2,5 @@
 "test_ambient_surface.py" = ["channel_module_names.py"]
 
 [debt.restricted-python]
-"channel_module_names.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }
-"test_ambient_surface.py#dynamic attribute name" = { count = 2, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }
+"channel_module_names.py#dynamic attribute name" = { count = 1, owner = "#6082", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }
+"test_ambient_surface.py#dynamic attribute name" = { count = 2, owner = "#6082", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

@@ -13,4 +13,4 @@ exports = ["registry_support.py", "task_registry"]
 "child_launched_boot.py" = "resolves the plugin namespaces (meiva.tasks, meiva.memory) the SDK installs at run time; they have no module file to import statically"
 
 [debt.restricted-python]
-"test_meiva_fleet_plugin.py#dynamic attribute name" = { count = 2, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }
+"test_meiva_fleet_plugin.py#dynamic attribute name" = { count = 2, owner = "#6082", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

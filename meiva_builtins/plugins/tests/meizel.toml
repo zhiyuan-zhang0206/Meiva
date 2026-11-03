@@ -2,4 +2,4 @@
 "meiva_sdk_reminder_plugin" = ["test_meiva_sdk_reminder_plugin.py"]
 
 [debt.restricted-python]
-"test_data_registry.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }
+"test_data_registry.py#dynamic attribute name" = { count = 1, owner = "#6082", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

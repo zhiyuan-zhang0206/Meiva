@@ -5,5 +5,5 @@
 "test_home_resolution.py" = ["_config_child.py"]
 
 [debt.restricted-python]
-"test_config_profiles.py#class __getattr__" = { count = 1, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }
-"test_config_profiles.py#dynamic attribute name" = { count = 4, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }
+"test_config_profiles.py#class __getattr__" = { count = 1, owner = "#6082", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }
+"test_config_profiles.py#dynamic attribute name" = { count = 4, owner = "#6082", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

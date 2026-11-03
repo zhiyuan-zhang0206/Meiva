@@ -18,4 +18,4 @@ exports = ["post_deploy_visual", "scripted_reply.py", "understanding_replay.py"]
 "understanding_replay.py" = { kinds = ["clock", "db", "home", "settings", "argv"], why = "Tool entry composes its process resources from the launch configuration, resolves the home the model catalog discovers plugins under, and builds the process clock its replay passes stamp with; the __main__ guard reads argv[1:] once and hands it to main" }
 
 [debt.ambient-read]
-"tart_golden.py#pid builtins.input" = { count = 1, owner = "#8237", until = "waits for `await_grant` to take the operator's confirmation as a value from the entry: it asks with `input()` itself" }
+"tart_golden.py#pid builtins.input" = { count = 1, owner = "#5816", until = "waits for `await_grant` to take the operator's confirmation as a value from the entry: it asks with `input()` itself" }

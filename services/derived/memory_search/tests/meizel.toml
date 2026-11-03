@@ -4,4 +4,4 @@
 "test_numpy_backend_memory_search.py" = ["search_service.py"]
 
 [debt.restricted-python]
-"test_memory_search_config.py#dynamic attribute name" = { count = 2, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }
+"test_memory_search_config.py#dynamic attribute name" = { count = 2, owner = "#6082", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

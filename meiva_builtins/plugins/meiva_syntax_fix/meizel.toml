@@ -23,4 +23,4 @@ exports = ["metrics.py"]
 "plugin.py" = "strict"
 
 [debt.ambient-read]
-"_ruff_run.py#pid sys.executable" = { count = 1, owner = "#8237", until = "waits for `ruff_executable` and `run_ruff` to take the interpreter path from its caller: it reads `sys.executable` itself" }
+"_ruff_run.py#pid sys.executable" = { count = 1, owner = "#5816", until = "waits for `ruff_executable` and `run_ruff` to take the interpreter path from its caller: it reads `sys.executable` itself" }

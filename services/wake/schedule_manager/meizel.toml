@@ -28,4 +28,4 @@ exports = ["blocked_streak.py", "daemon.py", "engine.py", "host_restart.py", "la
 "runner.py" = { kinds = ["clock", "home", "pid", "random", "settings", "argv"], why = "Service or operator process entry boots configuration before composing its resources; it resolves the account home and builds the random generator once, for the SDK context it binds; builds the process clock from SYSTEM_TIMERS; it also reads its command line (argv) once, as the process entry" }
 
 [debt.ambient-read]
-"engine.py#argv sys.argv" = { count = 3, owner = "#8237", until = "waits for `run_python_script` to stop swapping the process's `sys.argv`: it replaces `sys.argv[:]` with the script path for the run and restores the saved copy afterwards" }
+"engine.py#argv sys.argv" = { count = 3, owner = "#5816", until = "waits for `run_python_script` to stop swapping the process's `sys.argv`: it replaces `sys.argv[:]` with the script path for the run and restores the saved copy afterwards" }
