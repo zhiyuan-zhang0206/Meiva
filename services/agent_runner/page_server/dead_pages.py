@@ -6,12 +6,17 @@ import asyncio
 import functools
 import logging
 import urllib.request
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from functools import partial
+from http.client import HTTPResponse
 
 from psycopg_pool import ConnectionPool
 
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
+from base.db.rows import query_all
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 from base.events.live.projection import PageClosed
@@ -36,26 +41,36 @@ class ShowPage:
 
 def open_show_pages(pool: ConnectionPool, host: str) -> list[ShowPage]:
     """Every open page of this host that has no serve_dir (the agent's own server)."""
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
+    with pool.connection() as conn:
+        return query_all(
+            conn,
+            ShowPage,
             "SELECT agent_id, name, port, host FROM agent_pages "
             "WHERE host = %s AND serve_dir IS NULL "
             "AND closed_at IS NULL AND expired_at IS NULL "
             "ORDER BY agent_id, name",
             (host,),
         )
-        return [ShowPage(*row) for row in cur.fetchall()]
+
+
+# meiva:note
+# The status of the answer `opener(url)` gives. `urlopen` types its answer `Any`; a parameter typed
+# with the real `HTTPResponse` takes it without naming the `Any`.
+def _status(opener: Callable[[str], AbstractContextManager[HTTPResponse]], url: str) -> int:
+    with opener(url) as resp:
+        return resp.status
 
 
 def page_server_alive(host: str, port: int) -> bool:
     """Probe a page server's /health endpoint: True when any 200 answers."""
     try:
-        with urllib.request.urlopen(
-            f"http://{host}:{port}/health", timeout=_PROBE_TIMEOUT_S
-        ) as resp:
-            return resp.status == 200
+        status = _status(
+            partial(urllib.request.urlopen, timeout=_PROBE_TIMEOUT_S),
+            f"http://{host}:{port}/health",
+        )
     except OSError:
         return False
+    return status == 200
 
 
 def close_dead_show_pages(pool: ConnectionPool, agent_id: int, names: list[str]) -> bool:

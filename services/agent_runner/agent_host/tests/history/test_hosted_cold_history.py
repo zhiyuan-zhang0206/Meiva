@@ -19,7 +19,7 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoints
+from services.agent_runner.agent_host.invocation import TurnCheckpoints
 from services.agent_runner.agent_host.tests.runtime.host_support import BuildWith
 from services.agent_runner.agent_host.tests.runtime.hosted_resources import hosted_scope
 

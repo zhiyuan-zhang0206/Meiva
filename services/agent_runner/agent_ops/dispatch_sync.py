@@ -6,7 +6,6 @@ import threading
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from psycopg_pool import ConnectionPool
 
@@ -39,7 +38,7 @@ _state_write_lock = threading.Lock()
 
 def dispatch_sync(
     kind: str,
-    payload: dict[str, Any],
+    payload: dict[str, object],
     *,
     pool: ConnectionPool | None,
     db: Database,
@@ -147,7 +146,7 @@ def dispatch_sync(
 
 def _agent_arm(
     kind: str,
-    payload: dict[str, Any],
+    payload: dict[str, object],
     pool: ConnectionPool | None,
     *,
     home: Path,
@@ -188,7 +187,7 @@ def _agent_arm(
 
 
 def _upload_arm(
-    payload: dict[str, Any], pool: ConnectionPool | None, *, receiver: ReceiverConfig
+    payload: dict[str, object], pool: ConnectionPool | None, *, receiver: ReceiverConfig
 ) -> tuple[OpStatus, dict[str, object]]:
 
     from httpx import HTTPStatusError
@@ -225,7 +224,7 @@ def _upload_arm(
 
 def _transfer_arm(
     kind: str,
-    payload: dict[str, Any],
+    payload: dict[str, object],
     *,
     local_machine: str,
     home: Path,

@@ -401,6 +401,36 @@ class TestSchedulerIntegration:
         await sched.aclose()
 
 
+# meiva:note
+# A pinned model that is not a string cannot build: the wake is consumed with a rejection, as for a
+# model the catalog does not know, and never raises into the dispatcher (the #2344 loop).
+def test_a_non_string_llm_model_pin_is_rejected_not_raised(model_catalog: ModelCatalog) -> None:
+    stats = HostStats()
+    rejected: dict[int, str] = {}
+    stored = StoredConfig(
+        machine="test",
+        status="idling",
+        harness=Harness.MEIVA.value,
+        config_overlay=None,
+        birth_config=None,
+    )
+    admitted = admit_stored_model(
+        {"llm_model": 123},
+        agent_id=72,
+        stored=stored,
+        stats=stats,
+        rejected=rejected,
+        normalized={},
+        catalog=model_catalog,
+        keys=ProviderKeys({}),
+        llm_override="",
+        default_model="deepseek-flash",
+    )
+    assert admitted is False
+    assert stats.config_rejected == 1
+    assert 72 in rejected
+
+
 @pytest.mark.parametrize(
     "harness",
     [Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY],

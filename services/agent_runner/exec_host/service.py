@@ -14,7 +14,7 @@ import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
 import psutil
 
@@ -161,7 +161,7 @@ def _coerce_req_id(raw: object) -> int | str | None:
     return str(raw)
 
 
-def _parse_run_request(req: dict[str, Any], *, home: Path, default_cwd: Path) -> _RunRequest:
+def _parse_run_request(req: dict[str, object], *, home: Path, default_cwd: Path) -> _RunRequest:
     req_id = _coerce_req_id(req.get("id"))
     raw_agent_id = req.get("agent_id")
     if raw_agent_id is not None and (
@@ -231,7 +231,7 @@ def _leader_exited(leader: psutil.Process) -> bool:
         return True
 
 
-async def _write_message(writer: asyncio.StreamWriter, message: dict[str, Any]) -> bool:
+async def _write_message(writer: asyncio.StreamWriter, message: dict[str, object]) -> bool:
     try:
         writer.write(protocol.encode(message))
         await writer.drain()
@@ -436,7 +436,7 @@ class ExecHostService:
 
     async def _handle_run(
         self,
-        req: dict[str, Any],
+        req: dict[str, object],
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
     ) -> None:

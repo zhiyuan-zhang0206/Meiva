@@ -10,14 +10,13 @@ import asyncio
 import logging
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any
 
 from base.clock import Timers
 from base.daemon.shutdown import sigterm_requests_exit
 from base.native_process.stop_timing import OPS_DRAIN_S
 
-RequestTokens = set[asyncio.Task[Any]]
-WorkerFutures = set[asyncio.Future[Any]]
+RequestTokens = set[asyncio.Task[object]]
+WorkerFutures = set[object]
 
 _log = logging.getLogger("services.agent_runner.agent_ops.in_flight")
 _DRAIN_POLL_S = 0.1
@@ -37,7 +36,11 @@ def admitted(*, requests: RequestTokens) -> Generator[None]:
         requests.remove(handler)
 
 
-def track_worker(future: asyncio.Future[Any], *, workers: WorkerFutures) -> None:
+# meiva:note
+# The set holds futures of different result types, and only counts them and forgets each when it
+# finishes, so it is a set of objects: `Future[T]` is invariant in `T`, a set of one `Future[X]`
+# would refuse the others.
+def track_worker[T](future: asyncio.Future[T], *, workers: WorkerFutures) -> None:
     workers.add(future)
     future.add_done_callback(workers.discard)
 

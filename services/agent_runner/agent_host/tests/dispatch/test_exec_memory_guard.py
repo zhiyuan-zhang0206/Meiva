@@ -248,7 +248,10 @@ class _CriticalOs:
         return "critical"
 
     def footprint(self, pid: int) -> int:
-        return psutil.Process(pid).memory_info().rss
+        try:
+            return psutil.Process(pid).memory_info().rss
+        except psutil.NoSuchProcess:
+            return 0
 
 
 async def _run(tmp_path: Path, code: str, *, database_gate: ProcessDbGate) -> Any:
