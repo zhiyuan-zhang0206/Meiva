@@ -2,11 +2,10 @@
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from functools import partial
 from pathlib import Path
-from typing import Any
 
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
@@ -61,7 +60,7 @@ class UploadRecovery:
         self.claim_seconds = claim_seconds
         self.stopped = asyncio.Event()
         self.nudged = asyncio.Event()
-        self.calls: set[asyncio.Future[Any]] = set()
+        self.calls: set[Awaitable[object]] = set()
         self.task: asyncio.Task[None] | None = None
 
     # meiva:note
@@ -82,7 +81,7 @@ class UploadRecovery:
         # actual call finishes, and lifespan.close drains it before pool closure.
         return await asyncio.shield(task)
 
-    def finished_call(self, future: asyncio.Future[Any]) -> None:
+    def finished_call[T](self, future: asyncio.Future[T]) -> None:
         self.calls.discard(future)
         if not future.cancelled():
             future.exception()  # Consume errors even if the HTTP await was cancelled.

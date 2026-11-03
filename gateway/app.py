@@ -164,6 +164,7 @@ class GatewayServerState(
     memory_router.MemoryAppState,
     pages_router.PageServingAppState,
     cluster_router.HarnessAppState,
+    upload_delivery_router.UploadAppState,
     status_router.StatusAppState,
     reply_suggestion_router.ReplySuggestionAppState,
     agents_transfer_router.TransferAppState,
