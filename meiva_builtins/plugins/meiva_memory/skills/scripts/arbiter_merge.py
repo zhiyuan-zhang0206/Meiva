@@ -14,7 +14,7 @@ from pathlib import Path
 
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.paths.home import resolve_meiva_home
-from meiva_builtins.plugins.meiva_memory.pool_ops import pool_dir, refresh_index, repo_slug, run
+from meiva_builtins.plugins.meiva_memory.pool_ops import pool_dir, refresh_index, repo_slug
 
 # meiva:note
 # The pool gate is the `validate` check; a PR without it is never merged (task #6157).
@@ -43,13 +43,10 @@ def _first_text(row: dict[str, object], *keys: str) -> str:
 
 
 def _checks(pr: int, slug: str) -> list[tuple[str, str]] | None:
-    r = run(
-        ["gh", "pr", "view", str(pr), "--repo", slug, "--json", "statusCheckRollup"],
-        check=False,
-    )
-    if r.returncode != 0:
+    code, out, _ = _gh("pr", "view", str(pr), "--repo", slug, "--json", "statusCheckRollup")
+    if code != 0:
         return None
-    payload = _decoded(r.stdout)
+    payload = _decoded(out)
     if not is_object_dict(payload):
         return None
     rows: list[tuple[str, str]] = []
@@ -80,6 +77,11 @@ def validate_verdict(rows: list[tuple[str, str]] | None) -> str:
                 return "GREEN"
             return state or "UNKNOWN"
     return "ABSENT"
+
+
+def _gh(*args: str) -> tuple[int, str, str]:
+    r = subprocess.run(["gh", *args], capture_output=True, text=True, check=False)
+    return r.returncode, r.stdout, r.stderr
 
 
 def _git(pool: Path, *args: str) -> str:
@@ -149,10 +151,10 @@ def participation_snapshot(pool: Path) -> str:
 
 
 def _write_snapshot(pr: int, slug: str, snapshot: str) -> bool:
-    r = run(["gh", "pr", "view", str(pr), "--repo", slug, "--json", "body"], check=False)
-    if r.returncode != 0:
+    code, out, _ = _gh("pr", "view", str(pr), "--repo", slug, "--json", "body")
+    if code != 0:
         return False
-    payload = _decoded(r.stdout)
+    payload = _decoded(out)
     if not is_object_dict(payload):
         return False
     raw_body = payload.get("body")
@@ -186,23 +188,10 @@ def main() -> int:
     pool = pool_dir(resolve_meiva_home())
     slug = repo_slug(pool)
 
-    listed = run(
-        [
-            "gh",
-            "pr",
-            "list",
-            "--repo",
-            slug,
-            "--base",
-            "main",
-            "--json",
-            "number",
-            "-q",
-            ".[].number",
-        ],
-        check=False,
+    _, listing, _ = _gh(
+        "pr", "list", "--repo", slug, "--base", "main", "--json", "number", "-q", ".[].number"
     )
-    numbers = [int(n) for n in listed.stdout.split()]
+    numbers = [int(n) for n in listing.split()]
     if not numbers:
         print("  (no open PRs)")
         return 0
@@ -223,12 +212,12 @@ def main() -> int:
             skipped.append((n, "could not write the participation snapshot"))
             print(f"  ✗ PR #{n} skipped: snapshot write failed", file=sys.stderr)
             continue
-        r = run(["gh", "pr", "merge", str(n), "--repo", slug, "--squash"], check=False)
-        if r.returncode == 0:
+        code, _, err = _gh("pr", "merge", str(n), "--repo", slug, "--squash")
+        if code == 0:
             merged.append(n)
             print(f"  merged PR #{n}")
         else:
-            reason = r.stderr.strip() or str(r.returncode)
+            reason = err.strip() or str(code)
             skipped.append((n, reason))
             print(f"  ✗ PR #{n} merge failed: {reason}", file=sys.stderr)
 
