@@ -11,7 +11,7 @@ from ops.cluster.operations import harness_probe_op
 # absence is reported as `unknown`, never as a missing option.
 # meiva:link base/agents/docs/harness/harness.meiva.okf.md
 def test_the_op_answers_for_every_known_harness() -> None:
-    result = harness_probe_op("box", now=datetime(2026, 10, 20, 12, 0, tzinfo=UTC))
+    result = harness_probe_op("box", now=datetime(2026, 10, 20, 12, 0, tzinfo=UTC), environ={})
 
     assert result.machine == "box"
     assert [row.harness for row in result.harnesses] == list(Harness)

@@ -25,6 +25,7 @@ _SECRET_PATTERN = re.compile(r"sk-[A-Za-z0-9_\-]{8,}")
 
 PROBE_SOURCE = """\
 import json
+import os
 
 from base.agents.birth.harness import probe_local_harnesses
 from base.clock import Clock
@@ -37,7 +38,7 @@ rows = [
         "binary": probe.binary,
         "on_path": probe.on_path,
     }
-    for probe in probe_local_harnesses(now=Clock.from_settings().now())
+    for probe in probe_local_harnesses(now=Clock.from_settings().now(), environ=os.environ)
 ]
 print("__PROBE__" + json.dumps(rows))
 """

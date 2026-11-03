@@ -120,7 +120,7 @@ def dispatch_sync(
                 ).model_dump(mode="json")
         case "harness_probe":
             return OpStatus.COMPLETED, cluster.harness_probe_op(
-                local_machine.name(), now=now
+                local_machine.name(), now=now, environ=host.environ
             ).model_dump(mode="json")
         case (
             "shell_probe" | "shell_kill" | "shell_capture" | "schedule_capture" | "agent_skill_view"

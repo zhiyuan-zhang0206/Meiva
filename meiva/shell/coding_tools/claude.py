@@ -15,12 +15,13 @@ collaboration contract.
 from __future__ import annotations
 
 import tempfile
-import uuid
 from pathlib import Path
 
 from base.agents.messages.external_caller import launch_caller_assignment
+from base.clock.ids import new_uuid
 from base.paths.expand import expand_home
 from base.sessions import coding_session_owner
+from meiva.sdk_surface import process_context
 
 from ._claude_checks import send_bootstrap, wait_for_ready
 from ._common import (
@@ -156,7 +157,7 @@ def launch(
         preset_claude_first_run(site.home, stamp)
     with tempfile.TemporaryDirectory(prefix="meiva-claude-launch-") as marker_dir:
         facts = ClaudeLaunchFacts(
-            claude_session=resume or str(uuid.uuid4()),
+            claude_session=resume or str(new_uuid(process_context.current_context().require_rng())),
             failure_marker=Path(marker_dir) / "missing-claude",
             stamp=stamp,
             caller_assignment=caller_assignment,
