@@ -168,3 +168,18 @@ fixture/incident scope.
 - **evidence**: ~18 lines (soft cap 12) after the 2026-09-27 watcher-registry removal (docs/decisions/runtime/updates/recovery/2026-09-27-watchers-are-never-restarted.md) dropped the old supersede/replace/reuse residue entirely. Residue now: five Args (cron format, timezone, end_time types, name, notify) + the one-line warning that re-registering the same schedule does NOT dedupe any more — it starts a second, independent session, whose loss would silently reintroduce the double-firing confusion the old dedupe used to prevent. The class's calibration note already expected `watcher.cron` as an Args-format-heavy standing item.
 - **first-seen**: 2026-09-23
 - **last-verified**: 2026-09-27
+
+### deps:langgraph-1.2.11-add-node-compile-unknown-stubs
+- **class**: deps
+- **status**: open
+- **evidence**: `base/agents/history/tests/test_compact_boundary.py:70` (`StateGraph.add_node`) and `:77` (`StateGraph.compile`) each carry `# pyright: ignore[reportUnknownMemberType]` with a `meiva:note`. langgraph 1.2.11's own signatures mention `CachePolicy[Unknown]` and `BaseCheckpointSaver[Unknown]`, so both members stay partially Unknown whatever the test types; basedpyright reports the member access, not an argument. Lifts when a langgraph release parameterizes those two defaults, at which point the two comments and the `meiva:note` go.
+- **first-seen**: 2026-11-03 (PR #8274)
+- **last-verified**: 2026-11-03
+
+
+### boundary:base-tests-private-dependency-api
+- **class**: boundary
+- **status**: open
+- **evidence**: base tests read private names the dependencies and the telemetry pipeline do not type, each with a `# pyright: ignore` and a `meiva:note`: langchain_openai 1.6.2 private helpers `_create_usage_metadata_responses` (`base/packages/tests/lm/providers/test_openai_cache_write_pricing.py:9`), `_construct_lc_result_from_responses_api` and `_convert_responses_chunk_to_generation_chunk` (`base/packages/tests/lm/providers/test_openai_fast.py:7`, `:8`), their unparameterized `dict` parameters; the `_get_request_payload` method of ChatOpenAI and ChatAnthropic (`base/packages/tests/lm/test_fast_services.py:70`, `:92`); and the telemetry pipeline's `_exporter` attribute (`base/telemetry/tests/test_pipeline_sink_isolation.py:117`). The tests exercise the real wire conversion, which has no public entry. Revive when a public conversion entry exists or the pipeline exposes its exporter; each site is then a typed call.
+- **first-seen**: 2026-11-03 (PR #8274)
+- **last-verified**: 2026-11-03

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 import pytest
 import redis
@@ -26,15 +26,20 @@ from base.native_process.ownership import OwnedProcess
 _SECRET = "redisacltestsecret"  # noqa: S105 — test fixture, not a real credential
 
 
+# meiva:note
+# The one Redis call these tests make for ACL queries, typed here because redis-py leaves it
+# partly Unknown.
+class _RedisCommands(Protocol):
+    def execute_command(self, *args: str) -> object: ...
+
+
+def _commands(client: redis.Redis) -> _RedisCommands:
+    return client
+
+
 def _acl_users(admin_url: str) -> list[str]:
-    # meiva:note
-    # The redis-py stubs leave the client's response types partially unknown, so the ACL LIST
-    # reply is cast to the list of rule strings it is.
     with redis.Redis.from_url(admin_url, decode_responses=True) as r:  # pyright: ignore[reportUnknownMemberType]
-        return cast(
-            "list[str]",
-            r.execute_command("ACL", "LIST"),  # pyright: ignore[reportUnknownMemberType]
-        )
+        return cast("list[str]", _commands(r).execute_command("ACL", "LIST"))
 
 
 def test_ensure_creates_enabled_channel_scoped_user(redis_access: None) -> None:
@@ -223,8 +228,7 @@ def test_runtime_user_is_confined_to_cluster_data_and_channel_prefix(redis_acces
                 ("ACL", "SETUSER", "meiva_feat_x", "~*", "&*"),
                 ("PSUBSCRIBE", "meiva:other:inbound:*"),
             ):
-                verdict = cast(
-                    "object",
-                    admin.execute_command("ACL", "DRYRUN", "meiva_feat_x", *command),  # pyright: ignore[reportUnknownMemberType]
+                verdict = _commands(admin).execute_command(
+                    "ACL", "DRYRUN", "meiva_feat_x", *command
                 )
                 assert verdict != "OK", command

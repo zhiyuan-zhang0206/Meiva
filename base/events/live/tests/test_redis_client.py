@@ -7,11 +7,12 @@ import socket
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import replace
-from typing import Any, cast
+from typing import Any, Protocol
 from urllib.parse import urlsplit, urlunsplit
 
 import pytest
 import redis.asyncio as aredis
+from redis.asyncio.client import PubSub
 from redis.asyncio.connection import AbstractConnection
 from redis.exceptions import AuthenticationError, NoPermissionError
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -253,6 +254,16 @@ def _positive(value: object) -> bool:
     return isinstance(value, int | float) and value > 0
 
 
+# meiva:note
+# The one pubsub call these tests make, typed here because redis-py leaves it partly Unknown.
+class _MessageSource(Protocol):
+    async def get_message(self, *, timeout: float) -> Mapping[str, object] | None: ...
+
+
+def _messages(pubsub: PubSub) -> _MessageSource:
+    return pubsub
+
+
 def _assert_resilient_kwargs(kwargs: Mapping[str, object]) -> None:
     # TCP keepalive: probe a half-dead link in tens of seconds, not minutes.
     assert kwargs.get("socket_keepalive") is True
@@ -460,10 +471,8 @@ class TestDeadTransportRecovery:
         conn.next_health_check = 0.0
 
         # Must not raise TypeError — before the fix this was the crash.
-        msg = cast(
-            "dict[str, object] | None",
-            await asyncio.wait_for(pubsub.get_message(timeout=1.0), timeout=10),  # pyright: ignore[reportUnknownArgumentType]
-        )
+        source = _messages(pubsub)
+        msg = await asyncio.wait_for(source.get_message(timeout=1.0), timeout=10)
         assert msg is None  # timeout, cleanly — reconnect happened internally
 
         # Recovery: a publish now reaches the (re-subscribed) pubsub. Read in
@@ -473,10 +482,7 @@ class TestDeadTransportRecovery:
         await publisher.publish("meiva:test:dead-transport-pubsub", "wake!")  # pyright: ignore[reportUnknownMemberType]
         msg = None
         for _ in range(5):
-            msg = cast(
-                "dict[str, object] | None",
-                await asyncio.wait_for(pubsub.get_message(timeout=1.0), timeout=10),  # pyright: ignore[reportUnknownArgumentType]
-            )
+            msg = await asyncio.wait_for(source.get_message(timeout=1.0), timeout=10)
             if msg is not None and msg.get("data") == "wake!":
                 break
         assert msg is not None and msg.get("data") == "wake!", (
