@@ -25,8 +25,14 @@ from schedules.jobs.loop import CronSchedule, Trigger, run_loop
 from schedules.jobs.watch.main_red_watch import STATE_FILE, watch_once
 from schedules.jobs.telemetry_event import emit_system_event
 from schedules.plans.schedule_identity import parse_schedule_id
+from schedules.jobs.watch.main_red_liveness import liveness_once
 
 CRON = "*/30 * * * *"
+# meiva:note
+# The liveness slot sits five minutes after each round: far enough that a slow round has finished
+# and printed, close enough that a stopped watch is reported inside the hour it went quiet.
+LIVENESS_CRON = "5,35 * * * *"
+_LIVENESS_PAYLOAD = "liveness"
 _PROCESS_NAME = "main-red-watch"
 _EVENT_NAME = "main_red_watch_round"
 _RELEASE_GATE = "release-gate.yml"
@@ -176,11 +182,30 @@ def watch_round(slot, _payload, *, inputs, home, report_agent):
     print(f"[{datetime.now(UTC).isoformat()}] {line}", flush=True)
 
 
+# meiva:note
+# The liveness trigger is five minutes past each round: far enough that a slow round has finished
+# and printed, close enough that a stopped watch is reported inside the hour it went quiet.
+def liveness_tick(slot, _payload, *, inputs, home, report_agent):
+    del home
+    liveness_once(
+        slot,
+        database=inputs.database(),
+        open_card=partial(_open_card, report_agent=report_agent),
+    )
+
+
+def dispatch(slot, payload, *, inputs, home, report_agent):
+    if payload == _LIVENESS_PAYLOAD:
+        liveness_tick(slot, payload, inputs=inputs, home=home, report_agent=report_agent)
+        return
+    watch_round(slot, payload, inputs=inputs, home=home, report_agent=report_agent)
+
+
 if __name__ == "__main__":
     home = resolve_meiva_home()
     with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home) as inputs:
         round_once = partial(
-            watch_round,
+            dispatch,
             inputs=inputs,
             home=home,
             report_agent=report_agent_from_environ(os.environ),
@@ -190,7 +215,10 @@ if __name__ == "__main__":
             raise SystemExit(0)
         run_loop(
             inputs.database(),
-            CronSchedule((Trigger(CRON),), timezone=cluster_timezone()),
+            CronSchedule(
+                (Trigger(CRON), Trigger(LIVENESS_CRON, _LIVENESS_PAYLOAD)),
+                timezone=cluster_timezone(),
+            ),
             round_once,
             schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
             started_at=datetime.now(UTC),

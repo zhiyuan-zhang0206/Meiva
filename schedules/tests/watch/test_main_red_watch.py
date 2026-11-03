@@ -9,7 +9,10 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
+from base.db import Database
+from schedules.jobs.watch.main_red_liveness import liveness_once
 from schedules.jobs.watch.main_red_watch import STATE_FILE, load_state, watch_once
 from schedules.plans.watch.main_red import FAILURE_TEST, Card, RunFacts
 
@@ -162,3 +165,89 @@ def test_a_stale_schedule_is_reported_in_the_round_line(tmp_path: Path) -> None:
 
     assert "no new run" not in line
     assert "no new run" in late
+
+
+# meiva:note
+# The watch's own liveness. A round that stops arriving is indistinguishable from a quiet `main`
+# unless something opens a card, so the effect is driven here through the same injected opener the
+# round tests use: no database, no clock, no task API.
+class _Cursor:
+    def __init__(self, value: datetime | None) -> None:
+        self._value = value
+
+    def __enter__(self) -> _Cursor:
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+    def execute(self, sql: str, params: object) -> None:
+        del sql, params
+
+    def fetchone(self) -> tuple[datetime | None]:
+        return (self._value,)
+
+
+class _Connection:
+    def __init__(self, value: datetime | None) -> None:
+        self._value = value
+
+    def __enter__(self) -> _Connection:
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+    def cursor(self) -> _Cursor:
+        return _Cursor(self._value)
+
+
+class _Database:
+    def __init__(self, value: datetime | None) -> None:
+        self._value = value
+
+    def connect(self, *, autocommit: bool = False) -> _Connection:
+        assert autocommit, "the liveness read opens no transaction it must commit"
+        return _Connection(self._value)
+
+
+def test_a_round_that_stopped_opens_one_card() -> None:
+    now = datetime(2026, 11, 3, 10, 35, tzinfo=UTC)
+    opened: list[Card] = []
+
+    liveness_once(
+        now,
+        database=cast("Database", _Database(now - timedelta(minutes=61))),
+        open_card=lambda card: opened.append(card) or 900,
+    )
+
+    assert [card.fingerprint for card in opened] == ["main-red-watch/liveness"]
+    assert "stopped" in opened[0].title.lower()
+
+
+def test_a_round_inside_the_hour_opens_nothing() -> None:
+    now = datetime(2026, 11, 3, 10, 35, tzinfo=UTC)
+    opened: list[Card] = []
+
+    liveness_once(
+        now,
+        database=cast("Database", _Database(now - timedelta(minutes=31))),
+        open_card=lambda card: opened.append(card) or 900,
+    )
+
+    assert opened == []
+
+
+# meiva:note
+# A schedule that never ran is the manager's problem, not this card's: a fresh site must not open a
+# liveness card the first time the check runs.
+def test_a_watch_with_no_round_on_record_opens_nothing() -> None:
+    opened: list[Card] = []
+
+    liveness_once(
+        datetime(2026, 11, 3, 10, 35, tzinfo=UTC),
+        database=cast("Database", _Database(None)),
+        open_card=lambda card: opened.append(card) or 900,
+    )
+
+    assert opened == []
