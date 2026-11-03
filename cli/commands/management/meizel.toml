@@ -5,7 +5,7 @@ exports = ["config.py", "fleet_gateway.py", "fleet_leases.py", "schedules.py", "
 "schedule_verify_child.py" = ["schedule_verify_checks.py"]
 "schedules_verify.py" = ["child_verdict.py", "schedule_verify_child.py", "sweep_outcome.py"]
 "schedules_verify_read_rows.py" = ["schedules_verify.py"]
-"tests" = ["child_verdict.py", "config.py", "schedule_verify_checks.py", "schedules_verify.py", "sweep_outcome.py"]
+"tests" = ["child_verdict.py", "config.py", "schedule_verify_checks.py", "schedules.py", "schedules_verify.py", "sweep_outcome.py"]
 
 [external]
 "schedule_verify_child.py" = "dry-runs the imports of a user-written schedule script and checks its syntax"
