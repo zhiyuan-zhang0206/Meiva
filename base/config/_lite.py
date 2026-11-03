@@ -19,6 +19,7 @@ from threading import RLock, get_ident
 from typing import Any, Protocol
 
 from base.config.config_registry import DOMAIN_ATTRS
+from base.config.domain_shape import SettingsDomains
 from base.config.lite_parse import parse_field
 from base.config.profiles import PROCESS_PROFILES, profile_domain_error
 from base.host.env.boot_actions import apply_process_timezone
@@ -148,7 +149,7 @@ class _DomainView:
         setattr(getattr(self._owner._current_settings(), domain), name, value)
 
 
-class _SettingsView:
+class _SettingsView(SettingsDomains):
     """The stable `settings` object: lite until the first eager touch, then the
     constructed singleton. The object identity never changes, so every
     `from base.config import settings` binding — and every `set_field`
@@ -185,7 +186,7 @@ class _SettingsView:
             return True
         return name in PROCESS_PROFILES[profile]
 
-    def __getattr__(self, name: str) -> Any:
+    def __getattr__(self, name: str) -> object:
         if self._owner.mode == _FULL:
             return getattr(self._owner._current_settings(), name)
         if name.startswith("__") and name.endswith("__"):

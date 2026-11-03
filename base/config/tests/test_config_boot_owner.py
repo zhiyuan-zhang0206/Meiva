@@ -11,6 +11,7 @@ import pytest
 
 import base.config as facade
 from base.config import ConfigBoot, ConfigBuildWaitTimeoutError, _full
+from base.config.domain_shape import SettingsDomains
 from base.host.proc import run_bounded
 
 _CHILD = Path(__file__).with_name("_boot_owner_child.py")
@@ -175,6 +176,18 @@ def test_profile_rejection_remains_lazy_and_instance_local(tmp_path: Path) -> No
     with pytest.raises(AttributeError, match="profile"):
         _ = limited.view.alerts
     assert not limited.is_full()
+
+
+# meiva:note
+# The view's domain annotations are the only copy of the domain list, so they must match the `Settings`
+# aggregate field for field (name and class).
+def test_view_declares_every_settings_domain_with_its_model_type() -> None:
+    settings_domains = {
+        name: field.annotation.__name__
+        for name, field in _full.Settings.model_fields.items()
+        if name != "profile" and field.annotation is not None
+    }
+    assert dict(SettingsDomains.__annotations__) == settings_domains
 
 
 def test_owner_build_gate_is_bounded_and_does_not_block_another_owner() -> None:
