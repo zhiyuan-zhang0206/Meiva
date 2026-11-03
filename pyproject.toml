@@ -784,6 +784,11 @@ extraPaths = ["meiva_builtins/skills/integrations/web-ai/scripts"]
 root = "meiva_builtins/skills/integrations/web-sources"
 extraPaths = ["meiva_builtins/skills/integrations/web-sources/scripts"]
 
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/skills/practice"
+reportAny = "error"
+reportExplicitAny = "error"
+
 [tool.mutmut]
 # Mutation testing exploratory config (mutmut).
 # Modify paths_to_mutate / tests_dir
