@@ -17,8 +17,10 @@ import sys
 import time
 import urllib.request
 from collections.abc import Callable, Collection
-from contextlib import suppress
-from dataclasses import replace
+from contextlib import AbstractContextManager, suppress
+from dataclasses import dataclass, replace
+from functools import partial
+from http.client import HTTPResponse
 from pathlib import Path
 from typing import assert_never
 
@@ -40,6 +42,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
+from base.db.rows import query_all, query_one
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 from base.host.exit_codes import hard_exit
@@ -99,10 +102,35 @@ def page_server_config(*, daemon_settings: DaemonSettings | None = None) -> Page
     )
 
 
+@dataclass(frozen=True)
+class _SessionRow:
+    session_name: str
+
+
+@dataclass(frozen=True)
+class _IndexRow:
+    session_index: int
+
+
+@dataclass(frozen=True)
+class _TokenRow:
+    server_token: str | None
+
+
+# meiva:note
+# The body of the answer `opener(url)` gives. `urlopen` types its answer `Any`; a parameter typed
+# with the real `HTTPResponse` takes it without naming the `Any`.
+def _read(opener: Callable[[str], AbstractContextManager[HTTPResponse]], url: str) -> bytes:
+    with opener(url) as resp:
+        return resp.read()
+
+
 def open_rows(pool: ConnectionPool, host: str) -> list[PageRow]:
     """Every open serve row supervised by this host's daemon."""
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
+    with pool.connection() as conn:
+        return query_all(
+            conn,
+            PageRow,
             "SELECT id, agent_id, name, port, host, serve_dir, server_token, session_name "
             "FROM agent_pages "
             "WHERE closed_at IS NULL AND expired_at IS NULL "
@@ -110,35 +138,37 @@ def open_rows(pool: ConnectionPool, host: str) -> list[PageRow]:
             "ORDER BY agent_id, name",
             (host,),
         )
-        return [PageRow(*row) for row in cur.fetchall()]
 
 
 def _closed_page_sessions(pool: ConnectionPool, host: str) -> list[str]:
     """Persisted page sessions whose rows closed while this daemon was away."""
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
+    with pool.connection() as conn:
+        rows = query_all(
+            conn,
+            _SessionRow,
             "SELECT session_name FROM agent_pages "
             "WHERE (closed_at IS NOT NULL OR expired_at IS NOT NULL) "
             "AND serve_dir IS NOT NULL AND host = %s "
             "AND session_name IS NOT NULL",
             (host,),
         )
-        return [str(row[0]) for row in cur.fetchall()]
+    return [row.session_name for row in rows]
 
 
 def _allocate_session_index(pool: ConnectionPool, agent_id: int) -> int:
     """Atomically allocate one shell id from the owning agent's shared counter."""
-    with write_transaction(pool) as conn, conn.cursor() as cur:
-        cur.execute(
+    with write_transaction(pool) as conn:
+        row = query_one(
+            conn,
+            _IndexRow,
             "UPDATE agents_meta SET session_index = session_index + 1 "
             "WHERE id = %s RETURNING session_index",
             (agent_id,),
         )
-        row = cur.fetchone()
         conn.commit()
     if row is None:
         raise RuntimeError(f"agent {agent_id} not in agents_meta table — cannot allocate session")
-    return int(row[0]) - 1
+    return row.session_index - 1
 
 
 def _ensure_token(pool: ConnectionPool, row: PageRow) -> str:
@@ -151,19 +181,20 @@ def _ensure_token(pool: ConnectionPool, row: PageRow) -> str:
     if row.server_token is not None:
         return row.server_token
     minted = secrets.token_hex(16)
-    with write_transaction(pool) as conn, conn.cursor() as cur:
-        cur.execute(
+    with write_transaction(pool) as conn:
+        persisted = query_one(
+            conn,
+            _TokenRow,
             "UPDATE agent_pages SET server_token = COALESCE(server_token, %s) "
             "WHERE id = %s AND port = %s AND host = %s AND serve_dir = %s "
             "AND closed_at IS NULL AND expired_at IS NULL "
             "RETURNING server_token",
             (minted, row.id, row.port, row.host, row.serve_dir),
         )
-        persisted = cur.fetchone()
         conn.commit()
-    if persisted is None or persisted[0] is None:
+    if persisted is None or persisted.server_token is None:
         return minted
-    return str(persisted[0])
+    return persisted.server_token
 
 
 # meiva:note
@@ -236,10 +267,10 @@ def _create_page_session(
 def server_is_healthy(host: str, port: int, token: str) -> bool:
     """Whether the server answers /health with this row's durable token."""
     try:
-        with urllib.request.urlopen(f"http://{host}:{port}/health", timeout=1.0) as resp:
-            return resp.read() == f"ok:{token}".encode()
+        body = _read(partial(urllib.request.urlopen, timeout=1.0), f"http://{host}:{port}/health")
     except OSError:
         return False
+    return body == f"ok:{token}".encode()
 
 
 # meiva:note

@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pydantic import ValidationError
 
 from base.api_contracts.agent_contract import MeivaAgentError
+from base.host.boundary.untyped import object_of
 from ops.rpc_schemas import OpEnvelope, OpStatus, is_op_kind
 
 __all__ = [
@@ -68,7 +69,7 @@ def _bad_request(message: str) -> OpReply:
 # or not `{kind, payload}`, and a failed result at 200 for a kind outside the vocabulary.
 def read_request(body: bytes) -> OpEnvelope | OpReply:
     try:
-        parsed = json.loads(body)
+        parsed = object_of(json.loads, body)
     except json.JSONDecodeError as exc:
         return _bad_request(f"invalid JSON body: {exc}")
     try:

@@ -77,11 +77,11 @@ from services.agent_runner.agent_host.invocation import (
     HandoffSettlement,
     InvocationHooks,
     PendingWorkResult,
+    TurnCheckpoints,
     finish_completed_invocation,
     finish_pending_failure,
     settle_handoff_before_invocation,
 )
-from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoints
 from services.agent_runner.agent_host.invocation.driver import drive_context
 from services.agent_runner.agent_host.lifecycle.lease_controls import require_lifecycle_claim
 from services.agent_runner.agent_host.lifecycle.shells import (

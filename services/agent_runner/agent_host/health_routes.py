@@ -1,11 +1,32 @@
 """Loopback health routes expose the actual hosted owner and cancellation boundary."""
 
 from pathlib import Path
+from typing import TypeGuard
+
+from psycopg_pool import AsyncConnectionPool
 
 from base.clock import Clock
 from base.daemon.health import RouteHandler
+from base.host.boundary.fields import str_field
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
+from base.lm.harness.registry import FileSessionRegistry
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.host import AgentHost
+
+
+def _json_object(body: bytes) -> dict[str, object] | None:
+    import json
+
+    try:
+        value = object_of(json.loads, body or b"{}")
+    except ValueError:
+        return None
+    return value if is_object_dict(value) else None
+
+
+def _is_pool(value: object) -> TypeGuard[AsyncConnectionPool]:
+    return isinstance(value, AsyncConnectionPool)
 
 
 # meiva:note
@@ -24,10 +45,8 @@ def cancel_turn_route(scheduler: TurnScheduler) -> RouteHandler:
     async def handler(body: bytes) -> tuple[int, bytes, str]:
         import json
 
-        try:
-            agent_id = json.loads(body or b"{}")["agent_id"]
-        except (ValueError, KeyError, TypeError, json.JSONDecodeError):
-            return 400, b'{"error":"positive agent_id required"}', "application/json"
+        request = _json_object(body)
+        agent_id = None if request is None else request.get("agent_id")
         if type(agent_id) is not int or agent_id <= 0:
             return 400, b'{"error":"positive agent_id required"}', "application/json"
         cancelled = await scheduler.cancel_turn(agent_id)
@@ -41,19 +60,20 @@ def cancel_turn_route(scheduler: TurnScheduler) -> RouteHandler:
 def prepare_harness_switch_route(host: AgentHost, *, clock: Clock) -> RouteHandler:
 
     async def handler(body: bytes) -> tuple[int, bytes, str]:
-        import json
 
         from agent.messages import NoteTag, system_note_message
         from base.agents.messages.lifecycle_text import by_who
 
+        payload = _json_object(body)
+        if payload is None:
+            return 400, b'{"error":"invalid prepare-harness-switch payload"}', "application/json"
         try:
-            payload = json.loads(body or b"{}")
             agent_id = payload["agent_id"]
-            old_harness = payload["old_harness"]
-            new_harness = payload["new_harness"]
-            source = payload["source"]
-            message = payload["message"]
-        except (ValueError, KeyError, TypeError, json.JSONDecodeError):
+            old_harness = str_field(payload, "old_harness")
+            new_harness = str_field(payload, "new_harness")
+            source = str_field(payload, "source")
+            message = str_field(payload, "message")
+        except (KeyError, TypeError):
             return 400, b'{"error":"invalid prepare-harness-switch payload"}', "application/json"
         if type(agent_id) is not int or agent_id <= 0:
             return 400, b'{"error":"positive agent_id required"}', "application/json"
@@ -98,8 +118,13 @@ def prepare_harness_switch_route(host: AgentHost, *, clock: Clock) -> RouteHandl
                     payload=note_content,
                     created_at=now.isoformat(),
                 )
-                pool = getattr(host, "_control_pool", getattr(host, "_pool", None))
-                if pool is not None:
+                control_pool = object_of(getattr, host, "_control_pool", None)
+                pool = (
+                    control_pool
+                    if control_pool is not None
+                    else object_of(getattr, host, "_pool", None)
+                )
+                if _is_pool(pool):
                     try:
                         async with async_write_transaction(pool) as conn:
                             await aappend_harness_timeline_items(
@@ -115,8 +140,8 @@ def prepare_harness_switch_route(host: AgentHost, *, clock: Clock) -> RouteHandl
                         )
 
         host.drop_agent(agent_id)
-        registry = getattr(host, "_harness_registry", None)
-        if registry is not None:
+        registry = object_of(getattr, host, "_harness_registry", None)
+        if isinstance(registry, FileSessionRegistry):
             registry.delete(agent_id)
 
         return 200, b'{"ok":true}', "application/json"

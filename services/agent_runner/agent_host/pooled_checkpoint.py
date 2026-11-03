@@ -1,9 +1,10 @@
 """Checkpoint cursors own a pool lease instead of a host-wide saver lock."""
 
-from collections.abc import AsyncGenerator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from copy import copy
-from typing import Any, TypeGuard
+from dataclasses import dataclass
+from typing import TypeGuard
 from uuid import UUID
 
 from langchain_core.runnables import RunnableConfig
@@ -15,6 +16,8 @@ from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.history.checkpoint_postgres_walks import HistoryAsyncPostgresSaver
+from base.db.rows import aquery_one
+from base.host.boundary.untyped import object_of
 from base.native_process.runtime_incarnation import StaleIncarnationError
 
 
@@ -22,6 +25,21 @@ def _is_dict_row_pool(
     _pool: AsyncConnectionPool[AsyncConnection],
 ) -> TypeGuard[AsyncConnectionPool[AsyncConnection[DictRow]]]:
     return True
+
+
+@dataclass(frozen=True)
+class _OwnerRow:
+    machine: str
+    runtime_owner: UUID | None
+    status: str
+
+
+def _thread_id(config: RunnableConfig) -> str:
+    configurable = config.get("configurable", {})
+    thread_id = object_of(configurable.get, "thread_id", "")
+    if not isinstance(thread_id, str):
+        raise TypeError("the checkpoint config's thread_id must be a string")
+    return thread_id
 
 
 class MissingCheckpointParentError(RuntimeError):
@@ -138,38 +156,24 @@ class PooledPostgresSaver(HistoryAsyncPostgresSaver):
         except (ValueError, TypeError):
             return
 
-        async with conn.cursor() as cur:
-            await cur.execute(
-                "SELECT machine, runtime_owner, status FROM agents_meta WHERE id = %s FOR SHARE",
-                (agent_id,),
-            )
-            row = await cur.fetchone()
-            if row is None:
-                return
+        row = await aquery_one(
+            conn,
+            _OwnerRow,
+            "SELECT machine, runtime_owner, status FROM agents_meta WHERE id = %s FOR SHARE",
+            (agent_id,),
+        )
+        if row is None:
+            return
 
-            if isinstance(row, Mapping):
-                raw_machine = row["machine"]
-                raw_owner = row["runtime_owner"]
-                raw_status = row["status"]
-            else:
-                raw_machine = row[0]
-                raw_owner = row[1]
-                raw_status = row[2]
-
-            db_owner = (
-                raw_owner
-                if isinstance(raw_owner, UUID) or raw_owner is None
-                else UUID(str(raw_owner))
-            )
-            _check_row_ownership(
-                agent_id,
-                str(raw_machine),
-                db_owner,
-                str(raw_status),
-                expected_owner=self._expected_owner,
-                expected_machine=self._machine,
-                for_delete=for_delete,
-            )
+        _check_row_ownership(
+            agent_id,
+            row.machine,
+            row.runtime_owner,
+            row.status,
+            expected_owner=self._expected_owner,
+            expected_machine=self._machine,
+            for_delete=for_delete,
+        )
 
     async def aput(
         self,
@@ -186,7 +190,7 @@ class PooledPostgresSaver(HistoryAsyncPostgresSaver):
         transaction. First checkpoints may have no parent.
         """
         configurable = config.get("configurable", {})
-        thread_id = configurable.get("thread_id", "")
+        thread_id = _thread_id(config)
         parent = configurable.get("checkpoint_id")
         async with self._pool.connection() as conn, conn.transaction():
             if parent is not None:
@@ -209,12 +213,11 @@ class PooledPostgresSaver(HistoryAsyncPostgresSaver):
     async def aput_writes(
         self,
         config: RunnableConfig,
-        writes: Sequence[tuple[str, Any]],
+        writes: Sequence[tuple[str, object]],
         task_id: str,
         task_path: str = "",
     ) -> None:
-        configurable = config.get("configurable", {})
-        thread_id = configurable.get("thread_id", "")
+        thread_id = _thread_id(config)
         async with self._pool.connection() as conn, conn.transaction():
             lease = AsyncPostgresSaver(conn=conn, serde=self.serde)
             await lease.aput_writes(config, writes, task_id, task_path)

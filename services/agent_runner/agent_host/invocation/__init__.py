@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import assert_never
 
 from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from loguru import logger
 
 from agent.impersonation import process_host, settle_checkpoint
@@ -20,11 +21,11 @@ from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
 from base.agents.context import MeivaContext
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.agents.observation.relay_supervision import RelaySupervision
+from base.api_contracts.agent_contract import ReconstructionScope
 from base.db.protocols import AsyncPool, DatabaseLike
 from base.events.live.bus import EventBus
 from services.agent_runner.agent_host import TurnOutcome
 from services.agent_runner.agent_host.db_recovery import database_phase
-from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoints
 from services.agent_runner.agent_host.invocation.completion_decisions import (
     ApplyLifecycle,
     CarryOn,
@@ -34,6 +35,25 @@ from services.agent_runner.agent_host.invocation.completion_decisions import (
     plan_completion,
 )
 from services.agent_runner.agent_host.lifecycle.shells import apply_lifecycle_command
+
+
+# meiva:note
+# A scoped read view over the host's original saver and compiled graph, passed through one hosted
+# admission as explicit resources.
+@dataclass(frozen=True)
+class TurnCheckpoints:
+    saver: AsyncPostgresSaver
+    graph: AgentGraph
+    reconstruction: ReconstructionScope[AsyncPostgresSaver] | None = None
+
+    def bind(self, scope: ReconstructionScope[AsyncPostgresSaver] | None) -> TurnCheckpoints:
+        if scope is None:
+            return self
+        reader = scope.reader()
+        # meiva:note
+        # LangGraph's public copy preserves nodes, channels, compile options and
+        # serializer allowlists. Only this admission's checkpointer changes.
+        return TurnCheckpoints(reader, self.graph.copy({"checkpointer": reader}), scope)
 
 
 # meiva:note

@@ -21,7 +21,6 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import psutil
 
@@ -452,7 +451,7 @@ def kill_session(
     own_pid: int,
     timers: Timers,
     interrupted: bool | None = None,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Close the PTY shell and its known foreground group, best effort.
 
     Background jobs and detached descendants are not discovered or certified
@@ -490,7 +489,7 @@ def kill_session(
         raise RuntimeError(f"session {session.name}: shell survived the kill")
     if not session.wait_dead(_KILL_FORCE_WAIT_S):
         raise RuntimeError(f"session {session.name}: PTY teardown did not finish")
-    verdict: dict[str, Any] = {"mode": mode, "interrupted": interrupted}
+    verdict: dict[str, object] = {"mode": mode, "interrupted": interrupted}
     if remaining:
         verdict["survivors"] = sorted(identity.pid for identity in remaining)
         verdict["interrupted"] = True

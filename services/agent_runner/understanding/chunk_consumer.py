@@ -39,7 +39,6 @@ import time
 from collections.abc import Awaitable, Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any
 
 import psycopg
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -74,7 +73,12 @@ from base.agents.history.hierarchy.chunks import (
     write_chunk_calls,
     write_group_nodes,
 )
-from base.agents.history.hierarchy.generate import GenerateError, GenParams, build_generation_llm
+from base.agents.history.hierarchy.generate import (
+    GenerateError,
+    GenParams,
+    ToolSpec,
+    build_generation_llm,
+)
 from base.agents.history.hierarchy.rebuild import (
     MAX_REBUILD_ATTEMPTS,
     RebuildJob,
@@ -89,6 +93,7 @@ from base.agents.observation.snapshot import agent_model_target
 from base.clock import Clock
 from base.config import ConfigBoot
 from base.db import Database
+from base.db.rows import CountRow, aquery_one
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
@@ -172,7 +177,7 @@ def describe(
     model: str,
     overrides: ModelOverrides,
     located: LocatedChunk,
-    tools: Sequence[Any],
+    tools: Sequence[ToolSpec],
     calls: list[ChunkCall],
     agent_id: int,
     *,
@@ -270,7 +275,7 @@ async def run_job(
     pool: AsyncConnectionPool,
     db: Database,
     job: ChunkJob,
-    tools: Sequence[Any],
+    tools: Sequence[ToolSpec],
     models: ModelCache,
     executor: ThreadPoolExecutor | None = None,
     *,
@@ -418,7 +423,7 @@ class Consumer:
         self,
         pool: AsyncConnectionPool,
         db: Database,
-        tools: Sequence[Any],
+        tools: Sequence[ToolSpec],
         replay: Replay | None = None,
         *,
         catalog: ModelCatalog,
@@ -637,15 +642,16 @@ class Consumer:
     async def _live_jobs(self, agent_id: int) -> int:
         # meiva:note
         # PostgreSQL count returns exactly one row even when no matching job exists.
-        async with self.pool.connection() as conn, conn.cursor() as cur:
-            await cur.execute(
-                "SELECT count(*) FROM understanding_chunk_jobs"
+        async with self.pool.connection() as conn:
+            row = await aquery_one(
+                conn,
+                CountRow,
+                "SELECT count(*) AS n FROM understanding_chunk_jobs"
                 " WHERE agent_id = %s AND status IN ('pending', 'running')",
                 (agent_id,),
             )
-            row = await cur.fetchone()
         assert row is not None, "an aggregate query always returns one row"  # noqa: S101
-        return int(row[0])
+        return row.n
 
     async def run_until_idle(self) -> None:
         # meiva:note
@@ -688,7 +694,7 @@ class Consumer:
 async def replay_jobs(
     pool: AsyncConnectionPool,
     db: Database,
-    tools: Sequence[Any],
+    tools: Sequence[ToolSpec],
     agent_id: int,
     *,
     catalog: ModelCatalog,
@@ -727,7 +733,7 @@ async def replay_jobs(
 async def understanding_loop_forever(
     pool: AsyncConnectionPool,
     db: Database,
-    tools: Sequence[Any],
+    tools: Sequence[ToolSpec],
     *,
     catalog: ModelCatalog,
     keys: ProviderKeys,

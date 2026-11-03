@@ -16,10 +16,11 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, TypeGuard
 
 from base.clock import Timers
 from base.host.atomic_io import write_text_atomic
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from base.log import logger
 from base.native_process.ownership import OwnedProcess
 from base.native_process.process_control import ProcessControl
@@ -51,17 +52,19 @@ def write(path: Path, targets: Iterable[closure.Target]) -> None:
     write_text_atomic(path, json.dumps(payload), mode=0o600, sync_file=False)
 
 
-def _wire(identity: OwnedProcess) -> dict[str, Any]:
+def _wire(identity: OwnedProcess) -> dict[str, object]:
     return {"pid": identity.pid, "birth": identity.birth, "starttime": identity.starttime}
 
 
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
-
-
-def _require_str_dict(value: object, label: str) -> dict[str, Any]:
-    if not _is_str_dict(value):
+def _require_str_dict(value: object, label: str) -> dict[str, object]:
+    if not is_object_dict(value):
         raise TypeError(f"{label} must be an object")
+    return value
+
+
+def _require_list(value: object, label: str) -> list[object]:
+    if not is_object_list(value):
+        raise TypeError(f"{label} must be a list")
     return value
 
 
@@ -72,7 +75,7 @@ def read(path: Path) -> list[closure.Target]:
     miss leftovers it was never told about, never signal a guessed process.
     """
     try:
-        raw = json.loads(path.read_text())
+        raw = object_of(json.loads, path.read_text())
     except FileNotFoundError:
         return []
     except (OSError, ValueError) as exc:
@@ -85,14 +88,21 @@ def read(path: Path) -> list[closure.Target]:
             _require_str_dict(raw, "ledger root")["sessions"],
             "sessions",
         )
-        return [
-            closure.Target(
-                name,
-                closure.identity_from_wire(item["shell"]),
-                tuple(closure.identity_from_wire(member) for member in item["members"]),
+        targets: list[closure.Target] = []
+        for name, entry in sessions.items():
+            item = _require_str_dict(entry, "session")
+            members = _require_list(item["members"], "members")
+            targets.append(
+                closure.Target(
+                    name,
+                    closure.identity_from_wire(_require_str_dict(item["shell"], "shell")),
+                    tuple(
+                        closure.identity_from_wire(_require_str_dict(member, "member"))
+                        for member in members
+                    ),
+                )
             )
-            for name, item in sessions.items()
-        ]
+        return targets
     except (KeyError, TypeError, ValueError) as exc:
         logger.warning(
             "pty ledger {path} is malformed ({exc}); nothing to sweep", path=path, exc=exc

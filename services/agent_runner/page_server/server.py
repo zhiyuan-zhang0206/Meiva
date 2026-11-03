@@ -26,7 +26,10 @@ import io
 import os
 import socketserver
 from contextlib import suppress
+from dataclasses import dataclass
 from http import HTTPStatus
+
+from base.host.boundary.options import options
 
 
 class PageHandler(http.server.SimpleHTTPRequestHandler):
@@ -99,12 +102,19 @@ def configure_handler(token: str) -> None:
     PageHandler.extensions_map.update(_EXTENSIONS)
 
 
+@dataclass(frozen=True)
+class _Arguments:
+    port: int
+    host: str
+    dir: str
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Meiva page server (R3 doorplate 3)")
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--host", required=True)
     parser.add_argument("--dir", required=True)
-    args = parser.parse_args()
+    args = options(parser.parse_args(), _Arguments)
 
     # Token via env (see module docstring): argv stays clean.
     token = os.environ.get("PAGE_SERVER_TOKEN", "")

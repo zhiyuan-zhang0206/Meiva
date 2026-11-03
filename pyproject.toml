@@ -806,6 +806,30 @@ root = "scripts/structure/tests"
 root = "scripts/verify/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "services/agent_runner/agent_host/recovery/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/agent_runner/agent_host/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/agent_runner/agent_ops/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/agent_runner/exec_host/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/agent_runner/page_server/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/agent_runner/pty_sessions/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/agent_runner/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/agent_runner/understanding/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "services/backup/artifact/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -996,6 +1020,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "scripts/verify"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/agent_runner"
 reportAny = "error"
 reportExplicitAny = "error"
 

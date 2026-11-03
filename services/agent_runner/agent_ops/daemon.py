@@ -25,7 +25,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, assert_never
+from typing import assert_never
 
 import psycopg
 from psycopg_pool import ConnectionPool
@@ -96,7 +96,7 @@ def _new_rng() -> random.Random:
 
 async def run_arm(
     kind: str,
-    payload: dict[str, Any],
+    payload: dict[str, object],
     *,
     active_ops: ActiveOps,
     workers: in_flight.WorkerFutures,
@@ -144,7 +144,7 @@ async def run_arm(
 
 def _dispatch_in_thread(
     kind: str,
-    payload: dict[str, Any],
+    payload: dict[str, object],
     *,
     pool: ConnectionPool,
     authority: ConfigAuthority,
@@ -178,7 +178,7 @@ def _dispatch_in_thread(
 
 async def dispatch(
     kind: str,
-    payload: dict[str, Any],
+    payload: dict[str, object],
     *,
     active_ops: ActiveOps,
     workers: in_flight.WorkerFutures,
@@ -278,7 +278,7 @@ async def dispatch(
 
 async def dispatch_idempotent(
     kind: str,
-    payload: dict[str, Any],
+    payload: dict[str, object],
     key: str,
     pool: ConnectionPool,
     *,
@@ -340,7 +340,7 @@ async def dispatch_idempotent(
 
 async def dispatch_idempotent_pass(
     kind: str,
-    payload: dict[str, Any],
+    payload: dict[str, object],
     key: str,
     pool: ConnectionPool,
     *,

@@ -29,7 +29,7 @@ import threading
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
 import psutil
 
@@ -85,14 +85,14 @@ class RequestError(Exception):
         self.message = message
 
 
-def _text(req: dict[str, Any], key: str) -> str:
+def _text(req: dict[str, object], key: str) -> str:
     value = req.get(key)
     if not isinstance(value, str) or not value:
         raise RequestError(protocol.BAD_REQUEST, f"{key} must be a non-empty string")
     return value
 
 
-def _count(req: dict[str, Any], key: str, default: int, *, low: int, high: int) -> int:
+def _count(req: dict[str, object], key: str, default: int, *, low: int, high: int) -> int:
     value = req.get(key, default)
     if isinstance(value, bool) or not isinstance(value, int):
         raise RequestError(protocol.BAD_REQUEST, f"{key} must be an integer")
@@ -101,7 +101,7 @@ def _count(req: dict[str, Any], key: str, default: int, *, low: int, high: int) 
     return value
 
 
-def _seconds(req: dict[str, Any], key: str) -> float:
+def _seconds(req: dict[str, object], key: str) -> float:
     value = req.get(key)
     if isinstance(value, bool) or not isinstance(value, int | float) or value < 0:
         raise RequestError(protocol.BAD_REQUEST, f"{key} must be a non-negative number")
@@ -180,7 +180,7 @@ class PtyService:
         self._tasks: asyncio.TaskGroup | None = None
         self._stop: asyncio.Event | None = None
         self._finished = False
-        self._methods: dict[str, Callable[[dict[str, Any]], dict[str, Any] | None]] = {
+        self._methods: dict[str, Callable[[dict[str, object]], dict[str, object] | None]] = {
             "ping": self._ping,
             "has": self._has,
             "list": self._list,
@@ -202,7 +202,7 @@ class PtyService:
             return None
         return found
 
-    def _require(self, req: dict[str, Any]) -> session.PtySession:
+    def _require(self, req: dict[str, object]) -> session.PtySession:
         name = _text(req, "name")
         found = self._live(name)
         if found is None:
@@ -227,14 +227,14 @@ class PtyService:
 
     # -- handlers ------------------------------------------------------------
 
-    def _ping(self, req: dict[str, Any]) -> dict[str, Any]:
+    def _ping(self, req: dict[str, object]) -> dict[str, object]:
         del req
         return {"pid": self._pid, "host_generation": self._host_generation}
 
-    def _has(self, req: dict[str, Any]) -> dict[str, Any]:
+    def _has(self, req: dict[str, object]) -> dict[str, object]:
         return {"alive": self._live(_text(req, "name")) is not None}
 
-    def _list(self, req: dict[str, Any]) -> dict[str, Any]:
+    def _list(self, req: dict[str, object]) -> dict[str, object]:
         prefix = req.get("prefix", "")
         if not isinstance(prefix, str):
             raise RequestError(protocol.BAD_REQUEST, "prefix must be a string")
@@ -260,7 +260,7 @@ class PtyService:
         ]
         return {"sessions": rows}
 
-    def _new(self, req: dict[str, Any]) -> dict[str, Any]:
+    def _new(self, req: dict[str, object]) -> dict[str, object]:
         name = _text(req, "name")
         if not _NAME_RE.fullmatch(name):
             raise RequestError(
@@ -358,7 +358,7 @@ class PtyService:
         self._loop.call_soon_threadsafe(self._attach, created, cmd)
         return created
 
-    def _send(self, req: dict[str, Any]) -> None:
+    def _send(self, req: dict[str, object]) -> None:
         found = self._require(req)
         try:
             data = session.decode_data(req.get("data"))
@@ -369,20 +369,20 @@ class PtyService:
         except OSError as exc:
             raise RequestError(protocol.ERROR, f"session {found.name} is gone: {exc}") from exc
 
-    def _capture(self, req: dict[str, Any]) -> dict[str, Any]:
+    def _capture(self, req: dict[str, object]) -> dict[str, object]:
         found = self._require(req)
         # Protective clamp: CAPTURE_MAX_LINES (why it is a constant lives there).
         lines = _count(req, "lines", 200, low=1, high=CAPTURE_MAX_LINES)
         text = found.screen().render(lines, scrollback=bool(req.get("scrollback", True)))
         return {"text": text}
 
-    def _resize(self, req: dict[str, Any]) -> None:
+    def _resize(self, req: dict[str, object]) -> None:
         found = self._require(req)
         cols = _count(req, "cols", 0, low=1, high=RESIZE_MAX)
         rows = _count(req, "rows", 0, low=1, high=RESIZE_MAX)
         found.resize(cols, rows)
 
-    def _kill(self, req: dict[str, Any]) -> dict[str, Any]:
+    def _kill(self, req: dict[str, object]) -> dict[str, object]:
         found = self._live(_text(req, "name"))
         if found is None:
             return {"mode": "noop", "interrupted": False}  # idempotent, like posixproc
@@ -401,7 +401,7 @@ class PtyService:
         except RuntimeError as exc:
             raise RequestError(protocol.ERROR, str(exc)) from exc
 
-    def _close_all(self, req: dict[str, Any]) -> dict[str, Any]:
+    def _close_all(self, req: dict[str, object]) -> dict[str, object]:
         grace_s, kill_s = _seconds(req, "grace_s"), _seconds(req, "kill_s")
         return self.close_everything(grace_s=grace_s, kill_s=kill_s).to_wire()
 
@@ -518,7 +518,7 @@ class PtyService:
                 if reaped:
                     self._end(watching)
 
-    def handle(self, req: dict[str, Any]) -> dict[str, Any]:
+    def handle(self, req: dict[str, object]) -> dict[str, object]:
         """Answer one request object; never raises."""
         req_id = req.get("id")
         method = req.get("method")

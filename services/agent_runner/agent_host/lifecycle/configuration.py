@@ -12,6 +12,7 @@ from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot, settings
+from base.host.boundary.untyped import object_of
 from base.host.env.registry import child_env
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.harness.registration import SecureRandom
@@ -41,6 +42,10 @@ def boot_process() -> ConfigBoot:
     return config
 
 
+def _view_field(view: object, domain: str, field: str) -> object:
+    return object_of(getattr, object_of(getattr, view, domain), field)
+
+
 def host_policy(
     config: ConfigBoot,
     *,
@@ -65,7 +70,7 @@ def host_policy(
         ),
         default_model=config.view.lm.llm_model,
         llm_override=config.view.lm.llm_override,
-        default_reader=lambda domain, field: getattr(getattr(config.view, domain), field),
+        default_reader=lambda domain, field: _view_field(config.view, domain, field),
         clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
         harness_registration_ttl_seconds=daemon.harness_registration_ttl_seconds,
         held_settle_budget_s=daemon.held_settle_budget_s,

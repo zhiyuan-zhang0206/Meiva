@@ -15,6 +15,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from base.agents.birth.harness import LAUNCHABLE_HARNESSES
 from base.api_contracts.agent_contract import Harness
+from base.db.rows import aquery_one
 from base.log import logger
 from services.agent_runner.agent_host.scheduling.stored_config import StoredConfig
 
@@ -81,23 +82,17 @@ async def read_stored_config(
     control_pool: AsyncConnectionPool[psycopg.AsyncConnection], agent_id: int
 ) -> StoredConfig | None:
     async with control_pool.connection() as conn:
-        row = await (
-            await conn.execute(
-                "SELECT machine, status, harness, config_overlay, birth_config "
-                "FROM agents_meta WHERE id = %s",
-                (agent_id,),
-            )
-        ).fetchone()
+        row = await aquery_one(
+            conn,
+            StoredConfig,
+            "SELECT machine, status, harness, config_overlay, birth_config "
+            "FROM agents_meta WHERE id = %s",
+            (agent_id,),
+        )
     if row is None:
         logger.warning(
             "hosted wake for agent {agent_id} has no agents_meta row — ignoring",
             agent_id=agent_id,
         )
         return None
-    return StoredConfig(
-        machine=row[0],
-        status=row[1],
-        harness=row[2],
-        config_overlay=row[3],
-        birth_config=row[4],
-    )
+    return row

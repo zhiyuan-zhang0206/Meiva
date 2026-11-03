@@ -10,7 +10,6 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 from uuid import UUID
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -88,7 +87,7 @@ class HostPolicy:
     cache: HostCachePolicy
     default_model: str
     llm_override: str
-    default_reader: Callable[[str, str], Any]
+    default_reader: Callable[[str, str], object]
     clock_factory: Callable[[], Clock]
     harness_registration_ttl_seconds: float
     stall: StallTiming
@@ -122,12 +121,15 @@ class HostPolicy:
 
     def resolve_slices(
         self,
-        pins: Mapping[str, Any],
-        plugin_pins: Mapping[str, Mapping[str, Any]],
+        pins: Mapping[str, object],
+        plugin_pins: Mapping[str, Mapping[str, object]],
         plugin_configs: Mapping[str, BaseModel] | None,
     ) -> AgentSlices:
         """Resolve the model at the existing slice boundary, with pins taking precedence."""
-        brain = AgentBrain(pins.get("llm_model", self.default_model))
+        pinned = pins.get("llm_model", self.default_model)
+        if not isinstance(pinned, str):
+            raise TypeError("the pinned llm_model must be a string")
+        brain = AgentBrain(pinned)
         return AgentSlices.resolve(
             pins,
             plugin_pins,
@@ -198,7 +200,7 @@ class HostStats:
 
 
 def admit_stored_model(
-    pins: dict[str, Any],
+    pins: dict[str, object],
     *,
     agent_id: int,
     stored: stored_config.StoredConfig,
@@ -236,8 +238,15 @@ def admit_stored_model(
     Returns True when the wake may proceed, False when the configuration cannot
     build (the caller returns without a turn).
     """
-    model = pins.get("llm_model") or default_model
+    pinned_value = pins.get("llm_model")
+    pinned = pinned_value if isinstance(pinned_value, str) else None
+    model = pinned or default_model
     try:
+        # meiva:note
+        # A pinned model that is not a string cannot build; it is rejected here like an unknown model,
+        # so the wake is consumed instead of raising into the dispatcher (#2344).
+        if pinned_value and pinned is None:
+            raise ValueError("llm_model must be a string")  # noqa: TRY301
         if Harness(stored.harness) is not Harness.MEIVA and not uses_harness_model_selection(
             stored.birth_config
         ):
@@ -267,8 +276,8 @@ def admit_stored_model(
             )
         return False
     rejected.pop(agent_id, None)
-    if Harness(stored.harness) is Harness.MEIVA and "llm_model" in pins:
-        pinned_model = pins["llm_model"]
+    if Harness(stored.harness) is Harness.MEIVA and pinned is not None:
+        pinned_model = pinned
         resolved_model = resolve_available_model(pinned_model, models=catalog.models)
         if resolved_model != pinned_model:
             pins["llm_model"] = resolved_model
