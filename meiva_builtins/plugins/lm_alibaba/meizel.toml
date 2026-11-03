@@ -1,5 +1,5 @@
 [purity]
 "plugin.py" = "strict"
 
-[roots]
-"provider.py" = { kinds = ["settings"], why = "Alibaba Qwen provider builder reads the configured DashScope base URL from settings" }
+[debt.ambient-read]
+"provider.py#settings base.config.settings" = { count = 1, owner = "#5816", until = "waits for the provider factory to hand each binding its home's configured endpoint: `BuildContext` carries the model, keys, effort, timeout and the media-path `base_url` override, but a provider's own configured host is not in it, so the builder reads the settings registry itself; the sibling providers use published constants, and this is the first one whose host is configuration (`MEIVA_DASHSCOPE_BASE_URL`, because a dedicated Model Studio workspace serves the same API on its own host)" }

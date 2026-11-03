@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from base.paths.home import resolve_meiva_home
@@ -22,7 +23,7 @@ def main() -> int:
 
     home = resolve_meiva_home()
     pool = pool_dir(home)
-    branch = branch_name(home)
+    branch = branch_name(home, environ=os.environ)
     print(f"memory pool: {pool}  branch: {branch}")
 
     current = current_branch(pool)

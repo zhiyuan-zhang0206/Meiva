@@ -11,6 +11,7 @@ import meiva
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
+from base.clock import Clock
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -59,6 +60,10 @@ def test_concurrent_duplicate_note_has_one_business_effect(
                 clients=clients,
                 bus=pinned_bus,
                 meiva_home=meiva_home(),
+                # meiva:note
+                # The note stamp comes from the context's clock, which the SDK root fills in a real
+                # process; a hand-built context has to carry one or the update has no instant.
+                clock_factory=Clock.from_settings,
             )
             barrier.wait()
             task_registry.update_in_context(

@@ -22,7 +22,9 @@ fn = sys.argv[1]
 if fn == "pool_dir":
     print(str(pool_ops.pool_dir(resolve_meiva_home())))
 elif fn == "machine_name":
-    print(pool_ops.machine_name(resolve_meiva_home()))
+    import os
+
+    print(pool_ops.machine_name(resolve_meiva_home(), environ=os.environ))
 elif fn == "follows_variable":
     import os
 

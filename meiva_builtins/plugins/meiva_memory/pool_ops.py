@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -34,11 +35,12 @@ def pool_dir(home: Path) -> Path:
 
 
 # meiva:note
-# This host's machine name: `MEIVA_MACHINE_NAME` in the process environment, else in `home`'s
-# `.env`. Builds no Settings. A host that declares neither is not a configured unit; the steward
-# would push under a made-up branch, so this refuses instead.
-def machine_name(home: Path) -> str:
-    env = os.environ.get("MEIVA_MACHINE_NAME", "").strip()
+# This host's machine name: `MEIVA_MACHINE_NAME` in `environ`, else in `home`'s `.env`. Builds no
+# Settings. A host that declares neither is not a configured unit; the steward would push under a
+# made-up branch, so this refuses instead. `environ` is the process environment its entry script
+# read once -- the steward passes its own, so this helper reads none.
+def machine_name(home: Path, *, environ: Mapping[str, str]) -> str:
+    env = environ.get("MEIVA_MACHINE_NAME", "").strip()
     if env:
         return env
     declared = (dotenv_values(home / ".env").get("MEIVA_MACHINE_NAME") or "").strip()
@@ -50,8 +52,8 @@ def machine_name(home: Path) -> str:
     )
 
 
-def branch_name(home: Path) -> str:
-    return f"machine-{machine_name(home)}"
+def branch_name(home: Path, *, environ: Mapping[str, str]) -> str:
+    return f"machine-{machine_name(home, environ=environ)}"
 
 
 def current_branch(pool: Path) -> str:

@@ -25,6 +25,7 @@ from base.agents.tasks.reminder_window import (
     resets_window,
 )
 from base.agents.tasks.rules import first_open_child, is_closed, open_title_holder
+from base.clock import Clock
 
 if TYPE_CHECKING:
     # Annotation-only here; the runtime import sits at the raise site so plugin
@@ -62,12 +63,14 @@ _MAX_REMIND_INTERVAL_SECONDS = _task_priority.MAX_REMIND_INTERVAL_SECONDS
 _resolve_create_args = _task_priority.resolve_create_args
 
 
-def _append_note_to_results(cur: psycopg.Cursor, task_id: int, note: str) -> None:
+# meiva:note
+# `clock` is the process clock the caller already holds (the task registry takes it from its
+# `MeivaContext`): the note carries the instant it was written and the zone it is rendered in, and
+# neither is read here.
+def _append_note_to_results(cur: psycopg.Cursor, task_id: int, note: str, *, clock: Clock) -> None:
     """Append a timestamped note line to a task's results within the
     current transaction.  Caller must hold FOR UPDATE on the row."""
-    from meiva.sdk_surface import settings as sdk_settings
-
-    line = task_note_line(note, clock=sdk_settings.clock(), now=datetime.now(UTC))
+    line = task_note_line(note, clock=clock, now=clock.now())
     cur.execute(
         "SELECT results FROM agent_tasks WHERE id = %s FOR UPDATE",
         (task_id,),
@@ -102,7 +105,7 @@ def validate_status(status: str | None) -> None:
 # now is always accepted: it resumes the reminders, the one direction no bound guards. This lives
 # here, beside the note stamp, because this module is the update helper that owns the clock read.
 # Returns the deadline as an aware UTC instant, rejected when this home cannot honor it.
-def pause_deadline(value: datetime | str, *, max_seconds: int | None) -> datetime:
+def pause_deadline(value: datetime | str, *, max_seconds: int | None, clock: Clock) -> datetime:
     deadline = datetime.fromisoformat(value) if isinstance(value, str) else value
     if not isinstance(deadline, datetime):
         raise TypeError(
@@ -114,7 +117,7 @@ def pause_deadline(value: datetime | str, *, max_seconds: int | None) -> datetim
             "reminders_paused_until needs an explicit UTC offset (e.g. 2026-10-30T00:00:00+08:00)"
         )
     deadline = deadline.astimezone(UTC)
-    now = datetime.now(UTC)
+    now = clock.now()
     if deadline <= now:
         return deadline
     if max_seconds is None:
@@ -235,6 +238,7 @@ def write_task_update(
     update: UpdateWrite,
     reset_on: frozenset[str],
     actor: int | None,
+    clock: Clock,
 ) -> tuple[int | None, str, int | None, Event]:
     """Apply an update() row write inside the caller's transaction.
 
@@ -339,7 +343,7 @@ def write_task_update(
     # Append a timestamped note to results — works with any status or
     # standalone (no status change) as a drop-in for log().
     if update.note is not None:
-        _append_note_to_results(cur, task_id, update.note)
+        _append_note_to_results(cur, task_id, update.note, clock=clock)
         changes.append("note appended")
 
     owner_changing = update.owner is not None

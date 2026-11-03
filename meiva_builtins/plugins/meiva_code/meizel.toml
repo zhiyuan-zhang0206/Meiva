@@ -10,5 +10,5 @@ exports = ["agent_runtime.py", "plugin.py"]
 [purity]
 "__init__.py" = "strict"
 
-[roots]
-"_state.py" = { kinds = ["home"], why = "Plugin state factory resolves current agent workspace or user home as default logical cwd" }
+[debt.ambient-read]
+"_state.py#home pathlib.Path.home" = { count = 1, owner = "#5816", until = "waits for the state schema to take its default cwd from a caller: `cwd` is a pydantic field default factory (`Field(default_factory=default_cwd)`), constructed with no arguments by the state class itself; the host's after-init fills an absent channel from the invocation's Runtime, and a direct child construction has an SDK identity and lands in `agent_workspace`, so the branch without that identity is this process's own home -- the only cwd a state built outside both can be given" }
