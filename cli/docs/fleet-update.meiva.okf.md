@@ -55,8 +55,8 @@ before any SSH. The flags, their modes and the forwarded stop and start choices 
 
 ## The up half
 
-Ordered steps (`meiva start` on gateway then runners, roster convergence, runner
-smoke, `meiva packages refresh`, drift checks and silence expiry) and completion
+Ordered steps (`meiva start` on gateway then runners, roster convergence,
+`meiva packages refresh`, drift checks and silence expiry) and completion
 gates live in [[cli/docs/fleet-update-window/up-half.meiva.okf.md]].
 
 A failure ends the half: nothing rolls back, the message names the step to
@@ -97,6 +97,6 @@ code = ["cli/fleet_update/__init__.py:main", "cli/fleet_update/down.py:down", "c
 tests = ["cli/tests/fleet_update/test_fleet_update.py::test_runners_stop_first_and_start_last", "cli/tests/fleet_update/test_fleet_update.py::test_run_does_not_start_after_a_failed_down", "cli/tests/fleet_update/test_fleet_update.py::test_run_reports_up_failure_without_repeating_down", "cli/tests/fleet_update/test_fleet_update.py::test_run_dry_run_plans_both_halves_without_mutation", "cli/tests/fleet_update/test_fleet_update.py::test_run_uses_one_log_and_accepts_both_halves_options", "cli/tests/fleet_update/test_fleet_update.py::test_run_requires_a_target_before_contacting_hosts", "cli/tests/fleet_update/test_fleet_update_choices.py::test_the_operators_arguments_are_spliced_verbatim_into_each_hosts_stop_and_start", "cli/tests/fleet_update/test_fleet_update_choices.py::test_missing_choices_are_all_listed_at_once_and_no_host_is_touched", "cli/tests/fleet_update/test_fleet_update_gates.py::test_uncertified_or_tampered_targets_refuse_exit_2_before_any_ssh_command"]
 ```
 
-The gateway stops after every runner and starts before any runner; NEW is fetched on every host before any stop; the switch follows the stops; the drift checks run last and every one runs, so a red never skips the smoke or the refresh; the first failure ends the half with no rollback (refusals exit 2, failures exit 1).
+The gateway stops after every runner and starts before any runner; NEW is fetched on every host before any stop; the switch follows the stops; the drift checks run last and every one runs, so a red never skips the refresh; the first failure ends the half with no rollback (refusals exit 2, failures exit 1).
 
 Parent: [[cli/docs/cli.meiva.okf.md]].

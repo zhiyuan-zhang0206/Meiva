@@ -132,7 +132,7 @@ in source mode"). The fleet never decides what to keep.
 It judges a host's stop by two facts, both required: `meiva stop` exited 0, and the
 host's `run/lifecycle-op.json` then records a stop that is complete with result rc 0.
 It judges a start by `meiva start`'s exit code, which is 0 only after readiness, then
-the roster and smoke checks. A host counts as already stopped (a rerun of `down`)
+the roster, package-refresh and drift checks. A host counts as already stopped (a rerun of `down`)
 only when that journal's last operation is such a stop and no meiva-root is running.
 The separate halves remain available for manual release work and recovery.
 A stored-script upgrade uses the

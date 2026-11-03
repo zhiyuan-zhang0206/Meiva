@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 
-from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
 from base.paths import repo_root
 
 _ROSTER = {
@@ -37,20 +36,6 @@ class Gateway:
     def respond(self, method: str, path: str) -> tuple[int, object]:
         if (method, path) == ("GET", "/api/cluster/roster?fresh=true"):
             return 200, [{**_ROSTER, "not_in_public_summary": "discard"}]
-        if (method, path) == ("POST", "/api/keyed/v1/agents"):
-            return 201, {"id": 17}
-        if (method, path) == ("GET", "/api/agents/17/timeline"):
-            return 200, {
-                "items": [
-                    {"kind": "agent_code", "payload": "print(1 + 2)"},
-                    {"kind": "code_output", "payload": "stdout\n\n3\n"},
-                ]
-            }
-        if method == "POST" and path in {
-            "/api/agents/17/messages",
-            "/api/agents/17/terminate",
-        }:
-            return 200, {}
         return 404, {"error": "unexpected request"}
 
 
@@ -59,7 +44,7 @@ def gateway() -> Iterator[Gateway]:
     state = Gateway()
 
     class Handler(BaseHTTPRequestHandler):
-        def handle_request(self) -> None:
+        def do_GET(self) -> None:
             length = int(self.headers.get("Content-Length", "0"))
             body = json.loads(self.rfile.read(length)) if length else None
             headers = {key.lower(): value for key, value in self.headers.items()}
@@ -74,12 +59,6 @@ def gateway() -> Iterator[Gateway]:
             self.send_header("Content-Length", str(len(raw)))
             self.end_headers()
             self.wfile.write(raw)
-
-        def do_GET(self) -> None:
-            self.handle_request()
-
-        def do_POST(self) -> None:
-            self.handle_request()
 
         def log_message(self, format: str, *args: object) -> None:
             pass
@@ -134,32 +113,11 @@ def test_roster_program_uses_current_configuration_and_gateway_api(
     assert gateway.secret not in proc.stdout + proc.stderr
 
 
-def test_smoke_program_spawns_executes_and_terminates_with_current_gateway_api(
+def test_gateway_program_refuses_unknown_verb_without_calling_gateway(
     tmp_path: Path, gateway: Gateway
 ) -> None:
     proc = run_program(tmp_path, gateway, "smoke", "runner-a", "10")
-    assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert json.loads(proc.stdout) == {
-        "completed": True,
-        "spawn": 201,
-        "agent": 17,
-        "terminate": 200,
-    }
-    assert [(method, path) for method, path, _, _ in gateway.calls] == [
-        ("POST", "/api/keyed/v1/agents"),
-        ("POST", "/api/agents/17/messages"),
-        ("GET", "/api/agents/17/timeline"),
-        ("POST", "/api/agents/17/terminate"),
-    ]
-    assert all(
-        headers["authorization"] == f"Bearer {gateway.secret}" for _, _, headers, _ in gateway.calls
-    )
-    _, _, spawn_headers, spawn_body = gateway.calls[0]
-    assert spawn_body == {"machine": "runner-a"}
-    assert spawn_headers[SCOPE_HEADER.lower()] == PRINCIPAL_SCOPE
-    assert len(spawn_headers["idempotency-key"]) == 32
-    assert gateway.calls[1][3] == {
-        "content": "Update smoke test. Run exactly this Python code with your code tool, once: print(1 + 2)",
-        "source": "user",
-    }
+    assert proc.returncode == 2
+    assert "usage: fleet_gateway.py roster" in proc.stderr
+    assert gateway.calls == []
     assert gateway.secret not in proc.stdout + proc.stderr

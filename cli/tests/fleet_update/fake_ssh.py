@@ -74,14 +74,6 @@ class Sim:
         self.s["host_up"][alias] = True
         return 0
 
-    # meiva:note
-    # A smoke runs on the gateway, so the host it is about is the one in the command: a test
-    # stages that machine's red smoke without touching the gateway's own line.
-    def _smoke(self, command: str) -> int:
-        name = command.partition(" - smoke ")[2].split()[0].strip("'")
-        self.s["smoked"].append(name)
-        return self._failure("smoke", name)
-
     def _effect(self, kind: str, alias: str, host: State, command: str) -> int:
         self.s["effects"].append([kind, alias])
         if rc := self._failure(kind, alias):
@@ -92,8 +84,6 @@ class Sim:
             self._switch(host, command)
         elif kind in ("start", "oneshot"):
             return self._start(kind, alias, host)
-        elif kind == "smoke":
-            return self._smoke(command)
         elif kind == "refresh":
             assert "--force" not in command
         return 0
@@ -182,7 +172,6 @@ class Sim:
             "--detach": "switch",
             "launchctl bootstrap": "oneshot",
             'meiva" start': "start",
-            " - smoke": "smoke",
             "packages refresh": "refresh",
         }
         kind = next(k for s, k in kinds.items() if s in command)
@@ -284,8 +273,6 @@ def _barrier_participant(alias: str, command: str) -> tuple[str, str] | None:
         return "switch", alias
     if "launchctl bootstrap" in command or 'meiva" start' in command:
         return "start", alias
-    if " - smoke " in command:
-        return "smoke", command.partition(" - smoke ")[2].split()[0].strip("'")
     if "packages refresh" in command:
         return "refresh", alias
     return None

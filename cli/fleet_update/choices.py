@@ -91,7 +91,7 @@ _HALF_VALUES: dict[str, tuple[tuple[str, Callable[[str], object]], ...]] = {
         ("--silence-hours", float),
         ("--lease-confirm-seconds", _seconds),
     ),
-    "up": (("--smoke-timeout", int), ("--roster-timeout", int)),
+    "up": (("--roster-timeout", int),),
 }
 _NAMED = {"--only-service", "--disable-service", "--keep-service"}
 _SCOPES = {"run": ("both", "down", "up"), "down": ("both", "down"), "up": ("both", "up")}

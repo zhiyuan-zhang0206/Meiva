@@ -111,7 +111,7 @@ cat "$UPDATE_DIR/stdout.log" "$UPDATE_DIR/stderr.log"
 ```
 
 The command's redacted phase log is under `logs/`. Exit code `0` from a real
-`run` means both halves and the existing roster, agent smoke and drift checks
+`run` means both halves and the existing roster, package-refresh and drift checks
 passed. Report those results and any unlisted/offline machines. Missing
 `exit-code` means running or interrupted, never success; inspect the launchd
 state and logs before deciding which, and keep external SSH access for recovery

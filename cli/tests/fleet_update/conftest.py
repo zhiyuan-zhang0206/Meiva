@@ -38,10 +38,7 @@ _STOP: tuple[Group, ...] = (
     _group("--lease-confirm-seconds", "--lease-confirm-seconds", "0"),
     _group("--message --no-message", "--no-message"),
 )
-_START: tuple[Group, ...] = (
-    _group("--smoke-timeout", "--smoke-timeout", "300"),
-    _group("--roster-timeout", "--roster-timeout", "90"),
-)
+_START: tuple[Group, ...] = (_group("--roster-timeout", "--roster-timeout", "90"),)
 
 
 @pytest.fixture

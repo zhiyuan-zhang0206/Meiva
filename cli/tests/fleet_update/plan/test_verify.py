@@ -1,8 +1,7 @@
 # meiva:note
 # What `up` concludes from the roster and the per-host answers: which machines it waits for, how
-# long to keep waiting, which smokes run and which hosts are reported skipped, and the line each
-# listed host ends with. The inputs are what the gateway's roster program printed and what each
-# step returned.
+# long to keep waiting, which hosts are reported skipped, and the line each listed host ends with.
+# The inputs are what the gateway's roster program printed and what each step returned.
 # meiva:link cli/docs/fleet-update.meiva.okf.md
 from __future__ import annotations
 
@@ -28,11 +27,9 @@ from cli.fleet_update.plan.roster import (
 )
 from cli.fleet_update.plan.verify_steps import (
     DriftCheck,
-    SmokeStep,
     drift_checks,
     duplicate_names,
     machine_name,
-    smoke_plan,
 )
 
 _SHA = "a" * 40
@@ -146,24 +143,6 @@ def test_the_roster_is_read_again_after_a_poll_until_the_window_is_spent(
     assert poll_delay(elapsed, 30, 5.0) == delay
 
 
-def test_each_serving_machine_gets_one_smoke_run_by_the_host_that_owns_it() -> None:
-    names = {"gw": "gw", "mac": "mac-mini", "lin": "lin"}
-    rows = (_row("gw"), _row("mac-mini"), _row("lin", serves=False))
-    assert smoke_plan(rows, names, frozenset({"gw", "mac", "lin"})) == (
-        SmokeStep("gw", "gw", runs=True),
-        SmokeStep("mac", "mac-mini", runs=True),
-    )
-
-
-def test_a_machine_whose_host_never_started_is_skipped_not_smoked() -> None:
-    names = {"gw": "gw", "lin": "lin"}
-    rows = (_row("gw"), _row("lin"))
-    assert smoke_plan(rows, names, frozenset({"gw"})) == (
-        SmokeStep("gw", "gw", runs=True),
-        SmokeStep("lin", "lin", runs=False),
-    )
-
-
 def test_the_drift_checks_are_the_gateways_schedules_then_every_hosts_plugins() -> None:
     assert drift_checks("gw", ("gw", "mac")) == (
         DriftCheck("gw", "schedules verify --no-notify"),
@@ -239,10 +218,16 @@ def test_a_host_with_no_readable_record_fails_at_its_start_with_the_starts_own_w
 
 
 def test_every_listed_host_ends_with_serving_its_failures_or_why_it_was_skipped() -> None:
-    failures = (HostFailure("mac", "smoke", "exit 2"), HostFailure("mac", "plugins verify", "red"))
+    failures = (
+        HostFailure("mac", "packages refresh", "exit 2"),
+        HostFailure("mac", "plugins verify", "red"),
+    )
     skipped = {"lin": "start failed", "bsd": "dry run"}
     assert outcome("gw", failures, skipped) == "serving"
-    assert outcome("mac", failures, skipped) == "failed at 'smoke': exit 2; 'plugins verify': red"
+    assert (
+        outcome("mac", failures, skipped)
+        == "failed at 'packages refresh': exit 2; 'plugins verify': red"
+    )
     assert outcome("lin", failures, skipped) == "skipped: start failed"
     assert (
         outcome("lin", (HostFailure("lin", "start", "boom"),), skipped) == "failed at 'start': boom"
@@ -250,9 +235,12 @@ def test_every_listed_host_ends_with_serving_its_failures_or_why_it_was_skipped(
 
 
 def test_a_partial_up_is_summarised_one_line_per_failure_then_the_count() -> None:
-    failures = (HostFailure("lin", "start", "boom"), HostFailure("mac", "smoke", "red"))
+    failures = (
+        HostFailure("lin", "start", "boom"),
+        HostFailure("mac", "packages refresh", "red"),
+    )
     assert incomplete_summary(failures) == (
         "PARTIAL: lin failed at 'start': boom",
-        "PARTIAL: mac failed at 'smoke': red",
+        "PARTIAL: mac failed at 'packages refresh': red",
         "up incomplete: 2 host(s) failed; the rest are serving. Fix each and rerun `up` (idempotent).",
     )

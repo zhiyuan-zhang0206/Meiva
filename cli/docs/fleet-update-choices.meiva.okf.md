@@ -37,7 +37,7 @@ and start choices are forwarded unchanged, never checked against the diff.
 - Every half, forwarded to every host's `meiva start` (over SSH, or in the macOS
   one-shot LaunchAgent) by `up` and by a failed `down`'s recovery: `--all-services`,
   `--only-service NAME` or `--disable-service NAME` (repeatable), and `--start-timeout`.
-- `up` / `run`: `--smoke-timeout`, `--roster-timeout`.
+- `up` / `run`: `--roster-timeout`.
 
 One start selection applies to every host.
 

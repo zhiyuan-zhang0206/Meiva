@@ -39,7 +39,7 @@ def test_runners_stop_first_and_start_last(
     _assert_wave_order(cluster)
     kinds = [kind for kind, _ in cluster.effects if not kind.startswith("silence-")]
     assert kinds.index("fetch") < kinds.index("stop") < kinds.index("switch")
-    assert kinds[-10:-4] == ["smoke"] * 3 + ["refresh"] * 3
+    assert kinds[-7:-4] == ["refresh"] * 3
     assert set(kinds[-4:]) == {"schedules-verify", "plugins-verify"}
     assert set(_effect_aliases(cluster, "refresh")) == {"gw", "mac", "lin"}
     assert all(h["up"] and h["head"] == cluster.new for h in cluster.hosts.values())
@@ -54,7 +54,6 @@ def test_independent_waves_fan_out_concurrently_without_breaking_gateway_order(
         "stop": ["mac", "lin"],
         "switch": ["gw", "mac", "lin"],
         "start": ["mac", "lin"],
-        "smoke": ["gw", "mac", "lin"],
         "refresh": ["gw", "mac", "lin"],
     }
     assert run("run") == 0
@@ -71,7 +70,7 @@ def test_run_does_not_start_after_a_failed_down(
     cluster.fail[failing] = 1
     assert run("run") == 1
     assert failing in cluster.effects
-    assert not {"smoke", "refresh"} & {k for k, _ in cluster.effects}
+    assert "refresh" not in {k for k, _ in cluster.effects}
     if failing[0] == "stop":
         assert ("stop", "gw") not in cluster.effects
         assert "switch" not in {k for k, _ in cluster.effects}
@@ -83,7 +82,7 @@ def test_run_does_not_start_after_a_failed_down(
     assert cluster.silence_open
 
 
-@pytest.mark.parametrize("failing", [("smoke", "gw"), ("plugins-verify", "lin")])
+@pytest.mark.parametrize("failing", [("refresh", "gw"), ("plugins-verify", "lin")])
 def test_run_reports_up_failure_without_repeating_down(
     env: tuple[Cluster, Callable[..., int]],
     capsys: pytest.CaptureFixture[str],
@@ -92,8 +91,8 @@ def test_run_reports_up_failure_without_repeating_down(
     cluster, run = env
     cluster.fail[failing] = 1
     # meiva:note
-    # A failed smoke or drift check is a partial up (3): the window did not refuse, and every
-    # other host is still reported. Down never repeats, which is what this test is about.
+    # A failed package refresh or drift check is a partial up (3): the window did not refuse, and
+    # every other host is still reported. Down never repeats, which is what this test is about.
     assert run("run") == 3
     stops = [a for k, a in cluster.effects if k == "stop"]
     switches = [a for k, a in cluster.effects if k == "switch"]
@@ -173,7 +172,7 @@ def test_run_dry_run_plans_both_halves_without_mutation(
     output = capsys.readouterr().out
     assert "phase: down" in output and "phase: up" in output
     assert "stop --yes" in output and "launchctl bootstrap" in output
-    assert "smoke MACHINE" in output and "plugins verify" in output
+    assert "packages refresh" in output and "plugins verify" in output
 
 
 def test_run_uses_one_log_and_accepts_both_halves_options(
@@ -187,8 +186,6 @@ def test_run_uses_one_log_and_accepts_both_halves_options(
             "30",
             "--start-timeout",
             "60",
-            "--smoke-timeout",
-            "45",
             "--roster-timeout",
             "15",
             "--silence-hours",
@@ -200,7 +197,7 @@ def test_run_uses_one_log_and_accepts_both_halves_options(
     assert len(logs) == 1 and logs[0].name.endswith("-run.log")
     output = logs[0].read_text()
     assert "--mode smooth --timeout 30" in output and " -ge 12 " in output
-    assert "smoke gw 45" in output
+    assert "packages refresh" in output
     assert "down complete" in output and "up complete" in output
     assert "run `up` when ready" not in output
     assert cluster.silence_hours == 2

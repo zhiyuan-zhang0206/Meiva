@@ -81,7 +81,6 @@ def test_disabled_services_and_keeping_infra_are_forwarded_too(
         (["--stop-timeout", "0"], "--stop-timeout 0: not a number > 0"),
         (["--start-timeout", "-5"], "--start-timeout -5: not a number > 0"),
         (["--silence-hours", "0"], "--silence-hours 0.0: not a number > 0"),
-        (["--smoke-timeout", "0"], "--smoke-timeout 0: not a number > 0"),
         (["--roster-timeout", "-1"], "--roster-timeout -1: not a number > 0"),
         (["--lease-confirm-seconds", "-1"], "'-1' is not a number of seconds >= 0"),
         (["--mode", "gentle"], "--mode smooth|force"),
@@ -163,7 +162,6 @@ _ONE_EACH = [
     (["--silence-hours", "4"], "--silence-hours"),
     (["--lease-confirm-seconds", "0"], "--lease-confirm-seconds"),
     (["--no-message"], "--message | --no-message"),
-    (["--smoke-timeout", "300"], "--smoke-timeout"),
     (["--roster-timeout", "90"], "--roster-timeout"),
 ]
 
@@ -223,7 +221,7 @@ def test_missing_choices_are_all_listed_at_once_and_no_host_is_touched(
             "--message | --no-message",
         ]
     if half != "down":
-        expected += ["--smoke-timeout", "--roster-timeout"]
+        expected += ["--roster-timeout"]
     assert all(item in err for item in expected), err
     assert cluster.commands == [] and cluster.effects == []
     assert not (tmp_path / "logs").exists()

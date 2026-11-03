@@ -16,7 +16,6 @@ from cli.fleet_update.plan.gateway_commands import (
     pre_verify_script,
     refresh_command,
     roster_command,
-    smoke_command,
 )
 from cli.fleet_update.plan.host_commands import (
     CLEAN,
@@ -84,7 +83,6 @@ def test_the_helper_probe_reads_the_target_commits_objects_not_the_installed_che
 
 def test_the_gateway_programs_are_asked_by_verb() -> None:
     assert roster_command().endswith('"$S/.venv/bin/python" - roster')
-    assert smoke_command("mac mini", 300).endswith(" - smoke 'mac mini' 300")
     assert refresh_command().endswith('meiva" packages refresh')
     assert drift_command("plugins verify").endswith('meiva" plugins verify')
 

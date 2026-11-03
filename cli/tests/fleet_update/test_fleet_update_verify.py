@@ -31,23 +31,22 @@ _UNSETTLED_ROSTER = json.dumps(
 
 
 # meiva:note
-# The verification answers for every host, whatever the others did: one machine's red smoke must
-# not delete what the window learned about the rest, so the run still verifies them and still
+# The verification answers for every host, whatever the others did: one machine's failed check
+# must not delete what the window learned about the rest, so the run still verifies them and still
 # reports a line per host.
-def test_one_red_smoke_still_verifies_and_reports_every_host(
+def test_one_failed_refresh_still_verifies_and_reports_every_host(
     env: tuple[Cluster, Callable[..., int]], capsys: pytest.CaptureFixture[str]
 ) -> None:
     cluster, run = env
     assert run("down") == 0
-    cluster.fail[("smoke", "mac")] = 1
+    cluster.fail[("refresh", "mac")] = 1
     assert run("up") == PARTIAL_FAILURE_EXIT
     out = capsys.readouterr().out
-    assert len(cluster.smoked) == 3 and set(cluster.smoked) == {"gw", "mac", "lin"}
     matrix = [line.partition("matrix: ")[2] for line in out.splitlines() if "matrix: " in line]
     assert [row.split()[0] for row in matrix] == ["gw", "mac", "lin"]
     assert matrix[0].endswith("serving") and matrix[2].endswith("serving")
-    assert matrix[1].startswith("mac failed at 'smoke'")
-    assert "plugins verify" in out and "packages refresh" in out
+    assert matrix[1].startswith("mac failed at 'packages refresh'")
+    assert "plugins verify" in out and "schedules verify" in out
 
 
 def test_a_host_that_never_started_is_reported_skipped_not_missing(
@@ -60,9 +59,8 @@ def test_a_host_that_never_started_is_reported_skipped_not_missing(
     out = capsys.readouterr().out
     matrix = [line.partition("matrix: ")[2] for line in out.splitlines() if "matrix: " in line]
     assert len(matrix) == 3
-    assert matrix[0].startswith("gw ") and matrix[1].startswith("mac ")
+    assert matrix[0] == "gw serving" and matrix[1] == "mac serving"
     assert matrix[2].startswith("lin failed at 'start'")
-    assert len(cluster.smoked) == 2 and set(cluster.smoked) == {"gw", "mac"}
 
 
 def test_a_dry_run_says_the_helper_gate_was_not_evaluated(
@@ -128,7 +126,7 @@ def test_the_roster_wait_is_spent_on_the_sessions_clock() -> None:
             _UNSETTLED_ROSTER, Pacing(roster_poll_s=0.5, lease_tick_s=0.5), timers, most_reads=5
         ),
     )
-    args = argparse.Namespace(gateway="gw", roster_timeout=2, smoke_timeout=1, dry_run=False)
+    args = argparse.Namespace(gateway="gw", roster_timeout=2, dry_run=False)
     started = time.monotonic()
 
     with pytest.raises(FailedError):

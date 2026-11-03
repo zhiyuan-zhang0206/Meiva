@@ -23,7 +23,7 @@ from cli.fleet_update.plan.release_target import (
 from cli.tests.fleet_update.fleet_update_cluster import Cluster, certify_commit, git
 
 
-def test_drift_checks_run_after_the_smoke_and_the_refresh(
+def test_drift_checks_run_after_the_refresh(
     env: tuple[Cluster, Callable[..., int]],
 ) -> None:
     cluster, run = env
@@ -36,7 +36,7 @@ def test_drift_checks_run_after_the_smoke_and_the_refresh(
     first_verify = min(
         i for i, k in enumerate(kinds) if k in ("schedules-verify", "plugins-verify")
     )
-    assert first_verify > max(i for i, k in enumerate(kinds) if k in ("smoke", "refresh"))
+    assert first_verify > max(i for i, k in enumerate(kinds) if k == "refresh")
 
 
 @pytest.mark.parametrize(
@@ -58,7 +58,7 @@ def test_a_red_drift_check_fails_up_with_its_detail(
     assert run("up") == 3
     out = capsys.readouterr().out
     assert detail in out and f"matrix: {failing[1]} failed at" in out
-    assert {"smoke", "refresh"} <= {k for k, _ in cluster.effects}
+    assert "refresh" in {k for k, _ in cluster.effects}
     plugins = [a for k, a in cluster.effects if k == "plugins-verify"]
     assert len(plugins) == 3 and set(plugins) == {"gw", "mac", "lin"}
 

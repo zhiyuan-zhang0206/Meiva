@@ -107,7 +107,6 @@ class Cluster:
         self.names = {alias: alias for alias in self.hosts}
         self.silent: set[str] = set()
         self.hidden: set[str] = set()
-        self.smoked: list[str] = []
         self.laptop: dict[str, Any] | None = None
         self.effects: list[tuple[str, str]] = []
         self.commands: list[tuple[str, str]] = []
@@ -177,7 +176,6 @@ class Cluster:
             "names": self.names,
             "silent": sorted(self.silent),
             "hidden": sorted(self.hidden),
-            "smoked": self.smoked,
             "laptop": self.laptop,
             "effects": self.effects,
             "commands": self.commands,
@@ -211,7 +209,6 @@ class Cluster:
 
     def _adopt(self, data: dict[str, Any]) -> None:
         self.hosts = data["hosts"]
-        self.smoked = data["smoked"]
         self.effects = [(kind, alias) for kind, alias in data["effects"]]
         self.commands = [(alias, command) for alias, command in data["commands"]]
         self.roster_reads = data["roster_reads"]
