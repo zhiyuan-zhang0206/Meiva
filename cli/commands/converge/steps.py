@@ -106,7 +106,7 @@ def ensure_local_git_hooks(ctx: ConvergeCtx) -> None:
         return
     try:
         result = ctx.host.run(
-            list(hook_scan_argv(sys.executable, script)),
+            list(hook_scan_argv(ctx.host.platform.executable, script)),
             capture_output=True,
             text=True,
             timeout=_GIT_HOOKS_SCAN_TIMEOUT_S,

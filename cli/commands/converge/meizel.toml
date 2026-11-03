@@ -19,7 +19,5 @@ exports = ["brew_pin.py", "firewall.py", "firewall_command.py", "frontend_env.py
 "__init__.py" = "strict"
 
 [debt.ambient-read]
-"firewall.py#pid sys.executable" = { count = 1, owner = "#5816", until = "waits for `serving_binaries` to take the interpreter path from its caller: it reads `sys.executable` itself" }
 "ownership_preflight.py#pid grp.getgrgid" = { count = 1, owner = "#5816", until = "waits for nothing that can arrive: `_account` spells the repair command's group for the gid it just read from the account database, and falls back to the numeric gid when the group has no entry; a caller that already knew the name would have read the same database, and one that guessed would print a chown to a group nobody owns" }
 "ownership_preflight.py#pid pwd.getpwuid" = { count = 1, owner = "#5816", until = "waits for nothing that can arrive: `_account` resolves the uid `collect_ownership_warnings` takes from `ConvergeCtx.host` into the user name chown accepts, so the uid already arrives through the port that built this process's host and only the account database can say what that uid is called" }
-"steps.py#pid sys.executable" = { count = 1, owner = "#5816", until = "waits for `ensure_local_git_hooks` to take the interpreter path from its caller: it reads `sys.executable` itself" }
