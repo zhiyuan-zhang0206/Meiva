@@ -11,7 +11,7 @@ from base.clock import SYSTEM_TIMERS
 from base.clock.tests.fakes import system_clock
 from services.desktop.browser import page_lifecycle
 from services.desktop.browser.mcp_daemon import ChromeMcpDaemon, serve_with_upstream
-from services.desktop.browser.tab_groups.grouping import AgentTabGroups
+from services.desktop.browser.tab_groups.grouping import AgentTabGroups, ExtensionWorker
 from services.desktop.browser.tests.test_browser_mcp_daemon import (
     FakeUpstream,
     err,
@@ -133,9 +133,14 @@ async def test_grouping_failure_leaves_the_page_created_registered_and_selected(
     loguru_records: list[dict[str, Any]],
 ) -> None:
     up = FakeUpstream()
+    closed_port = _closed_local_port()
     d = new_daemon(
         up,
-        tab_groups=AgentTabGroups(_closed_local_port(), asyncio.TaskGroup(), timers=SYSTEM_TIMERS),
+        tab_groups=AgentTabGroups(
+            closed_port,
+            asyncio.TaskGroup(),
+            worker=ExtensionWorker(closed_port, timers=SYSTEM_TIMERS),
+        ),
     )
 
     explicit = await d.call_tool_for_agent("new_page", {"url": "https://a.example/"}, 7)
@@ -197,7 +202,11 @@ class WedgedChrome:
 
 async def test_a_stuck_grouping_neither_delays_new_page_nor_holds_the_daemon_lock() -> None:
     async with WedgedChrome() as chrome, asyncio.TaskGroup() as tasks:
-        groups = AgentTabGroups(chrome.port, tasks, timers=SYSTEM_TIMERS)
+        groups = AgentTabGroups(
+            chrome.port,
+            tasks,
+            worker=ExtensionWorker(chrome.port, timers=SYSTEM_TIMERS),
+        )
         d = new_daemon(FakeUpstream(), tab_groups=groups)
         try:
             started = time.monotonic()

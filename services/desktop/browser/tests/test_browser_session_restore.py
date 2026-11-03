@@ -24,6 +24,7 @@ from services.desktop.browser.session_restore import (
     Tab,
     ledger_path,
 )
+from services.desktop.browser.tab_groups.grouping import ExtensionWorker
 
 NOW = datetime(2026, 10, 22, tzinfo=UTC)
 
@@ -388,9 +389,45 @@ def test_record_for_stop_never_raises_and_records_nothing_without_a_browser(
 # ── the worker ladder ──────────────────────────────────────────────────────
 
 
+def _dead_worker_cdp_reply(
+    request: dict[str, Any], state: dict[str, Any], expressions: list[str]
+) -> dict[str, Any]:
+    method = request["method"]
+    req_id = request["id"]
+    if method == "Extensions.getExtensions":
+        found = (
+            [{"id": "EXT", "path": str(session_restore.EXTENSION_DIR)}] if state["loaded"] else []
+        )
+        return {"id": req_id, "result": {"extensions": found}}
+    if method == "Extensions.loadUnpacked":
+        state["loaded"] = True
+        state["live"] = True
+        return {"id": req_id, "result": {"id": "EXT"}}
+    if method == "Target.getTargets":
+        url = f"chrome-extension://EXT/{session_restore.shipped_worker()}"
+        infos = [{"type": "service_worker", "url": url, "targetId": "DEAD"}]
+        if state["live"]:
+            infos.append({"type": "service_worker", "url": url, "targetId": "LIVE"})
+        return {"id": req_id, "result": {"targetInfos": infos}}
+    if method == "Target.attachToTarget":
+        if request["params"]["targetId"] == "DEAD":
+            return {
+                "id": req_id,
+                "error": {"code": -32602, "message": "No target with given id found"},
+            }
+        return {"id": req_id, "result": {"sessionId": "S1"}}
+    if method == "Runtime.evaluate":
+        expr = request["params"]["expression"]
+        if expr == "typeof meivaGroup":
+            return {"id": req_id, "result": {"result": {"type": "string", "value": "function"}}}
+        expressions.append(expr)
+        return {"id": req_id, "result": {"result": {"value": {"ok": True}}}}
+    raise AssertionError(method)
+
+
 # meiva:note
 # A worker that idled out stays listed but refuses attach; only a reload
-#     brings a live one back (measured on Chrome 156).
+# brings a live one back (measured on Chrome 156).
 async def test_the_ladder_reloads_the_extension_after_a_dead_worker_refuses_attach() -> None:
     state: dict[str, Any] = {"loaded": True, "live": False}
     connections = 0
@@ -411,39 +448,7 @@ async def test_the_ladder_reloads_the_extension_after_a_dead_worker_refuses_atta
         with suppress(websockets.ConnectionClosed):
             async for raw_msg in conn:
                 raw = raw_msg if isinstance(raw_msg, str) else raw_msg.decode("utf-8")
-                request = json.loads(raw)
-                method = request["method"]
-                if method == "Extensions.getExtensions":
-                    found = (
-                        [{"id": "EXT", "path": str(session_restore.EXTENSION_DIR)}]
-                        if state["loaded"]
-                        else []
-                    )
-                    reply: dict[str, Any] = {"id": request["id"], "result": {"extensions": found}}
-                elif method == "Extensions.loadUnpacked":
-                    state["loaded"] = True
-                    state["live"] = True
-                    reply = {"id": request["id"], "result": {"id": "EXT"}}
-                elif method == "Target.getTargets":
-                    url = f"chrome-extension://EXT/{session_restore.shipped_worker()}"
-                    infos = [{"type": "service_worker", "url": url, "targetId": "DEAD"}]
-                    if state["live"]:
-                        infos.append({"type": "service_worker", "url": url, "targetId": "LIVE"})
-                    reply = {"id": request["id"], "result": {"targetInfos": infos}}
-                elif method == "Target.attachToTarget":
-                    target = request["params"]["targetId"]
-                    if target == "DEAD":
-                        reply = {
-                            "id": request["id"],
-                            "error": {"code": -32602, "message": "No target with given id found"},
-                        }
-                    else:
-                        reply = {"id": request["id"], "result": {"sessionId": "S1"}}
-                elif method == "Runtime.evaluate":
-                    expressions.append(request["params"]["expression"])
-                    reply = {"id": request["id"], "result": {"result": {"value": {"ok": True}}}}
-                else:
-                    raise AssertionError(method)
+                reply = _dead_worker_cdp_reply(json.loads(raw), state, expressions)
                 await conn.send(json.dumps(reply))
 
     async with websockets.asyncio.server.serve(
@@ -452,11 +457,15 @@ async def test_the_ladder_reloads_the_extension_after_a_dead_worker_refuses_atta
         sock = next(iter(server.sockets))
         addr: tuple[str, int] = sock.getsockname()
         ws_port = addr[1]
-        chrome = session_restore.CdpChrome(ws_port, timers=system_clock())
+        chrome = session_restore.CdpChrome(
+            ws_port,
+            worker=ExtensionWorker(ws_port, timers=system_clock()),
+        )
         assert await chrome.worker("meivaLayout()") == {"ok": True}
     # meiva:note
-    # The first attempt hit the dead target; the reload answered.
-    assert connections == 2
+    # The dead target refused attach, so `ExtensionWorker` reloaded the extension
+    # on the same websocket and attached to the fresh worker.
+    assert connections == 1
     assert expressions == ["meivaLayout()"]
 
 
@@ -470,10 +479,10 @@ def test_the_shipped_worker_reports_and_re_applies_the_layout_without_destroying
     assert "chrome.tabs.update(tab.id, { pinned: true })" in worker
     assert "chrome.tabs.group" in worker
     # meiva:note
-    # The recorded groups are re-made one per window through the same convergence
-    # the page path uses, so a restore cannot produce a second group with a title
-    # that already exists in that window.
-    assert "meivaConvergeWindow(group.title, windowId)" in worker
+    # Agent groups converge globally through `meivaConvergeTitle` so a restore
+    # cannot produce a second group for an agent, while user groups stay per-window.
+    assert "meivaConvergeTitle(group.title)" in worker
+    assert "chrome.tabGroups.query({ title: group.title, windowId })" in worker
     for forbidden in ("tabs.remove", "tabGroups.remove", "pinned: false", "tabs.move"):
         assert forbidden not in worker, forbidden
 

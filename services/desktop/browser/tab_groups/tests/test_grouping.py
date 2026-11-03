@@ -9,6 +9,7 @@ docs/decisions/engineering/design/contracts/2026-10-12-presentation-only-failure
 from __future__ import annotations
 
 import asyncio
+import base64
 import gc
 import hashlib
 import json
@@ -26,8 +27,12 @@ from base.clock import SYSTEM_TIMERS
 from services.desktop.browser.tab_groups import grouping
 from services.desktop.browser.tab_groups.grouping import (
     EXTENSION_DIR,
+    EXTENSION_NAME,
     AgentTabGroups,
+    ExtensionWorker,
     group_title,
+    stage_extension,
+    staged_extension_dir,
 )
 
 EXTENSION_ID = "ext0123456789abcdefghijklmnopabcd"
@@ -92,11 +97,13 @@ class ChromeModel:
         self.converge = converge if converge is not None else []
         self.converge_error = converge_error
         self.expressions: list[str] = []
+        self.uninstalled: list[str] = []
 
     def handlers(self) -> dict[str, Any]:
         return {
             "Extensions.getExtensions": self._get_extensions,
             "Extensions.loadUnpacked": self._load_unpacked,
+            "Extensions.uninstall": self._uninstall,
             "Target.getTargets": self._get_targets,
             "Target.attachToTarget": {"sessionId": "S1"},
             "Runtime.evaluate": self._evaluate,
@@ -118,13 +125,21 @@ class ChromeModel:
         return {"result": {"type": "object", "value": self.report}}
 
     def _get_extensions(self, _params: dict[str, Any]) -> dict[str, Any]:
-        found = [{"id": EXTENSION_ID, "path": str(EXTENSION_DIR)}] if self.loaded else []
+        found = (
+            [{"id": EXTENSION_ID, "name": EXTENSION_NAME, "path": str(EXTENSION_DIR)}]
+            if self.loaded
+            else []
+        )
         return {"extensions": found}
 
     def _load_unpacked(self, params: dict[str, Any]) -> dict[str, Any]:
         assert params == {"path": str(EXTENSION_DIR)}
         self.loaded, self.worker = True, SHIPPED_WORKER
         return {"id": EXTENSION_ID}
+
+    def _uninstall(self, params: dict[str, Any]) -> dict[str, Any]:
+        self.uninstalled.append(str(params["id"]))
+        return {}
 
     def _get_targets(self, _params: dict[str, Any]) -> dict[str, Any]:
         infos = [{"type": "page", "url": "https://example.com/", "targetId": "P1"}]
@@ -205,14 +220,19 @@ class FakeChrome:
         listing_timeout_s: float = grouping.LISTING_TIMEOUT_S,
         group_timeout_s: float = grouping.GROUP_TIMEOUT_S,
         worker_wait_s: float = grouping.WORKER_WAIT_S,
+        extension_dir: Path = EXTENSION_DIR,
     ) -> AgentTabGroups:
         return AgentTabGroups(
             self.port,
             _TASK_GROUPS[0],
+            worker=ExtensionWorker(
+                self.port,
+                timers=SYSTEM_TIMERS,
+                extension_dir=extension_dir,
+                worker_wait_s=worker_wait_s,
+            ),
             listing_timeout_s=listing_timeout_s,
             group_timeout_s=group_timeout_s,
-            worker_wait_s=worker_wait_s,
-            timers=SYSTEM_TIMERS,
         )
 
     async def _handle_http(
@@ -345,9 +365,21 @@ def test_manifest_points_at_the_worker_and_asks_only_for_what_it_uses() -> None:
     manifest = json.loads((EXTENSION_DIR / "manifest.json").read_text())
     worker = next(EXTENSION_DIR.glob("group-*.js"))
     assert manifest["manifest_version"] == 3
+    assert manifest["name"] == EXTENSION_NAME
+    assert len(base64.b64decode(manifest["key"], validate=True)) > 200
     assert manifest["background"] == {"service_worker": worker.name}
     assert sorted(manifest["permissions"]) == ["debugger", "tabGroups", "tabs"]
     assert sorted(p.name for p in EXTENSION_DIR.iterdir()) == sorted(["manifest.json", worker.name])
+
+
+def test_staged_extension_dir_syncs_manifest_and_prunes_stale_workers(tmp_path: Path) -> None:
+    staged = staged_extension_dir(tmp_path)
+    staged.mkdir(parents=True)
+    (staged / "group-000000000000.js").write_text("// old\n", encoding="utf-8")
+    stage_extension(staged)
+    assert sorted(p.name for p in staged.iterdir()) == sorted(["manifest.json", SHIPPED_WORKER])
+    assert (staged / "manifest.json").read_bytes() == (EXTENSION_DIR / "manifest.json").read_bytes()
+    assert (staged / SHIPPED_WORKER).read_bytes() == (EXTENSION_DIR / SHIPPED_WORKER).read_bytes()
 
 
 def test_worker_is_stateless_and_only_ever_ungroups_an_agents_last_tab() -> None:
@@ -520,6 +552,35 @@ async def test_a_copy_of_the_extension_at_another_path_is_not_ours() -> None:
     chrome.listings.append([_page("T1"), _page("T2")])
     await _group(chrome.groups(), 7, frozenset({"T1"}))
     assert chrome.ws.methods().count("Extensions.loadUnpacked") == 1
+
+
+async def test_stale_tab_group_extensions_from_other_paths_are_uninstalled(
+    tmp_path: Path,
+) -> None:
+    staged = staged_extension_dir(tmp_path)
+    model = ChromeModel(loaded=False)
+    handlers = model.handlers()
+    handlers["Extensions.getExtensions"] = {
+        "extensions": [
+            {"id": "OLD1", "name": EXTENSION_NAME, "path": "/releases/v1/extension"},
+            {"id": "OLD2", "name": EXTENSION_NAME, "path": "/releases/v2/extension"},
+            {"id": "USER1", "name": "User Dev Extension", "path": "/users/dev/ext"},
+        ]
+    }
+
+    def load_staged(params: dict[str, Any]) -> dict[str, Any]:
+        assert params == {"path": str(staged)}
+        model.loaded, model.worker = True, SHIPPED_WORKER
+        return {"id": EXTENSION_ID}
+
+    handlers["Extensions.loadUnpacked"] = load_staged
+    chrome = await FakeChrome.start(handlers)
+    chrome.listings.append([_page("T1"), _page("T2")])
+
+    await _group(chrome.groups(extension_dir=staged), 7, frozenset({"T1"}))
+
+    assert model.uninstalled == ["OLD1", "OLD2"]
+    assert (staged / SHIPPED_WORKER).is_file()
 
 
 async def test_group_new_page_skips_when_the_snapshot_failed(

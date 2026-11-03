@@ -30,7 +30,9 @@ stop and reads it back at the next start:
 The recorded pin and group are **re-applied** afterwards by the `browser-mcp`
 daemon (one extension call, `meivaApplyLayout`), because Chrome's own restore is
 not reliable about them — see below. That pass is idempotent and only ever pins
-and groups: it never closes, moves or unpins a tab.
+and groups: it never closes, unpins or ungroups a tab, keeps user-named groups
+in their own windows, and converges `Meiva #<id>` groups to one per agent across
+the browser.
 
 ## What was measured (Chrome 156.0.8078.47, macOS)
 
