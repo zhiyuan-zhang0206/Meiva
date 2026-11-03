@@ -4,5 +4,6 @@ exports = ["gateway_auth.py", "gateway_config.py", "gateway_tests.py", "integrat
 "conftest.py" = ["unit_gateway.py"]
 "gateway_config.py" = ["gateway_auth.py"]
 "integration_tests.py" = ["gateway_config.py"]
+"test_auth_bypass.py" = ["gateway_config.py"]
 "test_trusted_network.py" = ["gateway_config.py"]
 "unit_gateway.py" = ["gateway_config.py"]
