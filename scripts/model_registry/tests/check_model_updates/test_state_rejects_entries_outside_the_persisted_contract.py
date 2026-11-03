@@ -29,6 +29,7 @@ from scripts.model_registry.tests.test_check_model_updates import (
 from scripts.model_registry.tests.test_check_model_updates import (
     test_transient_ssl_eof_is_retried_without_marking_the_provider_error as test_transient_ssl_eof_is_retried_without_marking_the_provider_error,
 )
+from scripts.model_registry.tracker_state import load_state
 
 
 @pytest.mark.parametrize(
@@ -48,7 +49,7 @@ def test_state_rejects_entries_outside_the_persisted_contract(
     state_path.write_text(json.dumps({"providers": {"glm": entry}}))
 
     with pytest.raises((TypeError, ValueError), match=match):
-        bare_tracker._load_state(state_path)
+        load_state(state_path)
 
 
 def test_qwen_envelope_paginates_until_total(bare_tracker: Any) -> None:

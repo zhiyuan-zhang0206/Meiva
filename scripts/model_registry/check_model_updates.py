@@ -16,7 +16,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from functools import partial
 from pathlib import Path
-from typing import Any, Literal, override
+from typing import Literal, Protocol, override
 from urllib.parse import urlparse
 
 import requests
@@ -26,12 +26,22 @@ from urllib3 import _base_connection
 from urllib3.connection import HTTPSConnection
 from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 
+from base.host.boundary.fields import optional_str_field
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.options import options
 from base.host.env.dotenv_file import process_env_file, read_env_aliases
 from base.host.net.resilience import ExponentialBackoff, Policy, http_classifier, retry, retry_sleep
 from base.lm.registry import ModelSpec
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
-from scripts.model_registry.json_guards import is_object_dict, is_object_list, is_str_list
+from scripts.model_registry.fetch_ports import (
+    Addrinfo,
+    HttpGet,
+    JsonFetcher,
+    SessionForHost,
+)
+from scripts.model_registry.json_guards import is_str_list
+from scripts.model_registry.tracker_state import load_state, save_state
 
 _USER_AGENT = "Meiva model-update tracker"
 _TIMEOUT_SECONDS, _QWEN_PAGE_SIZE = 30, 100
@@ -40,6 +50,14 @@ _DOH_ENDPOINTS = ("https://cloudflare-dns.com/dns-query", "https://dns.google/re
 _FAKE_IP_NETWORK = ipaddress.ip_network("198.18.0.0/15")
 doh_cache: dict[str, str] = {}
 _DATED_SNAPSHOT_SUFFIX = re.compile(r"-\d{4}(?:-\d{2}(?:-\d{2})?)?$|-\d{8}$")
+
+
+class _Registered(Protocol):
+    # meiva:note
+    # What the comparison reads of a registered model: the provider it belongs to.
+
+    @property
+    def provider(self) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -118,7 +136,7 @@ def _environment_value(alias: str) -> str | None:
     return None
 
 
-def _response_object(value: object, name: str) -> dict[str, Any]:
+def _response_object(value: object, name: str) -> dict[str, object]:
     if not is_object_dict(value):
         raise TypeError(f"{name} response must be a JSON object")
     return value
@@ -198,7 +216,7 @@ def _first_real_doh_address(value: object, endpoint: str, host: str) -> str:
     raise ValueError(f"{endpoint} returned no usable A answer for {host}")
 
 
-def _doh_real_ip(host: str, *, http_get: Callable[..., Any]) -> str:
+def _doh_real_ip(host: str, *, http_get: HttpGet) -> str:
     if host in doh_cache:
         return doh_cache[host]
     last_error: Exception | None = None
@@ -222,7 +240,7 @@ def _doh_real_ip(host: str, *, http_get: Callable[..., Any]) -> str:
 def _session_for_host(
     host: str,
     *,
-    addrinfo: Callable[..., Any],
+    addrinfo: Addrinfo,
     doh_resolver: Callable[[str], str],
 ) -> requests.Session | None:
     try:
@@ -248,9 +266,9 @@ def _id_rows(value: object, field: str, source: str) -> list[str]:
         raise TypeError(f"{source} {field} must be a list")
     ids: list[str] = []
     for row in value:
-        if not is_object_dict(row) or field not in row or not isinstance(row[field], str):
+        model_id = optional_str_field(row, field) if is_object_dict(row) else None
+        if model_id is None:
             raise ValueError(f"{source} {field} entries must carry a string id")
-        model_id = row[field]
         if not model_id:
             raise ValueError(f"{source} {field} entries must not be empty")
         ids.append(model_id)
@@ -300,13 +318,13 @@ _FETCH_POLICY = Policy(
 def fetch_json(
     url: str,
     *,
-    headers: dict[str, str],
-    params: dict[str, str | int],
-    session_for_host: Callable[[str], Any],
-    http_get: Callable[..., Any],
+    headers: Mapping[str, str],
+    params: Mapping[str, str | int],
+    session_for_host: SessionForHost,
+    http_get: HttpGet,
     sleep: Callable[[float], None] = retry_sleep,
-) -> dict[str, Any]:
-    def _attempt() -> dict[str, Any]:
+) -> dict[str, object]:
+    def _attempt() -> dict[str, object]:
         host = urlparse(url).hostname or ""
         session = session_for_host(host)
         requester = session.get if session is not None else http_get
@@ -332,9 +350,7 @@ def _headers(source: SourceDescriptor, api_key: str) -> dict[str, str]:
     return headers
 
 
-def _openai_models(
-    source: SourceDescriptor, api_key: str, *, fetcher: Callable[..., dict[str, Any]]
-) -> list[str]:
+def _openai_models(source: SourceDescriptor, api_key: str, *, fetcher: JsonFetcher) -> list[str]:
     payload = fetcher(
         source.base_url + source.models_path, headers=_headers(source, api_key), params={}
     )
@@ -343,9 +359,7 @@ def _openai_models(
     return _id_rows(payload["data"], "id", source.provider)
 
 
-def _anthropic_models(
-    source: SourceDescriptor, api_key: str, *, fetcher: Callable[..., dict[str, Any]]
-) -> list[str]:
+def _anthropic_models(source: SourceDescriptor, api_key: str, *, fetcher: JsonFetcher) -> list[str]:
     ids: list[str] = []
     after_id: str | None = None
     while True:
@@ -369,9 +383,7 @@ def _anthropic_models(
     return ids
 
 
-def _gemini_models(
-    source: SourceDescriptor, api_key: str, *, fetcher: Callable[..., dict[str, Any]]
-) -> list[str]:
+def _gemini_models(source: SourceDescriptor, api_key: str, *, fetcher: JsonFetcher) -> list[str]:
     ids: list[str] = []
     params: dict[str, str | int] = {"key": api_key}
     while True:
@@ -396,9 +408,7 @@ def _gemini_models(
     return ids
 
 
-def _dashscope_models(
-    source: SourceDescriptor, api_key: str, *, fetcher: Callable[..., dict[str, Any]]
-) -> list[str]:
+def _dashscope_models(source: SourceDescriptor, api_key: str, *, fetcher: JsonFetcher) -> list[str]:
     ids: list[str] = []
     total: int | None = None
     page_no = 1
@@ -436,7 +446,7 @@ def fetch_provider_models(
     source: SourceDescriptor,
     api_key: str,
     *,
-    fetcher: Callable[..., dict[str, Any]],
+    fetcher: JsonFetcher,
 ) -> list[str]:
     if source.response_kind == "openai":
         return _openai_models(source, api_key, fetcher=fetcher)
@@ -468,7 +478,7 @@ def _identity(source: SourceDescriptor, model_id: str) -> tuple[str, tuple[int, 
 def compare_models(
     source: SourceDescriptor,
     upstream_ids: list[str],
-    registry: Mapping[str, Any],
+    registry: Mapping[str, _Registered],
 ) -> Comparison:
     registry_series: dict[str, list[tuple[str, tuple[int, ...]]]] = {}
     for model_id, spec in registry.items():
@@ -524,67 +534,6 @@ def _api_key(
 
 def _state_path(state_dir: Path | None, *, home: Path) -> Path:
     return (state_dir if state_dir is not None else home / "model-tracker") / "state.json"
-
-
-def _valid_status(value: object) -> str:
-    if not isinstance(value, str):
-        raise TypeError("model tracker state status must be a string")
-    if value != "ok" and (
-        not value.startswith("error:") or not value.removeprefix("error:").strip()
-    ):
-        raise ValueError("model tracker state status must be ok or error:<message>")
-    return value
-
-
-def _loaded_pending(pending: object) -> dict[str, object]:
-    if not is_object_dict(pending) or "status" not in pending or "rounds" not in pending:
-        raise ValueError("model tracker state pending must carry status and rounds")
-    rounds = pending["rounds"]
-    if not isinstance(rounds, int) or rounds < 1:
-        raise TypeError("model tracker state pending rounds must be a positive integer")
-    return {"status": _valid_status(pending["status"]), "rounds": rounds}
-
-
-def _loaded_provider(entry: dict[str, Any]) -> dict[str, object]:
-    if "reported" not in entry or "status" not in entry:
-        raise ValueError("model tracker state provider is missing reported or status")
-    reported = entry["reported"]
-    if not is_object_list(reported) or not all(isinstance(model_id, str) for model_id in reported):
-        raise ValueError("model tracker state reported must be a list of strings")
-    status = _valid_status(entry["status"])
-    # `announced` postdates the first state files: a file written before
-    # the field existed baselines on the status it was left in, so the
-    # upgrade itself never announces anything.
-    loaded: dict[str, object] = {
-        "reported": reported,
-        "status": status,
-        "announced": _valid_status(entry.get("announced", status)),
-    }
-    if "pending" in entry:
-        loaded["pending"] = _loaded_pending(entry["pending"])
-    return loaded
-
-
-def _load_state(path: Path) -> dict[str, dict[str, dict[str, object]]]:
-    if not path.exists():
-        return {"providers": {}}
-    raw = _response_object(json.loads(path.read_text()), "model tracker state")
-    raw_providers = raw.get("providers")
-    if not is_object_dict(raw_providers):
-        raise ValueError("model tracker state is missing providers")
-    providers: dict[str, dict[str, object]] = {}
-    for provider, entry in raw_providers.items():
-        if not isinstance(provider, str) or not is_object_dict(entry):
-            raise TypeError("model tracker state has an invalid provider entry")
-        providers[provider] = _loaded_provider(entry)
-    return {"providers": providers}
-
-
-def _save_state(path: Path, state: dict[str, dict[str, dict[str, object]]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
-    temporary.replace(path)
 
 
 def _status_changed(previous: object, current: str) -> bool:
@@ -742,12 +691,20 @@ def _write_report(directory: Path, markdown: str, payload: dict[str, object]) ->
     )
 
 
+@dataclass(frozen=True)
+class Options:
+    check: bool
+    env_file: Path | None
+    state_dir: Path | None
+    write_report: Path | None
+
+
 def main(
     argv: list[str],
     *,
     env_lookup: Callable[[str], str | None] | None = None,
     model_fetcher: Callable[[SourceDescriptor, str], list[str]] | None = None,
-    models: Mapping[str, Any] | None = None,
+    models: Mapping[str, ModelSpec] | None = None,
 ) -> int:
     if model_fetcher is None:
         session = partial(
@@ -755,7 +712,14 @@ def main(
             addrinfo=socket.getaddrinfo,
             doh_resolver=partial(_doh_real_ip, http_get=requests.get),
         )
-        fetcher = partial(fetch_json, session_for_host=session, http_get=requests.get)
+
+        def fetcher(
+            url: str, *, headers: Mapping[str, str], params: Mapping[str, str | int]
+        ) -> dict[str, object]:
+            return fetch_json(
+                url, headers=headers, params=params, session_for_host=session, http_get=requests.get
+            )
+
         model_fetcher = partial(fetch_provider_models, fetcher=fetcher)
     parser = argparse.ArgumentParser(
         description="Check official provider model lists for Meiva updates."
@@ -766,11 +730,11 @@ def main(
     parser.add_argument(
         "--write-report", type=Path, help="write last-report.md and last-report.json here"
     )
-    args = parser.parse_args(argv)
+    args = options(parser.parse_args(argv), Options)
     home = meiva_home()
     state_path = _state_path(args.state_dir, home=home)
     try:
-        state = _load_state(state_path)
+        state = load_state(state_path)
         reports = check_sources(
             _read_env_file(args.env_file),
             state,
@@ -778,7 +742,7 @@ def main(
             env_lookup=env_lookup,
             model_fetcher=model_fetcher,
         )
-        _save_state(state_path, state)
+        save_state(state_path, state)
     except Exception as exc:
         print(f"model update tracker failed before provider reporting: {exc}")
         return 1

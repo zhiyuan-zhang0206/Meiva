@@ -10,11 +10,19 @@ from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
+from base.host.boundary.options import options
 from scripts.model_registry.plugin_price_sync import lattice_drift
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+@dataclass(frozen=True)
+class Options:
+    catalog: Path | None
+    repo_root: Path | None
 
 
 def main(argv: list[str]) -> int:
@@ -23,7 +31,7 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument("--catalog", type=Path, help="archive to compare the declarations with")
     parser.add_argument("--repo-root", type=Path, help="repository holding the built-in providers")
-    args = parser.parse_args(argv)
+    args = options(parser.parse_args(argv), Options)
     repo_root = args.repo_root or _REPO_ROOT
     catalog = args.catalog or repo_root / "base/lm/pricing/pricing_catalog_archive.json"
 

@@ -7,6 +7,8 @@ import json
 from decimal import Decimal, InvalidOperation
 from typing import NamedTuple, TypeGuard
 
+from base.host.boundary.untyped import object_of
+
 
 class FlatRates(NamedTuple):
     """Flat cache-miss, cache-hit, and output rates in exact decimal form."""
@@ -28,14 +30,14 @@ def _decimal_node(node: ast.expr, *, context: str) -> Decimal:
         and not node.keywords
     ):
         try:
-            raw: object = ast.literal_eval(node.args[0])
+            raw = object_of(ast.literal_eval, node.args[0])
         except (ValueError, TypeError) as exc:
             raise RuntimeError(f"{context} must be a string literal") from exc
         if not isinstance(raw, str):
             raise TypeError(f"{context} must be a string literal")
     else:
         try:
-            raw = ast.literal_eval(node)
+            raw = object_of(ast.literal_eval, node)
         except (ValueError, TypeError) as exc:
             raise RuntimeError(f"{context} must be a numeric literal") from exc
     if isinstance(raw, bool) or not isinstance(raw, (str, int, float)):

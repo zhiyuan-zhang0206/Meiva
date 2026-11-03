@@ -24,6 +24,7 @@ from datetime import date
 from pathlib import Path
 from typing import NamedTuple
 
+from base.host.boundary.untyped import object_of
 from scripts.model_registry.plugin_price_rates import FlatRates, rates_from_nodes
 
 
@@ -260,7 +261,7 @@ def validated_provenance(
 
 def _literal[T](node: ast.expr, expected: type[T], *, context: str) -> T:
     try:
-        value: object = ast.literal_eval(node)
+        value = object_of(ast.literal_eval, node)
     except (ValueError, TypeError) as exc:
         raise RuntimeError(f"{context} must be a literal") from exc
     if not isinstance(value, expected):
@@ -270,7 +271,7 @@ def _literal[T](node: ast.expr, expected: type[T], *, context: str) -> T:
 
 def _optional_string_literal(node: ast.expr, *, context: str) -> str | None:
     try:
-        value: object = ast.literal_eval(node)
+        value = object_of(ast.literal_eval, node)
     except (ValueError, TypeError) as exc:
         raise RuntimeError(f"{context} must be a string or None literal") from exc
     if value is not None and not isinstance(value, str):
@@ -287,7 +288,7 @@ def _integer_literal(node: ast.expr, *, context: str) -> int:
 
 def _optional_integer_literal(node: ast.expr, *, context: str) -> int | None:
     try:
-        value: object = ast.literal_eval(node)
+        value = object_of(ast.literal_eval, node)
     except (ValueError, TypeError) as exc:
         raise RuntimeError(f"{context} must be an integer or None literal") from exc
     if value is not None and (isinstance(value, bool) or not isinstance(value, int)):

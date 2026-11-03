@@ -71,6 +71,7 @@ TESTS_OWING_ANY: tuple[str, ...] = (
     "meiva_builtins/skills/coordination",
     "scripts/ci",
     "scripts/host_ops",
+    "scripts/model_registry",
     "scripts/verify",
     "services/entrypoints",
 )

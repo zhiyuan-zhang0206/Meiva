@@ -102,6 +102,31 @@ def test_reconcile_appends_a_new_effective_period_without_rewriting_history() ->
     assert catalog["models"]["deepseek-v4-flash"]["periods"][-1]["effective_until"] is None
 
 
+# meiva:note
+# The catalog is read as a plain JSON document and written back whole: a key this updater does not
+# know (on the document, an entry, a period or a tier) survives a reconcile that appends a period.
+def test_reconcile_keeps_every_key_it_does_not_touch() -> None:
+    catalog = _reviewed_catalog()
+    catalog["unknown_top"] = {"kept": True}
+    entry = catalog["models"]["deepseek-flash"]
+    entry["unknown_entry"] = "e"
+    entry["periods"][-1]["unknown_period"] = "p"
+    entry["periods"][-1]["tiers"][0]["unknown_tier"] = "t"
+    table = _CURRENT_TABLE.replace("<td>$1.2</td>", "<td>$1.28</td>").replace(
+        "<td>$0.6</td>", "<td>$0.64</td>"
+    )
+
+    updated = _reconcile(catalog, table, "2026-10-29T12:34:56Z")
+
+    assert updated is not None
+    assert updated["unknown_top"] == {"kept": True}
+    kept = updated["models"]["deepseek-flash"]
+    assert kept["unknown_entry"] == "e"
+    assert kept["periods"][-2]["unknown_period"] == "p"
+    assert kept["periods"][-2]["tiers"][0]["unknown_tier"] == "t"
+    assert kept["periods"][-1]["effective_from"] == "2026-10-29T12:34:56Z"
+
+
 def test_reconcile_appends_a_period_when_peak_windows_change() -> None:
     table = _CURRENT_TABLE.replace(
         "Peak hours are 01:00 - 04:00 and 06:00 - 10:00 UTC,",
