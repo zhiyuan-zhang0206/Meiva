@@ -7,7 +7,6 @@ import { useState } from "react";
 
 import { WindowSelect } from "@/components/agents/window-select";
 import { ContextButton } from "@/components/inspector/context-breakdown";
-import { SectionSkeleton } from "@/components/inspector/inspector-panel-skeleton";
 import { Metric, Section } from "@/components/inspector/inspector-section";
 import { useAgentRoster } from "@/lib/agents/use-agents";
 import type { AgentInspectStatistics, AgentRow } from "@/lib/contracts/types";
@@ -162,6 +161,7 @@ export function CostActivitySection({
     <Section
       icon={<Activity className="size-3" />}
       title={t("sectionCostActivity")}
+      loading={!inspect && !failed && pending}
       action={
         <span className={cn("shrink-0 items-center gap-1", FLEX)}>
           <button
@@ -196,24 +196,37 @@ export function CostActivitySection({
         </span>
       }
     >
-      {inspect ? (
+      {!inspect && (failed || !pending) ? (
+        <InspectReadError
+          message={t("windowedUnavailable")}
+          retryLabel={t("retryWindowed")}
+          pending={fetching}
+          onRetry={onRefresh}
+        />
+      ) : (
         <div className="space-y-1">
-          {cost ? (
+          {!inspect || cost ? (
             <div className="grid grid-cols-2 gap-1">
               <Metric
                 label={t("metricCost")}
-                value={costAmount(cost.cost_usd, billingLabel)}
+                value={cost ? costAmount(cost.cost_usd, billingLabel) : undefined}
                 sub={unpricedSub}
-                valueTestId="inspector-cost-amount"
+                valueTestId={cost ? "inspector-cost-amount" : undefined}
               />
-              <Metric label={t("metricLlmCalls")} value={String(cost.llm_calls)} />
+              <Metric label={t("metricLlmCalls")} value={cost ? String(cost.llm_calls) : undefined} />
               <Metric
                 label={t("metricTokens")}
-                value={`${formatTokens(cost.tokens_in)} / ${formatTokens(cost.tokens_out)}`}
+                value={cost ? `${formatTokens(cost.tokens_in)} / ${formatTokens(cost.tokens_out)}` : undefined}
               />
               <Metric
                 label={t("metricCacheHit")}
-                value={cost.cache_hit_pct === null ? "N/A" : `${cost.cache_hit_pct.toFixed(2)}%`}
+                value={
+                  cost
+                    ? cost.cache_hit_pct === null
+                      ? "N/A"
+                      : `${cost.cache_hit_pct.toFixed(2)}%`
+                    : undefined
+                }
               />
             </div>
           ) : null}
@@ -222,37 +235,42 @@ export function CostActivitySection({
               <>
                 <Metric
                   label={t("metricTps")}
-                  value={tps?.lm_stage_tps != null ? formatTps(tps.lm_stage_tps) : "—"}
+                  value={inspect ? (tps?.lm_stage_tps != null ? formatTps(tps.lm_stage_tps) : "—") : undefined}
                 />
                 <Metric
                   label={t("metricLlmOutput")}
                   value={
-                    hasLife && activity.llm_seconds != null
-                      ? formatInterval(Math.round(activity.llm_seconds))
-                      : "—"
+                    inspect
+                      ? hasLife && activity.llm_seconds != null
+                        ? formatInterval(Math.round(activity.llm_seconds))
+                        : "—"
+                      : undefined
                   }
                 />
                 <Metric
                   label={t("metricCodeExecution")}
-                  value={hasLife ? formatInterval(Math.round(activity.exec_seconds)) : "—"}
+                  value={
+                    inspect
+                      ? hasLife
+                        ? formatInterval(Math.round(activity.exec_seconds))
+                        : "—"
+                      : undefined
+                  }
                 />
               </>
             ) : null}
             <Metric
               label={t("metricIdle")}
-              value={hasLife ? formatInterval(Math.round(idleSeconds)) : "—"}
+              value={
+                inspect
+                  ? hasLife
+                    ? formatInterval(Math.round(idleSeconds))
+                    : "—"
+                  : undefined
+              }
             />
           </div>
         </div>
-      ) : failed || !pending ? (
-        <InspectReadError
-          message={t("windowedUnavailable")}
-          retryLabel={t("retryWindowed")}
-          pending={fetching}
-          onRetry={onRefresh}
-        />
-      ) : (
-        <SectionSkeleton title={t("sectionCostActivity")} rows={4} />
       )}
     </Section>
   );

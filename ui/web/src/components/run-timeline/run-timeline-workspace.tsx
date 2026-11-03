@@ -8,13 +8,13 @@
 
 import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { useBreakpoint } from "@/lib/layout/breakpoint";
 import { FLEX_1, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
 import { usePanelLayoutStorage } from "@/lib/layout/panel-layout-storage";
+import { useClientReady } from "@/lib/layout/use-client-ready";
 import { cn } from "@/lib/format/utils";
 
 export const RUN_TIMELINE_SPLIT_LAYOUT_ID = "meiva.run-timeline.split";
@@ -30,14 +30,7 @@ const MAIN_PANEL_MIN = "420px";
 export function RunTimelineWorkspace({ main, side }: { main: ReactNode; side: ReactNode }) {
   const t = useTranslations("runTimeline");
   const { isWide } = useBreakpoint();
-  // The split mounts only once the breakpoint is known, as the memory graph's does:
-  // the pre-mount default is the narrow frame, and a group registered under it would
-  // re-register the moment the real breakpoint resolves.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- SSR-safe: runs once after mount so the first painted frame has the real breakpoint
-    setMounted(true);
-  }, []);
+  const clientReady = useClientReady();
   const splitStorage = usePanelLayoutStorage();
   const split = useDefaultLayout({
     id: RUN_TIMELINE_SPLIT_LAYOUT_ID,
@@ -55,7 +48,7 @@ export function RunTimelineWorkspace({ main, side }: { main: ReactNode; side: Re
     </aside>
   );
 
-  if (!mounted || !isWide) {
+  if (!clientReady || !isWide) {
     return (
       <div className={cn("overflow-y-auto", FLEX_1, MIN_H_0)} data-testid="run-timeline-workspace">
         <div className={cn("space-y-5 p-4", MIN_W_0)}>{main}</div>

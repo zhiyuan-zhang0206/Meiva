@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Inspector Panel
-description: The right-side panel for the selected agent — one ordered section list, the responsive close surfaces and the render-nothing-while-closed boundary.
+description: The right-side panel body for the selected agent — one ordered section list, in-place metric loading without shadow skeletons, and the render-nothing-while-closed boundary.
 tags: [frontend]
 ---
 
@@ -20,14 +20,11 @@ except the Activity section, which has its own node
 (`INSPECT_SECTION_ORDER` in `lib/inspector/inspector-widgets.ts`): the Open run
 timeline entry (100) first, then page (200), then the runtime sections in their
 established order — shells (300), liveness (400), configuration overlay (500) —
-then the Context section (600), the open notice (800), and the Activity section
-(900) last (user ruling 2026-10-18).
-Plugin widgets carry their own `order` and slot between those keys; equal orders
-stack built-in sections first, then widgets by (plugin, id), so the sort is
-deterministic regardless of registration order and DOM order is visual order.
-The non-embedded header carries the panel title alone (no section/category
-selector); `embedded` panels render no header at all — the mobile close X below
-has its own rule.
+then the Context section (600), and the Activity section (900) last (user ruling
+2026-10-18). Plugin widgets carry their own `order` and slot between those keys;
+equal orders stack built-in sections first, then widgets by (plugin, id), so the
+sort is deterministic regardless of registration order and DOM order is visual
+order.
 
 The Context section is shown only for a Meiva harness, as reported by the shared
 roster or the already-selected detail cache when the agent is outside the roster.
@@ -35,30 +32,36 @@ This subscription makes no additional detail request. Its token totals and thres
 cannot represent an external CLI session. Unknown harness metadata also keeps
 this section hidden.
 
-**Empty sections render nothing** — a hidden Page section with no open page, an
-available-but-empty shell list, an empty config overlay, a
-missing notice, a widget whose payload came back empty. The first-load skeleton
-promises only the built-in sections that may appear: the notice and plugin-widget
-areas are not promised by it (plugins have their own generic placeholder).
+**In-place loading, no shadow skeleton tree.** Persistent metric sections
+(`Liveness` and `Activity`) stay mounted at their ordered keys across initial
+loads, agent switches and window changes. While a section's read is pending with
+no matching snapshot, `Section` (`components/inspector/inspector-section.tsx`)
+sets `aria-busy` and `aria-label="{Title} loading"`, and each `Metric` cell
+renders a low-contrast `animate-pulse` bar inside the exact `17px` value line-box
+of its real card chrome so resolving values causes zero height shift or DOM
+remount. Conditional and sparse sections — `Page`, `Persistent shells`,
+`Configuration overlay`, `Context` and plugin widgets — render nothing while
+pending or empty rather than reserving speculative placeholder rows that collapse
+after fetch.
 
-**Responsive (user ruling 2026-08-23, superseding the 2026-08-05 floating-overlay
-ruling on desktop).** At ≥ lg the panel fills the resizable right-side panel;
-below lg it is a full-screen overlay with a backdrop, matching the mobile sidebar
-drawer. At ≥ lg the document bar's inspector trigger (ScanSearch) is the panel's
-one open/close control — it replaced the header-bar InspectorToggle on
-2026-10-18 — and the panel renders no header of its own; below lg the overlay
-header X closes it and the backdrop closes it too. Escape deliberately does not close either form (user ruling
-2026-08-24), and clicking outside the desktop panel does not close it either.
+**Single column chrome owner.** `SharedContextPanel` owns the right column's
+outer chrome at every breakpoint — the desktop `document-bar` with the
+`ScanSearch` toggle, the mobile full-screen sheet with its `Back to messages` +
+`ScanSearch` header, and the pinned bottom `notice-region`
+([[ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md|shared user context]]
+and [[ui/web/src/docs/frontend-state/shared-context/inspector-mode/inspector-mode.meiva.okf.md|Inspector mode]]).
+`InspectorPanel` therefore renders only its `ScrollArea` body inside `<aside>`
+with no standalone header, no `embedded` prop, no inline notice reply duplicate
+and no second mobile backdrop. Escape deliberately does not close the panel (user
+ruling 2026-08-24), and clicking outside the desktop panel does not close it
+either.
 
-**Rendering while closed.** Closing renders nothing — desktop releases the
-flex-column width, mobile removes the overlay — while all hooks still run
+**Rendering while closed.** Closing renders nothing while all hooks still run
 (rules-of-hooks) with the queries disabled, so a closed panel cannot produce
 inspect traffic. Closing aborts the in-flight reads.
 
 **Agent switch.** The panel stays mounted across agent switches (the page resets
 its error boundary via `resetKey`, not `key=`), so each switch also restores the
 scroll-to-top reset the former remount gave a new selection.
-
-The panel renders one merged sorted list: the Open run timeline entry (100) first, then page (200), then the runtime sections — shells (300), liveness (400) and the configuration overlay (500) — then the Context section (600), the open notice (800), and the Activity section (900) last. Plugin widgets keep their own order and slot between those keys; ties stack built-in sections first, then widgets by (plugin, id). The non-embedded header carries the title alone — no category or section filter — and embedded panels render no header.
 
 Parent: [[ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md]].

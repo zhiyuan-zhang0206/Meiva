@@ -175,9 +175,20 @@ describe("failure and loading", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await screen.findByTestId("run-timeline-chart");
   });
-  it("the route loading shell renders", () => {
-    const { container } = rtlRender(<Loading />);
+  it("the route loading shell renders the full header and split workspace", () => {
+    window.innerWidth = 1440;
+    const { container } = rtlRender(
+      <BrowserProvider browser={fakeBrowser()}>
+        <Loading />
+      </BrowserProvider>,
+    );
     expect(container.querySelector("main")).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "Agent view" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Back to Insights" })).toBeTruthy();
+    expect(screen.getByRole("separator", { name: "Resize the details panel" })).toBeTruthy();
+    expect(screen.getByTestId("run-timeline-reader").textContent).toBe(
+      "Click a block to read it here. Arrow keys move the selection; scroll to zoom and drag to pan.",
+    );
   });
   it("clicking a thinking block reads only the thinking, a tool call block only the call", async () => {
     const response: RunTimelineResponse = {

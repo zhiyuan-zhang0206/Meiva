@@ -1,13 +1,12 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useCallback, useMemo } from "react";
 
 import { AgentSidebar } from "@/components/agent-sidebar";
+import { SharedContextPanel } from "@/components/context/shared-context-panel";
 import { Composer } from "@/components/conversation/composer";
 import { UploadButton } from "@/components/conversation/upload-button";
-import { InspectorPanelSkeleton } from "@/components/inspector/inspector-panel-skeleton";
 import { HeaderBar } from "@/components/shell/header-bar";
 import { AgentEventStreamProvider } from "@/lib/transport/useEventStream";
 import { TimelineView } from "@/components/timeline";
@@ -23,11 +22,6 @@ import { useUserSettings } from "@/lib/state/use-user-settings";
 import { useTimeline } from "@/lib/timeline/use-timeline";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import { HomePageView } from "./home-view";
-
-const SharedContextPanel = dynamic(
-  () => import("@/components/context/shared-context-panel").then((module) => module.SharedContextPanel),
-  { loading: () => <InspectorPanelSkeleton /> },
-);
 
 // meiva:note
 // This route is the home page's composition root: every read the surface needs is taken here,

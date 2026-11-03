@@ -253,7 +253,7 @@ describe("Inspector read ownership", () => {
 
     view.rerender(<QueryClientProvider client={client}><InspectorPanel agentId={1} /></QueryClientProvider>);
     expect(screen.getByText("dev-server")).toBeTruthy();
-    expect(screen.queryByLabelText("Persistent shells loading")).toBeNull();
+    expect(screen.queryByLabelText("Liveness loading")).toBeNull();
 
     await waitFor(() => expect(liveCalls(1)).toBe(liveBefore + 1));
     const revalidated = liveCalls(1) - liveBefore + (statsCalls(1) - statsBefore);
@@ -275,8 +275,7 @@ describe("persisted metric evidence is internal (task #3869)", () => {
     data.metadata.lifecycle = { availability: "unavailable", sources: [] };
     getAgentInspectStatistics.mockResolvedValue(data);
     render(<InspectorPanel agentId={1} />);
-    await screen.findByText("Activity");
-    await waitFor(() => expect(getAgentInspectStatistics).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByLabelText("Activity loading")).toBeNull());
     expect(screen.queryByText("$0.0000")).toBeNull();
     expect(screen.queryByText("0.00 tok/s")).toBeNull();
     expect(screen.queryByText("No recorded data is available for this window.")).toBeNull();
@@ -328,8 +327,7 @@ describe("internal duration evidence never renders (task #3869)", () => {
     data.metadata.turns.reason = "missing_turn_durations";
     getAgentInspectStatistics.mockResolvedValue(data);
     render(<InspectorPanel agentId={1} />);
-    await screen.findByText("Activity");
-    await waitFor(() => expect(getAgentInspectStatistics).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByLabelText("Activity loading")).toBeNull());
     expect(
       screen.queryByText("Some recorded turns have no duration; throughput is unavailable."),
     ).toBeNull();

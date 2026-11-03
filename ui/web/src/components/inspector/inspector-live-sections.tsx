@@ -2,9 +2,7 @@
 
 import { modelLabel } from "@/lib/contracts/models";
 
-import { useQueryClient } from "@tanstack/react-query";
 import {
-  Bell,
   ExternalLink,
   HeartPulse,
   LayoutPanelTop,
@@ -15,12 +13,10 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 
 import { Metric, Section } from "@/components/inspector/inspector-section";
-import { OpenNoticeDetail } from "@/components/notifications/open-notice-detail";
 import { useAgentRoster } from "@/lib/agents/use-agents";
 import type {
   AgentInspectLive,
   HeartbeatInfo,
-  OpenNotice,
   PageRow,
   ShellInfo,
 } from "@/lib/contracts/types";
@@ -29,12 +25,10 @@ import { useNow } from "@/lib/format/now/use-now";
 import { useTimeFormat } from "@/lib/format/use-time-format";
 import { cn } from "@/lib/format/utils";
 import { harnessLabel } from "@/lib/harness/harness";
-import { inspectLiveQueryKey } from "@/lib/inspector/inspector-queries";
-import { fleetNoticeHref } from "@/lib/inspector/inspector-widgets";
 import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
 import { useWallNow } from "@/lib/transport/transport-context";
 
-import { formatInterval } from "./inspector-cost-section";
+import { formatInterval, InspectReadError } from "./inspector-cost-section";
 
 export function PageSection({ pages }: { pages: PageRow[] }) {
   const t = useTranslations("inspector");
@@ -59,42 +53,6 @@ export function PageSection({ pages }: { pages: PageRow[] }) {
           </span>
         </a>
       ))}
-    </Section>
-  );
-}
-
-export function NoticeReplySection({
-  agentId,
-  notice,
-}: {
-  agentId: number;
-  notice: OpenNotice;
-}) {
-  const queryClient = useQueryClient();
-  const t = useTranslations("inspector");
-  return (
-    <Section
-      icon={<Bell className="size-3" />}
-      title={t("sectionNotice")}
-      action={
-        <Link
-          href={fleetNoticeHref(notice.id)}
-          className="inline-flex items-center gap-1 hover:text-foreground"
-        >
-          <ExternalLink className="size-3" aria-hidden />
-          {t("jumpNotice")}
-        </Link>
-      }
-    >
-      <OpenNoticeDetail
-        key={notice.id}
-        agentId={agentId}
-        notice={notice}
-        showTimestamp
-        onResolved={() => {
-          void queryClient.invalidateQueries({ queryKey: inspectLiveQueryKey(agentId) });
-        }}
-      />
     </Section>
   );
 }
@@ -223,10 +181,23 @@ const STATUS_LABEL_KEY: Readonly<Record<string, AgentRowKey | undefined>> = {
   terminated: "statusTerminated",
 };
 
-export function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
-  const { liveness_state: state, heartbeat, spawned_at } = inspect;
+export function LivenessSection({
+  agentId,
+  inspect,
+  pending,
+  errorMessage,
+  fetching,
+  onRetry,
+}: {
+  agentId: number;
+  inspect: AgentInspectLive | undefined;
+  pending: boolean;
+  errorMessage: string;
+  fetching: boolean;
+  onRetry: () => void;
+}) {
   const { data: roster } = useAgentRoster();
-  const rosterRow = roster?.agents.find((agent) => agent.agent_id === inspect.agent_id);
+  const rosterRow = roster?.agents.find((agent) => agent.agent_id === agentId);
   // meiva:note
   // Which harness runs the agent and which model it was born on belong to the agent's
   // current state, not to its configuration overrides: the title bar stopped naming the
@@ -234,51 +205,72 @@ export function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
   // two facts a reader checks first sit together here.
   // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
   const harness = rosterRow?.harness;
-  const model = typeof inspect.config_overlay.llm_model === "string" ? inspect.config_overlay.llm_model : undefined;
-  const offline = state === "offline";
+  const model = typeof inspect?.config_overlay.llm_model === "string" ? inspect.config_overlay.llm_model : undefined;
+  const offline = inspect?.liveness_state === "offline";
   const t = useTranslations("inspector");
   const tStatus = useTranslations("agentRow");
   const now = useNow(1_000, useWallNow());
   const { formatAbsolute, formatFuture } = useTimeFormat();
-  const next = nextHeartbeatCell(
-    heartbeat,
-    {
-      pending: t("pending"),
-      due: t("due"),
-      paused: (time) => t("paused", { time }),
-    },
-    now,
-    formatFuture,
-  );
-  const lastPause = heartbeat.last_pause;
-  const impersonated = inspect.status !== "terminated" && rosterRow?.status === "impersonated";
-  const status = impersonated ? "impersonated" : inspect.status;
-  const statusKey = STATUS_LABEL_KEY[status];
+  const next = inspect
+    ? nextHeartbeatCell(
+        inspect.heartbeat,
+        {
+          pending: t("pending"),
+          due: t("due"),
+          paused: (time) => t("paused", { time }),
+        },
+        now,
+        formatFuture,
+      )
+    : undefined;
+  const lastPause = inspect?.heartbeat.last_pause;
+  const impersonated = inspect !== undefined && inspect.status !== "terminated" && rosterRow?.status === "impersonated";
+  const status = inspect ? (impersonated ? "impersonated" : inspect.status) : undefined;
+  const statusKey = status !== undefined ? STATUS_LABEL_KEY[status] : undefined;
   return (
-    <Section icon={<HeartPulse className={cn("size-3", offline && "text-destructive")} />} title={t("sectionLiveness")}>
-      <div className="grid grid-cols-2 gap-1">
-        <Metric
-          className="col-span-2"
-          label={t("metricBirth")}
-          value={`${formatRelative(spawned_at, now, { capitalize: true })}, ${formatAbsolute(spawned_at)}`}
+    <Section
+      icon={<HeartPulse className={cn("size-3", offline && "text-destructive")} />}
+      title={t("sectionLiveness")}
+      loading={!inspect && pending}
+    >
+      {!inspect && !pending ? (
+        <InspectReadError
+          message={errorMessage}
+          retryLabel={t("retryInspector")}
+          pending={fetching}
+          onRetry={onRetry}
         />
-        <Metric label={t("metricNextHeartbeat")} value={next.value} />
-        <Metric
-          label={t("metricLastPause")}
-          value={
-            lastPause
-              ? `${formatRelative(lastPause.at, now, { capitalize: true })} · ${formatInterval(Math.round(lastPause.duration_s))}`
-              : t("neverPaused")
-          }
-        />
-        <Metric label={t("metricHarness")} value={harness ? harnessLabel(harness) : "—"} />
-        <Metric label={t("metricModel")} value={model === undefined ? "—" : modelLabel(model)} />
-        <Metric label={t("metricMachine")} value={inspect.machine} />
-        <Metric
-          label={t("metricStatus")}
-          value={statusKey ? tStatus(statusKey) : status}
-        />
-      </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-1">
+          <Metric
+            className="col-span-2"
+            label={t("metricBirth")}
+            value={
+              inspect
+                ? `${formatRelative(inspect.spawned_at, now, { capitalize: true })}, ${formatAbsolute(inspect.spawned_at)}`
+                : undefined
+            }
+          />
+          <Metric label={t("metricNextHeartbeat")} value={next?.value} />
+          <Metric
+            label={t("metricLastPause")}
+            value={
+              inspect
+                ? lastPause
+                  ? `${formatRelative(lastPause.at, now, { capitalize: true })} · ${formatInterval(Math.round(lastPause.duration_s))}`
+                  : t("neverPaused")
+                : undefined
+            }
+          />
+          <Metric label={t("metricHarness")} value={inspect ? (harness ? harnessLabel(harness) : "—") : undefined} />
+          <Metric label={t("metricModel")} value={inspect ? (model === undefined ? "—" : modelLabel(model)) : undefined} />
+          <Metric label={t("metricMachine")} value={inspect?.machine} />
+          <Metric
+            label={t("metricStatus")}
+            value={status !== undefined ? (statusKey ? tStatus(statusKey) : status) : undefined}
+          />
+        </div>
+      )}
     </Section>
   );
 }

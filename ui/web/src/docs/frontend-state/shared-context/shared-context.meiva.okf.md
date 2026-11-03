@@ -16,8 +16,8 @@ empty document shows the empty state and a legacy `to_user.html` shows the
 migration placeholder — an empty document never collapses the panel. The column
 hides only when the user closes it: `display.context_panel_open` (default on) is
 the title bar's PanelRight toggle, and the timeline takes the width until it is
-reopened. The panel itself is a lazy boundary, loaded when the right panel first
-renders.
+reopened. `SharedContextPanel` and `InspectorPanel` are imported statically so
+first paint and mode switches never flash a separate `next/dynamic` fallback.
 
 The document body is the column's reading area: its `ScrollArea` viewport owns
 reading-position capture and restoration across Inspector mode changes, and the

@@ -48,7 +48,6 @@ export const getAgent = vi.fn<(id: number, signal?: AbortSignal) => Promise<Agen
 export const getAgentInspectWidgets = vi.fn<
   (agentId: number, signal?: AbortSignal) => Promise<InspectWidget[]>
 >(() => Promise.resolve([]));
-export const resolveNotice = vi.fn(() => Promise.resolve({ status: "ok" }));
 export const putSetting = vi.fn((key: string, value: unknown) =>
   Promise.resolve({ key, value, updated_at: "2026-06-14T12:00:00Z" }),
 );
@@ -140,7 +139,6 @@ export async function setupInspectorTest() {
     getAgentInspectWidgets,
     getAgentRoster,
     getAgent,
-    resolveNotice,
     putSetting,
     getSettings,
   };
@@ -161,7 +159,6 @@ export async function cleanupInspectorTest() {
   getAgentInspectWidgets.mockReset();
   getAgentRoster.mockReset();
   getAgent.mockReset();
-  resolveNotice.mockClear();
   putSetting.mockClear();
   getSettings.mockClear();
   window.innerWidth = 1024;
@@ -318,13 +315,3 @@ export function widgetFixture(over: Partial<InspectWidget> = {}): InspectWidget 
     ...over,
   };
 }
-
-export const widgetNotice = {
-  id: 92,
-  title: "Needs a call",
-  content: null,
-  priority: "P1" as const,
-  require_response: true,
-  blocking: false,
-  created_at: "2026-06-14T12:00:00Z",
-};

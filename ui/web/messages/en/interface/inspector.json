@@ -1,5 +1,4 @@
 {
-  "sectionWidgets": "Extensions",
   "widgetsUnavailable": "Inspector extensions unavailable",
   "retryWidgets": "Retry extensions",
   "title": "Inspector",
@@ -20,7 +19,6 @@
   "retrying": "Retrying…",
   "noData": "No data",
   "sectionPage": "Page",
-  "sectionNotice": "Notice",
   "sectionTasks": "Tasks",
   "sectionShells": "Persistent shells",
   "unnamed": "(unnamed)",
@@ -51,7 +49,6 @@
   "windowedUnavailable": "Windowed inspector data unavailable",
   "retryWindowed": "Retry windowed data",
   "openRunTimeline": "Open run timeline",
-  "jumpNotice": "Notification",
   "sectionContext": "Context",
   "metricContextUsed": "Used",
   "metricContextLimits": "Soft / Hard limit"

@@ -1,14 +1,14 @@
 ---
 type: doc
 title: Inspector section details
-description: What each Inspector section renders — shells, pages, the config-overlay diff, the notice reply surface and the no-fabrication rule; the Activity and Liveness sections have their own nodes.
+description: What each Inspector section renders — shells, pages, the config-overlay diff, plugin widgets and the no-fabrication rule; the Activity and Liveness sections have their own nodes.
 tags: [frontend]
 ---
 
 # Inspector section details
 
-Rendering facts of the panel's sections; the shell (layout, order, close
-surfaces) is in [[ui/web/src/docs/frontend-components/inspector/inspector.meiva.okf.md|Inspector Panel]]
+Rendering facts of the panel's sections; the shell (layout, order, loading
+contract) is in [[ui/web/src/docs/frontend-components/inspector/inspector.meiva.okf.md|Inspector Panel]]
 and the reads behind them in
 [[ui/web/src/docs/frontend-components/inspector/queries-and-refresh.meiva.okf.md|reads and refresh]].
 
@@ -19,9 +19,8 @@ hover, `11.5px` monospace values in anti-glare `#f0ede7` on dark surfaces, and t
 family. The panel's amber stale dot renders at its end — it marks
 "live refresh is failing" only when a snapshot is already displayed
 (stale-while-error); a cold failure gets the full error message in the body
-instead, so the dot never replaces content. The sibling links (`fleetTaskHref`,
-`fleetNoticeHref`) are typed literal routes so `next/link` infers them without a
-cast.
+instead, so the dot never replaces content. The fleet task link (`fleetTaskHref`)
+is a typed literal route so `next/link` infers it without a cast.
 
 **Activity** carries the cost, TPS and duration cells in its own node: [[ui/web/src/docs/frontend-components/inspector/activity.meiva.okf.md|Activity section]].
 
@@ -63,20 +62,15 @@ next heartbeat, the last pause, machine and status — the cell rules, including
 what a pause or a queued wake renders, are in
 [[ui/web/src/docs/frontend-components/inspector/section-details/liveness.meiva.okf.md|the Liveness section]].
 
-**Notice** renders the agent's single open notice at the bottom as the
-interactive reply surface (a `require_response` notice gets a reply box +
-Dismiss, an FYI gets Mark read; the same numbered question controls as the
-timeline), with a jump link into the fleet inbox. `OpenNoticeDetail` keys by
-notice id: a resolve leaves `pending` true while the notice is going away, and
-the keyed remount gives the *next* notice a fresh, enabled reply surface.
-Resolving invalidates the live query so the notice clears without waiting for
-the interval.
-
 **Widgets.** Plugin widgets render through the shared section chrome
-(`inspector-section.tsx`), so plugin sections and built-in ones share one header
-component; the widget section itself renders only the closed-set kinds the
-console knows (`InspectWidgetSection`) and a widgets fetch failure leaves the
-rest of the panel intact.
+(`inspector-section.tsx`), which also owns `Section` loading attributes and
+`Metric`'s `17px` pending breathing bar, so plugin sections and built-in ones
+share one header and card primitive; the widget section itself renders only the
+closed-set kinds the console knows (`InspectWidgetSection`), renders nothing
+while pending or empty, and a widgets fetch failure leaves the rest of the panel
+intact. Open notices are rendered once in `SharedContextPanel`'s pinned bottom
+`notice-region` ([[ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md|shared user context]]),
+never duplicated inside the Inspector scroll body.
 
 **No fabrication.** The panel renders the metrics, or nothing: coverage
 verdicts, duration precision and retained-source notes are machinery that go to
