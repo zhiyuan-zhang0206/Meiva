@@ -41,7 +41,7 @@ import sys
 import types
 from pathlib import Path
 
-from cli.boundary.untyped import object_of
+from base.host.boundary.untyped import object_of
 from cli.commands.management import schedule_verify_checks
 
 _DETAIL_MAX = 160

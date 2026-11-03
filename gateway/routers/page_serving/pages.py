@@ -30,6 +30,7 @@ from psycopg_pool import ConnectionPool
 from starlette.background import BackgroundTask
 
 from base.db import agent_exists
+from base.db.rows import query_one
 from base.events.live.bus import EventBus
 from base.events.live.projection import PageClosed, PageOpened
 from base.log import logger
@@ -49,7 +50,6 @@ from gateway.http.config import (
     gateway_state,
     state_as,
 )
-from gateway.http.db_rows import query_one
 from gateway.routers.page_serving import page_acceptance, page_target, page_target_policy
 from gateway.schemas import PageCloseRequest, PageRegisterRequest
 from ops.pages import (

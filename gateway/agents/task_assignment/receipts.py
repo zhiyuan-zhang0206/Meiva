@@ -7,9 +7,9 @@ from fastapi import HTTPException
 from psycopg.types.json import Jsonb
 
 from base.agents.tasks.model import validate_task_snapshot
+from base.db.rows import query_one
+from base.host.boundary.json_values import is_object_dict
 from gateway.agents.task_assignment.schemas import TaskAssignmentResult
-from gateway.http.db_rows import query_one
-from gateway.http.json_values import is_object_dict
 
 
 # meiva:note

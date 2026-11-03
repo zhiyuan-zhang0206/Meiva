@@ -1,0 +1,8 @@
+exports = ["json_values.py", "tests", "untyped.py"]
+
+[uses]
+"tests" = ["json_values.py", "untyped.py"]
+
+[purity]
+"json_values.py" = "strict"
+"untyped.py" = "strict"

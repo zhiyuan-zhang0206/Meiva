@@ -27,9 +27,9 @@ from datetime import datetime
 
 from psycopg_pool import ConnectionPool
 
+from base.db.rows import query_all
 from base.events.reads import audit_rows
 from base.events.reads.audit_rows import LINEAGE_EVENT_NAMES
-from gateway.http.db_rows import query_all
 
 # Bound on the tie read, below the route's client timeouts.
 _TIE_READ_STATEMENT_TIMEOUT_MS = 8_000

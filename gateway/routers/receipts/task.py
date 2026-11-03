@@ -6,7 +6,7 @@ import psycopg
 from fastapi import HTTPException
 from psycopg.types.json import Jsonb
 
-from gateway.http.db_rows import query_one
+from base.db.rows import query_one
 from gateway.schemas.tasks import TaskRow
 
 

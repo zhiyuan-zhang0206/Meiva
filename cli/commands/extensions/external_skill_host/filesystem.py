@@ -11,8 +11,8 @@ import stat
 from dataclasses import dataclass
 from pathlib import Path
 
+from base.host.boundary.untyped import object_of
 from base.native_process.os_platform import is_linux, is_macos
-from cli.boundary.untyped import object_of
 from cli.commands.extensions.external_skill_host.records import (
     DirectoryEntry,
     FileEntry,

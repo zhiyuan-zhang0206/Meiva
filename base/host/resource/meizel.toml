@@ -1,10 +1,14 @@
-exports = ["reading.py", "sample.py"]
+exports = ["memory_pressure.py", "reading.py", "sample.py"]
 
 [uses]
 "sample.py" = ["reading.py"]
 
 [purity]
+"memory_pressure.py" = { mode = "none", why = "the shell that asks the kernel for the memory-pressure level and one process footprint through sysctl and libproc (ctypes); the level names and the macOS-only decision are small, but the reads are the file" }
 "." = "strict"
 "__init__.py" = "strict"
 "reading.py" = "strict"
 "sample.py" = { mode = "none", why = "the shell that takes one live machine reading: it asks psutil for the CPU, memory and primary-disk figures and runs `pmset -g batt` on a macOS host, stamping the reading with the instant its caller names; the model, the battery parse and how the figures become the displayed sample are decided in reading.py" }
+
+[debt.ambient-read]
+"memory_pressure.py#environ ctypes.util.find_library" = { count = 2, owner = "#8237", until = "waits for `_DarwinMemory.pressure` and `_DarwinMemory.footprint` to take the loaded system library from their caller: each asks the library search path (LD_LIBRARY_PATH, PATH) for libc or libproc itself" }

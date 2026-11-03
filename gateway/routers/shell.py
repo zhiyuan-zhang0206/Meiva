@@ -17,9 +17,9 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query, Request
 from psycopg_pool import ConnectionPool
 
+from base.db.rows import query_one
+from base.host.boundary.json_values import is_object_list
 from gateway.http.config import gateway_config, gateway_rpc, gateway_state
-from gateway.http.db_rows import query_one
-from gateway.http.json_values import is_object_list
 from gateway.schemas import ShellCaptureResponse
 from ops.cluster import rpc as cluster_rpc
 

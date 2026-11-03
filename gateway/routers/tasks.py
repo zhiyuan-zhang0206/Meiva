@@ -33,11 +33,11 @@ from base.agents.tasks.priority import Priority
 from base.agents.tasks.reparent import resolve_reparent
 from base.agents.tasks.rules import first_open_child, is_closed, open_title_holder
 from base.agents.tasks.status import TaskStatus
+from base.db.rows import query_all, query_one
 from base.db.transaction import write_transaction
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.http.auth.request_principal import PrincipalScopeError, request_key
 from gateway.http.config import gateway_clock, gateway_rpc, gateway_state
-from gateway.http.db_rows import query_all, query_one
 from gateway.routers.receipts.task import existing_task_receipt, save_task_receipt
 from gateway.schemas.tasks import (
     TaskGraphRow,

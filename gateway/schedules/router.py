@@ -11,6 +11,7 @@ from psycopg.rows import class_row
 from psycopg_pool import ConnectionPool
 
 from base.cluster import session_name
+from base.db.rows import query_all, query_one
 from base.db.transaction import write_transaction
 from base.sessions.protocol import SessionBackend
 from gateway.agents.creation import create_and_launch_agent, guarded_draft_key
@@ -23,7 +24,6 @@ from gateway.http.config import (
     gateway_rpc,
     gateway_state,
 )
-from gateway.http.db_rows import query_all, query_one
 from gateway.http.model_catalog import require_model_catalog
 from gateway.routers.receipts import creation as creation_receipts
 from gateway.schedules import plans, receipts, session_control

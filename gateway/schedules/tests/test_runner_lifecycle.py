@@ -16,7 +16,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from gateway.http.db_rows import query_one
+from base.db.rows import query_one
 from gateway.schedules.rows import InsertedId
 from gateway.schedules.tests.runner_inputs import run_schedule as run
 from services.wake.schedule_manager import engine

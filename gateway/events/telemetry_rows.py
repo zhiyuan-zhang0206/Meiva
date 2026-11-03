@@ -23,9 +23,9 @@ import psycopg
 from psycopg import sql
 from psycopg.rows import class_row
 
+from base.db.rows import count_one
 from base.events.contract import TIER_BY_EVENT, EventTier
 from base.events.reads import EventRecord
-from gateway.http.db_rows import count_one
 
 _LEVELS = ("debug", "info", "warning", "error", "critical")
 _ANOMALY_LEVELS = ("warning", "error", "critical")

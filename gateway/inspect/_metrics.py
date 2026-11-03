@@ -18,7 +18,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from base.clock import Clock
-from gateway.http.json_values import is_object_dict
+from base.host.boundary.json_values import is_object_dict
 from gateway.inspect._metrics_health import note_inspect_metrics_coverage
 from gateway.inspect.schemas import (
     AgentActivity,

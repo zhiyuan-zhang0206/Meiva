@@ -17,7 +17,7 @@ from fastapi import HTTPException
 from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
-from gateway.http.db_rows import query_all, query_one
+from base.db.rows import query_all, query_one
 from gateway.routers.page_serving import page_target_policy
 from gateway.routers.refusal import HttpFailure
 

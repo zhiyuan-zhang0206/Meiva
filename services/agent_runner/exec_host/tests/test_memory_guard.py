@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 from loguru import logger
 
-from base.host.memory_pressure import PressureLevel
+from base.host.resource.memory_pressure import PressureLevel
 from services.agent_runner.exec_host.memory_guard import ExecDomain, ExecMemoryGuard
 
 _GIB = 1024**3

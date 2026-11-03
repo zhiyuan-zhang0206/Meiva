@@ -78,3 +78,9 @@ returned no row. `fetch_one` takes the cursor's row type through, so a plain cur
 tuple. A column psycopg adapts to a Python type (`int`, `str`, `datetime`, `Decimal`, `list[int]`
 for an array) is declared with that type; a `jsonb` column is declared `object` and narrowed where
 it is read. `dict_row` is not a typed alternative: its values are `Any`.
+
+`base/db/rows.py` is the shorthand for the common shape: `query_one(conn, RowCls, sql, params)`
+opens the cursor, runs the statement and returns `RowCls | None`; `query_all` returns
+`list[RowCls]`; `count_one(conn, sql, params)` runs a `SELECT count(*) AS n` statement and returns
+the `int`, raising when an aggregate returns no row. Gateway, CLI and services read through them
+instead of keeping a copy.

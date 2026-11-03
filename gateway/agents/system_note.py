@@ -16,9 +16,9 @@ from base.agents.messages.inbound import InboundKind
 from base.agents.messages.inbound_provenance import InboundProvenance
 from base.api_contracts.caller_identity import caller_payload
 from base.db import Database
+from base.db.rows import query_one
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
-from gateway.http.db_rows import query_one
 
 
 def system_note_blocking(

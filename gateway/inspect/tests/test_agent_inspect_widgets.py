@@ -29,13 +29,13 @@ from psycopg_pool import ConnectionPool
 import meiva_builtins.plugins as shipped_plugins
 from base.agents.tasks.priority import Priority
 from base.db import Database
+from base.db.rows import query_one
 from base.log.tests.log_records import LogRecords
 from base.packages.plugins.data_registry import DeclaredFace, build_data_registry
 from base.packages.plugins.extensions import PluginContributions
 from base.packages.plugins.surface.inspector import DuplicateInspectWidget, InspectWidgetSpec
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
-from gateway.http.db_rows import query_one
 from gateway.inspect import _plugin_widgets
 from gateway.inspect._plugin_faces import SHIPPED_PLUGINS_DIR, enabled_plugin_names
 from gateway.inspect.schemas import InspectWidgetResult, InspectWidgetTask

@@ -23,13 +23,13 @@ from base.agents.tasks.notes import task_note_line
 from base.clock import Clock
 from base.cluster import machines
 from base.db import Database
+from base.db.rows import query_all, query_one
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 from base.log import logger
 from gateway.agents.launch import forward
 from gateway.cluster.schemas import MachinePauseRequest, MachinePauseResponse, MachineResumeResponse
 from gateway.http.config import gateway_clock, gateway_rpc, gateway_state
-from gateway.http.db_rows import query_all, query_one
 from ops.lifecycle import force_mark_terminated
 
 router = APIRouter()

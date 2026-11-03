@@ -25,9 +25,9 @@ import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from base.db.rows import query_one
 from base.db.transaction import ConnectionSource
 from base.log import logger
-from gateway.http.db_rows import query_one
 from gateway.lgtm.staleness_plan import (
     HEARTBEAT_EVENT,
     STALENESS_THRESHOLD_S,

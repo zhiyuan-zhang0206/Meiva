@@ -16,7 +16,7 @@
 #
 # The agent host runs one sequential loop (`ExecMemoryGuard.run_forever`). Each tick
 # reads the pressure level the operating system itself reports
-# (`base.host.memory_pressure`); only at ``critical`` does it look at the exec
+# (`base.host.resource.memory_pressure`); only at ``critical`` does it look at the exec
 # domains this host owns, pick the one with the largest footprint, record the
 # reason next to its result file and kill its session leader. The run that owns
 # that domain observes the leader exit exactly as for any external SIGKILL — it
@@ -43,8 +43,8 @@ from pathlib import Path
 import psutil
 
 from base.host.env.agent_env import AGENT_ID_ENV
-from base.host.memory_pressure import MemorySource, PressureLevel
 from base.host.proc import EXEC_DOMAIN_SESSION_ENTRIES
+from base.host.resource.memory_pressure import MemorySource, PressureLevel
 from base.log import logger
 from base.native_process.exec_kill_notice import write_notice
 
@@ -223,7 +223,7 @@ async def run_memory_guard_forever(log: logging.Logger, host_pid: int, floor_byt
 
     Where the OS reports no pressure state (Linux), the guard does not run.
     """
-    from base.host.memory_pressure import host_memory_source
+    from base.host.resource.memory_pressure import host_memory_source
 
     source = host_memory_source()
     if source is None:

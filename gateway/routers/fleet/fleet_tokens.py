@@ -22,9 +22,9 @@ from typing import NamedTuple, SupportsFloat
 import psycopg
 from psycopg.rows import class_row
 
+from base.db.rows import query_all
 from base.events.contract import LLM_USAGE_KEYS
 from base.telemetry.metrics.event_sql import numeric
-from gateway.http.db_rows import query_all
 from services.upkeep.events_maintenance.token_totals import folded_through
 
 _RETAINED_WINDOW = timedelta(days=7)

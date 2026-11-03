@@ -15,6 +15,7 @@ import pytest
 import base.db
 from base.cluster import session_name
 from base.db.code_version_gate import ProcessDbGate
+from base.db.rows import query_one
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.tests.serving_root import observe
 from base.paths import run_dir
@@ -23,7 +24,6 @@ from base.sessions.pty.paths import service_socket_path
 from base.sessions.pty.tests.pty_service import FakePtyService
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
-from gateway.http.db_rows import query_one
 from gateway.schedules import session_control
 from gateway.schedules.rows import InsertedId
 from services.wake.schedule_manager import requests

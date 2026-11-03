@@ -18,7 +18,7 @@ from typing import Self, TypedDict
 import httpx
 from pydantic import TypeAdapter
 
-from gateway.http.json_values import is_object_dict
+from base.host.boundary.json_values import is_object_dict
 
 
 class _Receipt(TypedDict):

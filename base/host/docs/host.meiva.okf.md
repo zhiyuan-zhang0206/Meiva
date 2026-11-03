@@ -19,6 +19,7 @@ helpers. HTTPX uses its installed import behavior and public entry points.
 - [[base/host/env/docs/registry.meiva.okf.md]] — Environment declarations and boot/child projections.
 - [[base/host/docs/runtime_interpreter.meiva.okf.md]] — Loaded-runtime interpreter binding.
 - [[base/host/docs/resilience.meiva.okf.md]] — Retry primitives, classification and the wait seam.
+- [[base/host/boundary/docs/boundary.meiva.okf.md]] — The one place a value typed `Any` by a library or decoded from JSON is narrowed to a checked shape.
 - [[base/host/docs/brew_pin.meiva.okf.md]] — Operator-approved tool pins: brew formula manifest, uv release digests, apt-series pins, brew probes.
 
 `base/host/system/hostport.py` is the port to this machine. A component that starts a process,

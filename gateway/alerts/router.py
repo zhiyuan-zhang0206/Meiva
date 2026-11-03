@@ -40,6 +40,7 @@ from fastapi.responses import StreamingResponse
 from psycopg.rows import kwargs_row
 from pydantic import TypeAdapter
 
+from base.db.rows import count_one
 from base.db.transaction import write_transaction
 from base.telemetry.alerts import (
     AlertMessageStyle,
@@ -59,7 +60,6 @@ from gateway.events.sse import event_stream
 from gateway.events.sse_frames import SseCadence
 from gateway.http.auth.webhook import authenticate_webhook
 from gateway.http.config import gateway_clock, gateway_config, gateway_state
-from gateway.http.db_rows import count_one
 from ops.alerts import ALERTS_CHANNEL, AlertRow, AlertSeverity, AlertStatus, publish_alert_rows
 
 router = APIRouter()

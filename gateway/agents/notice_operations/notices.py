@@ -27,6 +27,7 @@ from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from base.events.notifications.notices import stage_notice_notification
 from base.events.notifications.publish import announce_sync
+from base.host.boundary.json_values import is_object_dict
 from gateway.agents.inbound_provenance import request_inbound_provenance
 from gateway.agents.notice_operations.notice_answers import resolution_answer, resolution_inbound
 from gateway.agents.notice_operations.notice_plan import (
@@ -45,7 +46,6 @@ from gateway.agents.schemas import (
 )
 from gateway.http.auth.request_principal import PrincipalScopeError, request_key
 from gateway.http.config import gateway_clock, gateway_config, gateway_rpc, gateway_state
-from gateway.http.json_values import is_object_dict
 from ops import lifecycle as _ops
 from ops.agents import get_agent_status
 

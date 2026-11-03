@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import psycopg
 from psycopg.abc import Params, QueryNoTemplate
 
-from gateway.http.db_rows import query_one
+from base.db.rows import query_one
 
 
 # meiva:note

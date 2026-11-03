@@ -1,8 +1,7 @@
-exports = ["fields.py", "json_body.py", "json_text.py", "options.py", "process.py", "untyped.py"]
+exports = ["fields.py", "json_body.py", "json_text.py", "options.py", "process.py"]
 
 [uses]
 "json_body.py" = ["json_text.py"]
 
 [purity]
 "json_text.py" = "strict"
-"untyped.py" = "strict"

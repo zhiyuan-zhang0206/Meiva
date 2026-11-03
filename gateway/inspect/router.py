@@ -18,6 +18,8 @@ from psycopg_pool import ConnectionPool, PoolTimeout
 from base.api_contracts.agent_contract import AgentNotFound
 from base.clock import Clock
 from base.db import Database
+from base.db.rows import query_one
+from base.host.boundary.json_values import is_object_list
 from gateway.http.config import (
     GatewayAppState,
     gateway_clock,
@@ -26,8 +28,6 @@ from gateway.http.config import (
     gateway_state,
     state_as,
 )
-from gateway.http.db_rows import query_one
-from gateway.http.json_values import is_object_list
 from gateway.inspect import _metrics, _plugin_metrics, _plugin_widgets, neighbors
 from gateway.inspect._cache import InspectCacheFullError, InspectQueryCache
 from gateway.inspect._heartbeat import HeartbeatCadence, HeartbeatState

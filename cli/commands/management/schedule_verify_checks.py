@@ -27,7 +27,7 @@ import types
 from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 
-from cli.boundary.untyped import object_of
+from base.host.boundary.untyped import object_of
 
 __all__ = ["call_site_problems", "is_repo_source", "undefined_name_problems"]
 

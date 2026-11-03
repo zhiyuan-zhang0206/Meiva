@@ -7,8 +7,8 @@ from typing import TypeGuard
 
 import yaml
 
+from base.host.boundary.untyped import object_of
 from base.telemetry.lgtm_local import NATIVE_SERVICES
-from cli.boundary.untyped import object_of
 
 NATIVE_CONSTANTS = NATIVE_SERVICES
 

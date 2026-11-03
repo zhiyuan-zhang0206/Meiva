@@ -14,8 +14,8 @@ from base.agents.messages.inbound import not_passive_inbound
 from base.agents.observation.evidence import AgentObservation, observation
 from base.agents.observation.snapshot import OpenNotice
 from base.api_contracts.agent_contract import AgentStatus, Harness, LivenessState
-from gateway.http.db_rows import query_one
-from gateway.http.json_values import is_object_dict
+from base.db.rows import query_one
+from base.host.boundary.json_values import is_object_dict
 from gateway.inspect._heartbeat import HeartbeatCadence, HeartbeatState, plan_heartbeat
 from gateway.inspect.schemas import HeartbeatInfo, HeartbeatLastPause
 from services.wake.heartbeat import STALE_PENDING_S

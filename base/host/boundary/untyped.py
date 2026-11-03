@@ -3,9 +3,10 @@
 #
 # `json.loads`, `yaml.safe_load`, `httpx.Response.json` and `ConfigBoot.get_field` return `Any`. A
 # function passed as an argument keeps its signature outside the callee, so this accepts it as
-# `Callable[P, object]` and hands back `object`: the caller narrows with `isinstance` instead of
-# holding an unchecked value, and the `Any` is never bound to a name. Prefer the typed readers in
-# `cli.boundary.json_body` when the answer is JSON; this is for the rest.
+# `Callable[P, object]` and hands back `object`: the caller narrows with `isinstance` (or
+# `base.host.boundary.json_values`) instead of holding an unchecked value, and the `Any` is never bound
+# to a name. Prefer a `TypeAdapter` or a pydantic model when the shape is known; this is for the
+# rest.
 
 from __future__ import annotations
 
