@@ -25,7 +25,7 @@ from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Literal, Protocol, TextIO
+from typing import Any, Protocol, TextIO
 
 import psutil
 import psycopg
@@ -56,7 +56,7 @@ class Launcher(Protocol):
         self,
         name: str,
         *,
-        term: Literal["default", "exit", "ignore"] = "default",
+        term: str = "default",
         ignore_hangup: bool = False,
         child_armed: Path | None = None,
     ) -> subprocess.Popen[str]: ...
@@ -182,7 +182,7 @@ def launched_processes(home: Path) -> Generator[Launcher, None, None]:
     def create(
         name: str,
         *,
-        term: Literal["default", "exit", "ignore"] = "default",
+        term: str = "default",
         ignore_hangup: bool = False,
         child_armed: Path | None = None,
     ) -> subprocess.Popen[str]:

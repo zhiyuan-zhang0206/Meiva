@@ -34,21 +34,20 @@ def test_self_restart_admits_successor_and_answers_on_same_agent(e2e_env: E2EEnv
     page.fill('[data-testid="composer-input"]', "\u91cd\u542f")
     page.click('[data-testid="composer-send"]')
 
-    original_generation: UUID | None = None
+    observed_generations: list[UUID] = []
 
     def original_turn_admitted() -> tuple[bool, object]:
         # meiva:note
         # The window between admission and the exec requesting the restart is the only
         # time the original generation is observable.
-        nonlocal original_generation
         row, commands = _evidence(agent_id)
         if row and row[1] is not None:
             if commands:
                 raise AssertionError(
                     f"the original generation was never observed: {row}, {commands}"
                 )
-            original_generation = row[1]
-        return original_generation is not None, {"agent": row, "commands": commands}
+            observed_generations.append(row[1])
+        return bool(observed_generations), {"agent": row, "commands": commands}
 
     poll_until(
         original_turn_admitted,
@@ -56,7 +55,7 @@ def test_self_restart_admits_successor_and_answers_on_same_agent(e2e_env: E2EEnv
         interval=0.02,
         what=f"agent {agent_id} admits the turn that restarts it",
     )
-    assert original_generation is not None
+    original_generation = observed_generations[-1]
 
     def restart_applied() -> tuple[bool, object]:
         row, commands = _evidence(agent_id)

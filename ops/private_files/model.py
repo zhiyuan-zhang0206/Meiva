@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Literal, TypedDict, TypeGuard
+from typing import TypedDict, TypeGuard
 
 
 class GitSource(TypedDict):
-    kind: Literal["git"]
+    # meiva:note
+    # Read from the manifest JSON unvalidated; `_probe_git_source` rejects any value but "git".
+    kind: str
     repo: str
     treeish: str
 

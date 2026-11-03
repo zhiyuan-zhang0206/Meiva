@@ -55,7 +55,7 @@ class _Base(BaseModel):
     agent_id: int
 
 
-class ChatStart(_Base, BaseModel):
+class ChatStart(_Base):
     """LLM started emitting text content (the model speaking to the
     user) — the UI starts a new chat block.
 
@@ -74,7 +74,7 @@ class ChatStart(_Base, BaseModel):
     non_human_wake: bool = False
 
 
-class ChatDelta(_Base, BaseModel):
+class ChatDelta(_Base):
     """A small token slice of chat text — content is the delta text.
     See `item_id` in ChatStart.
 
@@ -90,7 +90,7 @@ class ChatDelta(_Base, BaseModel):
     non_human_wake: bool = False
 
 
-class CompactRequest(_Base, BaseModel):
+class CompactRequest(_Base):
     """Notification sent by the SDK right after the agent calls
     `meiva.self.compact(summary)` — the UI can display
     "compacting..."; content carries a human-readable description
@@ -100,7 +100,7 @@ class CompactRequest(_Base, BaseModel):
     content: str
 
 
-class CompactDone(_Base, BaseModel):
+class CompactDone(_Base):
     """Compact finished — signal that messages were modified in place
     on the **current agent**. The UI prints one line "compact done";
     does not switch agent (agent_id is unchanged)."""
@@ -123,7 +123,7 @@ class CompactionStatus(StrEnum):
     REPLACED = "replaced"
 
 
-class CompactStarted(_Base, BaseModel):
+class CompactStarted(_Base):
     """A forced/auto compaction began — the compaction LLM is running and
     the history has not been replaced yet; the UI renders a ticking
     "Compacting" block until the matching `CompactFinished` (same
@@ -144,7 +144,7 @@ class CompactStarted(_Base, BaseModel):
     mode: CompactionMode
 
 
-class CompactFinished(_Base, BaseModel):
+class CompactFinished(_Base):
     """Terminal signal for one compaction run (`compact_id`) — emitted
     exactly once per `CompactStarted`, on every path.
 
@@ -165,7 +165,7 @@ class CompactFinished(_Base, BaseModel):
     finished_at: str
 
 
-class CodeStart(_Base, BaseModel):
+class CodeStart(_Base):
     """LLM started emitting agent code — the UI starts a new code
     block. See `item_id` in ChatStart."""
 
@@ -173,7 +173,7 @@ class CodeStart(_Base, BaseModel):
     item_id: str
 
 
-class CodeDelta(_Base, BaseModel):
+class CodeDelta(_Base):
     """A small token slice within a code block — content is the
     delta text."""
 
@@ -182,7 +182,7 @@ class CodeDelta(_Base, BaseModel):
     content: str
 
 
-class ReasoningStart(_Base, BaseModel):
+class ReasoningStart(_Base):
     """LLM started emitting thinking content (internal reasoning) —
     the UI starts a new reasoning block. See `item_id` in ChatStart."""
 
@@ -190,7 +190,7 @@ class ReasoningStart(_Base, BaseModel):
     item_id: str
 
 
-class ReasoningDelta(_Base, BaseModel):
+class ReasoningDelta(_Base):
     """A small token slice of thinking content — content is the
     delta text."""
 
@@ -199,7 +199,7 @@ class ReasoningDelta(_Base, BaseModel):
     content: str
 
 
-class ExecStart(_Base, BaseModel):
+class ExecStart(_Base):
     """Code stream finished, subprocess began executing — the UI
     displays an empty code-output block that will fill with streaming
     output. `item_id` is the stable key matching the subsequent
@@ -209,7 +209,7 @@ class ExecStart(_Base, BaseModel):
     item_id: str
 
 
-class ExecOutputChunk(_Base, BaseModel):
+class ExecOutputChunk(_Base):
     """Incremental subprocess stdout/stderr fragments pushed as the
     subprocess runs — the UI streams append-display without waiting
     for the entire exec to finish.
@@ -234,7 +234,7 @@ class ExecOutputChunk(_Base, BaseModel):
     keepalive: bool = False
 
 
-class ExecOutput(_Base, BaseModel):
+class ExecOutput(_Base):
     """Final exec stdout/stderr/exit code — the same blob the kernel feeds
     back to the agent and the UI displays. One shared view by design; the
     full unfiltered traceback goes to the logs for debugging.
@@ -250,7 +250,7 @@ class ExecOutput(_Base, BaseModel):
     content: str
 
 
-class Error(_Base, BaseModel):
+class Error(_Base):
     """User-perceivable failure (graph.ainvoke raised, Compaction
     LLM failed, chat persistence FK collision etc.). The UI should
     show content and reset streaming state. A permanent provider rejection
@@ -267,7 +267,7 @@ class Error(_Base, BaseModel):
     recovery: str | None = None
 
 
-class Cancelled(_Base, BaseModel):
+class Cancelled(_Base):
     """User actively clicked Stop (Web UI button) or the kernel
     received a cancel signal and terminated the current turn. The UI
     resets streaming state and prints an "Aborted" line.
@@ -278,13 +278,13 @@ class Cancelled(_Base, BaseModel):
     role: Literal["cancelled"] = "cancelled"
 
 
-class ImpersonationChanged(_Base, BaseModel):
+class ImpersonationChanged(_Base):
     """Durable session history changed; reload the unified timeline projection."""
 
     role: Literal["impersonation_changed"] = "impersonation_changed"
 
 
-class InboundArrived(_Base, BaseModel):
+class InboundArrived(_Base):
     """New system event: any inbound message INSERTed into
     inbound_messages publishes this. The Developer view uses it to
     show external inbound arrivals in real time."""
@@ -296,7 +296,7 @@ class InboundArrived(_Base, BaseModel):
     content: str
 
 
-class TokenUsage(_Base, BaseModel):
+class TokenUsage(_Base):
     """Published on LLM call completion — `input_tokens` is the
     context window the model actually saw (system prompt + all
     messages history), i.e. "how much of the context window was used".
@@ -320,13 +320,13 @@ class TokenUsage(_Base, BaseModel):
 # meiva:note
 # Empty, live-view-only model liveness, including requests with no visible reasoning summary.
 # msg_idx locates an ephemeral waiting card; no content, token or reasoning timing is inferred.
-class LLMKeepalive(_Base, BaseModel):
+class LLMKeepalive(_Base):
     role: Literal["llm_keepalive"] = "llm_keepalive"
     msg_idx: int = Field(ge=0)
     content: Literal[""] = ""
 
 
-class LLMDone(_Base, BaseModel):
+class LLMDone(_Base):
     """LLM streaming completed — published by
     `RedisStreamHandler.finish()`.
 
@@ -342,7 +342,7 @@ class LLMDone(_Base, BaseModel):
     role: Literal["llm_done"] = "llm_done"
 
 
-class TimelineSnapshot(_Base, BaseModel):
+class TimelineSnapshot(_Base):
     """Timeline snapshot, published by the agent at each graph node
     **enter** (`agent.graph.node_log.node_lifecycle`), rendered from the
     node's in-memory state.messages. The gateway forwards it unchanged; the
@@ -385,7 +385,7 @@ class TimelineSnapshot(_Base, BaseModel):
     msg_count: int
 
 
-class InboundCommitted(_Base, BaseModel):
+class InboundCommitted(_Base):
     """The claim node envelope-wrapped a chat inbound into a
     HumanMessage and wrote into LangGraph state.messages; publishes
     a protocol-layer ACK.
@@ -409,13 +409,13 @@ class InboundCommitted(_Base, BaseModel):
     inbound_id: int
 
 
-class ToUserChanged(_Base, BaseModel):
+class ToUserChanged(_Base):
     """The home-machine file changed; readers fetch its authoritative contents."""
 
     role: Literal["to_user_changed"] = "to_user_changed"
 
 
-class PageOpened(_Base, BaseModel):
+class PageOpened(_Base):
     """Published when the agent calls `meiva.ui.show(name)` to
     register / update an HTML page — the frontend Pages popover adds
     or in-place replaces an entry.
@@ -437,7 +437,7 @@ class PageOpened(_Base, BaseModel):
     url: str
 
 
-class PageClosed(_Base, BaseModel):
+class PageClosed(_Base):
     """Published when the agent calls `meiva.ui.close(name)`, the terminate
     cascade closes an agent-owned show() page, or the page-server daemon closes
     a row whose serve_dir remains unavailable — the frontend Pages popover
@@ -456,7 +456,7 @@ class PageClosed(_Base, BaseModel):
     name: str
 
 
-class AgentSpawned(_Base, BaseModel):
+class AgentSpawned(_Base):
     """A committed agent creation invalidates the live roster.
 
     Consumers read authoritative cards and ancestry; the event carries no
@@ -466,7 +466,7 @@ class AgentSpawned(_Base, BaseModel):
     role: Literal["agent_spawned"] = "agent_spawned"
 
 
-class AgentUpdated(_Base, BaseModel):
+class AgentUpdated(_Base):
     """A committed lifecycle or display-state change invalidates agent reads.
 
     This hint identifies the changed agent; consumers reconcile from their
@@ -476,7 +476,7 @@ class AgentUpdated(_Base, BaseModel):
     role: Literal["agent_updated"] = "agent_updated"
 
 
-class LabelUpdated(_Base, BaseModel):
+class LabelUpdated(_Base):
     """Thread label change notification:
     - gateway BackgroundTask LLM finished generating + CAS write
       succeeded publishes
@@ -491,7 +491,7 @@ class LabelUpdated(_Base, BaseModel):
     label: str | None
 
 
-class NoticePosted(_Base, BaseModel):
+class NoticePosted(_Base):
     """Published when the agent posts or edits any open notice via
     `meiva.ui.notify` / `meiva.ui.edit_notice`. Carries only the lightweight header
     (not the body), so the unified Inbox refetches its queue. A notice that needs
@@ -507,7 +507,7 @@ class NoticePosted(_Base, BaseModel):
     task_id: int | None = None
 
 
-class NoticeResolved(_Base, BaseModel):
+class NoticeResolved(_Base):
     """Published when an open notice leaves the queue. The frontend refetches the
     open and resolved Inbox views. The resolution's write or delivery path also
     publishes AgentUpdated when it removes a response-required notice, keeping
@@ -521,7 +521,7 @@ class NoticeResolved(_Base, BaseModel):
     had_reply: bool | None = None
 
 
-class TaskCreated(_Base, BaseModel):
+class TaskCreated(_Base):
     """Published when an agent creates a task through the meiva.tasks SDK. Fleet-wide
     (GLOBAL_ROLES), so every open task board invalidates and refetches /api/tasks.
     `agent_id` is the creating agent. Carries only the task id — consumers refetch
@@ -531,7 +531,7 @@ class TaskCreated(_Base, BaseModel):
     task_id: int
 
 
-class TaskUpdated(_Base, BaseModel):
+class TaskUpdated(_Base):
     """Published when an agent updates a task through the meiva.tasks SDK (status,
     owner, priority, results, reminder). Same fleet-wide invalidation trigger as
     TaskCreated; `agent_id` is the acting agent. The gateway PATCH path is a plain
@@ -548,7 +548,7 @@ class TaskUpdated(_Base, BaseModel):
 # payload is the row just written to `notification_events`, so a reconnecting
 # client deduplicates on `notification_id`.
 # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-class NotificationEmitted(_Base, BaseModel):
+class NotificationEmitted(_Base):
     role: Literal["notification"] = "notification"
     notification_id: int
     category: str

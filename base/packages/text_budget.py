@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -23,15 +24,23 @@ def count_words(text: str) -> int:
     return len(_CJK_CHARACTER.findall(text)) + len(_WORD_RUN.findall(without_cjk))
 
 
+def _count_lines(text: str) -> int:
+    return len(text.splitlines())
+
+
+_COUNTERS: dict[Unit, Callable[[str], int]] = {
+    Unit.CHARS: len,
+    Unit.LINES: _count_lines,
+    Unit.WORDS: count_words,
+}
+
+
 # meiva:link base/packages/docs/text-budget.meiva.okf.md
 def measure(text: str, unit: Unit) -> int:
-    if unit is Unit.CHARS:
-        return len(text)
-    if unit is Unit.LINES:
-        return len(text.splitlines())
-    if unit is Unit.WORDS:
-        return count_words(text)
-    raise ValueError(f"unknown unit: {unit!r}")
+    counter = _COUNTERS.get(unit)
+    if counter is None:
+        raise ValueError(f"unknown unit: {unit!r}")
+    return counter(text)
 
 
 # meiva:link base/packages/docs/text-budget.meiva.okf.md

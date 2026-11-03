@@ -60,13 +60,13 @@ async def test_retained_turn_can_register_settlement_after_service_stop_started(
     service = HostedServiceResources()
     scope = await service.turn()
     turn_release, child_release, created = asyncio.Event(), asyncio.Event(), asyncio.Event()
-    child: asyncio.Task[bool] | None = None
+    children: list[asyncio.Task[bool]] = []
 
     async def turn() -> None:
-        nonlocal child
         with service.hold_turn(asyncio.current_task()):
             await turn_release.wait()
             child = asyncio.create_task(child_release.wait(), name="original-settlement")
+            children.append(child)
             service.retain_task(scope, child)
             created.set()
 
@@ -79,8 +79,8 @@ async def test_retained_turn_can_register_settlement_after_service_stop_started(
         await created.wait()
         await root
         await asyncio.sleep(0)
-        assert child is not None
-        assert child in service._pending
+        assert len(children) == 1
+        assert children[0] in service._pending
         assert not joining.done()
     finally:
         turn_release.set()

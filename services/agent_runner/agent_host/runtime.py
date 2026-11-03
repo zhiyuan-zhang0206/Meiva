@@ -97,7 +97,7 @@ class HostPolicy:
     # `MEIVA_HOST_HELD_SETTLE_BUDGET_S` at boot; the deploy family's value is only the default.
     held_settle_budget_s: float
     # meiva:note
-    # The environment an external harness session starts from (`child_env("runner", ...)`).
+    # The environment an external harness session starts from (`child_env(...)`).
     harness_environ: Mapping[str, str]
     # meiva:note
     # The host process's own environment, which a spawned takeover relay's session environment is

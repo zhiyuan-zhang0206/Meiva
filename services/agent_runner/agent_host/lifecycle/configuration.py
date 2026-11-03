@@ -48,7 +48,7 @@ def host_policy(
     return HostPolicy(
         max_concurrent_turns=daemon.host_max_concurrent_turns,
         provider_keys=keys,
-        harness_environ=child_env("runner", config.process_environment()),
+        harness_environ=child_env(config.process_environment()),
         environ=config.process_environment(),
         rng=rng,
         pid=pid,

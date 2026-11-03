@@ -16,9 +16,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Literal
-
-import pytest
 
 # meiva:note
 # Ensure settings-lite so we can import config without a real .env
@@ -94,14 +91,13 @@ class TestScopeDerivationRules:
             == HOST_PASSTHROUGH_KEYS
         )
 
-    @pytest.mark.parametrize("role", ["gateway", "runner"])
-    def test_child_env_carries_the_login_identity(self, role: Literal["gateway", "runner"]) -> None:
+    def test_child_env_carries_the_login_identity(self) -> None:
         # meiva:note
         # A PTY child without USER reads a logged-in macOS Claude Code CLI as
         # "Not logged in" (its keychain lookup keys on the account name).
         from base.host.env.registry import child_env
 
-        env = child_env(role, {"USER": "operator", "LOGNAME": "operator"})
+        env = child_env({"USER": "operator", "LOGNAME": "operator"})
         assert env["USER"] == "operator"
         assert env["LOGNAME"] == "operator"
 
@@ -109,7 +105,7 @@ class TestScopeDerivationRules:
         # meiva:note
         # Issue #2095: the machine's proxy configuration is ambient host config —
         # the egress a building child (`npm run build` fetching Google Fonts for
-        # next/font) cannot re-source itself — so every role's child env carries it,
+        # next/font) cannot re-source itself — so every child env carries it,
         # in both spellings (a shell exports HTTP(S)_PROXY; npm/node/curl read the
         # lowercase set), non-empty only (an empty ALL_PROXY means "direct").
         from base.host.env.registry import NETWORK_PROXY_KEYS, child_env, network_proxy_configured
@@ -130,18 +126,16 @@ class TestScopeDerivationRules:
             "no_proxy": "localhost,127.0.0.1",
             "ALL_PROXY": "",
         }
-        for role in ("gateway", "runner"):
-            assert not (NETWORK_PROXY_KEYS & set(child_env(role, direct)))
+        assert not (NETWORK_PROXY_KEYS & set(child_env(direct)))
         # meiva:note
         # The family's single reader (the Feishu ws handshake asks it): any
         # non-empty proxy key, either spelling.
         assert network_proxy_configured(proxied) is True
         assert network_proxy_configured(direct) is False
-        for role in ("gateway", "runner"):
-            env = child_env(role, proxied)
-            assert env["HTTPS_PROXY"] == "http://127.0.0.1:7897"
-            assert env["no_proxy"] == "localhost,127.0.0.1"
-            assert "ALL_PROXY" not in env
+        env = child_env(proxied)
+        assert env["HTTPS_PROXY"] == "http://127.0.0.1:7897"
+        assert env["no_proxy"] == "localhost,127.0.0.1"
+        assert "ALL_PROXY" not in env
 
     def test_the_cluster_secret_rides_no_forwarded_view(self) -> None:
         # meiva:note
@@ -151,8 +145,7 @@ class TestScopeDerivationRules:
 
         launcher = {"MEIVA_CLUSTER_SECRET": "human-bearer"}
         assert "MEIVA_CLUSTER_SECRET" not in session_forward_keys()
-        for role in ("gateway", "runner"):
-            assert "MEIVA_CLUSTER_SECRET" not in child_env(role, launcher)
+        assert "MEIVA_CLUSTER_SECRET" not in child_env(launcher)
 
     def test_agent_runner_cluster_aliases_are_capability_plus_cluster_scope(self) -> None:
         from base.host.env.registry import agent_runner_cluster_aliases
@@ -170,13 +163,6 @@ class TestScopeDerivationRules:
 
 
 class TestDaemonChildEnv:
-    def test_child_env_refuses_the_agent_role(self) -> None:
-        from base.host.env.registry import child_env
-
-        removed_role: Any = "agent"
-        with pytest.raises(ValueError, match="daemon role"):
-            child_env(removed_role, {})
-
     def test_session_view_carries_the_gateway_url_and_port(self) -> None:
         from base.host.env.registry import session_forward_keys
 
@@ -270,7 +256,7 @@ class TestRegistryInvariants:
 
         # meiva:note
         # Exercises _ensure_validated(); raises RuntimeError on a collision.
-        child_env("gateway", {})
+        child_env({})
 
     def test_every_projection_key_is_registered(self) -> None:
         # meiva:note

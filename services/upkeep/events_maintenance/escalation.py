@@ -16,6 +16,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
+from typing import assert_never
 
 import psycopg
 from psycopg_pool import ConnectionPool
@@ -166,4 +167,4 @@ def run_escalation_pass(
     if mode is EscalationMode.SHADOW:
         with write_transaction(pool) as conn:
             return record_shadow(conn, due, now=now, cooldown_s=cooldown_s)
-    return len(due)
+    assert_never(mode)

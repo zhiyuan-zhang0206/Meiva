@@ -221,12 +221,11 @@ def test_late_previous_destination_during_claim_is_not_replaced_or_owned(
     installed_before = read_ledger(context)["installed"]
     (source / "SKILL.md").write_text("operator v2\n")
     original_rename = bridge.rename_no_replace
-    collision: Path | None = None
+    collisions: list[Path] = []
 
     def collide_with_claim(source_path: Path, destination: Path) -> None:
-        nonlocal collision
         if source_path == target:
-            collision = destination
+            collisions.append(destination)
             destination.mkdir()
             (destination / "user.txt").write_text("not Meiva owned\n")
         original_rename(source_path, destination)
@@ -234,8 +233,8 @@ def test_late_previous_destination_during_claim_is_not_replaced_or_owned(
     bridge.converge_external_agent_skill(
         context, host_home=client.parent, skill_names=(SKILL,), rename=collide_with_claim
     )
-    assert collision is not None
-    assert (collision / "user.txt").read_text() == "not Meiva owned\n"
+    assert len(collisions) == 1
+    assert (collisions[0] / "user.txt").read_text() == "not Meiva owned\n"
     assert (target / "SKILL.md").read_text() == "operator v1\n"
     ledger = read_ledger(context)
     assert ledger["installed"] == installed_before

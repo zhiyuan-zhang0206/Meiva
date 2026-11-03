@@ -201,10 +201,3 @@ def reconcile_plugin_schedules(
         removed=tuple(removed),
         skipped=tuple(skipped),
     )
-
-    return PluginScheduleSyncSummary(
-        created=tuple(created),
-        updated=tuple(updated),
-        removed=tuple(removed),
-        skipped=tuple(skipped),
-    )

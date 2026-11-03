@@ -31,12 +31,13 @@ async def test_guard_registers_the_actual_invocation_and_preserves_its_result() 
     scope = await service.turn()
     ctx = MeivaContext(identity=AgentIdentity(7, True), hosted_resources=scope)
     entered, release = asyncio.Event(), asyncio.Event()
-    actual: asyncio.Task[object] | None = None
+    invocations: list[asyncio.Task[object]] = []
     result: dict[str, object] = {"completed": True}
 
     async def invoke(*_args: object, **_kwargs: object) -> dict[str, object]:
-        nonlocal actual
-        actual = asyncio.current_task()
+        task = asyncio.current_task()
+        assert task is not None
+        invocations.append(task)
         entered.set()
         await release.wait()
         return result
@@ -44,7 +45,9 @@ async def test_guard_registers_the_actual_invocation_and_preserves_its_result() 
     guard = asyncio.create_task(_guarded(_Graph(invoke), ctx))
     try:
         await entered.wait()
-        assert actual is not None and actual in service._pending
+        assert len(invocations) == 1
+        actual = invocations[0]
+        assert actual in service._pending
         release.set()
         assert await guard is result
         assert actual.done()
@@ -61,11 +64,12 @@ async def test_external_cancel_retains_the_same_unknown_invocation_error() -> No
     ctx = MeivaContext(identity=AgentIdentity(7, True), hosted_resources=scope)
     entered = asyncio.Event()
     error = ValueError("original invocation cancellation failure")
-    actual: asyncio.Task[object] | None = None
+    invocations: list[asyncio.Task[object]] = []
 
     async def invoke(*_args: object, **_kwargs: object) -> dict[str, object]:
-        nonlocal actual
-        actual = asyncio.current_task()
+        task = asyncio.current_task()
+        assert task is not None
+        invocations.append(task)
         entered.set()
         try:
             await asyncio.Event().wait()
@@ -80,7 +84,8 @@ async def test_external_cancel_retains_the_same_unknown_invocation_error() -> No
         await guard
     assert propagated.value is error
     await asyncio.sleep(0)
-    assert actual is not None
+    assert len(invocations) == 1
+    actual = invocations[0]
     with pytest.raises(ValueError) as original:
         actual.result()
     assert original.value is error

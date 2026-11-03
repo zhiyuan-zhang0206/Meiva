@@ -1,7 +1,7 @@
 # Meizel: Bounded Container Topology, Purity Ratchets, and Standalone Polyglot Architecture
 
 > **Status**: Python `meizel` purity and bounded-container rules (`none` / `strict-to-be` / `strict`, 15 deterministic codes) are implemented and dogfooded on `meizel/`.
-> **What's left**: (1) Repository-wide rollout of `strict` and `strict-to-be` across `base/`, `ops/`, `agent/`, `gateway/`, `cli/`, `meiva/`, and `services/`; (2) tightening `basedpyright` (`reportAny`, `reportUnknown*`) with `typings/` stubs for untyped third-party boundaries; (3) adding TypeScript (`ui/web/src/`) and standalone Rust (`meizel-rs`) polyglot frontends over the shared `meizel.toml` / `meizel.policy.toml` contract.
+> **What's left**: (1) Repository-wide rollout of `strict` and `strict-to-be` across `base/`, `ops/`, `agent/`, `gateway/`, `cli/`, `meiva/`, and `services/`; (2) paying down `reportAny` and `reportExplicitAny`, which are visible as warnings, and raising them to error (`reportUnknown*` already gates every package root); (3) adding TypeScript (`ui/web/src/`) and standalone Rust (`meizel-rs`) polyglot frontends over the shared `meizel.toml` / `meizel.policy.toml` contract.
 
 ---
 

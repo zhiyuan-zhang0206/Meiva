@@ -5,7 +5,7 @@ import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import NotRequired, TypedDict
+from typing import NotRequired, TypedDict, assert_never
 
 from base.host.proc import CommandRunner
 from base.host.system.hostport import Host
@@ -81,7 +81,7 @@ def probe(verdict: CIStatus) -> Evidence:
         return rollup([check("lint", "FAILURE")])
     if verdict is CIStatus.ALL_PASSED:
         return rollup([check("lint", "SUCCESS"), check("test", "SUCCESS")])
-    raise AssertionError(verdict)
+    assert_never(verdict)
 
 
 def _probe_reply(evidence: Evidence, args: list[str]) -> Reply | None:

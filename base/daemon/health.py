@@ -79,7 +79,8 @@ from base.cluster.port_preflight import ListenerDiscoveryError, strict_listeners
 from base.daemon import health_schema
 from base.daemon.http_transport import RouteHandler as RouteHandler
 from base.daemon.http_transport import start_daemon_http
-from base.daemon.loop_health import LivenessGroup, LoopProgress  # noqa: F401  # pyright: ignore
+from base.daemon.loop_health import LivenessGroup
+from base.daemon.loop_health import LoopProgress as LoopProgress
 from base.native_process.loaded_commit import LoadedCommit
 
 # Re-export trackers moved to loop_health after this module crossed the 800-line ceiling.

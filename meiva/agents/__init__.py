@@ -340,6 +340,12 @@ def get_ancestors(agent_id: int) -> list[Neighbor]:
     ]
 
 
+# meiva:note
+# Wider than the `Literal` parameter on purpose: the model can pass any string, and the check below
+# is the fail-fast boundary for it.
+_DIRECTORY_SCOPES: tuple[str, ...] = ("live", "terminated", "all")
+
+
 def list_agents(
     *,
     scope: Literal["live", "terminated", "all"] = "live",
@@ -361,7 +367,7 @@ def list_agents(
         raise ValueError("query must be at most 200 characters")
     before_id = coerce_typed(before_id, "before_id", int, allow_none=True)
     limit = coerce_typed(limit, "limit", int)
-    if scope not in ("live", "terminated", "all"):
+    if scope not in _DIRECTORY_SCOPES:
         raise ValueError("scope must be 'live', 'terminated', or 'all'")
     if not 1 <= limit <= 200:
         raise ValueError("limit must be between 1 and 200")

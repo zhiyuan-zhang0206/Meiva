@@ -40,8 +40,8 @@ async def test_consume_stream_records_first_and_last_arrival() -> None:
 
 async def test_consume_stream_empty_stream_returns_none() -> None:
     async def empty() -> AsyncIterator[AIMessageChunk]:
-        if False:
-            yield AIMessageChunk(content="x")
+        for chunk in tuple[AIMessageChunk, ...]():
+            yield chunk
 
     chunks: list[AIMessageChunk] = []
     window = await consume_stream_with_stall_timeout(

@@ -42,7 +42,7 @@ outside an exec turn.
 from __future__ import annotations
 
 import hashlib
-from typing import Any
+from typing import Any, TypeGuard
 
 __description__ = "Meiva Code conventions — maintains cwd and auto-injects project AGENTS.md / CLAUDE.md (walking up from meiva.files.read paths)"
 
@@ -392,23 +392,35 @@ def _wrapped_glob(inner: Callable[..., list[Path]], pattern: str = "*") -> list[
 # docstring) forward, so `meiva.understand.UnderstandError` survives the wrap.
 def wrapped_understand(
     inner: Callable[..., list[str]],
-    targets: list[dict[str, str | list[str]]],
+    targets: object,
     effort: str = "max",
     max_concurrent: int | None = None,
 ) -> list[str]:
-    if not isinstance(targets, list):
+    if not _is_object_list(targets):
         return inner(targets, effort=effort, max_concurrent=max_concurrent)
-    resolved: list[dict[str, str | list[str]]] = []
-    for t in targets:
-        if not isinstance(t, dict) or "paths" not in t or "text" in t:
-            resolved.append(t)
-            continue
-        paths = t["paths"]
-        if not isinstance(paths, list) or not all(isinstance(p, (str, Path)) for p in paths):
-            resolved.append(t)
-            continue
-        resolved.append({**t, "paths": [str(_resolve_for_cwd(p)) for p in paths]})
+    resolved = [_with_resolved_paths(t) for t in targets]
     return inner(resolved, effort=effort, max_concurrent=max_concurrent)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _with_resolved_paths(target: object) -> object:
+    """One `paths` target with its paths made absolute; anything else comes back untouched."""
+    if not _is_object_dict(target) or "paths" not in target or "text" in target:
+        return target
+    paths = target["paths"]
+    if not _is_object_list(paths):
+        return target
+    path_values = [p for p in paths if isinstance(p, (str, Path))]
+    if len(path_values) != len(paths):
+        return target
+    return {**target, "paths": [str(_resolve_for_cwd(p)) for p in path_values]}
 
 
 # ── wrap meiva.ui.serve ────────────────────────────────────────────────────

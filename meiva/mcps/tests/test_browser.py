@@ -127,16 +127,14 @@ async def test_request_id_mismatch_reconnects_then_next_call_succeeds(
     next call succeeds on the fresh connection. The old socket is closed."""
     sock_path = service_socket(browser_home)
 
-    connections: int = 0
-    closed: int = 0
+    tally = {"connections": 0, "closed": 0}
     rebuilt = asyncio.Event()
     all_closed = asyncio.Event()
 
     async def _handle(r: asyncio.StreamReader, w: asyncio.StreamWriter) -> None:
-        nonlocal connections, closed
-        connections += 1
+        tally["connections"] += 1
         rebuilt.set()
-        desynced = connections == 1
+        desynced = tally["connections"] == 1
         try:
             while line := await r.readline():
                 req = json.loads(line)
@@ -151,8 +149,8 @@ async def test_request_id_mismatch_reconnects_then_next_call_succeeds(
                 await w.drain()
         finally:
             w.close()
-            closed += 1
-            if closed == 2:
+            tally["closed"] += 1
+            if tally["closed"] == 2:
                 all_closed.set()
 
     server = await asyncio.start_unix_server(_handle, path=str(sock_path))
@@ -164,11 +162,11 @@ async def test_request_id_mismatch_reconnects_then_next_call_succeeds(
     result = await session.list_tools()
     assert result.tools == []
     await asyncio.wait_for(rebuilt.wait(), timeout=2)  # the rebuild dialed a new socket
-    assert connections == 2  # the mismatch triggered a rebuild
+    assert tally["connections"] == 2  # the mismatch triggered a rebuild
     # Stack teardown closes the CURRENT (rebuilt) socket, not the dead one.
     await stack.aclose()
     await asyncio.wait_for(all_closed.wait(), timeout=2)  # server saw both EOFs
-    assert closed == 2
+    assert tally["closed"] == 2
     server.close()
     await server.wait_closed()
     with contextlib.suppress(OSError):
@@ -182,14 +180,13 @@ async def test_corrupt_line_reconnects_then_next_call_succeeds(
     connection so a single corrupt line cannot brick it for good."""
     sock_path = service_socket(browser_home)
 
-    connections: int = 0
+    tally = {"connections": 0}
     rebuilt = asyncio.Event()
 
     async def _handle(r: asyncio.StreamReader, w: asyncio.StreamWriter) -> None:
-        nonlocal connections
-        connections += 1
+        tally["connections"] += 1
         rebuilt.set()
-        corrupt = connections == 1
+        corrupt = tally["connections"] == 1
         try:
             while line := await r.readline():
                 if corrupt:
@@ -211,7 +208,7 @@ async def test_corrupt_line_reconnects_then_next_call_succeeds(
     result = await session.list_tools()
     assert result.tools == []
     await asyncio.wait_for(rebuilt.wait(), timeout=2)
-    assert connections == 2
+    assert tally["connections"] == 2
     await stack.aclose()
     server.close()
     await server.wait_closed()

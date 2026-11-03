@@ -23,7 +23,7 @@
 # handoff.
 #
 # **The env POLICY lives elsewhere** (Task #856 Phase C + R2 design convergence
-# point A): which keys a child receives is the `child_env(role)`
+# point A): which keys a child receives is the `child_env`
 # projection of the env registry (`base/host/env/registry.py` — host-scope facts +
 # MEIVA_HOME for daemon/session children, NOT "everything MEIVA_* minus a drop set"; the old denylist
 # forwarded MEIVA_AGENT_ID and every non-cluster knob into daemon sessions, a
@@ -161,7 +161,7 @@ def managed_service_env(
 def _session_forward_env(environ: Mapping[str, str]) -> dict[str, str]:
     from base.host.env.registry import child_env
 
-    return child_env("gateway", environ)
+    return child_env(environ)
 
 
 def cwd_is_inside_checkout(session_cwd: Path, checkout_root: Path) -> bool:

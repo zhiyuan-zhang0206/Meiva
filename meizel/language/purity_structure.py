@@ -402,17 +402,19 @@ def _is_exempt_class(node: ast.ClassDef) -> bool:
 
 
 def _count_public_behavioral(tree: ast.Module) -> int:
+    data_classes: set[str] = set()
     count = 0
     for stmt in tree.body:
+        if isinstance(stmt, ast.ClassDef) and (
+            _is_exempt_class(stmt) or any(_base_tail(base) in data_classes for base in stmt.bases)
+        ):
+            data_classes.add(stmt.name)
+            continue
         if (
             isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef)
             and not stmt.name.startswith("_")
             and not _is_overload(stmt)
-        ) or (
-            isinstance(stmt, ast.ClassDef)
-            and not stmt.name.startswith("_")
-            and not _is_exempt_class(stmt)
-        ):
+        ) or (isinstance(stmt, ast.ClassDef) and not stmt.name.startswith("_")):
             count += 1
     return count
 

@@ -496,8 +496,6 @@ def build_chat_model_bound(
     # e2e tests inject fake chat model via MEIVA_LLM_OVERRIDE (tests/e2e/README.md);
     # if set, warn loudly — a dev accidentally leaving it in .env would route
     # all agents through a fake LLM, and production observability must be fail-loud.
-    if type(meter) is not bool:
-        raise ValueError("meter must be a boolean")
     override = llm_override
     if override:
         logger.warning(

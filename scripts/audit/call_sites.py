@@ -91,7 +91,6 @@ def main(argv: list[str]) -> int:
         specs = [parse_call_spec(text) for text in arguments.spec]
     except ValueError as error:
         parser.error(str(error))
-        raise
     if not specs:
         parser.error("at least one --spec is required")
     findings, judged = judge_calls(sources(Path(arguments.root)), specs)

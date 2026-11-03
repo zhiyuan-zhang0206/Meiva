@@ -147,7 +147,7 @@ def previous_fire(
 # meiva:note
 # Normalize datetime / timedelta / ISO text to an aware UTC datetime. Relative inputs use
 # the caller's aware snapshot; naive datetime / ISO inputs still raise ValueError.
-def normalize_when(when: _dt.datetime | _dt.timedelta | str, *, now: _dt.datetime) -> _dt.datetime:
+def normalize_when(when: object, *, now: _dt.datetime) -> _dt.datetime:
     if isinstance(when, _dt.datetime):
         if when.tzinfo is None:
             raise ValueError(
@@ -174,7 +174,7 @@ def normalize_when(when: _dt.datetime | _dt.timedelta | str, *, now: _dt.datetim
 _DURATION_RE = _re.compile(r"^(\d+)([smhd])$")
 
 
-def parse_timeout(timeout: float | _dt.timedelta | str) -> float:
+def parse_timeout(timeout: object) -> float:
     """Coerce a timeout to a positive number of seconds.
 
     Accepts a number of seconds, a `timedelta`, or a `"<n>{s,m,h,d}"` duration

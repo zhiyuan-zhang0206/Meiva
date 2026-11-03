@@ -608,16 +608,18 @@ directory = "htmlcov"
 # attribute, wrong call signature) + enforces type annotation completeness in this repo.
 # Every strict rule that produces actionable signal here stays at error level and blocks merge.
 # The reportUnknown*/reportMissing* family is run on a LADDER (see reportUnknown* block below):
-# "warning" globally + "error" on the base/ops/services core via executionEnvironments.
-# Measured cost (origin/main, pyright 1.1.402): 11319 total findings, of which 85% (9644) land in
-# tests/ — monkeypatch lambdas, fake-helper signatures, and untyped-assignment scaffolding that is
-# idiomatic test-stub style, not a bug signal. The historical "third-party stacks lack stubs"
-# rationale no longer holds: every dependency now ships py.typed (langchain_core / redis / psycopg /
-# loguru / httpx / fastapi / starlette / anthropic / pydantic / openai / langgraph), and only ~0.6%
-# of findings name any library type — the rest is `Type of "x" is unknown` propagated from our own
-# untyped code. So the ladder gates the highest-signal core layers at error (234 findings, all
-# fixed here) while keeping the rest visible-but-non-blocking at warning; CI's `uv run pyright` and
-# the pre-commit hook both exit 0 on warnings, so the global downgrade never blocks merge.
+# "warning" globally + "error" on every package root (base, ops, services, agent, cli, gateway,
+# meizel, meiva, meiva_builtins) via executionEnvironments.
+# Measured with basedpyright 1.40.2 on main 4fff0542f (2026-11-03), whole repo, via CI:
+#   reportUnknown*/reportMissing*   2952 warnings, all under <pkg>/**/tests, scripts/ and the top-level
+#                                   tests/ (the package roots themselves are at 0)
+#   reportAny                      30684 (13181 outside tests dirs; base 1998, cli 2368, gateway 3532,
+#                                   services 1878, scripts 1471, meiva_builtins 1141, meiva 313,
+#                                   agent 209, meizel 186, ops 85)
+#   reportExplicitAny               6783 (2461 outside tests dirs; base 896, services 460, gateway 225)
+#   reportUnusedCallResult         18234 (3219 outside tests dirs)
+#   reportUnreachable (40), reportUnsafeMultipleInheritance (33), reportIgnoreCommentWithoutRule (1):
+#   fixed, now 0 and at "error".
 # reportUnnecessaryIsInstance stays fully OFF (see its own note below).
 typeCheckingMode = "strict"
 pythonVersion = "3.12"
@@ -664,11 +666,10 @@ reportMissingModuleSource = false
 # etc.) for unit tests, not as implementation users.
 reportPrivateUsage = "none"
 reportUnusedFunction = "none"
-# Ladder (see the [tool.pyright] header for cost data): global "warning" makes all 11319 Unknown/
-# Missing findings visible in the IDE and CI logs without gating merge; the base/ops/services
-# executionEnvironments below raise these same seven rules to "error" on the core layers, where the
-# 234 real findings have been annotated away. tests/ stays at warning — its 9644 findings are
-# monkeypatch/fake-helper stub idiom, not bugs, and gating them would be pure churn.
+# Ladder (see the [tool.pyright] header for counts): the global "warning" keeps the remaining
+# Unknown/Missing findings visible in the IDE and CI logs without gating merge; the package-root
+# executionEnvironments below raise these same seven rules to "error" where the findings have been
+# annotated away. The residue sits in tests, scripts/ and the top-level tests/.
 reportUnknownMemberType = "warning"
 reportUnknownArgumentType = "warning"
 reportUnknownVariableType = "warning"
@@ -683,13 +684,17 @@ reportMissingTypeArgument = "warning"
 # flags every such guard as "unnecessary" — all 18 current findings are false positives of exactly
 # this kind, so the rule is off rather than left as ignored warnings.
 reportUnnecessaryIsInstance = "none"
-# basedpyright-specific rules kept non-blocking during initial migration:
-reportAny = "none"
-reportExplicitAny = "none"
-reportUnsafeMultipleInheritance = "none"
-reportUnusedCallResult = "none"
-reportUnreachable = "none"
-reportIgnoreCommentWithoutRule = "none"
+# basedpyright-only rules. The first three are at 0 and gate merge. The other three stay at
+# "warning" (visible in CI logs, not blocking) until their counts, listed in the header, are paid
+# down: reportAny and reportExplicitAny come from boundary data (json, DB rows, argparse
+# namespaces, starlette app.state) and our own `Any` annotations; reportUnusedCallResult is
+# dominated by call statements in tests.
+reportUnsafeMultipleInheritance = "error"
+reportUnreachable = "error"
+reportIgnoreCommentWithoutRule = "error"
+reportAny = "warning"
+reportExplicitAny = "warning"
+reportUnusedCallResult = "warning"
 
 # A package's own tests (`<pkg>/**/tests/`) are held to the tests rung below wherever they sit:
 # reportUnknownMemberType and reportUnknownArgumentType at "error", the other five at "warning".
