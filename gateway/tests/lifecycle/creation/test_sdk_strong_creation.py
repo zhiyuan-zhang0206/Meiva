@@ -18,7 +18,7 @@ from base.api_contracts.agent_contract import GatewayUnavailable
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway.agents import router as agent_router
-from gateway.app import lifespan
+from gateway.app import GatewayServerState, lifespan
 from gateway.tests.agents.gateway_auth import without_credentials
 from gateway.tests.auth.gateway_auth import login_with_ticket
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
@@ -58,6 +58,7 @@ def _older(current: FastAPI) -> FastAPI:
         ),
         middleware=current.user_middleware,
     )
+    older.state = GatewayServerState()
     older.state.gateway_config = current.state.gateway_config
     older.state.gateway_process = current.state.gateway_process
     older.state.clock = current.state.clock

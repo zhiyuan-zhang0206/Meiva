@@ -15,11 +15,11 @@ from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.tests.serving_root import observe, observe_unreadable
 from base.deploy.lifecycle.tests.serving_root import serving_root as serving_root
 from base.paths.home import resolve_meiva_home
-from gateway.app import openapi_schema
 from gateway.tests.auth.gateway_config import gateway_test_client, gateway_test_process
 from gateway.tests.routers.cluster_endpoints.cluster_support import (
     serving_gate as serving_gate,
 )
+from gateway.tests.support.openapi_document.document import openapi_document
 
 
 @pytest.fixture(autouse=True)
@@ -84,7 +84,7 @@ def test_a_pure_gateway_reports_startup_once_a_stop_has_begun(
 def test_removed_ingress_cannot_dispatch(method: str, path: str) -> None:
     with gateway_test_client() as client:
         assert client.request(method, path).status_code == 404
-    assert path not in openapi_schema()["paths"]
+    assert path not in openapi_document().paths
 
 
 # meiva:note

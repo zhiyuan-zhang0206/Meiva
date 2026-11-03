@@ -23,6 +23,7 @@ from pathlib import Path
 # Same pattern as scripts/entrypoints/gateway.py.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from base.host.env.boot_actions import enter_scratch_home
+from gateway.http.json_values import is_object_dict
 
 if __name__ == "__main__":
     enter_scratch_home()
@@ -40,6 +41,13 @@ def _product_version() -> str:
     return version
 
 
+# meiva:note
+# The document's `paths` object, or an empty one when the document has none.
+def _paths(spec: dict[str, object]) -> dict[str, object]:
+    paths = spec.get("paths")
+    return paths if is_object_dict(paths) else {}
+
+
 def main() -> int:
     from gateway.app import openapi_schema
 
@@ -47,14 +55,17 @@ def main() -> int:
     # meiva:note
     # FastAPI defaults info.version to 0.1.0; the checked-in contract carries
     # the product version instead so the document has one version answer.
-    spec["info"]["version"] = _product_version()
+    info = spec["info"]
+    if not is_object_dict(info):
+        raise TypeError("the OpenAPI document has no info object")
+    info["version"] = _product_version()
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "ui/web/openapi.json")
     out.parent.mkdir(parents=True, exist_ok=True)
     # Trailing newline so the pre-commit `end-of-file-fixer` hook stops
     # touching this generated file (POSIX text file convention + reduces
     # noise of "false drift" from the codegen-fresh hook).
     out.write_text(json.dumps(spec, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    print(f"OpenAPI spec -> {out} ({len(spec.get('paths', {}))} paths)")
+    print(f"OpenAPI spec -> {out} ({len(_paths(spec))} paths)")
     return 0
 
 

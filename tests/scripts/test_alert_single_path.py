@@ -50,6 +50,7 @@ def test_nothing_but_grafana_posts_to_the_ingest_endpoint() -> None:
         if rel in {
             "gateway/alerts/router.py",
             "gateway/app.py",
+            "gateway/http/auth/cluster_middleware.py",
             "cli/commands/observability/plans/lgtm/urls.py",
         }:
             continue

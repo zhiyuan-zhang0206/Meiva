@@ -29,10 +29,9 @@ from base.config.tests.configuration import snapshot_process_config
 from base.host.db_authority.api import AcceptanceCache
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
-from gateway.app import (
-    cluster_auth_middleware,
-)
 from gateway.http.auth import rejection_log
+from gateway.http.auth.cluster_middleware import cluster_auth_middleware
+from gateway.http.auth.router import AuthAppState
 from gateway.http.config import GatewayAppState
 from gateway.http.error_handlers import (
     http_exception_handler,
@@ -46,6 +45,7 @@ from gateway.schemas import ErrorEnvelope
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_config_of
 
 _middleware_app = FastAPI()
+_middleware_app.state = AuthAppState()
 # meiva:note
 # isolated test credential.
 _SECRET = "test-secret"  # noqa: S105

@@ -5,12 +5,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from base.events.live.bus import EventBus
-from gateway.app import openapi_schema
 from gateway.tests.auth.gateway_config import GatewayTestClient
 from gateway.tests.events.test_notices_endpoint import insert_notice, seed_agent
 from gateway.tests.receipts.test_current_notice_receipts import HEADERS
 from gateway.tests.receipts.test_current_notice_receipts import client as client
 from gateway.tests.support.live_events.faults import unpublishable_bus
+from gateway.tests.support.openapi_document.document import openapi_document
 
 
 def _path(agent: int, notice: int) -> str:
@@ -147,10 +147,11 @@ def test_authentication_is_rechecked_on_replay(
 
 
 def test_openapi_requires_both_identity_headers() -> None:
-    route = openapi_schema()["paths"][
-        "/api/keyed/v1/agents/{agent_id}/notices/{notice_id}/resolve"
-    ]["post"]
+    route = (
+        openapi_document().paths["/api/keyed/v1/agents/{agent_id}/notices/{notice_id}/resolve"].post
+    )
+    assert route is not None
     headers = {
-        param["name"]: param["required"] for param in route["parameters"] if param["in"] == "header"
+        param.name: param.required for param in route.parameters if param.location == "header"
     }
     assert headers["Idempotency-Key"] and headers["Idempotency-Scope"]

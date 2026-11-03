@@ -1,1 +1,1 @@
-exports = ["checkpoints", "db_faults", "live_events", "runner_ops"]
+exports = ["checkpoints", "db_faults", "live_events", "openapi_document", "runner_ops"]

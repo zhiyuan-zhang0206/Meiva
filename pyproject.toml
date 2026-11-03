@@ -622,16 +622,16 @@ reportUnusedCallResult = "warning"
 
 # The seven reportUnknown*/reportMissing* rules are global errors, so every file is held to them
 # wherever it sits. A directory entry below that also holds reportAny / reportExplicitAny would
-# hold the tests under it to them too; while a root's tests still owe their Any debt, the root is
-# listed in TESTS_OWING_ANY (scripts/codegen/gen_pyright_test_environments.py) and each tests
-# directory under it gets a generated entry of its own that carries no Any rule. pyright takes the
-# FIRST entry whose root contains a file and a root is a plain directory (no globs), so that is
-# the only way to exempt a tests directory from its covering entry. The entries are GENERATED, one
-# per tests directory, sorted by root: run
+# hold the tests under it to them too; while some tests still owe their Any debt, their path prefix
+# is listed in TESTS_OWING_ANY (scripts/codegen/gen_pyright_test_environments.py) and each tests
+# directory under it whose covering entry holds the Any rules gets a generated entry of its own that
+# carries no Any rule. pyright takes the FIRST entry whose root contains a file and a root is a
+# plain directory (no globs), so that is the only way to exempt a tests directory from its covering
+# entry. The entries are GENERATED, one per tests directory, sorted by root: run
 # `.venv/bin/python scripts/codegen/gen_pyright_test_environments.py` after adding, moving or
-# removing a tests directory under a listed root (the pre-commit hook
+# removing a tests directory under a listed prefix (the pre-commit hook
 # `lint-pyright-test-environments` and tests/ci/test_pyright_test_environments.py fail until you
-# do). Do not edit between the markers. The generator and this region go when the last root
+# do). Do not edit between the markers. The generator and this region go when the last prefix
 # leaves TESTS_OWING_ANY, that is when reportAny is a global error.
 # BEGIN GENERATED pyright tests environments (scripts/codegen/gen_pyright_test_environments.py; edit nothing between the markers)
 [[tool.pyright.executionEnvironments]]
@@ -676,72 +676,20 @@ root = "cli/startup/tests"
 [[tool.pyright.executionEnvironments]]
 root = "cli/tests"
 
+[[tool.pyright.executionEnvironments]]
+root = "gateway/tests"
+
 # END GENERATED pyright tests environments
 
 # Directory entries that raise reportAny / reportExplicitAny to "error" once a directory's count is
-# 0. Their tests directories follow them unless the root is listed in TESTS_OWING_ANY.
+# 0. Their tests directories follow them unless their path is under a prefix listed in TESTS_OWING_ANY.
 [[tool.pyright.executionEnvironments]]
 root = "cli"
 reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "gateway/routers"
-reportAny = "error"
-reportExplicitAny = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "gateway/http"
-reportAny = "error"
-reportExplicitAny = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "gateway/schedules"
-reportAny = "error"
-reportExplicitAny = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "gateway/agents"
-reportAny = "error"
-reportExplicitAny = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "gateway/events"
-reportAny = "error"
-reportExplicitAny = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "gateway/inspect"
-reportAny = "error"
-reportExplicitAny = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "gateway/extensions"
-reportAny = "error"
-reportExplicitAny = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "gateway/upload_delivery"
-reportAny = "error"
-reportExplicitAny = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "gateway/alerts"
-reportAny = "error"
-reportExplicitAny = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "gateway/mcp_server"
-reportAny = "error"
-reportExplicitAny = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "gateway/lgtm"
-reportAny = "error"
-reportExplicitAny = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "gateway/cluster"
+root = "gateway"
 reportAny = "error"
 reportExplicitAny = "error"
 

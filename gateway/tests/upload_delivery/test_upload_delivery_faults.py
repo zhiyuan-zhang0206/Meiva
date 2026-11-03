@@ -27,7 +27,8 @@ from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.db.tests.lost_ack import LostAckPool
 from base.host.system.tests.fake_commands import fake_host
 from base.paths import resolve_meiva_home, run_dir
-from gateway.app import cluster_auth_middleware
+from gateway.http.auth.cluster_middleware import cluster_auth_middleware
+from gateway.http.auth.router import AuthAppState
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from gateway.tests.support.db_faults.insert_fault import failing_insert
 from gateway.tests.support.db_faults.update_fault import failing_update
@@ -82,6 +83,12 @@ def test_source_ready_commit_failure_recovers(
 
 
 # meiva:note
+# The state the faulted bare app serves with: the upload route's slice and the auth middleware's.
+class _FaultedState(UploadAppState, AuthAppState):
+    pass
+
+
+# meiva:note
 # The ready write commits, then the caller sees a failure: the pool lends the staged-file claim
 # first and the ready write second, and loses the acknowledgement of the second. The route answers
 # 500, and the next upload of the same batch finds the committed work again.
@@ -93,7 +100,7 @@ def test_source_ready_lost_commit_ack_recovers(
     # Assemble the real upload router with its failing ConnectionSource from the start. Borrow
     # the live gateway's native worker and authentication resources; never rewire its pool.
     app = FastAPI()
-    app.state = UploadAppState(
+    app.state = _FaultedState(
         {
             "db_pool": LostAckPool(
                 client.app.state.db_pool, lose_on=2, message="source ready response lost"
