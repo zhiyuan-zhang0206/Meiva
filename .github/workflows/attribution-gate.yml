@@ -102,8 +102,9 @@ jobs:
           The line states an intention, and an intention is what a reader can act on: a merged
           pull request is not proof that the task is done — it may be half of it, or a
           prerequisite, or work whose acceptance waits for a release. Whoever owns the task still
-          closes it. A sentence that merely mentions the field does not count; the line stands
-          alone.
+          closes it. A sentence that merely mentions the field does not count, the line stands
+          alone, a line inside a fenced block is a quotation rather than a statement, and two
+          different values are ambiguous — the reminder stays until one remains.
 
           This comment is deleted when the line appears. Nothing here fails or blocks a merge: the
           check only comments.
@@ -152,9 +153,53 @@ jobs:
             echo "the head branch '${HEAD_REF}' is outside the meiva-* convention"
           fi
 
-          if printf '%s\n' "$body" | grep -Eiq "$closes_line"; then
+          # meiva:note
+          # A fenced block is a quotation, not a statement by the author: a template or a doc
+          # pasted into the description carries the line, and reading it would let a documentation
+          # change announce a task it never touched.
+          outside_fences() {
+            awk '
+              # The run of backticks or tildes that starts the line, or "" when the line is not a
+              # fence: the character and the length both matter, because CommonMark closes a fence
+              # only with the same character and a run at least as long as the one that opened it.
+              function fence_run(line,    rest, char, count) {
+                rest = line
+                sub(/^[[:space:]]*/, "", rest)
+                char = substr(rest, 1, 1)
+                if (char != "`" && char != "~") return ""
+                count = 0
+                while (substr(rest, count + 1, 1) == char) count++
+                if (count < 3) return ""
+                return char count
+              }
+              {
+                run = fence_run($0)
+                if (run != "") {
+                  char = substr(run, 1, 1)
+                  length_of_run = substr(run, 2) + 0
+                  if (open_char == "") { open_char = char; open_length = length_of_run }
+                  else if (char == open_char && length_of_run >= open_length) { open_char = ""; open_length = 0 }
+                  next
+                }
+                if (open_char == "") print
+              }'
+          }
+
+          # The values on matching lines, normalized, one per line. Two different values are an
+          # ambiguous description rather than a satisfied one: the reader cannot tell which task
+          # the merge closes, so the reminder stays until one line remains.
+          closes_values="$(printf '%s\n' "$body" | outside_fences \
+            | grep -Ei "$closes_line" \
+            | sed -E 's/^[[:space:]]*[Cc]loses-[Tt]ask:[[:space:]]*//; s/[[:space:]]*$//' \
+            | tr '[:upper:]' '[:lower:]' | sort -u || true)"
+          closes_distinct="$(printf '%s' "$closes_values" | awk 'NF { count++ } END { print count + 0 }')"
+
+          if [ "$closes_distinct" -eq 1 ]; then
             closes_wanted=0
-            echo 'the description states what the merge closes'
+            echo "the description states what the merge closes: ${closes_values}"
+          elif [ "$closes_distinct" -gt 1 ]; then
+            closes_wanted=1
+            echo "the description states more than one closing task: ${closes_values}"
           else
             closes_wanted=1
             echo 'the description states no closing task'

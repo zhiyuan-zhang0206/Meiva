@@ -465,3 +465,55 @@ def test_a_second_run_of_the_closes_gate_keeps_the_single_comment(tmp_path: Path
 
 def test_the_template_requires_the_closes_line() -> None:
     assert "Closes-task: #<id>" in TEMPLATE.read_text()
+
+
+# meiva:note
+# A fenced block is a quotation: a description that pastes the template or a document carries the
+# line without stating anything, and reading it would let a documentation change announce a task it
+# never touched.
+def test_a_closes_line_inside_a_fence_is_a_quotation(tmp_path: Path) -> None:
+    run = run_gate(
+        tmp_path,
+        body="What changed.\n\n```text\nCloses-task: #6076\n```\n",
+    )
+    assert len(closes_comments(run)) == 1
+
+
+def test_a_tilde_fence_is_a_quotation_too(tmp_path: Path) -> None:
+    run = run_gate(tmp_path, body="What changed.\n\n~~~\nCloses-task: none\n~~~\n")
+    assert len(closes_comments(run)) == 1
+
+
+# meiva:note
+# Two different values state two different intentions, and a reader cannot tell which one the merge
+# performs: ambiguity is not a satisfied field.
+def test_two_different_closes_lines_stay_ambiguous(tmp_path: Path) -> None:
+    run = run_gate(
+        tmp_path,
+        body="What changed.\n\nCloses-task: #6076\nCloses-task: #6077\n",
+    )
+    assert len(closes_comments(run)) == 1
+
+
+def test_the_same_closes_line_twice_is_one_statement(tmp_path: Path) -> None:
+    run = run_gate(
+        tmp_path,
+        body="What changed.\n\nCloses-task: #6076\nCloses-task: #6076\nCo-authored-by: Meiva #7317\n",
+    )
+    assert closes_comments(run) == []
+
+
+# meiva:note
+# CommonMark closes a fence only with the same character and a run at least as long as the opener, so
+# a `~~~` line inside a ``` block does not end it. A description that quotes an example of both kinds
+# would otherwise announce the task its example names.
+def test_a_tilde_line_inside_a_backtick_fence_does_not_close_it(tmp_path: Path) -> None:
+    body = "What changed.\n\n````markdown\n~~~\nCloses-task: #1234\n```\n````\n"
+    run = run_gate(tmp_path, body=body)
+    assert len(closes_comments(run)) == 1
+
+
+def test_a_shorter_run_does_not_close_the_fence(tmp_path: Path) -> None:
+    body = "What changed.\n\n````text\nCloses-task: #1234\n```\n````\n"
+    run = run_gate(tmp_path, body=body)
+    assert len(closes_comments(run)) == 1
