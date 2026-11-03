@@ -176,8 +176,8 @@ def test_an_entry_is_written_only_for_tests_under_a_root_that_owes_any() -> None
 
 def test_a_prefix_whose_covering_entry_holds_no_any_rule_generates_nothing() -> None:
     # meiva:note
-    # `meiva_builtins/skills/integrations/web-ai/scripts` is listed, but a `base` tests directory
-    # is covered by no entry: there is no Any rule to opt out of, so no entry is written.
+    # The `base` and `base/x` prefixes are listed, but no entry covering `base/x/tests` holds an
+    # Any rule: there is no Any rule to opt out of, so no entry is written.
     text = gen.generate(
         _SYNTHETIC_PYPROJECT, ["base/x/tests/test_a.py"], owing_any=("base", "base/x")
     )
