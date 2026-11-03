@@ -76,7 +76,7 @@ from gateway.http.config import (
     gateway_state,
     state_as,
 )
-from gateway.http.db_rows import query_one
+from gateway.http.db_rows import count_one
 from gateway.http.model_catalog import catalog_for_observation, request_catalog
 from gateway.schemas.stats import StatsWindowHours, window_delta
 from ops.cluster import rpc as cluster_rpc
@@ -167,13 +167,6 @@ def _provider_api_costs(
     return float(openai), float(anthropic)
 
 
-# meiva:note
-# The answer of a `SELECT COUNT(*)`.
-@dataclass(frozen=True)
-class _CountRow:
-    n: int
-
-
 def _compute_stats_dashboard(
     pool: ConnectionPool,
     hours: StatsWindowHours,
@@ -191,12 +184,9 @@ def _compute_stats_dashboard(
         stats_events.set_statement_timeout(conn, config.stats_statement_timeout_ms)
         totals = stats_events.window_totals(conn, cluster=cluster, start=window_start, end=now)
         alert_classes = read_alert_classes(conn, cluster=cluster, start=window_start, end=now)
-        live = query_one(
-            conn,
-            _CountRow,
-            "SELECT COUNT(*) AS n FROM agents_meta WHERE status != 'terminated'",
+        live_count = count_one(
+            conn, "SELECT COUNT(*) AS n FROM agents_meta WHERE status != 'terminated'"
         )
-        live_count = live.n if live is not None else 0
     cache_hit_pct = (
         round(totals.cache_read / totals.cache_input * 100, 2)
         if totals.cache_input

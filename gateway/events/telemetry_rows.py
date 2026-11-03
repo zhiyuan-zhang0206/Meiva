@@ -25,7 +25,7 @@ from psycopg.rows import class_row
 
 from base.events.contract import TIER_BY_EVENT, EventTier
 from base.events.reads import EventRecord
-from gateway.http.db_rows import query_one
+from gateway.http.db_rows import count_one
 
 _LEVELS = ("debug", "info", "warning", "error", "critical")
 _ANOMALY_LEVELS = ("warning", "error", "critical")
@@ -112,13 +112,6 @@ def _row(record: _TelemetryRecord) -> EventRecord:
         "target_agent_id": target_agent_id,
         "attributes": attributes,
     }
-
-
-# meiva:note
-# The answer of a `SELECT count(*)`.
-@dataclass(frozen=True)
-class _CountRow:
-    n: int
 
 
 def _names(tier: EventTier) -> list[str]:
@@ -341,6 +334,4 @@ def count_events(
         return 0
     clause, params = where
     query = sql.SQL("SELECT count(*) AS n FROM telemetry_events WHERE {where}").format(where=clause)
-    row = query_one(conn, _CountRow, query, params)
-    assert row is not None  # noqa: S101 — an aggregate always returns one row
-    return row.n
+    return count_one(conn, query, params)

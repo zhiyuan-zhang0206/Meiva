@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 import psycopg
 from psycopg.abc import Params, QueryNoTemplate
 from psycopg.rows import class_row
@@ -30,3 +32,20 @@ def query_all[RowT](
     with conn.cursor(row_factory=class_row(row_class)) as cur:
         cur.execute(sql, params)
         return cur.fetchall()
+
+
+# meiva:note
+# The answer of a `SELECT count(*) AS n` statement.
+@dataclass(frozen=True)
+class CountRow:
+    n: int
+
+
+# meiva:note
+# Run a `SELECT count(*) AS n ...` statement and hand back the count. An aggregate always returns
+# one row, so no row is a broken statement, not a zero.
+def count_one(conn: psycopg.Connection, sql: QueryNoTemplate, params: Params | None = None) -> int:
+    row = query_one(conn, CountRow, sql, params)
+    if row is None:
+        raise RuntimeError("an aggregate count returned no row")
+    return row.n
