@@ -58,6 +58,21 @@ def test_session_cookie_header_uses_explicit_ttl() -> None:
     assert "Path=/" in set_cookie
 
 
+def test_the_session_cookie_stays_host_only() -> None:
+    # meiva:note
+    # A served page runs on the gateway origin today. What keeps a page from carrying the
+    # viewer's session to another origin is this cookie being host-only (no Domain=), which
+    # is the whole basis of the origin separation in task #6058.
+    header = session_cookie_header("tok")["Set-Cookie"]
+    assert "HttpOnly" in header
+    assert "SameSite=Lax" in header
+    assert "Path=/" in header
+    assert "Domain=" not in header, (
+        "the session cookie lost its host-only scope; the page-origin isolation in task "
+        "#6058 rests on it — read that task before changing this header"
+    )
+
+
 def test_session_cookie_header_secure_flag_is_explicit() -> None:
     insecure = session_cookie_header("tok", secure=False)["Set-Cookie"]
     secure = session_cookie_header("tok", secure=True)["Set-Cookie"]

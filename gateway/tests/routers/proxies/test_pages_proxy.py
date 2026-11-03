@@ -185,6 +185,25 @@ def test_proxy_serves_page_content(db_conn, page_server: int) -> None:
         assert "<h1>hello</h1>" in with_qs.text
 
 
+def test_proxy_serves_pages_under_a_content_security_policy(db_conn, page_server: int) -> None:
+    # meiva:note
+    # The policy is set by the gateway because upstream headers outside the forward list are
+    # dropped; a page server's own policy never reaches the browser.
+    aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    with gateway_test_client() as client:
+        _register(client, aid, "p", page_server)
+        resp = client.get(f"/pages/{aid}-p/")
+    assert resp.status_code == 200
+    policy = resp.headers["content-security-policy"]
+    assert policy.startswith("default-src 'none'")
+    # meiva:note
+    # The reply widgets post back to the API from the page itself; a policy that forbids it
+    # would break the product's answer surface, not a stray page.
+    assert "connect-src 'self'" in policy
+    assert "frame-ancestors 'none'" in policy
+    assert "base-uri 'none'" in policy
+
+
 def test_proxy_redirects_root_without_trailing_slash(db_conn, page_server: int) -> None:
     """/pages/{name} (no slash) redirects to /pages/{name}/ so relative asset
     links inside the page resolve against the page directory."""

@@ -94,6 +94,42 @@ def _EXPIRED_PAGE_HTML(agent_id: int, name: str, lang: str) -> str:  # noqa: N80
 
 
 # meiva:note
+# What a served page may load. Decided here because the page server cannot decide it:
+# every upstream header outside `_FORWARDED_RESPONSE_HEADERS` is dropped, so a policy set
+# by an agent's own server would never reach the browser.
+#
+# `default-src 'none'` cascades to every directive not written below, so each allowance
+# answers a page shape that exists today (measured over 322 page directories still on disk,
+# 2026-11-03 — task #6058):
+# - `style-src 'self' 'unsafe-inline'`: 97% style with a <style> block, 47% with style=.
+# - `script-src 'self' 'unsafe-inline'`: 19% carry an inline <script>; 'self' keeps a page's
+#   own vendored script (KaTeX) working while an off-site <script src> is refused (2 dirs).
+# - `img-src 'self' data:` and `font-src 'self' data:`: vendored assets, inlined images and
+#   KaTeX's font files; no scanned page loads an off-site image.
+# - `connect-src 'self'`: the reply widgets POST back to /api/agents/<id>/messages from the
+#   page itself. Dropping this line is what closes that door, and with it the reply panels —
+#   that change belongs to the page-exit work (#6058), not to this header.
+# - `form-action 'none'`: no scanned page submits a form by navigation; the two pages that
+#   carry a <form> handle submit in script.
+#
+# What this does NOT do: it does not stop a page from calling the same-origin API with the
+# viewer's session. It removes off-site code, off-site fetches, plugin embedding, base-uri
+# hijacking and framing by another site.
+_PAGE_CONTENT_SECURITY_POLICY = (
+    "default-src 'none'; "
+    "script-src 'self' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "font-src 'self' data:; "
+    "connect-src 'self'; "
+    "object-src 'none'; "
+    "base-uri 'none'; "
+    "frame-ancestors 'none'; "
+    "form-action 'none'"
+)
+
+
+# meiva:note
 # Response headers forwarded from the page server; everything else
 # (hop-by-hop, server internals) is dropped. Content-Length is forwarded too
 # (the upstream sets it for static files); an absent one (SSE) makes
@@ -339,6 +375,7 @@ async def _proxy_page_get_impl(agent_id: int, name: str, rest: str, request: Req
         detail = PAGE_SERVER_DOWN_BODY.get(lang, PAGE_SERVER_DOWN_BODY[PAGE_LANGUAGE_DEFAULT])
         raise HTTPException(status_code=502, detail=detail) from None
     headers = {k: v for k, v in resp.headers.items() if k.lower() in _FORWARDED_RESPONSE_HEADERS}
+    headers["content-security-policy"] = _PAGE_CONTENT_SECURITY_POLICY
     return StreamingResponse(
         _iter_upstream(resp),
         status_code=resp.status_code,
