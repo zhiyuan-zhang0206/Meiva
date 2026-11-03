@@ -83,6 +83,7 @@ PROMOTED_ROOTS: tuple[str, ...] = (
     "agent",
     "meiva",
     "meizel",
+    "cli",
 )
 # What every test file is held to: the tests ladder rung, wherever the file sits.
 TESTS_STANDARD = {

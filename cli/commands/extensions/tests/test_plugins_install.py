@@ -162,7 +162,7 @@ def test_install_skill_records_and_surfaces(
     db_url: str,
     unit_home: Path,
     tmp_path: Path,
-    capsys: pytest.CaptureFixture,
+    capsys: pytest.CaptureFixture[str],
     *,
     command_machine: MachineIdentityReader,
 ) -> None:
@@ -211,20 +211,20 @@ def test_install_rejects_duplicate(
 def test_install_rejects_unrecognized(
     unit_home: Path,
     tmp_path: Path,
-    capsys: pytest.CaptureFixture,
+    capsys: pytest.CaptureFixture[str],
     *,
     command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_plugin_repo(tmp_path)
     assert _install(url, None, None, machine=command_machine, home=unit_home) == 1
-    assert "unrecognized package" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "unrecognized package" in capsys.readouterr().err
     assert reg.load(home=unit_home).packages == []
 
 
 def test_install_bare_mcp_package_signposts_mcp_install(
     unit_home: Path,
     tmp_path: Path,
-    capsys: pytest.CaptureFixture,
+    capsys: pytest.CaptureFixture[str],
     *,
     command_machine: MachineIdentityReader,
 ) -> None:
@@ -241,7 +241,7 @@ def test_install_bare_mcp_package_signposts_mcp_install(
     _git(repo, "add", ".")
     _git(repo, "commit", "-q", "-m", "init")
     assert _install(f"file://{repo}", None, None, machine=command_machine, home=unit_home) == 1
-    assert "meiva mcp install" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "meiva mcp install" in capsys.readouterr().err
     assert reg.load(home=unit_home).packages == []
 
 
@@ -267,17 +267,17 @@ def test_installed_lists_entries(
     db_url: str,
     unit_home: Path,
     tmp_path: Path,
-    capsys: pytest.CaptureFixture,
+    capsys: pytest.CaptureFixture[str],
     *,
     command_machine: MachineIdentityReader,
 ) -> None:
     assert cmd_plugins_installed(home=unit_home) == 0
-    assert "(none)" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    assert "(none)" in capsys.readouterr().out
     _install(
         _make_skill_repo(tmp_path, "demo"), None, None, machine=command_machine, home=unit_home
     )
     assert cmd_plugins_installed(home=unit_home) == 0
-    assert "demo" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    assert "demo" in capsys.readouterr().out
 
 
 def test_upgrade_refetches(
@@ -327,20 +327,20 @@ def test_install_claude_code_plugin_from_subdir_surfaces_skill(
 def test_install_claude_code_plugin_without_anything_refused(
     unit_home: Path,
     tmp_path: Path,
-    capsys: pytest.CaptureFixture,
+    capsys: pytest.CaptureFixture[str],
     *,
     command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_claude_code_plugin_repo(tmp_path, agents=False, mcp=False, skills=False)
     assert _install(url, None, "plugins/pr-toolkit", machine=command_machine, home=unit_home) == 1
-    assert "nothing to" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "nothing to" in capsys.readouterr().err
     assert reg.load(home=unit_home).packages == []
 
 
 def test_install_claude_code_plugin_skills_only_surfaces(
     unit_home: Path,
     tmp_path: Path,
-    capsys: pytest.CaptureFixture,
+    capsys: pytest.CaptureFixture[str],
     *,
     command_machine: MachineIdentityReader,
 ) -> None:
@@ -359,7 +359,7 @@ def test_install_claude_code_plugin_skills_only_surfaces(
     surfaced = {s["name"] for s in skills_mod.names()}
     assert {"brainstorming", "writing-plans"} <= surfaced
     # install message itemizes the shipped skills
-    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    out = capsys.readouterr().out
     assert "brainstorming" in out and "writing-plans" in out
 
 
@@ -388,13 +388,13 @@ def test_upgrade_claude_code_plugin_skills_only(
 def test_install_claude_code_plugin_reports_contributions(
     unit_home: Path,
     tmp_path: Path,
-    capsys: pytest.CaptureFixture,
+    capsys: pytest.CaptureFixture[str],
     *,
     command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_claude_code_plugin_repo(tmp_path, agents=True, mcp=True)
     assert _install(url, None, "plugins/pr-toolkit", machine=command_machine, home=unit_home) == 0
-    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    out = capsys.readouterr().out
     # the install message itemizes what the plugin folder contributed
     assert "contributes:" in out
     assert "skill 'pr-toolkit'" in out
@@ -589,7 +589,7 @@ def test_dot_prefixed_plugin_dirs_are_not_mcp_sources(unit_home: Path) -> None:
 def test_install_refuses_dot_prefixed_plugin_name(
     unit_home: Path,
     tmp_path: Path,
-    capsys: pytest.CaptureFixture,
+    capsys: pytest.CaptureFixture[str],
     *,
     command_machine: MachineIdentityReader,
 ) -> None:
@@ -616,7 +616,7 @@ def test_install_refuses_dot_prefixed_plugin_name(
         )
         == 1
     )
-    assert "starts with" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "starts with" in capsys.readouterr().err
     assert reg.load(home=unit_home).packages == []
 
 

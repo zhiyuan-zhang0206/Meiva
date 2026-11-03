@@ -98,7 +98,7 @@ def _write(d: Path, name: str, template: str) -> Path:
 def test_a_malicious_skill_refuses_and_leaves_nothing_behind(
     unit_home: Path,
     tmp_path: Path,
-    capsys: pytest.CaptureFixture,
+    capsys: pytest.CaptureFixture[str],
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -118,7 +118,7 @@ def test_a_malicious_skill_refuses_and_leaves_nothing_behind(
         == 1
     )
 
-    err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    err = capsys.readouterr().err
     assert "credential-exfiltration" in err
     assert "--accept-risk" in err
     assert not (unit_home / "skills" / "helpful-backup").exists()
@@ -218,14 +218,14 @@ def test_a_clean_third_party_install_is_still_unreviewed(
 
 
 def test_register_scans_too_so_a_hand_copy_is_not_the_way_around_the_gate(
-    unit_home: Path, capsys: pytest.CaptureFixture
+    unit_home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """`cp -r && meiva skill register` reaches the same load dir as an install; it
     has to meet the same gate or the gate is decorative."""
     _write(unit_home / "skills" / "helpful-backup", "helpful-backup", _MALICIOUS)
 
     assert cmd_skill_register("helpful-backup", home=unit_home, now=datetime.now(UTC)) == 1
-    assert "credential-exfiltration" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "credential-exfiltration" in capsys.readouterr().err
     assert reg.get("helpful-backup", home=unit_home) is None  # on disk, but never loadable
 
     assert (
@@ -291,16 +291,18 @@ def test_trust_is_a_separate_human_verb(
     assert reg.get("code-review", home=unit_home).trust == "unreviewed"  # type: ignore[union-attr]
 
 
-def test_trust_refuses_an_unknown_package(unit_home: Path, capsys: pytest.CaptureFixture) -> None:
+def test_trust_refuses_an_unknown_package(
+    unit_home: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     assert cmd_skill_trust("nope", now=datetime.now(UTC), home=unit_home) == 1
-    assert "not tracked" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "not tracked" in capsys.readouterr().err
 
 
 def test_scan_reports_an_installed_package_and_exits_on_criticals(
     db_url: str,
     unit_home: Path,
     tmp_path: Path,
-    capsys: pytest.CaptureFixture,
+    capsys: pytest.CaptureFixture[str],
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -321,18 +323,18 @@ def test_scan_reports_an_installed_package_and_exits_on_criticals(
         == 0
     )
     assert cmd_skill_scan("code-review", home=unit_home) == 0
-    assert "trust=unreviewed" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    assert "trust=unreviewed" in capsys.readouterr().out
 
     dirty = _write(tmp_path / "helpful-backup", "helpful-backup", _MALICIOUS)
     assert cmd_skill_scan(str(dirty), home=unit_home) == 2
-    assert "credential-exfiltration" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    assert "credential-exfiltration" in capsys.readouterr().out
 
 
 def test_scan_surfaces_previously_accepted_findings(
     db_url: str,
     unit_home: Path,
     tmp_path: Path,
-    capsys: pytest.CaptureFixture,
+    capsys: pytest.CaptureFixture[str],
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -355,7 +357,7 @@ def test_scan_surfaces_previously_accepted_findings(
     )
 
     assert cmd_skill_scan("helpful-backup", home=unit_home) == 2
-    assert "previously accepted: credential-exfiltration" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    assert "previously accepted: credential-exfiltration" in capsys.readouterr().out
 
 
 def test_converge_stamps_repo_skills_builtin_and_leaves_a_review_alone(

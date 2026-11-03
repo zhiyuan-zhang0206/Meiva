@@ -73,7 +73,7 @@ def _set_mode_off(name: str) -> None:
 
 
 def test_update_lands_missing_and_reports(
-    process_config: ConfigBoot, unit_home: Path, repo: Path, capsys
+    process_config: ConfigBoot, unit_home: Path, repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     assert (
         cmd_skill_update(
@@ -86,7 +86,7 @@ def test_update_lands_missing_and_reports(
         )
         == 0
     )
-    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    out = capsys.readouterr().out
     assert "landed 'builtin-a'" in out
     assert "project-x" not in out
     assert (unit_home / "skills" / "builtin-a" / "SKILL.md").is_file()
@@ -95,7 +95,7 @@ def test_update_lands_missing_and_reports(
 
 
 def test_update_agents_project_skill_is_not_repo_native(
-    process_config: ConfigBoot, unit_home: Path, repo: Path, capsys
+    process_config: ConfigBoot, unit_home: Path, repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """`.agents/skills` skills are no longer repo-native sources (issue #146):
     update reports them as unknown and never lands a copy."""
@@ -110,13 +110,13 @@ def test_update_agents_project_skill_is_not_repo_native(
         )
         == 0
     )
-    err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    err = capsys.readouterr().err
     assert "'project-x' is not a repo-native skill" in err
     assert not (unit_home / "skills" / "project-x").exists()
 
 
 def test_update_unknown_name_errors(
-    process_config: ConfigBoot, unit_home: Path, repo: Path, capsys
+    process_config: ConfigBoot, unit_home: Path, repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     assert (
         cmd_skill_update(
@@ -129,7 +129,7 @@ def test_update_unknown_name_errors(
         )
         == 0
     )  # others still run; unknown reported
-    err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    err = capsys.readouterr().err
     assert "'nope' is not a repo-native skill" in err
 
 
@@ -170,7 +170,7 @@ def test_update_propagates_source_change(
 
 
 def test_update_replaces_a_local_edit_and_reports(
-    process_config: ConfigBoot, unit_home: Path, repo: Path, capsys
+    process_config: ConfigBoot, unit_home: Path, repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     assert (
         cmd_skill_update(
@@ -200,14 +200,14 @@ def test_update_replaces_a_local_edit_and_reports(
         )
         == 0
     )
-    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    out = capsys.readouterr().out
     assert "note:" in out and "local copy differed" in out
     body = copy.read_text(encoding="utf-8")
     assert "hands off" not in body and "v2" in body
 
 
 def test_update_restores_a_local_edit_without_a_source_change(
-    process_config: ConfigBoot, unit_home: Path, repo: Path, capsys
+    process_config: ConfigBoot, unit_home: Path, repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Local edits alone (no upstream change) are converged too: the source
     tree is restored and the replacement is reported."""
@@ -236,7 +236,7 @@ def test_update_restores_a_local_edit_without_a_source_change(
         )
         == 0
     )
-    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    out = capsys.readouterr().out
     assert "note:" in out and "local copy differed" in out
     body = copy.read_text(encoding="utf-8")
     assert "hands off" not in body and "description: d" in body
@@ -279,7 +279,7 @@ def test_update_adopts_matching_user_residue(
 
 
 def test_update_converges_a_diverged_user_residue(
-    process_config: ConfigBoot, unit_home: Path, repo: Path, capsys
+    process_config: ConfigBoot, unit_home: Path, repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _write_skill(unit_home / "skills", "builtin-a", body="# user hacked\n")
     reg.register(
@@ -299,7 +299,7 @@ def test_update_converges_a_diverged_user_residue(
         )
         == 0
     )
-    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    out = capsys.readouterr().out
     assert "note:" in out and "local copy differed" in out
     assert _entry("builtin-a").origin == "repo"
     body = (unit_home / "skills" / "builtin-a" / "SKILL.md").read_text(encoding="utf-8")
@@ -307,7 +307,7 @@ def test_update_converges_a_diverged_user_residue(
 
 
 def test_update_leaves_third_party_user_package_alone(
-    process_config: ConfigBoot, unit_home: Path, repo: Path, capsys
+    process_config: ConfigBoot, unit_home: Path, repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A genuinely third-party user install squatting a repo name is shadowed
     by converge; update must not adopt it either."""
@@ -385,7 +385,7 @@ def _install_skill(
     assert _entry(name).installed_hash is not None
 
 
-def test_upgrade_skips_unupdatable(unit_home: Path, capsys) -> None:
+def test_upgrade_skips_unupdatable(unit_home: Path, capsys: pytest.CaptureFixture[str]) -> None:
     _write_skill(unit_home / "skills", "local-skill")
     reg.register(
         reg.InstalledPackage(name="local-skill", type="skill"), home=unit_home
@@ -394,7 +394,7 @@ def test_upgrade_skips_unupdatable(unit_home: Path, capsys) -> None:
         cmd_skill_upgrade("local-skill", home=unit_home, user_home=unit_home, now=datetime.now(UTC))
         == 1
     )
-    assert "no recorded source" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "no recorded source" in capsys.readouterr().err
 
 
 def test_upgrade_refetches_from_source(
@@ -502,7 +502,7 @@ def test_upgrade_replaces_a_local_edit(
     db_url: str,
     unit_home: Path,
     tmp_path: Path,
-    capsys,
+    capsys: pytest.CaptureFixture[str],
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -521,7 +521,7 @@ def test_upgrade_replaces_a_local_edit(
         cmd_skill_upgrade("ext-skill", home=unit_home, user_home=unit_home, now=datetime.now(UTC))
         == 0
     )
-    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    out = capsys.readouterr().out
     assert "modified locally" in out
     body = copy.read_text(encoding="utf-8")
     assert "# hacked" not in body and "# v2" in body
@@ -549,7 +549,7 @@ def test_update_refuses_worktree_repo_for_default_home(
         )
         == 1
     )
-    err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    err = capsys.readouterr().err
     assert "worktree" in err
     assert not (unit_home / "skills" / "builtin-a").exists()
 
@@ -591,7 +591,7 @@ def test_update_adopt_sets_builtin_trust(
 
 
 def test_update_unchanged_reanchors_stale_origin_path(
-    process_config: ConfigBoot, unit_home: Path, repo: Path, capsys
+    process_config: ConfigBoot, unit_home: Path, repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """An up-to-date copy whose recorded origin_path points at a deleted
     worktree gets re-anchored to the current source (no-op pass)."""
@@ -657,7 +657,7 @@ def test_update_skips_channel_managed_packages(
         )
         == 0
     )
-    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    out = capsys.readouterr().out
     assert "channel-managed" in out and "skipped" in out
     body = (unit_home / "skills" / "builtin-a" / "SKILL.md").read_text(encoding="utf-8")
     assert "# v2" not in body

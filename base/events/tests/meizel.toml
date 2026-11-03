@@ -1,4 +1,4 @@
-exports = ["async_pubsub_view.py", "codegen_sources.py"]
+exports = ["async_pubsub_view.py", "codegen_sources.py", "pubsub_view.py"]
 
 [loads]
 "test_declarations_layout.py" = ["base/events/declarations"]

@@ -21,6 +21,7 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.events.tests.pubsub_view import messages
 from cli.commands.agents.tests.lease_support import ActiveSession as ActiveSession
 from cli.commands.agents.tests.lease_support import active as active
 from cli.commands.agents.tests.lease_support import assert_message_pending, elapse
@@ -149,10 +150,10 @@ def _published(
     pubsub.subscribe(*channels)
     try:
         for _ in channels:
-            assert pubsub.get_message(timeout=5.0) is not None
+            assert messages(pubsub).get_message(timeout=5.0) is not None
         act()
         frames: list[tuple[str, str]] = []
-        while (message := pubsub.get_message(timeout=0.5)) is not None:
+        while (message := messages(pubsub).get_message(timeout=0.5)) is not None:
             if message["type"] == "message":
                 channel, data = message["channel"], message["data"]
                 assert isinstance(channel, str) and isinstance(data, str)
