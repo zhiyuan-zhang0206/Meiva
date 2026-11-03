@@ -16,6 +16,16 @@ Two resident sequential loops under one `TaskGroup` (`services/wake/schedule_man
 - **`reconcile`** (`manager.py`) — every 5 s.
 - **`requests`** (`requests.py`) — every second, converges each queued `schedule_sync_requests` row to its latest desired revision (adopt a matching live execution; officially reap a predecessor before replacement), then deletes it only if unchanged. A failed reap or uncertain live provenance leaves work queued, for a bounded window (ten minutes of one failure streak), then the manager records the schedule as an error, emits `schedule_convergence_abandoned` and consumes the request. A consumed launch attempt is terminal for that revision, even if its outcome is unknown. See [[gateway/schedules/docs/schedule-convergence.meiva.okf.md]] for transactional receipts and advisory ownership.
 
+## What the two silence reports say
+`report_late_rounds` (`round_progress.py`) answers *the session is live -- is the loop still
+iterating*: it compares the schedule's own heartbeat deadline with the database clock.
+`report_stalled` answers *the session is gone -- for how long*: it alerts once per outage after
+two hours of absence and measures the silence from the last round the schedule finished, not
+from the moment the manager noticed, so a late detection does not shorten the reported outage.
+Without a beat the only observable fact is the sessionless observation and `silent_seconds`
+falls back to it. A launch clears the previous attempt's beat, so a beat on disk always
+describes the attempt running now.
+
 ## State that moved from memory to the row
 | was (gateway, in memory) | now |
 |---|---|

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from base.events.vocabulary import EventSpec, audit_event, telemetry_event
 
@@ -235,16 +235,20 @@ class ScheduleLaunchRefused(TypedDict):
     reason: str
 
 
+# meiva:note
+# `schedule_stalled` fires once after an enabled, non-completed schedule has had no live session
+# for more than two hours; a live observation rearms a later outage.
+#
+# ``silent_seconds`` measures the silence from the observable fact -- the last round the schedule
+# itself finished -- so a manager that noticed the lost session hours late still reports how long
+# the work has been stopped. ``session_missing_seconds`` is how long the manager has known the
+# session was gone; without a beat it is also the silence, and ``beat_written_at`` is absent.
 class ScheduleStalled(TypedDict):
-    """`schedule_stalled` payload — services/wake/schedule_manager/manager.py.
-
-    Emitted once after an enabled, non-completed schedule has had no live
-    session for more than two hours. A live observation rearms a later outage.
-    """
-
     schedule_id: int
     status: str
-    stalled_seconds: float
+    silent_seconds: float
+    session_missing_seconds: float
+    beat_written_at: NotRequired[str]
 
 
 # meiva:note
@@ -610,7 +614,7 @@ EVENTS: dict[str, EventSpec] = {
         "enabled non-completed schedule has had no live session for more than two hours",
         payload=ScheduleStalled,
         tier="anomaly",
-        site=("services/wake/schedule_manager/manager.py:_report_stalled_schedules telemetry.emit"),
+        site=("services/wake/schedule_manager/round_progress.py:report_stalled telemetry.emit"),
     ),
     "schedule_convergence_abandoned": telemetry_event(
         "schedule_convergence_abandoned",

@@ -10,7 +10,6 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-import services.wake.schedule_manager.manager as sm
 from base.cluster import session_name
 from base.config import settings
 from base.daemon.schedules.heartbeat import beat_path, write_beat
@@ -19,6 +18,7 @@ from base.deploy.lifecycle.tests.serving_root import observe
 from base.sessions.protocol import SessionBackend
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
+from services.wake.schedule_manager import round_progress
 from services.wake.schedule_manager.tests.manager_support import NOW, POLICY, schedule_manager
 
 
@@ -177,12 +177,12 @@ def test_missing_error_schedule_alerts_after_two_hours_and_rearms_after_recovery
     _set_status(db_conn, sid, "error")
     manager = schedule_manager(pool, backend)
 
-    with caplog.at_level(logging.WARNING, logger=sm.__name__):
+    with caplog.at_level(logging.WARNING, logger=round_progress.__name__):
         manager.reconcile(now=NOW)
-        _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S - 5)
+        _age_not_live(db_conn, sid, round_progress.STALL_ALERT_AFTER_S - 5)
         manager.reconcile(now=NOW)
         assert len(emitted_events) == 0
-        _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S + 0.1)
+        _age_not_live(db_conn, sid, round_progress.STALL_ALERT_AFTER_S + 0.1)
         manager.reconcile(now=NOW)
         manager.reconcile(now=NOW)
 
@@ -191,7 +191,7 @@ def test_missing_error_schedule_alerts_after_two_hours_and_rearms_after_recovery
         manager.reconcile(now=NOW)
         backend.live.remove(name)
         manager.reconcile(now=NOW)
-        _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S + 0.1)
+        _age_not_live(db_conn, sid, round_progress.STALL_ALERT_AFTER_S + 0.1)
         manager.reconcile(now=NOW)
 
     emitted = [(event.event_name, event.attributes) for event in emitted_events]
@@ -199,7 +199,14 @@ def test_missing_error_schedule_alerts_after_two_hours_and_rearms_after_recovery
         ("schedule_stalled", sid, "error"),
         ("schedule_stalled", sid, "error"),
     ]
-    assert all(7200.1 <= cast(float, attrs["stalled_seconds"]) < 7260 for _name, attrs in emitted)
+    # meiva:note
+    # No beat exists on this machine, so the only observable fact is the sessionless
+    # observation itself and both durations name it.
+    assert all(7200.1 <= cast(float, attrs["silent_seconds"]) < 7260 for _name, attrs in emitted)
+    assert all(
+        7200.1 <= cast(float, attrs["session_missing_seconds"]) < 7260 for _name, attrs in emitted
+    )
+    assert all("beat_written_at" not in attrs for _name, attrs in emitted)
     assert caplog.text.count(f"schedule {sid} has had no live session") == 2
 
 
@@ -214,7 +221,7 @@ def test_the_stall_alert_clock_and_flag_survive_a_restart(
     _set_status(db_conn, sid, "error")
 
     schedule_manager(pool, backend).reconcile(now=NOW)
-    _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S + 1)
+    _age_not_live(db_conn, sid, round_progress.STALL_ALERT_AFTER_S + 1)
     schedule_manager(pool, backend).reconcile(now=NOW)
     assert emitted_events.names() == ["schedule_stalled"]
     schedule_manager(pool, backend).reconcile(now=NOW)
@@ -232,7 +239,7 @@ def test_completed_and_disabled_schedules_do_not_stall_alert(
     _set_status(db_conn, completed, "completed")
     disabled = _insert(db_conn, "disabled-no-alert", enabled=False)
     for sid in (completed, disabled):
-        _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S + 1)
+        _age_not_live(db_conn, sid, round_progress.STALL_ALERT_AFTER_S + 1)
 
     schedule_manager(pool, backend).reconcile(now=NOW)
 
@@ -422,6 +429,11 @@ def _write_beat(home: Path, sid: int, *, offset_s: float) -> None:
     write_beat(home, sid, written_at=now, alive_by=now + timedelta(seconds=offset_s))
 
 
+def _write_beat_ago(home: Path, sid: int, *, written_s_ago: float) -> None:
+    written = datetime.now(UTC) - timedelta(seconds=written_s_ago)
+    write_beat(home, sid, written_at=written, alive_by=written + timedelta(seconds=600))
+
+
 def _hold_live(backend: _FakeBackend, sid: int) -> None:
     name = session_name(f"schedule-{sid}")
     if name not in backend.live:
@@ -494,10 +506,58 @@ def test_a_sessionless_schedule_reports_the_stall_and_not_the_round(
     _write_beat(unit_home, sid, offset_s=-600)
 
     schedule_manager(pool, backend).reconcile(now=NOW)
-    _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S + 1)
+    _age_not_live(db_conn, sid, round_progress.STALL_ALERT_AFTER_S + 1)
     schedule_manager(pool, backend).reconcile(now=NOW)
 
     assert emitted_events.names() == ["schedule_stalled"]
+
+
+def test_the_stall_report_measures_the_silence_not_the_detection(
+    unit_home: Path,
+    pool: ConnectionPool[psycopg.Connection],
+    fake_session: tuple[_FakeBackend, list[int]],
+    emitted_events: EmittedEvents,
+    db_conn: psycopg.Connection,
+) -> None:
+    backend, _launched = fake_session
+    sid = _insert(db_conn, "late-detection")
+    _set_status(db_conn, sid, "error")
+    _write_beat_ago(unit_home, sid, written_s_ago=5 * 3600)
+
+    manager = schedule_manager(pool, backend)
+    manager.reconcile(now=NOW)
+    _age_not_live(db_conn, sid, round_progress.STALL_ALERT_AFTER_S + 1)
+    manager.reconcile(now=NOW)
+
+    (event,) = list(emitted_events)
+    assert event.event_name == "schedule_stalled"
+    # meiva:note
+    # The manager noticed only one alert interval ago; the schedule stopped working five hours
+    # ago. The reported silence is the second number, and the first says which clock it came from.
+    assert 5 * 3600 <= cast(float, event.attributes["silent_seconds"]) < 5 * 3600 + 60
+    assert (
+        round_progress.STALL_ALERT_AFTER_S
+        <= cast(float, event.attributes["session_missing_seconds"])
+        < round_progress.STALL_ALERT_AFTER_S + 60
+    )
+    assert isinstance(event.attributes["beat_written_at"], str)
+
+
+def test_a_launch_forgets_the_previous_attempts_round(
+    unit_home: Path,
+    pool: ConnectionPool[psycopg.Connection],
+    fake_session: tuple[_FakeBackend, list[int]],
+    db_conn: psycopg.Connection,
+) -> None:
+    backend, launched = fake_session
+    sid = _insert(db_conn, "beat-cleared-on-launch")
+    _write_beat_ago(unit_home, sid, written_s_ago=60)
+    assert beat_path(unit_home, sid).exists()
+
+    schedule_manager(pool, backend).reconcile(now=NOW)
+
+    assert sid in launched
+    assert not beat_path(unit_home, sid).exists()
 
 
 def test_a_fresh_round_rearms_the_alert(
