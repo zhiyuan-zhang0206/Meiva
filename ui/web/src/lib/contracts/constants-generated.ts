@@ -30,6 +30,7 @@ export const NOTE_TAGS = [
   "heartbeat",
   "security",
   "context",
+  "turn_lost",
   "agent_id",
   "agent_memory",
   "inherited_memory",
