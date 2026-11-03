@@ -21,7 +21,8 @@ the selected agent, statistics must also echo the requested window
 (`matchesInspectWindow`). A malformed or misrouted payload is never rendered —
 not even as plain text under React Query's `keepPreviousData` — so one agent's
 inspector can never appear under another selection. A new window's pending state
-replaces the prior window with skeletons instead of showing the old numbers.
+replaces the prior window's values with in-place metric breathing bars instead of
+showing the old numbers or remounting the section.
 
 **Refresh ownership.**
 
@@ -35,8 +36,8 @@ replaces the prior window with skeletons instead of showing the old numbers.
   since spawn (`null`), `5m` is `0`, and `1h` / `24h` / `7d` are the backend's
   supported subset. When the backend clamps the request to its retention, the
   option label shows the applied hours (`applied_window_hours`).
-- Notice events: the global notices fold invalidates only the live query — the
-  inspector's notice section updates without re-reading statistics.
+- Notice events: the global notices fold invalidates only the live query without
+  re-reading statistics.
 - Task events (`task_created` / `task_updated` for the selected agent): refresh
   the widget read only, since task movement can change the task a widget row
   points at.
@@ -53,10 +54,11 @@ HTTP waiter does not shorten it.
 
 **Failure rendering.** A failed refresh that still has data keeps every section
 and shows the amber stale dot (stale-while-error); a cold failure with no data
-replaces the section with its own error + retry, and a retry re-fires only that
+replaces the section body with its own error + retry (`Liveness` for the live
+read, `Activity` for the windowed read, and an error block below `Page` when the
+widget read fails without cached widgets), and a retry re-fires only that
 section's read — the live failure cannot hide statistics or widgets and vice
-versa. The notice-resolve flow invalidates the live query so the panel clears
-without waiting for the slow interval.
+versa.
 
 **Retention and the switch budget** (`lib/layout/switch-budget.ts`): inactive
 entries persist for `INSPECTOR_RETENTION_MS` (30 minutes) per agent — both as

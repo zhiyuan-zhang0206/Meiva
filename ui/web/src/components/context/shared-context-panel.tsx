@@ -2,12 +2,11 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ScanSearch } from "lucide-react";
-import dynamic from "next/dynamic";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, QUESTION_REGION_MAX_HEIGHT_CLASS } from "@/lib/layout/layout";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef } from "react";
 
-import { InspectorPanelSkeleton } from "@/components/inspector/inspector-panel-skeleton";
+import { InspectorPanel } from "@/components/inspector/inspector-panel";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { OpenNoticeDetail } from "@/components/notifications/open-notice-detail";
 import { ToUserDocumentView } from "./to-user-document";
@@ -16,10 +15,6 @@ import type { useToUser } from "@/lib/context/use-to-user";
 import { useInspectorOpen } from "@/lib/inspector/inspector-panel-store";
 import { dropOpenNotices } from "@/lib/notifications/use-notices";
 import { cn } from "@/lib/format/utils";
-
-const Inspector = dynamic(() => import("@/components/inspector/inspector-panel").then((m) => m.InspectorPanel), {
-  loading: () => <InspectorPanelSkeleton />,
-});
 
 // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
 export function SharedContextPanel({ agentId, document, notices, noticesFailed, mobile, onClose, onCollapse }: {
@@ -103,7 +98,7 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
       />
       {inspecting && (
         <div data-testid="shared-inspector" className={cn(MIN_H_0, FLEX_1, FLEX)}>
-          <Inspector agentId={agentId} embedded />
+          <InspectorPanel agentId={agentId} />
         </div>
       )}
       {noticesFailed && <p role="status" className="shrink-0 border-t border-border/60 px-5 py-2 text-xs text-muted-foreground">{t("noticesUnavailable")}</p>}

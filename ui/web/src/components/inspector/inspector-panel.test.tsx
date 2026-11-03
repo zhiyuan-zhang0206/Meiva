@@ -66,6 +66,7 @@ describe("InspectorPanel", () => {
         return Promise.resolve(
           liveFixture({
             agent_id: 1,
+            machine: "agent-a-host",
             shells: [
               {
                 id: 91,
@@ -74,14 +75,8 @@ describe("InspectorPanel", () => {
                 uptime_seconds: 10,
               },
             ],
-            notice: {
-              id: 92,
-              title: "Agent A private notice",
-              content: "Only Agent A may answer this",
-              priority: "P1",
-              require_response: true,
-              blocking: true,
-              created_at: "2026-06-14T12:00:00Z",
+            config_overlay: {
+              custom_flag: "agent-a-secret-flag",
             },
           }),
         );
@@ -97,8 +92,8 @@ describe("InspectorPanel", () => {
       </QueryClientProvider>,
     );
     await waitFor(() => expect(screen.getByText("agent-a-private-shell")).toBeTruthy());
-    expect(screen.getByText("Agent A private notice")).toBeTruthy();
-    expect(screen.getByRole("textbox")).toBeTruthy();
+    expect(screen.getByText("agent-a-host")).toBeTruthy();
+    expect(screen.getByText("agent-a-secret-flag")).toBeTruthy();
 
     view.rerender(
       <QueryClientProvider client={qc}>
@@ -110,14 +105,15 @@ describe("InspectorPanel", () => {
     );
 
     expect(screen.queryByText("agent-a-private-shell")).toBeNull();
-    expect(screen.queryByText("Agent A private notice")).toBeNull();
-    expect(screen.queryByText("Only Agent A may answer this")).toBeNull();
-    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByText("agent-a-host")).toBeNull();
+    expect(screen.queryByText("agent-a-secret-flag")).toBeNull();
+    expect(screen.getByLabelText("Liveness loading")).toBeTruthy();
 
-    resolveAgentB?.(liveFixture({ agent_id: 2, shells: [] }));
-    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
-    expect(screen.queryByText("Notice")).toBeNull();
+    resolveAgentB?.(liveFixture({ agent_id: 2, machine: "agent-b-host", shells: [], config_overlay: {} }));
+    await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
+    expect(screen.getByText("agent-b-host")).toBeTruthy();
     expect(screen.queryByText("Persistent shells")).toBeNull();
+    expect(screen.queryByText("Configuration overlay")).toBeNull();
   });
 
   it("renders sections from their current-state and statistics responses", async () => {
@@ -223,19 +219,81 @@ describe("InspectorPanel", () => {
     expect(screen.queryByText("Page")).toBeNull();
   });
 
-  it("renders each section skeleton while its own read is pending", () => {
+  it("renders in-place metric breathing bars for persistent sections without speculative sparse sections while pending", () => {
     getAgentInspectLive.mockReturnValue(new Promise<AgentInspectLive>(() => undefined));
     getAgentInspectStatistics.mockReturnValue(new Promise<AgentInspectStatistics>(() => undefined));
+    getAgentInspectWidgets.mockReturnValue(new Promise<InspectWidget[]>(() => undefined));
 
     render(<InspectorPanel agentId={1} />);
 
+    expect(screen.getByRole("link", { name: "Open run timeline" })).toBeTruthy();
+
+    const liveness = screen.getByLabelText("Liveness loading");
+    expect(liveness.getAttribute("aria-busy")).toBe("true");
+    for (const label of ["Birth", "Next heartbeat", "Last pause", "Harness", "Model", "Machine", "Status"]) {
+      expect(within(liveness).getByText(label)).toBeTruthy();
+    }
+    expect(liveness.querySelectorAll(".animate-pulse")).toHaveLength(7);
+
+    const activity = screen.getByLabelText("Activity loading");
+    expect(activity.getAttribute("aria-busy")).toBe("true");
+    expect(screen.getAllByText("Activity")).toHaveLength(1);
+    for (const label of ["Cost", "LLM calls", "Tokens", "Cache hit", "TPS", "LLM output", "Code execution", "Idle"]) {
+      expect(within(activity).getByText(label)).toBeTruthy();
+    }
+    expect(activity.querySelectorAll(".animate-pulse")).toHaveLength(8);
+
     expect(screen.queryByText("Page")).toBeNull();
-    expect(screen.getByLabelText("Persistent shells loading")).toBeTruthy();
-    expect(screen.getByLabelText("Liveness loading")).toBeTruthy();
-    expect(screen.getByLabelText("Configuration overlay loading")).toBeTruthy();
-    expect(screen.getByLabelText("Activity loading")).toBeTruthy();
-    expect(screen.queryByLabelText("Notice loading")).toBeNull();
+    expect(screen.queryByText("Persistent shells")).toBeNull();
+    expect(screen.queryByText("Configuration overlay")).toBeNull();
+    expect(screen.queryByText("Extensions")).toBeNull();
+    expect(screen.queryByText("Context")).toBeNull();
+    expect(screen.queryByText("Notice")).toBeNull();
     expect(screen.queryByText("Loading…")).toBeNull();
+  });
+
+  it("keeps Liveness and Activity section and card DOM nodes mounted in place across initial resolve and window switches", async () => {
+    let releaseLive: (v: AgentInspectLive) => void = () => undefined;
+    let releaseWindowed: (v: AgentInspectStatistics) => void = () => undefined;
+    getAgentInspectLive.mockReturnValue(
+      new Promise<AgentInspectLive>((resolve) => {
+        releaseLive = resolve;
+      }),
+    );
+    getAgentInspectStatistics.mockImplementation((_agentId, hours) => {
+      if (hours === 24) {
+        return new Promise<AgentInspectStatistics>((resolve) => {
+          releaseWindowed = resolve;
+        });
+      }
+      return new Promise<AgentInspectStatistics>(() => undefined);
+    });
+
+    render(<InspectorPanel agentId={1} />);
+
+    const livenessSection = screen.getByLabelText("Liveness loading");
+    const birthCard = within(livenessSection).getByText("Birth").parentElement;
+    const activitySection = screen.getByLabelText("Activity loading");
+    const costCard = within(activitySection).getByText("Cost").parentElement;
+    expect(birthCard).not.toBeNull();
+    expect(costCard).not.toBeNull();
+
+    releaseLive(liveFixture({ shells: [], config_overlay: {} }));
+    releaseWindowed(fixture({ window_hours: 24 }));
+
+    await waitFor(() => expect(screen.getByText("$0.4213")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("test-host")).toBeTruthy());
+
+    expect(screen.getByText("Liveness").closest("section")).toBe(livenessSection);
+    expect(within(livenessSection).getByText("Birth").parentElement).toBe(birthCard);
+    expect(screen.getByText("Activity").closest("section")).toBe(activitySection);
+    expect(within(activitySection).getByText("Cost").parentElement).toBe(costCard);
+
+    fireEvent.change(screen.getByLabelText("Cost + activity window"), {
+      target: { value: "1" },
+    });
+    await waitFor(() => expect(screen.getByLabelText("Activity loading")).toBe(activitySection));
+    expect(within(activitySection).getByText("Cost").parentElement).toBe(costCard);
   });
 
   it("shows current state while statistics and plugins are pending", async () => {
@@ -249,13 +307,13 @@ describe("InspectorPanel", () => {
     render(<InspectorPanel agentId={1} />);
 
     await waitFor(() => expect(screen.getByText("dev-server")).toBeTruthy());
-    expect(screen.queryByLabelText("Persistent shells loading")).toBeNull();
+    expect(screen.queryByLabelText("Liveness loading")).toBeNull();
     expect(screen.getByLabelText("Activity loading")).toBeTruthy();
 
     releaseWindowed(fixture({ window_hours: 24 }));
     await waitFor(() => expect(screen.getByText("$0.4213")).toBeTruthy());
     expect(screen.queryByLabelText("Activity loading")).toBeNull();
-    expect(screen.queryByLabelText("Persistent shells loading")).toBeNull();
+    expect(screen.queryByLabelText("Liveness loading")).toBeNull();
   });
 
   it("a current-state failure does not hide statistics or extension state", async () => {

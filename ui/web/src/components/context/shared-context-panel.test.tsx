@@ -14,12 +14,13 @@ notifyManager.setScheduler((cb) => {
 });
 
 // meiva:note
-// The panel is rendered with the real InspectorPanel behind its `next/dynamic` chunk. A test that
-// cares whether Inspector mode is mounted reads `shared-inspector`, the panel's own wrapper, so
-// nothing replaces the inspector module and the lazy chunk loads the component the app ships.
+// The panel renders the real InspectorPanel directly. A test that cares whether Inspector mode
+// is mounted reads `shared-inspector`, the panel's own wrapper, so nothing replaces the
+// inspector module.
 import { SharedContextPanel } from "./shared-context-panel";
 
 import { resetTransport, transport } from "@/test-support/fake-api";
+import { resetStreamHandlers, TestStreamProvider } from "@/test-support/fake-stream";
 beforeEach(() => {
   resetTransport();
 });
@@ -32,7 +33,9 @@ let qc: QueryClient;
 function PanelWrapper({ children }: { children: ReactNode }) {
   return (
     <WallClockProvider wallNow={() => Date.now()}>
-      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+      <QueryClientProvider client={qc}>
+        <TestStreamProvider>{children}</TestStreamProvider>
+      </QueryClientProvider>
     </WallClockProvider>
   );
 }
@@ -106,10 +109,16 @@ beforeEach(() => {
   transport.getSettings.mockImplementation(() => new Promise(() => undefined));
   transport.putSetting.mockImplementation(() => new Promise(() => undefined));
   transport.getToUser.mockImplementation(() => new Promise(() => undefined));
+  transport.listPages.mockResolvedValue([]);
+  transport.getAgentRoster.mockResolvedValue({ agents: [], ancestors: [] });
+  transport.getAgentInspectLive.mockImplementation(() => new Promise(() => undefined));
+  transport.getAgentInspectStatistics.mockImplementation(() => new Promise(() => undefined));
+  transport.getAgentInspectWidgets.mockImplementation(() => new Promise(() => undefined));
 });
 
 afterEach(() => {
   cleanup();
+  resetStreamHandlers();
   vi.restoreAllMocks();
 });
 

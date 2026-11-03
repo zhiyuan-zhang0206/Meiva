@@ -1,10 +1,10 @@
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { formatAbsolute, formatRelative } from "@/lib/format/time";
 import { foldNotices } from "@/lib/fold/notices";
 import { inspectLiveQueryKey } from "@/lib/inspector/inspector-queries";
+import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import type { PageRow, SystemEvent } from "@/lib/contracts/types";
 import {
   cleanupInspectorTest,
@@ -13,15 +13,16 @@ import {
   getAgentInspectLive,
   getAgentInspectStatistics,
   getAgentInspectWidgets,
+  getAgentRoster,
   liveFixture,
   panelState,
   QueryClientProvider,
   render,
+  rosterFixture,
   setupInspectorTest,
   setInspectorPages,
   streamHandlers,
   widgetFixture,
-  widgetNotice,
 } from "./inspector-test-mock";
 
 
@@ -33,8 +34,7 @@ beforeEach(setupInspectorTest);
 afterEach(cleanupInspectorTest);
 
 describe("InspectorPanel", () => {
-  it("renders the notice section when agent has an open notice", async () => {
-    const createdAt = "2026-06-15T13:30:00Z";
+  it("never renders an inline Notice reply section inside the inspector body", async () => {
     getAgentInspectLive.mockResolvedValue(
       liveFixture({
         notice: {
@@ -44,57 +44,16 @@ describe("InspectorPanel", () => {
           priority: "P0",
           require_response: true,
           blocking: true,
-          created_at: createdAt,
+          created_at: "2026-06-15T13:30:00Z",
         },
       }),
     );
     render(<InspectorPanel agentId={1} />);
 
-    await waitFor(() => expect(screen.getByText("Notice")).toBeTruthy());
-    expect(screen.getByText("P0")).toBeTruthy();
-    expect(screen.getByText("Blocking")).toBeTruthy();
-    expect(screen.queryByText("Needs your answer")).toBeNull();
-    expect(
-      screen.getByText(`${formatRelative(createdAt, new Date())}, ${formatAbsolute(createdAt)}`),
-    ).toBeTruthy();
-    expect(screen.getByText("Approve deploy?")).toBeTruthy();
-    expect(screen.getByText("Can we push to prod?")).toBeTruthy();
-  });
-
-  it("renders the same numbered question controls in the inspector", async () => {
-    getAgentInspectLive.mockResolvedValue(
-      liveFixture({
-        notice: {
-          id: 9,
-          title: "Which layout?",
-          content: "Choose the scope.",
-          priority: "P2",
-          require_response: true,
-          blocking: false,
-          created_at: "2026-10-14T00:00:00Z",
-          question: {
-            type: "single_select",
-            options: [{ id: "z", label: "First layout" }, { id: "a", label: "Second layout" }],
-            allow_other: false,
-          },
-        },
-      }),
-    );
-    render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByRole("radio", { name: "1. First layout" })).toBeTruthy());
-    expect(screen.getByRole("radio", { name: "2. Second layout" })).toBeTruthy();
-    expect(screen.queryByRole("radio", { name: "3. Other" })).toBeNull();
-    expect(screen.getByLabelText("Comment (optional)")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Submit answer" }).hasAttribute("disabled")).toBe(true);
-  });
-
-  it("hides the Notice section when no notice is open", async () => {
-    getAgentInspectLive.mockResolvedValue(liveFixture({ notice: null }));
-    render(<InspectorPanel agentId={1} />);
-
-    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
     expect(screen.queryByText("Notice")).toBeNull();
-    expect(screen.queryByText("No open notice")).toBeNull();
+    expect(screen.queryByText("Approve deploy?")).toBeNull();
+    expect(screen.queryByRole("textbox")).toBeNull();
   });
 
   it("updates the notice without rereading statistics when notice SSE arrives", async () => {
@@ -130,101 +89,10 @@ describe("InspectorPanel", () => {
     expect(getAgentInspectStatistics).toHaveBeenCalledTimes(1);
   });
 
-  it("renders the Notice reply surface last without redundant open wording", async () => {
-    const page = {
-      id: 7,
-      agent_id: 1,
-      name: "task-dashboard",
-      port: 4173,
-      title: "Task dashboard",
-      serve_dir: null,
-      url: "http://gateway.test/pages/7-task-dashboard/",
-      created_at: "2026-08-24T12:00:00Z",
-      closed_at: null,
-    } satisfies PageRow;
-    setInspectorPages([page]);
-    getAgentInspectLive.mockResolvedValue(
-      liveFixture({
-        notice: {
-          id: 5,
-          title: "Approve?",
-          content: "ok?",
-          priority: "P1",
-          require_response: true,
-          blocking: false,
-          created_at: "2026-06-14T12:00:00Z",
-        },
-      }),
-    );
-    render(<InspectorPanel agentId={1} />);
-
-    await waitFor(() => expect(screen.getByText("Notice")).toBeTruthy());
-    expect(screen.getByRole("textbox")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Close without answering" })).toBeTruthy();
-    const notice = screen.getByText("Notice");
-    const timelineLink = screen.getByText("Open run timeline");
-    expect(
-      timelineLink.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    const noticeSection = notice.closest("section");
-    expect(noticeSection).not.toBeNull();
-    expect(within(noticeSection!).queryByText(/open/i)).toBeNull();
-  });
-
-  it("resolving a notice re-enables the reply box when a new notice takes its place", async () => {
-    const mk = (id: number, title: string) => ({
-      id,
-      title,
-      content: null,
-      priority: "P1" as const,
-      require_response: true,
-      blocking: false,
-      created_at: "2026-06-14T12:00:00Z",
-    });
-    getAgentInspectLive
-      .mockResolvedValueOnce(liveFixture({ notice: mk(5, "First?") }))
-      .mockResolvedValue(liveFixture({ notice: mk(6, "Second?") }));
-    render(<InspectorPanel agentId={1} />);
-
-    await waitFor(() => expect(screen.getByText("First?")).toBeTruthy());
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "done" } });
-    fireEvent.click(screen.getByLabelText("Send answer"));
-
-    await waitFor(() => expect(screen.getByText("Second?")).toBeTruthy());
-
-    const send = screen.getByLabelText("Send answer");
-    expect(send.hasAttribute("disabled")).toBe(true);
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "next" } });
-    expect(send.hasAttribute("disabled")).toBe(false);
-  });
-
-  it("shows a nonblocking question without redundant answer status", async () => {
-    getAgentInspectLive.mockResolvedValue(
-      liveFixture({
-        notice: {
-          id: 2,
-          title: "Milestone reached",
-          content: null,
-          priority: "P2",
-          require_response: true,
-          blocking: false,
-          created_at: "2026-06-14T12:00:00Z",
-        },
-      }),
-    );
-    render(<InspectorPanel agentId={1} />);
-
-    await waitFor(() => expect(screen.getByText("Milestone reached")).toBeTruthy());
-    expect(screen.queryByText("Needs your answer")).toBeNull();
-    expect(screen.queryByText("Blocking")).toBeNull();
-    expect(screen.getByText("P2")).toBeTruthy();
-    expect(screen.getByText("Milestone reached")).toBeTruthy();
-  });
-
   it("hides available-but-empty shells and an empty config overlay", async () => {
     getAgentInspectLive.mockResolvedValue(liveFixture({ shells: [], config_overlay: {} }));
     render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
     expect(screen.queryByText("Persistent shells")).toBeNull();
     expect(screen.queryByText("Configuration overlay")).toBeNull();
   });
@@ -232,7 +100,7 @@ describe("InspectorPanel", () => {
   it("does not render observation details", async () => {
     getAgentInspectLive.mockResolvedValue(liveFixture());
     render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("Birth")).toBeTruthy());
+    await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
     expect(screen.queryByText("Observation")).toBeNull();
     expect(screen.queryByText(/Machine probe:/)).toBeNull();
   });
@@ -395,15 +263,20 @@ describe("InspectorPanel plugin widgets", () => {
     setInspectorPages([]);
   });
 
-  it("slots a widget into the section order (750: between the configuration overlay and the notice)", async () => {
-    getAgentInspectLive.mockResolvedValue(liveFixture({ notice: widgetNotice }));
+  it("slots a widget into the section order (750: between context and activity)", async () => {
+    getAgentRoster.mockResolvedValue(rosterFixture({ harness: "meiva" }));
+    act(() => {
+      useTimelineStore.getState().applyTokenUsage(109_600, 0, 1_000_000, 374_000, 512_000);
+    });
+    getAgentInspectLive.mockResolvedValue(liveFixture());
     getAgentInspectWidgets.mockResolvedValue([widgetFixture({ order: 750 })]);
     render(<InspectorPanel agentId={1} />);
 
     const runLink = await screen.findByRole("link", { name: "Open run timeline" });
     const widgetLink = await screen.findByRole("link", { name: /Ship the inspector fix/ });
-    const reply = screen.getByRole("textbox");
-    const configOverlay = screen.getByText("Configuration overlay");
+    const context = await screen.findByText("Context");
+    const configOverlay = await screen.findByText("Configuration overlay");
+    const activity = screen.getByText("Activity");
     expect(
       runLink.compareDocumentPosition(widgetLink) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
@@ -411,16 +284,14 @@ describe("InspectorPanel plugin widgets", () => {
       configOverlay.compareDocumentPosition(widgetLink) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(
-      widgetLink.compareDocumentPosition(reply) & Node.DOCUMENT_POSITION_FOLLOWING,
+      context.compareDocumentPosition(widgetLink) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-  });
-
-  it("the notice section carries the jump into the fleet inbox", async () => {
-    getAgentInspectLive.mockResolvedValue(liveFixture({ notice: widgetNotice }));
-    render(<InspectorPanel agentId={1} />);
-
-    const jump = await screen.findByRole("link", { name: "Notification" });
-    expect(jump.getAttribute("href")).toBe("/fleet?notice=92");
+    expect(
+      widgetLink.compareDocumentPosition(activity) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    act(() => {
+      useTimelineStore.getState().applyTokenUsage(0, 0, 0, 0, 0);
+    });
   });
 
   it("renders no widget area when no plugin registers one", async () => {

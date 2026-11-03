@@ -36,9 +36,9 @@ describe("InspectorPanel liveness identity rows", () => {
     getAgentRoster.mockResolvedValue(rosterFixture({ harness: "codex" }));
     getAgentInspectLive.mockResolvedValue(liveFixture());
     render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
     const livenessSection = screen.getByText("Liveness").closest("section");
-    expect(within(livenessSection!).getByText("Codex")).toBeTruthy();
+    expect(await within(livenessSection!).findByText("Codex")).toBeTruthy();
     expect(within(livenessSection!).getByText("Claude Opus 4.8")).toBeTruthy();
   });
 
@@ -47,13 +47,14 @@ describe("InspectorPanel liveness identity rows", () => {
     getAgentInspectLive.mockResolvedValue(liveFixture());
     getAgentInspectStatistics.mockResolvedValue(fixture());
     render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("Cost")).toBeTruthy());
+    await waitFor(() => expect(screen.queryByLabelText("Activity loading")).toBeNull());
+    await screen.findByText("Codex");
     const activitySection = screen.getByText("Activity").closest("section");
     expect(within(activitySection!).getByText("Cost")).toBeTruthy();
     expect(within(activitySection!).getByText("LLM calls")).toBeTruthy();
     expect(within(activitySection!).getByText("Idle")).toBeTruthy();
     expect(within(activitySection!).queryByText("TPS")).toBeNull();
-    expect(within(activitySection!).queryByText("LM output")).toBeNull();
+    expect(within(activitySection!).queryByText("LLM output")).toBeNull();
     expect(within(activitySection!).queryByText("Code execution")).toBeNull();
   });
 
@@ -61,7 +62,7 @@ describe("InspectorPanel liveness identity rows", () => {
     getAgentRoster.mockResolvedValue({ agents: [], ancestors: [] });
     getAgentInspectLive.mockResolvedValue(liveFixture({ config_overlay: { auto_compact_fraction: 0.7 } }));
     render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
     const livenessSection = screen.getByText("Liveness").closest("section");
     for (const label of ["Harness", "Model"]) {
       const cell = within(livenessSection!).getByText(label).closest("div");
@@ -79,7 +80,7 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
       }),
     );
     render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
     expect(screen.getByText("16:30")).toBeTruthy();
     expect(screen.getByText("never paused")).toBeTruthy();
   });
@@ -93,7 +94,7 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
       }),
     );
     render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
     expect(screen.getByText("Tomorrow 15:21")).toBeTruthy();
     expect(
       formatUpcoming(nextAt, new Date("2026-10-17T16:26:00Z"), { clockFormat: "24h" }),
@@ -114,7 +115,7 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
       }),
     );
     render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
     const cell = screen.getByText("Next heartbeat").closest("div")!;
     expect(within(cell).getByText("paused · Tomorrow 15:21")).toBeTruthy();
     expect(cell.querySelectorAll("span")).toHaveLength(2);
@@ -136,7 +137,7 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
     const qc = createInspectorQueryClient();
     qc.setQueryData(SETTINGS_QUERY_KEY, (old) => ({ ...(old as Record<string, unknown>), "display.date_format": "relative" }));
     render(<InspectorPanel agentId={1} />, qc);
-    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
     const cell = screen.getByText("Next heartbeat").closest("div")!;
     expect(within(cell).getByText("paused · in 22h")).toBeTruthy();
     expect(cell.querySelectorAll("span")).toHaveLength(2);
@@ -151,7 +152,7 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
       }),
     );
     render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
     const livenessSection = screen.getByText("Liveness").closest("section");
     const nextCell = within(livenessSection!).getByText("Next heartbeat").closest("div");
     expect(within(nextCell!).getByText("paused · Tomorrow 15:21")).toBeTruthy();
@@ -187,7 +188,7 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
       }),
     );
     render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
     const livenessSection = screen.getByText("Liveness").closest("section");
     const nextCell = within(livenessSection!).getByText("Next heartbeat").closest("div");
     expect(within(nextCell!).getByText("due")).toBeTruthy();
@@ -200,7 +201,7 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
       }),
     );
     render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
     expect(screen.getByText("pending")).toBeTruthy();
     expect(screen.getByText("never paused")).toBeTruthy();
   });
@@ -213,7 +214,7 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
       }),
     );
     render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
     expect(screen.getByText("due")).toBeTruthy();
   });
 
@@ -231,7 +232,7 @@ describe("InspectorPanel heartbeat cells (merged into Liveness, Task #1195)", ()
       }),
     );
     render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
     const livenessSection = screen.getByText("Liveness").closest("section");
     expect(livenessSection).not.toBeNull();
     const nextCell = within(livenessSection!).getByText("Next heartbeat").closest("div");
@@ -246,7 +247,7 @@ describe("InspectorPanel birth (cell in the merged Liveness section, Task #1195)
     const spawned = "2026-06-14T12:00:00Z";
     getAgentInspectLive.mockResolvedValue(liveFixture({ spawned_at: spawned }));
     render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("Birth")).toBeTruthy());
+    await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
     expect(
       screen.getByText(`${formatRelative(spawned, new Date())}, ${formatAbsolute(spawned)}`),
     ).toBeTruthy();
@@ -342,7 +343,7 @@ describe("InspectorPanel liveness (merged section, Task #1195)", () => {
       liveFixture({ liveness_state: "online", last_probe_at: "2026-08-12T05:00:00Z" }),
     );
     const { container } = render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
     expect(screen.queryByText("online")).toBeNull();
     expect(container.querySelector(".text-destructive")).toBeNull();
     expect(screen.queryByText("Last judged")).toBeNull();
@@ -353,7 +354,7 @@ describe("InspectorPanel liveness (merged section, Task #1195)", () => {
       liveFixture({ liveness_state: "offline", last_probe_at: null }),
     );
     const { container } = render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
     expect(screen.queryByText("offline")).toBeNull();
     expect(container.querySelector(".text-destructive")).not.toBeNull();
     expect(screen.queryByText("never")).toBeNull();
@@ -362,7 +363,7 @@ describe("InspectorPanel liveness (merged section, Task #1195)", () => {
   it("shows the machine and lifecycle status (task #3904)", async () => {
     getAgentInspectLive.mockResolvedValue(liveFixture({ liveness_state: "online" }));
     render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
     expect(screen.getByText("Machine")).toBeTruthy();
     expect(screen.getByText("test-host")).toBeTruthy();
     expect(screen.getByText("Status")).toBeTruthy();
@@ -383,7 +384,7 @@ describe("InspectorPanel liveness (merged section, Task #1195)", () => {
       }),
     );
     render(<InspectorPanel agentId={1} />);
-    await waitFor(() => expect(screen.getByText("Liveness")).toBeTruthy());
+    await waitFor(() => expect(screen.queryByLabelText("Liveness loading")).toBeNull());
     const section = screen.getByText("Liveness").closest("section");
     expect(section).not.toBeNull();
     const text = section!.textContent;
@@ -435,8 +436,7 @@ describe("InspectorPanel Context section", () => {
       useTimelineStore.getState().applyTokenUsage(109_600, 0, 1_000_000, 374_000, 512_000);
     });
     render(<InspectorPanel agentId={1} />);
-    await screen.findByText("Activity");
-    await waitFor(() => expect(getAgentRoster).toHaveBeenCalled());
+    await screen.findByText(harness === "codex" ? "Codex" : "Claude Code");
     expect(screen.queryByText("Context")).toBeNull();
     expect(screen.queryByTestId("context-meter-button")).toBeNull();
   });

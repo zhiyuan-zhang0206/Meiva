@@ -23,10 +23,10 @@ afterEach(() => {
 });
 
 describe("RunTimelineWorkspace", () => {
-  it("splits the page with a keyboard-reachable, labelled separator on a wide viewport", async () => {
+  it("splits the page synchronously on the first client frame with a keyboard-reachable separator on a wide viewport", () => {
     renderWithBrowser(<RunTimelineWorkspace main={<p>main</p>} side={<p>side</p>} />);
 
-    const handle = await screen.findByRole("separator", { name: "Resize the details panel" });
+    const handle = screen.getByRole("separator", { name: "Resize the details panel" });
     expect(handle.getAttribute("aria-orientation")).toBe("vertical");
     expect(handle.getAttribute("tabindex")).toBe("0");
     expect(screen.getByTestId("run-timeline-main").textContent).toBe("main");

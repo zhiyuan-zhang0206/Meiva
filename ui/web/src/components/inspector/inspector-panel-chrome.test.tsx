@@ -3,8 +3,6 @@ import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
-import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS } from "@/lib/layout/layout";
-import { useStore } from "@/lib/state/store";
 import type {
   AgentInspectLive,
   AgentInspectStatistics,
@@ -55,7 +53,7 @@ describe("InspectorPanel desktop", () => {
     expect(viewport!.scrollTop).toBe(0);
   });
 
-  it("fills its resizable side panel without an overlay or backdrop", async () => {
+  it("fills its side panel without a standalone header, overlay, or backdrop", async () => {
     getAgentInspectStatistics.mockResolvedValue(fixture());
     render(<InspectorPanel agentId={1} />);
 
@@ -63,31 +61,14 @@ describe("InspectorPanel desktop", () => {
     const aside = screen.getByRole("complementary");
     const classes = aside.className.split(" ");
     expect(classes).toContain("flex");
+    expect(classes).toContain("h-full");
     expect(classes).toContain("w-full");
     expect(classes).not.toContain("border-l");
     expect(classes).not.toContain("fixed");
     expect(classes).not.toContain("absolute");
-    expect(document.querySelector('div[aria-hidden="true"]')).toBeNull();
-  });
-
-  it("uses the compact shared title bar with an inset divider", () => {
-    render(<InspectorPanel agentId={1} />);
-
-    const header = screen.getByText("Inspector", { selector: "span" }).closest("header");
-    expect(header?.className).toContain(BAR_HEIGHT_CLASS);
-    for (const dividerClass of BAR_DIVIDER_CLASS.split(" ")) {
-      expect(header?.className).toContain(dividerClass);
-    }
-    expect(header?.classList.contains("relative")).toBe(true);
-    expect(header?.className).not.toContain("border-b");
-  });
-
-  it("has no X close — the top-bar toggle is the desktop close (QA sweep 2026-09-18 F2)", async () => {
-    getAgentInspectStatistics.mockResolvedValue(fixture());
-    render(<InspectorPanel agentId={1} />);
-
-    await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
+    expect(aside.querySelector("header")).toBeNull();
     expect(screen.queryByRole("button", { name: "Close inspector" })).toBeNull();
+    expect(document.querySelector('div[aria-hidden="true"]')).toBeNull();
   });
 
   it("Escape does not close the panel on desktop", async () => {
@@ -122,47 +103,19 @@ describe("InspectorPanel mobile", () => {
     window.innerWidth = 375;
   });
 
-  it("renders as a full-screen overlay on mobile", async () => {
+  it("stays an embedded body without mounting a duplicate fixed sheet or backdrop on mobile", async () => {
     getAgentInspectStatistics.mockResolvedValue(fixture());
     render(<InspectorPanel agentId={1} />);
 
-    await waitFor(() => expect(screen.getByLabelText("Close inspector")).toBeTruthy());
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
     const aside = screen.getByRole("complementary");
-    expect(aside.parentElement?.className.split(" ")).toEqual(
-      expect.arrayContaining(["fixed", "inset-0", "z-50", "flex"]),
+    expect(aside.className.split(" ")).toEqual(
+      expect.arrayContaining(["h-full", "w-full", "flex"]),
     );
-    expect(document.querySelector('div[aria-hidden="true"]')).toBeTruthy();
-  });
-
-  it("closes when clicking the backdrop", async () => {
-    getAgentInspectStatistics.mockResolvedValue(fixture());
-    render(<InspectorPanel agentId={1} />);
-
-    await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
-    const backdrop = document.querySelector('[aria-hidden="true"]');
-    expect(backdrop).toBeTruthy();
-    fireEvent.click(backdrop!);
-    expect(useStore.getState().mobileInspectorOpen).toBe(false);
-  });
-
-  it("closes when clicking the X button (task #793 — the mobile overlay must be closable)", async () => {
-    getAgentInspectStatistics.mockResolvedValue(fixture());
-    render(<InspectorPanel agentId={1} />);
-
-    await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
-    const btn = screen.getByRole("button", { name: "Close inspector" });
-    fireEvent.click(btn);
-    expect(useStore.getState().mobileInspectorOpen).toBe(false);
-  });
-
-  it("header shows no agent id — the timeline header already shows it (task #709)", async () => {
-    getAgentInspectStatistics.mockResolvedValue(fixture());
-    render(<InspectorPanel agentId={1} />);
-
-    await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
-    const header = screen.getByText("Inspector", { selector: "span" });
-    expect(header.textContent).toBe("Inspector");
+    expect(aside.className).not.toContain("fixed");
+    expect(aside.parentElement?.className ?? "").not.toContain("fixed");
+    expect(aside.querySelector("header")).toBeNull();
+    expect(document.querySelector('div[aria-hidden="true"]')).toBeNull();
   });
 
   it("renders nothing while closed (overlay removed)", () => {
@@ -324,9 +277,9 @@ describe("InspectorPanel section layout", () => {
     setInspectorPages([]);
   });
 
-  it("embedded: renders without the header bar or the category selector", async () => {
-    render(<InspectorPanel agentId={1} embedded />);
-    await waitFor(() => expect(screen.getByText("Activity")).toBeTruthy());
+  it("renders without its own header bar or category selector", async () => {
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.queryByLabelText("Activity loading")).toBeNull());
 
     expect(screen.queryByText("Inspector", { selector: "span" })).toBeNull();
     expect(screen.queryByLabelText("Inspector category")).toBeNull();
