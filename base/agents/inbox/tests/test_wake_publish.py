@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Iterable
-from typing import cast
+from typing import Protocol
 
 import psycopg
 import pytest
+import redis
 
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.inbox.insert import insert_inbound_message
@@ -20,6 +21,16 @@ from base.db import Database, create_agent
 from base.events.live.bus import EventBus, event_bus_config_from_settings
 from base.events.live.redis_listener import RedisInboundListener
 from base.events.live.tests.fakes import sync_redis_factory
+
+
+# meiva:note
+# The one Redis call this test makes, typed here because redis-py leaves it partly Unknown.
+class _KeyScanner(Protocol):
+    def scan_iter(self, match: str) -> Iterable[object]: ...
+
+
+def _scanner(client: redis.Redis) -> _KeyScanner:
+    return client
 
 
 async def test_publish_leaves_no_redis_key(database: Database, event_bus: EventBus) -> None:
@@ -34,11 +45,7 @@ async def test_publish_leaves_no_redis_key(database: Database, event_bus: EventB
     )
     try:
         prefix = redis_channel_prefix(settings.data_plane.events_channel)
-        scanned = cast(
-            "Iterable[object]",
-            r.scan_iter(match=f"{prefix}:*{agent_id}*"),  # pyright: ignore[reportUnknownMemberType]
-        )
-        leftover = [str(key) for key in scanned]
+        leftover = [str(key) for key in _scanner(r).scan_iter(match=f"{prefix}:*{agent_id}*")]
         assert leftover == [], f"publish left Redis keys behind: {leftover}"
     finally:
         r.close()
