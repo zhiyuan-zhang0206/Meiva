@@ -18,6 +18,8 @@ import tempfile
 import time
 import zipfile
 from collections.abc import Callable
+from contextlib import AbstractContextManager
+from http.client import HTTPResponse
 from pathlib import Path
 from typing import TypeGuard, assert_never
 
@@ -34,6 +36,8 @@ from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS, binary_path
 from base.telemetry.loki_index_labels import validate_loki_deploy_config
 from base.telemetry.station_endpoint import validated_observability_base
+from cli.boundary.process import stderr_text
+from cli.boundary.untyped import object_of
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.observability._lgtm_assets import NATIVE_CONSTANTS, load_versions
 from cli.commands.observability._lgtm_provisioning import render_dashboard, render_provisioning
@@ -105,6 +109,15 @@ def _remaining(deadline: float) -> float:
     return deadline - time.monotonic()
 
 
+# meiva:note
+# `opener(url, timeout)` as a context manager of the answer the download reads. The port types its
+# answer `Any`; a parameter typed with the real `HTTPResponse` takes it without naming the `Any`.
+def _opened(
+    opener: Callable[[str, float], AbstractContextManager[HTTPResponse]], url: str, timeout: float
+) -> AbstractContextManager[HTTPResponse]:
+    return opener(url, timeout)
+
+
 # meiva:link cli/commands/observability/docs/lgtm/lgtm.meiva.okf.md
 def stream_download(
     url: str, destination: Path, *, limits: DownloadLimits, deadline: float
@@ -124,7 +137,7 @@ def stream_download(
         return limits.total_budget_s - _remaining(deadline)
 
     with (
-        SYSTEM_URL_OPENER(url, min(limits.socket_timeout_s, require_budget())) as response,
+        _opened(SYSTEM_URL_OPENER, url, min(limits.socket_timeout_s, require_budget())) as response,
         destination.open("wb") as output,
     ):
         total = content_length(response.headers.get("Content-Length"))
@@ -469,7 +482,7 @@ def render_configs(
         name: render_config(name, (source_dir / name).read_text(encoding="utf-8"), values)
         for name in CONFIG_TEMPLATES
     }
-    loki_config = yaml.safe_load(rendered["loki.yaml"])
+    loki_config = object_of(yaml.safe_load, rendered["loki.yaml"])
     if not _is_object_dict(loki_config):
         raise TypeError("native Loki config must render to a mapping")
     validate_loki_deploy_config(loki_config)
@@ -602,7 +615,7 @@ def verify_loki(home: Path, *, host: Host) -> None:
     argv = loki_verify_argv(str(binary_path(home, "loki")), str(home.resolve()))
     result = host.run(list(argv), capture_output=True, text=True, timeout=30)
     if result.returncode:
-        raise RuntimeError(loki_verify_error(result.stderr))
+        raise RuntimeError(loki_verify_error(stderr_text(result)))
 
 
 # meiva:note

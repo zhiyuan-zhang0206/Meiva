@@ -124,11 +124,16 @@ def look_at(process: psutil.Process, name: str, *, uid: int) -> SeenProcess:
     )
 
 
+def _scanned_name(info: Mapping[str, object]) -> str | None:
+    name = info["name"]
+    return name if isinstance(name, str) else None
+
+
 def _seen_processes(uid: int) -> tuple[SeenProcess, ...]:
     seen: list[SeenProcess] = []
     for process in psutil.process_iter(["pid", "name"]):
-        name = process.info["name"]
-        if name not in SCANNED_NAMES:
+        name = _scanned_name(process.info)
+        if name is None or name not in SCANNED_NAMES:
             continue
         try:
             seen.append(look_at(process, name, uid=uid))

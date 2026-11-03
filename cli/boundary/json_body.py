@@ -1,38 +1,26 @@
 # meiva:note
-# Typed JSON from an HTTP answer or a text a command received.
+# Typed JSON from an HTTP answer.
 #
-# `httpx.Response.json()` and `json.loads` return `Any`. These read the same bytes through
-# pydantic's `JsonValue`, so a reader holds a value of the JSON types and narrows it with
-# `isinstance` (a `dict` is `dict[str, JsonValue]`) before using it. A body that is not JSON, or
-# not the container a caller asks for, is a `ValueError`: `json.JSONDecodeError` for text that is not JSON (what
-# `json.loads` raised, so callers catching it keep working), `JsonShapeError` for the wrong container.
+# `httpx.Response.json()` returns `Any`. These read the body through `cli.boundary.json_text.loads`
+# (pydantic's `JsonValue`), so a reader narrows the value with `isinstance` before using it. A body
+# that is not JSON raises `json.JSONDecodeError`; one that is JSON of another container than the
+# caller asks for raises `JsonShapeError`, a `ValueError`. `loads` is re-exported for callers that
+# read both an answer and a text.
 
 from __future__ import annotations
 
-import json
-
 import httpx
-from pydantic import JsonValue, TypeAdapter, ValidationError
+from pydantic import JsonValue
+
+from cli.boundary.json_text import loads
 
 __all__ = ["JsonShapeError", "loads", "response_list", "response_object", "response_value"]
-
-_JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 
 # meiva:note
 # A JSON body that parsed but is not the container the caller asked for.
 class JsonShapeError(ValueError):
     pass
-
-
-# meiva:note
-# The JSON value in `text`.
-def loads(text: str | bytes) -> JsonValue:
-    try:
-        return _JSON_VALUE.validate_json(text)
-    except ValidationError as exc:
-        document = text if isinstance(text, str) else text.decode("utf-8", errors="replace")
-        raise json.JSONDecodeError(exc.errors()[0]["msg"], document, 0) from exc
 
 
 # meiva:note

@@ -30,6 +30,7 @@ from base.host.net.url_secret import url_host
 from base.host.private_storage import write_private_bytes
 from base.host.system.hostport import Host
 from base.native_process.child_env import filter_daemon_env, inherit_env
+from cli.boundary.process import stderr_text, stdout_text
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.instance import redis_plan
 from cli.commands.data_plane.instance.bounded_wait import Wait, wait_verdict
@@ -114,7 +115,7 @@ def redis_running(
         )
     except subprocess.TimeoutExpired:
         return False
-    return "PONG" in (out.stdout or "")
+    return "PONG" in stdout_text(out)
 
 
 # meiva:note
@@ -308,7 +309,7 @@ def _launch_redis(
     )
     if result.returncode != 0:
         print(
-            f"  ✗ redis-server failed (rc={result.returncode}): {result.stderr.strip()}",
+            f"  ✗ redis-server failed (rc={result.returncode}): {stderr_text(result).strip()}",
             file=sys.stderr,
         )
         return False

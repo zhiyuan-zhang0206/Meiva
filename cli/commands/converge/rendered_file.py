@@ -5,10 +5,13 @@ import json
 from pathlib import Path
 from typing import Literal
 
+from pydantic import TypeAdapter
+
 from base.host.atomic_io import write_text_atomic
 from base.telemetry.converge_report import report_converge_overwrite, report_converge_preserve
 
 LocalEditPolicy = Literal["preserve", "overwrite"]
+_HASHES: TypeAdapter[dict[str, str]] = TypeAdapter(dict[str, str])
 
 
 # meiva:note
@@ -35,7 +38,7 @@ def write_rendered_guarded(
 ) -> str | None:
     recorded: dict[str, str] = {}
     if hashes_path.exists():
-        recorded = json.loads(hashes_path.read_text(encoding="utf-8"))
+        recorded = _HASHES.validate_json(hashes_path.read_text(encoding="utf-8"))
     drift: str | None = None
     if path.exists() and key in recorded:
         current = hashlib.sha256(path.read_bytes()).hexdigest()

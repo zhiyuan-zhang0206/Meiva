@@ -47,6 +47,7 @@ from base.host.system.hostport import Host
 from base.log import logger
 from base.native_process.ownership import OwnedProcess
 from base.telemetry import EventPipeline
+from cli.boundary.process import stderr_text
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import pgbouncer
 from cli.commands.data_plane.config import DataPlaneConfig
@@ -615,7 +616,7 @@ def stop_redis(
             text=True,
             timeout=_REDIS_SHUTDOWN_TIMEOUT_S,
         )
-        returncode, detail = shutdown.returncode, (shutdown.stderr or "").strip()[:400]
+        returncode, detail = shutdown.returncode, stderr_text(shutdown).strip()[:400]
     except subprocess.TimeoutExpired:
         returncode, detail = -1, "redis-cli shutdown timed out"
     failure = stop_plan.redis_stop_failure(

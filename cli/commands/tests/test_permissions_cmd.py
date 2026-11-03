@@ -159,6 +159,27 @@ def test_the_cli_onboard_is_the_manual_pass(
     assert "Every required authorization is granted." in capsys.readouterr().out
 
 
+# meiva:note
+# `meiva permissions onboard` without `--timeout` parses to `None`: the pass then uses the onboarding
+# default rather than handing `None` to the request as its time limit.
+def test_the_cli_onboard_without_a_timeout_uses_the_onboarding_default(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    seat, helper = _host(tmp_path, **{"screen-recording": Grant.DENIED})
+    assert (
+        cmd.dispatch(
+            _args(permissions_cmd="onboard", timeout=None),
+            host=seat,
+            clock=clock_at(NOW),
+            run_id=RUN,
+        )
+        == 0
+    )
+    assert helper.requests == 1
+    assert "Every required authorization is granted." in capsys.readouterr().out
+
+
 def test_defer_says_plainly_that_nothing_was_granted(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

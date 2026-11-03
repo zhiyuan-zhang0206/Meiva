@@ -56,6 +56,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.host.net.url_secret import url_host
 from base.host.system.hostport import Host
 from base.native_process.ownership import OwnedProcess
+from cli.boundary.process import stderr_text
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.instance import pg_plan
 from cli.commands.data_plane.instance.bounded_wait import Wait, wait_verdict
@@ -179,7 +180,7 @@ def initdb(target: Path, *, os_user: str, home: Path, host: Host) -> None:
         timeout=_INITDB_TIMEOUT_S,
     )
     if result.returncode != 0:
-        raise RuntimeError(f"initdb failed (rc={result.returncode}): {result.stderr.strip()}")
+        raise RuntimeError(f"initdb failed (rc={result.returncode}): {stderr_text(result).strip()}")
 
 
 # meiva:note

@@ -11,6 +11,8 @@ import json
 from dataclasses import dataclass
 from typing import TypeGuard
 
+from cli.boundary.json_text import loads
+
 __all__ = ["NativeBirth", "intent_names", "native_birth", "render_intent"]
 
 _REFUSAL = "invalid PgBouncer stop intent; custody retained"
@@ -56,7 +58,7 @@ def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
 # raises, because custody is retained instead of guessed.
 def intent_names(text: str, birth: NativeBirth) -> bool:
     try:
-        raw: object = json.loads(text)
+        raw = loads(text)
     except ValueError:
         raise RuntimeError(_REFUSAL) from None
     value = raw if _is_object_dict(raw) else None

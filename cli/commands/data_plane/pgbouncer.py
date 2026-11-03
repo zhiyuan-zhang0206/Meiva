@@ -58,6 +58,7 @@ from base.host.proc import process_alive
 from base.host.system.hostport import Host
 from base.native_process.os_platform import LockTimeoutError
 from base.native_process.ownership import OwnedProcess
+from cli.boundary.process import stderr_text
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.data_plane._pooler_stop import OwnedPooler
 from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_boot
@@ -328,7 +329,7 @@ def _launch(run: _Run) -> int:
         env=dict(spec.daemon_env),
     )
     if result.returncode != 0:
-        print(text.launch_failed(result.returncode, result.stderr), file=sys.stderr)
+        print(text.launch_failed(result.returncode, stderr_text(result)), file=sys.stderr)
         return 1
     # meiva:note
     # `-d` daemonizes and returns at once; wait for the admin console to authenticate. The

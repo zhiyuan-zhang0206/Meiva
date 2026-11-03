@@ -13,6 +13,7 @@ from collections.abc import Collection
 from typing import assert_never
 from urllib.parse import quote
 
+from cli.boundary.json_body import response_object
 from cli.commands.lifecycle.start.login_link_plan import (
     LinkFacts,
     MintLink,
@@ -44,7 +45,7 @@ def _issue_ticket(config: StartConfig) -> str:
         timeout=_TIMEOUT_S,
     )
     response.raise_for_status()
-    ticket = response.json().get("ticket")
+    ticket = response_object(response).get("ticket")
     if not isinstance(ticket, str) or not ticket:
         raise ValueError("the gateway answered without a login ticket")
     return ticket

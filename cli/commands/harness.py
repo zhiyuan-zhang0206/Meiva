@@ -4,7 +4,7 @@ import sys
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import Any, TextIO
+from typing import TextIO
 
 # meiva:note
 # A harness child reaches the cluster through an attachment, and the bridge wants one
@@ -13,7 +13,7 @@ from typing import Any, TextIO
 # inside the attachment, so the child's own `meiva.*` calls carry the borrowed
 # identity. The opener is injected so the command is testable without a cluster.
 # meiva:link meiva/self/harness/docs/harness-attach.meiva.okf.md
-AttachmentOpener = Callable[..., AbstractContextManager[Any]]
+AttachmentOpener = Callable[..., AbstractContextManager[object]]
 
 
 def cmd_harness_exec(

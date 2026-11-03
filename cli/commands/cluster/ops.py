@@ -17,7 +17,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from types import MappingProxyType
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
 from base.agents.context.clients import DatabaseFactory
 
@@ -33,7 +33,7 @@ _NO_VALUE = "-"
 _UNATTRIBUTED_MACHINE = "?"
 
 
-def _is_obj(value: object) -> TypeGuard[dict[str, Any]]:
+def _is_obj(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict)
 
 
@@ -41,7 +41,7 @@ def _is_obj(value: object) -> TypeGuard[dict[str, Any]]:
 class OperationRow:
     ts: datetime
     event_name: str
-    attributes: Mapping[str, Any]
+    attributes: Mapping[str, object]
 
     @property
     def operation_id(self) -> str | None:

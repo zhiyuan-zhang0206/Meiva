@@ -16,8 +16,9 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping
 from pathlib import Path
-from typing import assert_never
+from typing import TypeGuard, assert_never
 
 from base.agents.context.clients import DatabaseFactory
 from base.clock import Deadline, Timers
@@ -80,13 +81,31 @@ def require_no_shell_sessions(home: Path) -> None:
 #
 # With the service listening its listing is the truth. Without it, what its ledger
 # names and still runs is a crash's leftover: a process that outlived the hangup.
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _session_names(reply: Mapping[str, object]) -> list[str]:
+    sessions = reply["sessions"]
+    if not _is_object_list(sessions):
+        raise TypeError(f"sessions is {type(sessions).__name__}, not a list")
+    names: list[str] = []
+    for row in sessions:
+        name = row.get("name") if _is_object_dict(row) else None
+        if not isinstance(name, str):
+            raise TypeError("a listed shell session has no name")
+        names.append(name)
+    return names
+
+
 def live_shell_sessions(home: Path) -> list[str]:
     run = run_dir(home)
     try:
-        return [
-            row["name"]
-            for row in client.request("list", socket_path=service_socket_path(run))["sessions"]
-        ]
+        return _session_names(client.request("list", socket_path=service_socket_path(run)))
     except client.ServiceDownError:
         return ledger.leftovers(ledger_path(run))
 

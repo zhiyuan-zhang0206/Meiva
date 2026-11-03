@@ -9,12 +9,13 @@ callers import those definitions directly.
 from __future__ import annotations
 
 import hashlib
-import json
 import subprocess
 import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import NamedTuple
+
+from pydantic import JsonValue
 
 from base.clock import Timers
 from base.cluster.machine import GatewayAccess, MachineIdentityReader, MachineRoles
@@ -22,6 +23,7 @@ from base.cluster.machine.boot import gateway_access_from_boot
 from base.db import Database
 from base.deploy.progress_timeout import GATEWAY_PREFLIGHT_BUDGET_S
 from base.sessions.env_forwarding import frontend_toolchain_env
+from cli.boundary.json_text import loads
 from cli.commands._setup import SetupValues
 from cli.database.runtime import CommandRuntime
 
@@ -115,6 +117,19 @@ def _locked_root_importer_versions(lock_text: str) -> dict[str, str] | None:
 
 
 # meiva:note
+# The `dependencies` and `devDependencies` of a parsed package.json, name to spec (the spec is
+# whatever JSON the file holds; only a string spec can name a workspace or file link).
+def _direct_dependencies(package: JsonValue) -> dict[str, JsonValue]:
+    direct: dict[str, JsonValue] = {}
+    if isinstance(package, dict):
+        for section in ("dependencies", "devDependencies"):
+            declared = package.get(section)
+            if isinstance(declared, dict):
+                direct.update(declared)
+    return direct
+
+
+# meiva:note
 # Detect a node_modules that no longer matches the pnpm lockfile.
 #
 # Called only when the install stamp matches, i.e. `pnpm-lock.yaml` has not changed since the
@@ -132,8 +147,7 @@ def _node_modules_drift(fe: Path, node_modules: Path) -> str | None:
             return f"foreign package-manager marker {marker!r}"
     if not (node_modules / ".modules.yaml").is_file():
         return "missing pnpm .modules.yaml metadata"
-    pkg_body = json.loads((fe / "package.json").read_text())
-    direct = {**pkg_body.get("dependencies", {}), **pkg_body.get("devDependencies", {})}
+    direct = _direct_dependencies(loads((fe / "package.json").read_text()))
     locked_versions = _locked_root_importer_versions((fe / "pnpm-lock.yaml").read_text())
     if locked_versions is None:
         return "unparseable pnpm-lock.yaml"
@@ -148,7 +162,8 @@ def _node_modules_drift(fe: Path, node_modules: Path) -> str | None:
         installed_pkg = node_modules / name / "package.json"
         if not installed_pkg.is_file():
             return f"{name}: not installed"
-        installed_version = json.loads(installed_pkg.read_text()).get("version")
+        installed = loads(installed_pkg.read_text())
+        installed_version = installed.get("version") if isinstance(installed, dict) else None
         if installed_version != locked_version:
             return f"{name}: installed {installed_version}, lockfile {locked_version}"
     return None
