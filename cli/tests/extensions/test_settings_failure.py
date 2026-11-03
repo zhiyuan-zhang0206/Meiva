@@ -9,6 +9,7 @@ hint that joins an agent-runner.
 
 from __future__ import annotations
 
+import pytest
 from pydantic import BaseModel, ValidationError
 
 from cli.main import print_settings_load_failure
@@ -25,11 +26,11 @@ def _validation_error(*fields: str) -> ValidationError:
     raise AssertionError("expected ValidationError for missing required fields")
 
 
-def test_friendly_template_lists_missing_vars(capsys):
+def test_friendly_template_lists_missing_vars(capsys: pytest.CaptureFixture[str]):
     rc = print_settings_load_failure(_validation_error("db_url", "redis_url"))
 
     assert rc == 1
-    err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    err = capsys.readouterr().err
     # Python attr names get uppercased + MEIVA_ prefixed to match the field aliases.
     assert "MEIVA_DB_URL=<value>" in err
     assert "MEIVA_REDIS_URL=<value>" in err
@@ -38,10 +39,10 @@ def test_friendly_template_lists_missing_vars(capsys):
     assert "Traceback" not in err
 
 
-def test_already_prefixed_alias_not_double_prefixed(capsys):
+def test_already_prefixed_alias_not_double_prefixed(capsys: pytest.CaptureFixture[str]):
     # A loc already shaped like an alias must not become MEIVA_MEIVA_X.
     print_settings_load_failure(_validation_error("MEIVA_DB_URL"))
 
-    err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    err = capsys.readouterr().err
     assert "MEIVA_DB_URL=<value>" in err
     assert "MEIVA_MEIVA_" not in err

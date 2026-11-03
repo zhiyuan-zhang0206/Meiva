@@ -3,26 +3,31 @@
 
 import json
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from cli.commands.extensions.mcp import cmd_mcp_add, cmd_mcp_list, cmd_mcp_remove
 
 
-def _config(home: Path) -> dict:
+def _config(home: Path) -> dict[str, object]:
     return json.loads((home / "mcp.json").read_text())
+
+
+def _servers(home: Path) -> dict[str, dict[str, object]]:
+    return cast("dict[str, dict[str, object]]", _config(home)["mcpServers"])
 
 
 def test_add_from_json_spec(unit_home: Path) -> None:
     spec = '{"command": "npx", "args": ["-y", "server-foo"], "env": {"K": "v"}}'
     assert cmd_mcp_add("foo", spec, None, [], [], home=unit_home) == 0
-    servers = _config(unit_home)["mcpServers"]
+    servers = _servers(unit_home)
     assert servers["foo"] == {"command": "npx", "args": ["-y", "server-foo"], "env": {"K": "v"}}
 
 
 def test_add_from_command_flags(unit_home: Path) -> None:
     assert cmd_mcp_add("bar", None, "uvx", ["server-bar"], ["TOKEN=abc"], home=unit_home) == 0
-    assert _config(unit_home)["mcpServers"]["bar"] == {
+    assert _servers(unit_home)["bar"] == {
         "command": "uvx",
         "args": ["server-bar"],
         "env": {"TOKEN": "abc"},
@@ -32,60 +37,60 @@ def test_add_from_command_flags(unit_home: Path) -> None:
 def test_add_merges_without_clobbering(unit_home: Path) -> None:
     cmd_mcp_add("a", None, "cmd-a", [], [], home=unit_home)
     cmd_mcp_add("b", None, "cmd-b", [], [], home=unit_home)
-    servers = _config(unit_home)["mcpServers"]
-    assert set(servers) == {"a", "b"}  # pyright: ignore[reportUnknownArgumentType]
+    servers = _servers(unit_home)
+    assert set(servers) == {"a", "b"}
 
 
-def test_add_replace_reports(unit_home: Path, capsys: pytest.CaptureFixture) -> None:
+def test_add_replace_reports(unit_home: Path, capsys: pytest.CaptureFixture[str]) -> None:
     cmd_mcp_add("a", None, "cmd-a", [], [], home=unit_home)
     assert cmd_mcp_add("a", None, "cmd-a2", [], [], home=unit_home) == 0
-    assert "replaced" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
-    assert _config(unit_home)["mcpServers"]["a"]["command"] == "cmd-a2"
+    assert "replaced" in capsys.readouterr().out
+    assert _servers(unit_home)["a"]["command"] == "cmd-a2"
 
 
-def test_add_rejects_both_forms(unit_home: Path, capsys: pytest.CaptureFixture) -> None:
+def test_add_rejects_both_forms(unit_home: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert cmd_mcp_add("x", '{"command": "c"}', "c", [], [], home=unit_home) == 1
-    assert "not both" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "not both" in capsys.readouterr().err
     assert not (unit_home / "mcp.json").exists()
 
 
-def test_add_rejects_neither_form(unit_home: Path, capsys: pytest.CaptureFixture) -> None:
+def test_add_rejects_neither_form(unit_home: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert cmd_mcp_add("x", None, None, [], [], home=unit_home) == 1
-    assert "need --json" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "need --json" in capsys.readouterr().err
 
 
-def test_add_rejects_bad_json(unit_home: Path, capsys: pytest.CaptureFixture) -> None:
+def test_add_rejects_bad_json(unit_home: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert cmd_mcp_add("x", "{not json}", None, [], [], home=unit_home) == 1
     assert not (unit_home / "mcp.json").exists()
 
 
-def test_add_rejects_non_object_json(unit_home: Path, capsys: pytest.CaptureFixture) -> None:
+def test_add_rejects_non_object_json(unit_home: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert cmd_mcp_add("x", "[1, 2]", None, [], [], home=unit_home) == 1
-    assert "server object" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "server object" in capsys.readouterr().err
 
 
-def test_add_rejects_bad_env_pair(unit_home: Path, capsys: pytest.CaptureFixture) -> None:
+def test_add_rejects_bad_env_pair(unit_home: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert cmd_mcp_add("x", None, "cmd", [], ["NOEQUALS"], home=unit_home) == 1
-    assert "KEY=VALUE" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "KEY=VALUE" in capsys.readouterr().err
 
 
 # ── parse-layer discipline: a malformed invocation never reaches command code ─
 
 
 def test_list_without_machine_config_flags_builtins_readonly(
-    unit_home: Path, capsys: pytest.CaptureFixture
+    unit_home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     # no machine config yet → only built-in / plugin-bundled servers, all read-only here
     assert cmd_mcp_list(home=unit_home, user_home=unit_home) == 0
-    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    out = capsys.readouterr().out
     assert "machine" not in out
     assert "read-only here" in out
 
 
-def test_list_shows_machine_entry(unit_home: Path, capsys: pytest.CaptureFixture) -> None:
+def test_list_shows_machine_entry(unit_home: Path, capsys: pytest.CaptureFixture[str]) -> None:
     cmd_mcp_add("foo", None, "npx", ["-y", "server-foo"], [], home=unit_home)
     assert cmd_mcp_list(home=unit_home, user_home=unit_home) == 0
-    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    out = capsys.readouterr().out
     assert "foo" in out and "machine" in out
     assert "npx -y server-foo" in out
 
@@ -107,9 +112,9 @@ def test_list_reports_invalid_overlay_without_successful_disabled_listing(
 def test_remove_machine_entry(unit_home: Path) -> None:
     cmd_mcp_add("foo", None, "npx", [], [], home=unit_home)
     assert cmd_mcp_remove("foo", home=unit_home) == 0
-    assert _config(unit_home).get("mcpServers", {}) == {}  # pyright: ignore[reportUnknownMemberType]
+    assert _config(unit_home).get("mcpServers", {}) == {}
 
 
-def test_remove_unknown_errors(unit_home: Path, capsys: pytest.CaptureFixture) -> None:
+def test_remove_unknown_errors(unit_home: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert cmd_mcp_remove("nope", home=unit_home) == 1
-    assert "not a machine-config server" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "not a machine-config server" in capsys.readouterr().err

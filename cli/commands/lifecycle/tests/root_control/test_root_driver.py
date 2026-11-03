@@ -14,6 +14,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import cast
 
 import psutil
 import pytest
@@ -423,15 +424,11 @@ def test_plugin_birth_config_is_part_of_the_existing_unit_generation(tmp_path: P
         manifest = driver.tree_manifest(
             (spec,), tmp_path, roles=ROLES, delivery=launch_delivery(tmp_path), home=meiva_home()
         )
-        from typing import Any
-
         units_obj = manifest["units"]
         assert isinstance(units_obj, list)
-        units_any: Any = units_obj
-        row_obj: object = units_any[0]
+        row_obj = cast("list[object]", units_obj)[0]
         assert isinstance(row_obj, dict)
-        row_any: Any = row_obj
-        row: dict[str, object] = row_any
+        row = cast("dict[str, object]", row_obj)
         return UnitManifest.from_mapping(row, origin="test")
 
     base = replace(service(), plugin_config=("probe", Config(interval=40)))

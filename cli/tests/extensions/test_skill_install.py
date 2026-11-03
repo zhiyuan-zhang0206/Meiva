@@ -319,7 +319,7 @@ def test_collision_leaves_the_load_dir_untouched(
     db_url: str,
     unit_home: Path,
     tmp_path: Path,
-    capsys: pytest.CaptureFixture,
+    capsys: pytest.CaptureFixture[str],
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -355,7 +355,7 @@ def test_collision_leaves_the_load_dir_untouched(
         )
         == 1
     )
-    assert "already installed: alpha" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "already installed: alpha" in capsys.readouterr().err
     assert not (unit_home / "skills" / "beta").exists()
     assert reg.get("beta", home=unit_home) is None
 
@@ -363,7 +363,7 @@ def test_collision_leaves_the_load_dir_untouched(
 def test_no_skill_in_source_fails_fast(
     unit_home: Path,
     tmp_path: Path,
-    capsys: pytest.CaptureFixture,
+    capsys: pytest.CaptureFixture[str],
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -384,14 +384,14 @@ def test_no_skill_in_source_fails_fast(
         )
         == 1
     )
-    assert "no skill found" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "no skill found" in capsys.readouterr().err
     assert reg.load(home=unit_home).packages == []
 
 
 def test_malformed_skill_md_fails_fast(
     unit_home: Path,
     tmp_path: Path,
-    capsys: pytest.CaptureFixture,
+    capsys: pytest.CaptureFixture[str],
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -414,14 +414,14 @@ def test_malformed_skill_md_fails_fast(
         )
         == 1
     )
-    assert "description" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "description" in capsys.readouterr().err
     assert reg.load(home=unit_home).packages == []
 
 
 def test_missing_path_in_source_errors(
     unit_home: Path,
     tmp_path: Path,
-    capsys: pytest.CaptureFixture,
+    capsys: pytest.CaptureFixture[str],
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -439,7 +439,7 @@ def test_missing_path_in_source_errors(
         )
         == 1
     )
-    assert "not found in source" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "not found in source" in capsys.readouterr().err
 
 
 def test_install_skips_junk_names(
@@ -515,7 +515,7 @@ def test_install_records_explicit_update_policy(
 def test_install_rejects_a_bad_check_every(
     unit_home: Path,
     tmp_path: Path,
-    capsys: pytest.CaptureFixture,
+    capsys: pytest.CaptureFixture[str],
     *,
     command_runtime: CommandRuntime,
 ) -> None:
@@ -534,7 +534,7 @@ def test_install_rejects_a_bad_check_every(
         )
         == 1
     )
-    assert "duration" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "duration" in capsys.readouterr().err
     assert reg.get("bad-duration", home=unit_home) is None
 
 

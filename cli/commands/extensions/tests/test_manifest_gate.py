@@ -10,6 +10,7 @@ legacy paths (covered by the existing install tests).
 import json
 import os
 import subprocess
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -49,7 +50,7 @@ GOOD_MANIFEST = {
 }
 
 
-def _write_manifest(pkg: Path, manifest: dict) -> None:
+def _write_manifest(pkg: Path, manifest: Mapping[str, object]) -> None:
     (pkg / "meiva-plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
@@ -81,7 +82,7 @@ def uv(tmp_path: Path) -> UvBuild:
 
 
 def test_mcp_install_refuses_manifest_beyond_host_engines(
-    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture
+    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture[str]
 ) -> None:
     pkg = _make_mcp_package(tmp_path)
     # ">=2099" (not ">=99"): the host version is now the derived date axis
@@ -89,13 +90,13 @@ def test_mcp_install_refuses_manifest_beyond_host_engines(
     bad = dict(GOOD_MANIFEST, engines={"meiva": ">=2099"})
     _write_manifest(pkg, bad)
     assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
-    assert "requires Meiva >=2099" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "requires Meiva >=2099" in capsys.readouterr().err
     assert reg.get("acme", home=unit_home) is None
     assert not (unit_home / "mcps" / "acme").exists()
 
 
 def test_mcp_install_refuses_unbounded_pyproject(
-    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture
+    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The #1198 shape: pyproject without an upper bound, manifest with one."""
     pkg = _make_mcp_package(tmp_path)
@@ -106,12 +107,12 @@ def test_mcp_install_refuses_unbounded_pyproject(
         encoding="utf-8",
     )
     assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
-    assert "#1198" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "#1198" in capsys.readouterr().err
     assert reg.get("acme", home=unit_home) is None
 
 
 def test_mcp_install_refuses_pyproject_out_of_declared_range(
-    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture
+    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture[str]
 ) -> None:
     pkg = _make_mcp_package(tmp_path)
     _write_manifest(pkg, GOOD_MANIFEST)
@@ -121,17 +122,17 @@ def test_mcp_install_refuses_pyproject_out_of_declared_range(
         encoding="utf-8",
     )
     assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
-    assert "reaches above" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "reaches above" in capsys.readouterr().err
     assert reg.get("acme", home=unit_home) is None
 
 
 def test_mcp_install_refuses_invalid_manifest(
-    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture
+    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture[str]
 ) -> None:
     pkg = _make_mcp_package(tmp_path)
     (pkg / "meiva-plugin.json").write_text("not json", encoding="utf-8")
     assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
-    assert "not valid JSON" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "not valid JSON" in capsys.readouterr().err
     assert reg.get("acme", home=unit_home) is None
 
 
@@ -145,20 +146,20 @@ def test_mcp_install_accepts_valid_manifest(unit_home: Path, tmp_path: Path, uv:
 
 
 def test_mcp_install_manifest_without_pyproject_fails_when_declaring_packages(
-    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture
+    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture[str]
 ) -> None:
     pkg = _make_mcp_package(tmp_path)
     _write_manifest(pkg, GOOD_MANIFEST)
     (pkg / "pyproject.toml").unlink()
     assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
-    assert "no pyproject.toml" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "no pyproject.toml" in capsys.readouterr().err
 
 
 # ─── meiva mcp upgrade ───────────────────────────────────────────────────
 
 
 def test_mcp_upgrade_refuses_source_that_breaks_the_contract(
-    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture
+    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture[str]
 ) -> None:
     pkg = _make_mcp_package(tmp_path)
     _write_manifest(pkg, GOOD_MANIFEST)
@@ -183,7 +184,7 @@ def test_mcp_upgrade_refuses_source_that_breaks_the_contract(
         )
         == 1
     )
-    assert "requires Meiva >=2099" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "requires Meiva >=2099" in capsys.readouterr().err
     # the landed copy still carries the previous manifest — nothing was re-landed
     landed = unit_home / "mcps" / "acme" / "meiva-plugin.json"
     assert json.loads(landed.read_text(encoding="utf-8"))["engines"] == {"meiva": ">=0.1.0"}
@@ -204,7 +205,7 @@ def _git_repo(pkg: Path) -> str:
 def test_plugins_install_refuses_invalid_manifest_before_detection(
     unit_home: Path,
     tmp_path: Path,
-    capsys: pytest.CaptureFixture,
+    capsys: pytest.CaptureFixture[str],
     *,
     command_machine: MachineIdentityReader,
 ) -> None:
@@ -225,7 +226,7 @@ def test_plugins_install_refuses_invalid_manifest_before_detection(
         )
         == 1
     )
-    err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    err = capsys.readouterr().err
     assert "apiVersion" in err
     assert "unrecognized package" not in err  # the gate runs first
     assert reg.get("pkg", home=unit_home) is None
@@ -234,7 +235,7 @@ def test_plugins_install_refuses_invalid_manifest_before_detection(
 def test_plugins_install_accepts_manifest_with_valid_engines(
     unit_home: Path,
     tmp_path: Path,
-    capsys: pytest.CaptureFixture,
+    capsys: pytest.CaptureFixture[str],
     *,
     command_machine: MachineIdentityReader,
 ) -> None:
@@ -257,13 +258,13 @@ def test_plugins_install_accepts_manifest_with_valid_engines(
         )
         == 1
     )
-    assert "unrecognized package" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "unrecognized package" in capsys.readouterr().err
 
 
 def test_skill_install_refuses_invalid_manifest_before_discovery(
     unit_home: Path,
     tmp_path: Path,
-    capsys: pytest.CaptureFixture,
+    capsys: pytest.CaptureFixture[str],
     *,
     command_machine: MachineIdentityReader,
 ) -> None:
@@ -283,7 +284,7 @@ def test_skill_install_refuses_invalid_manifest_before_discovery(
         )
         == 1
     )
-    err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    err = capsys.readouterr().err
     assert "engines (or requires_commit) is required" in err
     assert reg.get("x", home=unit_home) is None
 

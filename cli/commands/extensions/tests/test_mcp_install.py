@@ -124,16 +124,16 @@ def test_install_rejects_duplicate(unit_home: Path, tmp_path: Path, uv: UvBuild)
 
 
 def test_install_rejects_builtin_collision(
-    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture
+    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture[str]
 ) -> None:
     pkg = _make_mcp_package(tmp_path, "chrome")
     assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
-    assert "built-in" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "built-in" in capsys.readouterr().err
     assert reg.get("chrome", home=unit_home) is None
 
 
 def test_install_rejects_no_mcp_json_or_pyproject(
-    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture, uv: UvBuild
+    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], uv: UvBuild
 ) -> None:
     """A directory without .mcp.json or pyproject.toml is rejected."""
     plain = tmp_path / "plain"
@@ -142,15 +142,15 @@ def test_install_rejects_no_mcp_json_or_pyproject(
     assert (
         cmd_mcp_install(str(plain), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
     )
-    assert "no .mcp.json or pyproject.toml" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "no .mcp.json or pyproject.toml" in capsys.readouterr().err
 
 
 def test_install_rejects_multi_server_package(
-    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture, uv: UvBuild
+    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], uv: UvBuild
 ) -> None:
     pkg = _make_mcp_package(tmp_path, "acme", servers=["acme", "acme2"])
     assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
-    assert "exactly one server" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "exactly one server" in capsys.readouterr().err
 
 
 # ─── auto-detection from pyproject.toml (no .mcp.json shipped) ────────────
@@ -226,7 +226,7 @@ def test_install_auto_detect_falls_back_to_single_package(
 
 
 def test_install_auto_detect_rejects_bare_pyproject(
-    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture
+    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """A pyproject.toml without a detectable module succeeds with fallback."""
     pkg = tmp_path / "bare-src"
@@ -255,7 +255,7 @@ def test_install_auto_detect_rejects_bare_pyproject(
 _FAKE_TOKEN = "s3cret"  # noqa: S105 — fixture value, not a credential
 
 
-def _landed_env(unit_home: Path, name: str = "acme") -> dict:
+def _landed_env(unit_home: Path, name: str = "acme") -> dict[str, object]:
     data = json.loads((unit_home / "mcps" / name / ".mcp.json").read_text(encoding="utf-8"))
     return data["mcpServers"][name].get("env", {})
 
@@ -304,7 +304,7 @@ def test_install_env_overrides_package_default(
 
 
 def test_install_rejects_bad_env_pair(
-    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture, uv: UvBuild
+    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], uv: UvBuild
 ) -> None:
     pkg = _make_mcp_package(tmp_path)
     assert (
@@ -313,7 +313,7 @@ def test_install_rejects_bad_env_pair(
         )
         == 1
     )
-    assert "KEY=VALUE" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "KEY=VALUE" in capsys.readouterr().err
 
 
 def test_upgrade_preserves_injected_env(unit_home: Path, tmp_path: Path, uv: UvBuild) -> None:
@@ -377,13 +377,13 @@ def test_upgrade_refuses_when_the_landed_env_cannot_be_read(
 
 
 def test_list_flags_installed_origin(
-    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture
+    unit_home: Path, tmp_path: Path, uv: UvBuild, capsys: pytest.CaptureFixture[str]
 ) -> None:
     cmd_mcp_install(
         str(_make_mcp_package(tmp_path)), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)
     )
     assert cmd_mcp_list(home=unit_home, user_home=unit_home) == 0
-    out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    out = capsys.readouterr().out
     assert "acme" in out and "installed" in out
 
 
@@ -399,9 +399,9 @@ def test_uninstall_removes_dir_registry_and_config(
     assert "acme" not in load_mcp_config(home=unit_home)
 
 
-def test_uninstall_rejects_non_mcp(unit_home: Path, capsys: pytest.CaptureFixture) -> None:
+def test_uninstall_rejects_non_mcp(unit_home: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert cmd_mcp_uninstall("nope", home=unit_home) == 1
-    assert "not an installed MCP package" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    assert "not an installed MCP package" in capsys.readouterr().err
 
 
 def test_upgrade_refetches_from_source(unit_home: Path, tmp_path: Path, uv: UvBuild) -> None:
@@ -430,7 +430,7 @@ def test_upgrade_refetches_from_source(unit_home: Path, tmp_path: Path, uv: UvBu
 
 
 def test_upgrade_rejects_non_mcp(
-    unit_home: Path, capsys: pytest.CaptureFixture, uv: UvBuild
+    unit_home: Path, capsys: pytest.CaptureFixture[str], uv: UvBuild
 ) -> None:
     assert (
         cmd_mcp_upgrade("nope", uv=uv, home=unit_home, now=datetime.now(UTC), user_home=unit_home)
@@ -574,14 +574,16 @@ def test_upgrade_dead_source_reports_and_fails(
     )
 
 
-def test_mcp_list_flags_dead_source(unit_home: Path, tmp_path: Path, capsys, uv: UvBuild) -> None:
+def test_mcp_list_flags_dead_source(
+    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], uv: UvBuild
+) -> None:
     """`meiva mcp list` warns that a recorded local source is gone, so the
     operator sees the upgradeability problem before an upgrade fails."""
     pkg = _make_mcp_package(tmp_path, "orphan2", module="orphan2_mcp")
     assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 0
     shutil.rmtree(pkg)
     assert cmd_mcp_list(home=unit_home, user_home=unit_home) == 0
-    err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
+    err = capsys.readouterr().err
     assert "recorded source path no longer exists" in err
 
 

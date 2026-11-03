@@ -500,7 +500,7 @@ def test_only_reports_a_skip_reason_for_untracked_names(
 
 
 def test_rollback_restores_the_previous_tree(
-    refresh_config: ConfigBoot, core_repo: Path, capsys
+    refresh_config: ConfigBoot, core_repo: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     from cli.commands.extensions.packages import cmd_packages_rollback
 
@@ -520,7 +520,7 @@ def test_rollback_restores_the_previous_tree(
     copy = home / "skills" / "foo" / "SKILL.md"
     copy.write_text("---\nname: foo\ndescription: MINE\n---\n\nedited\n", encoding="utf-8")
     assert cmd_packages_rollback("foo", home=_home(), now=datetime.now(UTC)) == 0
-    assert "current copy differs" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
+    assert "current copy differs" in capsys.readouterr().out
     assert "# v2" in copy.read_text(encoding="utf-8")
 
 
@@ -587,7 +587,7 @@ def test_refresh_cmd_json_shape(
         )
         == 0
     )
-    payload = json.loads(capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
+    payload = json.loads(capsys.readouterr().out)
     assert payload["ran"] is True
     (item,) = payload["items"]
     assert item["name"] == "foo" and item["mode"] == "auto"
