@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Callable, Sequence
 from dataclasses import replace
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import psycopg
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.claim.harness_turn import (
+    HarnessTurnProjector,
     format_tool_use,
     harness_turn_node,
     interrupt_engine,
@@ -21,9 +23,12 @@ from agent.graph.claim.harness_turn import (
     render_messages,
     turn_key,
 )
+from agent.graph.claim.lost_turn import lost_turn_note, pending_inbound_ids, report_lost_turn
 from agent.graph.llm_errors import FatalLLMStreamError
+from agent.messages import NoteTag
 from agent.state import AgentState
 from base.agents.context import HostedTurnResources, MeivaContext
+from base.agents.messages.kwargs import read_meiva_kwargs
 from base.agents.tests.units import spawn_agent
 from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
@@ -664,3 +669,82 @@ async def test_terminate_interrupt_preserves_projected_tool_call_messages() -> N
     assert engine.submitted == [("[Heartbeat]: check in", "window-4")]
     assert command.update is not None
     assert command.update == {"halted": True, "harness_pending_input": None}
+
+
+# meiva:note
+# The note a lost turn leaves behind has to say three things and no fourth: that the message was not
+# answered, which rows were consumed, and that they will not come back. It is a system note, not a
+# reply, so a reader cannot mistake it for the agent having answered (#6150).
+def test_the_lost_turn_note_says_it_is_not_a_reply_and_never_returns() -> None:
+    now = datetime(2026, 11, 4, 2, 11, tzinfo=UTC)
+
+    note = lost_turn_note(
+        [7379],
+        "turn-1",
+        "HarnessTurnFaultedError: claude_code turn turn-1 failed (API 400): boom",
+        now=now,
+    )
+    kwargs = read_meiva_kwargs(note)
+    content = str(note.content)
+
+    assert kwargs.get("meiva_msg_type") == "system_note"
+    assert kwargs.get("meiva_note_tag") == NoteTag.TURN_LOST.value
+    assert "was not answered" in content
+    assert "7379" in content
+    assert "will not deliver it again" in content
+    assert "API 400" in content
+
+
+# meiva:note
+# The ids come from the claim's own record; anything else in that channel is not an inbound id.
+def test_pending_inbound_ids_reads_only_the_recorded_claim() -> None:
+    assert pending_inbound_ids({"inbound_ids": [1, 2]}) == [1, 2]
+    assert pending_inbound_ids({"inbound_ids": ["x", 3]}) == [3]
+    assert pending_inbound_ids({}) == []
+    assert pending_inbound_ids(None) == []
+
+
+# meiva:note
+# Only a turn that produced nothing is recorded as a loss: one that already streamed text showed the
+# reader something, and a second "this failed" note beside a half reply would be noise.
+async def test_the_projector_reports_whether_the_turn_produced_text() -> None:
+    projector = HarnessTurnProjector(
+        event_publisher=MagicMock(),
+        agent_id=7,
+        base_idx=0,
+        turn_progress=MagicMock(),
+        clock=MagicMock(),
+    )
+
+    assert projector.produced_text() is False
+
+    projector.on_event(AssistantText(turn_id="t1", text="hello"))
+
+    assert projector.produced_text() is True
+
+
+# meiva:note
+# The record has to exist, not merely be attempted: this asserts the note reached the append path
+# and that a turn which produced text appends nothing.
+async def test_a_lost_turn_appends_one_note_and_a_quiet_turn_appends_none() -> None:
+    now = datetime(2026, 11, 4, 2, 11, tzinfo=UTC)
+    ctx = MagicMock()
+    ctx.require_clock.return_value.now.return_value = now
+    ctx.harness.value = "claude_code"
+    appended: list[list[BaseMessage]] = []
+
+    async def append(_ctx: object, _agent_id: int, messages: Sequence[BaseMessage]) -> None:
+        appended.append(list(messages))
+
+    await report_lost_turn(
+        ctx,
+        7,
+        {"inbound_ids": [7379]},
+        "turn-1",
+        RuntimeError("boom"),
+        append=append,
+    )
+
+    assert len(appended) == 1
+    assert read_meiva_kwargs(appended[0][0]).get("meiva_note_tag") == NoteTag.TURN_LOST.value
+    assert "7379" in str(appended[0][0].content)

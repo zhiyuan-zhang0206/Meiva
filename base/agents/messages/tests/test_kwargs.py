@@ -26,6 +26,7 @@ def test_note_tag_value_set() -> None:
         "compact_reminder",
         "history_dump",
         "silent_idle_continue",
+        "turn_lost",
         "memory",
         "memory_write_check",
         "to_user_soft_limit",

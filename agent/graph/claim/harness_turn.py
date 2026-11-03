@@ -13,6 +13,8 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent import state as _state
+from agent.graph.claim.lost_turn import report_lost_turn
+from agent.graph.claim.timeline import append_turn_timeline
 from agent.graph.claim.turn_stamp import persist_last_active
 from agent.graph.hooks.framework import harness_pre_turn_hooks
 from agent.graph.interrupt import (
@@ -26,10 +28,8 @@ from agent.messages import exec_output_message
 from agent.nodes import CLAIM, HARNESS_TURN
 from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.history.harness_messages import (
-    aappend_harness_timeline_items,
     aget_next_harness_message_seq,
 )
-from base.agents.history.timeline import build_timeline_items
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.inbound import InterruptReason
 from base.agents.messages.kwargs import ExecStatus, read_meiva_kwargs
@@ -37,7 +37,6 @@ from base.agents.messages.reply_intent import resolve_agent_reply
 from base.agents.observation.turn_progress import TurnProgress
 from base.agents.sdk.telemetry import SdkCall
 from base.clock import Clock
-from base.db.transaction import async_write_transaction
 from base.events.live.coalescer import DeltaCoalescer
 from base.events.live.projection import (
     Cancelled,
@@ -250,6 +249,9 @@ class HarnessTurnProjector:
             non_human_wake=self._non_human_wake,
         )
         self._publisher.emit(ev.model_dump_json())
+
+    def produced_text(self) -> bool:
+        return self._any_text_event or bool(self._messages)
 
     def on_event(self, event: BridgeEvent) -> None:
         self._turn_progress.mark(self._agent_id)
@@ -579,16 +581,6 @@ def _resolve_turn_prompt_and_key(
     return text, key
 
 
-async def _append_turn_timeline(
-    ctx: MeivaContext, agent_id: int, messages: Sequence[BaseMessage]
-) -> None:
-    if not messages or ctx.ops_pool is None:
-        return
-    items, _ = build_timeline_items(messages, inputs=ctx.timestamp_policy())
-    async with async_write_transaction(ctx.ops_pool) as pool_conn:
-        await aappend_harness_timeline_items(pool_conn, agent_id, ctx.harness.value, items)
-
-
 async def _handle_turn_interrupted(
     ctx: MeivaContext,
     agent_id: int,
@@ -597,7 +589,7 @@ async def _handle_turn_interrupted(
     reason: InterruptReason,
 ) -> None:
     partial = projector.settle_interrupt(reason)
-    await _append_turn_timeline(ctx, agent_id, partial)
+    await append_turn_timeline(ctx, agent_id, partial)
     _announce_cancel(ctx, agent_id)
     await interrupt_engine(agent_id, bridge)
 
@@ -646,13 +638,17 @@ async def _run_harness_turn(
             update={**extra_updates, "halted": True, "harness_pending_input": None}, goto=CLAIM
         )
     except (HarnessTurnFaultedError, HarnessClosedError, HarnessSetupError) as exc:
+        if not projector.produced_text():
+            await report_lost_turn(
+                ctx, agent_id, state.harness_pending_input, key, exc, append=append_turn_timeline
+            )
         raise FatalLLMStreamError(f"{ctx.harness.value} harness turn aborted: {exc}") from exc
 
     turns = (*turn.prelude, turn)
     for completed in turns:
         log_turn_usage(ctx, agent_id, bridge.model, completed)
     committed = projector.finish(turns)
-    await _append_turn_timeline(ctx, agent_id, committed)
+    await append_turn_timeline(ctx, agent_id, committed)
     await persist_last_active(ctx, agent_id, turns[-1].text)
     return Command[HarnessGoto](
         update={**extra_updates, "halted": True, "harness_pending_input": None}, goto=CLAIM

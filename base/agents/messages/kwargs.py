@@ -53,6 +53,10 @@ class NoteTag(StrEnum):
     HEARTBEAT = "heartbeat"
     SECURITY = "security"
     CONTEXT = "context"
+    # meiva:note
+    # A harness turn died before it produced a single word, and the inbound that started it was
+    # consumed by the queue's at-most-once rule. The note is the only place that loss is visible.
+    TURN_LOST = "turn_lost"
     AGENT_ID = "agent_id"
     AGENT_MEMORY = "agent_memory"
     INHERITED_MEMORY = "inherited_memory"
