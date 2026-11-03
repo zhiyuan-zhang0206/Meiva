@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import Any
 
 import psycopg
 import pytest
@@ -23,6 +22,7 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 from agent.db import LoggingConnectionPool, claim_inbound_batch
 from base.db import create_agent
 from base.events.declarations.agent_runtime import DbPoolAcquireSlow
+from base.host.boundary.json_values import is_object_dict
 from base.log.tests.log_records import LogRecords
 
 _HOLD_S = 0.25
@@ -50,8 +50,37 @@ async def _pool(
         yield pool
 
 
-def _acquire_records(records: LogRecords) -> list[dict[str, Any]]:
-    return [r for r in records if str(r["extra"].get("event", "")).startswith("db_pool_acquire")]
+# meiva:note
+# The `extra` of every pool-borrow record. A loguru record's `extra` is `Any` on the record dict,
+# so each is narrowed here once and the assertions below read typed fields out of it.
+def _acquire_records(records: LogRecords) -> list[dict[str, object]]:
+    extras: list[dict[str, object]] = []
+    if not records:
+        return extras
+    for record in records:
+        extra = record.get("extra")
+        if not is_object_dict(extra):
+            continue
+        event = extra.get("event")
+        if isinstance(event, str) and event.startswith("db_pool_acquire"):
+            extras.append(extra)
+    return extras
+
+
+# meiva:note
+# The text `key` holds in a narrowed record extra.
+def _text(extra: dict[str, object], key: str) -> str:
+    value = extra[key]
+    assert isinstance(value, str)
+    return value
+
+
+# meiva:note
+# The number `key` holds in a narrowed record extra.
+def _number(extra: dict[str, object], key: str) -> float:
+    value = extra[key]
+    assert isinstance(value, int | float) and not isinstance(value, bool)
+    return float(value)
 
 
 # meiva:note
@@ -84,13 +113,12 @@ async def test_slow_acquire_warns_and_names_the_slot_wait(
         conn = await _release_after(pool, holder)
         await pool.putconn(conn)
 
-    [record] = _acquire_records(loguru_records)
-    extra = record["extra"]
-    assert extra["event"] == "db_pool_acquire_slow"
-    assert extra["name"] == "ops"
-    assert extra["slot_wait_ms"] >= _HOLD_S * 1000 * 0.8
-    assert extra["check_attempts"] == 1
-    assert record["level"].name == "WARNING"
+    [extra] = _acquire_records(loguru_records)
+    assert _text(extra, "event") == "db_pool_acquire_slow"
+    assert _text(extra, "name") == "ops"
+    assert _number(extra, "slot_wait_ms") >= _HOLD_S * 1000 * 0.8
+    assert _number(extra, "check_attempts") == 1
+    assert loguru_records.messages(level="WARNING")
     assert set(extra) >= set(DbPoolAcquireSlow.__annotations__)
 
 
@@ -100,8 +128,8 @@ async def test_every_slow_acquire_warns(db_url: str, loguru_records: LogRecords)
             await pool.putconn(await pool.getconn())
 
     records = _acquire_records(loguru_records)
-    assert [r["extra"]["event"] for r in records] == ["db_pool_acquire_slow"] * 2
-    assert [r["level"].name for r in records] == ["WARNING", "WARNING"]
+    assert [_text(extra, "event") for extra in records] == ["db_pool_acquire_slow"] * 2
+    assert len(loguru_records.messages(level="WARNING")) == 2
 
 
 # meiva:note
@@ -118,10 +146,10 @@ async def test_slow_acquire_separates_slot_wait_and_check(
         conn = await _release_after(pool, holder)
         await pool.putconn(conn)
 
-    extra = _acquire_records(loguru_records)[0]["extra"]
-    assert extra["slot_wait_ms"] >= _HOLD_S * 1000 * 0.8
-    assert extra["check_ms"] >= _HOLD_S * 1000 * 0.8
-    assert extra["check_attempts"] == 1
+    [extra] = _acquire_records(loguru_records)
+    assert _number(extra, "slot_wait_ms") >= _HOLD_S * 1000 * 0.8
+    assert _number(extra, "check_ms") >= _HOLD_S * 1000 * 0.8
+    assert _number(extra, "check_attempts") == 1
 
 
 async def test_pool_timeout_errors_and_propagates(db_url: str, loguru_records: LogRecords) -> None:
@@ -134,15 +162,14 @@ async def test_pool_timeout_errors_and_propagates(db_url: str, loguru_records: L
 
         await pool.putconn(holder)
 
-    [record] = _acquire_records(loguru_records)
-    extra = record["extra"]
-    assert extra["event"] == "db_pool_acquire_timeout"
-    assert extra["name"] == "ops"
-    assert extra["pool_size"] == 1
-    assert extra["pool_available"] == 0
-    assert extra["mx"] == 1
-    assert extra["slot_wait_ms"] >= _HOLD_S * 1000 * 0.8
-    assert record["level"].name == "ERROR"
+    [extra] = _acquire_records(loguru_records)
+    assert _text(extra, "event") == "db_pool_acquire_timeout"
+    assert _text(extra, "name") == "ops"
+    assert _number(extra, "pool_size") == 1
+    assert _number(extra, "pool_available") == 0
+    assert _number(extra, "mx") == 1
+    assert _number(extra, "slot_wait_ms") >= _HOLD_S * 1000 * 0.8
+    assert loguru_records.messages(level="ERROR")
 
 
 # meiva:note

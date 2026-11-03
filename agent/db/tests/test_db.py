@@ -28,6 +28,7 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config.service_read import ConfigAuthority
 from base.db import Database, agent_exists, create_agent, list_agents
 from base.db.code_version_gate import ProcessDbGate
+from base.db.rows import IdRow, query_one
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 
@@ -54,17 +55,17 @@ def _insert_inbound(
 ) -> int:
     """chat kind defaults to source='user' (consistent with production); for non-chat kinds tests usually
     don't care about source, and using 'user' also does not affect claim results (claim does not filter by source)."""
-    with conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-            "VALUES (%s, %s, %s, %s) RETURNING id",
-            (agent_id, content, kind, source),
-        )
-        row = cur.fetchone()
-        assert row is not None
-        pid = row[0]
+    row = query_one(
+        conn,
+        IdRow,
+        "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+        "VALUES (%s, %s, %s, %s) RETURNING id",
+        (agent_id, content, kind, source),
+    )
     conn.commit()
-    return pid
+    if row is None:
+        raise RuntimeError("inserting an inbound returned no id")
+    return row.id
 
 
 class TestCreateThread:
@@ -146,19 +147,16 @@ class TestFatalProviderReport:
 
 def test_inbound_messages_table_exists(db_conn: psycopg.Connection):
     """After schema rename, the inbound_messages table is available."""
-    with db_conn.cursor() as cur:
-        cur.execute("INSERT INTO agents (label) VALUES ('t1') RETURNING id")
-        row = cur.fetchone()
-        assert row is not None
-        agent_id = row[0]
-        cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-            "VALUES (%s, 'hi', 'chat', 'kernel') RETURNING id",
-            (agent_id,),
-        )
-        row = cur.fetchone()
-        assert row is not None
-        assert row[0] is not None
+    agent = query_one(db_conn, IdRow, "INSERT INTO agents (label) VALUES ('t1') RETURNING id")
+    assert agent is not None
+    inbound = query_one(
+        db_conn,
+        IdRow,
+        "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+        "VALUES (%s, 'hi', 'chat', 'kernel') RETURNING id",
+        (agent.id,),
+    )
+    assert inbound is not None
     db_conn.commit()
 
 
@@ -172,19 +170,19 @@ class TestFinalizeClaimedInbounds:
     def _insert_claimed(
         db_conn: psycopg.Connection, agent_id: int, content: str, age: str = "60 seconds"
     ) -> int:
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO inbound_messages "
-                "(agent_id, content, kind, source, status, claimed_at, created_at) "
-                "VALUES (%s, %s, 'chat', 'user', 'claimed', "
-                "now() - %s::interval, now() - %s::interval) RETURNING id",
-                (agent_id, content, age, age),
-            )
-            row = cur.fetchone()
-            assert row is not None
-            row_id: int = row[0]
+        row = query_one(
+            db_conn,
+            IdRow,
+            "INSERT INTO inbound_messages "
+            "(agent_id, content, kind, source, status, claimed_at, created_at) "
+            "VALUES (%s, %s, 'chat', 'user', 'claimed', "
+            "now() - %s::interval, now() - %s::interval) RETURNING id",
+            (agent_id, content, age, age),
+        )
         db_conn.commit()
-        return row_id
+        if row is None:
+            raise RuntimeError("inserting a claimed inbound returned no id")
+        return row.id
 
     @staticmethod
     def _statuses(db_conn: psycopg.Connection, ids: list[int]) -> dict[int, str]:
