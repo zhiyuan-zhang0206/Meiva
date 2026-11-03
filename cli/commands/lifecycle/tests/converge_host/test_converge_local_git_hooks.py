@@ -6,7 +6,6 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -17,7 +16,13 @@ import cli.commands.converge.steps as csteps
 import cli.commands.lifecycle.converge_host as cv
 from base.host.proc import run_bounded
 from base.host.system.hostport import Host
-from base.host.system.tests.fake_commands import LINUX_X86, FakeCommands, fake_host
+from base.host.system.tests.fake_commands import (
+    LINUX_X86,
+    FakeCommands,
+    Reply,
+    fake_host,
+)
+from base.native_process.os_platform import Platform
 from cli.commands.converge.plans.checkout_warnings import hook_scan_argv, hook_scan_warnings
 from cli.commands.converge.spec import ALL_ROLES, ConvergeCtx
 
@@ -151,6 +156,30 @@ def test_a_checker_that_fails_unexpectedly_is_silent(
 
 
 # meiva:note
+# The scan runs on the interpreter of the host this step was given. A converge grades the machine
+# it was pointed at, and on a host it did not build, this process's interpreter is not that
+# machine's.
+def test_the_scan_runs_on_the_interpreter_the_host_names(ctx: ConvergeCtx) -> None:
+    script = ctx.repo / "base" / "deploy" / "git" / "check_git_hooks.py"
+    script.parent.mkdir(parents=True)
+    script.write_text("")
+    elsewhere = "/opt/elsewhere/bin/python3.12"
+    commands = FakeCommands()
+    commands.on([elsewhere], Reply(stdout="hook check: OK (1 clone(s))\n"))
+
+    csteps.ensure_local_git_hooks(
+        replace(
+            ctx,
+            host=fake_host(commands, platform=Platform("linux", "x86_64", elsewhere)),
+        )
+    )
+
+    assert [argv[0] for argv in commands.argvs] == [elsewhere], (
+        "the scan must run on the interpreter of the machine the step was handed"
+    )
+
+
+# meiva:note
 # Faults a real checker cannot produce on demand: the interpreter vanishing, a hung scan.
 @pytest.mark.parametrize(
     "fault",
@@ -164,7 +193,7 @@ def test_a_scan_that_cannot_run_is_silent(
     script.parent.mkdir(parents=True)
     script.write_text("")
     commands = FakeCommands()
-    commands.on([sys.executable], fault)
+    commands.on([LINUX_X86.executable], fault)
 
     csteps.ensure_local_git_hooks(replace(ctx, host=fake_host(commands)))
 

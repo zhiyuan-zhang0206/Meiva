@@ -47,7 +47,12 @@ def configured_machine_name(machine: MachineIdentityReader) -> str | None:
     return None
 
 
-def serving_binaries(roles: frozenset[str], *, home: Path) -> tuple[Path, ...]:
+# meiva:note
+# The interpreter audited is the one the caller hands in, taken from the `Host` it already holds
+# (`host.platform.executable`, the value `Host.system()` read once for the whole process). That is
+# the same path the docstring below means by `sys.executable`; reading this module's own would
+# report one machine's exposure while the caller asked about another's.
+def serving_binaries(roles: frozenset[str], *, home: Path, interpreter: Path) -> tuple[Path, ...]:
     """The binaries this unit serves a non-loopback port from, by capability.
 
     Resolved through the same helpers that *launch* them, because auditing a path
@@ -70,7 +75,7 @@ def serving_binaries(roles: frozenset[str], *, home: Path) -> tuple[Path, ...]:
     """
     from base.cluster.dataplane.pg_tools import pg_tool
 
-    candidates = [Path(sys.executable)]
+    candidates = [interpreter]
     if "gateway" in roles:
         candidates.append(pg_tool("postgres", home=home))
         # A gateway with a cluster secret serves the collector's authenticated
@@ -91,7 +96,7 @@ def audit_this_host(
     it on demand. Same detector, so they can never disagree about whether the
     firewall is the cause.
     """
-    required = serving_binaries(roles, home=home)
+    required = serving_binaries(roles, home=home, interpreter=Path(host.platform.executable))
     if not required:
         return FirewallAudit(
             FirewallVerdict.ALLOWED, "no serving binary resolved on this host to audit"

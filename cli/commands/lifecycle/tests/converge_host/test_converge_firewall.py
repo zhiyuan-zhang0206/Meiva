@@ -126,7 +126,11 @@ class AlfDaemon:
 
 
 def _host_with(daemon: AlfDaemon) -> Host:
-    return fake_host(daemon, platform=DARWIN_ARM64, programs={_TOOL: _TOOL})
+    return fake_host(
+        daemon,
+        platform=replace(DARWIN_ARM64, executable=str(_interpreter())),
+        programs={_TOOL: _TOOL},
+    )
 
 
 # meiva:note
@@ -257,9 +261,9 @@ def test_step_is_registered_in_converge_for_both_capabilities() -> None:
 
 def test_runner_audits_only_the_interpreter(tmp_path: Path) -> None:
     """An agent-runner holds no local data plane, so its daemons need no audit."""
-    assert cfw.serving_binaries(frozenset({"agent-runner"}), home=tmp_path) == (
-        Path(sys.executable),
-    )
+    assert cfw.serving_binaries(
+        frozenset({"agent-runner"}), home=tmp_path, interpreter=_interpreter()
+    ) == (_interpreter(),)
 
 
 def test_gateway_audits_the_data_plane_too(default_home: Path) -> None:
@@ -270,10 +274,34 @@ def test_gateway_audits_the_data_plane_too(default_home: Path) -> None:
     otelcol.parent.mkdir(parents=True)
     otelcol.write_text("#!/bin/sh\n")
 
-    assert cfw.serving_binaries(frozenset({"gateway"}), home=home) == (
-        Path(sys.executable),
+    assert cfw.serving_binaries(frozenset({"gateway"}), home=home, interpreter=_interpreter()) == (
+        _interpreter(),
         postgres,
         otelcol,
+    )
+
+
+# meiva:note
+# The audit audits the interpreter of the host it is given, not this process's. Every caller of the
+# step already holds the machine (`ConvergeCtx.host`, `Host.system()`), so the path that ends up on
+# the allowlist is that machine's -- which is what makes auditing it prove anything.
+def test_the_audit_audits_the_interpreter_the_host_names(ctx: ConvergeCtx, tmp_path: Path) -> None:
+    interpreter = tmp_path / "uv" / "cpython-3.12.11" / "bin" / "python3.12"
+    interpreter.parent.mkdir(parents=True)
+    interpreter.write_text("")
+    host = fake_host(
+        _daemon(),
+        platform=replace(DARWIN_ARM64, executable=str(interpreter)),
+        programs={_TOOL: _TOOL},
+    )
+    assert isinstance(ctx.machine, ConfiguredMachineIdentity)
+    ctx.machine.set(host=_OFF_BOX)
+
+    audit = cfw.audit_this_host(_RUNNER, home=ctx.meiva_home, machine=ctx.machine, host=host)
+
+    assert audit.missing == (interpreter,), (
+        "a step that resolved its own interpreter would audit this process's exposure on the "
+        "machine the caller named"
     )
 
 
@@ -288,8 +316,8 @@ def test_a_binary_that_is_not_installed_is_not_audited(default_home: Path) -> No
 
     # meiva:note
     # No collector under this home: its binary path resolves to nothing that exists.
-    assert cfw.serving_binaries(frozenset({"gateway"}), home=home) == (
-        Path(sys.executable),
+    assert cfw.serving_binaries(frozenset({"gateway"}), home=home, interpreter=_interpreter()) == (
+        _interpreter(),
         postgres,
     )
 
