@@ -64,7 +64,7 @@ def _seed_harnesses(client: GatewayTestClient) -> None:
                 default_model="gpt-6.1-terra",
             ),
             HarnessAvailability(
-                harness=Harness.KIMI_CODE,
+                harness=Harness.CLAUDE_CODE,
                 status="unavailable",
                 reason="not signed in",
                 launchable=False,
@@ -237,7 +237,7 @@ class TestSpawnHarness:
         before = _agent_count(db_conn)
         with gateway_test_client() as client:
             _seed_harnesses(client)
-            response = spawn_via_http(client, {"spawner": "user", "harness": "kimi_code"})
+            response = spawn_via_http(client, {"spawner": "user", "harness": "claude_code"})
         assert response.status_code == 400
         assert response.json()["reason"] == "harness_not_launchable"
         assert _agent_count(db_conn) == before

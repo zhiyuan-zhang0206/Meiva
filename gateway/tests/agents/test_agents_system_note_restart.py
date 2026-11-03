@@ -51,19 +51,19 @@ def _seed_restart_harnesses(client: GatewayTestClient) -> None:
                 default_model="gpt-6.1-sol",
             ),
             HarnessAvailability(
-                harness=Harness.KIMI_CODE,
+                harness=Harness.CLAUDE_CODE,
                 status="available",
                 reason="signed in",
                 launchable=True,
                 billing=HarnessBilling.SUBSCRIPTION,
                 models=[
                     HarnessModelOption(
-                        id="kimi-for-coding",
-                        reasoning_effort_options=["off", "high"],
+                        id="claude-opus-4-6",
+                        reasoning_effort_options=["low", "medium", "high"],
                         reasoning_effort_default="high",
                     )
                 ],
-                default_model="kimi-for-coding",
+                default_model="claude-opus-4-6",
             ),
         ],
     )

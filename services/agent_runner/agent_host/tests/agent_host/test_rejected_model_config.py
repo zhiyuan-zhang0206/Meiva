@@ -443,7 +443,7 @@ def test_only_legacy_history_pins_bypass_execution_validation(
 
 @pytest.mark.parametrize(
     "harness",
-    [Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY, Harness.KIMI_CODE],
+    [Harness.CLAUDE_CODE, Harness.CODEX, Harness.ANTIGRAVITY],
 )
 def test_admit_stored_model_accepts_uncatalogued_external_cli_models(
     model_catalog: ModelCatalog, harness: Harness
