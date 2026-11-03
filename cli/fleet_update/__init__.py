@@ -81,6 +81,7 @@ def main(
         operation=operation,
     )
     phase = "down" if args.half == "run" else args.half
+    resolved_new: str | None = None
     try:
         if args.half != "up":
             if target_request is None:
@@ -90,7 +91,7 @@ def main(
                 # reach the resolver, where the failure would name a type instead of the choice.
                 raise FailedError("refused: no target to resolve")
             resolved = resolve_target(repo, target_request)
-            args.resolved_new = resolved.sha
+            resolved_new = resolved.sha
             s.say(resolved.notice)
         hosts = [args.gateway, *args.runner]
         unames = s.run_all(hosts, lambda host: s.run(host, "uname -s", effect=False).split()[-1])
@@ -98,7 +99,7 @@ def main(
         for phase in ("down", "up") if args.half == "run" else (args.half,):
             s.say(f"phase: {phase}")
             if phase == "down":
-                down(s, args)
+                down(s, args, resolved_new)
                 continue
             failures = up(s, args)
             if failures:

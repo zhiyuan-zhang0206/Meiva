@@ -10,10 +10,9 @@
 
 from __future__ import annotations
 
-import argparse
 from datetime import datetime, timedelta
 
-from .choices import start_flags
+from .choices import FleetArgs, start_flags
 from .fleet_verify import verify
 from .oneshot import start_script
 from .plan.host_commands import INCOMPLETE
@@ -46,7 +45,7 @@ def _host_failure(
 
 def _start_one(
     s: Session,
-    args: argparse.Namespace,
+    args: FleetArgs,
     alias: str,
     window: tuple[datetime, datetime],
 ) -> HostFailure | None:
@@ -65,7 +64,7 @@ def _start_one(
 
 
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
-def up(s: Session, args: argparse.Namespace) -> list[HostFailure]:
+def up(s: Session, args: FleetArgs) -> list[HostFailure]:
     # meiva:note
     # Start the gateway first and then all runners in parallel, then verify every host: one
     # failure never erases what the window learned about the others, and each listed host ends

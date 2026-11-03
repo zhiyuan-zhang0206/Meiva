@@ -7,10 +7,9 @@
 
 from __future__ import annotations
 
-import argparse
 from dataclasses import dataclass
 
-from .choices import forwarded_flags, message_flag, start_flags
+from .choices import DownChoices, FleetArgs, forwarded_flags, message_flag, start_flags
 from .fleet_gate import baselines, git_in_repo, probe_helper, probe_host, resolve_target
 from .oneshot import start_script
 from .plan.gateway_commands import pre_verify_script
@@ -63,8 +62,16 @@ def host_evidence(s: Session, alias: str) -> HostEvidence:
 
 
 # meiva:note
+# The choices of the `down` half; only the `run` and `down` halves carry them.
+def _chosen(args: FleetArgs) -> DownChoices:
+    if args.down is None:
+        raise RefusedError("refused: this half carries no stop choices")
+    return args.down
+
+
+# meiva:note
 # OLD only feeds the `.python-version` refusal: it decides nothing about what stops or starts.
-def _old_target(s: Session, args: argparse.Namespace, heads: dict[str, str], new: str) -> OldTarget:
+def _old_target(s: Session, args: FleetArgs, heads: dict[str, str], new: str) -> OldTarget:
     old = old_commit(heads, new)
     if old.reasons or old.resolved is None:
         return old
@@ -75,7 +82,7 @@ def _old_target(s: Session, args: argparse.Namespace, heads: dict[str, str], new
     ).stdout.rstrip()
     s.say(stat or "no change under " + " ".join(_WATCHED))
     python = git_in_repo("diff", "--quiet", old.resolved, new, "--", ".python-version", repo=s.repo)
-    allowed = args.python == "--allow-python-change"
+    allowed = _chosen(args).python == "--allow-python-change"
     reasons = python_change_reason(changed=bool(python.returncode), allowed=allowed)
     return OldTarget(reasons, old.resolved)
 
@@ -94,7 +101,7 @@ def _fetch_and_probe(s: Session, alias: str, new: str) -> dict[str, str]:
 
 
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
-def _preflight(s: Session, args: argparse.Namespace, new: str) -> _Preflight:
+def _preflight(s: Session, args: FleetArgs, new: str) -> _Preflight:
     hosts = start_order(args.gateway, tuple(args.runner))
     probed = s.run_all(hosts, lambda alias: probe_host(s, alias))
     reasons: list[str] = []
@@ -128,7 +135,7 @@ def _preflight(s: Session, args: argparse.Namespace, new: str) -> _Preflight:
         )
     helper_facts = s.run_all(hosts, lambda alias: _fetch_and_probe(s, alias, new))
     probes = dict(zip(hosts, helper_facts, strict=True))
-    rebuild = bool(getattr(args, "rebuild_extras", False))
+    rebuild = args.rebuild_extras
     table = baselines(s.repo)
     try:
         helper_reasons = refusals(probes, table, rebuild=rebuild)
@@ -144,7 +151,7 @@ def _preflight(s: Session, args: argparse.Namespace, new: str) -> _Preflight:
 
 
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
-def _stored_schedules(s: Session, args: argparse.Namespace, new: str) -> None:
+def _stored_schedules(s: Session, args: FleetArgs, new: str) -> None:
     out = s.run(
         args.gateway,
         pre_verify_script(
@@ -152,18 +159,18 @@ def _stored_schedules(s: Session, args: argparse.Namespace, new: str) -> None:
             new=new,
             read_rows=program_text(VERIFY_SCRIPTS / "schedules_verify_read_rows.py"),
             check_rows=program_text(CHECK_ROWS_SCRIPT),
-            max_age_min=int(args.silence_hours * 60),
+            max_age_min=int(_chosen(args).silence_hours * 60),
         ),
         effect=False,
     )
-    check = schedule_check(out, allow_red=args.red == "--allow-red-schedules", new=new)
+    check = schedule_check(out, allow_red=_chosen(args).red == "--allow-red-schedules", new=new)
     for note in check.notes:
         s.say(note)
     if check.refusal is not None:
         raise RefusedError(check.refusal)
 
 
-def _restart(s: Session, args: argparse.Namespace, alias: str) -> None:
+def _restart(s: Session, args: FleetArgs, alias: str) -> None:
     script = start_script(
         macos=s.os[alias] == "Darwin",
         alias=alias,
@@ -174,9 +181,7 @@ def _restart(s: Session, args: argparse.Namespace, alias: str) -> None:
     s.run(alias, script)
 
 
-def _restart_wave(
-    s: Session, args: argparse.Namespace, to_restart: tuple[str, ...]
-) -> frozenset[str]:
+def _restart_wave(s: Session, args: FleetArgs, to_restart: tuple[str, ...]) -> frozenset[str]:
     recovered: set[str] = set()
     if args.gateway in to_restart:
         try:
@@ -206,7 +211,7 @@ def _restart_wave(
 # meiva:link cli/docs/fleet-update-window/failed-stop-recovery.meiva.okf.md
 def _recover_after_failed_stop(
     s: Session,
-    args: argparse.Namespace,
+    args: FleetArgs,
     serving: frozenset[str],
     stopped: frozenset[str],
     failed: frozenset[str],
@@ -247,12 +252,18 @@ def _stop_one(s: Session, step: StopStep) -> None:
         raise FailedError(f"{step.alias}: stop exited 0 but its journal records no completed stop")
 
 
-def _stop_wave(s: Session, args: argparse.Namespace, pre: _Preflight) -> None:
+def _stop_wave(s: Session, args: FleetArgs, pre: _Preflight) -> None:
+    chosen = _chosen(args)
     choices = StopChoices(
-        forwarded=(args.shell, args.browser, args.extras, *forwarded_flags(args, args.kept)),
-        mode=args.mode,
-        timeout=args.stop_timeout,
-        infra=args.infra,
+        forwarded=(
+            chosen.shell,
+            chosen.browser,
+            chosen.extras,
+            *forwarded_flags(args, chosen.kept),
+        ),
+        mode=chosen.mode,
+        timeout=chosen.stop_timeout,
+        infra=chosen.infra,
         message=message_flag(args),
         legacy_message_hosts=pre.legacy_stop,
     )
@@ -290,24 +301,24 @@ def _stop_wave(s: Session, args: argparse.Namespace, pre: _Preflight) -> None:
 
 
 # meiva:link cli/docs/fleet-update.meiva.okf.md
-def down(s: Session, args: argparse.Namespace) -> None:
-    pre_resolved: str | None = getattr(args, "resolved_new", None)
-    new = (
-        pre_resolved
-        if pre_resolved is not None
-        else resolve_target(s.repo, args.target_request).sha
-    )
+def down(s: Session, args: FleetArgs, resolved_new: str | None) -> None:
+    if resolved_new is not None:
+        new = resolved_new
+    elif args.target_request is not None:
+        new = resolve_target(s.repo, args.target_request).sha
+    else:
+        raise RefusedError("refused: no target to resolve")
     pre = _preflight(s, args, new)
     if pre.reasons:
         raise RefusedError("refused: " + "; ".join(pre.reasons))
-    announce_leases(s, args.gateway, args.lease_confirm_seconds)
+    announce_leases(s, args.gateway, _chosen(args).lease_confirm_seconds)
     _stored_schedules(s, args, new)
     silence_note = f" ({args.message_text})" if args.message_text else ""
     run_silence(
         s,
         args.gateway,
         "open",
-        hours=args.silence_hours,
+        hours=_chosen(args).silence_hours,
         comment=(
             f"fleet update to {new[:12]}: planned outage{silence_note}; `up` expires this silence"
         ),

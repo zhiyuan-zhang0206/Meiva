@@ -10,6 +10,8 @@ import json
 from dataclasses import dataclass
 from typing import TypeGuard
 
+from ..untyped import object_of
+
 
 def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict)
@@ -33,7 +35,7 @@ class HostEvidence:
 # gate that is deciding whether to refuse.
 def parse_journal(text: str) -> Journal | None:
     try:
-        parsed: object = json.loads(text)
+        parsed = object_of(json.loads, text)
     except ValueError:
         return None
     if not _is_object_dict(parsed):

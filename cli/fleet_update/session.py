@@ -10,14 +10,14 @@ from __future__ import annotations
 
 import os
 import subprocess
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from subprocess import PIPE, STDOUT
 from threading import Lock
-from typing import Protocol
+from typing import IO, Protocol
 
 from .plan.host_commands import login_shell
 from .plan.operation import OperationIdentity, shell_exports
@@ -44,6 +44,13 @@ class RefusedError(FailedError):
 # How often the window looks again while it waits: the roster until every host agrees, and the
 # lease countdown while the operator releases takeovers. Five seconds is enough to watch the
 # window move without burying the leases named above it.
+# meiva:note
+# The lines of a text stream. `Popen` types the stream's text as `Any` when `stdin` is chosen by a
+# conditional; a parameter typed `IO[str]` takes it without naming the `Any`.
+def _text_lines(stream: IO[str]) -> Iterator[str]:
+    yield from stream
+
+
 @dataclass(frozen=True)
 class Pacing:
     roster_poll_s: float = 5.0
@@ -161,10 +168,11 @@ class Session:
             process.stdin.write(stdin)
             process.stdin.close()
         lines: list[str] = []
-        for raw in process.stdout or ():
-            line = raw.rstrip("\n")
-            lines.append(line)
-            self.say(f"    {alias}| {line}")
+        if process.stdout is not None:
+            for raw in _text_lines(process.stdout):
+                line = raw.rstrip("\n")
+                lines.append(line)
+                self.say(f"    {alias}| {line}")
         if rc := process.wait():
             raise FailedError(f"{alias}: exit {rc}: {lines[-1] if lines else 'no output'}")
         return "\n".join(lines)

@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal, TypeGuard
 
+from ..untyped import object_of
+
 CERTIFICATE_SCHEMA = "meiva-release/v1"
 CHANNEL_SCHEMA = "meiva-channel/v1"
 BEGIN_CERTIFICATE = "-----BEGIN MEIVA RELEASE CERTIFICATE-----"
@@ -180,7 +182,7 @@ def _extract_delimited_json(
     if not found_end or end_marker in after_end:
         return None
     try:
-        parsed: object = json.loads(json_block.strip())
+        parsed = object_of(json.loads, json_block.strip())
     except json.JSONDecodeError:
         return None
     return parsed if _is_str_dict(parsed) else None
