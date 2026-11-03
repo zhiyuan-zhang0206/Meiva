@@ -169,7 +169,11 @@ def test_invalid_question_does_not_supersede_the_current_question(
 ) -> None:
     agent = seed_agent(db_conn)
     notice = post_question(client, agent)
-    for question in ({"type": "unknown"}, {"type": "single_select", "options": []}):
+    invalid_questions: tuple[dict[str, object], ...] = (
+        {"type": "unknown"},
+        {"type": "single_select", "options": []},
+    )
+    for question in invalid_questions:
         response = client.post(
             f"/api/agents/{agent}/notices",
             json={"title": "Invalid", "require_response": True, "question": question},

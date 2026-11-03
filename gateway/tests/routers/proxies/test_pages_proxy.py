@@ -140,12 +140,12 @@ def page_server(tmp_path: Path) -> Iterator[int]:
 
     # SimpleHTTPRequestHandler takes directory as a constructor arg (a class
     # attribute is ignored — __init__ falls back to cwd).
-    handler = lambda *args, **kwargs: _QuietHandler(  # noqa: E731 — factory for ThreadingTCPServer
-        *args,  # pyright: ignore[reportUnknownArgumentType]
-        directory=str(tmp_path),
-        **kwargs,
-    )
-    server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), handler)  # pyright: ignore[reportUnknownArgumentType]
+    def handler(
+        request: socket.socket, client_address: object, server: socketserver.BaseServer
+    ) -> _QuietHandler:
+        return _QuietHandler(request, client_address, server, directory=str(tmp_path))
+
+    server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -160,10 +160,10 @@ def _register(client: TestClient, agent_id: int, name: str, port: int) -> None:
     assert resp.status_code == 201
 
 
-def test_proxy_serves_page_content(db_conn, page_server: int) -> None:
+def test_proxy_serves_page_content(db_conn: psycopg.Connection, page_server: int) -> None:
     """GET through the gateway returns the page server's content — root,
     nested path, and query string all work."""
-    aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    aid = create_agent(db_conn)
     with gateway_test_client() as client:
         resp = _post_page(client, aid, {"name": "p", "port": page_server, "host": "127.0.0.1"})
     assert resp.status_code == 201
@@ -185,11 +185,13 @@ def test_proxy_serves_page_content(db_conn, page_server: int) -> None:
         assert "<h1>hello</h1>" in with_qs.text
 
 
-def test_proxy_serves_pages_under_a_content_security_policy(db_conn, page_server: int) -> None:
+def test_proxy_serves_pages_under_a_content_security_policy(
+    db_conn: psycopg.Connection, page_server: int
+) -> None:
     # meiva:note
     # The policy is set by the gateway because upstream headers outside the forward list are
     # dropped; a page server's own policy never reaches the browser.
-    aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    aid = create_agent(db_conn)
     with gateway_test_client() as client:
         _register(client, aid, "p", page_server)
         resp = client.get(f"/pages/{aid}-p/")
@@ -204,10 +206,12 @@ def test_proxy_serves_pages_under_a_content_security_policy(db_conn, page_server
     assert "base-uri 'none'" in policy
 
 
-def test_proxy_redirects_root_without_trailing_slash(db_conn, page_server: int) -> None:
+def test_proxy_redirects_root_without_trailing_slash(
+    db_conn: psycopg.Connection, page_server: int
+) -> None:
     """/pages/{name} (no slash) redirects to /pages/{name}/ so relative asset
     links inside the page resolve against the page directory."""
-    aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    aid = create_agent(db_conn)
     with gateway_test_client() as client:
         _register(client, aid, "p", page_server)
         resp = client.get(f"/pages/{aid}-p", follow_redirects=False)
@@ -215,17 +219,17 @@ def test_proxy_redirects_root_without_trailing_slash(db_conn, page_server: int) 
     assert resp.headers["location"] == f"/pages/{aid}-p/"
 
 
-def test_proxy_404_unknown_page(db_conn) -> None:
+def test_proxy_404_unknown_page(db_conn: psycopg.Connection) -> None:
     """A never-registered page name is a 404, not a proxy attempt."""
-    aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    aid = create_agent(db_conn)
     with gateway_test_client() as client:
         resp = client.get(f"/pages/{aid}-never/")
     assert resp.status_code == 404
 
 
-def test_proxy_404_closed_page(db_conn, page_server: int) -> None:
+def test_proxy_404_closed_page(db_conn: psycopg.Connection, page_server: int) -> None:
     """close() removes the reverse-proxy route: a closed page 404s."""
-    aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    aid = create_agent(db_conn)
     with gateway_test_client() as client:
         _register(client, aid, "p", page_server)
         _close_page(client, aid, "p")
@@ -292,7 +296,7 @@ def test_proxy_410_expired_page_en_when_display_language_en(
     assert "Page expired - ask the agent to serve it again" in response.text
 
 
-def test_proxy_404_missing_agent(db_conn, page_server: int) -> None:
+def test_proxy_404_missing_agent(db_conn: psycopg.Connection, page_server: int) -> None:
     with gateway_test_client() as client:
         resp = client.get("/pages/99999-p/")
     assert resp.status_code == 404
@@ -308,10 +312,12 @@ def test_proxy_404_missing_agent(db_conn, page_server: int) -> None:
         "sub/..%5coutside-secret.txt",
     ],
 )
-def test_proxy_rejects_traversal(db_conn, page_server: int, bad_path: str) -> None:
+def test_proxy_rejects_traversal(
+    db_conn: psycopg.Connection, page_server: int, bad_path: str
+) -> None:
     """Encoded dot-segments and backslashes are rejected with 400 — the
     gateway never forwards a path that could escape the page directory."""
-    aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    aid = create_agent(db_conn)
     with gateway_test_client() as client:
         _register(client, aid, "p", page_server)
         resp = client.get(f"/pages/{aid}-p/{bad_path}")
@@ -321,10 +327,10 @@ def test_proxy_rejects_traversal(db_conn, page_server: int, bad_path: str) -> No
     assert "TOP-SECRET-OUTSIDE-CONTENT" not in resp.text
 
 
-def test_proxy_502_when_page_server_unreachable(db_conn) -> None:
+def test_proxy_502_when_page_server_unreachable(db_conn: psycopg.Connection) -> None:
     """A registered page whose server is down surfaces as 502 with the
     friendly zh copy (the default display language) — never the raw host:port."""
-    aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    aid = create_agent(db_conn)
     # Grab a free port and release it — nothing will be listening there.
     probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     probe.bind(("127.0.0.1", 0))
@@ -365,7 +371,7 @@ def test_proxy_502_friendly_copy_en_when_display_language_en(
     )
 
 
-def test_proxy_502_emits_structured_log_line(db_conn) -> None:
+def test_proxy_502_emits_structured_log_line(db_conn: psycopg.Connection) -> None:
     """The 502 branch writes one structured log line carrying trace_id,
     agent_id, page name, host:port, and the exception type + message — the
     traceability the report asked for (task #2212)."""
@@ -378,7 +384,7 @@ def test_proxy_502_emits_structured_log_line(db_conn) -> None:
     def _capture(message: _Any) -> None:
         records.append(message.record)
 
-    aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    aid = create_agent(db_conn)
     probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     probe.bind(("127.0.0.1", 0))
     free_port = probe.getsockname()[1]
@@ -499,7 +505,7 @@ def test_proxy_revalidates_nonloopback_registry_target_before_dialing(
     assert "refusing to proxy" in response.json()["detail"]
 
 
-def test_proxy_streams_sse_chunked_content(db_conn) -> None:
+def test_proxy_streams_sse_chunked_content(db_conn: psycopg.Connection) -> None:
     """A chunked upstream (SSE) passes through with its content-type and all
     events — the proxy streams instead of buffering."""
     sse_server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), _SSEHandler)
@@ -507,7 +513,7 @@ def test_proxy_streams_sse_chunked_content(db_conn) -> None:
     thread.start()
     try:
         port = sse_server.server_address[1]
-        aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+        aid = create_agent(db_conn)
         with gateway_test_client() as client:
             _register(client, aid, "sse", port)
             resp = client.get(f"/pages/{aid}-sse/")
@@ -520,11 +526,11 @@ def test_proxy_streams_sse_chunked_content(db_conn) -> None:
         sse_server.server_close()
 
 
-def test_proxy_requires_auth(db_conn) -> None:
+def test_proxy_requires_auth(db_conn: psycopg.Connection) -> None:
     """The reverse proxy is auth-gated like every other API route: no
     credentials -> 401; a valid bearer passes the middleware (404 here
     because the page was never registered, proving it reached the route)."""
-    aid = create_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    aid = create_agent(db_conn)
     with gateway_test_client(cluster_secret=_SECRET) as client:
         no_auth = without_credentials(client).get(f"/pages/{aid}-p/")
         assert no_auth.status_code == 401

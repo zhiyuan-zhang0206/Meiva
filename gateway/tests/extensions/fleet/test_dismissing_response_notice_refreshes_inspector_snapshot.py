@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 import psycopg
@@ -14,13 +14,13 @@ from base.agents.observation.snapshot import select_one
 from base.config import settings
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from gateway.tests.extensions.fleet.test_fleet_notices_via_gateway import NoticeView, seed_agent
 from gateway.tests.extensions.fleet.test_fleet_notices_via_gateway import (
     load_activity_plugin as load_activity_plugin,
 )
 from gateway.tests.extensions.fleet.test_fleet_notices_via_gateway import (
     sdk_via_inprocess_gateway as sdk_via_inprocess_gateway,
 )
-from gateway.tests.extensions.fleet.test_fleet_notices_via_gateway import seed_agent
 from gateway.tests.support.live_events.recorder import recording_live_events
 from meiva.tests.fixtures.pin_agent import pin_agent
 
@@ -122,9 +122,10 @@ def test_notice_return_int_and_edit_dismiss_take_no_id(
     open notice with no id argument."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    notice = meiva.ui.notify(
-        "hold this", content="body", priority="P2", idempotency_key=str(uuid4())
-    )  # type: ignore[attr-defined]
+    notice = cast(
+        "NoticeView",
+        meiva.ui.notify("hold this", content="body", priority="P2", idempotency_key=str(uuid4())),  # type: ignore[attr-defined]
+    )
     assert isinstance(notice, int)
     assert int(notice) == notice  # int conversion gives the id
 
@@ -146,9 +147,9 @@ def test_notice_return_int_and_edit_dismiss_take_no_id(
     assert row[2] == "withdrawn"
 
     # After dismissal, new notify should show pending_count = 1 (the fresh one)
-    nid2 = meiva.ui.notify("fresh fyi", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
-    assert nid2.pending_count == 1  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-    assert nid2.pending_notices[0]["id"] == nid2  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+    nid2 = cast("NoticeView", meiva.ui.notify("fresh fyi", idempotency_key=str(uuid4())))  # type: ignore[attr-defined]
+    assert nid2.pending_count == 1
+    assert nid2.pending_notices[0]["id"] == nid2
 
 
 def test_notify_with_expire_at_valid(
@@ -164,13 +165,16 @@ def test_notify_with_expire_at_valid(
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     # timedelta
-    nid1 = meiva.ui.notify(
-        "expires in 1h", expire_at=timedelta(hours=1), idempotency_key=str(uuid4())
-    )  # pyright: ignore[reportCallIssue]
+    nid1 = cast(
+        "NoticeView",
+        meiva.ui.notify(  # pyright: ignore[reportCallIssue]
+            "expires in 1h", expire_at=timedelta(hours=1), idempotency_key=str(uuid4())
+        ),
+    )
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT expire_at FROM agent_notices WHERE agent_id = %s AND local_id = %s",
-            (agent_id, int(nid1)),  # pyright: ignore[reportUnknownArgumentType]
+            (agent_id, int(nid1)),
         )
         row = cur.fetchone()
     assert row is not None
@@ -179,11 +183,14 @@ def test_notify_with_expire_at_valid(
     meiva.ui.dismiss_notice()  # pyright: ignore[reportCallIssue]
 
     target = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
-    nid2 = meiva.ui.notify("expires at ISO", expire_at=target, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
+    nid2 = cast(
+        "NoticeView",
+        meiva.ui.notify("expires at ISO", expire_at=target, idempotency_key=str(uuid4())),  # pyright: ignore[reportCallIssue]
+    )
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT expire_at FROM agent_notices WHERE agent_id = %s AND local_id = %s",
-            (agent_id, int(nid2)),  # pyright: ignore[reportUnknownArgumentType]
+            (agent_id, int(nid2)),
         )
         row = cur.fetchone()
     assert row is not None

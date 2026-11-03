@@ -28,6 +28,7 @@ from base.agents.context.gateway_client.transport import raise_from_response
 from base.api_contracts.agent_contract import (
     EXCEPTION_BY_REASON,
     AgentLaunchFailed,
+    ErrorReason,
     MeivaAgentError,
 )
 from gateway.http.middleware.error_envelope import request_trace_middleware
@@ -40,17 +41,12 @@ def _rng() -> random.Random:
     return random.Random(0)  # noqa: S311
 
 
-# Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
-# pyright: reportUnknownMemberType = warning
-# pyright: reportUnknownArgumentType = warning
-
-
 @pytest.mark.parametrize(
     ("reason", "cls"),
     list(EXCEPTION_BY_REASON.items()),
     ids=[r.value for r in EXCEPTION_BY_REASON],
 )
-def test_handler_emits_expected_wire(reason, cls):
+def test_handler_emits_expected_wire(reason: ErrorReason, cls: type[MeivaAgentError]) -> None:
     """Server-side: handler encodes the full envelope plus SDK wire reason."""
     app = FastAPI()
     app.middleware("http")(request_trace_middleware(_rng()))
@@ -61,7 +57,7 @@ def test_handler_emits_expected_wire(reason, cls):
     app.add_exception_handler(MeivaAgentError, meiva_agent_error_handler)  # type: ignore[arg-type]
 
     @app.get("/_raise")
-    def _raise():
+    def _raise() -> None:
         raise cls("forced wire-test message")
 
     with TestClient(app) as client:
@@ -83,7 +79,7 @@ def test_handler_emits_expected_wire(reason, cls):
     list(EXCEPTION_BY_REASON.items()),
     ids=[r.value for r in EXCEPTION_BY_REASON],
 )
-def test_sdk_reconstructs_from_wire(reason, cls):
+def test_sdk_reconstructs_from_wire(reason: ErrorReason, cls: type[MeivaAgentError]) -> None:
     """client-side: feed synthetic wire body to raise_from_response; it reconstructs same
     cls + message."""
     body = {"detail": "forced wire-test message", "reason": reason.value}

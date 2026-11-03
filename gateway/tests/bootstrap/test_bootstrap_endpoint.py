@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlsplit
 
+import psycopg
 import pytest
 
 from base import config
@@ -30,7 +31,7 @@ def _auth() -> dict[str, str]:
 
 @pytest.mark.usefixtures("served_gateway_home")
 def test_bootstrap_returns_config_with_secret(
-    db_conn, *, machine_identity: MachineIdentityReader
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:
     with gateway_test_client(
         machine=machine_identity, fields={"cluster_secret": _SECRET}
@@ -56,7 +57,7 @@ def test_bootstrap_returns_config_with_secret(
 
 @pytest.mark.usefixtures("served_gateway_home")
 def test_bootstrap_carries_no_cluster_name(
-    db_conn, *, machine_identity: MachineIdentityReader
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:
     """Path-only identity: no name travels in the payload — a runner's cluster
     identity is the gateway URL + secret; the db/role identifiers ride inside
@@ -70,7 +71,7 @@ def test_bootstrap_carries_no_cluster_name(
 
 
 def test_bootstrap_rejects_missing_secret(
-    db_conn, *, machine_identity: MachineIdentityReader
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:
     """No bearer -> 401 (reachability is not trust)."""
     with gateway_test_client(
@@ -81,7 +82,7 @@ def test_bootstrap_rejects_missing_secret(
 
 
 def test_bootstrap_rejects_wrong_secret(
-    db_conn, *, machine_identity: MachineIdentityReader
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:
     with gateway_test_client(
         machine=machine_identity, fields={"cluster_secret": _SECRET}
@@ -92,7 +93,7 @@ def test_bootstrap_rejects_wrong_secret(
 
 @pytest.mark.usefixtures("served_gateway_home")
 def test_bootstrap_rejects_every_caller_when_secret_unset(
-    db_conn, *, machine_identity: MachineIdentityReader
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:
     """A blank secret opens nothing: there is no no-credential posture to serve."""
     with gateway_test_client(machine=machine_identity, fields={"cluster_secret": ""}) as client:
@@ -101,7 +102,7 @@ def test_bootstrap_rejects_every_caller_when_secret_unset(
 
 
 def test_old_role_runner_request_gets_no_database_login(
-    db_conn,
+    db_conn: psycopg.Connection,
     served_gateway_home: Any,
     *,
     machine_identity: MachineIdentityReader,
@@ -125,7 +126,7 @@ def test_old_role_runner_request_gets_no_database_login(
 
 
 def test_bootstrap_without_a_database_endpoint_refused(
-    db_conn, tmp_path: Path, *, machine_identity: MachineIdentityReader
+    db_conn: psycopg.Connection, tmp_path: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     """A gateway config snapshot without MEIVA_DB_URL is a 400, never a guess."""
     (tmp_path / ".env").write_text("MEIVA_REDIS_URL=redis://127.0.0.1:1/0\n")
@@ -138,7 +139,7 @@ def test_bootstrap_without_a_database_endpoint_refused(
 
 
 def test_bootstrap_strips_a_remote_managed_planes_provider_password(
-    db_conn, tmp_path: Path, *, machine_identity: MachineIdentityReader
+    db_conn: psycopg.Connection, tmp_path: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     """A remote-managed plane's gateway `.env` holds the provider's owner URL,
     password included (a local plane's holds the credential-free endpoint, so it

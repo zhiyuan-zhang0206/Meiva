@@ -29,6 +29,7 @@ from gateway.tests.auth.gateway_config import (
     gateway_test_config,
 )
 from gateway.tests.support.live_events.faults import unpublishable_bus
+from gateway.tests.support.live_events.pubsub_view import messages
 from gateway.tests.support.runner_ops.ops_stub import refused, runner_ops
 from gateway.tests.upload_delivery.test_upload_delivery_recovery import (
     CLAIM_SECONDS,
@@ -190,14 +191,12 @@ def _inbound_wakes(bus: EventBus, agent: int) -> Generator[Callable[[], list[str
     redis = bus.sync_redis(decode_responses=True)
     pubsub = redis.pubsub()  # pyright: ignore[reportUnknownMemberType]
     pubsub.subscribe(inbound_channel(agent, bus.channel))
-    assert pubsub.get_message(timeout=5)["type"] == "subscribe"  # pyright: ignore[reportUnknownMemberType, reportOptionalSubscript]
+    assert pubsub.get_message(timeout=5)["type"] == "subscribe"  # pyright: ignore[reportOptionalSubscript]
 
     def received() -> list[str]:
         payloads: list[str] = []
         while True:
-            # meiva:note
-            # The redis-py client and its pubsub are untyped. The annotated shape is the one the untyped call returns.
-            message: dict[str, Any] | None = pubsub.get_message(timeout=0.3)  # pyright: ignore[reportUnknownMemberType, reportAssignmentType]
+            message = messages(pubsub).get_message(timeout=0.3)
             if message is None:
                 return payloads
             if message["type"] == "message":
@@ -206,7 +205,7 @@ def _inbound_wakes(bus: EventBus, agent: int) -> Generator[Callable[[], list[str
     try:
         yield received
     finally:
-        pubsub.close()  # pyright: ignore[reportUnknownMemberType]
+        pubsub.close()
         redis.close()
 
 

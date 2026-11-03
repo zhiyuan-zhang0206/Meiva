@@ -10,6 +10,7 @@ self/root exclusions, and the birth chain.
 
 import math
 import uuid
+from typing import cast
 
 import psycopg
 import pytest
@@ -60,7 +61,11 @@ def _event(
     db_conn.commit()
 
 
-def _neighbors(client: TestClient, agent_id: int, **params: int) -> list[dict]:
+def _score(row: dict[str, object]) -> float:
+    return cast("float", row["score"])
+
+
+def _neighbors(client: TestClient, agent_id: int, **params: int) -> list[dict[str, object]]:
     resp = client.get(f"/api/agents/{agent_id}/neighbors", params=params)
     assert resp.status_code == 200, resp.text
     return resp.json()["neighbors"]
@@ -79,7 +84,7 @@ def test_direct_ties_both_directions_self_and_root_excluded(db_conn: psycopg.Con
 
     ids = {r["agent_id"] for r in rows}
     assert ids == {b, c}  # root a excluded; both neighbors found regardless of direction
-    assert all(r["depth"] == 1 for r in rows)  # pyright: ignore[reportUnknownArgumentType]
+    assert all(r["depth"] == 1 for r in rows)
 
 
 def test_lineage_and_message_equal_at_zero_age(db_conn: psycopg.Connection) -> None:
@@ -95,7 +100,7 @@ def test_lineage_and_message_equal_at_zero_age(db_conn: psycopg.Connection) -> N
         rows = _neighbors(client, a, depth=1)
 
     by_id = {r["agent_id"]: r for r in rows}
-    assert by_id[b]["score"] == by_id[c]["score"]
+    assert _score(by_id[b]) == _score(by_id[c])
 
 
 def test_lineage_permanent_message_decays_over_time(db_conn: psycopg.Connection) -> None:
@@ -111,8 +116,8 @@ def test_lineage_permanent_message_decays_over_time(db_conn: psycopg.Connection)
         rows = _neighbors(client, a, depth=1)
 
     by_id = {r["agent_id"]: r for r in rows}
-    assert set(by_id) == {lineage, msg}  # pyright: ignore[reportUnknownArgumentType]
-    assert by_id[lineage]["score"] > by_id[msg]["score"]
+    assert set(by_id) == {lineage, msg}
+    assert _score(by_id[lineage]) > _score(by_id[msg])
 
 
 def test_resurrect_counts_as_a_tie(db_conn: psycopg.Connection) -> None:
@@ -137,7 +142,7 @@ def test_recency_decay_ranks_recent_first(db_conn: psycopg.Connection) -> None:
         rows = _neighbors(client, a, depth=1)
 
     assert [r["agent_id"] for r in rows] == [recent, stale]
-    assert rows[0]["score"] > rows[1]["score"]
+    assert _score(rows[0]) > _score(rows[1])
 
 
 def test_depth_limits_reach_and_gamma_decays_deeper_hops(db_conn: psycopg.Connection) -> None:
@@ -156,10 +161,10 @@ def test_depth_limits_reach_and_gamma_decays_deeper_hops(db_conn: psycopg.Connec
     assert {r["agent_id"] for r in depth1} == {b}
     # depth=2 reaches c, marked as a 2-hop neighbor, and below b (gamma discount).
     by_id = {r["agent_id"]: r for r in depth2}
-    assert set(by_id) == {b, c}  # pyright: ignore[reportUnknownArgumentType]
+    assert set(by_id) == {b, c}
     assert by_id[b]["depth"] == 1
     assert by_id[c]["depth"] == 2
-    assert by_id[c]["score"] < by_id[b]["score"]
+    assert _score(by_id[c]) < _score(by_id[b])
 
 
 def test_terminated_neighbor_included_with_status(db_conn: psycopg.Connection) -> None:
@@ -170,7 +175,7 @@ def test_terminated_neighbor_included_with_status(db_conn: psycopg.Connection) -
     with gateway_test_client() as client:
         rows = _neighbors(client, a, depth=1)
 
-    assert len(rows) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert len(rows) == 1
     assert rows[0]["agent_id"] == dead
     assert rows[0]["status"] == "terminated"
 
@@ -184,7 +189,7 @@ def test_limit_caps_result_count(db_conn: psycopg.Connection) -> None:
     with gateway_test_client() as client:
         rows = _neighbors(client, a, depth=1, limit=2)
 
-    assert len(rows) == 2  # pyright: ignore[reportUnknownArgumentType]
+    assert len(rows) == 2
 
 
 # meiva:note
@@ -201,7 +206,7 @@ def test_defaults_come_from_display_config(db_conn: psycopg.Connection) -> None:
     with gateway_test_client(fields={"neighbors_default_limit": 2}) as client:
         rows = _neighbors(client, a)
 
-    assert len(rows) == 2  # pyright: ignore[reportUnknownArgumentType]
+    assert len(rows) == 2
 
 
 def test_no_ties_returns_empty(db_conn: psycopg.Connection) -> None:
@@ -227,7 +232,7 @@ def test_depth_out_of_range_422(db_conn: psycopg.Connection) -> None:
 # ── ancestors: the immutable birth chain above the queried agent ─────────
 
 
-def _ancestors(client: TestClient, agent_id: int, **params: int) -> list[dict]:
+def _ancestors(client: TestClient, agent_id: int, **params: int) -> list[dict[str, object]]:
     resp = client.get(f"/api/agents/{agent_id}/neighbors", params=params)
     assert resp.status_code == 200, resp.text
     return resp.json()["ancestors"]
@@ -247,8 +252,8 @@ def test_ancestors_spawn_chain_nearest_first_walks_to_top(db_conn: psycopg.Conne
     assert [r["agent_id"] for r in rows] == [b, a]
     assert [r["depth"] for r in rows] == [1, 2]
     # each hop's edge is the permanent lineage weight, gamma-discounted per hop
-    assert rows[0]["score"] == pytest.approx(math.log1p(1), abs=1e-3)  # pyright: ignore[reportUnknownMemberType]
-    assert rows[1]["score"] < rows[0]["score"]
+    assert _score(rows[0]) == pytest.approx(math.log1p(1), abs=1e-3)
+    assert _score(rows[1]) < _score(rows[0])
     assert [r["agent_id"] for r in rows_b] == [a]
 
 
@@ -301,7 +306,7 @@ def test_ancestors_terminated_ancestor_included_with_status(db_conn: psycopg.Con
     with gateway_test_client() as client:
         rows = _ancestors(client, b)
 
-    assert len(rows) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert len(rows) == 1
     assert rows[0]["agent_id"] == a
     assert rows[0]["status"] == "terminated"
 
@@ -317,7 +322,7 @@ def test_ancestors_read_born_spawner_not_the_recorded_events(db_conn: psycopg.Co
         rows = _ancestors(client, b)
 
     assert [r["agent_id"] for r in rows] == [a]
-    assert rows[0]["score"] == pytest.approx(math.log1p(1), abs=1e-3)  # pyright: ignore[reportUnknownMemberType]
+    assert _score(rows[0]) == pytest.approx(math.log1p(1), abs=1e-3)
 
 
 def test_ancestors_use_one_constant_weight_per_birth_edge(db_conn: psycopg.Connection) -> None:
@@ -329,7 +334,7 @@ def test_ancestors_use_one_constant_weight_per_birth_edge(db_conn: psycopg.Conne
         rows = _ancestors(client, b)
 
     assert [r["agent_id"] for r in rows] == [a]
-    assert rows[0]["score"] == pytest.approx(math.log1p(1), abs=1e-3)  # pyright: ignore[reportUnknownMemberType]
+    assert _score(rows[0]) == pytest.approx(math.log1p(1), abs=1e-3)
 
 
 # ── frozen archive cache: the immutable Loki archive is read once a day ──

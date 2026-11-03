@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import psycopg
 from fastapi.testclient import TestClient
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 
 from base.agents.history.timeline import build_timeline_items
 from base.agents.inbox.insert import insert_inbound_message
@@ -266,7 +267,7 @@ class TestTimelineDispatch:
     """
 
     @staticmethod
-    def _put_checkpoint(agent_id: int, messages: list) -> None:
+    def _put_checkpoint(agent_id: int, messages: Sequence[BaseMessage]) -> None:
         """Directly use PostgresSaver.put to set a checkpoint with
         channel_values.messages = `messages`. Bypass the entire graph, so tests
         only care about dispatch behavior."""
@@ -385,7 +386,7 @@ class TestTimelineDispatch:
                 additional_kwargs={"meiva_msg_type": "exec_output"},
             ),
         ]
-        self._put_checkpoint(tid, messages)  # pyright: ignore[reportUnknownMemberType]
+        self._put_checkpoint(tid, messages)
 
         resp = test_client.get(f"/api/agents/{tid}/timeline")
         assert resp.status_code == 200
@@ -450,7 +451,7 @@ class TestTimelineDispatch:
             ),
             AIMessage(content="after restart, hello"),  # 2 — must render
         ]
-        self._put_checkpoint(tid, messages)  # pyright: ignore[reportUnknownMemberType]
+        self._put_checkpoint(tid, messages)
 
         resp = test_client.get(f"/api/agents/{tid}/timeline")
         assert resp.status_code == 200
@@ -500,7 +501,7 @@ class TestTimelineDispatch:
             ),  # 1
             AIMessage(content="hello back"),  # 2
         ]
-        self._put_checkpoint(tid, messages)  # pyright: ignore[reportUnknownMemberType]
+        self._put_checkpoint(tid, messages)
 
         resp = test_client.get(f"/api/agents/{tid}/timeline")
         assert resp.status_code == 200
@@ -523,7 +524,7 @@ class TestTimelineDispatch:
 
         tid = create_agent(db_conn)
         messages = [AIMessage(content="plain string reply")]
-        self._put_checkpoint(tid, messages)  # pyright: ignore[reportUnknownMemberType]
+        self._put_checkpoint(tid, messages)
 
         resp = test_client.get(f"/api/agents/{tid}/timeline")
         assert resp.status_code == 200
@@ -551,7 +552,7 @@ class TestTimelineDispatch:
                 additional_kwargs={"meiva_created_at": "2026-06-19T08:00:00+00:00"},
             ),
         ]
-        self._put_checkpoint(tid, messages)  # pyright: ignore[reportUnknownMemberType]
+        self._put_checkpoint(tid, messages)
         resp = test_client.get(f"/api/agents/{tid}/timeline")
         assert resp.status_code == 200
         assert [it["item_id"] for it in resp.json()["items"]] == ["0.0", "1.0"]
@@ -589,7 +590,7 @@ class TestTimelineDispatch:
         tid = create_agent(db_conn)
         # meiva:note
         # The redis-py client and its pubsub are untyped.
-        self._put_checkpoint(tid, [attach])  # pyright: ignore[reportUnknownMemberType]
+        self._put_checkpoint(tid, [attach])
 
         resp = test_client.get(f"/api/agents/{tid}/timeline")
         assert resp.status_code == 200

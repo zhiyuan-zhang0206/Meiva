@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import replace
 
 import psycopg
@@ -221,7 +222,7 @@ class TestSystemPromptInColdLoad:
     """
 
     @staticmethod
-    def _put_checkpoint(agent_id: int, messages: list) -> None:
+    def _put_checkpoint(agent_id: int, messages: Sequence[BaseMessage]) -> None:
         from langgraph.checkpoint.base import empty_checkpoint
         from langgraph.checkpoint.postgres import PostgresSaver
 
@@ -254,7 +255,7 @@ class TestSystemPromptInColdLoad:
         messages: list[BaseMessage] = [SystemMessage(content="You are Meiva.")]
         for i in range(60):
             messages.append(HumanMessage(content=f"user msg {i}"))
-        self._put_checkpoint(tid, messages)  # pyright: ignore[reportUnknownMemberType]
+        self._put_checkpoint(tid, messages)
 
         resp = test_client.get(f"/api/agents/{tid}/timeline")
         assert resp.status_code == 200
@@ -278,7 +279,7 @@ class TestSystemPromptInColdLoad:
         messages: list[BaseMessage] = [SystemMessage(content="You are Meiva.")]
         for i in range(10):
             messages.append(HumanMessage(content=f"user msg {i}"))
-        self._put_checkpoint(tid, messages)  # pyright: ignore[reportUnknownMemberType]
+        self._put_checkpoint(tid, messages)
 
         resp = test_client.get(f"/api/agents/{tid}/timeline")
         assert resp.status_code == 200
@@ -301,9 +302,7 @@ class TestSystemPromptInColdLoad:
         reconfigure(test_client, display=replace(config.display, timeline_default_limit=5))
 
         tid = create_agent(db_conn)
-        self._put_checkpoint(  # pyright: ignore[reportUnknownMemberType]
-            tid, [HumanMessage(content=f"m{i}") for i in range(8)]
-        )
+        self._put_checkpoint(tid, [HumanMessage(content=f"m{i}") for i in range(8)])
 
         resp = test_client.get(f"/api/agents/{tid}/timeline")
         assert resp.status_code == 200
@@ -334,7 +333,7 @@ class TestSystemPromptInColdLoad:
         )
         for i in range(60):
             messages.append(HumanMessage(content=f"user msg {i}"))
-        self._put_checkpoint(tid, messages)  # pyright: ignore[reportUnknownMemberType]
+        self._put_checkpoint(tid, messages)
 
         resp = test_client.get(f"/api/agents/{tid}/timeline")
         assert resp.status_code == 200
@@ -369,7 +368,7 @@ class TestSystemPromptInColdLoad:
         )
         for i in range(10):
             messages.append(HumanMessage(content=f"user msg {i}"))
-        self._put_checkpoint(tid, messages)  # pyright: ignore[reportUnknownMemberType]
+        self._put_checkpoint(tid, messages)
 
         resp = test_client.get(f"/api/agents/{tid}/timeline")
         assert resp.status_code == 200
@@ -389,7 +388,7 @@ class TestSystemPromptInColdLoad:
         messages: list[BaseMessage] = [SystemMessage(content="You are Meiva.")]
         for i in range(60):
             messages.append(HumanMessage(content=f"user msg {i}"))
-        self._put_checkpoint(tid, messages)  # pyright: ignore[reportUnknownMemberType]
+        self._put_checkpoint(tid, messages)
 
         resp = test_client.get(f"/api/agents/{tid}/timeline")
         oldest = resp.json()["items"][-1]["item_id"]

@@ -241,7 +241,7 @@ def test_post_message_invalid_source_422(
     assert _pending_rows(db_conn, tid) == []
 
 
-def _payload_row(conn: psycopg.Connection, agent_id: int) -> tuple[str, dict | None]:
+def _payload_row(conn: psycopg.Connection, agent_id: int) -> tuple[str, dict[str, object] | None]:
     with conn.cursor() as cur:
         cur.execute(
             "SELECT content, payload FROM inbound_messages WHERE agent_id = %s ORDER BY id",

@@ -1,1 +1,5 @@
-exports = ["faults.py", "recorder.py", "wakes.py"]
+exports = ["faults.py", "pubsub_view.py", "recorder.py", "wakes.py"]
+
+[uses]
+"recorder.py" = ["pubsub_view.py"]
+"wakes.py" = ["pubsub_view.py"]

@@ -1,9 +1,5 @@
 # meiva:note
 # `GET /sessions`, `POST /understanding/build` and `GET /understanding/builds/{id}`.
-# pyright: reportUnknownMemberType = warning
-# pyright: reportUnknownArgumentType = warning
-# pyright: reportUnknownLambdaType = warning
-# pyright: reportUnknownVariableType = warning
 
 from __future__ import annotations
 
@@ -303,7 +299,11 @@ def test_a_second_build_merges_into_live_jobs_and_the_pending_rebuild(
 def test_concurrent_builds_of_one_agent_merge_into_one_rebuild(db_conn: psycopg.Connection) -> None:
     agent, _boundary = _seed_agent_with_history(db_conn)
     with _client() as client, ThreadPoolExecutor(max_workers=4) as pool:
-        bodies = list(pool.map(lambda _i: _build(client, agent, sessions=[1, 2]), range(4)))
+
+        def build(_i: int) -> dict[str, Any]:
+            return _build(client, agent, sessions=[1, 2])
+
+        bodies = list(pool.map(build, range(4)))
     assert len({b["rebuild_id"] for b in bodies}) == 1
     assert len(_jobs(db_conn, agent)) == 3 and _count(db_conn, "understanding_rebuilds") == 1
     # meiva:note

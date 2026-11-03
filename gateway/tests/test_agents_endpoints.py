@@ -29,7 +29,9 @@ def withdrawn_model(add_models: AddModels, model_catalog: ModelCatalog) -> tuple
     return model, catalog
 
 
-def _agent_row(db: psycopg.Connection, agent_id: int) -> tuple | None:
+def _agent_row(
+    db: psycopg.Connection, agent_id: int
+) -> tuple[int, str, int | None, str | None, str] | None:
     with db.cursor() as cur:
         cur.execute(
             "SELECT id, spawner, fork_source_agent_id, "

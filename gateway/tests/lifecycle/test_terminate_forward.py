@@ -307,7 +307,9 @@ def _insert_open_task(
             "VALUES (%s, '', %s, 'user', %s, now() - make_interval(mins => %s)) RETURNING id",
             (title, status, owner, age_minutes),
         )
-        task_id: int = cur.fetchone()[0]  # type: ignore[index]
+        row = cur.fetchone()
+        assert row is not None
+        task_id: int = row[0]
     db_conn.commit()
     return task_id
 

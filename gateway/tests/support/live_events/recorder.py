@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from base.events.live.bus import EventBus
+from gateway.tests.support.live_events.pubsub_view import messages
 
 __all__ = ["LiveEventRecorder", "RecordedEvent", "recording_live_events"]
 
@@ -76,9 +77,7 @@ def recording_live_events(
 
     def listen() -> None:
         while not stop.is_set():
-            # meiva:note
-            # The redis-py client and its pubsub are untyped. The annotated shape is the one the untyped call returns.
-            message: dict[str, Any] | None = pubsub.get_message(timeout=_POLL_S)  # pyright: ignore[reportUnknownMemberType, reportAssignmentType]
+            message = messages(pubsub).get_message(timeout=_POLL_S)
             if message is None:
                 continue
             if message["type"] == "subscribe":
@@ -96,5 +95,5 @@ def recording_live_events(
     finally:
         stop.set()
         thread.join()
-        pubsub.close()  # pyright: ignore[reportUnknownMemberType]
+        pubsub.close()
         redis.close()

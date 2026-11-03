@@ -13,8 +13,11 @@ Coverage:
     refreshes the UI later; contrast the /messages data endpoint's 503)
 """
 
+from collections.abc import Sequence
+
 import psycopg
 import pytest
+from langchain_core.messages import BaseMessage
 
 from base.db import create_agent
 from base.host.env.agent_slices import ModelOverrides
@@ -31,7 +34,7 @@ def test_client(db_conn: psycopg.Connection):
         yield client
 
 
-def _put_checkpoint(agent_id: int, messages: list) -> None:
+def _put_checkpoint(agent_id: int, messages: Sequence[BaseMessage]) -> None:
     """Write channel_values.messages = `messages` directly via
     PostgresSaver.put, bypassing the graph — the endpoint only cares about
     reading back what is in the checkpoint."""

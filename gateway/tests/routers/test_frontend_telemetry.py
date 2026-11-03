@@ -15,7 +15,6 @@ writes asynchronously). The PG `events` copy was retired at the LGTM cutover
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -29,15 +28,18 @@ ELEMENT = "spawn"
 SESSION = "123e4567-e89b-12d3-a456-426614174000"
 
 
-def _payload(events: list[dict], session: str = SESSION) -> dict:
+def _payload(events: list[dict[str, str]], session: str = SESSION) -> dict[str, object]:
     return {"session_id": session, "events": events}
 
 
-def _one(page: str = PAGE, element: str = ELEMENT, **extra: str) -> dict:
+def _one(page: str = PAGE, element: str = ELEMENT, **extra: str) -> dict[str, str]:
     return {"page": page, "element": element, **extra}
 
 
-def _rows(home: Path, session: str) -> list[tuple]:  # type: ignore[no-untyped-def]
+type _MirrorRow = tuple[str, str, str, str, dict[str, object]]
+
+
+def _rows(home: Path, session: str) -> list[_MirrorRow]:  # type: ignore[no-untyped-def]
     """This session's `frontend_interaction` mirror lines, oldest first,
     after a sync barrier. Each test uses a fresh session id (the mirror is
     cumulative within a worker — the PG TRUNCATE barrier is gone with the
@@ -53,7 +55,7 @@ def _rows(home: Path, session: str) -> list[tuple]:  # type: ignore[no-untyped-d
     path = logs_dir(home=home) / f"events-{day}.jsonl"
     if not path.exists():
         return []
-    out: list[tuple[Any, ...]] = []
+    out: list[_MirrorRow] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         try:
             obj = json.loads(line)
@@ -103,7 +105,7 @@ class TestFrontendTelemetryIngest:
             )
         assert r.status_code == 204
         rows = _rows(unit_home, session)
-        assert len(rows) == 3  # pyright: ignore[reportUnknownArgumentType]
+        assert len(rows) == 3
         for row in rows:
             assert row[0] == "frontend_interaction"
             assert row[1] == "telemetry"
@@ -186,7 +188,7 @@ class TestFrontendTelemetryIngest:
             r = client.post("/api/frontend-telemetry", json=_payload(events, session=session))
         assert r.status_code == 204
         rows = _rows(unit_home, session)
-        assert len(rows) == ft_router.MAX_EVENTS_PER_MINUTE  # pyright: ignore[reportUnknownArgumentType]
+        assert len(rows) == ft_router.MAX_EVENTS_PER_MINUTE
 
     def test_second_session_gets_own_budget(self, unit_home: Path) -> None:  # type: ignore[no-untyped-def]
         session = _session()
@@ -202,5 +204,5 @@ class TestFrontendTelemetryIngest:
             )
         assert r1.status_code == 204
         assert r2.status_code == 204
-        assert len(_rows(unit_home, session)) == ft_router.MAX_EVENTS_PER_MINUTE  # pyright: ignore[reportUnknownArgumentType]
-        assert len(_rows(unit_home, other)) == 3  # pyright: ignore[reportUnknownArgumentType]
+        assert len(_rows(unit_home, session)) == ft_router.MAX_EVENTS_PER_MINUTE
+        assert len(_rows(unit_home, other)) == 3
