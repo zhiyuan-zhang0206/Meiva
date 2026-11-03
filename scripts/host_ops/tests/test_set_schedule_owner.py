@@ -6,10 +6,12 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import psycopg
 import pytest
 
+from base.host.env.boot_policy import PLACEHOLDER_DB_URL
 from scripts.host_ops import set_schedule_owner
 
 
@@ -112,4 +114,45 @@ def test_a_blank_reason_is_refused_before_anything_is_written() -> None:
         set_schedule_owner.reason_argument("   ")
     assert set_schedule_owner.reason_argument("  because the card is the P0 lead's  ") == (
         "because the card is the P0 lead's"
+    )
+
+
+# meiva:note
+# The trap this tool fell into once: a bare `python scripts/host_ops/...` inherits a shell that
+# exported MEIVA_DB_URL, settings ignores that variable, and the run dials the placeholder. The
+# refusal has to name where the value should have come from and the variable it ignored, or the
+# reader goes looking for a network fault.
+#
+# The two directions of the fact matter: an absent .env file sends the reader to the home it named,
+# a present file without the key sends them into that file. Both are asserted, and both exit
+# non-zero rather than printing a warning.
+def test_an_absent_env_file_names_the_home(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit) as refused:
+        set_schedule_owner.connect(PLACEHOLDER_DB_URL, tmp_path)
+    message = str(refused.value)
+    assert "does not exist" in message
+    assert "MEIVA_HOME" in message
+    assert "MEIVA_DB_URL" in message
+    assert getattr(refused.value, "code", 0) != 0
+
+
+def test_a_present_env_file_without_the_key_names_the_file(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text("MEIVA_REDIS_URL=redis://127.0.0.1:1/0\n", encoding="utf-8")
+    with pytest.raises(SystemExit) as refused:
+        set_schedule_owner.connect(PLACEHOLDER_DB_URL, tmp_path)
+    message = str(refused.value)
+    assert str(tmp_path / ".env") in message
+    assert "carries no MEIVA_DB_URL" in message
+    assert getattr(refused.value, "code", 0) != 0
+
+
+# meiva:note
+# The other direction: a real URL passes the gate. This asserts the decision, not a dial -- `connect`
+# would open a socket, which is the one thing a unit test must not do here.
+def test_a_real_url_passes_the_gate(tmp_path: Path) -> None:
+    assert (
+        set_schedule_owner.unresolvable_reason(
+            "postgresql://meiva@db.example:6432/meiva_main", tmp_path
+        )
+        is None
     )

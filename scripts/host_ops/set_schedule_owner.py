@@ -19,9 +19,14 @@ import socket
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
+from urllib.parse import urlsplit
 
 import psycopg
 from psycopg.rows import class_row
+
+from base.host.env.boot_policy import PLACEHOLDER_DB_URL
+from base.paths.home import resolve_meiva_home
 
 
 def _positive_id(value: str) -> int:
@@ -108,12 +113,60 @@ def assign_owner(
     return previous, "updated"
 
 
+# meiva:note
+# The reason the run cannot dial, or None when it can. The check sits at the connection, not at
+# settings load, because a process that deliberately carries the placeholder is a legitimate way to
+# say "this box has no database" -- refusing there would turn every such tool red.
+#
+# The comparison is whole-string, the same one `base/cluster/dataplane/direct_url.py:30` makes -- this
+# is the repository's standing reading of the placeholder, not a comparison invented here. It holds
+# only while settings hands back the file's value unchanged; if `base/config/service_read.py` ever
+# applies its `project_service_db_url` projection to this URL, compare components instead.
+#
+# The message names the two halves of the trap this tool hit once: the address it read and where it
+# came from, and the variable it ignored. A bare "connection refused" sent its first reader looking
+# for a network fault. It forks on a fact, because an absent .env file and a .env without the key
+# send the reader to different places -- the first to the home it named, the second to the file. The
+# URL is never printed whole: it carries the password.
+def unresolvable_reason(db_url: str, home: Path) -> str | None:
+    if db_url != PLACEHOLDER_DB_URL:
+        return None
+    parts = urlsplit(db_url)
+    env_file = home / ".env"
+    address = f"{parts.hostname}:{parts.port}"
+    ignored = (
+        "The process environment's MEIVA_DB_URL is not read by settings, so exporting it in the "
+        "shell changes nothing."
+    )
+    if not env_file.is_file():
+        return (
+            f"no database to assign an owner in: {env_file} does not exist, so settings fell back "
+            f"to the boot placeholder ({address}). {ignored} If the home MEIVA_HOME names is not "
+            f"the one you meant, point it at the one that holds a .env."
+        )
+    return (
+        f"no database to assign an owner in: settings resolved {address} from {env_file}, which "
+        f"carries no MEIVA_DB_URL or carries the placeholder itself. {ignored} Put it in "
+        f"{env_file}, or point MEIVA_HOME at the home that holds one."
+    )
+
+
+# meiva:note
+# The connection this run writes through: refuse a placeholder home before dialing, then hand the
+# URL to psycopg. Both facts come in as data so a test can drive every direction without patching.
+def connect(db_url: str, home: Path) -> psycopg.Connection:
+    refusal = unresolvable_reason(db_url, home)
+    if refusal is not None:
+        raise SystemExit(refusal)
+    return psycopg.connect(db_url)
+
+
 def main(argv: list[str]) -> int:
     args = _parse(argv)
     from base.config import settings
 
     owner: int | None = None if args.clear else args.owner
-    with psycopg.connect(settings.data_plane.db_url) as conn:
+    with connect(settings.data_plane.db_url, resolve_meiva_home()) as conn:
         previous, outcome = assign_owner(conn, args.schedule_id, owner, args.reason)
         if args.dry_run:
             conn.rollback()
