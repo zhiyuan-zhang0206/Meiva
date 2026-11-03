@@ -110,7 +110,9 @@ def cluster_status_op(
 # options + reasoning-effort ladders without starting an agent turn or spending model quota;
 # it runs on the daemon's worker thread so a slow CLI never blocks the event loop.
 # meiva:link base/agents/docs/harness/harness.meiva.okf.md
-def harness_probe_op(machine: str, *, now: datetime) -> HarnessProbeResult:
+def harness_probe_op(
+    machine: str, *, now: datetime, environ: Mapping[str, str]
+) -> HarnessProbeResult:
     return HarnessProbeResult(
         machine=machine,
         harnesses=[
@@ -130,7 +132,7 @@ def harness_probe_op(machine: str, *, now: datetime) -> HarnessProbeResult:
                 ],
                 default_model=row.default_model,
             )
-            for row in probe_local_harnesses(now=now)
+            for row in probe_local_harnesses(now=now, environ=environ)
         ],
     )
 

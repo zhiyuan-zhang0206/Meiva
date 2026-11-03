@@ -60,9 +60,10 @@ skill directory, whose `references/` holds the collaboration contract and whose
 - `_common` — shared by the launchers: workspace path resolution, where a typed path has its
   leading `~` expanded against the home the launcher entry read and a `~someone` spelling is
   refused on stderr instead of read from the user database; `LaunchSite`, the facts a
-  launch reads from the process once (the agent's shell sessions, the home, the cluster
-  home, the directory a new session starts in, the machine facts, and the clock: the timers
-  every wait spends and the instant a first-run preset is stamped with); a new owner generation
+  launch takes from the bound context once (`meiva.context`: the user home, the cluster home,
+  and the clock: the timers every wait spends and the instant a first-run preset is stamped
+  with), beside the agent's shell sessions, the directory a new session starts in and the
+  machine facts; a new owner generation
   for each launch, after the workspace's dead ones are reclaimed; owner-record status
   (every generation of the workspace) and cancel; and the lineage facts read from the
   cluster.
@@ -79,9 +80,9 @@ The launchers are shells over a `LaunchSite`: they type the plan's lines into re
 sessions, wait with the site's timers and the pacing a caller gives (short windows in tests,
 the launch's own constants otherwise) and reclaim every session they opened when a step
 fails. A wait never reads a clock for itself: a new wait in either launcher takes
-`LaunchSite.timers` as a parameter, and a `SYSTEM_TIMERS` read in `claude.py`, `codex.py` or
-`_claude_checks.py` puts a second owner of the process clock back and is charged as an
-`ambient-read`. A test drives a wait with `ManualTimers` and spends no wall time
+`LaunchSite.timers` as a parameter, and a `SYSTEM_TIMERS` read anywhere in this package — or a
+`Path.home()`/`meiva_home()` in `_common.py` — puts a second owner of a process fact back and is
+charged as an `ambient-read`; the site takes the clock and both homes from `meiva.context`. A test drives a wait with `ManualTimers` and spends no wall time
 (`tests/test_waits_spend_their_timers.py`). Tests run
 them against a real pty-sessions service and stand-in `claude` and `codex` programs
 installed through the test home's `.bash_profile` (`tests/fake_tools.py`), so the

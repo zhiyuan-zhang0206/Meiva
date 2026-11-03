@@ -10,9 +10,7 @@ exports = ["antigravity.py", "claude.py", "codex.py", "plans"]
 "codex.py" = ["_common.py", "plans"]
 "tests" = ["__init__.py", "_claude_checks.py", "_common.py", "_first_run.py", "antigravity.py", "claude.py", "codex.py", "plans"]
 
-[roots]
-"_common.py" = { kinds = ["home", "clock"], why = "launch_site() resolves the operator's Path.home() for Claude and Codex user-level config files, and reads the process clock once for the site: the timers every launch wait spends (`LaunchSite.timers`) and the instant a first-run preset is stamped with (`LaunchSite.now`)" }
-"claude.py" = { kinds = ["random", "environ"], why = "launch() mints a fresh UUID for a new Claude Code session when --resume is not given; it also creates scratch space under the temporary directory (TMPDIR)" }
-
 [debt.ambient-read]
+"claude.py#environ tempfile.TemporaryDirectory()" = { count = 1, owner = "#8237", until = "waits for nothing that can arrive: `launch()` opens one scratch directory for the failure marker a supervised Claude Code launch leaves when the CLI never answers, and the plan it hands `run_supervised_launch` owns that path for as long as the launch runs; the site carries the home, the cluster and the clock, and a marker directory is none of the three" }
+"claude.py#random tempfile.TemporaryDirectory()" = { count = 1, owner = "#8237", until = "waits for nothing that can arrive: the marker directory's name is minted by the OS so two launches in one process cannot share a marker; the plan prints the session id, never where the marker sits" }
 "codex.py#pid sys.executable" = { count = 1, owner = "#8237", until = "waits for `supervisor_command` to take the interpreter path from its caller: it reads `sys.executable` itself" }

@@ -118,6 +118,13 @@ class Clock:
     def now(self) -> datetime:
         return self._now()
 
+    # meiva:note
+    # The timers this clock measures waits with, so a component that was handed a `Clock` spends
+    # its waits on the same source that produced `now()` instead of reaching for `SYSTEM_TIMERS`.
+    @property
+    def timers(self) -> Timers:
+        return self._timers
+
     def zone(self) -> ZoneInfo | None:
         name = self._config.authoritative_timezone
         if name is None:

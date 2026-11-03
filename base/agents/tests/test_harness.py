@@ -115,6 +115,7 @@ def _probe(
         str(home / "empty-bin"),
         _BIN_DIRS,
         now=_NOW,
+        environ={},
         cli_runner=cli_runner,
         model_prober=model_prober,
     )
@@ -122,7 +123,9 @@ def _probe(
 
 
 def test_every_harness_gets_one_readable_row(tmp_path: Path) -> None:
-    rows = probe_local_harnesses(tmp_path, str(tmp_path / "empty-bin"), _BIN_DIRS, now=_NOW)
+    rows = probe_local_harnesses(
+        tmp_path, str(tmp_path / "empty-bin"), _BIN_DIRS, now=_NOW, environ={}
+    )
     assert [row.harness for row in rows] == list(Harness)
     assert all(row.reason for row in rows)
 
@@ -225,6 +228,7 @@ def test_a_path_install_is_reported_as_on_path(tmp_path: Path) -> None:
         str(binary.parent),
         _BIN_DIRS,
         now=_NOW,
+        environ={},
         cli_runner=_silent_cli,
         model_prober=_stub_model_prober,
     )

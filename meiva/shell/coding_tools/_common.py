@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
 from base.api_contracts.agent_contract import AgentNotFound, AgentStatus, GatewayUnavailable
-from base.clock import SYSTEM_TIMERS, Timers
+from base.clock import Timers
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.log import logger
-from base.paths import meiva_home
 from base.paths.expand import expand_home
 from base.sessions import coding_session_owner, tool_capabilities
 from base.sessions import provenance as provenance_block
@@ -74,14 +73,16 @@ class LaunchSite:
 # The launch site of this process. It raises when the process has no agent identity: a launch is an agent's.
 def launch_site() -> LaunchSite:
     shell = sessions.shell_sessions()
+    context = process_context.current_context()
+    clock = context.require_clock()
     return LaunchSite(
         shell=shell,
-        home=Path.home(),
-        cluster=meiva_home(),
+        home=context.require_user_home(),
+        cluster=context.require_meiva_home(),
         session_cwd=agent_workspace(shell.agent_id),
         host=sessions.session_host(sessions.process_environ()),
-        timers=SYSTEM_TIMERS,
-        now=datetime.now(UTC),
+        timers=clock.timers,
+        now=clock.now(),
     )
 
 

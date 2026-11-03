@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -365,10 +365,10 @@ _CLI_TIMEOUT_S: dict[Harness, float] = {
 CliRunner = Callable[..., "subprocess.CompletedProcess[str]"]
 
 
-def _cli_environment() -> dict[str, str]:
-    from base.host.env.registry import child_env, process_environment
+def _cli_environment(environ: Mapping[str, str]) -> dict[str, str]:
+    from base.host.env.registry import child_env
 
-    environment = child_env(process_environment())
+    environment = child_env(environ)
     return {**environment, "PATH": harness_child_path(path_env=environment.get("PATH"))}
 
 
@@ -424,11 +424,11 @@ def _cli_login(
     harness: Harness,
     binary: str,
     *,
+    environment: Mapping[str, str],
     runner: CliRunner = subprocess.run,
-    environment: dict[str, str] | None = None,
 ) -> _LoginEvidence:
     args = _CLI_STATUS_ARGS[harness]
-    env = _cli_environment() if environment is None else environment
+    env = dict(environment)
     try:
         done = runner(
             [binary, *args],
@@ -455,6 +455,7 @@ def _probe_external(
     bin_dirs: Sequence[str],
     *,
     now: datetime,
+    environ: Mapping[str, str],
     cli_runner: CliRunner = subprocess.run,
     model_prober: ModelProber = probe_cli_models,
 ) -> HarnessProbe:
@@ -468,7 +469,7 @@ def _probe_external(
             harness, "unavailable", f"the {binary} command was not found on PATH or in {searched}"
         )
     installed = f"installed at {path}" if on_path else f"installed at {path} (not on PATH)"
-    env = _cli_environment()
+    env = _cli_environment(environ)
     cli_evidence = _cli_login(harness, path, runner=cli_runner, environment=env)
     evidence = (
         _stored_login(harness, home, now=now) if cli_evidence.signed_in is None else cli_evidence
@@ -535,6 +536,7 @@ def probe_local_harnesses(
     bin_dirs: Sequence[str] | None = None,
     *,
     now: datetime,
+    environ: Mapping[str, str],
     cli_runner: CliRunner = subprocess.run,
     model_prober: ModelProber = probe_cli_models,
 ) -> list[HarnessProbe]:
@@ -550,6 +552,7 @@ def probe_local_harnesses(
                 path_env,
                 resolved_bin_dirs,
                 now=now,
+                environ=environ,
                 cli_runner=cli_runner,
                 model_prober=model_prober,
             )
