@@ -1014,6 +1014,11 @@ reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/skills/platform/impersonator-guide"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/skills/platform/meiva-guide"
 reportAny = "error"
 reportExplicitAny = "error"

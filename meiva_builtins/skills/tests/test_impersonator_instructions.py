@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import psycopg
@@ -84,6 +84,28 @@ def test_instruction_script_requires_the_agent(
         instruction_reader.parse_target(["0"])
     assert exit_info.value.code == 2
     assert "--agent" in capsys.readouterr().err
+
+
+# meiva:note
+# `native_snapshot()` answers `Any`, so `snapshot_messages` is the check that a borrowed agent's
+# snapshot really carries messages: a state object with no message list, and a list holding
+# something that is not a message, are both refused by name.
+def test_snapshot_messages_refuses_a_snapshot_without_messages(instruction_reader: Any) -> None:
+    with pytest.raises(TypeError, match="no message sequence"):
+        instruction_reader.snapshot_messages(SimpleNamespace())
+
+
+def test_snapshot_messages_refuses_a_snapshot_holding_a_non_message(
+    instruction_reader: Any,
+) -> None:
+    snapshot = SimpleNamespace(messages=[SystemMessage(content="Native rules"), "not a message"])
+    with pytest.raises(TypeError, match="not a message"):
+        instruction_reader.snapshot_messages(snapshot)
+
+
+def test_snapshot_messages_reads_the_messages_a_snapshot_carries(instruction_reader: Any) -> None:
+    messages = [SystemMessage(content="Native rules")]
+    assert instruction_reader.snapshot_messages(SimpleNamespace(messages=messages)) == messages
 
 
 # meiva:note
