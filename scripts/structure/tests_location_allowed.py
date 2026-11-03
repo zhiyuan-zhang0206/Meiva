@@ -333,10 +333,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "scans every system-note writer in agent/, meiva_builtins/ and demos/ for a NoteTag value",
     ),
-    "tests/contracts/test_skill_tools_group.py": (
-        "contract",
-        "reads the `skill-tools` and `svc-*` dependency groups in pyproject.toml, scans the tree for imports of the skill libraries, and exports the two service faces",
-    ),
     "tests/contracts/test_lint_truncate_isolation.py": (
         "contract",
         "keeps the per-test TRUNCATE list in step with db/schema.sql and migrations/",

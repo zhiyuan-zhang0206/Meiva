@@ -61,7 +61,7 @@ LangChain types `AIMessage(Chunk).content` weakly as `str | list[str | dict[str,
 
 ### Claude Agent SDK bridge
 [[../../harness/docs/harness.meiva.okf.md]] — shared half; unwired.
-[[../../harness/claude/docs/claude.meiva.okf.md]] — Claude adapter; opt-in extra.
+[[../../harness/claude/docs/claude.meiva.okf.md]] — Claude adapter.
   delivery contract.
 
 ### decision models — [[base/lm/docs/decision-models.meiva.okf.md]]

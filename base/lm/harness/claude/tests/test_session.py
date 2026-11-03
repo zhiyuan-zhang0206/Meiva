@@ -1,20 +1,12 @@
 from __future__ import annotations
 
-import asyncio
-import sys
 from pathlib import Path
 
 import pytest
 
-from base.clock.tests.fakes import system_clock
 from base.lm.harness import ClusterFact, EntryPoint, FileSessionRegistry, Handoff
-from base.lm.harness.base_session import SessionBinding
-from base.lm.harness.claude import DEFAULT_MODEL, BridgeConfig
-from base.lm.harness.claude.session import (
-    ClaudeSession,
-    MissingClaudeSdkError,
-    SessionClosedError,
-)
+from base.lm.harness.claude import DEFAULT_MODEL
+from base.lm.harness.claude.session import SessionClosedError
 from base.lm.harness.claude.tests import fake_sdk as fake
 from base.lm.harness.claude.tests.fake_sdk import Block, Emit, Say
 from base.lm.harness.claude.tests.support import start
@@ -237,28 +229,12 @@ async def test_resume_does_not_reinject_the_handoff(tmp_path: Path) -> None:
         await second.stop()
 
 
-def test_a_missing_extra_names_the_install_command(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # meiva:note
-    # The SDK is an optional extra: a machine without it must still be able to
-    # import the package, and the failure has to arrive where the adapter is
-    # actually used — with the exact install command, not an ImportError traceback.
-    # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
-    monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
-    session = ClaudeSession(
-        BridgeConfig(cwd=tmp_path), environ={}, binding=SessionBinding(), clock=system_clock()
-    )
-    with pytest.raises(MissingClaudeSdkError, match=r"pip install 'meiva\[harness-claude\]'"):
-        asyncio.run(session.start())
-
-
 def test_the_shared_package_does_not_reach_into_an_adapter() -> None:
     # meiva:note
     # `base.lm.harness` is the half every provider shares; importing it must not
-    # pull in one adapter (nor its optional dependency). The check is on the
-    # module source because an import-time side effect is exactly what this test
-    # exists to prevent, and importing in-process cannot prove absence.
+    # pull in one adapter. The check is on the module source because an
+    # import-time side effect is exactly what this test exists to prevent, and
+    # importing in-process cannot prove absence.
     # meiva:link base/lm/harness/docs/harness.meiva.okf.md
     import base.lm.harness as shared
 

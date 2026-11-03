@@ -24,8 +24,6 @@ reaping result, the handoff size in bytes, and the token/cost totals.
 
 ## Requirements
 
-- The Claude adapter is an optional extra: `pip install -e '.[harness-claude]'`
-  (a development checkout gets it from the dev dependency group).
 - A Claude subscription login on the machine running it (`claude auth status`
   reports `authMethod: claude.ai`). The demo never sets or reads an API key; an
   `ANTHROPIC_API_KEY` exported in the shell is blanked for the child.

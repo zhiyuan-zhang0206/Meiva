@@ -21,4 +21,4 @@
 "settle.py" = "strict"
 "session.py" = { mode = "none", why = "the shell that runs one DeepSeek ACP session: it opens the connection, awaits the requests requests.py describes, routes what the runtime sends through settle.py route_notification, and assigns the answers to its own state; the settlement, its cost and the running totals are decided in settle.py" }
 "usage.py" = "strict"
-"usage_files.py" = { mode = "none", why = "the shell that finds and decodes one session's usage log: it globs and stats the candidates expected_log_paths orders and missing_log words, decompresses the bytes (zstd, or the CLI when the wheel is absent), and hands them to usage.parse_usage" }
+"usage_files.py" = { mode = "none", why = "the shell that finds and decodes one session's usage log: it globs and stats the candidates expected_log_paths orders and missing_log words, decompresses the bytes, and hands them to usage.parse_usage" }
