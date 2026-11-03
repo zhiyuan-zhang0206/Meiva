@@ -5,6 +5,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import IO
 
 import pytest
 
@@ -55,8 +56,9 @@ class Holder:
             stdout=subprocess.PIPE,
             text=True,
         )
-        assert self._process.stdout is not None
-        assert self._process.stdout.readline().strip() == "locked"
+        stdout: IO[str] | None = self._process.stdout
+        assert stdout is not None
+        assert stdout.readline().strip() == "locked"
 
     @property
     def pid(self) -> int:

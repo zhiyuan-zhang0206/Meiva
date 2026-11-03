@@ -9,8 +9,28 @@ from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import BaseModel
 
+from base.host.boundary.untyped import object_of
 from meizel.tests.synthetic import commit, git
+
+
+class _Hook(BaseModel):
+    id: str
+    files: str | None = None
+    stages: list[str] | None = None
+    always_run: bool | None = None
+    verbose: bool | None = None
+    entry: str | None = None
+
+
+class _HookRepo(BaseModel):
+    hooks: list[_Hook]
+
+
+class _PreCommitConfig(BaseModel):
+    repos: list[_HookRepo]
+
 
 ROOT = Path(__file__).resolve().parents[2]
 MEIZEL_PUSH = ROOT / "scripts/hooks/prepush-meizel.sh"
@@ -146,14 +166,18 @@ def test_meizel_push_rejects_an_unknown_range(tmp_path: Path) -> None:
 
 
 def test_meizel_hook_keeps_role_inputs_without_a_separate_gate() -> None:
-    config = yaml.safe_load((ROOT / ".pre-commit-config.yaml").read_text())
-    hooks = {h["id"]: h for r in config["repos"] for h in r["hooks"]}
+    config = _PreCommitConfig.model_validate(
+        object_of(yaml.safe_load, (ROOT / ".pre-commit-config.yaml").read_text())
+    )
+    hooks = {h.id: h for r in config.repos for h in r.hooks}
     assert "lint-meizel-roles" not in hooks
     changed = hooks["meizel-check-changed"]
+    assert changed.files is not None
     for path in ["ordinary.py", "scan.sh", "pkg/data.toml", ".pre-commit-config.yaml", "x.yml"]:
-        assert re.search(changed["files"], path)
+        assert re.search(changed.files, path)
     hook = hooks["meizel-check-full"]
-    assert hook["stages"] == ["pre-push"]
-    assert hook["always_run"] is True
-    assert hook["verbose"] is True
-    assert shlex.split(hook["entry"]) == ["bash", "scripts/hooks/prepush-meizel.sh"]
+    assert hook.stages == ["pre-push"]
+    assert hook.always_run is True
+    assert hook.verbose is True
+    assert hook.entry is not None
+    assert shlex.split(hook.entry) == ["bash", "scripts/hooks/prepush-meizel.sh"]

@@ -740,6 +740,9 @@ root = "scripts/ci/pull_requests/tests"
 root = "scripts/ci/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "scripts/data_plane_ops/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "scripts/host_ops/onboarding/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -896,6 +899,16 @@ reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "scripts/data_plane_ops"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "scripts/entrypoints"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "scripts/hooks"
 reportAny = "error"
 reportExplicitAny = "error"
@@ -916,7 +929,17 @@ reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "scripts/provision"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "scripts/structure"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "scripts/tests"
 reportAny = "error"
 reportExplicitAny = "error"
 

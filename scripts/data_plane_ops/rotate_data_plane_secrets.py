@@ -24,7 +24,7 @@ from dataclasses import asdict, dataclass, field, fields
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Protocol, Self, TypeGuard
+from typing import Protocol, Self
 
 import redis
 from dotenv import dotenv_values
@@ -38,6 +38,9 @@ from base.cluster import (
 )
 from base.cluster.derive import REDIS_PASSWORD_ENV
 from base.config import settings
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.options import options
+from base.host.boundary.untyped import object_of
 from base.host.env.dotenv_file import upsert_env
 from base.host.net.url_secret import url_host, url_with_password
 from base.paths import meiva_home
@@ -101,14 +104,6 @@ def _journal_stamp(record: dict[str, object]) -> str:
     return stamp
 
 
-def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
-    return isinstance(value, dict)
-
-
-def _is_str_object_dict(value: object) -> TypeGuard[dict[str, object]]:
-    return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
-
-
 @dataclass(frozen=True)
 class GatewayContext:
     home: Path
@@ -170,10 +165,10 @@ class RotationState:
     @classmethod
     def load(cls, path: Path) -> RotationState:
         try:
-            raw: object = json.loads(path.read_text())
+            raw = object_of(json.loads, path.read_text())
         except (json.JSONDecodeError, UnicodeDecodeError):
             raise RuntimeError("invalid Redis rotation journal JSON") from None
-        record = raw if _is_str_object_dict(raw) else {}
+        record = raw if is_object_dict(raw) else {}
         if set(record) != {item.name for item in fields(cls)}:
             raise RuntimeError(
                 f"{path} is not a Redis-only rotation journal (Postgres credentials no "
@@ -462,6 +457,16 @@ def rotation_phases(*, execute: bool) -> tuple[RotationPhase, ...]:
     )
 
 
+# meiva:note
+# The flags `_build_parser` declares, read once so the rotation holds typed values instead of the parser's `Any`.
+@dataclass(frozen=True)
+class Options:
+    scope: str
+    execute: bool
+    yes: bool
+    resume: str | None
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Rotate the Redis data-plane credentials.")
     parser.add_argument(
@@ -490,7 +495,7 @@ def run_rotation(
             file=sys.stderr,
         )
         return 1
-    args = _build_parser().parse_args(argv)
+    args = options(_build_parser().parse_args(argv), Options)
     try:
         _require_gateway_context(context.profile)
     except RuntimeError:
@@ -547,7 +552,7 @@ def main(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 1
-    args = _build_parser().parse_args(argv)
+    args = options(_build_parser().parse_args(argv), Options)
     try:
         _require_gateway_context(settings.profile)
     except RuntimeError:

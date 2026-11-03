@@ -544,7 +544,7 @@ def _window_description(*, branch: str, days: int | None, commits: int | None, t
 
 
 # meiva:note
-# The command line, typed: the window is `days` or `commits` (an exclusive pair), neither when the default applies.
+# The window is `days` or `commits` (an exclusive pair), neither when the default applies.
 @dataclass(frozen=True)
 class Options:
     repo: str

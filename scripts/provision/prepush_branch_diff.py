@@ -7,6 +7,7 @@ import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
+from typing import IO
 
 _HOOK_ID = re.compile(r"^- hook id: (\S+)$")
 _FAILURE = re.compile(r"^- (?:exit code: \d+|files were modified by this hook)$")
@@ -146,8 +147,9 @@ def _run(
         command, cwd=directory, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
     )
     output: list[str] = []
-    if process.stdout is not None:
-        for line in process.stdout:
+    stdout: IO[str] | None = process.stdout
+    if stdout is not None:
+        for line in stdout:
             output.append(line)
             if stream:
                 sys.stdout.write(line)
