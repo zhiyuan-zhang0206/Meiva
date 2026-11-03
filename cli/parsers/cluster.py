@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from base.deploy.progress_timeout import UNIT_BUNDLE_TTL_S
-from cli.options import options
+from cli.boundary.options import options
 
 
 @dataclass(frozen=True)

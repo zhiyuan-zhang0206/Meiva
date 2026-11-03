@@ -11,7 +11,7 @@ import argparse
 import sys
 from dataclasses import dataclass
 
-from cli.options import options
+from cli.boundary.options import options
 
 
 @dataclass(frozen=True)

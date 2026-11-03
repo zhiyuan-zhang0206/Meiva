@@ -16,7 +16,7 @@ from pathlib import Path
 
 from base.host import runtime_interpreter
 from base.host.runtime_interpreter import LoadedRuntimeIdentity
-from cli.options import attribute
+from cli.boundary.options import attribute
 
 
 # meiva:note
