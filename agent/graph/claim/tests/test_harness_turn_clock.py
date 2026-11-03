@@ -22,6 +22,7 @@ from base.lm.harness import (
     HarnessTurn,
     ReasoningDelta,
     ReasoningText,
+    TextDelta,
     ToolResult,
     ToolUse,
     Usage,
@@ -226,3 +227,97 @@ def test_existing_clock_ignores_unused_rendering_config_until_the_next_capture(
     result = json.loads(completed.stdout.splitlines()[-1])
 
     assert result == {"projected": True, "next_capture_refused": True, "initial_bad_refused": True}
+
+
+async def test_async_tool_result_after_completed_text_flushes_step_before_settling_result(
+    live_events: LiveEvents,
+) -> None:
+    timers = ManualTimers(wall_start=START)
+    clock = Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
+    projector = HarnessTurnProjector(
+        event_publisher=live_events.publisher,
+        agent_id=7,
+        base_idx=9,
+        turn_progress=TurnProgress(),
+        clock=clock,
+        non_human_wake=True,
+    )
+    projector.on_event(
+        ToolUse(
+            turn_id="turn",
+            tool_use_id="call_1",
+            name="run_command",
+            tool_input={"CommandLine": "python3 -c 'import meiva; meiva.self.pause_heartbeat()'"},
+        )
+    )
+    timers.advance(6)
+    projector.on_event(ReasoningText(turn_id="turn", text="Pausing heartbeat while idle."))
+    projector.on_event(TextDelta(turn_id="turn", text="Waiting for task completion."))
+    projector.on_event(AssistantText(turn_id="turn", text="Waiting for task completion."))
+    timers.advance(11)
+    projector.on_event(
+        ToolResult(
+            turn_id="turn",
+            tool_use_id="call_1",
+            content="Heartbeat paused.\n",
+            is_error=False,
+        )
+    )
+    timers.advance(2)
+    projector.on_event(ReasoningText(turn_id="turn", text="Task finished."))
+    projector.on_event(AssistantText(turn_id="turn", text="Heartbeat successfully paused."))
+    timers.advance(1)
+    messages = projector.finish((_turn("Heartbeat successfully paused."),))
+    events = await live_events.events()
+
+    roles_and_ids = [(ev["role"], ev.get("item_id")) for ev in events]
+    assert roles_and_ids.index(("chat_delta", "11.1")) < roles_and_ids.index(
+        ("exec_output", "10.0")
+    )
+    assert ("reasoning_start", "12.0") in roles_and_ids
+    assert ("chat_start", "12.1") in roles_and_ids
+
+    assert len(messages) == 4
+    assert isinstance(messages[0], AIMessage) and messages[0].tool_calls[0]["id"] == "call_1"
+    assert isinstance(messages[1], ToolMessage) and messages[1].content == "Heartbeat paused.\n"
+    assert messages[1].additional_kwargs["meiva_exec_ms"] == 17000
+    assert messages[2].additional_kwargs["meiva_reasoning_ms_by_block"] == {"0": 6000}
+    assert (
+        messages[2].additional_kwargs["meiva_created_at"]
+        == (START + timedelta(seconds=17)).isoformat()
+    )
+    assert messages[3].additional_kwargs["meiva_reasoning_ms_by_block"] == {"0": 2000}
+    assert (
+        messages[3].additional_kwargs["meiva_created_at"]
+        == (START + timedelta(seconds=20)).isoformat()
+    )
+
+
+async def test_async_tool_result_followed_by_next_tool_use_does_not_merge_prior_text() -> None:
+    timers = ManualTimers(wall_start=START)
+    clock = Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
+    projector = _projector(clock)
+    projector.on_event(
+        ToolUse(
+            turn_id="turn", tool_use_id="call_1", name="Bash", tool_input={"command": "sleep 6"}
+        )
+    )
+    timers.advance(5)
+    projector.on_event(AssistantText(turn_id="turn", text="Waiting on background command."))
+    timers.advance(3)
+    projector.on_event(_result("call_1"))
+    timers.advance(1)
+    projector.on_event(
+        ToolUse(turn_id="turn", tool_use_id="call_2", name="Bash", tool_input={"command": "echo 2"})
+    )
+    timers.advance(1)
+    projector.on_event(_result("call_2"))
+    messages = projector.finish((_turn(""),))
+
+    assert len(messages) == 5
+    assert isinstance(messages[2], AIMessage)
+    assert messages[2].content == "Waiting on background command."
+    assert messages[2].tool_calls == []
+    assert isinstance(messages[3], AIMessage)
+    assert messages[3].content == ""
+    assert messages[3].tool_calls[0]["id"] == "call_2"

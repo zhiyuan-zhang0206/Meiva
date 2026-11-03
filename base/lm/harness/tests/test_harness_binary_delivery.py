@@ -51,3 +51,4 @@ def test_a_given_environment_is_never_dropped(tmp_path: Path) -> None:
     environment = wiring.session_environ({"HOME": str(tmp_path), "MEIVA_HOME": str(tmp_path)})
 
     assert environment["MEIVA_HOME"] == str(tmp_path)
+    assert Path(environment["MEIVA_PYTHON"]).name.startswith("python")

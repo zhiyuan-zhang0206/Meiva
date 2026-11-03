@@ -25,7 +25,11 @@ and none of it is a graph-state fact, so `MeivaContext.clients` holds it as a `C
 - a caller that needs a different gateway client derives a sibling with
   `ClientSet.with_gateway(builder)` instead of rewriting a live set: the sibling keeps the endpoint
   and the other builders, builds and closes the clients its builders return (the gateway client
-  among them), and carries no event-pipeline factory (a process has one writer).
+  among them), and carries no event-pipeline factory (a process has one writer);
+- `ClientSet.event_producer()` answers `self.event_pipeline` only when no process-wide pipeline is
+  bound and this set carries a pipeline or factory, so SDK operations inside quiet attachments and
+  launched children route direct telemetry/audit projections through their context's writer while
+  daemon/exec processes keep their bound process writer.
 
 A failure to build a client raises at the call that needed it; nothing here swallows one.
 An explicit `Database` factory remains the only source of SQL configuration even

@@ -33,10 +33,17 @@ def test_oauth_blanks_both_credential_variables() -> None:
 # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
 def test_the_registration_handle_reaches_the_cli() -> None:
     env = build_env(
-        {"MEIVA_HARNESS_HANDLE": "handle-1", "MEIVA_HOME": "/home"}, AuthConfig(), host={}
+        {
+            "MEIVA_HARNESS_HANDLE": "handle-1",
+            "MEIVA_HOME": "/home",
+            "MEIVA_PYTHON": "/opt/meiva/.venv/bin/python",
+        },
+        AuthConfig(),
+        host={},
     )
     assert env["MEIVA_HARNESS_HANDLE"] == "handle-1"
     assert env["MEIVA_HOME"] == "/home"
+    assert env["MEIVA_PYTHON"] == "/opt/meiva/.venv/bin/python"
 
 
 def test_api_key_mode_passes_exactly_one_secret() -> None:

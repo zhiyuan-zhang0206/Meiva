@@ -125,6 +125,42 @@ def test_unknown_item_maps_to_nothing() -> None:
     )
 
 
+def test_web_search_maps_to_tool_use_and_result() -> None:
+    started = item_event(
+        {"item": {"type": "webSearch", "id": "ws-1", "query": "meiva harness"}},
+        phase="started",
+        turn_id="turn-1",
+    )
+    assert started == [
+        ToolUse(
+            turn_id="turn-1",
+            tool_use_id="ws-1",
+            name="web_search",
+            tool_input={"query": "meiva harness"},
+        )
+    ]
+    completed = item_event(
+        {
+            "item": {
+                "type": "webSearch",
+                "id": "ws-1",
+                "query": "meiva harness",
+                "results": [{"title": "Meiva Docs"}],
+            }
+        },
+        phase="completed",
+        turn_id="turn-1",
+    )
+    assert completed == [
+        ToolResult(
+            turn_id="turn-1",
+            tool_use_id="ws-1",
+            is_error=False,
+            content='{"query": "meiva harness", "results": [{"title": "Meiva Docs"}]}',
+        )
+    ]
+
+
 def test_assistant_text_and_phase() -> None:
     item = {"type": "agentMessage", "text": "hello", "phase": "final_answer"}
     assert assistant_text(item) == "hello"

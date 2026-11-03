@@ -209,3 +209,59 @@ def test_stop_marks_the_exporter_closing_before_the_drain(tmp_path: Path) -> Non
     pipeline.stop(timeout=5.0)
 
     assert seen == [True]
+
+
+class _NoopLoggerProvider:
+    def force_flush(self, timeout_millis: int = 2000) -> bool:
+        del timeout_millis
+        return True
+
+    def shutdown(self) -> None:
+        return None
+
+
+class _ShutdownMeterProvider(_NoopLoggerProvider):
+    def get_meter(self, _name: str) -> object:
+        raise RuntimeError("cannot schedule new futures after interpreter shutdown")
+
+
+def test_atexit_executor_shutdown_without_bound_pipeline_emits_no_error_or_status_event(
+    tmp_path: Path,
+) -> None:
+    from loguru import logger
+
+    from base.telemetry.delivery.state import process_state
+
+    records: list[str] = []
+    sink_id = logger.add(records.append, format="{level}:{message}")
+    prior_pipeline = process_state["pipeline"]
+
+    shutdown_backend = telemetry_otlp.OtlpBackend(
+        export_allowed=lambda: True,
+        providers=(_NoopLoggerProvider(), _ShutdownMeterProvider()),
+        enabled=lambda: True,
+        endpoint=lambda: "http://127.0.0.1:4318",
+        mirror_dir=tmp_path,
+        home=tmp_path,
+    )
+    unreachable_backend = telemetry_otlp.OtlpBackend(
+        export_allowed=lambda: True,
+        providers=None,
+        enabled=lambda: True,
+        endpoint=lambda: "http://127.0.0.1:1",
+        mirror_dir=tmp_path,
+        home=tmp_path,
+    )
+    process_state["pipeline"] = None
+    try:
+        shutdown_backend.warmup()
+        unreachable_backend.warmup()
+    finally:
+        shutdown_backend.shutdown(timeout=2.0)
+        unreachable_backend.shutdown(timeout=2.0)
+        process_state["pipeline"] = prior_pipeline
+        logger.remove(sink_id)
+
+    assert not any("Failed to initialize OTLP providers" in record for record in records)
+    assert not any("otlp init-status event failed" in record for record in records)
+    assert not any(record.startswith("ERROR:") for record in records)

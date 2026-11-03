@@ -16,8 +16,7 @@ USER_REPLY_PREFIX = "Meiva agent to user: "
 # meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
 NON_HUMAN_WAKE_REMINDER = (
     "Non-human wake: unprefixed assistant text folds into the collapsed work log. "
-    "End the turn with no assistant text when nothing needs the human now, or begin "
-    f"user-intended text with `{USER_REPLY_PREFIX}`."
+    f"Begin user-intended text with `{USER_REPLY_PREFIX}`."
 )
 
 

@@ -450,6 +450,8 @@ class HarnessTurnProjector:
     def _on_tool_result(self, event: ToolResult) -> None:
         if (slot := self._tool_slots.get(event.tool_use_id)) is None:
             return
+        if self._text_completed and (self._text_buf or self._reasoning_buf):
+            self._flush_completed_text()
         slot_idx, exec_item_id, started_at = slot
         now = self._clock.now()
         self._step_started_at = now

@@ -251,14 +251,27 @@ def _dynamic_tool(item: RequestParams, phase: str, turn_id: str) -> list[BridgeE
 
 
 def _web_search(item: RequestParams, phase: str, turn_id: str) -> list[BridgeEvent]:
-    if phase != "started":
-        return []
+    identifier = _as_text(item.get("id")) or ""
+    if phase == "started":
+        return [
+            ToolUse(
+                turn_id=turn_id,
+                tool_use_id=identifier,
+                name="web_search",
+                tool_input={"query": item.get("query")},
+            )
+        ]
+    summary: dict[str, object] = {"query": item.get("query")}
+    if item.get("action") is not None:
+        summary["action"] = item.get("action")
+    if item.get("results") is not None:
+        summary["results"] = item.get("results")
     return [
-        ToolUse(
+        ToolResult(
             turn_id=turn_id,
-            tool_use_id=_as_text(item.get("id")) or "",
-            name="web_search",
-            tool_input={"query": item.get("query")},
+            tool_use_id=identifier,
+            is_error=False,
+            content=_clip(json.dumps(summary, ensure_ascii=False)),
         )
     ]
 

@@ -317,3 +317,47 @@ def test_compact_publishes_the_notice_text_of_its_summary(
     assert request.role == "compact_request"
     assert request.content == f"[compact requested, {len(summary)} chars]"
     assert "Progress" not in request.content
+
+
+@pytest.mark.usefixtures("sdk_model_owner")
+def test_pause_heartbeat_routes_its_event_to_the_contexts_pipeline_when_unbound(
+    redis_url: str,
+    db_conn: psycopg.Connection[Any],
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    from base.agents.context.clients import ClientSet
+    from base.db import Database
+    from base.telemetry.delivery.pipeline import EventPipeline
+    from base.telemetry.delivery.receipts import DrainStatus, Event
+    from base.telemetry.delivery.state import process_state
+
+    agent_id = _spawned(model_catalog, config_authority, database_gate, machine_identity)
+    written: list[Event] = []
+    pipeline = EventPipeline(writer=written.extend, batch_size=1)
+
+    def build_pipeline() -> EventPipeline:
+        return pipeline
+
+    def build_db() -> Database:
+        return Database.from_settings(gate=database_gate)
+
+    clients = ClientSet(
+        database=build_db,
+        pipeline_factory=build_pipeline,
+    )
+    pin_agent(agent_id, clients=clients, machine=machine_identity)
+    prior_pipeline = process_state["pipeline"]
+    process_state["pipeline"] = None
+    try:
+        meiva.self.pause_heartbeat(120)
+        assert clients.sync_events(timeout=2).status is DrainStatus.COMPLETED
+        paused_events = [ev for ev in written if ev.event_name == "heartbeat_paused"]
+        assert len(paused_events) == 1
+        assert paused_events[0].agent_id == agent_id
+        assert paused_events[0].attributes["duration_s"] == 120.0
+    finally:
+        process_state["pipeline"] = prior_pipeline
+        clients.close(pipeline_timeout=2)

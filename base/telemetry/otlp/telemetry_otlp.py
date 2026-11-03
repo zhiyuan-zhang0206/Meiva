@@ -218,14 +218,25 @@ def endpoint_reachable(endpoint: str) -> bool:
         return False
 
 
+# meiva:note
+# Emit init status into the unified stream; never affect backend setup. When the collector is
+# unavailable, the event reaches the JSONL mirror even though its OTLP copy cannot leave the
+# process. Processes with no bound event pipeline have no global stream to receive this event.
+# meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md
 def _emit_backend_event(event_name: str, **attributes: object) -> None:
-    """Emit init status into the unified stream; never affect backend setup.
-
-    When the collector is unavailable, the event reaches the JSONL mirror even
-    though its OTLP copy cannot leave the process.
-    """
+    if not pipeline_bound():
+        return
     with failure_isolated("otlp init-status event"):
         emit("telemetry", event_name, attributes=attributes)
+
+
+# meiva:note
+# Whether provider setup failed because Python already shut down its exit executors.
+# meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md
+def _executor_shutdown_at_exit(exc: BaseException) -> bool:
+    return sys.is_finalizing() or (
+        isinstance(exc, RuntimeError) and "after interpreter shutdown" in str(exc)
+    )
 
 
 class _Instrument(Protocol):
@@ -577,12 +588,11 @@ class OtlpBackend:
         except Exception as exc:
             # meiva:note
             # A process that binds no event pipeline has no sink for this diagnosis — the
-            # attempt could not deliver anything either. That is the watcher child's shape:
-            # it builds the boot pipeline, binds none, and at exit the SDK's executors are
-            # already shut down, so the bring-up fails and used to print a warning plus
-            # traceback for work that finished (#5578).
+            # attempt could not deliver anything either. That covers both `stop()` setting
+            # `self._closing` (#5578) and an `atexit` sync (`ExternalAttachment.close`) running
+            # after `threading._shutdown()` has already stopped `concurrent.futures` executors.
             # meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md
-            if self._closing and not pipeline_bound():
+            if (self._closing or _executor_shutdown_at_exit(exc)) and not pipeline_bound():
                 return False
             self._init_failed_at = time.monotonic()
             self._report(

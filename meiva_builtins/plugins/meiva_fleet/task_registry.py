@@ -5,7 +5,7 @@ task; owners are reminded periodically, and a task may nest under a parent.
 from __future__ import annotations
 
 import builtins
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     import psycopg
 
     from base.events.live.bus import EventBus
-    from base.telemetry import Event
+    from base.telemetry import Event, EventPipeline
 
     from .default_config import FleetConfig
 
@@ -164,7 +164,7 @@ def create_in_context(
         priority=priority,
         operation_key=operation_key,
     )
-    publish_creation(committed.publication, bus)
+    publish_creation(committed.publication, bus, producer=context.clients.event_producer())
     return committed.task
 
 
@@ -236,7 +236,12 @@ def commit_creation(
 # meiva:note
 # The emission half of a creation: the recorded events, then a live refresh of every open task
 # board. A replayed acceptance publishes nothing.
-def publish_creation(committed: TaskPublication | None, bus: EventBus) -> None:
+def publish_creation(
+    committed: TaskPublication | None,
+    bus: EventBus,
+    *,
+    producer: Callable[[], EventPipeline] | None = None,
+) -> None:
     if committed is None:
         return
     # meiva:note
@@ -245,7 +250,7 @@ def publish_creation(committed: TaskPublication | None, bus: EventBus) -> None:
     from base.events.live import announce
 
     for event in publication_events(committed):
-        telemetry.emit_prepared(event)
+        telemetry.emit_prepared(event, producer=producer)
     announce.publish_task_created_sync(bus, committed.actor, committed.task_id)
 
 
@@ -428,6 +433,7 @@ def update_in_context(
             operation_key=operation_key,
         ),
         bus,
+        producer=context.clients.event_producer(),
     )
 
 
@@ -577,7 +583,12 @@ def commit_update(
 # meiva:note
 # The emission half of an update: the recorded events, a live refresh of every open task board and,
 # when the update closed the task, one log line. A replayed commit publishes nothing.
-def publish_update(committed: TaskPublication | None, bus: EventBus) -> None:
+def publish_update(
+    committed: TaskPublication | None,
+    bus: EventBus,
+    *,
+    producer: Callable[[], EventPipeline] | None = None,
+) -> None:
     if committed is None:
         return
     # meiva:note
@@ -586,7 +597,7 @@ def publish_update(committed: TaskPublication | None, bus: EventBus) -> None:
     from base.events.live import announce
 
     for event in publication_events(committed):
-        telemetry.emit_prepared(event)
+        telemetry.emit_prepared(event, producer=producer)
     announce.publish_task_updated_sync(bus, committed.actor, committed.task_id)
     if committed.closed_title is not None:
         _log_closed(committed.actor, committed.task_id, committed.closed_title)

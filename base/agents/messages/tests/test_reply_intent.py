@@ -17,6 +17,7 @@ def test_header_constants_match_contract() -> None:
     assert USER_REPLY_PREFIX == "Meiva agent to user: "
     assert USER_REPLY_PREFIX.startswith(USER_REPLY_HEADER)
     assert f"`{USER_REPLY_PREFIX}`" in NON_HUMAN_WAKE_REMINDER
+    assert "no assistant text" not in NON_HUMAN_WAKE_REMINDER
     assert "\n" not in NON_HUMAN_WAKE_REMINDER
 
 

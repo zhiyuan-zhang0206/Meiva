@@ -29,7 +29,17 @@ def test_a_recorded_thread_resumes_with_the_selected_model() -> None:
         model="gpt-5-codex",
         approval_policy="untrusted",
         sandbox="read-only",
-    ) == ("thread/resume", {"threadId": "thread-old", "model": "gpt-5-codex"})
+    ) == (
+        "thread/resume",
+        {
+            "threadId": "thread-old",
+            "cwd": "/elsewhere",
+            "approvalPolicy": "untrusted",
+            "sandbox": "read-only",
+            "config": {"shell_environment_policy": {"inherit": "all"}},
+            "model": "gpt-5-codex",
+        },
+    )
 
 
 def test_a_fresh_thread_carries_the_callers_policy_and_inherits_the_environment() -> None:

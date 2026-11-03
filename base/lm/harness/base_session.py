@@ -253,6 +253,10 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         return self._session_id
 
     @property
+    def model(self) -> str | None:
+        return self._model
+
+    @property
     def handoff_ticket(self) -> TurnTicket | None:
         return self._handoff_ticket
 

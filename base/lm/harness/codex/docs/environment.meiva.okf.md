@@ -26,8 +26,9 @@ handle whenever it constructs a session, including a reconnect. Session construc
 resolves the executable, filters credentials and copies the mapping into the
 transport. It does not spawn the CLI until `start()`, which uses that snapshot
 without inheriting the starting process's later environment. An explicitly empty
-transport environment stays empty. HOME, CODEX_HOME, MEIVA_HOME, PATH and registration
-values otherwise pass through to the CLI and its descendants.
+transport environment stays empty. HOME, CODEX_HOME, MEIVA_HOME, MEIVA_PYTHON, PATH
+and registration values otherwise pass through to the CLI and its descendants across
+both `thread/start` and `thread/resume` (`shell_environment_policy.inherit = "all"`).
 
 Executable discovery remains a separate resource operation in the shared
 `harness_binaries` owner: a missing PATH retains its existing host lookup, and

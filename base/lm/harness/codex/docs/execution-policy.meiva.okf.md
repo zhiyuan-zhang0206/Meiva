@@ -43,6 +43,9 @@ without that AppArmor restriction; on Ubuntu it degrades to "no command runs".
 `approval_policy` defaults to `never` for the same reason a headless bridge
 cannot park: nobody is at the prompt. With `danger-full-access` and `never`,
 `codex` never asks, and the bridge's approval path stays dormant until a caller
-opts into `untrusted`/`on-request`.
+opts into `untrusted`/`on-request`. Both `thread/start` and `thread/resume` send
+`cwd`, `approvalPolicy`, `sandbox`, and `config.shell_environment_policy.inherit = "all"`
+so a resumed thread keeps the same execution policy and environment inheritance
+instead of falling back to `read-only` with restricted network.
 
 Parent: [[base/lm/harness/codex/docs/codex.meiva.okf.md|Codex app-server session bridge]].

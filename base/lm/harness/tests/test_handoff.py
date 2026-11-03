@@ -51,7 +51,7 @@ def test_render_mentions_identity_and_task(tmp_path: Path) -> None:
     assert "Handoff" not in text
     assert f"- workspace: {tmp_path}" in text
     assert "- machine: macmini" in text
-    assert "python3 -c '" in text
+    assert '"$MEIVA_PYTHON" -c \'' in text
     assert "import meiva" in text
     assert text.rstrip().endswith("Read hello.txt and reply with the third word.")
 
