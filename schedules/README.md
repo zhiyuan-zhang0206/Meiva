@@ -65,7 +65,12 @@ pulled, a disk that filled — are counted and never become a card. Each round
 emits `main_red_watch_round`, and that event is persisted rather than lived in
 the mirror alone: a second trigger five minutes after each round reads the
 newest one back and opens a card for the lead when it is more than an hour old,
-so a watch that stopped reporting is a card rather than silence.
+so a watch that stopped reporting is a card rather than silence. A stream the
+watch has only just started reading gets one threshold of grace before its
+silence is reported — a nightly added today has no run on record because its
+cron has not come round yet — and a stream that cannot be read at all (a
+renamed workflow, a busy API) is one named note in the round, never the end of
+the round or of the process that would report it next time.
 
 - **product** schedules (adversarial evaluation, self-evolution, memory, model
   tracking, debt clearing, CI observability, trace shipping, harness CLI convergence) are Meiva's own

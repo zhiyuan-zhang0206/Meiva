@@ -336,11 +336,24 @@ def card_body(
     )
 
 
+# meiva:note
+# `since` is when this watch first observed the stream. A stream that has no run on record is only
+# a stopped schedule once one threshold has passed since then: before that the cron has simply not
+# come round yet, and a card about it would name a problem nobody can act on. Streams older than
+# the watch itself pass no `since`, and their silence means what it always did.
 def liveness_alert(
-    label: str, last_start: datetime | None, now: datetime, *, stale_after: timedelta
+    label: str,
+    last_start: datetime | None,
+    now: datetime,
+    *,
+    stale_after: timedelta,
+    since: datetime | None = None,
 ) -> str | None:
     if last_start is None:
-        return f"{label} has no run on record at all: the schedule never started here."
+        if since is not None and now - since < stale_after:
+            return None
+        watching = f" since {since.isoformat()}" if since is not None else " at all"
+        return f"{label} has no run on record{watching}: the schedule never started here."
     age = now - last_start
     if age < stale_after:
         return None
