@@ -37,7 +37,6 @@ import signal
 import socket
 import subprocess
 import tempfile
-import time
 from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
@@ -45,6 +44,7 @@ from pathlib import Path
 
 import psycopg
 
+from base.clock import Timers
 from base.cluster.dataplane.pg_foreground import start_foreground_postgres, stop_foreground_postgres
 from base.cluster.dataplane.pg_tools import pg_shm_args, pg_start_env, pg_tool, pg_tz_args
 from base.db import connect_url
@@ -224,11 +224,15 @@ def recovery_argv(
 
 
 def _wait_promoted(
-    process: subprocess.Popen[bytes], instance: RestoredInstance, log: Path, timeout_s: float
+    process: subprocess.Popen[bytes],
+    instance: RestoredInstance,
+    log: Path,
+    timeout_s: float,
+    timers: Timers,
 ) -> int:
     """Block until recovery has ended and the instance is a primary; returns its timeline."""
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
+    deadline = timers.monotonic() + timeout_s
+    while timers.monotonic() < deadline:
         if process.poll() is not None:
             raise RestoreError(
                 f"recovery failed, postgres exited {process.returncode}: {_log_tail(log)}"
@@ -251,7 +255,7 @@ def _wait_promoted(
                     "(the superuser of a restored cluster is the OS user that ran initdb on "
                     f"the source; name it with --user): {_log_tail(log)}"
                 ) from None
-        time.sleep(_POLL_S)
+        timers.sleep(_POLL_S)
     raise RestoreError(f"recovery did not finish within {timeout_s:g}s: {_log_tail(log)}")
 
 
@@ -264,6 +268,10 @@ def _stop(process: subprocess.Popen[bytes], *, clean: bool) -> None:
     stop_foreground_postgres(process)
 
 
+# meiva:note
+# `timers` is the clock the two phases are bounded and narrated on, handed in by the caller that
+# owns the process clock: the operator's `meiva backup walg restore` passes its runtime clock, the
+# weekly drill the tick's. Neither the wait nor the narration reads a clock of its own.
 @contextmanager
 def restored_instance(
     directory: Path,
@@ -274,6 +282,7 @@ def restored_instance(
     user: str,
     keep_data: bool,
     path: Path | None,
+    timers: Timers,
     timeout_s: float = RESTORE_TIMEOUT_S,
     socket_root: Path = SOCKET_ROOT,
     home: Path,
@@ -290,7 +299,7 @@ def restored_instance(
             or recovery failed (Postgres' own FATAL is in the message).
     """
     _prepare_directory(directory, home=home)
-    started = time.monotonic()
+    started = timers.monotonic()
     report(f"fetching backup {backup} into {directory}")
     try:
         run_walg(
@@ -304,7 +313,7 @@ def restored_instance(
         raise RestoreError(f"backup-fetch failed: {exc}") from None
     directory.chmod(0o700)
     (directory / "recovery.signal").touch()
-    report(f"fetched in {time.monotonic() - started:.0f}s; recovering to {target.describe()}")
+    report(f"fetched in {timers.monotonic() - started:.0f}s; recovering to {target.describe()}")
 
     # Short and private: a socket path is capped at 103 bytes, which a deep scratch path exceeds.
     socket_dir = Path(tempfile.mkdtemp(prefix="meiva-walg-restore-", dir=socket_root))
@@ -322,8 +331,8 @@ def restored_instance(
             home=home,
         )
         process = start_foreground_postgres(argv, log=log, env=pg_start_env(environ))
-        timeline = _wait_promoted(process, instance, log, timeout_s)
-        report(f"promoted on timeline {timeline} after {time.monotonic() - started:.0f}s")
+        timeline = _wait_promoted(process, instance, log, timeout_s, timers)
+        report(f"promoted on timeline {timeline} after {timers.monotonic() - started:.0f}s")
         yield instance
     finally:
         try:

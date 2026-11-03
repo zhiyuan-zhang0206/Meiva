@@ -51,6 +51,15 @@ from services.backup.walg.tests.support import (
 )
 
 T0 = datetime(2026, 10, 2, 6, 25, 0, tzinfo=UTC)
+
+
+# meiva:note
+# The instant the drill writes into its record: the tests read the real wall clock here, as the
+# tick hands the drill its own `_now`, and no case asserts a fixed `finished_at`.
+def _wall_now() -> datetime:
+    return datetime.now(UTC)
+
+
 SEGMENT = 16 * 1024 * 1024
 
 
@@ -242,6 +251,8 @@ def _run(
         previous,
         lambda _line: None,
         path=sandbox.path,
+        timers=SYSTEM_TIMERS,
+        now=_wall_now,
         database_for_url=_database_factory(),
         throwaway=ThrowawayConfig(
             tmp_path, home=sandbox.home, environ=os.environ, timers=SYSTEM_TIMERS
@@ -421,6 +432,8 @@ def _run_drill(
         previous,
         lines.append,
         path=sandbox.path,
+        timers=SYSTEM_TIMERS,
+        now=_wall_now,
         database_for_url=_database_factory(),
         throwaway=ThrowawayConfig(
             scratch_base, home=sandbox.home, environ=os.environ, timers=SYSTEM_TIMERS

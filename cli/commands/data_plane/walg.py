@@ -183,6 +183,7 @@ def cmd_walg_restore(
             user=user,
             keep_data=True,
             path=path,
+            timers=clock,
             home=home,
             environ=environ,
         ):

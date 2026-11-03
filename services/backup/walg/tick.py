@@ -36,6 +36,7 @@ from pathlib import Path
 
 import psycopg
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster.dataplane import pg_admin, walg_binary
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 from base.db import Database
@@ -231,6 +232,8 @@ def _drill(
         database_for_url=database_for_url,
         home=home,
         environ=environ,
+        timers=SYSTEM_TIMERS,
+        now=_now,
     )
     state.update_state(home, drill=record)
     if record.ok:
