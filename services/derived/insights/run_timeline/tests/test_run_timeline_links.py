@@ -3,12 +3,11 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 from typing import LiteralString
 
 import psycopg
 import pytest
-from fastapi import HTTPException, Request
+from fastapi import HTTPException
 
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentityReader
@@ -18,6 +17,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.derived.insights.run_timeline import links, router
+from services.derived.insights.run_timeline.tests.app_request import app_request
 
 _INSERT: LiteralString = (
     "INSERT INTO audit_events (event_uid, ts, machine, process, event_name, level, source, "
@@ -243,8 +243,7 @@ def test_a_window_longer_than_a_page_is_read_completely(
 
 
 def _content(*, database_gate: ProcessDbGate, **params: int):
-    state = SimpleNamespace(db=Database.from_settings(gate=database_gate))
-    request = Request({"type": "http", "app": SimpleNamespace(state=state)})
+    request = app_request(db=Database.from_settings(gate=database_gate))
     return router.get_run_timeline_link_content(request, **params)
 
 

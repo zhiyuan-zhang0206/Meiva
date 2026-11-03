@@ -2,3 +2,8 @@ exports = ["test_projection.py"]
 
 [uses]
 "test_history_cache.py" = ["test_projection.py"]
+"test_request_rules.py" = ["app_request.py"]
+"test_run_timeline.py" = ["app_request.py"]
+"test_run_timeline_context.py" = ["app_request.py"]
+"test_run_timeline_links.py" = ["app_request.py"]
+"test_run_timeline_messages.py" = ["app_request.py"]

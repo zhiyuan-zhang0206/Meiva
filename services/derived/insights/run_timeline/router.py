@@ -7,9 +7,13 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from psycopg_pool import ConnectionPool
+from starlette.applications import Starlette
+from starlette.datastructures import State
 
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.db.protocols import DatabaseLike as Database
+from base.lm.catalog import ModelCatalog
 from services.derived.insights.config import InsightsConfig
 from services.derived.insights.run_timeline.context import (
     ResolvedRequest,
@@ -45,6 +49,29 @@ from services.derived.insights.run_timeline.schemas import (
 )
 
 router = APIRouter()
+
+
+# meiva:note
+# What the insights app carries on `app.state`: the one set of attributes its handlers read. The app
+# is built with an instance of this class (`build_app`), and `insights_state` reaches it.
+class InsightsAppState(State):
+    db: Database
+    db_pool: ConnectionPool
+    insights_config: InsightsConfig
+    catalog: ModelCatalog
+    timeline_timestamps: TimestampSource
+    run_timeline_reader: TimelineReader
+
+
+# meiva:note
+# The state of the app serving this request. A state of any other class is a wiring error (an app
+# built without `build_app`), so it fails here instead of as a missing attribute in a handler.
+def insights_state(request: Request) -> InsightsAppState:
+    app = request.scope.get("app")
+    state = app.state if isinstance(app, Starlette) else None
+    if not isinstance(state, InsightsAppState):
+        raise TypeError("the app's state is not an InsightsAppState; build the app with build_app")
+    return state
 
 
 # meiva:note
@@ -86,8 +113,8 @@ def get_run_timeline(
     options: Annotated[tuple[int | None, str | None], Depends(_options)] = (None, None),
 ) -> RunTimelineResponse:
     max_units, snapshot = options
-    reader: TimelineReader = request.app.state.run_timeline_reader
-    timestamps: TimestampSource = request.app.state.timeline_timestamps
+    state = insights_state(request)
+    reader, timestamps = state.run_timeline_reader, state.timeline_timestamps
     with _request_errors():
         check_window_query(from_, to, recent_hours)
         cut = reader.get(agent_id, snapshot)
@@ -122,9 +149,12 @@ def get_run_timeline_messages(
     ),
 ) -> RunTimelineMessages:
     limit, full, snapshot = options
-    config: InsightsConfig = request.app.state.insights_config
-    reader: TimelineReader = request.app.state.run_timeline_reader
-    timestamps: TimestampSource = request.app.state.timeline_timestamps
+    state = insights_state(request)
+    config, reader, timestamps = (
+        state.insights_config,
+        state.run_timeline_reader,
+        state.timeline_timestamps,
+    )
     with _request_errors():
         check_message_range(start, end)
         cut = reader.get(agent_id, snapshot)
@@ -153,13 +183,14 @@ def get_run_timeline_context(
     at: Annotated[int, Query(ge=0)],
     snapshot: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
 ) -> RunTimelineContext:
-    reader: TimelineReader = request.app.state.run_timeline_reader
+    state = insights_state(request)
+    reader = state.run_timeline_reader
     with _request_errors():
         cut = reader.get(agent_id, snapshot)
         idx, ts, segment, view = reader.request(cut, at)
-    config: InsightsConfig = request.app.state.insights_config
+    config = state.insights_config
     return build_run_timeline_context(
-        request.app.state.db_pool,
+        state.db_pool,
         agent_id,
         ResolvedRequest(
             idx=idx,
@@ -169,7 +200,7 @@ def get_run_timeline_context(
             sessions=cut.sessions,
             view=view,
         ),
-        catalog=request.app.state.catalog,
+        catalog=state.catalog,
         default_model=config.default_model,
     )
 
@@ -187,7 +218,7 @@ def get_run_timeline_links(
     with _request_errors():
         ids = parse_agent_ids(agents)
         check_link_window(from_, to)
-    db: Database = request.app.state.db
+    db = insights_state(request).db
     return RunTimelineLinks(links=read_links(db, ids, from_, to))
 
 
@@ -202,7 +233,7 @@ def get_run_timeline_link_content(
 ) -> RunTimelineLinkContent:
     with _request_errors():
         check_link_content_selector(inbound_id, notice_id)
-    db: Database = request.app.state.db
+    db = insights_state(request).db
     found = read_link_content(db, inbound_id=inbound_id, notice_id=notice_id)
     if found is None:
         raise HTTPException(status_code=404, detail="no such message or notice")

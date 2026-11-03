@@ -15,7 +15,8 @@ import httpx
 import numpy as np
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
+from base.host.boundary.untyped import object_of
+from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError, row_vectors
 from services.derived.memory_indexer.embeddings.sync_call import run_sync
 
 NAME = "embeddinggemma"
@@ -105,7 +106,7 @@ def _vectors(body: object, *, model: str, count: int) -> np.ndarray:
             f"EmbeddingGemma vectors must be finite with shape ({count}, {DIM})"
         )
     norms = np.linalg.norm(vectors.astype(np.float64), axis=1, keepdims=True)
-    if np.any(norms == 0):
+    if np.equal(norms, 0).any():
         raise EmbeddingAPIError("EmbeddingGemma returned a zero vector")
     return (vectors / norms).astype(np.float32)
 
@@ -156,7 +157,7 @@ class EmbeddingGemmaProvider:
                         "POST", self._config.endpoint, json=payload, headers=headers
                     ) as response:
                         response.raise_for_status()
-                        body = json.loads(await response.aread())
+                        body = object_of(json.loads, await response.aread())
         except (httpx.HTTPError, TimeoutError, json.JSONDecodeError) as exc:
             raise EmbeddingAPIError(f"EmbeddingGemma embed failed ({type(exc).__name__})") from exc
         return _vectors(body, model=self._config.model, count=len(texts))
@@ -165,7 +166,7 @@ class EmbeddingGemmaProvider:
         return run_sync(lambda: self._embed(texts, DOCUMENT_PREFIX))
 
     def embed_query(self, text: str) -> np.ndarray:
-        return run_sync(lambda: self._embed([text], QUERY_PREFIX))[0]
+        return row_vectors(run_sync(lambda: self._embed([text], QUERY_PREFIX)))[0]
 
     async def embed_query_async(self, text: str) -> np.ndarray:
-        return (await self._embed([text], QUERY_PREFIX))[0]
+        return row_vectors(await self._embed([text], QUERY_PREFIX))[0]

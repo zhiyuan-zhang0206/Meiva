@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from fastapi import HTTPException, Request
+from fastapi import HTTPException
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from psycopg import Connection
 
@@ -32,6 +32,7 @@ from services.derived.insights.run_timeline.projection.reader import (
     Snapshot,
     TimelineReader,
 )
+from services.derived.insights.run_timeline.tests.app_request import app_request
 
 _TIMELINE_SOURCE = TimestampSource(
     clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
@@ -154,11 +155,10 @@ def read(
         def snapshot(_agent: int, _snapshot: str | None) -> Snapshot:
             return cut
 
-        state = SimpleNamespace(
+        request = app_request(
             run_timeline_reader=SimpleNamespace(get=snapshot, window=reader.window),
             timeline_timestamps=_TIMELINE_SOURCE,
         )
-        request = Request({"type": "http", "app": SimpleNamespace(state=state)})
         return router.get_run_timeline(request, 405, from_, to, recent_hours, (max_units, None))
     finally:
         jobs.close()

@@ -12,12 +12,14 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime
-from typing import TypeGuard, get_args
+from typing import NamedTuple, TypeGuard, get_args
 
 from base.agents.messages.envelope import validate_source
 from base.db.protocols import DatabaseLike as Database
 from base.db.protocols import SyncConnection
 from base.events.reads import AuditFilter, EventRecord, query_audit_rows
+from base.host.boundary.untyped import object_of
+from services.derived.insights.run_timeline.projection.rows import rows_as
 from services.derived.insights.run_timeline.request_rules import TimelineRequestError
 from services.derived.insights.run_timeline.schemas import (
     LinkKind,
@@ -25,8 +27,41 @@ from services.derived.insights.run_timeline.schemas import (
     RunTimelineLinkContent,
 )
 
+
+# meiva:note
 # The kinds read from `audit_events`; a notice comes from `agent_notices`.
-_AUDIT_KINDS: list[str] = [kind for kind in get_args(LinkKind) if kind != "notice"]
+def _audit_kinds() -> list[str]:
+    kinds = object_of(get_args, LinkKind)
+    return [
+        kind
+        for kind in (kinds if _is_tuple(kinds) else ())
+        if isinstance(kind, str) and kind != "notice"
+    ]
+
+
+def _is_tuple(value: object) -> TypeGuard[tuple[object, ...]]:
+    return isinstance(value, tuple)
+
+
+class _IdRow(NamedTuple):
+    id: int
+
+
+class _NoticeRow(NamedTuple):
+    id: int
+    agent_id: int
+    created_at: datetime
+
+
+class _MessageRow(NamedTuple):
+    content: str
+
+
+class _NoticeContentRow(NamedTuple):
+    title: str
+    content: str | None
+
+
 # A transport page, not a display limit: the reader pages until the window is exhausted.
 PAGE_SIZE = 500
 _AGENT_PREFIX = "agent:"
@@ -68,10 +103,10 @@ def _chat_inbounds(conn: SyncConnection, page: Sequence[EventRecord]) -> set[int
     ]
     if not ids:
         return set()
-    rows = conn.execute(
-        "SELECT id FROM inbound_messages WHERE id = ANY(%s) AND kind = 'chat'", [ids]
-    ).fetchall()
-    return {int(r[0]) for r in rows}
+    with conn.cursor(row_factory=rows_as(_IdRow)) as cur:
+        cur.execute("SELECT id FROM inbound_messages WHERE id = ANY(%s) AND kind = 'chat'", [ids])
+        rows = cur.fetchall()
+    return {r.id for r in rows}
 
 
 def _link(row: EventRecord) -> RunTimelineLink | None:
@@ -98,22 +133,25 @@ def _notices(
     conn: SyncConnection, agents: list[int], start: datetime, end: datetime
 ) -> list[RunTimelineLink]:
     """Notices the agents posted to the user in the window: the one structured agent-to-user channel."""
-    rows = conn.execute(
-        "SELECT id, agent_id, created_at FROM agent_notices "
-        "WHERE agent_id = ANY(%s) AND created_at >= %s AND created_at <= %s ORDER BY created_at, id",
-        [agents, start, end],
-    ).fetchall()
+    with conn.cursor(row_factory=rows_as(_NoticeRow)) as cur:
+        cur.execute(
+            "SELECT id, agent_id, created_at FROM agent_notices "
+            "WHERE agent_id = ANY(%s) AND created_at >= %s AND created_at <= %s "
+            "ORDER BY created_at, id",
+            [agents, start, end],
+        )
+        rows = cur.fetchall()
     return [
         RunTimelineLink(
             kind="notice",
-            ts=created_at,
-            sender=int(agent_id),
+            ts=row.created_at,
+            sender=row.agent_id,
             receiver=None,
             inbound_id=None,
             fork_from=None,
-            notice_id=int(notice_id),
+            notice_id=row.id,
         )
-        for notice_id, agent_id, created_at in rows
+        for row in rows
     ]
 
 
@@ -134,7 +172,7 @@ def read(
                 conn,
                 AuditFilter(
                     involving_agents=agents,
-                    event_names=_AUDIT_KINDS,
+                    event_names=_audit_kinds(),
                     from_=start,
                     to=end,
                 ),
@@ -165,17 +203,24 @@ def read_content(
 ) -> RunTimelineLinkContent | None:
     with db.connect(autocommit=True) as conn:
         if inbound_id is not None:
-            row = conn.execute(
-                "SELECT content FROM inbound_messages WHERE id = %s AND kind = 'chat'", [inbound_id]
-            ).fetchone()
-            return None if row is None else RunTimelineLinkContent(title=None, content=str(row[0]))
-        row = conn.execute(
-            "SELECT title, content FROM agent_notices WHERE id = %s", [notice_id]
-        ).fetchone()
+            with conn.cursor(row_factory=rows_as(_MessageRow)) as cur:
+                cur.execute(
+                    "SELECT content FROM inbound_messages WHERE id = %s AND kind = 'chat'",
+                    [inbound_id],
+                )
+                message = cur.fetchone()
+            return (
+                None
+                if message is None
+                else RunTimelineLinkContent(title=None, content=message.content)
+            )
+        with conn.cursor(row_factory=rows_as(_NoticeContentRow)) as cur:
+            cur.execute("SELECT title, content FROM agent_notices WHERE id = %s", [notice_id])
+            notice = cur.fetchone()
         return (
             None
-            if row is None
-            else RunTimelineLinkContent(title=str(row[0]), content=str(row[1] or ""))
+            if notice is None
+            else RunTimelineLinkContent(title=notice.title, content=notice.content or "")
         )
 
 

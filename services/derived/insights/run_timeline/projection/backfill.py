@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Sequence
+from dataclasses import dataclass
 
 from loguru import logger
 
@@ -13,6 +15,7 @@ from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.protocols import db_config_from_boot
+from base.host.boundary.options import options
 from base.host.exit_codes import hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -23,12 +26,19 @@ from services.derived.insights.run_timeline.request_rules import (
 )
 
 
+# meiva:note
+# The positional arguments `main` registers.
+@dataclass(frozen=True)
+class _Arguments:
+    agent_ids: Sequence[int]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Prepare derived Run Timeline rows for the named agents using the installed generation."
     )
     parser.add_argument("agent_ids", nargs="+", type=positive_agent_id)
-    args = parser.parse_args()
+    args = options(parser.parse_args(), _Arguments)
     config = ConfigBoot()
     config.boot()
     version = CodeVersion(LoadedCommit.capture())

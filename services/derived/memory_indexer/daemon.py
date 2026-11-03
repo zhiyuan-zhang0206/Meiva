@@ -41,7 +41,11 @@ from services.derived.memory_indexer.backends.factory import get_backend
 from services.derived.memory_indexer.backends.probe import probe_backend
 from services.derived.memory_indexer.chunking import chunk_rows
 from services.derived.memory_indexer.config import MemoryIndexerConfig, MemoryIndexerInputs
-from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError, EmbeddingProvider
+from services.derived.memory_indexer.embeddings.base import (
+    EmbeddingAPIError,
+    EmbeddingProvider,
+    row_vectors,
+)
 from services.derived.memory_indexer.embeddings.factory import get_provider
 from services.derived.memory_indexer.patrol_plan import next_patrol
 from services.derived.memory_indexer.patrol_status import PatrolStatus, emit_patrol_event
@@ -187,7 +191,9 @@ def _embed_batches(
         # One external call per gap; commit calls beat separately below.
         liveness.beat()
         vectors = provider.embed_batch(texts)
-        for (path, mtime, hash_, kind, chunk_idx, _), vector in zip(batch, vectors, strict=True):
+        for (path, mtime, hash_, kind, chunk_idx, _), vector in zip(
+            batch, row_vectors(vectors), strict=True
+        ):
             progress.upsert_rows.append((str(path), mtime, hash_, vector, kind, chunk_idx))
             done = progress.done_by_file.get(path, 0) + 1
             progress.done_by_file[path] = done

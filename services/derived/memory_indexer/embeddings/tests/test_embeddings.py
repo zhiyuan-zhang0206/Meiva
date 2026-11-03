@@ -598,6 +598,14 @@ def test_embed_malformed_response_raises() -> None:
         _provider(transport=fake).embed_query("hello")
 
 
+# meiva:note
+# A usage block that is not an object is an EmbeddingAPIError at billing, not a pydantic error.
+def test_embed_malformed_usage_raises() -> None:
+    fake = AsyncClient(response_body={"usageMetadata": "nope"})
+    with pytest.raises(EmbeddingAPIError, match="malformed"):
+        _provider(transport=fake).embed_query("hello")
+
+
 def test_sync_embed_rejects_running_loop() -> None:
     """Fail with caller guidance before creating a coroutine or a client."""
     fake = AsyncClient(

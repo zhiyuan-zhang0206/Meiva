@@ -19,9 +19,13 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Protocol, TypeGuard
 
 import numpy as np
+from numpy.typing import NDArray
+
+from base.host.boundary.json_values import is_object_list
+from base.host.boundary.untyped import object_of
 
 
 class EmbeddingAPIError(RuntimeError):
@@ -32,6 +36,25 @@ class EmbeddingAPIError(RuntimeError):
     # retries the remaining dirty paths while keeping liveness beating.
     # `meiva.memory.search` wraps this as `IndexerUnavailable` and raises to the caller.
     pass
+
+
+def _is_vector(value: object) -> TypeGuard[NDArray[np.float32]]:
+    return isinstance(value, np.ndarray) and value.ndim == 1
+
+
+def row_vectors(matrix: np.ndarray) -> list[NDArray[np.float32]]:
+    # meiva:note
+    # Iterating or indexing an ndarray is typed Any; this splits an (N, dim)
+    # matrix into its N row vectors, and refuses anything that is not a matrix.
+    rows = object_of(list, matrix)
+    if not is_object_list(rows):
+        raise TypeError("embedding matrix must be iterable")
+    vectors: list[NDArray[np.float32]] = []
+    for row in rows:
+        if not _is_vector(row):
+            raise TypeError("embedding matrix must be two-dimensional")
+        vectors.append(row)
+    return vectors
 
 
 class EmbeddingProvider(Protocol):

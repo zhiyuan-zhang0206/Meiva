@@ -5,7 +5,6 @@ import random
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
 
 from fastapi import FastAPI
 from psycopg_pool import ConnectionPool
@@ -19,11 +18,12 @@ from services.derived.insights.config import InsightsConfig
 from services.derived.insights.run_timeline import router as run_timeline_router
 from services.derived.insights.run_timeline.projection.jobs import IndexJobs, SegmentReads
 from services.derived.insights.run_timeline.projection.reader import TimelineReader
+from services.derived.insights.run_timeline.router import InsightsAppState
 
 
 def build_app(
     db: Database,
-    pool: ConnectionPool[Any],
+    pool: ConnectionPool,
     config: InsightsConfig,
     *,
     home: Path,
@@ -46,12 +46,14 @@ def build_app(
     app = FastAPI(
         title="meiva-insights", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan
     )
-    app.state.db = db
-    app.state.db_pool = pool
-    app.state.insights_config = config
-    app.state.catalog = catalog
-    app.state.timeline_timestamps = timestamps
-    app.state.run_timeline_reader = TimelineReader(reads, pool, jobs=jobs, timers=timers, rng=rng)
+    state = InsightsAppState()
+    state.db = db
+    state.db_pool = pool
+    state.insights_config = config
+    state.catalog = catalog
+    state.timeline_timestamps = timestamps
+    state.run_timeline_reader = TimelineReader(reads, pool, jobs=jobs, timers=timers, rng=rng)
+    app.state = state
     app.include_router(run_timeline_router.router)
 
     @app.get(

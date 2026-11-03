@@ -37,14 +37,18 @@ import logging
 import math
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 
 import numpy as np
 import psycopg
 from psycopg import sql as pgsql
+from psycopg.rows import class_row
 from psycopg_pool import ConnectionPool
 
 from base.db import Database
 from base.db.transaction import write_transaction
+from base.host.boundary.json_values import is_object_list
+from base.host.boundary.untyped import object_of
 from services.derived.memory_indexer.backends.base import KIND_BODY, ChunkHit, pk_of
 
 _log = logging.getLogger("services.derived.memory_indexer.backends.pgvector")
@@ -114,6 +118,43 @@ LIMIT %s
 """
 
 
+@dataclass(frozen=True)
+class _MetaRow:
+    path: str
+    mtime: float
+    content_hash: str
+    embedder: str
+
+
+@dataclass(frozen=True)
+class _HitRow:
+    path: str
+    kind: str
+    chunk_idx: int
+    distance: float | None
+
+
+@dataclass(frozen=True)
+class _TypmodRow:
+    atttypmod: int | None
+
+
+def _floats(embedding: np.ndarray) -> list[float]:
+    # meiva:note
+    # ndarray iteration and tolist() are typed Any; a one-dimensional float32
+    # vector converts to Python floats, and any other input (a scalar, a matrix) is refused with
+    # TypeError, whether it comes from the indexer or from a query vector.
+    values = object_of(embedding.astype(np.float32).tolist)
+    if not is_object_list(values):
+        raise TypeError("embedding must be a one-dimensional vector")
+    floats: list[float] = []
+    for value in values:
+        if not isinstance(value, float):
+            raise TypeError("embedding must be a one-dimensional vector")
+        floats.append(value)
+    return floats
+
+
 def _vector_text(embedding: np.ndarray) -> str:
     """The pgvector literal for a float32 vector — `[v0, v1, ...]`.
 
@@ -121,7 +162,7 @@ def _vector_text(embedding: np.ndarray) -> str:
     touches SQL text (no injection surface) and no client-side vector adapter
     dependency is needed.
     """
-    return "[" + ",".join(str(float(v)) for v in embedding.astype(np.float32)) + "]"
+    return "[" + ",".join(str(v) for v in _floats(embedding)) + "]"
 
 
 def _upsert_params(
@@ -152,14 +193,16 @@ def _dim_of(client: psycopg.Connection) -> int | None:
 
     pgvector encodes the dim as the typmod itself (verified against real
     vector(3072) / vector(768) columns: atttypmod == dim)."""
-    row = client.execute(
-        "SELECT atttypmod FROM pg_attribute "
-        "WHERE attrelid = to_regclass(%s) AND attname = 'vector'",
-        (EMBEDDINGS_TABLE,),
-    ).fetchone()
-    if row is None or row[0] is None:
-        return None
-    return int(row[0])
+    row = (
+        client.cursor(row_factory=class_row(_TypmodRow))
+        .execute(
+            "SELECT atttypmod FROM pg_attribute "
+            "WHERE attrelid = to_regclass(%s) AND attname = 'vector'",
+            (EMBEDDINGS_TABLE,),
+        )
+        .fetchone()
+    )
+    return None if row is None else row.atttypmod
 
 
 _EXPECTED_COLUMNS = {
@@ -396,12 +439,11 @@ class PGVectorBackend:
         No row cap."""
         meta: dict[str, tuple[float, str, str]] = {}
         with self._conn() as conn:
-            rows = conn.execute(_ALL_META_SQL).fetchall()
+            rows = conn.cursor(row_factory=class_row(_MetaRow)).execute(_ALL_META_SQL).fetchall()
         for row in rows:
-            path, mtime, hash_, fingerprint = row
-            prev = meta.get(path)
-            if prev is None or mtime > prev[0]:
-                meta[path] = (mtime, hash_, fingerprint)
+            prev = meta.get(row.path)
+            if prev is None or row.mtime > prev[0]:
+                meta[row.path] = (row.mtime, row.content_hash, row.embedder)
         return meta
 
     def search_topk(self, query_vector: np.ndarray, k: int) -> list[ChunkHit]:
@@ -421,13 +463,17 @@ class PGVectorBackend:
         empty when the table is empty. `timeout` bounds the pool-borrow wait
         when connected (None = the pool's default)."""
         with self._conn(timeout=timeout) as conn:
-            rows = conn.execute(
-                _SEARCH_SQL,
-                (_vector_text(query_vector), self._fingerprint, max(_RAW_SEARCH_LIMIT, k)),
-            ).fetchall()
+            rows = (
+                conn.cursor(row_factory=class_row(_HitRow))
+                .execute(
+                    _SEARCH_SQL,
+                    (_vector_text(query_vector), self._fingerprint, max(_RAW_SEARCH_LIMIT, k)),
+                )
+                .fetchall()
+            )
         best: dict[str, tuple[float, str, int]] = {}
-        for path, kind, chunk_idx, distance in rows:
-            if distance is None:
+        for hit in rows:
+            if hit.distance is None:
                 # Defensive branch, unreachable against current pgvector
                 # (verified on 0.8.6: a zero query vector is defined —
                 # similarity fixed at 0, distance 1.0 for every row — and NaN
@@ -438,9 +484,9 @@ class PGVectorBackend:
                 continue
             # A zero query vector yields a NaN distance; it has no direction, so every
             # row is equally (un)similar — score 0 rather than a NaN that no ranking holds.
-            row_distance = 1.0 if math.isnan(distance) else float(distance)
-            if path not in best or row_distance < best[path][0]:
-                best[path] = (row_distance, str(kind), int(chunk_idx))
+            row_distance = 1.0 if math.isnan(hit.distance) else hit.distance
+            if hit.path not in best or row_distance < best[hit.path][0]:
+                best[hit.path] = (row_distance, hit.kind, hit.chunk_idx)
         ranked = sorted(best.items(), key=lambda item: item[1][0])[:k]
         return [
             ChunkHit(path, kind, chunk_idx, 1.0 - distance)

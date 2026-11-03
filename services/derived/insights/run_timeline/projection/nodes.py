@@ -89,6 +89,9 @@ def window_nodes(
     )
     return project_nodes(
         rows,
-        {k: RunTimelineGeneration(**vars(v)) for k, v in jobs.items()},
-        {k: RunTimelineGeneration(**vars(v)) for k, v in checks.items()},
+        {k: RunTimelineGeneration.model_validate(v, from_attributes=True) for k, v in jobs.items()},
+        {
+            k: RunTimelineGeneration.model_validate(v, from_attributes=True)
+            for k, v in checks.items()
+        },
     )

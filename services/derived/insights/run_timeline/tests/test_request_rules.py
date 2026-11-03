@@ -27,6 +27,7 @@ from services.derived.insights.run_timeline.request_rules import (
     positive_agent_id,
     resolve_window,
 )
+from services.derived.insights.run_timeline.tests.app_request import app_request
 
 NOON = datetime(2026, 10, 4, 12, 0, tzinfo=UTC)
 NAIVE = NOON.replace(tzinfo=None)
@@ -191,12 +192,12 @@ class _Refusing:
         raise self._refusal
 
 
-def _request(reader: object) -> Request:
-    state = SimpleNamespace(
+def _request(reader: object, **members: object) -> Request:
+    return app_request(
         timeline_timestamps=SimpleNamespace(clock=SimpleNamespace(now=lambda: NOON)),
         run_timeline_reader=reader,
+        **members,
     )
-    return Request({"type": "http", "app": SimpleNamespace(state=state)})
 
 
 def test_the_router_answers_a_refusal_with_its_status_detail_and_headers() -> None:
@@ -252,9 +253,7 @@ def test_the_context_route_answers_a_refusal_of_the_reader_as_http() -> None:
         def request(self, _cut: object, _at: int) -> object:
             raise TimelineRequestError(404, "the agent has made no LLM request")
 
-    state = _request(Missing()).scope["app"].state
-    state.insights_config = SimpleNamespace(default_model="claude-opus-5")
-    request = Request({"type": "http", "app": SimpleNamespace(state=state)})
+    request = _request(Missing(), insights_config=SimpleNamespace(default_model="claude-opus-5"))
 
     with pytest.raises(HTTPException) as caught:
         route.get_run_timeline_context(request, 7, 0, None)
