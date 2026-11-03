@@ -19,6 +19,7 @@ from typing import Any, LiteralString, cast
 import psycopg
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster.dataplane.pg_tools import pg_tool
 from services.backup.walg import restore
 from services.backup.walg.restore import RecoveryTarget, RestoreError, restored_instance
@@ -126,6 +127,7 @@ def test_recovers_to_the_target_lsn_and_never_touches_the_source(
             user="meiva",
             keep_data=True,
             path=sandbox.path,
+            timers=SYSTEM_TIMERS,
             socket_root=socket_root,
             home=sandbox.home,
             environ=sandbox.environ,
@@ -154,6 +156,7 @@ def test_recovers_to_a_target_time(
             user="meiva",
             keep_data=False,
             path=sandbox.path,
+            timers=SYSTEM_TIMERS,
             home=sandbox.home,
             environ=sandbox.environ,
         ) as instance:
@@ -174,6 +177,7 @@ def test_without_a_target_recovery_replays_all_archived_wal(
             user="meiva",
             keep_data=False,
             path=sandbox.path,
+            timers=SYSTEM_TIMERS,
             home=sandbox.home,
             environ=sandbox.environ,
         ) as instance:
@@ -202,6 +206,7 @@ def test_a_backup_that_carries_archive_settings_still_cannot_archive(
                 user="meiva",
                 keep_data=False,
                 path=sandbox.path,
+                timers=SYSTEM_TIMERS,
                 home=sandbox.home,
                 environ=sandbox.environ,
             ) as instance,
@@ -233,6 +238,7 @@ def test_a_missing_segment_between_backup_and_target_fails_recovery(
                 user="meiva",
                 keep_data=False,
                 path=sandbox.path,
+                timers=SYSTEM_TIMERS,
                 home=sandbox.home,
                 environ=sandbox.environ,
             ),
@@ -258,6 +264,7 @@ def test_refuses_a_directory_that_is_not_empty(
             user="meiva",
             keep_data=True,
             path=sandbox.path,
+            timers=SYSTEM_TIMERS,
             home=sandbox.home,
             environ=sandbox.environ,
         ),
@@ -279,6 +286,7 @@ def test_refuses_the_live_data_directory(tmp_path: Path, monkeypatch: pytest.Mon
                 user="meiva",
                 keep_data=True,
                 path=sandbox.path,
+                timers=SYSTEM_TIMERS,
                 home=sandbox.home,
                 environ=sandbox.environ,
             ),
@@ -303,6 +311,7 @@ def test_the_live_data_directory_is_the_one_of_the_home_it_is_handed(
             user="meiva",
             keep_data=True,
             path=sandbox.path,
+            timers=SYSTEM_TIMERS,
             home=elsewhere,
             environ=sandbox.environ,
         ),
@@ -324,6 +333,7 @@ def test_a_failed_fetch_is_a_restore_error(tmp_path: Path, monkeypatch: pytest.M
             user="meiva",
             keep_data=True,
             path=sandbox.path,
+            timers=SYSTEM_TIMERS,
             home=sandbox.home,
             environ=sandbox.environ,
         ),
@@ -442,6 +452,7 @@ def test_a_role_the_restored_cluster_does_not_have_fails_at_once(
                 user="not_the_superuser",
                 keep_data=False,
                 path=sandbox.path,
+                timers=SYSTEM_TIMERS,
                 socket_root=socket_root,
                 home=sandbox.home,
                 environ=sandbox.environ,

@@ -40,16 +40,16 @@ import math
 import re
 import shutil
 import tempfile
-import time
 import traceback
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import psycopg
 
+from base.clock import Timers
 from base.cluster.dataplane import pg_admin
 from base.cluster.dataplane.pg_throwaway_base import (
     InsufficientThrowawaySpaceError,
@@ -258,6 +258,7 @@ def _restore_and_verify(
     socket_root: Path,
     home: Path,
     environ: Mapping[str, str],
+    timers: Timers,
     space_factor: float = SPACE_FACTOR,
     host_floor_bytes: int = HOST_FLOOR_BYTES,
 ) -> str:
@@ -296,6 +297,7 @@ def _restore_and_verify(
             user=_admin_user(target),
             keep_data=False,
             path=path,
+            timers=timers,
             socket_root=socket_root,
             home=home,
             environ=environ,
@@ -353,6 +355,12 @@ def drill_record(
     )
 
 
+# meiva:note
+# `timers` and `now` are the tick's clock, handed down: `timers` bounds the recovery this drill
+# drives and measures how long it took, `now` stamps the record written here. `now` is a callable
+# on purpose -- it is read where the record is built, so the stamp stays the *completion* instant
+# (a pre-read instant handed in by the caller would date the drill from when it started). The
+# drill reads neither itself, so a test drives both.
 def run_drill(
     target: PgTarget,
     backup: Backup,
@@ -365,11 +373,13 @@ def run_drill(
     socket_root: Path = SOCKET_ROOT,
     home: Path,
     environ: Mapping[str, str],
+    timers: Timers,
+    now: Callable[[], datetime],
     space_factor: float = SPACE_FACTOR,
     host_floor_bytes: int = HOST_FLOOR_BYTES,
 ) -> DrillRecord:
     """Run one drill against `backup`; every failure becomes a record with `ok=False`."""
-    started = time.monotonic()
+    started = timers.monotonic()
     reached: int | None = None
     refused: str | None = None
     try:
@@ -389,6 +399,7 @@ def run_drill(
                 socket_root=socket_root,
                 home=home,
                 environ=environ,
+                timers=timers,
                 space_factor=space_factor,
                 host_floor_bytes=host_floor_bytes,
             ),
@@ -406,7 +417,7 @@ def run_drill(
         previous,
         reached=reached,
         outcome=outcome,
-        seconds=time.monotonic() - started,
-        finished=datetime.now(UTC),
+        seconds=timers.monotonic() - started,
+        finished=now(),
         refused=refused,
     )
