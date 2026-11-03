@@ -38,9 +38,16 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
-from gateway.http.config import gateway_config
+from gateway.http.config import GatewayAppState, gateway_config, state_as
 
 router = APIRouter()
+
+
+# meiva:note
+# The HTTP client to Grafana the app root builds; this proxy is its only reader.
+class GrafanaAppState(GatewayAppState):
+    grafana_client: httpx.AsyncClient
+
 
 # meiva:note
 # Reverse-proxy dialing: connect fails fast (5s) when Grafana is down; a
@@ -172,7 +179,7 @@ async def _proxy(rest: str, request: Request) -> Response:
     query = request.url.query
     if query:
         target += f"?{query}"
-    client: httpx.AsyncClient = request.app.state.grafana_client
+    client = state_as(request, GrafanaAppState).grafana_client
     try:
         # meiva:note
         # Forward the whitelisted request headers (Content-Type matters for

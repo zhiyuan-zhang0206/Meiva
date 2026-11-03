@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, TypeGuard
 
 import psycopg
+from psycopg.rows import class_row
 from psycopg_pool import ConnectionPool
 
 from base.db.transaction import write_transaction
@@ -118,9 +120,24 @@ def pending_sync(pool: ConnectionPool, *, min_age_seconds: float, limit: int) ->
     return [int(row[0]) for row in rows]
 
 
-def recent_sync(pool: ConnectionPool, *, after_id: int, limit: int) -> list[tuple[Any, ...]]:
-    with pool.connection() as conn:
-        rows = conn.execute(_SELECT_RECENT, (after_id, limit)).fetchall()
+# meiva:note
+# One delivered notification as the recovery read returns it.
+@dataclass(frozen=True)
+class NotificationDelivery:
+    id: int
+    category: str
+    subject: str
+    body: str | None
+    href: str | None
+    importance: str
+    agent_id: int
+    created_at: datetime
+
+
+def recent_sync(pool: ConnectionPool, *, after_id: int, limit: int) -> list[NotificationDelivery]:
+    with pool.connection() as conn, conn.cursor(row_factory=class_row(NotificationDelivery)) as cur:
+        cur.execute(_SELECT_RECENT, (after_id, limit))
+        rows = cur.fetchall()
     return list(reversed(rows))
 
 

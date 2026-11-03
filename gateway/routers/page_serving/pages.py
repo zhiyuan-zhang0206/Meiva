@@ -20,6 +20,7 @@ import asyncio
 import html as _html
 import re as _re
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from typing import Annotated
 
 import httpx
@@ -40,7 +41,15 @@ from base.packages.docs.pages_copy import (
     PAGE_SERVER_TIMEOUT_BODY,
 )
 from base.telemetry.alerts import display_language
-from gateway.http.config import GatewayConfig, gateway_clock, gateway_config
+from gateway.http.config import (
+    GatewayAppState,
+    GatewayConfig,
+    gateway_clock,
+    gateway_config,
+    gateway_state,
+    state_as,
+)
+from gateway.http.db_rows import query_one
 from gateway.routers.page_serving import page_acceptance, page_target, page_target_policy
 from gateway.schemas import PageCloseRequest, PageRegisterRequest
 from ops.pages import (
@@ -51,6 +60,12 @@ from ops.pages import (
 from ops.rpc_schemas import PageRow
 
 router = APIRouter()
+
+
+# meiva:note
+# The page host cache the app root builds; the page routes are its only readers.
+class PageServingAppState(GatewayAppState):
+    page_host_cache: page_target.PageHostCache
 
 
 # meiva:note
@@ -208,22 +223,22 @@ async def post_guarded_page_register(
 ) -> PageRow:
     result = await asyncio.to_thread(
         page_acceptance.register,
-        request.app.state.db_pool,
+        gateway_state(request).db_pool,
         key,
         agent_id,
         body,
         _absolute_url(request, ""),
-        request.app.state.page_host_cache,
+        state_as(request, PageServingAppState).page_host_cache,
         gateway_config(request).pages.default_ttl_seconds,
         gateway_clock(request),
     )
     if not result.replayed:
         for name in result.closed_names:
             await _publish_page_event(
-                request.app.state.bus, PageClosed(agent_id=agent_id, name=name)
+                gateway_state(request).bus, PageClosed(agent_id=agent_id, name=name)
             )
         await _publish_page_event(
-            request.app.state.bus,
+            gateway_state(request).bus,
             PageOpened(
                 agent_id=agent_id,
                 page_id=result.record.id,
@@ -250,7 +265,7 @@ async def post_guarded_page_close(
 ) -> PageRow:
     result = await asyncio.to_thread(
         page_acceptance.close,
-        request.app.state.db_pool,
+        gateway_state(request).db_pool,
         key,
         agent_id,
         name,
@@ -258,7 +273,9 @@ async def post_guarded_page_close(
         _absolute_url(request, ""),
     )
     if result.closed_names:
-        await _publish_page_event(request.app.state.bus, PageClosed(agent_id=agent_id, name=name))
+        await _publish_page_event(
+            gateway_state(request).bus, PageClosed(agent_id=agent_id, name=name)
+        )
     return result.record
 
 
@@ -268,7 +285,7 @@ async def post_guarded_page_close(
     description="Fleet view page-load: all agents' currently open pages in one fetch, so\neach fleet row can surface its agent's panels without a per-row request.\nSSE PageOpened/PageClosed handles deltas.",
 )
 def get_all_pages(request: Request) -> list[PageRow]:
-    with request.app.state.db_pool.connection() as conn:
+    with gateway_state(request).db_pool.connection() as conn:
         return [_absolutize(request, r) for r in list_all_open_pages(conn)]
 
 
@@ -278,7 +295,7 @@ def get_all_pages(request: Request) -> list[PageRow]:
     description="UI page-load fetches the agent's currently open page list; SSE PageOpened/Closed handles deltas.",
 )
 def get_pages(agent_id: int, request: Request) -> list[PageRow]:
-    with request.app.state.db_pool.connection() as conn:
+    with gateway_state(request).db_pool.connection() as conn:
         if not agent_exists(conn, agent_id):
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
         return [_absolutize(request, r) for r in list_open_pages(conn, agent_id)]
@@ -317,14 +334,14 @@ async def _close_upstream(resp: httpx.Response, client: httpx.AsyncClient) -> No
 async def _proxy_page_get_impl(agent_id: int, name: str, rest: str, request: Request) -> Response:
     _validate_proxy_rest(rest)
     target_row = await asyncio.to_thread(
-        _page_target_blocking, request.app.state.db_pool, agent_id, name
+        _page_target_blocking, gateway_state(request).db_pool, agent_id, name
     )
     if target_row is None:
         expired = await asyncio.to_thread(
-            _page_expired_blocking, request.app.state.db_pool, agent_id, name
+            _page_expired_blocking, gateway_state(request).db_pool, agent_id, name
         )
         if expired:
-            lang = await asyncio.to_thread(_page_language, request.app.state.db_pool)
+            lang = await asyncio.to_thread(_page_language, gateway_state(request).db_pool)
             return Response(
                 status_code=410,
                 media_type="text/html",
@@ -334,8 +351,8 @@ async def _proxy_page_get_impl(agent_id: int, name: str, rest: str, request: Req
     host, port = target_row
     await asyncio.to_thread(
         page_target.validate_proxy_page_target,
-        request.app.state.db_pool,
-        request.app.state.page_host_cache,
+        gateway_state(request).db_pool,
+        state_as(request, PageServingAppState).page_host_cache,
         agent_id,
         host,
     )
@@ -343,7 +360,7 @@ async def _proxy_page_get_impl(agent_id: int, name: str, rest: str, request: Req
     query = request.url.query
     if query:
         target += f"?{query}"
-    config: GatewayConfig = request.app.state.gateway_config
+    config: GatewayConfig = gateway_state(request).gateway_config
     dial = page_target_policy.proxy_dial(
         config.page_proxy_connect_seconds, config.page_proxy_read_seconds
     )
@@ -362,7 +379,7 @@ async def _proxy_page_get_impl(agent_id: int, name: str, rest: str, request: Req
         # meiva:note
         # Friendly, language-aware copy in place of the raw host:port detail —
         # the dial target stays in the log line above (task #2212, QA nit B).
-        lang = await asyncio.to_thread(_page_language, request.app.state.db_pool)
+        lang = await asyncio.to_thread(_page_language, gateway_state(request).db_pool)
         detail = PAGE_SERVER_TIMEOUT_BODY.get(lang, PAGE_SERVER_TIMEOUT_BODY[PAGE_LANGUAGE_DEFAULT])
         raise HTTPException(status_code=504, detail=detail) from None
     except httpx.HTTPError as exc:
@@ -371,7 +388,7 @@ async def _proxy_page_get_impl(agent_id: int, name: str, rest: str, request: Req
         # meiva:note
         # Friendly, language-aware copy in place of the raw host:port detail —
         # the dial target stays in the log line above (task #2212).
-        lang = await asyncio.to_thread(_page_language, request.app.state.db_pool)
+        lang = await asyncio.to_thread(_page_language, gateway_state(request).db_pool)
         detail = PAGE_SERVER_DOWN_BODY.get(lang, PAGE_SERVER_DOWN_BODY[PAGE_LANGUAGE_DEFAULT])
         raise HTTPException(status_code=502, detail=detail) from None
     headers = {k: v for k, v in resp.headers.items() if k.lower() in _FORWARDED_RESPONSE_HEADERS}
@@ -470,13 +487,21 @@ def _page_target_blocking(pool: ConnectionPool, agent_id: int, name: str) -> tup
 
 
 # meiva:note
+# Whether the newest registry row of a page name carries an expiry.
+@dataclass(frozen=True)
+class _ExpiredRow:
+    expired: bool
+
+
+# meiva:note
 # Whether the newest registry row for this page name expired.
 def _page_expired_blocking(pool: ConnectionPool, agent_id: int, name: str) -> bool:
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT expired_at IS NOT NULL FROM agent_pages "
+    with pool.connection() as conn:
+        row = query_one(
+            conn,
+            _ExpiredRow,
+            "SELECT expired_at IS NOT NULL AS expired FROM agent_pages "
             "WHERE agent_id = %s AND name = %s ORDER BY id DESC LIMIT 1",
             (agent_id, name),
         )
-        row = cur.fetchone()
-    return bool(row[0]) if row is not None else False
+    return row.expired if row is not None else False

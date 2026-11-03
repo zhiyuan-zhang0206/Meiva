@@ -9,9 +9,11 @@ any child remains in progress.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Literal, overload
+from typing import Literal
 
+import psycopg
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from psycopg import Cursor
 from psycopg_pool import ConnectionPool
@@ -27,12 +29,15 @@ from base.agents.tasks.delivery import (
 from base.agents.tasks.owner_notifications import (
     owner_change_notifications,
 )
+from base.agents.tasks.priority import Priority
 from base.agents.tasks.reparent import resolve_reparent
 from base.agents.tasks.rules import first_open_child, is_closed, open_title_holder
+from base.agents.tasks.status import TaskStatus
 from base.db.transaction import write_transaction
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.http.auth.request_principal import PrincipalScopeError, request_key
-from gateway.http.config import gateway_clock, gateway_rpc
+from gateway.http.config import gateway_clock, gateway_rpc, gateway_state
+from gateway.http.db_rows import query_all, query_one
 from gateway.routers.receipts.task import existing_task_receipt, save_task_receipt
 from gateway.schemas.tasks import (
     TaskGraphRow,
@@ -78,90 +83,113 @@ _TASK_SUMMARY_COLS = (
 )
 
 
-@overload
-def _row_to_task(
-    row: tuple[Any, ...],
-    fields: Literal["full"],
-    owner_label: str | None = None,
-) -> TaskRow: ...
-
-
-@overload
-def _row_to_task(
-    row: tuple[Any, ...],
-    fields: Literal["summary"],
-    owner_label: str | None = None,
-) -> TaskSummaryRow: ...
-
-
-@overload
-def _row_to_task(
-    row: tuple[Any, ...],
-    fields: Literal["graph"],
-    owner_label: str | None = None,
-) -> TaskGraphRow: ...
+# meiva:note
+# The columns every task projection selects, as the database holds them: timestamps stay
+# `datetime`, and `status` / `priority` are the stored strings (converted to their enums where
+# the response row is built). A projection that selects fewer columns uses a narrower class.
+@dataclass(frozen=True)
+class _SummaryDbRow:
+    id: int
+    parent_id: int | None
+    title: str
+    status: str
+    owner: int | None
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+    remind_interval_seconds: int | None
+    last_reminded_at: datetime | None
+    reminder_count: int
+    priority: str
+    reminders_paused_until: datetime | None
+    owner_label: str | None
 
 
 # meiva:note
-# Build a task row from the selected projection plus its owner label.
-# meiva:link gateway/routers/docs/routers.meiva.okf.md
-def _row_to_task(
-    row: tuple[Any, ...],
-    fields: Literal["full", "summary", "graph"],
-    owner_label: str | None = None,
-) -> TaskRow | TaskSummaryRow | TaskGraphRow:
-    if fields == "graph":
-        return TaskGraphRow(
-            id=row[0],
-            parent_id=row[1],
-            title=row[2],
-            description=row[3],
-            status=row[4],
-            owner=row[5],
-            owner_label=owner_label,
-            created_by=row[6],
-            created_at=row[7].isoformat(),
-            updated_at=row[8].isoformat(),
-            remind_interval_seconds=row[9],
-            last_reminded_at=row[10].isoformat() if row[10] else None,
-            reminder_count=row[11],
-            priority=row[12],
-            reminders_paused_until=row[13].isoformat() if row[13] else None,
-        )
-    if fields == "summary":
-        return TaskSummaryRow(
-            id=row[0],
-            parent_id=row[1],
-            title=row[2],
-            status=row[3],
-            owner=row[4],
-            owner_label=owner_label,
-            created_by=row[5],
-            created_at=row[6].isoformat(),
-            updated_at=row[7].isoformat(),
-            remind_interval_seconds=row[8],
-            last_reminded_at=row[9].isoformat() if row[9] else None,
-            reminder_count=row[10],
-            priority=row[11],
-            reminders_paused_until=row[12].isoformat() if row[12] else None,
-        )
+# What a PATCH checks under `FOR UPDATE` before it writes: who owns the task, whether it is the
+# immutable system root, and the owner's agent status (NULL when there is no owner row).
+@dataclass(frozen=True)
+class _PatchGuardRow:
+    owner: int | None
+    is_root: bool
+    owner_status: str | None
+
+
+# meiva:note
+# The graph projection: the summary columns plus the description.
+@dataclass(frozen=True)
+class _GraphDbRow(_SummaryDbRow):
+    description: str
+
+
+# meiva:note
+# The full projection: the graph columns plus `results`.
+@dataclass(frozen=True)
+class _FullDbRow(_GraphDbRow):
+    results: str | None
+
+
+def _iso(moment: datetime | None) -> str | None:
+    return moment.isoformat() if moment else None
+
+
+def _summary_task(row: _SummaryDbRow) -> TaskSummaryRow:
+    return TaskSummaryRow(
+        id=row.id,
+        parent_id=row.parent_id,
+        title=row.title,
+        status=TaskStatus(row.status),
+        owner=row.owner,
+        owner_label=row.owner_label,
+        created_by=row.created_by,
+        created_at=row.created_at.isoformat(),
+        updated_at=row.updated_at.isoformat(),
+        remind_interval_seconds=row.remind_interval_seconds,
+        last_reminded_at=_iso(row.last_reminded_at),
+        reminder_count=row.reminder_count,
+        priority=Priority(row.priority),
+        reminders_paused_until=_iso(row.reminders_paused_until),
+    )
+
+
+def _graph_task(row: _GraphDbRow) -> TaskGraphRow:
+    return TaskGraphRow(
+        id=row.id,
+        parent_id=row.parent_id,
+        title=row.title,
+        description=row.description,
+        status=TaskStatus(row.status),
+        owner=row.owner,
+        owner_label=row.owner_label,
+        created_by=row.created_by,
+        created_at=row.created_at.isoformat(),
+        updated_at=row.updated_at.isoformat(),
+        remind_interval_seconds=row.remind_interval_seconds,
+        last_reminded_at=_iso(row.last_reminded_at),
+        reminder_count=row.reminder_count,
+        priority=Priority(row.priority),
+        reminders_paused_until=_iso(row.reminders_paused_until),
+    )
+
+
+def _full_task(row: _FullDbRow) -> TaskRow:
     return TaskRow(
-        id=row[0],
-        parent_id=row[1],
-        title=row[2],
-        description=row[3],
-        results=row[4],
-        status=row[5],
-        owner=row[6],
-        owner_label=owner_label,
-        created_by=row[7],
-        created_at=row[8].isoformat(),
-        updated_at=row[9].isoformat(),
-        remind_interval_seconds=row[10],
-        last_reminded_at=row[11].isoformat() if row[11] else None,
-        reminder_count=row[12],
-        priority=row[13],
-        reminders_paused_until=row[14].isoformat() if row[14] else None,
+        id=row.id,
+        parent_id=row.parent_id,
+        title=row.title,
+        description=row.description,
+        results=row.results,
+        status=TaskStatus(row.status),
+        owner=row.owner,
+        owner_label=row.owner_label,
+        created_by=row.created_by,
+        created_at=row.created_at.isoformat(),
+        updated_at=row.updated_at.isoformat(),
+        remind_interval_seconds=row.remind_interval_seconds,
+        last_reminded_at=_iso(row.last_reminded_at),
+        reminder_count=row.reminder_count,
+        priority=Priority(row.priority),
+        reminders_paused_until=_iso(row.reminders_paused_until),
     )
 
 
@@ -218,16 +246,36 @@ def _windowed_tasks(
 # meiva:link gateway/routers/docs/routers.meiva.okf.md
 @router.get("/api/tasks/{task_id}", dependencies=[Depends(deny_isolated_result_read)])
 def get_task(request: Request, task_id: int) -> TaskRow:
-    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
+    with gateway_state(request).db_pool.connection() as conn:
+        row = query_one(
+            conn,
+            _FullDbRow,
             f"SELECT {_TASK_COLS}, a.label AS owner_label "  # noqa: S608
             "FROM agent_tasks t LEFT JOIN agents a ON t.owner = a.id WHERE t.id = %s",
             (task_id,),
         )
-        row = cur.fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail=f"Task {task_id} not found.")
-    return _row_to_task(row[:-1], "full", owner_label=row[-1])
+    return _full_task(row)
+
+
+_TASK_LIST_TAIL = (
+    ", a.label AS owner_label FROM agent_tasks t "
+    "LEFT JOIN agents a ON t.owner = a.id ORDER BY t.created_at DESC"
+)
+
+
+def _list_tasks(
+    conn: psycopg.Connection, fields: Literal["full", "summary", "graph"]
+) -> list[TaskRow | TaskSummaryRow]:
+    if fields == "full":
+        full = query_all(conn, _FullDbRow, "SELECT " + _TASK_COLS + _TASK_LIST_TAIL)
+        return [_full_task(row) for row in full]
+    if fields == "graph":
+        graph = query_all(conn, _GraphDbRow, "SELECT " + _TASK_GRAPH_COLS + _TASK_LIST_TAIL)
+        return [_graph_task(row) for row in graph]
+    summary = query_all(conn, _SummaryDbRow, "SELECT " + _TASK_SUMMARY_COLS + _TASK_LIST_TAIL)
+    return [_summary_task(row) for row in summary]
 
 
 @router.get("/api/tasks", dependencies=[Depends(deny_isolated_result_read)])
@@ -246,14 +294,8 @@ def get_tasks(
     window: str = Query("all", pattern="^(24h|7d|30d|all)$"),
     fields: Literal["full", "summary", "graph"] = Query("full"),
 ) -> TaskListResponse:
-    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            f"SELECT {_TASK_COLS if fields == 'full' else _TASK_GRAPH_COLS if fields == 'graph' else _TASK_SUMMARY_COLS}, a.label AS owner_label "  # noqa: S608
-            "FROM agent_tasks t "
-            "LEFT JOIN agents a ON t.owner = a.id "
-            "ORDER BY t.created_at DESC"
-        )
-        tasks = [_row_to_task(r[:-1], fields, owner_label=r[-1]) for r in cur.fetchall()]
+    with gateway_state(request).db_pool.connection() as conn:
+        tasks = _list_tasks(conn, fields)
     if window == "all":
         return TaskListResponse(tasks=tasks)
     return TaskListResponse(tasks=_windowed_tasks(tasks, window, now=gateway_clock(request).now()))
@@ -340,7 +382,7 @@ def _patch_fields(body: TaskUpdateRequest) -> tuple[list[str], list[object]]:
     return sets, params
 
 
-def _validate_patch_title(cur: Cursor[Any], task_id: int, title: str | None) -> None:
+def _validate_patch_title(cur: Cursor, task_id: int, title: str | None) -> None:
     """Apply the shared title uniqueness rule with the HTTP boundary error."""
     # A rename must keep the SDK create() invariant: no two in_progress
     # tasks share a title.
@@ -361,7 +403,7 @@ def _validate_patch_title(cur: Cursor[Any], task_id: int, title: str | None) -> 
 # network or process wake can roll back the owner assignment.
 # meiva:link gateway/routers/docs/routers.meiva.okf.md
 def patch_task_blocking(
-    pool: ConnectionPool[Any],
+    pool: ConnectionPool,
     task_id: int,
     body: TaskUpdateRequest,
     operation_key: str,
@@ -370,24 +412,26 @@ def patch_task_blocking(
     path = operation_path if operation_path is not None else f"/api/tasks/{task_id}"
     request_body = body.model_dump(mode="json", exclude_unset=True)
     with write_transaction(pool) as conn, conn.cursor() as cur:
-        previous = existing_task_receipt(cur, path, operation_key, request_body)
+        previous = existing_task_receipt(conn, path, operation_key, request_body)
         if previous is not None:
             return previous, []
         sets, params = _patch_fields(body)
         # The system root task is immutable (the task-tree anchor / default
         # parent) — reject any edit before writing, same rule as the SDK
         # update() path. Check existence here too so a missing task still 404s.
-        cur.execute(
-            "SELECT t.owner, t.is_root, a.status "
+        guard = query_one(
+            conn,
+            _PatchGuardRow,
+            "SELECT t.owner, t.is_root, a.status AS owner_status "
             "FROM agent_tasks t LEFT JOIN agents_meta a ON a.id = t.owner "
             "WHERE t.id = %s FOR UPDATE OF t",
             (task_id,),
         )
-        guard = cur.fetchone()
         if guard is None:
             raise HTTPException(status_code=404, detail=f"Task {task_id} not found.")
-        previous_owner, is_root, previous_owner_status = guard
-        if is_root:
+        previous_owner = guard.owner
+        previous_owner_status = guard.owner_status
+        if guard.is_root:
             raise HTTPException(
                 status_code=422,
                 detail=f"Task {task_id} is the system root task and is immutable.",
@@ -423,12 +467,11 @@ def patch_task_blocking(
             f"FROM updated u "
             f"LEFT JOIN agents a ON u.owner = a.id"
         )
-        cur.execute(update_sql, (*params, task_id))  # pyright: ignore[reportArgumentType, reportCallIssue]
-        row = cur.fetchone()
+        row = query_one(conn, _FullDbRow, update_sql, (*params, task_id))  # pyright: ignore[reportArgumentType, reportCallIssue]
         if row is None:
             raise HTTPException(status_code=404, detail=f"Task {task_id} not found.")
 
-        task = _row_to_task(row[:-1], "full", owner_label=row[-1])
+        task = _full_task(row)
         receipts: list[TaskNoteReceipt] = []
         if "owner" in body.model_fields_set and previous_owner != task.owner:
             supersede_task_assignments(cur, task_id)
@@ -445,7 +488,7 @@ def patch_task_blocking(
                 ),
                 "user",
             )
-        save_task_receipt(cur, path, operation_key, request_body, task)
+        save_task_receipt(conn, path, operation_key, request_body, task)
     emit_task_note_events(receipts)
     return task, receipts
 
@@ -486,7 +529,7 @@ async def patch_task(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     task, notes = await asyncio.to_thread(
         patch_task_blocking,
-        request.app.state.db_pool,
+        gateway_state(request).db_pool,
         task_id,
         body,
         operation_key,
@@ -495,19 +538,19 @@ async def patch_task(
     for note in notes:
         await asyncio.to_thread(
             publish_inbound_wake,
-            request.app.state.db,
-            request.app.state.bus,
+            gateway_state(request).db,
+            gateway_state(request).bus,
             note.agent_id,
             str(note.inbound_id),
         )
         if note.resurrect:
             await lifecycle.resurrect_if_terminated(
-                request.app.state.db,
-                request.app.state.bus,
+                gateway_state(request).db,
+                gateway_state(request).bus,
                 note.agent_id,
                 trigger_inbound_id=note.inbound_id,
                 trigger_inbound_kind=InboundKind.SYSTEM_NOTE,
-                local_machine=request.app.state.machine.name(),
+                local_machine=gateway_state(request).machine.name(),
                 rpc=gateway_rpc(request),
             )
     return task

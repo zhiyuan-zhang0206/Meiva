@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from base.paths import insights_socket
 from gateway.agents.eval_guard import deny_isolated_result_read
+from gateway.http.config import GatewayAppState, state_as
 from services.derived.insights.run_timeline.schemas import (
     RunTimelineContext,
     RunTimelineLinkContent,
@@ -22,6 +23,12 @@ from services.derived.insights.run_timeline.schemas import (
 )
 
 router = APIRouter()
+
+
+# meiva:note
+# The HTTP client to the insights service the app root builds; this proxy is its only reader.
+class InsightsAppState(GatewayAppState):
+    insights_client: httpx.AsyncClient
 
 
 _TIMEOUT = httpx.Timeout(connect=2.0, read=120.0, write=5.0, pool=5.0)
@@ -51,7 +58,7 @@ def _validate_rest(rest: str) -> None:
 async def _forward(request: Request, path: str) -> Response:
     target = path + (f"?{request.url.query}" if request.url.query else "")
     headers = {k: v for k, v in request.headers.items() if k.lower() in _FORWARDED_REQUEST_HEADERS}
-    client: httpx.AsyncClient = request.app.state.insights_client
+    client = state_as(request, InsightsAppState).insights_client
     try:
         resp = await client.get(target, headers=headers)
     except httpx.TimeoutException:

@@ -19,7 +19,7 @@ model registry validates writes; existing agents retain their frozen model.
 
 `gateway/app.py` mounts both routers at their existing API paths. Runtime
 configuration endpoints obtain their database and pool from the serving
-`Request.app.state` and pass them explicitly to the machine lookup, capability
+app state (`gateway_state(request)`) and pass them explicitly to the machine lookup, capability
 projection and read/audit/write RPC helpers. The audit fanout uses that same
 app database. Role lookups and ops dispatch go to the registry and
 `ops.cluster.rpc` directly: a runner is a row in `machines` and a listener, so a

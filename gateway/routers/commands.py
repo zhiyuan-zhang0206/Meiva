@@ -11,10 +11,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 
 from fastapi import APIRouter, Request
 
-from gateway.http.config import gateway_rpc
+from gateway.http.config import gateway_rpc, gateway_state
+from gateway.http.db_rows import query_one
+from gateway.http.json_values import is_object_dict, is_object_list
 from gateway.schemas import CommandItem
 from ops.cluster import rpc as cluster_rpc
 
@@ -28,7 +31,7 @@ _HARNESS_FORBIDDEN_COMMANDS: frozenset[str] = frozenset({"compact"})
 
 def _local_commands(request: Request, *, harness: str = "meiva") -> list[CommandItem]:
     """The gateway-local catalog: the unscoped view and the availability fallback."""
-    discovered = request.app.state.command_catalog.discover()
+    discovered = gateway_state(request).command_catalog.discover()
     return [
         CommandItem(
             name=c["name"],
@@ -41,16 +44,39 @@ def _local_commands(request: Request, *, harness: str = "meiva") -> list[Command
 
 
 # meiva:note
+# The machine and harness columns of an agent; either is NULL for a row that never recorded it.
+@dataclass(frozen=True)
+class _MachineHarnessRow:
+    machine: str | None
+    harness: str | None
+
+
+# meiva:note
+# The command entries of an `agent_skill_view` answer, each still a decoded JSON object.
+def _command_entries(value: object) -> list[dict[str, object]]:
+    if not is_object_list(value):
+        raise TypeError("agent_skill_view answered a non-list `commands`")
+    entries: list[dict[str, object]] = []
+    for entry in value:
+        if not is_object_dict(entry):
+            raise TypeError("agent_skill_view answered a non-object command")
+        entries.append(entry)
+    return entries
+
+
+# meiva:note
 # (machine, harness) recorded for an agent, or (None, 'meiva') when the row is absent.
 def _agent_machine_and_harness(request: Request, agent_id: int) -> tuple[str | None, str]:
-    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT machine, harness FROM agents_meta WHERE id = %s", (agent_id,))
-        row = cur.fetchone()
+    with gateway_state(request).db_pool.connection() as conn:
+        row = query_one(
+            conn,
+            _MachineHarnessRow,
+            "SELECT machine, harness FROM agents_meta WHERE id = %s",
+            (agent_id,),
+        )
     if row is None:
         return None, "meiva"
-    machine = str(row[0]) if row[0] is not None else None
-    harness = str(row[1]) if len(row) > 1 and row[1] is not None else "meiva"
-    return machine, harness
+    return row.machine, row.harness if row.harness is not None else "meiva"
 
 
 @router.get("/api/commands")
@@ -70,7 +96,7 @@ async def get_commands(request: Request, agent_id: int | None = None) -> list[Co
         return _local_commands(request, harness=harness)
     try:
         result = await gateway_rpc(request).dispatch_to_machine(
-            request.app.state.db,
+            gateway_state(request).db,
             machine,
             "agent_skill_view",
             {"agent_id": agent_id},
@@ -86,6 +112,6 @@ async def get_commands(request: Request, agent_id: int | None = None) -> list[Co
         return _local_commands(request, harness=harness)
     return [
         CommandItem.model_validate(command)
-        for command in result["commands"]
+        for command in _command_entries(result.get("commands"))
         if harness == "meiva" or command.get("name") not in _HARNESS_FORBIDDEN_COMMANDS
     ]

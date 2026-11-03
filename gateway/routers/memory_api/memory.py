@@ -15,7 +15,13 @@ from base.lm.catalog import ModelCatalog
 from base.lm.factory import process_provider_keys
 from base.packages.docs.notes import parse_note
 from gateway.agents.eval_guard import deny_isolated_result_read
-from gateway.http.config import MemorySearchSettings, gateway_config
+from gateway.http.config import (
+    GatewayAppState,
+    MemorySearchSettings,
+    gateway_config,
+    gateway_state,
+    state_as,
+)
 from gateway.http.disconnect import run_until_disconnect
 from gateway.http.model_catalog import require_model_catalog
 from gateway.routers.memory_api import memory_plan
@@ -31,6 +37,16 @@ from services.derived.memory_indexer.backends.base import ChunkHit
 from services.derived.memory_indexer.embeddings.base import EmbeddingProvider
 
 router = APIRouter()
+
+
+# meiva:note
+# The search embedder, its concurrency gate and the unreadable-memory reports the app root builds;
+# this directory's routes are their only readers, so it declares them. The embedder is absent when
+# the model catalog failed to load, which `require_model_catalog` refuses first.
+class MemoryAppState(GatewayAppState):
+    memory_embedder: EmbeddingProvider
+    memory_search_gate: asyncio.Semaphore
+    memory_unreadable_reports: rerank.UnreadableReports
 
 
 # meiva:note
@@ -137,7 +153,7 @@ async def post_memory_search(request: Request, body: MemorySearchRequest) -> Mem
     # meiva:link gateway/routers/docs/memory.meiva.okf.md
     inputs = gateway_config(request).memory_search
     catalog = require_model_catalog(request)
-    provider: EmbeddingProvider = request.app.state.memory_embedder
+    provider = state_as(request, MemoryAppState).memory_embedder
     plan = memory_plan.search_plan(
         purpose=body.purpose,
         configured_deadline_s=inputs.deadline,
@@ -191,8 +207,8 @@ async def _search_and_rank(
         k=body.k,
         limit=plan.limit,
         exclude=plan.exclude,
-        memory_root=request.app.state.gateway_config.memory_root,
-        reports=request.app.state.memory_unreadable_reports,
+        memory_root=gateway_state(request).gateway_config.memory_root,
+        reports=state_as(request, MemoryAppState).memory_unreadable_reports,
     )
 
 
@@ -206,7 +222,7 @@ async def _vector_candidates(
     # meiva:link gateway/routers/docs/memory.meiva.okf.md
     from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 
-    gate = request.app.state.memory_search_gate
+    gate = state_as(request, MemoryAppState).memory_search_gate
     try:
         async with _bounded_semaphore(gate, inputs.acquire_timeout):
             query_vector = await provider.embed_query_async(body.query)
@@ -218,7 +234,7 @@ async def _vector_candidates(
     try:
         async with _bounded_semaphore(gate, inputs.acquire_timeout):
             return await _backend_topk(
-                request.app.state.db,
+                gateway_state(request).db,
                 query_vector,
                 plan.vector_count,
                 plan.deadline_s,
@@ -287,7 +303,7 @@ def get_memory_note(request: Request, path: str) -> MemoryNoteResponse:
     # meiva:note
     # A note path must resolve inside memory_root to a readable Markdown note. Absolute paths, traversal, null bytes, missing files and invalid frontmatter share the 404 surface rather than exposing filesystem errors.
     # meiva:link gateway/routers/docs/memory.meiva.okf.md
-    root = request.app.state.gateway_config.memory_root.resolve()
+    root = gateway_state(request).gateway_config.memory_root.resolve()
     rel = Path(path)
     if rel.is_absolute() or rel.suffix != ".md":
         raise HTTPException(status_code=404, detail="memory note not found")
@@ -335,7 +351,7 @@ def get_memory_note(request: Request, path: str) -> MemoryNoteResponse:
     ),
 )
 def get_memory_pool(request: Request) -> Response:
-    root = request.app.state.gateway_config.memory_root
+    root = gateway_state(request).gateway_config.memory_root
     if not root.is_dir():
         raise HTTPException(status_code=404, detail="gateway memory pool not initialized")
     try:
@@ -359,7 +375,7 @@ def _build_pool_bundle(root: Path) -> tuple[str, bytes]:
 
     with tempfile.TemporaryDirectory(prefix="memory-pool-bundle-") as tmp:
         bundle_path = Path(tmp) / "pool.bundle"
-        result = run_bounded(
+        result: subprocess.CompletedProcess[str] = run_bounded(
             ["git", "-C", str(root), "bundle", "create", str(bundle_path), "HEAD"],
             timeout=60.0,
             capture_output=True,
@@ -370,10 +386,11 @@ def _build_pool_bundle(root: Path) -> tuple[str, bytes]:
                 status_code=500,
                 detail=f"git bundle create failed: {(result.stderr or '').strip()[:200]}",
             )
-        head = run_bounded(
+        rev_parse: subprocess.CompletedProcess[str] = run_bounded(
             ["git", "-C", str(root), "rev-parse", "HEAD"],
             timeout=30.0,
             capture_output=True,
             text=True,
-        ).stdout.strip()
+        )
+        head = rev_parse.stdout.strip()
         return head, bundle_path.read_bytes()

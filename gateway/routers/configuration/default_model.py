@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 
 from base.agents.model.birth_config import resolve_default_model, set_cluster_default_model
+from gateway.http.config import gateway_state
 from gateway.http.model_catalog import require_model_catalog
 from gateway.schemas.models import DefaultModelView, DefaultModelWrite
 
@@ -15,11 +16,11 @@ router = APIRouter()
 )
 def get_default_model(request: Request) -> DefaultModelView:
 
-    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
+    with gateway_state(request).db_pool.connection() as conn, conn.cursor() as cur:
         resolved = resolve_default_model(
             cur,
             catalog=require_model_catalog(request),
-            authority=request.app.state.config_authority,
+            authority=gateway_state(request).config_authority,
         )
         return DefaultModelView(model=resolved.model, source=resolved.source)
 
@@ -40,9 +41,9 @@ def put_default_model(body: DefaultModelWrite, request: Request) -> DefaultModel
                 f"(the spawnable roster in base/lm/registry.py)"
             ),
         )
-    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
+    with gateway_state(request).db_pool.connection() as conn, conn.cursor() as cur:
         set_cluster_default_model(cur, body.model, updated_by="api")
         resolved = resolve_default_model(
-            cur, catalog=catalog, authority=request.app.state.config_authority
+            cur, catalog=catalog, authority=gateway_state(request).config_authority
         )
         return DefaultModelView(model=resolved.model, source=resolved.source)

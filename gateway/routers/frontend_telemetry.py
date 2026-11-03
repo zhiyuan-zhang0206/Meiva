@@ -28,18 +28,24 @@ from __future__ import annotations
 
 import logging
 from collections import deque
-from typing import Any
 
 from fastapi import APIRouter, Request, Response
 
 from base import telemetry
-from gateway.http.config import gateway_clock
+from gateway.http.config import GatewayAppState, gateway_clock, state_as
 from gateway.http.middleware.error_envelope import error_response
 from gateway.schemas import FrontendInteractionIn, FrontendTelemetryBatch
 
 router = APIRouter()
 
 _log = logging.getLogger(__name__)
+
+
+# meiva:note
+# The per-session rate limiter the app root builds; the batch route is its only reader.
+class FrontendTelemetryAppState(GatewayAppState):
+    telemetry_rate_limiter: SessionRateLimiter
+
 
 # Backstop rate limit: events per session per minute (sliding window). The
 # client caps itself at 100/min; this is defense in depth, not the primary
@@ -80,7 +86,7 @@ class SessionRateLimiter:
 
 def _emit_one(batch: FrontendTelemetryBatch, ev: FrontendInteractionIn) -> None:
     """Emit one validated interaction as a `frontend_interaction` event."""
-    attributes: dict[str, Any] = {
+    attributes: dict[str, object] = {
         "page": ev.page,
         "element": ev.element,
         "session_id": batch.session_id,
@@ -127,7 +133,7 @@ async def ingest(request: Request) -> Response:
             retryable=False,
         )
 
-    limiter: SessionRateLimiter = request.app.state.telemetry_rate_limiter
+    limiter = state_as(request, FrontendTelemetryAppState).telemetry_rate_limiter
     now = gateway_clock(request).now().timestamp()
     accepted = 0
     dropped = 0

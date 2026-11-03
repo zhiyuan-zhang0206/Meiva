@@ -50,9 +50,13 @@ def _upstream() -> FastAPI:
 
 def _gateway(transport: httpx.AsyncBaseTransport, *, pool: ConnectionPool | None = None) -> FastAPI:
     app = FastAPI()
+    app.state = proxy.InsightsAppState(
+        {
+            "insights_client": httpx.AsyncClient(transport=transport, base_url="http://insights"),
+            "db_pool": pool,
+        }
+    )
     app.include_router(proxy.router)
-    app.state.insights_client = httpx.AsyncClient(transport=transport, base_url="http://insights")
-    app.state.db_pool = pool
     return app
 
 

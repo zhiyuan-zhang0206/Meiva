@@ -10,12 +10,14 @@ import threading
 import time
 from collections import OrderedDict
 from contextlib import nullcontext
+from dataclasses import dataclass
 from urllib.parse import urlparse
 
 from fastapi import HTTPException
 from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
+from gateway.http.db_rows import query_all, query_one
 from gateway.routers.page_serving import page_target_policy
 from gateway.routers.refusal import HttpFailure
 
@@ -23,6 +25,20 @@ __all__ = ["PageHostCache", "validate_page_dial_target", "validate_proxy_page_ta
 
 _PAGE_HOST_CACHE_TTL_S = 60.0
 _PAGE_HOST_CACHE_MAX_ENTRIES = 4096
+
+
+# meiva:note
+# The URL of a live unit of a machine.
+@dataclass(frozen=True)
+class _UnitUrlRow:
+    url: str
+
+
+# meiva:note
+# The machine an agent lives on.
+@dataclass(frozen=True)
+class _MachineRow:
+    machine: str | None
 
 
 # meiva:note
@@ -54,17 +70,15 @@ class PageHostCache:
                 self._hosts.move_to_end(machine)
                 return cached[1]
         hosts = {machine}
-        with (
-            pool.connection() if connection is None else nullcontext(connection) as conn,
-            conn.cursor() as cur,
-        ):
-            cur.execute(
+        with pool.connection() if connection is None else nullcontext(connection) as conn:
+            for unit in query_all(
+                conn,
+                _UnitUrlRow,
                 "SELECT url FROM machine_units "
                 "WHERE machine_name = %s AND stopped_at IS NULL AND url IS NOT NULL",
                 (machine,),
-            )
-            for (url,) in cur.fetchall():
-                hostname = urlparse(str(url)).hostname
+            ):
+                hostname = urlparse(unit.url).hostname
                 if hostname:
                     hosts.add(hostname)
         allowed = frozenset(hosts)
@@ -81,14 +95,12 @@ class PageHostCache:
 def _agent_machine(
     pool: ConnectionPool, agent_id: int, *, connection: Connection | None = None
 ) -> str | None:
-    with (
-        pool.connection() if connection is None else nullcontext(connection) as conn,
-        conn.cursor() as cur,
-    ):
-        cur.execute("SELECT machine FROM agents_meta WHERE id = %s", (agent_id,))
-        row = cur.fetchone()
-    machine = row[0] if row is not None else None
-    return str(machine) if machine and machine != "unknown" else None
+    with pool.connection() if connection is None else nullcontext(connection) as conn:
+        row = query_one(
+            conn, _MachineRow, "SELECT machine FROM agents_meta WHERE id = %s", (agent_id,)
+        )
+    machine = row.machine if row is not None else None
+    return machine if machine and machine != "unknown" else None
 
 
 def _refuse(failure: HttpFailure | None) -> None:
