@@ -512,20 +512,40 @@ async def has_pending_interrupt(pool: AsyncConnectionSource, agent_id: int) -> b
 #     external interrupts (user / admin / peer) need the in-flight abort; the
 #     self row is still dispatched normally at claim.
 # meiva:note
-# The reason a pending external abort names. The poll runs through pools a test fakes (the cancel
-# watcher's), so the row is read positionally rather than through `class_row`: a fake cursor
-# answers with a tuple and needs no `row_factory`, and a row of another shape fails here instead
-# of being unpacked blind.
-def _interrupt_reason(row: tuple[object, ...] | None) -> InterruptReason | None:
-    if row is None:
-        return None
-    kind = row[0]
-    source = row[1]
-    if not isinstance(kind, str) or not isinstance(source, str):
-        raise TypeError("a pending interrupt row has columns of unexpected types")
-    if kind == "restart":
-        return InterruptReason.RESTART
-    return InterruptReason.USER if source == "user" else InterruptReason.SYSTEM
+# The kind and source of a pending external abort. Read positionally rather than through
+# `class_row` because this query runs through pools a test fakes (the cancel watcher's): a fake
+# cursor answers with a tuple and needs no `row_factory`, while psycopg's `class_row` needs a real
+# `pgresult`. A row of another width or column type fails in `from_row` instead of being unpacked
+# blind — a silently ignored abort would let a paused turn keep running.
+@dataclass(frozen=True)
+class PendingInterrupt:
+    kind: str
+    source: str
+
+    @classmethod
+    def from_row(cls, row: tuple[object, ...]) -> "PendingInterrupt":
+        if len(row) != 2:
+            raise TypeError(f"a pending interrupt row has {len(row)} columns, not 2")
+        kind, source = row
+        if not isinstance(kind, str) or not isinstance(source, str):
+            raise TypeError("a pending interrupt row has columns of unexpected types")
+        return cls(kind, source)
+
+    # meiva:note
+    # The interrupt this row names: a restart is its own reason; a cancel or terminate is the
+    # user's when it carries `source='user'` and the system's otherwise.
+    @property
+    def reason(self) -> InterruptReason:
+        if self.kind == "restart":
+            return InterruptReason.RESTART
+        return InterruptReason.USER if self.source == "user" else InterruptReason.SYSTEM
+
+
+# meiva:note
+# The reason a selected row names, or None when the query found no row. Separate from
+# `pending_interrupt_reason` so the row never has to be bound to a name in the caller.
+def _reason_of(row: tuple[object, ...] | None) -> InterruptReason | None:
+    return None if row is None else PendingInterrupt.from_row(row).reason
 
 
 async def pending_interrupt_reason(
@@ -540,4 +560,4 @@ async def pending_interrupt_reason(
             "ORDER BY i.id LIMIT 1",
             (agent_id, RESTART_INTERRUPT_GRACE_S),
         )
-        return _interrupt_reason(await cur.fetchone())
+        return _reason_of(await cur.fetchone())
