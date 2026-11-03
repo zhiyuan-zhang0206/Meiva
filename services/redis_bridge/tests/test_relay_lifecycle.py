@@ -14,6 +14,8 @@ from services.redis_bridge import relay
 from services.redis_bridge.tests.relay_support import (
     GatedAddress,
     SocketDefect,
+    accepted_by,
+    address_of,
     backend_listener,
     blocked_dials,
     close_all,
@@ -30,9 +32,9 @@ def test_serving_exit_reclaims_an_accepted_idle_connection() -> None:
     with backend_listener() as backend_side, occupied_address() as unbindable:
         client, accepted = socket.socketpair()
         client.settimeout(2.0)
-        service = relay.RelayService(unbindable, backend_side.getsockname(), rebind_delay_s=0.0)
+        service = relay.RelayService(unbindable, address_of(backend_side), rebind_delay_s=0.0)
         service._admit(accepted, ("127.0.0.1", 1))
-        backend, _ = backend_side.accept()
+        backend = accepted_by(backend_side)
         try:
             backend.sendall(b"ready")
             assert client.recv(5) == b"ready"
@@ -49,10 +51,10 @@ def test_serving_exit_reclaims_an_accepted_idle_connection() -> None:
 
 def test_stop_fences_admission_and_reclaims_idle_pumps() -> None:
     with backend_listener() as backend_side:
-        service = relay.RelayService(("127.0.0.1", 0), backend_side.getsockname())
+        service = relay.RelayService(("127.0.0.1", 0), address_of(backend_side))
         client, accepted = socket.socketpair()
         service._admit(accepted, ("127.0.0.1", 1))
-        backend, _ = backend_side.accept()
+        backend = accepted_by(backend_side)
         owners = tuple(service._connections)
         try:
             backend.sendall(b"ready")
@@ -88,7 +90,7 @@ def test_one_stop_budget_retains_blocked_dns_then_reaps_late_backend(
         assert stalled.service.stop(2.0)
         assert all(owner.completed() and not owner._pumps for owner in stalled.owners)
         for _ in stalled.owners:
-            peer, _ = stalled.backend_side.accept()
+            peer = accepted_by(stalled.backend_side)
             with peer:
                 peer.settimeout(2.0)
                 assert peer.recv(1) == b""
@@ -127,12 +129,12 @@ def test_unknown_pump_error_interrupts_reverse_and_is_raised_by_service() -> Non
     error = LookupError("forwarding implementation defect")
     with backend_listener() as backend_side:
         client, accepted = socket.socketpair()
-        service = relay.RelayService(("127.0.0.1", 0), backend_side.getsockname())
+        service = relay.RelayService(("127.0.0.1", 0), address_of(backend_side))
         service._admit(
             cast(socket.socket, SocketDefect(accepted, recv_error=error)), ("127.0.0.1", 1)
         )
         owner = service._connections[0]
-        backend, _ = backend_side.accept()
+        backend = accepted_by(backend_side)
         try:
             assert owner._done.wait(2.0), "unknown pump failure must release the reverse pump"
             owner._thread.join(timeout=2.0)
@@ -199,14 +201,12 @@ def test_rebound_listener_preserves_the_old_live_connection(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     with backend_listener() as backend_side:
-        service = relay.RelayService(
-            ("127.0.0.1", 0), backend_side.getsockname(), rebind_delay_s=0.0
-        )
+        service = relay.RelayService(("127.0.0.1", 0), address_of(backend_side), rebind_delay_s=0.0)
         with ThreadPoolExecutor(max_workers=1) as executor:
             serving = executor.submit(relay.run_service, service)
             first = wait_bound(service)
             client = socket.create_connection(first, timeout=2.0)
-            backend, _ = backend_side.accept()
+            backend = accepted_by(backend_side)
             try:
                 client.sendall(b"old request")
                 assert backend.recv(11) == b"old request"
@@ -218,7 +218,7 @@ def test_rebound_listener_preserves_the_old_live_connection(
                 backend.sendall(b"old response")
                 assert client.recv(12) == b"old response"
                 new_client = socket.create_connection(second, timeout=2.0)
-                new_backend, _ = backend_side.accept()
+                new_backend = accepted_by(backend_side)
                 try:
                     new_client.sendall(b"new")
                     assert new_backend.recv(3) == b"new"
@@ -234,9 +234,7 @@ def test_rebound_listener_preserves_the_old_live_connection(
 
 def test_an_admitted_connection_clears_the_listener_failure_count() -> None:
     with backend_listener() as backend_side:
-        service = relay.RelayService(
-            ("127.0.0.1", 0), backend_side.getsockname(), rebind_delay_s=0.0
-        )
+        service = relay.RelayService(("127.0.0.1", 0), address_of(backend_side), rebind_delay_s=0.0)
         endpoints: list[socket.socket] = []
         with ThreadPoolExecutor(max_workers=1) as executor:
             serving = executor.submit(relay.run_service, service)
@@ -245,7 +243,7 @@ def test_an_admitted_connection_clears_the_listener_failure_count() -> None:
                 for index in range(relay.MAX_LISTENER_FAILURES + 2):
                     address = wait_bound(service, previous=address)
                     client = socket.create_connection(address, timeout=2.0)
-                    backend, _ = backend_side.accept()
+                    backend = accepted_by(backend_side)
                     endpoints.extend((client, backend))
                     client.sendall(bytes([index]))
                     assert backend.recv(1) == bytes([index])
@@ -275,7 +273,7 @@ def test_listener_bind_failures_back_off_until_the_address_returns(
     holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     holder.bind(("127.0.0.1", 0))
     holder.listen()
-    name = holder.getsockname()
+    name = address_of(holder)
     address = (name[0], name[1])
     service = relay.RelayService(address, ("127.0.0.1", 6380), rebind_delay_s=0.05)
     with ThreadPoolExecutor(max_workers=1) as executor:
@@ -314,10 +312,10 @@ def test_serving_reaps_completed_connections_without_stopping_admission() -> Non
     with backend_listener() as backend_side:
         client, accepted = socket.socketpair()
         client.settimeout(2.0)
-        service = relay.RelayService(("127.0.0.1", 0), backend_side.getsockname())
+        service = relay.RelayService(("127.0.0.1", 0), address_of(backend_side))
         service._admit(accepted, ("127.0.0.1", 1))
         owner = service._connections[0]
-        backend, _ = backend_side.accept()
+        backend = accepted_by(backend_side)
         backend.settimeout(2.0)
         try:
             client.shutdown(socket.SHUT_WR)
@@ -344,10 +342,10 @@ def test_two_pump_defects_are_both_retained_and_the_first_is_raised(
     with backend_listener() as backend_side:
         client, accepted = socket.socketpair()
         endpoint = SocketDefect(accepted, recv_error=second, recv_gate=gate, sendall_error=first)
-        service = relay.RelayService(("127.0.0.1", 0), backend_side.getsockname())
+        service = relay.RelayService(("127.0.0.1", 0), address_of(backend_side))
         service._admit(cast(socket.socket, endpoint), ("127.0.0.1", 1))
         owner = service._connections[0]
-        backend, _ = backend_side.accept()
+        backend = accepted_by(backend_side)
         try:
             backend.sendall(b"data for the defective client side")
             wait_until(lambda: service._errors == [first], "the reverse pump failure")
@@ -380,10 +378,10 @@ def test_worker_failure_cleanup_retains_both_original_errors(
         SocketDefect(accepted, sendall_error=primary, worker_shutdown_error=secondary),
     )
     with backend_listener() as backend_side:
-        service = relay.RelayService(("127.0.0.1", 0), backend_side.getsockname())
+        service = relay.RelayService(("127.0.0.1", 0), address_of(backend_side))
         service._admit(endpoint, ("127.0.0.1", 1))
         owner = service._connections[0]
-        backend, _ = backend_side.accept()
+        backend = accepted_by(backend_side)
         try:
             backend.sendall(b"data for the defective client side")
             assert owner._done.wait(2.0)

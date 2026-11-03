@@ -1,2 +1,4 @@
 [uses]
+"test_installed_relay.py" = ["relay_support.py"]
+"test_redis_bridge_relay.py" = ["relay_support.py"]
 "test_relay_lifecycle.py" = ["relay_support.py"]
