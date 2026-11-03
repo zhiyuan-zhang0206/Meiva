@@ -11,6 +11,8 @@ from pathlib import Path
 import psutil
 from loguru import logger
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from meiva.mcps._startup import ProcessFacts, is_daemon_cmdline, stale_daemon_pids
 
 
@@ -28,8 +30,8 @@ def socket_is_live(socket_path: str, *, timeout_seconds: float) -> bool:
             if not chunk:
                 return False
             buf += chunk
-        resp = json.loads(buf.split(b"\n", 1)[0])
-        return bool(resp.get("ok"))
+        resp = object_of(json.loads, buf.split(b"\n", 1)[0])
+        return is_object_dict(resp) and bool(resp.get("ok"))
     except (OSError, json.JSONDecodeError, TimeoutError):
         return False
     finally:

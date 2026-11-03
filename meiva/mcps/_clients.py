@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
 
 from base.clock import Timers
 from meiva.mcps.config import MCPConnectError, ToolInfo
@@ -42,11 +42,11 @@ class McpClients:
         self,
         server: str,
         tool: str,
-        args: dict[str, Any],
+        args: Mapping[str, object],
         *,
         timeout_seconds: float,
         agent_id: int | None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         return self.remote().call_tool(
             server, tool, args, timeout_seconds=timeout_seconds, agent_id=agent_id
         )

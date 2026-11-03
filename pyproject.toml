@@ -728,6 +728,9 @@ root = "cli/tests"
 root = "gateway/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "meiva/mcps/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -1019,6 +1022,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "meiva/impersonation"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva/mcps"
 reportAny = "error"
 reportExplicitAny = "error"
 

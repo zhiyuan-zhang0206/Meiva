@@ -50,6 +50,23 @@ async def test_handle_client_call_tool_returns_content(
 
 
 # meiva:note
+# A wrong-typed field of the request is refused, not defaulted: `args: "oops"` would otherwise call
+# the tool with no arguments at all. The handler's TypeError becomes an error response, and the
+# connection stays open for the next request.
+async def test_a_wrong_typed_args_field_is_an_error_response(
+    unit_home: Path, scope: daemon_mod.Scope
+) -> None:
+    write_servers(unit_home, {"fs": fixture_entry()})
+    async with served_client(scope) as peer:
+        response = await ask(peer, "call_tool", "fs", tool="echo", args="oops")
+        assert response["ok"] is False
+        assert response["error"] == "TypeError: args is str, not an object"
+        after = await ask(peer, "call_tool", "fs", tool="echo", args={"text": "still here"})
+    assert after["ok"] is True
+    assert after["result"]["content"] == [{"type": "text", "text": "still here"}]
+
+
+# meiva:note
 # isError=True: the daemon still answers ok=True and carries the full structure; the semantic layer
 # (`is_error → raise`) lives on the client side.
 async def test_a_tool_error_is_data_the_client_judges(

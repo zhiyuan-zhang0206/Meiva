@@ -11,13 +11,16 @@ import inspect
 import json
 import keyword
 import types
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from base.agents.context.identity import AgentIdentity
+from base.host.boundary.fields import bool_field, str_field
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from meiva.mcps._clients import McpClients
 from meiva.mcps.config import MCPCallError, MCPConnectError, ToolInfo
 from meiva.sdk_surface.pure.caller.identity_plan import attributed_agent_id, caller_facts
@@ -51,34 +54,38 @@ class ToolSource:
 # meiva:note
 # The cached tool list of `document` (the parsed cache file), or None when the entry is unusable: not an object, no usable `cached_at`, older than `ttl_s` at `now`, or a `tools` field that is not a list of objects. Missing fields of a tool fill with empty values.
 def cached_tools(document: object, *, now: float, ttl_s: float) -> list[ToolInfo] | None:
-    data: Any = document
-    if not isinstance(document, dict):
+    if not is_object_dict(document):
         return None
-    cached_at = data.get("cached_at")
-    if cached_at is None:
+    cached_at = document.get("cached_at")
+    if isinstance(cached_at, bool) or not isinstance(cached_at, int | float):
         return None
     try:
         age = now - cached_at
-    except (TypeError, OverflowError):
+    except OverflowError:
         return None
     if age > ttl_s:
         return None
-    tools = data.get("tools")
-    items: Any = tools
-    if not isinstance(tools, list):
+    tools = document.get("tools")
+    if not is_object_list(tools):
         return None
     result: list[ToolInfo] = []
-    for t in items:
-        item: Any = t
-        if not isinstance(t, dict):
+    for entry in tools:
+        if not is_object_dict(entry):
             return None
-        result.append(
-            {
-                "name": item.get("name", ""),
-                "description": item.get("description", ""),
-                "input_schema": item.get("input_schema", {}),
-            }
-        )
+        name = entry.get("name")
+        if not isinstance(name, str):
+            return None
+        description = entry.get("description")
+        if description is None:
+            description = ""
+        elif not isinstance(description, str):
+            return None
+        schema = entry.get("input_schema")
+        if schema is None:
+            schema = {}
+        elif not is_object_dict(schema):
+            return None
+        result.append(ToolInfo(name=name, description=description, input_schema=schema))
     return result
 
 
@@ -99,7 +106,7 @@ class DiskCache:
         if not path.is_file():
             return None
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = object_of(json.loads, path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return None
         return cached_tools(data, now=now, ttl_s=self.ttl_s)
@@ -138,12 +145,29 @@ def list_tools(source: ToolSource, server: str) -> list[ToolInfo]:
     return tools
 
 
-def call_raw(source: ToolSource, server: str, tool: str, **args: object) -> dict[str, Any]:
+def call_raw(source: ToolSource, server: str, tool: str, **args: object) -> dict[str, object]:
     """Call through the daemon once; an unknown result is never replayed."""
     agent_id = resolve_agent_id(source.identity)
     return source.remote.call_tool(
         server, tool, args, timeout_seconds=source.timeout_seconds, agent_id=agent_id
     )
+
+
+# meiva:note
+# The content blocks of one daemon tool result, checked: the wire carries a list of objects and a
+# result without one is a broken daemon reply, not an empty answer.
+def _content_blocks(
+    raw: Mapping[str, object], *, server: str, tool: str
+) -> list[dict[str, object]]:
+    content = raw.get("content")
+    if not is_object_list(content):
+        raise MCPCallError(f"{server}.{tool} returned no content list")
+    blocks: list[dict[str, object]] = []
+    for block in content:
+        if not is_object_dict(block):
+            raise MCPCallError(f"{server}.{tool} returned a content block that is not an object")
+        blocks.append(block)
+    return blocks
 
 
 def call_text(source: ToolSource, server: str, tool: str, **args: object) -> str:
@@ -159,9 +183,10 @@ def call_text(source: ToolSource, server: str, tool: str, **args: object) -> str
     structuredContent.)
     """
     raw = call_raw(source, server, tool, **args)
-    text_parts = [c["text"] for c in raw["content"] if c.get("type") == "text"]
+    blocks = _content_blocks(raw, server=server, tool=tool)
+    text_parts = [str_field(block, "text") for block in blocks if block.get("type") == "text"]
     text = "\n".join(text_parts)
-    if raw["isError"]:
+    if bool_field(raw, "isError"):
         raise MCPCallError(f"{server}.{tool} errored: {text or '(no message)'}")
     if not text:
         # An empty join is only an error when something a text join cannot
@@ -169,13 +194,13 @@ def call_text(source: ToolSource, server: str, tool: str, **args: object) -> str
         # real payload is elsewhere; a structured-only response likewise. But a
         # response whose blocks are ALL text — even if each is the empty string
         # (e.g. chrome list_pages with no open pages) — is a genuine "".
-        non_text = [c for c in raw["content"] if c.get("type") != "text"]
+        non_text = [block for block in blocks if block.get("type") != "text"]
         if non_text:
-            kinds = [c.get("type", "?") for c in raw["content"]]
+            kinds = [block.get("type", "?") for block in blocks]
             raise MCPCallError(
                 f"{server}.{tool} returned non-text content (kinds={kinds}); use .raw() to get the full result"
             )
-        if raw["structuredContent"] is not None:
+        if raw.get("structuredContent") is not None:
             raise MCPCallError(
                 f"{server}.{tool} returned only structuredContent; use .raw() to get the full result"
             )
@@ -242,7 +267,7 @@ class ServerProxy(types.ModuleType):
     def __dir__(self) -> list[str]:
         return sorted([*self._load_tool_names(), "raw"])
 
-    def raw(self, tool: str, **args: object) -> dict[str, Any]:
+    def raw(self, tool: str, **args: object) -> dict[str, object]:
         """Call a tool and return the full result for non-text outputs: a dict
         with `content` (list of blocks), `isError`, `structuredContent`."""
         return call_raw(self._source, self._server, tool, **args)
@@ -289,7 +314,31 @@ def make_tool_callable(
     return call
 
 
-def schema_to_signature(schema: dict[str, Any]) -> inspect.Signature | None:
+# meiva:note
+# The schema's `required` names, or None when the field is present but is not a list of strings —
+# the caller reads None as "no display signature" and keeps `(**kwargs)`.
+def _required_names(schema: Mapping[str, object]) -> set[object] | None:
+    raw = schema.get("required")
+    if raw is None:
+        return set()
+    if not is_object_list(raw) or not all(isinstance(name, str) for name in raw):
+        return None
+    return set(raw)
+
+
+# meiva:note
+# One keyword-only parameter from a JSON Schema property: the declared primitive type when the
+# schema names one of them, and plain `Any` (no annotation) otherwise.
+def _parameter(name: str, pschema: object, *, required: bool) -> inspect.Parameter:
+    ptype = pschema.get("type") if is_object_dict(pschema) else None
+    annotation: object = JSON_PRIMITIVE.get(ptype, Any) if isinstance(ptype, str) else Any
+    default = inspect.Parameter.empty if required else None
+    return inspect.Parameter(
+        name, inspect.Parameter.KEYWORD_ONLY, annotation=annotation, default=default
+    )
+
+
+def schema_to_signature(schema: Mapping[str, object]) -> inspect.Signature | None:
     """Build a display-only signature from a tool's JSON Schema, so the tool
     renders as `(*, url: str, ...)` instead of `(**kwargs)` when listed.
 
@@ -300,25 +349,21 @@ def schema_to_signature(schema: dict[str, Any]) -> inspect.Signature | None:
     type or a missing field still fails at the server, not here (fail-fast).
     """
     props = schema.get("properties")
-    props_dict: Any = props
-    if not isinstance(props, dict) or not props:
+    if not is_object_dict(props) or not props:
         return None
     # An MCP tool parameter name can be a non-identifier (hyphen, leading digit)
     # or a Python keyword (`from`, `class`); inspect.Parameter rejects or
     # mis-renders those. Fall back to (**kwargs) — the JSON schema in the
     # docstring still lists every parameter.
     if not all(
-        isinstance(n, str) and n.isidentifier() and not keyword.iskeyword(n) for n in props_dict
+        isinstance(name, str) and name.isidentifier() and not keyword.iskeyword(name)
+        for name in props
     ):
         return None
-    required = set(schema.get("required") or [])
-    params: list[inspect.Parameter] = []
-    for name, pschema in props_dict.items():
-        pschema_dict: Any = pschema
-        ptype: object = pschema_dict.get("type") if isinstance(pschema, dict) else None
-        ann = JSON_PRIMITIVE.get(ptype, Any) if isinstance(ptype, str) else Any
-        default = inspect.Parameter.empty if name in required else None
-        params.append(
-            inspect.Parameter(name, inspect.Parameter.KEYWORD_ONLY, annotation=ann, default=default)
-        )
-    return inspect.Signature(params, return_annotation=str)
+    required = _required_names(schema)
+    if required is None:
+        return None
+    return inspect.Signature(
+        [_parameter(name, pschema, required=name in required) for name, pschema in props.items()],
+        return_annotation=str,
+    )

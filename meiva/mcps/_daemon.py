@@ -31,16 +31,18 @@ import json
 import os
 import signal
 import sys
+from collections.abc import Mapping
 from contextlib import AsyncExitStack, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 from loguru import logger
 from mcp import ClientSession
 from mcp.types import CallToolResult, ListToolsResult
 
 from base.config import settings
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.host.system.hostport import Host
 from base.host.system.probes import display_available
 from base.log.sinks import add_sink
@@ -99,7 +101,7 @@ class Buckets:
     """One set of cached MCP sessions: the session per server, the transport stack
     that closes it, and the lock that serializes its (re)connect."""
 
-    sessions: dict[str, Any] = field(default_factory=dict[str, Any])
+    sessions: dict[str, ManagedSession] = field(default_factory=dict[str, ManagedSession])
     stacks: dict[str, AsyncExitStack] = field(default_factory=dict[str, AsyncExitStack])
     locks: dict[str, asyncio.Lock] = field(default_factory=dict[str, asyncio.Lock])
 
@@ -173,9 +175,12 @@ class SerialSession:
         async with self._lock:
             return await self._session.list_tools()
 
-    async def call_tool(self, name: str, args: dict[str, Any]) -> CallToolResult:
+    async def call_tool(self, name: str, args: Mapping[str, object]) -> CallToolResult:
         async with self._lock:
-            result = await self._session.call_tool(name, args)
+            # meiva:note
+            # The SDK session asks for its own `dict[str, Any]`, so it gets a copy: a shared
+            # session must never keep a reference to another agent's argument mapping.
+            result = await self._session.call_tool(name, dict(args))
             if not isinstance(result, CallToolResult):
                 raise TypeError(f"Expected CallToolResult, got {type(result).__name__}")
             return result
@@ -299,6 +304,41 @@ async def connect_http(
     return session, local_stack
 
 
+# meiva:note
+# An optional field of a request with a type contract: absent (or an explicit null, the wire's
+# spelling of "not provided") answers `default`, and a value of another type is refused. This is not
+# the `optional_*_field` family, which reads a wrong type as absent on purpose: here a wrong-typed
+# `args` would call the tool with no arguments at all and a wrong-typed `agent_id` would silently
+# drop the caller's identity from the direct-dial services.
+def _optional_str(record: Mapping[str, object], key: str, default: str) -> str:
+    value = record.get(key)
+    if value is None:
+        return default
+    if not isinstance(value, str):
+        raise TypeError(f"{key} is {type(value).__name__}, not str")
+    return value
+
+
+def _optional_object(
+    record: Mapping[str, object], key: str, default: dict[str, object]
+) -> dict[str, object]:
+    value = record.get(key)
+    if value is None:
+        return default
+    if not is_object_dict(value):
+        raise TypeError(f"{key} is {type(value).__name__}, not an object")
+    return value
+
+
+def _optional_int(record: Mapping[str, object], key: str, default: int | None) -> int | None:
+    value = record.get(key)
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{key} is {type(value).__name__}, not int")
+    return value
+
+
 async def _handle_list_tools(req_id: object, server: str, scope: Scope) -> dict[str, object]:
     """List the configured server's tools in the daemon wire format."""
     session = await get_session(server, scope)
@@ -307,17 +347,21 @@ async def _handle_list_tools(req_id: object, server: str, scope: Scope) -> dict[
 
 
 async def _handle_call_tool(
-    req: dict[str, Any], req_id: object, params: dict[str, Any], server: str, scope: Scope
+    req: Mapping[str, object],
+    req_id: object,
+    params: Mapping[str, object],
+    server: str,
+    scope: Scope,
 ) -> dict[str, object]:
     """Call one MCP tool and serialize its result for the daemon wire protocol."""
-    tool = params.get("tool", "")
-    args: dict[str, Any] = params.get("args") or {}
+    tool = _optional_str(params, "tool", "")
+    args = _optional_object(params, "args", {})
     session = await get_session(server, scope)
     # meiva:note
     # The direct-dial sessions carry the calling agent's identity to their
     # respective daemons (page affinity + governance/audit).
     if isinstance(session, (BrowserLineSession, ComputerLineSession)):
-        session.client_agent_id = req.get("agent_id")
+        session.client_agent_id = _optional_int(req, "agent_id", None)
     try:
         result = await session.call_tool(tool, args)
     except Exception as e:
@@ -334,10 +378,10 @@ async def _handle_call_tool(
 
 
 async def _dispatch_request(
-    req: dict[str, Any],
+    req: Mapping[str, object],
     req_id: object,
     method: object,
-    params: dict[str, Any],
+    params: Mapping[str, object],
     server: str,
     scope: Scope,
 ) -> dict[str, object]:
@@ -353,11 +397,11 @@ async def _dispatch_request(
 
 # meiva:note
 # Serve one request; one bad call becomes an error response, not a dropped connection. A transport failure before a tool call starts, or while listing tools, drops the dead session and tries again after the delay `retry_delay` names. A started tool call converts an uncertain transport failure to MCPCallError before reaching here, so it is never replayed.
-async def dispatch_with_retry(req: dict[str, Any], scope: Scope) -> dict[str, object]:
+async def dispatch_with_retry(req: Mapping[str, object], scope: Scope) -> dict[str, object]:
     req_id = req.get("id")
     method = req.get("method")
-    params: dict[str, Any] = req.get("params") or {}
-    server: str = params.get("server", "")
+    params = _optional_object(req, "params", {})
+    server = _optional_str(params, "server", "")
     attempt = 0
     try:
         while True:
@@ -392,9 +436,13 @@ async def handle_client(
         with suppress(ConnectionResetError, BrokenPipeError):
             while line := await reader.readline():
                 try:
-                    req = json.loads(line.decode("utf-8"))
+                    req = object_of(json.loads, line.decode("utf-8"))
                 except json.JSONDecodeError as e:
                     writer.write(encode_line(error_response(None, f"JSON parse error: {e}")))
+                    await writer.drain()
+                    continue
+                if not is_object_dict(req):
+                    writer.write(encode_line(error_response(None, "request line is not an object")))
                     await writer.drain()
                     continue
                 writer.write(encode_line(await dispatch_with_retry(req, scope)))

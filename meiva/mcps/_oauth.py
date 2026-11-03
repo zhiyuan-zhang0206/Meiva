@@ -27,9 +27,9 @@ import asyncio
 import json
 import os
 import webbrowser
+from collections.abc import Mapping
 from contextlib import suppress
 from pathlib import Path
-from typing import Any
 
 import httpx2
 from loguru import logger
@@ -37,6 +37,9 @@ from mcp.client.auth import AuthorizationCodeResult
 from mcp.client.auth.oauth2 import OAuthContext
 from mcp.shared.auth import OAuthClientInformationFull, OAuthMetadata, OAuthToken
 from pydantic import AnyUrl
+
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 # Loopback callback port for the authorization-code redirect. It is part of the
 # registered redirect_uris (OAuth requires exact-match redirect URIs), so it is
@@ -61,17 +64,16 @@ class FileTokenStorage:
     def __init__(self, server: str, *, home: Path) -> None:
         self._path = home / "mcp_oauth" / f"{server}.json"
 
-    def _read(self) -> dict[str, Any]:
+    def _read(self) -> dict[str, object]:
         if not self._path.is_file():
             return {}
         try:
-            data = json.loads(self._path.read_text(encoding="utf-8"))
-            raw: Any = data
-            return raw if isinstance(data, dict) else {}
+            data = object_of(json.loads, self._path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return {}
+        return data if is_object_dict(data) else {}
 
-    def _write(self, data: dict[str, Any]) -> None:
+    def _write(self, data: Mapping[str, object]) -> None:
         # Created 0600 from the start (audit round-2 security P3): these files
         # hold OAuth tokens, and a write-then-chmod leaves a 0644 window under
         # a permissive umask. os.open's mode is subject to umask, which can
