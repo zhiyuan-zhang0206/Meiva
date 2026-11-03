@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -25,6 +26,11 @@ from scripts.hooks.diff_checks_cache import (
     python_tree_digest,
     record_run,
 )
+
+# meiva:note
+# The interpreter the runner hands its children is the caller's value, so these tests name it here:
+# a cached verdict keyed under another interpreter's command line is a different measurement.
+_PYTHON = sys.executable
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -76,7 +82,12 @@ def test_commit_amend_reuses_every_cached_subcheck_and_selector(tmp_path: Path) 
 
     change = ChangeSet(root=tmp_path, base="origin/main", files=("mod.py",))
     first, failed_first = check(
-        change, skip_tests=False, execute=execute, choose=choose, cache=cache
+        change,
+        skip_tests=False,
+        execute=execute,
+        choose=choose,
+        cache=cache,
+        python=_PYTHON,
     )
     assert failed_first is False
     assert selector_calls == 1
@@ -84,7 +95,12 @@ def test_commit_amend_reuses_every_cached_subcheck_and_selector(tmp_path: Path) 
 
     calls.clear()
     second, failed_second = check(
-        change, skip_tests=False, execute=execute, choose=choose, cache=cache
+        change,
+        skip_tests=False,
+        execute=execute,
+        choose=choose,
+        cache=cache,
+        python=_PYTHON,
     )
     assert failed_second is False
     assert selector_calls == 1
@@ -133,6 +149,7 @@ def test_doc_amend_reuses_python_checks_and_reruns_tree_checks(tmp_path: Path) -
         execute=execute,
         choose=lambda _c: Selection("SELECTED", (), ()),
         cache=first_cache,
+        python=_PYTHON,
     )
     assert set(ran_labels) == {"meizel", "pyright", "ruff", "docs-refs", "docs-okf"}
 
@@ -150,6 +167,7 @@ def test_doc_amend_reuses_python_checks_and_reruns_tree_checks(tmp_path: Path) -
         execute=execute,
         choose=lambda _c: Selection("SELECTED", (), ()),
         cache=second_cache,
+        python=_PYTHON,
     )
     assert set(ran_labels) == {"meizel", "docs-refs", "docs-okf"}
 
@@ -178,6 +196,7 @@ def test_failing_or_unreadable_runs_are_never_cached(tmp_path: Path) -> None:
         execute=execute,
         choose=lambda _c: Selection("SELECTED", (), ()),
         cache=cache,
+        python=_PYTHON,
     )
     first_attempts = attempts
     check(
@@ -186,6 +205,7 @@ def test_failing_or_unreadable_runs_are_never_cached(tmp_path: Path) -> None:
         execute=execute,
         choose=lambda _c: Selection("SELECTED", (), ()),
         cache=cache,
+        python=_PYTHON,
     )
     assert attempts == first_attempts * 2
 
@@ -262,6 +282,7 @@ def test_incremental_mode_scopes_meizel_and_handles_deleted_or_global_inputs(
         skip_tests=True,
         execute=execute,
         choose=lambda _c: Selection("SELECTED", (), ()),
+        python=_PYTHON,
     )
     assert any(cmd[1:5] == ("-m", "meizel", "check", "--changed") for cmd in invocations)
     assert any("basedpyright" in cmd[0] and cmd[-1] == "live.py" for cmd in invocations)
@@ -272,6 +293,7 @@ def test_incremental_mode_scopes_meizel_and_handles_deleted_or_global_inputs(
         skip_tests=True,
         execute=execute,
         choose=lambda _c: Selection("SELECTED", (), ()),
+        python=_PYTHON,
     )
     assert failed is False
     assert values["pyright"] == "0err(0s)"
@@ -288,6 +310,7 @@ def test_incremental_mode_scopes_meizel_and_handles_deleted_or_global_inputs(
         skip_tests=True,
         execute=execute,
         choose=lambda _c: Selection("SELECTED", (), ()),
+        python=_PYTHON,
     )
     assert any("basedpyright" in cmd[0] and len(cmd) == 3 for cmd in invocations)
 
@@ -299,6 +322,7 @@ def test_full_mode_sweeps_every_layer_even_for_a_doc_only_change(tmp_path: Path)
         ChangeSet(root=tmp_path, base="origin/main", files=("docs/note.md",)),
         skip_tests=True,
         mode="full",
+        python=_PYTHON,
     )
     joined = "\n".join(lines)
     for expected in (
@@ -335,6 +359,7 @@ def test_full_mode_sweeps_every_layer_even_for_a_doc_only_change(tmp_path: Path)
         execute=execute,
         choose=lambda _c: Selection("SELECTED", (), ()),
         mode="full",
+        python=_PYTHON,
     )
     assert failed is False
     assert values["pyright"] == "0err(1s)"

@@ -26,6 +26,11 @@ from scripts.hooks.diff_checks import (
     run_child,
 )
 
+# meiva:note
+# The interpreter the runner hands its children is the caller's value, so these tests name it here:
+# a plan or a receipt read by another interpreter's tools is a different measurement.
+_PYTHON = sys.executable
+
 
 def _git_track(root: Path) -> None:
     env = {"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"}
@@ -74,6 +79,7 @@ def _run(values: dict[str, str], files: tuple[str, ...]) -> tuple[dict[str, str]
         skip_tests=True,
         execute=execute,
         choose=_always(Selection("SELECTED", (), ())),
+        python=_PYTHON,
     )
 
 
@@ -106,7 +112,7 @@ def test_the_receipt_states_every_field_and_never_prints_a_bare_none() -> None:
 # A documentation-only change owes the document checks, not a type check it cannot fail; and the
 # layers it does not owe say so instead of vanishing.
 def test_a_documentation_change_runs_the_document_checks_and_says_why_the_rest_are_absent() -> None:
-    lines = plan(_change("docs/readme.md"), skip_tests=True)
+    lines = plan(_change("docs/readme.md"), skip_tests=True, python=_PYTHON)
     joined = "\n".join(lines)
 
     assert any("docs-refs" in line for line in lines)
@@ -128,7 +134,9 @@ def test_a_python_change_without_a_manifest_skips_the_debt_comparison() -> None:
     values, _ = _run({}, ("base/thing.py",))
 
     assert values["debt"] == "n/a(no-manifest-changed)"
-    with_manifest = plan(_change("base/thing.py", "base/meizel.toml"), skip_tests=True)
+    with_manifest = plan(
+        _change("base/thing.py", "base/meizel.toml"), skip_tests=True, python=_PYTHON
+    )
     assert any("debt" in line for line in with_manifest)
 
 
@@ -157,6 +165,7 @@ def test_a_blocking_run_that_exits_non_zero_turns_the_receipt_red() -> None:
         skip_tests=True,
         execute=execute,
         choose=_always(Selection("SELECTED", (), ())),
+        python=_PYTHON,
     )
 
     assert failed is True
@@ -178,6 +187,7 @@ def test_a_green_run_reports_the_counts_its_tests_produced_with_their_units() ->
         skip_tests=False,
         execute=execute,
         choose=_always(Selection("SELECTED", ("tests/test_a.py",), ())),
+        python=_PYTHON,
     )
 
     assert failed is False
@@ -227,6 +237,7 @@ def test_the_debt_field_reads_its_columns_by_position_not_by_the_reference_name(
             skip_tests=True,
             execute=execute,
             choose=_always(Selection("SELECTED", (), ())),
+            python=_PYTHON,
         )
 
     rules, _ = run(rule_table)
@@ -248,6 +259,7 @@ def test_debt_output_without_a_table_is_reported_as_unreadable() -> None:
         skip_tests=True,
         execute=execute,
         choose=_always(Selection("SELECTED", (), ())),
+        python=_PYTHON,
     )
 
     assert values["debt"].startswith("unreadable")
@@ -257,7 +269,7 @@ def test_debt_output_without_a_table_is_reported_as_unreadable() -> None:
 # The React Server Component boundary refuses a client hook in a server component at build time
 # only: type checking, linting and unit tests all pass, which is how a broken page shipped today.
 def test_a_change_under_the_app_router_schedules_the_production_build() -> None:
-    lines = plan(_change("ui/web/src/app/fleet/page.tsx"), skip_tests=True)
+    lines = plan(_change("ui/web/src/app/fleet/page.tsx"), skip_tests=True, python=_PYTHON)
 
     assert any("next-build" in line for line in lines), (
         "a file under ui/web/src/app/ moves code across the RSC boundary; only the production "
@@ -267,7 +279,11 @@ def test_a_change_under_the_app_router_schedules_the_production_build() -> None:
 
 
 def test_a_change_that_cannot_cross_the_boundary_skips_the_build() -> None:
-    lines = plan(_change("ui/web/src/lib/browser/browser.ts", "base/thing.py"), skip_tests=True)
+    lines = plan(
+        _change("ui/web/src/lib/browser/browser.ts", "base/thing.py"),
+        skip_tests=True,
+        python=_PYTHON,
+    )
 
     assert not any("next-build" in line for line in lines)
 
@@ -290,6 +306,7 @@ def test_errors_outside_the_closure_are_named_and_do_not_fail_the_change(tmp_pat
         skip_tests=True,
         execute=execute,
         choose=_always(Selection("SELECTED", (), ())),
+        python=_PYTHON,
     )
 
     assert failed is False, "an error the change cannot reach is not this change's"
@@ -311,6 +328,7 @@ def test_an_error_in_a_file_that_imports_the_change_fails_it(tmp_path: Path) -> 
         skip_tests=True,
         execute=execute,
         choose=_always(Selection("SELECTED", (), ())),
+        python=_PYTHON,
     )
 
     assert failed is True, (
@@ -335,6 +353,7 @@ def test_the_meizel_field_carries_what_the_checker_covered() -> None:
         skip_tests=True,
         execute=execute,
         choose=_always(Selection("SELECTED", (), ())),
+        python=_PYTHON,
     )
 
     assert values["meizel"] == "ok(exit=0,772manifests,76697edges)(17s)"
@@ -344,7 +363,7 @@ def test_the_meizel_field_carries_what_the_checker_covered() -> None:
 # A green exit code is not the same fact as "the tests ran": the selector never chooses the app
 # tree whole, so a page test can sit red for days while every run it received was green.
 def test_a_change_anywhere_in_the_web_tree_runs_the_whole_app_test_tree() -> None:
-    lines = plan(_change("ui/web/src/lib/browser/browser.ts"), skip_tests=True)
+    lines = plan(_change("ui/web/src/lib/browser/browser.ts"), skip_tests=True, python=_PYTHON)
 
     assert any("vitest-app" in line for line in lines), (
         "a change under ui/web/ can break a page no selector names; only the whole app tree "
@@ -357,7 +376,7 @@ def test_a_change_anywhere_in_the_web_tree_runs_the_whole_app_test_tree() -> Non
 
 
 def test_a_change_outside_the_web_tree_runs_no_app_tests() -> None:
-    lines = plan(_change("base/thing.py"), skip_tests=True)
+    lines = plan(_change("base/thing.py"), skip_tests=True, python=_PYTHON)
 
     assert not any("vitest-app" in line for line in lines)
 
@@ -373,6 +392,7 @@ def test_the_app_tree_field_reports_the_denominator_and_not_only_the_verdict() -
         skip_tests=True,
         execute=execute,
         choose=_always(Selection("SELECTED", (), ())),
+        python=_PYTHON,
     )
 
     assert failed is False
@@ -392,6 +412,7 @@ def test_the_app_tree_still_fails_the_receipt_when_its_tests_do() -> None:
         skip_tests=True,
         execute=execute,
         choose=_always(Selection("SELECTED", (), ())),
+        python=_PYTHON,
     )
 
     assert failed is True
@@ -421,6 +442,7 @@ def test_the_app_tree_parser_reads_a_coloured_summary() -> None:
         skip_tests=True,
         execute=execute,
         choose=_always(Selection("SELECTED", (), ())),
+        python=_PYTHON,
     )
 
     assert failed is False
@@ -464,6 +486,7 @@ def test_errors_are_counted_beside_failures_and_never_folded_into_them() -> None
         skip_tests=False,
         execute=execute,
         choose=_always(Selection("SELECTED", ("tests/test_a.py",), ())),
+        python=_PYTHON,
     )
 
     assert failed is True, "the shell saw exit 1; the receipt must not read as green"
@@ -636,6 +659,7 @@ def test_transitive_two_hop_importers_join_the_closure_and_fail_the_change(
         skip_tests=True,
         execute=execute,
         choose=_always(Selection("SELECTED", (), ())),
+        python=_PYTHON,
     )
     assert failed is True
     assert "1in-closure" in values["pyright"]
