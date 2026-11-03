@@ -10,6 +10,7 @@ exports = ["agents", "alerts", "app.py", "cluster", "events", "http", "mcp_serve
 "extensions" = ["agents", "cluster", "http"]
 "http" = ["schemas"]
 "inspect" = ["http", "lgtm", "schemas"]
+"lgtm" = ["http"]
 "mcp_server" = ["http"]
 "routers" = ["agents", "extensions", "http", "lgtm", "schemas"]
 "schedules" = ["agents", "http", "routers"]
