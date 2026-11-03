@@ -22,6 +22,7 @@ import traceback
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 from types import FrameType
+from typing import Union
 
 _BUFFER_SIZE = 65536
 INITIAL_REBIND_DELAY_S = 1.0
@@ -303,10 +304,9 @@ class RelayService:
             if self._listener is None:
                 return None
             try:
-                name = self._listener.getsockname()
+                return _bound(self._listener.getsockname)
             except OSError:
                 return None
-            return (name[0], name[1])
 
     def request_stop(self) -> None:
         with self._lock:
@@ -365,7 +365,7 @@ class RelayService:
                 listener = open_listener(self._listen_address)
                 with self._lock:
                     self._listener = listener
-                bound = listener.getsockname()
+                bound = _bound(listener.getsockname)
                 _log(
                     f"relay listening on {bound[0]}:{bound[1]} -> "
                     f"{self._backend_address[0]}:{self._backend_address[1]}"
@@ -395,7 +395,7 @@ class RelayService:
         while not self._stopped.is_set():
             self._reap()
             try:
-                client, peer = listener.accept()
+                client, peer = _accepted(listener.accept)
             except OSError as exc:
                 # macOS's installed Python 3.9 has a distinct socket.timeout type.
                 if isinstance(exc, socket.timeout):
@@ -406,6 +406,27 @@ class RelayService:
                 return
             self._admit(client, peer)
             self._listener_failures = 0
+
+
+# meiva:note
+# The address a socket reports: `(host, port)` for IPv4, `(host, port, flowinfo, scope_id)` for
+# IPv6. The socket stubs type it `Any`; a method passed as a callable that returns this type keeps
+# that `Any` from becoming an expression of ours, and this module runs from a bare file under the
+# system interpreter, so it imports nothing from the repository to do it. It is `Union` rather than
+# `|` because 3.9 cannot combine two aliases with `|` at runtime.
+_SocketAddress = Union[tuple[str, int], tuple[str, int, int, int]]  # noqa: UP007
+
+
+def _bound(getsockname: Callable[[], _SocketAddress]) -> tuple[str, int]:
+    name = getsockname()
+    return name[0], name[1]
+
+
+def _accepted(
+    accept: Callable[[], tuple[socket.socket, _SocketAddress]],
+) -> tuple[socket.socket, tuple[str, int]]:
+    client, peer = accept()
+    return client, (peer[0], peer[1])
 
 
 def run_service(service: RelayService) -> None:
@@ -423,13 +444,23 @@ def run_service(service: RelayService) -> None:
         service.stop()
 
 
-def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
+# meiva:note
+# A `Namespace` subclass rather than `base.host.boundary.options`: this file runs on its own under the
+# system Python 3.9 and cannot import the repository.
+class _Arguments(argparse.Namespace):
+    listen_host: str
+    listen_port: int
+    backend_host: str
+    backend_port: int
+
+
+def _parse_args(argv: Sequence[str]) -> _Arguments:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--listen-host", required=True)
     parser.add_argument("--listen-port", required=True, type=int)
     parser.add_argument("--backend-host", default="127.0.0.1")
     parser.add_argument("--backend-port", required=True, type=int)
-    return parser.parse_args(argv)
+    return parser.parse_args(argv, namespace=_Arguments())
 
 
 def main(argv: Sequence[str]) -> None:

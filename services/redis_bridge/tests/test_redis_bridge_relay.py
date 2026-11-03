@@ -10,6 +10,7 @@ from contextlib import suppress
 import pytest
 
 from services.redis_bridge import relay
+from services.redis_bridge.tests.relay_support import accepted_by, address_of
 
 
 @pytest.fixture
@@ -21,9 +22,9 @@ def connection() -> Iterator[tuple[socket.socket, socket.socket, relay.Connectio
         listener.settimeout(3.0)
         errors: list[BaseException] = []
         handler = relay.Connection(
-            relay_client, ("127.0.0.1", 12345), listener.getsockname(), errors.append
+            relay_client, ("127.0.0.1", 12345), address_of(listener), errors.append
         )
-        backend, _ = listener.accept()
+        backend = accepted_by(listener)
     client.settimeout(3.0)
     backend.settimeout(3.0)
     try:

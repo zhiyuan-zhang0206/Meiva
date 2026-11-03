@@ -62,6 +62,26 @@ def backend_listener() -> Generator[socket.socket]:
 
 
 # meiva:note
+# The IPv4 address a bound socket reports and the connection a listener accepts, typed: the socket
+# stubs return `Any`, and a method passed as a typed callable keeps that out of the tests.
+def address_of(sock: socket.socket) -> tuple[str, int]:
+    return _address(sock.getsockname)
+
+
+def accepted_by(listener: socket.socket) -> socket.socket:
+    return _accept(listener.accept)
+
+
+def _address(getsockname: Callable[[], tuple[str, int]]) -> tuple[str, int]:
+    return getsockname()
+
+
+def _accept(accept: Callable[[], tuple[socket.socket, object]]) -> socket.socket:
+    connection, _peer = accept()
+    return connection
+
+
+# meiva:note
 # An address a relay cannot bind because another socket is listening on it.
 @contextmanager
 def occupied_address() -> Generator[tuple[str, int]]:
@@ -69,8 +89,7 @@ def occupied_address() -> Generator[tuple[str, int]]:
         holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         holder.bind(("127.0.0.1", 0))
         holder.listen()
-        name = holder.getsockname()
-        yield (name[0], name[1])
+        yield address_of(holder)
 
 
 # meiva:note
@@ -179,7 +198,7 @@ class BlockedDials:
 def blocked_dials(count: int) -> Generator[BlockedDials]:
     entered, release = threading.Event(), threading.Event()
     with backend_listener() as backend_side:
-        host, port = backend_side.getsockname()
+        host, port = address_of(backend_side)
         gated = GatedAddress(host, port, entered=entered, release=release)
         service = relay.RelayService(("127.0.0.1", 0), gated)
         pairs = [socket.socketpair() for _ in range(count)]

@@ -1049,6 +1049,11 @@ reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "services/redis_bridge"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "services/supervision"
 reportAny = "error"
 reportExplicitAny = "error"

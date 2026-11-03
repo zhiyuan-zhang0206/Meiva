@@ -5,11 +5,13 @@ import socket
 import subprocess
 from pathlib import Path
 
+from services.redis_bridge.tests.relay_support import accepted_by, address_of
+
 
 def test_installed_source_forwards_and_sigterm_reclaims_idle_connection(tmp_path: Path) -> None:
     with socket.socket() as reservation, socket.socket() as backend_listener:
         reservation.bind(("127.0.0.1", 0))
-        listen_port = reservation.getsockname()[1]
+        listen_port = address_of(reservation)[1]
         reservation.close()
         backend_listener.bind(("127.0.0.1", 0))
         backend_listener.listen()
@@ -20,7 +22,7 @@ def test_installed_source_forwards_and_sigterm_reclaims_idle_connection(tmp_path
             "--listen-port",
             str(listen_port),
             "--backend-port",
-            str(backend_listener.getsockname()[1]),
+            str(address_of(backend_listener)[1]),
         ]
         # meiva:note
         # fixed system interpreter and the relay file alone, no shell. Its own directory is the
@@ -41,7 +43,7 @@ def test_installed_source_forwards_and_sigterm_reclaims_idle_connection(tmp_path
                 "an idle Python 3.9 listener timeout must not trigger rebind"
             )
             with socket.create_connection(("127.0.0.1", listen_port), timeout=3.0) as client:
-                backend, _ = backend_listener.accept()
+                backend = accepted_by(backend_listener)
                 with backend:
                     client.sendall(b"PING\r\n")
                     assert backend.recv(6) == b"PING\r\n"
