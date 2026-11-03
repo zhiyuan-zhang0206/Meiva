@@ -15,7 +15,7 @@ def repo(make_repo: RepoFactory, files: dict[str, str]) -> Path:
     return make_repo(
         {
             "meizel.toml": ROOT,
-            "meizel.policy.toml": render_policy({}, {}),
+            "meizel.policy.toml": render_policy({}, {}, {}),
             "app/__init__.py": "",
             "app/meizel.toml": "",
             "tests/__init__.py": "",

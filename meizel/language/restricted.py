@@ -8,8 +8,9 @@ import re
 from meizel.graph.imports import ImportAccess
 from meizel.graph.model import Restricted
 from meizel.graph.universe import Universe
+from meizel.language.bindings import module_bindings
 
-__all__ = ["EXTERNAL_FORMS", "RestrictedForms", "const_str"]
+__all__ = ["DYNAMIC_ATTR_FORMS", "EXTERNAL_FORMS", "RestrictedForms", "const_str"]
 
 _RESTRICTED_REFS = {
     "importlib.import_module": "importlib.import_module",
@@ -34,6 +35,17 @@ EXTERNAL_FORMS = frozenset(
         "compile of source text",
     }
 )
+# meiva:note
+# The forms a file may use once `[dynamic-attrs]` declares that it owns an attribute name that only
+# the running program knows: a computed name given to `getattr`/`hasattr`/`setattr`/`delattr`, a
+# module that answers for names it does not bind, and a class that forwards the attributes it lacks.
+DYNAMIC_NAME = "dynamic attribute name"
+MODULE_GETATTR = "module __getattr__"
+CLASS_GETATTR = "class __getattr__"
+DYNAMIC_ATTR_FORMS = frozenset({DYNAMIC_NAME, MODULE_GETATTR, CLASS_GETATTR})
+_REEXPORT_HOPS = 6
+_ATTRIBUTE_BUILTINS = frozenset({"getattr", "hasattr", "setattr", "delattr"})
+_FORWARDING_METHODS = frozenset({"__getattr__", "__getattribute__"})
 _BUILTIN_REFS = frozenset({"__import__", "exec", "compile"})
 _SYS_MODULES_METHODS = frozenset({"setdefault", "pop", "update"})
 _SHELL_CALLS = frozenset(
@@ -66,6 +78,10 @@ class RestrictedForms(ImportAccess):
     def __init__(self, universe: Universe, path: str, tree: ast.Module, *, walrus: bool) -> None:
         super().__init__(universe, path, tree, walrus=walrus)
         self.restricted: list[Restricted] = []
+        # meiva:note
+        # The tracked files whose content this file's scan read besides its own: a cached scan is
+        # stale when one of them changes.
+        self.binding_files: set[str] = set()
 
     def restrict(self, line: int, form: str, detail: str = "") -> None:
         self.restricted.append(Restricted(line, form, detail))
@@ -87,6 +103,77 @@ class RestrictedForms(ImportAccess):
             form = _RESTRICTED_REFS.get(".".join(parts[:end]))
             if form:
                 self.restrict(line, form)
+
+    # meiva:note
+    # `getattr`/`hasattr`/`setattr`/`delattr` of the builtins (through an alias too) whose name is
+    # not a string the source states: a literal, or a name bound once to one, here or in a first-party
+    # module. Which attribute the call touches is then a run-time fact, not one the checker can read.
+    def attribute_name_call(self, node: ast.Call) -> None:
+        if not self.is_attribute_builtin(node.func):
+            return
+        spread = any(isinstance(arg, ast.Starred) for arg in node.args[:2])
+        if spread or (len(node.args) >= 2 and self.stated_name(node.args[1]) is None):
+            self.restrict(node.lineno, DYNAMIC_NAME)
+
+    def is_attribute_builtin(self, func: ast.expr) -> bool:
+        if isinstance(func, ast.Name):
+            origin, bound = self.scope.find(func.id)
+            if origin is None:
+                return not bound and func.id in _ATTRIBUTE_BUILTINS
+        else:
+            origin = self.dotted(func)
+        return (
+            origin is not None
+            and origin.startswith("builtins.")
+            and origin.removeprefix("builtins.") in _ATTRIBUTE_BUILTINS
+        )
+
+    # meiva:note
+    # The string an attribute-name argument states, or None when only the run knows it.
+    def stated_name(self, node: ast.expr, depth: int = 0) -> str | None:
+        if depth > 8:
+            return None
+        if isinstance(node, ast.Constant):
+            return node.value if isinstance(node.value, str) else None
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            left = self.stated_name(node.left, depth + 1)
+            right = self.stated_name(node.right, depth + 1)
+            return None if left is None or right is None else left + right
+        if isinstance(node, ast.Name):
+            value = self.scope.constant(node.id)
+            if value is not None:
+                return self.stated_name(value, depth + 1)
+        if isinstance(node, ast.Name | ast.Attribute):
+            origin = self.dotted(node)
+            if origin is not None and self.u.is_first_party_name(origin):
+                return self.module_string(origin)
+        return None
+
+    # meiva:note
+    # The string a first-party module's top-level name is bound to, when the name is bound once to a
+    # literal there; a re-export is followed for as many hops as a class lookup follows one.
+    def module_string(self, dotted: str, hops: int = _REEXPORT_HOPS) -> str | None:
+        owner, _, name = dotted.rpartition(".")
+        module = self.u.resolve_module(owner) if hops and owner else None
+        if module is None or module.file is None:
+            return None
+        read = module_bindings(self.u, module.file, seen=self.binding_files)
+        value = dict(read.strings).get(name)
+        if value is not None or name in read.defined:
+            return value
+        origin = dict(read.reexports).get(name)
+        return None if origin is None or origin == dotted else self.module_string(origin, hops - 1)
+
+    # meiva:note
+    # `__getattr__` at module level, and `__getattr__`/`__getattribute__` in a class body.
+    def forwarding_method(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef, *, depth: int
+    ) -> None:
+        if self.scope.is_class:
+            if node.name in _FORWARDING_METHODS:
+                self.restrict(node.lineno, CLASS_GETATTR)
+        elif depth == 0 and node.name == "__getattr__":
+            self.restrict(node.lineno, MODULE_GETATTR)
 
     # --- sys.modules ---------------------------------------------------------------
 

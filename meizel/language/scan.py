@@ -41,11 +41,12 @@ from meizel.language.bindings import (
 )
 from meizel.language.input_mutations import InputListAppend, input_list_appends
 from meizel.language.mounts import mount_facts
-from meizel.language.restricted import EXTERNAL_FORMS, const_str
+from meizel.language.restricted import DYNAMIC_ATTR_FORMS, EXTERNAL_FORMS, const_str
 from meizel.language.typescript import typescript_files, typescript_scopes
 from meizel.lint_common import is_test_path
 
 __all__ = [
+    "DYNAMIC_ATTR_FORMS",
     "EXTERNAL_FORMS",
     "TYPE_CHECKING_DOC",
     "TYPE_CHECKING_MESSAGE",
@@ -388,6 +389,7 @@ class Scanner(AmbientAccess):
 
     def visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
         previous_requester, self.fixture_requester = self.fixture_requester, node
+        self.forwarding_method(node, depth=self.fn_depth)
         args = node.args
         for deco in node.decorator_list:
             self.visit(deco)
@@ -630,6 +632,7 @@ class Scanner(AmbientAccess):
             self.record_call(callee, node)
         self.entropy_touch(callee, node)
         self.patch_forms(node, callee)
+        self.attribute_name_call(node)
         self.spawn_call(callee, node)
         fixtures.record_call(self.fixture_state, node, callee, requester=self.fixture_requester)
         unshadowed_open = (

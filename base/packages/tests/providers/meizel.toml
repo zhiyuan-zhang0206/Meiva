@@ -4,3 +4,7 @@ exports = ["test_provider_plugins.py"]
 "test_validate_model_config.py" = ["_model_config_cases.py"]
 "test_provider_key_fallback.py" = ["_provider_key_child.py"]
 "test_fresh_catalog_process.py" = ["_fresh_catalog_child.py"]
+
+[debt.restricted-python]
+"test_model_registry.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }
+"test_provider_plugin_gate.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

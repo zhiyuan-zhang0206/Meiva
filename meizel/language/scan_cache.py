@@ -404,6 +404,7 @@ def _sources_from_json(text: str) -> Sources:
 def _policy_digest(policy: Policy) -> str:
     payload = {
         "external": sorted(policy.external.items()),
+        "dynamic-attrs": sorted(policy.dynamic_attrs.items()),
         "loads": [[k, list(v)] for k, v in sorted(policy.loads.items())],
         "defaults": list(policy.default_arguments),
         "listed": [[r, s, sorted(v.items())] for (r, s), v in sorted(policy.listed.items())],

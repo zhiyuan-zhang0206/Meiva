@@ -14,6 +14,9 @@ exports = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py"
 "tests" = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py", "impersonation_handoff.py", "llm", "messages", "nodes.py", "ownership", "process_boot.py", "startup", "state.py", "takeover"]
 "turn" = ["db", "graph", "impersonation_handoff.py", "startup", "state.py", "state_channels.py"]
 
+[dynamic-attrs]
+"state.py" = "plugin state handles read and write the graph-state channels named <plugin>__<field>; the fields come from each plugin's own declared state class, which exists only after the plugins load"
+
 [purity]
 "__init__.py" = "strict"
 "nodes.py" = "strict"

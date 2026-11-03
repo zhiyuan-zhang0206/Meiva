@@ -16,3 +16,6 @@ exports = ["antigravity.py", "claude.py", "codex.py", "plans"]
 
 [debt.ambient-read]
 "codex.py#pid sys.executable" = { count = 1, owner = "#8237", until = "waits for `supervisor_command` to take the interpreter path from its caller: it reads `sys.executable` itself" }
+
+[debt.restricted-python]
+"_common.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }

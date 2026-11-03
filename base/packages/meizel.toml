@@ -27,3 +27,6 @@ exports = ["composer_commands.py", "dashboard_supply.py", "docs", "extensions", 
 "composer_commands.py#settings base.packages.plugins.flags.read_declared_flag" = { count = 1, owner = "#5816", until = "waits for read_declared_flag() to take the config view: composer_commands only calls the flag reader, which reads settings itself, so this entry disappears when the reader gains a required config argument" }
 "dashboard_supply.py#environ tempfile.TemporaryDirectory()" = { count = 1, owner = "#8237", until = "waits for `_unpacked_plugin` to take the parent of its scratch directory from its caller: it creates it where TMPDIR points" }
 "dashboard_supply.py#random tempfile.TemporaryDirectory()" = { count = 1, owner = "#8237", until = "waits for `_unpacked_plugin` to take the parent of its scratch directory from its caller: it creates it under a random name wherever TMPDIR points" }
+
+[debt.restricted-python]
+"plugin_config_admin.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }

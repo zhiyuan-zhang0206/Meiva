@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 
 from meizel.contracts.ambient_read import (
@@ -42,6 +42,7 @@ from meizel.graph.universe import Universe, parent_of
 from meizel.language import scan_all
 from meizel.language.fixtures import FixtureIndex, fixture_facts, is_test_file
 from meizel.language.scan import (
+    DYNAMIC_ATTR_FORMS,
     EXTERNAL_FORMS,
     TYPE_CHECKING_MESSAGE,
     FileScan,
@@ -53,6 +54,7 @@ from meizel.lint_common import is_test_path
 from meizel.roles import select_packages
 
 _EMPTY_POLICY = Policy()
+_PRUNE = "run `python -m meizel sync --prune` to remove it"
 
 __all__ = [
     "POLICY",
@@ -103,6 +105,7 @@ class Analysis:
     # meiva:note
     # Warnings the run cannot turn into a violation: (manifest, the line to print).
     inert: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+    stale_dynamic_attrs: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
 
     def language_counts(self) -> dict[str, int]:
         return {
@@ -161,24 +164,21 @@ def _fixture_facts(
     return fixture_facts(FixtureIndex(universe, defined, plugins), requests)
 
 
-def _declared_loads(manifests: dict[str, Manifest]) -> set[str]:
-    return {
-        f"{directory}/{name}" if directory else name
-        for directory, manifest in manifests.items()
-        for name in manifest.loads
-    }
+# meiva:note
+# The `[loads]`, `[external]` and `[dynamic-attrs]` files, as repository paths.
+def _declared_sites(manifests: dict[str, Manifest]) -> tuple[set[str], set[str], set[str]]:
+    def paths(table: Callable[[Manifest], Iterable[str]]) -> set[str]:
+        return {
+            f"{directory}/{name}" if directory else name
+            for directory, manifest in manifests.items()
+            for name in table(manifest)
+        }
 
-
-def _declared_externals(manifests: dict[str, Manifest]) -> set[str]:
-    return {
-        f"{directory}/{name}" if directory else name
-        for directory, manifest in manifests.items()
-        for name in manifest.external
-    }
+    return paths(lambda m: m.loads), paths(lambda m: m.external), paths(lambda m: m.dynamic_attrs)
 
 
 def _source_diagnostics(
-    scans: Iterable[FileScan], loaders: set[str], externals: set[str]
+    scans: Iterable[FileScan], loaders: set[str], externals: set[str], owners: set[str]
 ) -> list[Diagnostic]:
     found: list[Diagnostic] = []
     for scan in scans:
@@ -188,6 +188,8 @@ def _source_diagnostics(
         owner = scan.path.rpartition("/")[0]
         for item in scan.restricted:
             if scan.path in externals and item.form in EXTERNAL_FORMS:
+                continue
+            if scan.path in owners and item.form in DYNAMIC_ATTR_FORMS:
                 continue
             form = f"{item.form}{' ' + repr(item.detail) if item.detail else ''}"
             found.append(
@@ -201,7 +203,8 @@ def _source_diagnostics(
                     (
                         "use a static import, and inject a collaborator instead of patching it; a file that genuinely "
                         f"owns a dynamic load declares it under [loads] in {manifest_path(scan.path.rpartition('/')[0])}; "
-                        "a file that runs code from outside the repository declares it under [external] with a reason",
+                        "a file that runs code from outside the repository declares it under [external] with a reason; "
+                        "a file that owns an attribute name only the run knows declares it under [dynamic-attrs] with a reason",
                     ),
                     DebtKey(owner, file_key(owner, scan.path, form))
                     if scan.path.endswith(".py")
@@ -366,19 +369,17 @@ def _patch_diagnostics(
     return found
 
 
-def _stale_loads(scans: dict[str, FileScan], loaders: set[str]) -> list[tuple[str, str]]:
+# meiva:note
+# The declared sites whose file no longer has a restricted form of the kind the declaration exempts
+# (`forms`, or any restricted form for a `[loads]` site), as (directory, name).
+def _stale_sites(
+    scans: dict[str, FileScan], declared: set[str], forms: frozenset[str] | None
+) -> list[tuple[str, str]]:
     return sorted(
         (path.rpartition("/")[0], path.rpartition("/")[2])
-        for path in loaders
-        if path not in scans or not scans[path].restricted
-    )
-
-
-def _stale_externals(scans: dict[str, FileScan], externals: set[str]) -> list[tuple[str, str]]:
-    return sorted(
-        (path.rpartition("/")[0], path.rpartition("/")[2])
-        for path in externals
-        if path not in scans or not any(r.form in EXTERNAL_FORMS for r in scans[path].restricted)
+        for path in declared
+        if path not in scans
+        or not any(forms is None or r.form in forms for r in scans[path].restricted)
     )
 
 
@@ -402,6 +403,7 @@ class StaleDeclarations:
     loads: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
     externals: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
     exports: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
+    dynamic_attrs: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
 
 
 def _stale_diagnostics(
@@ -416,31 +418,34 @@ def _stale_diagnostics(
                 manifest.line_of(cf),
                 Code.MANIFEST_STALE_EDGE,
                 f"{cf} -> {ct} is declared but no fact edge needs it",
-                ("run `python -m meizel sync --prune` to remove it",),
+                (_PRUNE,),
             )
         )
-    for directory, name in stale.loads:
-        manifest = manifests[directory]
-        found.append(
-            Diagnostic(
-                manifest.path,
-                manifest.line_of(name),
-                Code.STALE_LOAD,
-                f"[loads] {name!r} is declared but the file has no dynamic load",
-                ("run `python -m meizel sync --prune` to remove it",),
+    for sites, code, what, fix in (
+        (
+            stale.loads,
+            Code.STALE_LOAD,
+            "[loads] {!r} is declared but the file has no dynamic load",
+            _PRUNE,
+        ),
+        (
+            stale.externals,
+            Code.STALE_EXTERNAL,
+            "[external] {!r} is declared but the file runs no external code",
+            "remove the entry",
+        ),
+        (
+            stale.dynamic_attrs,
+            Code.STALE_DYNAMIC_ATTRS,
+            "[dynamic-attrs] {!r} is declared but the file has no dynamic attribute name",
+            "remove the entry",
+        ),
+    ):
+        for directory, name in sites:
+            manifest = manifests[directory]
+            found.append(
+                Diagnostic(manifest.path, manifest.line_of(name), code, what.format(name), (fix,))
             )
-        )
-    for directory, name in stale.externals:
-        manifest = manifests[directory]
-        found.append(
-            Diagnostic(
-                manifest.path,
-                manifest.line_of(name),
-                Code.STALE_EXTERNAL,
-                f"[external] {name!r} is declared but the file runs no external code",
-                ("remove the entry",),
-            )
-        )
     return found
 
 
@@ -636,8 +641,8 @@ def diagnose(
 ) -> list[Diagnostic]:
     pol = _EMPTY_POLICY if policy is None else policy
     _, found, _ = judge_facts(scan.facts, manifests)
-    loaders, externals = _declared_loads(manifests), _declared_externals(manifests)
-    found.extend(_source_diagnostics([scan], loaders, externals))
+    loaders, externals, owners = _declared_sites(manifests)
+    found.extend(_source_diagnostics([scan], loaders, externals, owners))
     found.extend(_patch_diagnostics([scan], _approved(pol), scan.facts))
     found.extend(ambient_diagnostics([scan], manifests) + _entropy_diagnostics([scan], manifests))
     found.extend(_type_cast_diagnostics([scan]) + _any_collaborator_diagnostics([scan]))
@@ -729,7 +734,7 @@ def analyze(
     )
     judged = sorted(scans if scope is None else scope & scans.keys())
     judged_scans = [scans[p] for p in judged]
-    loaders, externals = _declared_loads(manifests), _declared_externals(manifests)
+    loaders, externals, owners = _declared_sites(manifests)
     facts = [f for scan in judged_scans for f in scan.facts]
     facts.extend([*_fixture_facts(universe, scans, judged), *_load_facts(manifests)])
     mounts, unmounted = mount_facts(universe, scope)
@@ -737,7 +742,7 @@ def analyze(
     diagnostics.extend(unmounted)
     projections, found, needed = judge_facts(facts, manifests)
     diagnostics.extend(found)
-    diagnostics.extend(_source_diagnostics(judged_scans, loaders, externals))
+    diagnostics.extend(_source_diagnostics(judged_scans, loaders, externals, owners))
     diagnostics.extend(_patch_diagnostics(judged_scans, _approved(policy), facts))
     diagnostics.extend(ambient_diagnostics(judged_scans, manifests))
     diagnostics.extend(
@@ -755,9 +760,10 @@ def analyze(
         purity_diags.extend(export_diags)
         stale = StaleDeclarations(
             _stale_edges(manifests, needed),
-            _stale_loads(scans, loaders),
-            _stale_externals(scans, externals),
+            _stale_sites(scans, loaders, None),
+            _stale_sites(scans, externals, EXTERNAL_FORMS),
             unused_exports,
+            _stale_sites(scans, owners, DYNAMIC_ATTR_FORMS),
         )
         diagnostics.extend(_stale_diagnostics(manifests, stale))
         diagnostics.extend(stale_roots(scans, manifests))
@@ -789,4 +795,5 @@ def analyze(
         stale.externals,
         stale.exports,
         inert,
+        stale.dynamic_attrs,
     )

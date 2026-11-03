@@ -23,3 +23,6 @@ exports = ["__init__.py", "__main__.py", "choices.py", "fleet_gate.py", "fleet_v
 "choices.py#environ tempfile.TemporaryDirectory()" = { count = 1, owner = "#8237", until = "waits for `_service_problems` to take the parent of its scratch directory from its caller: it creates it where TMPDIR points" }
 "choices.py#pid sys.executable" = { count = 1, owner = "#8237", until = "waits for `_service_problems` to take the interpreter path from its caller: it reads `sys.executable` itself" }
 "choices.py#random tempfile.TemporaryDirectory()" = { count = 1, owner = "#8237", until = "waits for `_service_problems` to take the parent of its scratch directory from its caller: it creates it under a random name wherever TMPDIR points" }
+
+[debt.restricted-python]
+"choices.py#dynamic attribute name" = { count = 5, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }

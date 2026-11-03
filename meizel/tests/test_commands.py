@@ -248,6 +248,37 @@ def test_bootstrap_carries_external_declarations(make_repo: RepoFactory, tmp_pat
     )
 
 
+def test_bootstrap_carries_dynamic_attrs_declarations(
+    make_repo: RepoFactory, tmp_path: Path
+) -> None:
+    root = make_repo(
+        {
+            "app/__init__.py": "",
+            "app/proxy.py": "def __getattr__(name):\n    raise AttributeError(name)\n",
+            "app/meizel.toml": '[dynamic-attrs]\n"proxy.py" = "answers any name"\n',
+        }
+    )
+    out = tmp_path / "out"
+    assert run(root, "bootstrap", "--out", str(out)) == 0
+    assert (out / "app/meizel.toml").read_text() == (
+        '[dynamic-attrs]\n"proxy.py" = "answers any name"\n'
+    )
+
+
+def test_prune_drops_a_dynamic_attrs_entry_whose_file_is_gone(make_repo: RepoFactory) -> None:
+    root = make_repo(
+        {
+            "app/__init__.py": "",
+            "app/proxy.py": "def __getattr__(name):\n    raise AttributeError(name)\n",
+            "app/meizel.toml": '[dynamic-attrs]\n"proxy.py" = "answers any name"\n"gone.py" = "was a proxy"\n',
+        }
+    )
+    assert run(root, "sync", "--prune") == 0
+    assert (root / "app/meizel.toml").read_text() == (
+        '[dynamic-attrs]\n"proxy.py" = "answers any name"\n'
+    )
+
+
 CYCLE = {
     "pkg/__init__.py": "",
     "pkg/a.py": "from pkg import b\n",

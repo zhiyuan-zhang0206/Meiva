@@ -1,8 +1,8 @@
 # meiva:note
 # `meizel.policy.toml` in the checker: validation, rendering, `policy diff` and the surface report.
 # The format and its reader live in `meizel.allowances`, shared with the lints whose allowances the
-# file also holds. Here: a manifest may use a dynamic-load or external-code form only for the sites
-# the policy lists (the free-text reason in a manifest no longer counts), a change to the file is
+# file also holds. Here: a manifest may use a dynamic-load, external-code or dynamic-attribute-name
+# form only for the sites the policy lists (the free-text reason in a manifest no longer counts), a change to the file is
 # reported by `policy diff` so a reviewer sees every widening at once, and `policy surface` reports
 # the declarations of both trees - the policy and each manifest's `[roots]`/`[state]` - so that an
 # allowance that appears is never silent either.
@@ -53,8 +53,9 @@ def _site(manifest: Manifest, name: str) -> str:
 
 
 # meiva:note
-# What the policy owes the tree it governs: no manifest runs code the policy does not list, and the
-# policy's own approved list stays inside the ceiling the policy sets for it.
+# What the policy owes the tree it governs: no manifest runs code, owns a dynamic attribute name or
+# loads a directory that the policy does not list, and the policy's own approved list stays inside
+# the ceiling the policy sets for it.
 def check(manifests: dict[str, Manifest], policy: Policy) -> list[Diagnostic]:
     """Every `[external]` and `[loads]` site in a manifest that the policy does not list."""
     found: list[Diagnostic] = []
@@ -63,6 +64,9 @@ def check(manifests: dict[str, Manifest], policy: Policy) -> list[Diagnostic]:
         for name in manifest.external:
             if _site(manifest, name) not in policy.external:
                 found.append(_unlisted(manifest, name, "external", ""))
+        for name in manifest.dynamic_attrs:
+            if _site(manifest, name) not in policy.dynamic_attrs:
+                found.append(_unlisted(manifest, name, "dynamic-attrs", ""))
         for name, targets in manifest.loads.items():
             listed = policy.loads.get(_site(manifest, name), ())
             missing = [t for t in targets if t not in listed]
@@ -125,12 +129,20 @@ def _unlisted(manifest: Manifest, name: str, table: str, detail: str) -> Diagnos
     )
 
 
-def render_policy(external: dict[str, str], loads: dict[str, tuple[str, ...]]) -> str:
+def render_policy(
+    external: dict[str, str],
+    loads: dict[str, tuple[str, ...]],
+    dynamic_attrs: dict[str, str],
+) -> str:
     """A policy file listing exactly these sites, sorted."""
     blocks = [
         "[external]\n"
         + "".join(f"{json.dumps(p)} = {json.dumps(r)}\n" for p, r in sorted(external.items()))
     ]
+    blocks.append(
+        "[dynamic-attrs]\n"
+        + "".join(f"{json.dumps(p)} = {json.dumps(r)}\n" for p, r in sorted(dynamic_attrs.items()))
+    )
     blocks.append(
         "[loads]\n"
         + "".join(
@@ -183,6 +195,7 @@ def changes(old: Policy, new: Policy) -> list[str]:
         )
 
     table("external", dict(old.external), dict(new.external))
+    table("dynamic-attrs", dict(old.dynamic_attrs), dict(new.dynamic_attrs))
     table("loads", dict(old.loads), dict(new.loads))
     table(
         "default-arguments",
@@ -229,10 +242,12 @@ WIDER = "wider"
 UNKNOWN = "unknown"
 
 # meiva:note
-# The tables whose entries excuse a site: `meizel.policy.toml`'s three checker tables, a manifest's
+# The tables whose entries excuse a site: `meizel.policy.toml`'s four checker tables, a manifest's
 # `[roots]` and `[state]`, and an `unless` clause. Every other table holds a rule's vocabulary - the
 # names it treats as a read of the world - where an entry that appears shows the checker more.
-_ALLOWANCES = frozenset({"external", "loads", "default-arguments", "roots", "state"})
+_ALLOWANCES = frozenset(
+    {"external", "dynamic-attrs", "loads", "default-arguments", "roots", "state"}
+)
 _UNLESS = " unless"
 
 # meiva:note
@@ -329,6 +344,9 @@ Key = tuple[str, str, str]
 def _policy_items(policy: Policy) -> list[Item]:
     found = [Item(POLICY, "external", path, reason) for path, reason in policy.external.items()]
     found.extend(
+        Item(POLICY, "dynamic-attrs", path, reason) for path, reason in policy.dynamic_attrs.items()
+    )
+    found.extend(
         Item(POLICY, "loads", f"{path} -> {target}", "")
         for path, targets in policy.loads.items()
         for target in targets
@@ -405,13 +423,13 @@ def _manifest_items(manifest: Manifest) -> list[Item]:
 
 # meiva:note
 # The path an entry names, where its name is one: a `[roots]`/`[state]` file below its own
-# directory, an `[external]` site, or the source of a `[loads]` entry. A dotted name or a `path::site`
+# directory, an `[external]` or `[dynamic-attrs]` site, or the source of a `[loads]` entry. A dotted name or a `path::site`
 # is not a path, so a rename cannot pair it and it is reported as added and removed.
 def _path(item: Item) -> str | None:
     if item.table in {"roots", "state"}:
         directory = item.source.rpartition("/")[0]
         return f"{directory}/{item.name}" if directory else item.name
-    if item.table == "external":
+    if item.table in {"external", "dynamic-attrs"}:
         return item.name
     if item.table == "loads":
         return item.name.partition(" -> ")[0]

@@ -10,3 +10,6 @@ exports = [ "notes.py", "seeds.py"]
 "test_update_non_owner_notifies_owner.py" = ["concurrent_claim.py",  "notes.py", "seeds.py"]
 "test_update_receipt_identity.py" = ["seeds.py"]
 "test_update_receipts.py" = ["seeds.py"]
+
+[debt.restricted-python]
+"test_create_unique_title_no_conflict.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

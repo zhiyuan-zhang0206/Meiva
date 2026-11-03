@@ -98,8 +98,9 @@ that is loading and creates no edge.
 ## Restricted Python
 
 Dynamic imports, `exec`/`compile`, non-literal Python subprocesses, string patch targets
-on first-party code, and `sys.modules` writes are governed by
-[[meizel/docs/checker/restricted/restricted.meiva.okf.md|restricted Python, `[loads]`, and `[external]`]].
+on first-party code, `sys.modules` writes, and attribute names or `__getattr__` hooks that only
+the run resolves are governed by
+[[meizel/docs/checker/restricted/restricted.meiva.okf.md|restricted Python, `[loads]`, `[external]`, and `[dynamic-attrs]`]].
 
 ## Frontend dependencies
 
@@ -111,7 +112,7 @@ lockfile is refused before node starts. States, remedies and exit code:
 ## Manifest
 
 `meizel.toml` keys are `purity` / `[purity]` ([[meizel/docs/checker/purity.meiva.okf.md|purity]]),
-`exports` (list), `[uses]` ([[meizel/docs/checker/narrowing.meiva.okf.md|narrowed endpoints]]), `[loads]` and `[external]`
+`exports` (list), `[uses]` ([[meizel/docs/checker/narrowing.meiva.okf.md|narrowed endpoints]]), `[loads]`, `[external]` and `[dynamic-attrs]`
 (sites in [[meizel/docs/checker/policy/policy.meiva.okf.md|the policy file]]), `[state]` and `[roots]`
 ([[meizel/docs/checker/ambient.meiva.okf.md|ambient reads]]) and `[debt.<code>]`. Names are
 direct children; `meizel.toml` is outside the directory budget. A directory without one has no

@@ -21,6 +21,16 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 "validation.py" = ["__init__.py"]
 "wraps.py" = ["__init__.py", "installation.py", "pure", "settings.py"]
 
+[dynamic-attrs]
+"discovery.py" = "reads the members each SDK namespace lists in __all_for_meiva__; the names are the live surface, framework and plugins together"
+"help.py" = "finds the SDK namespace that holds a documented target by walking the live surface names; the namespaces include those plugins register"
+"install.py" = "reverts wrap layers at the (parent, attr) pair recorded when a plugin's wrap was applied; the targets are plugin-declared SDK paths"
+"metering.py" = "wraps and restores the (parent, attr) routines of the meter surface, which is the live SDK surface including plugin namespaces"
+"plugins.py" = "installs and removes plugin namespaces and members on the meiva package; the names are what each plugin declares"
+"sdk_disable.py" = "applies the operator's MEIVA_SDK_DISABLE entries by name, and DisabledSDKModule is a sentinel that answers any attribute with the disable error"
+"settings.py" = "the plugin-config proxy meiva.sdk_surface.settings.plugins.<name> answers for the plugins registered at run time; the module hook also serves the three lazy URL constants"
+"wraps.py" = "applies plugin wrap declarations to (parent, attr) targets that plugins name in the live SDK tree"
+
 [roots]
 "help.py" = { kinds = ["home"], why = "_home_relative reads Path.home() to normalize user home prefixes in rendered SDK constant defaults" }
 "settings.py" = { kinds = ["settings"], why = "SDK settings facade reads live process settings when no attached-agent context overrides them" }

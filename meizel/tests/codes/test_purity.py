@@ -366,7 +366,7 @@ def test_impure_test_fixture_flags_heavy_fixtures_and_monkeypatch_for_strict_tes
 ) -> None:
     root = make_repo(
         {
-            "meizel.policy.toml": render_policy({}, {})
+            "meizel.policy.toml": render_policy({}, {}, {})
             + '\n[purity]\nimpure-fixtures = ["db_conn"]\n',
             "pkg/__init__.py": "",
             "pkg/domain.py": "def calc(x: int) -> int:\n    return x + 1\n",
@@ -737,7 +737,7 @@ def test_a_pure_look_alike_is_not_an_impure_call(make_repo: RepoFactory, source:
 def test_a_shell_constructor_the_policy_lists_is_an_impure_call(make_repo: RepoFactory) -> None:
     root = make_repo(
         {
-            "meizel.policy.toml": render_policy({}, {})
+            "meizel.policy.toml": render_policy({}, {}, {})
             + '\n[purity]\npure-third-party = ["meizel"]\nimpure-calls = ["meizel.graph.universe.GitRepo"]\n',
             "pkg/__init__.py": "",
             "pkg/a.py": (
@@ -765,7 +765,7 @@ def test_a_policy_listed_constructor_named_without_a_call_is_an_impure_call(
 ) -> None:
     root = make_repo(
         {
-            "meizel.policy.toml": render_policy({}, {})
+            "meizel.policy.toml": render_policy({}, {}, {})
             + '\n[purity]\npure-third-party = ["meizel"]\nimpure-calls = ["meizel.graph.universe.GitRepo", "meizel.graph.universe.load_universe"]\n',
             "pkg/__init__.py": "",
             "pkg/a.py": source,
@@ -784,7 +784,7 @@ def test_a_shell_constructor_named_in_an_annotation_is_not_an_impure_call(
 ) -> None:
     root = make_repo(
         {
-            "meizel.policy.toml": render_policy({}, {})
+            "meizel.policy.toml": render_policy({}, {}, {})
             + '\n[purity]\npure-third-party = ["meizel"]\nimpure-calls = ["meizel.graph.universe.GitRepo"]\n',
             "pkg/__init__.py": "",
             "pkg/a.py": (

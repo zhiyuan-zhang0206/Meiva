@@ -16,3 +16,7 @@ exports = ["sealed_plan.py", "sealed_tree.py", "stage.py", "stage_plan.py"]
 
 [roots]
 "stage.py" = { kinds = ["environ", "platform", "argv"], why = "the `python -m base.deploy.sealed_release.stage` entry: it hands its own process environment to the Host it builds (whose constructor reads the platform and uid) and passes the Host down; everything below takes the Host and explicit paths; it also reads its command line (argv) once, as the process entry" }
+
+[debt.restricted-python]
+"sealed_plan.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }
+"sealed_tree.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }

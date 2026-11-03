@@ -4,3 +4,6 @@
 [purity]
 "chat.py" = "strict"
 "plugin.py" = "strict"
+
+[debt.restricted-python]
+"chat.py#dynamic attribute name" = { count = 2, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }

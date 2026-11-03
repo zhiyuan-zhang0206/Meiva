@@ -6,3 +6,6 @@ exports = ["leak_guard_suite.py"]
 [uses]
 "test_harness_imports.py" = ["harness_imports.py"]
 "test_read_only_cli_imports.py" = ["child_read_only_cli.py"]
+
+[debt.restricted-python]
+"test_watch_pr.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

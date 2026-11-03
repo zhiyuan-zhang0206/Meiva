@@ -14,6 +14,9 @@ exports = ["__init__.py", "browser.py", "choices.py", "closure_plan.py", "eviden
 "shell_sessions.py" = ["closure_plan.py"]
 "steps.py" = ["choices.py"]
 
+[dynamic-attrs]
+"restart.py" = "a tee wrapper around a text stream that forwards every other attribute to the stream it wraps"
+
 [purity]
 "admission.py" = "strict"
 "choices.py" = "strict"

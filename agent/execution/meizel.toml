@@ -9,6 +9,9 @@ exports = ["agent_traceback.py", "child.py", "protocol.py"]
 [external]
 "child.py" = "executes the agent-authored code of one execute_code call"
 
+[dynamic-attrs]
+"child.py" = "_LazyStateSlot forwards every attribute read and write to the agent state object it builds on first use; the names are the plugin-declared state fields, which exist only once the plugins have loaded"
+
 [purity]
 "__init__.py" = "strict"
 "agent_traceback.py" = "strict"

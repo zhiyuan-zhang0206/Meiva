@@ -1,5 +1,8 @@
 exports = ["configuration.py", "ids.py", "tests"]
 
+[dynamic-attrs]
+"configuration.py" = "_DynamicView is the structural type of the configuration view, which answers any domain name by forwarding to the live settings (base/config/_lite.py); a declaration with no body"
+
 [purity]
 "__init__.py" = "strict-to-be"
 "configuration.py" = "strict"

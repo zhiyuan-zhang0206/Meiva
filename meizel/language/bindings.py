@@ -55,6 +55,7 @@ class Bindings:
     all_names: frozenset[str] = frozenset()
     classes: tuple[ClassFacts, ...] = ()
     reexports: tuple[tuple[str, str], ...] = ()
+    strings: tuple[tuple[str, str], ...] = ()
 
 
 def provides(bindings: Bindings, name: str) -> bool:
@@ -125,6 +126,20 @@ def _read(source: str, file: str) -> Bindings:
         all_names=frozenset(all_names),
         classes=_class_facts(tree, scope, file),
         reexports=tuple(scope.imports.items()),
+        strings=_string_constants(scope),
+    )
+
+
+# meiva:note
+# The module-level names bound exactly once, to a string literal.
+def _string_constants(scope: Scope) -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (name, value.value)
+        for name, value in scope.values.items()
+        if scope.stores.get(name) == 1
+        and name not in scope.imports
+        and isinstance(value, ast.Constant)
+        and isinstance(value.value, str)
     )
 
 

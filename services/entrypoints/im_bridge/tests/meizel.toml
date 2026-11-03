@@ -15,3 +15,6 @@ exports = ["adapters", "conftest.py", "slices.py"]
 "test_push_watchdog_retry.py" = ["slices.py"]
 "test_timeline_outbox.py" = ["slices.py", "support.py"]
 "test_timeline_selection.py" = ["support.py", "test_im_bridge_core.py", "test_timeline_outbox.py"]
+
+[debt.restricted-python]
+"test_im_bridge_daemon.py#dynamic attribute name" = { count = 2, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

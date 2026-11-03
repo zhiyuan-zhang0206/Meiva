@@ -7,6 +7,7 @@ exports = ["fixtures.py", "no_script_sibling_imports.py", "path_imports.py", "sc
 "patching.py" = ["bindings.py", "fixtures.py", "purity.py", "python_commands.py", "restricted.py"]
 "purity.py" = ["purity_structure.py"]
 "python_commands.py" = ["restricted.py"]
+"restricted.py" = ["bindings.py"]
 "scan.py" = ["ambient.py", "bindings.py", "fixtures.py", "input_mutations.py", "mounts.py", "purity.py", "restricted.py", "typescript.py"]
 "scan_cache.py" = ["fixtures.py", "input_mutations.py", "scan.py", "typescript.py"]
 "tests" = ["fixtures.py", "input_mutations.py", "no_script_sibling_imports.py", "path_imports.py", "scan.py", "scan_cache.py", "script_siblings.py", "typescript.py"]
@@ -24,3 +25,6 @@ exports = ["fixtures.py", "no_script_sibling_imports.py", "path_imports.py", "sc
 "purity.py" = "strict"
 "scan.py" = "strict"
 "script_siblings.py" = "strict"
+
+[debt.restricted-python]
+"scan.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }

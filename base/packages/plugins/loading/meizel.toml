@@ -8,5 +8,8 @@ exports = ["discovery.py", "faces.py", "plugin_loader.py", "registry.py", "scaff
 "plugin_loader.py" = "loads discovered plugins, built-in or user-installed; core does not depend on them"
 "schedule_face.py" = "loads discovered plugin schedule and ui_stats faces and syntax-checks contributed schedule scripts"
 
+[dynamic-attrs]
+"plugin_loader.py" = "binds a plugin submodule as an attribute of its parent package after a by-path load, as the import system does; the names are the plugin's own module names"
+
 [purity]
 "__init__.py" = "strict"

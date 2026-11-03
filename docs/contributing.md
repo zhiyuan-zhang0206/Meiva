@@ -239,7 +239,7 @@ violations pass, anything new fails, and the debt may only shrink
   ([ambient reads](../meizel/docs/checker/ambient.meiva.okf.md),
   [readers](../meizel/docs/checker/ambient-readers.meiva.okf.md)).
 - `meizel.policy.toml` lists every allowance a manifest cannot grant itself (`[external]` sites,
-  `[loads]` sites, default-argument injections) and every exemption of the lint rules in
+  `[dynamic-attrs]` sites, `[loads]` sites, default-argument injections) and every exemption of the lint rules in
   `meizel/` (ambient state, clock lattice, single owners, setenv in tests, per-agent settings,
   `TYPE_CHECKING`) and the names through which the repository's own state is reached
   (`[ambient]`, `[ambient-readers]`). Rule code holds no exemption of its own. Do not edit the

@@ -18,7 +18,7 @@ from meizel.tests.synthetic import (
 
 ROOT = '[roles]\napplication = ["app", "cfg"]\ntooling = ["tool"]\ntests = ["tests"]\n'
 POLICY = (
-    render_policy({}, {})
+    render_policy({}, {}, {})
     + '\n[ambient]\nsettings = ["settings", "get_field()"]\ndb = ["Database.from_settings()"]\n'
 )
 STATE = {

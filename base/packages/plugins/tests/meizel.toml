@@ -6,3 +6,6 @@ exports = []
 "test_load_report.py" = ["plugin_boundary.py"]
 "test_service_config_snapshot.py" = ["plugin_boundary.py", "plugin_boundary_child.py"]
 "test_config_boot_race.py" = ["config_boot_child.py"]
+
+[debt.restricted-python]
+"config_boot_child.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

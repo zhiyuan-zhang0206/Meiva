@@ -13,5 +13,3 @@ exports = ["hermetic_transactions.py", "logger_add_diagnose.py", "loguru_format.
 "no_silent_failures.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 "time_bomb.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 "zombie_pyright_ignores.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
-
-[debt.ambient-read]

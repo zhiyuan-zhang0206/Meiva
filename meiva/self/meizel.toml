@@ -4,6 +4,10 @@ exports = ["harness", "lifecycle_plans.py", "plans.py", "wake.py"]
 "__init__.py" = ["harness", "lifecycle_plans.py", "plans.py", "wake.py"]
 "harness" = []
 
+[dynamic-attrs]
+"__init__.py" = "plugin members land on meiva.self through a declared SdkMember; they are absent until the plugins load, so the module hook triggers the load and retries the name"
+"wake.py" = "_LazyRedis is the structural type of a proxy that forwards any attribute to the redis client it builds on first use; a declaration with no body"
+
 [purity]
 "__init__.py" = { mode = "none", why = "the meiva.self facade: attach, restart, terminate, compact and pause_heartbeat read the bound context, the installation and the database row, run the SQL plans.py returns in a transaction, emit the audit and telemetry events and publish the wake; whether the harness may take the action, the overlay a restart stores, whether the caller is an attached controller and the texts of a compaction are decided by the pure lifecycle_plans.py, the statements by plans.py and the wake channel by wake.py" }
 "lifecycle_plans.py" = "strict"

@@ -9,6 +9,9 @@ exports = ["capabilities.py", "compaction.py", "context_notes.py", "conversation
 "skill_selection.py" = ["sdk_scope.py"]
 "system_prompt.py" = ["_base_prompt.py", "_codeact.py", "capabilities.py", "conversation.py", "live.py"]
 
+[dynamic-attrs]
+"live.py" = "walks the operator-configured expand paths (meiva.<namespace>.<member>) and the namespaces plugins registered on the live SDK tree; both name sets come from configuration and plugin loading"
+
 [purity]
 "__init__.py" = "strict"
 "capabilities.py" = "strict"

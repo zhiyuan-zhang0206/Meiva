@@ -47,7 +47,7 @@ _KEYED_ENTRY = re.compile(r"""^\s*("[^"]*"|'[^']*'|[\w.-]+)\s*=""")
 def _keyed_line(section: str, line: str) -> re.Match[str] | None:
     if section in {"state", "roots", "purity"}:
         return _KEYED_ENTRY.match(line)
-    return _EXTERNAL_ENTRY.match(line) if section == "external" else None
+    return _EXTERNAL_ENTRY.match(line) if section in {"external", "dynamic-attrs"} else None
 
 
 def remove_entries(text: str, removals: dict[str, dict[str, set[str]]]) -> str:

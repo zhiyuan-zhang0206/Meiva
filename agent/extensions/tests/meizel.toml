@@ -1,2 +1,5 @@
 [uses]
 "test_lazy_plugin_load.py" = ["child_lazy_load.py"]
+
+[debt.restricted-python]
+"child_lazy_load.py#dynamic attribute name" = { count = 3, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

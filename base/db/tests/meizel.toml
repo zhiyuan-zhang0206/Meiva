@@ -4,3 +4,6 @@ exports = ["fakes.py", "lost_ack.py", "swallowed_cancel.py"]
 "test_boot_authority.py" = ["_boot_authority_child.py"]
 "test_connect_helpers.py" = ["_stale_worker_child.py"]
 "test_swallowed_cancel.py" = ["swallowed_cancel.py"]
+
+[debt.restricted-python]
+"test_database_handle.py#dynamic attribute name" = { count = 1, owner = "#8266", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }
