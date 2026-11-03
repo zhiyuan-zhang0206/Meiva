@@ -50,6 +50,11 @@ def _breaker_ctx(pool: AsyncConnectionPool, *, database_gate: ProcessDbGate) -> 
     )
 
 
+# meiva:note
+# A real graph failure is flushed to PostgreSQL so a separate saver/connection (bypassing
+# in-memory buffered state) sees the opened breaker while leaving the settled abort out of
+# `HostedServiceResources.failures`. `StateGraph.add_node` and `compile` carry partial
+# LangGraph stub types, hence the member-type suppressions on those two builder calls.
 @pytest.mark.parametrize("overflow", [False, True])
 async def test_host_persists_provider_failure_before_releasing_turn(
     redis_url: str,
@@ -62,8 +67,7 @@ async def test_host_persists_provider_failure_before_releasing_turn(
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
 ) -> None:
-    """A real graph failure is flushed to PG; a fresh reader sees its breaker."""
-    async with hosted_scope(expected_error=FatalProviderError) as resources:
+    async with hosted_scope() as resources:
         from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
         from langgraph.graph import END, START, StateGraph
 
@@ -132,7 +136,6 @@ async def test_host_persists_provider_failure_before_releasing_turn(
                     ),
                 )
             ).exited
-        # New saver/connection prevents in-memory buffered state from faking success.
         async with AsyncPostgresSaver.from_conn_string(settings.data_plane.db_url) as reader:
             stored = await reader.aget_tuple({"configurable": {"thread_id": str(agent_id)}})
         assert stored is not None
@@ -143,4 +146,4 @@ async def test_host_persists_provider_failure_before_releasing_turn(
         assert circuit.reason == ("context_overflow" if overflow else "billing")
         assert circuit.opened_at is not None
         assert calls == 1
-        assert resources.require_service().failures == [(resources, failure)]
+        assert resources.require_service().failures == []

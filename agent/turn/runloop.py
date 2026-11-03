@@ -1,5 +1,7 @@
 """Shared graph invocation configuration and recoverable turn-error reporting."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -7,7 +9,11 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 
 from agent.graph.hooks.compact import CompactionFailedError
-from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
+from agent.graph.llm_errors import (
+    FatalLLMStreamError,
+    FatalProviderError,
+    retry_exhausted_error,
+)
 from agent.startup import CHECKPOINT_INTERVAL_KEY
 from agent.state import BaseAgentState
 from agent.state_channels import CircuitState
@@ -20,6 +26,7 @@ from agent.turn.failure_decision import (
 from base.agents.context import MeivaContext
 from base.events.live.bus import EventBus
 from base.events.live.projection import Error
+from base.lm.errors import is_retryable_provider_error
 from base.log import logger
 from base.telemetry.audit_events import prepare_event_log, record_audit_reported_async
 
@@ -293,7 +300,7 @@ async def handle_fatal_llm_error(
     emit_reports: bool = True,
     deferred: list[Error] | None = None,
 ) -> dict[str, object]:
-    logger.opt(exception=True).error(
+    logger.opt(exception=exc).error(
         "LLM turn aborted (retry cap exhausted or provider rejected) — "
         "agent stays alive and idles for next inbound",
         event="llm_turn_aborted",
@@ -358,14 +365,31 @@ def graph_config(
     }
 
 
+# meiva:note
+# Invocation errors that settle a hosted turn into `halted=True` with a user-visible `Error`
+# event rather than escaping as an unclassified host crash or late resource failure.
+def is_settled_invocation_abort(exc: BaseException) -> bool:
+    return isinstance(exc, (FatalLLMStreamError, FatalProviderError, CompactionFailedError)) or (
+        isinstance(exc, Exception) and is_retryable_provider_error(exc)
+    )
+
+
+# meiva:note
+# A single turn's prepared abort survives database-only settlement retries.
 @dataclass
 class PendingTurnFailure:
-    """A single turn's prepared abort survives database-only settlement retries."""
-
     error: FatalLLMStreamError | FatalProviderError | CompactionFailedError
     prepared_update: dict[str, object] | None = None
     reports_started: bool = False
     errors: list[Error] = field(default_factory=list[Error])
+
+    @classmethod
+    def from_invocation_error(cls, exc: Exception) -> PendingTurnFailure | None:
+        if isinstance(exc, (FatalLLMStreamError, FatalProviderError, CompactionFailedError)):
+            return cls(exc)
+        if is_retryable_provider_error(exc):
+            return cls(retry_exhausted_error(exc))
+        return None
 
 
 # meiva:note

@@ -69,8 +69,16 @@ the scan does not rewrite state or manufacture messages.
 Host replacement still respects the ownership lease even when a predecessor's
 exact process has exited. Normal cancellation also retains the shield around
 runtime initialization and cleanup because those paths contain side-effecting
-threads. A true stalled turn that cannot unwind retains its slot and requires
-supervisor recovery; backlog recovery does not weaken that resource boundary.
+threads. Foreground graph invocations (`stall_guard.py`) hold their `ainvoke`
+task in `HostedServiceResources` while running; settled invocation aborts
+(`FatalLLMStreamError`, `FatalProviderError`, `CompactionFailedError`, and
+exhausted transient provider retries converted via `PendingTurnFailure.from_invocation_error`)
+and bounded `TurnStallTimeoutError` aborts settle without recording false late
+resource failures into `HostedServiceResources.failures`, whereas unknown
+exceptions and uncancellable stragglers (`HostRestartRequiredError`) remain
+retained for service stop/join. A true stalled turn that cannot unwind retains
+its slot and requires supervisor recovery; backlog recovery does not weaken
+that resource boundary.
 
 ## Key Dependencies
 - [[services/supervision/meiva_root_glue/docs/meiva_root_glue.meiva.okf.md]] — root probes and supervises the selected service manifest.

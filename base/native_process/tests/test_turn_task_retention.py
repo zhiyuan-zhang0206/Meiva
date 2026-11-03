@@ -2,6 +2,7 @@ import asyncio
 
 import pytest
 
+from base.log.tests.log_records import LogRecords
 from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
 
 
@@ -129,3 +130,79 @@ async def test_explicit_scope_child_is_not_joined_without_entering_the_watch_gro
     assert service.joined
     with pytest.raises(RuntimeError, match="already joined"):
         service.retain_task(scope, child)
+
+
+async def test_retain_task_skips_failure_recording_for_settled_exception_types(
+    loguru_records: LogRecords,
+) -> None:
+    service = HostedServiceResources()
+    settled_scope = await service.turn()
+
+    async def fail_settled() -> None:
+        raise KeyError("handled-by-caller")
+
+    settled_child = asyncio.create_task(fail_settled(), name="settled-child")
+    service.retain_task(settled_scope, settled_child, settled=(LookupError,))
+    await asyncio.wait({settled_child}, timeout=1)
+    await asyncio.sleep(0)
+    assert service.failures == []
+    assert not any(
+        "retained until service stop/join" in record["message"] for record in loguru_records
+    )
+    await service.aclose()
+    assert service.joined
+
+    second_service = HostedServiceResources()
+    unexpected_scope = await second_service.turn()
+    unexpected = ValueError("unlisted-child-failure")
+
+    async def fail_unexpected() -> None:
+        raise unexpected
+
+    unexpected_child = asyncio.create_task(fail_unexpected(), name="unexpected-child")
+    second_service.retain_task(unexpected_scope, unexpected_child, settled=(LookupError,))
+    await asyncio.wait({unexpected_child}, timeout=1)
+    await asyncio.sleep(0)
+    assert second_service.failures == [(unexpected_scope, unexpected)]
+    with pytest.raises(ValueError) as joined:
+        await second_service.aclose()
+    assert joined.value is unexpected
+    assert second_service.joined
+
+
+async def test_hold_task_tracks_live_foreground_task_without_retaining_its_error() -> None:
+    service, foreign = HostedServiceResources(), HostedServiceResources()
+    scope, other = await service.turn(), await foreign.turn()
+    release = asyncio.Event()
+    expected = KeyError("foreground-caller-handles-this")
+
+    async def fail_when_released() -> None:
+        await release.wait()
+        raise expected
+
+    foreground = asyncio.create_task(fail_when_released(), name="foreground-held-task")
+    service.hold_task(scope, foreground)
+    try:
+        with pytest.raises(RuntimeError, match="original service scope"):
+            foreign.hold_task(scope, foreground)
+        with pytest.raises(RuntimeError, match="original service scope"):
+            service.hold_task(other, foreground)
+        with pytest.raises(TimeoutError, match="foreground-held-task"):
+            await service.aclose(deadline=asyncio.get_running_loop().time())
+        assert foreground in service._pending
+        assert not service.joined
+        release.set()
+        with pytest.raises(KeyError) as caught:
+            await foreground
+        assert caught.value is expected
+        await asyncio.sleep(0)
+        assert foreground not in service._pending
+        assert service.failures == []
+    finally:
+        release.set()
+        await asyncio.wait({foreground}, timeout=1)
+        await service.aclose()
+        await foreign.aclose()
+    assert service.joined
+    with pytest.raises(RuntimeError, match="already joined"):
+        service.hold_task(scope, foreground)

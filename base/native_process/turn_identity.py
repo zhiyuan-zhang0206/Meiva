@@ -69,25 +69,47 @@ class HostedServiceResources:
         task.add_done_callback(self._pending.discard)
         return task
 
-    def retain_task(self, scope: HostedTurnResources, task: asyncio.Task[Any]) -> None:
-        """Retain an original turn child without changing its result or cancelling siblings.
-
-        Existing turns may create settlement work after service stop begins.
-        The same pending set keeps that actual Task inside the original join
-        deadline, even if its caller has already returned or raised.
-        """
+    def _require_task_scope(self, scope: HostedTurnResources) -> None:
         if scope.service is not self:
             raise RuntimeError("a hosted task requires its original service scope")
         if self._closed and self.joined:
             raise RuntimeError("hosted resource service has already joined")
-        self._pending.add(task)
-        task.add_done_callback(partial(self._collect_task, scope))
 
-    def _collect_task(self, scope: HostedTurnResources, task: asyncio.Task[Any]) -> None:
+    # meiva:note
+    # Keep a foreground child inside the service join span while its caller classifies its outcome.
+    # meiva:link base/native_process/docs/native_process.meiva.okf.md
+    def hold_task(self, scope: HostedTurnResources, task: asyncio.Task[Any]) -> None:
+        self._require_task_scope(scope)
+        self._pending.add(task)
+        task.add_done_callback(self._pending.discard)
+
+    # meiva:note
+    # Retain an original turn child without changing its result or cancelling siblings.
+    # Existing turns may create settlement work after service stop begins; `_pending` keeps
+    # that actual `Task` inside the join deadline even if its caller returned or raised, while
+    # `settled` excludes bounded handled aborts from `failures`.
+    # meiva:link base/native_process/docs/native_process.meiva.okf.md
+    def retain_task(
+        self,
+        scope: HostedTurnResources,
+        task: asyncio.Task[Any],
+        *,
+        settled: tuple[type[BaseException], ...] = (),
+    ) -> None:
+        self._require_task_scope(scope)
+        self._pending.add(task)
+        task.add_done_callback(partial(self._collect_task, scope, settled))
+
+    def _collect_task(
+        self,
+        scope: HostedTurnResources,
+        settled: tuple[type[BaseException], ...],
+        task: asyncio.Task[Any],
+    ) -> None:
         self._pending.discard(task)
         if not task.cancelled():
             error = task.exception()
-            if error is not None:
+            if error is not None and not isinstance(error, settled):
                 self.record_failure(scope, error, name=task.get_name())
 
     def record_failure(

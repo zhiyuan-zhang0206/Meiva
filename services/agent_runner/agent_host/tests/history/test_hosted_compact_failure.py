@@ -14,7 +14,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent import state as states
 from agent.graph.claim.node import claim_node
-from agent.graph.hooks.compact import COMPACT_MAX_ATTEMPTS, CompactionFailedError
+from agent.graph.hooks.compact import COMPACT_MAX_ATTEMPTS
 from agent.impersonation_handoff import flush_checkpoint
 from agent.startup import wrap_saver_writes_with_nstep_interval
 from base.agents.context import MeivaContext
@@ -22,7 +22,6 @@ from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_re
 from base.agents.inbox.insert import insert_inbound_message
 from base.db import Database
 from base.events.live.bus import EventBus
-from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.tests.history import provider_down_model
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.runtime.host_support import EventTap, Rig, Row
@@ -125,29 +124,6 @@ async def _assert_new_inbound_resumes_with_history(
     assert _inbound_status(db_conn, compact_id) == ("done",)
 
 
-def _retained_compaction_failure(
-    host: AgentHost, provider_error: RuntimeError
-) -> CompactionFailedError:
-    ((scope, failure),) = host._resource_service.failures
-    assert scope.service is host._resource_service
-    assert isinstance(failure, CompactionFailedError)
-    assert failure.__cause__ is provider_error
-    return failure
-
-
-async def _close_host_with_original_failure(
-    host: AgentHost, original: CompactionFailedError | None, provider_error: RuntimeError
-) -> None:
-    if original is None:
-        await host.aclose()
-        return
-    with pytest.raises(CompactionFailedError) as observed:
-        await host.aclose()
-    assert observed.value is original
-    assert observed.value.__cause__ is provider_error
-    assert host.resources_joined
-
-
 @pytest.mark.parametrize("interval", [1, 100])
 async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound(
     db_conn: psycopg.Connection,
@@ -177,7 +153,6 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
         control_pool=aops_pool,
         bus=None,
     )
-    original_failure: CompactionFailedError | None = None
     try:
         await asyncio.wait_for(host.run_turn(agent), 10)
         await _assert_failure_is_visible_and_durable(
@@ -191,7 +166,7 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
         )
         assert not replies
         assert provider_down_model.CALLS[agent] == COMPACT_MAX_ATTEMPTS
-        original_failure = _retained_compaction_failure(host, provider_error)
+        assert host._resource_service.failures == []
 
         insert_inbound_message(
             db_conn,
@@ -208,4 +183,5 @@ async def test_compaction_failure_is_visible_durable_and_recovers_on_new_inbound
             db_conn, aops_pool, config, compact_id=compact_id, history=history
         )
     finally:
-        await _close_host_with_original_failure(host, original_failure, provider_error)
+        await host.aclose()
+    assert host.resources_joined

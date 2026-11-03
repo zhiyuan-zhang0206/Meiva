@@ -23,8 +23,6 @@ from langgraph.graph.state import CompiledStateGraph
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 from pydantic import BaseModel
 
-from agent.graph.hooks.compact import CompactionFailedError
-from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
 from agent.graph.node_log import flush_node_exit_aggregate
 from agent.impersonation import (
     active_lease,
@@ -117,6 +115,7 @@ from services.agent_runner.agent_host.settlement import (
 )
 from services.agent_runner.agent_host.stall_guard import (
     HostRestartRequiredError,
+    TurnStallTimeoutError,
     run_invocation_with_stall_guard,
 )
 
@@ -222,15 +221,15 @@ class AgentHost:
         """The immutable owner this actual hosted service advertises to health clients."""
         return self._owner
 
+    # meiva:note
+    # Hold single-flight through boot, execution and cleanup, including threads.
+    # Outer cancellation retains unjoined turns; durable interrupts still cancel work.
     async def run_turn(self, agent_id: int) -> None:
-        """Hold single-flight through boot, execution and cleanup, including threads.
-        Outer cancellation retains unjoined turns; durable interrupts still cancel work.
-        """
         with self._resource_service.hold_turn(asyncio.current_task()):
             resources = await self._resource_service.turn()
             self.turn_fingerprints.pop(agent_id, None)
             work = asyncio.create_task(self._run_turn(agent_id, resources=resources))
-            self._resource_service.retain_task(resources, work)
+            self._resource_service.retain_task(resources, work, settled=(TurnStallTimeoutError,))
             cancelled = False
             try:
                 try:
@@ -666,8 +665,11 @@ class AgentHost:
                 initial,
                 timing=self._policy.stall,
             )
-        except (FatalLLMStreamError, FatalProviderError, CompactionFailedError) as exc:
-            return PendingTurnFailure(exc)
+        except Exception as exc:
+            pending = PendingTurnFailure.from_invocation_error(exc)
+            if pending is None:
+                raise
+            return pending
 
     async def _invoke_until_done(
         self, agent_id: int, ctx: MeivaContext, *, checkpoints: TurnCheckpoints | None = None

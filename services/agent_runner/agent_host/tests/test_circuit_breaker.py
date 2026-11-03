@@ -2,9 +2,11 @@
 
 import json
 from datetime import UTC, datetime
-from typing import cast
+from typing import NoReturn, cast
 from unittest.mock import MagicMock
 
+import anthropic
+import httpx2
 import psycopg
 import pytest
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
@@ -17,7 +19,14 @@ from agent.graph.claim.tests.claim_support import (
     make_runtime,
     thread_config,
 )
-from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
+from agent.graph.llm_errors import (
+    FatalLLMStreamError,
+    FatalProviderError,
+    LLMStreamCorruptedError,
+    LLMStreamTruncatedError,
+    LLMStreamUnexpectedStopReasonError,
+    retry_exhausted_error,
+)
 from agent.state import AgentState, CircuitState
 from agent.turn.runloop import handle_fatal_llm_error
 from base.agents.context import MeivaContext
@@ -311,6 +320,75 @@ async def test_fatal_llm_stream_error_does_not_open_breaker(
     )
 
     assert update == {"halted": True}
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        LLMStreamCorruptedError("terminal reason missing"),
+        LLMStreamUnexpectedStopReasonError("pause_turn", stop_reason="pause_turn", output_tokens=7),
+        LLMStreamTruncatedError("max_tokens", stop_reason="max_tokens", output_tokens=4096),
+    ],
+)
+async def test_stream_corrupted_and_stop_reason_aborts_halt_without_opening_breaker(
+    exc: FatalLLMStreamError,
+    loguru_records: LogRecords,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    try:
+        raise exc
+    except FatalLLMStreamError as raised:
+        captured = raised
+    update = await handle_fatal_llm_error(
+        captured, breaker_ctx(database_gate=database_gate), agent_id=42, circuit=None
+    )
+
+    assert update == {"halted": True}
+    assert loguru_records.events("circuit_breaker_open") == []
+    aborts = loguru_records.events("llm_turn_aborted")
+    assert len(aborts) == 1
+    assert aborts[0]["exception"] is not None
+    assert aborts[0]["exception"].value is captured
+
+
+def _raise_transient_503() -> NoReturn:
+    response = httpx2.Response(503, request=httpx2.Request("POST", "https://audit.invalid"))
+    raise anthropic.InternalServerError(
+        "Service unavailable",
+        response=response,
+        body={
+            "type": "error",
+            "error": {"type": "service_unavailable_error", "message": "Service unavailable"},
+        },
+    )
+
+
+async def test_retry_exhausted_transient_503_halts_without_opening_breaker_and_logs_cause(
+    loguru_records: LogRecords,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    try:
+        _raise_transient_503()
+    except anthropic.InternalServerError as raw:
+        wrapped = retry_exhausted_error(raw)
+        cause = raw
+
+    update = await handle_fatal_llm_error(
+        wrapped, breaker_ctx(database_gate=database_gate), agent_id=42, circuit=None
+    )
+
+    assert update == {"halted": True}
+    assert loguru_records.events("circuit_breaker_open") == []
+    aborts = loguru_records.events("llm_turn_aborted")
+    assert len(aborts) == 1
+    assert aborts[0]["extra"]["error_class"] == "transient"
+    assert aborts[0]["extra"]["provider"] == "anthropic"
+    assert aborts[0]["extra"]["status"] == 503
+    assert aborts[0]["exception"] is not None
+    assert aborts[0]["exception"].value is wrapped
+    assert wrapped.__cause__ is cause
 
 
 async def test_fatal_provider_error_does_not_reopen_already_open_breaker(
