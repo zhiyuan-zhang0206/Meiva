@@ -13,6 +13,8 @@ from dataclasses import replace
 from typing import Any, Literal, assert_never
 from uuid import UUID
 
+from pydantic import BaseModel, ConfigDict
+
 import meiva.sdk_surface.agent_identity
 from base.agents.context import MeivaContext
 from base.agents.context.gateway_client import launch_retry as _launch_retry
@@ -22,6 +24,33 @@ from base.log import logger
 from meiva.gateway_client import agent_plans, plans
 from meiva.gateway_client.plans import Request
 from meiva.sdk_surface import process_context
+
+
+# meiva:note
+# The reader of one field of a gateway answer: the answer object is validated against it, so a
+# reply of another shape raises here instead of reaching the caller as an unchecked value.
+class _Answer(BaseModel):
+    model_config = ConfigDict(strict=True)
+
+
+class _StatusAnswer(_Answer):
+    status: str
+
+
+class _InboundIdAnswer(_Answer):
+    inbound_id: int
+
+
+class _TextAnswer(_Answer):
+    text: str | None
+
+
+class _NeighborsAnswer(_Answer):
+    neighbors: list[dict[str, object]]
+
+
+class _AncestorsAnswer(_Answer):
+    ancestors: list[dict[str, object]]
 
 
 def _ctx(context: MeivaContext | None) -> MeivaContext:
@@ -217,13 +246,15 @@ def send_system_note(
         content=content, note_tag=note_tag, source=source, task_id=task_id, resurrect=resurrect
     )
     plan = plans.system_note_request(agent_id, note, idempotency_key)
-    return int(_transport.json_object(_run(plan, _ctx(None)))["inbound_id"])
+    return _InboundIdAnswer.model_validate(
+        _transport.json_object(_run(plan, _ctx(None)))
+    ).inbound_id
 
 
 def get_last_message(agent_id: int, caller: str) -> str | None:
     """GET /api/agents/{id}/last-message → the agent's most recent AI turn text."""
     plan = Request("GET", f"/api/agents/{agent_id}/last-message", params={"caller": caller})
-    return _transport.json_object(_run(plan, _ctx(None)))["text"]
+    return _TextAnswer.model_validate(_transport.json_object(_run(plan, _ctx(None)))).text
 
 
 def get_neighbors(agent_id: int, *, depth: int, limit: int) -> list[dict[str, Any]]:
@@ -235,7 +266,7 @@ def get_neighbors(agent_id: int, *, depth: int, limit: int) -> list[dict[str, An
     plan = Request(
         "GET", f"/api/agents/{agent_id}/neighbors", params={"depth": depth, "limit": limit}
     )
-    return _transport.json_object(_run(plan, _ctx(None)))["neighbors"]
+    return _NeighborsAnswer.model_validate(_transport.json_object(_run(plan, _ctx(None)))).neighbors
 
 
 def get_ancestors(agent_id: int) -> list[dict[str, Any]]:
@@ -244,7 +275,7 @@ def get_ancestors(agent_id: int) -> list[dict[str, Any]]:
     top, so the neighbors `depth`/`limit` params do not apply). Same dict
     shape as get_neighbors."""
     plan = Request("GET", f"/api/agents/{agent_id}/neighbors", params={"depth": 1, "limit": 20})
-    return _transport.json_object(_run(plan, _ctx(None)))["ancestors"]
+    return _AncestorsAnswer.model_validate(_transport.json_object(_run(plan, _ctx(None)))).ancestors
 
 
 # The born-chain read runs at every context establishment, on the agent
@@ -271,7 +302,9 @@ def get_born_chain(agent_id: int, *, context: MeivaContext | None = None) -> lis
         timeout_seconds=_BORN_CHAIN_TIMEOUT_S,
         max_retries=1,
     )
-    return _transport.json_object(_run(plan, _ctx(context)))["ancestors"]
+    return _AncestorsAnswer.model_validate(
+        _transport.json_object(_run(plan, _ctx(context)))
+    ).ancestors
 
 
 def list_agents(
@@ -351,21 +384,21 @@ def restart(
     plan = agent_plans.restart_request(
         agent_id, _actor_or(source), message=message, config_overlay=config_overlay
     )
-    return _transport.json_object(_run(plan, _ctx(None)))["status"]
+    return _StatusAnswer.model_validate(_transport.json_object(_run(plan, _ctx(None)))).status
 
 
 # meiva:note
 # POST /api/agents/{id}/cancel → status string (`cancelled` / `not_running`).
 def cancel(agent_id: int) -> str:
     response = _run(Request("POST", f"/api/agents/{agent_id}/cancel", body={}), _ctx(None))
-    return _transport.json_object(response)["status"]
+    return _StatusAnswer.model_validate(_transport.json_object(response)).status
 
 
 # meiva:note
 # POST /api/agents/{id}/compact → the queued `compact_request` inbound id.
 def compact(agent_id: int) -> int:
     response = _run(Request("POST", f"/api/agents/{agent_id}/compact", body={}), _ctx(None))
-    return _transport.json_object(response)["inbound_id"]
+    return _InboundIdAnswer.model_validate(_transport.json_object(response)).inbound_id
 
 
 def resurrect(agent_id: int, *, prompt: str, resurrected_by: str | None = None) -> str:
@@ -378,7 +411,7 @@ def resurrect(agent_id: int, *, prompt: str, resurrected_by: str | None = None) 
     was woken up and what to do.
     """
     plan = agent_plans.resurrect_request(agent_id, prompt, _actor_or(resurrected_by))
-    return _transport.json_object(_run(plan, _ctx(None)))["status"]
+    return _StatusAnswer.model_validate(_transport.json_object(_run(plan, _ctx(None)))).status
 
 
 def register_page(

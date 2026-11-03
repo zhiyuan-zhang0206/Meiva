@@ -8,11 +8,19 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from typing import Any
+from dataclasses import dataclass
 
 from psycopg import AsyncConnection, Connection
 
 from base.agents.history.timeline_item import TimelineItem
+from base.db.rows import aquery_all, query_all
+
+
+# meiva:note
+# The `item` column of an `agent_harness_messages` row, a jsonb timeline item still to validate.
+@dataclass(frozen=True)
+class _ItemRow:
+    item: object
 
 
 def _int_from_row(row: tuple[object, ...] | None) -> int:
@@ -22,7 +30,7 @@ def _int_from_row(row: tuple[object, ...] | None) -> int:
     return int(val) if isinstance(val, (int, str)) else 0
 
 
-def get_next_harness_message_seq(conn: Connection[Any], agent_id: int) -> int:
+def get_next_harness_message_seq(conn: Connection, agent_id: int) -> int:
     with conn.cursor() as cur:
         cur.execute(
             "SELECT COALESCE(MAX(seq) + 1, 0) FROM agent_harness_messages WHERE agent_id = %s",
@@ -31,7 +39,7 @@ def get_next_harness_message_seq(conn: Connection[Any], agent_id: int) -> int:
         return _int_from_row(cur.fetchone())
 
 
-async def aget_next_harness_message_seq(conn: AsyncConnection[Any], agent_id: int) -> int:
+async def aget_next_harness_message_seq(conn: AsyncConnection, agent_id: int) -> int:
     async with conn.cursor() as cur:
         await cur.execute(
             "SELECT COALESCE(MAX(seq) + 1, 0) FROM agent_harness_messages WHERE agent_id = %s",
@@ -40,7 +48,7 @@ async def aget_next_harness_message_seq(conn: AsyncConnection[Any], agent_id: in
         return _int_from_row(await cur.fetchone())
 
 
-def load_harness_message_count(conn: Connection[Any], agent_id: int) -> int:
+def load_harness_message_count(conn: Connection, agent_id: int) -> int:
     with conn.cursor() as cur:
         cur.execute(
             "SELECT COUNT(*) FROM agent_harness_messages WHERE agent_id = %s",
@@ -49,7 +57,7 @@ def load_harness_message_count(conn: Connection[Any], agent_id: int) -> int:
         return _int_from_row(cur.fetchone())
 
 
-async def aload_harness_message_count(conn: AsyncConnection[Any], agent_id: int) -> int:
+async def aload_harness_message_count(conn: AsyncConnection, agent_id: int) -> int:
     async with conn.cursor() as cur:
         await cur.execute(
             "SELECT COUNT(*) FROM agent_harness_messages WHERE agent_id = %s",
@@ -59,7 +67,7 @@ async def aload_harness_message_count(conn: AsyncConnection[Any], agent_id: int)
 
 
 def load_harness_timeline_items(
-    conn: Connection[Any],
+    conn: Connection,
     agent_id: int,
     *,
     limit: int | None = None,
@@ -75,14 +83,12 @@ def load_harness_timeline_items(
         query += " LIMIT %s"
         params.append(limit)
 
-    with conn.cursor() as cur:
-        cur.execute(query, tuple(params))
-        rows = cur.fetchall()
-        return [TimelineItem.model_validate(row[0]) for row in rows]
+    rows = query_all(conn, _ItemRow, query, tuple(params))
+    return [TimelineItem.model_validate(row.item) for row in rows]
 
 
 async def aload_harness_timeline_items(
-    conn: AsyncConnection[Any],
+    conn: AsyncConnection,
     agent_id: int,
     *,
     limit: int | None = None,
@@ -98,14 +104,12 @@ async def aload_harness_timeline_items(
         query += " LIMIT %s"
         params.append(limit)
 
-    async with conn.cursor() as cur:
-        await cur.execute(query, tuple(params))
-        rows = await cur.fetchall()
-        return [TimelineItem.model_validate(row[0]) for row in rows]
+    rows = await aquery_all(conn, _ItemRow, query, tuple(params))
+    return [TimelineItem.model_validate(row.item) for row in rows]
 
 
 def append_harness_timeline_items(
-    conn: Connection[Any],
+    conn: Connection,
     agent_id: int,
     harness: str,
     items: Sequence[TimelineItem],
@@ -148,7 +152,7 @@ def append_harness_timeline_items(
 
 
 async def aappend_harness_timeline_items(
-    conn: AsyncConnection[Any],
+    conn: AsyncConnection,
     agent_id: int,
     harness: str,
     items: Sequence[TimelineItem],

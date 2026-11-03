@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, TypeGuard
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from base.host.boundary.json_values import is_object_dict, is_object_list
 
 # meiva:note
 # Suffix -> MIME for image uploads that can be inlined as native model content.
@@ -30,14 +31,6 @@ class TimelineUploadFile(BaseModel):
     url: str = Field(min_length=1)
 
 
-def _is_object_list(value: object) -> TypeGuard[list[Any]]:
-    return isinstance(value, list)
-
-
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
-
-
 def parse_upload_url(url: str) -> tuple[int, str] | None:
     """Split an upload url into (agent_id, name), or None if it is not the
     ``/api/agents/<int>/uploads/<name>`` shape. Does not check the file exists
@@ -59,16 +52,16 @@ def image_mime_for(name: str) -> str | None:
 
 def inbound_image_urls(agent_id: int, payload: Mapping[str, object] | None) -> list[str] | None:
     raw_blocks = payload.get("content_blocks") if payload else None
-    if not _is_object_list(raw_blocks):
+    if not is_object_list(raw_blocks):
         return None
     urls: list[str] = []
     for raw_block in raw_blocks:
-        if not _is_str_dict(raw_block):
+        if not is_object_dict(raw_block):
             continue
         if raw_block.get("type") != "image_url":
             continue
         image_url = raw_block.get("image_url")
-        if not _is_str_dict(image_url):
+        if not is_object_dict(image_url):
             continue
         url = image_url.get("url")
         if not isinstance(url, str):
@@ -110,7 +103,7 @@ def inbound_upload_files(
     agent_id: int, payload: Mapping[str, object] | None
 ) -> list[TimelineUploadFile] | None:
     raw_files = payload.get("upload_files") if payload else None
-    if not _is_object_list(raw_files):
+    if not is_object_list(raw_files):
         return None
     files = [
         parsed for raw in raw_files if (parsed := _parse_upload_file(agent_id, raw)) is not None
@@ -119,7 +112,7 @@ def inbound_upload_files(
 
 
 def kwargs_upload_files(raw: object) -> list[TimelineUploadFile] | None:
-    if not _is_object_list(raw):
+    if not is_object_list(raw):
         return None
     files: list[TimelineUploadFile] = []
     for item in raw:

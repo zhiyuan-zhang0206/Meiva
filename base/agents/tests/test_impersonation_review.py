@@ -10,6 +10,7 @@ import pytest
 from base.agents import impersonation as leases
 from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
+from base.agents.impersonation.status import LeaseRecord
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.inbox.chat_delivery import insert_chat_inbound_once
 from base.cluster.machine import MachineIdentityReader
@@ -28,7 +29,7 @@ def session(
     *,
     config_authority: ConfigAuthority,
     machine_identity: MachineIdentityReader,
-) -> dict[str, Any]:
+) -> LeaseRecord:
     local_machine = machine_identity.name()
     agent_id = create_agent(db_conn)
     owner = RuntimeIncarnation(agent_id, uuid4(), uuid4())

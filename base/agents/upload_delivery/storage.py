@@ -3,11 +3,13 @@
 import hashlib
 import os
 import re
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 
-from psycopg import Connection
+import psycopg
+from pydantic import BaseModel, TypeAdapter
 
 from base.agents.upload_delivery.models import (
     Manifest,
@@ -16,6 +18,7 @@ from base.agents.upload_delivery.models import (
     UploadQuotaExceededError,
 )
 from base.agents.upload_delivery.paths import STAGED_NAMESPACE
+from base.db.rows import query_all
 from base.host.private_storage import create_private_bytes
 from base.paths.private_dir import ensure_private_dir
 
@@ -24,10 +27,27 @@ _TEMPORARY = re.compile(r"^\..+\.[A-Za-z0-9_]{8}\.tmp$")
 _INVENTORY_DEPTH = 3
 
 
-def lock_agent(conn: Connection[Any], agent_id: int) -> None:
+def lock_agent(conn: psycopg.Connection, agent_id: int) -> None:
     # Conservatively serialize across machines; physical reservation accounting
     # still binds the actual storage directory, not the independent MEIVA_HOME.
     conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (f"upload:{agent_id}",))
+
+
+# meiva:note
+# One object of a stored manifest, as far as the reservation is concerned.
+class _StoredObject(BaseModel):
+    name: str
+    size: int
+
+
+# meiva:note
+# The two fields of a stored manifest that decide what it reserves. A protocol-2 manifest names
+# its send `directory`; a protocol-1 one has none and is named by its `batch_id`. Other fields
+# of the stored manifest are not this module's business and are ignored.
+class _StoredManifest(BaseModel):
+    directory: str | None = None
+    batch_id: str | None = None
+    objects: list[_StoredObject]
 
 
 # meiva:note
@@ -35,16 +55,19 @@ def lock_agent(conn: Connection[Any], agent_id: int) -> None:
 # read from its stored manifest without requiring it to be the current protocol: a row an
 # earlier protocol left unfinished keeps reserving what it reserved. A protocol-2 manifest
 # names `<send directory>/<file>`; a protocol-1 one `.delivered-v1/<batch>/<file>`.
-def reserved_paths(manifest: Mapping[str, Any]) -> dict[str, int]:
-    directory = manifest.get("directory")
-    prefix = (
-        str(directory) if directory is not None else f"{LEGACY_NAMESPACE}/{manifest['batch_id']}"
-    )
-    return {f"{prefix}/{item['name']}": int(item["size"]) for item in manifest["objects"]}
+def reserved_paths(manifest: object) -> dict[str, int]:
+    stored = _StoredManifest.model_validate(manifest)
+    if stored.directory is not None:
+        prefix = stored.directory
+    elif stored.batch_id is not None:
+        prefix = f"{LEGACY_NAMESPACE}/{stored.batch_id}"
+    else:
+        raise ValueError("a stored manifest names neither a directory nor a batch")
+    return {f"{prefix}/{item.name}": item.size for item in stored.objects}
 
 
 def check_quota(
-    conn: Connection[Any],
+    conn: psycopg.Connection,
     agent_id: int,
     directory: Path,
     machine: str,
@@ -65,34 +88,62 @@ def check_quota(
         raise UploadQuotaExceededError(f"upload exceeds agent {agent_id}'s native physical quota")
 
 
+# meiva:note
+# An object of a historical `agent_upload_batches` manifest (a bare list of stored objects).
+class _LegacyObject(TypedDict):
+    stored_name: str
+    size: int
+
+
+_LEGACY_OBJECTS = TypeAdapter(list[_LegacyObject])
+
+
+# meiva:note
+# A statement that selects one stored `manifest` jsonb column; the value is validated by the reader.
+@dataclass(frozen=True)
+class _ManifestRow:
+    manifest: object
+
+
+# meiva:note
+# A receiving staged file: its identity and the bytes it reserves.
+@dataclass(frozen=True)
+class _ReceivingRow:
+    file_id: str
+    size: int
+
+
 def _reservations(
-    conn: Connection[Any], agent_id: int, directory: Path, machine: str
+    conn: psycopg.Connection, agent_id: int, directory: Path, machine: str
 ) -> dict[str, int]:
     owned: dict[str, int] = {}
-    rows = conn.execute(
+    for legacy in query_all(
+        conn,
+        _ManifestRow,
         "SELECT manifest FROM agent_upload_batches WHERE agent_id=%s AND receipt IS NULL",
         (agent_id,),
-    ).fetchall()
-    for row in rows:
-        for item in row[0]:
+    ):
+        for item in _LEGACY_OBJECTS.validate_python(legacy.manifest):
             owned[item["stored_name"]] = item["size"]
     resolved = str(directory.resolve())
-    rows = conn.execute(
+    for reserving in query_all(
+        conn,
+        _ManifestRow,
         "SELECT manifest FROM upload_delivery_batches WHERE agent_id=%s AND storage_machine=%s "
         "AND storage_directory=%s AND ready_at IS NULL UNION ALL "
         "SELECT manifest FROM upload_delivery_copies WHERE agent_id=%s AND storage_machine=%s "
         "AND storage_directory=%s AND ready_at IS NULL",
         (agent_id, machine, resolved, agent_id, machine, resolved),
-    ).fetchall()
-    for row in rows:
-        owned.update(reserved_paths(row[0]))
-    rows = conn.execute(
+    ):
+        owned.update(reserved_paths(reserving.manifest))
+    for receiving in query_all(
+        conn,
+        _ReceivingRow,
         "SELECT file_id, size FROM upload_staged_files WHERE agent_id=%s AND storage_machine=%s "
         "AND storage_directory=%s AND state='receiving'",
         (agent_id, machine, resolved),
-    ).fetchall()
-    for file_id, size in rows:
-        owned[f"{STAGED_NAMESPACE}/{file_id}"] = size
+    ):
+        owned[f"{STAGED_NAMESPACE}/{receiving.file_id}"] = receiving.size
     return owned
 
 

@@ -1,13 +1,23 @@
 """Public agent-scoped session handles over the durable impersonation store."""
 
-from typing import Any
+from typing import NotRequired
+
+from psycopg.rows import dict_row
 
 from base.agents import impersonation as control
-from base.agents.impersonation.history import public_session, resolve
+from base.agents.impersonation.history import PublicSession, public_session, resolve
+from base.agents.impersonation.status import parse_lease
 from base.api_contracts.caller_identity import CallerIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
+
+
+# meiva:note
+# The new session as `public_session` shows it, plus the relay's scoped credential once when the
+# relay runs inside the controller's own session.
+class RequestedSession(PublicSession):
+    relay_token: NotRequired[str]
 
 
 def request(
@@ -19,14 +29,14 @@ def request(
     name: str,
     executor_name: str,
     provider: str,
-    process_metadata: dict[str, Any],
+    process_metadata: dict[str, object],
     ttl_seconds: int = 3600,
     reason: str = "",
     thread_id: str | None = None,
     codex_remote: str | None = None,
     batch_window_seconds: int = 0,
     local_machine: str,
-) -> dict[str, Any]:
+) -> RequestedSession:
     """Request an automatic safe-boundary takeover; return credentials once.
 
     ``batch_window_seconds`` is the relay's routine-message merge window (see
@@ -52,20 +62,18 @@ def request(
         local_machine=local_machine,
     )
     if "relay_token" in result:
-        return public_session(result) | {"relay_token": result["relay_token"]}
-    return public_session(result)
+        return RequestedSession(**public_session(result), relay_token=result["relay_token"])
+    return RequestedSession(**public_session(result))
 
 
 def list_sessions(
     db: Database, agent_id: int, *, before: int | None = None, limit: int = 100
-) -> list[dict[str, Any]]:
+) -> list[PublicSession]:
     """Page permanent history newest first; IDs are never reused.
 
     ``limit`` is one page (default 100, validated 1..1000); pass ``before``
     to read rows older than that session id.
     """
-    from psycopg.rows import dict_row
-
     if not 1 <= limit <= 1000:
         raise ValueError("limit must be from 1 through 1000")
     with db.connect() as conn, conn.cursor(row_factory=dict_row) as cur:
@@ -74,7 +82,7 @@ def list_sessions(
             "AND (%s::bigint IS NULL OR session_id<%s) ORDER BY session_id DESC LIMIT %s",
             (agent_id, before, before, limit),
         )
-        return [public_session(row) for row in cur.fetchall()]
+        return [public_session(parse_lease(row)) for row in cur.fetchall()]
 
 
 def private_id(

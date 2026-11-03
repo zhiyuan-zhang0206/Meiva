@@ -20,6 +20,7 @@ from base.api_contracts.agent_contract import (
 )
 from base.config.agent_pins import resolve_agent_config_pins
 from base.config.service_read import ConfigAuthority
+from base.host.boundary.json_values import is_object_dict
 from base.lm import factory
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
@@ -62,7 +63,7 @@ def _resolve_probed_spawn_defaults(
 # meiva:note
 # Check the model, effort and provider key a plain birth or inherited fork will run.
 def validate_spawn_model_config(
-    cur: psycopg.Cursor,
+    cur: psycopg.Cursor[tuple[object, ...]],
     config: dict[str, object] | None,
     fork_from: int | None = None,
     *,
@@ -80,7 +81,10 @@ def validate_spawn_model_config(
         row = cur.fetchone()
         if row is None:
             raise AgentNotFound(f"fork source agent {fork_from} does not exist")
-        inherited = row[0]
+        stored = row[0]
+        if stored is not None and not is_object_dict(stored):
+            raise TypeError(f"agents_meta.birth_config of agent {fork_from} is not a JSON object")
+        inherited = stored
     elif harness is not Harness.MEIVA and probed_models is not None:
         config, inherited = _resolve_probed_spawn_defaults(
             harness, config, probed_models, probed_default_model

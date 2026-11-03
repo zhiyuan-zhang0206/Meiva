@@ -1,7 +1,6 @@
 import time
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
 
 import psycopg
 import pytest
@@ -9,6 +8,7 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.agents import impersonation as leases
+from base.agents.impersonation import RequestedLease
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
@@ -42,7 +42,7 @@ def active_lease(
     age: float = 400,
     database_gate: ProcessDbGate,
     local_machine: str,
-) -> dict[str, Any]:
+) -> RequestedLease:
     lease = accept_controller(
         create_native_owner(conn, local_machine=local_machine),
         authority=config_authority,

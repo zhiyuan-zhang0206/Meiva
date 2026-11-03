@@ -5,6 +5,7 @@ import json
 import os
 import sys
 from collections.abc import Callable
+from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,8 @@ from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
 from base.telemetry import DrainStatus
+from base.telemetry.delivery.pipeline import EventPipeline
+from base.telemetry.delivery.receipts import Event
 from gateway import app as gateway_app
 from gateway.cluster import server
 from gateway.cluster.process_boot import LOADED_IMAGE
@@ -104,9 +107,29 @@ def test_gateway_handles_retain_the_same_entry_gate(
 
 # meiva:note
 # An event writer whose stop fails, as one that cannot flush its last batch would.
-class _FailsToStop:
-    def stop(self, timeout: float) -> object:
-        raise RuntimeError("writer close failed")
+def _failing_writer(_batch: list[Event]) -> None:
+    raise RuntimeError("writer close failed")
+
+
+def _pipeline_whose_writer_failed() -> EventPipeline:
+    pipeline = EventPipeline(writer=_failing_writer, batch_size=1)
+    pipeline.enqueue(
+        Event(
+            ts=datetime.now(UTC),
+            trace_id=None,
+            span_id=None,
+            agent_id=None,
+            machine="test",
+            cluster="test",
+            process="test",
+            category="telemetry",
+            event_name="sdk_call",
+            level="info",
+            source="system",
+            target_agent_id=None,
+        )
+    )
+    return pipeline
 
 
 def test_gateway_cleanup_preserves_a_startup_primary(
@@ -120,7 +143,7 @@ def test_gateway_cleanup_preserves_a_startup_primary(
         machine=machine_identity,
         host=fake_host(),
     )
-    process.clients = ClientSet(pipeline_factory=_FailsToStop)
+    process.clients = ClientSet(pipeline_factory=_pipeline_whose_writer_failed)
     process.clients.event_pipeline()
     with pytest.raises(ValueError) as caught, process.lifetime():
         raise primary

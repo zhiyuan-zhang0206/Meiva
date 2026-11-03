@@ -18,6 +18,7 @@ from agent.tests.impersonation.lease_support import (
 from agent.tests.impersonation.lease_support import cluster as cluster
 from agent.tests.impersonation.lease_support import sleeper as sleeper
 from base.agents import impersonation as leases
+from base.agents.impersonation.status import PublicLease
 from base.agents.impersonation.tests.test_host_transport import FakeAppServer
 from base.agents.impersonation.tests.test_host_transport import short_socket as short_socket
 from base.agents.observation.relay_supervision import RelayChild, RelaySupervision
@@ -29,7 +30,7 @@ DEGRADED = STALE_RELAY_REASON
 
 async def _supervise(
     cluster: Cluster,
-    session: dict[str, Any] | None,
+    session: PublicLease | None,
     owner: RuntimeIncarnation,
     relays: RelaySupervision,
     *,
@@ -181,7 +182,7 @@ async def test_a_session_relay_with_a_stale_heartbeat_keeps_authority_and_names_
     await _supervise(cluster, session, owner, RelaySupervision())
     after = cluster.get(active["id"])
     assert after["status"] == "active"
-    assert "unsupported" in after["relay_degraded_reason"]
+    assert "unsupported" in str(after["relay_degraded_reason"])
 
 
 async def test_a_fresh_heartbeat_records_no_degradation(cluster: Cluster) -> None:

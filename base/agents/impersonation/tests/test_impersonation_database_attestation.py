@@ -4,6 +4,7 @@ from uuid import uuid4
 import pytest
 
 from base.agents import impersonation as leases
+from base.agents.impersonation import RequestedLease
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import SYSTEM_TIMERS
@@ -41,7 +42,7 @@ def _active(
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     local_machine: str,
-) -> dict[str, Any]:
+) -> RequestedLease:
     lease = leases.request(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
@@ -144,7 +145,7 @@ def test_dsh_request_mints_a_session_relay_credential(
         executor_name="Test executor_name",
     )
     assert lease["relay_provider"] == "dsh"
-    assert lease["relay_token"]
+    assert lease.get("relay_token")
 
 
 def test_antigravity_request_records_host_relay_spec(

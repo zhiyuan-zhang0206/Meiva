@@ -1,7 +1,5 @@
 """Task creation effects inside a caller-owned transaction, without commit or wake."""
 
-from typing import Any
-
 import psycopg
 from psycopg import sql
 
@@ -13,7 +11,7 @@ from base.agents.tasks.rules import is_closed, open_title_holder
 from base.telemetry import Event
 
 
-def ensure_parent_exists(cur: psycopg.Cursor[Any], parent: int) -> None:
+def ensure_parent_exists(cur: psycopg.Cursor, parent: int) -> None:
     """Validate `parent` names an existing task; raise ValueError otherwise.
 
     Also rejects parent=1 on a deployment where task 1 is not the system root
@@ -42,6 +40,8 @@ def ensure_parent_exists(cur: psycopg.Cursor[Any], parent: int) -> None:
             f"task 1 is not the system root task -- the root is {what}; "
             "pass its id for a top-level task"
         )
+    if not isinstance(row[2], str):
+        raise TypeError(f"agent_tasks.status of task {parent} is not text: {row[2]!r}")
     if is_closed(row[2]):
         raise ValueError(
             f"parent task {parent} is {row[2]} — a closed task cannot be the "
@@ -51,7 +51,7 @@ def ensure_parent_exists(cur: psycopg.Cursor[Any], parent: int) -> None:
 
 
 def insert_task(
-    cur: psycopg.Cursor[Any],
+    cur: psycopg.Cursor,
     title: str,
     description: str,
     effective_parent: int | None,
@@ -126,7 +126,7 @@ def insert_task(
 
 
 def queue_creation_notifications(
-    cur: psycopg.Cursor[Any],
+    cur: psycopg.Cursor,
     task: Task,
     owner: int,
     actor: int,
@@ -147,7 +147,7 @@ def queue_creation_notifications(
 
 
 def create_task_in_transaction(
-    cur: psycopg.Cursor[Any],
+    cur: psycopg.Cursor,
     title: str,
     description: str,
     *,

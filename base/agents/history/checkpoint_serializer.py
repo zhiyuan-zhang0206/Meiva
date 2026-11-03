@@ -8,10 +8,10 @@ stock serializer would hand back the raw dict for each, silently breaking the ch
 
 from __future__ import annotations
 
-from typing import Any
-
 import ormsgpack
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+
+from base.host.boundary.untyped import object_of
 
 _PRE_SPLIT_MODULE = "agent.state"
 # msgpack fixstr header (length 11) + the module name: the prefix of a pre-split envelope tuple.
@@ -28,13 +28,15 @@ def _names_pre_split_type(blob: bytes) -> bool:
     def probe(_code: int, data: bytes) -> None:
         nonlocal found
         try:
-            payload: Any = ormsgpack.unpackb(
-                data, ext_hook=probe, option=ormsgpack.OPT_NON_STR_KEYS
+            payload = object_of(
+                ormsgpack.unpackb, data, ext_hook=probe, option=ormsgpack.OPT_NON_STR_KEYS
             )
         except ormsgpack.MsgpackDecodeError:
             return
-        if isinstance(payload, tuple | list) and payload and payload[0] == _PRE_SPLIT_MODULE:  # pyright: ignore[reportUnknownArgumentType]
-            found = True
+        if isinstance(payload, tuple | list):
+            items: list[object] = [*payload]
+            if items and items[0] == _PRE_SPLIT_MODULE:
+                found = True
         return
 
     try:
@@ -55,4 +57,4 @@ class CheckpointSerializer(JsonPlusSerializer):
                 "no longer readable; delete the checkpoint rows (checkpoints, checkpoint_blobs, "
                 "checkpoint_writes) of the thread that holds it"
             )
-        return super().loads_typed(data)
+        return object_of(super().loads_typed, data)

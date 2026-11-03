@@ -22,10 +22,14 @@ from collections.abc import Mapping
 from contextlib import ExitStack
 from threading import Lock, local
 from types import TracebackType
-from typing import Any, Protocol, Self, TypeGuard
+from typing import Protocol, Self
 
+from base.agents.context import MeivaContext
+from base.agents.context.clients import ClientSet
 from base.agents.context.external_attachment.identity import AttachmentCodec, IdentitySource
 from base.agents.context.external_attachment.state_schema import BaseAgentState
+from base.agents.impersonation.manifest import LocalCaptureGate
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.log import logger
 from base.telemetry import Event
 
@@ -48,10 +52,6 @@ class _TelemetryClients(Protocol):
 
 def _close_flush_permitted() -> bool:
     return bool(getattr(_close_flush_permission, "allowed", False))
-
-
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
 
 
 def _deliver_telemetry_before_detach(*, clients: _TelemetryClients) -> None:
@@ -87,15 +87,15 @@ class ExternalAttachment:
         self._closed = False
         self._closing = False
         self._stack = ExitStack()
-        self._event_gate: Any = None
+        self._event_gate: LocalCaptureGate | None = None
         self._call_lock = Lock()
-        self._prior_context: Any = None
+        self._prior_context: MeivaContext | None = None
         self._bound = False
-        self._own_clients: Any = None
-        self._state_cls: type[Any]
-        self._state: Any = None
+        self._own_clients: ClientSet | None = None
+        self._state_cls: type[BaseAgentState]
+        self._state: BaseAgentState | None = None
 
-    def open(self, prior_context: object) -> None:
+    def open(self, prior_context: MeivaContext | None) -> None:
         self._prior_context = prior_context
         if not _attachment_lock.acquire(blocking=False):
             raise RuntimeError("this process already has an external attachment")
@@ -115,7 +115,12 @@ class ExternalAttachment:
         self._resolve_config(overlay, birth)
         lease = self.identity.require()
         applied = self._applied_version(state, lease)
-        for encoded in lease["plugin_delta"][applied:]:
+        deltas = lease["plugin_delta"]
+        if not is_object_list(deltas):
+            raise TypeError("an external lease plugin_delta must be a list")
+        for encoded in deltas[applied:]:
+            if not is_object_dict(encoded):
+                raise TypeError("an external lease plugin delta entry must be an object")
             self._codec.apply_plugin_delta(
                 state, self._codec.decode_plugin_delta(encoded, self._state_cls)
             )
@@ -128,12 +133,15 @@ class ExternalAttachment:
         raise NotImplementedError
 
     def _resolve_config(
-        self, overlay: Mapping[str, Any] | None, birth: Mapping[str, Any] | None
+        self, overlay: Mapping[str, object] | None, birth: Mapping[str, object] | None
     ) -> None:
         raise NotImplementedError
 
-    def _applied_version(self, _state: BaseAgentState, lease: Mapping[str, Any]) -> int:
-        return int(lease["applied_version"])
+    def _applied_version(self, _state: BaseAgentState, lease: Mapping[str, object]) -> int:
+        applied = lease["applied_version"]
+        if not isinstance(applied, int):
+            raise TypeError(f"an external lease applied_version must be an int: {applied!r}")
+        return applied
 
     def _set_state(self, state: BaseAgentState) -> None:
         raise NotImplementedError
@@ -187,7 +195,7 @@ class ExternalAttachment:
             raise RuntimeError("external attachment is closing")
         self._validate()
         raw_update = self._state_update()
-        if not _is_str_dict(raw_update):
+        if not is_object_dict(raw_update):
             raise TypeError("external plugin state update must be a dict")
         if raw_update:
             encoded = self._codec.encode_plugin_delta(raw_update, self._state_cls)

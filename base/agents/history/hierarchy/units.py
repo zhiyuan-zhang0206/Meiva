@@ -42,6 +42,7 @@ from base.agents.history.timeline import TimelineItem, build_timeline_items
 from base.agents.messages.envelope import inbound_body
 from base.agents.messages.kwargs import MeivaMsgType, read_meiva_kwargs
 from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.host.boundary.json_values import is_object_dict
 
 UnitKind = Literal["work", "text", "inbound", "note"]
 
@@ -327,12 +328,7 @@ def catalog_line(unit: MessageUnit, messages: Sequence[BaseMessage]) -> str:
         return f"agent text: {_flat(msg.text, CONTENT_CHARS)}"
     parts: list[str] = []
     if isinstance(msg, AIMessage):
-        content = msg.content
-        thinking = (
-            "".join(str(b.get("thinking", "")) for b in content if isinstance(b, dict))
-            if isinstance(content, list)
-            else ""
-        )
+        thinking = _thinking(msg)
         if thinking.strip():
             parts.append(f"reasoning\u300c{_flat(thinking, PART_CHARS)}\u300d")
         if msg.tool_calls:
@@ -384,7 +380,7 @@ def _thinking(msg: AIMessage) -> str:
     content = msg.content
     if not isinstance(content, list):
         return ""
-    return "".join(str(b.get("thinking", "")) for b in content if isinstance(b, dict))
+    return "".join(str(b.get("thinking", "")) for b in content if is_object_dict(b))
 
 
 def _reasoning_ms(msg: AIMessage) -> int | None:

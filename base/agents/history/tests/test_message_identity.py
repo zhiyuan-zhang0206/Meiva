@@ -3,7 +3,7 @@ from typing import Any, cast
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
-from langgraph.checkpoint.base import CheckpointTuple, empty_checkpoint
+from langgraph.checkpoint.base import CheckpointTuple, DeltaChannelHistory, empty_checkpoint
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from langgraph.types import Overwrite
@@ -68,14 +68,14 @@ async def test_sync_async_reads_mark_plain_and_snapshot_without_store_access(
 @pytest.mark.parametrize("seed", ["plain", "snapshot", "writes", "overwrite"])
 def test_legacy_walk_seed_and_writes_never_upgrade_after_reserialization(seed: str) -> None:
     original = AIMessage(content="legacy")
-    entry: dict[str, Any] = {"writes": []}
+    entry: DeltaChannelHistory = {"writes": []}
     if seed == "plain":
         entry["seed"] = [original]
     elif seed == "snapshot":
         entry["seed"] = _DeltaSnapshot([original])
     else:
         value = Overwrite([original]) if seed == "overwrite" else [original]
-        entry["writes"] = [(0, "task", value)]
+        entry["writes"] = [("0", "task", value)]
     serde = JsonPlusSerializer()
     first = fold_history(deepcopy(entry))
     second = fold_history(deepcopy(entry))

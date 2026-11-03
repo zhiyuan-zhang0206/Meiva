@@ -10,12 +10,27 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 
-__all__ = ["object_of"]
+__all__ = ["object_mapping", "object_of", "object_sequence"]
 
 
 # meiva:note
 # `function(*args, **kwargs)` as an `object`.
 def object_of[**P](function: Callable[P, object], /, *args: P.args, **kwargs: P.kwargs) -> object:
     return function(*args, **kwargs)
+
+
+# meiva:note
+# A mapping a library types with `Any` values (`RunnableConfig["configurable"]`, a checkpoint's
+# `channel_values`), read with `object` values: the reader narrows each entry it uses instead of
+# holding an unchecked one. The parameter annotation does the work; assigning the mapping to a local
+# annotated `Mapping[str, object]` would narrow back to the declared `Any`-valued type.
+def object_mapping(mapping: Mapping[str, object], /) -> Mapping[str, object]:
+    return mapping
+
+
+# meiva:note
+# The sequence twin of `object_mapping`: a list a library types `list[Any]`, read as `Sequence[object]`.
+def object_sequence(items: Sequence[object], /) -> Sequence[object]:
+    return items

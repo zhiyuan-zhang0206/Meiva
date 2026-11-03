@@ -635,6 +635,48 @@ reportUnusedCallResult = "warning"
 # leaves TESTS_OWING_ANY, that is when reportAny is a global error.
 # BEGIN GENERATED pyright tests environments (scripts/codegen/gen_pyright_test_environments.py; edit nothing between the markers)
 [[tool.pyright.executionEnvironments]]
+root = "base/agents/context/gateway_client/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/agents/context/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/agents/history/hierarchy/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/agents/history/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/agents/impersonation/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/agents/inbox/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/agents/incarnation/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/agents/messages/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/agents/model/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/agents/observation/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/agents/sdk/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/agents/tasks/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/agents/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/agents/upload_delivery/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "cli/commands/agents/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -767,6 +809,11 @@ root = "services/entrypoints/im_bridge/tests"
 
 # Directory entries that raise reportAny / reportExplicitAny to "error" once a directory's count is
 # 0. Their tests directories follow them unless their path is under a prefix listed in TESTS_OWING_ANY.
+[[tool.pyright.executionEnvironments]]
+root = "base/agents"
+reportAny = "error"
+reportExplicitAny = "error"
+
 [[tool.pyright.executionEnvironments]]
 root = "cli"
 reportAny = "error"

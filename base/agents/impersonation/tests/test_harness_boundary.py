@@ -1,4 +1,3 @@
-from typing import Any
 from uuid import uuid4
 
 import psycopg
@@ -6,6 +5,7 @@ import pytest
 
 from base.agents import impersonation as leases
 from base.agents.impersonation import sessions
+from base.agents.impersonation.sessions import RequestedSession
 from base.api_contracts.agent_contract import Harness
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
@@ -27,7 +27,7 @@ def request_takeover(
     event_bus: EventBus,
     config_authority: ConfigAuthority,
     agent_id: int,
-) -> dict[str, Any]:
+) -> RequestedSession:
     return sessions.request(
         database,
         event_bus,

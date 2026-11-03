@@ -38,7 +38,7 @@ from base.lm.catalog import ModelCatalog
 from base.log import logger
 
 
-def latest_checkpoint_id(cur: psycopg.Cursor, agent_id: int) -> str | None:
+def latest_checkpoint_id(cur: psycopg.Cursor[tuple[object, ...]], agent_id: int) -> str | None:
     """Latest checkpoint_id for the source agent; None if empty.
 
     LangGraph's checkpoint_id is UUIDv7 / ULID-style (time-prefix); lex order
@@ -67,8 +67,8 @@ def latest_checkpoint_id(cur: psycopg.Cursor, agent_id: int) -> str | None:
         (agent_id,),
     )
     skip_count = 0
-    for (kind,) in cur:
-        if kind == "heartbeat":
+    for inbound in cur:
+        if inbound[0] == "heartbeat":
             skip_count += 1
         else:
             break
@@ -79,7 +79,12 @@ def latest_checkpoint_id(cur: psycopg.Cursor, agent_id: int) -> str | None:
         (str(agent_id), skip_count),
     )
     row = cur.fetchone()
-    return row[0] if row else None
+    if row is None:
+        return None
+    checkpoint_id = row[0]
+    if not isinstance(checkpoint_id, str):
+        raise TypeError(f"checkpoint_id of agent {agent_id} is not text: {checkpoint_id!r}")
+    return checkpoint_id
 
 
 def _announce_created_agent(

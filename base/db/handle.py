@@ -14,8 +14,10 @@ from __future__ import annotations
 
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
+from typing import overload
 
 import psycopg
+from psycopg.rows import RowFactory
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
 
 from base.db import connections
@@ -67,6 +69,35 @@ class Database:
             dial=self._dial,
         )
 
+    # meiva:note
+    # The overloads state what the pool lends: tuple rows, or the rows its `row_factory` builds
+    # (`dict_row` lends `Connection[DictRow]`, which is what the checkpoint savers are typed for).
+    # The implementation returns the pool `connections.pool_with_config` built on this handle's
+    # config, unchanged.
+    @overload
+    def pool(
+        self,
+        *,
+        min_size: int | None = None,
+        max_size: int | None = None,
+        direct: bool = False,
+        timeout: float = connections.DEFAULT_POOL_TIMEOUT_S,
+        check_connections: bool = False,
+        autocommit: bool = False,
+        row_factory: None = None,
+    ) -> ConnectionPool: ...
+    @overload
+    def pool[RowT](
+        self,
+        *,
+        min_size: int | None = None,
+        max_size: int | None = None,
+        direct: bool = False,
+        timeout: float = connections.DEFAULT_POOL_TIMEOUT_S,
+        check_connections: bool = False,
+        autocommit: bool = False,
+        row_factory: RowFactory[RowT],
+    ) -> ConnectionPool[psycopg.Connection[RowT]]: ...
     def pool(
         self,
         *,
@@ -77,8 +108,7 @@ class Database:
         check_connections: bool = False,
         autocommit: bool = False,
         row_factory: object = None,
-    ) -> ConnectionPool:
-        """`base.db.pool()` on this handle's config."""
+    ) -> object:
         return connections.pool_with_config(
             self._config,
             min_size=min_size,

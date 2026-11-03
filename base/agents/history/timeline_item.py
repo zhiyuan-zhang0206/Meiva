@@ -8,9 +8,10 @@ importers keep working.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from datetime import datetime
+from typing import Literal, NamedTuple
 
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
 from base.agents.impersonation.status import ImpersonationMetadata
 from base.agents.messages.inbound_images import (
@@ -126,6 +127,30 @@ class TimelineItem(BaseModel):
 # ── impersonation expansion: a checkpoint session marker becomes its permanent messages ──
 
 
+# meiva:note
+# One selected `agent_impersonation_entries` row; `payload` is the jsonb message entry that
+# `_MessageEntry` validates.
+class _EntryRow(NamedTuple):
+    session_id: int
+    seq: int
+    created_at: datetime
+    payload: object
+
+
+_ENTRY_ROWS = TypeAdapter(list[_EntryRow])
+
+
+# meiva:note
+# The message entry `impersonation.history` writes: an inbound copy carries the queue row's
+# `inbound_id` and `payload`, a reply carries neither.
+class _MessageEntry(BaseModel):
+    direction: Literal["in", "out"]
+    source: str | None
+    content: str
+    payload: dict[str, object] | None = None
+    inbound_id: int | None = None
+
+
 def hydrate(
     db: DatabaseLike,
     items: list[TimelineItem],
@@ -159,17 +184,17 @@ def hydrate(
             upper_session, upper_seq = info.session_id, cursor_position[1] - 1
     if not anchors:
         return items
-    with db.connect() as conn, conn.cursor() as cur:
-        cur.execute(
+    with db.connect() as conn:
+        selected = conn.execute(
             "SELECT p.session_id,e.seq,e.created_at,e.payload FROM agent_impersonations p "
             "JOIN agent_impersonation_entries e ON e.lease_id=p.id "
             "WHERE p.agent_id=%s AND p.session_id=ANY(%s) AND e.kind='message' "
             "AND (%s::bigint IS NULL OR p.session_id<>%s OR e.seq<=%s) "
             "ORDER BY p.session_id DESC,e.seq DESC LIMIT %s",
             (agent_id, list(anchors), upper_session, upper_session, upper_seq, limit + 1),
-        )
-        rows = cur.fetchall()
-    rendered = [_message(anchors[row[0]], row) for row in reversed(rows)]
+        ).fetchall()
+    rows = _ENTRY_ROWS.validate_python(selected)
+    rendered = [_message(anchors[row.session_id], row) for row in reversed(rows)]
     return sorted([*items, *rendered], key=lambda item: _position(item.item_id))
 
 
@@ -178,26 +203,26 @@ def _position(item_id: str) -> tuple[int, int]:
     return int(message), int(block)
 
 
-def _message(anchor: TimelineItem, row: tuple[Any, ...]) -> TimelineItem:
-    _, seq, created_at, payload = row
+def _message(anchor: TimelineItem, row: _EntryRow) -> TimelineItem:
+    entry = _MessageEntry.model_validate(row.payload)
     info = anchor.impersonation
     assert info is not None  # noqa: S101 — selected marker
-    outgoing = payload["direction"] == "out"
+    outgoing = entry.direction == "out"
     prefix = anchor.item_id.rsplit(".", 1)[0]
     return TimelineItem(
-        item_id=f"{prefix}.{seq + 1}",
+        item_id=f"{prefix}.{row.seq + 1}",
         kind="agent_chat" if outgoing else "inbound_chat",
-        source=payload["source"],
-        payload=payload["content"],
-        images=None if outgoing else inbound_image_urls(info.agent_id, payload["payload"]),
-        files=None if outgoing else inbound_upload_files(info.agent_id, payload["payload"]),
-        created_at=created_at.isoformat(),
-        inbound_id=None if outgoing else payload["inbound_id"],
+        source=entry.source,
+        payload=entry.content,
+        images=None if outgoing else inbound_image_urls(info.agent_id, entry.payload),
+        files=None if outgoing else inbound_upload_files(info.agent_id, entry.payload),
+        created_at=row.created_at.isoformat(),
+        inbound_id=None if outgoing else entry.inbound_id,
         impersonation=ImpersonationMetadata.model_validate(
             {
                 **info.model_dump(),
                 "anchor_item_id": anchor.item_id,
-                "seq": seq,
+                "seq": row.seq,
             }
         ),
     )

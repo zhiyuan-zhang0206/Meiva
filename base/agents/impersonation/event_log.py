@@ -13,17 +13,17 @@ audit event, still holds the body itself.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 import psycopg
 from psycopg.types.json import Jsonb
 
-from base.agents.impersonation._store import lock_lease
+from base.agents.impersonation._store import LeaseIdRow, lock_lease
 from base.agents.impersonation.history import append, export_handoff
-from base.agents.impersonation.status import LOG_PROTOCOL_VERSION
+from base.agents.impersonation.status import LOG_PROTOCOL_VERSION, LeaseRecord
+from base.db.rows import query_all, query_one
 from base.telemetry import Event, event_id, event_line, event_line_digest
 from base.telemetry.audit_events import audit_event_uid, record_audit
 from base.telemetry.delivery.serialization import event_payload
@@ -44,21 +44,31 @@ def event_item(event: Event) -> tuple[str, str, str, datetime]:
     return key, event_line_digest(event), kind, event.ts
 
 
+# meiva:note
+# The answer of the receipt lock function: the receipt's state, or NULL when it does not exist.
+@dataclass(frozen=True)
+class _ReceiptRow:
+    state: object
+
+
 def locked_receipt_state(conn: psycopg.Connection, lease_id: str, source_key: str) -> str | None:
     """Lock one controller receipt and return its state (None when it does not exist)."""
-    row = conn.execute(
-        "SELECT lock_impersonation_event_participant(%s,%s)", (lease_id, source_key)
-    ).fetchone()
+    row = query_one(
+        conn,
+        _ReceiptRow,
+        "SELECT lock_impersonation_event_participant(%s,%s) AS state",
+        (lease_id, source_key),
+    )
     if row is None:
         raise RuntimeError("Receipt lock function returned no row")
-    state = row[0]
+    state = row.state
     if state is not None and not isinstance(state, str):
         raise TypeError("Receipt lock state must be a string or None")
     return state
 
 
 def append_source_event(
-    conn: psycopg.Connection, lease: Mapping[str, Any], event: Event, *, source_key: str
+    conn: psycopg.Connection, lease: LeaseRecord, event: Event, *, source_key: str
 ) -> None:
     """Record one event in the lease's own log, in the caller's transaction.
 
@@ -74,7 +84,7 @@ def append_source_event(
     surrogate = event_id(line, timestamp_ns)
     if source_key == CENTRAL_SOURCE:
         record_audit(conn, event)
-        payload: dict[str, Any] = {
+        payload: dict[str, object] = {
             "event_uid": audit_event_uid(event),
             "id": surrogate,
             "line_sha256": digest,
@@ -105,6 +115,15 @@ def refresh_completed_export(conn: psycopg.Connection, lease_id: str) -> None:
 
 
 # meiva:note
+# One open source receipt of a lease and the rows it holds.
+@dataclass(frozen=True)
+class _OpenSourceRow:
+    source_key: str
+    opened_at: datetime
+    item_count: int
+
+
+# meiva:note
 # Seal the source receipts of ended leases whose controller never sealed them, and return how many
 # receipts that sealed. A receipt is sealed by the controller process that opened it, on detach
 # (`seal_local_participant`); a controller killed before its detach, or one whose seal was lost to
@@ -117,7 +136,9 @@ def refresh_completed_export(conn: psycopg.Connection, lease_id: str) -> None:
 def seal_abandoned_event_sources(
     conn: psycopg.Connection, *, grace_seconds: int, limit: int
 ) -> int:
-    candidates = conn.execute(
+    candidates = query_all(
+        conn,
+        LeaseIdRow,
         "SELECT id FROM agent_impersonations WHERE event_delivery_protocol_version=%s "
         "AND ended_at IS NOT NULL "
         "AND ended_at <= clock_timestamp() - %s * interval '1 second' "
@@ -126,24 +147,28 @@ def seal_abandoned_event_sources(
         "WHERE p.lease_id=agent_impersonations.id AND p.state='open') "
         "ORDER BY ended_at LIMIT %s",
         (LOG_PROTOCOL_VERSION, grace_seconds, limit),
-    ).fetchall()
+    )
     sealed = 0
-    for (lease_id,) in candidates:
+    for candidate in candidates:
+        lease_id = candidate.id
         # meiva:note
         # The lease row lock is the serialization point every receipt writer takes before
         # touching a participant, so the states read below cannot change under this pass.
         lease = lock_lease(conn, str(lease_id))
         if lease["events_completed_at"] is not None:
             continue
-        open_sources = conn.execute(
+        open_sources = query_all(
+            conn,
+            _OpenSourceRow,
             "SELECT p.source_key, p.opened_at, "
             "(SELECT count(*) FROM agent_impersonation_entries e "
             "WHERE e.lease_id=p.lease_id AND e.source_key=p.source_key) AS item_count "
             "FROM agent_impersonation_event_participants p "
             "WHERE p.lease_id=%s AND p.state='open' ORDER BY p.opened_at",
             (lease_id,),
-        ).fetchall()
-        for source_key, opened_at, item_count in open_sources:
+        )
+        for source in open_sources:
+            source_key = source.source_key
             append(
                 conn,
                 str(lease_id),
@@ -151,8 +176,8 @@ def seal_abandoned_event_sources(
                 {
                     "event": "event_source_abandoned",
                     "source_key": source_key,
-                    "source_opened_at": opened_at.isoformat(),
-                    "item_count": item_count,
+                    "source_opened_at": source.opened_at.isoformat(),
+                    "item_count": source.item_count,
                     "grace_seconds": grace_seconds,
                     "reason": "the controller process never sealed this source receipt",
                 },

@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 from collections.abc import Collection
-from typing import Any
 
 import psycopg
 from psycopg.types.json import Jsonb
@@ -25,7 +24,7 @@ __all__ = ["insert_passive_host_lifecycle_notes"]
 
 
 def insert_passive_host_lifecycle_notes(
-    conn: psycopg.Connection[Any],
+    conn: psycopg.Connection,
     *,
     machine: str,
     source: str,

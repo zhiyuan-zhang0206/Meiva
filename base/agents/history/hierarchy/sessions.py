@@ -26,8 +26,10 @@ from psycopg_pool import ConnectionPool
 from base.agents.history.checkpoint import FullHistory
 from base.agents.history.hierarchy.chunk_plan import segment_requests
 from base.agents.history.hierarchy.chunks import segment_head_len, sendable_len, uncovered
+from base.agents.history.hierarchy.store import SpanRow
 from base.agents.history.hierarchy.units import divide_units
 from base.agents.messages.timestamp_policy import TimestampPolicy
+from base.db.rows import query_all
 
 CoverageStatus = Literal["none", "partial", "full"]
 
@@ -178,10 +180,12 @@ def _touches(material: tuple[int, int], covered: Sequence[tuple[int, int]]) -> b
 def load_covered_spans(pool: ConnectionPool, agent_id: int) -> list[tuple[int, int]]:
     """The inclusive message spans of the agent's level-1 nodes of the chunk pipeline, in order."""
     with pool.connection() as conn:
-        rows = conn.execute(
+        rows = query_all(
+            conn,
+            SpanRow,
             "SELECT span_start, span_end FROM understanding_nodes"
             " WHERE agent_id = %s AND depth = 1"
             " ORDER BY span_start",
             (agent_id,),
-        ).fetchall()
-    return [(int(a), int(b)) for a, b in rows]
+        )
+    return [(row.span_start, row.span_end) for row in rows]

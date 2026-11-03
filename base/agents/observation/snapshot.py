@@ -7,8 +7,9 @@ Directory cards and the live tree have their own bounded read contract in
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, TypeGuard
+from typing import TypeGuard
 from uuid import UUID
 
 import psycopg
@@ -24,6 +25,7 @@ from base.agents.tasks.priority import Priority
 from base.api_contracts.agent_contract import AgentStatus, Harness, LivenessState
 from base.api_contracts.notice_question import NoticeQuestion
 from base.db import Database
+from base.db.rows import query_one
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.log import logger
@@ -70,7 +72,7 @@ _FULL_COLS = (
     # no-interpolation preference); keep the '30' in sync with
     # base.agents.inbox.rows.NOTICE_FYI_TTL_DAYS — the C1 tests lock the coupling.
     "AND n.created_at > now() - interval '30 days') AS unread_notice_count"
-    ", a.config_overlay, mp.last_probe_at, "
+    ", a.config_overlay, mp.last_probe_at AS machine_probe_at, "
     "mp.agent_host_online, a.last_admission_at, "
     "a.last_launch_failure_reason, a.last_launch_failure_at, a.birth_config, a.last_launch_attempt_id, a.harness, "
     "a.harness_exit_code, a.harness_exit_at"
@@ -187,8 +189,19 @@ class AgentSnapshot(BaseModel):
     harness_exit_at: datetime | None = None
 
 
-def _is_config_map(value: object) -> TypeGuard[Mapping[str, Any]]:
+def _is_config_map(value: object) -> TypeGuard[Mapping[str, object]]:
     return isinstance(value, Mapping)
+
+
+# meiva:note
+# A stored configuration map (`config_overlay` / `birth_config`, jsonb): None when unset,
+# otherwise a mapping; anything else is corrupt stored configuration.
+def _config_map(value: object, name: str) -> Mapping[str, object] | None:
+    if value is None:
+        return None
+    if not _is_config_map(value):
+        raise ValueError(f"{name} must be a configuration map")
+    return value
 
 
 # meiva:link base/agents/observation/docs/observation.meiva.okf.md
@@ -202,77 +215,118 @@ def agent_supports_vision(
     from base.config.agent_pins import resolve_agent_config_pins
     from base.lm.factory import model_supports_vision
 
-    if config_overlay is not None:
-        if not _is_config_map(config_overlay):
-            raise ValueError("config_overlay must be a configuration map")
-        if "llm_model" in config_overlay and not isinstance(config_overlay["llm_model"], str):
-            raise ValueError("config_overlay.llm_model must be a model name")
-    if birth_config is not None:
-        if not _is_config_map(birth_config):
-            raise ValueError("birth_config must be a configuration map")
-        if "llm_model" in birth_config and not isinstance(birth_config["llm_model"], str):
-            raise ValueError("birth_config.llm_model must be a model name")
-    pins = resolve_agent_config_pins(config_overlay, birth_config)
+    overlay = _config_map(config_overlay, "config_overlay")
+    if overlay is not None and "llm_model" in overlay and not isinstance(overlay["llm_model"], str):
+        raise ValueError("config_overlay.llm_model must be a model name")
+    birth = _config_map(birth_config, "birth_config")
+    if birth is not None and "llm_model" in birth and not isinstance(birth["llm_model"], str):
+        raise ValueError("birth_config.llm_model must be a model name")
+    pins = resolve_agent_config_pins(overlay, birth)
     if catalog is None:
         return None
     model = _model_of_pins(pins, catalog=catalog, default_model=default_model)
     return model_supports_vision(model, catalog=catalog)
 
 
-def _model_of_pins(pins: dict[str, Any], *, catalog: ModelCatalog, default_model: str) -> str:
+def _model_of_pins(pins: Mapping[str, object], *, catalog: ModelCatalog, default_model: str) -> str:
     from base.lm.registry import resolve_available_model
 
-    return resolve_available_model(pins.get("llm_model") or default_model, models=catalog.models)
+    pinned = pins.get("llm_model")
+    if not pinned:
+        return resolve_available_model(default_model, models=catalog.models)
+    if not isinstance(pinned, str):
+        raise TypeError("the llm_model pin must be a model name")
+    return resolve_available_model(pinned, models=catalog.models)
+
+
+# meiva:note
+# The database session's clock (`SELECT clock_timestamp() AS now`).
+@dataclass(frozen=True)
+class _ClockRow:
+    now: datetime
 
 
 # meiva:note
 # Read the current UTC timestamp from the database session.
-def _db_now(cur: psycopg.Cursor[Any]) -> datetime:
-    cur.execute("SELECT clock_timestamp()")
-    row = cur.fetchone()
-    if row is None or not isinstance(row[0], datetime):
+def db_now(conn: psycopg.Connection) -> datetime:
+    row = query_one(conn, _ClockRow, "SELECT clock_timestamp() AS now")
+    if row is None:
         raise RuntimeError("clock_timestamp() did not return a timestamp")
-    return row[0]
+    return row.now
+
+
+# meiva:note
+# One `_FULL_COLS` row, a field per selected column. `notices_awaiting_response` is a json
+# array and the two configuration maps are jsonb; the reader validates all three. The harness
+# exit columns are selected but this snapshot does not report them.
+@dataclass(frozen=True)
+class _SnapshotRow:
+    id: int
+    spawner: str
+    fork_source_agent_id: int | None
+    fork_source_checkpoint_id: str | None
+    status: str
+    spawned_at: datetime
+    last_active_at: datetime
+    last_inbound_at: datetime
+    label: str | None
+    machine: str
+    heartbeat_paused_until: datetime | None
+    liveness_state: str
+    last_probe_at: datetime | None
+    notices_awaiting_response: object
+    unread_notice_count: int
+    config_overlay: object
+    machine_probe_at: datetime | None
+    agent_host_online: bool | None
+    last_admission_at: datetime | None
+    last_launch_failure_reason: str | None
+    last_launch_failure_at: datetime | None
+    birth_config: object
+    last_launch_attempt_id: UUID | None
+    harness: str
+    harness_exit_code: int | None
+    harness_exit_at: datetime | None
 
 
 def _row_to_snapshot(
-    row: tuple[Any, ...],
+    row: _SnapshotRow,
     *,
     catalog: ModelCatalog | None,
     default_model: str,
     now: datetime,
 ) -> AgentSnapshot:
     supports_vision = agent_supports_vision(
-        row[15], row[21], catalog=catalog, default_model=default_model
+        row.config_overlay, row.birth_config, catalog=catalog, default_model=default_model
     )
     return AgentSnapshot.model_validate(
         {
-            "agent_id": row[0],
-            "last_launch_attempt_id": row[22],
-            "spawner": row[1],
-            "fork_source_agent_id": row[2],
-            "fork_source_checkpoint_id": row[3],
-            "status": AgentStatus(row[4]),
-            "harness": row[23],
-            "spawned_at": row[5],
-            "last_active_at": row[6],
-            "last_inbound_at": row[7],
-            "label": row[8],
-            "machine": row[9],
-            "heartbeat_paused_until": row[10],
-            "liveness_state": row[11],
-            "last_probe_at": row[12],
-            "notices_awaiting_response": row[13],
-            "unread_notice_count": row[14],
+            "agent_id": row.id,
+            "last_launch_attempt_id": row.last_launch_attempt_id,
+            "spawner": row.spawner,
+            "fork_source_agent_id": row.fork_source_agent_id,
+            "fork_source_checkpoint_id": row.fork_source_checkpoint_id,
+            "status": AgentStatus(row.status),
+            "harness": row.harness,
+            "spawned_at": row.spawned_at,
+            "last_active_at": row.last_active_at,
+            "last_inbound_at": row.last_inbound_at,
+            "label": row.label,
+            "machine": row.machine,
+            "heartbeat_paused_until": row.heartbeat_paused_until,
+            "liveness_state": row.liveness_state,
+            "last_probe_at": row.last_probe_at,
+            "notices_awaiting_response": row.notices_awaiting_response,
+            "unread_notice_count": row.unread_notice_count,
             "supports_vision": supports_vision,
-            "observation": observation(row[16]),
+            "observation": observation(row.machine_probe_at),
             "availability": availability(
-                status=row[4],
-                host_online=row[17],
-                probe_at=row[16],
-                admission_at=row[18],
+                status=row.status,
+                host_online=row.agent_host_online,
+                probe_at=row.machine_probe_at,
+                admission_at=row.last_admission_at,
                 now=now,
-                launch_failure=(row[19], row[20]),
+                launch_failure=(row.last_launch_failure_reason, row.last_launch_failure_at),
             ),
         }
     )
@@ -286,18 +340,26 @@ def select_one(
     default_model: str,
 ) -> AgentSnapshot | None:
     """Look up a single agent's snapshot; returns None when the row does not exist."""
-    with conn.cursor() as cur:
-        now = _db_now(cur)
-        cur.execute(
-            f"SELECT {_FULL_COLS} {_FROM} WHERE a.id = %s {_GROUP}",
-            (agent_id,),
-        )
-        row = cur.fetchone()
+    now = db_now(conn)
+    row = query_one(
+        conn,
+        _SnapshotRow,
+        f"SELECT {_FULL_COLS} {_FROM} WHERE a.id = %s {_GROUP}",
+        (agent_id,),
+    )
     return (
         _row_to_snapshot(row, catalog=catalog, default_model=default_model, now=now)
-        if row
+        if row is not None
         else None
     )
+
+
+# meiva:note
+# An agent's two stored configuration maps (jsonb), validated by `_config_map`.
+@dataclass(frozen=True)
+class _PinsRow:
+    config_overlay: object
+    birth_config: object
 
 
 def agent_model_target(
@@ -325,15 +387,17 @@ def agent_model_target(
     from base.config.agent_pins import resolve_agent_config_pins
     from base.db.pooled_session import retryable_connection_error
 
-    row: tuple[Any, ...] | None = None
+    row: _PinsRow | None = None
     try:
         for attempt in range(1, 4):
             try:
                 with db.connect(autocommit=True) as conn:
-                    row = conn.execute(
+                    row = query_one(
+                        conn,
+                        _PinsRow,
                         "SELECT config_overlay, birth_config FROM agents_meta WHERE id = %s",
                         (agent_id,),
-                    ).fetchone()
+                    )
                 break
             except Exception as exc:
                 if attempt >= 3 or not retryable_connection_error(exc):
@@ -346,7 +410,10 @@ def agent_model_target(
             model=fallback,
         )
         return fallback, ModelOverrides.from_pins(None)
-    pins = resolve_agent_config_pins(row[0] if row else None, row[1] if row else None)
+    pins = resolve_agent_config_pins(
+        _config_map(row.config_overlay if row else None, "config_overlay"),
+        _config_map(row.birth_config if row else None, "birth_config"),
+    )
     return _model_of_pins(
         pins, catalog=catalog, default_model=default_model
     ), ModelOverrides.from_pins(pins)

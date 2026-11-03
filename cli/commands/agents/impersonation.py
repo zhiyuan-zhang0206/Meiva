@@ -23,6 +23,7 @@ from typing import Literal, TextIO, assert_never
 from uuid import UUID
 
 from base.agents.context.clients import DatabaseFactory
+from base.agents.impersonation import InboxMessage
 from base.agents.impersonation.host_transport import (
     AntigravityServer,
     antigravity_server_from_environment,
@@ -141,7 +142,7 @@ async def _wait_inbox(
     redis_url: str,
     events_channel: str,
     timers: Timers,
-) -> list[dict[str, object]]:
+) -> list[InboxMessage]:
     from base.agents import impersonation as control
 
     if not math.isfinite(wait) or wait < 0:
@@ -154,7 +155,7 @@ async def _wait_inbox(
         redis_url, agent_id, events_channel=events_channel, timers=timers
     )
 
-    async def read_until_a_message_or_the_deadline() -> list[dict[str, object]]:
+    async def read_until_a_message_or_the_deadline() -> list[InboxMessage]:
         if wait:
             await listener.ensure_listening()
         deadline = timers.monotonic() + wait

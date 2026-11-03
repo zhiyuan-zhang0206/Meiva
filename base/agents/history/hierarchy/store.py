@@ -1,11 +1,13 @@
 # meiva:link base/agents/history/docs/range-read-contracts.meiva.okf.md
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from decimal import Decimal
+
+from pydantic import TypeAdapter
 
 from base.agents.history.hierarchy.usage import GenerationUsage
 from base.db.protocols import DatabaseLike, SyncConnection
@@ -29,6 +31,14 @@ class StoredNode:
     check_key: str | None = None
 
 
+# meiva:note
+# The inclusive message span of one stored node (`SELECT span_start, span_end ...`).
+@dataclass(frozen=True)
+class SpanRow:
+    span_start: int
+    span_end: int
+
+
 @contextmanager
 def _read_connection(db: DatabaseLike) -> Generator[SyncConnection]:
     db_pool = db.pool(autocommit=True)
@@ -39,9 +49,32 @@ def _read_connection(db: DatabaseLike) -> Generator[SyncConnection]:
         db_pool.close()
 
 
+# meiva:note
+# The columns `load_nodes` selects, in the order of `StoredNode`'s fields, validated from the
+# selected tuples.
+_NODE_ROWS = TypeAdapter(
+    list[
+        tuple[
+            int,
+            int,
+            int,
+            int,
+            datetime | None,
+            datetime | None,
+            str,
+            int | None,
+            str,
+            str,
+            int | None,
+            str | None,
+        ]
+    ]
+)
+
+
 def load_nodes(db: DatabaseLike, agent_id: int) -> list[StoredNode]:
     with _read_connection(db) as conn:
-        rows = conn.execute(
+        selected = conn.execute(
             """
             SELECT id, depth, span_start, span_end, start_ts, end_ts, text, parent_id,
                    engine_version, prompt_version, job_id, check_key
@@ -51,12 +84,22 @@ def load_nodes(db: DatabaseLike, agent_id: int) -> list[StoredNode]:
             """,
             (agent_id,),
         ).fetchall()
-    return [StoredNode(*row) for row in rows]
+    return [StoredNode(*row) for row in _NODE_ROWS.validate_python(selected)]
 
 
-def _costs(rows: list[Any]) -> dict[Any, GenerationUsage]:
+# meiva:note
+# One grouped row of `understanding_chunk_calls` / `understanding_group_calls`: the grouping key,
+# the call count and the summed token and latency columns (`numeric` sums arrive as `Decimal`, the
+# latency sum as `float`), validated from the selected tuples.
+_JOB_COST_ROWS = TypeAdapter(list[tuple[int, int, Decimal, Decimal, Decimal, float]])
+_CHECK_COST_ROWS = TypeAdapter(list[tuple[str, int, Decimal, Decimal, Decimal, float]])
+
+
+def _costs[KeyT](
+    rows: Sequence[tuple[KeyT, int, Decimal, Decimal, Decimal, float]],
+) -> dict[KeyT, GenerationUsage]:
     return {
-        key: GenerationUsage(int(calls), int(inp), int(cache), int(out), float(ms) / 1000)
+        key: GenerationUsage(calls, int(inp), int(cache), int(out), ms / 1000)
         for key, calls, inp, cache, out, ms in rows
     }
 
@@ -71,34 +114,45 @@ def load_generation_costs(
     with _read_connection(db) as conn:
         jobs = conn.execute(
             """
-            SELECT job_id, count(*), coalesce(sum((usage_metadata->>'input_tokens')::bigint), 0),
-                   coalesce(sum((usage_metadata->'input_token_details'->>'cache_read')::bigint), 0),
-                   coalesce(sum((usage_metadata->>'output_tokens')::bigint), 0), sum(duration_ms)
+            SELECT job_id AS key, count(*) AS calls,
+                   coalesce(sum((usage_metadata->>'input_tokens')::bigint), 0) AS inp,
+                   coalesce(sum((usage_metadata->'input_token_details'->>'cache_read')::bigint), 0) AS cache,
+                   coalesce(sum((usage_metadata->>'output_tokens')::bigint), 0) AS out,
+                   sum(duration_ms) AS ms
             FROM understanding_chunk_calls WHERE agent_id = %s AND job_id = ANY(%s) GROUP BY job_id
             """
             if job_ids is not None
             else """
-            SELECT job_id, count(*), coalesce(sum((usage_metadata->>'input_tokens')::bigint), 0),
-                   coalesce(sum((usage_metadata->'input_token_details'->>'cache_read')::bigint), 0),
-                   coalesce(sum((usage_metadata->>'output_tokens')::bigint), 0), sum(duration_ms)
+            SELECT job_id AS key, count(*) AS calls,
+                   coalesce(sum((usage_metadata->>'input_tokens')::bigint), 0) AS inp,
+                   coalesce(sum((usage_metadata->'input_token_details'->>'cache_read')::bigint), 0) AS cache,
+                   coalesce(sum((usage_metadata->>'output_tokens')::bigint), 0) AS out,
+                   sum(duration_ms) AS ms
             FROM understanding_chunk_calls WHERE agent_id = %s GROUP BY job_id
             """,
             (agent_id, job_ids) if job_ids is not None else (agent_id,),
         ).fetchall()
         checks = conn.execute(
             """
-            SELECT check_key, count(*), coalesce(sum((usage_metadata->>'input_tokens')::bigint), 0),
-                   coalesce(sum((usage_metadata->'input_token_details'->>'cache_read')::bigint), 0),
-                   coalesce(sum((usage_metadata->>'output_tokens')::bigint), 0), sum(duration_ms)
+            SELECT check_key AS key, count(*) AS calls,
+                   coalesce(sum((usage_metadata->>'input_tokens')::bigint), 0) AS inp,
+                   coalesce(sum((usage_metadata->'input_token_details'->>'cache_read')::bigint), 0) AS cache,
+                   coalesce(sum((usage_metadata->>'output_tokens')::bigint), 0) AS out,
+                   sum(duration_ms) AS ms
             FROM understanding_group_calls WHERE agent_id = %s AND check_key = ANY(%s) GROUP BY check_key
             """
             if check_keys is not None
             else """
-            SELECT check_key, count(*), coalesce(sum((usage_metadata->>'input_tokens')::bigint), 0),
-                   coalesce(sum((usage_metadata->'input_token_details'->>'cache_read')::bigint), 0),
-                   coalesce(sum((usage_metadata->>'output_tokens')::bigint), 0), sum(duration_ms)
+            SELECT check_key AS key, count(*) AS calls,
+                   coalesce(sum((usage_metadata->>'input_tokens')::bigint), 0) AS inp,
+                   coalesce(sum((usage_metadata->'input_token_details'->>'cache_read')::bigint), 0) AS cache,
+                   coalesce(sum((usage_metadata->>'output_tokens')::bigint), 0) AS out,
+                   sum(duration_ms) AS ms
             FROM understanding_group_calls WHERE agent_id = %s GROUP BY check_key
             """,
             (agent_id, check_keys) if check_keys is not None else (agent_id,),
         ).fetchall()
-    return _costs(jobs), _costs(checks)
+    return (
+        _costs(_JOB_COST_ROWS.validate_python(jobs)),
+        _costs(_CHECK_COST_ROWS.validate_python(checks)),
+    )

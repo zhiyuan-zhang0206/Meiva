@@ -12,6 +12,7 @@ import pytest
 
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
+from base.telemetry.delivery.pipeline import EventPipeline
 
 
 class _Closable:
@@ -182,7 +183,7 @@ def test_a_client_that_cannot_be_built_raises_at_the_call() -> None:
 
 
 def test_cold_export_observation_and_finalization_build_nothing() -> None:
-    def forbidden() -> object:
+    def forbidden() -> EventPipeline:
         pytest.fail("a cold ClientSet must not construct an exporter for cleanup or diagnostics")
 
     clients = ClientSet(pipeline_factory=forbidden)
@@ -205,9 +206,11 @@ def test_description_carries_the_gateway_endpoint_and_no_secret() -> None:
     from base.cluster.machine import MachineFacts
 
     machine = MachineFacts.of(name="child", role="agent-runner")
+    gateway_url = description["gateway_url"]
+    assert isinstance(gateway_url, str)
     child = MeivaContext.from_description(
         description,
-        clients=ClientSet(gateway_url=description["gateway_url"]),
+        clients=ClientSet(gateway_url=gateway_url),
         machine=machine,
         environ={"MEIVA_TEST": "1"},
     )
@@ -240,7 +243,7 @@ def test_a_built_event_pipeline_is_returned_while_another_thread_builds_a_client
     """
     build_started = threading.Event()
     release_build = threading.Event()
-    pipeline = object()
+    pipeline = EventPipeline(writer=lambda _batch: None)
 
     def slow_gateway(url: str) -> httpx.Client:
         build_started.set()
@@ -263,15 +266,17 @@ def test_a_built_event_pipeline_is_returned_while_another_thread_builds_a_client
     builder.join(timeout=10)
     reader.join(timeout=10)
 
+    pipeline.stop(timeout=2)
+
     assert not blocked, "event_pipeline() waited for an unrelated client build"
     assert returned == [pipeline]
 
 
 def test_a_derived_set_keeps_the_event_pipeline_factory_of_its_parent() -> None:
-    built: list[object] = []
+    built: list[EventPipeline] = []
 
-    def pipeline() -> object:
-        built.append(object())
+    def pipeline() -> EventPipeline:
+        built.append(EventPipeline(writer=lambda _batch: None))
         return built[-1]
 
     parent = ClientSet(pipeline_factory=pipeline)
@@ -279,13 +284,14 @@ def test_a_derived_set_keeps_the_event_pipeline_factory_of_its_parent() -> None:
 
     assert derived.event_pipeline() is built[0]
     assert parent.event_pipeline() is built[1]
+    for each in built:
+        each.stop(timeout=2)
 
 
 def test_event_producer_answers_the_set_pipeline_only_when_no_process_pipeline_is_bound(
     tmp_path: Path,
 ) -> None:
     from base import telemetry
-    from base.telemetry.delivery.pipeline import EventPipeline
     from base.telemetry.delivery.state import process_state
 
     assert ClientSet().event_producer() is None

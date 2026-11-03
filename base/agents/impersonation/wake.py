@@ -4,6 +4,10 @@ It lives with the impersonation relay because every wake first runs the relay li
 impersonation publishes through it and so does the inbox.
 """
 
+from dataclasses import dataclass
+from datetime import datetime
+
+from psycopg.rows import class_row
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import ResponseError
 from redis.exceptions import TimeoutError as RedisTimeoutError
@@ -72,6 +76,16 @@ def publish_inbound_wake(db: DatabaseLike, bus: EventBus, agent_id: int, payload
         return False
 
 
+# meiva:note
+# The active lease's relay liveness as the database clock judges it.
+@dataclass(frozen=True)
+class _RelayLiveness:
+    relay_provider: str | None
+    relay_heartbeat_at: datetime | None
+    stale: bool
+    recently_stamped: bool
+
+
 def relay_liveness_alert(db: DatabaseLike, agent_id: int) -> None:
     """Loud, best-effort signal when a wake lands for an agent whose active
     lease has a stale relay heartbeat. Never raises: the wake itself must not
@@ -79,27 +93,27 @@ def relay_liveness_alert(db: DatabaseLike, agent_id: int) -> None:
     """
     try:
         # Staleness is judged by the database clock, in the same statement that reads the lease.
-        with db.connect() as conn:
-            row = conn.execute(
+        with db.connect() as conn, conn.cursor(row_factory=class_row(_RelayLiveness)) as cur:
+            row = cur.execute(
                 "SELECT relay_provider,relay_heartbeat_at,"
                 "relay_heartbeat_at IS NULL OR "
-                "relay_heartbeat_at < clock_timestamp() - make_interval(secs => %s),"
+                "relay_heartbeat_at < clock_timestamp() - make_interval(secs => %s) AS stale,"
                 "relay_last_failure_at IS NOT NULL AND "
                 "relay_last_failure_at >= clock_timestamp() - make_interval(secs => %s) "
+                "AS recently_stamped "
                 "FROM agent_impersonations WHERE agent_id=%s AND status='active' "
                 "ORDER BY created_at DESC LIMIT 1",
                 (RELAY_HEARTBEAT_STALE_SECONDS, RELAY_FAILURE_STAMP_SECONDS, agent_id),
             ).fetchone()
         if row is None:
             return
-        provider, heartbeat, stale, recently_stamped = row
-        if stale and not recently_stamped:
+        if row.stale and not row.recently_stamped:
             logger.error(
                 "inbound wake for an impersonated agent whose relay heartbeat is stale; "
                 "messages may sit unread in the inbox",
                 agent_id=agent_id,
-                relay_provider=provider,
-                relay_heartbeat_at=str(heartbeat),
+                relay_provider=row.relay_provider,
+                relay_heartbeat_at=str(row.relay_heartbeat_at),
             )
     except Exception:
         logger.exception("impersonation relay liveness check failed", agent_id=agent_id)

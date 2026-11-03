@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
+from base.host.boundary.untyped import object_of
 from base.log import logger
 
 __all__ = ["ClientSet", "DatabaseFactory", "DatabaseHandle", "LazyConnection"]
@@ -20,7 +21,7 @@ if TYPE_CHECKING:
     from base.telemetry.delivery.receipts import DrainResult
 
     class _ExecutedCursor(Protocol):
-        def fetchone(self) -> tuple[Any, ...]: ...
+        def fetchone(self) -> tuple[object, ...]: ...
 
 
 type DatabaseHandle = Database
@@ -76,11 +77,11 @@ class LazyConnection:
             conn.close()  # type: ignore[attr-defined]
 
     def __getattr__(self, attr: str) -> object:
-        return getattr(self._get(), attr)
+        return object_of(getattr, self._get(), attr)
 
     if TYPE_CHECKING:
 
-        def cursor(self, *args: object, **kwargs: object) -> psycopg.Cursor[Any]: ...
+        def cursor(self, *args: object, **kwargs: object) -> psycopg.Cursor: ...
 
         def transaction(
             self, *args: object, **kwargs: object
@@ -111,7 +112,7 @@ class ClientSet:
         redis: Callable[[], object] | None = None,
         gateway: Callable[[str], httpx.Client] | None = None,
         factories: Mapping[Callable[..., object], Callable[[], object]] | None = None,
-        pipeline_factory: Callable[[], Any] | None = None,
+        pipeline_factory: Callable[[], EventPipeline] | None = None,
     ) -> None:
         """`database` hands over the cluster database handle, which is the composition root's to
         name (the exec child's is built from its settings, the host passes the one it holds); a set
@@ -130,7 +131,7 @@ class ClientSet:
         self._factories = dict(factories) if factories is not None else {}
         self._made: dict[Callable[..., object], object] = {}
         self._pipeline_factory = pipeline_factory
-        self._event_pipeline: Any = None
+        self._event_pipeline: EventPipeline | None = None
 
     # ── the three base clients ───────────────────────────────────────────
 
@@ -310,7 +311,7 @@ class ClientSet:
 
     # ── builders ─────────────────────────────────────────────────────────
 
-    def _connect_sql(self) -> psycopg.Connection[Any]:
+    def _connect_sql(self) -> psycopg.Connection:
         return self.database().connect(autocommit=True)
 
     def _connect_redis(self) -> object:

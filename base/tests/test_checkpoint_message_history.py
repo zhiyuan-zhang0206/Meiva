@@ -193,7 +193,10 @@ def test_empty_and_no_reset_match_upstream(db_conn: psycopg.Connection) -> None:
 
 
 def test_batch_bound_keeps_one_oversized_write_intact() -> None:
-    keys = [{"size": size, "idx": i} for i, size in enumerate([100_000, 180_000, 500_000, 1])]
+    keys = [
+        history.WriteKey(depth=0, checkpoint_id="c", task_id="t", task_path="", idx=i, size=size)
+        for i, size in enumerate([100_000, 180_000, 500_000, 1])
+    ]
     batches = list(history.body_key_batches(keys))
     assert [len(batch) for batch in batches] == [1, 1, 1, 1]
     assert [item for batch in batches for item in batch] == keys

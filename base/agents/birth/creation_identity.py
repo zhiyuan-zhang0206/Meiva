@@ -10,6 +10,9 @@ from uuid import UUID
 import psycopg
 from psycopg.types.json import Jsonb
 
+from base.db.rows import query_one
+from base.host.boundary.json_values import is_object_dict
+
 
 class CreationConflictError(ValueError):
     """A creation key already identifies a different request."""
@@ -21,6 +24,19 @@ class CreationReceipt:
     machine: str
     config: dict[str, object] | None
     birth_config: dict[str, object]
+    launch_attempt_id: UUID
+    launch_pending: bool
+
+
+# meiva:note
+# The columns `find_creation` selects: the snapshot joined with whether its launch is still pending.
+@dataclass(frozen=True)
+class _SnapshotRow:
+    agent_id: int
+    request_hash: str
+    machine: str
+    config_overlay: object
+    birth_config: object
     launch_attempt_id: UUID
     launch_pending: bool
 
@@ -38,19 +54,30 @@ def lock_creation(conn: psycopg.Connection, key: str) -> None:
 
 def find_creation(conn: psycopg.Connection, key: str, request_hash: str) -> CreationReceipt | None:
     """Read a committed creation; later retries never insert another first prompt."""
-    row = conn.execute(
+    row = query_one(
+        conn,
+        _SnapshotRow,
         "SELECT s.agent_id, s.request_hash, s.machine, s.config_overlay, s.birth_config, "
         "s.launch_attempt_id, COALESCE(m.last_launch_attempt_id=s.launch_attempt_id "
         "AND m.machine=s.machine AND m.status='idling' AND m.last_admission_at IS NULL, FALSE) "
+        "AS launch_pending "
         "FROM agent_creation_snapshots s LEFT JOIN agents_meta m ON m.id=s.agent_id "
         "WHERE s.creation_key=%s",
         (key,),
-    ).fetchone()
+    )
     if row is None:
         return None
-    if row[1] != request_hash:
+    if row.request_hash != request_hash:
         raise CreationConflictError("creation key already identifies a different request")
-    return CreationReceipt(row[0], row[2], row[3], row[4], row[5], row[6])
+    config = row.config_overlay
+    if config is not None and not is_object_dict(config):
+        raise TypeError("agent_creation_snapshots.config_overlay is not a JSON object")
+    birth_config = row.birth_config
+    if not is_object_dict(birth_config):
+        raise TypeError("agent_creation_snapshots.birth_config is not a JSON object")
+    return CreationReceipt(
+        row.agent_id, row.machine, config, birth_config, row.launch_attempt_id, row.launch_pending
+    )
 
 
 def recover_birth(

@@ -51,13 +51,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 import psycopg
 
 from base.api_contracts.agent_contract import DefaultModelSource as DefaultModelSource
 from base.config import frozen_field_names
 from base.config.service_read import ConfigAuthority
+from base.host.boundary.untyped import object_mapping
 from base.lm.catalog import ModelCatalog
 from base.lm.registry import resolve_available_model
 
@@ -74,7 +75,7 @@ def resolve_default_model(
     *,
     catalog: ModelCatalog,
     authority: ConfigAuthority,
-    config_model: str | None = None,
+    config_model: object | None = None,
 ) -> DefaultModelResolution:
     """Resolve the DB choice over fresh configuration, including withdrawals."""
     stored = cluster_default_model(cur)
@@ -83,7 +84,7 @@ def resolve_default_model(
             resolve_available_model(stored, models=catalog.models), DefaultModelSource.CLUSTER
         )
     if config_model is None:
-        config_model = authority.current_field_values()["llm_model"]
+        config_model = object_mapping(authority.current_field_values())["llm_model"]
     if not isinstance(config_model, str):
         raise ValueError("default llm_model must be a string")  # noqa: TRY004
     return DefaultModelResolution(
@@ -128,7 +129,7 @@ def resolve_birth_config(
     catalog: ModelCatalog,
     authority: ConfigAuthority,
     inherited: Mapping[str, object] | None = None,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """The frozen-field map to persist on a newly born agent's row.
 
     Args:
@@ -150,14 +151,14 @@ def resolve_birth_config(
         cluster expressed no explicit opinion" sentinel, and freezing THAT is
         what keeps a later explicit cluster choice from reaching this agent.
     """
-    stamped: dict[str, Any] = dict(inherited or {})
+    stamped: dict[str, object] = dict(inherited or {})
     overlay_keys = set(overlay or {})
     pending = [n for n in frozen_field_names() if n not in overlay_keys and n not in stamped]
     if not pending:
         return stamped
     # One .env read for the whole batch (current_field_values re-reads the file
     # so an edit since this process started is reflected).
-    values = authority.current_field_values()
+    values = object_mapping(authority.current_field_values())
     default_model = (
         resolve_default_model(
             cur, config_model=values["llm_model"], catalog=catalog, authority=authority

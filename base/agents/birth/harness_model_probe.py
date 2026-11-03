@@ -13,6 +13,7 @@ from base.agents.model.harness_models import (
     parse_codex_model_list,
 )
 from base.api_contracts.agent_contract import Harness
+from base.host.boundary.untyped import object_of
 from base.lm.harness.claude import SECRET_ENV_NAMES as CLAUDE_SECRET_ENV_NAMES
 from base.lm.harness.codex.auth import build_env as build_codex_env
 
@@ -45,7 +46,7 @@ def _json_lines(stdout: str) -> list[dict[str, object]]:
         if not line or not line.startswith("{"):
             continue
         try:
-            item: object = json.loads(line)
+            item = object_of(json.loads, line)
         except json.JSONDecodeError:
             continue
         if _is_dict(item):

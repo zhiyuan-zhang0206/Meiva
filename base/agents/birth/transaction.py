@@ -6,7 +6,6 @@ import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
 from uuid import UUID
 
 import psycopg
@@ -25,6 +24,8 @@ from base.agents.model.birth_config import (
 )
 from base.config.service_read import ConfigAuthority
 from base.db import fetch_one
+from base.db.rows import IdRow, query_one
+from base.host.boundary.json_values import is_object_dict
 from base.lm.catalog import ModelCatalog
 from base.lm.registry import normalize_overlay_llm_model
 from base.log import logger
@@ -120,21 +121,31 @@ def validate_spawn_args(
         )
 
 
-def _insert_agent_identity(cur: psycopg.Cursor[Any], label: str | None) -> int:
+# meiva:note
+# The `RETURNING last_launch_attempt_id` of the agents_meta insert.
+@dataclass(frozen=True)
+class _LaunchAttemptRow:
+    last_launch_attempt_id: UUID
+
+
+def _insert_agent_identity(conn: psycopg.Connection, label: str | None) -> int:
     # label: when the spawner assigns one, store it sticky (label_user_set=TRUE)
     # so the labeler's CAS (WHERE label IS NULL AND NOT label_user_set) skips it.
     # Otherwise leave NULL — the labeler generates a short name via LLM CAS when
     # spawn carries a prompt; without prompt / on LLM failure the label stays
     # NULL and the frontend displays the fallback "#N".
     if label:
-        cur.execute(
+        row = query_one(
+            conn,
+            IdRow,
             "INSERT INTO agents (label, label_user_set) VALUES (%s, TRUE) RETURNING id",
             (label,),
         )
     else:
-        cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
-    new_id: int = fetch_one(cur, "spawn: insert agent")[0]
-    return new_id
+        row = query_one(conn, IdRow, "INSERT INTO agents DEFAULT VALUES RETURNING id")
+    if row is None:
+        raise RuntimeError("expected exactly one row: spawn: insert agent")
+    return row.id
 
 
 def _apply_birth_harness_defaults(
@@ -155,7 +166,7 @@ def _apply_birth_harness_defaults(
 
 
 def _resolve_birth_overlay(
-    cur: psycopg.Cursor[Any],
+    cur: psycopg.Cursor[tuple[object, ...]],
     config: dict[str, object] | None,
     fork_from: int | None,
     *,
@@ -178,7 +189,10 @@ def _resolve_birth_overlay(
     inherited: dict[str, object] | None = None
     if fork_from is not None:
         cur.execute("SELECT birth_config FROM agents_meta WHERE id = %s", (fork_from,))
-        inherited = fetch_one(cur, "spawn: read fork source birth_config")[0]
+        stored = fetch_one(cur, "spawn: read fork source birth_config")[0]
+        if stored is not None and not is_object_dict(stored):
+            raise TypeError(f"agents_meta.birth_config of agent {fork_from} is not a JSON object")
+        inherited = stored
     elif harness_defaults:
         config, inherited = _apply_birth_harness_defaults(config, harness_defaults)
     if config and harness_enum is Harness.MEIVA:
@@ -212,7 +226,7 @@ def _resolve_birth_overlay(
 
 
 def _insert_fork_history(
-    cur: psycopg.Cursor[Any],
+    cur: psycopg.Cursor[tuple[object, ...]],
     new_id: int,
     fork_from: int | None,
     fork_checkpoint: str | None,
@@ -245,7 +259,7 @@ def _insert_fork_history(
 
 
 def insert_agent_birth(
-    cur: psycopg.Cursor[Any],
+    cur: psycopg.Cursor[tuple[object, ...]],
     *,
     catalog: ModelCatalog,
     authority: ConfigAuthority,
@@ -290,7 +304,7 @@ def insert_agent_birth(
     # bypass the rule.
     # meiva:link base/agents/docs/harness/harness.meiva.okf.md
     born_harness = resolve_birth_harness(cur, harness, fork_from)
-    new_id = _insert_agent_identity(cur, label)
+    new_id = _insert_agent_identity(conn, label)
     config, birth_config = _resolve_birth_overlay(
         cur,
         config,
@@ -305,7 +319,9 @@ def insert_agent_birth(
     # fork stays traceable via the fork event's `source` and the fork
     # prompt inbound's source; it is not what the spawner column means.
     lineage_spawner = f"agent:{fork_from}" if fork_from is not None else spawner
-    cur.execute(
+    launch_row = query_one(
+        conn,
+        _LaunchAttemptRow,
         "INSERT INTO agents_meta (id, spawner, born_spawner, fork_source_agent_id, "
         "fork_source_checkpoint_id, status, machine, harness, config_overlay, birth_config, "
         "last_launch_attempt_id) "
@@ -323,7 +339,9 @@ def insert_agent_birth(
             json.dumps(birth_config, sort_keys=True),
         ),
     )
-    launch_attempt_id: UUID = fetch_one(cur, "spawn: insert agent meta")[0]
+    if launch_row is None:
+        raise RuntimeError("expected exactly one row: spawn: insert agent meta")
+    launch_attempt_id = launch_row.last_launch_attempt_id
     _insert_fork_history(cur, new_id, fork_from, fork_checkpoint, fork_tail_skills)
     if prompt is not None:
         assert prompt_source is not None, "prompt requires prompt_source (validated above)"  # noqa: S101

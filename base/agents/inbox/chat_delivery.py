@@ -25,6 +25,7 @@ from base.agents.messages.inbound_provenance import (
 )
 from base.api_contracts.caller_identity import caller_payload
 from base.db import fetch_one
+from base.db.rows import IdRow, query_one
 from base.telemetry.audit_events import record_audit
 
 
@@ -190,30 +191,31 @@ def insert_chat_inbound_in_transaction(
     source_transport = provenance.source_transport if provenance is not None else None
     content_hash = content_sha256(content) if provenance is not None else None
     assertion_match = source_assertion_match(source, provenance) if provenance is not None else None
-    with db.cursor() as cur:
-        cur.execute(
-            "INSERT INTO inbound_messages "
-            "(agent_id, content, kind, source, payload, client_message_id, "
-            "source_verified_by, source_transport, content_hash, source_assertion_match) "
-            "VALUES (%s, %s, 'chat', %s, %s::jsonb, %s, %s, %s, %s, %s) "
-            "ON CONFLICT (client_message_id) WHERE client_message_id IS NOT NULL "
-            "DO NOTHING RETURNING id",
-            (
-                agent_id,
-                content,
-                source,
-                encoded_payload,
-                client_message_id,
-                source_verified_by,
-                source_transport,
-                content_hash,
-                assertion_match,
-            ),
-        )
-        inserted = cur.fetchone()
-        if inserted is None:
-            if client_message_id is None:
-                raise RuntimeError("a NULL client message id cannot conflict")
+    inserted = query_one(
+        db,
+        IdRow,
+        "INSERT INTO inbound_messages "
+        "(agent_id, content, kind, source, payload, client_message_id, "
+        "source_verified_by, source_transport, content_hash, source_assertion_match) "
+        "VALUES (%s, %s, 'chat', %s, %s::jsonb, %s, %s, %s, %s, %s) "
+        "ON CONFLICT (client_message_id) WHERE client_message_id IS NOT NULL "
+        "DO NOTHING RETURNING id",
+        (
+            agent_id,
+            content,
+            source,
+            encoded_payload,
+            client_message_id,
+            source_verified_by,
+            source_transport,
+            content_hash,
+            assertion_match,
+        ),
+    )
+    if inserted is None:
+        if client_message_id is None:
+            raise RuntimeError("a NULL client message id cannot conflict")
+        with db.cursor() as cur:
             cur.execute(
                 "SELECT id, agent_id, content, kind, source, payload, status "
                 "FROM inbound_messages WHERE client_message_id = %s",
@@ -227,26 +229,22 @@ def insert_chat_inbound_in_transaction(
                 source=source,
                 payload=payload,
             )
-        else:
-            receipt = ChatInboundReceipt(
-                inbound_id=int(inserted[0]),
-                inserted=True,
-                pending=True,
-            )
+    else:
+        receipt = ChatInboundReceipt(inbound_id=inserted.id, inserted=True, pending=True)
 
-        prepared_event: telemetry.Event | None = None
-        if receipt.inserted and source.startswith("agent:"):
-            sender_id: int | None = None
-            with contextlib.suppress(ValueError):
-                sender_id = int(source.removeprefix("agent:"))
-            prepared_event = telemetry.prepare_event(
-                "audit",
-                "send_message",
-                agent_id=agent_id,
-                source=source,
-                target_agent_id=sender_id,
-                attributes={"inbound_id": receipt.inbound_id, "content": content},
-            )
-            prepared_event = record_audit(db, record_central_event(db, prepared_event))
+    prepared_event: telemetry.Event | None = None
+    if receipt.inserted and source.startswith("agent:"):
+        sender_id: int | None = None
+        with contextlib.suppress(ValueError):
+            sender_id = int(source.removeprefix("agent:"))
+        prepared_event = telemetry.prepare_event(
+            "audit",
+            "send_message",
+            agent_id=agent_id,
+            source=source,
+            target_agent_id=sender_id,
+            attributes={"inbound_id": receipt.inbound_id, "content": content},
+        )
+        prepared_event = record_audit(db, record_central_event(db, prepared_event))
 
     return receipt, prepared_event

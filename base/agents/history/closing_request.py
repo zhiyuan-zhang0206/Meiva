@@ -12,9 +12,11 @@ leaves no anchor.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 from langchain_core.messages import BaseMessage, SystemMessage
+
+from base.host.boundary.json_values import is_object_dict
 
 # The boundary checkpoint's metadata key holding the anchor.
 METADATA_KEY = "compact_anchor"
@@ -31,7 +33,7 @@ class ClosingRequest:
     extra_tokens: int = 0
     model: str | None = None
 
-    def to_metadata(self) -> dict[str, Any]:
+    def to_metadata(self) -> dict[str, object]:
         return {
             "input_tokens": self.input_tokens,
             "extra_tokens": self.extra_tokens,
@@ -42,9 +44,9 @@ class ClosingRequest:
     def from_metadata(cls, raw: object) -> ClosingRequest | None:
         """The anchor stored in a boundary's metadata; None when the compaction left none
         (an agent-written summary makes no closing call)."""
-        if not isinstance(raw, dict):
+        if not is_object_dict(raw):
             return None
-        data: dict[str, Any] = raw  # pyright: ignore[reportUnknownVariableType]
+        data = raw
         tokens, extra, model = (
             data.get("input_tokens"),
             data.get("extra_tokens", 0),

@@ -8,7 +8,7 @@ import psycopg
 import pytest
 
 from base.agents import impersonation as leases
-from base.agents.impersonation import wake
+from base.agents.impersonation import RequestedLease, wake
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.inbox.insert import insert_inbound_message
 from base.api_contracts.caller_identity import CallerIdentity
@@ -26,6 +26,14 @@ from base.tests.impersonation.support import (
     create_native_owner,
     request_controller,
 )
+
+
+# meiva:note
+# The relay token a session relay's request minted; a request for another relay has none.
+def _token(lease: RequestedLease) -> str:
+    token = lease.get("relay_token")
+    assert token is not None
+    return token
 
 
 def test_request_requires_a_relay_binding(
@@ -129,7 +137,7 @@ def test_claude_request_mints_a_scoped_relay_credential(
             database,
             event_bus,
             lease["id"],
-            lease["relay_token"],
+            _token(lease),
             local_machine=machine_identity.name(),
         )["status"]
         == "requested"
@@ -379,7 +387,7 @@ def test_relay_inbox_uses_the_scoped_credential_only(
     with pytest.raises(leases.ImpersonationError, match="Invalid relay token"):
         leases.relay_inbox(database, lease["id"], "wrong", local_machine=machine_identity.name())
     rows = leases.relay_inbox(
-        database, lease["id"], lease["relay_token"], local_machine=machine_identity.name()
+        database, lease["id"], _token(lease), local_machine=machine_identity.name()
     )
     assert [row["content"] for row in rows] == ["hello"]
 
@@ -404,13 +412,13 @@ def test_relay_heartbeat_beats_while_open_and_stops_at_terminal(
         local_machine=machine_identity.name(),
     )
     leases.relay_heartbeat(
-        database, lease["id"], lease["relay_token"], local_machine=machine_identity.name()
+        database, lease["id"], _token(lease), local_machine=machine_identity.name()
     )
     row = leases.relay_get(
         database,
         event_bus,
         lease["id"],
-        lease["relay_token"],
+        _token(lease),
         local_machine=machine_identity.name(),
     )
     assert row["relay_heartbeat_at"] is not None
@@ -425,7 +433,7 @@ def test_relay_heartbeat_beats_while_open_and_stops_at_terminal(
     )
     leases.activate(database, event_bus, lease["id"], owner)
     leases.relay_heartbeat(
-        database, lease["id"], lease["relay_token"], local_machine=machine_identity.name()
+        database, lease["id"], _token(lease), local_machine=machine_identity.name()
     )
     leases.release(
         database,
@@ -436,7 +444,7 @@ def test_relay_heartbeat_beats_while_open_and_stops_at_terminal(
     )
     with pytest.raises(leases.ImpersonationError, match="ended"):
         leases.relay_heartbeat(
-            database, lease["id"], lease["relay_token"], local_machine=machine_identity.name()
+            database, lease["id"], _token(lease), local_machine=machine_identity.name()
         )
 
 

@@ -1,8 +1,11 @@
 """Shared SDK task dataclass, column order and immutable snapshot validation."""
 
+from __future__ import annotations
+
 import json
 from dataclasses import asdict, dataclass, fields
-from typing import Any
+
+from pydantic import TypeAdapter
 
 from base.agents.tasks.priority import DEFAULT_PRIORITY, validate_priority
 from base.agents.tasks.status import TaskStatus
@@ -40,17 +43,21 @@ class Task:
 TASK_COLUMNS = ", ".join(field.name for field in fields(Task))
 
 
-def task_from_row(row: tuple[Any, ...]) -> Task:
-    return Task(*render_task_timestamps(row, TASK_COLUMNS))
+_TASK_COLUMN_NAMES = tuple(TASK_COLUMNS.split(", "))
+_TASK = TypeAdapter(Task)
 
 
-def validate_task_snapshot(snapshot: dict[str, object]) -> dict[str, Any]:
-    """Validate every dataclass field without silently filling missing defaults."""
-    from pydantic import TypeAdapter
+def task_from_row(row: tuple[object, ...]) -> Task:
+    values = render_task_timestamps(row, TASK_COLUMNS)
+    return _TASK.validate_python(dict(zip(_TASK_COLUMN_NAMES, values, strict=True)))
 
+
+# meiva:note
+# Validate every dataclass field without silently filling missing defaults, and hand back the `Task`.
+def parse_task_snapshot(snapshot: dict[str, object]) -> Task:
     if set(snapshot) != {field.name for field in fields(Task)}:
         raise ValueError("task creation snapshot has missing or unknown fields")
-    task = TypeAdapter(Task).validate_json(json.dumps(snapshot), strict=True)
+    task = _TASK.validate_json(json.dumps(snapshot), strict=True)
     try:
         TaskStatus(task.status)
     except ValueError:
@@ -58,4 +65,9 @@ def validate_task_snapshot(snapshot: dict[str, object]) -> dict[str, Any]:
             f"status must be one of {sorted(s.value for s in TaskStatus)}, got {task.status!r}"
         ) from None
     validate_priority(task.priority)
-    return asdict(task)
+    return task
+
+
+def validate_task_snapshot(snapshot: dict[str, object]) -> dict[str, object]:
+    """Validate every dataclass field without silently filling missing defaults."""
+    return asdict(parse_task_snapshot(snapshot))

@@ -1,16 +1,18 @@
 # meiva:link gateway/upload_delivery/docs/delivered-uploads/delivered-uploads.meiva.okf.md
 
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PurePosixPath
-from typing import Any
 
-from psycopg import Connection
+import psycopg
 from psycopg.types.json import Jsonb
+from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 from base.agents.inbox.chat_delivery import insert_chat_inbound_in_transaction
 from base.agents.messages.inbound_provenance import InboundProvenance
 from base.agents.upload_delivery.models import (
     PROTOCOL,
+    STATE,
     Acceptance,
     CopyProof,
     DeliveryStatus,
@@ -28,57 +30,97 @@ from base.agents.upload_delivery.paths import agent_upload_dir
 from base.agents.upload_delivery.staging import claim_for_batch, staged_object
 from base.agents.upload_delivery.storage import lock_agent
 from base.api_contracts.agent_contract import AgentNotFound
+from base.db.rows import IdRow, query_all, query_one
 from base.db.transaction import ConnectionSource, write_transaction
 from base.host.db_authority.unit import UnitIdentity
 from base.paths import WORKSPACES_DIR_NAME
 
 MAX_COPY_ATTEMPTS = 3
+_DELIVERY_STATE: TypeAdapter[STATE] = TypeAdapter(STATE)
 
 
-def target_unit(conn: Connection[Any], agent_id: int) -> UnitIdentity:
+# meiva:note
+# The serving machine of an agent (`SELECT machine FROM agents_meta`).
+@dataclass(frozen=True)
+class _MachineRow:
+    machine: str
+
+
+# meiva:note
+# A registered runner unit of a machine (`SELECT u.machine_name, u.home FROM machine_units u ...`).
+@dataclass(frozen=True)
+class _UnitRow:
+    machine_name: str
+    home: str
+
+
+def target_unit(conn: psycopg.Connection, agent_id: int) -> UnitIdentity:
     if (
-        conn.execute("SELECT id FROM agents WHERE id=%s FOR NO KEY UPDATE", (agent_id,)).fetchone()
+        query_one(conn, IdRow, "SELECT id FROM agents WHERE id=%s FOR NO KEY UPDATE", (agent_id,))
         is None
     ):
         raise AgentNotFound(agent_id)
-    agent = conn.execute(
-        "SELECT machine FROM agents_meta WHERE id=%s FOR UPDATE", (agent_id,)
-    ).fetchone()
+    agent = query_one(
+        conn, _MachineRow, "SELECT machine FROM agents_meta WHERE id=%s FOR UPDATE", (agent_id,)
+    )
     if agent is None:
         raise AgentNotFound(agent_id)
-    rows = conn.execute(
+    units = query_all(
+        conn,
+        _UnitRow,
         "SELECT u.machine_name, u.home FROM machine_units u JOIN machines m "
         "ON m.name=u.machine_name WHERE m.name=%s AND u.serve_agent_runner "
         "AND u.url=m.gateway_url FOR SHARE OF u,m",
-        (agent[0],),
-    ).fetchall()
-    if len(rows) != 1:
+        (agent.machine,),
+    )
+    if len(units) != 1:
         raise UploadDeliveryConflictError("target has no unique registered serving runner unit")
-    return UnitIdentity(machine=rows[0][0], home=rows[0][1])
+    return UnitIdentity(machine=units[0].machine_name, home=units[0].home)
 
 
-def _lookup(conn: Connection[Any], key: str, fingerprint: str) -> Acceptance | None:
-    row = conn.execute(
+# meiva:note
+# The stored identity of a batch (`SELECT request_hash, protocol, acceptance ...`); `acceptance`
+# is jsonb, validated by the reader.
+@dataclass(frozen=True)
+class _LookupRow:
+    request_hash: str
+    protocol: int
+    acceptance: object
+
+
+def _lookup(conn: psycopg.Connection, key: str, fingerprint: str) -> Acceptance | None:
+    row = query_one(
+        conn,
+        _LookupRow,
         "SELECT request_hash, protocol, acceptance FROM upload_delivery_batches "
         "WHERE operation_key=%s",
         (key,),
-    ).fetchone()
+    )
     if row is None:
         return None
-    if row[0] != fingerprint or row[1] != PROTOCOL or row[2] is None:
+    if row.request_hash != fingerprint or row.protocol != PROTOCOL or row.acceptance is None:
         raise UploadDeliveryConflictError(
             "idempotency key already identifies another upload manifest"
         )
-    return Acceptance.model_validate(row[2])
+    return Acceptance.model_validate(row.acceptance)
 
 
-def _taken_directories(conn: Connection[Any], agent_id: int, prefix: str) -> set[str]:
-    rows = conn.execute(
+# meiva:note
+# A send directory a batch already took (`SELECT send_directory ...`); protocol-1 rows have none.
+@dataclass(frozen=True)
+class _SendDirectoryRow:
+    send_directory: str | None
+
+
+def _taken_directories(conn: psycopg.Connection, agent_id: int, prefix: str) -> set[str]:
+    rows = query_all(
+        conn,
+        _SendDirectoryRow,
         "SELECT send_directory FROM upload_delivery_batches "
         "WHERE agent_id=%s AND send_directory LIKE %s",
         (agent_id, f"{prefix}%"),
-    ).fetchall()
-    return {str(row[0]) for row in rows if row[0] is not None}
+    )
+    return {row.send_directory for row in rows if row.send_directory is not None}
 
 
 def send(
@@ -169,30 +211,50 @@ def send(
         return acceptance
 
 
+# meiva:note
+# One batch as `status` reads it; the jsonb columns are validated by the reader.
+@dataclass(frozen=True)
+class _StatusRow:
+    batch_id: str
+    state: str
+    reason: str | None
+    send_directory: str | None
+    message: object
+    manifest: object
+    inbound_id: int | None
+    source_unit: object
+    target_unit: object
+    attempts: int
+    next_attempt_at: datetime
+    protocol: int
+
+
 def status(pool: ConnectionSource, agent_id: int, batch_id: str) -> DeliveryStatus:
     with pool.connection() as conn:
-        row = conn.execute(
+        row = query_one(
+            conn,
+            _StatusRow,
             "SELECT batch_id, state, reason, send_directory, message, manifest, inbound_id, "
             "source_unit, target_unit, attempts, next_attempt_at, protocol "
             "FROM upload_delivery_batches WHERE agent_id=%s AND batch_id=%s",
             (agent_id, batch_id),
-        ).fetchone()
-    if row is None or row[11] != PROTOCOL:
+        )
+    if row is None or row.protocol != PROTOCOL or row.send_directory is None:
         raise AgentNotFound(agent_id)
-    manifest = Manifest.model_validate(row[5])
-    frozen = FrozenMessage.model_validate(row[4])
+    manifest = Manifest.model_validate(row.manifest)
+    frozen = FrozenMessage.model_validate(row.message)
     return DeliveryStatus(
-        batch_id=row[0],
-        state=row[1],
-        reason=row[2],
-        directory=row[3],
+        batch_id=row.batch_id,
+        state=_DELIVERY_STATE.validate_python(row.state),
+        reason=row.reason,
+        directory=row.send_directory,
         message_text=frozen.text,
         files=manifest.objects,
-        inbound_id=row[6],
-        source=UnitIdentity.model_validate(row[7]),
-        target=UnitIdentity.model_validate(row[8]),
-        attempts=row[9],
-        next_attempt_at=row[10] if row[1] == "pending" else None,
+        inbound_id=row.inbound_id,
+        source=UnitIdentity.model_validate(row.source_unit),
+        target=UnitIdentity.model_validate(row.target_unit),
+        attempts=row.attempts,
+        next_attempt_at=row.next_attempt_at if row.state == "pending" else None,
     )
 
 
@@ -210,21 +272,45 @@ def served_object(
         return staged_object(conn, agent_id, batch_id, ordinal, unit=unit)
 
 
+# meiva:note
+# The target and manifest of an accepted batch; both are jsonb, validated by the reader.
+@dataclass(frozen=True)
+class _AcceptedRow:
+    target_unit: object
+    manifest: object
+
+
 def accepted_object(
     pool: ConnectionSource, agent_id: int, batch_id: str, ordinal: int
 ) -> tuple[UnitIdentity, str, Object]:
     with pool.connection() as conn:
-        row = conn.execute(
+        row = query_one(
+            conn,
+            _AcceptedRow,
             "SELECT target_unit, manifest FROM upload_delivery_batches "
             "WHERE agent_id=%s AND batch_id=%s AND protocol=%s AND state='accepted'",
             (agent_id, batch_id, PROTOCOL),
-        ).fetchone()
+        )
     if row is None:
         raise AgentNotFound(agent_id)
-    manifest = Manifest.model_validate(row[1])
+    manifest = Manifest.model_validate(row.manifest)
     if not 0 <= ordinal < len(manifest.objects):
         raise UploadDeliveryConflictError("object ordinal is absent from the fixed manifest")
-    return UnitIdentity.model_validate(row[0]), manifest.directory, manifest.objects[ordinal]
+    return (
+        UnitIdentity.model_validate(row.target_unit),
+        manifest.directory,
+        manifest.objects[ordinal],
+    )
+
+
+# meiva:note
+# One claimed batch (`RETURNING manifest, source_unit, target_unit`); all three are jsonb,
+# validated by the reader.
+@dataclass(frozen=True)
+class _DueRow:
+    manifest: object
+    source_unit: object
+    target_unit: object
 
 
 # meiva:note
@@ -244,7 +330,9 @@ def due(
     claim_seconds: float,
 ) -> list[ReceiveRequest]:
     with write_transaction(pool) as conn:
-        rows = conn.execute(
+        rows = query_all(
+            conn,
+            _DueRow,
             "UPDATE upload_delivery_batches SET next_attempt_at=now()+make_interval(secs => %s) "
             "WHERE batch_id IN ("
             "SELECT batch_id FROM upload_delivery_batches "
@@ -257,26 +345,35 @@ def due(
                 Jsonb(current_unit(local_machine=local_machine, home=home).model_dump()),
                 limit,
             ),
-        ).fetchall()
+        )
     return [
         ReceiveRequest(
             version=PROTOCOL,
-            manifest=Manifest.model_validate(row[0]),
-            source=UnitIdentity.model_validate(row[1]),
-            target=UnitIdentity.model_validate(row[2]),
+            manifest=Manifest.model_validate(row.manifest),
+            source=UnitIdentity.model_validate(row.source_unit),
+            target=UnitIdentity.model_validate(row.target_unit),
         )
         for row in rows
     ]
 
 
+# meiva:note
+# The state of a batch (`SELECT state ...` or `RETURNING state`).
+@dataclass(frozen=True)
+class _StateRow:
+    state: str
+
+
 def validate_pending(pool: ConnectionSource, request: ReceiveRequest) -> bool:
     """Fence known placement changes before copy; final acceptance rechecks under lock."""
     with write_transaction(pool) as conn:
-        row = conn.execute(
+        row = query_one(
+            conn,
+            _StateRow,
             "SELECT state FROM upload_delivery_batches WHERE batch_id=%s AND protocol=%s FOR UPDATE",
             (request.manifest.batch_id, PROTOCOL),
-        ).fetchone()
-        if row is None or row[0] != "pending":
+        )
+        if row is None or row.state != "pending":
             return False
         if target_unit(conn, request.manifest.agent_id) != request.target:
             raise UploadDeliveryConflictError("agent placement changed after upload acceptance")
@@ -285,14 +382,16 @@ def validate_pending(pool: ConnectionSource, request: ReceiveRequest) -> bool:
 
 def record_failure(pool: ConnectionSource, batch_id: str, reason: str, *, hold: bool) -> str | None:
     with write_transaction(pool) as conn:
-        row = conn.execute(
+        row = query_one(
+            conn,
+            _StateRow,
             "UPDATE upload_delivery_batches SET reason=%s, attempts=attempts+1, "
             "state=CASE WHEN %s OR attempts+1 >= %s THEN 'hold' ELSE 'pending' END, "
             "next_attempt_at=now()+interval '30 seconds' * (attempts+1) "
             "WHERE batch_id=%s AND protocol=%s AND state='pending' RETURNING state",
             (reason, hold, MAX_COPY_ATTEMPTS, batch_id, PROTOCOL),
-        ).fetchone()
-    return None if row is None else row[0]
+        )
+    return None if row is None else row.state
 
 
 # meiva:note
@@ -318,6 +417,29 @@ def _proof_paths(proof: CopyProof, manifest: Manifest, *, home: str) -> list[str
     return [str(native_directory / item.name) for item in manifest.objects]
 
 
+# meiva:note
+# The two provenance facts `send` stored beside a batch; nothing else is stored there.
+class _StoredProvenance(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_verified_by: str | None
+    source_transport: str
+
+
+# meiva:note
+# The batch `complete` locks (`SELECT inbound_id, target_unit, manifest, provenance, state,
+# source_unit, message ...`); the jsonb columns are validated by the reader.
+@dataclass(frozen=True)
+class _CompleteRow:
+    inbound_id: int | None
+    target_unit: object
+    manifest: object
+    provenance: object
+    state: str
+    source_unit: object
+    message: object
+
+
 def complete(pool: ConnectionSource, request: ReceiveRequest, proof: CopyProof) -> int:
     if (
         proof.version != PROTOCOL
@@ -327,29 +449,34 @@ def complete(pool: ConnectionSource, request: ReceiveRequest, proof: CopyProof) 
         raise UploadDeliveryConflictError("receiver proof differs from the frozen target manifest")
     manifest = request.manifest
     with write_transaction(pool) as conn:
-        row = conn.execute(
+        row = query_one(
+            conn,
+            _CompleteRow,
             "SELECT inbound_id, target_unit, manifest, provenance, state, source_unit, message "
             "FROM upload_delivery_batches "
             "WHERE batch_id=%s AND protocol=%s AND ready_at IS NOT NULL FOR UPDATE",
             (manifest.batch_id, PROTOCOL),
-        ).fetchone()
+        )
         if row is None:
             raise UploadDeliveryConflictError("source acceptance is absent")
         if (
-            UnitIdentity.model_validate(row[1]) != request.target
-            or Manifest.model_validate(row[2]) != manifest
-            or UnitIdentity.model_validate(row[5]) != request.source
+            UnitIdentity.model_validate(row.target_unit) != request.target
+            or Manifest.model_validate(row.manifest) != manifest
+            or UnitIdentity.model_validate(row.source_unit) != request.source
         ):
             raise UploadDeliveryConflictError("stored intent differs from receiver proof")
-        if row[0] is not None:
-            return row[0]
-        if row[4] != "pending":
+        if row.inbound_id is not None:
+            return row.inbound_id
+        if row.state != "pending":
             raise UploadDeliveryConflictError("held delivery cannot accept a late copy proof")
         if target_unit(conn, manifest.agent_id) != request.target:
             raise UploadDeliveryConflictError("agent placement changed after upload acceptance")
         paths = _proof_paths(proof, manifest, home=request.target.home)
-        frozen = FrozenMessage.model_validate(row[6])
-        provenance = InboundProvenance(**row[3])
+        frozen = FrozenMessage.model_validate(row.message)
+        stored = _StoredProvenance.model_validate(row.provenance)
+        provenance = InboundProvenance(
+            source_verified_by=stored.source_verified_by, source_transport=stored.source_transport
+        )
         note_content = upload_note(
             request.target.machine,
             [

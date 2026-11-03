@@ -14,7 +14,6 @@ import random
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
@@ -76,7 +75,12 @@ from base.agents.impersonation.relay import (
     record_degradation,
     stamp_relay_failure,
 )
-from base.agents.impersonation.status import ImpersonationStatus
+from base.agents.impersonation.status import (
+    ImpersonationStatus,
+    PublicLease,
+    relay_provider,
+    relay_thread_id,
+)
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.agents.observation.relay_supervision import RelayChild, RelaySupervision, relay_exited
 from base.agents.observation.relay_supervision import heartbeat_fresh as _heartbeat_fresh
@@ -86,6 +90,7 @@ from base.db import Database
 from base.db.protocols import DatabaseLike
 from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
+from base.host.boundary.json_values import is_object_dict
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.paths import workspaces_root
@@ -126,14 +131,14 @@ def draw_relay_token(rng: random.Random) -> str:
 
 
 def _held(
-    session: dict[str, Any] | None, incarnation: RuntimeIncarnation | None
-) -> tuple[dict[str, Any], RuntimeIncarnation]:
+    session: PublicLease | None, incarnation: RuntimeIncarnation | None
+) -> tuple[PublicLease, RuntimeIncarnation]:
     if session is None or incarnation is None:
         raise RuntimeError("a lease decision needs the admitted native runtime that read it")
     return session, incarnation
 
 
-def lease_phase(session: dict[str, Any] | None) -> LeasePhase | None:
+def lease_phase(session: Mapping[str, object] | None) -> LeasePhase | None:
     if session is None:
         return None
     match session["status"]:
@@ -155,7 +160,7 @@ def lease_phase(session: dict[str, Any] | None) -> LeasePhase | None:
 
 async def native_status(
     db: DatabaseLike, bus: EventBus, agent_id: int, *, incarnation: RuntimeIncarnation | None
-) -> dict[str, Any] | None:
+) -> PublicLease | None:
     """Read authoritative lease state only for an admitted native runtime."""
     if incarnation is None:
         return None
@@ -263,13 +268,13 @@ async def _activate_accepted(
     graph: _handoff.AgentGraph,
     db: DatabaseLike,
     bus: EventBus,
-    session: dict[str, Any],
+    session: PublicLease,
     incarnation: RuntimeIncarnation,
     relays: RelaySupervision,
     *,
     timestamps: TimestampSource,
     host: TakeoverHost,
-) -> dict[str, Any] | None:
+) -> PublicLease | None:
     """Activate an accepted lease; None when the relay gate failed and native control resumes."""
     await _handoff.ensure_start_marker(graph, session, notes=timestamps.policy())
     # The bound relay must be live before the takeover stands. On failure
@@ -287,7 +292,7 @@ async def _activate_accepted(
 async def apply_plugin_deltas(
     graph: _handoff.AgentGraph,
     db: DatabaseLike,
-    session: dict[str, Any],
+    session: PublicLease,
     agent_id: int,
     incarnation: RuntimeIncarnation,
 ) -> None:
@@ -303,9 +308,10 @@ async def apply_plugin_deltas(
     )
     for step in plan:
         if step.apply:
-            delta = decode_plugin_delta(
-                session["plugin_delta"][step.version - 1], graph.builder.state_schema
-            )
+            encoded = session["plugin_delta"][step.version - 1]
+            if not is_object_dict(encoded):
+                raise TypeError("a stored plugin delta must be an object")
+            delta = decode_plugin_delta(encoded, graph.builder.state_schema)
             receipt = {"lease_id": session["id"], "version": step.version}
             await graph.aupdate_state(config, {**delta, "impersonation_applied": receipt})
             await _handoff.flush_graph_checkpoint(graph, agent_id)
@@ -388,7 +394,7 @@ async def clear_turn_fatal(pool: AsyncConnectionPool, incarnation: RuntimeIncarn
     return True
 
 
-def handoff_owed(session: dict[str, Any] | None) -> bool:
+def handoff_owed(session: Mapping[str, object] | None) -> bool:
     phase = lease_phase(session)
     return (
         session is not None
@@ -448,7 +454,7 @@ async def settle_checkpoint(
 def establish_relay(
     db: DatabaseLike,
     bus: EventBus,
-    session: dict[str, Any],
+    session: PublicLease,
     incarnation: RuntimeIncarnation,
     relays: RelaySupervision,
     *,
@@ -476,7 +482,7 @@ def establish_relay(
 def _await_existing_relay(
     db: DatabaseLike,
     bus: EventBus,
-    session: dict[str, Any],
+    session: PublicLease,
     incarnation: RuntimeIncarnation,
     host: TakeoverHost,
     *,
@@ -517,7 +523,7 @@ def _await_existing_relay(
 def _establish_spawned_relay(
     db: DatabaseLike,
     bus: EventBus,
-    session: dict[str, Any],
+    session: PublicLease,
     incarnation: RuntimeIncarnation,
     relays: RelaySupervision,
     host: TakeoverHost,
@@ -535,19 +541,17 @@ def _establish_spawned_relay(
     # it still has the record in hand. The cost is one owner-only file read plus at most
     # one probe.
     # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
+    provider = relay_provider(session)
+    thread_id = relay_thread_id(session)
     antigravity_endpoint_file = None
-    if session["relay_provider"] == "antigravity":
+    if provider == "antigravity":
         try:
-            resolve_antigravity_endpoint(
-                session["relay_thread_id"], home=host.home, antigravity_server=None
-            )
+            resolve_antigravity_endpoint(thread_id, home=host.home, antigravity_server=None)
         except (OSError, RuntimeError, ValueError) as exc:
             return _roll_back_relay_failure(
                 db, bus, session, incarnation, endpoint_unusable_reason(str(exc))
             )
-        antigravity_endpoint_file = str(
-            antigravity_endpoint_path(session["relay_thread_id"], home=host.home)
-        )
+        antigravity_endpoint_file = str(antigravity_endpoint_path(thread_id, home=host.home))
 
     relay_token = draw_relay_token(host.rng)
     try:
@@ -563,14 +567,15 @@ def _establish_spawned_relay(
         return _await_existing_relay(
             db, bus, session, incarnation, host, reason=ADOPTED_RELAY_DOWN_REASON
         )
+    codex_home = session["process_metadata"].get("codex_home")
     binding = RelayBinding(
         agent_id=incarnation.agent_id,
         lease_id=session["id"],
-        provider=session["relay_provider"],
-        thread_id=session["relay_thread_id"],
+        provider=provider,
+        thread_id=thread_id,
         codex_remote=session["relay_codex_remote"],
         antigravity_endpoint_file=antigravity_endpoint_file,
-        codex_home=session["process_metadata"].get("codex_home"),
+        codex_home=codex_home if isinstance(codex_home, str) else None,
     )
     child = RelayChild(
         session["id"],
@@ -586,7 +591,7 @@ def _establish_spawned_relay(
 def _await_spawned_relay(
     db: DatabaseLike,
     bus: EventBus,
-    session: dict[str, Any],
+    session: PublicLease,
     incarnation: RuntimeIncarnation,
     relays: RelaySupervision,
     child: RelayChild,
@@ -595,7 +600,7 @@ def _await_spawned_relay(
     clock = host.clock
     started = clock.monotonic()
     while True:
-        failure = startup_failure(session["relay_provider"], child.process.poll())
+        failure = startup_failure(relay_provider(session), child.process.poll())
         if failure is not None:
             relays.children.pop(incarnation.agent_id, None)
             return _roll_back_relay_failure(db, bus, session, incarnation, failure)
@@ -627,7 +632,7 @@ def _await_spawned_relay(
 def _roll_back_relay_failure(
     db: DatabaseLike,
     bus: EventBus,
-    session: dict[str, Any],
+    session: PublicLease,
     incarnation: RuntimeIncarnation,
     reason: str,
 ) -> bool:
@@ -636,7 +641,7 @@ def _roll_back_relay_failure(
     return False
 
 
-def _lease_view(session: dict[str, Any], *, now: datetime) -> LeaseView | None:
+def _lease_view(session: PublicLease, *, now: datetime) -> LeaseView | None:
     phase = lease_phase(session)
     if phase is None:
         return None
@@ -661,7 +666,7 @@ def _lease_view(session: dict[str, Any], *, now: datetime) -> LeaseView | None:
 async def supervise_relay(
     db: Database,
     bus: EventBus,
-    session: dict[str, Any] | None,
+    session: PublicLease | None,
     agent_id: int,
     relays: RelaySupervision,
     *,
@@ -730,7 +735,7 @@ async def _retire_relay_child(
 def _end_dead_relay_lease(
     db: Database,
     bus: EventBus,
-    session: dict[str, Any],
+    session: PublicLease,
     agent_id: int,
     incarnation: RuntimeIncarnation,
     exit_code: int | None,
@@ -760,7 +765,7 @@ def _end_dead_relay_lease(
 # the liveness alert names the gap until the controller re-requests or releases.
 # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
 async def _record_stale_relay(
-    db: Database, session: dict[str, Any], agent_id: int, incarnation: RuntimeIncarnation
+    db: Database, session: PublicLease, agent_id: int, incarnation: RuntimeIncarnation
 ) -> None:
     await asyncio.to_thread(
         record_degradation,

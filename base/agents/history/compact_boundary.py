@@ -11,7 +11,7 @@ compaction segment for history reads and audits.
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass
 
 import psycopg
 from psycopg.pq import TransactionStatus
@@ -20,6 +20,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from base.agents.history.closing_request import METADATA_KEY as CLOSING_METADATA_KEY
 from base.agents.history.closing_request import ClosingRequest
+from base.db.rows import aquery_one
 from base.db.transaction import async_write_transaction
 
 # Stamp the thread's newest checkpoint as a compaction boundary; the RETURNING
@@ -34,6 +35,13 @@ _MARK_BOUNDARY_SQL = (
     "       ORDER BY checkpoint_id DESC LIMIT 1)"
     " RETURNING checkpoint_id"
 )
+
+
+# meiva:note
+# The `RETURNING checkpoint_id` of the boundary stamp.
+@dataclass(frozen=True)
+class _BoundaryRow:
+    checkpoint_id: str
 
 
 async def mark_compact_boundary(
@@ -55,16 +63,17 @@ async def mark_compact_boundary(
     missed stamp only loses segment traceability, never recoverability (the
     summary survives regardless).
     """
-    async with async_write_transaction(pool) as conn, conn.cursor() as cur:
-        stamp: dict[str, Any] = {"compact_boundary": True}
+    async with async_write_transaction(pool) as conn:
+        stamp: dict[str, object] = {"compact_boundary": True}
         if closing is not None:
             stamp[CLOSING_METADATA_KEY] = closing.to_metadata()
-        await cur.execute(
-            _MARK_BOUNDARY_SQL, (Jsonb(stamp), thread_id, checkpoint_ns, thread_id, checkpoint_ns)
+        row = await aquery_one(
+            conn,
+            _BoundaryRow,
+            _MARK_BOUNDARY_SQL,
+            (Jsonb(stamp), thread_id, checkpoint_ns, thread_id, checkpoint_ns),
         )
-        row = await cur.fetchone()
-    boundary = row[0] if row is not None else None
-    return None if boundary is None else str(boundary)
+    return None if row is None else row.checkpoint_id
 
 
 async def stamp_compact_checkpoint(
@@ -84,7 +93,7 @@ async def stamp_compact_checkpoint(
         raise RuntimeError("compact source stamping requires a caller-owned transaction")
     if not checkpoint_id:
         raise ValueError("compact source checkpoint ID must contain text")
-    stamp: dict[str, Any] = {"compact_boundary": True}
+    stamp: dict[str, object] = {"compact_boundary": True}
     if closing is not None:
         stamp[CLOSING_METADATA_KEY] = closing.to_metadata()
     row = await (

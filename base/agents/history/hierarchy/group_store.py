@@ -15,9 +15,9 @@ import hashlib
 import json
 import re
 from collections.abc import Sequence
-from typing import Any
+from dataclasses import dataclass
 
-from psycopg import AsyncCursor
+import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from base import telemetry
@@ -29,6 +29,7 @@ from base.agents.history.hierarchy.group import (
     OpenNode,
 )
 from base.agents.history.hierarchy.store import SCHEMA_VERSION
+from base.db.rows import CountRow, IdRow, aquery_all, aquery_one
 from base.db.transaction import async_write_transaction
 from base.log import logger
 
@@ -41,16 +42,24 @@ class GroupOrderError(RuntimeError):
 CLAIM_LEASE_SECONDS = 3600.0
 
 
+# meiva:note
+# The open count a level was last checked at.
+@dataclass(frozen=True)
+class _LastCheckedRow:
+    last_checked_open: int
+
+
 async def load_last_checked(pool: AsyncConnectionPool, agent_id: int, level: int) -> int:
     """The open count at the level's last check (0 before the first)."""
-    async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute(
+    async with pool.connection() as conn:
+        row = await aquery_one(
+            conn,
+            _LastCheckedRow,
             "SELECT last_checked_open FROM understanding_group_state"
             " WHERE agent_id = %s AND level = %s",
             (agent_id, level),
         )
-        row = await cur.fetchone()
-    return 0 if row is None else int(row[0])
+    return 0 if row is None else row.last_checked_open
 
 
 async def load_open_nodes(
@@ -61,17 +70,18 @@ async def load_open_nodes(
     `upto` (a rebuild's replay) hides the nodes that end past that message index, as if they had
     not landed yet.
     """
-    async with pool.connection() as conn, conn.cursor() as cur:
-        await cur.execute(
-            "SELECT id, span_start, span_end, start_ts, end_ts, text FROM understanding_nodes"
+    async with pool.connection() as conn:
+        return await aquery_all(
+            conn,
+            OpenNode,
+            'SELECT id, span_start, span_end, start_ts AS start, end_ts AS "end", text'
+            " FROM understanding_nodes"
             " WHERE agent_id = %s AND depth = %s AND parent_id IS NULL"
             " AND start_ts IS NOT NULL AND end_ts IS NOT NULL"
             " AND (%s::bigint IS NULL OR span_end <= %s::bigint)"
             " ORDER BY span_start",
             (agent_id, level, upto, upto),
         )
-        rows = await cur.fetchall()
-    return [OpenNode(int(r[0]), int(r[1]), int(r[2]), r[3], r[4], str(r[5])) for r in rows]
 
 
 async def claim_check(pool: AsyncConnectionPool, agent_id: int, level: int) -> bool:
@@ -144,16 +154,18 @@ async def write_groups(
     transaction, the lease released with it.
     """
     index = {n.id: i for i, n in enumerate(nodes)}
-    async with async_write_transaction(pool) as conn, conn.cursor() as cur:
+    async with async_write_transaction(pool) as conn:
         for group in groups:
             children = nodes[index[group.first] : index[group.last] + 1]
             span = (children[0].span_start, children[-1].span_end)
-            await _require_no_earlier_open_node(cur, agent_id, level, children)
+            await _require_no_earlier_open_node(conn, agent_id, level, children)
             input_hash = hashlib.sha256(
                 f"{GROUP_ENGINE_VERSION}|{GROUP_PROMPT_VERSION}|{agent_id}|{level}|"
                 f"{[c.id for c in children]}".encode()
             ).hexdigest()
-            await cur.execute(
+            row = await aquery_one(
+                conn,
+                IdRow,
                 _UPSERT_GROUP_SQL,
                 (
                     agent_id,
@@ -173,30 +185,38 @@ async def write_groups(
                     check_key,
                 ),
             )
-            row = await cur.fetchone()
             assert row is not None, "an upsert with RETURNING always returns a row"  # noqa: S101
-            await cur.execute(
+            await conn.execute(
                 "UPDATE understanding_nodes SET parent_id = %s WHERE id = ANY(%s)",
-                (int(row[0]), [c.id for c in children]),
+                (row.id, [c.id for c in children]),
             )
         # Counted, not derived from the snapshot: a leaf of a later job of the same agent may
         # have landed while the call ran, and the baseline must include it.
-        await cur.execute(
-            "SELECT count(*) FROM understanding_nodes WHERE agent_id = %s AND depth = %s"
+        counted = await aquery_one(
+            conn,
+            CountRow,
+            "SELECT count(*) AS n FROM understanding_nodes WHERE agent_id = %s AND depth = %s"
             " AND parent_id IS NULL"
             " AND start_ts IS NOT NULL AND end_ts IS NOT NULL"
             " AND (%s::bigint IS NULL OR span_end <= %s::bigint)",
             (agent_id, level, upto, upto),
         )
-        row = await cur.fetchone()
-        assert row is not None, "an aggregate query always returns one row"  # noqa: S101
-        remaining = int(row[0])
-        await cur.execute(_RELEASE_SQL, (remaining, agent_id, level))
+        assert counted is not None, "an aggregate query always returns one row"  # noqa: S101
+        remaining = counted.n
+        await conn.execute(_RELEASE_SQL, (remaining, agent_id, level))
     return remaining
 
 
+# meiva:note
+# An open node that starts before the group's end without being one of its children.
+@dataclass(frozen=True)
+class _BlockerRow:
+    id: int
+    span_start: int
+
+
 async def _require_no_earlier_open_node(
-    cur: AsyncCursor[Any], agent_id: int, level: int, children: Sequence[OpenNode]
+    conn: psycopg.AsyncConnection, agent_id: int, level: int, children: Sequence[OpenNode]
 ) -> None:
     """Raise `GroupOrderError` when an open node of the level starts before the group's end without
     being one of its children (a leaf landed out of message order and stayed behind).
@@ -204,18 +224,19 @@ async def _require_no_earlier_open_node(
     Groups are always a prefix of the open set, so any such node is an invariant violation, not a
     case to group around: only the rebuild (`rebuild.py`) repairs it.
     """
-    await cur.execute(
+    row = await aquery_one(
+        conn,
+        _BlockerRow,
         "SELECT id, span_start FROM understanding_nodes WHERE agent_id = %s AND depth = %s"
         " AND parent_id IS NULL"
         " AND start_ts IS NOT NULL AND end_ts IS NOT NULL"
         " AND span_start < %s AND NOT (id = ANY(%s)) ORDER BY span_start LIMIT 1",
         (agent_id, level, children[-1].span_end, [c.id for c in children]),
     )
-    row = await cur.fetchone()
     if row is not None:
         raise GroupOrderError(
             f"agent {agent_id} level {level}: group over spans {children[0].span_start}-"
-            f"{children[-1].span_end} would close across open node {row[0]} (span_start {row[1]});"
+            f"{children[-1].span_end} would close across open node {row.id} (span_start {row.span_start});"
             " leaves landed out of message order and the upper levels need a rebuild"
         )
 

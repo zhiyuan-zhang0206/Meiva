@@ -325,7 +325,7 @@ def _gen(llm: Any, *, model_catalog: ModelCatalog, **kw: Any) -> Any:
         1,
         model="m",
         agent_id=7,
-        tools=["T"],
+        tools=[{"name": "T"}],
         **kw,
         catalog=model_catalog,
         timeline_inputs=_TIMELINE_INPUTS,
@@ -344,13 +344,13 @@ def test_request_is_prefix_plus_one_instruction_with_tools_bound(
         1,
         model=model,
         agent_id=7,
-        tools=["T"],
+        tools=[{"name": "T"}],
         catalog=model_catalog,
         timeline_inputs=_TIMELINE_INPUTS,
     )
     assert out.groups == [UnitGroup(0, 1, "look"), UnitGroup(2, 2, "run")]
     assert [u.kind for u in out.units] == ["inbound", "work", "work"]
-    assert llm.bound == ["T"]
+    assert llm.bound == [{"name": "T"}]
     request = llm.requests[0]
     assert request[: len(_PREFIX)] == list(_PREFIX)  # byte-identical prefix, head in-band
     assert len(request) == len(_PREFIX) + 1 and isinstance(request[-1], HumanMessage)
@@ -503,7 +503,7 @@ def test_a_chunk_is_numbered_from_its_own_first_unit(model_catalog: ModelCatalog
         4,
         model="m",
         agent_id=7,
-        tools=["T"],
+        tools=[{"name": "T"}],
         catalog=model_catalog,
         timeline_inputs=_TIMELINE_INPUTS,
     )
@@ -524,7 +524,7 @@ def test_a_chunk_is_numbered_from_its_own_first_unit(model_catalog: ModelCatalog
             4,
             model="m",
             agent_id=7,
-            tools=["T"],
+            tools=[{"name": "T"}],
             catalog=model_catalog,
             timeline_inputs=_TIMELINE_INPUTS,
         )

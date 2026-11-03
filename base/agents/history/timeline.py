@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, assert_never
+from typing import Literal, assert_never
 
 from langchain_core.messages import (
     AIMessage,
@@ -25,6 +25,7 @@ from base.agents.messages.kwargs import (
 from base.agents.messages.reply_intent import resolve_agent_reply
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.sdk.tally import SdkCall, sdk_calls_by_tool_call_id
+from base.host.boundary.json_values import is_object_dict
 from base.lm.content import message_addl_kwargs, message_content
 from base.lm.system_note import unwrap_system_note
 
@@ -64,7 +65,12 @@ _NO_TIMESTAMP_NOTE_TAGS = frozenset(
 )
 
 
-def _inbound_text(content: str | list[str | dict[str, Any]]) -> str:
+# meiva:note
+# The content of a message as `message_content` hands it back: a string, or a list of strings and block dicts.
+MessageContent = str | list[str | dict[str, object]]
+
+
+def _inbound_text(content: MessageContent) -> str:
     # meiva:note
     # A message's text blocks joined, each rendered as its own text: a block that is one
     # complete system note loses its envelope, because the framing is not content the card
@@ -140,7 +146,7 @@ def _message_items(
     msg: BaseMessage,
     msg_idx: int,
     kwargs: MeivaMessageKwargs,
-    sdk_by_id: dict[str, Any],
+    sdk_by_id: dict[str, list[SdkCall]],
     inputs: TimestampPolicy,
 ) -> list[TimelineItem]:
     raw_content = message_content(msg)
@@ -198,7 +204,7 @@ def _system_prompt_item(msg_idx: int, content: str) -> TimelineItem:
 
 def _inbound_item(
     msg_idx: int,
-    raw_content: str | list[str | dict[str, Any]],
+    raw_content: MessageContent,
     kwargs: MeivaMessageKwargs,
 ) -> TimelineItem:
     embedded_id = None
@@ -225,15 +231,15 @@ def _inbound_item(
     )
 
 
-def _attach_images(content: str | list[str | dict[str, Any]]) -> list[str] | None:
+def _attach_images(content: MessageContent) -> list[str] | None:
     if not isinstance(content, list):
         return None
     urls: list[str] = []
     for block in content:
         if not isinstance(block, dict) or block.get("type") != "image_url":
             continue
-        image_url: dict[str, Any] | str | None = block.get("image_url")
-        if not isinstance(image_url, dict):
+        image_url = block.get("image_url")
+        if not is_object_dict(image_url):
             continue
         url = image_url.get("url")
         if isinstance(url, str) and url.startswith("data:"):
@@ -242,7 +248,7 @@ def _attach_images(content: str | list[str | dict[str, Any]]) -> list[str] | Non
 
 
 # meiva:link base/agents/history/docs/timeline/timeline.meiva.okf.md
-def _attach_image_captions(content: str | list[str | dict[str, Any]]) -> list[str] | None:
+def _attach_image_captions(content: MessageContent) -> list[str] | None:
     from base.lm.reasoning import content_blocks
 
     if not isinstance(content, list):
@@ -268,9 +274,7 @@ def _attach_image_captions(content: str | list[str | dict[str, Any]]) -> list[st
     return captions or None
 
 
-def _attach_item(
-    msg_idx: int, raw_content: str | list[str | dict[str, Any]], created_at: str | None
-) -> TimelineItem:
+def _attach_item(msg_idx: int, raw_content: MessageContent, created_at: str | None) -> TimelineItem:
     return TimelineItem(
         item_id=f"{msg_idx}.0",
         kind="attach",
@@ -357,16 +361,15 @@ def tail_window(items: list[TimelineItem], limit: int) -> tuple[list[TimelineIte
 
 
 def _fold_addl_reasoning_into_content(
-    content: str | list[Any], additional_kwargs: dict[str, Any]
-) -> str | list[Any]:
+    content: str | list[object], additional_kwargs: dict[str, object]
+) -> str | list[object]:
     from base.lm.reasoning import ContentBlock
 
     addl_reasoning = additional_kwargs.get("reasoning_content")
     if not (addl_reasoning and isinstance(addl_reasoning, str) and addl_reasoning.strip()):
         return content
     if isinstance(content, list):
-        items: list[dict[str, Any] | str] = content
-        if any(isinstance(b, dict) and b.get("type") == "thinking" for b in items):
+        if any(is_object_dict(b) and b.get("type") == "thinking" for b in content):
             return content
         head: ContentBlock = {"type": "thinking", "thinking": addl_reasoning, "index": 0}
         return [head, *content]
@@ -461,13 +464,13 @@ def _chat_item(
 
 # meiva:link base/agents/history/docs/timeline/timeline.meiva.okf.md
 def _content_block_item(
-    block: str | dict[str, Any],
+    block: object,
     pos: int,
     ctx: _AiBlockContext,
     *,
     reasoning_attached: bool,
 ) -> tuple[TimelineItem | None, int | None, bool]:
-    if not isinstance(block, dict):
+    if not is_object_dict(block):
         return None, None, reasoning_attached
     block_type = block.get("type")
     if block_type not in ("text", "thinking"):

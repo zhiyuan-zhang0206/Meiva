@@ -6,6 +6,8 @@ from uuid import uuid4
 import psycopg
 
 from base.agents import impersonation as leases
+from base.agents.impersonation import RequestedLease
+from base.agents.impersonation.status import PublicLease
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import SYSTEM_TIMERS
@@ -31,7 +33,7 @@ def create_native_owner(conn: psycopg.Connection, *, local_machine: str) -> Runt
     return owner
 
 
-def native_status(owner: RuntimeIncarnation, *, database_gate: ProcessDbGate) -> dict[str, Any]:
+def native_status(owner: RuntimeIncarnation, *, database_gate: ProcessDbGate) -> PublicLease:
     result = leases.native_status(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
@@ -50,7 +52,7 @@ def request_controller(
     thread: str | None = None,
     database_gate: ProcessDbGate,
     local_machine: str,
-) -> dict[str, Any]:
+) -> RequestedLease:
     kwargs: dict[str, Any] = {}
     if provider in ("codex", "antigravity"):
         kwargs["relay_thread_id"] = thread or str(uuid4())
@@ -77,7 +79,7 @@ def accept_controller(
     authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     local_machine: str,
-) -> dict[str, Any]:
+) -> RequestedLease:
     lease = request_controller(
         owner, authority=authority, database_gate=database_gate, local_machine=local_machine
     )

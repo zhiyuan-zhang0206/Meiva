@@ -7,6 +7,7 @@ import pytest
 from base.agents import impersonation as leases
 from base.agents.impersonation import history as history
 from base.agents.impersonation import sessions as sessions
+from base.agents.impersonation.status import LeaseRecord
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import SYSTEM_TIMERS, Clock
@@ -46,7 +47,7 @@ def start(
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
-) -> dict[str, Any]:
+) -> LeaseRecord:
     result = sessions.request(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
@@ -155,4 +156,4 @@ def test_inbound_attachments_survive_timeline_and_handoff(
     assert image_item.images == [valid_url]
     document = history.build_document(lease, history.entries(str(lease["id"]), db_conn))
     assert document["messages"][0]["payload"]["payload"] == payload
-    assert document["messages"][0]["acknowledged"] is True
+    assert document["messages"][0].get("acknowledged") is True

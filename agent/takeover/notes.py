@@ -30,7 +30,7 @@ class SessionRef:
     name: str
 
     @classmethod
-    def of(cls, lease: Mapping[str, str | int]) -> SessionRef:
+    def of(cls, lease: Mapping[str, object]) -> SessionRef:
         agent_id, session_id, name = lease["agent_id"], lease["session_id"], lease["name"]
         if not (
             isinstance(agent_id, int) and isinstance(session_id, int) and isinstance(name, str)

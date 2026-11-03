@@ -9,6 +9,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from psycopg_pool import AsyncConnectionPool
 
 from agent.impersonation_handoff import (
+    SessionIdentity,
     deliver_handoff,
     ensure_start_marker,
     note_stamp,
@@ -37,7 +38,7 @@ def _notes(*, timestamps: bool = False) -> TimestampPolicy:
     return TimestampPolicy.from_clock(clock, timestamps_enabled=timestamps)
 
 
-def _session(number: int = 0) -> dict[str, Any]:
+def _session(number: int = 0) -> SessionIdentity:
     return {
         "agent_id": 42,
         "session_id": number,

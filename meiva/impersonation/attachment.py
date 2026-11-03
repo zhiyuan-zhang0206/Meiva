@@ -36,6 +36,7 @@ from base.agents.impersonation.manifest import (
     open_local_participant,
     seal_local_participant,
 )
+from base.agents.impersonation.status import PublicLease
 from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.config.agent_pins import resolve_agent_config_pins
@@ -112,7 +113,9 @@ class _Codec:
 
         return plugin_state_codec.encode_plugin_delta(dict(update), state_cls)
 
-    def decode_plugin_delta(self, encoded: dict[str, str], state_cls: type[Any]) -> dict[str, Any]:
+    def decode_plugin_delta(
+        self, encoded: Mapping[str, object], state_cls: type[Any]
+    ) -> dict[str, Any]:
         from base.agents.context.external_attachment import plugin_state_codec
 
         return plugin_state_codec.decode_plugin_delta(encoded, state_cls)
@@ -278,7 +281,7 @@ class Attachment(ExternalAttachment):
     def capture_local_event(self, event: Event) -> Event:
         return capture_local_event(event, gate=self._event_gate)
 
-    def _lease(self) -> dict[str, Any]:
+    def _lease(self) -> PublicLease:
         return require_active(self._database(), self.lease_id, local_machine=self._machine.name())
 
     def _validate(self) -> int:

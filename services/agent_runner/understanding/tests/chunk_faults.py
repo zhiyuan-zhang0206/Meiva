@@ -4,7 +4,6 @@
 import asyncio
 from dataclasses import dataclass
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 from psycopg_pool import AsyncConnectionPool
@@ -22,7 +21,11 @@ from base.config import ConfigBoot
 from base.db import Database
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.understanding import chunk_consumer as loop
-from services.agent_runner.understanding.tests.consumer_helpers import consumer_config, lm_wiring
+from services.agent_runner.understanding.tests.consumer_helpers import (
+    consumer_config,
+    db_without_agent_meta,
+    lm_wiring,
+)
 from services.agent_runner.understanding.tests.consumer_history import inbound_history
 
 
@@ -122,7 +125,7 @@ async def run_rounds(
         async with asyncio.TaskGroup() as tg:
             await loop.Consumer(
                 pool,
-                MagicMock(),
+                db_without_agent_meta(),
                 [],
                 clock=system_clock(),
                 **lm_wiring(model_catalog),

@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
+from pydantic import TypeAdapter
 
 import meiva
 from agent.state import build_agent_state, plugin_state_schema
@@ -30,6 +31,7 @@ from agent.tests.impersonation.lease_support import Cluster
 from agent.tests.impersonation.lease_support import cluster as cluster
 from base.agents import impersonation as leases
 from base.agents.context.external_attachment.plugin_state_codec import encode_plugin_delta
+from base.agents.impersonation.status import PublicLease
 from base.agents.impersonation.tests.impersonation_support import legacy_session
 from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.clock import SYSTEM_TIMERS, Clock
@@ -111,6 +113,9 @@ def native_state_class() -> type[Any]:
 
 # meiva:note
 # One active takeover of a native agent whose checkpoint is in the database.
+_JOURNAL = TypeAdapter(list[dict[str, str]])
+
+
 @dataclass(frozen=True)
 class Takeover:
     cluster: Cluster
@@ -126,11 +131,11 @@ class Takeover:
     def machine(self) -> str:
         return self.cluster.local_machine
 
-    def lease(self) -> dict[str, Any]:
+    def lease(self) -> PublicLease:
         return self.cluster.get(self.lease_id)
 
     def journal(self) -> list[dict[str, str]]:
-        return self.lease()["plugin_delta"]
+        return _JOURNAL.validate_python(self.lease()["plugin_delta"])
 
     def write_checkpoint(self, **channels: object) -> None:
         self.write_channels({"sample__seen": {"native"}, **channels})

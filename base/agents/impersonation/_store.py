@@ -3,20 +3,24 @@
 import hashlib
 import hmac
 from collections.abc import Mapping
-from typing import Any
+from dataclasses import dataclass
+from datetime import datetime
+from typing import TypedDict, TypeGuard
 from uuid import UUID
 
-from psycopg.rows import dict_row
+from psycopg.rows import class_row, dict_row
 
 from base.agents.impersonation.status import (
     OPEN,
     ImpersonationStatus,
     LeaseRecord,
+    PublicLease,
     is_log_native,
     parse_lease,
 )
 from base.api_contracts.agent_contract import AgentStatus, Harness
 from base.db.protocols import SyncConnection
+from base.db.rows import IdRow
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
@@ -28,10 +32,51 @@ def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def lock_agent(conn: SyncConnection, agent_id: int) -> dict[str, Any]:
-    with conn.cursor(row_factory=dict_row) as cur:
-        cur.execute("SELECT * FROM agents_meta WHERE id=%s FOR UPDATE", (agent_id,))
-        row = cur.fetchone()
+# meiva:note
+# One pending inbox message as a controller reads it. The payload is the stored envelope, still to
+# be checked by whoever reads into it.
+class InboxMessage(TypedDict):
+    id: int
+    content: str
+    kind: str
+    source: str
+    payload: object
+    created_at: datetime
+
+
+# meiva:note
+# An inbox message as the relay reads it, with its delivery state on the lease.
+class RelayInboxMessage(InboxMessage):
+    delivery_attempts: int
+    delivery_due: bool
+
+
+# meiva:note
+# The answer of a statement that selects the `id` of a lease (a UUID).
+@dataclass(frozen=True)
+class LeaseIdRow:
+    id: UUID
+
+
+# meiva:note
+# The agent columns impersonation reads while it holds the agent row lock.
+@dataclass(frozen=True)
+class LockedAgent:
+    id: int
+    status: str
+    machine: str
+    harness: str
+    runtime_generation: UUID | None
+    runtime_owner: UUID | None
+
+
+def lock_agent(conn: SyncConnection, agent_id: int) -> LockedAgent:
+    with conn.cursor(row_factory=class_row(LockedAgent)) as cur:
+        row = cur.execute(
+            "SELECT id,status,machine,harness,runtime_generation,runtime_owner "
+            "FROM agents_meta WHERE id=%s FOR UPDATE",
+            (agent_id,),
+        ).fetchone()
     if row is None:
         raise ImpersonationError(f"Agent {agent_id} does not exist")
     return row
@@ -40,12 +85,14 @@ def lock_agent(conn: SyncConnection, agent_id: int) -> dict[str, Any]:
 def lock_lease(conn: SyncConnection, lease_id: str) -> LeaseRecord:
     # Read only the immutable foreign key first; all mutations acquire the agent
     # lock before the lease or inbox, matching native ownership and claim order.
-    row = conn.execute(
-        "SELECT agent_id FROM agent_impersonations WHERE id=%s", (UUID(str(lease_id)),)
-    ).fetchone()
+    with conn.cursor(row_factory=class_row(IdRow)) as id_cur:
+        row = id_cur.execute(
+            "SELECT agent_id AS id FROM agent_impersonations WHERE id=%s",
+            (UUID(str(lease_id)),),
+        ).fetchone()
     if row is None:
         raise ImpersonationError("Impersonation does not exist")
-    lock_agent(conn, row[0])
+    lock_agent(conn, row.id)
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute("SELECT * FROM agent_impersonations WHERE id=%s FOR UPDATE", (lease_id,))
         lease = cur.fetchone()
@@ -54,13 +101,32 @@ def lock_lease(conn: SyncConnection, lease_id: str) -> LeaseRecord:
     return parse_lease(lease)
 
 
-def public(lease: Mapping[str, Any]) -> dict[str, Any]:
+# meiva:note
+# The shape `public` promises beyond the status it checks is the lease row's own: the rows are
+# read whole from `agent_impersonations`, as `parse_lease` does for the stored record.
+def _is_public_lease(row: dict[str, object]) -> TypeGuard[PublicLease]:
+    return isinstance(row.get("status"), ImpersonationStatus)
+
+
+def public(lease: Mapping[str, object]) -> PublicLease:
     status = ImpersonationStatus(lease["status"])
-    return {
+    projected: dict[str, object] = {
         key: status if key == "status" else str(value) if isinstance(value, UUID) else value
         for key, value in lease.items()
         if key not in ("token_hash", "relay_token_hash", "automatic", "consent_version")
     }
+    if not _is_public_lease(projected):
+        raise TypeError("A public lease needs a parsed status")
+    return projected
+
+
+# meiva:note
+# The columns `live_lease_on_machine` reads.
+@dataclass(frozen=True)
+class _LiveLeaseRow:
+    id: str
+    source: str
+    executor_name: str
 
 
 # meiva:note
@@ -70,17 +136,17 @@ def public(lease: Mapping[str, Any]) -> dict[str, Any]:
 # ended early), so testing the clock alone reports a lease nobody holds. Read-only: the
 # caller owns the transaction and the failure semantics.
 def live_lease_on_machine(conn: SyncConnection, machine: str) -> tuple[str, str] | None:
-    row = conn.execute(
-        "SELECT id::text, source, executor_name FROM agent_impersonations "
-        "WHERE machine=%s AND status IN ('requested','accepted','active') "
-        "AND expires_at>clock_timestamp() "
-        "ORDER BY expires_at DESC, agent_id LIMIT 1",
-        (machine,),
-    ).fetchone()
+    with conn.cursor(row_factory=class_row(_LiveLeaseRow)) as cur:
+        row = cur.execute(
+            "SELECT id::text AS id, source, executor_name FROM agent_impersonations "
+            "WHERE machine=%s AND status IN ('requested','accepted','active') "
+            "AND expires_at>clock_timestamp() "
+            "ORDER BY expires_at DESC, agent_id LIMIT 1",
+            (machine,),
+        ).fetchone()
     if row is None:
         return None
-    lease_id, source, executor = row
-    return lease_id, f"{source} / {executor}" if executor else source
+    return row.id, f"{row.source} / {row.executor_name}" if row.executor_name else row.source
 
 
 # meiva:note
@@ -97,7 +163,7 @@ def machine_mismatch_message(*, agent_id: int, agent_machine: str, local_machine
 
 
 def local(
-    lease: Mapping[str, Any],
+    lease: LeaseRecord,
     *,
     local_machine: str,
 ) -> None:
@@ -112,7 +178,7 @@ def local(
 
 
 def authenticate(
-    lease: Mapping[str, Any],
+    lease: LeaseRecord,
     *,
     local_machine: str,
 ) -> None:
@@ -123,26 +189,26 @@ def authenticate(
     )
 
 
-def require_meiva_harness(meta: Mapping[str, Any]) -> None:
-    harness = Harness(meta["harness"])
-    if harness is not Harness.MEIVA:
+def require_meiva_harness(agent_id: int, harness: str) -> None:
+    parsed = Harness(harness)
+    if parsed is not Harness.MEIVA:
         raise ImpersonationError(
-            f"Impersonation requires the Meiva harness: agent {meta['id']} uses {harness.value!r}"
+            f"Impersonation requires the Meiva harness: agent {agent_id} uses {parsed.value!r}"
         )
 
 
-def require_native(conn: SyncConnection, incarnation: RuntimeIncarnation) -> dict[str, Any]:
+def require_native(conn: SyncConnection, incarnation: RuntimeIncarnation) -> LockedAgent:
     meta = lock_agent(conn, incarnation.agent_id)
-    require_meiva_harness(meta)
-    if (meta["runtime_generation"], meta["runtime_owner"]) != (
+    require_meiva_harness(meta.id, meta.harness)
+    if (meta.runtime_generation, meta.runtime_owner) != (
         incarnation.generation,
         incarnation.owner,
-    ) or AgentStatus(meta["status"]) not in (AgentStatus.RUNNING, AgentStatus.IDLING):
+    ) or AgentStatus(meta.status) not in (AgentStatus.RUNNING, AgentStatus.IDLING):
         raise ImpersonationError("Native runtime no longer owns this agent")
     return meta
 
 
-def dismiss_reminders(conn: SyncConnection, lease: Mapping[str, Any]) -> None:
+def dismiss_reminders(conn: SyncConnection, lease: LeaseRecord) -> None:
     """Retire this lease's pending renewal reminders, in the lease transaction.
 
     Reminders are written for the external controller only; once the lease
@@ -235,13 +301,13 @@ def require_active_locked(
     # Do not persist expiration here and then raise (which would roll it back).
     # The native boundary/get reconciler persists it independently.
     meta = lock_agent(conn, lease["agent_id"])
-    require_meiva_harness(meta)
+    require_meiva_harness(meta.id, meta.harness)
     fresh = conn.execute("SELECT %s > clock_timestamp()", (lease["expires_at"],)).fetchone()
     validate_active(
         lease,
         fresh=fresh == (True,),
-        machine=meta["machine"],
-        status=AgentStatus(meta["status"]),
+        machine=meta.machine,
+        status=AgentStatus(meta.status),
         local_machine=local_machine,
     )
 
@@ -280,7 +346,7 @@ def validate_relay_spec(
 
 
 def authenticate_relay(
-    lease: Mapping[str, Any],
+    lease: LeaseRecord,
     relay_token: str,
     *,
     local_machine: str,
@@ -304,7 +370,7 @@ def require_relay_active_locked(
     local_machine: str,
 ) -> None:
     meta = lock_agent(conn, lease["agent_id"])
-    require_meiva_harness(meta)
+    require_meiva_harness(meta.id, meta.harness)
     fresh = conn.execute("SELECT %s > clock_timestamp()", (lease["expires_at"],)).fetchone()
     authenticate_relay(
         lease,
@@ -313,7 +379,7 @@ def require_relay_active_locked(
     )
     if lease["status"] != ImpersonationStatus.ACTIVE or fresh != (True,):
         raise ImpersonationError("Impersonation is not active or its TTL has expired")
-    if meta["machine"] != lease["machine"] or AgentStatus(meta["status"]) not in (
+    if meta.machine != lease["machine"] or AgentStatus(meta.status) not in (
         AgentStatus.RUNNING,
         AgentStatus.IDLING,
     ):

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import Any
 from uuid import uuid4
 
 import psycopg
 import pytest
 
 from base.agents import impersonation as leases
+from base.agents.impersonation import RequestedLease
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.api_contracts.caller_identity import CallerIdentity
 from base.cluster.machine import MachineIdentityReader
@@ -177,7 +177,7 @@ def test_reaper_expires_offline_lease_and_keeps_unconsumed_handoff(
 def _assert_force_expired_row(
     db_conn: psycopg.Connection,
     owner: RuntimeIncarnation,
-    lease: dict[str, Any],
+    lease: RequestedLease,
     lease_status: str,
 ) -> None:
     row = db_conn.execute(
@@ -196,7 +196,7 @@ def _assert_force_expired_row(
     ).fetchone() == (("done",) if lease_status == "active" else None)
 
 
-def _assert_expired_lifecycle_entry(db_conn: psycopg.Connection, lease: dict[str, Any]) -> None:
+def _assert_expired_lifecycle_entry(db_conn: psycopg.Connection, lease: RequestedLease) -> None:
     entry_row = db_conn.execute(
         "SELECT payload FROM agent_impersonation_entries WHERE lease_id=%s "
         "AND kind='lifecycle' ORDER BY seq DESC LIMIT 1",

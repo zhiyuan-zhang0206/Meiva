@@ -8,10 +8,10 @@
 # meiva:link gateway/upload_delivery/docs/delivered-uploads/source-publication.meiva.okf.md
 
 import hashlib
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
-from psycopg import Connection
+import psycopg
 from psycopg.types.json import Jsonb
 
 from base.agents.upload_delivery.models import (
@@ -25,6 +25,7 @@ from base.agents.upload_delivery.paths import agent_upload_dir, staged_path
 from base.agents.upload_delivery.storage import check_quota, lock_agent
 from base.api_contracts.agent_contract import AgentNotFound
 from base.db import agent_exists
+from base.db.rows import query_all, query_one
 from base.db.transaction import ConnectionSource, write_transaction
 from base.host.db_authority.unit import UnitIdentity
 from base.host.private_storage import create_private_bytes
@@ -39,8 +40,66 @@ __all__ = [
 ]
 
 
-def _staged(row: tuple[Any, ...]) -> StagedFile:
-    return StagedFile(file_id=row[0], name=row[2], size=row[3], sha256=row[4], content_type=row[5])
+# meiva:note
+# A staged file as `upload_staged_files` stores it: the identity the person picked, its state
+# and the native directory it is bound to. The reads below extend it with the columns they
+# also select.
+@dataclass(frozen=True)
+class _StagedRow:
+    file_id: str
+    request_hash: str
+    name: str
+    size: int
+    sha256: str
+    content_type: str
+    state: str
+    storage_directory: str
+
+
+# meiva:note
+# A staged file with its owning unit (jsonb, validated by `_own`) and the batch that took it,
+# if any, with that batch's state (`b.state AS batch_state`).
+@dataclass(frozen=True)
+class _ClaimRow(_StagedRow):
+    source_unit: object
+    batch_id: str | None
+    batch_state: str | None
+
+
+# meiva:note
+# A staged file with its owning unit (jsonb, validated by `_own`).
+@dataclass(frozen=True)
+class _ObjectRow(_StagedRow):
+    source_unit: object
+
+
+# meiva:note
+# What `discard` reads: the file's own state, the batch that took it and that batch's state.
+@dataclass(frozen=True)
+class _DiscardRow:
+    state: str
+    batch_id: str | None
+    storage_directory: str
+    source_unit: object
+    batch_state: str | None
+
+
+# meiva:note
+# A staged file whose bytes a sweep removes: its id and the directory they live in.
+@dataclass(frozen=True)
+class _PathRow:
+    file_id: str
+    storage_directory: str
+
+
+def _staged(row: _StagedRow) -> StagedFile:
+    return StagedFile(
+        file_id=row.file_id,
+        name=row.name,
+        size=row.size,
+        sha256=row.sha256,
+        content_type=row.content_type,
+    )
 
 
 def _verify_bytes(path: Path, size: int, sha256: str) -> None:
@@ -62,16 +121,18 @@ def _claim(
     unit: UnitIdentity,
     max_bytes: int,
     max_files: int,
-) -> tuple[Any, ...]:
+) -> _StagedRow:
     with write_transaction(pool) as conn:
         lock_agent(conn, agent_id)
-        found = conn.execute(
+        found = query_one(
+            conn,
+            _StagedRow,
             "SELECT file_id, request_hash, name, size, sha256, content_type, state, "
             "storage_directory FROM upload_staged_files WHERE operation_key=%s",
             (key,),
-        ).fetchone()
+        )
         if found is not None:
-            if found[1] != fingerprint or found[7] != str(directory):
+            if found.request_hash != fingerprint or found.storage_directory != str(directory):
                 raise UploadDeliveryConflictError(
                     "idempotency key already identifies another staged file"
                 )
@@ -97,15 +158,15 @@ def _claim(
                 str(directory),
             ),
         )
-        return (
-            file.file_id,
-            fingerprint,
-            file.name,
-            file.size,
-            file.sha256,
-            file.content_type,
-            "receiving",
-            str(directory),
+        return _StagedRow(
+            file_id=file.file_id,
+            request_hash=fingerprint,
+            name=file.name,
+            size=file.size,
+            sha256=file.sha256,
+            content_type=file.content_type,
+            state="receiving",
+            storage_directory=str(directory),
         )
 
 
@@ -152,7 +213,7 @@ def stage(
         max_files=max_files,
     )
     file = _staged(row)
-    if row[6] != "receiving":
+    if row.state != "receiving":
         return file
     path = staged_path(directory, file.file_id)
     try:
@@ -184,18 +245,21 @@ def discard(
     unit = current_unit(local_machine=local_machine, home=home)
     with write_transaction(pool) as conn:
         lock_agent(conn, agent_id)
-        row = conn.execute(
-            "SELECT s.state, s.batch_id, s.storage_directory, s.source_unit, b.state "
+        row = query_one(
+            conn,
+            _DiscardRow,
+            "SELECT s.state, s.batch_id, s.storage_directory, s.source_unit, "
+            "b.state AS batch_state "
             "FROM upload_staged_files s LEFT JOIN upload_delivery_batches b "
             "ON b.batch_id = s.batch_id WHERE s.file_id=%s AND s.agent_id=%s FOR UPDATE OF s",
             (file_id, agent_id),
-        ).fetchone()
+        )
         if row is None:
             return
-        if row[0] == "released" or (row[1] is not None and row[4] != "hold"):
+        if row.state == "released" or (row.batch_id is not None and row.batch_state != "hold"):
             raise UploadDeliveryConflictError("a send has taken this file")
-        _own(row[3], unit)
-        staged_path(Path(row[2]), file_id).unlink(missing_ok=True)
+        _own(row.source_unit, unit)
+        staged_path(Path(row.storage_directory), file_id).unlink(missing_ok=True)
         conn.execute("DELETE FROM upload_staged_files WHERE file_id=%s", (file_id,))
 
 
@@ -208,15 +272,17 @@ def sweep_unsent(
 ) -> int:
     unit = current_unit(local_machine=local_machine, home=home)
     with write_transaction(pool) as conn:
-        rows = conn.execute(
+        rows = query_all(
+            conn,
+            _PathRow,
             "SELECT file_id, storage_directory FROM upload_staged_files WHERE batch_id IS NULL "
             "AND source_unit=%s AND created_at < now() - make_interval(secs => %s) "
             "ORDER BY created_at LIMIT %s FOR UPDATE SKIP LOCKED",
             (Jsonb(unit.model_dump()), ttl_seconds, limit),
-        ).fetchall()
-        for file_id, directory in rows:
-            staged_path(Path(directory), file_id).unlink(missing_ok=True)
-            conn.execute("DELETE FROM upload_staged_files WHERE file_id=%s", (file_id,))
+        )
+        for swept in rows:
+            staged_path(Path(swept.storage_directory), swept.file_id).unlink(missing_ok=True)
+            conn.execute("DELETE FROM upload_staged_files WHERE file_id=%s", (swept.file_id,))
     return len(rows)
 
 
@@ -236,26 +302,28 @@ def release_accepted(
 ) -> int:
     unit = current_unit(local_machine=local_machine, home=home)
     with write_transaction(pool) as conn:
-        rows = conn.execute(
+        rows = query_all(
+            conn,
+            _PathRow,
             "SELECT s.file_id, s.storage_directory FROM upload_staged_files s "
             "JOIN upload_delivery_batches b ON b.batch_id = s.batch_id "
             "WHERE s.state='ready' AND b.state='accepted' AND s.source_unit=%s "
             "AND (%s::text IS NULL OR s.batch_id=%s) "
             "ORDER BY s.created_at LIMIT %s FOR UPDATE OF s SKIP LOCKED",
             (Jsonb(unit.model_dump()), batch_id, batch_id, limit),
-        ).fetchall()
-        for file_id, directory in rows:
-            staged_path(Path(directory), file_id).unlink(missing_ok=True)
+        )
+        for released in rows:
+            staged_path(Path(released.storage_directory), released.file_id).unlink(missing_ok=True)
             conn.execute(
                 "UPDATE upload_staged_files SET state='released', released_at=now() "
                 "WHERE file_id=%s",
-                (file_id,),
+                (released.file_id,),
             )
     return len(rows)
 
 
 def claim_for_batch(
-    conn: Connection[Any],
+    conn: psycopg.Connection,
     agent_id: int,
     file_ids: list[str],
     *,
@@ -264,43 +332,47 @@ def claim_for_batch(
 ) -> list[StagedFile]:
     if not file_ids or len(set(file_ids)) != len(file_ids):
         raise UploadDeliveryConflictError("upload send requires one or more distinct staged files")
-    rows = conn.execute(
+    rows = query_all(
+        conn,
+        _ClaimRow,
         "SELECT s.file_id, s.request_hash, s.name, s.size, s.sha256, s.content_type, s.state, "
-        "s.storage_directory, s.source_unit, s.batch_id, b.state "
+        "s.storage_directory, s.source_unit, s.batch_id, b.state AS batch_state "
         "FROM upload_staged_files s LEFT JOIN upload_delivery_batches b "
         "ON b.batch_id = s.batch_id WHERE s.agent_id=%s AND s.file_id = ANY(%s) FOR UPDATE OF s",
         (agent_id, file_ids),
-    ).fetchall()
-    by_id = {row[0]: row for row in rows}
+    )
+    by_id = {row.file_id: row for row in rows}
     if len(by_id) != len(file_ids):
         raise UploadDeliveryConflictError("one or more staged files do not exist for this agent")
     files: list[StagedFile] = []
     for fid in file_ids:
         row = by_id[fid]
-        if row[6] != "ready" or (row[9] is not None and row[10] != "hold"):
+        if row.state != "ready" or (row.batch_id is not None and row.batch_state != "hold"):
             raise UploadDeliveryConflictError("staged file is not ready to be sent")
-        _own(row[8], unit)
-        if row[7] != str(directory):
+        _own(row.source_unit, unit)
+        if row.storage_directory != str(directory):
             raise UploadDeliveryConflictError("staged file binds another native physical root")
-        _verify_bytes(staged_path(directory, fid), row[3], row[4])
+        _verify_bytes(staged_path(directory, fid), row.size, row.sha256)
         files.append(_staged(row))
     return files
 
 
 def staged_object(
-    conn: Connection[Any], agent_id: int, batch_id: str, ordinal: int, *, unit: UnitIdentity
+    conn: psycopg.Connection, agent_id: int, batch_id: str, ordinal: int, *, unit: UnitIdentity
 ) -> tuple[Path, StagedFile]:
-    row = conn.execute(
+    row = query_one(
+        conn,
+        _ObjectRow,
         "SELECT s.file_id, s.request_hash, s.name, s.size, s.sha256, s.content_type, s.state, "
         "s.storage_directory, s.source_unit FROM upload_delivery_batches b "
         "JOIN upload_staged_files s ON s.file_id = (b.manifest->'objects'->%s->>'staged_id') "
         "WHERE b.agent_id=%s AND b.batch_id=%s AND b.protocol=2 AND b.ready_at IS NOT NULL "
         "AND s.batch_id = b.batch_id",
         (ordinal, agent_id, batch_id),
-    ).fetchone()
-    if row is None or row[6] != "ready":
+    )
+    if row is None or row.state != "ready":
         raise UploadDeliveryConflictError("source object is not available for this batch")
-    _own(row[8], unit)
-    path = staged_path(Path(row[7]), row[0])
-    _verify_bytes(path, row[3], row[4])
+    _own(row.source_unit, unit)
+    path = staged_path(Path(row.storage_directory), row.file_id)
+    _verify_bytes(path, row.size, row.sha256)
     return path, _staged(row)

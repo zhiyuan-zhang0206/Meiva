@@ -45,7 +45,7 @@ import threading
 from collections.abc import Callable, Mapping, Sized
 from dataclasses import dataclass, field, fields
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, Self
+from typing import TYPE_CHECKING, Protocol, Self
 
 from base.agents.context.clients import ClientSet, LazyConnection
 from base.agents.context.identity import AgentIdentity
@@ -58,6 +58,8 @@ from base.api_contracts.agent_contract import Harness
 from base.clock import Clock, Timers
 from base.clock.ids import new_uuid
 from base.cluster.machine import MachineIdentityReader
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_mapping
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.harness.engine import TurnEngine
@@ -397,7 +399,7 @@ class MeivaContext:
             raise RuntimeError("this MeivaContext carries no AgentIdentity (ctx.identity is None)")
         return self.identity
 
-    def describe(self) -> dict[str, Any]:
+    def describe(self) -> dict[str, object]:
         """The serializable, non-secret description an exec request envelope carries."""
         return {
             "identity": self.require_identity().describe(),
@@ -407,7 +409,7 @@ class MeivaContext:
     @classmethod
     def from_description(
         cls,
-        description: dict[str, Any],
+        description: Mapping[str, object],
         *,
         clients: ClientSet,
         machine: MachineIdentityReader,
@@ -415,8 +417,11 @@ class MeivaContext:
         original_incarnation: RuntimeIncarnation | None = None,
     ) -> Self:
         """Rebuild identity with clients and original admission supplied by the child's root."""
+        identity = description["identity"]
+        if not is_object_dict(identity):
+            raise TypeError(f"context description identity must be an object: {identity!r}")
         return cls(
-            identity=AgentIdentity.from_description(description["identity"]),
+            identity=AgentIdentity.from_description(identity),
             original_incarnation=original_incarnation,
             clients=clients,
             machine=machine,
@@ -487,6 +492,8 @@ class MeivaContext:
     def __repr__(self) -> str:
         named = {f.name for f in fields(self)}
         held = ", ".join(
-            f"{name}={_printed_value(value)}" for name, value in vars(self).items() if name in named
+            f"{name}={_printed_value(value)}"
+            for name, value in object_mapping(vars(self)).items()
+            if name in named
         )
         return f"MeivaContext({held})"

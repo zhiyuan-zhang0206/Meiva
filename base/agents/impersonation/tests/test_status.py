@@ -99,7 +99,7 @@ def test_public_readers_reject_invalid_raw_status(
         if reader == "public":
             public(raw)
         elif reader == "public_session":
-            history.public_session(raw)
+            history.public_session(parse_lease(raw))
         elif reader == "resolve":
             history.resolve(db, 7, 1, local_machine="local")
         else:

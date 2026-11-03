@@ -7,6 +7,7 @@ import re
 import time
 from collections.abc import Sequence
 from typing import Any, TypedDict
+from unittest.mock import MagicMock
 
 from langchain_core.messages import AIMessage
 
@@ -68,3 +69,15 @@ class GroupModels:
             f'<group first="{g.first}" last="{g.last}">{g.summary}</group>' for g in groups
         )
         return AIMessage(content=text or "no groups")
+
+
+# meiva:note
+# A stand-in `Database` whose `agents_meta` lookup finds no row, which is the answer a consumer
+# test needs from the effective-model read (`agent_model_target` falls back to the cluster
+# model). The old tests passed a bare `MagicMock`, whose duck-typed answer the typed reader
+# refuses.
+def db_without_agent_meta() -> MagicMock:
+    db = MagicMock()
+    cursor = db.connect.return_value.__enter__.return_value.cursor.return_value.__enter__
+    cursor.return_value.fetchone.return_value = None
+    return db

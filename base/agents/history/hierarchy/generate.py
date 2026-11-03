@@ -13,23 +13,28 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Protocol
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.tools import BaseTool
 
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.call import extract_text, invoke_response
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 
+# meiva:note
+# A tool the model is told about: a schema mapping, a class, a function or a LangChain tool.
+type ToolSpec = dict[str, object] | type | Callable[..., object] | BaseTool
+
 
 class InvocableLlm(Protocol):
-    def invoke(self, messages: list[Any], /) -> object: ...
+    def invoke(self, messages: list[BaseMessage], /) -> object: ...
 
 
 class ToolBindableLlm(Protocol):
-    def bind_tools(self, tools: list[Any], /) -> InvocableLlm: ...
+    def bind_tools(self, tools: list[ToolSpec], /) -> InvocableLlm: ...
 
 
 class GenerateError(Exception):
@@ -116,9 +121,9 @@ class ModelCall:
 
 def invoke_agent_shaped(
     llm: ToolBindableLlm,
-    messages: list[Any],
+    messages: list[BaseMessage],
     *,
-    tools: Sequence[Any],
+    tools: Sequence[ToolSpec],
     catalog: ModelCatalog,
     desc: str,
     model: str,
@@ -165,7 +170,7 @@ def invoke_agent_shaped(
             raise
         if on_call is not None:
             on_call(ModelCall(rounds, response, (time.monotonic() - started) * 1_000, None))
-        tool_calls = list(getattr(response, "tool_calls", None) or [])
+        tool_calls = response.tool_calls if isinstance(response, AIMessage) else []
         if not tool_calls:
             text = extract_text(response)
             if text:
@@ -175,7 +180,7 @@ def invoke_agent_shaped(
                 f"response_metadata: {getattr(response, 'response_metadata', None)!r}"
             )
         if rounds >= limit:
-            names = ", ".join(str(tc.get("name")) for tc in tool_calls)
+            names = ", ".join(tc["name"] for tc in tool_calls)
             raise GenerateError(
                 f"Model ({desc}) kept calling tools after {limit} refusal round(s) "
                 f"({names}) — tools are unavailable in this call"
@@ -183,6 +188,5 @@ def invoke_agent_shaped(
         rounds += 1
         messages.append(response)
         messages.extend(
-            ToolMessage(content=_TOOL_REFUSAL, tool_call_id=str(tc.get("id") or ""))
-            for tc in tool_calls
+            ToolMessage(content=_TOOL_REFUSAL, tool_call_id=tc["id"] or "") for tc in tool_calls
         )

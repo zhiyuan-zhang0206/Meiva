@@ -36,7 +36,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from base.agents.history.hierarchy.group import GroupReplyError
+from base.agents.history.hierarchy.group import GroupReplyError, group_texts
 from base.agents.history.hierarchy.units import MessageUnit
 
 # Only a tag with its attributes opens a group: a summary that mentions the word `<group` is fine,
@@ -77,7 +77,7 @@ def parse_reply(text: str) -> list[Draft]:
     opened = len(_OPENING.findall(text))
     drafts = [
         Draft(int(first), int(last), summary.strip())
-        for first, last, summary in _ITEM.findall(text)
+        for first, last, summary in group_texts(text, _ITEM)
     ]
     if opened != len(drafts):
         raise GroupReplyError(
