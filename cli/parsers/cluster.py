@@ -9,15 +9,69 @@ Settings (see ``cli.main`` module docstring)."""
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
+from typing import Literal
 
 from base.deploy.progress_timeout import UNIT_BUNDLE_TTL_S
+from cli.options import options
+
+
+@dataclass(frozen=True)
+class _MachineName:
+    name: str
+
+
+@dataclass(frozen=True)
+class _MarkStagingOptions:
+    name: str
+    is_staging: bool
+
+
+@dataclass(frozen=True)
+class _PauseOptions:
+    name: str
+    reason: str | None
+
+
+@dataclass(frozen=True)
+class _DestroyOptions:
+    drop_db: bool
+    stop_mode: Literal["smooth", "force"]
+    stop_timeout: float
+
+
+@dataclass(frozen=True)
+class _OpsOptions:
+    hours: int
+    limit: int
+    operation: str | None
+
+
+@dataclass(frozen=True)
+class _HealthProbeOptions:
+    schema_check: bool
+
+
+@dataclass(frozen=True)
+class _IssueUnitOptions:
+    machine: str
+    home: str
+    out: str
+    ttl_hours: float
+
+
+@dataclass(frozen=True)
+class _InstallUnitOptions:
+    bundle: str
+    transport_key: str
 
 
 def _h_cluster_status(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.cluster.control import cmd_cluster_status
+    from cli.database.runtime import runtime_of
 
-    config = args.runtime.config
+    config = runtime_of(args).config
     return cmd_cluster_status(
         access=gateway_access_from_boot(config),
         status_probe_timeout_s=config.view.gateway.status_probe_timeout_seconds,
@@ -27,42 +81,52 @@ def _h_cluster_status(args: argparse.Namespace) -> int:
 def _h_cluster_mark_staging(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.cluster.control import cmd_cluster_mark_staging
+    from cli.database.runtime import runtime_of
 
+    opts = options(args, _MarkStagingOptions)
     return cmd_cluster_mark_staging(
-        name=args.name,
-        is_staging=args.is_staging,
-        access=gateway_access_from_boot(args.runtime.config),
+        name=opts.name,
+        is_staging=opts.is_staging,
+        access=gateway_access_from_boot(runtime_of(args).config),
     )
 
 
 def _h_cluster_pause(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.cluster.control import cmd_cluster_pause
+    from cli.database.runtime import runtime_of
 
+    opts = options(args, _PauseOptions)
     return cmd_cluster_pause(
-        name=args.name,
-        reason=args.reason,
-        access=gateway_access_from_boot(args.runtime.config),
+        name=opts.name,
+        reason=opts.reason,
+        access=gateway_access_from_boot(runtime_of(args).config),
     )
 
 
 def _h_cluster_resume(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.cluster.control import cmd_cluster_resume
+    from cli.database.runtime import runtime_of
 
-    return cmd_cluster_resume(name=args.name, access=gateway_access_from_boot(args.runtime.config))
+    return cmd_cluster_resume(
+        name=options(args, _MachineName).name,
+        access=gateway_access_from_boot(runtime_of(args).config),
+    )
 
 
 def _h_cluster_destroy(args: argparse.Namespace) -> int:
     from cli.commands.cluster.home import DestroyRequest, cmd_cluster_destroy
     from cli.commands.cluster.plans.destroy_plan import StopMode
+    from cli.database.runtime import runtime_of
 
-    runtime = args.runtime
+    opts = options(args, _DestroyOptions)
+    runtime = runtime_of(args)
     request = DestroyRequest(
         home=runtime.home,
-        drop_db=args.drop_db,
-        stop_mode=StopMode(args.stop_mode),
-        stop_timeout_s=args.stop_timeout,
+        drop_db=opts.drop_db,
+        stop_mode=StopMode(opts.stop_mode),
+        stop_timeout_s=opts.stop_timeout,
         checkout=runtime.checkout,
         user_home=runtime.session.user_home,
         helper_port=runtime.config.view.services.permissions_helper_port,
@@ -80,31 +144,36 @@ def _h_cluster_destroy(args: argparse.Namespace) -> int:
 # makes them readable without hand-written SQL (task #6024).
 def _h_cluster_ops(args: argparse.Namespace) -> int:
     from cli.commands.cluster.ops import cmd_cluster_ops
+    from cli.database import database_factory_of
 
+    opts = options(args, _OpsOptions)
     return cmd_cluster_ops(
-        database_factory=args.database_factory,
-        hours=args.hours,
-        limit=args.limit,
-        operation=args.operation,
+        database_factory=database_factory_of(args),
+        hours=opts.hours,
+        limit=opts.limit,
+        operation=opts.operation,
     )
 
 
 def _h_cluster_health_probe(args: argparse.Namespace) -> int:
     from cli.commands.cluster.health import cmd_health_probe
+    from cli.database import database_factory_of, producer_of
+    from cli.database.runtime import runtime_of
 
     return cmd_health_probe(
-        check_schema=args.schema_check,
-        database_factory=args.database_factory,
-        producer=args.producer,
-        command=args.runtime,
+        check_schema=options(args, _HealthProbeOptions).schema_check,
+        database_factory=database_factory_of(args),
+        producer=producer_of(args),
+        command=runtime_of(args),
     )
 
 
 def _h_cluster_health_probe_register(args: argparse.Namespace) -> int:
     from base.host.system.job_values import JobRoots
     from cli.commands.cluster.cron import cmd_cron_register
+    from cli.database.runtime import runtime_of
 
-    runtime = args.runtime
+    runtime = runtime_of(args)
     return cmd_cron_register(
         os_jobs_enabled=runtime.config.view.general.os_jobs_enabled,
         host=runtime.host,
@@ -117,8 +186,9 @@ def _h_cluster_health_probe_register(args: argparse.Namespace) -> int:
 def _h_cluster_health_probe_unregister(args: argparse.Namespace) -> int:
     from base.host.system.job_values import JobRoots
     from cli.commands.cluster.cron import cmd_cron_unregister
+    from cli.database.runtime import runtime_of
 
-    runtime = args.runtime
+    runtime = runtime_of(args)
     return cmd_cron_unregister(
         host=runtime.host,
         roots=JobRoots(
@@ -129,24 +199,29 @@ def _h_cluster_health_probe_unregister(args: argparse.Namespace) -> int:
 
 def _h_cluster_db_authority_issue_unit(args: argparse.Namespace) -> int:
     from cli.commands.cluster.control import cmd_db_authority_issue_unit
+    from cli.database.runtime import runtime_of
 
+    opts = options(args, _IssueUnitOptions)
     return cmd_db_authority_issue_unit(
-        machine=args.machine,
-        home=args.home,
-        out=args.out,
-        ttl_hours=args.ttl_hours,
-        command=args.runtime,
+        machine=opts.machine,
+        home=opts.home,
+        out=opts.out,
+        ttl_hours=opts.ttl_hours,
+        command=runtime_of(args),
     )
 
 
 def _h_cluster_db_authority_install_unit(args: argparse.Namespace) -> int:
     from cli.commands.cluster.control import cmd_db_authority_install_unit
+    from cli.database.runtime import runtime_of
 
+    opts = options(args, _InstallUnitOptions)
+    runtime = runtime_of(args)
     return cmd_db_authority_install_unit(
-        bundle=args.bundle,
-        transport_key=args.transport_key,
-        home=args.runtime.home,
-        now=args.runtime.clock.now().timestamp(),
+        bundle=opts.bundle,
+        transport_key=opts.transport_key,
+        home=runtime.home,
+        now=runtime.clock.now().timestamp(),
     )
 
 

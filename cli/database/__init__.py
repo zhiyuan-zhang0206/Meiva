@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from threading import Lock
 from typing import TYPE_CHECKING, NoReturn
@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, NoReturn
 from base.cluster.machine import MachineIdentityReader
 from base.host.exit_codes import hard_exit
 from base.telemetry import DrainResult, EventPipeline
-from cli.options import attribute
+from cli.options import attribute, options
 
 if TYPE_CHECKING:
     from base.cluster.dataplane.direct_url import ClusterDirectUrl
@@ -29,6 +29,7 @@ __all__ = [
     "open_operator_database",
     "operator_database_factory",
     "operator_event_pipeline",
+    "pipeline_owner_of",
     "producer_of",
 ]
 
@@ -276,7 +277,20 @@ def database_factory_of(args: argparse.Namespace) -> OperatorDatabaseFactory:
     return attribute(args, "database_factory", OperatorDatabaseFactory)
 
 
+@dataclass(frozen=True)
+class _Producer:
+    producer: Callable[[], EventPipeline]
+
+
 # meiva:note
-# The event pipeline `cli.main` bound to the parsed command (`args.producer`), as the class it is.
-def producer_of(args: argparse.Namespace) -> OperatorEventPipeline:
+# The command's event producer as the callable the commands take (`producer=`): `cli.main` binds
+# an `OperatorEventPipeline`, and a command only ever calls it for the pipeline.
+def producer_of(args: argparse.Namespace) -> Callable[[], EventPipeline]:
+    return options(args, _Producer).producer
+
+
+# meiva:note
+# The event pipeline owner `cli.main` bound to the parsed command (`args.producer`), as the class it
+# is, for the start path that also initializes logging and closes the command through it.
+def pipeline_owner_of(args: argparse.Namespace) -> OperatorEventPipeline:
     return attribute(args, "producer", OperatorEventPipeline)
