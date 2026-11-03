@@ -23,6 +23,14 @@ convention that file documents (`<class>:<file>:<symbol>`, or `<class>:<slug>` f
 finding that spans files). Write `none` when the PR introduces no such debt. There is
 no CI gate; the ledger's reconcile pass reads what this section records. -->
 
+## Closes-task
+
+<!-- The task this merge finishes, or `none`. An intention, not a link: a merged pull request can
+be half the work or a prerequisite, and closing the task stays with its owner. The
+attribution-gate workflow comments while the line is missing and never blocks a merge. -->
+
+Closes-task: #<id>
+
 ## Attribution
 
 <!-- The id of the Meiva agent that did the work. A change a person made without an agent

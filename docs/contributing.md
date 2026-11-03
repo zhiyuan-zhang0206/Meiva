@@ -100,6 +100,16 @@ that reaches `main` without it — a change a person made without an agent write
 `Meiva: none` on a line of its own in the description instead, and the reminder goes
 away.
 
+A `Closes-task: #<id>` line in the description states the task this merge finishes; `Closes-task:
+none` states that it finishes none. Write the field on a line of its own — a sentence that mentions
+it does not count — because it is read mechanically: a merged pull request is not by itself proof
+that a task is done (it can be half the work, a prerequisite, or work whose acceptance waits for a
+release), so the line records the author's intention and nothing more. Closing the task stays with
+whoever owns it; a reviewer or PMO reads the line and does not close on their own. The same workflow,
+`.github/workflows/attribution-gate.yml`, comments while the line is missing and deletes the comment
+once it appears — it never blocks a merge. A task whose acceptance waits for a release records that
+in the task itself, as `Deploy-gate: <sha>`, rather than anticipating `Closes-task:` here.
+
 ```bash
 # The description is the body of the landed commit: an empty one leaves no record.
 test -n "$(gh pr view --json body -q .body)" \

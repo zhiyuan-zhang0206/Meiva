@@ -8,8 +8,13 @@
 # wrote it, and the owner develops on `meiva-*` branches too. A standalone `Meiva: none` line in
 # the description is the explicit human exit.
 #
-# One comment per pull request: created while the line is missing, deleted once the line (or the
-# exit) appears. `types: [edited]` is what closes that loop.
+# It also comments when the description carries no `Closes-task: #<id>` (or `none`) line: which
+# task a merge finishes is an intention only the author can state, and a merged pull request is not
+# proof that the task is done — it may be half of it, a prerequisite, or work whose acceptance
+# waits for a release. The line makes the candidates readable; the owner still closes the task.
+#
+# One comment per line, per pull request: created while the line is missing, deleted once it
+# appears. `types: [edited]` is what closes that loop, and neither comment can block a merge.
 
 name: Attribution gate
 
@@ -34,7 +39,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Reconcile the attribution comment
+      - name: Reconcile the description comments
         # The whole point of this workflow is that it cannot refuse a shared-account pull
         # request, so a failed step (a fork's read-only token, an API hiccup) stays a note in
         # the log instead of a red check.
@@ -48,15 +53,19 @@ jobs:
         run: |
           set -euo pipefail
 
-          marker='<!-- meiva-attribution-gate -->'
           # The comment this run owns: the marker alone would also match a person quoting it.
           author='github-actions[bot]'
           # The id is digits: the template's `<id>` placeholder is not attribution.
           trailer='co-authored-by:[[:space:]]*meiva[[:space:]]*#[0-9]+'
           # A standalone line, so a description that merely mentions the exit does not use it.
           human_exit='^[[:space:]]*meiva:[[:space:]]*none[[:space:]]*$'
+          # The task the merge closes, or the word for "none". Intent, not a reference: `Task:`
+          # alone cannot tell a finished task from one this change only touches.
+          closes_line='^[[:space:]]*closes-task:[[:space:]]*(#[0-9]+|none)[[:space:]]*$'
 
-          message="$(cat <<'MESSAGE'
+          body="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.body // ""')"
+
+          attribution_message="$(cat <<'MESSAGE'
           <!-- meiva-attribution-gate -->
           This pull request reaches `main` from a `meiva-*` branch, and its description names no
           Meiva agent.
@@ -79,48 +88,77 @@ jobs:
           MESSAGE
           )"
 
-          body="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.body // ""')"
+          closes_message="$(cat <<'MESSAGE'
+          <!-- meiva-closes-task -->
+          This pull request's description does not say whether merging it finishes a task.
+
+          Add one line: the task the merge closes, or the word `none` when it closes none (a
+          change that only touches a task's ground, or a prerequisite of one, closes none):
+
+          ```text
+          Closes-task: #<task-id>
+          ```
+
+          The line states an intention, and an intention is what a reader can act on: a merged
+          pull request is not proof that the task is done — it may be half of it, or a
+          prerequisite, or work whose acceptance waits for a release. Whoever owns the task still
+          closes it. A sentence that merely mentions the field does not count; the line stands
+          alone.
+
+          This comment is deleted when the line appears. Nothing here fails or blocks a merge: the
+          check only comments.
+          MESSAGE
+          )"
+
+          # One comment per marker: created while it is wanted, deleted once it is not, and never
+          # two of the same. Everything about the pull request is decided above; this only reconciles.
+          reconcile() {
+            local marker="$1" wanted="$2" message="$3" existing id keep=''
+            local ids=()
+            existing="$(gh api --paginate               "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments?per_page=100"               --jq ".[] | select(.user.login == \"${author}\") | select((.body // \"\") | contains(\"${marker}\")) | .id")"
+            while IFS= read -r id; do
+              if [ -n "$id" ]; then ids+=("$id"); fi
+            done <<< "$existing"
+
+            if [ "$wanted" -eq 1 ] && [ "${#ids[@]}" -gt 0 ]; then
+              keep="${ids[0]}"
+            fi
+            for id in ${ids[@]+"${ids[@]}"}; do
+              if [ "$id" = "$keep" ]; then
+                echo "keeping comment ${id} ${marker}"
+                continue
+              fi
+              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/issues/comments/${id}" >/dev/null
+              echo "deleted comment ${id} ${marker}"
+            done
+            if [ "$wanted" -eq 1 ] && [ -z "$keep" ]; then
+              gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+                -f body="$message" >/dev/null
+              echo "commented on pull request ${PR_NUMBER} ${marker}"
+            fi
+          }
 
           if printf '%s\n' "$body" | grep -Eiq "$trailer"; then
-            wanted=0
+            attribution_wanted=0
             echo 'the description names an agent id'
           elif printf '%s\n' "$body" | grep -Eiq "$human_exit"; then
-            wanted=0
+            attribution_wanted=0
             echo 'the description carries the human exit'
           elif [[ "$HEAD_REF" == meiva-* ]]; then
-            wanted=1
+            attribution_wanted=1
             echo 'a meiva-* pull request reaches main without an agent id'
           else
-            wanted=0
+            attribution_wanted=0
             echo "the head branch '${HEAD_REF}' is outside the meiva-* convention"
           fi
 
-          existing="$(gh api --paginate \
-            "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments?per_page=100" \
-            --jq ".[] | select(.user.login == \"${author}\") | select((.body // \"\") | contains(\"${marker}\")) | .id")"
-
-          ids=()
-          while IFS= read -r id; do
-            if [ -n "$id" ]; then ids+=("$id"); fi
-          done <<< "$existing"
-
-          # Keep the first while it is wanted; every other comment this workflow posted goes, so
-          # a pull request never carries two.
-          keep=''
-          if [ "$wanted" -eq 1 ] && [ "${#ids[@]}" -gt 0 ]; then
-            keep="${ids[0]}"
+          if printf '%s\n' "$body" | grep -Eiq "$closes_line"; then
+            closes_wanted=0
+            echo 'the description states what the merge closes'
+          else
+            closes_wanted=1
+            echo 'the description states no closing task'
           fi
-          for id in ${ids[@]+"${ids[@]}"}; do
-            if [ "$id" = "$keep" ]; then
-              echo "keeping comment ${id}"
-              continue
-            fi
-            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/issues/comments/${id}" >/dev/null
-            echo "deleted comment ${id}"
-          done
 
-          if [ "$wanted" -eq 1 ] && [ -z "$keep" ]; then
-            gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
-              -f body="$message" >/dev/null
-            echo "commented on pull request ${PR_NUMBER}"
-          fi
+          reconcile '<!-- meiva-attribution-gate -->' "$attribution_wanted" "$attribution_message"
+          reconcile '<!-- meiva-closes-task -->' "$closes_wanted" "$closes_message"
