@@ -23,6 +23,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+from base.host.boundary.options import options
 from scripts.host_ops.admission_floor import (
     add_arguments as add_floor_arguments,
 )
@@ -51,11 +52,14 @@ from scripts.host_ops.admission_ledger import (
 from scripts.host_ops.admission_ledger import (
     lock_holder,
     lock_path,
+    read_table,
     reserve,
     reserved_gib,
     take_lock,
     wait_for_lock,
+    write_table,
 )
+from scripts.host_ops.admission_options import RunOptions
 
 GIB = 1024**3
 DATA_VOLUME = "/System/Volumes/Data"
@@ -359,31 +363,6 @@ def emit(path: Path, kind: str, **fields: object) -> None:
         print(f"admission: cannot write {path}: {exc}", file=sys.stderr)
 
 
-def read_table(path: Path) -> dict[str, dict[str, object]]:
-    # meiva:note
-    # An unreadable table is reported and treated as empty: the job still runs, and the
-    # next measured run rewrites it.
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return {}
-    except (OSError, json.JSONDecodeError) as exc:
-        print(f"admission: ignoring unreadable table {path}: {exc}", file=sys.stderr)
-        return {}
-
-
-def write_table(path: Path, table: dict[str, dict[str, object]]) -> None:
-    # meiva:note
-    # Replace in one step so a concurrent reader sees either the old table or the new one.
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(table, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        temporary.replace(path)
-    except OSError as exc:
-        print(f"admission: cannot write {path}: {exc}", file=sys.stderr)
-
-
 def measure_group(pid: int, stop: threading.Event) -> int:
     # meiva:note
     # Summed RSS of the job's whole process group: a multi-worker job's cost is the group,
@@ -523,12 +502,12 @@ def _announce_gate(
     return outcome.jobs
 
 
-def _declared_peak(args: argparse.Namespace, home: Path, script: str) -> float | None:
+def _declared_peak(peak_mb: float | None, home: Path, script: str) -> float | None:
     # meiva:note
     # A job that never declared its memory is refused rather than given a default: a guessed
     # default is a wrong answer that no later measurement can correct.
     table = read_table(home / "job-classes.json")
-    declared = args.peak_mb if args.peak_mb is not None else table.get(script, {}).get("peak_mb")
+    declared = peak_mb if peak_mb is not None else table.get(script, {}).get("peak_mb")
     if declared is None:
         print(
             f"admission: {script} declares no memory: pass --peak-mb <MiB per worker> once",
@@ -560,10 +539,10 @@ def _rewrite(
     )
 
 
-def _command(args: argparse.Namespace, parser: argparse.ArgumentParser) -> list[str]:
+def _command(remainder: list[str], parser: argparse.ArgumentParser) -> list[str]:
     # meiva:note
     # Everything after `--` is the job; without the separator the whole remainder is.
-    command = list(args.command[1:] if args.command[:1] == ["--"] else args.command)
+    command = list(remainder[1:] if remainder[:1] == ["--"] else remainder)
     if not command:
         parser.error("no command given (use: admission-run [flags] -- <command...>)")
     return command
@@ -601,9 +580,9 @@ def main(
     parser.add_argument("--dry-run", action="store_true", help="print the plan, run nothing")
     parser.add_argument("--home", type=Path, help="ledger root for this run, for a rehearsal")
     parser.add_argument("command", nargs=argparse.REMAINDER)
-    args = parser.parse_args(argv)
+    args = options(parser.parse_args(argv), RunOptions)
 
-    command = _command(args, parser)
+    command = _command(args.command, parser)
 
     resolved_home = args.home or home or admission_home()
     events = resolved_home / "events.jsonl"
@@ -672,7 +651,7 @@ def main(
         if verdict == "refuse":
             return 3
 
-    peak_mb = _declared_peak(args, resolved_home, script)
+    peak_mb = _declared_peak(args.peak_mb, resolved_home, script)
     if peak_mb is None:
         return 2
 

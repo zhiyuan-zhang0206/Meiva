@@ -16,8 +16,10 @@ import argparse
 import os
 import sys
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
+from base.host.boundary.options import options
 from base.host.db_authority.model import AuthorityRefusedError
 from base.host.db_authority.unit import consume_unit
 from base.paths.home import resolve_meiva_home
@@ -60,6 +62,12 @@ def command_from(argv: Sequence[str]) -> list[str]:
     return list(argv[index + 1 :])
 
 
+@dataclass(frozen=True)
+class Options:
+    home: Path | None
+    check: bool
+
+
 # meiva:note
 # Entry: `--check` answers presence only and exits; otherwise exec the caller's command with the
 # token in its environment. The exec path prints one line to stderr so a caller's stdout pipe
@@ -83,7 +91,8 @@ def main(argv: Sequence[str]) -> int:
         action="store_true",
         help="print TOKEN_PRESENT True/False and exit instead of running a command",
     )
-    args, _rest = parser.parse_known_args(argv)
+    namespace, _rest = parser.parse_known_args(argv)
+    args = options(namespace, Options)
     home = args.home if args.home is not None else resolve_meiva_home()
 
     if args.check:

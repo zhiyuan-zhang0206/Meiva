@@ -10,6 +10,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from xml.etree import ElementTree
 
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+# meiva:note
+# The checkout root goes first even when an installed project already put it later on `sys.path`:
+# this directory holds a module named `base`, and run by path its own directory would win the name
+# `base` over the application package.
+if sys.path[:1] != [str(_REPO_ROOT)]:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from base.host.boundary.options import options  # noqa: E402
+
 
 # meiva:note
 # The nightly verdict reads junit only: the duration leg retries a shard up to three times, so a job's exit code can be green after a first-attempt failure, and an auxiliary measurement step can fail while every test passed. Neither belongs in the answer to "was main green last night".
@@ -88,6 +98,17 @@ def judge(results: Sequence[ShardResult], expected: Mapping[str, Sequence[str]])
     return NightlyVerdict(ok=True, reason="all-shards-green", shards=tuple(results))
 
 
+@dataclass(frozen=True)
+class Options:
+    junit_dir: Path
+    sha: str
+    static_shards: int
+    backend_shards: int
+    e2e_shards: int
+    output: Path
+    run_url: str
+
+
 def main(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -101,7 +122,7 @@ def main(argv: Sequence[str]) -> int:
         "--output", type=Path, required=True, help="path of the nightly record to write"
     )
     parser.add_argument("--run-url", default="", help="link to the run, recorded for the reader")
-    arguments = parser.parse_args(argv)
+    arguments = options(parser.parse_args(argv), Options)
 
     paths = sorted(arguments.junit_dir.rglob("*.xml"))
     results = [read_shard(path) for path in paths]

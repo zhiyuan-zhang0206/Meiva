@@ -182,6 +182,19 @@ def positive_id(value: str) -> int:
     return result
 
 
+# meiva:note
+# The parsed flags as a typed namespace. This adapter may be copied from a reviewed revision and run
+# against another checkout's `--source`, so it takes no new import from this checkout: the flags are
+# read through the namespace's own annotations, which argparse fills with the `type=` converted
+# values.
+class _Arguments(argparse.Namespace):
+    schedule_id: int
+    home: Path
+    source: Path
+    script_file: str
+    expected_sha256: str
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("schedule_id", type=positive_id)
@@ -189,7 +202,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--source", required=True, type=Path)
     parser.add_argument("--script-file", required=True)
     parser.add_argument("--expected-sha256", required=True, type=old_script_digest)
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=_Arguments())
     raw = (
         sys.stdin.buffer.read() if args.script_file == "-" else Path(args.script_file).read_bytes()
     )

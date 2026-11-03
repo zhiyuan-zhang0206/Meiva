@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 _EDITABLE_PTH_NAME = "_editable_impl_meiva.pth"
@@ -75,12 +75,21 @@ class _JsonObject(dict[str, object]):
     pass
 
 
+# meiva:note
+# The object `decode(text)` returns, read as `object`: `json` types its answer `Any`, and a parameter
+# typed `Callable[[str], object]` takes the decoder without naming the `Any`. This file runs before
+# any project environment exists, on whatever `python3` the host has, and is copied on its own, so
+# it carries this adapter instead of importing `base.host.boundary.untyped`.
+def _decoded(decode: Callable[[str], object], text: str) -> object:
+    return decode(text)
+
+
 def _direct_url_violations(checkout: Path) -> list[str]:
     violations: list[str] = []
     expected_url = _resolved(checkout).as_uri()
     for path in _record_paths(checkout, _DIRECT_URL_PATTERNS):
         try:
-            payload: object = json.loads(path.read_text(), object_hook=_JsonObject)
+            payload = _decoded(json.JSONDecoder(object_hook=_JsonObject).decode, path.read_text())
         except (OSError, json.JSONDecodeError) as exc:
             violations.append(f"{path} has unreadable direct_url.json: {exc}")
             continue

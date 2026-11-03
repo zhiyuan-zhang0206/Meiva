@@ -15,11 +15,53 @@ import shutil
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 
 DEFAULT_LIMIT = 3
 DEFAULT_MAX_BYTES = 64 * 1024 * 1024
 UNIT_SUFFIXES = (".scope", ".service")
+
+
+class UnitUsage(TypedDict):
+    # meiva:note
+    # One cgroup unit's memory: its name, its path under the slice, the current use and its limit (None when unlimited).
+
+    unit: str
+    path: str
+    current: int
+    max: int | None
+
+
+class SliceUsage(TypedDict):
+    current: int | None
+    max: int | None
+    swap_current: int | None
+    swap_max: int | None
+
+
+class HostSample(TypedDict):
+    # meiva:note
+    # The JSON line one run appends: pressure, the slice's memory and swap, its events and its largest units.
+
+    ts: str
+    pressure: dict[str, dict[str, float]]
+    slice: SliceUsage
+    events: dict[str, int]
+    units: list[UnitUsage]
+
+
+# meiva:note
+# The parsed flags as a typed namespace. This sampler depends only on the standard library (a
+# timer runs it on hosts with no project import path), so the flags are read through the
+# namespace's own annotations, which argparse fills with the `type=` converted values, instead of
+# through `base.host.boundary.options`.
+class _Arguments(argparse.Namespace):
+    cgroup_root: str
+    pressure: str
+    output: str
+    limit: int
+    max_bytes: int
+    echo: bool
 
 
 def read_pressure(path: Path) -> dict[str, dict[str, float]]:
@@ -79,8 +121,8 @@ def read_events(path: Path) -> dict[str, int]:
     return events
 
 
-def largest_units(root: Path, *, limit: int) -> list[dict[str, Any]]:
-    found: list[dict[str, Any]] = []
+def largest_units(root: Path, *, limit: int) -> list[UnitUsage]:
+    found: list[UnitUsage] = []
     for current in root.rglob("memory.current"):
         unit_dir = current.parent
         if not unit_dir.name.endswith(UNIT_SUFFIXES):
@@ -89,30 +131,30 @@ def largest_units(root: Path, *, limit: int) -> list[dict[str, Any]]:
         if usage is None:
             continue
         found.append(
-            {
-                "unit": unit_dir.name,
-                "path": unit_dir.relative_to(root).as_posix(),
-                "current": usage,
-                "max": read_limit(unit_dir / "memory.max"),
-            }
+            UnitUsage(
+                unit=unit_dir.name,
+                path=unit_dir.relative_to(root).as_posix(),
+                current=usage,
+                max=read_limit(unit_dir / "memory.max"),
+            )
         )
     found.sort(key=lambda item: item["current"], reverse=True)
     return found[:limit]
 
 
-def sample(*, pressure: Path, cgroup_root: Path, limit: int) -> dict[str, Any]:
-    return {
-        "ts": datetime.now(UTC).isoformat(timespec="seconds"),
-        "pressure": read_pressure(pressure),
-        "slice": {
-            "current": read_int(cgroup_root / "memory.current"),
-            "max": read_limit(cgroup_root / "memory.max"),
-            "swap_current": read_int(cgroup_root / "memory.swap.current"),
-            "swap_max": read_limit(cgroup_root / "memory.swap.max"),
-        },
-        "events": read_events(cgroup_root / "memory.events"),
-        "units": largest_units(cgroup_root, limit=limit),
-    }
+def sample(*, pressure: Path, cgroup_root: Path, limit: int) -> HostSample:
+    return HostSample(
+        ts=datetime.now(UTC).isoformat(timespec="seconds"),
+        pressure=read_pressure(pressure),
+        slice=SliceUsage(
+            current=read_int(cgroup_root / "memory.current"),
+            max=read_limit(cgroup_root / "memory.max"),
+            swap_current=read_int(cgroup_root / "memory.swap.current"),
+            swap_max=read_limit(cgroup_root / "memory.swap.max"),
+        ),
+        events=read_events(cgroup_root / "memory.events"),
+        units=largest_units(cgroup_root, limit=limit),
+    )
 
 
 def append_line(path: Path, line: str, *, max_bytes: int) -> None:
@@ -138,7 +180,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
     parser.add_argument("--max-bytes", type=int, default=DEFAULT_MAX_BYTES)
     parser.add_argument("--echo", action="store_true")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=_Arguments())
     payload = sample(
         pressure=Path(args.pressure),
         cgroup_root=Path(args.cgroup_root),

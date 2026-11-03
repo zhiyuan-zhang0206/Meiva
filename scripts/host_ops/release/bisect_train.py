@@ -18,10 +18,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(_REPO_ROOT) not in sys.path:
+# meiva:note
+# The checkout root goes first even when an installed project already put it later on `sys.path`:
+# this directory holds a module named `base`, and run by path its own directory would win the name
+# `base` over the application package.
+if sys.path[:1] != [str(_REPO_ROOT)]:
     sys.path.insert(0, str(_REPO_ROOT))
 
 # meiva:link scripts/docs/scripts.meiva.okf.md
+from base.host.boundary.options import attribute, options  # noqa: E402
 from cli.fleet_update.plan.release_target import Channel, parse_release_tag  # noqa: E402
 from scripts.host_ops.release.git_tags import (  # noqa: E402
     git_run,
@@ -242,6 +247,27 @@ def _execute_bisect(
             git_run(repository, "worktree", "prune")
 
 
+@dataclass(frozen=True)
+class PlanOptions:
+    repo: Path
+    good: str
+    bad: str
+    pytest_target: str
+    allow_uncertified_good: bool
+
+
+@dataclass(frozen=True)
+class RunOptions(PlanOptions):
+    pytest_python: Path | None
+
+
+@dataclass(frozen=True)
+class ProbeOptions:
+    worktree: Path
+    pytest_python: Path
+    pytest_target: str
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Plan or execute O(log K) git bisect over a Release Train commit range."
@@ -266,21 +292,24 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str]) -> int:
-    args = _parser().parse_args(argv)
-    if args.subcommand == "probe":
-        return _run_probe(args.worktree, args.pytest_python, args.pytest_target)
+    namespace = _parser().parse_args(argv)
+    subcommand = attribute(namespace, "subcommand", str)
+    if subcommand == "probe":
+        probe = options(namespace, ProbeOptions)
+        return _run_probe(probe.worktree, probe.pytest_python, probe.pytest_target)
 
+    args = options(namespace, PlanOptions)
     plan, reason = build_bisect_plan(
         args.repo,
         good_ref=args.good,
         bad_ref=args.bad,
         pytest_target=args.pytest_target,
-        allow_uncertified_good=bool(args.allow_uncertified_good),
+        allow_uncertified_good=args.allow_uncertified_good,
     )
     if plan is None:
         print(json.dumps({"ok": False, "error": reason}))
         return 2
-    if args.subcommand == "plan":
+    if subcommand == "plan":
         print(
             json.dumps(
                 {
@@ -297,8 +326,11 @@ def main(argv: Sequence[str]) -> int:
         )
         return 0
 
+    run_options = options(namespace, RunOptions)
     pytest_python = (
-        args.pytest_python if args.pytest_python is not None else _default_pytest_python(args.repo)
+        run_options.pytest_python
+        if run_options.pytest_python is not None
+        else _default_pytest_python(args.repo)
     )
     payload, rc = _execute_bisect(args.repo, plan, pytest_python)
     print(json.dumps(payload))

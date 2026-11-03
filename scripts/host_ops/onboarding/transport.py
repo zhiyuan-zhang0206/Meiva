@@ -6,6 +6,8 @@ import subprocess
 from dataclasses import dataclass
 from typing import TypeGuard
 
+from base.host.boundary.untyped import object_of
+
 LOCAL_HOST_NAMES = frozenset({"local", "localhost"})
 
 # meiva:note
@@ -53,7 +55,7 @@ class Result:
         for raw_line in reversed(self.stdout.strip().splitlines()):
             line = raw_line.strip()
             if line.startswith("{"):
-                parsed = json.loads(line)
+                parsed = object_of(json.loads, line)
                 if _is_object_dict(parsed):
                     return parsed
         raise ValueError(

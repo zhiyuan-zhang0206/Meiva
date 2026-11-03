@@ -10,13 +10,19 @@ import argparse
 import json
 import sys
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(_REPO_ROOT) not in sys.path:
+# meiva:note
+# The checkout root goes first even when an installed project already put it later on `sys.path`:
+# this directory holds a module named `base`, and run by path its own directory would win the name
+# `base` over the application package.
+if sys.path[:1] != [str(_REPO_ROOT)]:
     sys.path.insert(0, str(_REPO_ROOT))
 
 # meiva:link scripts/docs/scripts.meiva.okf.md
+from base.host.boundary.options import attribute, options  # noqa: E402
 from cli.fleet_update.plan.release_target import (  # noqa: E402
     ChannelPointer,
     ReleaseCertificate,
@@ -35,6 +41,30 @@ from scripts.host_ops.release.git_tags import (  # noqa: E402
     resolved_commit,
     write_annotated_tag,
 )
+
+
+@dataclass(frozen=True)
+class PrecheckOptions:
+    repo: Path
+    event_name: str
+    target_ref: str
+    version: str
+    hotfix_of: str
+    github_output: Path | None
+
+
+@dataclass(frozen=True)
+class MintOptions:
+    repo: Path
+    sha: str
+    source_ref: str
+    certified_at: str
+    gate_run_id: str
+    gate_run_url: str
+    version: str
+    hotfix_of: str
+    reason: str
+    github_output: Path | None
 
 
 def _resolve_target_ref(repository: Path, event_name: str, target_ref: str) -> tuple[str, str]:
@@ -98,7 +128,7 @@ def _validate_explicit_version(
         raise ValueError(f"tag {version} already marks {existing}, not {target_sha}")
 
 
-def _run_precheck(args: argparse.Namespace) -> int:
+def _run_precheck(args: PrecheckOptions) -> int:
     if args.event_name not in ("schedule", "workflow_dispatch"):
         raise ValueError(f"unsupported --event-name {args.event_name!r}")
     sha, source_ref = _resolve_target_ref(args.repo, args.event_name, args.target_ref)
@@ -175,7 +205,7 @@ def _apply_release_tag(repository: Path, cert: ReleaseCertificate) -> str:
     return tag_plan
 
 
-def _run_mint(args: argparse.Namespace) -> int:
+def _run_mint(args: MintOptions) -> int:
     sha = resolved_commit(args.repo, args.sha.strip())
     if sha is None or sha != args.sha.strip():
         raise ValueError(f"--sha {args.sha!r} must be an existing 40-hex commit in {args.repo}")
@@ -258,9 +288,9 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str]) -> int:
     args = _parser().parse_args(argv)
     try:
-        if args.subcommand == "precheck":
-            return _run_precheck(args)
-        return _run_mint(args)
+        if attribute(args, "subcommand", str) == "precheck":
+            return _run_precheck(options(args, PrecheckOptions))
+        return _run_mint(options(args, MintOptions))
     except (ValueError, RuntimeError) as exc:
         print(f"::error::{exc}", file=sys.stderr)
         print(json.dumps({"ok": False, "error": str(exc)}))
