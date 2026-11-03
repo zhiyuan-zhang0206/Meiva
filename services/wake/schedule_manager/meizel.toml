@@ -1,10 +1,10 @@
-exports = ["blocked_streak.py", "daemon.py", "engine.py", "host_restart.py", "launch_events.py", "manager.py", "requests.py", "revisions.py", "runner.py", "stall_policy.py", "tests"]
+exports = ["blocked_streak.py", "daemon.py", "engine.py", "host_restart.py", "launch_events.py", "manager.py", "requests.py", "revisions.py", "round_progress.py", "runner.py", "stall_policy.py", "tests"]
 
 [uses]
 "daemon.py" = ["manager.py", "manager_policy.py", "requests.py"]
 "engine.py" = ["guard_admission.py", "script_outcome.py", "stall_policy.py"]
 "guard_admission.py" = ["script_outcome.py"]
-"manager.py" = ["blocked_streak.py", "convergence.py", "host_restart.py", "launch_events.py", "manager_policy.py", "recovery_gate.py", "revisions.py"]
+"manager.py" = ["blocked_streak.py", "convergence.py", "host_restart.py", "launch_events.py", "manager_policy.py", "recovery_gate.py", "revisions.py", "round_progress.py"]
 "requests.py" = ["manager.py"]
 "revisions.py" = ["convergence.py"]
 "runner.py" = ["engine.py", "stall_policy.py"]

@@ -1,0 +1,64 @@
+# meiva:note
+# The heartbeat is the only thing that distinguishes "the loop has nothing to do"
+# from "the loop stopped", so these cases pin the file's shape (plain JSON at a
+# stable path, readable outside the manager) and the deadline comparison --
+# including the malformed file, which must read as "no heartbeat" rather than as
+# "late", because a broken file is not evidence that the loop ran.
+
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+from base.daemon.schedules.heartbeat import (
+    alert_marks_path,
+    beat_path,
+    is_overdue,
+    read_alert_marks,
+    read_beat,
+    write_alert_marks,
+    write_beat,
+)
+
+NOW = datetime(2026, 11, 3, 18, 0, tzinfo=UTC)
+
+
+def test_a_round_lands_as_plain_json_under_a_stable_path(tmp_path: Path) -> None:
+    path = write_beat(tmp_path, 42, written_at=NOW, alive_by=NOW + timedelta(hours=1))
+
+    assert path == beat_path(tmp_path, 42) == tmp_path / "state/schedules/42.heartbeat.json"
+    loaded = json.loads(path.read_text())
+    assert loaded["schedule_id"] == 42
+    assert loaded["alive_by"].startswith("2026-11-03T19:00")
+    assert loaded["written_at"].startswith("20")
+
+
+def test_a_deadline_passes_only_after_its_own_instant_plus_the_skew(tmp_path: Path) -> None:
+    write_beat(tmp_path, 7, written_at=NOW, alive_by=NOW)
+    beat = read_beat(tmp_path, 7)
+
+    assert is_overdue(beat, now=NOW + timedelta(seconds=59), skew_s=60) is False
+    assert is_overdue(beat, now=NOW + timedelta(seconds=60), skew_s=60) is True
+
+
+def test_a_missing_or_broken_heartbeat_is_not_late(tmp_path: Path) -> None:
+    assert read_beat(tmp_path, 9) is None
+    assert is_overdue(None, now=NOW, skew_s=0) is False
+
+    path = beat_path(tmp_path, 9)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not json")
+    assert read_beat(tmp_path, 9) is None
+    assert is_overdue(read_beat(tmp_path, 9), now=NOW, skew_s=0) is False
+
+    path.write_text(json.dumps({"schedule_id": 9}))
+    assert read_beat(tmp_path, 9) is None
+
+
+def test_alert_marks_round_trip_and_land_at_a_documented_path(tmp_path: Path) -> None:
+    assert read_alert_marks(tmp_path) == {}
+    write_alert_marks(tmp_path, {"42": "2026-11-03T19:00:00+00:00"})
+
+    assert alert_marks_path(tmp_path) == tmp_path / "state/schedules/progress-alerts.json"
+    assert read_alert_marks(tmp_path) == {"42": "2026-11-03T19:00:00+00:00"}

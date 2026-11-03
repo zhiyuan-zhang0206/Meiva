@@ -38,6 +38,14 @@ The built-in cron slot mechanism — at-most-once claims per `(schedule_id, slot
 | `error` | failed, lost or unknown launch/execution outcome | no auto restart; explicit start/restart creates a new revision; the silence alert still applies |
 | `stopped` | disabled / killed by manager | don't restart |
 
+## Liveness
+
+A sessionless schedule alerts once after two hours (`schedule_stalled`). A resident
+schedule -- a `while True` loop, so `schedule_fire_log` never gains a row -- writes
+`state/schedules/<id>.heartbeat.json` each round naming when it expects to be back;
+a passed deadline raises `schedule_not_progressing` once per episode. Schedules without
+a heartbeat are unaffected.
+
 ## One launch attempt per revision
 
 The manager conditionally commits `launch_count=1` and an unknown-outcome error

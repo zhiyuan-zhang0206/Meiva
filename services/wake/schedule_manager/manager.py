@@ -56,6 +56,7 @@ from services.wake.schedule_manager.convergence import (
 from services.wake.schedule_manager.launch_events import emit_gate_held, emit_launch_refused
 from services.wake.schedule_manager.manager_policy import ManagerPolicy
 from services.wake.schedule_manager.recovery_gate import GateState, observe_gate, refuse
+from services.wake.schedule_manager.round_progress import report_late_rounds
 
 _log = logging.getLogger(__name__)
 
@@ -268,6 +269,7 @@ class ScheduleManager:
         known = live | enabled
         self._forget_unknown(known)
         self._report_stalled_schedules(enabled_rows, live)
+        report_late_rounds(self._pool, home=self._home, status_by_id=enabled_rows, live_ids=live)
         # A launch can find a same-name session after liveness initially said it
         # was absent. If the official reap refused it, this set makes the next
         # reconcile retry rather than adopting the stale survivor forever.

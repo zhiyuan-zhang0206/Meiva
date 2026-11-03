@@ -23,3 +23,12 @@ from __future__ import annotations
 # the manager raises the stall alert (services/wake/schedule_manager/manager.py). Must stay
 # above NO_PROGRESS_TIMEOUT_S — see the module docstring for why.
 SCHEDULE_STALL_ALERT_AFTER_S = 2 * 60 * 60
+
+# meiva:note
+# How far past a resident schedule's own `alive_by` the manager waits before it calls the
+# round late. It absorbs the reconcile poll (POLL_INTERVAL_S = 5 in
+# services/wake/schedule_manager/manager.py) plus one late wake-up -- never a whole round.
+# The writer knows how long its own round may take and states that in `alive_by`, so widening
+# this constant would only hide slow rounds behind a bigger number instead of making the
+# schedule declare them.
+SCHEDULE_PROGRESS_SKEW_S = 60.0
