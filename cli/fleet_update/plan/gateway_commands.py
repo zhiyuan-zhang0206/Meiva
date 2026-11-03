@@ -1,7 +1,7 @@
 # meiva:note
-# The commands the window runs against the cluster as a whole: the gateway's roster and smoke
-# programs (shipped over stdin), the packages refresh and the drift checks on each host, the
-# machine name each host boots into, and the pre-update check of the stored schedule table.
+# The commands the window runs against the cluster as a whole: the gateway's roster program
+# (shipped over stdin), the packages refresh and the drift checks on each host, the machine name
+# each host boots into, and the pre-update check of the stored schedule table.
 # meiva:link cli/docs/fleet-update.meiva.okf.md
 
 from __future__ import annotations
@@ -13,10 +13,6 @@ from .host_commands import HOME, MEIVA, PROGRAM, PYTHON
 
 def roster_command() -> str:
     return f"{PROGRAM} roster"
-
-
-def smoke_command(machine: str, timeout_s: int) -> str:
-    return f"{PROGRAM} smoke {shlex.quote(machine)} {timeout_s}"
 
 
 # meiva:note

@@ -1,9 +1,8 @@
 # meiva:note
 # The window's verification stage, on the hosts: which machine each host is, the roster until
-# every listed machine agrees on one commit, a smoke test per serving agent-runner, the package
-# refresh and the drift checks. What each answer means is decided in `plan/`; this reads the
-# answers and records one line per host. Like the rest of `cli.fleet_update`, nothing here
-# imports application code.
+# every listed machine agrees on one commit, the package refresh and the drift checks. What each
+# answer means is decided in `plan/`; this reads the answers and records one line per host. Like
+# the rest of `cli.fleet_update`, nothing here imports application code.
 # meiva:link cli/docs/fleet-update-window/fleet-update-window.meiva.okf.md
 
 from __future__ import annotations
@@ -15,7 +14,6 @@ from .plan.gateway_commands import (
     machine_name_command,
     refresh_command,
     roster_command,
-    smoke_command,
 )
 from .plan.host_failures import HostFailure
 from .plan.roster import (
@@ -27,7 +25,7 @@ from .plan.roster import (
     timeout_message,
     unlisted_lines,
 )
-from .plan.verify_steps import drift_checks, duplicate_names, machine_name, smoke_plan
+from .plan.verify_steps import drift_checks, duplicate_names, machine_name
 from .session import FailedError, Session
 
 
@@ -118,39 +116,25 @@ def verify(
     gateway_stdin: str,
 ) -> tuple[list[HostFailure], dict[str, str], str]:
     # meiva:note
-    # Roster, then one smoke per serving machine, then refresh and drift -- each host's answer
-    # recorded on its own line. A host the window already knows failed to start is expected to
-    # be offline, so one failure never costs the rest the whole roster timeout.
+    # Roster, then refresh and drift -- each host's answer recorded on its own line. A host the
+    # window already knows failed to start is expected to be offline, so one failure never costs
+    # the rest the whole roster timeout.
     failures: list[HostFailure] = []
     skipped: dict[str, str] = {}
     commit = ""
     if args.dry_run:
-        s.run(args.gateway, smoke_command("MACHINE", args.smoke_timeout) + "  # each agent-runner")
         skipped.update(dict.fromkeys(hosts, "dry run"))
     else:
         try:
             names = machine_names(s, hosts)
             failed_names = frozenset(names[a] for a in hosts if a not in started)
-            rows, commit = roster(s, args, names, gateway_stdin, expect_offline=failed_names)
+            _rows, commit = roster(s, args, names, gateway_stdin, expect_offline=failed_names)
         except FailedError as exc:
             failures += [HostFailure(alias, "roster", str(exc)) for alias in hosts]
         else:
-            steps = smoke_plan(rows, names, started)
-            for step in steps:
-                if not step.runs:
-                    skipped.setdefault(step.owner, "start failed")
-            runnable = [step for step in steps if step.runs]
-            outcomes = s.gather(
-                runnable,
-                lambda step: s.run(
-                    args.gateway,
-                    smoke_command(step.machine, args.smoke_timeout),
-                    stdin=gateway_stdin,
-                ),
-            )
-            for step, out in zip(runnable, outcomes, strict=True):
-                if isinstance(out, FailedError):
-                    failures.append(HostFailure(step.owner, "smoke", str(out)))
+            for alias in hosts:
+                if alias not in started:
+                    skipped.setdefault(alias, "start failed")
     failures += refresh(s, hosts)
     failures += run_drift_checks(s, args.gateway, hosts)
     return failures, skipped, commit

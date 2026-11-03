@@ -26,8 +26,8 @@ never collide on a log name, and fails the test on any order production forbids.
 explicit-argument forwarding and refusals, `test_fleet_update_leases.py` the lease announcement and
 its confirm window, `test_fleet_update_recovery.py` the failed-stop recovery,
 `test_fleet_update_helper_gate.py` the helper gate, and `test_fleet_update_programs.py` runs the
-shipped `cli/commands/management/fleet_gateway.py` program for real against a local HTTP server
-standing in for the gateway API. `plan/` holds the tests of the strict decision modules: their
+shipped `cli/commands/management/fleet_gateway.py` roster program for real against a local HTTP
+server standing in for the gateway API. `plan/` holds the tests of the strict decision modules: their
 inputs are the text a host printed and their outputs are values, so they need no host at all.
 `local_ssh.py` is the other `ssh`: it ignores the alias and runs the command in a real `zsh` or
 `sh`, for the tests that check what a host's own shell does with a window's command.

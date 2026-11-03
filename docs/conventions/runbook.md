@@ -476,7 +476,7 @@ not compare your choices with the diff. A complete command:
   --close-shell-sessions --keep-browser --keep-extras --keep-infra --keep-no-services \
   --mode smooth --stop-timeout 600 --message "Operator rolling out stable release: reason" \
   --refuse-python-change --refuse-red-schedules --silence-hours 4 --lease-confirm-seconds 0 \
-  --all-services --start-timeout 1800 --smoke-timeout 300 --roster-timeout 90
+  --all-services --start-timeout 1800 --roster-timeout 90
 ```
 
 Alternatives per choice: `--channel latest`, `--release vYYYY.MM.DD.HHMMSS` (or `-hf<N>`),
@@ -530,7 +530,7 @@ half, use the separate commands:
   --all-services --start-timeout 1800
 # manual release steps, if any
 .venv/bin/python -m cli.fleet_update up --gateway GATEWAY --runner RUNNER --log-dir DIR --execute \
-  --all-services --start-timeout 1800 --smoke-timeout 300 --roster-timeout 90
+  --all-services --start-timeout 1800 --roster-timeout 90
 ```
 
 - `down` names the takeovers its stops will end: past the refusal gate and
@@ -595,8 +595,7 @@ half, use the separate commands:
   name it reports itself (`machine_name()`), not by its SSH alias; a name with no
   row fails the half. Roster machines that are not listed (a laptop that is off) are
   reported with their online flag and commits and never fail `up` (see the last bullet for their old processes). Then
-  the gateway smoke-tests each listed agent-runner with a real agent, reading its own
-  address and bearer in place; then each host runs `meiva packages refresh`
+  each host runs `meiva packages refresh`
   (skills follow their channel) and its summary
   line (`summary: …`) is printed. A differing local copy is replaced and
   reported — an info line names the differing files. Last, two read-only drift checks
@@ -605,7 +604,7 @@ half, use the separate commands:
   above) and `meiva plugins verify` on every listed host (each enabled plugin loads as an
   agent boot loads it; the loader skips a broken plugin, so this is what turns that into
   a failure — 2026-10-03: out-of-repo plugins calling deleted hook APIs). They come
-  last so a red never skips the smoke or the refresh. Only after they pass does `up`
+  last so a red never skips the refresh. Only after they pass does `up`
   expire the window's alert silence.
 - The window is quiet through one Grafana silence, not through any gate in the services:
   `down` has the gateway host create a silence in the co-located Grafana's Alertmanager

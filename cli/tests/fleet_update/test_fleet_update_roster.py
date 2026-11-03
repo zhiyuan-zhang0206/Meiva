@@ -39,7 +39,6 @@ def test_a_roster_that_never_agrees_fails_with_its_last_state(
     # meiva:note
     # A roster that never agrees leaves every host unverified, and every host still gets a line
     # saying why: skipping the refresh as well would hide the one stage that still ran.
-    assert "smoke" not in {k for k, _ in cluster.effects}
     assert "refresh" in {k for k, _ in cluster.effects}
     assert (
         len(
@@ -65,7 +64,6 @@ def test_an_unlisted_offline_machine_is_reported_not_required(
     assert run("up") == 0
     out = capsys.readouterr().out
     assert "roster: laptop is not listed, not checked: online=False head=None running=None" in out
-    assert len(cluster.smoked) == 3 and set(cluster.smoked) == {"gw", "mac", "lin"}
     refreshes = [a for k, a in cluster.effects if k == "refresh"]
     assert len(refreshes) == 3 and set(refreshes) == {"gw", "mac", "lin"}
     assert "up complete: every listed machine runs" in out
@@ -82,7 +80,6 @@ def test_a_listed_machine_that_is_offline_fails(
     assert run("up", "--roster-timeout", "1") == 3
     out = capsys.readouterr().out
     assert "roster after 1s: offline ['lin']" in out
-    assert "smoke" not in {k for k, _ in cluster.effects}
     assert (
         len(
             [
@@ -102,7 +99,8 @@ def test_the_roster_name_comes_from_the_host_not_its_ssh_alias(
     assert run("down") == 0
     cluster.names["mac"] = "mac-mini"
     assert run("up") == 0
-    assert len(cluster.smoked) == 3 and set(cluster.smoked) == {"gw", "mac-mini", "lin"}
+    assert cluster.roster_reads == 1
+    assert any(a == "mac" and "ConfiguredMachineIdentity" in c for a, c in cluster.commands)
 
 
 @pytest.mark.parametrize("reply", ["Traceback (most recent call last):", "", '{"name": "gw"}'])
@@ -128,7 +126,6 @@ def test_a_listed_host_with_no_roster_row_is_an_error(
     assert run("up") == 3
     out = capsys.readouterr().out
     assert "no roster row for ['lin']" in out
-    assert "smoke" not in {k for k, _ in cluster.effects}
     assert (
         len(
             [
