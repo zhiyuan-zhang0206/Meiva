@@ -9,6 +9,21 @@ from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import dataclass
+
+from cli.options import options
+
+
+@dataclass(frozen=True)
+class _ScheduleUpdateFields:
+    name: str | None
+    script: str | None
+    script_file: str | None
+    command: str | None
+    description: str | None
+    machine: str | None
+    enable: bool
+    disable: bool
 
 
 def _h_config_audit(args: argparse.Namespace) -> int:
@@ -56,15 +71,16 @@ def _h_schedules_create(args: argparse.Namespace) -> int:
 def _h_schedules_update(args: argparse.Namespace) -> int:
     from cli.commands.management.schedules import h_schedules_update
 
+    fields = options(args, _ScheduleUpdateFields)
     if (
-        args.name is None
-        and args.script is None
-        and args.script_file is None
-        and args.command is None
-        and args.description is None
-        and args.machine is None
-        and not args.enable
-        and not args.disable
+        fields.name is None
+        and fields.script is None
+        and fields.script_file is None
+        and fields.command is None
+        and fields.description is None
+        and fields.machine is None
+        and not fields.enable
+        and not fields.disable
     ):
         print(
             "meiva: pass at least one of --name / --script / --script-file / --command / "

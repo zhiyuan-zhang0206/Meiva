@@ -1,16 +1,28 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
+
+from cli.options import options
+
+
+@dataclass(frozen=True)
+class _ExecOptions:
+    file: str | None
+    handle: str | None
+    agent_id: int | None
+    session_id: str | None
 
 
 def _h_harness_exec(args: argparse.Namespace) -> int:
     from cli.commands.harness import cmd_harness_exec
 
+    opts = options(args, _ExecOptions)
     return cmd_harness_exec(
-        file=args.file,
-        handle=args.handle,
-        agent_id=args.agent_id,
-        session_id=args.session_id,
+        file=opts.file,
+        handle=opts.handle,
+        agent_id=opts.agent_id,
+        session_id=opts.session_id,
     )
 
 

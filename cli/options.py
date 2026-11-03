@@ -20,7 +20,7 @@ import types
 import typing
 from typing import TypeGuard
 
-__all__ = ["OptionsError", "attribute", "options"]
+__all__ = ["OptionsError", "attribute", "options", "raw"]
 
 
 # meiva:note
@@ -166,3 +166,14 @@ def attribute[T](args: argparse.Namespace, name: str, kind: type[T]) -> T:
     if not isinstance(value, kind):
         raise OptionsError(f"{name} is {type(value).__name__}, not {kind.__name__}")
     return value
+
+
+# meiva:note
+# The attribute `name` of `args` as an opaque `object`, for a check that only asks whether it was
+# answered (`is None`) or that hands it to code which narrows it itself. Anything the handler
+# computes with comes through `options`, not through here.
+def raw(args: argparse.Namespace, name: str) -> object:
+    carried = _carried(args)
+    if name not in carried:
+        raise OptionsError(f"{name} is missing")
+    return carried[name]

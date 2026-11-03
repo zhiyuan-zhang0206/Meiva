@@ -13,7 +13,11 @@ import argparse
 import subprocess
 import sys
 from collections.abc import Sequence
+from dataclasses import dataclass
 from functools import partial
+from typing import Literal
+
+from cli.options import attribute, options, raw
 
 # meiva:note
 # A lifecycle verb defaults and infers nothing: every choice is the operator's
@@ -24,8 +28,10 @@ USAGE_EXIT = 2
 
 def h_init(args: argparse.Namespace) -> int:
     from cli.init_intent import run_init
+    from cli.start_runtime import site_of
+    from cli.startup.service_path import CallerHost
 
-    return run_init(args, args.site, args.caller_host)
+    return run_init(args, site_of(args), attribute(args, "caller_host", CallerHost))
 
 
 def _h_start(
@@ -35,14 +41,16 @@ def _h_start(
 ) -> int:
     if retained_children is None:
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")
+    from cli.database import database_factory_of, producer_of
     from cli.start_intent import run_start
+    from cli.start_runtime import site_of
 
     return run_start(
         args,
-        args.site,
+        site_of(args),
         retained_children=retained_children,
-        database_factory=args.database_factory,
-        producer=args.producer,
+        database_factory=database_factory_of(args),
+        producer=producer_of(args),
     )
 
 
@@ -67,7 +75,7 @@ def add_choice(
 def missing_choices(args: argparse.Namespace, choices: Sequence[tuple[str, str]]) -> list[str]:
     # meiva:note
     # The answer forms of every choice in `(dest, answer form)` left unanswered.
-    return [form for dest, form in choices if getattr(args, dest) is None]
+    return [form for dest, form in choices if raw(args, dest) is None]
 
 
 def refuse_conflict(verb: str, error: ValueError) -> int:
@@ -112,11 +120,29 @@ def stop_problems(args: argparse.Namespace, roles: frozenset[str] | None) -> lis
             "this home's capabilities are unreadable, so --keep-infra/--stop-infra cannot be "
             "validated; finish `meiva init` first"
         )
-    elif "gateway" in roles and args.keep_infra is None:
+    elif "gateway" in roles and raw(args, "keep_infra") is None:
         problems.append("--keep-infra | --stop-infra (this host serves the gateway)")
-    elif "gateway" not in roles and args.keep_infra is not None:
+    elif "gateway" not in roles and raw(args, "keep_infra") is not None:
         problems.append("--keep-infra/--stop-infra: this host has no local data plane")
     return problems
+
+
+@dataclass(frozen=True)
+class _StopAnswers:
+    # meiva:note
+    # What a `meiva stop` that passed `stop_problems` carries: every choice but `keep_infra`
+    # (a gateway host's alone) is answered, so none of these is None.
+    keep_infra: bool | None
+    keep_service: Sequence[str]
+    keep_browser: bool
+    keep_shell_sessions: bool
+    keep_extras: bool
+    mode: Literal["smooth", "force"]
+    message: str
+    assume_yes: bool
+    timeout: float
+    maintenance_for: str | None
+    reason: str | None
 
 
 def h_stop(
@@ -125,9 +151,11 @@ def h_stop(
     retained_children: list[subprocess.Popen[bytes]] | None = None,
 ) -> int:
     from base.cluster.machine import MachineRoleInvalid, MachineRoleMissing
+    from cli.database.runtime import runtime_of
 
+    runtime = runtime_of(args)
     try:
-        roles: frozenset[str] | None = args.runtime.machine.role()
+        roles: frozenset[str] | None = runtime.machine.role()
     except (MachineRoleMissing, MachineRoleInvalid):
         roles = None
     if problems := stop_problems(args, roles):
@@ -136,33 +164,35 @@ def h_stop(
     from cli.commands.lifecycle.stop import cmd_stop
     from cli.commands.lifecycle.stop.choices import StopChoices, StopRequest, StopWindow
     from cli.commands.lifecycle.stop.execute import StopEnvironment
+    from cli.database import database_factory_of, producer_of
 
+    answers = options(args, _StopAnswers)
     try:
         maintenance_for_seconds = (
-            parse_duration(args.maintenance_for) if args.maintenance_for else None
+            parse_duration(answers.maintenance_for) if answers.maintenance_for else None
         )
     except ValueError as error:
         return refuse_usage("stop", [str(error)])
 
     request = StopRequest(
         choices=StopChoices(
-            keep_infra=args.keep_infra,
-            preserve_sessions=frozenset(args.keep_service),
-            keep_browser=args.keep_browser,
-            keep_shell_sessions=args.keep_shell_sessions,
+            keep_infra=answers.keep_infra,
+            preserve_sessions=frozenset(answers.keep_service),
+            keep_browser=answers.keep_browser,
+            keep_shell_sessions=answers.keep_shell_sessions,
             announce=True,
-            teardown_extras=not args.keep_extras,
-            force=args.mode == "force",
-            message=args.message or None,
+            teardown_extras=not answers.keep_extras,
+            force=answers.mode == "force",
+            message=answers.message or None,
         ),
-        window=StopWindow(for_seconds=maintenance_for_seconds, reason=args.reason),
-        require_confirmation=not args.assume_yes,
-        timeout=args.timeout,
+        window=StopWindow(for_seconds=maintenance_for_seconds, reason=answers.reason),
+        require_confirmation=not answers.assume_yes,
+        timeout=answers.timeout,
     )
     environment = StopEnvironment(
-        command=args.runtime,
-        database_factory=args.database_factory,
-        producer=args.producer,
+        command=runtime,
+        database_factory=database_factory_of(args),
+        producer=producer_of(args),
         stdin=sys.stdin,
     )
     try:
@@ -185,23 +215,49 @@ _RESTART_COMMON_CHOICES = (
 _RESTART_TREE_FORMS = "--all-services | --only-service NAME ... | --disable-service NAME ..."
 
 
+@dataclass(frozen=True)
+class _RestartScope:
+    only: Literal["agent-host"] | None
+    all_services: bool
+    only_service: Sequence[str] | None
+    disable_service: Sequence[str] | None
+
+
 def restart_problems(args: argparse.Namespace) -> list[str]:
     # meiva:note
     # Every missing or inapplicable `meiva restart` choice for the scope named.
-    tree = bool(args.all_services or args.only_service or args.disable_service)
+    scope = options(args, _RestartScope)
+    tree = bool(scope.all_services or scope.only_service or scope.disable_service)
     problems = missing_choices(args, _RESTART_COMMON_CHOICES)
-    if args.only is not None:
+    if scope.only is not None:
         if tree:
-            problems.append(f"--only {args.only} excludes {_RESTART_TREE_FORMS}")
+            problems.append(f"--only {scope.only} excludes {_RESTART_TREE_FORMS}")
         problems += [
-            f"{form}: not part of --only {args.only}"
+            f"{form}: not part of --only {scope.only}"
             for dest, form in _RESTART_TREE_CHOICES
-            if getattr(args, dest) is not None
+            if raw(args, dest) is not None
         ]
         return problems
     if not tree:
         problems.append(f"the scope: --only agent-host | {_RESTART_TREE_FORMS}")
     return problems + missing_choices(args, _RESTART_TREE_CHOICES)
+
+
+@dataclass(frozen=True)
+class _RestartTiming:
+    # meiva:note
+    # The choices every `meiva restart` scope carries once `restart_problems` is empty.
+    mode: Literal["smooth", "force"]
+    timeout: float
+    start_timeout: float
+    message: str
+
+
+@dataclass(frozen=True)
+class _RestartTree:
+    keep_shell_sessions: bool
+    keep_browser: bool
+    keep_extras: bool
 
 
 def h_restart(
@@ -211,17 +267,23 @@ def h_restart(
 ) -> int:
     if problems := restart_problems(args):
         return refuse_usage("restart", problems)
-    if args.only is not None:
+    from cli.database import database_factory_of
+    from cli.database.runtime import runtime_of
+
+    scope = options(args, _RestartScope)
+    timing = options(args, _RestartTiming)
+    runtime = runtime_of(args)
+    if scope.only is not None:
         from cli.commands.lifecycle.stop.restart import cmd_restart_agent_host
 
         try:
             return cmd_restart_agent_host(
-                force=args.mode == "force",
-                timeout=args.timeout,
-                start_timeout=args.start_timeout,
-                message=args.message or None,
-                database_factory=args.database_factory,
-                command=args.runtime,
+                force=timing.mode == "force",
+                timeout=timing.timeout,
+                start_timeout=timing.start_timeout,
+                message=timing.message or None,
+                database_factory=database_factory_of(args),
+                command=runtime,
             )
         except ValueError as error:
             return refuse_conflict("restart", error)
@@ -229,24 +291,26 @@ def h_restart(
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")
     from base.paths import repo_root
     from cli.commands.lifecycle.stop.restart import cmd_restart, restart_runtime
+    from cli.database import producer_of
 
+    tree = options(args, _RestartTree)
     try:
         return cmd_restart(
-            only_services=tuple(args.only_service or ()),
-            disabled_services=tuple(args.disable_service or ()),
-            all_services=args.all_services,
-            keep_shell_sessions=args.keep_shell_sessions,
-            keep_browser=args.keep_browser,
-            restart_extras=not args.keep_extras,
-            force=args.mode == "force",
-            timeout=args.timeout,
-            start_timeout=args.start_timeout,
-            message=args.message or None,
-            runtime=restart_runtime(repo_root(), home=args.runtime.home),
+            only_services=tuple(scope.only_service or ()),
+            disabled_services=tuple(scope.disable_service or ()),
+            all_services=scope.all_services,
+            keep_shell_sessions=tree.keep_shell_sessions,
+            keep_browser=tree.keep_browser,
+            restart_extras=not tree.keep_extras,
+            force=timing.mode == "force",
+            timeout=timing.timeout,
+            start_timeout=timing.start_timeout,
+            message=timing.message or None,
+            runtime=restart_runtime(repo_root(), home=runtime.home),
             retained_children=retained_children,
-            database_factory=args.database_factory,
-            producer=args.producer,
-            command=args.runtime,
+            database_factory=database_factory_of(args),
+            producer=producer_of(args),
+            command=runtime,
         )
     except ValueError as error:
         return refuse_conflict("restart", error)
@@ -254,44 +318,60 @@ def h_restart(
 
 def _h_status(args: argparse.Namespace) -> int:
     from cli.commands.lifecycle.status import cmd_status
+    from cli.database import database_factory_of
+    from cli.database.runtime import runtime_of
 
-    return cmd_status(database_factory=args.database_factory, command=args.runtime)
+    return cmd_status(database_factory=database_factory_of(args), command=runtime_of(args))
+
+
+@dataclass(frozen=True)
+class _ServiceSelection:
+    all_services: bool
+    only_service: Sequence[str] | None
+    disable_service: Sequence[str] | None
 
 
 def _h_converge(args: argparse.Namespace) -> int:
     from base.paths import repo_root
     from cli.commands.lifecycle.converge_host import cmd_converge
+    from cli.database import database_factory_of, producer_of
+    from cli.database.runtime import runtime_of
 
+    selection = options(args, _ServiceSelection)
     return cmd_converge(
         repo=repo_root(),
-        only_services=tuple(args.only_service or ()),
-        disabled_services=tuple(args.disable_service or ()),
-        all_services=args.all_services,
-        database_factory=args.database_factory,
-        producer=args.producer,
-        command=args.runtime,
+        only_services=tuple(selection.only_service or ()),
+        disabled_services=tuple(selection.disable_service or ()),
+        all_services=selection.all_services,
+        database_factory=database_factory_of(args),
+        producer=producer_of(args),
+        command=runtime_of(args),
     )
 
 
 def _h_firewall_status(args: argparse.Namespace) -> int:
     from cli.commands.converge.firewall_command import cmd_firewall_status
+    from cli.database.runtime import runtime_of
 
+    runtime = runtime_of(args)
     return cmd_firewall_status(
-        home=args.runtime.home,
-        user_home=args.runtime.session.user_home,
-        machine=args.runtime.machine,
-        host=args.runtime.host,
+        home=runtime.home,
+        user_home=runtime.session.user_home,
+        machine=runtime.machine,
+        host=runtime.host,
     )
 
 
 def _h_firewall_sync(args: argparse.Namespace) -> int:
     from cli.commands.converge.firewall_command import cmd_firewall_sync
+    from cli.database.runtime import runtime_of
 
+    runtime = runtime_of(args)
     return cmd_firewall_sync(
-        home=args.runtime.home,
-        user_home=args.runtime.session.user_home,
-        machine=args.runtime.machine,
-        host=args.runtime.host,
+        home=runtime.home,
+        user_home=runtime.session.user_home,
+        machine=runtime.machine,
+        host=runtime.host,
     )
 
 
