@@ -339,3 +339,8 @@ def test_lifetime_report_combines_ledger_and_tail(db_conn: psycopg.Connection) -
     assert report["totals"]["total_tokens"] == 132
     assert report["totals"]["recorded_cost_usd"] == 0.6
     assert report["agents"][0]["by_model"]["m"]["llm_calls"] == 3
+    facts = usage.facts_of(report)
+    assert facts.start is None
+    reminder = budget.budget_message(facts, usd_limit=0.1)
+    assert reminder is not None
+    assert "[None, " in reminder

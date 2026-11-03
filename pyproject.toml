@@ -680,6 +680,12 @@ root = "cli/tests"
 root = "gateway/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/skills/coordination/meiva-dynamic-workflow/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "scripts/ci/helper_smoke/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -749,6 +755,11 @@ reportExplicitAny = "error"
 [[tool.pyright.executionEnvironments]]
 root = "meiva"
 extraPaths = [".agents/skills/meiva-self-development/reference"]
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/skills/coordination"
+reportAny = "error"
+reportExplicitAny = "error"
 
 # A sub-skill's script reaches its parent skill's scripts/ only through the
 # runtime `__file__`-derived sys.path guard (Structure Rule 6) — pyright does

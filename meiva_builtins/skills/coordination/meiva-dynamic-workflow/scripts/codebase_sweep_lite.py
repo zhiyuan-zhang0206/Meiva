@@ -12,10 +12,19 @@ Contrast with codebase_sweep_orchestrator.py (7 waves, ~28 agents).
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 from uuid import uuid4
 
 import meiva
+from base.host.boundary.fields import (
+    int_field,
+    optional_int_field,
+    optional_list_field,
+    optional_str_field,
+    str_field,
+)
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 ORCH = meiva.self.AGENT_ID
 HD = meiva.files.resolve("codebase_sweep_lite")
@@ -37,17 +46,61 @@ def hf(wave: int, role: str) -> Path:
     return HD / f"w{wave}_{role}.json"
 
 
+# meiva:note
+# A wave's findings: the `findings` array of the JSON object its workers wrote, each element an
+# object carrying the finding's own fields. A file that is not there yet is no findings.
+def _findings(path: Path) -> list[dict[str, object]]:
+    if not path.exists():
+        return []
+    document = object_of(json.loads, meiva.files.read(str(path)))
+    if not is_object_dict(document):
+        raise TypeError(f"{path.name} is not a JSON object")
+    findings: list[dict[str, object]] = []
+    for entry in optional_list_field(document, "findings") or []:
+        if not is_object_dict(entry):
+            raise TypeError(f"{path.name} carries a finding that is not an object")
+        findings.append(entry)
+    return findings
+
+
+# meiva:note
+# The draft report a wave wrote, or the whole draft document as JSON when it carries no `report`.
+def _draft_text(path: Path) -> str:
+    if not path.exists():
+        return ""
+    draft = object_of(json.loads, meiva.files.read(str(path)))
+    if not is_object_dict(draft):
+        raise TypeError(f"{path.name} is not a JSON object")
+    return optional_str_field(draft, "report") or json.dumps(draft, ensure_ascii=False)
+
+
 def spawn(prompt: str) -> int:
     return meiva.agents.spawn(prompt=prompt, idempotency_key=str(uuid4()))
 
 
-def read_state() -> dict[str, Any]:
+# meiva:note
+# What the orchestrator records between runs: the wave a resumed run starts from, the wave after
+# it, and how many agents it spawned there.
+class _State(TypedDict):
+    wave: int
+    next: int | None
+    spawned: int
+
+
+def read_state() -> _State:
     if SF.exists():
-        return json.loads(meiva.files.read(str(SF)))
-    return {"wave": 1}
+        recorded = object_of(json.loads, meiva.files.read(str(SF)))
+        if not is_object_dict(recorded):
+            raise TypeError("orchestrator state is not a JSON object")
+        return _State(
+            wave=int_field(recorded, "wave"),
+            next=optional_int_field(recorded, "next"),
+            spawned=optional_int_field(recorded, "spawned") or 0,
+        )
+    return _State(wave=1, next=None, spawned=0)
 
 
-def write_state(state: dict[str, Any]) -> None:
+def write_state(state: _State) -> None:
     with open(SF, "w") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
@@ -145,12 +198,9 @@ def wave2():
     log("WAVE 2/5: Verify — cross-check findings")
 
     # Collect findings
-    all_findings: list[dict[str, Any]] = []
+    all_findings: list[dict[str, object]] = []
     for role, _, _ in W1_TARGETS:
-        fpath = hf(1, role)
-        if fpath.exists():
-            data = json.loads(meiva.files.read(str(fpath)))
-            all_findings.extend(data.get("findings", []))
+        all_findings.extend(_findings(hf(1, role)))
 
     log(f"  Wave 1: {len(all_findings)} findings")
 
@@ -160,9 +210,9 @@ def wave2():
         return
 
     # Group by type
-    by_type: dict[str, list[dict[str, Any]]] = {}
-    for f in all_findings:
-        by_type.setdefault(f["type"], []).append(f)
+    by_type: dict[str, list[dict[str, object]]] = {}
+    for finding in all_findings:
+        by_type.setdefault(str_field(finding, "type"), []).append(finding)
 
     W2_FILES: list[str] = []
     for ftype, findings in by_type.items():
@@ -242,11 +292,7 @@ def wave4():
     log("=" * 50)
     log("WAVE 4/5: Adversarial — challenge findings")
 
-    draft_path = hf(3, "draft")
-    draft_text = ""
-    if draft_path.exists():
-        draft = json.loads(meiva.files.read(str(draft_path)))
-        draft_text = draft.get("report", json.dumps(draft, ensure_ascii=False))
+    draft_text = _draft_text(hf(3, "draft"))
 
     W4_FILES: list[str] = []
     for role, focus in [
