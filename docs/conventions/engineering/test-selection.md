@@ -533,9 +533,13 @@ rebase onto the latest base, so the recorded verification is the one that actual
 combined-tree job; the Trunk merge queue that provided one was retired on 2026-11-01. A
 merge-order problem has to survive the post-merge runs below.
 
-**No test suite runs on a push to `main`.** `ci.yml` has exactly two triggers, `pull_request` and
-`workflow_dispatch`; merging to `main` starts no CI run of its own. (Two narrow push workflows exist
-— `cache-warm.yml` and `ci-app.yml` — and neither runs tests.)
+**No full test suite runs on a push to `main`.** `ci.yml` has three triggers — `pull_request`,
+`workflow_dispatch` and a nightly `schedule` — and none of them is a push; merging to `main` starts
+no full run of its own. A narrow gate does run on the merge: `main-push.yml` executes the full
+`meizel check` graph and the hook-script scratch-home test in about two minutes, because both catch
+a failure that no diff-based selection can reach (2026-11-03: `#8330` left `main` red for 42
+minutes, `#8339` for 13 — the second one was a combination neither pull request had tested).
+`cache-warm.yml` and `ci-app.yml` are the other push workflows; neither runs the backend suite.
 
 ### Where the full suite runs
 
@@ -545,6 +549,8 @@ Two scheduled workflows run the whole population on `main`, each for a different
 |---|---|---|
 | `.github/workflows/release-gate.yml` | every six hours (`17 */6 * * *`), and on demand before a wave; skipped when `channel/latest` already points at `main` HEAD | may this tree be called `vX.Y.Z` — and, as a side effect, was `main` green |
 | `.github/workflows/refresh-test-durations.yml` (nightly, main) | daily (`30 19 * * *`) | was main green last night — the `verdict` job reads junit only, so a retried measurement cannot wash a first-attempt failure green |
+| `.github/workflows/ci.yml` (nightly, main) | daily (`0 18 * * *` = 02:00 +08) | runs the same full matrix a manual dispatch does, so a merge that landed between two gates is verified the same night; `main-red-watch` turns its red runs into a card |
+| `.github/workflows/main-push.yml` (the gate) | every push to `main` | not the suite: the full `meizel check` graph and `scripts/tests/test_hooks_scratch_home.py`, the two checks whose verdict cannot depend on a diff. Its green run never closes a card a full run opened |
 
 The nightly run is the honest answer to "is main broken", and a red night blocks the release
 gate. It does **not** stop main from accepting merges: a nightly flake must not become a

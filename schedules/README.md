@@ -48,9 +48,14 @@ messages the P0 lead when one of them fails two runs in a row (`_SCHEDULED_WORKF
 
 `main-red-watch` answers the other half of that question — whether `main` is
 green — now that nothing verifies a merged tree. `ci.yml` runs on `pull_request`
-alone, so a merge starts no test; the six-hourly `release-gate` and the nightly
-verdict are the only evidence, and on 2026-11-01 two scheduled gate runs went red
-on `main` with nobody watching. Every thirty minutes it reads their newest runs
+plus a nightly full run, so a merge starts no test; the six-hourly `release-gate`,
+the nightly verdict and that nightly full run are the only evidence, and on
+2026-11-01 two scheduled gate runs went red on `main` with nobody watching. The
+full run's own listing is narrowed to `main`: `ci.yml` also runs on every pull
+request, and a red branch there is that pull request's business. The narrow
+`main-push.yml` gate is read the same way, except that a green run of it never
+closes a card — it runs two checks, not the population, so it cannot say a red
+nightly found is fixed. Every thirty minutes it reads their newest runs
 and opens **one** task for the P0 lead per red that no green run of the same
 commit explains: a first red is recorded silently (a single test out of 1344 is
 usually a flake, and that same commit passed the nightly an hour later), a red

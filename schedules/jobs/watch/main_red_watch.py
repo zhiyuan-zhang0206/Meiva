@@ -84,6 +84,16 @@ def save_state(path: Path, entries: Mapping[str, Entry], watermarks: Mapping[str
     )
 
 
+# meiva:note
+# The commit a card points at, subject first: a reader of the card has to know which merge to look
+# at, and a sha alone sends them to `git log` before they can tell whether it is theirs.
+def _commit_line(run: RunFacts) -> tuple[str, ...]:
+    if not run.head_sha:
+        return ()
+    short = run.head_sha[:10]
+    return (f"{short} {run.head_title}" if run.head_title else short,)
+
+
 def round_line(*, entries: int, confirmed: int, infra: int, notes: tuple[str, ...]) -> str:
     head = f"fingerprints={entries} confirmed={confirmed} infra={infra}"
     return head if not notes else f"{head} | " + " | ".join(notes)
@@ -100,6 +110,7 @@ def watch_once(
     workflows: tuple[str, ...],
     release_gate_last_start: datetime | None,
     nightly_last_start: datetime | None,
+    ci_nightly_last_start: datetime | None,
 ) -> str:
     entries, watermarks = load_state(state_path)
     notes: list[str] = []
@@ -124,7 +135,7 @@ def watch_once(
                         entry,
                         latest_url=run.html_url,
                         job_names=run.job_names,
-                        candidate_commits=(),
+                        candidate_commits=_commit_line(run),
                     ),
                 )
                 task_id = open_card(card)
@@ -139,6 +150,7 @@ def watch_once(
     for label, last_start, stale_after in (
         ("release-gate", release_gate_last_start, RELEASE_GATE_STALE_AFTER),
         ("nightly", nightly_last_start, NIGHTLY_STALE_AFTER),
+        ("nightly-full", ci_nightly_last_start, NIGHTLY_STALE_AFTER),
     ):
         alert = liveness_alert(label, last_start, now, stale_after=stale_after)
         if alert is not None:

@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 
 from schedules.plans.watch.main_red import (
     FAILURE_INFRA,
+    GATE_CHECK_STEPS,
     FAILURE_TEST,
     NIGHTLY_STALE_AFTER,
     RELEASE_GATE_STALE_AFTER,
@@ -195,3 +196,59 @@ def test_the_schedule_alert_names_the_schedule_not_the_code() -> None:
     assert quiet is None
     assert stale is not None and "the schedule, not the code" in stale
     assert missing is not None
+
+
+# meiva:note
+# The push gate's checks print no JUnit line, so a failed check step is the only thing that can name
+# its red. Without this a `meizel check` violation would read as an unnamed failure — infra — and
+# open no card, which is the case the gate exists for.
+def test_a_failed_gate_check_step_names_the_red_instead_of_going_infra() -> None:
+    named = parse_failures(
+        "meizel: 1 violations [unresolved-import: 1]",
+        job_name="main push gate (locality graph + hook scripts)",
+        suite_step_failed=True,
+        failed_steps=("Locality gate (full meizel check)",),
+        check_steps=GATE_CHECK_STEPS,
+    )
+    unnamed = parse_failures(
+        "meizel: 1 violations [unresolved-import: 1]",
+        job_name="main push gate (locality graph + hook scripts)",
+        suite_step_failed=True,
+        failed_steps=("Install Python deps",),
+        check_steps=GATE_CHECK_STEPS,
+    )
+
+    assert [failure.kind for failure in named] == [FAILURE_TEST]
+    assert "Locality gate (full meizel check)" in named[0].test_id
+    assert [failure.kind for failure in unnamed] == [FAILURE_INFRA]
+
+
+# meiva:note
+# A runner that never started a step is GitHub's fault, not `main`'s: the infra marker still wins,
+# so a codeload outage cannot be read as a red of the tree.
+def test_a_runner_that_never_started_stays_infra_even_for_the_gate() -> None:
+    failures = parse_failures(
+        "An action could not be found at the URI 'https://codeload.github.com/...'",
+        job_name="main push gate (locality graph + hook scripts)",
+        suite_step_failed=True,
+        failed_steps=("Locality gate (full meizel check)",),
+        check_steps=GATE_CHECK_STEPS,
+    )
+
+    assert [failure.kind for failure in failures] == [FAILURE_INFRA]
+
+
+# meiva:note
+# The step names are the contract between the workflow and the watch: renaming a step in
+# `main-push.yml` would silently stop a failing check from naming itself, which is a hole no other
+# test would see.
+def test_the_gate_step_names_exist_in_the_workflow() -> None:
+    from pathlib import Path
+
+    import yaml
+
+    root = Path(__file__).resolve().parents[3]
+    workflow = yaml.safe_load((root / ".github" / "workflows" / "main-push.yml").read_text())
+    names = {step.get("name") for step in workflow["jobs"]["gate"]["steps"]}
+
+    assert names >= GATE_CHECK_STEPS, GATE_CHECK_STEPS - names

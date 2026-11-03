@@ -16,8 +16,17 @@
 # - `frontend` runs `next typegen`, `tsc --noEmit`, and `prepush_frontend.py --base`
 #   (incremental ESLint, conditional Next.js production build, and targeted Vitest).
 #
-# Manual `workflow_dispatch` runs (and `release-gate.yml` before channel certification)
-# execute the full repository-wide suite across all shards and smoke lanes.
+# Every non-pull-request run executes the full repository-wide suite across all shards and
+# smoke lanes: a manual `workflow_dispatch`, the nightly `schedule` below, and `release-gate.yml`
+# before channel certification. `classify` branches on the event once — anything that is not a
+# pull request is full — so a new trigger inherits the full suite instead of adding a mode.
+# That is the boundary of the shortcut: a trigger that should NOT run everything (a
+# `merge_group` queue would run the matrix once per queued pull request) has to decide its own
+# scope before it is added, because this branch will otherwise treat it as full.
+#
+# The nightly schedule exists because `ci.yml` runs on no other main-branch event: without it,
+# a merge starts no test and a red can sit on `main` until a pull request happens to select the
+# affected paths. It is the `main-red-watch` schedule that turns a red nightly run into a card.
 #
 # MEIVA_DB_URL / MEIVA_REDIS_URL are pointed at unreachable sentinel ports on
 # purpose. The suite must provision its own throwaway cluster; a sentinel turns
@@ -33,6 +42,11 @@ name: CI
 on:
   pull_request:
   workflow_dispatch:
+  schedule:
+    # 02:00 +08 (18:00 UTC) — the nightly full run of `main`. Offset from the 04:00 consolidation
+    # and the 07:00 health check, and from the two other timed workflows (`release-gate` at :17
+    # every six hours, the duration refresh at 19:30 UTC), so the runner pool is not shared.
+    - cron: '0 18 * * *'
 
 permissions:
   contents: read
@@ -1014,8 +1028,8 @@ jobs:
           git fetch --depth=1 origin "$base"
           echo "LINT_STRUCTURE_BASELINE_BASE=$(git rev-parse FETCH_HEAD^{commit})" >> "$GITHUB_ENV"
 
-      - name: Fetch comparison ancestry for manual structure guard
-        if: github.event_name == 'workflow_dispatch'
+      - name: Fetch comparison ancestry for the structure guard
+        if: github.event_name != 'pull_request'
         run: |
           git fetch --unshallow origin "$(git rev-parse HEAD)" \
             refs/heads/main:refs/remotes/origin/main
@@ -1093,6 +1107,16 @@ jobs:
           else
             echo "No changed files in PR diff; skipping pre-commit structural hooks."
           fi
+
+      # meiva:note
+      # The hook scripts' scratch-home rule is a cross-cutting constraint, not a property of the
+      # diff: the test lives in `scripts/tests/`, so a change under `gateway/` or `base/` never
+      # selects it, while exactly such a change can break a hook payload's import order
+      # (2026-11-03, `#8330`). Five seconds on every pull request and every full run; no `if:`.
+      - name: Every hook script enters a scratch home before application code
+        run: >-
+          env -u VIRTUAL_ENV uv run python -m pytest --test-environment=static -q
+          scripts/tests/test_hooks_scratch_home.py
 
       - name: Locality gate (meizel check)
         shell: bash

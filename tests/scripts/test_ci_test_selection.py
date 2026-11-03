@@ -544,12 +544,20 @@ def test_static_contracts_run_once_outside_the_native_data_plane() -> None:
     assert "continue-on-error" not in static
     assert (
         sum(
-            str(step.get("run", "")).count("--test-environment=static")
+            str(step.get("run", "")).count("--junit-xml=tmp/junit-backend-static")
             for job in jobs.values()
             for step in job["steps"]
         )
         == 1
     )
+    # meiva:note
+    # The hook-script scratch-home test runs on every pull request, whatever the diff selects: the
+    # rule it guards is cross-cutting, and five seconds does not justify a job of its own.
+    hook = _step(
+        jobs["backend-structure"], "Every hook script enters a scratch home before application code"
+    )
+    assert "if" not in hook
+    assert "scripts/tests/test_hooks_scratch_home.py" in hook["run"]
     for job, name in (
         ("backend-shard", "Run pytest shard"),
         ("backend-selected", "Run selected pytest subset"),
@@ -699,6 +707,7 @@ def test_native_classify_step_preserves_document_and_dispatch_routing(tmp_path: 
             ("true", "false"),
         ),
         ("workflow_dispatch", "", (doc,), ("true", "true")),
+        ("schedule", "", (doc,), ("true", "true")),
     ]
     for index, (event, head_ref, paths, expected) in enumerate(cases):
         repo = tmp_path / f"repo-{index}"

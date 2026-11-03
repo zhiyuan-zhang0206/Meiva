@@ -19,6 +19,13 @@ import yaml
 WORKFLOWS = Path(__file__).resolve().parents[2] / ".github/workflows"
 EXEMPTIONS = {
     (
+        "main-push.yml",
+        "push",
+    ): "The narrow gate on `main` itself: it must run on every merge, because the red it catches "
+    "comes from the combination of two changes and no paths filter can name that. It runs two "
+    "checks (full `meizel check` and the hook-script scratch-home test), not the matrix, and it is "
+    "the only push trigger that runs tests.",
+    (
         "ci.yml",
         "pull_request",
     ): "Change-class classification inside ci.yml gates backend, frontend, and e2e lanes per diff.",

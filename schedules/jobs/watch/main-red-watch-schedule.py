@@ -3,10 +3,10 @@
 # red that no green run explains into one card for the P0 lead.
 #
 # It exists because the queue that used to verify a merged tree is gone (retired 2026-11-01) and
-# `ci.yml` never runs on a push to `main`: the six-hourly `release-gate` and the nightly verdict
-# are the only evidence that `main` is green, and on 2026-11-01 both scheduled runs of the gate
-# went red without anyone seeing them. A red page is not a signal nobody is watching for; it is
-# no signal at all.
+# `ci.yml` runs on no push to `main`: the six-hourly `release-gate`, the nightly duration refresh
+# and the nightly full run of `ci.yml` are the only evidence that `main` is green, and on
+# 2026-11-01 both scheduled runs of the gate went red without anyone seeing them. A red page is
+# not a signal nobody is watching for; it is no signal at all.
 #
 # The decision lives in `schedules/plans/main_red.py` and the effects in
 # `schedules/jobs/main_red_watch.py`; this entry only supplies the cluster's own values.
@@ -15,10 +15,14 @@
 import os
 import subprocess
 import sys
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from functools import partial
+from pathlib import Path
 
 import meiva
+from base.daemon.schedules.inputs import ScheduleInputs
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.paths.home import resolve_meiva_home
 from schedules.jobs.entry import cluster_timezone, open_schedule_entry
 from schedules.jobs.loop import CronSchedule, Trigger, run_loop
@@ -26,6 +30,9 @@ from schedules.jobs.watch.main_red_watch import STATE_FILE, watch_once
 from schedules.jobs.telemetry_event import emit_system_event
 from schedules.plans.schedule_identity import parse_schedule_id
 from schedules.jobs.watch.main_red_liveness import liveness_once
+from schedules.plans.watch.main_red import Card, Failure, GATE_CHECK_STEPS, RunFacts
+
+RunProcess = Callable[..., subprocess.CompletedProcess[str]]
 
 CRON = "*/30 * * * *"
 # meiva:note
@@ -37,15 +44,35 @@ _PROCESS_NAME = "main-red-watch"
 _EVENT_NAME = "main_red_watch_round"
 _RELEASE_GATE = "release-gate.yml"
 _NIGHTLY = "refresh-test-durations.yml"
+_CI_NIGHTLY = "ci.yml"
+_MAIN_PUSH = "main-push.yml"
+# meiva:note
+# Only a workflow that runs the whole population may close a red; the push gate runs two checks,
+# so its green run says nothing about the test a nightly run found. Reading it as verdict enough
+# would close cards for failures nobody fixed.
+_FULL_SUITE_WORKFLOWS = frozenset({_RELEASE_GATE, _NIGHTLY, _CI_NIGHTLY})
 _REPORT_AGENT = 405
 _ENV_REPORT_AGENT = "MEIVA_MAIN_RED_REPORT_AGENT"
 _REPO = "zhiyuan-zhang0206/Meiva"
+# meiva:note
+# `ci.yml` also runs on every pull request, so its runs must be narrowed to the default branch:
+# a red pull-request run is that pull request's business, and reading it here would open cards
+# against `main` for a branch nobody merged.
+_PR_RUNNING_WORKFLOWS = frozenset({_CI_NIGHTLY})
+
+
+def _runs_path(workflow: str, page: int) -> str:
+    # meiva:note
+    # One place builds the listing path, so the newest run and the run history are narrowed alike:
+    # a liveness read that saw a pull-request run would report the schedule alive while it is dead.
+    branch = "&branch=main" if workflow in _PR_RUNNING_WORKFLOWS else ""
+    return f"repos/{_REPO}/actions/workflows/{workflow}/runs?per_page={page}{branch}"
 
 
 # meiva:note
 # The lead the cards belong to. A site that reports elsewhere sets the variable; a value that is
 # not a positive id stops the round naming the variable instead of opening cards into nothing.
-def report_agent_from_environ(environ):
+def report_agent_from_environ(environ: Mapping[str, str]) -> int:
     raw = environ.get(_ENV_REPORT_AGENT, "").strip()
     if not raw:
         return _REPORT_AGENT
@@ -58,7 +85,7 @@ def report_agent_from_environ(environ):
     return agent_id
 
 
-def _api(path, run_process):
+def _api(path: str, run_process: RunProcess) -> str:
     result = run_process(
         ["gh", "api", "--method", "GET", path], capture_output=True, text=True, timeout=120
     )
@@ -67,7 +94,23 @@ def _api(path, run_process):
     return result.stdout
 
 
-def _job_log(job_id, run_process):
+# meiva:note
+# The steps of a job that reported `failure`. The watch names the one that failed when it is a
+# check of the push gate, so a red says which check, not only which job.
+def _failed_step_names(job: Mapping[object, object]) -> tuple[str, ...]:
+    steps = job.get("steps")
+    if not is_object_list(steps):
+        return ()
+    names: list[str] = []
+    for step in steps:
+        if is_object_dict(step) and step.get("conclusion") == "failure":
+            name = step.get("name")
+            if isinstance(name, str):
+                names.append(name)
+    return tuple(names)
+
+
+def _job_log(job_id: int, run_process: RunProcess) -> str:
     result = run_process(
         ["gh", "api", "--method", "GET", f"repos/{_REPO}/actions/jobs/{job_id}/logs"],
         capture_output=True,
@@ -77,28 +120,29 @@ def _job_log(job_id, run_process):
     return result.stdout if result.returncode == 0 else ""
 
 
-def fetch_runs(workflow, run_process):
+def fetch_runs(workflow: str, run_process: RunProcess) -> tuple[RunFacts, ...]:
     import json
 
-    from schedules.plans.watch.main_red import RunFacts, parse_failures
+    from schedules.plans.watch.main_red import parse_failures
 
-    listing = json.loads(
-        _api(f"repos/{_REPO}/actions/workflows/{workflow}/runs?per_page=10", run_process)
-    )
-    facts = []
+    listing = json.loads(_api(_runs_path(workflow, 10), run_process))
+    facts: list[RunFacts] = []
     for item in listing.get("workflow_runs", []):
         conclusion = item.get("conclusion")
         if conclusion not in {"success", "failure"}:
             continue
-        failures = ()
-        job_names = ()
+        failures: tuple[Failure, ...] = ()
+        job_names: tuple[str, ...] = ()
         if conclusion == "failure":
             jobs = json.loads(
                 _api(f"repos/{_REPO}/actions/runs/{item['id']}/jobs?per_page=100", run_process)
             ).get("jobs", [])
             failed = [job for job in jobs if job.get("conclusion") == "failure"]
             job_names = tuple(job.get("name", "") for job in failed)
-            parsed = []
+            parsed: list[Failure] = []
+            check_steps: frozenset[str] = (
+                GATE_CHECK_STEPS if workflow == _MAIN_PUSH else frozenset()
+            )
             for job in failed:
                 log = _job_log(job["id"], run_process)
                 parsed.extend(
@@ -106,6 +150,8 @@ def fetch_runs(workflow, run_process):
                         log[-400_000:],
                         job_name=job.get("name", ""),
                         suite_step_failed=True,
+                        failed_steps=_failed_step_names(job),
+                        check_steps=check_steps,
                     )
                 )
             failures = tuple(parsed)
@@ -118,24 +164,43 @@ def fetch_runs(workflow, run_process):
                 failures=failures,
                 html_url=item.get("html_url"),
                 job_names=job_names,
+                covers_full_suite=workflow in _FULL_SUITE_WORKFLOWS,
+                head_title=_commit_subject(item.get("head_sha", ""), run_process)
+                if conclusion == "failure"
+                else "",
             )
         )
     return tuple(facts)
 
 
-def _last_run_start(workflow, run_process):
+# meiva:note
+# The merge commit's subject, so a card names the change instead of only a sha. Read for a failing
+# run alone: a green run's subject is not evidence anyone acts on.
+def _commit_subject(sha: str, run_process: RunProcess) -> str:
+    if not sha:
+        return ""
+    result = run_process(
+        ["gh", "api", f"repos/{_REPO}/commits/{sha}", "--jq", ".commit.message"],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip().splitlines()[0][:120] if result.stdout.strip() else ""
+
+
+def _last_run_start(workflow: str, run_process: RunProcess) -> datetime | None:
     import json
 
-    listing = json.loads(
-        _api(f"repos/{_REPO}/actions/workflows/{workflow}/runs?per_page=1", run_process)
-    )
+    listing = json.loads(_api(_runs_path(workflow, 1), run_process))
     runs = listing.get("workflow_runs", [])
     if not runs:
         return None
     return datetime.fromisoformat(runs[0]["created_at"].replace("Z", "+00:00"))
 
 
-def _open_card(card, report_agent):
+def _open_card(card: Card, report_agent: int) -> int:
     return int(
         meiva.tasks.create(
             title=card.title,
@@ -148,7 +213,7 @@ def _open_card(card, report_agent):
     )
 
 
-def _close_card(task_id, reason):
+def _close_card(task_id: int, reason: str) -> None:
     meiva.tasks.update(
         task_id,
         status="done",
@@ -157,7 +222,9 @@ def _close_card(task_id, reason):
     )
 
 
-def watch_round(slot, _payload, *, inputs, home, report_agent):
+def watch_round(
+    slot: datetime, _payload: object, *, inputs: ScheduleInputs, home: Path, report_agent: int
+) -> None:
     state_path = home / "run" / STATE_FILE
     run_process = subprocess.run
     line = watch_once(
@@ -175,9 +242,10 @@ def watch_round(slot, _payload, *, inputs, home, report_agent):
             image=inputs.image,
             home=inputs.home,
         ),
-        workflows=(_RELEASE_GATE, _NIGHTLY),
+        workflows=(_RELEASE_GATE, _NIGHTLY, _CI_NIGHTLY, _MAIN_PUSH),
         release_gate_last_start=_last_run_start(_RELEASE_GATE, run_process),
         nightly_last_start=_last_run_start(_NIGHTLY, run_process),
+        ci_nightly_last_start=_last_run_start(_CI_NIGHTLY, run_process),
     )
     print(f"[{datetime.now(UTC).isoformat()}] {line}", flush=True)
 
@@ -185,7 +253,9 @@ def watch_round(slot, _payload, *, inputs, home, report_agent):
 # meiva:note
 # The liveness trigger is five minutes past each round: far enough that a slow round has finished
 # and printed, close enough that a stopped watch is reported inside the hour it went quiet.
-def liveness_tick(slot, _payload, *, inputs, home, report_agent):
+def liveness_tick(
+    slot: datetime, _payload: object, *, inputs: ScheduleInputs, home: Path, report_agent: int
+) -> None:
     del home
     liveness_once(
         slot,
@@ -194,7 +264,9 @@ def liveness_tick(slot, _payload, *, inputs, home, report_agent):
     )
 
 
-def dispatch(slot, payload, *, inputs, home, report_agent):
+def dispatch(
+    slot: datetime, payload: object, *, inputs: ScheduleInputs, home: Path, report_agent: int
+) -> None:
     if payload == _LIVENESS_PAYLOAD:
         liveness_tick(slot, payload, inputs=inputs, home=home, report_agent=report_agent)
         return
