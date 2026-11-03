@@ -35,19 +35,16 @@ def register_agent_source(code: str) -> None:
     )
 
 
-def _exc_type_name(te: TracebackException) -> str:
-    name = getattr(te, "exc_type_str", None)
-    if name is not None:
-        return name
-    return te.exc_type.__name__
-
-
 def _filter_stack(stack: StackSummary) -> StackSummary:
     return StackSummary.from_list([f for f in stack if f.filename == AGENT_CODE_FILENAME])
 
 
 def _format_level(te: TracebackException) -> str:
-    if _exc_type_name(te) in _SYNTAX_EXC_NAMES:
+    # meiva:note
+    # The 3.13-only `exc_type_str` this read used to prefer fed nothing but this check, and the three
+    # names in `_SYNTAX_EXC_NAMES` are builtins, so `exc_type.__name__` answers the same on every
+    # supported version.
+    if te.exc_type.__name__ in _SYNTAX_EXC_NAMES:
         return _strip_caret_lines("".join(te.format_exception_only()))
     kept = _filter_stack(te.stack)
     parts: list[str] = []

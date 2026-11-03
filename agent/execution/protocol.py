@@ -8,14 +8,28 @@ import base64
 import contextlib
 import json
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal, TypeGuard
+from typing import Literal, TypeGuard
 from uuid import UUID
+
+from pydantic import TypeAdapter
 
 from agent.execution.result_kind import RESULT_KINDS, ResultKind
 from base.host.atomic_io import write_bytes_atomic
+from base.host.boundary.fields import (
+    optional_bool_field,
+    optional_float_field,
+    optional_int_field,
+    optional_list_field,
+    optional_object_field,
+    optional_str_field,
+    str_field,
+)
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
@@ -29,6 +43,12 @@ _NO_AGENT_DIRNAME = "_no_agent_"
 
 
 # meiva:note
+# The pair `JsonPlusSerializer.dumps_typed` answers, checked rather than declared: langgraph leaves
+# the method unannotated, so this validator is what turns its `Any` into a real tuple.
+_TYPED_BLOB = TypeAdapter(tuple[str, bytes])
+
+
+# meiva:note
 # Lazily build the typed-blob serializer using the same msgpack allowlist as the checkpointer.
 def dumps_typed(obj: object) -> tuple[str, bytes]:
     from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
@@ -39,7 +59,7 @@ def dumps_typed(obj: object) -> tuple[str, bytes]:
     serde = JsonPlusSerializer(
         allowed_msgpack_modules=checkpoint_msgpack_allowlist(loaded_state_classes())
     )
-    return serde.dumps_typed(obj)
+    return _TYPED_BLOB.validate_python(object_of(serde.dumps_typed, obj))
 
 
 def loads_typed(data: tuple[str, bytes]) -> object:
@@ -51,29 +71,28 @@ def loads_typed(data: tuple[str, bytes]) -> object:
     serde = JsonPlusSerializer(
         allowed_msgpack_modules=checkpoint_msgpack_allowlist(loaded_state_classes())
     )
-    return serde.loads_typed(data)
+    return object_of(serde.loads_typed, data)
 
 
 @dataclass
 class RequestPayload:
     code: str
-    context: dict[str, Any]
+    context: Mapping[str, object]
     timeout_s: float
-    state: dict[str, Any] | None
+    state: dict[str, object] | None
     incarnation: RuntimeIncarnation | None = None
     state_raw: tuple[str, bytes] | None = None
 
     @property
     def agent_id(self) -> int | None:
-        raw = self.context["identity"]["agent_id"]
-        return int(raw) if raw is not None else None
+        return _acting_agent_id(self.context)
 
-    def materialize_state(self) -> dict[str, Any] | None:
+    def materialize_state(self) -> dict[str, object] | None:
         if self.state_raw is None:
             return self.state
         if self.state is None:
             decoded = loads_typed(self.state_raw)
-            if not isinstance(decoded, dict):
+            if not is_object_dict(decoded):
                 raise ValueError(
                     f"exec request state blob decoded to {type(decoded).__name__}, expected dict"
                 )
@@ -89,9 +108,30 @@ class ResultPayload:
     exc_msg: str | None = None
     full_traceback: str | None = None
     code_reached: bool | None = None
-    state_update: dict[str, Any] | None = None
+    state_update: dict[str, object] | None = None
     state_update_error: str | None = None
-    sdk_calls: list[dict[str, Any]] | None = None
+    sdk_calls: list[dict[str, object]] | None = None
+
+
+# meiva:note
+# The agent id the request context acts as: `identity.agent_id` is the one field both sides write
+# (`MeivaContext.describe`) and both sides read (the payload, and the envelope check below), so a
+# missing or non-object identity fails here instead of at two separate indexing sites.
+def _acting_agent_id(context: Mapping[str, object]) -> int | None:
+    identity = optional_object_field(context, "identity")
+    if identity is None:
+        raise TypeError("exec request context identity must be an object")
+    return optional_int_field(identity, "agent_id")
+
+
+# meiva:note
+# The number `row[key]`; `base.host.boundary.fields` has `int_field` but no float twin, and a
+# timeout reads as a float.
+def _float_field(row: Mapping[str, object], key: str) -> float:
+    value = optional_float_field(row, key)
+    if value is None:
+        raise TypeError(f"{key} is {type(row.get(key)).__name__}, not a number")
+    return value
 
 
 # meiva:note
@@ -134,14 +174,14 @@ def write_request(
     path: Path,
     *,
     code: str,
-    context: dict[str, Any],
+    context: Mapping[str, object],
     timeout_s: float,
-    state: dict[str, Any] | None,
+    state: Mapping[str, object] | None,
     incarnation: RuntimeIncarnation | None,
 ) -> None:
     started_at = time.perf_counter()
-    agent_id = context["identity"]["agent_id"]
-    envelope: dict[str, Any] = {
+    agent_id = _acting_agent_id(context)
+    envelope: dict[str, object] = {
         "v": REQUEST_VERSION,
         "code": code,
         "agent_id": agent_id,
@@ -149,6 +189,8 @@ def write_request(
         "timeout_s": timeout_s,
     }
     if incarnation is not None:
+        if agent_id is None:
+            raise RuntimeError("an exec incarnation needs an agent id")
         incarnation.require_agent(agent_id)
         envelope["incarnation"] = {
             "generation": str(incarnation.generation),
@@ -165,35 +207,40 @@ def write_request(
 def read_request(path: Path) -> RequestPayload:
     started_at = time.perf_counter()
     envelope = _read_json(path)
-    if envelope.get("v") != REQUEST_VERSION:
+    version = optional_int_field(envelope, "v")
+    if version != REQUEST_VERSION:
         raise ValueError(
-            f"exec request envelope version {envelope.get('v')!r} != {REQUEST_VERSION} "
+            f"exec request envelope version {version!r} != {REQUEST_VERSION} "
             f"(stale file or version skew between agent and exec child)"
         )
+    context = optional_object_field(envelope, "context")
+    if context is None:
+        raise TypeError("exec request envelope context must be a dict")
     state_raw = None
-    if envelope.get("state_b64") is not None:
-        state_raw = (str(envelope["state_tag"]), base64.b64decode(envelope["state_b64"]))
-    acts_as = envelope["context"]["identity"]["agent_id"]
-    if envelope["agent_id"] != acts_as:
+    state_b64 = optional_str_field(envelope, "state_b64")
+    if state_b64 is not None:
+        state_raw = (str_field(envelope, "state_tag"), base64.b64decode(state_b64))
+    acting_agent_id = _acting_agent_id(context)
+    envelope_agent_id = optional_int_field(envelope, "agent_id")
+    if envelope_agent_id != acting_agent_id:
         raise ValueError(
-            f"exec request envelope names agent {envelope['agent_id']!r} but its context acts as "
-            f"{acts_as!r}"
+            f"exec request envelope names agent {envelope_agent_id!r} but its context acts as "
+            f"{acting_agent_id!r}"
         )
-    identity = envelope.get("incarnation")
+    identity = optional_object_field(envelope, "incarnation")
     incarnation = None
     if identity is not None:
-        if envelope["agent_id"] is None:
+        if envelope_agent_id is None:
             raise ValueError("exec incarnation requires an agent id")
         incarnation = RuntimeIncarnation(
-            int(envelope["agent_id"]), UUID(identity["generation"]), UUID(identity["owner"])
+            envelope_agent_id,
+            UUID(str_field(identity, "generation")),
+            UUID(str_field(identity, "owner")),
         )
-    raw_context: object = envelope["context"]
-    if not _is_object_dict(raw_context):
-        raise TypeError("exec request envelope context must be a dict")
     payload = RequestPayload(
-        code=str(envelope["code"]),
-        context={str(k): v for k, v in raw_context.items()},
-        timeout_s=float(envelope["timeout_s"]),
+        code=str_field(envelope, "code"),
+        context=context,
+        timeout_s=_float_field(envelope, "timeout_s"),
         state=None,
         incarnation=incarnation,
         state_raw=state_raw,
@@ -206,7 +253,7 @@ def write_result(path: Path, payload: ResultPayload) -> None:
     if payload.kind not in RESULT_KINDS:
         raise ValueError(f"unknown result kind {payload.kind!r}")
     started_at = time.perf_counter()
-    envelope: dict[str, Any] = {
+    envelope: dict[str, object] = {
         "v": RESULT_VERSION,
         "kind": payload.kind,
         "lifecycle_type": payload.lifecycle_type,
@@ -229,52 +276,47 @@ def _is_result_kind(value: object) -> TypeGuard[ResultKind]:
     return isinstance(value, str) and value in RESULT_KINDS
 
 
-def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
-    return isinstance(value, dict)
-
-
-def _is_object_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
-
-
 def read_result(path: Path) -> ResultPayload:
     started_at = time.perf_counter()
     envelope = _read_json(path)
-    if envelope.get("v") != RESULT_VERSION:
-        raise ValueError(f"exec result envelope version {envelope.get('v')!r} != {RESULT_VERSION}")
+    version = optional_int_field(envelope, "v")
+    if version != RESULT_VERSION:
+        raise ValueError(f"exec result envelope version {version!r} != {RESULT_VERSION}")
     kind_raw = envelope.get("kind")
     if not _is_result_kind(kind_raw):
         raise ValueError(f"exec result envelope has unknown kind {kind_raw!r}")
-    state_update: dict[str, Any] | None = None
-    if envelope.get("update_b64") is not None:
-        decoded = loads_typed(
-            (str(envelope["update_tag"]), base64.b64decode(envelope["update_b64"]))
-        )
-        if not _is_object_dict(decoded):
+    state_update: dict[str, object] | None = None
+    update_b64 = optional_str_field(envelope, "update_b64")
+    if update_b64 is not None:
+        decoded = loads_typed((str_field(envelope, "update_tag"), base64.b64decode(update_b64)))
+        if not is_object_dict(decoded):
             raise ValueError(
                 f"exec result update blob decoded to {type(decoded).__name__}, expected dict"
             )
-        state_update = {str(k): v for k, v in decoded.items()}
-    code_reached = envelope.get("code_reached")
-    raw_sdk_calls: object = envelope.get("sdk_calls")
-    sdk_calls: list[dict[str, Any]] | None = (
-        [{str(k): v for k, v in item.items()} for item in raw_sdk_calls if _is_object_dict(item)]
-        if _is_object_list(raw_sdk_calls)
-        else None
-    )
+        state_update = decoded
     payload = ResultPayload(
         kind=kind_raw,
-        lifecycle_type=envelope.get("lifecycle_type"),
-        exc_type=envelope.get("exc_type"),
-        exc_msg=envelope.get("exc_msg"),
-        full_traceback=envelope.get("full_traceback"),
-        code_reached=(code_reached if isinstance(code_reached, bool) else None),
+        lifecycle_type=optional_str_field(envelope, "lifecycle_type"),
+        exc_type=optional_str_field(envelope, "exc_type"),
+        exc_msg=optional_str_field(envelope, "exc_msg"),
+        full_traceback=optional_str_field(envelope, "full_traceback"),
+        code_reached=optional_bool_field(envelope, "code_reached"),
         state_update=state_update,
-        state_update_error=envelope.get("state_update_error"),
-        sdk_calls=sdk_calls,
+        state_update_error=optional_str_field(envelope, "state_update_error"),
+        sdk_calls=_sdk_calls(envelope),
     )
     _log_envelope_transfer("result", "read", path, started_at)
     return payload
+
+
+# meiva:note
+# The wire list `base.agents.sdk.telemetry.tally_entries` writes: one object per SDK call, or None
+# when the child wrote none. An entry that is not an object is dropped, as before.
+def _sdk_calls(envelope: Mapping[str, object]) -> list[dict[str, object]] | None:
+    entries = optional_list_field(envelope, "sdk_calls")
+    if entries is None:
+        return None
+    return [entry for entry in entries if is_object_dict(entry)]
 
 
 def _log_envelope_transfer(
@@ -295,12 +337,12 @@ def _log_envelope_transfer(
     )
 
 
-def _write_json(path: Path, envelope: dict[str, Any]) -> None:
+def _write_json(path: Path, envelope: Mapping[str, object]) -> None:
     data = json.dumps(envelope, ensure_ascii=False).encode("utf-8")
     write_bytes_atomic(path, data, mode=0o600, suppress_cleanup_error=True)
 
 
-def _read_json(path: Path) -> dict[str, Any]:
+def _read_json(path: Path) -> dict[str, object]:
     size_bytes = path.stat().st_size
     if size_bytes > MAX_ENVELOPE_BYTES:
         raise ValueError(
@@ -308,7 +350,7 @@ def _read_json(path: Path) -> dict[str, Any]:
             "ceiling — this state snapshot or result delta is over the exec envelope limit; "
             "compact the conversation"
         )
-    data: object = json.loads(path.read_text(encoding="utf-8"))
-    if not _is_object_dict(data):
+    data = object_of(json.loads, path.read_text(encoding="utf-8"))
+    if not is_object_dict(data):
         raise TypeError(f"exec envelope {path} is {type(data).__name__}, expected object")
-    return {str(k): v for k, v in data.items()}
+    return data

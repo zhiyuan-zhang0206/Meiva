@@ -198,8 +198,8 @@ async def run_agent_code(
     ExecResult,
     dict[str, Any],
     int,
-    list[dict[str, Any]] | None,
-    list[dict[str, Any]] | None,
+    object,
+    list[dict[str, object]] | None,
 ]:
     """Run the agent's code in one disposable child process.
 

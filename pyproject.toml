@@ -635,6 +635,9 @@ reportUnusedCallResult = "warning"
 # leaves TESTS_OWING_ANY, that is when reportAny is a global error.
 # BEGIN GENERATED pyright tests environments (scripts/codegen/gen_pyright_test_environments.py; edit nothing between the markers)
 [[tool.pyright.executionEnvironments]]
+root = "agent/execution/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/agents/context/gateway_client/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -866,6 +869,11 @@ root = "services/supervision/roster/tests"
 
 # Directory entries that raise reportAny / reportExplicitAny to "error" once a directory's count is
 # 0. Their tests directories follow them unless their path is under a prefix listed in TESTS_OWING_ANY.
+[[tool.pyright.executionEnvironments]]
+root = "agent/execution"
+reportAny = "error"
+reportExplicitAny = "error"
+
 [[tool.pyright.executionEnvironments]]
 root = "base/agents"
 reportAny = "error"
