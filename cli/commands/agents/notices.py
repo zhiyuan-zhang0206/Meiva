@@ -30,9 +30,15 @@ def _print_notice(
     kind = "NOTICE"
     label = n.get("agent_label") or ""
     status = f" [{agent_status}]" if agent_status else ""
+    # meiva:note
+    # `source` is the credential the SERVER verified for the write, not the caller's
+    # claim; it is what answers "which credential posted this", which the URL's
+    # agent_id cannot. Absent on rows written before the column existed.
+    source = n.get("source_verified_by")
     print(
         f"[{i}/{total}] #{n['id']} {kind} {n['priority']} "
         f"agent#{n['agent_id']} {label}{status}: {n['title']}"
+        + (f"  [source: {source}]" if source else "")
     )
     if n.get("content"):
         print(f"    {n['content'][:120]}")

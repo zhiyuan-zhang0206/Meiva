@@ -78,6 +78,7 @@ def test_notice_item_wire_shape() -> None:
         "question",
         "answer",
         "task_id",
+        "source_verified_by",
         "expire_at",
     }
     assert d["id"] == 5

@@ -82,9 +82,10 @@ def stage_human_notice(
         return None
     cur.execute(
         "INSERT INTO agent_notices "
-        "(agent_id,local_id,task_id,title,content,priority,require_response,blocking,expire_at) "
+        "(agent_id,local_id,task_id,title,content,priority,require_response,blocking,expire_at,"
+        "source_verified_by) "
         "VALUES (%s,COALESCE((SELECT MAX(local_id) FROM agent_notices WHERE agent_id=%s),-1)+1, "
-        "%s,%s,%s,%s,TRUE,FALSE,now()+make_interval(secs=>%s)) RETURNING id",
+        "%s,%s,%s,%s,TRUE,FALSE,now()+make_interval(secs=>%s),'internal') RETURNING id",
         (
             agent_id,
             agent_id,

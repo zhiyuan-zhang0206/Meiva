@@ -3348,6 +3348,7 @@ export interface components {
             question?: (components["schemas"]["ChoiceQuestion"] | components["schemas"]["TextQuestion"]) | null;
             answer?: components["schemas"]["NoticeAnswer"] | null;
             task_id?: number | null;
+            source_verified_by?: string | null;
             expire_at: string;
         };
         NoticeOption: {

@@ -14475,6 +14475,17 @@
             ],
             "title": "Task Id"
           },
+          "source_verified_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Verified By"
+          },
           "expire_at": {
             "type": "string",
             "format": "date-time",
