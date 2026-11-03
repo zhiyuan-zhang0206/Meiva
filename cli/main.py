@@ -23,6 +23,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable, MutableMapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, TextIO
@@ -38,6 +39,7 @@ from base.native_process.os_platform import (
 # Only the settings-free parser composition entry is imported here. Domain
 # adapters lazy-import runtime commands when their bound handler is dispatched.
 from cli import parsers
+from cli.options import options
 from cli.startup.entry_plan import (
     LITE_VERBS,
     needs_stop_probe,
@@ -124,6 +126,13 @@ def opt_into_lite_config(
         deliver_lite_api_token(environ, home=home)
 
 
+@dataclass(frozen=True)
+class _InitArguments:
+    config_file: str | None
+    ssl_cert_file: str | None
+    transport_key: str
+
+
 # meiva:note
 # Hand `meiva init` the host facts of its caller, the process facts beyond its site.
 #
@@ -142,6 +151,7 @@ def bind_init_inputs(args: argparse.Namespace) -> None:
     from cli.startup.service_path import BirthFacts, CallerHost
     from services.backup.artifact import passphrase
 
+    init = options(args, _InitArguments)
     table = cluster.new_home_ports()
     args.caller_host = CallerHost(
         service_path=os.environ.get("MEIVA_SERVICE_PATH"),
@@ -151,7 +161,7 @@ def bind_init_inputs(args: argparse.Namespace) -> None:
         occupied_ports=frozenset(
             port for port in table.values() if isinstance(port, int) and not cluster.port_free(port)
         ),
-        local_names=_local_names() if args.config_file is not None else frozenset(),
+        local_names=_local_names() if init.config_file is not None else frozenset(),
         birth=BirthFacts(
             now=datetime.now(UTC),
             cluster_secret=secrets.token_urlsafe(32),
@@ -159,11 +169,11 @@ def bind_init_inputs(args: argparse.Namespace) -> None:
             redis_password=secrets.token_urlsafe(32),
             backup_passphrase=passphrase.mint(random.SystemRandom()),
         ),
-        transport_key=args.transport_key,
+        transport_key=init.transport_key,
         user_home=Path.home(),
     )
-    if args.ssl_cert_file is not None:
-        os.environ["SSL_CERT_FILE"] = args.ssl_cert_file
+    if init.ssl_cert_file is not None:
+        os.environ["SSL_CERT_FILE"] = init.ssl_cert_file
 
 
 # meiva:note
@@ -278,6 +288,23 @@ def parse_command_args(
     )
 
 
+@dataclass(frozen=True)
+class _PasswordChoice:
+    prompt: bool
+
+
+@dataclass(frozen=True)
+class _Dispatch:
+    func: Callable[[argparse.Namespace], int]
+
+
+# meiva:note
+# Run the handler the parser bound to `args`. A handler whose declared options the namespace does
+# not carry (`cli.options`) is a parser/handler mismatch, a programming error that raises.
+def _invoke(args: argparse.Namespace) -> int:
+    return options(args, _Dispatch).func(args)
+
+
 # meiva:note
 # Execute an already-parsed CLI namespace against an explicit `declared` home and `checkout`.
 def dispatch_parsed(
@@ -295,18 +322,21 @@ def dispatch_parsed(
         from cli.startup.password_input import PasswordInputError
 
         try:
-            args.password = read_new_password(prompt=args.prompt, stdin=sys.stdin)
+            args.password = read_new_password(
+                prompt=options(args, _PasswordChoice).prompt, stdin=sys.stdin
+            )
         except PasswordInputError as exc:
             print(f"meiva auth set-password: {exc}; nothing was changed", file=sys.stderr)
             return 1
     if tuple(args_in[:1]) == ("init",):
         bind_init_inputs(args)
-        return args.func(args)
+        return _invoke(args)
     if tuple(args_in[:1]) == ("start",):
         from cli.start_identity import require_initialized
+        from cli.start_runtime import site_of
 
         try:
-            require_initialized(args.site.home)
+            require_initialized(site_of(args).home)
         except (ValueError, TypeError, RuntimeError, OSError) as exc:
             print(f"meiva start: {exc}", file=sys.stderr)
             return 1
@@ -334,7 +364,7 @@ def dispatch_parsed(
         sink = pre_dispatch_log_sink(args_in)
         if sink is not None:
             producer.initialize_logging(sink)
-        return args.func(args)
+        return _invoke(args)
     except LockTimeoutError as exc:
         print(
             f"meiva: another local lifecycle operation is active; retry after it finishes: {exc}",

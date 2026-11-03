@@ -79,6 +79,26 @@ The worktree override deliberately stays environment-only:
   home); the environment switch is the deliberate escape hatch for a caller
   that means it.
 
+## Reading the parsed arguments: typed, once
+
+`argparse.Namespace` attributes are `Any`, so a handler never reads `args.name`.
+It declares a frozen dataclass of the attributes it reads and calls
+`cli.options.options(args, Shape)` as its first line; every later use holds a real
+type. A field is the namespace attribute of the same name and carries its type
+(`str`, `int`, `Path | None`, `list[str]`, `Literal[...]`, an enum, a domain class);
+a field has no default, because the parser answered it. An attribute the namespace
+lacks or one of the wrong type is an `OptionsError` naming every such field at once,
+which is a programming error that raises: argparse has already checked what the operator
+typed, so a mismatch means the parser and its handler disagree, and it fails the first
+time the verb runs rather than being reported as a usage error.
+
+The entry binds a few values beside the flags (`args.runtime`, `args.database_factory`,
+`args.producer`, `args.site`). Each has a class and an accessor next to it
+(`cli.database.runtime.runtime_of`, `cli.start_runtime.site_of`) that wraps
+`cli.options.attribute`. A dataclass is declared in the parser module and uses only
+types that module can import without loading Settings; the accessor and the
+`cmd_*` implementation are imported inside the handler, as before.
+
 ## The review action
 
 A new CLI argument without `required` / `type=` needs a required form, a

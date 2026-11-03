@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
+
+from cli.options import options
 
 FAMILY_DAYS_NAMES = frozenset(
     {"agent", "shell", "gateway", "ops", "watchdog", "snapshot", "other", "default"}
@@ -50,32 +54,52 @@ def _family_days(value: str) -> dict[str, int]:
     return family_days
 
 
+@dataclass(frozen=True)
+class _RetentionOptions:
+    older_than: int | None
+    family_days: Mapping[str, int] | None
+    dry_run: bool
+
+
 def _h_logs_retention(args: argparse.Namespace) -> int:
     from base.paths import logs_dir
     from cli.commands.observability.logs import cmd_logs_retention
+    from cli.database.runtime import runtime_of
 
-    explicit = args.older_than is not None or args.family_days is not None
+    opts = options(args, _RetentionOptions)
+    runtime = runtime_of(args)
+    explicit = opts.older_than is not None or opts.family_days is not None
     return cmd_logs_retention(
-        older_than_days=args.older_than,
-        family_days=args.family_days,
+        older_than_days=opts.older_than,
+        family_days=opts.family_days,
         default_retention_days=(
-            None if explicit else args.runtime.config.view.observability.log_retention_days
+            None if explicit else runtime.config.view.observability.log_retention_days
         ),
-        dry_run=args.dry_run,
-        logs_path=logs_dir(home=args.runtime.home),
-        now=args.runtime.clock.now(),
+        dry_run=opts.dry_run,
+        logs_path=logs_dir(home=runtime.home),
+        now=runtime.clock.now(),
     )
+
+
+@dataclass(frozen=True)
+class _RotateOptions:
+    dry_run: bool
+    size_mib: int
+    logs_path: Path | None
 
 
 def _h_logs_rotate(args: argparse.Namespace) -> int:
     from base.paths import logs_dir
     from cli.commands.observability.logs import cmd_logs_rotate
+    from cli.database.runtime import runtime_of
 
+    opts = options(args, _RotateOptions)
+    runtime = runtime_of(args)
     return cmd_logs_rotate(
-        dry_run=args.dry_run,
-        size_mib=args.size_mib,
-        logs_path=logs_dir(home=args.runtime.home) if args.logs_path is None else args.logs_path,
-        now=args.runtime.clock.now(),
+        dry_run=opts.dry_run,
+        size_mib=opts.size_mib,
+        logs_path=logs_dir(home=runtime.home) if opts.logs_path is None else opts.logs_path,
+        now=runtime.clock.now(),
     )
 
 

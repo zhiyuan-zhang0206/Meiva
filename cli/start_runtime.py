@@ -9,12 +9,14 @@
 
 from __future__ import annotations
 
+import argparse
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from base.host import runtime_interpreter
 from base.host.runtime_interpreter import LoadedRuntimeIdentity
+from cli.options import attribute
 
 
 # meiva:note
@@ -27,6 +29,12 @@ from base.host.runtime_interpreter import LoadedRuntimeIdentity
 class HomeSite:
     home: Path
     checkout: Path
+
+
+# meiva:note
+# The site `cli.main` bound to a parsed `init` or `start` (`args.site`), as the class it is.
+def site_of(args: argparse.Namespace) -> HomeSite:
+    return attribute(args, "site", HomeSite)
 
 
 # meiva:note
