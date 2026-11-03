@@ -1,16 +1,19 @@
 from __future__ import annotations
 
-from collections.abc import Callable, MutableMapping
+from collections.abc import Callable, MutableMapping, Sequence
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import TypeGuard
 from uuid import UUID
+
+from langchain_core.language_models import BaseChatModel
 
 import meiva
 from base.api_contracts.agent_contract import Harness
 from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.db import Database
+from base.host.boundary.untyped import object_of
 from base.host.env.agent_slices import ModelOverrides, agent_setting
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_contract import ProviderBinding
@@ -23,20 +26,57 @@ from base.telemetry.otlp.trace_readiness import TraceReadiness
 from meiva.sdk_surface import sdk_disable
 
 
-def apply_per_agent_sdk_disable(*, default_reader: Callable[[str, str], Any]) -> None:
+# meiva:note
+# The tuple twin of `base.host.boundary.json_values.is_object_list`: the registry hands a list
+# setting back as a tuple (`agent_slices._value`), and a TypeGuard is what turns `object` into a
+# sequence of `object` instead of a sequence of `Unknown`.
+def _is_sequence(value: object) -> TypeGuard[Sequence[object]]:
+    return isinstance(value, list | tuple)
+
+
+# meiva:note
+# A per-agent setting the config registry declares as a list of names. `agent_setting` answers
+# `object` (its reader is the SDK config authority), so a value of another shape stops the boot
+# naming the setting instead of iterating a string into single characters.
+def _names(value: object, setting: str) -> list[str]:
+    if not _is_sequence(value):
+        raise TypeError(f"{setting} must be a list of names, got {type(value).__name__}")
+    names = [item for item in value if isinstance(item, str)]
+    if len(names) != len(value):
+        raise TypeError(f"{setting} must hold only names")
+    return names
+
+
+# meiva:note
+# The plugin namespace `meiva.memory`, or None on a home that never loaded the memory plugin.
+# `meiva` answers a plugin name through a module `__getattr__` typed `Any` (the name exists only at
+# run time), so the namespace arrives as `object` and each attribute is named at its own use.
+def _memory_namespace() -> object | None:
+    try:
+        return object_of(getattr, meiva, "memory")
+    except AttributeError:
+        return None
+
+
+def apply_per_agent_sdk_disable(*, default_reader: Callable[[str, str], object]) -> None:
     configured = agent_setting("sdk_disable", default_reader=default_reader)
     if not configured:
         return
-    sdk_disable.apply_sdk_disable(list(configured))
+    sdk_disable.apply_sdk_disable(_names(configured, "sdk_disable"))
 
 
 def apply_per_agent_eval_isolation(
-    *, agent_id: int | None, default_reader: Callable[[str, str], Any], home: Path
+    *, agent_id: int | None, default_reader: Callable[[str, str], object], home: Path
 ) -> None:
     if not agent_setting("eval_isolation", default_reader=default_reader):
         return
 
-    allowed_network = set(agent_setting("eval_network_allowlist", default_reader=default_reader))
+    allowed_network = set(
+        _names(
+            agent_setting("eval_network_allowlist", default_reader=default_reader),
+            "eval_network_allowlist",
+        )
+    )
     disabled = ["agents.get_last_message", "tasks", "mcps", "ui"]
     if "web" not in allowed_network:
         disabled.append("web")
@@ -48,13 +88,28 @@ def apply_per_agent_eval_isolation(
         raise RuntimeError("eval isolation needs the agent identity of the exec it isolates")
     isolated_pool = workspace_dir(agent_id, home=home) / "memory-pool"
     isolated_pool.mkdir(parents=True, exist_ok=True)
-    memory = getattr(meiva, "memory", None)
+    memory = _memory_namespace()
     if memory is not None:
-        memory.PATH = meiva.const(isolated_pool, doc=memory.PATH.__doc__)
-        memory.search = _isolated_memory_search
+        # meiva:note
+        # The pool's documented help text is carried over verbatim: `meiva.memory.PATH` is a
+        # `const(...)` whose `__doc__` is the body `help()` renders, and an isolated run must not
+        # describe a different directory than the one it points at.
+        doc = object_of(getattr, object_of(getattr, memory, "PATH"), "__doc__")
+        if not isinstance(doc, str):
+            raise TypeError("meiva.memory.PATH carries no help text to carry over")
+        # meiva:note
+        # `memory` is `object` here (`meiva` answers plugin names as `Any`), so the two writes are
+        # `setattr` with a constant name — the shape `B010` warns about, and the only shape that
+        # type-checks against an opaque namespace.
+        setattr(memory, "PATH", meiva.const(isolated_pool, doc=doc))  # noqa: B010
+        setattr(memory, "search", _isolated_memory_search)  # noqa: B010
 
 
-def _isolated_memory_search(_query: str, _k: int = 5) -> list[Any]:
+# meiva:note
+# The isolated pool answers every recall with nothing: the notes it would find live in the cluster
+# pool this run must not read. Typed `object` because the plugin that owns `search` declares the
+# element type (`MemoryMatch`), and the agent core does not import a plugin.
+def _isolated_memory_search(_query: str, _k: int = 5) -> list[object]:
     return []
 
 
@@ -122,7 +177,7 @@ async def boot_agent_scope(
     permissions_notice_key: UUID,
     home: Path,
     harness: Harness = Harness.MEIVA,
-) -> tuple[Any, ProviderBinding | None]:
+) -> tuple[BaseChatModel | None, ProviderBinding | None]:
     workspace = workspace_dir(agent_id, home=home)
 
     from base.agents.to_user.document import ensure_document
