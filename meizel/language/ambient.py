@@ -46,6 +46,12 @@ from meizel.lint_common import is_test_path
 
 __all__ = ["AmbientAccess", "AmbientRecorder"]
 
+# meiva:note
+# The function that calls the function it is handed. A function typed `Any` can be called without
+# `reportAny` only through `object_of(get_field, name)`, so the ambient rule reads that as the call
+# `get_field(name)`.
+OBJECT_OF = "base.host.boundary.untyped.object_of"
+
 
 def _own_nodes(function: ast.FunctionDef | ast.AsyncFunctionDef) -> Iterator[ast.AST]:
     pending: list[ast.AST] = list(function.body)
@@ -486,6 +492,12 @@ class AmbientAccess(PatchForms):
         if callee is None:
             callee = self._local_callee(call.func)
         self.ambient.called(callee, call, loop_clock=fake_entropy.is_loop_clock(call, self.dotted))
+        if callee == OBJECT_OF and call.args and isinstance(call.args[0], ast.Name | ast.Attribute):
+            reader = call.args[0]
+            handed = ast.Call(func=reader, args=call.args[1:], keywords=call.keywords)
+            handed = ast.copy_location(handed, call)
+            reader_callee = self.dotted(reader) or self._local_callee(reader)
+            self.ambient.called(reader_callee, handed)
 
     # meiva:note
     # The module-level function of this same file that a bare call names, when its entry says a

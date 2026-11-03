@@ -48,7 +48,9 @@ does not declare, in either table, is `manifest-syntax`. A name is resolved agai
 declares the kind. A bare name (`settings`) acquires where it is imported (`from base.config import settings`)
 or read as an attribute (`base.config.settings.x`). A name ending in `()` (`get_field()`,
 `Database.from_settings()`) acquires only where it is called, so importing a class for an annotation
-acquires nothing.
+acquires nothing. `base.host.boundary.untyped.object_of(reader, *args, **kwargs)` is the call
+`reader(*args, **kwargs)`, judged the same way when `reader` is a name or an attribute chain; any other
+first argument is not guessed at.
 
 ```toml
 # meizel.policy.toml
