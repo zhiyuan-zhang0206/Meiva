@@ -1122,6 +1122,11 @@ reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/lm_xiaomi"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/skills/coordination"
 reportAny = "error"
 reportExplicitAny = "error"
