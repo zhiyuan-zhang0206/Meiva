@@ -121,6 +121,12 @@ class TurnCompleted:
     cumulative_cost_usd: float | None
     permission_denials: tuple[str, ...]
     steps: tuple[Usage, ...] = ()
+    # meiva:note
+    # A failed API call is reported as `is_error=True` with `subtype="success"` and this status
+    # (`api_error_status`), per the Claude SDK's own ResultMessage. Carried to the fault message so a
+    # 400 is named as one instead of being reported as a successful stop.
+    api_error_status: int | None = None
+    errors: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

@@ -4,25 +4,27 @@ exports = ["acp", "antigravity", "base_session.py", "bridge.py", "claude", "code
 "__init__.py" = ["bridge.py", "engine.py", "events.py", "handoff.py", "registration.py", "registry.py"]
 "antigravity" = ["base_session.py", "cancel.py", "events.py", "handoff.py", "process.py", "registry.py", "session"]
 "base_session.py" = ["events.py", "handoff.py", "process.py", "registry.py", "session"]
-"bridge.py" = ["base_session.py", "engine.py", "events.py", "handoff.py", "registration.py", "registry.py"]
+"bridge.py" = ["base_session.py", "engine.py", "events.py", "faults.py", "handoff.py", "registration.py", "registry.py"]
 "claude" = ["__init__.py", "base_session.py", "cancel.py", "events.py", "handoff.py", "process.py", "registry.py", "session"]
 "codex" = ["base_session.py", "cancel.py", "events.py", "handoff.py", "process.py", "registry.py", "session"]
 "deepseek" = ["__init__.py", "acp", "base_session.py", "cancel.py", "events.py", "handoff.py", "process.py", "registry.py", "session"]
 "cancel.py" = []
 "engine.py" = ["events.py", "handoff.py"]
 "events.py" = []
+"faults.py" = ["engine.py"]
 "handoff.py" = []
 "process.py" = []
 "registration.py" = []
 "registry.py" = []
 "session" = ["events.py"]
 "wiring.py" = ["antigravity", "base_session.py", "bridge.py", "claude", "codex", "events.py", "handoff.py", "registration.py", "registry.py"]
-"tests" = ["__init__.py", "antigravity", "base_session.py", "cancel.py", "claude", "codex", "handoff.py", "registration.py", "registry.py", "wiring.py"]
+"tests" = ["__init__.py", "antigravity", "base_session.py", "cancel.py", "claude", "codex", "engine.py", "events.py", "faults.py", "handoff.py", "registration.py", "registry.py", "wiring.py"]
 
 [purity]
 "cancel.py" = "strict"
 "engine.py" = "strict"
 "events.py" = "strict"
+"faults.py" = "strict"
 "handoff.py" = "strict"
 
 [roots]

@@ -42,6 +42,12 @@ class ResultFields:
     result_text: str | None
     permission_denials: tuple[str, ...]
     # meiva:note
+    # A failed API call arrives as `is_error=True` with `subtype="success"`: `api_error_status`
+    # carries the HTTP status (the SDK documents 429/500/529 and this 400) and `result` carries the
+    # provider's message. `subtype` says "success" on that shape, so it cannot name the failure.
+    api_error_status: int | None
+    errors: tuple[str, ...]
+    # meiva:note
     # The CLI names what started the turn a result reports on: `human` for a prompt
     # this session submitted, `task-notification` for the CLI's own turn over a
     # background task it finished without us, and nothing at all on a CLI too old to
@@ -69,6 +75,8 @@ def parse_result(message: object) -> ResultFields:
         cost_usd=_float_or_none(getattr(message, "total_cost_usd", None)),
         result_text=_text(getattr(message, "result", None)),
         permission_denials=_denials(getattr(message, "permission_denials", None)),
+        api_error_status=_int_or_none(getattr(message, "api_error_status", None)),
+        errors=_messages(getattr(message, "errors", None)),
         origin_kind=_origin_kind(getattr(message, "origin", None)),
     )
 
@@ -244,6 +252,10 @@ def _denials(raw: _Json) -> tuple[str, ...]:
         else:
             names.append(str(item))
     return tuple(names)
+
+
+def _messages(raw: _Json) -> tuple[str, ...]:
+    return tuple(str(item) for item in _as_list(raw) if str(item).strip())
 
 
 def _render(content: _Json) -> str:

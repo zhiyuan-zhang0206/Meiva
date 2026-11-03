@@ -147,6 +147,35 @@ def test_usage_reports_the_whole_prompt_not_only_the_uncached_remainder() -> Non
     assert cached <= fields.usage.input_tokens, "the cache fields are subsets of the prompt"
 
 
+# meiva:note
+# The failed-API-call shape: `is_error=True` with `subtype="success"`, the status in
+# `api_error_status` and the provider's sentence in the result text (#6150). The fields have to
+# survive the mapping or the bridge can only report the subtype.
+def test_result_fields_carry_the_api_error_status_and_the_error_list() -> None:
+    fields = parse_result(
+        fake.ResultMessage(
+            subtype="success",
+            is_error=True,
+            stop_reason="stop_sequence",
+            result="API Error: 400 This API key is not scoped to a workspace",
+            api_error_status=400,
+            errors=["bad request"],
+        )
+    )
+
+    assert fields.is_error is True
+    assert fields.api_error_status == 400
+    assert fields.errors == ("bad request",)
+    assert fields.result_text == "API Error: 400 This API key is not scoped to a workspace"
+
+
+def test_a_successful_result_carries_no_status_and_no_errors() -> None:
+    fields = parse_result(fake.ResultMessage(subtype="success"))
+
+    assert fields.api_error_status is None
+    assert fields.errors == ()
+
+
 def test_unknown_messages_map_to_nothing() -> None:
 
     class FutureMessage:

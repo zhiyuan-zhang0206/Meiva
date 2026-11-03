@@ -114,6 +114,8 @@ class ResultMessage:
     model_usage: dict[str, Any] | None = None
     permission_denials: list[Any] | None = None
     origin: dict[str, Any] | None = None
+    errors: list[str] | None = None
+    api_error_status: int | None = None
 
 
 @dataclass
