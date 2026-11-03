@@ -29,6 +29,7 @@ from base.deploy.progress_timeout import (
     SERVICE_READY_TIMEOUT_S,
 )
 from base.host.exit_codes import hard_exit
+from base.host.proc import CommandRunner
 from base.host.system.hostport import Host
 from base.native_process.child_env import inherited_process_env
 from base.native_process.code_version import CodeVersion
@@ -87,6 +88,12 @@ _SCOPE_PROBE_TIMEOUT_S = 10.0
 
 
 # meiva:note
+# Standard systemd user-manager runtime root; parameterized so tests exercise real directories
+# under `tmp_path` without patching filesystem lookups.
+_USER_RUNTIME_ROOT = Path("/run/user")
+
+
+# meiva:note
 # The agent-host budget is opt-in per machine and only meaningful where cgroups exist.
 # The probe runs once, at assembly, because the alternative failure is worse than having
 # no cap: a unit wrapped in a launcher the host cannot run never starts at all, so a
@@ -103,40 +110,57 @@ _SCOPE_PROBE_TIMEOUT_S = 10.0
 # from "cannot start at all", which is what inventing a directory that does not exist would
 # trade it for.
 def user_runtime_dir(
-    environ: Mapping[str, str], *, uid: int, isdir: Callable[[str], bool]
+    environ: Mapping[str, str],
+    *,
+    uid: int,
+    isdir: Callable[[str], bool],
+    runtime_root: Path = _USER_RUNTIME_ROOT,
 ) -> str | None:
     current = environ.get("XDG_RUNTIME_DIR")
     if current:
         return current
-    candidate = f"/run/user/{uid}"
+    candidate = str(runtime_root / str(uid))
     return candidate if isdir(candidate) else None
 
 
 # meiva:note
-# Writing it onto the process is the point, not a convenience: the launch rewrite hands
-# `systemd-run --user` to the supervisor, which inherits this environment. Repairing the
-# probe alone would leave that second hop failing exactly as before.
+# Populate `XDG_RUNTIME_DIR` on the launch mapping when an existing user runtime dir is found.
+# `Supervisor` snapshots its entry environment before `--wiring` loads, so `bind_memory_budget`
+# installs any repaired value onto the supervisor (`set_launch_env`) and hands that same
+# `supervisor.launch_environ()` mapping to the scope probe (`can_scope_units`): probe and
+# spawned `systemd-run --user` wrapper see the identical environment and can never diverge.
 def ensure_user_runtime_dir(
-    environ: MutableMapping[str, str], *, uid: int, isdir: Callable[[str], bool]
+    environ: MutableMapping[str, str],
+    *,
+    uid: int,
+    isdir: Callable[[str], bool],
+    runtime_root: Path = _USER_RUNTIME_ROOT,
 ) -> str | None:
-    resolved = user_runtime_dir(environ, uid=uid, isdir=isdir)
+    resolved = user_runtime_dir(environ, uid=uid, isdir=isdir, runtime_root=runtime_root)
     if resolved is not None:
         environ["XDG_RUNTIME_DIR"] = resolved
     return resolved
 
 
 # meiva:note
-# Whether this host can scope a unit at all. Asked with the largest numbers configured, so a
-# value the host refuses (rather than the mechanism itself) fails at assembly rather than at
-# the launch that would have started the unit. One probe for the whole set: it answers for
-# the mechanism, not for a particular unit.
-def can_scope_units(*, budgets: Sequence[UnitBudget], platform: str) -> bool:
+# Whether this host can scope a unit at all. Asked with the largest numbers configured and the
+# exact base environment `Supervisor` will hand to `systemd-run --user`, so a refused value or
+# unreachable user bus fails here at assembly rather than at the launch that starts the unit.
+def can_scope_units(
+    *,
+    budgets: Sequence[UnitBudget],
+    platform: str,
+    env: Mapping[str, str],
+    run: CommandRunner,
+) -> bool:
     capped = [budget for budget in budgets if budget.max_mb > 0]
     if not capped or platform != "linux":
         return False
     return _systemd_user_scope_available(
         max(budget.max_mb for budget in capped),
         max(budget.swap_max_mb for budget in capped),
+        env=env,
+        run=run,
     )
 
 
@@ -200,12 +224,18 @@ def memory_scoped_argv(
 
 
 # meiva:note
-# The probe carries the SAME attributes the launch will use. A bare `systemd-run ... true`
-# proves the binary exists, not that this systemd accepts MemoryMax or MemorySwapMax -- and
-# a refused attribute is exactly how the launch would fail.
-def _systemd_user_scope_available(max_mb: int, swap_max_mb: int) -> bool:
+# The probe carries the SAME attributes and environment the launch will use. A bare
+# `systemd-run ... true` or an ambient-env probe proves neither that this systemd accepts
+# MemoryMax/MemorySwapMax nor that the child's own launch environment reaches the user bus.
+def _systemd_user_scope_available(
+    max_mb: int,
+    swap_max_mb: int,
+    *,
+    env: Mapping[str, str],
+    run: CommandRunner,
+) -> bool:
     try:
-        done = subprocess.run(  # noqa: S603
+        done = run(
             [
                 "systemd-run",
                 "--user",
@@ -219,7 +249,7 @@ def _systemd_user_scope_available(max_mb: int, swap_max_mb: int) -> bool:
             ],
             capture_output=True,
             timeout=_SCOPE_PROBE_TIMEOUT_S,
-            check=False,
+            env=dict(env),
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -227,15 +257,8 @@ def _systemd_user_scope_available(max_mb: int, swap_max_mb: int) -> bool:
 
 
 # meiva:note
-# The one place the memory budget is decided: config, platform and scope support are read
-# here and handed on as an opaque launch rewrite, so the supervisor stays free of platform
-# names and ambient config.
-#
-# It takes `host` because the decision needs the user id, and `Host` is the door that already
-# carries it. A daemonized supervisor inherits no login session, so the user-bus variable has
-# to be restored before anything asks whether scoping is possible -- and restoring it in the
-# process environment is the point, because the later `systemd-run --user` launch inherits it
-# too. Repairing only the probe would leave that second hop failing for the same reason.
+# Whether any unit on this platform asks for a cgroup memory cap; gates the missing-runtime-dir
+# error so a healthy macOS machine does not log a Linux user-bus complaint on every start.
 def memory_cap_wanted(*, budgets: Sequence[UnitBudget], platform: str) -> bool:
     return platform == "linux" and any(budget.max_mb > 0 for budget in budgets)
 
@@ -262,28 +285,47 @@ def configured_memory_budgets() -> tuple[UnitBudget, ...]:
 
 
 # meiva:note
-# The repair runs unconditionally -- writing a runtime dir that already exists costs nothing
-# and the launch below may need it on platforms that never cap. The complaint does not: an
-# alert on a healthy macOS developer machine, naming a Linux mechanism that does not apply
-# there, is how an alert becomes noise.
-def bind_memory_budget(supervisor: Supervisor, *, host: Host) -> None:
-    # meiva:note
-    # The retirement policy is bound here, with the rewrite it governs: the count is what bounds
-    # the restart loop a rewrite can cause, and it is configuration because "how many transient
-    # wrapper failures is this host allowed" is an operating decision, not a code constant.
-    supervisor.set_rewrite_retire_after(settings.agent.rewrite_retire_after_failures)
-    runtime_dir = ensure_user_runtime_dir(os.environ, uid=host.uid, isdir=os.path.isdir)
-    budgets = configured_memory_budgets()
+# Repair `XDG_RUNTIME_DIR` on the supervisor's launch environment before probing scope support,
+# then probe `systemd-run --user` under `supervisor.launch_environ()` -- the exact environment
+# `Supervisor._spawn` hands to the wrapped child. Mutating `os.environ` alone after `Supervisor`
+# construction (2026-11-03 cold-start break) let the probe pass on the mutated process env while
+# `Supervisor._spawn` launched `systemd-run --user` from its pre-wiring snapshot without
+# `XDG_RUNTIME_DIR`, failing `Failed to connect to bus: No medium found` and retiring the cap.
+def bind_memory_budget(
+    supervisor: Supervisor,
+    *,
+    host: Host,
+    budgets: Sequence[UnitBudget],
+    retire_after_failures: int,
+    runtime_root: Path = _USER_RUNTIME_ROOT,
+) -> None:
+    supervisor.set_rewrite_retire_after(retire_after_failures)
+    launch_env = supervisor.launch_environ()
+    had_runtime_dir = bool(launch_env.get("XDG_RUNTIME_DIR"))
+    runtime_dir = ensure_user_runtime_dir(
+        launch_env,
+        uid=host.uid,
+        isdir=os.path.isdir,
+        runtime_root=runtime_root,
+    )
+    if runtime_dir is not None and not had_runtime_dir:
+        supervisor.set_launch_env({"XDG_RUNTIME_DIR": runtime_dir})
     if runtime_dir is None and memory_cap_wanted(budgets=budgets, platform=host.platform.system):
         _log.error(
-            "no user runtime dir: XDG_RUNTIME_DIR is unset and /run/user/%d does not exist; "
+            "no user runtime dir: XDG_RUNTIME_DIR is unset and %s/%d does not exist; "
             "systemd-run --user cannot reach the user manager, so unit memory caps will not apply",
+            runtime_root,
             host.uid,
         )
     caps = unit_memory_caps(
         budgets=budgets,
         platform=host.platform.system,
-        scope_available=can_scope_units(budgets=budgets, platform=host.platform.system),
+        scope_available=can_scope_units(
+            budgets=budgets,
+            platform=host.platform.system,
+            env=supervisor.launch_environ(),
+            run=host.run,
+        ),
     )
     supervisor.set_argv_transform(
         (lambda unit_id, argv: memory_scoped_argv(unit_id, argv, caps=caps)) if caps else None
@@ -347,7 +389,12 @@ def build_wiring(
         config = ConfigBoot()
         config.boot()
     host = Host.system(environ=config.process_environment())
-    bind_memory_budget(context.supervisor, host=host)
+    bind_memory_budget(
+        context.supervisor,
+        host=host,
+        budgets=configured_memory_budgets(),
+        retire_after_failures=settings.agent.rewrite_retire_after_failures,
+    )
     machine = ConfiguredMachineIdentity(config)
     clock = context.clock
     version = CodeVersion(image)

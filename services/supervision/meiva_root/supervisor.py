@@ -17,6 +17,7 @@ import psutil
 from base.clock import Clock
 from base.host.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
 from base.host.runtime_interpreter import LoadedRuntimeIdentity
+from base.log import logger
 from base.native_process.ownership import OwnedProcess
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL, ProcessControl
 from base.native_process.root_control.ipc import (
@@ -90,20 +91,19 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         self._clock = clock
         self._root_pid = root_pid
         # meiva:note
-        # The child-process launcher. None means `asyncio.create_subprocess_exec`; a deployment
-        # assembly (`--wiring`) may install its own before start. `environ` is what every child
-        # starts from, read once by the entry (a `--wiring` loaded after construction cannot change
-        # it); each manifest overlays its own names.
+        # The child-process launcher (`None` means `asyncio.create_subprocess_exec`) and entry
+        # environment. `--wiring` may install a launcher or layer launch-env repairs
+        # (`set_launch_env`) before `start()`; each manifest overlays its own names.
         self.spawn: ChildSpawn | None = spawn
         self._run_dir = run_dir
         self._log_dir = run_dir / "logs"
         self._config = config if config is not None else SupervisorConfig()
         self._process_control = process_control
         self._environ = environ
+        self._launch_env: dict[str, str] = {}
         # meiva:note
         # Opaque launch rewriting from the assembly; None launches the manifest as written.
         self._argv_transform: ArgvTransform | None = None
-
         # meiva:note
         # Retirement bounds a restart loop; the counting rule lives in `rewrite.note_early_exit`.
         self._rewrite_retire_after = self._config.rewrite_retire_after_failures
@@ -562,8 +562,6 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
     @staticmethod
     def _emit_restart_failed(runtime: UnitRuntime, failure: RestartFailure) -> None:
         try:
-            from base.log import logger
-
             logger.warning(
                 "unit {unit} replacement failed at its {stage} half — explicit failure state "
                 "recorded; intent stays running and the health monitor has a finite automatic restart budget",
@@ -579,8 +577,6 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
 
     def _emit_restart_cleared(self, runtime: UnitRuntime, failure: RestartFailure) -> None:
         try:
-            from base.log import logger
-
             logger.info(
                 "unit {unit} replacement succeeded — failure state cleared after "
                 "{failed_for_s:.0f}s",
@@ -609,6 +605,18 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
             _log.error("unit %s failed to start: %s", runtime.manifest.id, exc)
             return
         self._clear_restart_failure(runtime)
+
+    # meiva:note
+    # Base environment handed to every spawned unit before `manifest.env` overlays names.
+    def launch_environ(self) -> dict[str, str]:
+        return dict(self._environ) | self._launch_env
+
+    # meiva:note
+    # Pre-start launch environment defaults/repairs from `--wiring`; `manifest.env` still wins.
+    def set_launch_env(self, env: Mapping[str, str]) -> None:
+        if self._running:
+            raise RuntimeError("root launch environment cannot change while running")
+        self._launch_env = dict(env)
 
     # meiva:note
     # The assembly owns the decision; no platform name or ambient config enters this file.
@@ -648,7 +656,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         )
         log_fd = os.open(log_path, os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o644)
         try:
-            env = dict(self._environ) | dict(manifest.env)
+            env = self.launch_environ() | dict(manifest.env)
             launcher = self.spawn or asyncio.create_subprocess_exec
             plain = list(manifest.exec)
             argv = (
@@ -659,7 +667,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
             # meiva:note
             # Where this generation's output starts: the retirement warning quotes from here.
             log_offset = os.lseek(log_fd, 0, os.SEEK_END)
-            proc = await self._launch(
+            proc = await launch_with_fallback(
                 launcher,
                 argv,
                 plain,
@@ -704,17 +712,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         watch = asyncio.create_task(self._watch(runtime, generation))
         self._retain_watch(watch, generation)
         runtime.watch_task = watch
-        _log.info(
-            "unit %s started (pid %s): %s",
-            manifest.id,
-            proc.pid,
-            " ".join(manifest.exec),
-        )
-
-    async def _launch(
-        self, launcher: ChildSpawn, argv: Sequence[str], plain: Sequence[str], **options: object
-    ) -> asyncio.subprocess.Process:
-        return await launch_with_fallback(launcher, argv, plain, **options)
+        _log.info("unit %s started (pid %s): %s", manifest.id, proc.pid, " ".join(manifest.exec))
 
     async def _watch(self, runtime: UnitRuntime, generation: Generation) -> None:
         """Reap one direct child and make an unexpected exit eligible for replacement."""
