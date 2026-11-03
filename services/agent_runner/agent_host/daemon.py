@@ -579,6 +579,7 @@ async def run(
             rng=SecureRandom(secure_rng),
             pid=os.getpid(),
             user_home=user_home,
+            python=Path(sys.executable),
         )
         host = AgentHost(
             pool=workload_pool,

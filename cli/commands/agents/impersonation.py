@@ -331,7 +331,11 @@ def _request(
         executor_name=opts.caller,
         process_metadata={
             **process_metadata(pid=runtime.pid, codex_home=env.codex_home),
-            "invoked_python": sys.executable,
+            # meiva:note
+            # The interpreter this verb runs on, read from the runtime's host: `Host.system()` is
+            # where this process read its own platform once, and the lease records that value for
+            # whoever reads the metadata back.
+            "invoked_python": runtime.host.platform.executable,
         },
         ttl_seconds=opts.ttl,
         reason=opts.reason,
@@ -347,7 +351,7 @@ def _request(
             agent_id=opts.agent_id,
             session_id=int_field(response, "session_id"),
             token=str_field(response, "relay_token"),
-            interpreter=sys.executable,
+            interpreter=runtime.host.platform.executable,
         )
         del response["relay_token"]
     _emit(response)

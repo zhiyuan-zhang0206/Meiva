@@ -11,7 +11,6 @@ import asyncio
 import base64
 import contextlib
 import random
-import sys
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime
 from pathlib import Path
@@ -94,6 +93,11 @@ from base.paths import workspaces_root
 RELAY_WAIT = RelayWait()
 
 
+# meiva:note
+# `python` is the interpreter the host runs on, handed in by the root that read it (`HostPolicy.python`
+# from the agent-host daemon, `CommandRuntime.host` from a CLI verb). The relay this host starts is the
+# `meiva` console script installed beside that interpreter, so deriving it here from a second read
+# would let a host describe one installation's program while running another's.
 def process_host(
     local_machine: str,
     *,
@@ -101,12 +105,13 @@ def process_host(
     environ: Mapping[str, str],
     rng: random.Random,
     clock: Clock,
+    python: Path,
 ) -> TakeoverHost:
     return TakeoverHost(
         local_machine=local_machine,
         home=home,
         workspaces_root=workspaces_root(home=home),
-        relay_program=(str(Path(sys.executable).with_name("meiva")),),
+        relay_program=(str(python.with_name("meiva")),),
         environ=environ,
         rng=rng,
         clock=clock,

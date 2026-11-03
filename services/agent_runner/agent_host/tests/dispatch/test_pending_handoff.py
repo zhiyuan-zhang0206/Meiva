@@ -1,5 +1,7 @@
 import os
 import random
+import sys
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -158,6 +160,7 @@ async def test_the_scan_wake_settles_the_receipt_it_selected_the_row_for(
             home=meiva_home(),
             rng=_rng(),
             environ=dict(os.environ),
+            python=Path(sys.executable),
         ),
     )
     assert db_conn.execute(

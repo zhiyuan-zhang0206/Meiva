@@ -12,7 +12,6 @@ import io
 import json
 import re
 import stat
-import sys
 from argparse import Namespace
 from dataclasses import replace
 from pathlib import Path
@@ -184,7 +183,7 @@ def test_request_uses_external_identity_without_delivering_a_credential(
     metadata = row["process_metadata"]
     assert isinstance(metadata, dict)
     assert metadata["pid"] > 0
-    assert metadata["invoked_python"] == sys.executable
+    assert metadata["invoked_python"] == command_runtime.host.platform.executable
     output = capsys.readouterr()
     assert "token" not in json.loads(output.out)
     assert "starts the codex relay automatically" in output.err
@@ -327,7 +326,7 @@ def test_dsh_request_writes_the_plugin_stub_and_never_prints_the_credential(
     match = re.fullmatch(
         rf"SID={response['session_id']}\nAGENT={agent_id}\n"
         r"MEIVA_IMPERSONATION_RELAY_TOKEN=(?P<token>\S+)\n"
-        rf"MEIVA_IMPERSONATION_RELAY_PY={re.escape(sys.executable)}\n",
+        rf"MEIVA_IMPERSONATION_RELAY_PY={re.escape(command_runtime.host.platform.executable)}\n",
         text,
     )
     assert match is not None, text
@@ -344,6 +343,46 @@ def test_dsh_request_writes_the_plugin_stub_and_never_prints_the_credential(
         local_machine=machine_identity.name(),
     )
     assert snapshot["status"] == ImpersonationStatus.REQUESTED
+
+
+# meiva:note
+# Both places a request names its interpreter come from the runtime it was handed: the lease's
+# `invoked_python` and the DSH stub's interpreter are `CommandRuntime.host.platform.executable`,
+# the machine the CLI entry built once. A command that read its own would record this process's
+# installation while acting for another.
+def test_a_request_names_the_interpreter_of_the_runtime_it_was_given(
+    idle_agent: tuple[int, RuntimeIncarnation],
+    tmp_path: Path,
+    db_conn: psycopg.Connection,
+    operator_database: OperatorDatabaseFactory,
+    *,
+    command_runtime: CommandRuntime,
+) -> None:
+    agent_id, _ = idle_agent
+    elsewhere = "/opt/elsewhere/bin/python3.12"
+    runtime = replace(
+        command_runtime,
+        host=replace(
+            command_runtime.host,
+            platform=replace(command_runtime.host.platform, executable=elsewhere),
+        ),
+    )
+    stub = tmp_path / "session-1.env"
+    env = replace(NO_ENV, dsh_relay_stub=str(stub))
+
+    code = _run(
+        *_request_args(agent_id, "--provider", "dsh"),
+        runtime=runtime,
+        database=operator_database,
+        env=env,
+    )
+
+    assert code == 0
+    [row] = _lease_rows(db_conn, agent_id)
+    metadata = row["process_metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["invoked_python"] == elsewhere
+    assert f"MEIVA_IMPERSONATION_RELAY_PY={elsewhere}" in stub.read_text()
 
 
 @pytest.mark.parametrize("from_environment", [False, True])

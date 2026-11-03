@@ -61,6 +61,11 @@ class HandoffSettlement:
     home: Path
     rng: random.Random
     environ: Mapping[str, str] = field(repr=False)
+    # meiva:note
+    # The interpreter this host runs on (`HostPolicy.python`): the takeover relay it may start is
+    # the `meiva` console script beside it, so the settlement carries the value the daemon read
+    # rather than letting `process_host` read a second one.
+    python: Path
 
 
 @dataclass(frozen=True)
@@ -96,6 +101,7 @@ async def settle_handoff_before_invocation(
                 environ=settlement.environ,
                 rng=settlement.rng,
                 clock=settlement.timestamps.clock,
+                python=settlement.python,
             ),
         )
         if not handoff_resume_wanted(
@@ -189,6 +195,7 @@ async def finish_completed_invocation(
                         environ=hooks.settlement.environ,
                         rng=hooks.settlement.rng,
                         clock=hooks.settlement.timestamps.clock,
+                        python=hooks.settlement.python,
                     ),
                 )
             return TurnOutcome(exited=False, crashed=False)

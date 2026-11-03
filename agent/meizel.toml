@@ -23,4 +23,3 @@ exports = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py"
 "state_channels.py" = "strict"
 
 [debt.ambient-read]
-"impersonation.py#pid sys.executable" = { count = 1, owner = "#5816", until = "waits for `process_host` to take the interpreter path from its caller: it reads `sys.executable` itself" }

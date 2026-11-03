@@ -193,9 +193,12 @@ class AgentHost:
         self.turn_progress = TurnProgress()
         self.relays = RelaySupervision()
         # meiva:note
-        # Handoff invocations share this immutable carrier of the host's injected dependencies.
+        # Handoff invocations share this immutable carrier of the host's injected dependencies;
+        # its process values are bound once, so the settlement and the settle path agree.
+        environ = policy.environ
+        python = policy.python
         self._handoff_settlement = HandoffSettlement(
-            db, bus, self.relays, handoff_stamping, self._machine, home, policy.rng, policy.environ
+            db, bus, self.relays, handoff_stamping, self._machine, home, policy.rng, environ, python
         )
         self.admission = TurnAdmission(policy.max_concurrent_turns)
         self.stats = HostStats()
@@ -213,6 +216,7 @@ class AgentHost:
             rng=policy.rng,
             receipt_landed=handoff_landed,
             budget_s=policy.held_settle_budget_s,
+            python=policy.python,
         )
         self._resource_service = HostedServiceResources()
 

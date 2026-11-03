@@ -114,6 +114,11 @@ class HostPolicy:
     # The operating-system account's home (`~`), read once by the daemon root and handed to the
     # contexts the host builds.
     user_home: Path
+    # meiva:note
+    # The interpreter this host process runs on, read once by the daemon root beside the parent
+    # facts it hands its exec children. The `meiva` console script a takeover relay starts is
+    # installed beside it, so anything that needs that program derives it from this value.
+    python: Path
 
     def resolve_slices(
         self,

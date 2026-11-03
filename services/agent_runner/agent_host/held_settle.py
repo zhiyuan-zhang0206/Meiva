@@ -71,6 +71,11 @@ class HeldSettle:
     # `MEIVA_HOST_HELD_SETTLE_BUDGET_S`: a default here would be a second owner of the number the
     # domain already declares and guards.
     budget_s: float
+    # meiva:note
+    # The interpreter this host runs on (`HostPolicy.python`), from which the takeover relay's
+    # `meiva` console script is found. The host root read it once; this settle path must not read
+    # a second one.
+    python: Path
 
 
 async def settle_owed_handoff(
@@ -112,6 +117,7 @@ async def _settle_attempts(
                     environ=held.environ,
                     rng=held.rng,
                     clock=held.timestamps.clock,
+                    python=held.python,
                 ),
             )
         except ImpersonationError:
