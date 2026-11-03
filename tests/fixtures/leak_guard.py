@@ -96,9 +96,11 @@ SIGNALS = tuple(
     )
     if hasattr(signal, name)
 )
+# meiva:note
 # `signal.getsignal` wraps this C function to turn 0 and 1 into enum members: three Python frames
-# per signal and per read. The raw answer (0, 1, a callable or None) compares just as well.
-_getsignal: Callable[[int], Any] = _signal.getsignal
+# per signal and per read. The raw answer (0, 1, a callable or None) compares just as well. The
+# `_signal` C module ships no stub, so its attribute is typed by the cast.
+_getsignal = cast("Callable[[int], Any]", _signal.getsignal)
 _now = time.perf_counter_ns
 _IGNORED_ENV = os.environ.encodekey("PYTEST_CURRENT_TEST")  # pytest rewrites it on every phase
 _EXCLUDED_DIRS = r"(?:tests|site-packages|node_modules)"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import types
+from typing import cast
 
 import pytest
 
@@ -144,7 +145,10 @@ def test_driver_refusal_finds_new_aliases_without_probing_dynamic_modules(
     holder = types.ModuleType("driver_batch_late_aliases")
     holder.__getattr__ = dynamic
     monkeypatch.setitem(sys.modules, holder.__name__, holder)
-    originals = {"connect": psycopg.connect, "execute_command": redis.Redis.execute_command}
+    originals: dict[str, object] = {
+        "connect": psycopg.connect,
+        "execute_command": cast("object", redis.Redis.execute_command),
+    }
     holder.__dict__.update(originals)
 
     with pytest.MonkeyPatch.context() as patch:

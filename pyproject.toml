@@ -900,71 +900,17 @@ reportMissingParameterType = "error"
 reportUnknownLambdaType = "error"
 reportMissingTypeArgument = "error"
 
-# Ladder rung — tests/ call-site rules (audit round-2 tests-ci P1, task
-# #1143). The two call-signature rules gate merge on these test directories:
-# the first ones zeroed by the tests/ annotation sweep (integration 16, e2e
-# 25 findings on 2026-08-10). Expand outward by zeroing a directory then
-# adding its EE here.
+# The top-level tests/ tree is held to the same rung as the packages above: one entry covers
+# integration, e2e, components, skills, path_scoped, ci and fixtures.
 [[tool.pyright.executionEnvironments]]
-root = "tests/integration"
+root = "tests"
 reportUnknownMemberType = "error"
 reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "tests/e2e"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "tests/scripts"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "tests/components/ops"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "tests/components/plugins"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "tests/skills"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "tests/components/meiva"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "tests/components/agent"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "tests/components/cli"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "tests/components/base"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "tests/components/services"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
-
-# The former directory conftests (tests/path_scoped/) come from the directories above.
-[[tool.pyright.executionEnvironments]]
-root = "tests/path_scoped"
-reportUnknownMemberType = "error"
-reportUnknownArgumentType = "error"
+reportUnknownVariableType = "error"
+reportUnknownParameterType = "error"
+reportMissingParameterType = "error"
+reportUnknownLambdaType = "error"
+reportMissingTypeArgument = "error"
 
 [tool.mutmut]
 # Mutation testing exploratory config (mutmut).

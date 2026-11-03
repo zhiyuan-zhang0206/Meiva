@@ -443,14 +443,18 @@ def scenario_env(e2e_process_env: None, request: pytest.FixtureRequest) -> Itera
     Use bare os.environ not monkeypatch——the latter function teardown automatically unsets,
     which would clear it while gateway_proc still needs env. This fixture's own finalizer clears.
     """
-    # pytest's FixtureRequest.node resolves to Unknown in its stub —
-    # the marker read is the whole point of this fixture.
-    marker = request.node.get_closest_marker("scenario")  # pyright: ignore[reportUnknownMemberType]
+    # meiva:note
+    # pytest's FixtureRequest.node resolves to Unknown in its stub — the marker read is the whole
+    # point of this fixture.
+    marker = cast(
+        "pytest.Mark | None",
+        request.node.get_closest_marker("scenario"),  # pyright: ignore[reportUnknownMemberType]
+    )
     if marker is None:
         raise RuntimeError(
             f"e2e test {request.node.name} needs @pytest.mark.scenario('module:factory')"  # pyright: ignore[reportUnknownMemberType]
         )
-    scenario = marker.args[0]  # pyright: ignore[reportUnknownMemberType]
+    scenario = cast("str", marker.args[0])
     prev = os.environ.get("MEIVA_LLM_OVERRIDE")
     os.environ["MEIVA_LLM_OVERRIDE"] = scenario
     try:

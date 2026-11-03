@@ -7,7 +7,7 @@ from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.dataplane.pg_stall_watchdog import StallWatchdogConfig, stall_guard
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
 from base.cluster.machine.configured import ConfiguredMachineIdentity
-from base.config import get_field, set_field, settings
+from base.config import ConfigBoot, get_field, set_field, settings
 from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -16,6 +16,7 @@ from base.deploy.tests import containers
 from base.deploy.tests.containers import postgres, redis_server
 from base.events.live.bus import EventBus
 from base.events.live.redis_listener import RedisInboundListener
+from base.events.tests.redis_views import sync_redis
 from base.host import proc
 from base.host.env import port_lease
 from base.host.env.port_table import FIXED_PORTS
@@ -44,6 +45,7 @@ __all__ = [
     "SYSTEM_TIMERS",
     "ClusterDirectUrl",
     "CodeVersion",
+    "ConfigBoot",
     "ConfiguredMachineIdentity",
     "Database",
     "EventBus",
@@ -80,4 +82,5 @@ __all__ = [
     "snapshot_process_config",
     "stall_guard",
     "stdlib_logging_isolated",
+    "sync_redis",
 ]

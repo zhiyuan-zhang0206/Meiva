@@ -2,11 +2,10 @@ import os
 from pathlib import Path
 
 import psycopg
-import redis
-import redis.asyncio
 from psycopg.conninfo import conninfo_to_dict
 
 from base.config import ConfigBoot, settings
+from base.events.tests.redis_views import async_redis, sync_redis
 from tests.fixtures.env_bootstrap import UNPROVISIONED_REDIS_URL
 
 
@@ -40,7 +39,7 @@ def test_native_sync_data_plane_calls_reach_provisioned_services(
 ) -> None:
     with psycopg.connect(db_url) as connection:
         assert connection.execute("SELECT 1").fetchone() == (1,)
-    with redis.Redis.from_url(redis_url) as client:
+    with sync_redis(redis_url) as client:
         assert client.ping()
 
 
@@ -52,5 +51,5 @@ async def test_native_async_data_plane_calls_reach_provisioned_services(
 ) -> None:
     async with await psycopg.AsyncConnection.connect(db_url) as connection:
         assert await (await connection.execute("SELECT 1")).fetchone() == (1,)
-    async with redis.asyncio.Redis.from_url(redis_url) as client:
+    async with async_redis(redis_url) as client:
         assert await client.ping()

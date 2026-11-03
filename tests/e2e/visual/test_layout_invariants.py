@@ -89,7 +89,9 @@ def _invisible_track_point(track: Locator) -> tuple[float, float]:
     return x, y
 
 
-def _assert_scrollbar_layout(viewport: Locator, content: Locator, before: dict) -> None:
+def _assert_scrollbar_layout(
+    viewport: Locator, content: Locator, before: dict[str, object]
+) -> None:
     assert viewport.evaluate("el => el.clientWidth") == before["width"]
     assert content.evaluate("el => el.getBoundingClientRect().toJSON()") == before["rect"]
 

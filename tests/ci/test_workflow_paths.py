@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+from typing import cast
 
 import pytest
 import yaml
@@ -32,19 +33,22 @@ EXEMPTIONS = {
 
 def unfiltered_events(workflow: Path) -> set[str]:
     # YAML 1.1 reads bare `on` as True; quoted `on` remains a string.
-    document = yaml.safe_load(workflow.read_text())
-    triggers = document["on" if "on" in document else True]
-    if isinstance(triggers, str):
-        triggers = {triggers: {}}
-    elif isinstance(triggers, list):
-        triggers = dict.fromkeys(triggers)
+    document = cast("dict[object, object]", yaml.safe_load(workflow.read_text()))
+    declared = document["on" if "on" in document else True]
+    if isinstance(declared, str):
+        triggers: object = {declared: {}}
+    elif isinstance(declared, list):
+        triggers = dict.fromkeys(cast("list[str]", declared))
+    else:
+        triggers = declared
     assert isinstance(triggers, dict), f"Invalid on declaration in {workflow.name}"
-    missing = set()
-    for event in {"pull_request", "push"}.intersection(triggers):
-        options = triggers[event]
-        if not isinstance(options, dict) or not any(
-            key in options and isinstance(options[key], list) and options[key]
-            for key in ("paths", "paths-ignore")
+    events = cast("dict[str, object]", triggers)
+    missing: set[str] = set()
+    for event in {"pull_request", "push"}.intersection(events):
+        options = events[event]
+        filters = cast("dict[str, object]", options) if isinstance(options, dict) else {}
+        if not any(
+            isinstance(filters.get(key), list) and filters[key] for key in ("paths", "paths-ignore")
         ):
             missing.add(event)
     return missing
@@ -178,15 +182,17 @@ def glob_regex(pattern: str) -> re.Pattern[str]:
 
 def filter_entries(workflow: Path) -> list[str]:
     """The positive `paths:` entries of a workflow's push and pull_request events."""
-    document = yaml.safe_load(workflow.read_text())
+    document = cast("dict[object, object]", yaml.safe_load(workflow.read_text()))
     triggers = document["on" if "on" in document else True]
     if not isinstance(triggers, dict):
         return []
+    events = cast("dict[str, object]", triggers)
     entries: list[str] = []
     for event in ("push", "pull_request"):
-        options = triggers.get(event)
+        options = events.get(event)
         if isinstance(options, dict):
-            entries.extend(entry for entry in options.get("paths", []) if not entry.startswith("!"))
+            paths = cast("dict[str, list[str]]", options).get("paths", [])
+            entries.extend(entry for entry in paths if not entry.startswith("!"))
     return entries
 
 

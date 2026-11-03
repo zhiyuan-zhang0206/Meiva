@@ -5,11 +5,10 @@ from pathlib import Path
 
 import psycopg
 import pytest
-import redis
-import redis.asyncio
 from psycopg.conninfo import conninfo_to_dict
 
 from base.config import ConfigBoot, settings
+from base.events.tests.redis_views import async_redis, sync_redis
 from tests.fixtures.env_bootstrap import UNPROVISIONED_DB_URL, UNPROVISIONED_REDIS_URL
 from tests.fixtures.static_environment import static_mode
 
@@ -36,7 +35,7 @@ def test_sync_data_plane_calls_are_refused_without_native_provisioning(
         psycopg.connect(settings.data_plane.db_url)
     with pytest.raises(pytest.fail.Exception, match=expected):
         psycopg.Connection.connect(settings.data_plane.db_url)
-    with redis.Redis.from_url(settings.data_plane.redis_url) as client:
+    with sync_redis(settings.data_plane.redis_url) as client:
         with pytest.raises(pytest.fail.Exception, match=redis_expected):
             client.ping()
         with pytest.raises(pytest.fail.Exception, match=redis_expected):
@@ -53,7 +52,7 @@ async def test_async_data_plane_calls_are_refused_without_native_provisioning(
     redis_expected = "Static tests cannot use" if static_mode(pytestconfig) else "Redis"
     with pytest.raises(pytest.fail.Exception, match=expected):
         await psycopg.AsyncConnection.connect(settings.data_plane.db_url)
-    async with redis.asyncio.Redis.from_url(settings.data_plane.redis_url) as client:
+    async with async_redis(settings.data_plane.redis_url) as client:
         with pytest.raises(pytest.fail.Exception, match=redis_expected):
             await client.ping()
         with pytest.raises(pytest.fail.Exception, match=redis_expected):

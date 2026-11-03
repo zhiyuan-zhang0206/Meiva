@@ -9,6 +9,7 @@ import re
 import sys
 from collections.abc import Iterator, Mapping
 from pathlib import Path
+from typing import cast
 
 import pytest
 import pytest_asyncio
@@ -16,6 +17,7 @@ import pytest_asyncio
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
+from base.events.tests.redis_views import sync_redis
 from base.host.exit_codes import hard_exit
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
@@ -61,10 +63,21 @@ def _catalog_cluster_projection() -> Iterator[None]:
             os.environ[PLUGIN_CLUSTER_CONFIG_ENV] = previous
 
 
+# meiva:note
+# `process_config`, `database_gate` and `db_conn` are annotated `object` here and cast inside the
+# function after its own lazy import. `base.config` and psycopg may only be imported once
+# `tests/fixtures/env_bootstrap.py` has set the environment (its import-time block pins the
+# boot mode, the sentinel URLs and the OS-jobs switch first), and `process_config` is itself a
+# lazily importing fixture, so a module-level import or a `TYPE_CHECKING` one (banned here
+# without a `[type-checking.files]` exemption) would reorder that boot. Do not "fix" these back
+# to `ConfigBoot` / `ProcessDbGate` / `psycopg.Connection` annotations.
 @pytest.fixture(scope="session")
-def throwaway_config(process_config) -> ThrowawayConfig:
+def throwaway_config(process_config: object) -> ThrowawayConfig:
+    from base.config import ConfigBoot
+
+    config = cast("ConfigBoot", process_config)
     return ThrowawayConfig(
-        configured_base(process_config.view.data_plane.pg_throwaway_base),
+        configured_base(config.view.data_plane.pg_throwaway_base),
         home=meiva_home(),
         environ=os.environ,
         timers=SYSTEM_TIMERS,
@@ -74,7 +87,7 @@ def throwaway_config(process_config) -> ThrowawayConfig:
 @pytest.fixture(scope="session")
 def provisioned_db(
     pytestconfig: pytest.Config,
-    process_config,
+    process_config: object,
     database_version: CodeVersion,
     throwaway_config: ThrowawayConfig,
 ) -> Iterator[str]:
@@ -83,27 +96,31 @@ def provisioned_db(
     from langgraph.checkpoint.postgres import PostgresSaver
 
     from base.cluster.machine.configured import ConfiguredMachineIdentity
+    from base.config import ConfigBoot
     from base.db.test_db_guard import assert_test_db_url
     from base.deploy.tests.containers import postgres
 
+    config = cast("ConfigBoot", process_config)
     database_version.get()
-    machine = ConfiguredMachineIdentity(process_config)
+    machine = ConfiguredMachineIdentity(config)
     with postgres(config=throwaway_config, machine_name=machine.name, watch_stalls=False) as url:
         assert_test_db_url(url, context="provisioned_db")
-        process_config.set_field("db_url", url)
+        config.set_field("db_url", url)
         with PostgresSaver.from_conn_string(url) as saver:
             saver.setup()
         yield url
 
 
 @pytest.fixture(scope="session")
-def provisioned_redis(pytestconfig: pytest.Config, process_config) -> Iterator[str]:
+def provisioned_redis(pytestconfig: pytest.Config, process_config: object) -> Iterator[str]:
     if static_mode(pytestconfig):
         pytest.fail("Static tests cannot request Redis; use the native test environment.")
+    from base.config import ConfigBoot
     from base.deploy.tests.containers import redis_server
 
+    config = cast("ConfigBoot", process_config)
     with redis_server() as url:
-        process_config.set_field("redis_url", url)
+        config.set_field("redis_url", url)
         yield url
 
 
@@ -340,8 +357,6 @@ def _clean_redis(
     redis_access: None,
     request: pytest.FixtureRequest,
 ) -> Iterator[None]:
-    import redis
-
     from base.config import get_field, set_field
 
     previous_redis_url = get_field("redis_url")
@@ -351,7 +366,7 @@ def _clean_redis(
     previous_file = env_file.read_text()
     request.addfinalizer(functools.partial(env_file.write_text, previous_file))
     _rewrite_test_env_file_line(env_file, "MEIVA_REDIS_URL", provisioned_redis)
-    with redis.Redis.from_url(provisioned_redis) as client:
+    with sync_redis(provisioned_redis) as client:
         client.flushdb()
     yield
 
@@ -429,19 +444,22 @@ def gateway_data_plane(db_url: str, redis_url: str) -> None:
 
 
 @pytest.fixture
-def cluster_defaults_unset(db_conn) -> Iterator[None]:
-    with db_conn.cursor() as cur:
+def cluster_defaults_unset(db_conn: object) -> Iterator[None]:
+    import psycopg
+
+    conn = cast("psycopg.Connection", db_conn)
+    with conn.cursor() as cur:
         cur.execute("SELECT llm_model FROM cluster_defaults WHERE id = 1")
         row = cur.fetchone()
         saved = row[0] if row else None
         cur.execute("UPDATE cluster_defaults SET llm_model = NULL WHERE id = 1")
-    db_conn.commit()
+    conn.commit()
     try:
         yield
     finally:
-        with db_conn.cursor() as cur:
+        with conn.cursor() as cur:
             cur.execute("UPDATE cluster_defaults SET llm_model = %s WHERE id = 1", (saved,))
-        db_conn.commit()
+        conn.commit()
 
 
 @pytest.fixture
@@ -462,12 +480,13 @@ def database_gate(database_version: CodeVersion):
 
 
 @pytest.fixture
-def database(db_url: str, database_gate):
+def database(db_url: str, database_gate: object):
     from base.cluster.dataplane.direct_url import ClusterDirectUrl
     from base.db import Database
+    from base.db.code_version_gate import ProcessDbGate
 
     return Database.from_settings(
-        gate=database_gate,
+        gate=cast("ProcessDbGate", database_gate),
         direct_url=ClusterDirectUrl(lambda: "127.0.0.1", home=meiva_home()),
     )
 
