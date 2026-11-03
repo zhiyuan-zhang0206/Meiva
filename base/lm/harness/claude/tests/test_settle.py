@@ -30,6 +30,8 @@ REPORTED = ResultFields(
     cost_usd=0.25,
     result_text="the result's own text",
     permission_denials=("Bash",),
+    api_error_status=None,
+    errors=(),
     origin_kind="human",
 )
 

@@ -29,6 +29,13 @@ class HarnessTurn:
     stop_reason: str | None = None
     num_turns: int = 1
     steps: tuple[Usage, ...] = ()
+    # meiva:note
+    # What the provider said went wrong, when it said more than a subtype. `api_error_status` is the
+    # HTTP status of a failed API call the result reports as `is_error` with `subtype="success"`
+    # (the SDK documents that shape), and `errors` is the CLI's own list. Both are read only to build
+    # a fault message; a turn that succeeded carries neither.
+    api_error_status: int | None = None
+    errors: tuple[str, ...] = ()
     prelude: tuple[HarnessTurn, ...] = ()
     replayed: bool = False
 

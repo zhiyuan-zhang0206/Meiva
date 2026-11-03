@@ -83,6 +83,8 @@ def settle_result(
         cost_usd=fields.cost_usd,
         cumulative_cost_usd=updated.cost_usd,
         permission_denials=fields.permission_denials,
+        api_error_status=fields.api_error_status,
+        errors=fields.errors,
     )
     return ResultSettlement(
         totals=updated, session_id=resolved_session, completed=completed, outcome=outcome

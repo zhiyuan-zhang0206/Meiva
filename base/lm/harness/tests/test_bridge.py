@@ -723,6 +723,17 @@ async def test_session_model_and_error_detail_surface_through_bridge() -> None:
                         stop_reason="usage limit reached",
                     )
                 )
+            elif self._n == 3:
+                self._queue.append(
+                    replace(
+                        completion(
+                            turn_id, "API Error: 400 This API key is not scoped to a workspace"
+                        ),
+                        is_error=True,
+                        stop_reason="stop_sequence",
+                        api_error_status=400,
+                    )
+                )
             else:
                 self._queue.append(completion(turn_id, "ok"))
             return FakeTicket(turn_id)
@@ -732,6 +743,8 @@ async def test_session_model_and_error_detail_surface_through_bridge() -> None:
     assert bridge.model == "gpt-6.1-sol"
     with pytest.raises(HarnessTurnFaultedError, match="failed \\(failed\\): usage limit reached"):
         await bridge.run_turn("two", key="k2")
+    with pytest.raises(HarnessTurnFaultedError, match="failed \\(API 400\\): API Error: 400"):
+        await bridge.run_turn("three", key="k3")
 
 
 def registration(

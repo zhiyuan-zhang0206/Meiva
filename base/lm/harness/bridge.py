@@ -24,6 +24,7 @@ from base.lm.harness.events import (
     TurnFaulted,
     UnsolicitedOutput,
 )
+from base.lm.harness.faults import fault_message
 from base.lm.harness.handoff import Handoff
 from base.lm.harness.registration import (
     ATTACHED,
@@ -290,18 +291,7 @@ class HarnessBridge:
             done = self._consume_event(event, turn_id, streamed, on_event=on_event)
             if done is not None:
                 if done.is_error:
-                    detail = next(
-                        (
-                            candidate.strip()
-                            for candidate in (done.stop_reason, done.text)
-                            if candidate and candidate.strip() and candidate.strip() != done.subtype
-                        ),
-                        "",
-                    )
-                    suffix = f": {detail}" if detail else ""
-                    raise HarnessTurnFaultedError(
-                        f"{self.harness.value} turn {done.turn_id} failed ({done.subtype}){suffix}"
-                    )
+                    raise HarnessTurnFaultedError(fault_message(self.harness.value, done))
                 return done
         raise HarnessClosedError(f"harness event stream ended before turn {turn_id} completed")
 
@@ -399,4 +389,6 @@ def _completed(event: CompletedTurnEvent, streamed: str) -> HarnessTurn:
         stop_reason=getattr(event, "stop_reason", None),
         num_turns=max(int(getattr(event, "num_turns", 1) or 1), 1),
         steps=tuple(getattr(event, "steps", ()) or ()),
+        api_error_status=getattr(event, "api_error_status", None),
+        errors=tuple(getattr(event, "errors", ()) or ()),
     )
