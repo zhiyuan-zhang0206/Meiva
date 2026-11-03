@@ -57,9 +57,21 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-http>=1.30",
     "pyyaml>=6.0.3",
     "httpx[socks]>=0.28",
+    # Imported directly by meiva/mcps/_oauth.py (OAuth token exchange and
+    # discovery); Starlette 1.2+ TestClient also prefers httpx2 over httpx.
+    "httpx2>=2.3.0",
+    # Claude Code harness adapter (base/lm/harness/claude). The minor bound is
+    # deliberate: the adapter dispatches on the SDK's message class names, so a
+    # 0.x minor bump is a mapping change to review, not something to pick up
+    # silently.
+    "claude-agent-sdk>=0.2.168,<0.3",
+    # DeepSeek harness per-turn usage log decompression
+    # (base/lm/harness/deepseek/usage_files.py).
+    "zstandard>=0.23",
     # --- Common runtime libraries ---
     # Imported directly by first-party code (Pillow, requests, mdit,
-    # cryptography, lark, websockets, oss2).
+    # cryptography, lark, websockets, oss2, trafilatura, feedparser) and
+    # invoked by built-in skills (yt-dlp).
     # Heavy ML/numerical libraries are excluded outright: torch / tensorflow / jax /
     # transformers / opencv / numba / dask.
     "Pillow>=10.4.0",  # image processing (PIL)
@@ -70,16 +82,10 @@ dependencies = [
     "lark-oapi>=1.7.1",
     "websockets>=15.0.1",
     "oss2>=2.19.1",
+    "trafilatura>=2.1.0",  # main-content extraction (web-sources skill)
+    "feedparser>=6.0.12",  # RSS/Atom parsing (web-sources/rss skill)
+    "yt-dlp>=2026.3.17",  # YouTube/media metadata, captions, and audio extraction
 ]
-
-[project.optional-dependencies]
-# Provider adapters sit behind their own extra (base/lm/harness/claude). The
-# Claude wheel bundles a ~240MB Claude Code CLI, which is the piece the adapter
-# actually runs, so a machine that only runs Codex or Antigravity must not pay
-# for it. The minor bound is deliberate: the adapter dispatches on the SDK's
-# message class names, so a 0.x minor bump is a mapping change to review, not
-# something to pick up silently.
-harness-claude = ["claude-agent-sdk>=0.2.168,<0.3"]
 
 [project.scripts]
 # `uv sync` installs `.venv/bin/meiva` — cluster ops CLI (start/stop/status/update/...).
@@ -129,12 +135,6 @@ exclude = ["**/tests/**"]
 
 [tool.uv]
 package = true
-# `dev` builds the product and `skill-tools` is what the built-in skill scripts run.
-# Naming both keeps every `uv sync` (developer, CI, fleet update) installing the same
-# set, so no existing venv loses a library. A service profile excludes them explicitly:
-# `uv sync --only-group svc-X` installs that service's face alone, and
-# `--no-group skill-tools` is the one-machine build without the skill scripts.
-default-groups = ["dev", "skill-tools"]
 
 [dependency-groups]
 dev = [
@@ -150,85 +150,9 @@ dev = [
     # stays out of the format scope for now — see [tool.ruff.format].exclude.
     "ruff>=0.16.7,<0.17",
     "pytest-cov>=7.0",
-    # starlette 1.2+ TestClient prefers httpx2 over httpx; declaring it here
-    # makes the in-process TestClient (FastAPI re-exports starlette's) run on
-    # httpx2 and silences the deprecation warning. Prod HTTP stays on httpx
-    # (the SDKs + bootstrap fetch); httpx2 is test-only.
-    "httpx2>=2.3.0",
     "mutmut>=3.5.0",
     "pytest-split",
     "beautifulsoup4>=4.12.3",  # HTML parsing for scripts/model_registry/update_model_pricing.py
-]
-
-# Installed by default, because `[tool.uv] default-groups` names it: the libraries the
-# built-in skill scripts run. No first-party module outside `meiva_builtins/skills/` imports
-# one (tests/contracts/test_skill_tools_group.py re-derives that on every run), so a face that
-# runs no skill leaves the group out:
-#     uv sync --only-group svc-gateway     # a service face: this group is not in it
-#     uv sync --no-group skill-tools       # a one-machine build without the skill scripts
-# Default membership does not leak into a service face: `uv export --only-group svc-X` emits
-# that group's closure only, never another default group's.
-# A skill script that finds a member missing raises MissingSkillToolError
-# (meiva_builtins/skills/toolbox.py), which names this group and the install command.
-skill-tools = [
-    "trafilatura>=2.1.0",  # main-content extraction: web-sources generic scrape
-    "feedparser>=6.0.12",  # RSS/Atom parsing: web-sources rss
-    "yt-dlp>=2026.3.17",  # the `yt-dlp` program: audio-transcribe, web-sources youtube
-]
-
-# Service faces: the third-party distributions one service's own code imports, listed so an
-# image can be built from that service alone (`uv export --only-group svc-<name>`). They are
-# not default groups - only a build that names one installs it. A member the project also
-# declares keeps the project's exact requirement, extras included (`psycopg[binary]` is a
-# compiled payload that no import names), so a bump lands in both places together and
-# tests/contracts/test_skill_tools_group.py fails when the two disagree; a member only the
-# lock carries is a bare name, its version being the lock's business. `claude-agent-sdk` is
-# the one deliberate omission from the agent-host face: it stays behind the `harness-claude`
-# extra, so an image for a machine that runs no Claude harness builds without it
-# (`--extra harness-claude` adds it back).
-svc-exec-host = [
-    "cryptography>=42.0.0",
-    "httpcore",
-    "httpx[socks]>=0.28",
-    "loguru>=0.7.3",
-    "psutil>=7.1.0",
-    "psycopg[binary]>=3.2",
-    "pydantic",
-    "pydantic-core",
-    "pydantic-settings>=2.13.1",
-    "python-dotenv>=1.2.2",
-]
-
-svc-agent-host = [
-    { include-group = "skill-tools" },  # agent-host runs the built-in skill scripts
-    "anthropic",
-    "anyio",
-    "croniter>=6.2.2",
-    "cryptography>=42.0.0",
-    "google-genai>=2.0",
-    "httpcore",
-    "httpx[socks]>=0.28",
-    "langchain-core",
-    "langgraph>=0.3",
-    "loguru>=0.7.3",
-    "markdown-it-py>=4.0",
-    "mcp>=2.0.0,<3",
-    "mdit-py-plugins>=0.6",
-    "openai",
-    "opentelemetry-sdk>=1.30",
-    "ormsgpack",
-    "Pillow>=10.4.0",
-    "psutil>=7.1.0",
-    "psycopg[binary]>=3.2",
-    "psycopg-pool>=3.2",
-    "pydantic",
-    "pydantic-core",
-    "pydantic-settings>=2.13.1",
-    "python-dotenv>=1.2.2",
-    "pyyaml>=6.0.3",
-    "redis>=7.4.0",
-    "traceloop-sdk>=0.61",
-    "websockets>=15.0.1",
 ]
 
 [tool.ruff]

@@ -144,9 +144,7 @@ Treat yt-dlp occasional breakage as a **known maintenance tax**, not a one-time 
 
 ## Troubleshooting
 
-- **`yt-dlp` not found**: install the `skill-tools` group (`uv sync --group skill-tools` in a
-  checkout); `uv tool install yt-dlp` or `pipx install yt-dlp` also works where the skill runs
-  outside one. `MissingSkillToolError` names the group. Version is recorded in `fetched_via`.
+- **`yt-dlp` not found**: `pip install yt-dlp` or `brew install yt-dlp`, confirm `which yt-dlp`. Version is recorded in `fetched_via`.
 - **Signature error / player challenge failure**: `pip install -U yt-dlp`; install deno or
   impersonation extra (see maintenance tax).
 - **enum missing videos (gap larger than window)**: new content exceeds `max_scan` depth

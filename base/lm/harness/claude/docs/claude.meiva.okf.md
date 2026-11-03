@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Claude harness adapter
-description: '`base/lm/harness/claude/` — one Claude Agent SDK session as a turn engine: start/resume, handoff injection, event mapping, interrupt with process assertions, usage accounting. Behind the optional `harness-claude` extra.'
+description: '`base/lm/harness/claude/` — one Claude Agent SDK session as a turn engine: start/resume, handoff injection, event mapping, interrupt with process assertions, usage accounting.'
 tags:
 - base
 - library
@@ -19,23 +19,6 @@ resumable transcript and a subscription-backed quota.
 The shared half — events, handoff, registry, process probe — lives in
 [[../../docs/harness.meiva.okf.md]]. This adapter owns only what the Claude SDK
 decides differently from another provider.
-
-## Optional dependency
-
-`claude-agent-sdk` is the `harness-claude` extra, not a base dependency: its wheel
-bundles a ~240MB Claude Code CLI, and a machine that runs only Codex or
-Antigravity should not pay for it.
-
-    pip install 'meiva[harness-claude]'
-
-`session.py` imports the SDK inside `_load_sdk()`, at the first start of a session, so
-`import base.lm.harness` and `import base.lm.harness.claude` both work on a machine
-without the extra, and so does selecting this harness: `open_session` answers
-`claude_code` from the configuration alone, which is what the selector's own test
-checks. Only starting a session fails, and the error names the command above
-(`MissingClaudeSdkError`). The development environment resolves
-the SDK through type stubs (`typings/claude_agent_sdk/`), so pyright still
-resolves the import without bundling the ~240MB CLI in the default checkout.
 
 ## Modules
 

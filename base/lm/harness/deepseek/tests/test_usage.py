@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
+import zstandard
 
 from base.lm.harness.deepseek.usage import (
     StepUsage,
@@ -180,7 +180,6 @@ def test_merge_marks_the_whole_snapshot_unavailable() -> None:
 
 
 def test_a_zstd_frame_is_decompressed(tmp_path: Path) -> None:
-    zstandard = pytest.importorskip("zstandard")
     path = tmp_path / "session.v4.jsonl.zstd"
     compressed = zstandard.ZstdCompressor().compress(assistant_message(1, 1, text=9).encode())
     path.write_bytes(compressed)

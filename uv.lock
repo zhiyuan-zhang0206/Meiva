@@ -1957,11 +1957,14 @@ name = "meiva"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [
+    { name = "claude-agent-sdk" },
     { name = "croniter" },
     { name = "cryptography" },
     { name = "fastapi" },
+    { name = "feedparser" },
     { name = "google-genai" },
     { name = "httpx", extra = ["socks"] },
+    { name = "httpx2" },
     { name = "langchain-anthropic" },
     { name = "langchain-google-genai" },
     { name = "langchain-moonshot" },
@@ -1989,20 +1992,17 @@ dependencies = [
     { name = "redis" },
     { name = "requests" },
     { name = "traceloop-sdk" },
+    { name = "trafilatura" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "websockets" },
-]
-
-[package.optional-dependencies]
-harness-claude = [
-    { name = "claude-agent-sdk" },
+    { name = "yt-dlp" },
+    { name = "zstandard" },
 ]
 
 [package.dev-dependencies]
 dev = [
     { name = "basedpyright" },
     { name = "beautifulsoup4" },
-    { name = "httpx2" },
     { name = "mutmut" },
     { name = "pre-commit" },
     { name = "pytest" },
@@ -2014,65 +2014,17 @@ dev = [
     { name = "radon" },
     { name = "ruff" },
 ]
-skill-tools = [
-    { name = "feedparser" },
-    { name = "trafilatura" },
-    { name = "yt-dlp" },
-]
-svc-agent-host = [
-    { name = "anthropic" },
-    { name = "anyio" },
-    { name = "croniter" },
-    { name = "cryptography" },
-    { name = "feedparser" },
-    { name = "google-genai" },
-    { name = "httpcore" },
-    { name = "httpx", extra = ["socks"] },
-    { name = "langchain-core" },
-    { name = "langgraph" },
-    { name = "loguru" },
-    { name = "markdown-it-py" },
-    { name = "mcp" },
-    { name = "mdit-py-plugins" },
-    { name = "openai" },
-    { name = "opentelemetry-sdk" },
-    { name = "ormsgpack" },
-    { name = "pillow" },
-    { name = "psutil" },
-    { name = "psycopg", extra = ["binary"] },
-    { name = "psycopg-pool" },
-    { name = "pydantic" },
-    { name = "pydantic-core" },
-    { name = "pydantic-settings" },
-    { name = "python-dotenv" },
-    { name = "pyyaml" },
-    { name = "redis" },
-    { name = "traceloop-sdk" },
-    { name = "trafilatura" },
-    { name = "websockets" },
-    { name = "yt-dlp" },
-]
-svc-exec-host = [
-    { name = "cryptography" },
-    { name = "httpcore" },
-    { name = "httpx", extra = ["socks"] },
-    { name = "loguru" },
-    { name = "psutil" },
-    { name = "psycopg", extra = ["binary"] },
-    { name = "pydantic" },
-    { name = "pydantic-core" },
-    { name = "pydantic-settings" },
-    { name = "python-dotenv" },
-]
 
 [package.metadata]
 requires-dist = [
-    { name = "claude-agent-sdk", marker = "extra == 'harness-claude'", specifier = ">=0.2.168,<0.3" },
+    { name = "claude-agent-sdk", specifier = ">=0.2.168,<0.3" },
     { name = "croniter", specifier = ">=6.2.2" },
     { name = "cryptography", specifier = ">=42.0.0" },
     { name = "fastapi", specifier = ">=0.120" },
+    { name = "feedparser", specifier = ">=6.0.12" },
     { name = "google-genai", specifier = ">=2.0" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.28" },
+    { name = "httpx2", specifier = ">=2.3.0" },
     { name = "langchain-anthropic", specifier = ">=0.3" },
     { name = "langchain-google-genai", specifier = ">=4.4.2" },
     { name = "langchain-moonshot", specifier = ">=0.1.0" },
@@ -2100,16 +2052,17 @@ requires-dist = [
     { name = "redis", specifier = ">=7.4.0" },
     { name = "requests", specifier = ">=2.32.0" },
     { name = "traceloop-sdk", specifier = ">=0.61" },
+    { name = "trafilatura", specifier = ">=2.1.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.40" },
     { name = "websockets", specifier = ">=15.0.1" },
+    { name = "yt-dlp", specifier = ">=2026.3.17" },
+    { name = "zstandard", specifier = ">=0.23" },
 ]
-provides-extras = ["harness-claude"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "basedpyright", specifier = ">=1.40.2" },
     { name = "beautifulsoup4", specifier = ">=4.12.3" },
-    { name = "httpx2", specifier = ">=2.3.0" },
     { name = "mutmut", specifier = ">=3.5.0" },
     { name = "pre-commit", specifier = ">=4.5.1" },
     { name = "pytest", specifier = ">=9.0.3" },
@@ -2120,56 +2073,6 @@ dev = [
     { name = "pytest-xdist", specifier = ">=3.8" },
     { name = "radon", specifier = "==6.0.1" },
     { name = "ruff", specifier = ">=0.16.7,<0.17" },
-]
-skill-tools = [
-    { name = "feedparser", specifier = ">=6.0.12" },
-    { name = "trafilatura", specifier = ">=2.1.0" },
-    { name = "yt-dlp", specifier = ">=2026.3.17" },
-]
-svc-agent-host = [
-    { name = "anthropic" },
-    { name = "anyio" },
-    { name = "croniter", specifier = ">=6.2.2" },
-    { name = "cryptography", specifier = ">=42.0.0" },
-    { name = "feedparser", specifier = ">=6.0.12" },
-    { name = "google-genai", specifier = ">=2.0" },
-    { name = "httpcore" },
-    { name = "httpx", extras = ["socks"], specifier = ">=0.28" },
-    { name = "langchain-core" },
-    { name = "langgraph", specifier = ">=0.3" },
-    { name = "loguru", specifier = ">=0.7.3" },
-    { name = "markdown-it-py", specifier = ">=4.0" },
-    { name = "mcp", specifier = ">=2.0.0,<3" },
-    { name = "mdit-py-plugins", specifier = ">=0.6" },
-    { name = "openai" },
-    { name = "opentelemetry-sdk", specifier = ">=1.30" },
-    { name = "ormsgpack" },
-    { name = "pillow", specifier = ">=10.4.0" },
-    { name = "psutil", specifier = ">=7.1.0" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
-    { name = "psycopg-pool", specifier = ">=3.2" },
-    { name = "pydantic" },
-    { name = "pydantic-core" },
-    { name = "pydantic-settings", specifier = ">=2.13.1" },
-    { name = "python-dotenv", specifier = ">=1.2.2" },
-    { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "redis", specifier = ">=7.4.0" },
-    { name = "traceloop-sdk", specifier = ">=0.61" },
-    { name = "trafilatura", specifier = ">=2.1.0" },
-    { name = "websockets", specifier = ">=15.0.1" },
-    { name = "yt-dlp", specifier = ">=2026.3.17" },
-]
-svc-exec-host = [
-    { name = "cryptography", specifier = ">=42.0.0" },
-    { name = "httpcore" },
-    { name = "httpx", extras = ["socks"], specifier = ">=0.28" },
-    { name = "loguru", specifier = ">=0.7.3" },
-    { name = "psutil", specifier = ">=7.1.0" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
-    { name = "pydantic" },
-    { name = "pydantic-core" },
-    { name = "pydantic-settings", specifier = ">=2.13.1" },
-    { name = "python-dotenv", specifier = ">=1.2.2" },
 ]
 
 [[package]]
