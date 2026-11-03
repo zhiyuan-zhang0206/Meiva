@@ -46,7 +46,7 @@ def test_workspace_dir_none_fails_fast(unit_home: Path) -> None:
     directory — callers that legitimately have no agent id (pre-bootstrap) are
     expected to branch to Path.home() themselves before calling this."""
     with pytest.raises(ValueError, match="workspace_dir"):
-        paths.workspace_dir(None, home=unit_home)  # pyright: ignore[reportArgumentType]
+        paths.workspace_dir(None, home=unit_home)
     assert not (unit_home / "workspaces" / "None").exists()
 
 

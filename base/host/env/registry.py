@@ -1,23 +1,23 @@
-"""The env-key declaration registry and its boot/child projections.
-
-Settings fields declare aliases and metadata in ``base/config/``;
-``config_registry.py`` reads class declarations without instantiating Settings.
-Pre-Settings authority projections use the generated ``config_lite_table``
-index, avoiding a full configuration import at boot. Non-Settings passthrough
-keys are ``EnvField`` rows here. Enabled provider-plugin bindings declare their
-removable provider keys, loaded at the delivery boundaries that consume them.
-
-Consumption roles are explicit. ``_HEALTH_PORT_SERVICES``, ``_IDENTITY_FIELDS``
-and ``_DERIVED_FIELDS`` remain hand-maintained classifications of declared
-Settings fields; adding a declaration does not automatically decide every
-projection. Capability/scope metadata validates those consumption choices.
-
-``child_env(role)`` supplies daemon/session environment dicts;
-``env_keep_set(role)`` and ``env_authority_drop_set(role)`` supply dotenv_boot's
-set-membership projections. Native delivery uses
-``base.sessions.env_forwarding.forward_env_dict``; secrets never ride argv.
-Current structure: base/host/env/docs/registry.meiva.okf.md.
-"""
+# meiva:note
+# The env-key declaration registry and its boot/child projections.
+#
+# Settings fields declare aliases and metadata in ``base/config/``;
+# ``config_registry.py`` reads class declarations without instantiating Settings.
+# Pre-Settings authority projections use the generated ``config_lite_table``
+# index, avoiding a full configuration import at boot. Non-Settings passthrough
+# keys are ``EnvField`` rows here. Enabled provider-plugin bindings declare their
+# removable provider keys, loaded at the delivery boundaries that consume them.
+#
+# Consumption roles are explicit. ``_HEALTH_PORT_SERVICES``, ``_IDENTITY_FIELDS``
+# and ``_DERIVED_FIELDS`` remain hand-maintained classifications of declared
+# Settings fields; adding a declaration does not automatically decide every
+# projection. Capability/scope metadata validates those consumption choices.
+#
+# ``child_env(environ)`` supplies daemon/session environment dicts;
+# ``env_keep_set(role)`` and ``env_authority_drop_set(role)`` supply dotenv_boot's
+# set-membership projections. Native delivery uses
+# ``base.sessions.env_forwarding.forward_env_dict``; secrets never ride argv.
+# Current structure: base/host/env/docs/registry.meiva.okf.md.
 
 from __future__ import annotations
 
@@ -353,12 +353,12 @@ def _ensure_validated() -> None:
 
 
 # meiva:note
-# The parent->child env dict a daemon / session child of `role` receives, read from `environ`.
+# The parent->child env dict a daemon / session child receives, read from `environ`.
 #
 # POSITIVE allowlist, not a drop list (Task #856 Phase C, audit F-s3-4): a
 # non-modeled knob (MEIVA_AGENT_ID, ...) or agent-scope override never rides a
-# daemon session. `gateway` and `runner` (daemons belong to those profiles)
-# get the same session view; an agent process has no forwarding view (it is
+# daemon session. Every daemon (gateway and
+# runner) gets the same session view; an agent process has no forwarding view (it is
 # launched with the launcher's own environment).
 # Host passthroughs (DISPLAY/WAYLAND_DISPLAY/HOME/USER/LOGNAME), the temp-dir vars and the
 # machine's network proxy configuration (NETWORK_PROXY_KEYS — the one egress
@@ -367,9 +367,7 @@ def _ensure_validated() -> None:
 #
 # The allow/drop decision is the DATA in this registry; the caller
 # (base.sessions.env_forwarding) is the mechanism that applies it.
-def child_env(role: Literal["gateway", "runner"], environ: Mapping[str, str]) -> dict[str, str]:
-    if role not in ("gateway", "runner"):
-        raise ValueError(f"unknown daemon role {role!r} — must be gateway or runner")
+def child_env(environ: Mapping[str, str]) -> dict[str, str]:
     _ensure_validated()
     env = {k: environ[k] for k in session_forward_keys() if k in environ}
     for key in HOST_PASSTHROUGH_KEYS | _TEMP_DIR_KEYS | NETWORK_PROXY_KEYS:

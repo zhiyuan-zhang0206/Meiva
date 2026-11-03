@@ -23,8 +23,6 @@ def cache_write_tokens(
     # add both. OpenAI Responses uses a 30-minute default and may prefix its
     # aggregate with the served service tier.
     # meiva:link base/lm/pricing/docs/pricing.meiva.okf.md
-    if default_ttl not in ("5m", "30m"):
-        raise ValueError(f"unsupported default cache-write TTL: {default_ttl!r}")
     generic = sum(
         _count(details, key)
         for key in details

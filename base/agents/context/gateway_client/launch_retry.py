@@ -35,7 +35,7 @@ def get_launch_attempt(agent_id: int, *, context: MeivaContext) -> UUID:
     return UUID(attempt)
 
 
-def validate_retry_admission(*, key: str, prior: str | UUID) -> tuple[str, RetryLaunchRequest]:
+def validate_retry_admission(*, key: str, prior: object) -> tuple[str, RetryLaunchRequest]:
     """Require a caller-owned key and observed attempt before HTTP."""
     key = validate_idempotency_key(key)
     if not isinstance(prior, (str, UUID)):

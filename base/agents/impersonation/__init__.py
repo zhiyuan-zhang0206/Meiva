@@ -91,7 +91,6 @@ def _validate_invoked_python(process_metadata: dict[str, Any] | None) -> None:
 
 
 def _validate_request(
-    caller: CallerIdentity,
     *,
     name: str,
     executor_name: str,
@@ -103,8 +102,6 @@ def _validate_request(
 ) -> None:
     if not name.strip() or not executor_name.strip():
         raise ValueError("Session name and executor name must be nonempty")
-    if caller.kind != "external_agent":
-        raise ValueError("Impersonation requires an external_agent caller")
     _validate_invoked_python(process_metadata)
     validate_relay_spec(relay_provider, relay_thread_id, relay_codex_remote)
     if (
@@ -157,7 +154,6 @@ def request(
     """Prepare a controller lease and return its scoped relay credential."""
     ttl = _ttl(ttl_seconds)
     _validate_request(
-        caller,
         name=name,
         executor_name=executor_name,
         process_metadata=process_metadata,

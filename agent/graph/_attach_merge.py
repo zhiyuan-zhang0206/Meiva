@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import stat
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
 from agent.state import AttachEntry, AttachState
 from base.lm.attach.constants import ATTACH_MAX_FILE_BYTES, ATTACH_MEDIA_MIME
 from base.log import logger
 
 
-def merge_attachments(pending: AttachState, entries: list[dict[str, Any]] | None) -> AttachState:
+def merge_attachments(pending: AttachState, entries: object) -> AttachState:
     """Merge valid child registrations into pending attachments without reading bytes."""
     merged: list[AttachEntry] = []
     positions: dict[str, int] = {}
@@ -27,7 +27,7 @@ def merge_attachments(pending: AttachState, entries: list[dict[str, Any]] | None
 
     if entries is None:
         return pending.model_copy(update={"pending": merged})
-    if not isinstance(entries, list):
+    if not _is_object_list(entries):
         logger.warning("dropping tampered exec attachment payload with non-list entries")
         return pending.model_copy(update={"pending": merged})
 
@@ -42,6 +42,10 @@ def merge_attachments(pending: AttachState, entries: list[dict[str, Any]] | None
         else:
             merged[prior] = attachment
     return pending.model_copy(update={"pending": merged})
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
 
 
 def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:

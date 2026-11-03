@@ -4,16 +4,16 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 from base.lm.harness.antigravity.session import AgySession
 from base.lm.harness.antigravity.tests.support import Harness, start
 
 
 class _SilentSession:
-    async def events(self) -> AsyncIterator[Any]:
-        if False:
-            yield None
+    async def events(self) -> AsyncIterator[object]:
+        for event in tuple[object, ...]():
+            yield event
 
     async def close(self, *, reason: str = "") -> None:
         return None

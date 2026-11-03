@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 import psutil
 import pytest
@@ -216,7 +216,7 @@ def test_literal_child_is_armed_in_the_owned_group_and_cleanup_preserves_failure
 
 
 def test_literal_launcher_rejects_executable_text_as_behavior(home: Path) -> None:
-    executable_text: Any = "__import__('os')._exit(97)"
+    executable_text = "__import__('os')._exit(97)"
     with (
         launched_processes(home) as create,
         pytest.raises(ValueError, match="invalid fixture SIGTERM behavior"),

@@ -133,7 +133,7 @@ def parse_timestamp_opt(raw: object) -> datetime | None:
         return None
 
 
-def email_from_jwt(token: str) -> str | None:
+def email_from_jwt(token: object) -> str | None:
     if not isinstance(token, str):
         return None
     parts = token.strip().split(".")

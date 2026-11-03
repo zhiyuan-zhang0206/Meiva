@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, assert_never
 
 from langchain_core.messages import (
     AIMessage,
@@ -82,7 +82,7 @@ def _inbound_text(content: str | list[str | dict[str, Any]]) -> str:
             and b.get("type") == "text"
             and isinstance(text := b.get("text"), str)
         )
-    return str(content)
+    assert_never(content)
 
 
 # meiva:note
@@ -375,7 +375,7 @@ def _fold_addl_reasoning_into_content(
             {"type": "thinking", "thinking": addl_reasoning, "index": 0},
             {"type": "text", "text": content, "index": 1},
         ]
-    return content
+    assert_never(content)
 
 
 def ai_message_items(

@@ -8,7 +8,7 @@ import logging
 import random
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeGuard
 
 from psycopg.errors import ConnectionDoesNotExist, ConnectionFailure
 from psycopg_pool import ConnectionPool, PoolTimeout
@@ -65,6 +65,10 @@ _SELECT_NOTICE = (
     "n.require_response, n.blocking, n.created_at, n.resolved_at, n.resolution, n.reply, n.task_id, n.question "
     "FROM agent_notices n JOIN agents t ON t.id = n.agent_id "
 )
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
 
 
 def _row_to_notice(r: tuple[Any, ...]) -> dict[str, Any]:
@@ -461,7 +465,7 @@ class NoticeBridge(NoticeBridgeOwner):
 
     async def resolve_frozen_reply(
         self, agent_id: int, notice_id: int, text: str
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         """One call to the original target; return its actual domain response, no fallback."""
         g = self.core.gateway
         response = await (await g._http()).post(
@@ -470,8 +474,8 @@ class NoticeBridge(NoticeBridgeOwner):
             headers=self._keyed_headers(),
         )
         response.raise_for_status()
-        result: dict[str, Any] = response.json()
-        if not isinstance(result, dict):
+        result: object = response.json()
+        if not _is_object_dict(result):
             raise TypeError("notice resolution response must be an object")
         return result
 

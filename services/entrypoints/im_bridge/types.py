@@ -182,7 +182,7 @@ class NoticeBridgeOwner:
 
     async def resolve_frozen_reply(
         self, agent_id: int, notice_id: int, text: str
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         raise NotImplementedError
 
     async def handle_callback(

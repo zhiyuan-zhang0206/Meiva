@@ -221,7 +221,7 @@ def workspaces_root(*, home: Path) -> Path:
     return workspaces_path(_root(home))
 
 
-def workspace_dir(agent_id: int, *, home: Path) -> Path:
+def workspace_dir(agent_id: int | None, *, home: Path) -> Path:
     """Per-agent workspace ($MEIVA_HOME/workspaces/<agent_id>); create if missing.
 
     A stable scratch area for files an agent produces or downloads. Survives
@@ -229,7 +229,7 @@ def workspace_dir(agent_id: int, *, home: Path) -> Path:
     by the framework — cleanup is an ops decision. Cross-agent sharing happens
     by passing absolute paths in messages, not by writing into each other's
     workspace."""
-    if agent_id is None:  # pyright: ignore[reportUnnecessaryComparison] — guards a bad call, type hint alone won't catch it at runtime
+    if agent_id is None:
         raise ValueError(
             "workspace_dir(None) — pass a real agent_id. Check "
             "meiva.sdk_surface.agent_identity.agent_id() is not None first (pre-bootstrap has no "

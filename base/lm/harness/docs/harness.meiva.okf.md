@@ -75,7 +75,7 @@ resolve against the OS default (`/usr/bin:/bin:/usr/sbin:/sbin`), so a real spaw
 failed while `which codex` in a shell succeeded. Two rules close that gap.
 
 The environment a session starts from is a required value: the host root builds it once
-(`child_env("runner", process_environment())`) and hands it down as
+(`child_env(process_environment())`) and hands it down as
 `HostPolicy.harness_environ`; `bridge_for`, `open_session` and `session_environ` never fall
 back to the process environment.
 

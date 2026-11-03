@@ -580,8 +580,9 @@ class FakeProviderStatusError(openai.APIStatusError):
 
 def astream_raising(exc: Exception) -> AsyncIterator[AIMessageChunk]:
     async def _gen() -> AsyncIterator[AIMessageChunk]:
+        for chunk in tuple[AIMessageChunk, ...]():
+            yield chunk
         raise exc
-        yield  # pragma: no cover — unreachable; only marks this an async generator
 
     return _gen()
 

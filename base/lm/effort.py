@@ -43,7 +43,7 @@ class ReasoningEffort(StrEnum):
     MAX = "max"
 
 
-def coerce_effort(effort: str | ReasoningEffort | None, *, example: str) -> ReasoningEffort | None:
+def coerce_effort(effort: object, *, example: str) -> ReasoningEffort | None:
     """Normalize the public `effort` knob onto the enum; None passes through.
 
     The one effort contract for the SDK batch entry points (`meiva.web.fetch` /
