@@ -12,4 +12,3 @@ exports = ["diff_checks.py", "diff_checks_pytest.py", "tests"]
 
 [debt.ambient-read]
 "diff_checks_plan.py#environ shutil.which()" = { count = 2, owner = "#5816", until = "waits for the module's top level to take the program path, or the search path, from its caller: it asks PATH for the program itself" }
-"diff_checks_plan.py#pid sys.executable" = { count = 3, owner = "#5816", until = "waits for `PythonCommands.is_interpreter` to accept an interpreter its caller handed in: `_docs_runs` and `_refusal_runs` compose `python -m scripts.audit.refusal_loss` and the two `scripts/content_lint/*.py` checks, and this read is also the fact edge that `scripts/meizel.toml` declares as `hooks -> audit` and `hooks -> content_lint`; with the value taken as a parameter the checker stops recognising the command, the declarations go stale, and a change to either script stops selecting `scripts/hooks/tests`" }

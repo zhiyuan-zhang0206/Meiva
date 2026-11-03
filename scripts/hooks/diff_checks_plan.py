@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import shutil
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import assert_never
@@ -38,15 +37,17 @@ class ScheduledGroup:
 
 
 # meiva:note
-# Which interpreter a command runs under is the caller's value, with one exception kept below: a
-# command whose target is a first-party entry (`python -m scripts.ci.test_selector`, a
-# `scripts/content_lint/*.py` script) reads the interpreter at the site where it is composed,
-# because that read is also the fact edge the graph uses to know this file runs that entry. Handing
-# the value in there makes `PythonCommands.is_interpreter` stop recognising the command, and the
-# manifests that declare the edge go stale -- the checker says so, and deleting those declarations
-# would trade a debt repayment for a blind spot in test selection. A tool a check runs
-# (`basedpyright`, `ruff`) is installed beside the interpreter the caller names, so its directory
-# comes from that value instead: one receipt naming one installation.
+# Which interpreter a command runs under is the caller's value, every command included. A command
+# whose target is a first-party entry (`python -m scripts.ci.test_selector`, a
+# `scripts/content_lint/*.py` script) names the interpreter through a parameter declared as
+# `Interpreter`, which `PythonCommands.is_interpreter` reads as evidence: the edges the manifests
+# declare (`hooks -> audit`, `hooks -> content_lint`, `hooks -> ci`) come from that form, so
+# threading the value costs no declaration. A tool a check runs (`basedpyright`, `ruff`) is
+# installed beside the interpreter the caller names, so its directory comes from the same value:
+# one receipt naming one installation.
+Interpreter = str
+
+
 def _tool(name: str, *, python: str) -> str:
     candidate = Path(python).parent / name
     return str(candidate) if candidate.exists() else name
@@ -190,27 +191,27 @@ def _debt_runs(change: ChangeSet, *, python: str) -> tuple[Run, ...]:
 # meiva:note
 # A documentation change gets the document checks, not a type check it cannot fail: what a doc
 # asserts is that its links, flags and nodes exist.
-def _docs_runs() -> tuple[Run, ...]:
+def _docs_runs(*, python: Interpreter) -> tuple[Run, ...]:
     return (
         Run(
             "docs-refs",
-            (sys.executable, "scripts/content_lint/check_doc_references.py"),
+            (python, "scripts/content_lint/check_doc_references.py"),
             "exit code; the summary line carries the docs it read",
         ),
         Run(
             "docs-okf",
-            (sys.executable, "scripts/content_lint/lint_meiva_okf.py"),
+            (python, "scripts/content_lint/lint_meiva_okf.py"),
             "exit code; the summary line carries the documents it read",
         ),
     )
 
 
-def _refusal_runs(change: ChangeSet) -> tuple[Run, ...]:
+def _refusal_runs(change: ChangeSet, *, python: Interpreter) -> tuple[Run, ...]:
     return (
         Run(
             "refusal-loss",
             (
-                sys.executable,
+                python,
                 "-m",
                 "scripts.audit.refusal_loss",
                 "--base",
@@ -306,25 +307,25 @@ def schedule_groups(
         if "manifests" in changed_kinds:
             groups.append(ScheduledGroup("manifest-change", _debt_runs(change, python=python)))
         if "docs" in changed_kinds:
-            groups.append(ScheduledGroup("docs-change", _docs_runs()))
+            groups.append(ScheduledGroup("docs-change", _docs_runs(python=python)))
         if _touches_rsc_boundary(change):
             groups.append(ScheduledGroup("frontend-rsc", _FRONTEND_RUNS))
         if _touches_web_tree(change):
             groups.append(ScheduledGroup("frontend-app", _APP_TEST_RUNS))
         if debt_reduced:
-            groups.append(ScheduledGroup("debt-reduced", _refusal_runs(change)))
+            groups.append(ScheduledGroup("debt-reduced", _refusal_runs(change, python=python)))
         return tuple(groups)
     if mode == "full":
         groups = [
             ScheduledGroup("full-meizel", _full_meizel_runs(python=python)),
             ScheduledGroup("full-python", _full_python_runs(python=python)),
             ScheduledGroup("full-debt", _debt_runs(change, python=python)),
-            ScheduledGroup("full-docs", _docs_runs()),
+            ScheduledGroup("full-docs", _docs_runs(python=python)),
             ScheduledGroup("full-frontend-rsc", _FRONTEND_RUNS),
             ScheduledGroup("full-frontend-app", _APP_TEST_RUNS),
         ]
         if debt_reduced:
-            groups.append(ScheduledGroup("debt-reduced", _refusal_runs(change)))
+            groups.append(ScheduledGroup("debt-reduced", _refusal_runs(change, python=python)))
         return tuple(groups)
     assert_never(mode)
 

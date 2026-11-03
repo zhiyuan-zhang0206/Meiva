@@ -1,12 +1,11 @@
 # meiva:note
-# Which Python a receipt's children run on: the caller's value for the commands that take one, and
-# the read at the site for a command that names a first-party entry -- because there the read is
-# also the fact edge the manifests declare. Each test hands in an interpreter no module of this
+# Which Python a receipt's children run on: the caller's value for every command, including the
+# ones that name a first-party entry -- those keep their fact edges through the `Interpreter`
+# parameter `diff_checks_plan.py` declares. Each test hands in an interpreter no module of this
 # package could have read, so a read that crept back in reddens instead of passing quietly.
 
 from __future__ import annotations
 
-import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Literal
@@ -73,12 +72,13 @@ def test_the_checker_runs_on_the_interpreter_the_caller_handed_in(tmp_path: Path
 
 
 # meiva:note
-# The exception, asserted rather than assumed: a command that names a first-party entry keeps the
-# read at the site, because that read is the fact edge `scripts/meizel.toml` declares
-# (`hooks -> audit`, `hooks -> content_lint`). Threading it makes the edge vanish and the
-# declaration stale, so a change that starts threading these has to move the declarations too --
-# and this test is where that decision is noticed.
-def test_a_command_naming_a_first_party_entry_keeps_the_read_that_puts_it_in_the_graph() -> None:
+# The commands that name a first-party entry take the caller's interpreter too. The edge those
+# commands are the only evidence for (`hooks -> audit`, `hooks -> content_lint`) now comes from the
+# `Interpreter` parameter they declare, which `meizel check` enforces; this test pins the value, so
+# a read that crept back in reddens here instead of passing quietly.
+def test_a_command_naming_a_first_party_entry_runs_on_the_interpreter_the_caller_handed_in() -> (
+    None
+):
     commands = _commands(
         _change("base/thing.py", "base/meizel.toml", "docs/readme.md"),
         mode="incremental",
@@ -86,9 +86,9 @@ def test_a_command_naming_a_first_party_entry_keeps_the_read_that_puts_it_in_the
     )
 
     for label in ("docs-refs", "docs-okf", "refusal-loss"):
-        assert commands[label][0] == sys.executable, (
-            f"{label} names a first-party entry: its edge comes from the read at the site, so "
-            "handing the value in would silently drop the declaration"
+        assert commands[label][0] == _ELSEWHERE, (
+            f"{label} names a first-party entry: its command runs on the interpreter the caller "
+            "handed in, and its edge comes from the `Interpreter` parameter"
         )
 
 
