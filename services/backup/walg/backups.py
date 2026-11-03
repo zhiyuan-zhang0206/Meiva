@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TypeGuard
 
+from base.host.boundary.untyped import object_of
 from services.backup.walg.runner import run_walg
 
 QUERY_TIMEOUT_S = 1800
@@ -71,7 +72,7 @@ def parse_backups(text: str) -> list[Backup]:
     if not text.strip():
         return []
     try:
-        payload: object = json.loads(text)
+        payload = object_of(json.loads, text)
     except ValueError:
         raise BackupChainError("backup-list printed output that is not JSON") from None
     if payload is None:

@@ -39,6 +39,7 @@ from typing import TypeGuard
 import oss2
 from oss2.models import HeadObjectResult, PartInfo
 
+from base.host.boundary.untyped import object_of
 from services.backup.artifact.names import REMOTE_ROOT
 from services.backup.artifact.offsite_plan import (
     OssTarget,
@@ -115,7 +116,7 @@ def _headers_value(raw: object) -> dict[str, str]:
 # Open the OSS bucket with the RAM AccessKey pair in the credentials file.
 def open_bucket(target: OssTarget) -> oss2.Bucket:
     try:
-        raw: object = json.loads(target.credentials_file.read_text())
+        raw = object_of(json.loads, target.credentials_file.read_text())
     except (OSError, ValueError) as exc:
         raise ValueError("OSS credentials file is not readable JSON") from exc
     if not _is_object_dict(raw):

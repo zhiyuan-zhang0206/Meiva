@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypeGuard
 
+from base.host.boundary.untyped import object_of
 from services.backup.walg.backups import QUERY_TIMEOUT_S
 from services.backup.walg.gaps import (
     MissingRange,
@@ -94,7 +95,9 @@ def _to_int(value: object) -> int:
 # meiva:link services/backup/walg/docs/walg-tick.meiva.okf.md
 def parse_verdict(text: str, *, recorded_gaps: Sequence[RecordedGap] = ()) -> ChainVerdict:
     try:
-        payload = _require_object_dict(json.loads(text), "wal-verify report must be an object")
+        payload = _require_object_dict(
+            object_of(json.loads, text), "wal-verify report must be an object"
+        )
         integrity = _require_object_dict(payload["integrity"], "wal-verify checks must be objects")
         timeline = _require_object_dict(payload["timeline"], "wal-verify checks must be objects")
         statuses = (

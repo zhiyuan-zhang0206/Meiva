@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import TypeGuard
 from urllib.parse import urlsplit
 
+from base.host.boundary.untyped import object_of
 from base.host.private_storage import create_private_bytes, private_file_problem
 from base.host.verified_file.reader import RegularFileReadError, regular_bytes
 from services.backup.artifact.names import REMOTE_ROOT
@@ -110,7 +111,7 @@ def read_config(path: Path) -> WalgConfig:
     """
     _owner_only_file(path, "WAL-G config")
     try:
-        raw: object = json.loads(regular_bytes(path, max_bytes=_CONFIG_MAX_BYTES))
+        raw = object_of(json.loads, regular_bytes(path, max_bytes=_CONFIG_MAX_BYTES))
     except (OSError, RegularFileReadError, ValueError):
         raise WalgConfigError(f"WAL-G config {path} is not readable JSON") from None
     if not _is_object_dict(raw):

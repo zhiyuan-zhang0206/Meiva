@@ -25,8 +25,10 @@ from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, TypeGuard
+from typing import Literal
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.host.private_storage import write_private_bytes
 from base.host.verified_file.reader import RegularFileReadError, regular_bytes
 
@@ -41,7 +43,6 @@ STEPS = (STEP_PREFLIGHT, STEP_BACKUP, STEP_VERIFY, STEP_RETENTION)
 """The tick's steps in order; `RunRecord.step` names the one that failed."""
 
 RunStatus = Literal["ok", "failed"]
-_RUN_STATUSES = ("ok", "failed")
 
 
 class StateError(RuntimeError):
@@ -143,10 +144,13 @@ class State:
 StateSection = TickRecord | RunRecord | BackupRecord | VerifyRecord | RetentionRecord | DrillRecord
 
 
-def _timestamps_to_json(record: StateSection) -> dict[str, Any]:
+def _timestamps_to_json(record: StateSection) -> dict[str, object]:
+    fields = object_of(asdict, record)
+    if not is_object_dict(fields):
+        raise TypeError("a state record is not a mapping")
     return {
         key: _stamp(value) if isinstance(value, datetime) else value
-        for key, value in asdict(record).items()
+        for key, value in fields.items()
     }
 
 
@@ -159,58 +163,83 @@ def to_json(state: State) -> bytes:
         ("retention", state.retention),
         ("drill", state.drill),
     )
-    sections: dict[str, Any] = {"version": _VERSION}
+    sections: dict[str, object] = {"version": _VERSION}
     for name, record in records:
         sections[name] = None if record is None else _timestamps_to_json(record)
     return (json.dumps(sections, indent=2, sort_keys=True) + "\n").encode()
 
 
-def _tick(r: dict[str, Any]) -> TickRecord:
+# meiva:note
+# A recorded number as `int(...)` / `float(...)` reads it: a number or a numeric string; anything
+# else makes the file malformed.
+def _whole(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int | float | str):
+        raise TypeError("a recorded number must be a number or a numeric string")
+    return int(value)
+
+
+def _real(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float | str):
+        raise TypeError("a recorded number must be a number or a numeric string")
+    return float(value)
+
+
+def _tick(r: dict[str, object]) -> TickRecord:
     skipped = r["skipped"]
     return TickRecord(
         started_at=_parse(r["started_at"]), skipped=None if skipped is None else str(skipped)
     )
 
 
-def _run(r: dict[str, Any]) -> RunRecord:
+def _run(r: dict[str, object]) -> RunRecord:
     status, step = r["status"], r["step"]
-    if status not in _RUN_STATUSES:
+    if status == "ok":
+        run_status: RunStatus = "ok"
+    elif status == "failed":
+        run_status = "failed"
+    else:
         raise StateError(f"unknown run status {status!r}")
     if step is not None and step not in STEPS:
         raise StateError(f"unknown run step {step!r}")
     return RunRecord(
         started_at=_parse(r["started_at"]),
         finished_at=_parse(r["finished_at"]),
-        status=status,
+        status=run_status,
         step=None if step is None else str(step),
         detail=str(r["detail"]),
     )
 
 
-def _backup(r: dict[str, Any]) -> BackupRecord:
+def _backup(r: dict[str, object]) -> BackupRecord:
     kind = r["kind"]
-    if kind not in ("full", "delta"):
+    if kind == "full":
+        backup_kind: Literal["full", "delta"] = "full"
+    elif kind == "delta":
+        backup_kind = "delta"
+    else:
         raise StateError(f"unknown backup kind {kind!r}")
     return BackupRecord(
         name=str(r["name"]),
-        kind=kind,
+        kind=backup_kind,
         finished_at=_parse(r["finished_at"]),
-        uncompressed_bytes=int(r["uncompressed_bytes"]),
-        compressed_bytes=int(r["compressed_bytes"]),
+        uncompressed_bytes=_whole(r["uncompressed_bytes"]),
+        compressed_bytes=_whole(r["compressed_bytes"]),
     )
 
 
-def _verify(r: dict[str, Any]) -> VerifyRecord:
+def _verify(r: dict[str, object]) -> VerifyRecord:
     return VerifyRecord(
         at=_parse(r["at"]), integrity=str(r["integrity"]), timeline=str(r["timeline"])
     )
 
 
-def _retention(r: dict[str, Any]) -> RetentionRecord:
-    return RetentionRecord(at=_parse(r["at"]), marked=int(r["marked"]), deleted=int(r["deleted"]))
+def _retention(r: dict[str, object]) -> RetentionRecord:
+    return RetentionRecord(
+        at=_parse(r["at"]), marked=_whole(r["marked"]), deleted=_whole(r["deleted"])
+    )
 
 
-def _drill(r: dict[str, Any]) -> DrillRecord:
+def _drill(r: dict[str, object]) -> DrillRecord:
     target_lsn, last_ok_at = r["target_lsn"], r["last_ok_at"]
     last_refused_at = r.get("last_refused_at")
     last_refused_reason = r.get("last_refused_reason")
@@ -222,7 +251,7 @@ def _drill(r: dict[str, Any]) -> DrillRecord:
         ok=ok,
         backup=str(r["backup"]),
         target_lsn=None if target_lsn is None else str(target_lsn),
-        seconds=float(r["seconds"]),
+        seconds=_real(r["seconds"]),
         detail=str(r["detail"]),
         last_ok_at=None if last_ok_at is None else _parse(last_ok_at),
         last_refused_at=None if last_refused_at is None else _parse(last_refused_at),
@@ -230,18 +259,14 @@ def _drill(r: dict[str, Any]) -> DrillRecord:
     )
 
 
-def _is_object_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
-
-
-def _require_object_dict(value: object, message: str) -> dict[str, Any]:
-    if not _is_object_dict(value):
+def _require_object_dict(value: object, message: str) -> dict[str, object]:
+    if not is_object_dict(value):
         raise TypeError(message)
     return value
 
 
 def _section[R](
-    raw: Mapping[str, Any], name: str, build: Callable[[dict[str, Any]], R]
+    raw: Mapping[str, object], name: str, build: Callable[[dict[str, object]], R]
 ) -> R | None:
     body = raw[name]
     if body is None:
@@ -256,7 +281,7 @@ def from_json(data: bytes) -> State:
         StateError: not JSON, a different version, or a section of the wrong shape.
     """
     try:
-        raw = _require_object_dict(json.loads(data), "state file must be an object")
+        raw = _require_object_dict(object_of(json.loads, data), "state file must be an object")
         version = raw["version"]
     except (ValueError, KeyError, TypeError):
         raise StateError("the WAL-G state file is malformed") from None

@@ -21,7 +21,6 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 import ormsgpack
 from psycopg import Connection
@@ -49,6 +48,8 @@ from base.config import ConfigBoot
 from base.db import Database, connect_url
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
+from base.db.rows import count_one, query_all, query_one
+from base.host.boundary.options import options
 from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP
 from base.host.exit_codes import hard_exit
 from base.log import logger
@@ -189,7 +190,7 @@ LEFT JOIN LATERAL jsonb_each_text(latest.versions) AS channels ON TRUE
 # (`messages` since the #3180 cutover) keeps no materialized blob, so it adds no row here; its
 # newest objects arrive as writes below.
 _CENSUS_BLOBS = """
-SELECT b.channel, b.version, b.type, b.blob
+SELECT b.channel, b.version, b.type AS blob_type, b.blob
 FROM unnest(%s::text[], %s::text[]) AS wanted(channel, version)
 JOIN checkpoint_blobs b
   ON b.thread_id = %s
@@ -201,10 +202,48 @@ JOIN checkpoint_blobs b
 # meiva:note
 # What this checkpoint itself wrote: the newest superstep, message objects included.
 _CENSUS_WRITES = """
-SELECT channel, type, blob
+SELECT channel, type AS blob_type, blob
 FROM checkpoint_writes
 WHERE thread_id = %s AND checkpoint_ns = %s AND checkpoint_id = %s
 """
+
+
+@dataclass(frozen=True)
+class _ThreadRow:
+    thread_id: str
+
+
+@dataclass(frozen=True)
+class _LatestRow:
+    checkpoint_id: str
+    ts: datetime | None
+    key: str | None
+    value: str | None
+
+
+@dataclass(frozen=True)
+class _BlobRow:
+    channel: str
+    version: str
+    blob_type: str | None
+    blob: bytes | memoryview | None
+
+
+@dataclass(frozen=True)
+class _WriteRow:
+    channel: str
+    blob_type: str | None
+    blob: bytes | memoryview | None
+
+
+@dataclass(frozen=True)
+class _Regclass:
+    reg: str | None
+
+
+@dataclass(frozen=True)
+class _Owner:
+    owner: str | None
 
 
 # meiva:note
@@ -383,25 +422,25 @@ def _builds_with(reader: CheckpointSerializer, key: tuple[str, str], blob: bytes
 # Read the type names of the newest stored conversation per sampled thread — its materialized
 # channels plus the writes of that checkpoint — and account for every one of them.
 def census_checkpoint_types(
-    conn: Connection[Any],
+    conn: Connection,
     *,
     threads: int = CENSUS_THREADS,
     retired: tuple[RetiredCheckpointType, ...] = RETIRED_CHECKPOINT_MSGPACK_TYPES,
 ) -> TypeCensus:
     tally = _Tally(registry=retired)
-    sampled = conn.execute(_CENSUS_THREADS, (threads,)).fetchall()
-    for (thread_id_value,) in sampled:
-        thread_id = str(thread_id_value)
-        rows = conn.execute(_CENSUS_LATEST_CHECKPOINT, (thread_id,)).fetchall()
+    sampled = query_all(conn, _ThreadRow, _CENSUS_THREADS, (threads,))
+    for sampled_thread in sampled:
+        thread_id = sampled_thread.thread_id
+        rows = query_all(conn, _LatestRow, _CENSUS_LATEST_CHECKPOINT, (thread_id,))
         if not rows:
             continue
-        checkpoint_id, written_at = rows[0][0], rows[0][1]
-        tally.conversation(written_at)
-        wanted = [
-            (str(channel), str(version)) for _, _, channel, version in rows if channel is not None
-        ]
+        checkpoint_id = rows[0].checkpoint_id
+        tally.conversation(rows[0].ts)
+        wanted = [(row.key, str(row.value)) for row in rows if row.key is not None]
         if wanted:
-            blob_rows = conn.execute(
+            blob_rows = query_all(
+                conn,
+                _BlobRow,
                 _CENSUS_BLOBS,
                 (
                     [channel for channel, _ in wanted],
@@ -409,14 +448,16 @@ def census_checkpoint_types(
                     thread_id,
                     "",
                 ),
-            ).fetchall()
+            )
             tally.blobs += len(blob_rows)
-            for channel, _version, blob_type, blob in blob_rows:
-                tally.row(blob_type, blob, where=f"thread {thread_id} channel {channel}")
-        write_rows = conn.execute(_CENSUS_WRITES, (thread_id, "", checkpoint_id)).fetchall()
+            for blob_row in blob_rows:
+                where = f"thread {thread_id} channel {blob_row.channel}"
+                tally.row(blob_row.blob_type, blob_row.blob, where=where)
+        write_rows = query_all(conn, _WriteRow, _CENSUS_WRITES, (thread_id, "", checkpoint_id))
         tally.writes += len(write_rows)
-        for channel, blob_type, blob in write_rows:
-            tally.row(blob_type, blob, where=f"thread {thread_id} channel {channel}")
+        for write_row in write_rows:
+            where = f"thread {thread_id} channel {write_row.channel}"
+            tally.row(write_row.blob_type, write_row.blob, where=where)
     unknown = {
         key
         for key in tally.observed
@@ -454,46 +495,48 @@ def verify_restored_database(
     required_tables = ("agents", "checkpoint_blobs", "checkpoints", "checkpoint_writes")
     with connect_url(db_url, autocommit=True, unbounded=True) as conn:
         for table in required_tables:
-            row = conn.execute("SELECT to_regclass(%s)", (table,)).fetchone()
-            if row is None or row[0] != table:
+            row = query_one(conn, _Regclass, "SELECT to_regclass(%s) AS reg", (table,))
+            if row is None or row.reg != table:
                 raise RuntimeError(f"restored schema is missing {table}")
-        agents = conn.execute("SELECT count(*) FROM agents").fetchone()
-        blobs = conn.execute("SELECT count(*) FROM checkpoint_blobs").fetchone()
-        checkpoints = conn.execute("SELECT count(*) FROM checkpoints").fetchone()
-        writes = conn.execute("SELECT count(*) FROM checkpoint_writes").fetchone()
-        sample = conn.execute(
-            "SELECT thread_id FROM checkpoints ORDER BY checkpoint->>'ts' DESC NULLS LAST LIMIT 1"
-        ).fetchone()
-        owner = conn.execute(
-            "SELECT pg_catalog.pg_get_userbyid(relowner) FROM pg_catalog.pg_class "
-            "WHERE relname = 'agents' AND relnamespace = to_regnamespace('public')"
-        ).fetchone()
+        agents = count_one(conn, "SELECT count(*) AS n FROM agents")
+        blobs = count_one(conn, "SELECT count(*) AS n FROM checkpoint_blobs")
+        checkpoints = count_one(conn, "SELECT count(*) AS n FROM checkpoints")
+        writes = count_one(conn, "SELECT count(*) AS n FROM checkpoint_writes")
+        sample = query_one(
+            conn,
+            _ThreadRow,
+            "SELECT thread_id FROM checkpoints ORDER BY checkpoint->>'ts' DESC NULLS LAST LIMIT 1",
+        )
+        owner = query_one(
+            conn,
+            _Owner,
+            "SELECT pg_catalog.pg_get_userbyid(relowner) AS owner FROM pg_catalog.pg_class "
+            "WHERE relname = 'agents' AND relnamespace = to_regnamespace('public')",
+        )
         census = census_checkpoint_types(conn)
-    if agents is None or blobs is None or checkpoints is None or writes is None:
-        raise RuntimeError("restored count query returned no row")
-    if sample is None or not str(sample[0]).isdigit():
+    if sample is None or not sample.thread_id.isdigit():
         raise RuntimeError("restored checkpoints contain no readable agent conversation")
 
-    sample_agent_id = int(sample[0])
+    sample_agent_id = int(sample.thread_id)
     restored = database_for_url(db_url)
     messages = checkpoint_reader.load_checkpoint_messages_full(restored, sample_agent_id)
     if not messages:
         raise RuntimeError("restored checkpoint conversation has no messages")
 
-    if owner is None or not owner[0]:
+    if owner is None or not owner.owner:
         raise RuntimeError("restored agents table has no resolvable owner")
     refusal = census.failure()
     if refusal is not None:
         raise RuntimeError(f"restored checkpoints do not read back: {refusal}")
 
     return RestoreReport(
-        agents=agents[0],
-        checkpoint_blobs=blobs[0],
-        checkpoints=checkpoints[0],
-        checkpoint_writes=writes[0],
+        agents=agents,
+        checkpoint_blobs=blobs,
+        checkpoints=checkpoints,
+        checkpoint_writes=writes,
         sample_agent_id=sample_agent_id,
         sample_message_count=len(messages),
-        agents_owner=str(owner[0]),
+        agents_owner=owner.owner,
         census=census,
     )
 
@@ -554,10 +597,17 @@ def run_drill(
     return report, time.monotonic() - started
 
 
+# meiva:note
+# The command line, parsed: the artifact to restore, or None for the newest managed one.
+@dataclass(frozen=True)
+class _Arguments:
+    artifact: Path | None
+
+
 def main(argv: list[str]) -> None:
     parser = argparse.ArgumentParser(description="Restore and verify an encrypted Meiva DB backup.")
     parser.add_argument("artifact", nargs="?", type=Path, help="managed .dump.enc artifact")
-    args = parser.parse_args(argv)
+    args = options(parser.parse_args(argv), _Arguments)
     config = ConfigBoot()
     config.read_process_environment()
     home = meiva_home()

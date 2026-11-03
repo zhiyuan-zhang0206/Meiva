@@ -20,7 +20,6 @@ from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 import psycopg
 
@@ -86,7 +85,7 @@ def _storage_round_trip(
 
 
 def _postgres_facts(
-    *, path: Path | None, admin: AbstractContextManager[psycopg.Connection[Any]], home: Path
+    *, path: Path | None, admin: AbstractContextManager[psycopg.Connection], home: Path
 ) -> str:
     expected = expected_archive(path=path, home=home)
     try:
@@ -136,7 +135,7 @@ def run_check_on(
     path: Path | None,
     token: str,
     binary_problem: str | None,
-    admin: AbstractContextManager[psycopg.Connection[Any]],
+    admin: AbstractContextManager[psycopg.Connection],
     home: Path,
     environ: Mapping[str, str],
 ) -> list[Step]:

@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeGuard
 
+from base.host.boundary.untyped import object_of
+
 # meiva:note
 # A recorded gap is a WAL range this cluster has accepted as permanently missing.
 # The record lives in wal-gaps.json beside this module, so adding one is a
@@ -75,7 +77,7 @@ def load_recorded_gaps(path: Path | None = None) -> tuple[RecordedGap, ...]:
     source = path or RECORDED_GAPS_PATH
     try:
         payload = _require_object_dict(
-            json.loads(source.read_text(encoding="utf-8")),
+            object_of(json.loads, source.read_text(encoding="utf-8")),
             "recorded gaps payload must be an object",
         )
         entries = _require_object_list(

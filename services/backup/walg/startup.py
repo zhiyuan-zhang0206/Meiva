@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import sys
 from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import psycopg
 
+from base.db.rows import query_one
 from base.log import logger
 from services.backup.walg.archive import expected_for
 from services.backup.walg.archive_plan import ActualArchive, differs, mismatch_message
@@ -21,22 +22,31 @@ from services.backup.walg.archive_plan import ActualArchive, differs, mismatch_m
 # warns and the start continues (fail loud, not fail closed).
 
 
-def read_actual(conn: psycopg.Connection[Any]) -> ActualArchive:
-    row = conn.execute(
-        "SELECT current_setting('archive_mode'), "
-        "(SELECT setting::int FROM pg_settings WHERE name = 'archive_timeout'), "
-        "current_setting('archive_command')"
-    ).fetchone()
+@dataclass(frozen=True)
+class _ArchiveRow:
+    mode: str
+    timeout_s: int
+    command: str
+
+
+def read_actual(conn: psycopg.Connection) -> ActualArchive:
+    row = query_one(
+        conn,
+        _ArchiveRow,
+        "SELECT current_setting('archive_mode') AS mode, "
+        "(SELECT setting::int FROM pg_settings WHERE name = 'archive_timeout') AS timeout_s, "
+        "current_setting('archive_command') AS command",
+    )
     if row is None:
         raise RuntimeError("Postgres returned no archive settings")
-    return ActualArchive(mode=str(row[0]), timeout_s=int(row[1]), command=str(row[2]))
+    return ActualArchive(mode=row.mode, timeout_s=row.timeout_s, command=row.command)
 
 
 def assert_configured_archive(
     *,
     machine: str,
     path: Path | None,
-    admin: AbstractContextManager[psycopg.Connection[Any]],
+    admin: AbstractContextManager[psycopg.Connection],
     home: Path,
 ) -> str | None:
     try:

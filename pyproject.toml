@@ -773,6 +773,18 @@ root = "scripts/model_registry/tests"
 root = "scripts/verify/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "services/backup/artifact/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/backup/scheduler/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/backup/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/backup/walg/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "services/derived/insights/run_timeline/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -891,6 +903,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "scripts/verify"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/backup"
 reportAny = "error"
 reportExplicitAny = "error"
 
