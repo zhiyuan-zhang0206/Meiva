@@ -8,11 +8,11 @@ import { isParent } from "./remark-shared";
 // own line but glued to the prose line above (no blank line between), the pair
 // parses as *inline* math, so a `\frac` + `\left(...\right)` pair lands mid
 // paragraph, wraps at the first narrow column and stretches the line height - the
-// 2026-10-20 report where a phone showed a two-formula paragraph as rubble. The
-// delimiters are unambiguous in the source, so this reads the span back from the
-// file and promotes it to a display math node, splitting the paragraph around it.
-// It is a source-level recovery, not a reading of intent: `$...$` stays inline,
-// and a `$$` pair the author meant literally is promoted all the same.
+// 2026-10-20 report where a phone showed a two-formula paragraph as rubble.
+// Single-paragraph `\[...\]` spans share the same inline representation. Both
+// delimiter pairs are unambiguous in the source, so this reads the span back from
+// the file and promotes it to a display math node, splitting the paragraph around
+// it. `$...$` and `\(...\)` stay inline.
 // meiva:link ui/web/src/docs/frontend-components/markdown-surfaces.meiva.okf.md
 
 type MathNode = Extract<Nodes, { type: "math" }>;
@@ -26,7 +26,10 @@ function isDisplayDelimited(node: Nodes, source: string): node is InlineMathNode
   const end = node.position?.end.offset;
   if (start === undefined || end === undefined) return false;
   const raw = source.slice(start, end);
-  return raw.length >= 4 && raw.startsWith("$$") && raw.endsWith("$$");
+  return (
+    (raw.length >= 4 && raw.startsWith("$$") && raw.endsWith("$$")) ||
+    (raw.length >= 5 && raw.startsWith("\\[") && raw.endsWith("\\]"))
+  );
 }
 
 

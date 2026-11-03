@@ -404,9 +404,10 @@ describe("math through the lazy KaTeX surface", () => {
   it("does not read a pair around inline code as math", async () => {
     const { container } = renderMarkdown(<ChatMarkdown content={"cost $ `a` and `b` $ end"} />);
 
-    await waitFor(() => expect(container.textContent).toContain("cost $`a` and `b`$ end"), { timeout: 5000 });
+    await waitFor(() => expect(container.querySelectorAll("code")).toHaveLength(2), { timeout: 5000 });
     expect(container.querySelector(".katex")).toBeNull();
     expect(container.querySelector(".katex-error")).toBeNull();
+    expect(container.textContent).toBe("cost $ a and b $ end");
   });
 
   it("renders the reported 2026-10-19 reply without a katex-error", async () => {
@@ -423,6 +424,57 @@ describe("math through the lazy KaTeX surface", () => {
     const arrows = [...container.querySelectorAll("annotation")].filter((node) => node.textContent === "\\to");
     expect(arrows.length).toBeGreaterThanOrEqual(10);
     expect(container.textContent).toContain("\u6839\u6761\u4ef6 $ \u5e95\u4e0b\u7684");
+    const boldTexts = [...container.querySelectorAll("strong")].map((node) => node.textContent);
+    expect(boldTexts).toContain("\u4e3b\u5b50\u5206\u652f");
+  });
+
+  it("keeps currency amounts and bold intact in reported timeline and shared-context replies", async () => {
+    const content = [
+      "2. `$40` **\u4e0d\u662f\u62e6\u505c\u9600\u3002** \u5f53\u524d\u7528\u91cf **$0.51 / $40.00**\u3002",
+      "4. 11 \u6708\u5927\u6982\u7387\u843d\u5728 **$30 \u4e0a\u4e0b**\uff0c$40 \u8fd9\u6761\u63d0\u9192\u7ebf\u4f1a\u5728\u771f\u8d85\u7684\u65f6\u5019\u53eb\u9192\u6211\u4eec\u3002",
+      "- 10 \u6708\uff1aActions \u6bdb\u989d $23.11\uff0c\u5176\u4e2d **$22.61 \u662f\u5b58\u50a8**\uff1b\u5206\u949f\u6570\u6bdb\u989d $18.48\u3001\u5b9e\u6263 $0.48\uff08\u88ab\u6bcf\u6708 $18 \u7684 compute \u7528\u91cf\u5403\u6389\uff09\u3002",
+      "- 11 \u6708\u5934\u4e09\u5929\uff1a\u6bdb\u989d $7.85\u3001\u5b9e\u6263 **$0.51**\uff0c\u540c\u6837\u5168\u662f\u5b58\u50a8\u3002",
+      "| \u52a8\u4f5c | \u6548\u679c |\n|---|---|\n| cleanup | **\u91ca\u653e 38.2 GB**\uff08\u2248$9.5/\u6708\uff09 |\n| `recorder` | \u6bcf\u6b21\u53d1\u5e03\u6f14\u7ec3\u7701 $0.12\uff0c\u2248$14/\u6708 |",
+      "\u73b0\u5728\u8ba1\u8d39\u5b58\u50a8\uff1a**\u5236\u54c1 13.54 GB\uff08\u2248$2.9/\u6708\uff09**\uff0c\u539f 51.7 GB\uff08\u2248$12.4/\u6708\uff09\u3002",
+      "\u5355\u4ef7 **$30 \u4e0a\u4e0b**\uff0c\u590d\u6742\u5ea6\u662f $O(n^2)$\u3002",
+    ].join("\n\n");
+    const { container } = renderMarkdown(<ChatMarkdown content={content} />);
+
+    await waitFor(() => expect(container.querySelectorAll(".katex")).toHaveLength(1), { timeout: 5000 });
+    expect(container.querySelector("annotation")?.textContent).toBe("O(n^2)");
+    expect(container.querySelector(".katex-error")).toBeNull();
+    expect(container.textContent).not.toContain("**");
+    expect(container.textContent).toContain("$0.12\uff0c\u2248$14/\u6708");
+    const boldTexts = [...container.querySelectorAll("strong")].map((node) => node.textContent);
+    expect(boldTexts).toEqual(
+      expect.arrayContaining([
+        "$0.51 / $40.00",
+        "$30 \u4e0a\u4e0b",
+        "$22.61 \u662f\u5b58\u50a8",
+        "$0.51",
+        "\u91ca\u653e 38.2 GB",
+        "\u5236\u54c1 13.54 GB\uff08\u2248$2.9/\u6708\uff09",
+      ]),
+    );
+  });
+
+  it("renders explicit \\(...\\) and \\[...\\] LaTeX delimiters while leaving escaped \\[1\\] and URLs intact", async () => {
+    const content = [
+      "Inline \\(x^2 + 1\\) and [wiki](https://en.wikipedia.org/wiki/Foo_\\(bar\\)) with \\[1\\].",
+      "\\[",
+      "\\int_0^1 x\\,dx = \\frac{1}{2}",
+      "- 0",
+      "\\]",
+    ].join("\n");
+    const { container } = renderMarkdown(<ChatMarkdown content={content} />);
+
+    await waitFor(() => expect(container.querySelectorAll(".katex")).toHaveLength(2), { timeout: 5000 });
+    expect(container.querySelectorAll(".katex-display")).toHaveLength(1);
+    expect(container.querySelector(".katex-error")).toBeNull();
+    expect(screen.getByRole("link", { name: "wiki" }).getAttribute("href")).toBe(
+      "https://en.wikipedia.org/wiki/Foo_(bar)",
+    );
+    expect(container.textContent).toContain("[1].");
   });
 
   it("turns a $$ pair glued to the line above into display math (2026-10-20 phone report)", async () => {

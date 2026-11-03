@@ -1,11 +1,16 @@
 // meiva:note
-// LaTeX is loaded on demand, and the recovery plugin runs before the prose
-// guard: a promoted `$$` span is a block node the guard never inspects.
+// LaTeX is loaded on demand. `remark-math` runs with `singleDollarTextMath: false`
+// so `$$...$$` and `mdast-util-math` remain upstream while `remarkLatexMath`
+// enforces Pandoc and prose boundaries on `$...$` at tokenize time and adds
+// `\(...\)` / `\[...\]`; `remarkDisplayMathRecovery` promotes single-paragraph
+// `$$...$$` and `\[...\]` spans into display blocks.
 // meiva:link ui/web/src/docs/frontend-components/markdown-safe-content.meiva.okf.md
 import type { PluggableList } from "unified";
 
 import remarkDisplayMathRecovery from "./remark-display-math-recovery";
-import remarkMathProseGuard from "./remark-math-prose-guard";
+import remarkLatexMath from "./remark-latex-math";
+
+export { hasMathSyntax } from "./latex-math-guard";
 
 export interface MarkdownMath {
   remark: PluggableList;
@@ -18,7 +23,11 @@ const defaultImport = (): Promise<MarkdownMath> =>
     import("rehype-katex"),
     import("katex/dist/katex.min.css"),
   ]).then(([remarkMath, rehypeKatex]) => ({
-    remark: [remarkMath.default, remarkDisplayMathRecovery, remarkMathProseGuard],
+    remark: [
+      [remarkMath.default, { singleDollarTextMath: false }],
+      remarkLatexMath,
+      remarkDisplayMathRecovery,
+    ],
     rehype: [[rehypeKatex.default, { throwOnError: false }]],
   }));
 

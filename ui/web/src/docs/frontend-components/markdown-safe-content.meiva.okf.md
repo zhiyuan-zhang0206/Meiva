@@ -33,10 +33,10 @@ Raw HTML renders through the GitHub-style sanitize allowlist extended with figur
 
 ## Math
 
-Inline `$x$` and display `$$…$$` math render through KaTeX, loaded lazily:
-content without a `$` never imports the math chunk, and KaTeX output renders
-after the sanitizer — its inputs cannot produce injection and its trust and
-strict defaults stand.
+Inline `$x$` / `\(x\)` and display `$$…$$` / `\[…\]` math render through KaTeX,
+loaded lazily: content without `$`, `\(`, `\[` or a `math` code fence never
+imports the math chunk, and KaTeX output renders after the sanitizer — its
+inputs cannot produce injection and its trust and strict defaults stand.
 
 The chunk is a value, like the code chunk: `lib/markdown/math.ts` builds a
 source with one deferred import per instance (the first attempt shared, a failed
@@ -46,9 +46,26 @@ default, so every surface shares one cache. A test wraps its tree in the
 provider with a source built around a fake importer, which is why no shipped
 module exports a test-only reset or import override for math.
 
+`remark-math` runs with `singleDollarTextMath: false` so it still owns `$$…$$`
+and `mdast-util-math`, while `lib/markdown/remark-latex-math.ts` tokenizes
+single-dollar `$…$` and explicit `\(...\)` / `\[...\]` delimiters inside
+`micromark` before emphasis, inline code, autolinks or CommonMark character
+escapes run. Single-dollar math follows Pandoc's `tex_math_dollars` boundaries
+(not preceded by an unescaped `$` or ASCII alphanumeric, no whitespace just
+inside either `$`, no digit immediately after the closing `$`, single-line
+only) and rejects candidate spans carrying backticks, CJK or typography
+punctuation outside `\text{…}`-family groups, unbraced `**` emphasis runs, or
+currency-leading prose (`$30 for …`, `($30) and …`). Rolling back at tokenize
+time keeps currency amounts (`**$0.51 / $40.00**`, `**$30 …**, $40`) and
+surrounding emphasis intact instead of swallowing delimiters into a dead math
+token. Mid-line `\[1\]` and `\[TODO\]` stay CommonMark bracket escapes unless
+padded with spaces or carrying math syntax; standalone or multi-line `\[…\]`
+always renders as display math.
+
 Display math needs help from two places, because `remark-math` treats a
 single-line `$$…$$` pair as *inline* math (only a fence on its own line, content
-below, is flow math). A recovery plugin reads the `$$` delimiters back from the
+below, is flow math), and single-paragraph `\[…\]` spans share the same inline
+node. A recovery plugin reads `$$…$$` and `\[…\]` delimiters back from the
 source and promotes such a span to a `math` block, splitting the paragraph
 around it; the promoted node carries the `data` shape `mdast-util-math` uses,
 because `mdast-util-to-hast` has no handler for `math` and a bare node renders as
@@ -58,8 +75,6 @@ keeps code-block chrome. A display formula wider than the column scrolls
 sideways (`.katex-display` overflow), and `.chat-md .katex` resets the
 container's `overflow-wrap:anywhere`, which otherwise breaks a formula
 mid-expression.
-
-Math renders through KaTeX only after a lazily loaded chunk: content without $ never imports remark-math / rehype-katex (the loader is the unit under test), content with $ upgrades to inline and display math once the deduplicated module promise resolves, and KaTeX runs after the sanitizer with throwOnError false — its inputs cannot produce injection and its trust/strict defaults stand A `$…$` pair that carries prose — CJK outside `\text{…}`, fullwidth punctuation, or an inline-code backtick — is not math: the span demotes to its literal `$…$` text, because remark-math pairs any two `$` on a line and a `$` written as a plain symbol would otherwise swallow the sentence up to the next one and paint it as a KaTeX error.
 
 ## Document anchors
 

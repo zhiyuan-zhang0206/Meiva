@@ -17,7 +17,12 @@ import type { Plugin, PluggableList } from "unified";
 import { CopyButton } from "@/components/content/copy-button";
 import { PythonCode } from "@/components/content/python-code";
 import { MIN_W_0 } from "@/lib/layout/layout";
-import { defaultMarkdownMath, type MarkdownMath, type MarkdownMathSource } from "@/lib/markdown/math";
+import {
+  defaultMarkdownMath,
+  hasMathSyntax,
+  type MarkdownMath,
+  type MarkdownMathSource,
+} from "@/lib/markdown/math";
 import remarkAutolinkDelimiter from "@/lib/markdown/remark-autolink-delimiter";
 import remarkCjkLinkBoundary from "@/lib/markdown/remark-cjk-link-boundary";
 import { cn } from "@/lib/format/utils";
@@ -166,7 +171,7 @@ export interface ChatMarkdownProps {
 export const ChatMarkdownRenderer = memo(function ChatMarkdownRenderer({ content, components: overrides, resolveUrl, inline = false }: ChatMarkdownProps) {
   const [math, setMath] = useState<MarkdownMath | null>(null);
   const mathSource = useMarkdownMath();
-  const needsMath = content.includes("$");
+  const needsMath = hasMathSyntax(content);
   useEffect(() => {
     if (!needsMath || math !== null) return;
     let active = true;
