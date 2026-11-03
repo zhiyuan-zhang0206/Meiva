@@ -11,12 +11,15 @@ import argparse
 import json
 import sys
 from collections.abc import Iterator
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[2]
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
+from base.host.boundary.options import options  # noqa: E402
 from scripts.audit.sdk_usage_report import read_calls, report, timestamp  # noqa: E402
 
 _DESCRIPTION = (
@@ -33,14 +36,23 @@ def _lines(path: Path) -> Iterator[str]:
         yield from stream
 
 
+@dataclass(frozen=True)
+class Options:
+    events: list[Path]
+    start: datetime
+    end: datetime
+    coverage: float
+    agent_id: list[int] | None
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=_DESCRIPTION)
     parser.add_argument("events", nargs="+", type=Path, help="JSONL event mirror files")
     parser.add_argument("--start", required=True, type=timestamp)
     parser.add_argument("--end", required=True, type=timestamp)
-    parser.add_argument("--coverage", type=float, default=70, help="cumulative call percentage")
+    parser.add_argument("--coverage", type=float, default=70.0, help="cumulative call percentage")
     parser.add_argument("--agent-id", type=int, action="append", help="repeat to narrow callers")
-    args = parser.parse_args(argv)
+    args = options(parser.parse_args(argv), Options)
     try:
         mirrors = [(str(path), _lines(path)) for path in args.events]
         data = report(read_calls(mirrors), args.start, args.end, args.coverage, args.agent_id)

@@ -12,8 +12,11 @@ import json
 import subprocess
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
+from base.host.boundary.options import options
+from base.host.boundary.untyped import object_of
 from scripts.audit.analysis import (
     audit_target,
     drift_report,
@@ -54,7 +57,7 @@ def run_gh(args: list[str]) -> str:
 
 
 def _json_mapping(text: str, location: str) -> dict[str, object]:
-    payload: object = json.loads(text)
+    payload = object_of(json.loads, text)
     return mapping(payload, location)
 
 
@@ -89,6 +92,13 @@ def _audit(
     return drift_report(protection, expected, workflows)
 
 
+@dataclass(frozen=True)
+class Options:
+    repo: str | None
+    branch: str
+    as_json: bool
+
+
 def main(
     argv: list[str],
     *,
@@ -100,7 +110,7 @@ def main(
     parser.add_argument("--repo", help="GitHub repository as owner/repo")
     parser.add_argument("--branch", default="main")
     parser.add_argument("--json", action="store_true", dest="as_json")
-    args = parser.parse_args(argv)
+    args = options(parser.parse_args(argv), Options)
 
     try:
         remote_url = _origin_url() if args.repo is None else None

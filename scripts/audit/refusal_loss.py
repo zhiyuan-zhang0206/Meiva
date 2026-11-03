@@ -6,9 +6,11 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from base.host.boundary.options import options
+from base.host.boundary.process import stdout_text
 from base.host.proc import run_bounded
 from scripts.audit.analysis.refusal_loss import (
     DELETION,
@@ -31,7 +33,7 @@ def _git(repo: Path, *args: str) -> str:
     done = run_bounded(
         ["git", *args], timeout=GIT_TIMEOUT_S, capture_output=True, cwd=repo, text=True
     )
-    return str(done.stdout or "")
+    return stdout_text(done)
 
 
 # meiva:note
@@ -103,6 +105,17 @@ def render(found: tuple[Finding, ...], rule: str) -> str:
     return "\n".join(lines)
 
 
+@dataclass(frozen=True)
+class Options:
+    base: str
+    rev_range: str | None
+    since: str | None
+    json: bool
+    receipt: bool
+    blocking: str
+    no_block: bool
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         description="Report a debt-reducing change that removes a refusal instead of moving it."
@@ -125,7 +138,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--no-block", action="store_true", help="report only; never fail the caller"
     )
-    args = parser.parse_args(argv)
+    args = options(parser.parse_args(argv), Options)
     rev_range = args.rev_range or (
         f"--since={args.since} HEAD" if args.since else f"{args.base}...HEAD"
     )

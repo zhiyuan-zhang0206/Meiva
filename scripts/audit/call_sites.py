@@ -25,8 +25,10 @@ import argparse
 import json
 import sys
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
+from base.host.boundary.options import options
 from scripts.audit.analysis.calls import (
     MISSING,
     call_site_payload,
@@ -68,6 +70,14 @@ def sources(root: Path) -> Iterator[tuple[str, str]]:
             continue
 
 
+@dataclass(frozen=True)
+class Options:
+    spec: list[str]
+    root: str
+    json: bool
+    enforce: bool
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         description="Report call sites that cannot supply a parameter."
@@ -86,7 +96,7 @@ def main(argv: list[str]) -> int:
         action="store_true",
         help="exit 1 when a call cannot supply the parameter (the default reports only)",
     )
-    arguments = parser.parse_args(argv)
+    arguments = options(parser.parse_args(argv), Options)
     try:
         specs = [parse_call_spec(text) for text in arguments.spec]
     except ValueError as error:

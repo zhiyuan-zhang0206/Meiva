@@ -20,9 +20,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from base.host.boundary.options import options
 from scripts.audit.analysis import Census, census, report_lines
 from scripts.ci.test_impact import build_impact
 from scripts.ci.test_selector import estimate_seconds, load_checkout, load_durations
@@ -48,6 +49,13 @@ def measure(repo_root: Path, *, top: int = 10) -> Census:
     )
 
 
+@dataclass(frozen=True)
+class Options:
+    repo_root: Path
+    top: int
+    json: bool
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         description="Measure how far changes reach through the PR test-selection impact graph."
@@ -55,7 +63,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--repo-root", type=Path, default=_REPO_ROOT)
     parser.add_argument("--top", type=int, default=10, help="heaviest unbounded sites to list")
     parser.add_argument("--json", action="store_true")
-    args = parser.parse_args(argv)
+    args = options(parser.parse_args(argv), Options)
     report = measure(args.repo_root.resolve(), top=args.top)
     if args.json:
         print(json.dumps(asdict(report), indent=2, sort_keys=True))

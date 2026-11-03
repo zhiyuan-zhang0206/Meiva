@@ -68,12 +68,14 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent.parent
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
+from base.host.boundary.options import options  # noqa: E402
 from meizel import lint_common  # noqa: E402
 from scripts.audit.analysis import (  # noqa: E402
     GENERATED_FILES,
@@ -119,6 +121,13 @@ def _relative(raw: str, repo_root: Path) -> str:
     return relative_target(raw, spec.resolve() if spec.is_absolute() else None, repo_root)
 
 
+@dataclass(frozen=True)
+class Options:
+    targets: list[str]
+    limit: int | None
+    as_json: bool
+
+
 def main(argv: list[str], *, repo_root: Path | None = None) -> int:
     # meiva:note
     # Report references in an explicit checkout, defaulting to this checkout.
@@ -134,7 +143,7 @@ def main(argv: list[str], *, repo_root: Path | None = None) -> int:
         "--limit", type=int, default=None, help="list at most this many files per group"
     )
     parser.add_argument("--json", action="store_true", dest="as_json", help="complete, for scripts")
-    args = parser.parse_args(argv)
+    args = options(parser.parse_args(argv), Options)
     bad_limit = limit_error(args.limit)
     if bad_limit is not None:
         parser.error(bad_limit)

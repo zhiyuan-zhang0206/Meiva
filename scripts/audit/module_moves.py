@@ -34,8 +34,10 @@ from __future__ import annotations
 import argparse
 import importlib
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
+from base.host.boundary.options import options
 from meizel import lint_common
 from scripts.audit.analysis import (
     is_text,
@@ -105,6 +107,11 @@ def _module_pair(value: str) -> tuple[str, str]:
         raise argparse.ArgumentTypeError(str(error)) from error
 
 
+@dataclass(frozen=True)
+class Options:
+    pairs: list[tuple[str, str]]
+
+
 def main(argv: list[str], *, repo_root: Path | None = None) -> int:
     """Audit tracked content in an explicit checkout, defaulting to this checkout.
 
@@ -113,7 +120,7 @@ def main(argv: list[str], *, repo_root: Path | None = None) -> int:
     """
     parser = argparse.ArgumentParser(description=(__doc__ or "").split("## What it checks")[0])
     parser.add_argument("pairs", nargs="+", metavar="OLD=NEW", type=_module_pair)
-    args = parser.parse_args(argv)
+    args = options(parser.parse_args(argv), Options)
     texts = _tracked_text(_REPO if repo_root is None else repo_root.resolve())
     failed = False
     for old, new in args.pairs:
