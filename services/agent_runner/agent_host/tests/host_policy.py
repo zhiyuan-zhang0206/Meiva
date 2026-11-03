@@ -1,5 +1,6 @@
 import os
 import random
+import sys
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,7 @@ def configured_policy(**changes: Any) -> HostPolicy:
             rng=SecureRandom(random.SystemRandom()),
             pid=os.getpid(),
             user_home=Path("/nonexistent/host-policy-user-home"),
+            python=Path(sys.executable),
             stall=StallTiming(
                 scan_interval_s=daemon.host_turn_progress_scan_interval_seconds,
                 no_progress_timeout_s=daemon.host_turn_no_progress_timeout_seconds,

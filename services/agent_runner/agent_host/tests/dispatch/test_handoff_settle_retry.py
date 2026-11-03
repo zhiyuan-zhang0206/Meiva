@@ -3,6 +3,7 @@
 # closed when the budget runs out.
 
 import asyncio
+import sys
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
@@ -439,6 +440,36 @@ async def test_the_host_takes_its_settle_budget_from_the_policy(
 
 
 # meiva:note
+# The interpreter a takeover relay starts comes from the policy the root read, not from a second
+# read inside the settle path: a host whose policy names another installation derives that
+# installation's `meiva`, and the invariant is asserted on both carriers the host builds.
+@pytest.mark.usefixtures("event_pipeline")
+async def test_the_host_hands_the_interpreter_it_was_configured_with_to_its_carriers(
+    aops_pool: AsyncConnectionPool[Any],
+    database: Database,
+    event_bus: EventBus,
+    model_catalog: ModelCatalog,
+    tmp_path: Path,
+) -> None:
+    elsewhere = tmp_path / "uv" / "cpython-3.12.11" / "bin" / "python3.12"
+    graph, saver = await _graph(aops_pool, 0)
+    host = _host(
+        pool=aops_pool,
+        saver=saver,
+        graph=graph,
+        database=database,
+        event_bus=event_bus,
+        model_catalog=model_catalog,
+        policy=configured_policy(python=elsewhere),
+    )
+    try:
+        assert host._held_settle.python == elsewhere
+        assert host._handoff_settlement.python == elsewhere
+    finally:
+        await host.aclose()
+
+
+# meiva:note
 # The other half of the budget's journey: the policy the root builds carries the configuration's
 # value, so the number `AgentHost` hands the settle is the one an operator set.
 def test_the_host_policy_takes_the_settle_budget_from_the_configuration(tmp_path: Path) -> None:
@@ -451,6 +482,7 @@ def test_the_host_policy_takes_the_settle_budget_from_the_configuration(tmp_path
         rng=SecureRandom(SystemRandom()),
         pid=1,
         user_home=tmp_path,
+        python=Path(sys.executable),
     )
 
     assert policy.held_settle_budget_s == 7.5

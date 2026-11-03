@@ -343,6 +343,7 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
             clock=Clock.from_settings(),
             home=unit_home,
             environ=dict(os.environ),
+            python=Path(sys.executable),
         ),
     )
     resumed = await claim_node(

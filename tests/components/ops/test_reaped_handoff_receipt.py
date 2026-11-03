@@ -6,6 +6,7 @@ import os
 # Nothing else in the suite covers resurrect x handoff, and without this the deadlock would
 # only move from zero seconds to the reap grace.
 import random
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -168,6 +169,7 @@ async def test_a_reaped_handoff_receipt_lands_on_the_resurrected_agents_first_tu
         home=meiva_home(),
         rng=_rng(),
         environ=dict(os.environ),
+        python=Path(sys.executable),
     )
     await settle_handoff_before_invocation(
         graph, ctx, agent_id, fresh_input=False, settlement=settlement

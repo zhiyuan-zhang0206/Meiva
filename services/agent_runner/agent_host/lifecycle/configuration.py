@@ -42,7 +42,13 @@ def boot_process() -> ConfigBoot:
 
 
 def host_policy(
-    config: ConfigBoot, *, keys: ProviderKeys, rng: SecureRandom, pid: int, user_home: Path
+    config: ConfigBoot,
+    *,
+    keys: ProviderKeys,
+    rng: SecureRandom,
+    pid: int,
+    user_home: Path,
+    python: Path,
 ) -> HostPolicy:
     daemon = config.view.daemon
     return HostPolicy(
@@ -53,6 +59,7 @@ def host_policy(
         rng=rng,
         pid=pid,
         user_home=user_home,
+        python=python,
         cache=HostCachePolicy(
             idle_ttl_seconds=daemon.host_agent_idle_ttl_seconds, size=daemon.host_agent_cache_size
         ),
