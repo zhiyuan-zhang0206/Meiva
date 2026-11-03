@@ -19,8 +19,12 @@ MEMORY_ARBITRATOR_LABEL = "memory-arbiter"
 TRIGGERS = (
     Trigger(
         "0 4 * * *",
-        "Daily consolidation (rebuild indexes, commit, push, PR merge) — rebuild `MEMORY.md`"
-        " and the directory indexes first (`rebuild_memory_index.py`, `gen_indexes_tree.py`),"
+        "Daily consolidation (rebuild indexes, commit, push, PR merge) — first run, in this"
+        " order: `~/.meiva/source/.venv/bin/python ~/.meiva/source/meiva_builtins/plugins/"
+        "meiva_memory/skills/scripts/rebuild_memory_index.py`, then the same interpreter on"
+        " `~/.meiva/source/meiva_builtins/plugins/meiva_memory/skills/scripts/gen_indexes.py`"
+        " (both take no arguments and resolve the Meiva home themselves; bare script names are"
+        " not on PATH and `python3` cannot import `base`),"
         " then merge only PRs whose `validate` check is green, whose author is not the merger,"
         " and write the collector snapshot (each face's HEAD + dirty count) into the PR body"
         " first",
