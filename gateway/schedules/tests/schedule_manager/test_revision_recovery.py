@@ -8,7 +8,6 @@
 
 from collections.abc import Generator
 from pathlib import Path
-from typing import Any
 
 import psycopg
 import pytest
@@ -24,7 +23,9 @@ from base.sessions.pty.paths import service_socket_path
 from base.sessions.pty.tests.pty_service import FakePtyService
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
+from gateway.http.db_rows import query_one
 from gateway.schedules import session_control
+from gateway.schedules.rows import InsertedId
 from services.wake.schedule_manager import requests
 from services.wake.schedule_manager.blocked_streak import BLOCKED_GIVE_UP_AFTER_S
 from services.wake.schedule_manager.tests.manager_support import NOW, schedule_manager
@@ -32,9 +33,9 @@ from services.wake.schedule_manager.tests.session_fakes import Backend
 
 
 @pytest.fixture
-def provenance(unit_home: Path) -> Generator[list[dict[str, Any]]]:
+def provenance(unit_home: Path) -> Generator[list[dict[str, object]]]:
     """The pty-sessions service of the home, answering with the sessions the test's backend holds."""
-    sessions: list[dict[str, Any]] = []
+    sessions: list[dict[str, object]] = []
     socket_path = service_socket_path(run_dir(unit_home))
     socket_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     service = FakePtyService(socket_path, sessions)
@@ -46,7 +47,7 @@ def provenance(unit_home: Path) -> Generator[list[dict[str, Any]]]:
 
 @pytest.fixture
 def backend(
-    provenance: list[dict[str, Any]], serving_root: start_serving.RootBirth, unit_home: Path
+    provenance: list[dict[str, object]], serving_root: start_serving.RootBirth, unit_home: Path
 ) -> Backend:
     generation = start_serving.begin_start(unit_home)
     assert start_serving.mark_serving(
@@ -56,13 +57,15 @@ def backend(
 
 
 def _insert(conn: psycopg.Connection, machine: str = "gateway") -> int:
-    row = conn.execute(
+    row = query_one(
+        conn,
+        InsertedId,
         "INSERT INTO schedules (name, script, command, desired_revision, machine) VALUES ('revision', 'pass', 'python schedule.py', 1, %s) RETURNING id",
         (machine,),
-    ).fetchone()
+    )
     assert row is not None
     conn.commit()
-    return row[0]
+    return row.id
 
 
 def _runner_command(sid: int, revision: int) -> str:
@@ -176,7 +179,7 @@ def test_failed_revision_is_not_retried_after_unknown_launch(
 def test_an_uncertain_live_revision_is_never_blindly_replaced(
     db_conn: psycopg.Connection,
     backend: Backend,
-    provenance: list[dict[str, Any]],
+    provenance: list[dict[str, object]],
     *,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -197,7 +200,7 @@ def test_an_uncertain_live_revision_is_never_blindly_replaced(
 def test_a_blocked_request_is_retried_for_a_bounded_window_then_consumed_with_an_alert(
     db_conn: psycopg.Connection,
     backend: Backend,
-    provenance: list[dict[str, Any]],
+    provenance: list[dict[str, object]],
     blocked_by: str,
     emitted_events: EmittedEvents,
     *,
@@ -240,11 +243,13 @@ def test_a_failed_schedule_does_not_block_other_queued_revisions(
     sid = _insert(db_conn)
     backend.hold(session_name(f"schedule-{sid}"), "legacy")
     backend.fail_reap = True
-    row = db_conn.execute(
-        "INSERT INTO schedules (name, script, command, desired_revision, machine) VALUES ('other', 'pass', 'python schedule.py', 1, 'gateway') RETURNING id"
-    ).fetchone()
+    row = query_one(
+        db_conn,
+        InsertedId,
+        "INSERT INTO schedules (name, script, command, desired_revision, machine) VALUES ('other', 'pass', 'python schedule.py', 1, 'gateway') RETURNING id",
+    )
     assert row is not None
-    other = row[0]
+    other = row.id
     db_conn.commit()
     with base.db.pool(gate=database_gate) as pool:
         session_control.enqueue_blocking(pool, sid)

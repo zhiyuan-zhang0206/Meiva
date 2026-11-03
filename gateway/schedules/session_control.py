@@ -16,7 +16,6 @@ import asyncio
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 from psycopg import Connection
 from psycopg_pool import ConnectionPool
@@ -29,12 +28,12 @@ from base.sessions.protocol import SessionBackend
 _log = logging.getLogger(__name__)
 
 
-def enqueue_blocking(pool: ConnectionPool[Any], schedule_id: int, machine: str = "gateway") -> None:
+def enqueue_blocking(pool: ConnectionPool, schedule_id: int, machine: str = "gateway") -> None:
     with write_transaction(pool) as conn:
         enqueue_in_transaction(conn, schedule_id, machine)
 
 
-def enqueue_in_transaction(conn: Connection[Any], schedule_id: int, machine: str) -> None:
+def enqueue_in_transaction(conn: Connection, schedule_id: int, machine: str) -> None:
     conn.execute(
         "INSERT INTO schedule_sync_requests (schedule_id, machine) VALUES (%s, %s) "
         "ON CONFLICT (schedule_id, machine) DO UPDATE SET requested_at = clock_timestamp()",
@@ -42,27 +41,25 @@ def enqueue_in_transaction(conn: Connection[Any], schedule_id: int, machine: str
     )
 
 
-def _is_queued_blocking(
-    pool: ConnectionPool[Any], schedule_id: int, machine: str | None = None
-) -> bool:
-    with pool.connection() as conn, conn.cursor() as cur:
+def _is_queued_blocking(pool: ConnectionPool, schedule_id: int, machine: str | None = None) -> bool:
+    with pool.connection() as conn:
         if machine is not None:
-            cur.execute(
+            queued = conn.execute(
                 "SELECT 1 FROM schedule_sync_requests WHERE schedule_id = %s AND machine = %s",
                 (schedule_id, machine),
-            )
+            ).fetchone()
         else:
-            cur.execute(
+            queued = conn.execute(
                 "SELECT 1 FROM schedule_sync_requests WHERE schedule_id = %s", (schedule_id,)
-            )
-        return cur.fetchone() is not None
+            ).fetchone()
+        return queued is not None
 
 
 # meiva:note
 # Wait up to `wait_s` (the service's one-second poll plus the kill and relaunch it runs)
 # for the request to be consumed, looking every `poll_s`.
 async def wait_consumed(
-    pool: ConnectionPool[Any],
+    pool: ConnectionPool,
     schedule_id: int,
     *,
     machine: str | None = None,
@@ -84,7 +81,7 @@ async def wait_consumed(
 
 
 async def request_sync(
-    pool: ConnectionPool[Any],
+    pool: ConnectionPool,
     schedule_id: int,
     machine: str = "gateway",
     *,
@@ -136,13 +133,13 @@ def plugin_schedules_stat_digest(home: Path) -> tuple[tuple[str, int, int], ...]
     return tuple(entries)
 
 
-def _run_with_conn(pool: ConnectionPool[Any], action: Callable[[Any], object]) -> None:
+def _run_with_conn(pool: ConnectionPool, action: Callable[[Connection], object]) -> None:
     with pool.connection() as conn:
         action(conn)
 
 
 async def sync_startup_schedules(
-    db_pool: ConnectionPool[Any],
+    db_pool: ConnectionPool,
     *,
     home: Path,
     resolve_machine: Callable[[], str],
@@ -172,7 +169,7 @@ async def sync_startup_schedules(
 
 
 async def run_plugin_schedules_reconciler(
-    pool: ConnectionPool[Any], home: Path, *, interval_seconds: float = 5.0
+    pool: ConnectionPool, home: Path, *, interval_seconds: float = 5.0
 ) -> None:
     from base.daemon.schedules.plugin_schedules import reconcile_plugin_schedules
 

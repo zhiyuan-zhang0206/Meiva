@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
 import psycopg
 
@@ -38,13 +37,15 @@ def _names(conn: psycopg.Connection) -> set[str]:
         return {r[0] for r in cur.fetchall()}
 
 
-def _row(conn: psycopg.Connection, name: str) -> Any:
+def _row(conn: psycopg.Connection, name: str) -> tuple[object, ...]:
     with conn.cursor() as cur:
         cur.execute(
             "SELECT name, enabled, script, command FROM schedules WHERE name = %s",
             (name,),
         )
-        return cur.fetchone()
+        row = cur.fetchone()
+    assert row is not None
+    return row
 
 
 def _versions(conn: psycopg.Connection, name: str) -> list[tuple[str]]:

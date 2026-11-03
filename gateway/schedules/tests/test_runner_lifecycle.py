@@ -16,6 +16,8 @@ from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from gateway.http.db_rows import query_one
+from gateway.schedules.rows import InsertedId
 from gateway.schedules.tests.runner_inputs import run_schedule as run
 from services.wake.schedule_manager import engine
 from services.wake.schedule_manager.stall_policy import StallPolicy
@@ -40,13 +42,15 @@ def test_closing_a_guard_that_never_stalled_ends_its_thread(database_gate: Proce
 def test_a_finished_run_leaves_no_guard_thread(
     db_conn: psycopg.Connection, unit_home: object, *, machine_identity: MachineIdentityReader
 ) -> None:
-    row = db_conn.execute(
+    row = query_one(
+        db_conn,
+        InsertedId,
         "INSERT INTO schedules (name, script, command, enabled, status, machine) "
-        "VALUES ('guard-thread', 'pass', 'python schedule.py', true, 'stopped', 'gateway') RETURNING id"
-    ).fetchone()
+        "VALUES ('guard-thread', 'pass', 'python schedule.py', true, 'stopped', 'gateway') RETURNING id",
+    )
     db_conn.commit()
     assert row is not None
 
-    assert run(row[0], machine=machine_identity) == 0
+    assert run(row.id, machine=machine_identity) == 0
 
     assert not [t for t in threading.enumerate() if t.name.endswith("-stall-guard")]
