@@ -13,8 +13,9 @@ from pathlib import Path
 from typing import NoReturn
 
 from base.clock import Timers
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from base.host.permissions_helper.client import PermissionsHelperClient, RootStatus
-from scripts.boundary.untyped import is_object_dict, is_object_list, object_of
 
 # meiva:note
 # A decoded JSON object from the processes the smoke drives as a black box (the root's control socket, the unit probes): the readers below narrow the fields it reads.

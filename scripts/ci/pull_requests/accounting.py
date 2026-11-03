@@ -14,11 +14,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TypedDict
 
+from base.host.boundary.fields import optional_int_field, optional_object_field, optional_str_field
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.options import options
+from base.host.boundary.process import stdout_text
+from base.host.boundary.untyped import object_of
 from base.host.system.hostport import Host
-from scripts.boundary.fields import optional_int, optional_object, optional_str
-from scripts.boundary.options import options
-from scripts.boundary.process import stdout_text
-from scripts.boundary.untyped import is_object_dict, is_object_list, object_of
 
 _GH_TIMEOUT_S = 60.0
 LINUX_MINUTE_USD = 0.006
@@ -107,7 +108,7 @@ def _gh_api(path: str, *, host: Host) -> object:
 # meiva:note
 # The integer `id` a page row was checked to carry.
 def _row_id(row: Mapping[str, object]) -> int:
-    identifier = optional_int(row, "id")
+    identifier = optional_int_field(row, "id")
     if identifier is None:
         raise CiUsageReadError("invalid row identity")
     return identifier
@@ -206,7 +207,7 @@ def job_minutes(started: str | None, completed: str | None) -> int:
 def _pull_request_numbers(raw: list[object], error: str) -> list[int]:
     numbers: list[int] = []
     for pr in raw:
-        number = optional_int(pr, "number") if is_object_dict(pr) else None
+        number = optional_int_field(pr, "number") if is_object_dict(pr) else None
         if number is None:
             raise CiUsageReadError(error)
         numbers.append(number)
@@ -263,23 +264,23 @@ def _run_identity(
             pr_number = merged
             agent_id, task_id = parse_identity(_pr_title(repo, pr_number, host=host))
     if task_id is None:
-        head_commit = optional_object(run, "head_commit") or {}
+        head_commit = optional_object_field(run, "head_commit") or {}
         _, task_id = parse_identity(str(head_commit.get("message") or ""))
     return pr_number, agent_id, task_id
 
 
 def _run_entry(run: Mapping[str, object], repo: str, *, host: Host) -> LedgerEntry:
     pr_number, agent_id, task_id = _run_identity(run, repo, host=host)
-    day = (optional_str(run, "created_at") or "")[:10]
+    day = (optional_str_field(run, "created_at") or "")[:10]
     return LedgerEntry(
         run_id=_row_id(run),
         day=day,
         agent_id=agent_id,
         task_id=task_id,
         pr_number=pr_number,
-        name=optional_str(run, "name"),
-        head_branch=optional_str(run, "head_branch"),
-        conclusion=optional_str(run, "conclusion"),
+        name=optional_str_field(run, "name"),
+        head_branch=optional_str_field(run, "head_branch"),
+        conclusion=optional_str_field(run, "conclusion"),
         linux_minutes=0,
         macos_minutes=0,
         jobs=0,
@@ -375,7 +376,7 @@ def load_ledger(path: Path) -> dict[int, dict[str, object]]:
             loaded = object_of(json.loads, line)
         except json.JSONDecodeError:
             continue
-        if is_object_dict(loaded) and (run_id := optional_int(loaded, "run_id")) is not None:
+        if is_object_dict(loaded) and (run_id := optional_int_field(loaded, "run_id")) is not None:
             ledger[run_id] = loaded
     return ledger
 
@@ -421,15 +422,15 @@ def report_rows(
             created = 0.0
         if created < cutoff:
             continue
-        key = optional_int(entry, "agent_id")
+        key = optional_int_field(entry, "agent_id")
         if key not in per_agent:
             per_agent[key] = ReportRow(
                 agent_id=key, runs=0, linux_minutes=0, macos_minutes=0, est_usd=0.0
             )
         row = per_agent[key]
         row["runs"] += 1
-        row["linux_minutes"] += optional_int(entry, "linux_minutes") or 0
-        row["macos_minutes"] += optional_int(entry, "macos_minutes") or 0
+        row["linux_minutes"] += optional_int_field(entry, "linux_minutes") or 0
+        row["macos_minutes"] += optional_int_field(entry, "macos_minutes") or 0
     rows = list(per_agent.values())
     for row in rows:
         row["est_usd"] = round(

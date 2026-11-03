@@ -31,8 +31,8 @@ from base.api_contracts.config import (
     ConfigWriteResult,
 )
 from base.cluster.machine import MachineIdentityReader
+from base.host.boundary.options import options
 from cli.boundary.json_body import response_object
-from cli.boundary.options import options
 from ops.env_audit import EnvWriteAudit, read_env_write_records
 
 _HTTP_TIMEOUT_S = 15.0

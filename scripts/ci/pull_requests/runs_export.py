@@ -29,10 +29,11 @@ if str(_REPO_ROOT) not in sys.path:
 # meiva:note
 # The script-mode root guard must run before importing the checkout-owned API.
 from base.clock import Timers  # noqa: E402
+from base.host.boundary.fields import optional_int_field, optional_str_field  # noqa: E402
+from base.host.boundary.json_values import is_object_dict  # noqa: E402
+from base.host.boundary.options import options  # noqa: E402
+from base.host.boundary.untyped import object_of  # noqa: E402
 from base.telemetry import EventPipeline  # noqa: E402
-from scripts.boundary.fields import optional_int, optional_str  # noqa: E402
-from scripts.boundary.options import options  # noqa: E402
-from scripts.boundary.untyped import is_object_dict, object_of  # noqa: E402
 from scripts.ci.pull_requests import runs_api  # noqa: E402
 from scripts.ci.pull_requests.gh_process import GhProcess  # noqa: E402
 from scripts.ci.pull_requests.runs_api import PullRecord, RunRecord  # noqa: E402
@@ -114,21 +115,21 @@ def complete_days(now: datetime, days: int, tz: ZoneInfo) -> list[date]:
 
 
 def _run_id(run: RunRecord) -> int:
-    identifier = optional_int(run, "id")
+    identifier = optional_int_field(run, "id")
     if identifier is None:
         raise runs_api.CiRunsError("workflow run lacks an integer id")
     return identifier
 
 
 def _pr_number(pr: PullRecord) -> int:
-    number = optional_int(pr, "number")
+    number = optional_int_field(pr, "number")
     if number is None:
         raise runs_api.CiRunsError("pull request lacks an integer number")
     return number
 
 
 def _attempt(run: RunRecord) -> int:
-    return optional_int(run, "run_attempt") or 0
+    return optional_int_field(run, "run_attempt") or 0
 
 
 def wall_seconds(run: RunRecord) -> float | None:
@@ -230,7 +231,7 @@ def load_cache(path: Path) -> RunCache:
     return RunCache(
         runs=_records(cached.get("runs")),
         prs=_records(cached.get("prs")),
-        last_fetch_end=optional_str(cached, "last_fetch_end"),
+        last_fetch_end=optional_str_field(cached, "last_fetch_end"),
     )
 
 
@@ -365,7 +366,7 @@ def percentile(values: Iterable[float], quantile: float) -> float | None:
 
 def _flags(run: RunRecord, superseded: set[int], abandoned_shas: set[str]) -> dict[str, bool]:
     identifier = _run_id(run)
-    head_sha = optional_str(run, "head_sha")
+    head_sha = optional_str_field(run, "head_sha")
     label = workflow_class(run.get("name"))
     wall = wall_seconds(run)
     return {
@@ -388,7 +389,7 @@ def _abandoned_shas(prs: list[PullRecord]) -> set[str]:
     return {
         sha
         for pr in prs
-        if pr.get("merged_at") is None and (sha := optional_str(pr, "head_sha")) is not None
+        if pr.get("merged_at") is None and (sha := optional_str_field(pr, "head_sha")) is not None
     }
 
 
@@ -483,7 +484,9 @@ def _runs_per_completed_pr(
     run_pr: dict[int, int],
     runs_by_id: dict[int, RunRecord],
 ) -> dict[int, list[RunRecord]]:
-    numbers = {number for pr in completed_prs if (number := optional_int(pr, "number")) is not None}
+    numbers = {
+        number for pr in completed_prs if (number := optional_int_field(pr, "number")) is not None
+    }
     per_pr: dict[int, list[RunRecord]] = defaultdict(list)
     for identifier, number in run_pr.items():
         if number in numbers and identifier in runs_by_id:

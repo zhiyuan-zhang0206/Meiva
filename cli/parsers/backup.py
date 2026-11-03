@@ -4,7 +4,7 @@ import argparse
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from cli.boundary.options import options
+from base.host.boundary.options import options
 
 
 @dataclass(frozen=True)

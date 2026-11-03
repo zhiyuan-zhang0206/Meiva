@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Literal
 
-from cli.boundary.options import options
+from base.host.boundary.options import options
 from cli.parsers.host import ServiceSelection, add_service_selection, refuse_usage
 
 

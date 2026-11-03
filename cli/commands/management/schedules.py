@@ -32,8 +32,8 @@ from pydantic import BaseModel, TypeAdapter
 
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import GatewayAccess
+from base.host.boundary.options import options
 from cli.boundary.json_body import response_object
-from cli.boundary.options import options
 from cli.database import database_factory_of
 from cli.database.runtime import runtime_of
 

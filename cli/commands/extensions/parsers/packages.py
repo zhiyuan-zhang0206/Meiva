@@ -11,7 +11,7 @@ import sys
 from dataclasses import dataclass
 from typing import Literal
 
-from cli.boundary.options import options
+from base.host.boundary.options import options
 
 
 @dataclass(frozen=True)

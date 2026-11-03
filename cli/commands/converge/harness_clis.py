@@ -8,12 +8,12 @@ from __future__ import annotations
 import subprocess
 from collections.abc import Mapping, Sequence
 
+from base.host.boundary.process import stderr_text, stdout_text
 from base.host.env.harness.catalog import HarnessSpec
 from base.host.env.harness.convergence import (
     CommandResult,
     converge_local_harness_clis,
 )
-from cli.boundary.process import stderr_text, stdout_text
 from cli.commands.converge.spec import ConvergeCtx
 
 

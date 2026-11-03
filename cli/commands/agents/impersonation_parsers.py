@@ -8,7 +8,7 @@ import sys
 from dataclasses import dataclass
 from functools import partial
 
-from cli.boundary.options import options
+from base.host.boundary.options import options
 
 
 def _integer_range(value: str, *, maximum: int, minimum: int = 1) -> int:

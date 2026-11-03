@@ -31,8 +31,8 @@ from base.clock import Timers
 from base.db import Database
 from base.events.live.bus import EventBus, event_bus_config_from_config
 from base.events.live.redis_listener import RedisInboundListener
-from cli.boundary.fields import int_field, str_field
-from cli.boundary.options import options
+from base.host.boundary.fields import int_field, str_field
+from base.host.boundary.options import options
 from cli.commands.agents.cleanup_after import run_then_clean_up
 from cli.commands.agents.impersonation_adapters import codex_endpoint
 from cli.commands.agents.relay.request_plan import (

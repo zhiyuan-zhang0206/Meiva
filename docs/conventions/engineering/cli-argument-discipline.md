@@ -83,7 +83,7 @@ The worktree override deliberately stays environment-only:
 
 `argparse.Namespace` attributes are `Any`, so a handler never reads `args.name`.
 It declares a frozen dataclass of the attributes it reads and calls
-`cli.boundary.options.options(args, Shape)` as its first line; every later use holds a real
+`base.host.boundary.options.options(args, Shape)` as its first line; every later use holds a real
 type. A field is the namespace attribute of the same name and carries its type
 (`str`, `int`, `Path | None`, `list[str]`, `Literal[...]`, an enum, a domain class);
 a field has no default, because the parser answered it. An attribute the namespace
@@ -95,7 +95,7 @@ time the verb runs rather than being reported as a usage error.
 The entry binds a few values beside the flags (`args.runtime`, `args.database_factory`,
 `args.producer`, `args.site`). Each has a class and an accessor next to it
 (`cli.database.runtime.runtime_of`, `cli.start_runtime.site_of`) that wraps
-`cli.boundary.options.attribute`. A dataclass is declared in the parser module and uses only
+`base.host.boundary.options.attribute`. A dataclass is declared in the parser module and uses only
 types that module can import without loading Settings; the accessor and the
 `cmd_*` implementation are imported inside the handler, as before.
 

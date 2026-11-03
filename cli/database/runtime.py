@@ -16,11 +16,11 @@ from base.clock.configuration import clock_config_from_boot
 from base.clock.ids import new_uuid
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
+from base.host.boundary.options import attribute
 from base.host.permissions_helper.client import HelperFactory
 from base.host.system.hostport import Host
 from base.paths import repo_root
 from base.sessions.helperproc import helper_for
-from cli.boundary.options import attribute
 
 __all__ = [
     "CommandRuntime",

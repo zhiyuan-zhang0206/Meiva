@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypeGuard
 
+from base.host.boundary.untyped import object_of
 from meizel.allowances import POLICY, Policy, parse
 from meizel.checkout import GitRepo
 from meizel.contracts.sync import prepare_policy_snapshot
@@ -24,7 +25,6 @@ from meizel.test_graph.cutoff import (
     package_local_tests as package_local_tests,
 )
 from meizel.test_graph.impact import propagate_test_consumers
-from scripts.boundary.untyped import object_of
 from scripts.structure.imports.facts import UNANCHORED_READ, Fact, FactKind, Unknown, collect
 from scripts.structure.imports.fixture_scopes import declarations
 from scripts.structure.placement import CODE_TOPS, ModuleIndex

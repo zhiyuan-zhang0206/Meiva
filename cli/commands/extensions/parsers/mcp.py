@@ -12,7 +12,7 @@ import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from cli.boundary.options import options
+from base.host.boundary.options import options
 
 
 @dataclass(frozen=True)

@@ -13,10 +13,11 @@ from pathlib import Path
 from typing import TypedDict
 
 from base.clock import Clock
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.process import stderr_text, stdout_text
+from base.host.boundary.untyped import object_of
 from base.host.proc import run_bounded
 from base.host.system.hostport import Host
-from scripts.boundary.process import stderr_text, stdout_text
-from scripts.boundary.untyped import is_object_dict, is_object_list, object_of
 
 _GH_TIMEOUT_S = 30.0
 PASSING = frozenset({"SUCCESS", "SKIPPED", "NEUTRAL"})

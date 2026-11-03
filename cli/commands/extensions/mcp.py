@@ -54,9 +54,9 @@ from typing import TypeGuard
 
 from pydantic import JsonValue
 
+from base.host.boundary.process import stderr_text
 from base.host.system.hostport import Host
 from cli.boundary.json_text import loads
-from cli.boundary.process import stderr_text
 from cli.commands.extensions._pkg_source import AcquiredSource, SourcePathNotFoundError
 from cli.commands.extensions.plans.mcp_autodetect import auto_detect_mcp, write_mcp_json
 from cli.commands.extensions.plans.mcp_server_spec import (

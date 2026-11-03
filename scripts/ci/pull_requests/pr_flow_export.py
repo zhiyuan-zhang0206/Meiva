@@ -73,10 +73,11 @@ if str(_REPO_ROOT) not in sys.path:
 
 # meiva:note
 # The script-mode root guard must run before importing the checkout-owned API.
+from base.host.boundary.fields import optional_int_field  # noqa: E402
+from base.host.boundary.json_values import is_object_dict, is_object_list  # noqa: E402
+from base.host.boundary.options import options  # noqa: E402
+from base.host.boundary.untyped import object_of  # noqa: E402
 from base.telemetry import EventPipeline  # noqa: E402
-from scripts.boundary.fields import optional_int  # noqa: E402
-from scripts.boundary.options import options  # noqa: E402
-from scripts.boundary.untyped import is_object_dict, is_object_list, object_of  # noqa: E402
 from scripts.ci.pull_requests.gh_process import GhProcess  # noqa: E402
 
 DEFAULT_REPO = "zhiyuan-zhang0206/Meiva"
@@ -147,7 +148,7 @@ class Options:
 
 
 def _number(meta: Mapping[str, object]) -> int:
-    number = optional_int(meta, "number")
+    number = optional_int_field(meta, "number")
     if number is None:
         raise PrFlowError("pull request row lacks an integer number")
     return number

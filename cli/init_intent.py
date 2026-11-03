@@ -23,11 +23,11 @@ from urllib.parse import SplitResult, urlsplit
 
 from dotenv import dotenv_values
 
+from base.host.boundary.options import options, raw
 from base.host.env.registry import derived_env_keys, env_identity_keys
 from base.host.net.predicates import is_loopback_host
 from base.native_process.os_platform import file_lock
 from base.paths.private_dir import ensure_private_dir
-from cli.boundary.options import options, raw
 from cli.commands.cluster.unit_join import join_gateway
 from cli.start_identity import (
     CAP_ARGS,

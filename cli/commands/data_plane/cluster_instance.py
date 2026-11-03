@@ -53,10 +53,10 @@ from base.cluster.authority.monitor import MONITOR_MAP, MONITOR_ROLE
 from base.cluster.dataplane.pg_admin import pg_socket_dir as _base_pg_socket_dir
 from base.cluster.dataplane.pg_tools import pg_shm_args, pg_start_env, pg_tool, pg_tz_args
 from base.cluster.machine import MachineIdentityReader
+from base.host.boundary.process import stderr_text
 from base.host.net.url_secret import url_host
 from base.host.system.hostport import Host
 from base.native_process.ownership import OwnedProcess
-from cli.boundary.process import stderr_text
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.instance import pg_plan
 from cli.commands.data_plane.instance.bounded_wait import Wait, wait_verdict

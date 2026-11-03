@@ -11,9 +11,9 @@ from threading import Lock
 from typing import TYPE_CHECKING, NoReturn
 
 from base.cluster.machine import MachineIdentityReader
+from base.host.boundary.options import attribute, options
 from base.host.exit_codes import hard_exit
 from base.telemetry import DrainResult, EventPipeline
-from cli.boundary.options import attribute, options
 
 if TYPE_CHECKING:
     from base.cluster.dataplane.direct_url import ClusterDirectUrl

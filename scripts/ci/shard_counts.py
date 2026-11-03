@@ -55,10 +55,11 @@ if str(_REPO_ROOT) not in sys.path:
 
 # meiva:note
 # Script mode runs this file with the interpreter CI provides and only `scripts/ci/` on sys.path: the
-# checkout root comes first so `scripts.boundary` (standard library only) resolves against this tree.
-from scripts.boundary.options import attribute, options  # noqa: E402
-from scripts.boundary.required import required_int, required_str  # noqa: E402
-from scripts.boundary.untyped import is_object_dict, is_object_list, object_of  # noqa: E402
+# checkout root comes first so `base.host.boundary` (standard library only) resolves against this tree.
+from base.host.boundary.fields import int_field, str_field  # noqa: E402
+from base.host.boundary.json_values import is_object_dict, is_object_list  # noqa: E402
+from base.host.boundary.options import attribute, options  # noqa: E402
+from base.host.boundary.untyped import object_of  # noqa: E402
 
 # meiva:note
 # One leak-guard finding of a test: the test id, the kind of finding and its detail (plus the `shard` whose report it came from once `total` has read it).
@@ -155,10 +156,10 @@ def read_shard_counts(path: Path) -> ShardCounts:
     data = _read_object(path)
     try:
         counts = ShardCounts(
-            group=required_str(data, "group"),
-            tests=required_int(data, "tests"),
-            skipped=required_int(data, "skipped"),
-            failed=required_int(data, "failed"),
+            group=str_field(data, "group"),
+            tests=int_field(data, "tests"),
+            skipped=int_field(data, "skipped"),
+            failed=int_field(data, "failed"),
             buckets=_int_map(data.get("buckets"), "buckets"),
         )
         if "leaks" in data:
@@ -178,7 +179,7 @@ def read_baseline(path: Path) -> Baseline:
     data = _read_object(path)
     try:
         return Baseline(
-            tests=required_int(data, "tests"),
+            tests=int_field(data, "tests"),
             skipped=0,
             buckets=_int_map(data.get("buckets"), "buckets"),
             sha=str(data.get("sha", "?")),

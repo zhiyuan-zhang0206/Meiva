@@ -6,9 +6,9 @@ import sys
 from dataclasses import dataclass
 
 from base.clock import Clock
+from base.host.boundary.options import options
 from base.host.permissions_helper.grants import checklist
 from base.host.permissions_helper.grants.gate import GateReport, GateState
-from cli.boundary.options import options
 from cli.database.runtime import runtime_of
 from services.desktop.permissions_helper import onboarding
 from services.desktop.permissions_helper.onboarding import GateHost

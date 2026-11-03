@@ -8,15 +8,18 @@ collection to `--stacks`; the exit status is pytest's.
 import argparse
 import faulthandler
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
-from scripts.boundary.options import options
 from scripts.ci.collection_tracebacks import periodic_tracebacks
 
 
-@dataclass(frozen=True)
-class Options:
+# meiva:note
+# The parsed flags as a typed namespace. This tool collects with `pytest.main` in its own process, so
+# no project module may be imported before pytest loads the root conftest and its environment block
+# (`tests/fixtures/env_bootstrap.py` fails the run when one was): the flags are read through the
+# namespace's own annotations, which argparse fills with the `type=` converted values, instead of
+# through `base.host.boundary.options`.
+class _Arguments(argparse.Namespace):
     count: int
     plan: str
     stacks: str
@@ -36,7 +39,7 @@ def main(argv: list[str]) -> int:
         "--files-from",
         help="plan only the test files listed in this file, one per line (the selected subset)",
     )
-    args = options(parser.parse_args(argv), Options)
+    args = parser.parse_args(argv, namespace=_Arguments())
     files = _listed_files(args.files_from) if args.files_from is not None else []
     if args.files_from is not None and not files:
         parser.error(f"{args.files_from} lists no test file")

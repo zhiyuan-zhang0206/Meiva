@@ -36,8 +36,8 @@ from pathlib import Path
 
 from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
+from base.host.boundary.process import stderr_text
 from base.packages.extensions import install_registry as reg
-from cli.boundary.process import stderr_text
 from cli.commands.extensions.plans.source_binding import SourceBinding
 from cli.commands.extensions.skill_package import ExtensionGateway
 from cli.commands.extensions.skills_sync import Source

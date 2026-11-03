@@ -28,6 +28,7 @@ from dotenv import dotenv_values
 
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentityReader
+from base.host.boundary.process import stderr_text
 from base.host.boundary.untyped import object_of
 from base.host.net.ports import SYSTEM_URL_OPENER
 from base.host.net.resilience import Policy, retry
@@ -37,7 +38,6 @@ from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS, binary_path
 from base.telemetry.loki_index_labels import validate_loki_deploy_config
 from base.telemetry.station_endpoint import validated_observability_base
-from cli.boundary.process import stderr_text
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.observability._lgtm_assets import NATIVE_CONSTANTS, load_versions
 from cli.commands.observability._lgtm_provisioning import render_dashboard, render_provisioning
