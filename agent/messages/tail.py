@@ -14,10 +14,24 @@ __all__ = [
 
 
 # meiva:note
+# The `meiva_source` every inbound message carries. The bag comes off a stored LangChain
+# message, so the value is narrowed here rather than trusted from the TypedDict: a missing
+# source still raises the KeyError callers relied on, and a non-string one names the field
+# instead of being dropped silently. (`base.host.boundary.fields.str_field` is the same read,
+# but this module is `strict` and that one is not, so importing it would break the manifest.)
+def _source_of(msg: AnyMessage) -> str:
+    kwargs = read_meiva_kwargs(msg)
+    source = kwargs.get("meiva_source")
+    if source is None:
+        raise KeyError("meiva_source")
+    if not isinstance(source, str):
+        raise TypeError(f"meiva_source is {type(source).__name__}, not str")
+    return source
+
+
+# meiva:note
 # The `meiva_source` of every inbound added since the last assistant turn.
-# Scans backward from the end, stopping at the most recent AIMessage, and
-# indexes `meiva_source` off the raw bag so a missing source on an inbound
-# message surfaces as a KeyError instead of being silently dropped.
+# Scans backward from the end, stopping at the most recent AIMessage.
 def _tail_inbound_sources(messages: list[AnyMessage]) -> list[str]:
     sources: list[str] = []
     for msg in reversed(messages):
@@ -27,9 +41,7 @@ def _tail_inbound_sources(messages: list[AnyMessage]) -> list[str]:
             continue
         if read_meiva_kwargs(msg).get("meiva_msg_type") != MeivaMsgType.INBOUND:
             continue
-        source = msg.additional_kwargs["meiva_source"]  # pyright: ignore[reportUnknownMemberType]
-        if isinstance(source, str):
-            sources.append(source)
+        sources.append(_source_of(msg))
     return sources
 
 
@@ -43,9 +55,9 @@ def tail_has_agent_inbound(messages: list[AnyMessage]) -> bool:
 
 # meiva:note
 # The newest `agent:`-sourced inbound after the last assistant turn: the one message a peer
-# gate reads, never the conversation. Reads `meiva_source` by index, not `.get`, because every
-# inbound-typed message carries the contract field and a missing source must surface as a
-# KeyError instead of being silently skipped.
+# gate reads, never the conversation. Every inbound-typed message carries the contract field, so
+# a source that is missing or not a string stops the scan (`_source_of`) instead of skipping the
+# message it belongs to.
 # meiva:link agent/messages/docs/message-format.meiva.okf.md
 def last_agent_inbound_text(messages: list[AnyMessage]) -> str | None:
     for msg in reversed(messages):
@@ -55,8 +67,7 @@ def last_agent_inbound_text(messages: list[AnyMessage]) -> str | None:
             continue
         if read_meiva_kwargs(msg).get("meiva_msg_type") != MeivaMsgType.INBOUND:
             continue
-        source = msg.additional_kwargs["meiva_source"]  # pyright: ignore[reportUnknownMemberType]
-        if not (isinstance(source, str) and source.startswith("agent:")):
+        if not _source_of(msg).startswith("agent:"):
             continue
         content = msg.content
         return content if isinstance(content, str) else None

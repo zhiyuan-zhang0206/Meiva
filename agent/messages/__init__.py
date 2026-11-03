@@ -30,7 +30,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, TypedDict, Unpack
+from typing import TypedDict, Unpack
 
 from langchain_core.messages import (
     HumanMessage,
@@ -123,7 +123,7 @@ def inbound_message(
         kwargs["meiva_image_urls"] = image_urls
     # langchain types content as str | list[str | dict]; our block list is a
     # subset it accepts at runtime (a leading text block + native image blocks).
-    normalized_content: str | list[str | dict[str, Any]] = (
+    normalized_content: str | list[str | dict[str, object]] = (
         content if isinstance(content, str) else [dict(item) for item in content]
     )
     return HumanMessage(
@@ -211,7 +211,7 @@ def security_note_message(
 def attach_message(
     *, blocks: list[dict[str, object]], text: str, created_at: datetime
 ) -> HumanMessage:
-    content_blocks: list[str | dict[str, Any]] = (
+    content_blocks: list[str | dict[str, object]] = (
         [dict(block) for block in blocks] if blocks else [{"type": "text", "text": text}]
     )
     return HumanMessage(
