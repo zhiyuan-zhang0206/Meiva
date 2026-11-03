@@ -13,11 +13,11 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import NoReturn, assert_never
 
-from base.daemon.schedules.heartbeat import write_beat
+from base.daemon.schedules.heartbeat import write_round_beat
 from base.daemon.schedules.watcher import next_fire
 from base.db import Database
 from base.deploy.schedule_timing import SCHEDULE_FIRST_ROUND_BUDGET_S
@@ -93,15 +93,6 @@ def loop_once[R](
 # start) refreshes it. A stored copy that omits it must keep running exactly as before -- the
 # pre-wave `down` verify binds those stored calls against this signature, and a required argument
 # would refuse the whole cluster's update. Every template in this repository passes it.
-def _write_round_beat(
-    home: Path | None, schedule_id: int, *, now: datetime, sleep_s: float, budget_s: float
-) -> None:
-    if home is None:
-        return
-    promise = now + timedelta(seconds=sleep_s + budget_s)
-    write_beat(home, schedule_id, written_at=now, alive_by=promise, budget_s=budget_s)
-
-
 # meiva:note
 # The promise is "the next beat lands by now + sleep + the slowest round this loop has taken". It
 # starts from a budget the schedule does not have to declare and tightens itself as rounds are
@@ -125,12 +116,12 @@ def run_loop(
 ) -> NoReturn:
     floor = started_at
     budget = SCHEDULE_FIRST_ROUND_BUDGET_S
-    _write_round_beat(home, schedule_id, now=clock(), sleep_s=0.0, budget_s=budget)
+    write_round_beat(home, schedule_id, now=clock(), sleep_s=0.0, budget_s=budget)
     while True:
         began = clock()
         tick = loop_once(db, schedule, fire, floor=floor, now=began, schedule_id=schedule_id)
         floor = tick.floor
         ended = clock()
         budget = _next_round_budget(budget, (ended - began).total_seconds())
-        _write_round_beat(home, schedule_id, now=ended, sleep_s=tick.sleep, budget_s=budget)
+        write_round_beat(home, schedule_id, now=ended, sleep_s=tick.sleep, budget_s=budget)
         time.sleep(tick.sleep)

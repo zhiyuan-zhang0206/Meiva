@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -34,7 +35,10 @@ __all__ = [
     "read_beat",
     "write_alert_marks",
     "write_beat",
+    "write_round_beat",
 ]
+
+_log = logging.getLogger(__name__)
 
 
 # meiva:note
@@ -98,6 +102,33 @@ def write_beat(
         payload["round_budget_s"] = round(budget_s, 3)
     _write_atomically(path, json.dumps(payload, sort_keys=True) + "\n")
     return path
+
+
+# meiva:note
+# One promise per round, written by the loop that takes it. `home` and `schedule_id` may be absent --
+# a stored schedule script written before these parameters existed -- and then the caller keeps
+# running exactly as before. A failing write is logged, never raised: a schedule that dies on its
+# own heartbeat is worse than a silent one.
+def write_round_beat(
+    home: Path | None,
+    schedule_id: int | None,
+    *,
+    now: datetime,
+    sleep_s: float,
+    budget_s: float,
+) -> None:
+    if home is None or schedule_id is None:
+        return
+    try:
+        write_beat(
+            home,
+            schedule_id,
+            written_at=now,
+            alive_by=now + timedelta(seconds=sleep_s + budget_s),
+            budget_s=budget_s,
+        )
+    except OSError as exc:
+        _log.warning("schedule %s could not write its round beat: %s", schedule_id, exc)
 
 
 def read_beat(home: Path, schedule_id: int) -> Beat | None:

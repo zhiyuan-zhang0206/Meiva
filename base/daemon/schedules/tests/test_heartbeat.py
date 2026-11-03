@@ -19,6 +19,7 @@ from base.daemon.schedules.heartbeat import (
     read_beat,
     write_alert_marks,
     write_beat,
+    write_round_beat,
 )
 
 NOW = datetime(2026, 11, 3, 18, 0, tzinfo=UTC)
@@ -80,3 +81,37 @@ def test_the_measured_budget_rides_along_without_changing_the_contract(tmp_path:
 
     plain = write_beat(tmp_path, 56, written_at=NOW, alive_by=NOW)
     assert "round_budget_s" not in json.loads(plain.read_text())
+
+
+# meiva:note
+# A round beat may be absent, and its absence is silent by design: a stored schedule script written
+# before the parameters existed keeps running exactly as it did, and a beat that cannot be written
+# must never end the loop it reports on.
+def test_a_round_beat_without_a_home_or_an_id_writes_nothing(tmp_path: Path) -> None:
+    write_round_beat(None, 42, now=NOW, sleep_s=60, budget_s=5)
+    write_round_beat(tmp_path, None, now=NOW, sleep_s=60, budget_s=5)
+
+    assert list(tmp_path.rglob("*.heartbeat.json")) == []
+
+
+def test_a_round_beat_promises_the_sleep_plus_the_measured_round(tmp_path: Path) -> None:
+    write_round_beat(tmp_path, 39, now=NOW, sleep_s=60, budget_s=12.5)
+
+    beat = read_beat(tmp_path, 39)
+    assert beat is not None
+    assert beat.written_at == NOW
+    # meiva:note
+    # The file keeps whole seconds, so the promise is compared at that precision and the measured
+    # budget keeps its fraction -- the question it answers ("which round widened this?") needs it.
+    assert beat.alive_by == NOW + timedelta(seconds=72)
+    assert json.loads(beat_path(tmp_path, 39).read_text())["round_budget_s"] == 12.5
+
+
+def test_a_round_beat_that_cannot_be_written_does_not_raise(tmp_path: Path) -> None:
+    blocked = tmp_path / "blocked"
+    blocked.mkdir()
+    (blocked / "state").write_text("")
+
+    write_round_beat(blocked, 39, now=NOW, sleep_s=60, budget_s=1)
+
+    assert (blocked / "state").is_file()
