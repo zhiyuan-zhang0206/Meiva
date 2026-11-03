@@ -31,7 +31,7 @@ import json
 import re
 import sys
 import tomllib
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeGuard
@@ -321,9 +321,15 @@ def _roles_cache_key(universe: Universe, declared: Mapping[str, tuple[str, ...]]
     return f"roles:v1:{hasher.hexdigest()}"
 
 
+# meiva:note
+# `json.loads` answers `Any`; this binding states the one widening, and the decoded value is checked
+# with `_is_object_list` before anything is read out of it.
+_DECODE: Callable[[str], object] = json.loads
+
+
 def _decode_cached_roles(text: str) -> list[Diagnostic] | None:
     try:
-        raw: object = json.loads(text)
+        raw = _DECODE(text)
     except ValueError:
         return None
     if not _is_object_list(raw):
@@ -417,6 +423,20 @@ def check(
     result = sorted(found, key=lambda d: (d.path, d.line, d.message))
     _store_cached_roles(universe, cache_key, result)
     return result
+
+
+# meiva:note
+# What `meizel roles` reads from argv, checked once at the dispatch boundary. The role names are a
+# second shape: the `list` subcommand declares them and the other modes leave the attribute unset,
+# which a reader that refuses a missing field must not be asked for unconditionally.
+@dataclass(frozen=True)
+class RolesQuery:
+    mode: str
+
+
+@dataclass(frozen=True)
+class RolesList(RolesQuery):
+    role_names: Sequence[str]
 
 
 def run_roles(repo: Checkout, declared: Roles, mode: str, role_names: tuple[str, ...] = ()) -> int:

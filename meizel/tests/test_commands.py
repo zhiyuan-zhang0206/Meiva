@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import shutil
 import subprocess
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
+from meizel.contracts.cli import read_args
 from meizel.contracts.sync import remove_entries
 from meizel.entry import main
 from meizel.graph import python_reverse_closure
+from meizel.graph.model import MeizelError
 from meizel.tests.synthetic import RepoFactory, git, seat, verdict
 
 SOURCES = {
@@ -425,3 +430,57 @@ def test_impacted_fails_closed_on_syntax_error(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "cannot compute impacted Python files" in captured.err
+
+
+# meiva:note
+# `read_args` is the checker's own twin of `base.host.boundary.options.options` — a twin because the
+# root `meizel.toml` declares no cross-package `[uses]` entry for `meizel`. These cases pin the rules
+# the two readers must share: an extra attribute is ignored, a missing or wrong-typed one is refused
+# by name, and a bool is not a whole number. They pin this reader only — the base side has its own
+# cases, and neither suite turns red for a change on the other.
+@dataclass(frozen=True)
+class _Shape:
+    paths: Sequence[str]
+    limit: int | None
+
+
+def test_the_shape_reads_the_attributes_it_names_and_ignores_the_rest() -> None:
+    args = argparse.Namespace(paths=["meizel"], limit=3, jobs=8, repo=None)
+
+    assert read_args(args, _Shape) == _Shape(paths=["meizel"], limit=3)
+
+
+def test_a_missing_attribute_is_refused_by_name() -> None:
+    with pytest.raises(MeizelError, match="limit is missing"):
+        read_args(argparse.Namespace(paths=[]), _Shape)
+
+
+def test_every_bad_attribute_is_named_in_one_error() -> None:
+    with pytest.raises(MeizelError) as raised:
+        read_args(argparse.Namespace(paths=7), _Shape)
+
+    assert "paths is int, not collections.abc.Sequence[str]" in str(raised.value)
+    assert "limit is missing" in str(raised.value)
+
+
+def test_a_wrong_typed_attribute_names_the_type_it_found() -> None:
+    with pytest.raises(MeizelError, match=r"paths is str, not collections\.abc\.Sequence"):
+        read_args(argparse.Namespace(paths="meizel", limit=None), _Shape)
+
+
+def test_an_element_of_the_wrong_type_is_refused() -> None:
+    with pytest.raises(MeizelError, match=r"paths is list, not collections\.abc\.Sequence"):
+        read_args(argparse.Namespace(paths=["meizel", 7], limit=None), _Shape)
+
+
+def test_a_bool_is_not_a_whole_number() -> None:
+    with pytest.raises(MeizelError, match="limit is bool, not int"):
+        read_args(argparse.Namespace(paths=[], limit=True), _Shape)
+
+
+# meiva:note
+# The shape is checked before its fields are read, so a caller that hands over something other than a
+# dataclass gets the analyzer's own error instead of an `AttributeError` from `fields`.
+def test_a_shape_that_is_not_a_dataclass_is_refused() -> None:
+    with pytest.raises(MeizelError, match="not a dataclass"):
+        read_args(argparse.Namespace(paths=[]), dict)

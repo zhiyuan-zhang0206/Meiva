@@ -66,7 +66,7 @@ def _within(path: str, scopes: list[str]) -> bool:
 def sites(
     universe: Universe,
     code: str,
-    prefixes: list[str],
+    prefixes: Sequence[str],
     paths: list[str],
     jobs: int | None = None,
 ) -> list[Site]:

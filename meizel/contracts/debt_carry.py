@@ -7,10 +7,12 @@ raises a total, and records nothing that was not already recorded.
 
 from __future__ import annotations
 
-import argparse
 import sys
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
+from dataclasses import dataclass
+from typing import Protocol
 
+from meizel.contracts.analysis import analyze
 from meizel.contracts.debt import (
     EDGE_CODES,
     PATCH_CODES,
@@ -35,7 +37,13 @@ from meizel.contracts.debt_rules import (
     rule_change,
     rule_diff,
 )
-from meizel.contracts.debt_sites import approved, format_approved, format_sites, sites
+from meizel.contracts.debt_sites import (
+    approved,
+    format_approved,
+    format_sites,
+    propagation,
+    sites,
+)
 from meizel.contracts.debt_symbol import (
     SymbolMove,
     declared_manifests,
@@ -114,7 +122,7 @@ def _relocated(
 _PATCH_CODES = frozenset(PATCH_CODES)
 
 
-def parse_renames(specs: list[str]) -> list[tuple[str, str]]:
+def parse_renames(specs: Sequence[str]) -> list[tuple[str, str]]:
     """`OLD=NEW` target renames, each side a non-empty dotted name."""
     renames: list[tuple[str, str]] = []
     for spec in specs:
@@ -265,8 +273,8 @@ def _move_symbols(
 def carry(
     repo: Checkout,
     base: str | None = None,
-    rename_targets: list[str] | None = None,
-    move_symbols: list[str] | None = None,
+    rename_targets: Sequence[str] | None = None,
+    move_symbols: Sequence[str] | None = None,
 ) -> tuple[list[str], list[str]]:
     base = base or default_base(repo)
     moved = renames_since(repo, base)
@@ -318,6 +326,38 @@ def _declared_symbols(repo: Checkout, path: str | None) -> list[SymbolMove]:
 
 
 # meiva:note
+# What `run_debt` reads a mode's shape with. `cli` owns the namespace boundary (`read_args`), and
+# importing it back here would make the two modules import each other, so the reader arrives as a
+# parameter and every shape below is read off the parsed namespace exactly once.
+class ReadArgs(Protocol):
+    def __call__[T](self, shape: type[T]) -> T: ...
+
+
+# meiva:note
+# The flags `meizel debt` carries whatever the mode — the subcommand name, the root's worker count,
+# and the summary's two flags — which is why they are one base instead of eight copies that drift.
+@dataclass(frozen=True)
+class DebtBase:
+    debt_mode: str | None
+    jobs: int | None
+    json: bool
+    unowned: bool
+
+
+@dataclass(frozen=True)
+class DebtPrune(DebtBase):
+    pass
+
+
+# meiva:note
+# The `paths` operand the three mode parsers that take one declare; the summary and the flag-only
+# modes never set it, so it is read only for the modes that do.
+@dataclass(frozen=True)
+class DebtPaths(DebtBase):
+    paths: Sequence[str]
+
+
+# meiva:note
 # What a grown baseline costs, printed with the failure: the baseline is the repository's record of
 # accepted exceptions, so growth is not a number going up — it is a rule turning into a suggestion.
 # The two commands name where the movement sits, and the two documents own the rule.
@@ -331,12 +371,27 @@ _GROWTH_GUIDE = (
 )
 
 
-def _run_diff(repo: Checkout, ref: str, on_growth: str, args: argparse.Namespace) -> int:
-    symbols = _declared_symbols(repo, args.symbol_moves_file)
+@dataclass(frozen=True)
+class DebtDiff(DebtBase):
+    against: str
+    on_growth: str
+    by_target: bool
+    target_prefix: Sequence[str]
+    depth: int
+    symbol_moves_file: str | None
+    waive_if_changed: Sequence[str]
+
+
+# meiva:note
+# The comparison against `--against`, and what it means when the baseline grew: a rule change is
+# reported, never judged, and only the content's own growth is the change's fault.
+def _run_diff(repo: Checkout, opts: DebtDiff) -> int:
+    ref, on_growth = opts.against, opts.on_growth
+    symbols = _declared_symbols(repo, opts.symbol_moves_file)
     base_texts = manifest_texts_at(repo, ref)
     changed_decls = declarations_changed(repo, ref, before=base_texts)
     rules_changed = rule_change(
-        repo, ref, args.waive_if_changed, changed_decls=changed_decls
+        repo, ref, opts.waive_if_changed, changed_decls=changed_decls
     ) or bool(symbols)
     if rules_changed:
         result = rule_diff(
@@ -344,11 +399,11 @@ def _run_diff(repo: Checkout, ref: str, on_growth: str, args: argparse.Namespace
             ref,
             totals_at(repo, ref, texts=base_texts),
             renames_since(repo, ref),
-            args.jobs,
+            opts.jobs,
             symbols,
         )
         print("\n".join(result.lines()))
-        print("\n".join(_measured(repo, ref, args.waive_if_changed, changed_decls)))
+        print("\n".join(_measured(repo, ref, opts.waive_if_changed, changed_decls)))
         print("\n".join(result.explanation()))
         grew = result.content_grew
     else:
@@ -358,9 +413,9 @@ def _run_diff(repo: Checkout, ref: str, on_growth: str, args: argparse.Namespace
             "meizel: totals only: this change edits no rule code, policy or declaration, "
             f"so it has no rules/content split against {ref}"
         )
-    if args.by_target:
+    if opts.by_target:
         print()
-        print("\n".join(by_target(repo, ref, args.target_prefix, args.depth)))
+        print("\n".join(by_target(repo, ref, opts.target_prefix, opts.depth)))
         print()
     if not grew:
         if not rules_changed:
@@ -371,11 +426,16 @@ def _run_diff(repo: Checkout, ref: str, on_growth: str, args: argparse.Namespace
     return 1 if on_growth == "fail" else 0
 
 
-def _run_record(
-    repo: Checkout, targets: list[str], jobs: int | None, args: argparse.Namespace, today: str
-) -> int:
+@dataclass(frozen=True)
+class DebtRecord(DebtBase):
+    paths: Sequence[str]
+    owner: str
+    until: str
+
+
+def _run_record(repo: Checkout, targets: list[str], opts: DebtRecord, today: str) -> int:
     written, created, unrecordable = record(
-        repo, targets, jobs, naming=Naming(args.owner, args.until, today)
+        repo, targets, opts.jobs, naming=Naming(opts.owner, opts.until, today)
     )
     for path in written:
         print(f"meizel: wrote {path}")
@@ -392,11 +452,41 @@ def _run_record(
     return 0
 
 
+@dataclass(frozen=True)
+class DebtResolve(DebtBase):
+    paths: Sequence[str]
+
+
+@dataclass(frozen=True)
+class DebtSites(DebtBase):
+    code: str
+    target_prefix: Sequence[str]
+    as_json: bool
+    paths: Sequence[str]
+
+
+@dataclass(frozen=True)
+class DebtApproved(DebtBase):
+    as_json: bool
+
+
+@dataclass(frozen=True)
+class DebtPropagation(DebtBase):
+    top: int
+
+
+@dataclass(frozen=True)
+class DebtCarry(DebtBase):
+    rename_target: Sequence[str]
+    move_symbol: Sequence[str]
+    base: str | None
+
+
 # meiva:note
 # What `debt carry` says: the entries it moved, each manifest the move had to create, and — when
 # nothing moved — that no rename had recorded debt at all.
-def _run_carry(repo: Checkout, args: argparse.Namespace) -> int:
-    lines, created = carry(repo, args.base, args.rename_target, args.move_symbol)
+def _run_carry(repo: Checkout, opts: DebtCarry) -> int:
+    lines, created = carry(repo, opts.base, opts.rename_target, opts.move_symbol)
     for line in lines:
         print(f"meizel: carried {line}")
     for path in created:
@@ -408,34 +498,61 @@ def _run_carry(repo: Checkout, args: argparse.Namespace) -> int:
     return 0
 
 
-def run_debt(
-    repo: Checkout, targets: list[str], args: argparse.Namespace, jobs: int | None, today: str = ""
-) -> int:
-    mode = args.debt_mode
-    if mode is None:
-        print(summarize(repo, as_json=args.json, unowned_list=args.unowned))
-        return 0
-    for flag in ("json", "unowned"):
-        if vars(args).get(flag, False):
+# meiva:note
+# The summary's two flags belong to `meizel debt` alone: a mode that received them was asked for two
+# different commands at once, so it refuses rather than running one of them. `propagation` is not one
+# of those modes: `meizel debt --json propagation` printed the report and never looked at the flag
+# before this reader existed, and refusing there would be a new decision rather than a read-through.
+def _reject_summary_flags(opts: DebtBase) -> None:
+    for flag, asked in (("json", opts.json), ("unowned", opts.unowned)):
+        if asked:
             raise MeizelError(f"--{flag} belongs to the summary: `meizel debt --{flag}`")
-    if mode == "prune":
-        for line in prune_debt(repo, jobs):
-            print(line)
+
+
+# meiva:note
+# Which debt command runs: every mode names the shape it is read into, and a mode with no shape is a
+# new subcommand that arrived without one — refused rather than handed an empty carrier. The
+# propagation report is answered before the summary flags are judged: that is the order the command
+# already had, so `debt --json propagation` keeps printing the report instead of starting to refuse.
+def run_debt(repo: Checkout, targets: list[str], read: ReadArgs, today: str = "") -> int:
+    base = read(DebtBase)
+    if base.debt_mode is None:
+        print(summarize(repo, as_json=base.json, unowned_list=base.unowned))
         return 0
-    if mode in ("sites", "approved"):
-        universe = repo.universe()
-        if mode == "sites":
-            found = sites(universe, args.code, args.target_prefix, targets, jobs)
-            print(format_sites(found, as_json=args.as_json))
-        else:
-            print(format_approved(approved(universe, jobs), as_json=args.as_json))
+    if base.debt_mode == "propagation":
+        opts = read(DebtPropagation)
+        analysis = analyze(repo.universe(), jobs=opts.jobs)
+        print(
+            propagation(analysis.universe, analysis.manifests, analysis.scans).render(top=opts.top)
+        )
         return 0
-    if mode == "resolve":
-        for line in resolve(repo, targets, jobs):
-            print(line)
-        return 0
-    if mode == "diff":
-        return _run_diff(repo, args.against, args.on_growth, args)
-    if mode == "carry":
-        return _run_carry(repo, args)
-    return _run_record(repo, targets, jobs, args, today)
+    _reject_summary_flags(base)
+    match base.debt_mode:
+        case "prune":
+            opts = read(DebtPrune)
+            for line in prune_debt(repo, opts.jobs):
+                print(line)
+            return 0
+        case "sites":
+            opts = read(DebtSites)
+            universe = repo.universe()
+            found = sites(universe, opts.code, opts.target_prefix, targets, opts.jobs)
+            print(format_sites(found, as_json=opts.as_json))
+            return 0
+        case "approved":
+            opts = read(DebtApproved)
+            print(format_approved(approved(repo.universe(), opts.jobs), as_json=opts.as_json))
+            return 0
+        case "resolve":
+            opts = read(DebtResolve)
+            for line in resolve(repo, targets, opts.jobs):
+                print(line)
+            return 0
+        case "diff":
+            return _run_diff(repo, read(DebtDiff))
+        case "carry":
+            return _run_carry(repo, read(DebtCarry))
+        case "record":
+            return _run_record(repo, targets, read(DebtRecord), today)
+        case unknown:
+            raise MeizelError(f"unknown debt mode {unknown!r}")

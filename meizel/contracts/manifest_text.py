@@ -40,10 +40,18 @@ def entry_end(lines: list[str], start: int) -> int:
     return len(lines) - 1
 
 
+# meiva:note
+# The quoted names of an array literal, read one match at a time: `findall` answers `Any` for a
+# pattern with groups, and each group is checked here before it becomes a name.
 def items(block: str) -> list[str]:
     body = block[block.index("[") + 1 : block.rindex("]")]
     uncommented = "\n".join(line.split("#", 1)[0] for line in body.splitlines())
-    return [a or b for a, b in QUOTED.findall(uncommented)]
+    names: list[str] = []
+    for match in QUOTED.finditer(uncommented):
+        quoted = match.group(1) or match.group(2)
+        if isinstance(quoted, str):
+            names.append(quoted)
+    return names
 
 
 def _line(prefix: str, key: str | None, values: list[str]) -> str:

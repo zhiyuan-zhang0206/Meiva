@@ -3,21 +3,31 @@ from __future__ import annotations
 import json
 from collections import Counter, defaultdict
 from collections.abc import Mapping
+from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 
 from meizel.contracts.analysis import Analysis, analyze
 from meizel.contracts.debt import DebtTable, set_debt
 from meizel.contracts.manifest import manifest_path
 from meizel.contracts.rule import Projection
 from meizel.graph.graphs import cycle_through, strongly_connected, transitive_reduction_size
-from meizel.graph.model import Fact
+from meizel.graph.model import Code, Fact, FactKind
 from meizel.graph.universe import Checkout, EditPlan, Universe, is_private_module, parent_of
 
-__all__ = ["bootstrap", "is_test_path", "plan_bootstrap", "render_manifest"]
+__all__ = ["Bootstrap", "bootstrap", "is_test_path", "plan_bootstrap", "render_manifest"]
 
 Edges = dict[tuple[str, str], list[Fact]]
+
+
+# meiva:note
+# What `meizel bootstrap` reads from argv, checked once at the dispatch boundary: the directory to
+# mirror manifests into and the worker count, instead of `Any` attributes of a parsed namespace.
+@dataclass(frozen=True)
+class Bootstrap:
+    out: Path
+    jobs: int | None
 
 
 def is_test_path(path: str) -> bool:
@@ -121,8 +131,51 @@ def _witness(fact: Fact) -> str:
     return f"{fact.src}:{fact.line} -> {fact.dst} ({fact.detail})"
 
 
-def _components(graph: dict[str, list[str]], edges: Edges) -> list[dict[str, Any]]:
-    report: list[dict[str, Any]] = []
+# meiva:note
+# The report `--out` writes as `report.json`: its shape is fixed by this module, so it is spelled out
+# here instead of a `dict[str, Any]` that the summary line and every later reader would re-check.
+class _Component(TypedDict):
+    members: list[str]
+    intra_edges: int
+    cycle: list[str]
+    witnesses: list[dict[str, str]]
+
+
+class _DirectoryReport(TypedDict):
+    children: int
+    edges: int
+    reduced_edges: int
+    production_edges: int
+    components: list[_Component]
+    production_components: list[_Component]
+
+
+class _Summary(TypedDict):
+    source_files_by_backend: dict[str, int]
+    directories_with_typescript_files: int
+    directories_with_python_files: int
+    directories_containing_python_anywhere: int
+    directories_with_local_edges: int
+    fact_edges: int
+    fact_edges_by_kind: dict[FactKind, int]
+    local_edges: int
+    local_edges_reduced: int
+    cyclic_directories: int
+    cyclic_directories_production_only: int
+    blocked_exports: int
+    violations_by_code: dict[Code, int]
+
+
+class _Report(TypedDict):
+    summary: _Summary
+    cyclic_directories: list[str]
+    cyclic_directories_production_only: list[str]
+    blocked_exports: list[dict[str, str]]
+    directories: dict[str, _DirectoryReport]
+
+
+def _components(graph: dict[str, list[str]], edges: Edges) -> list[_Component]:
+    report: list[_Component] = []
     for members in strongly_connected(graph):
         cycle = cycle_through(graph, members)
         inside = set(members)
@@ -140,7 +193,7 @@ def _components(graph: dict[str, list[str]], edges: Edges) -> list[dict[str, Any
     return sorted(report, key=lambda c: -len(c["members"]))
 
 
-def _directory_report(edges: Edges, children: int) -> dict[str, Any]:
+def _directory_report(edges: Edges, children: int) -> _DirectoryReport:
     everything = _graph(edges, production=False)
     production = _graph(edges, production=True)
     return {
@@ -153,7 +206,7 @@ def _directory_report(edges: Edges, children: int) -> dict[str, Any]:
     }
 
 
-def _build_report(analysis: Analysis) -> dict[str, Any]:
+def _build_report(analysis: Analysis) -> _Report:
     universe = analysis.universe
     grouped = _edges_by_directory(analysis.projections)
     _, blocked = _exports(analysis.projections)

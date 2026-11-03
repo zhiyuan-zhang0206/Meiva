@@ -9,8 +9,8 @@ from __future__ import annotations
 import json
 import tomllib
 from collections import Counter
-from collections.abc import Iterable, Mapping
-from typing import Any, TypeGuard
+from collections.abc import Iterable, Mapping, Sequence
+from typing import NotRequired, TypedDict, TypeGuard
 
 from meizel.contracts.debt import (
     PATCH_CODES,
@@ -69,15 +69,43 @@ def _judged_directories(universe: Universe) -> set[str]:
     return judged
 
 
-def _report(universe: Universe, *, unowned_list: bool = False) -> dict[str, Any]:
+# meiva:note
+# The summary document `--json` prints and `_text` reads back. Its shape is fixed by this module, so it
+# is spelled out here instead of a `dict[str, Any]` that every reader has to re-check.
+class _Counts(TypedDict):
+    entries: int
+    occurrences: int
+
+
+class _Top(TypedDict):
+    total: int
+    by_code: dict[str, int]
+    strict_to_be_directories: int
+    unowned_entries: int
+    unowned: int
+
+
+class _Report(TypedDict):
+    basis: str
+    total: int
+    unowned: _Counts
+    unstated: _Counts
+    unreviewed: _Counts
+    by_code: dict[str, int]
+    by_top_level: dict[str, _Top]
+    directories: dict[str, int]
+    unowned_list: NotRequired[list[str]]
+
+
+def _report(universe: Universe, *, unowned_list: bool = False) -> _Report:
     baselines = read_baselines(universe)
-    tops: dict[str, dict[str, Any]] = {}
+    tops: dict[str, _Top] = {}
     for directory, table in baselines.items():
         top = tops.setdefault(
             _top(directory),
             {
                 "total": 0,
-                "by_code": Counter(),
+                "by_code": {},
                 "strict_to_be_directories": 0,
                 "unowned_entries": 0,
                 "unowned": 0,
@@ -89,29 +117,30 @@ def _report(universe: Universe, *, unowned_list: bool = False) -> dict[str, Any]
         top["unowned_entries"] += entries
         top["unowned"] += occurrences
         for code, rows in table.items():
-            top["by_code"][code.value] += sum(entry.count for entry in rows.values())
+            counted = top["by_code"].get(code.value, 0)
+            top["by_code"][code.value] = counted + sum(entry.count for entry in rows.values())
     judged = _judged_directories(universe)
     missing, occurrences = _unowned(baselines)
     unstated, unstated_occurrences = _without_until(baselines)
     unread, unread_occurrences = _unreviewed(baselines)
-    listed = {"unowned_list": _unowned_lines(baselines)} if unowned_list else {}
-    return {
-        **listed,
+    for top in tops.values():
+        top["by_code"] = dict(sorted(top["by_code"].items()))
+    report: _Report = {
         "basis": "recorded manifest debt only; no source, semantic purity, or test-resource analysis",
         "total": sum(total(t) for t in baselines.values()),
         "unowned": {"entries": missing, "occurrences": occurrences},
         "unstated": {"entries": unstated, "occurrences": unstated_occurrences},
         "unreviewed": {"entries": unread, "occurrences": unread_occurrences},
         "by_code": {c.value: n for c, n in sorted(_by_code(baselines).items(), key=str)},
-        "by_top_level": {
-            name: {**top, "by_code": dict(sorted(top["by_code"].items()))}
-            for name, top in sorted(tops.items())
-        },
+        "by_top_level": dict(sorted(tops.items())),
         "directories": {
             "strict_to_be": len(baselines),
             "strict": len(judged - set(baselines)),
         },
     }
+    if unowned_list:
+        report["unowned_list"] = _unowned_lines(baselines)
+    return report
 
 
 # meiva:note
@@ -121,7 +150,7 @@ def _counted(count: int, one: str, many: str) -> str:
     return f"{count} {one if count == 1 else many}"
 
 
-def _text(data: dict[str, Any]) -> str:
+def _text(data: _Report) -> str:
     modes = data["directories"]
     lines = [
         f"meizel debt: {_counted(data['total'], 'recorded locality debt', 'recorded locality debts')}"
@@ -423,7 +452,7 @@ def _targets(tables: Iterable[Mapping[str, Mapping[str, object]]]) -> Targets:
     return counts
 
 
-def _group(target: str, prefixes: list[str], depth: int) -> str:
+def _group(target: str, prefixes: Sequence[str], depth: int) -> str:
     """The row a target is counted under: its longest listed prefix, or its first `depth` names."""
     if prefixes:
         inside = [p for p in prefixes if target_under(target, p)]
@@ -432,7 +461,7 @@ def _group(target: str, prefixes: list[str], depth: int) -> str:
 
 
 def _grouped(
-    before: Targets, after: Targets, prefixes: list[str], depth: int
+    before: Targets, after: Targets, prefixes: Sequence[str], depth: int
 ) -> dict[tuple[str, str], list[int]]:
     """`(code, group) -> [before, after]`, with a row for every listed prefix."""
     groups: dict[tuple[str, str], list[int]] = {}
@@ -445,7 +474,7 @@ def _grouped(
     return groups
 
 
-def by_target(repo: Checkout, ref: str, prefixes: list[str], depth: int) -> list[str]:
+def by_target(repo: Checkout, ref: str, prefixes: Sequence[str], depth: int) -> list[str]:
     """Recorded patch debt per target group against `ref`: what a change paid down or added.
 
     Counts come from the baselines, keyed by the target of each entry, so debt that moves with
