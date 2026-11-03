@@ -37,6 +37,7 @@ from pathlib import Path
 from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.packages.extensions import install_registry as reg
+from cli.boundary.process import stderr_text
 from cli.commands.extensions.plans.source_binding import SourceBinding
 from cli.commands.extensions.skill_package import ExtensionGateway
 from cli.commands.extensions.skills_sync import Source
@@ -89,7 +90,7 @@ def cmd_skill_install(
     try:
         acquired = acquire_source(source, ref)
     except (subprocess.CalledProcessError, SourcePathNotFoundError) as e:
-        detail = e.stderr.strip() if isinstance(e, subprocess.CalledProcessError) else str(e)
+        detail = stderr_text(e).strip() if isinstance(e, subprocess.CalledProcessError) else str(e)
         print(f"[meiva skill install] {detail}", file=sys.stderr)
         return 1
     try:
@@ -688,7 +689,7 @@ def cmd_skill_upgrade(name: str, *, home: Path, now: datetime, user_home: Path) 
             install_registry.placed_source(recorded, user_home=user_home), pkg.ref
         )
     except (subprocess.CalledProcessError, SourcePathNotFoundError) as e:
-        detail = e.stderr.strip() if isinstance(e, subprocess.CalledProcessError) else str(e)
+        detail = stderr_text(e).strip() if isinstance(e, subprocess.CalledProcessError) else str(e)
         print(f"[meiva skill upgrade] {detail}", file=sys.stderr)
         return 1
     try:

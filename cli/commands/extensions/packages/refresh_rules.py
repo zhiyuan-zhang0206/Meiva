@@ -36,10 +36,12 @@ def _jitter_percent(name: str, last_check_at: str | None) -> int:
 
 # meiva:note
 # `base` doubled per consecutive failure (capped), plus +/-10% jitter.
+# The doubling is a left shift: typeshed types `int ** int` with a non-literal exponent as `Any`, and
+# the number of failures is never negative, so `<<` gives the same value without the `Any`.
 def effective_interval_seconds(
     base_seconds: int, failures: int, *, name: str, last_check_at: str | None
 ) -> int:
-    seconds = min(base_seconds * (2 ** min(failures, _BACKOFF_MAX_DOUBLINGS)), _BACKOFF_CAP_SECONDS)
+    seconds = min(base_seconds << min(failures, _BACKOFF_MAX_DOUBLINGS), _BACKOFF_CAP_SECONDS)
     return max(1, int(seconds * (100 + _jitter_percent(name, last_check_at)) / 100))
 
 

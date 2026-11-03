@@ -35,6 +35,8 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+from cli.boundary.json_text import loads
+
 
 @dataclass
 class Materialized:
@@ -75,9 +77,11 @@ def _read_manifest(pkg_dir: Path) -> tuple[str, str]:
     """
     manifest = pkg_dir / ".claude-plugin" / "plugin.json"
     try:
-        data = json.loads(manifest.read_text(encoding="utf-8"))
+        data = loads(manifest.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:
         raise ClaudeCodePluginError(f"unreadable plugin.json: {e}") from e
+    if not isinstance(data, dict):
+        raise ClaudeCodePluginError("plugin.json is not a JSON object")
     name = data.get("name")
     if not isinstance(name, str) or not name:
         raise ClaudeCodePluginError("plugin.json missing a 'name' field")

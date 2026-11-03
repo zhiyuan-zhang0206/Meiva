@@ -26,6 +26,7 @@ from cli.commands.converge.tests.external_skills import (
 )
 from cli.commands.extensions import external_skills as bridge
 from cli.commands.extensions.external_skill_host import filesystem as bridge_fs
+from cli.commands.extensions.external_skill_host.records import Claim, CleanupItem, Ledger
 from cli.commands.extensions.tests.support import killed_converge as killed
 from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import UserSession
@@ -217,7 +218,7 @@ def test_interrupted_target_claim_is_reported_and_leaves_a_late_target_alone(
 # transaction-owned `previous` path and the target is v2. Built with the bridge's own steps.
 def _v2_live_with_garbage_queued(
     context: ConvergeCtx, client: Path, source: Path
-) -> tuple[killed.Site, dict[str, Any], dict[str, Any], Path]:
+) -> tuple[killed.Site, Ledger, CleanupItem, Path]:
     source.joinpath("SKILL.md").write_text("operator v2\n")
     site = _site(context, client, source)
     ledger = killed.stage(site)
@@ -328,7 +329,7 @@ def test_unsupported_cleanup_never_changes_directory_permissions(tmp_path: Path)
     assert stat.S_IMODE(outside.stat().st_mode) == stat.S_IMODE(outside_before.st_mode)
 
 
-def _claim_of(item: dict[str, Any], path: str) -> dict[str, str]:
+def _claim_of(item: CleanupItem, path: str) -> Claim:
     return next(claim for claim in item["file_claims"] if claim["path"] == path)
 
 

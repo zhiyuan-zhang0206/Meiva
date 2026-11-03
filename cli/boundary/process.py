@@ -15,8 +15,8 @@ __all__ = ["stderr_text", "stdout_text"]
 
 
 # meiva:note
-# The captured stdout of `result` as text ("" when it was not captured).
-def stdout_text(result: subprocess.CompletedProcess[object]) -> str:
+# The captured stdout of `result` (a finished process, or the error `check=True` raised) as text ("" when it was not captured).
+def stdout_text(result: subprocess.CompletedProcess[object] | subprocess.CalledProcessError) -> str:
     stream = result.stdout
     if stream is None:
         return ""
@@ -26,8 +26,8 @@ def stdout_text(result: subprocess.CompletedProcess[object]) -> str:
 
 
 # meiva:note
-# The captured stderr of `result` as text ("" when it was not captured).
-def stderr_text(result: subprocess.CompletedProcess[object]) -> str:
+# The captured stderr of `result` (a finished process, or the error `check=True` raised) as text ("" when it was not captured).
+def stderr_text(result: subprocess.CompletedProcess[object] | subprocess.CalledProcessError) -> str:
     stream = result.stderr
     if stream is None:
         return ""

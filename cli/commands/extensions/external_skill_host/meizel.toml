@@ -1,8 +1,10 @@
-exports = ["cleanup.py", "filesystem.py", "ledger.py"]
+exports = ["cleanup.py", "filesystem.py", "ledger.py", "records.py"]
 
 [uses]
-"cleanup.py" = ["filesystem.py", "ledger.py"]
-"ledger.py" = ["filesystem.py"]
+"cleanup.py" = ["filesystem.py", "ledger.py", "records.py"]
+"filesystem.py" = ["records.py"]
+"ledger.py" = ["filesystem.py", "records.py"]
 
 [purity]
 "__init__.py" = "strict"
+"records.py" = "strict"

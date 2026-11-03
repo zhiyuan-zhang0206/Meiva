@@ -20,12 +20,14 @@ from __future__ import annotations
 
 import importlib.util
 import inspect
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 
 from base.cluster.machine import MachineIdentityReader
 from base.packages.plugins.loading.scaffold import ScaffoldFacts
+from cli.boundary.untyped import object_of
 
 
 @dataclass(frozen=True)
@@ -66,7 +68,7 @@ def run_plugin_scaffolds(*, machine: MachineIdentityReader, facts: ScaffoldFacts
         except BaseException as exc:
             load_report.report_plugin_load_failure(name, exc)
             continue
-        scaffold = getattr(module, "scaffold", None)
+        scaffold = _scaffold_of(module)
         if scaffold is None:
             continue
         try:
@@ -79,6 +81,18 @@ def run_plugin_scaffolds(*, machine: MachineIdentityReader, facts: ScaffoldFacts
         scaffold(machine=machine, facts=facts)
         ran.append(name)
     return ScaffoldResult(ran=ran)
+
+
+# meiva:note
+# The `scaffold` a plugin's setup module defines, or None; whether it is callable is checked here,
+# what it accepts is checked by the caller against the keywords it passes.
+def _scaffold_of(module: ModuleType) -> Callable[..., object] | None:
+    found = object_of(getattr, module, "scaffold", None)
+    if found is None:
+        return None
+    if not callable(found):
+        raise TypeError(f"{module.__name__}: scaffold is not callable")
+    return found
 
 
 def _load_setup_module(name: str, setup_py: Path) -> ModuleType:

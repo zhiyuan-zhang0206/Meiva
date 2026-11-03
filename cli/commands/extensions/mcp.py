@@ -46,21 +46,32 @@ import json
 import shutil
 import subprocess
 import sys
-import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import TypeGuard
+
+from pydantic import JsonValue
 
 from base.host.system.hostport import Host
+from cli.boundary.json_text import loads
+from cli.boundary.process import stderr_text
 from cli.commands.extensions._pkg_source import AcquiredSource, SourcePathNotFoundError
+from cli.commands.extensions.plans.mcp_autodetect import auto_detect_mcp, write_mcp_json
 from cli.commands.extensions.plans.mcp_server_spec import (
     build_server_spec,
-    derive_server_name,
     parse_env_pairs,
     server_summary,
 )
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _is_json_object(value: JsonValue) -> TypeGuard[dict[str, JsonValue]]:
+    return isinstance(value, dict)
 
 
 def _machine_config_file(*, home: Path) -> Path:
@@ -69,11 +80,7 @@ def _machine_config_file(*, home: Path) -> Path:
     return machine_config_path(home=home)
 
 
-def _is_any_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
-
-
-def _read_machine_config(path: Path) -> dict[str, Any]:
+def _read_machine_config(path: Path) -> dict[str, JsonValue]:
     """Read `$MEIVA_HOME/mcp.json` as a dict ({} when absent).
 
     Raises:
@@ -81,14 +88,14 @@ def _read_machine_config(path: Path) -> dict[str, Any]:
     """
     if not path.is_file():
         return {}
-    data: object = json.loads(path.read_text(encoding="utf-8"))
-    if not _is_any_dict(data):
+    data = loads(path.read_text(encoding="utf-8"))
+    if not _is_json_object(data):
         # ValueError (not TypeError): malformed config file content, surfaced to the user.
         raise ValueError(f"{path} is not a JSON object (got {type(data).__name__})")
     return data
 
 
-def _write_machine_config(path: Path, data: dict[str, Any]) -> None:
+def _write_machine_config(path: Path, data: dict[str, JsonValue]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
@@ -146,9 +153,7 @@ def cmd_mcp_list(*, home: Path, user_home: Path) -> int:
     if not merged:
         print("[meiva mcp list] (no MCP servers configured)")
         return 0
-    machine_servers: dict[str, Any] = (
-        machine.get("mcpServers", {}) if isinstance(machine, dict) else {}
-    )
+    machine_servers = machine.get("mcpServers", {})
     machine_names: set[str] = set(machine_servers) if isinstance(machine_servers, dict) else set()
     for name in sorted(merged):
         # Order matters: machine config is the top layer, so a name present in
@@ -313,9 +318,10 @@ def _landed_env(dest: Path, name: str) -> dict[str, str]:
     if not mcp_json.is_file():
         return {}
     servers = read_servers(mcp_json)
-    env = servers.get(name, {}).get("env")
-    if _is_any_dict(env):
-        return dict(env)
+    entry = servers.get(name, {})
+    env = entry.get("env") if isinstance(entry, dict) else None
+    if _is_object_dict(env):
+        return {key: str(value) for key, value in env.items()}
     return {}
 
 
@@ -331,9 +337,13 @@ def _apply_env_overrides(dest: Path, name: str, overrides: dict[str, str]) -> No
     if not overrides:
         return
     mcp_json = dest / ".mcp.json"
-    data = json.loads(mcp_json.read_text(encoding="utf-8"))
-    spec = data["mcpServers"][name]
-    spec["env"] = {**(spec.get("env") or {}), **overrides}
+    data = loads(mcp_json.read_text(encoding="utf-8"))
+    servers = data.get("mcpServers") if isinstance(data, dict) else None
+    spec = servers.get(name) if isinstance(servers, dict) else None
+    if spec is None or not _is_json_object(spec):
+        raise ValueError(f"{mcp_json} has no mcpServers entry named {name!r}")
+    declared = spec.get("env")
+    spec["env"] = {**(declared if isinstance(declared, dict) else {}), **overrides}
     mcp_json.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
@@ -391,7 +401,7 @@ def uv_sync(pkg_dir: Path, build: UvBuild) -> None:
     except subprocess.TimeoutExpired as exc:
         raise UvSyncError(f"timed out after {_UV_SYNC_TIMEOUT_S:.0f}s") from exc
     if result.returncode != 0:
-        raise UvSyncError(result.stderr.strip())
+        raise UvSyncError(stderr_text(result).strip())
 
 
 def _register_mcp(
@@ -430,127 +440,6 @@ def _register_mcp(
     )
 
 
-def _main_module_candidates(search_dirs: list[Path]) -> list[str]:
-    """Return the first package with a ``__main__.py``, in search order."""
-    for base in search_dirs:
-        for child in sorted(base.iterdir()):
-            if (
-                child.is_dir()
-                and not child.name.startswith(".")
-                and child.name != "src"
-                and (child / "__main__.py").is_file()
-            ):
-                return [child.name]
-    return []
-
-
-def _package_candidates(search_dirs: list[Path]) -> list[str]:
-    """Return Python package directories in deterministic search order."""
-    packages: list[str] = []
-    for base in search_dirs:
-        for child in sorted(base.iterdir()):
-            if (
-                child.is_dir()
-                and not child.name.startswith(".")
-                and child.name != "src"
-                and (child / "__init__.py").is_file()
-            ):
-                packages.append(child.name)
-    return packages
-
-
-def _detect_module(pkg_dir: Path, project: dict[str, Any], fallback_name: str) -> str:
-    """Detect the Python module to run via ``-m`` from a package tree.
-
-    Priority (first match wins):
-
-    1. A top-level directory (or ``src/<dir>``) whose ``__main__.py`` exists —
-       the most reliable signal of a ``python -m <module>`` entry point.
-    2. ``[project.scripts]`` first entry — extract the module part (left of
-       ``:``) from the ``"module:function"`` value.
-    3. A single top-level Python package (directory with ``__init__.py``) —
-       unambiguous when only one package directory exists.
-    4. *fallback_name* with underscores instead of hyphens.
-    """
-    search_dirs = [pkg_dir]
-    src_dir = pkg_dir / "src"
-    if src_dir.is_dir():
-        search_dirs.append(src_dir)
-
-    # 1. __main__.py
-    main_modules = _main_module_candidates(search_dirs)
-    if main_modules:
-        return main_modules[0]
-
-    # 2. [project.scripts] first entry -> module part before ':'
-    scripts = project.get("scripts")
-    if _is_any_dict(scripts) and scripts:
-        first_value = next(iter(scripts.values()))
-        if isinstance(first_value, str) and ":" in first_value:
-            module = first_value.split(":", 1)[0].strip()
-            if module:
-                return module
-
-    # 3. Single top-level Python package (__init__.py)
-    packages = _package_candidates(search_dirs)
-    if len(packages) == 1:
-        return packages[0]
-
-    # 4. Fallback: sanitize the name
-    return fallback_name.replace("-", "_")
-
-
-def _auto_detect_mcp(pkg_dir: Path) -> tuple[str, dict[str, Any]]:
-    """Auto-detect MCP server name and spec from a package that lacks ``.mcp.json``.
-
-    Reads ``pyproject.toml`` to derive the server name and the Python module to
-    run.  The returned spec dict carries ``command``, ``args``, ``env``, and
-    ``description`` — the same shape as one entry under an ``.mcp.json``
-    ``mcpServers`` key.
-
-    Returns:
-        ``(server_name, spec_dict)``.
-
-    Raises:
-        ValueError: ``pyproject.toml`` is missing, unparseable, or does not
-            carry enough information to detect the server.
-    """
-    pyproject = pkg_dir / "pyproject.toml"
-    if not pyproject.is_file():
-        raise ValueError(
-            "no .mcp.json or pyproject.toml found; "
-            "an MCP package must ship at least one of these at its root"
-        )
-    try:
-        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-    except Exception as e:
-        raise ValueError(f"cannot parse pyproject.toml: {e}") from e
-
-    project = data.get("project")
-    if not _is_any_dict(project):
-        raise ValueError("pyproject.toml [project] section is missing or not a table")
-    raw_name = project.get("name", "")
-    if not raw_name:
-        raise ValueError("pyproject.toml [project] has no 'name' field")
-    name = derive_server_name(str(raw_name))
-    module = _detect_module(pkg_dir, project, name)
-    description = str(project.get("description", "")) or f"{name} MCP server"
-
-    spec: dict[str, Any] = {
-        "command": ".venv/bin/python",
-        "args": ["-m", module],
-        "env": {},
-        "description": description,
-    }
-    return name, spec
-
-
-def _write_mcp_json(dest: Path, name: str, spec: dict[str, Any]) -> None:
-    """Write a generated ``.mcp.json`` into *dest* for a single server."""
-    data = {"mcpServers": {name: spec}}
-    (dest / ".mcp.json").write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-
-
 def _acquire_or_report(source: str, ref: str | None, verb: str) -> AcquiredSource | None:
     """`acquire_source` with the failure already printed (git failure or a
     dead local-path source); None means the caller should return 1."""
@@ -559,18 +448,18 @@ def _acquire_or_report(source: str, ref: str | None, verb: str) -> AcquiredSourc
     try:
         return acquire_source(source, ref)
     except (subprocess.CalledProcessError, SourcePathNotFoundError) as e:
-        detail = e.stderr.strip() if isinstance(e, subprocess.CalledProcessError) else str(e)
+        detail = stderr_text(e).strip() if isinstance(e, subprocess.CalledProcessError) else str(e)
         print(f"[meiva mcp {verb}] {detail}", file=sys.stderr)
         return None
 
 
-def _detect_server(pkg_dir: Path) -> tuple[str, Any] | None:
+def _detect_server(pkg_dir: Path) -> tuple[str, dict[str, JsonValue] | None] | None:
     """`(server name, auto-detected spec)` of a package; the spec is None when it ships `.mcp.json`."""
     mcp_json = pkg_dir / ".mcp.json"
     try:
         if mcp_json.is_file():
             return _package_server_name(mcp_json), None
-        return _auto_detect_mcp(pkg_dir)
+        return auto_detect_mcp(pkg_dir)
     except ValueError as e:
         print(f"[meiva mcp install] {e}", file=sys.stderr)
         return None
@@ -652,7 +541,7 @@ def cmd_mcp_install(
 
         _land_package(acq.cloned, pkg_dir, dest)
         if auto_spec is not None:
-            _write_mcp_json(dest, name, auto_spec)
+            write_mcp_json(dest, name, auto_spec)
         _apply_env_overrides(dest, name, overrides)
         try:
             uv_sync(dest, uv)

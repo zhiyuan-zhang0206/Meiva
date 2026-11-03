@@ -7,7 +7,7 @@ import sys
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import Literal
 
 from cli.commands.extensions.external_skill_host.filesystem import (
     ClientConflictError,
@@ -17,6 +17,13 @@ from cli.commands.extensions.external_skill_host.filesystem import (
     verify_cleanup_file,
 )
 from cli.commands.extensions.external_skill_host.ledger import SKILL_NAME, write_ledger
+from cli.commands.extensions.external_skill_host.records import (
+    Claim,
+    CleanupItem,
+    FileEntry,
+    Ledger,
+    ManifestEntry,
+)
 
 
 def transaction_path(
@@ -33,33 +40,33 @@ def quarantine_path(ledger_path: Path, kind: str, generation_id: str) -> Path:
     return ledger_path.parent / f".{ledger_path.stem}-retained-{kind}-{generation_id}"
 
 
-def _file_claims(manifest: list[dict[str, Any]]) -> list[dict[str, str]]:
-    claims: list[dict[str, str]] = []
+def _file_claims(manifest: list[ManifestEntry]) -> list[Claim]:
+    claims: list[Claim] = []
     for item in manifest:
         if item["kind"] != "file":
             continue
-        relative = str(item["path"])
+        relative = item["path"]
         path = Path(relative)
         suffix = hashlib.sha256(relative.encode()).hexdigest()[:16]
         quarantine = path.with_name(f".{path.name}.meiva-retained-{suffix}").as_posix()
-        claims.append({"path": relative, "quarantine": quarantine, "state": "source"})
+        claims.append(Claim(path=relative, quarantine=quarantine, state="source"))
     return claims
 
 
 def queue_garbage(
-    ledger: dict[str, Any],
+    ledger: Ledger,
     *,
-    kind: str,
+    kind: Literal["prepared", "stage", "previous"],
     path_generation_id: str,
-    manifest: list[dict[str, Any]],
+    manifest: list[ManifestEntry],
 ) -> None:
-    record = {
-        "file_claims": _file_claims(manifest),
-        "kind": kind,
-        "location": "source",
-        "manifest": manifest,
-        "path_generation_id": path_generation_id,
-    }
+    record = CleanupItem(
+        file_claims=_file_claims(manifest),
+        kind=kind,
+        location="source",
+        manifest=manifest,
+        path_generation_id=path_generation_id,
+    )
     if record not in ledger["garbage"]:
         ledger["garbage"].append(record)
 
@@ -77,15 +84,15 @@ def _source_path(
     return transaction_path(skills_root, kind, generation_id, skill_name=skill_name)
 
 
-def _verify_cleanup_candidate(path: Path, manifest: list[dict[str, Any]]) -> None:
+def _verify_cleanup_candidate(path: Path, manifest: list[ManifestEntry]) -> None:
     current = tree_manifest(path)
     validate_manifest_subset(current, manifest)
 
 
 def _restore_cleanup_candidate(
     ledger_path: Path,
-    ledger: dict[str, Any],
-    item: dict[str, Any],
+    ledger: Ledger,
+    item: CleanupItem,
     source: Path,
     quarantine: Path,
     rename: Callable[[Path, Path], None],
@@ -96,16 +103,16 @@ def _restore_cleanup_candidate(
         write_ledger(ledger_path, ledger)
 
 
-def _manifest_files(item: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    return {str(entry["path"]): entry for entry in item["manifest"] if entry["kind"] == "file"}
+def _manifest_files(item: CleanupItem) -> dict[str, FileEntry]:
+    return {entry["path"]: entry for entry in item["manifest"] if entry["kind"] == "file"}
 
 
 def _preserve_file_claim(
     ledger_path: Path,
-    ledger: dict[str, Any],
-    claim: dict[str, str],
+    ledger: Ledger,
+    claim: Claim,
     root: Path,
-    expected: dict[str, Any],
+    expected: FileEntry,
     rename: Callable[[Path, Path], None],
 ) -> None:
     """Isolate one file, then terminally preserve it instead of path-unlinking."""
@@ -160,8 +167,8 @@ def _preserve_file_claim(
 
 def preserve_claimed_tree(
     ledger_path: Path,
-    ledger: dict[str, Any],
-    item: dict[str, Any],
+    ledger: Ledger,
+    item: CleanupItem,
     quarantine: Path,
     rename: Callable[[Path, Path], None],
 ) -> None:
@@ -177,8 +184,8 @@ def preserve_claimed_tree(
 
 def _claim_from_source(
     ledger_path: Path,
-    ledger: dict[str, Any],
-    item: dict[str, Any],
+    ledger: Ledger,
+    item: CleanupItem,
     source: Path,
     quarantine: Path,
     rename: Callable[[Path, Path], None],
@@ -206,8 +213,8 @@ def _claim_from_source(
 
 def _settle_claim(
     ledger_path: Path,
-    ledger: dict[str, Any],
-    item: dict[str, Any],
+    ledger: Ledger,
+    item: CleanupItem,
     source: Path,
     quarantine: Path,
     rename: Callable[[Path, Path], None],
@@ -235,9 +242,9 @@ def _settle_claim(
 
 def _cleanup_garbage_item(
     ledger_path: Path,
-    ledger: dict[str, Any],
+    ledger: Ledger,
     skills_root: Path,
-    item: dict[str, Any],
+    item: CleanupItem,
     rename: Callable[[Path, Path], None],
     *,
     skill_name: str = SKILL_NAME,
@@ -263,7 +270,7 @@ def _cleanup_garbage_item(
 
 def cleanup_garbage_impl(
     ledger_path: Path,
-    ledger: dict[str, Any],
+    ledger: Ledger,
     skills_root: Path,
     label: str,
     rename: Callable[[Path, Path], None],
