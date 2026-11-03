@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     # Annotation-only (`build` return): keeps the chat-model stack off the
@@ -26,10 +26,10 @@ _MIMO_EFFORT_LEVELS = ("none", "high")
 
 def mimo_extra_body(
     *,
-    thinking: Mapping[str, Any] | None,
+    thinking: Mapping[str, object] | None,
     reasoning_effort: str,
     effort_levels: tuple[str, ...],
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Resolve the mimo branch's `extra_body` kwarg.
 
     Caller-explicit `thinking={"type":"disabled"}` (short-text paths) wins
@@ -71,14 +71,11 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # BaseChatOpenAI; model_kwargs would collide). No graded
     # reasoning_effort field on MiMo — see `mimo_extra_body` for the on/off
     # mapping.
-    mimo_kwargs: dict[str, Any] = {}
     extra_body = mimo_extra_body(
         thinking=ctx.thinking,
         reasoning_effort=ctx.resolved_effort,
         effort_levels=(ctx.effort_levels if ctx.effort_levels is not None else _MIMO_EFFORT_LEVELS),
     )
-    if extra_body:
-        mimo_kwargs["extra_body"] = extra_body
     return ReasoningContentChatModel(
         model=ctx.model,  # type: ignore[call-arg]
         api_key=api_key,  # type: ignore[arg-type]
@@ -87,7 +84,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
         stream_usage=True,
         disable_streaming=ctx.disable_streaming,
         timeout=ctx.timeout,
-        **mimo_kwargs,
+        extra_body=extra_body or None,
     )
 
 
