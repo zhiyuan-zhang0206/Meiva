@@ -1,5 +1,5 @@
 # meiva:note
-# `cli.options`: the boundary from an argparse namespace to typed values.
+# `cli.boundary.options`: the boundary from an argparse namespace to typed values.
 
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ from typing import Literal, NewType
 import pytest
 
 from cli import main as _main
+from cli.boundary.options import OptionsError, attribute, options
 from cli.database import open_operator_database
-from cli.options import OptionsError, attribute, options
 
 _Id = NewType("_Id", int)
 

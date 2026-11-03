@@ -20,7 +20,7 @@ from base.host.permissions_helper.client import HelperFactory
 from base.host.system.hostport import Host
 from base.paths import repo_root
 from base.sessions.helperproc import helper_for
-from cli.options import attribute
+from cli.boundary.options import attribute
 
 __all__ = [
     "CommandRuntime",

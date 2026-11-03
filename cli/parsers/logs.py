@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from cli.options import options
+from cli.boundary.options import options
 
 FAMILY_DAYS_NAMES = frozenset(
     {"agent", "shell", "gateway", "ops", "watchdog", "snapshot", "other", "default"}

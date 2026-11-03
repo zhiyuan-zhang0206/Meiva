@@ -39,7 +39,7 @@ from base.native_process.os_platform import (
 # Only the settings-free parser composition entry is imported here. Domain
 # adapters lazy-import runtime commands when their bound handler is dispatched.
 from cli import parsers
-from cli.options import options
+from cli.boundary.options import options
 from cli.startup.entry_plan import (
     LITE_VERBS,
     needs_stop_probe,
@@ -300,7 +300,7 @@ class _Dispatch:
 
 # meiva:note
 # Run the handler the parser bound to `args`. A handler whose declared options the namespace does
-# not carry (`cli.options`) is a parser/handler mismatch, a programming error that raises.
+# not carry (`cli.boundary.options`) is a parser/handler mismatch, a programming error that raises.
 def _invoke(args: argparse.Namespace) -> int:
     return options(args, _Dispatch).func(args)
 
