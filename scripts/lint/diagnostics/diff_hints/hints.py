@@ -26,6 +26,7 @@ import subprocess
 import sys
 import tomllib
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeGuard
 
@@ -36,6 +37,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[4]
 
 sys.path.insert(0, str(_REPO_ROOT))
 
+from base.host.env.boot_actions import enter_scratch_home  # noqa: E402
+
+if __name__ == "__main__":
+    enter_scratch_home()
+
+from base.host.boundary.options import attribute, options  # noqa: E402
+from base.host.boundary.untyped import object_of  # noqa: E402
 from meizel.allowances import POLICY, parse  # noqa: E402
 from meizel.checkout import roles_at  # noqa: E402
 from meizel.graph.model import OS_KINDS, KindName  # noqa: E402
@@ -179,7 +187,10 @@ def _known_kinds(rev: str) -> frozenset[KindName]:
 def _declared(
     manifest: str, text: str, known: frozenset[KindName]
 ) -> dict[str, frozenset[KindName]]:
-    raw: object = tomllib.loads(text).get("roots", {})
+    document = object_of(tomllib.loads, text)
+    raw: object = document.get("roots") if _is_str_dict(document) else None
+    if raw is None:
+        raw = dict[str, object]()
     if not _is_str_dict(raw):
         raise GitError(f"{manifest}: [roots] must be a table")
     found: dict[str, frozenset[KindName]] = {}
@@ -679,20 +690,51 @@ def _parser() -> argparse.ArgumentParser:
     report = commands.add_parser("report")
     report.add_argument("base")
     report.add_argument("head")
-    report.add_argument("--json", action="store_true")
+    report.add_argument("--json", action="store_true", dest="as_json")
     return parser
+
+
+@dataclass(frozen=True)
+class CommitMsgOptions:
+    message_file: str
+
+
+@dataclass(frozen=True)
+class BranchOptions:
+    head: str
+    base: str
+    summary: str | None
+
+
+@dataclass(frozen=True)
+class StatsOptions:
+    base: str
+    head: str
+    tree: bool
+    sites: int
+
+
+@dataclass(frozen=True)
+class ReportOptions:
+    base: str
+    head: str
+    as_json: bool
 
 
 def main(argv: Sequence[str]) -> int:
     args = _parser().parse_args(argv)
+    command = attribute(args, "command", str)
     try:
-        if args.command == "commit-msg":
-            return _commit_msg(args.message_file)
-        if args.command == "branch":
-            return _branch(args.head, args.base, args.summary)
-        if args.command == "stats":
-            return _stats(args.base, args.head, tree=args.tree, shown=args.sites)
-        return _report(args.base, args.head, as_json=args.json)
+        if command == "commit-msg":
+            return _commit_msg(options(args, CommitMsgOptions).message_file)
+        if command == "branch":
+            branch = options(args, BranchOptions)
+            return _branch(branch.head, branch.base, branch.summary)
+        if command == "stats":
+            stats = options(args, StatsOptions)
+            return _stats(stats.base, stats.head, tree=stats.tree, shown=stats.sites)
+        report = options(args, ReportOptions)
+        return _report(report.base, report.head, as_json=report.as_json)
     except (GitError, ValueError) as error:
         sys.stderr.write(f"diff hints: {error}\n")
         return 2

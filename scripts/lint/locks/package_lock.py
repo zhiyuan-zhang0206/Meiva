@@ -31,7 +31,8 @@ def _noncanonical_url_errors(text: str) -> list[str]:
     for lineno, line in enumerate(text.splitlines(), start=1):
         if line.lstrip().startswith("#"):
             continue
-        for url in _URL_RE.findall(line):
+        for match in _URL_RE.finditer(line):
+            url = match[0]
             if not url.startswith(_REGISTRY):
                 errors.append(f"line {lineno}: URL {url} must start with {_REGISTRY}")
     return errors

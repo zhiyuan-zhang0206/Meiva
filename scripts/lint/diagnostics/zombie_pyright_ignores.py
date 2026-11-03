@@ -32,10 +32,20 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Literal, TypeGuard
 
+# meiva:note
+# A standalone script: the repository root goes on the path before the first import of
+# the repository's own packages.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO_ROOT))
 
-from meizel import lint_common  # noqa: E402 - standalone script
+from base.host.env.boot_actions import enter_scratch_home  # noqa: E402
+
+if __name__ == "__main__":
+    enter_scratch_home()
+
+from base.host.boundary.options import options  # noqa: E402
+from base.host.boundary.untyped import object_of  # noqa: E402
+from meizel import lint_common  # noqa: E402
 
 _PYPROJECT_PATH = _REPO_ROOT / "pyproject.toml"
 _PYRIGHT_PATH = _REPO_ROOT / ".venv/bin/basedpyright"
@@ -543,7 +553,7 @@ def pyright_errors(path: Path) -> frozenset[tuple[int, str]]:
         text=True,
     )
     try:
-        payload = _as_mapping(json.loads(result.stdout), "Pyright JSON output")
+        payload = _as_mapping(object_of(json.loads, result.stdout), "Pyright JSON output")
     except (json.JSONDecodeError, ValueError) as exc:
         raise RuntimeError(
             f"Pyright did not return valid JSON for {path}: {result.stderr.strip()}"
@@ -680,6 +690,14 @@ def changed_python(only: list[str] | None, *, repo_root: Path | None = None) -> 
     return None if scope is None else sorted(rel for rel in scope if rel.endswith(".py"))
 
 
+@dataclass(frozen=True)
+class Options:
+    check: bool
+    verify: list[str] | None
+    strip: list[str] | None
+    all_tier: bool
+
+
 def main(
     argv: Sequence[str],
     *,
@@ -690,7 +708,7 @@ def main(
     # `--only FILE...` (the commit hook) checks just the changed files, unless the tier
     # configuration they are judged against changed too.
     arguments, only = lint_common.split_only(list(argv))
-    args = build_parser().parse_args(arguments)
+    args = options(build_parser().parse_args(arguments), Options)
     if args.all_tier and args.strip is None:
         build_parser().error("--all-tier requires --strip")
 

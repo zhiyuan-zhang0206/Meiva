@@ -710,6 +710,21 @@ root = "scripts/host_ops/tcc/tests"
 root = "scripts/host_ops/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "scripts/lint/diagnostics/diff_hints/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "scripts/lint/diagnostics/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "scripts/lint/locks/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "scripts/lint/plugins/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "scripts/lint/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "scripts/model_registry/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -799,6 +814,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "scripts/host_ops"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "scripts/lint"
 reportAny = "error"
 reportExplicitAny = "error"
 
