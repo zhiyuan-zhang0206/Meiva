@@ -144,7 +144,7 @@ def test_expect_attribution_violations() -> None:
         "h4: no sampled row for pid 8 (dead or no response)"
     ]
     # A joined row without requests fails loudly too.
-    empty = {"unit": "u", "point": "h4", "pid": 7, "requests": []}
+    empty: dict[str, object] = {"unit": "u", "point": "h4", "pid": 7, "requests": []}
     assert smoke.f12_expect_attribution({"tccd": [empty]}, [("h4", [7], 400)]) == [
         "h4 u pid 7: no requests observed"
     ]

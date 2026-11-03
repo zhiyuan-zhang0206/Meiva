@@ -156,14 +156,10 @@ def test_session_for_host_healthy_resolution_returns_none(tracker: Any) -> None:
         del type
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("104.18.1.2", 443))]
 
-    assert (
-        tracker._session_for_host(
-            host,
-            addrinfo=getaddrinfo,
-            doh_resolver=lambda _host: pytest.fail("healthy DNS must not use DoH"),
-        )
-        is None
-    )
+    def no_doh(_host: str) -> str:
+        pytest.fail("healthy DNS must not use DoH")
+
+    assert tracker._session_for_host(host, addrinfo=getaddrinfo, doh_resolver=no_doh) is None
 
 
 def test_session_for_host_fake_ip_returns_pinned_session(tracker: Any) -> None:
@@ -213,13 +209,16 @@ def test_fetch_json_uses_pinned_session_when_fake_ip(tracker: Any) -> None:
     def session_for_host(_host: str) -> Session:
         return session
 
+    def no_plain_get(*_args: object, **_kwargs: object) -> _JSONResponse:
+        pytest.fail("pinned session must own the request")
+
     assert (
         tracker.fetch_json(
             url,
             headers=headers,
             params=params,
             session_for_host=session_for_host,
-            http_get=lambda *_args, **_kwargs: pytest.fail("pinned session must own the request"),
+            http_get=no_plain_get,
         )
         == payload
     )
@@ -579,19 +578,24 @@ def test_transient_ssl_eof_is_retried_without_marking_the_provider_error(
     def no_session_for_host(_host: str) -> None:
         return None
 
+    def fetch_gemini(
+        url: str, *, headers: dict[str, str], params: dict[str, str | int]
+    ) -> dict[str, Any]:
+        return tracker.fetch_json(
+            url,
+            headers=headers,
+            params=params,
+            session_for_host=no_session_for_host,
+            http_get=get,
+            sleep=timers.sleep,
+        )
+
     def fetch(source: Any, api_key: str) -> list[str]:
         if source.provider == "gemini":
             return tracker.fetch_provider_models(
                 source,
                 api_key,
-                fetcher=lambda url, *, headers, params: tracker.fetch_json(
-                    url,
-                    headers=headers,
-                    params=params,
-                    session_for_host=no_session_for_host,
-                    http_get=get,
-                    sleep=timers.sleep,
-                ),
+                fetcher=fetch_gemini,
             )
         return known_models(tracker, source, models={})
 
@@ -632,19 +636,24 @@ def test_repeated_provider_failure_announces_once_and_never_repeats(
 
     current_get: Callable[..., _JSONResponse] = ok_get
 
+    def fetch_gemini(
+        url: str, *, headers: dict[str, str], params: dict[str, str | int]
+    ) -> dict[str, Any]:
+        return tracker.fetch_json(
+            url,
+            headers=headers,
+            params=params,
+            session_for_host=no_session_for_host,
+            http_get=current_get,
+            sleep=timers.sleep,
+        )
+
     def fetch(source: Any, api_key: str) -> list[str]:
         if source.provider == "gemini":
             return tracker.fetch_provider_models(
                 source,
                 api_key,
-                fetcher=lambda url, *, headers, params: tracker.fetch_json(
-                    url,
-                    headers=headers,
-                    params=params,
-                    session_for_host=no_session_for_host,
-                    http_get=current_get,
-                    sleep=timers.sleep,
-                ),
+                fetcher=fetch_gemini,
             )
         return known_models(tracker, source, models={})
 

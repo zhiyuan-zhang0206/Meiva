@@ -1,14 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 
 from scripts.content_lint import lint_doc_roster as lint
-
-# Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
-# pyright: reportUnknownMemberType = warning
-# pyright: reportUnknownArgumentType = warning
 
 _SENTINEL = "<!-- lint:roster-table -->"
 
@@ -31,7 +28,7 @@ class _FakeSpec:
         self.session = session
 
 
-def _run_service_check(registered, runbook_text, tmp_path) -> int:
+def _run_service_check(registered: Sequence[str], runbook_text: str, tmp_path: Path) -> int:
     runbook = tmp_path / "runbook.md"
     runbook.write_text(runbook_text, encoding="utf-8")
     return lint.check(
@@ -40,26 +37,26 @@ def _run_service_check(registered, runbook_text, tmp_path) -> int:
     )
 
 
-def test_roster_matches_registered_passes(tmp_path):
+def test_roster_matches_registered_passes(tmp_path: Path):
     services = ["gateway", "labeler", "otel-collector"]
     assert _run_service_check(services, _roster_table(*services), tmp_path) == 0
 
 
-def test_roster_has_extra_service_fails(tmp_path):
+def test_roster_has_extra_service_fails(tmp_path: Path):
     registered = ["gateway", "labeler"]
     # The roster documents `scheduler` on top of the registered set (the #728 case).
     text = _roster_table("gateway", "labeler", "scheduler")
     assert _run_service_check(registered, text, tmp_path) == 1
 
 
-def test_registered_missing_from_roster_fails(tmp_path):
+def test_registered_missing_from_roster_fails(tmp_path: Path):
     # build_services() registers `browser` but the roster forgot to document it.
     registered = ["gateway", "labeler", "browser"]
     text = _roster_table("gateway", "labeler")
     assert _run_service_check(registered, text, tmp_path) == 1
 
 
-def test_missing_sentinel_errors(tmp_path):
+def test_missing_sentinel_errors(tmp_path: Path):
     registered = ["gateway", "labeler"]
     # A roster table with no sentinel above it.
     text = (
@@ -114,7 +111,7 @@ def _load_healthcheck_lint(
     directory: set[str],
     hand_added: set[str],
     table_text: str,
-    tmp_path,
+    tmp_path: Path,
 ) -> int:
     """Load the lint with all three healthcheck-roster sources faked and the
     roster doc pointed at a temp file."""
@@ -132,7 +129,7 @@ def _load_healthcheck_lint(
     )
 
 
-def test_healthcheck_roster_matches_passes(tmp_path):
+def test_healthcheck_roster_matches_passes(tmp_path: Path):
     assert (
         _load_healthcheck_lint(
             spec_modules={"gateway", "browser"},
@@ -145,7 +142,7 @@ def test_healthcheck_roster_matches_passes(tmp_path):
     )
 
 
-def test_healthcheck_roster_phantom_row_fails(tmp_path):
+def test_healthcheck_roster_phantom_row_fails(tmp_path: Path):
     """The audit's drift case: the table documents a module that no longer
     exists in the directory (task_maintenance)."""
     assert (
@@ -160,7 +157,7 @@ def test_healthcheck_roster_phantom_row_fails(tmp_path):
     )
 
 
-def test_healthcheck_roster_missing_module_fails(tmp_path):
+def test_healthcheck_roster_missing_module_fails(tmp_path: Path):
     """The audit's other drift case: a real module is absent from the table."""
     assert (
         _load_healthcheck_lint(
@@ -174,7 +171,7 @@ def test_healthcheck_roster_missing_module_fails(tmp_path):
     )
 
 
-def test_healthcheck_roster_unregistered_module_fails(tmp_path):
+def test_healthcheck_roster_unregistered_module_fails(tmp_path: Path):
     """A module file with neither a ServiceSpec row nor a hand-added import."""
     assert (
         _load_healthcheck_lint(
@@ -188,7 +185,7 @@ def test_healthcheck_roster_unregistered_module_fails(tmp_path):
     )
 
 
-def test_healthcheck_roster_sentinel_missing_fails(tmp_path):
+def test_healthcheck_roster_sentinel_missing_fails(tmp_path: Path):
     assert (
         _load_healthcheck_lint(
             spec_modules={"gateway"},

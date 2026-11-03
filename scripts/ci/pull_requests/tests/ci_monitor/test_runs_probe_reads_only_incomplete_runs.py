@@ -1,17 +1,17 @@
-# pyright: reportUnknownArgumentType = warning
-# pyright: reportUnknownMemberType = warning
 """Ci monitor cases: runs probe reads only incomplete runs."""
 
 from __future__ import annotations
 
 import json
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import pytest
 
+from base.clock import Clock
 from base.host.net.tests.fake_url_opener import FakeUrlOpener
+from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
 from scripts.ci.pull_requests import commands as ci_utils
 from scripts.ci.pull_requests import status
@@ -52,7 +52,11 @@ def test_runs_probe_returns_none_on_bad_response(returncode: int, stdout: str) -
     """A failed query is None (unanswerable), not [] (nothing scheduled) — the
     distinction is what keeps an unanswerable probe from reading as green."""
     response = subprocess.CompletedProcess([], returncode, stdout, "boom")
-    host = fake_host(lambda *_a, **_k: response)
+
+    def answer(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return response
+
+    host = fake_host(answer)
     assert status.runs_not_yet_reporting("abc123", None, host=host) is None
 
 
@@ -69,7 +73,9 @@ def test_parse_ts(value: str | None, expected: float | None) -> None:
     assert status.parse_ts(value) == expected
 
 
-def test_wait_all_passed_exits_zero(no_sleep, poll, capsys) -> None:
+def test_wait_all_passed_exits_zero(
+    no_sleep: Clock, poll: Callable[..., Host], capsys: pytest.CaptureFixture[str]
+) -> None:
     host = poll(CIStatus.ALL_PASSED)
     assert (
         ci_utils.main(
@@ -89,7 +95,12 @@ def test_wait_all_passed_exits_zero(no_sleep, poll, capsys) -> None:
     "verdict",
     [CIStatus.FAILED, CIStatus.MERGE_CONFLICT, CIStatus.NO_WORKFLOW_RUNS, CIStatus.NOT_READY],
 )
-def test_wait_not_green_exits_one(no_sleep, poll, capsys, verdict) -> None:
+def test_wait_not_green_exits_one(
+    no_sleep: Clock,
+    poll: Callable[..., Host],
+    capsys: pytest.CaptureFixture[str],
+    verdict: CIStatus,
+) -> None:
     host = poll(verdict)
     assert (
         ci_utils.main(
@@ -105,7 +116,9 @@ def test_wait_not_green_exits_one(no_sleep, poll, capsys, verdict) -> None:
     assert "NOT green" in capsys.readouterr().err
 
 
-def test_wait_not_ready_names_draft_gating(no_sleep, poll, capsys) -> None:
+def test_wait_not_ready_names_draft_gating(
+    no_sleep: Clock, poll: Callable[..., Host], capsys: pytest.CaptureFixture[str]
+) -> None:
     host = poll(CIStatus.NOT_READY)
     assert (
         ci_utils.main(
@@ -121,7 +134,9 @@ def test_wait_not_ready_names_draft_gating(no_sleep, poll, capsys) -> None:
     assert "draft gating" in capsys.readouterr().err
 
 
-def test_wait_failed_lists_failed_checks(no_sleep, poll, capsys) -> None:
+def test_wait_failed_lists_failed_checks(
+    no_sleep: Clock, poll: Callable[..., Host], capsys: pytest.CaptureFixture[str]
+) -> None:
     host = poll(CIStatus.FAILED)
     assert (
         ci_utils.main(
@@ -137,7 +152,7 @@ def test_wait_failed_lists_failed_checks(no_sleep, poll, capsys) -> None:
     assert "lint" in capsys.readouterr().err
 
 
-def test_wait_pending_then_green(no_sleep, poll) -> None:
+def test_wait_pending_then_green(no_sleep: Clock, poll: Callable[..., Host]) -> None:
     host = poll(CIStatus.PENDING, CIStatus.PENDING, CIStatus.ALL_PASSED)
     assert (
         ci_utils.main(
@@ -152,7 +167,9 @@ def test_wait_pending_then_green(no_sleep, poll) -> None:
     )
 
 
-def test_wait_no_checks_then_green(no_sleep, poll, capsys) -> None:
+def test_wait_no_checks_then_green(
+    no_sleep: Clock, poll: Callable[..., Host], capsys: pytest.CaptureFixture[str]
+) -> None:
     host = poll(CIStatus.NO_CHECKS, CIStatus.ALL_PASSED)
     assert (
         ci_utils.main(
@@ -168,7 +185,7 @@ def test_wait_no_checks_then_green(no_sleep, poll, capsys) -> None:
     assert "no checks yet" in capsys.readouterr().err
 
 
-def test_wait_transient_error_then_green(no_sleep, poll) -> None:
+def test_wait_transient_error_then_green(no_sleep: Clock, poll: Callable[..., Host]) -> None:
     # One gh/network hiccup must not kill the poll — only 3 consecutive do.
     host = poll(CIStatus.ERROR, CIStatus.PENDING, CIStatus.ALL_PASSED)
     assert (
@@ -184,7 +201,9 @@ def test_wait_transient_error_then_green(no_sleep, poll) -> None:
     )
 
 
-def test_wait_three_consecutive_errors_exit_three(no_sleep, poll, capsys) -> None:
+def test_wait_three_consecutive_errors_exit_three(
+    no_sleep: Clock, poll: Callable[..., Host], capsys: pytest.CaptureFixture[str]
+) -> None:
     host = poll(CIStatus.ERROR)
     assert (
         ci_utils.main(
@@ -200,7 +219,9 @@ def test_wait_three_consecutive_errors_exit_three(no_sleep, poll, capsys) -> Non
     assert "boom" in capsys.readouterr().err
 
 
-def test_wait_timeout_while_pending_exits_one(no_sleep, poll, capsys) -> None:
+def test_wait_timeout_while_pending_exits_one(
+    no_sleep: Clock, poll: Callable[..., Host], capsys: pytest.CaptureFixture[str]
+) -> None:
     # --timeout bounds the wait for run_background use (no watchdog there);
     # a still-pending PR at the deadline is a failed watch, not a silent hang.
     host = poll(CIStatus.PENDING)
@@ -259,7 +280,7 @@ def test_wait_json_mutually_exclusive() -> None:
     assert e.value.code == 2
 
 
-def test_one_shot_behavior_unchanged(gh: Any, capsys) -> None:
+def test_one_shot_behavior_unchanged(gh: Any, capsys: pytest.CaptureFixture[str]) -> None:
     """Legacy contract: without --wait, a PENDING probe prints and exits 0 —
     a one-shot query, not a poller."""
     host = gh([APP_CHECK, status_check_rollup_entry("backend", "", status="IN_PROGRESS")])
@@ -273,7 +294,7 @@ def test_one_shot_behavior_unchanged(gh: Any, capsys) -> None:
     assert "pending" in out.out.lower()
 
 
-def test_one_shot_not_ready_exits_one(gh: Any, capsys) -> None:
+def test_one_shot_not_ready_exits_one(gh: Any, capsys: pytest.CaptureFixture[str]) -> None:
     host = gh(core_rollup("SKIPPED"), is_draft=True, main_completed=True)
     assert (
         ci_utils.main(
@@ -304,7 +325,7 @@ def test_pending_is_not_terminal() -> None:
     assert not CIStatus.PENDING.is_terminal
 
 
-def test_json_probe_carries_terminal_flag(gh: Any, capsys) -> None:
+def test_json_probe_carries_terminal_flag(gh: Any, capsys: pytest.CaptureFixture[str]) -> None:
     """The --json one-shot output includes `terminal`, so a subprocess-based
     watcher can decide without re-deriving the verdict domain."""
     host = gh([APP_CHECK, status_check_rollup_entry("backend (pytest + pyright)", "SUCCESS")])
@@ -325,7 +346,9 @@ def test_json_probe_carries_terminal_flag(gh: Any, capsys) -> None:
     assert "gate_checks" not in payload
 
 
-def test_json_probe_reports_draft_and_core_skipped(gh: Any, capsys) -> None:
+def test_json_probe_reports_draft_and_core_skipped(
+    gh: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
     host = gh(core_rollup("SKIPPED"), is_draft=True, main_completed=True)
     assert (
         ci_utils.main(
@@ -345,7 +368,7 @@ def test_json_probe_reports_draft_and_core_skipped(gh: Any, capsys) -> None:
     assert payload["core_skipped"]
 
 
-def test_json_probe_pending_is_not_terminal(gh: Any, capsys) -> None:
+def test_json_probe_pending_is_not_terminal(gh: Any, capsys: pytest.CaptureFixture[str]) -> None:
     host = gh([APP_CHECK, status_check_rollup_entry("backend", "", status="IN_PROGRESS")])
     assert (
         ci_utils.main(
