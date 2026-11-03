@@ -7,4 +7,4 @@ exports = ["browser.py", "browser_reach.py", "frontend.py", "gate.py", "gateway.
 "tests" = ["browser_mcp.py", "browser_reach.py", "computer_mcp.py", "frontend.py", "gateway.py", "insights.py", "lgtm.py", "mcp_daemon.py", "memory_search.py", "otel_collector.py", "permissions_helper.py", "plans", "prod_venv.py", "protocol_probe.py", "redis_acl.py", "redis_bridge.py"]
 
 [debt.ambient-read]
-"prod_venv.py#environ tempfile.gettempdir" = { count = 1, owner = "#8237", until = "waits for `_probe` to take the temporary directory from its caller: it asks the process environment (TMPDIR) for it" }
+"prod_venv.py#environ tempfile.gettempdir" = { count = 1, owner = "#8237", until = "waits for nothing that can arrive: `_probe` runs each leg with the OS temp directory as its working directory so a production-venv probe never runs inside this checkout or wherever the supervisor happened to start; `_probe_within` and `observe_venv` hand it a command, an environment and a deadline, and none of those is a directory to run in" }
