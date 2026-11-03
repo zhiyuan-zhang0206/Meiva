@@ -35,7 +35,7 @@ from datetime import datetime
 from pathlib import Path
 
 from base.cluster.machine import MachineIdentityReader
-from cli.boundary.process import stderr_text
+from base.host.boundary.process import stderr_text
 from cli.commands.extensions._claude_code_plugin import Materialized
 from cli.commands.extensions._manifest_gate import gate_refuses
 from cli.commands.extensions.plans.source_binding import SourceBinding

@@ -9,7 +9,8 @@ from datetime import UTC, datetime, timedelta
 from typing import TypeGuard
 
 from base.clock import Timers
-from scripts.boundary.untyped import is_object_dict, is_object_list, object_of
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from scripts.ci.pull_requests.gh_process import GhProcess
 
 __all__ = [
@@ -28,7 +29,7 @@ _PAGE_SIZE = 100
 _MAX_GH_ATTEMPTS = 4
 
 # meiva:note
-# One jq-projected GitHub workflow run (`id`, `created_at`, `conclusion`, ...): a decoded JSON object whose fields the readers in `scripts.boundary.fields` narrow.
+# One jq-projected GitHub workflow run (`id`, `created_at`, `conclusion`, ...): a decoded JSON object whose fields the readers in `base.host.boundary.fields` narrow.
 RunRecord = dict[str, object]
 # meiva:note
 # One jq-projected closed pull request (`number`, `head_ref`, `merged_at`, ...), read the same way.

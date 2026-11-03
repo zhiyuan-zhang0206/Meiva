@@ -703,11 +703,6 @@ reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "scripts/boundary"
-reportAny = "error"
-reportExplicitAny = "error"
-
-[[tool.pyright.executionEnvironments]]
 root = "scripts/ci"
 reportAny = "error"
 reportExplicitAny = "error"

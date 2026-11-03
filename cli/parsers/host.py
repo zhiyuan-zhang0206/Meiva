@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Literal
 
-from cli.boundary.options import attribute, options, raw
+from base.host.boundary.options import attribute, options, raw
 
 # meiva:note
 # A lifecycle verb defaults and infers nothing: every choice is the operator's

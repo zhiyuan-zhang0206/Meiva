@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import TypedDict
 
 from base.clock import Timers
-from scripts.boundary.untyped import is_object_dict, object_of
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 from .support import (
     JsonObject,

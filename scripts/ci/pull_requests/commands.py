@@ -29,9 +29,9 @@ from datetime import datetime
 from pathlib import Path
 
 from base.clock import Clock
+from base.host.boundary.options import options
 from base.host.net.ports import UrlOpener
 from base.host.system.hostport import Host
-from scripts.boundary.options import options
 from scripts.ci.pull_requests import monitor
 from scripts.ci.pull_requests.accounting import DEFAULT_LEDGER, load_ledger, report_rows
 from scripts.ci.pull_requests.status import DEFAULT_REPO, POLL_INTERVAL

@@ -21,11 +21,11 @@ if str(_SCRIPT_REPOSITORY_ROOT) not in sys.path:
 from base.deploy.git.repo_change import (  # noqa: E402
     is_doc_path,
 )
+from base.host.boundary.options import options  # noqa: E402
 from meizel.checkout import lanes_at, roles_at  # noqa: E402
 from meizel.roles import all_packages, pytest_test_hosts  # noqa: E402
 from meizel.test_graph.cutoff import package_local_tests  # noqa: E402
 from meizel.test_graph.impact import TREE_SCAN_PINS as TREE_SCAN_TESTS  # noqa: E402
-from scripts.boundary.options import options  # noqa: E402
 from scripts.ci.shard_counts import (  # noqa: E402
     estimate_seconds,
     load_durations,

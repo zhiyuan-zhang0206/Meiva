@@ -37,8 +37,8 @@ if str(_REPOSITORY_ROOT) not in sys.path:
 
 # meiva:note
 # Script mode (`python -S`, no installed project) has only `scripts/ci/` on sys.path: the checkout
-# root comes first so `scripts.boundary` (standard library only) resolves against this tree.
-from scripts.boundary.untyped import object_of  # noqa: E402
+# root comes first so `base.host.boundary` (standard library only) resolves against this tree.
+from base.host.boundary.untyped import object_of  # noqa: E402
 
 # The 85% gate denominator — must match [tool.coverage.run].source's core
 # set and the comment in ci.yml's gate step. ops/services/meiva_builtins are

@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 
-from cli.boundary.options import options
+from base.host.boundary.options import options
 
 
 @dataclass(frozen=True)

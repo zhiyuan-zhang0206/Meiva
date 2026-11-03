@@ -15,9 +15,9 @@ from typing import assert_never
 
 from base.cluster.dataplane import pooler
 from base.cluster.dataplane.pg_tools import pg_tool
+from base.host.boundary.process import stdout_text
 from base.host.system.boot_unit import systemd_running
 from base.host.system.hostport import Host
-from cli.boundary.process import stdout_text
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.host_dependencies.diagnosis import (
     Absent,

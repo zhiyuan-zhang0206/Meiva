@@ -38,12 +38,12 @@ from loguru import logger
 from base import paths
 from base.config import ConfigBoot
 from base.config.domains.packages import PackagesSettings
+from base.host.boundary.process import stderr_text, stdout_text
 from base.host.git.gitenv import git_env
 from base.host.system.hostport import Host
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from base.packages.extensions import install_registry
 from base.packages.skills.names import match_key
-from cli.boundary.process import stderr_text, stdout_text
 from cli.commands.extensions.packages.refresh_git_plan import (
     core_fetch,
     core_listing,

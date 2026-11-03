@@ -15,8 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from base.host import runtime_interpreter
+from base.host.boundary.options import attribute
 from base.host.runtime_interpreter import LoadedRuntimeIdentity
-from cli.boundary.options import attribute
 
 
 # meiva:note

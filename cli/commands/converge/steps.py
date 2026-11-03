@@ -6,8 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from base.host.boundary.process import stdout_text
 from base.host.private_storage import converge_private_tree, ensure_private_file
-from cli.boundary.process import stdout_text
 from cli.commands.converge.plans.checkout_warnings import hook_scan_argv, hook_scan_warnings
 from cli.commands.converge.plans.shell_rc import rc_file_name, with_path_block
 from cli.commands.converge.spec import ConvergeCtx

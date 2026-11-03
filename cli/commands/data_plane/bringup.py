@@ -36,6 +36,7 @@ from base.cluster.dataplane.pg_tools import pg_tool
 from base.cluster.derive import runner_db_url_projection
 from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
+from base.host.boundary.process import stderr_text
 from base.host.db_authority import delivery as db_delivery_files
 from base.host.db_authority import ledger, model
 from base.host.db_authority.api import API_TOKEN_ENV, api_token
@@ -47,7 +48,6 @@ from base.host.system.hostport import Host
 from base.log import logger
 from base.native_process.ownership import OwnedProcess
 from base.telemetry import EventPipeline
-from cli.boundary.process import stderr_text
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import pgbouncer
 from cli.commands.data_plane.config import DataPlaneConfig

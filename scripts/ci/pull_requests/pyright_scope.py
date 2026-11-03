@@ -25,8 +25,9 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from scripts.boundary.options import options
-from scripts.boundary.untyped import is_object_dict, is_object_list, object_of
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.options import options
+from base.host.boundary.untyped import object_of
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 

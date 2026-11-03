@@ -32,9 +32,9 @@ _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPOSITORY_ROOT))
 
+from base.host.boundary.options import options  # noqa: E402
 from meizel.checkout import roles_at  # noqa: E402
 from meizel.roles import select_packages  # noqa: E402
-from scripts.boundary.options import options  # noqa: E402
 
 ROLES = roles_at(_REPOSITORY_ROOT)
 

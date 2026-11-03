@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict
 
-from scripts.boundary.options import options
+from base.host.boundary.options import options
 
 # meiva:note
 # The selection the registry promises for a `marked` lane, spelled the way pytest reads it.

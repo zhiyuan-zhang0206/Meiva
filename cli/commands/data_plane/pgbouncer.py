@@ -52,13 +52,13 @@ from base.clock import Deadline, Timers
 from base.cluster import ownership, port_preflight
 from base.cluster.dataplane import pooler as pooler_files
 from base.cluster.machine import MachineIdentityReader
+from base.host.boundary.process import stderr_text
 from base.host.db_authority.delivery import POOLER_ADMIN
 from base.host.private_storage import write_private_bytes
 from base.host.proc import process_alive
 from base.host.system.hostport import Host
 from base.native_process.os_platform import LockTimeoutError
 from base.native_process.ownership import OwnedProcess
-from cli.boundary.process import stderr_text
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.data_plane._pooler_stop import OwnedPooler
 from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_boot

@@ -10,10 +10,10 @@ from pathlib import Path
 
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.config import settings
+from base.host.boundary.options import attribute
 from base.host.system.hostport import Host
 from base.paths import meiva_home
 from base.sessions.helperproc import helper_client
-from scripts.boundary.options import attribute
 from services.desktop.permissions_helper import lifecycle
 from services.desktop.permissions_helper.launchd_job import LaunchdFacts, helper_job_label
 

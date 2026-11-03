@@ -27,6 +27,7 @@ from pydantic import ValidationError
 
 from base import telemetry
 from base.deploy import start_trace
+from base.host.boundary.options import options
 from base.host.db_authority.delivery import GENERATION_ENV
 from base.host.env.registry import derived_env_keys, env_identity_keys
 from base.host.permissions_helper.client import HelperFactory
@@ -34,7 +35,6 @@ from base.host.system import boot_policy
 from base.host.system.hostport import Host
 from base.native_process.os_platform import file_lock, is_macos
 from base.paths.private_dir import ensure_private_dir
-from cli.boundary.options import options
 from cli.database import OperatorDatabaseFactory, OperatorEventPipeline
 from cli.start_identity import require_initialized
 from cli.start_runtime import HomeSite, StartRuntime

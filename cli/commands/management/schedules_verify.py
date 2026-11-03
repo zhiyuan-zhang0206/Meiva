@@ -40,10 +40,10 @@ from base.cluster.machine import (
     gateway_auth_headers,
 )
 from base.cluster.machine.boot import gateway_access_from_boot
+from base.host.boundary.options import options
 from base.host.net.http_dial import get as dial_get
 from base.paths import repo_root
 from base.telemetry import EventPipeline
-from cli.boundary.options import options
 from cli.database import producer_of
 from cli.database.runtime import CommandRuntime, runtime_of
 

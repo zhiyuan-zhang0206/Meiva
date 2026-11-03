@@ -16,9 +16,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from base.clock import SYSTEM_TIMERS
+from base.host.boundary.options import options
+from base.host.boundary.untyped import object_of
 from base.host.permissions_helper.client import RootStatus
-from scripts.boundary.options import options
-from scripts.boundary.untyped import object_of
 
 from .f12 import f12_finish, f12_point
 from .support import (

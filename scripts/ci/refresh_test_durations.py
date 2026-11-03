@@ -59,8 +59,8 @@ from pathlib import Path
 from typing import Literal, Protocol, TypeGuard
 
 from base.host.atomic_io import write_text_atomic
-from scripts.boundary.options import attribute, options
-from scripts.boundary.untyped import object_of
+from base.host.boundary.options import attribute, options
+from base.host.boundary.untyped import object_of
 
 _STATIC_WORKERS = 4
 _BACKEND_WORKERS = 4  # mirrors the backend-shard job (-n 4)

@@ -22,11 +22,16 @@ if str(_REPO_ROOT) not in sys.path:
 
 # meiva:note
 # The weekly workflow runs this file as a script with the interpreter CI provides, so the checkout
-# root comes first on sys.path for `scripts.boundary` (standard library only).
-from scripts.boundary.fields import optional_list, optional_object, optional_str  # noqa: E402
-from scripts.boundary.options import options  # noqa: E402
-from scripts.boundary.required import required_str  # noqa: E402
-from scripts.boundary.untyped import is_object_dict, is_object_list, object_of  # noqa: E402
+# root comes first on sys.path for `base.host.boundary` (standard library only).
+from base.host.boundary.fields import (  # noqa: E402
+    optional_list_field,
+    optional_object_field,
+    optional_str_field,
+    str_field,
+)
+from base.host.boundary.json_values import is_object_dict, is_object_list  # noqa: E402
+from base.host.boundary.options import options  # noqa: E402
+from base.host.boundary.untyped import object_of  # noqa: E402
 
 MARKER = "<!-- weekly-dependency-audit -->"
 _TITLE = "Weekly dependency audit: findings need attention"
@@ -116,7 +121,7 @@ def osv_severity(advisory_ids: list[str], fetch: Fetch) -> str:
             continue
         if not is_object_dict(record):
             continue
-        specific = optional_object(record, "database_specific") or {}
+        specific = optional_object_field(record, "database_specific") or {}
         severity = specific.get("severity")
         if isinstance(severity, str) and severity.lower() in _SEVERITY_RANK:
             return severity.lower()
@@ -124,7 +129,7 @@ def osv_severity(advisory_ids: list[str], fetch: Fetch) -> str:
 
 
 def _aliases(entry: Mapping[str, object]) -> list[str]:
-    aliases = optional_list(entry, "aliases") or []
+    aliases = optional_list_field(entry, "aliases") or []
     return [alias for alias in aliases if isinstance(alias, str) and alias.startswith("GHSA-")]
 
 
@@ -136,20 +141,20 @@ def python_vulnerabilities(audit_json: Mapping[str, object], fetch: Fetch) -> li
     for entry in entries:
         if not is_object_dict(entry):
             raise TypeError("uv audit JSON vulnerability is not an object")
-        dependency = optional_object(entry, "dependency")
+        dependency = optional_object_field(entry, "dependency")
         if dependency is None:
             raise TypeError("uv audit JSON vulnerability lacks its dependency")
-        ids = [required_str(entry, "id"), *_aliases(entry)]
-        fix_versions = optional_list(entry, "fix_versions") or []
+        ids = [str_field(entry, "id"), *_aliases(entry)]
+        fix_versions = optional_list_field(entry, "fix_versions") or []
         found.append(
             Vulnerability(
                 ecosystem="python",
-                package=required_str(dependency, "name"),
-                version=required_str(dependency, "version"),
-                advisory=required_str(entry, "display_id"),
+                package=str_field(dependency, "name"),
+                version=str_field(dependency, "version"),
+                advisory=str_field(entry, "display_id"),
                 severity=osv_severity(ids, fetch),
                 fix=", ".join(str(version) for version in fix_versions) or "none",
-                summary=required_str(entry, "summary"),
+                summary=str_field(entry, "summary"),
             )
         )
     return found
@@ -255,7 +260,8 @@ def _advisory_versions(findings: list[object]) -> list[str]:
         {
             version
             for finding in findings
-            if is_object_dict(finding) and (version := optional_str(finding, "version")) is not None
+            if is_object_dict(finding)
+            and (version := optional_str_field(finding, "version")) is not None
         }
     )
 
@@ -360,7 +366,7 @@ def latest_binaries(
         data = gh_api(f"repos/{repo}/releases/latest")
         if not is_object_dict(data):
             raise TypeError(f"{repo} latest release is not an object")
-        return required_str(data, "tag_name")
+        return str_field(data, "tag_name")
 
     tags = gh_api("repos/pgvector/pgvector/tags?per_page=100")
     if not is_object_list(tags):
@@ -368,8 +374,7 @@ def latest_binaries(
     pgvector_tags = [
         name
         for tag in tags
-        if is_object_dict(tag)
-        and re.fullmatch(r"v\d+\.\d+\.\d+", name := required_str(tag, "name"))
+        if is_object_dict(tag) and re.fullmatch(r"v\d+\.\d+\.\d+", name := str_field(tag, "name"))
     ]
     maven = "https://repo1.maven.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-linux-amd64"
     return [

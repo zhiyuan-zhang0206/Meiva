@@ -9,7 +9,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-from scripts.boundary.options import options
+from base.host.boundary.options import options
 from scripts.ci.file_shard_shadow import Plan, RuntimeNode, RuntimeReport
 
 

@@ -47,8 +47,8 @@ from base.cluster.machine import MachineIdentityReader
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.redis_listener import RedisInboundListener
-from cli.boundary.fields import bool_field, int_field, str_field
-from cli.boundary.options import options
+from base.host.boundary.fields import bool_field, int_field, str_field
+from base.host.boundary.options import options
 from cli.commands.agents.cleanup_after import run_then_clean_up
 from cli.commands.agents.impersonation_adapters import (
     RelayAdapter,
