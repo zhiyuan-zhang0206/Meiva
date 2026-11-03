@@ -1,38 +1,43 @@
 #!/usr/bin/env python
-"""Generate the pyright `executionEnvironments` entries for package-level tests directories.
-
-A package's own tests live in `<pkg>/**/tests/`. pyright configures by directory: an
-`executionEnvironments` entry names a root (a plain directory, no globs) and the FIRST
-entry, in list order, whose root contains a file decides that file's rules. A tests
-directory under `base/`, `ops/` or `services/` would inherit the package's seven `error`
-rules; one under `meiva/`, `scripts/` or `meiva_builtins/` would fall to the global `warning`
-and lose the two gated call-signature rules. Either way pyright just stops applying the
-tests standard, silently. So each such directory needs its own entry, listed above the
-entry of its package, and hand-writing one per directory (about 150 are planned) turns
-into hundreds of lines that every test-moving change edits in the same place.
-
-This script owns that list. It reads test hosts from pytest `testpaths`, scans their
-tracked `<pkg>/**/tests/` directories and writes
-one entry per directory that is not already at the tests standard into the region of
-`pyproject.toml` fenced by the BEGIN/END comments below. Everything outside the region is
-hand-written and left byte-for-byte alone.
-
-* The region is sorted by root and each entry is its own five lines, blank line included,
-  so two changes adding entries only collide when their roots are neighbors in that order.
-  Either resolves by running this script again.
-* The entry sets exactly the two call-signature rules to `error`; the other five rules
-  come from the global configuration (`warning`).
-* A tests directory inside a hand-written entry that carries more than rules (the
-  `extraPaths` of `meiva_builtins/skills/integrations/web-ai`) repeats those settings, because the
-  generated entry takes precedence and would otherwise drop them.
-
-Run after adding, moving or removing a tests directory, or let the pre-commit
-`lint-pyright-test-environments` hook fail loud:
-
-    .venv/bin/python scripts/codegen/gen_pyright_test_environments.py
-
-`--check` exits 1 without writing when the region is stale.
-"""
+# meiva:note
+# Generate the pyright `executionEnvironments` entries for package-level tests directories.
+#
+# A package's own tests live in `<pkg>/**/tests/`. pyright configures by directory: an
+# `executionEnvironments` entry names a root (a plain directory, no globs) and the FIRST
+# entry, in list order, whose root contains a file decides that file's rules. A tests
+# directory under `base/`, `ops/` or `services/` would inherit the package's seven `error`
+# rules; one under `meiva/` or `meiva_builtins/` would fall to the global `warning` and lose the
+# two gated call-signature rules. Either way pyright just stops applying the
+# tests standard, silently. So each such directory needs its own entry, listed above the
+# entry of its package, and hand-writing one per directory (about 150 are planned) turns
+# into hundreds of lines that every test-moving change edits in the same place.
+#
+# This script owns that list. It reads test hosts from pytest `testpaths`, scans their
+# tracked `<pkg>/**/tests/` directories and writes
+# one entry per directory that is not already at the tests standard into the region of
+# `pyproject.toml` fenced by the BEGIN/END comments below. Everything outside the region is
+# hand-written and left byte-for-byte alone.
+#
+# * The region is sorted by root and each entry is its own five lines, blank line included,
+#   so two changes adding entries only collide when their roots are neighbors in that order.
+#   Either resolves by running this script again.
+# * The entry sets exactly the two call-signature rules to `error`; the other five rules
+#   come from the global configuration (`warning`).
+# * A root listed in `PROMOTED_ROOTS` has paid off those five rules in its tests too, so its
+#   tests directories get no entry: they inherit the package entry's seven `error` rules. The
+#   generator refuses a promoted root whose package entry does not hold all seven at `error`,
+#   so a promotion cannot silently leave its tests unchecked.
+# * A tests directory inside a hand-written entry that carries more than rules (the
+#   `extraPaths` of `meiva_builtins/skills/integrations/web-ai`) repeats those settings, because the
+#   generated entry takes precedence and would otherwise drop them.
+#
+# Run after adding, moving or removing a tests directory, or let the pre-commit
+# `lint-pyright-test-environments` hook fail loud:
+#
+#     .venv/bin/python scripts/codegen/gen_pyright_test_environments.py
+#
+# `--check` exits 1 without writing when the region is stale.
+#
 
 from __future__ import annotations
 
@@ -66,6 +71,11 @@ OTHER_RULES = (
     "reportUnknownLambdaType",
     "reportMissingTypeArgument",
 )
+# meiva:note
+# Roots whose tests directories already meet the production rung (all seven rules at `error`
+# through the package's own entry): they need no tests entry. Promote a root here only after
+# zeroing the five tests-rung rules in every one of its tests directories.
+PROMOTED_ROOTS: tuple[str, ...] = ("scripts",)
 # What every test file is held to: the tests ladder rung, wherever the file sits.
 TESTS_STANDARD = {
     **dict.fromkeys(CALL_SIGNATURE_RULES, "error"),
@@ -162,7 +172,15 @@ def generate(pyproject_text: str, tracked: Iterable[str]) -> str:
     region = _region(pyproject_text)
     handwritten = pyproject_text[: region.start()] + pyproject_text[region.end() :]
     config = tomllib.loads(handwritten)["tool"]["pyright"]
-    rendered = _render(_entries(config, tests_roots(tracked, pytest_test_hosts(handwritten))))
+    roots = tests_roots(tracked, pytest_test_hosts(handwritten))
+    promoted = [root for root in roots if root.split("/", 1)[0] in PROMOTED_ROOTS]
+    unheld = [root for root in promoted if set(effective_rules(config, root).values()) != {"error"}]
+    if unheld:
+        raise SystemExit(
+            f"promoted tests directories are not held to all seven rules at error: {unheld}. "
+            "Give their package a hand-written entry, or drop the root from PROMOTED_ROOTS."
+        )
+    rendered = _render(_entries(config, [root for root in roots if root not in promoted]))
     return pyproject_text[: region.start()] + rendered + pyproject_text[region.end() :]
 
 
@@ -194,7 +212,9 @@ def _tracked_python_files(repo_root: Path) -> list[str]:
 
 
 def main(argv: list[str], *, repo_root: Path = _REPO_ROOT) -> int:
-    parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n", 1)[0])
+    parser = argparse.ArgumentParser(
+        description="Generate the pyright executionEnvironments entries for package-level tests directories."
+    )
     parser.add_argument(
         "--check", action="store_true", help="exit 1 if pyproject.toml is stale; write nothing"
     )

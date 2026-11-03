@@ -7,9 +7,6 @@ import pytest
 
 from scripts.content_lint import lint_doc_symbols as mod
 
-# Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
-# pyright: reportUnknownMemberType = warning
-
 
 class _BoundLint:
     def __init__(self, docs: Path, skills: Path) -> None:
@@ -26,7 +23,7 @@ class _BoundLint:
 
 
 @pytest.fixture
-def lint(tmp_path: Path):
+def lint(tmp_path: Path) -> tuple[_BoundLint, Path]:
     """Point BOTH scan roots at throwaway dirs; valid_meiva_names() still reads the
     real live meiva namespace (that's the source of truth under test).
 
@@ -41,7 +38,7 @@ def lint(tmp_path: Path):
 
 
 @pytest.fixture
-def dev_skills(tmp_path: Path):
+def dev_skills(tmp_path: Path) -> tuple[_BoundLint, Path]:
     """The `.agents/skills/` scan root, isolated; conventions pointed at an empty dir."""
     docs = tmp_path / "docs" / "conventions"
     docs.mkdir(parents=True)
@@ -51,7 +48,7 @@ def dev_skills(tmp_path: Path):
     return _BoundLint(docs, skills_root), skills
 
 
-def test_dev_skill_fake_ref_is_flagged(dev_skills):
+def test_dev_skill_fake_ref_is_flagged(dev_skills: tuple[_BoundLint, Path]):
     mod, skills = dev_skills
     # A dev skill is a procedural instruction an agent follows now, so a dangling
     # meiva.* in it is the same drift class conventions is gated for.
@@ -59,32 +56,32 @@ def test_dev_skill_fake_ref_is_flagged(dev_skills):
     assert mod.check() == 1
 
 
-def test_dev_skill_valid_ref_passes(dev_skills):
+def test_dev_skill_valid_ref_passes(dev_skills: tuple[_BoundLint, Path]):
     mod, skills = dev_skills
     (skills / "SKILL.md").write_text("Read it via `meiva.files.read`.\n")
     assert mod.check() == 0
 
 
-def test_valid_ref_in_code_span_passes(lint):
+def test_valid_ref_in_code_span_passes(lint: tuple[_BoundLint, Path]):
     mod, docs = lint
     # meiva.watcher is a real submodule; in a backtick span -> clean.
     (docs / "a.md").write_text("The cron surface lives in `meiva.watcher.cron`.\n")
     assert mod.check() == 0
 
 
-def test_fake_ref_in_code_span_is_flagged(lint):
+def test_fake_ref_in_code_span_is_flagged(lint: tuple[_BoundLint, Path]):
     mod, docs = lint
     (docs / "a.md").write_text("Call `meiva.bogus.frobnicate()` to do the thing.\n")
     assert mod.check() == 1
 
 
-def test_fake_ref_in_fenced_block_is_flagged(lint):
+def test_fake_ref_in_fenced_block_is_flagged(lint: tuple[_BoundLint, Path]):
     mod, docs = lint
     (docs / "a.md").write_text("```python\nmeiva.bogus.run()\n```\n")
     assert mod.check() == 1
 
 
-def test_prose_only_mention_not_flagged(lint):
+def test_prose_only_mention_not_flagged(lint: tuple[_BoundLint, Path]):
     mod, docs = lint
     # Bare prose 'meiva.bogus' with NO backticks -> the FP guard means it is not
     # checked. This is the load-bearing zero-false-positive case.
@@ -92,21 +89,21 @@ def test_prose_only_mention_not_flagged(lint):
     assert mod.check() == 0
 
 
-def test_hostname_suffix_not_flagged(lint):
+def test_hostname_suffix_not_flagged(lint: tuple[_BoundLint, Path]):
     mod, docs = lint
     # `meiva.example.com` is a hostname, not a symbol -> domain guard skips it.
     (docs / "a.md").write_text("Reach the gateway at `meiva.example.com`.\n")
     assert mod.check() == 0
 
 
-def test_metasyntactic_placeholder_not_flagged(lint):
+def test_metasyntactic_placeholder_not_flagged(lint: tuple[_BoundLint, Path]):
     mod, docs = lint
     # `help(meiva.X)` is the docstring stand-in for "any submodule" -> meta guard skips it.
     (docs / "a.md").write_text("Drill into a submodule with `help(meiva.X)`.\n")
     assert mod.check() == 0
 
 
-def test_dunder_attr_not_flagged(lint):
+def test_dunder_attr_not_flagged(lint: tuple[_BoundLint, Path]):
     mod, docs = lint
     # `meiva.__all_for_meiva__` is Python protocol surface the design docs cite, not a
     # deletable SDK member -> dunder guard skips it.
@@ -114,7 +111,7 @@ def test_dunder_attr_not_flagged(lint):
     assert mod.check() == 0
 
 
-def test_plugin_namespace_is_valid(lint):
+def test_plugin_namespace_is_valid(lint: tuple[_BoundLint, Path]):
     mod, docs = lint
     # `cwd` is declared by meiva_code as an `SdkNamespace` -> a live meiva.* member,
     # discovered by the plugin-scan half of valid_meiva_names().
@@ -123,7 +120,7 @@ def test_plugin_namespace_is_valid(lint):
     assert mod.check() == 0
 
 
-def test_exemption_path(lint):
+def test_exemption_path(lint: tuple[_BoundLint, Path]):
     bound, docs = lint
     (docs / "a.md").write_text("A special `meiva.legacyshim` reference.\n")
     assert bound.check() == 1  # not a member -> flagged

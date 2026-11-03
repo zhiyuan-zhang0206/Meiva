@@ -124,6 +124,9 @@ def _run_watcher(
 
     meiva_home = tmp_path / "meiva-home"
 
+    def _ignore_atexit(*_args: object, **_kwargs: object) -> None:
+        return None
+
     def workspace_for_test(_agent_id: int, *, home: Path) -> Path:
         # meiva:note
         # The template must hand the workspace lookup the home its entry resolved, not read the environment again below it.
@@ -156,7 +159,7 @@ def _run_watcher(
             {
                 "__name__": run_name,
                 "atexit": types.SimpleNamespace(
-                    register=on_atexit if on_atexit is not None else lambda *_a, **_kw: None
+                    register=on_atexit if on_atexit is not None else _ignore_atexit
                 ),
                 "meiva": fake_meiva,
                 "Clock": types.SimpleNamespace(from_settings=lambda: clock),

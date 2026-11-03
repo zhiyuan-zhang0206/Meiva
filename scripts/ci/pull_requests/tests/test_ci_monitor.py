@@ -28,10 +28,6 @@ from base.host.system.tests.fake_commands import Reply, fake_host
 from scripts.ci.pull_requests import status
 from scripts.ci.pull_requests.tests.ci_evidence import monitor_host, probe, rollup
 
-# Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
-# pyright: reportUnknownMemberType = warning
-# pyright: reportUnknownArgumentType = warning
-
 CIStatus = status.CIStatus
 TEST_NOW = datetime(2026, 9, 13, 12, 0, tzinfo=UTC)
 
@@ -59,7 +55,7 @@ def status_check_rollup_entry(
     workflow: str = "CI",
     status: str = "COMPLETED",
     completed_at: str | None = None,
-) -> dict:
+) -> dict[str, object]:
     """One statusCheckRollup entry. `workflow=""` models a GitHub App check."""
     return {
         "__typename": "CheckRun",
@@ -119,7 +115,7 @@ def gh_runner(calls: list[list[str]]) -> Host:
 @pytest.fixture
 def gh() -> Callable[..., Host]:
     def install(
-        checks: list[dict],
+        checks: list[dict[str, object]],
         mergeable: str = "MERGEABLE",
         *,
         scheduled: list[str] | None = None,
@@ -317,9 +313,10 @@ def test_empty_rollup_with_an_unanswerable_probe_is_error(gh: Any) -> None:
 
 
 def test_gh_failure_is_an_error() -> None:
-    host = fake_host(
-        lambda argv, **_k: subprocess.CompletedProcess(list(argv), 1, "", "gh: not authenticated")
-    )
+    def unauthenticated(argv: Sequence[str], **_: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(list(argv), 1, "", "gh: not authenticated")
+
+    host = fake_host(unauthenticated)
     r = status.check_ci("1", host=host, clock=TEST_CLOCK, workflows=True)
     assert r.verdict is CIStatus.ERROR
     assert "not authenticated" in r.error_detail
@@ -457,7 +454,7 @@ def test_main_workflow_probe_reads_completed_runs_of_the_main_workflow() -> None
     assert status.main_workflow_run_completed("abc123", None, host=host) is False
 
 
-def core_rollup(conclusion: str, *, classify: str = "SKIPPED") -> list[dict]:
+def core_rollup(conclusion: str, *, classify: str = "SKIPPED") -> list[dict[str, object]]:
     return [
         APP_CHECK,
         status_check_rollup_entry("classify change", classify),
@@ -607,7 +604,9 @@ def diag_gh() -> Any:
     return _install
 
 
-def diag_pr_view(mergeable: str = "MERGEABLE", checks: list[dict] | None = None) -> str:
+def diag_pr_view(
+    mergeable: str = "MERGEABLE", checks: list[dict[str, object]] | None = None
+) -> str:
     return json.dumps(
         {
             "mergeable": mergeable,
@@ -618,11 +617,11 @@ def diag_pr_view(mergeable: str = "MERGEABLE", checks: list[dict] | None = None)
     )
 
 
-def diag_check(name: str, conclusion: str = "FAILURE") -> dict:
+def diag_check(name: str, conclusion: str = "FAILURE") -> dict[str, object]:
     return {"name": name, "conclusion": conclusion, "status": "COMPLETED"}
 
 
-def diag_job(name: str, job_id: int = 9, conclusion: str = "FAILURE") -> dict:
+def diag_job(name: str, job_id: int = 9, conclusion: str = "FAILURE") -> dict[str, object]:
     """Real-shaped REST job object: numeric `.id`, lowercase conclusion."""
     return {"name": name, "id": job_id, "run_id": 10, "conclusion": conclusion.lower()}
 
@@ -647,7 +646,7 @@ def diag_runs(run_id: int = 10) -> str:
     )
 
 
-def diag_jobs_payload(job: dict) -> str:
+def diag_jobs_payload(job: dict[str, object]) -> str:
     """Real-shaped REST jobs payload wrapping one projected job (issue #1945)."""
     return json.dumps({"total_count": 1, "jobs": [job]})
 
