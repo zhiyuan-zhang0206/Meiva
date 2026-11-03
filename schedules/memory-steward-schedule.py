@@ -17,7 +17,12 @@ MEMORY_ARBITRATOR_LABEL = "memory-arbiter"
 # The 12:00 merge trigger was removed on 2026-08-01: merge/close/revert is the merge
 # captain's job, not the arbiter's.
 TRIGGERS = (
-    Trigger("0 4 * * *", "Daily consolidation (commit + push + PR merge)"),
+    Trigger(
+        "0 4 * * *",
+        "Daily consolidation (commit + push + PR merge) — merge only PRs whose `validate`"
+        " check is green, whose author is not the merger, and write the collector snapshot"
+        " (each face's HEAD + dirty count) into the PR body first",
+    ),
     Trigger("0 7 * * *", "Daily health check — OKF, size, dedup, stale"),
 )
 
