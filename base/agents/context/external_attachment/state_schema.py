@@ -62,6 +62,13 @@ class BaseAgentState(BaseModel):
     skill_reads: Annotated[list[str], operator.add] = Field(default_factory=list)
     halted: bool = False
     interrupted_by_restart: bool = False
+    # meiva:note
+    # Why this turn ended (`base/agents/observation/ended_with.py`): the agent's own
+    # declaration, resolved at claim's turn boundary; the float holds a halting model
+    # call's record until that boundary decides whether the turn ended there.
+    ended_with: str | None = None
+    ended_with_reason: str | None = None
+    turn_end_held_seconds: float | None = None
     harness_pending_input: dict[str, object] | None = None
     turn_active: bool = False
     non_human_wake: bool = False

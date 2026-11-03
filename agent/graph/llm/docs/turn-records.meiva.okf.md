@@ -13,6 +13,23 @@ attempt's traceback reaches the record. Both emit sites name the owning agent
 explicitly — the process-wide log binding is the no-agent sentinel, and the
 Inspector activity projection drops records without it.
 
+The record of the attempt that stops the model loop is emitted one node later, by the
+turn boundary (`agent/graph/claim/turn_end.py`): only claim knows whether the turn ended
+there, so it holds the measured call and writes it once, with `ended_with` — the closed
+vocabulary of `base/agents/observation/ended_with.py`:
+
+- `no_input` — claim ended the turn at its idle boundary: nothing more arrived;
+- `budget` — a budget rail ended it (truncated output, exhausted retry budget), the only
+  value that also appears on an `ok=False` record;
+- `done` / `waiting:<object>` / `deferred:time` — the agent's own declaration, carried by
+  `meiva.state_update` (`ended_with` + `ended_with_reason`) and validated where it enters
+  the state: `waiting:` requires its object, and `deferred:time` requires the one-sentence
+  reason that makes a dependency-free delay attributable.
+
+A value outside that set is an invalid record. A turn that continues past its halt, and a
+turn ended by terminate or restart, carry no `ended_with`: the loop did not end those by
+running out of input, and it does not guess.
+
 A failed try publishes no Error: retries may still succeed, so Error is
 published once by the runloop after the retry layer is exhausted, while
 Cancelled stays with the node. Only a success whose command carries `messages`

@@ -8,7 +8,7 @@ from langchain_core.runnables import RunnableConfig
 
 from agent.graph.llm._backoff import Attempt
 from agent.graph.llm.node import llm_attempt
-from agent.graph.llm.tests.llm_support import ScriptedModel, end_turn_chunk, llm_runtime
+from agent.graph.llm.tests.llm_support import ScriptedModel, llm_runtime, tool_call_chunk
 from agent.state import AgentState
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
@@ -18,10 +18,13 @@ _CONFIG: RunnableConfig = {"configurable": {"thread_id": "1"}}
 _STATE = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
 
+# meiva:note
+# A tool call keeps the turn going, so that attempt emits its own record — the halt record
+# is the turn boundary's (agent/graph/claim/turn_end.py), which stamps the same agent id.
 async def test_turn_end_records_carry_the_owning_agent(
     loguru_records: LogRecords, model_catalog: ModelCatalog, database_gate: ProcessDbGate
 ) -> None:
-    model = ScriptedModel(scripts=[[end_turn_chunk()]])
+    model = ScriptedModel(scripts=[[tool_call_chunk()]])
 
     result = await llm_attempt(
         _STATE,

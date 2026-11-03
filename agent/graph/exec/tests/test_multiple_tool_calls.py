@@ -340,6 +340,38 @@ async def test_a_compacting_call_discards_the_findings_of_its_batch(
     assert result["security_findings"] == []
 
 
+# meiva:note
+# The turn-end declaration is agent input, so it is validated where it enters the state and
+# never reaches a `turn_end` record outside the closed set.
+# meiva:link agent/graph/llm/docs/turn-records.meiva.okf.md
+async def test_a_turn_end_declaration_reaches_the_state(database_gate: ProcessDbGate) -> None:
+    result = await _run_calls(
+        _state(
+            "import meiva\n"
+            "meiva.state_update['ended_with'] = 'deferred:time'\n"
+            "meiva.state_update['ended_with_reason'] = 'night, continue after 09:00'\n"
+        ),
+        _runtime(database_gate),
+        _config(),
+        process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
+    )
+
+    assert result["ended_with"] == "deferred:time"
+    assert result["ended_with_reason"] == "night, continue after 09:00"
+
+
+async def test_a_turn_end_declaration_outside_the_set_aborts_the_turn(
+    database_gate: ProcessDbGate,
+) -> None:
+    with pytest.raises(ValueError, match="ended_with must be one of"):
+        await _run_calls(
+            _state("import meiva\nmeiva.state_update['ended_with'] = 'finished for today'\n"),
+            _runtime(database_gate),
+            _config(),
+            process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
+        )
+
+
 async def test_unknown_tool_does_not_consume_sibling_code() -> None:
     state = _state("print('must not run')", "print('runs')")
     ai = state.messages[-1]

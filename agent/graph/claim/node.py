@@ -84,6 +84,7 @@ from ._dispatch import handle_heartbeat as handle_heartbeat
 from ._present import publish_end_timeline_snapshot, publish_inbound_committed
 from ._routing import ClaimGoto, resolve_routing, route_target
 from .harness_turn import render_messages, turn_key
+from .turn_end import settle_turn_end
 
 
 def claim_will_idle(state: _state.AgentState, *, harness: Harness = Harness.MEIVA) -> bool:
@@ -316,4 +317,8 @@ async def claim_node(
         timeline_limit=runtime.context.require_agent().read("display", "timeline_default_limit"),
         publish_timeline=runtime.context.harness is Harness.MEIVA,
     ):
-        return await claim_node_impl(state, runtime, config)
+        command = await claim_node_impl(state, runtime, config)
+    # meiva:note
+    # The turn boundary emits the record a halting model call held, with the reason this
+    # decision point resolved (`turn_end.py`).
+    return settle_turn_end(state, command, agent_id)

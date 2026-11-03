@@ -51,6 +51,20 @@ def end_turn_chunk(text: str = "ok", *, output_tokens: int = 1) -> AIMessageChun
 
 
 # meiva:note
+# The final chunk of an answer that calls a tool: the terminal reason claims the tool call
+# the chunk carries, which is what the node's validators require of it.
+def tool_call_chunk(name: str = "execute_code") -> AIMessageChunk:
+    return AIMessageChunk(
+        content="",
+        response_metadata={"model_provider": "anthropic", "stop_reason": "tool_use"},
+        tool_call_chunks=[
+            {"name": name, "args": '{"code": "print(1)"}', "id": "call_1", "index": 0}
+        ],
+        usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+    )
+
+
+# meiva:note
 # Each streaming request plays the next script in `scripts`; what is left in `scripts` afterwards is the number of tries the caller never made. A non-streaming call is a failure of the caller, since the node has no fallback request.
 class ScriptedModel(BaseChatModel):
     scripts: SkipValidation[list[Sequence[Step]]] = Field(default_factory=list)

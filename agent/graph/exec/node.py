@@ -71,6 +71,7 @@ from agent.nodes import AFTER_EXEC, EXEC
 from agent.state import AttachState, validate_plugin_state_keys
 from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.messages.kwargs import ExecStatus
+from base.agents.observation import ended_with
 from base.events.live.projection import Cancelled, ExecOutput, ExecStart
 from base.events.live.publisher import AgentEventPublisher
 from base.host.env.agent_slices import AgentSlices
@@ -241,6 +242,10 @@ async def run_agent_code(
         raise TypeError(payload.state_update_error)
     delta = payload.state_update if payload is not None else None
     plugin_state_update = validate_plugin_state_keys(dict(delta), state.__class__) if delta else {}
+    if "ended_with" in plugin_state_update:
+        ended_with.validate(
+            plugin_state_update["ended_with"], reason=plugin_state_update.get("ended_with_reason")
+        )
     attachments = plugin_state_update.pop("attach", None)
     sdk_calls = payload.sdk_calls if payload is not None else None
     return result, plugin_state_update, exec_ms, attachments, sdk_calls

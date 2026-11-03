@@ -12,7 +12,12 @@ from langchain_core.runnables import RunnableConfig
 
 from agent.graph.llm._backoff import Attempt
 from agent.graph.llm.node import llm_attempt, llm_node
-from agent.graph.llm.tests.llm_support import ScriptedModel, end_turn_chunk, llm_runtime
+from agent.graph.llm.tests.llm_support import (
+    ScriptedModel,
+    end_turn_chunk,
+    llm_runtime,
+    tool_call_chunk,
+)
 from agent.state import AgentState
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
@@ -62,6 +67,10 @@ async def test_turn_end_ok_false_record_carries_exception(
     assert "simulated LLM timeout" in str(rec["exception"].value)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
 
+# meiva:note
+# The attempt that stops the model loop hands its record to the turn boundary
+# (`agent/graph/claim/turn_end.py`), which is the only place that knows whether the turn
+# ended there; that is why it carries `turn_end_held_seconds` and no line yet.
 async def test_turn_end_ok_true_record_no_exception(
     loguru_records: LogRecords, model_catalog: ModelCatalog, database_gate: ProcessDbGate
 ) -> None:
@@ -77,13 +86,30 @@ async def test_turn_end_ok_true_record_no_exception(
     )
 
     assert result.update is not None and result.update["messages"][0].content == "ok"
+    assert loguru_records.events("turn_end") == [], "a halting attempt holds its record"
+    assert result.update["turn_end_held_seconds"] is not None
+    assert "meiva_non_human_wake" not in result.update["messages"][0].additional_kwargs
+
+
+# meiva:note
+# A tool call keeps the turn going, so that attempt's record is not the turn's end.
+async def test_turn_end_ok_true_record_emitted_when_the_loop_continues(
+    loguru_records: LogRecords, model_catalog: ModelCatalog, database_gate: ProcessDbGate
+) -> None:
+    model = ScriptedModel(scripts=[[tool_call_chunk()]])
+
+    result = await llm_node(
+        _STATE,
+        llm_runtime(model, model_catalog=model_catalog, database_gate=database_gate),
+        _config_with_thread(),
+        rng=_rng(),
+    )
+
+    assert result.update is not None and result.update.get("turn_end_held_seconds") is None
     turn_end_records = loguru_records.events("turn_end")
     assert len(turn_end_records) == 1
-    rec = turn_end_records[0]
-    assert rec["extra"]["ok"] is True
-    assert rec["level"].name == "INFO"  # pyright: ignore[reportUnknownMemberType]
-    assert rec["exception"] is None
-    assert "meiva_non_human_wake" not in result.update["messages"][0].additional_kwargs
+    assert turn_end_records[0]["extra"]["ok"] is True
+    assert turn_end_records[0]["exception"] is None
 
 
 async def test_llm_node_stamps_meiva_non_human_wake_only_when_state_non_human_wake(
