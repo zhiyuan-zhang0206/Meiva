@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
@@ -12,6 +13,7 @@ from psycopg_pool import ConnectionPool
 import services.wake.schedule_manager.manager as sm
 from base.cluster import session_name
 from base.config import settings
+from base.daemon.schedules.heartbeat import beat_path, write_beat
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.tests.serving_root import observe
 from base.sessions.protocol import SessionBackend
@@ -409,3 +411,116 @@ def test_a_refused_launch_does_not_consume_the_auto_restart_budget(
     assert backend.created == []
     assert "schedule_auto_restart" not in emitted_events.names()
     assert "schedule_auto_restart_suppressed" not in emitted_events.names()
+
+
+# meiva:note
+# The round-deadline alert: a resident schedule states when it will be back, and the
+# manager reports the promise it stopped keeping. Late, on time, no heartbeat at all,
+# and a session already gone (which belongs to `schedule_stalled`, never to both).
+def _write_beat(home: Path, sid: int, *, offset_s: float) -> None:
+    now = datetime.now(UTC)
+    write_beat(home, sid, written_at=now, alive_by=now + timedelta(seconds=offset_s))
+
+
+def _hold_live(backend: _FakeBackend, sid: int) -> None:
+    name = session_name(f"schedule-{sid}")
+    if name not in backend.live:
+        backend.live.append(name)
+
+
+def test_a_late_round_alerts_once_and_survives_a_restart(
+    unit_home: Path,
+    pool: ConnectionPool[psycopg.Connection],
+    fake_session: tuple[_FakeBackend, list[int]],
+    emitted_events: EmittedEvents,
+    db_conn: psycopg.Connection,
+) -> None:
+    backend, _launched = fake_session
+    sid = _insert(db_conn, "late-round")
+    _set_status(db_conn, sid, "running")
+    _hold_live(backend, sid)
+    _write_beat(unit_home, sid, offset_s=-600)
+
+    schedule_manager(pool, backend).reconcile(now=NOW)
+    assert emitted_events.names() == ["schedule_not_progressing"]
+    schedule_manager(pool, backend).reconcile(now=NOW)
+    assert emitted_events.names() == ["schedule_not_progressing"]
+
+
+def test_an_on_time_round_is_silent(
+    unit_home: Path,
+    pool: ConnectionPool[psycopg.Connection],
+    fake_session: tuple[_FakeBackend, list[int]],
+    emitted_events: EmittedEvents,
+    db_conn: psycopg.Connection,
+) -> None:
+    backend, _launched = fake_session
+    sid = _insert(db_conn, "on-time-round")
+    _set_status(db_conn, sid, "running")
+    _hold_live(backend, sid)
+    _write_beat(unit_home, sid, offset_s=600)
+
+    schedule_manager(pool, backend).reconcile(now=NOW)
+    assert emitted_events.names() == []
+
+
+def test_a_schedule_without_a_heartbeat_is_silent(
+    unit_home: Path,
+    pool: ConnectionPool[psycopg.Connection],
+    fake_session: tuple[_FakeBackend, list[int]],
+    emitted_events: EmittedEvents,
+    db_conn: psycopg.Connection,
+) -> None:
+    backend, _launched = fake_session
+    sid = _insert(db_conn, "no-heartbeat")
+    _set_status(db_conn, sid, "running")
+    _hold_live(backend, sid)
+    assert not beat_path(unit_home, sid).exists()
+
+    schedule_manager(pool, backend).reconcile(now=NOW)
+    assert emitted_events.names() == []
+
+
+def test_a_sessionless_schedule_reports_the_stall_and_not_the_round(
+    unit_home: Path,
+    pool: ConnectionPool[psycopg.Connection],
+    fake_session: tuple[_FakeBackend, list[int]],
+    emitted_events: EmittedEvents,
+    db_conn: psycopg.Connection,
+) -> None:
+    backend, _launched = fake_session
+    sid = _insert(db_conn, "sessionless-late-round")
+    _set_status(db_conn, sid, "running")
+    _write_beat(unit_home, sid, offset_s=-600)
+
+    schedule_manager(pool, backend).reconcile(now=NOW)
+    _age_not_live(db_conn, sid, sm.STALL_ALERT_AFTER_S + 1)
+    schedule_manager(pool, backend).reconcile(now=NOW)
+
+    assert emitted_events.names() == ["schedule_stalled"]
+
+
+def test_a_fresh_round_rearms_the_alert(
+    unit_home: Path,
+    pool: ConnectionPool[psycopg.Connection],
+    fake_session: tuple[_FakeBackend, list[int]],
+    emitted_events: EmittedEvents,
+    db_conn: psycopg.Connection,
+) -> None:
+    backend, _launched = fake_session
+    sid = _insert(db_conn, "rearmed-round")
+    _set_status(db_conn, sid, "running")
+    _hold_live(backend, sid)
+    _write_beat(unit_home, sid, offset_s=-600)
+
+    mgr = schedule_manager(pool, backend)
+    mgr.reconcile(now=NOW)
+    assert emitted_events.names() == ["schedule_not_progressing"]
+
+    _write_beat(unit_home, sid, offset_s=600)
+    mgr.reconcile(now=NOW)
+    assert emitted_events.names() == ["schedule_not_progressing"]
+
+    _write_beat(unit_home, sid, offset_s=-900)
+    mgr.reconcile(now=NOW)
+    assert emitted_events.names() == ["schedule_not_progressing", "schedule_not_progressing"]

@@ -247,6 +247,19 @@ class ScheduleStalled(TypedDict):
     stalled_seconds: float
 
 
+# meiva:note
+# `schedule_not_progressing` payload — services/wake/schedule_manager/round_progress.py.
+# Emitted once per episode when a resident schedule's session is still live but the round
+# it promised (`alive_by` in its heartbeat) never started. A live session alone cannot say
+# this: the loop writes a heartbeat every round, including rounds that found nothing to do,
+# so a deadline that stops moving is the loop itself having stopped.
+class ScheduleNotProgressing(TypedDict):
+    schedule_id: int
+    status: str
+    overdue_seconds: float
+    alive_by: str
+
+
 class ScheduleConvergenceAbandoned(TypedDict):
     """`schedule_convergence_abandoned` payload — services/wake/schedule_manager/manager.py.
 
@@ -583,6 +596,14 @@ EVENTS: dict[str, EventSpec] = {
         payload=ScheduleLaunchRefused,
         tier="anomaly",
         site="services/wake/schedule_manager/manager.py:_emit_launch_refused",
+    ),
+    "schedule_not_progressing": telemetry_event(
+        "schedule_not_progressing",
+        "a resident schedule's own next-round deadline passed while its session stayed live",
+        payload=ScheduleNotProgressing,
+        tier="anomaly",
+        persist=True,
+        site=("services/wake/schedule_manager/manager.py:_report_late_rounds telemetry.emit"),
     ),
     "schedule_stalled": telemetry_event(
         "schedule_stalled",
