@@ -14,6 +14,7 @@ from meiva.sdk_surface.process_context import MeivaContext
 from meiva.sdk_surface.pure.caller.harness_plan import harness_name
 from meiva.sdk_surface.pure.caller.identity_plan import (
     ActorFacts,
+    CallerFacts,
     actor_after_external,
     actor_before_external,
     attributed_agent_id,
@@ -109,6 +110,23 @@ def require_lease_free_agent_id() -> int:
     if invalid is not None:
         raise invalid[0](invalid[1])
     return actor
+
+
+# meiva:note
+# The bound caller's facts, or None when nothing is bound: the non-raising read.
+#
+# Its one consumer is the schedule steering rule (`schedule_capability.py`). It deliberately does
+# not validate a borrowed lease -- `require_actor` does that, and `agent_id` does it for the id --
+# so a second caller that reads it to decide something about safety would skip that check. A second
+# consumer comes to the owner of this door first; it is not a same-shape reuse.
+#
+# `None` means no identity is bound at all; it never means "the identity is invalid" (an invalid
+# borrowed lease raises on the validating reads instead of turning into None here).
+#
+# It stays out of the `meiva.*` user surface: `meiva.sdk_surface` is the SDK's own namespace, not
+# the one agents call, and this read is not there to make that easier.
+def bound_caller() -> CallerFacts | None:
+    return caller_facts(_bound())
 
 
 def require_actor(context: MeivaContext | None = None) -> str:

@@ -43,7 +43,7 @@ from base.api_contracts.agent_contract import (
 )
 from base.api_contracts.agent_contract import SpawnTargetNotAgentRunner as SpawnTargetNotAgentRunner
 from meiva import gateway_client
-from meiva.agents import peers, row_text
+from meiva.agents import peers, row_text, schedule_capability
 from meiva.agents.contracts import (
     CommandInfo,
     HarnessAvailability,
@@ -466,6 +466,7 @@ def retry_launch(
     A deliberate new retry needs a new key and the latest observed attempt.
     """
     agent_id = coerce_typed(agent_id, "agent_id", int)
+    schedule_capability.assert_schedule_capability("agents.retry_launch", target_agent_id=agent_id)
     return gateway_client.retry_launch(
         agent_id,
         idempotency_key=idempotency_key,
@@ -568,6 +569,7 @@ def terminate(
     tasks it still owns, most recently updated first, or None) and
     `shell_sessions` (a `ShellSessionsKill`, or None when no kill ran)."""
     agent_id = coerce_typed(agent_id, "agent_id", int)
+    schedule_capability.assert_schedule_capability("agents.terminate", target_agent_id=agent_id)
     message = coerce_str(message, "message", allow_none=True)
     force = coerce_typed(force, "force", bool)
     kill_all_shell_sessions = coerce_typed(kill_all_shell_sessions, "kill_all_shell_sessions", bool)
@@ -598,6 +600,7 @@ def restart(
     `config_overlay` is an optional flat {field_name: value} mapping merged
     into the agent's persistent configuration (such as harness or llm_model)."""
     agent_id = coerce_typed(agent_id, "agent_id", int)
+    schedule_capability.assert_schedule_capability("agents.restart", target_agent_id=agent_id)
     message = coerce_str(message, "message")
     if not message.strip():
         raise ValueError("message must not be blank")
@@ -613,6 +616,7 @@ def cancel(agent_id: int) -> CancelResult:
     `cancelled` means a running turn was cancelled, `not_running` that there
     was none. The next input starts a fresh turn."""
     agent_id = coerce_typed(agent_id, "agent_id", int)
+    schedule_capability.assert_schedule_capability("agents.cancel", target_agent_id=agent_id)
     return CancelResult(gateway_client.cancel(agent_id))
 
 
@@ -622,12 +626,14 @@ def compact(agent_id: int) -> None:
     Returns once the request is durable; the summary is generated and applied
     by the agent itself, and no result is reported back."""
     agent_id = coerce_typed(agent_id, "agent_id", int)
+    schedule_capability.assert_schedule_capability("agents.compact", target_agent_id=agent_id)
     gateway_client.compact(agent_id)
 
 
 def resurrect(agent_id: int, prompt: str) -> ResurrectResult:
     """Wake a terminated agent with its previous conversation state intact."""
     agent_id = coerce_typed(agent_id, "agent_id", int)
+    schedule_capability.assert_schedule_capability("agents.resurrect", target_agent_id=agent_id)
     prompt = coerce_str(prompt, "prompt")
     return ResurrectResult(gateway_client.resurrect(agent_id, prompt=prompt))
 

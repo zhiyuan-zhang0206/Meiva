@@ -1,11 +1,13 @@
-exports = ["peers.py"]
+exports = ["peers.py", "schedule_capability.py"]
 
 [uses]
-"__init__.py" = ["contracts.py", "peers.py", "row_text.py"]
+"__init__.py" = ["contracts.py", "peers.py", "row_text.py", "schedule_capability.py"]
 "contracts.py" = []
+"schedule_capability.py" = []
 "tests" = ["__init__.py", "peers.py", "row_text.py"]
 
 [purity]
 "contracts.py" = "strict"
 "peers.py" = "strict"
 "row_text.py" = "strict"
+"schedule_capability.py" = { mode = "none", why = "the schedule steering rule: it reads the bound caller through the SDK identity door and refuses an action aimed at the agent that caller speaks for; the action table and the refusal text are the whole rule" }
