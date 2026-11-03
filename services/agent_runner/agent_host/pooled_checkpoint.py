@@ -122,6 +122,7 @@ class PooledPostgresSaver(HistoryAsyncPostgresSaver):
         bound._machine = machine
         return bound
 
+    # meiva:link services/docs/agent_runner_side/checkpoint-writes.meiva.okf.md
     async def _verify_owner(
         self,
         conn: AsyncConnection[DictRow],
@@ -188,7 +189,6 @@ class PooledPostgresSaver(HistoryAsyncPostgresSaver):
         thread_id = configurable.get("thread_id", "")
         parent = configurable.get("checkpoint_id")
         async with self._pool.connection() as conn, conn.transaction():
-            await self._verify_owner(conn, thread_id)
             if parent is not None:
                 async with conn.cursor() as cur:
                     await cur.execute(
@@ -202,7 +202,9 @@ class PooledPostgresSaver(HistoryAsyncPostgresSaver):
                             f"namespace={configurable['checkpoint_ns']!r} parent={parent}"
                         )
             lease = AsyncPostgresSaver(conn=conn, serde=self.serde)
-            return await lease.aput(config, checkpoint, metadata, new_versions)
+            saved_config = await lease.aput(config, checkpoint, metadata, new_versions)
+            await self._verify_owner(conn, thread_id)
+            return saved_config
 
     async def aput_writes(
         self,
@@ -214,9 +216,9 @@ class PooledPostgresSaver(HistoryAsyncPostgresSaver):
         configurable = config.get("configurable", {})
         thread_id = configurable.get("thread_id", "")
         async with self._pool.connection() as conn, conn.transaction():
-            await self._verify_owner(conn, thread_id)
             lease = AsyncPostgresSaver(conn=conn, serde=self.serde)
             await lease.aput_writes(config, writes, task_id, task_path)
+            await self._verify_owner(conn, thread_id)
 
     async def adelete_thread(self, thread_id: str) -> None:
         async with self._pool.connection() as conn, conn.transaction():

@@ -1,3 +1,4 @@
+import asyncio
 import json
 from types import SimpleNamespace
 from typing import Annotated, Any, TypedDict, cast
@@ -13,12 +14,11 @@ from psycopg import AsyncConnection
 from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 
+from agent.db import claim_inbound_batch
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.native_process.runtime_incarnation import RuntimeIncarnation, StaleIncarnationError
 from services.agent_runner.agent_host.health_routes import prepare_harness_switch_route
-from services.agent_runner.agent_host.pooled_checkpoint import (
-    PooledPostgresSaver,
-    StaleIncarnationError,
-)
+from services.agent_runner.agent_host.pooled_checkpoint import PooledPostgresSaver
 
 
 def _config(thread: str = "9101", namespace: str = "", parent: str | None = None) -> RunnableConfig:
@@ -55,19 +55,21 @@ async def _setup_agent(
     status: str = "running",
     machine: str = "test-box",
     owner: UUID | None = None,
+    generation: UUID | None = None,
 ) -> None:
     async with pool.connection() as conn, conn.transaction():
         await conn.execute(
             "INSERT INTO agents (id) VALUES (%s) ON CONFLICT DO NOTHING", (agent_id,)
         )
         await conn.execute(
-            "INSERT INTO agents_meta (id, status, machine, runtime_owner) "
-            "VALUES (%s, %s, %s, %s) "
+            "INSERT INTO agents_meta (id, status, machine, runtime_owner, runtime_generation) "
+            "VALUES (%s, %s, %s, %s, %s) "
             "ON CONFLICT (id) DO UPDATE SET "
             "  status = EXCLUDED.status, "
             "  machine = EXCLUDED.machine, "
-            "  runtime_owner = EXCLUDED.runtime_owner",
-            (agent_id, status, machine, owner),
+            "  runtime_owner = EXCLUDED.runtime_owner, "
+            "  runtime_generation = EXCLUDED.runtime_generation",
+            (agent_id, status, machine, owner, generation),
         )
 
 
@@ -420,3 +422,258 @@ async def test_prepare_harness_switch_with_fenced_saver_succeeds(
     assert state.values.get("messages") is not None
     assert len(state.values["messages"]) >= 1
     assert "Harness switched from 'meiva' to 'claude_code'" in state.values["messages"][0].content
+
+
+async def _wait_for_blocked_query(conn: AsyncConnection) -> None:
+    async with asyncio.timeout(5):
+        while True:
+            cur = await conn.execute(
+                "SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a USING (pid) "
+                "WHERE NOT l.granted AND a.datname = current_database()"
+            )
+            row = await cur.fetchone()
+            assert row is not None
+            if row[0]:
+                return
+            await asyncio.sleep(0.01)
+
+
+async def _enqueue_chat(pool: AsyncConnectionPool[Any], agent_id: int) -> int:
+    async with pool.connection() as conn, conn.transaction():
+        cur = await conn.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+            "VALUES (%s, 'next turn', 'chat', 'user') RETURNING id",
+            (agent_id,),
+        )
+        row = await cur.fetchone()
+        assert row is not None
+        return int(row[0])
+
+
+async def _assert_agents_meta_unlocked(pool: AsyncConnectionPool[Any], agent_id: int) -> None:
+    async with pool.connection() as conn, conn.transaction():
+        cur = await conn.execute(
+            "SELECT 1 FROM agents_meta WHERE id = %s FOR UPDATE NOWAIT",
+            (agent_id,),
+        )
+        assert (await cur.fetchone()) == (1,)
+
+
+async def test_aput_does_not_lock_agents_meta_during_checkpoint_upload(
+    aops_pool: AsyncConnectionPool[Any],
+    adb_conn: AsyncConnection,
+) -> None:
+    agent_id = 9113
+    owner = uuid4()
+    generation = uuid4()
+    machine = "test-box"
+    await _setup_agent(
+        aops_pool, agent_id, status="running", machine=machine, owner=owner, generation=generation
+    )
+    inbound_id = await _enqueue_chat(aops_pool, agent_id)
+    incarnation = RuntimeIncarnation(agent_id, generation, owner)
+
+    saver = _saver(aops_pool, expected_owner=owner, machine=machine)
+    saved1 = await saver.aput(
+        _config(str(agent_id)), _checkpoint("1"), {"source": "input", "step": -1}, {"value": "1"}
+    )
+    parent_id = str(saved1.get("configurable", {})["checkpoint_id"])
+    cp2 = _checkpoint("2")
+    config2 = _config(str(agent_id), parent=parent_id)
+
+    await adb_conn.execute(
+        "INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, checkpoint, metadata) "
+        "VALUES (%s, '', %s, '{}'::jsonb, '{}'::jsonb)",
+        (str(agent_id), cp2["id"]),
+    )
+    writing = asyncio.create_task(
+        saver.aput(config2, cp2, {"source": "loop", "step": 0}, {"value": "2"})
+    )
+    try:
+        await _wait_for_blocked_query(adb_conn)
+        assert not writing.done()
+        await _assert_agents_meta_unlocked(aops_pool, agent_id)
+        claimed = await claim_inbound_batch(aops_pool, agent_id, incarnation=incarnation)
+        assert [row.id for row in claimed] == [inbound_id]
+        assert not writing.done()
+        await adb_conn.rollback()
+        saved2 = await asyncio.wait_for(writing, timeout=5)
+    finally:
+        await adb_conn.rollback()
+        if not writing.done():
+            await asyncio.gather(writing, return_exceptions=True)
+
+    assert saved2.get("configurable", {})["checkpoint_id"] == cp2["id"]
+    async with aops_pool.connection() as conn:
+        cur = await conn.execute(
+            "SELECT count(*) FROM checkpoints WHERE thread_id = %s", (str(agent_id),)
+        )
+        assert (await cur.fetchone()) == (2,)
+        cur = await conn.execute(
+            "SELECT count(*) FROM checkpoint_blobs WHERE thread_id = %s AND version = '2'",
+            (str(agent_id),),
+        )
+        assert (await cur.fetchone()) == (1,)
+
+
+async def test_aput_writes_does_not_lock_agents_meta_during_write_upload(
+    aops_pool: AsyncConnectionPool[Any],
+    adb_conn: AsyncConnection,
+) -> None:
+    agent_id = 9114
+    owner = uuid4()
+    generation = uuid4()
+    machine = "test-box"
+    await _setup_agent(
+        aops_pool, agent_id, status="running", machine=machine, owner=owner, generation=generation
+    )
+    inbound_id = await _enqueue_chat(aops_pool, agent_id)
+    incarnation = RuntimeIncarnation(agent_id, generation, owner)
+
+    saver = _saver(aops_pool, expected_owner=owner, machine=machine)
+    saved1 = await saver.aput(
+        _config(str(agent_id)), _checkpoint("1"), {"source": "input", "step": -1}, {"value": "1"}
+    )
+    cp1_id = str(saved1.get("configurable", {})["checkpoint_id"])
+
+    await adb_conn.execute(
+        "INSERT INTO checkpoint_writes "
+        "(thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob) "
+        "VALUES (%s, '', %s, 'task-upload', '', 0, 'messages', 'empty', ''::bytea)",
+        (str(agent_id), cp1_id),
+    )
+    writing = asyncio.create_task(
+        saver.aput_writes(saved1, [("messages", "streamed reply")], "task-upload")
+    )
+    try:
+        await _wait_for_blocked_query(adb_conn)
+        assert not writing.done()
+        await _assert_agents_meta_unlocked(aops_pool, agent_id)
+        claimed = await claim_inbound_batch(aops_pool, agent_id, incarnation=incarnation)
+        assert [row.id for row in claimed] == [inbound_id]
+        assert not writing.done()
+        await adb_conn.rollback()
+        await asyncio.wait_for(writing, timeout=5)
+    finally:
+        await adb_conn.rollback()
+        if not writing.done():
+            await asyncio.gather(writing, return_exceptions=True)
+
+    async with aops_pool.connection() as conn:
+        cur = await conn.execute(
+            "SELECT count(*) FROM checkpoint_writes "
+            "WHERE thread_id = %s AND task_id = 'task-upload' AND type <> 'empty'",
+            (str(agent_id),),
+        )
+        assert (await cur.fetchone()) == (1,)
+
+
+async def test_mid_upload_takeover_during_aput_rolls_back_checkpoint_and_blobs(
+    aops_pool: AsyncConnectionPool[Any],
+    adb_conn: AsyncConnection,
+) -> None:
+    agent_id = 9115
+    old_owner = uuid4()
+    new_owner = uuid4()
+    machine = "test-box"
+    await _setup_agent(aops_pool, agent_id, status="running", machine=machine, owner=old_owner)
+
+    zombie_saver = _saver(aops_pool, expected_owner=old_owner, machine=machine)
+    saved1 = await zombie_saver.aput(
+        _config(str(agent_id)), _checkpoint("1"), {"source": "input", "step": -1}, {"value": "1"}
+    )
+    parent_id = str(saved1.get("configurable", {})["checkpoint_id"])
+    cp2 = _checkpoint("2")
+    config2 = _config(str(agent_id), parent=parent_id)
+
+    await adb_conn.execute(
+        "INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, checkpoint, metadata) "
+        "VALUES (%s, '', %s, '{}'::jsonb, '{}'::jsonb)",
+        (str(agent_id), cp2["id"]),
+    )
+    writing = asyncio.create_task(
+        zombie_saver.aput(config2, cp2, {"source": "loop", "step": 0}, {"value": "2"})
+    )
+    try:
+        await _wait_for_blocked_query(adb_conn)
+        assert not writing.done()
+        async with aops_pool.connection() as conn, conn.transaction():
+            await conn.execute(
+                "UPDATE agents_meta SET runtime_owner = %s WHERE id = %s",
+                (new_owner, agent_id),
+            )
+        assert not writing.done()
+        await adb_conn.rollback()
+        with pytest.raises(StaleIncarnationError, match="stale runner write"):
+            await asyncio.wait_for(writing, timeout=5)
+    finally:
+        await adb_conn.rollback()
+        if not writing.done():
+            await asyncio.gather(writing, return_exceptions=True)
+
+    async with aops_pool.connection() as conn:
+        cur = await conn.execute(
+            "SELECT count(*) FROM checkpoints WHERE thread_id = %s", (str(agent_id),)
+        )
+        assert (await cur.fetchone()) == (1,)
+        cur = await conn.execute(
+            "SELECT count(*) FROM checkpoints WHERE thread_id = %s AND checkpoint_id = %s",
+            (str(agent_id), cp2["id"]),
+        )
+        assert (await cur.fetchone()) == (0,)
+        cur = await conn.execute(
+            "SELECT count(*) FROM checkpoint_blobs WHERE thread_id = %s AND version = '2'",
+            (str(agent_id),),
+        )
+        assert (await cur.fetchone()) == (0,)
+
+
+async def test_mid_upload_takeover_during_aput_writes_rolls_back_writes(
+    aops_pool: AsyncConnectionPool[Any],
+    adb_conn: AsyncConnection,
+) -> None:
+    agent_id = 9116
+    old_owner = uuid4()
+    new_owner = uuid4()
+    machine = "test-box"
+    await _setup_agent(aops_pool, agent_id, status="running", machine=machine, owner=old_owner)
+
+    zombie_saver = _saver(aops_pool, expected_owner=old_owner, machine=machine)
+    saved1 = await zombie_saver.aput(
+        _config(str(agent_id)), _checkpoint("1"), {"source": "input", "step": -1}, {"value": "1"}
+    )
+    cp1_id = str(saved1.get("configurable", {})["checkpoint_id"])
+
+    await adb_conn.execute(
+        "INSERT INTO checkpoint_writes "
+        "(thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob) "
+        "VALUES (%s, '', %s, 'task-zombie-inflight', '', 0, 'messages', 'empty', ''::bytea)",
+        (str(agent_id), cp1_id),
+    )
+    writing = asyncio.create_task(
+        zombie_saver.aput_writes(
+            saved1, [("messages", "stale inflight reply")], "task-zombie-inflight"
+        )
+    )
+    try:
+        await _wait_for_blocked_query(adb_conn)
+        assert not writing.done()
+        async with aops_pool.connection() as conn, conn.transaction():
+            await conn.execute(
+                "UPDATE agents_meta SET runtime_owner = %s WHERE id = %s",
+                (new_owner, agent_id),
+            )
+        assert not writing.done()
+        await adb_conn.rollback()
+        with pytest.raises(StaleIncarnationError, match="stale runner write"):
+            await asyncio.wait_for(writing, timeout=5)
+    finally:
+        await adb_conn.rollback()
+        if not writing.done():
+            await asyncio.gather(writing, return_exceptions=True)
+
+    async with aops_pool.connection() as conn:
+        cur = await conn.execute(
+            "SELECT count(*) FROM checkpoint_writes WHERE thread_id = %s", (str(agent_id),)
+        )
+        assert (await cur.fetchone()) == (0,)
