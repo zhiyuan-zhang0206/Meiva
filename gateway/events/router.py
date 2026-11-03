@@ -35,15 +35,14 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from contextlib import contextmanager
-from dataclasses import asdict
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated
 
 import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from base.events.contract import tier_for
-from base.events.reads import audit_rows
+from base.events.reads import EventRecord, audit_rows
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.events import telemetry_rows
 from gateway.events.events_plan import (
@@ -54,7 +53,7 @@ from gateway.events.events_plan import (
     plan_events,
 )
 from gateway.events.schemas import EventRow, EventsMeta, EventsResponse
-from gateway.http.config import GatewayConfig, gateway_clock, gateway_config
+from gateway.http.config import GatewayConfig, gateway_clock, gateway_config, gateway_state
 
 router = APIRouter()
 
@@ -66,9 +65,12 @@ _MAX_HOURS = 24 * 365
 @contextmanager
 def _read_connection(request: Request) -> Generator[psycopg.Connection]:
     """One pooled connection for an events read, bounded by a statement timeout."""
-    config: GatewayConfig = request.app.state.gateway_config
-    with request.app.state.db_pool.connection() as conn:
-        conn.execute(f"SET LOCAL statement_timeout = {config.events_read_timeout_ms}")
+    config: GatewayConfig = gateway_state(request).gateway_config
+    with gateway_state(request).db_pool.connection() as conn:
+        conn.execute(
+            "SELECT set_config('statement_timeout', %s, true)",
+            (str(config.events_read_timeout_ms),),
+        )
         yield conn
 
 
@@ -76,11 +78,33 @@ def _count(request: Request, plan: EventsPlan) -> int:
     """Exact filtered row count across the tables the request reads."""
     total = 0
     with _read_connection(request) as conn:
+        f = plan.filters
         if plan.use_audit:
-            total += audit_rows.count_events(conn, **asdict(plan.filters))
+            total += audit_rows.count_events(
+                conn,
+                agent_id=f.agent_id,
+                event_names=f.event_names,
+                tiers=f.tiers,
+                trace_id=f.trace_id,
+                machine=f.machine,
+                level=f.level,
+                attribute_filters=f.attribute_filters,
+                from_=f.from_,
+                to=f.to,
+            )
         if plan.use_telemetry:
             total += telemetry_rows.count_events(
-                conn, categories=plan.telemetry_categories, **asdict(plan.filters)
+                conn,
+                categories=plan.telemetry_categories,
+                agent_id=f.agent_id,
+                event_names=f.event_names,
+                tiers=f.tiers,
+                trace_id=f.trace_id,
+                machine=f.machine,
+                level=f.level,
+                attribute_filters=f.attribute_filters,
+                from_=f.from_,
+                to=f.to,
             )
     return total
 
@@ -90,15 +114,27 @@ def _count(request: Request, plan: EventsPlan) -> int:
 #
 # One table pages directly. Two tables each give their newest `offset + limit`
 # rows (`page_depth`), which are merged and then sliced.
-def _read_page(request: Request, plan: EventsPlan) -> tuple[list[dict[str, Any]], bool]:
+def _read_page(request: Request, plan: EventsPlan) -> tuple[list[EventRecord], bool]:
     both = plan.use_audit and plan.use_telemetry
     depth, page_offset = page_depth(plan)
-    rows: list[dict[str, Any]] = []
+    f = plan.filters
+    rows: list[EventRecord] = []
     has_more = False
     with _read_connection(request) as conn:
         if plan.use_audit:
             page, more = audit_rows.query_events(
-                conn, limit=depth, offset=page_offset, **asdict(plan.filters)
+                conn,
+                limit=depth,
+                offset=page_offset,
+                agent_id=f.agent_id,
+                event_names=f.event_names,
+                tiers=f.tiers,
+                trace_id=f.trace_id,
+                machine=f.machine,
+                level=f.level,
+                attribute_filters=f.attribute_filters,
+                from_=f.from_,
+                to=f.to,
             )
             rows += page
             has_more = has_more or more
@@ -108,7 +144,15 @@ def _read_page(request: Request, plan: EventsPlan) -> tuple[list[dict[str, Any]]
                 categories=plan.telemetry_categories,
                 limit=depth,
                 offset=page_offset,
-                **asdict(plan.filters),
+                agent_id=f.agent_id,
+                event_names=f.event_names,
+                tiers=f.tiers,
+                trace_id=f.trace_id,
+                machine=f.machine,
+                level=f.level,
+                attribute_filters=f.attribute_filters,
+                from_=f.from_,
+                to=f.to,
             )
             rows += page
             has_more = has_more or more

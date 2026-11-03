@@ -30,7 +30,7 @@ from gateway.events.sse import (
     get_pubsub_message,
 )
 from gateway.events.sse_frames import SseCadence, parse_agent_ids, sse_frame, warm_frame
-from gateway.http.config import gateway_config
+from gateway.http.config import gateway_config, gateway_state
 from gateway.http.middleware import runtime_metrics, stopping
 from ops.alerts import ALERTS_CHANNEL, AlertRow
 
@@ -396,7 +396,7 @@ async def get_merged_stream(
     sse = gateway_config(request).sse
     return StreamingResponse(
         merged_event_stream(
-            request.app.state.bus,
+            gateway_state(request).bus,
             request,
             channels=parse_channels(channels),
             agent_filter=parse_agents(agents),

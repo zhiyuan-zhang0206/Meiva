@@ -28,7 +28,7 @@ from gateway.events.events_plan import AgentEventsRequest, plan_agent_events
 from gateway.events.schemas import AgentEventRow
 from gateway.events.sse import event_stream
 from gateway.events.sse_frames import SseCadence
-from gateway.http.config import GatewayConfig, gateway_clock, gateway_config
+from gateway.http.config import GatewayConfig, gateway_clock, gateway_config, gateway_state
 
 router = APIRouter()
 
@@ -54,7 +54,7 @@ async def get_events_stream(agent_id: int, request: Request) -> StreamingRespons
     """
     return StreamingResponse(
         event_stream(
-            request.app.state.bus,
+            gateway_state(request).bus,
             agent_id,
             request,
             poll_s=gateway_config(request).sse.disconnect_poll_seconds,
@@ -126,10 +126,13 @@ def get_agent_events(
         now=gateway_clock(request).now(),
         default_limit=gateway_config(request).display.events_default_limit,
     )
-    config: GatewayConfig = request.app.state.gateway_config
+    config: GatewayConfig = gateway_state(request).gateway_config
     try:
-        with request.app.state.db_pool.connection() as conn:
-            conn.execute(f"SET LOCAL statement_timeout = {config.events_read_timeout_ms}")
+        with gateway_state(request).db_pool.connection() as conn:
+            conn.execute(
+                "SELECT set_config('statement_timeout', %s, true)",
+                (str(config.events_read_timeout_ms),),
+            )
             rows, _ = telemetry_rows.query_events(
                 conn,
                 agent_id=query.agent_id,

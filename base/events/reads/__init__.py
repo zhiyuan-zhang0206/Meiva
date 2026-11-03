@@ -5,7 +5,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
-from typing import Any, LiteralString
+from typing import Any, LiteralString, TypedDict
 
 from base.db.protocols import SyncConnection
 from base.events.contract import EventTier
@@ -19,6 +19,27 @@ _COLUMNS: LiteralString = (
     "event_uid, ts, trace_id, span_id, agent_id, machine, process, event_name, level, source, "
     "target_agent_id, attributes"
 )
+
+
+# meiva:note
+# One recorded event in the stream's row shape, which the audit table and the telemetry table both
+# return (`gateway.events.telemetry_rows.query_events` builds the same shape), so one merge serves
+# both. `id` is the unsigned stream id and `line_sha256` the digest of the recorded row.
+class EventRecord(TypedDict):
+    id: int
+    line_sha256: str
+    ts: datetime
+    trace_id: str | None
+    span_id: str | None
+    agent_id: int | None
+    machine: str
+    process: str
+    category: str
+    event_name: str
+    level: str
+    source: str
+    target_agent_id: int | None
+    attributes: dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -39,7 +60,7 @@ def _stream_id(event_uid: int) -> int:
     return event_uid + (1 << 64) if event_uid < 0 else event_uid
 
 
-def _row(record: tuple[Any, ...]) -> dict[str, Any]:
+def _row(record: tuple[Any, ...]) -> EventRecord:
     (
         event_uid,
         ts,
@@ -152,7 +173,7 @@ def query_audit_rows(
     limit: int = 100,
     offset: int = 0,
     direction: str = "backward",
-) -> tuple[list[dict[str, object]], bool]:
+) -> tuple[list[EventRecord], bool]:
     where = _where(filters)
     if where is None:
         return [], False

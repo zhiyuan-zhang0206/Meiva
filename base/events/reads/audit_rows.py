@@ -13,7 +13,6 @@ Loki line: the table does not keep the line bytes.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 
 from base.db.protocols import SyncConnection
 from base.events.contract import EventTier
@@ -25,6 +24,7 @@ from base.events.reads import (
 )
 from base.events.reads import (
     AuditFilter,
+    EventRecord,
     count_audit_rows,
     query_audit_rows,
 )
@@ -52,7 +52,7 @@ def query_events(
     limit: int = 100,
     offset: int = 0,
     direction: str = "backward",
-) -> tuple[list[dict[str, Any]], bool]:
+) -> tuple[list[EventRecord], bool]:
     return query_audit_rows(
         conn,
         AuditFilter(

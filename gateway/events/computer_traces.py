@@ -11,11 +11,10 @@ record is permanent), and a trace is always a small bounded read (500 rows).
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from base.events.reads import audit_rows
+from gateway.http.config import gateway_state
 
 router = APIRouter()
 
@@ -33,7 +32,7 @@ _TRACE_LIMIT = 500
 def get_computer_trace(
     request: Request,
     task_id: int = Query(..., ge=1, description="task id whose desktop trail to read"),
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """The desktop-action trail for one task: session envelope + actions.
 
     Returns:
@@ -43,7 +42,7 @@ def get_computer_trace(
     envelope rows (may be null while a session is open); `actions` carries
     the computer_action rows with the replay-relevant payload keys.
     """
-    with request.app.state.db_pool.connection() as conn:
+    with gateway_state(request).db_pool.connection() as conn:
         rows, _has_more = audit_rows.query_events(
             conn,
             attribute_filters={"task_id": str(task_id)},
@@ -53,19 +52,18 @@ def get_computer_trace(
         )
     if not rows:
         raise HTTPException(status_code=404, detail=f"no computer-use trace for task {task_id}")
-    actions: list[dict[str, Any]] = []
-    start: dict[str, Any] | None = None
-    end: dict[str, Any] | None = None
+    actions: list[dict[str, object]] = []
+    start: dict[str, object] | None = None
+    end: dict[str, object] | None = None
     for row in rows:
-        attrs: dict[str, Any] = row.get("attributes") or {}
-        ts = row.get("ts")
-        entry: dict[str, Any] = {
+        attrs = row["attributes"]
+        entry: dict[str, object] = {
             "id": row["id"],
-            "ts": ts.isoformat() if ts is not None else None,
-            "agent_id": row.get("agent_id"),
-            "event": row.get("event_name"),
+            "ts": row["ts"].isoformat(),
+            "agent_id": row["agent_id"],
+            "event": row["event_name"],
         }
-        if row.get("event_name") == "computer_action":
+        if row["event_name"] == "computer_action":
             entry.update(
                 {
                     "action": attrs.get("action"),
@@ -77,7 +75,7 @@ def get_computer_trace(
                 }
             )
             actions.append(entry)
-        elif row.get("event_name") == "computer_session_start":
+        elif row["event_name"] == "computer_session_start":
             start = entry | {
                 "first_tool": attrs.get("first_tool"),
                 "first_action_at": attrs.get("first_action_at"),

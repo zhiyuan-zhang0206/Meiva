@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Any
+from typing import TypedDict, Unpack
 
 import psycopg
 
+from base.events.contract import EventTier
 from gateway.events import telemetry_rows
 
 _NOW = datetime(2026, 10, 2, 12, 0, tzinfo=UTC)
@@ -24,7 +26,7 @@ def _put(
     machine: str = "m1",
     trace_id: str | None = None,
     source: str = "test",
-    attributes: dict[str, Any] | None = None,
+    attributes: Mapping[str, object] | None = None,
 ) -> int:
     uid = uuid.uuid4().int % (1 << 62)
     db.execute(
@@ -50,7 +52,22 @@ def _put(
     return uid
 
 
-def _names(db: psycopg.Connection, **filters: Any) -> list[str]:
+# meiva:note
+# The filters these tests pass to `query_events`.
+class _Filters(TypedDict, total=False):
+    agent_id: int
+    categories: list[str]
+    cluster: str
+    grep: str
+    level: str
+    machine: str
+    service_only: bool
+    tiers: list[EventTier]
+    exclude_agent_ids: list[int]
+    level_min: str
+
+
+def _names(db: psycopg.Connection, **filters: Unpack[_Filters]) -> list[str]:
     rows, _ = telemetry_rows.query_events(db, **filters)
     return [row["event_name"] for row in rows]
 

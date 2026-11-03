@@ -9,7 +9,7 @@ the wire before.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import (
     BaseModel,
@@ -39,7 +39,7 @@ class AgentEventRow(BaseModel):
     agent_id: int | None
     level: str
     event: str
-    payload: dict[str, Any]
+    payload: dict[str, object]
 
 
 class AgentEventsResponse(BaseModel):
@@ -77,7 +77,7 @@ class EventRow(BaseModel):
     level: str
     source: str
     target_agent_id: int | None
-    attributes: dict[str, Any]
+    attributes: dict[str, object]
 
 
 class EventsMeta(BaseModel):
@@ -205,7 +205,7 @@ class MetricsReport(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     meta: MetricsMeta
-    metrics: dict[str, Any]
+    metrics: dict[str, object]
 
 
 class AgentMetricsItem(BaseModel):
