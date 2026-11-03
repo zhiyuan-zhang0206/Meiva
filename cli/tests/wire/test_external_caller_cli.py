@@ -118,6 +118,26 @@ def test_send_rejects_a_client_message_id_the_wire_cannot_carry(
     assert "1 to 128 characters" in capsys.readouterr().err
 
 
+def test_agents_group_help_lists_timeline_and_send() -> None:
+    from cli.parsers import build_parser
+
+    normalized_help = " ".join(build_parser().format_help().split())
+    assert "ls / timeline / send / cancel" in normalized_help
+
+
+def test_send_help_documents_external_agent_subject_examples(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from cli.parsers import build_parser
+
+    with pytest.raises(SystemExit) as exit_info:
+        _ = build_parser().parse_args(["agents", "send", "--help"])
+    assert exit_info.value.code == 0
+    out = capsys.readouterr().out
+    assert "external_agent:NAME[:INSTANCE]" in out
+    assert "external_agent:claude_code" in out
+
+
 def test_send_requires_source_at_parse_time(capsys: pytest.CaptureFixture[str]) -> None:
     from cli.parsers import build_parser
 

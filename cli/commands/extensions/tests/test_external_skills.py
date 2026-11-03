@@ -612,6 +612,8 @@ def test_product_guide_has_one_builtin_source_and_nested_operator_entries(unit_h
     sources, _ = iter_sources(repo, home=unit_home)
     canonical = repo / "meiva_builtins" / "skills" / "platform" / "meiva-guide"
     assert (repo / ".agents" / "skills" / "meiva-guide").resolve() == canonical
+    assert (repo / ".claude" / "skills" / "meiva-guide").resolve() == canonical
+    assert (repo / ".meiva" / "skills" / "meiva-guide").resolve() == canonical
     assert any(source.name == "meiva-guide" and source.src == canonical for source in sources)
     executor = canonical.parent / "impersonator-guide"
     assert any(source.name == "impersonator-guide" and source.src == executor for source in sources)

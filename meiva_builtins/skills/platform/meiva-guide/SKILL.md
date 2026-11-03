@@ -1,6 +1,6 @@
 ---
 name: meiva-guide
-description: "Routes Meiva setup, operation, and extension requests. Use when the task needs Meiva CLI/SDK guidance or a platform-specific procedure."
+description: "Routes Meiva setup, operation, agent collaboration, and extension requests. Use when operating Meiva via CLI/SDK, inspecting or messaging numbered Meiva agents, or following a platform procedure."
 ---
 
 # Meiva Guide
@@ -13,8 +13,14 @@ The root is a map; load the relevant sub-skill for the task.
 ## Choose your execution surface
 
 - **Humans and external agents:** use the `meiva` CLI from a shell. On a
-  production host, `meiva` points to the production checkout. In a development
-  checkout, use its own `.venv/bin/meiva` and an isolated development home.
+  production host, bare `meiva` (`~/.local/bin/meiva`) operates the running
+  cluster — including inspecting or messaging live agents (`meiva agents ls`,
+  `meiva agents timeline <id>`, `meiva agents send <id> <text> --source
+  external_agent:<subject>` with subjects such as `claude_code`, `codex`, or
+  `antigravity`; never send raw gateway HTTP requests using local cluster
+  secrets, and never pass `--source user` when acting as an external agent).
+  In a development checkout, use its own `.venv/bin/meiva` with an isolated
+  `MEIVA_HOME`, never against the production home.
 - **Meiva agents:** use the `meiva.*` SDK for capabilities available to your agent;
   use `meiva.shell.run(...)` for CLI operations. Load a sub-skill with
   `meiva.help(meiva.skills.meiva_guide.<subskill>)`.
@@ -41,7 +47,7 @@ checkout, not the installed skill copy. For a deployment, that source is
 | Find skills, plugins, or MCP providers; compare, install, and verify a capability | [packages.install](packages/install/SKILL.md) |
 | Add, inspect, or remove MCP servers | [mcp](mcp/SKILL.md) |
 | Understand Meiva plugins or develop a native plugin | [plugins](plugins/SKILL.md), then [plugins.develop](plugins/develop/SKILL.md) |
-| Create or manage agents, commands, and config overlays | [agents](agents/SKILL.md) |
+| Inspect, message, create, or manage agents, commands, and config overlays | [agents](agents/SKILL.md) |
 | Choose a model for an agent | [models](models/SKILL.md) |
 | Write, create, inspect, or change persistent scheduled work | [schedules](schedules/SKILL.md) |
 | Publish an artifact or collect user input through a page | [pages](pages/SKILL.md) |

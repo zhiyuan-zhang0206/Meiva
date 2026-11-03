@@ -242,7 +242,7 @@ for the full surface.
 | `python -m cli.fleet_update` | roll the latest merged code across a networked cluster over SSH (`down`, then `up`) — the only update path |
 | `meiva cluster status/destroy` | multi-machine roster + decommission of this host's cluster |
 | `.venv/bin/meiva init --no-serve-gateway --serve-agent-runner --gateway-url <url> --db-capability <bundle>` | init of a split-deployment agent-runner joining a gateway, then `meiva start --all-services` (its checkout's CLI — `meiva` on PATH does not exist yet; with the bundle's `MEIVA_DB_CAPABILITY_KEY` exported) |
-| `meiva agents` | observe + control agents (ls / cancel / restart / terminate) |
+| `meiva agents` | observe + control agents (ls / timeline / send / cancel / restart / terminate) |
 | `meiva schedules` | gateway-supervised schedules (cron jobs agents create and own) |
 | `meiva skill install <src>` | install Agent Skills from a git URL or local path |
 | `meiva plugins` / `meiva mcp` | manage plugins and MCP servers |

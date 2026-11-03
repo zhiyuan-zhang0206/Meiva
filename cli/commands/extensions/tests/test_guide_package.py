@@ -51,7 +51,12 @@ def test_converged_namespaces_load_real_task_instructions(
     repo = _repo(tmp_path)
     converge_skills(repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
 
+    root_body = meiva.skills.meiva_guide.__doc__
+    assert isinstance(root_body, str)
+    assert "meiva agents send" in root_body
+
     expected = {
+        ("meiva_guide", "agents"): "external_agent:claude_code",
         ("meiva_guide", "deploy"): "meiva init",
         ("meiva_guide", "operations"): "Alert review",
         ("meiva_guide", "modification_layers"): "L4",
@@ -91,6 +96,15 @@ def _assert_portable_reading_links(target: Path) -> None:
             destination = (document.parent / link.split("#")[0]).resolve()
             assert destination.is_relative_to(target)
             assert destination.is_file()
+
+
+def test_guide_markdown_passes_skill_scanner_without_critical_findings() -> None:
+    from base.packages.skills.scan import criticals, scan_file
+
+    for document in sorted(GUIDE.rglob("*.md")):
+        raw = document.read_bytes()
+        rel = document.relative_to(GUIDE).as_posix()
+        assert criticals(scan_file(rel, len(raw), raw)) == []
 
 
 @pytest.mark.parametrize("client", [".codex", ".claude"])
