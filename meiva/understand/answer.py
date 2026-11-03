@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from base.clock import Clock
 from base.host.env.agent_slices import ModelOverrides
@@ -248,7 +247,12 @@ def _save_result(deps: UnderstandDeps, target: TargetSpec, result: str) -> None:
         (site.directory / stale).unlink(missing_ok=True)
 
 
-def _call_text(deps: UnderstandDeps, content: list[Any], *, effort: str | ReasoningEffort) -> str:
+def _call_text(
+    deps: UnderstandDeps,
+    content: list[dict[str, object]],
+    *,
+    effort: str | ReasoningEffort,
+) -> str:
     return _invoke(
         deps, calls.plan_text_call(deps.models.text, deps.timeout_seconds, effort), content
     )
@@ -275,7 +279,7 @@ def _call_paths(
 # meiva:note
 # Build the planned model through the real provider factory and invoke it once on `content`. A
 # build failure (missing API key etc.) surfaces as `UnderstandError`.
-def _invoke(deps: UnderstandDeps, call: ModelCall, content: list[Any]) -> str:
+def _invoke(deps: UnderstandDeps, call: ModelCall, content: list[dict[str, object]]) -> str:
     options = call.build
     try:
         llm = factory.build_chat_model(
