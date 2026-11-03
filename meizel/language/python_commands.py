@@ -24,7 +24,17 @@ from meizel.language.restricted import RestrictedForms, const_str
 
 __all__ = ["PythonCommands"]
 
+# meiva:note
+# The fourth evidence is a parameter the caller typed with this file's `Interpreter` name, which
+# widens the list in the module docstring by exactly that form. A parameter is the caller's promise:
+# `def go(python: Interpreter)` says which interpreter the caller chose, so a command built from it
+# stays visible and keeps the edge a bare `sys.executable` used to be the only evidence for. Only the
+# declaration counts -- a bare `str`, an absent annotation, `Any`, an optional or a union are
+# silence, a local variable is no caller's promise at all, and the name must be bound in this file,
+# so a misspelled `Interpreter` reads as no evidence rather than as `str`. The rule reads
+# declarations; it never guesses at a value that merely looks like an interpreter.
 _INTERPRETER = re.compile(r"python(3(\.\d+)?)?")
+_INTERPRETER_TYPE = "Interpreter"
 _FLAGS_WITH_VALUE = frozenset({"-X", "-W"})
 _ROOT = PurePosixPath(".")
 
@@ -74,8 +84,10 @@ class PythonCommands(RestrictedForms):
         text = const_str(expr)
         return text is not None and "/" not in text and self.is_interpreter(expr)
 
+    # meiva:note
+    # `sys.executable`, a literal `.../python[3[.x]]`, a name bound once to one of those, or a
+    # parameter the caller typed as `Interpreter`.
     def is_interpreter(self, expr: ast.expr, depth: int = 0) -> bool:
-        """`sys.executable`, a literal `.../python[3[.x]]`, or a name bound once to one of those."""
         if depth > 4:
             return False
         if self.dotted(expr) == "sys.executable":
@@ -84,8 +96,24 @@ class PythonCommands(RestrictedForms):
         if text is not None:
             return _INTERPRETER.fullmatch(text.rsplit("/", 1)[-1]) is not None
         if isinstance(expr, ast.Name):
+            if self.interpreter_parameter(expr.id):
+                return True
             value = self.scope.constant(expr.id)
             return value is not None and self.is_interpreter(value, depth + 1)
+        return False
+
+    # meiva:note
+    # Whether `name` is a parameter declared with this file's `Interpreter` type. The scope walk
+    # stops where an inner binding shadows the name, so a rebound parameter is no evidence.
+    def interpreter_parameter(self, name: str) -> bool:
+        declared, annotation = self.scope.parameter(name)
+        if not declared or annotation is None:
+            return False
+        if isinstance(annotation, ast.Name):
+            return annotation.id == _INTERPRETER_TYPE and self.scope.find(annotation.id)[1]
+        if isinstance(annotation, ast.Attribute):
+            dotted = self.dotted(annotation)
+            return dotted is not None and dotted.rsplit(".", 1)[-1] == _INTERPRETER_TYPE
         return False
 
     def module_target(self, name: ast.expr | None, line: int) -> None:

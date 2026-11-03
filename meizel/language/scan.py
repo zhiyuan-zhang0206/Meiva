@@ -411,6 +411,9 @@ class Scanner(AmbientAccess):
             top_level=self.fn_depth == 0 and not self.scope.is_class,
         )
         inner = Scope(annotation.closure_parent())
+        inner.parameters = {
+            arg.arg: arg.annotation for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs)
+        }
         collect_scope(inner, node.body, self.package, walrus=self.walrus)
         self.observe_input_parameters(node, inner)
         inner.shadowed.update(parameter_names(args))
