@@ -33,13 +33,14 @@ from gateway.app import (
     cluster_auth_middleware,
 )
 from gateway.http.auth import rejection_log
-from gateway.http.middleware.error_envelope import request_trace_middleware
-from gateway.http.middleware.error_handlers import (
+from gateway.http.config import GatewayAppState
+from gateway.http.error_handlers import (
     http_exception_handler,
     meiva_agent_error_handler,
     request_validation_error_handler,
     unhandled_exception_handler,
 )
+from gateway.http.middleware.error_envelope import request_trace_middleware
 from gateway.lgtm.backend_failure import raise_backend_unavailable
 from gateway.schemas import ErrorEnvelope
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_config_of
@@ -88,7 +89,8 @@ def _assert_envelope(
 def handler_client() -> Iterator[GatewayTestClient]:
     """An isolated app that dispatches every shared gateway error handler."""
     app = FastAPI()
-    app.state.gateway_config = gateway_config_of(snapshot_process_config())
+    config = gateway_config_of(snapshot_process_config())
+    app.state = GatewayAppState({"gateway_config": config})
     app.add_middleware(
         CORSMiddleware,
         allow_origin_regex=".*",
@@ -96,7 +98,7 @@ def handler_client() -> Iterator[GatewayTestClient]:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.middleware("http")(request_trace_middleware(app.state.gateway_config.rng))
+    app.middleware("http")(request_trace_middleware(config.rng))
     app.add_exception_handler(MeivaAgentError, meiva_agent_error_handler)  # type: ignore[arg-type]
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)  # type: ignore[arg-type]
     app.add_exception_handler(RequestValidationError, request_validation_error_handler)  # type: ignore[arg-type]

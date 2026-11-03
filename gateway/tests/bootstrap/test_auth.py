@@ -18,7 +18,7 @@ from base.host.net.auth import (
     bearer_header,
     cookie_name,
 )
-from gateway.http.config import placeholder_config
+from gateway.http.config import GatewayAppState, placeholder_config
 from gateway.http.middleware.cors import cors_allowed_origins
 from gateway.tests.auth.gateway_auth import LOGIN_PASSWORD, seed_login_password
 from gateway.tests.auth.gateway_config import anonymous_gateway_client, gateway_config_fields
@@ -40,8 +40,12 @@ def request_with_origin(
     allowed_origins: tuple[str, ...] = ("https://allowed.example",),
 ) -> Request:
     standin = FastAPI()
-    standin.state.gateway_config = replace(
-        placeholder_config(), cluster_secret=SECRET, allowed_origins=allowed_origins
+    standin.state = GatewayAppState(
+        {
+            "gateway_config": replace(
+                placeholder_config(), cluster_secret=SECRET, allowed_origins=allowed_origins
+            )
+        }
     )
     return Request(
         {

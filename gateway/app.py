@@ -85,16 +85,16 @@ from gateway.http.config import (
     gateway_config_from_boot,
     placeholder_config,
 )
-from gateway.http.middleware import latency, runtime_metrics
-from gateway.http.middleware.cors import request_host
-from gateway.http.middleware.error_envelope import error_response, request_trace_middleware
-from gateway.http.middleware.error_handlers import (
+from gateway.http.error_handlers import (
     http_exception_handler,
     meiva_agent_error_handler,
     model_catalog_unavailable_handler,
     request_validation_error_handler,
     unhandled_exception_handler,
 )
+from gateway.http.middleware import latency, runtime_metrics
+from gateway.http.middleware.cors import request_host
+from gateway.http.middleware.error_envelope import error_response, request_trace_middleware
 from gateway.http.model_catalog import (
     CatalogAppState,
     CatalogLoadFailure,
@@ -166,6 +166,7 @@ class GatewayServerState(
     status_router.StatusAppState,
     reply_suggestion_router.ReplySuggestionAppState,
     agents_transfer_router.TransferAppState,
+    auth_router.AuthAppState,
 ):
     pass
 

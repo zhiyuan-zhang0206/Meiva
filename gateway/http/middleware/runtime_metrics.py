@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Literal
+from typing import Literal, Protocol
 
 import psutil
 
@@ -21,6 +21,29 @@ from base import telemetry
 from gateway.http.middleware.loop_lag import LagPolicy, LagReport, LagWindow, tick_plan
 
 _log = logging.getLogger(__name__)
+
+
+# meiva:note
+# The one field of psutil's per-process memory tuple this module reads. typeshed declares `pmem` per
+# `sys.platform` and falls to `class pmem(Any)` when the platform is not fixed (basedpyright checks
+# platform "All"), which makes every attribute read `Any`; the view states the field's type.
+class _ProcessMemory(Protocol):
+    @property
+    def rss(self) -> int: ...
+
+
+# meiva:note
+# The resident set size of `process` in bytes.
+def process_rss_bytes(process: psutil.Process) -> int:
+    return _rss_of(process.memory_info())
+
+
+# meiva:note
+# The parameter annotation is what carries the view: a local `memory: _ProcessMemory = ...` is
+# narrowed back to the stub's `pmem` on assignment, whose `rss` is `Any`.
+def _rss_of(memory: _ProcessMemory) -> int:
+    return memory.rss
+
 
 TICK_INTERVAL_S = 1.0
 EMIT_INTERVAL_S = 60.0
@@ -134,13 +157,12 @@ class GatewayRuntimeMonitor:
                 "slow_ticks": report.slow_ticks,
             },
         )
-        memory = self._process.memory_info()
         telemetry.emit(
             "telemetry",
             "gateway_process",
             attributes={
                 "cpu_percent": self._process.cpu_percent(interval=None),
-                "rss_bytes": memory.rss,
+                "rss_bytes": process_rss_bytes(self._process),
                 "fd_count": self._process.num_fds(),
             },
         )

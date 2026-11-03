@@ -12,8 +12,8 @@ from psycopg import errors as pg_errors
 from base.clock.tests.fakes import system_clock
 from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
+from gateway.http.error_handlers import unhandled_exception_handler
 from gateway.http.middleware.error_envelope import request_trace_middleware
-from gateway.http.middleware.error_handlers import unhandled_exception_handler
 from gateway.lgtm.telemetry_staleness import TelemetryStaleness
 from gateway.routers.fleet import fleet_graph as fg
 from gateway.tests.auth.gateway_config import gateway_config_of

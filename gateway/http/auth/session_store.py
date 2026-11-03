@@ -11,16 +11,38 @@ from __future__ import annotations
 from collections import OrderedDict
 from collections.abc import Collection
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
 
-from psycopg.rows import dict_row
+from psycopg.rows import class_row
 from psycopg_pool import ConnectionPool
 
 from base.db.transaction import write_transaction
 from base.host.net.auth import new_session_id
 
 _CACHE_TTL = timedelta(seconds=30)
+
+
+# meiva:note
+# One `web_sessions` row as the sessions listing reads it.
+@dataclass(frozen=True, slots=True)
+class WebSessionRow:
+    id: str
+    created_at: datetime
+    expires_at: datetime
+    revoked_at: datetime | None
+    last_seen_at: datetime
+    user_agent: str
+    ip: str
+
+
+@dataclass(frozen=True, slots=True)
+class _SessionValidity:
+    id: str
+    expires_at: datetime
+    revoked_at: datetime | None
+
+
 _SESSION_CACHE_MAX_ENTRIES = 4096
 
 
@@ -69,7 +91,7 @@ class SessionStore:
 
     def __init__(
         self,
-        pool: ConnectionPool[Any],
+        pool: ConnectionPool,
         *,
         max_cache_entries: int = _SESSION_CACHE_MAX_ENTRIES,
         cache: OrderedDict[str, tuple[datetime, datetime]] | None = None,
@@ -113,7 +135,10 @@ class SessionStore:
                 return True
             self._cache.pop(session_id, None)
 
-        with self._pool.connection() as conn, conn.cursor() as cur:
+        with (
+            self._pool.connection() as conn,
+            conn.cursor(row_factory=class_row(_SessionValidity)) as cur,
+        ):
             cur.execute(
                 "SELECT id, expires_at, revoked_at FROM web_sessions WHERE id = %s",
                 (session_id,),
@@ -121,8 +146,8 @@ class SessionStore:
             row = cur.fetchone()
         if row is None:
             return False
-        _, expires_at, revoked_at = row
-        if revoked_at is not None or expires_at <= now:
+        expires_at = row.expires_at
+        if row.revoked_at is not None or expires_at <= now:
             return False
 
         self._cache[session_id] = (min(now + _CACHE_TTL, expires_at), expires_at)
@@ -150,10 +175,10 @@ class SessionStore:
 
 
 def list_sessions(
-    pool: ConnectionPool[Any],
+    pool: ConnectionPool,
     *,
     exclude_revoked: bool = True,
-) -> list[dict[str, Any]]:
+) -> list[WebSessionRow]:
     """Return sessions newest-first; by default only currently active rows."""
     query = (
         """
@@ -169,9 +194,9 @@ def list_sessions(
         ORDER BY created_at DESC, id DESC
         """
     )
-    with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+    with pool.connection() as conn, conn.cursor(row_factory=class_row(WebSessionRow)) as cur:
         cur.execute(query)
-        return [dict(row) for row in cur.fetchall()]
+        return cur.fetchall()
 
 
 class SessionTouchThrottle:
@@ -212,7 +237,7 @@ class SessionTouchThrottle:
                 self.last_touch.pop(session_id, None)
 
 
-def touch_session(pool: ConnectionPool[Any], session_id: str) -> None:
+def touch_session(pool: ConnectionPool, session_id: str) -> None:
     """Record recent use of a session."""
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
@@ -221,7 +246,7 @@ def touch_session(pool: ConnectionPool[Any], session_id: str) -> None:
         )
 
 
-def session_ids_with_suffix(pool: ConnectionPool[Any], suffix: str) -> list[str]:
+def session_ids_with_suffix(pool: ConnectionPool, suffix: str) -> list[str]:
     """Active (unrevoked, unexpired) session ids ending with ``suffix``, newest first.
 
     The sessions list masks non-current ids to their final 8 characters; the

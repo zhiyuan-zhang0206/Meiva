@@ -1,10 +1,9 @@
-exports = ["cors.py", "error_envelope.py", "error_handlers.py", "latency.py", "runtime_metrics.py", "stopping.py"]
+exports = ["cors.py", "error_envelope.py", "latency.py", "runtime_metrics.py", "stopping.py"]
 
 [uses]
 "error_envelope.py" = ["correlation.py"]
-"error_handlers.py" = ["error_envelope.py"]
 "runtime_metrics.py" = ["loop_lag.py"]
-"tests" = ["correlation.py", "error_envelope.py", "error_handlers.py", "loop_lag.py", "runtime_metrics.py"]
+"tests" = ["correlation.py", "loop_lag.py", "runtime_metrics.py"]
 
 [purity]
 "__init__.py" = "strict"

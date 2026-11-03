@@ -2704,6 +2704,17 @@ export interface components {
             machine: string | null;
             depth: number;
         };
+        BrowserSession: {
+            id: string;
+            created_at: string;
+            expires_at: string;
+            revoked_at: string | null;
+            last_seen_at: string;
+            user_agent: string;
+            ip: string;
+            current: boolean;
+            managed: boolean;
+        };
         BuildJobOut: {
             session: number;
             start_index: number;
@@ -4426,9 +4437,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["BrowserSession"][];
                 };
             };
         };

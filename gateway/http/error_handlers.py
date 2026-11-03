@@ -10,6 +10,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from base.agents.inbox.chat_delivery import ChatInboundCommittedError
 from base.api_contracts.agent_contract import AgentLaunchFailed, MeivaAgentError
+from gateway.http.config import gateway_state
 from gateway.http.middleware.error_envelope import error_response
 
 _log = logging.getLogger(__name__)
@@ -56,7 +57,7 @@ def cors_headers(request: Request) -> dict[str, str]:
     origin = request.headers.get("origin")
     if origin is None:
         return {}
-    allowed_origins: tuple[str, ...] = request.app.state.gateway_config.allowed_origins
+    allowed_origins: tuple[str, ...] = gateway_state(request).gateway_config.allowed_origins
     if origin not in allowed_origins:
         return {}
     return {

@@ -4,7 +4,7 @@ exports = ["login_password.py", "login_password_store.py", "rejection_log.py", "
 "login_password_store.py" = ["login_password.py"]
 "rejection_log.py" = ["rejection_policy.py"]
 "request_principal.py" = ["login_password.py", "login_password_store.py", "session_store.py"]
-"router.py" = ["login_password.py", "login_password_store.py", "request_principal.py", "session_store.py"]
+"router.py" = ["login_password.py", "login_password_store.py", "rejection_log.py", "request_principal.py", "session_store.py"]
 "tests" = ["login_password.py", "login_password_store.py", "rejection_policy.py", "request_principal.py", "session_store.py"]
 "webhook.py" = ["request_principal.py"]
 
