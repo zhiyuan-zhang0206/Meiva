@@ -10,6 +10,8 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from scripts.hooks.diff_checks import (
     ChangeSet,
     Selection,
@@ -257,8 +259,11 @@ def test_cache_evicts_oldest_entries_past_cap_and_cli_exposes_flags(tmp_path: Pa
     assert lookup_run(cache, "key-0") is None
     assert lookup_run(cache, "key-1") is None
     assert lookup_run(cache, "key-4") is not None
-    raw = json.loads(cache.cache_path.read_text(encoding="utf-8"))
-    assert list(raw["entries"].keys()) == ["key-2", "key-3", "key-4"]
+    raw = object_of(json.loads, cache.cache_path.read_text(encoding="utf-8"))
+    assert is_object_dict(raw)
+    entries = raw["entries"]
+    assert is_object_dict(entries)
+    assert list(entries) == ["key-2", "key-3", "key-4"]
 
     parsed = parse_args(["--mode", "full", "--no-cache"])
     assert parsed.mode == "full"

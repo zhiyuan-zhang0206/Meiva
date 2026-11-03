@@ -27,6 +27,8 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 # within the file budget.
 sys.path.insert(0, str(REPOSITORY_ROOT))
 
+from base.host.boundary.options import options  # noqa: E402
+from base.host.boundary.untyped import object_of  # noqa: E402
 from scripts.hooks.diff_checks_cache import (  # noqa: E402
     CACHE_FILENAME,
     CacheContext,
@@ -173,7 +175,7 @@ def select_tests(change: ChangeSet) -> Selection:
         )
     finally:
         Path(listing_path).unlink(missing_ok=True)
-    payload: object = json.loads(result.stdout)
+    payload = object_of(json.loads, result.stdout)
     if not is_str_object_dict(payload):
         return Selection(decision="UNKNOWN", tests=(), blind=())
     raw_tests = payload.get("tests")
@@ -441,7 +443,20 @@ def plan(
     return render_plan(change, groups, skip_tests=skip_tests, mode=mode)
 
 
-def parse_args(argv: Sequence[str]) -> argparse.Namespace:
+# meiva:note
+# The flags `parse_args` declares, read once so `main` holds typed values instead of the parser's `Any`.
+@dataclass(frozen=True)
+class Options:
+    base: str
+    mode: CheckMode
+    no_cache: bool
+    changed_files: Path | None
+    skip_tests: bool
+    dry_run: bool
+    repo_root: Path
+
+
+def parse_args(argv: Sequence[str]) -> Options:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", default="origin/main", help="the commit to compare HEAD with")
     parser.add_argument(
@@ -463,15 +478,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--skip-tests", action="store_true", help="select tests, run none of them")
     parser.add_argument("--dry-run", action="store_true", help="print the plan and run nothing")
     parser.add_argument("--repo-root", type=Path, default=REPOSITORY_ROOT)
-    return parser.parse_args(argv)
-
-
-def _validated_mode(raw: object) -> CheckMode:
-    if raw == "incremental":
-        return "incremental"
-    if raw == "full":
-        return "full"
-    raise ValueError(f"unsupported diff_checks mode: {raw!r}")
+    return options(parser.parse_args(argv), Options)
 
 
 def main(argv: Sequence[str]) -> int:
@@ -482,7 +489,7 @@ def main(argv: Sequence[str]) -> int:
     # because that command names `scripts.ci.test_selector` and the read is what puts it in the
     # graph.
     python = sys.executable
-    mode = _validated_mode(arguments.mode)
+    mode = arguments.mode
     root = arguments.repo_root.resolve()
     files = (
         tuple(
