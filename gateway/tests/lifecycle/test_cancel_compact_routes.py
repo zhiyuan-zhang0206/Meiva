@@ -6,10 +6,50 @@ from __future__ import annotations
 import psycopg
 import pytest
 
+from base.api_contracts.agent_contract import Harness, HarnessBilling
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import MachineIdentitySetter
-from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
+from gateway.schemas.models import HarnessAvailability, HarnessModelOption
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client, spawn_via_http
 from gateway.tests.support.runner_ops.ops_stub import RunnerOps
+
+
+def _seed_harnesses(client: GatewayTestClient, machine: str) -> None:
+    client.app.state.harness_cache.store(
+        machine,
+        [
+            HarnessAvailability(
+                harness=Harness.CLAUDE_CODE,
+                status="available",
+                reason="signed in",
+                launchable=True,
+                billing=HarnessBilling.SUBSCRIPTION,
+                models=[
+                    HarnessModelOption(
+                        id="claude-opus-5-5",
+                        reasoning_effort_options=["low", "high"],
+                        reasoning_effort_default="high",
+                    )
+                ],
+                default_model="claude-opus-5-5",
+            ),
+            HarnessAvailability(
+                harness=Harness.CODEX,
+                status="available",
+                reason="signed in",
+                launchable=True,
+                billing=HarnessBilling.SUBSCRIPTION,
+                models=[
+                    HarnessModelOption(
+                        id="gpt-6.1-sol",
+                        reasoning_effort_options=["low", "medium", "high"],
+                        reasoning_effort_default="medium",
+                    )
+                ],
+                default_model="gpt-6.1-sol",
+            ),
+        ],
+    )
 
 
 @pytest.fixture
@@ -75,6 +115,7 @@ def test_compact_refuses_an_external_harness_agent_with_400(
     db_conn: psycopg.Connection,
 ) -> None:
     with gateway_test_client(machine=_local_machine) as client:
+        _seed_harnesses(client, gateway_local_runner.name)
         agent_id = spawn_via_http(
             client, {"harness": "claude_code", "config": {"llm_model": "claude-opus-5-5"}}
         ).json()["id"]
@@ -97,6 +138,7 @@ def test_restart_rejects_external_harness_while_running_and_accepts_while_idling
     db_conn: psycopg.Connection,
 ) -> None:
     with gateway_test_client(machine=_local_machine) as client:
+        _seed_harnesses(client, gateway_local_runner.name)
         agent_id = spawn_via_http(
             client, {"harness": "codex", "config": {"llm_model": "gpt-6.1-sol"}}
         ).json()["id"]

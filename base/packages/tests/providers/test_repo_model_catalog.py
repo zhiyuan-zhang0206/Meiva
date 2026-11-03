@@ -235,11 +235,6 @@ def test_kimi_k3_1_pro_family_and_display_successor(*, model_catalog: ModelCatal
     assert model_catalog.models["kimi-k3"].thinking_always_on
 
 
-def test_kimi_models_are_native_only(*, model_catalog: ModelCatalog) -> None:
-    for model in ("kimi-k3", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"):
-        assert model_catalog.models[model].external_harnesses == {}
-
-
 def test_docs_state_the_actual_plugin_catalog_size(*, model_catalog: ModelCatalog) -> None:
     # meiva:note
     # The two docs that state the roster size have no other consumer, so they are the check.

@@ -1,7 +1,7 @@
 exports = ["bootstrap.py", "harness_probe.py", "harness_rows.py", "machine_pause.py", "monitor", "ops_dispatch.py", "process_boot.py", "roster", "router.py", "server.py", "status.py"]
 
 [uses]
-"harness_probe.py" = ["ops_dispatch.py", "schemas.py"]
+"harness_probe.py" = ["harness_rows.py", "ops_dispatch.py", "schemas.py"]
 "harness_rows.py" = ["schemas.py"]
 "machine_pause.py" = ["schemas.py"]
 "monitor" = ["schemas.py"]

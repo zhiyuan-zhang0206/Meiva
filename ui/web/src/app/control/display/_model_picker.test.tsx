@@ -17,19 +17,16 @@ const MODELS: ModelsResponse["models"] = {
     provider: "deepseek",
     context_window: 128_000,
     pricing: { input: 0.28, cache_read: 0.028, output: 0.42 },
-    harnesses: ["meiva"],
   },
   "claude-opus-5-5": {
     provider: "claude",
     context_window: 1_000_000,
     pricing: { input: 2, cache_read: 0.2, output: 10 },
-    harnesses: ["meiva"],
   },
   "claude-sonnet-5-5": {
     provider: "claude",
     context_window: 1_000_000,
     pricing: { input: 2, cache_read: 0.2, output: 10 },
-    harnesses: ["meiva"],
   },
 };
 

@@ -4,8 +4,6 @@
 
 from __future__ import annotations
 
-from base.api_contracts.agent_contract import Harness
-from base.lm.effort import HarnessModelSpec
 from base.lm.registry import ModelSpec, ModelTuning
 
 # meiva:note
@@ -16,7 +14,6 @@ ADAPTIVE_EFFORT = ("low", "medium", "high", "xhigh", "max")
 MODELS = {
     "claude-sonnet-5": ModelSpec(
         provider="claude",
-        external_harnesses={Harness.CLAUDE_CODE: HarnessModelSpec(ADAPTIVE_EFFORT, "high")},
         spawnable=True,
         # meiva:note
         # Display-only supersession: existing agent configs remain valid.
@@ -41,18 +38,6 @@ MODELS = {
     ),
     "claude-sonnet-5-5": ModelSpec(
         provider="claude",
-        external_harnesses={
-            Harness.CLAUDE_CODE: HarnessModelSpec(ADAPTIVE_EFFORT, "high"),
-            Harness.ANTIGRAVITY: HarnessModelSpec(
-                ("low", "medium", "high"),
-                "high",
-                {
-                    "low": "claude-sonnet-5-5-low",
-                    "medium": "claude-sonnet-5-5-medium",
-                    "high": "claude-sonnet-5-5-high",
-                },
-            ),
-        },
         spawnable=True,
         context_window=1_000_000,
         max_output_tokens=128_000,
@@ -69,7 +54,6 @@ MODELS = {
     ),
     "claude-haiku-5-5": ModelSpec(
         provider="claude",
-        external_harnesses={Harness.CLAUDE_CODE: HarnessModelSpec(ADAPTIVE_EFFORT, "medium")},
         spawnable=True,
         context_window=1_000_000,
         max_output_tokens=128_000,
@@ -83,7 +67,6 @@ MODELS = {
     ),
     "claude-haiku-4-5-20251001": ModelSpec(
         provider="claude",
-        external_harnesses={},
         spawnable=True,
         superseded_by="claude-haiku-5-5",
         context_window=200_000,
@@ -107,7 +90,6 @@ MODELS = {
     ),
     "claude-opus-5": ModelSpec(
         provider="claude",
-        external_harnesses={Harness.CLAUDE_CODE: HarnessModelSpec(ADAPTIVE_EFFORT, "high")},
         spawnable=True,
         # meiva:note
         # Anthropic lists Opus 5 as Legacy and provides a 5.5 migration guide;
@@ -131,18 +113,6 @@ MODELS = {
     ),
     "claude-opus-5-5": ModelSpec(
         provider="claude",
-        external_harnesses={
-            Harness.CLAUDE_CODE: HarnessModelSpec(ADAPTIVE_EFFORT, "medium"),
-            Harness.ANTIGRAVITY: HarnessModelSpec(
-                ("low", "medium", "high"),
-                "medium",
-                {
-                    "low": "claude-opus-5-5-low",
-                    "medium": "claude-opus-5-5-medium",
-                    "high": "claude-opus-5-5-high",
-                },
-            ),
-        },
         spawnable=True,
         context_window=1_000_000,
         max_output_tokens=128_000,
@@ -162,7 +132,6 @@ MODELS = {
     ),
     "claude-fable-5": ModelSpec(
         provider="claude",
-        external_harnesses={Harness.CLAUDE_CODE: HarnessModelSpec(ADAPTIVE_EFFORT, "high")},
         spawnable=True,
         superseded_by="claude-fable-5-1",
         context_window=1_000_000,
@@ -197,7 +166,6 @@ MODELS = {
     ),
     "claude-fable-5-1": ModelSpec(
         provider="claude",
-        external_harnesses={Harness.CLAUDE_CODE: HarnessModelSpec(ADAPTIVE_EFFORT, "high")},
         spawnable=True,
         context_window=1_000_000,
         max_output_tokens=128_000,

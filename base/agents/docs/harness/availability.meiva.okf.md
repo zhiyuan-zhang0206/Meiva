@@ -10,11 +10,12 @@ tags: [base, agents, frontend]
 ## Local probe
 
 `meiva.agents.harness_availability()` reports one row per harness for this machine.
-A row carries a status — `available` (installed, and the CLI or the store shows a
-live sign-in), `unavailable` (not installed, no sign-in, or credentials that
-cannot renew and have expired) or `unknown` (installed, but no login state could
-be read) — plus a readable reason, the executable a session would start and
-whether PATH led to it.
+A row carries a status — `available` (installed, signed in, and live model options
+read), `unavailable` (not installed, no sign-in, or credentials that cannot renew
+and have expired) or `unknown` (installed, but sign-in or live model options could
+not be read) — plus a readable reason, the executable a session would start,
+whether PATH led to it, `models` (`ProbedHarnessModel` entries with per-model
+reasoning-effort options and default), and `default_model`.
 
 The probe asks about a stored sign-in; it does not authenticate. Two distinctions
 follow. A store is evidence, an account record is not: `~/.claude.json` keeps
@@ -33,11 +34,15 @@ The store has to belong to the CLI: Antigravity's IDE writes
 `authentication required` — so only the CLI's file is read.
 
 The probe asks the CLI, then reads the store. It runs `claude auth status --json`,
-`codex login status` or `agy models` — the one that belongs to that harness —
-through the environment a session would be handed and under a bounded timeout,
-and falls back to the stored credential only when the CLI cannot answer: a
-timeout, a binary that will not run, or output that names no login state. Neither
-path starts a session or spends model quota, and a sign-in nobody can prove stays
+`codex login status` or `agy models` — the one that belongs to that
+harness — through the environment a session would be handed and under a bounded
+timeout, and falls back to the stored credential only when the CLI cannot answer:
+a timeout, a binary that will not run, or output that names no login state. Once
+sign-in is established, the probe queries the CLI's live model and effort
+catalogue in parallel across external harnesses (`agy` reuses its login stdout);
+if the model catalogue cannot be read or returns empty, the row degrades to
+`unknown` with the catalogue failure appended to `reason`. Neither path starts a
+turn or spends model quota, and a sign-in or model list nobody can prove stays
 `unknown` rather than an invented answer. When PATH misses a user-level install
 the probe still looks in the conventional bin directories, because an agent
 process starts without the interactive shell profile; `on_path=false` says that
@@ -57,10 +62,11 @@ process lifetime; a gateway restart leaves them unchecked again.
 
 The Refresh button above Spawn calls
 `POST /api/cluster/machines/{name}/harnesses/refresh` for every ready runner
-machine in one action.
-Only that endpoint dispatches `harness_probe` to its runner, which answers from
+machine in one action. That endpoint — and an external-harness spawn or restart
+against a machine with no cached snapshot (`ensure_machine_harnesses`) —
+dispatches `harness_probe` to its runner, which answers from
 `probe_local_harnesses()`. Concurrent refresh requests for one machine share the
-same in-flight probe, owned by the leading HTTP request. Cancelling a follower
+same in-flight probe, owned by the leading request. Cancelling a follower
 does not cancel that work; cancelling the leader settles all followers without
 replacing the snapshot. A failed refresh preserves the prior snapshot and is
 reported to the caller. A name no machine carries answers 404, and a machine
@@ -70,10 +76,11 @@ availability and replaces the snapshot; it does not launch or authenticate a
 session. The browser still makes one request per ready machine on each explicit
 refresh.
 
-Each row carries the probe's `status` and `reason` unchanged, plus `launchable`,
-which the gateway composes from two facts: a launcher for that harness exists in
-this build (`LAUNCHABLE_HARNESSES`) and the machine can actually run it
-(`available`, or the built-in runtime, which needs no CLI). A harness can
-therefore be installed and signed in and still not launchable. The form keeps
+Each row carries the probe's `status`, `reason`, `models`, and `default_model`
+unchanged, plus `launchable`, which the gateway composes from three facts: a
+launcher for that harness exists in this build (`LAUNCHABLE_HARNESSES`), the
+machine reports `available`, and an external harness reports at least one model
+(the built-in runtime needs neither an external CLI nor probed models). A harness
+can therefore be installed and signed in and still not launchable. The form keeps
 such a row visible and disabled; creating an agent the machine cannot start
 would only look like success.

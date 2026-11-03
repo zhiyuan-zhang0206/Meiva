@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Literal, get_args, get_type_hints
@@ -40,9 +41,12 @@ from base.telemetry.alerts import frontend_base_url
 from base.telemetry.observability import cluster_label
 from gateway.http.middleware.cors import cors_allowed_origins, trusted_request_hosts
 from gateway.http.process import GatewayProcess
+from gateway.schemas.models import HarnessAvailability
 from ops.cluster.rpc import RpcClient
 from services.derived.memory_indexer.embeddings import factory as embedding_factory
 from services.derived.memory_indexer.embeddings.embeddinggemma import EmbeddingGemmaConfig
+
+EnsureHarnesses = Callable[[str], Awaitable[Sequence[HarnessAvailability]]]
 
 
 # meiva:note
@@ -514,6 +518,7 @@ class GatewayAppState(State):
     service_endpoints: ServiceEndpoints
     command_catalog: CommandCatalog
     shell_backend: SessionBackend
+    ensure_machine_harnesses: EnsureHarnesses
 
 
 # meiva:note
@@ -569,3 +574,7 @@ def gateway_cluster(request: Request) -> str:
 # handler asks for the client instead of creating one from process settings.
 def gateway_rpc(request: Request) -> RpcClient:
     return gateway_state(request).rpc
+
+
+def gateway_ensure_harnesses(request: Request) -> EnsureHarnesses:
+    return gateway_state(request).ensure_machine_harnesses

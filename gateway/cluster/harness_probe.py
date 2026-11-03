@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Collection
 
 from fastapi import HTTPException
 
+from base.agents.birth.harness import LAUNCHABLE_HARNESSES
+from base.api_contracts.agent_contract import Harness
 from base.cluster import machines
 from base.cluster.machine import MachineIdentityReader
 from base.db import Database
+from gateway.cluster.harness_rows import availability_rows
 from gateway.cluster.ops_dispatch import dispatch_op
 from gateway.cluster.schemas import HarnessAvailability
 from ops.cluster.rpc import RpcClient
@@ -92,3 +95,23 @@ async def probe_harnesses(
     return HarnessProbeResult.model_validate(
         await dispatch_op(db, target, "harness_probe", {}, rpc=rpc)
     )
+
+
+async def ensure_machine_harnesses(
+    target: str,
+    *,
+    cache: HarnessProbeCache,
+    db: Database,
+    local_machine: MachineIdentityReader,
+    rpc: RpcClient,
+    launchable_harnesses: Collection[Harness] = LAUNCHABLE_HARNESSES,
+) -> list[HarnessAvailability]:
+    cached = cache.get(target)
+    if cached is not None:
+        return cached
+
+    async def probe() -> list[HarnessAvailability]:
+        probed = await probe_harnesses(target, db=db, local_machine=local_machine, rpc=rpc)
+        return availability_rows(probed, launchable_harnesses)
+
+    return await cache.refresh(target, probe)

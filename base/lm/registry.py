@@ -1,12 +1,6 @@
 # meiva:note
 # `ModelTuning` field names match flat `base.config` settings fields one-for-one, with `DEFAULT_TUNING` fully populated as the shared floor and `None` serving as the topology-independent unset sentinel across `explain_setting` and `resolve_setting` (`shared-default < model-default < explicit`). `validate_models` and `validate_spec` require `attach_modalities` to be a subset of `media_types`, require `sdk_hidden_members` entries to be dotted paths under `meiva` and `sdk_doc_style` to be a plain identifier, require every spawnable model to declare `context_window`, `knowledge_cutoff`, `effort_levels`, a current price, a concrete `tuning.reasoning_effort` within `effort_levels`, and `max_output_tokens` on Anthropic-protocol bindings, and require acyclic `superseded_by` chains, valid `fast_of` standard targets, and non-spawnable `unavailable_fallback` sources pointing to spawnable replacements. `resolve_available_model` and `normalize_overlay_llm_model` settle withdrawn models to their declared fallback in one hop and return `(requested, resolved)` when rewriting an overlay.
 # meiva:link base/lm/docs/model-configuration.meiva.okf.md
-# meiva:note
-# `ModelSpec.external_harnesses` names the external harnesses that can run a model; the built-in
-# runtime (`meiva`) runs every spawnable model, so it is implied by `harnesses_for` rather than
-# listed, and an empty set means the built-in loop is the only route. `validate_spec` rejects a
-# value outside the `Harness` enum rather than dropping it.
-# meiva:link base/agents/docs/harness/harness-models.meiva.okf.md
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping
@@ -14,8 +8,6 @@ from dataclasses import asdict, dataclass, field
 from dataclasses import fields as dataclass_fields
 from typing import Any, Literal, overload
 
-from base.api_contracts.agent_contract import Harness
-from base.lm.effort import EFFORT_VOCAB, HarnessModelSpec
 from base.lm.pricing import PriceBook
 
 
@@ -90,14 +82,6 @@ class ReferenceTps:
 @dataclass(frozen=True)
 class ModelSpec:
     provider: str
-    # meiva:note
-    # External execution bindings own their supported efforts and CLI model mappings. An empty
-    # map offers this model only on the native runtime; API Fast service variants do not inherit
-    # a CLI binding unless an adapter can execute that service selection.
-    # meiva:link base/agents/docs/harness/harness-models.meiva.okf.md
-    external_harnesses: Mapping[Harness, HarnessModelSpec] = field(
-        default_factory=dict[Harness, HarnessModelSpec], kw_only=True
-    )
     fast_of: str | None = field(default=None, kw_only=True)
     reference_tps: ReferenceTps | None = field(default=None, kw_only=True)
     spawnable: bool = False
@@ -117,29 +101,6 @@ class ModelSpec:
     sdk_doc_style: str | None = None
     tuning: ModelTuning = field(default_factory=ModelTuning)
 
-    # meiva:note
-    # Every harness that can run this model, built-in runtime first: `meiva` runs every
-    # spawnable model, so only the external claims are declared, and their order follows the
-    # Harness enum rather than the order a plugin listed them in.
-    # meiva:link base/agents/docs/harness/harness-models.meiva.okf.md
-    def harnesses(self) -> tuple[Harness, ...]:
-        return (
-            Harness.MEIVA,
-            *(
-                harness
-                for harness in Harness
-                if harness is not Harness.MEIVA and harness in self.external_harnesses
-            ),
-        )
-
-    def harness_model(self, model: str, harness: Harness, effort: object) -> tuple[str, str]:
-        if effort is not None and not isinstance(effort, str):
-            raise ValueError("reasoning_effort must be a string")
-        binding = self.external_harnesses.get(harness)
-        if binding is None:
-            raise ValueError(f"model {model!r} is not supported by harness {harness.value!r}")
-        return binding.selection(model, effort)
-
     @staticmethod
     def validate_spec(
         model_id: str,
@@ -150,7 +111,6 @@ class ModelSpec:
         pending_price_models: Collection[str] = (),
     ) -> None:
         _validate_sdk_help(spec, model_id)
-        _validate_external_harnesses(spec, model_id)
         if spec.attach_modalities is not None and not spec.attach_modalities <= spec.media_types:
             raise RuntimeError(
                 f"model {model_id!r} declares attach_modalities "
@@ -230,7 +190,6 @@ class ModelSpec:
         _validate_fast_links(models)
 
 
-harnesses_for = ModelSpec.harnesses
 validate_spec = ModelSpec.validate_spec
 validate_models = ModelSpec.validate_models
 tuning_field_names = ModelTuning.field_names
@@ -276,32 +235,6 @@ def _validate_sdk_help(spec: ModelSpec, model_id: str) -> None:
             f"model {model_id!r} declares sdk_doc_style {style!r} — a style is a plain "
             f"identifier, the key a target declares with doc_variants"
         )
-
-
-# meiva:note
-# A harness the enum does not carry is refused rather than dropped: the value would
-# otherwise vanish from the published per-model set and take the model out of a CLI's
-# column with nothing to show for it.
-# meiva:link base/agents/docs/harness/harness-models.meiva.okf.md
-def _validate_external_harnesses(spec: ModelSpec, model_id: str) -> None:
-    if not isinstance(spec.external_harnesses, Mapping):
-        raise TypeError(
-            f"external_harnesses for {model_id!r} must map harnesses to execution settings"
-        )
-    unknown = sorted(
-        repr(harness) for harness in spec.external_harnesses if not isinstance(harness, Harness)
-    )
-    if unknown:
-        raise RuntimeError(
-            f"model {model_id!r} declares external_harnesses {unknown} outside the "
-            f"Harness enum {[harness.value for harness in Harness]} — a harness nothing can "
-            "run is refused, never dropped"
-        )
-    for harness, binding in spec.external_harnesses.items():
-        if harness is Harness.MEIVA or not isinstance(binding, HarnessModelSpec):
-            raise RuntimeError(f"invalid external_harnesses binding for {model_id!r}: {harness!r}")
-        if not set(binding.effort_levels) <= set(EFFORT_VOCAB):
-            raise RuntimeError(f"invalid external_harnesses effort vocabulary for {model_id!r}")
 
 
 def _validate_fast_links(models: Mapping[str, ModelSpec]) -> None:

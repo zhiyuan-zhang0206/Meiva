@@ -30,7 +30,30 @@ def runner(
 ) -> Generator[RunnerOps]:
     """The runner `local-test`, which accepts every launch it is asked for."""
     set_machine_identity(role="agent-runner", name="local-test")
-    replies = {"spawn-launch": launched, "launch-reconcile": completed({"wake_published": False})}
+    probe_reply = {
+        "machine": "local-test",
+        "harnesses": [
+            {"harness": "meiva", "status": "available", "reason": "built-in"},
+            {
+                "harness": "codex",
+                "status": "available",
+                "reason": "signed in",
+                "models": [
+                    {
+                        "id": "gpt-6-astra",
+                        "reasoning_effort_options": ["low", "high", "ultra"],
+                        "reasoning_effort_default": "high",
+                    }
+                ],
+                "default_model": "gpt-6-astra",
+            },
+        ],
+    }
+    replies = {
+        "spawn-launch": launched,
+        "launch-reconcile": completed({"wake_published": False}),
+        "harness_probe": completed(probe_reply),
+    }
     with runner_ops(db_conn, "local-test", replies) as value:
         yield value
 

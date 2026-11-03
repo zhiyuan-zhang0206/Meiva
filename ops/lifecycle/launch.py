@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 
 from psycopg_pool import ConnectionPool
 
@@ -11,7 +12,7 @@ from base.agents.birth.harness import LAUNCHABLE_HARNESSES, resolve_birth_harnes
 from base.agents.birth.spawn import latest_checkpoint_id
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.model.birth_config import uses_harness_model_selection
-from base.api_contracts.agent_contract import ForkSourceEmpty, Harness
+from base.api_contracts.agent_contract import ForkSourceEmpty, Harness, ProbedHarnessModel
 from base.config.agent_pins import resolve_agent_config_pins
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -83,6 +84,8 @@ def spawn_prechecks_blocking(
     catalog: ModelCatalog,
     keys: ProviderKeys,
     authority: ConfigAuthority,
+    probed_models: Sequence[ProbedHarnessModel] | None = None,
+    probed_default_model: str | None = None,
 ) -> str | None:
     """Sync spawn pre-checks — via to_thread: model-config validation (may read
     provider API keys) + fork checkpoint lookup. Returns the fork checkpoint
@@ -100,6 +103,8 @@ def spawn_prechecks_blocking(
             authority=authority,
             llm_override=authority.service_field_value("llm_override"),
             harness=body.harness or Harness.MEIVA,
+            probed_models=probed_models,
+            probed_default_model=probed_default_model,
         )
     fork_checkpoint: str | None = None
     if body.fork_from is not None:

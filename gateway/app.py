@@ -54,7 +54,7 @@ from gateway.cluster import bootstrap as bootstrap_router
 from gateway.cluster import machine_pause as machine_pause_router
 from gateway.cluster import router as cluster_router
 from gateway.cluster import status as status_router
-from gateway.cluster.harness_probe import HarnessProbeCache
+from gateway.cluster.harness_probe import HarnessProbeCache, ensure_machine_harnesses
 from gateway.cluster.monitor import alert_classes as alert_classes_router
 from gateway.cluster.monitor import ops_monitor as ops_monitor_router
 from gateway.cluster.process_boot import LOADED_IMAGE
@@ -199,6 +199,17 @@ def _build_request_resources(
     app.state.status_cache = StatusCache()
     app.state.shell_backend = get_shell_backend(home=process.home)
     app.state.harness_cache = HarnessProbeCache()
+
+    async def _ensure_harnesses(target: str) -> list[Any]:
+        return await ensure_machine_harnesses(
+            target,
+            cache=app.state.harness_cache,
+            db=app.state.db,
+            local_machine=app.state.machine,
+            rpc=app.state.rpc,
+        )
+
+    app.state.ensure_machine_harnesses = _ensure_harnesses
     app.state.identity_mismatch_log = IdentityMismatchLog()
     app.state.service_endpoints = ServiceEndpoints.from_boot(
         config, runtime=paths.run_dir(process.home)

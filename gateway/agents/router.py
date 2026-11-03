@@ -18,7 +18,7 @@ from base.telemetry.audit_events import prepare_event_log, record_audit
 from gateway.agents.creation import create_and_launch_agent, scoped_creation_key
 from gateway.agents.schemas import AgentRow, LabelPatchRequest
 from gateway.http.auth.request_principal import PRINCIPAL_SCOPE, SCOPE_HEADER
-from gateway.http.config import gateway_clock, gateway_rpc
+from gateway.http.config import gateway_clock, gateway_ensure_harnesses, gateway_rpc
 from gateway.http.model_catalog import (
     catalog_for_observation,
     request_default_model,
@@ -58,8 +58,8 @@ def get_models(request: Request) -> ModelsResponse:
 
     from base.agents.model.birth_config import resolve_default_model
     from base.lm.pricing import rates_at
-    from base.lm.registry import explain_setting, harnesses_for
-    from gateway.schemas.models import HarnessModelInfo, ModelInfo, ModelPricing
+    from base.lm.registry import explain_setting
+    from gateway.schemas.models import ModelInfo, ModelPricing
 
     catalog = require_model_catalog(request)
 
@@ -93,14 +93,6 @@ def get_models(request: Request) -> ModelsResponse:
                 ),
                 reasoning_effort_default=resolved_effort or None,
                 superseded_by=spec.superseded_by,
-                harnesses=list(harnesses_for(spec)),
-                harness_settings={
-                    harness: HarnessModelInfo(
-                        reasoning_effort_options=list(binding.effort_levels),
-                        reasoning_effort_default=binding.default_effort,
-                    )
-                    for harness, binding in spec.external_harnesses.items()
-                },
             )
 
     with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
@@ -208,6 +200,7 @@ async def post_guarded_agents(
             creation_key=key,
             clock=gateway_clock(request),
             rpc=gateway_rpc(request),
+            ensure_harnesses=gateway_ensure_harnesses(request),
         )
     except CreationConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

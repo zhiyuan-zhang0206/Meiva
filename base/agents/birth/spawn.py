@@ -22,6 +22,7 @@ wakes its host.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from uuid import UUID
 
 import psycopg
@@ -118,6 +119,7 @@ def create_agent_row(
     prompt_source: str | None = None,
     fork_tail_skills: list[str] | None = None,
     harness: str | None = None,
+    harness_defaults: Mapping[str, object] | None = None,
     creation_key: str | None = None,
     creation_request_hash: str | None = None,
 ) -> tuple[int, dict[str, object] | None, int | None, UUID]:
@@ -209,6 +211,7 @@ def create_agent_row(
             prompt_source=prompt_source,
             fork_tail_skills=fork_tail_skills,
             harness=harness,
+            harness_defaults=harness_defaults,
             creation_key=creation_key,
             creation_request_hash=creation_request_hash,
         )

@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Which models a harness runs
-description: The registry's per-model harness declaration behind the spawn form's model column, and what it does and does not claim.
+description: Live per-machine CLI model and reasoning-effort probing behind external harness selection, and how execution settings reach each harness bridge.
 tags: [base, agents, lm, frontend]
 ---
 
@@ -9,49 +9,58 @@ tags: [base, agents, lm, frontend]
 
 Split out of [[base/agents/docs/harness/harness.meiva.okf.md|Agent harness
 identity]], which owns the value set, its immutability and the fork rule. This
-node owns the matrix the spawn form's model column is built from.
+node owns how model and reasoning-effort choices are discovered, validated and
+executed per harness.
 
-The model registry owns it: `ModelSpec.external_harnesses` maps each external
-harness to a `HarnessModelSpec`. A binding declares its exact effort ladder,
-concrete default, and optional effort-to-CLI-model mapping. `GET /api/models`
-publishes the supported harnesses and their `harness_settings`; the frontend
-owns no provider table or effort conversion.
+`meiva` runs every spawnable model declared in the native `ModelCatalog` through
+its configured provider API keys (`GET /api/models`). External harnesses
+(`claude_code`, `codex`, `antigravity`) own their own
+account-specific and CLI-version-dependent catalogues: `harness_probe` queries
+each signed-in CLI in real time (`base/agents/birth/harness_model_probe.py`,
+`base/agents/model/harness_models.py`) and publishes `models`
+(`ProbedHarnessModel(id, reasoning_effort_options, reasoning_effort_default)`)
+and `default_model` on the machine's harness availability row. Static model
+registry entries carry no external harness tables, and uncatalogued CLI models
+(such as `gpt-oss-120b` in `agy` or CLI-only models in `claude` and `codex`)
+are selectable and runnable without native catalog registration,
+`superseded_by` filtering, or provider API keys.
 
-`meiva` runs every spawnable model through its configured API keys.
-`harnesses_for` therefore implies the native runtime. External bindings name
-only executable selections: Claude Code and Codex use the registered
-model ID; Antigravity's Gemini 4 Argon, Gemini 3.8 Flash, Claude Opus 5.5 and
-Claude Sonnet 5.5 bindings translate low/medium/high into the exact observed
-`agy models` IDs ending in that effort. Antigravity offers only these declared
-CLI variants. API Fast service variants remain
-native-only until an adapter explicitly supports that service selection.
+Each external CLI is probed through a non-agentic protocol query under a bounded
+timeout without starting a turn or spending model quota:
 
-`validate_spec` rejects unknown harnesses; bindings reject invalid defaults
-and incomplete CLI model mappings. External effort ladders are independent
-of native API tuning: Codex model/list advertises low through ultra on the
-models that support it, and omits API-only none. Spawn
-preflight and the birth transaction reject a model/effort combination the
-chosen harness cannot execute; they never substitute a CLI default for an
-unsupported selection.
+- `codex`: `codex app-server --listen stdio://` (`initialize` -> `model/list`),
+  reading visible `id`, `supportedReasoningEfforts` (including `ultra` when the
+  installed CLI and account support it), `defaultReasoningEffort`, and
+  `isDefault`.
+- `claude_code`: `claude -p --input-format stream-json --output-format stream-json --verbose --no-session-persistence`
+  (`control_request` `initialize`), reading `resolvedModel` / `value`,
+  `supportsEffort`, `supportedEffortLevels`, and `defaultEffort`.
+- `antigravity`: `agy models`, reusing stdout from the login check, stripping
+  progress output and grouping `<base>-<effort>` suffixes into canonical effort
+  ladders while preserving effort-less model IDs verbatim.
+
+If a signed-in external CLI fails its model probe or returns zero models, its
+probe row degrades to `status="unknown"` with the failure reason and
+`launchable=False`. When a caller spawns or switches onto an external harness on
+a machine whose gateway `HarnessProbeCache` is cold, the gateway coalesces an
+on-demand `harness_probe` (`ensure_machine_harnesses`) and validates
+`(llm_model, reasoning_effort)` against the live `ProbedHarnessModel` list via
+`resolve_probed_harness_selection` before creating or restarting the agent.
+Unsupported models or efforts fail fast with `InvalidModelConfig` (HTTP 400);
+omitted fields resolve to the probed `default_model` and its
+`reasoning_effort_default` (never the native cluster default or prior-harness
+pins).
 
 The stored `llm_model` and `reasoning_effort` select the execution session.
-The runner resolves that binding and passes it through `bridge_for` and
-`open_session`. Claude receives SDK model/effort options; Codex receives them
-on every `turn/start`, including after thread resume; Antigravity receives the
-resolved full model ID on its command line.
-External agents use the CLI's authentication and do not construct a native
-chat model or require its provider API key.
+The runner passes them through `bridge_for` and `open_session`: Claude receives
+SDK model/effort options; Codex receives them on every `turn/start`, including
+after thread resume; Antigravity resolves `<model>-<effort>`
+(`resolve_antigravity_cli_model`) onto `--model`. External agents use the CLI's
+authentication and do not construct a native chat model or require its provider
+API key.
 
-Model and Effort mean execution settings in both spawn layouts. External
-harnesses own their context, compaction and continuation. Meiva retains their
-basic timeline projection, without a separate history/summary model or native
-compaction controls. Whether a machine can start the chosen harness remains
-the launch probe's independent `launchable` verdict.
-
-
-New external births stamp `harness_model_selection: 1` in `birth_config`. Only
-that version opts `llm_model` and `reasoning_effort` into CLI execution. Older
-external sessions used those pins for native history settings, so they retain
-the adapter/CLI's original defaults when relaunched or resumed. Their stored
-history choices are not reinterpreted as execution settings. Unknown selection
-versions fail explicitly; no existing row is rewritten during deployment.
+New external births stamp `harness_model_selection: 1` in `birth_config` along
+with the probed default `llm_model` and `reasoning_effort` when not overridden.
+Only version `1` opts those pins into CLI execution; older rows without the
+stamp retain the adapter/CLI's original defaults on resume, and unknown
+selection versions fail explicitly.

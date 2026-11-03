@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from uuid import UUID
 
 from fastapi import Header, HTTPException, Request
@@ -17,9 +18,16 @@ from base.agents.birth.creation_identity import (
 from base.agents.birth.harness import resolve_birth_harness
 from base.agents.birth.spawn import create_agent_row
 from base.agents.labels import spawn_prompt_with_label
+from base.agents.model.harness_models import resolve_probed_harness_selection
 from base.agents.observation import snapshot as snapshot_module
 from base.agents.observation.evidence import AgentAvailability, AvailabilityReason
-from base.api_contracts.agent_contract import AgentNotFound, ForkConfigChangeNotAllowed, Harness
+from base.api_contracts.agent_contract import (
+    AgentNotFound,
+    ForkConfigChangeNotAllowed,
+    Harness,
+    HarnessNotLaunchable,
+    ProbedHarnessModel,
+)
 from base.clock import Clock
 from base.cluster.machines import is_paused, lookup_role
 from base.config.service_read import ConfigAuthority
@@ -39,6 +47,7 @@ from gateway.http.auth.request_principal import (
     PrincipalScopeError,
     request_key,
 )
+from gateway.http.config import EnsureHarnesses
 from ops.cluster.rpc import RpcClient
 from ops.lifecycle.launch import spawn_prechecks_blocking
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
@@ -60,6 +69,48 @@ def creation_receipt(pool: ConnectionPool, key: str, request_hash: str) -> Creat
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+def _check_spawn_target_blocking(db: Database, target: str) -> None:
+    refusal = launch_plan.spawn_target_refusal(
+        target, lookup_role(db, target), paused=is_paused(db, target)
+    )
+    if refusal is not None:
+        raise refusal
+
+
+async def _resolve_external_spawn_probe(
+    db: Database,
+    target: str,
+    body: SpawnAgentRequest,
+    ensure_harnesses: EnsureHarnesses | None,
+) -> tuple[tuple[ProbedHarnessModel, ...] | None, str | None, dict[str, object] | None]:
+    target_harness = body.harness or Harness.MEIVA
+    if target_harness is Harness.MEIVA or body.fork_from is not None:
+        return None, None, None
+    await asyncio.to_thread(_check_spawn_target_blocking, db, target)
+    if ensure_harnesses is None:
+        raise RuntimeError("external harness spawn requires ensure_harnesses wiring")
+    rows = await ensure_harnesses(target)
+    row = next((item for item in rows if item.harness is target_harness), None)
+    if row is None or not row.launchable:
+        detail = row.reason if row is not None else "missing probe row"
+        raise HarnessNotLaunchable(
+            f"harness {target_harness.value!r} is not launchable on {target!r}: {detail}"
+        )
+    probed_models = row.to_probed_models()
+    resolved_model, resolved_effort = resolve_probed_harness_selection(
+        target_harness,
+        probed_models,
+        row.default_model,
+        requested_model=body.config.get("llm_model") if body.config else None,
+        requested_effort=body.config.get("reasoning_effort") if body.config else None,
+    )
+    return (
+        probed_models,
+        row.default_model,
+        {"llm_model": resolved_model, "reasoning_effort": resolved_effort},
+    )
+
+
 async def create_and_launch_agent(
     body: SpawnAgentRequest,
     target: str,
@@ -73,6 +124,7 @@ async def create_and_launch_agent(
     clock: Clock,
     rpc: RpcClient,
     creation_identity: dict[str, object] | None = None,
+    ensure_harnesses: EnsureHarnesses | None = None,
 ) -> SpawnedAgent:
     """Gateway-side spawn (Task #1236 follow-up): preflight -> create the agent
     ROW in-process -> forward a launch-only op to the target runner.
@@ -110,6 +162,9 @@ async def create_and_launch_agent(
             clock=clock,
             rpc=rpc,
         )
+    probed_models, probed_default_model, harness_defaults = await _resolve_external_spawn_probe(
+        db, target, body, ensure_harnesses
+    )
     keys = await asyncio.to_thread(process_provider_keys, catalog)
     tail_skills, model_receipt = await asyncio.to_thread(
         spawn_preflight_blocking,
@@ -120,12 +175,21 @@ async def create_and_launch_agent(
         catalog=catalog,
         keys=keys,
         authority=authority,
+        probed_models=probed_models,
+        probed_default_model=probed_default_model,
     )
     # fork_checkpoint resolution stays gateway-side: LangGraph checkpoints are
     # append-only and "latest" drifts under concurrent writes, so the gateway
     # resolves an explicit id before creating the row.
     fork_checkpoint = await asyncio.to_thread(
-        spawn_prechecks_blocking, body, pool, catalog=catalog, keys=keys, authority=authority
+        spawn_prechecks_blocking,
+        body,
+        pool,
+        catalog=catalog,
+        keys=keys,
+        authority=authority,
+        probed_models=probed_models,
+        probed_default_model=probed_default_model,
     )
     try:
         new_id, birth_config, prompt_inbound_id, launch_attempt_id = await asyncio.to_thread(
@@ -142,6 +206,7 @@ async def create_and_launch_agent(
             label=body.label,
             fork_tail_skills=tail_skills,
             harness=body.harness.value if body.harness is not None else None,
+            harness_defaults=harness_defaults,
             prompt=body.prompt,
             prompt_source=body.prompt_source,
             creation_key=creation_key,
@@ -264,6 +329,8 @@ def spawn_preflight_blocking(
     catalog: ModelCatalog,
     keys: ProviderKeys,
     authority: ConfigAuthority,
+    probed_models: Sequence[ProbedHarnessModel] | None = None,
+    probed_default_model: str | None = None,
 ) -> tuple[list[str] | None, tuple[str, str] | None]:
     # meiva:note
     # Capability and the pause latch are read from the cluster registry — the same
@@ -277,11 +344,8 @@ def spawn_preflight_blocking(
     # unreachable and its agents were terminated on pause, so every spawn (schedules,
     # watcher respawns, peer spawns) is refused here with the same clear reason
     # instead of a transport error at dial time.
-    refusal = launch_plan.spawn_target_refusal(
-        target, lookup_role(db, target), paused=is_paused(db, target)
-    )
-    if refusal is not None:
-        raise refusal
+    _check_spawn_target_blocking(db, target)
+    target_harness = body.harness or Harness.MEIVA
     tail_skills: list[str] | None = None
     if body.fork_from is not None:
         with pool.connection() as conn, conn.cursor() as cur:
@@ -293,7 +357,7 @@ def spawn_preflight_blocking(
     # withdrawal surfacing later as a wake-time normalization (task #4306: the
     # 9/20-21 recurrence wrote 12 retired ids through this path, silently).
     model_receipt: tuple[str, str] | None = None
-    if body.config:
+    if body.config and target_harness is Harness.MEIVA:
         from base.lm.registry import normalize_overlay_llm_model
 
         model_receipt = normalize_overlay_llm_model(body.config, models=catalog.models)
@@ -310,7 +374,9 @@ def spawn_preflight_blocking(
             keys=keys,
             authority=authority,
             llm_override=authority.service_field_value("llm_override"),
-            harness=body.harness or Harness.MEIVA,
+            harness=target_harness,
+            probed_models=probed_models,
+            probed_default_model=probed_default_model,
         )
     if model_receipt is not None:
         logger.warning(

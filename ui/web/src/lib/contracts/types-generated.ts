@@ -3029,11 +3029,14 @@ export interface components {
             reason: string;
             launchable: boolean;
             billing: components["schemas"]["HarnessBilling"];
+            models?: components["schemas"]["HarnessModelOption"][];
+            default_model?: string | null;
         };
         HarnessBilling: "api" | "subscription";
-        HarnessModelInfo: {
-            reasoning_effort_options: string[];
-            reasoning_effort_default: string;
+        HarnessModelOption: {
+            id: string;
+            reasoning_effort_options?: string[];
+            reasoning_effort_default?: string | null;
         };
         HeartbeatInfo: {
             interval_s: number;
@@ -3298,10 +3301,6 @@ export interface components {
             reasoning_effort_options?: string[] | null;
             reasoning_effort_default?: string | null;
             superseded_by?: string | null;
-            harnesses: components["schemas"]["Harness"][];
-            harness_settings?: {
-                [key: string]: components["schemas"]["HarnessModelInfo"];
-            };
         };
         ModelPricing: {
             input: number;

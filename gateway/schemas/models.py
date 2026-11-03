@@ -5,12 +5,15 @@ FastAPI generates the model-picker wire contract from these schemas and the
 canonical registry's vendor reference TPS metadata.
 """
 
-from pydantic import (
-    BaseModel,
-    Field,
-)
+from pydantic import BaseModel, Field
 
-from base.api_contracts.agent_contract import DefaultModelSource, Harness
+from base.api_contracts.agent_contract import (
+    DefaultModelSource,
+    Harness,
+    HarnessBilling,
+    HarnessStatus,
+    ProbedHarnessModel,
+)
 from base.lm.registry import ReferenceTps
 
 
@@ -25,9 +28,44 @@ class ModelPricing(BaseModel):
     cache_write_30m: float | None = None
 
 
-class HarnessModelInfo(BaseModel):
-    reasoning_effort_options: list[str]
-    reasoning_effort_default: str
+# meiva:note
+# One model and its reasoning-effort ladder probed live from an external harness CLI.
+# meiva:link base/agents/docs/harness/harness-models.meiva.okf.md
+class HarnessModelOption(BaseModel):
+    id: str
+    reasoning_effort_options: list[str] = Field(default_factory=list)
+    reasoning_effort_default: str | None = None
+
+
+# meiva:note
+# One harness as one machine can run it. `status` is what that machine's probe
+# could prove about install, sign-in and live CLI model catalogue; `launchable`
+# is this build's answer to "can a session actually be started on it there" —
+# a harness can be installed and signed in and still not launchable, and the
+# spawn form says so instead of letting the choice look usable.
+# meiva:link base/agents/docs/harness/harness.meiva.okf.md
+class HarnessAvailability(BaseModel):
+    harness: Harness
+    status: HarnessStatus
+    reason: str
+    launchable: bool
+    # meiva:note
+    # How this harness bills: `api` is metered per token and its rates are worth
+    # showing while a model is chosen, `subscription` is not (user 2026-10-20).
+    # meiva:link base/agents/docs/harness/harness.meiva.okf.md
+    billing: HarnessBilling
+    models: list[HarnessModelOption] = Field(default_factory=list)
+    default_model: str | None = None
+
+    def to_probed_models(self) -> tuple[ProbedHarnessModel, ...]:
+        return tuple(
+            ProbedHarnessModel(
+                id=item.id,
+                reasoning_effort_options=tuple(item.reasoning_effort_options),
+                reasoning_effort_default=item.reasoning_effort_default,
+            )
+            for item in self.models
+        )
 
 
 class ModelInfo(BaseModel):
@@ -48,13 +86,6 @@ class ModelInfo(BaseModel):
     # model still shows. Display-only: a superseded model remains spawnable and
     # config-valid; the frontend filters it from the picker by this field.
     superseded_by: str | None = None
-    # meiva:note
-    # Every harness that can run this model, the built-in runtime first: the spawn form
-    # keeps a model in its column only while the chosen harness appears here, so the
-    # registry's per-model declaration is the single authority for that cascade.
-    # meiva:link base/agents/docs/harness/harness-models.meiva.okf.md
-    harnesses: list[Harness]
-    harness_settings: dict[Harness, HarnessModelInfo] = Field(default_factory=dict)
 
 
 class ModelsResponse(BaseModel):

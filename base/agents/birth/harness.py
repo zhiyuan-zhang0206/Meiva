@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 from collections.abc import Callable, Collection, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -10,6 +11,8 @@ from typing import Any, NamedTuple, TypeGuard
 
 import psycopg
 
+from base.agents.birth.harness_model_probe import ModelProber, probe_cli_models
+from base.agents.model.harness_models import CatalogProbeResult
 from base.api_contracts.agent_contract import (
     LAUNCHABLE_HARNESSES,
     AgentNotFound,
@@ -17,6 +20,7 @@ from base.api_contracts.agent_contract import (
     Harness,
     HarnessNotLaunchable,
     HarnessStatus,
+    ProbedHarnessModel,
     coerce_harness,
 )
 from base.host.env.harness_binaries import (
@@ -33,12 +37,15 @@ class HarnessProbe(NamedTuple):
     reason: str
     binary: str | None = None
     on_path: bool = False
+    models: tuple[ProbedHarnessModel, ...] = ()
+    default_model: str | None = None
 
 
 @dataclass(frozen=True)
 class _LoginEvidence:
     signed_in: bool | None
     detail: str
+    cli_stdout: str | None = None
 
 
 # meiva:note
@@ -397,7 +404,9 @@ def _answered_agy(done: subprocess.CompletedProcess[str]) -> _LoginEvidence:
     said = f"{done.stdout}\n{done.stderr}".lower()
     if done.returncode == 0 and done.stdout.strip():
         return _LoginEvidence(
-            signed_in=True, detail="agy models listed the catalogue, which needs a login"
+            signed_in=True,
+            detail="agy models listed the catalogue, which needs a login",
+            cli_stdout=done.stdout,
         )
     if done.returncode != 0 and ("sign in" in said or "authentication required" in said):
         return _LoginEvidence(signed_in=False, detail="agy models asked for a sign-in")
@@ -447,6 +456,7 @@ def _probe_external(
     *,
     now: datetime,
     cli_runner: CliRunner = subprocess.run,
+    model_prober: ModelProber = probe_cli_models,
 ) -> HarnessProbe:
     binary = _BINARIES[harness]
     path, on_path = locate_harness_binary(binary, home=home, path_env=path_env, bin_dirs=bin_dirs)
@@ -458,11 +468,44 @@ def _probe_external(
             harness, "unavailable", f"the {binary} command was not found on PATH or in {searched}"
         )
     installed = f"installed at {path}" if on_path else f"installed at {path} (not on PATH)"
-    evidence = _cli_login(harness, path, runner=cli_runner)
-    if evidence.signed_in is None:
-        evidence = _stored_login(harness, home, now=now)
+    env = _cli_environment()
+    cli_evidence = _cli_login(harness, path, runner=cli_runner, environment=env)
+    evidence = (
+        _stored_login(harness, home, now=now) if cli_evidence.signed_in is None else cli_evidence
+    )
     if evidence.signed_in is True:
-        return HarnessProbe(harness, "available", f"{installed}; {evidence.detail}", path, on_path)
+        if (
+            harness is Harness.ANTIGRAVITY
+            and cli_evidence.cli_stdout is None
+            and model_prober is probe_cli_models
+        ):
+            probed = CatalogProbeResult(error=cli_evidence.detail)
+        else:
+            probed = model_prober(
+                harness,
+                path,
+                home=home,
+                environment=env,
+                agy_stdout=cli_evidence.cli_stdout,
+            )
+        if probed.models:
+            return HarnessProbe(
+                harness,
+                "available",
+                f"{installed}; {evidence.detail}",
+                path,
+                on_path,
+                models=probed.models,
+                default_model=probed.default_model,
+            )
+        failure = probed.error or "no models returned"
+        return HarnessProbe(
+            harness,
+            "unknown",
+            f"{installed}; {evidence.detail}, but model catalogue probe failed: {failure}",
+            path,
+            on_path,
+        )
     if evidence.signed_in is False:
         return HarnessProbe(
             harness,
@@ -483,8 +526,8 @@ def _probe_external(
 
 # meiva:note
 # The probe asks each CLI and falls back to the stored credential only when the CLI cannot
-# answer; neither path starts a session or spends model quota, and a sign-in it cannot
-# prove stays `unknown` rather than being guessed either way.
+# answer; neither path starts a session or spends model quota, and a sign-in or model
+# catalogue it cannot prove stays `unknown` rather than being guessed either way.
 # meiva:link base/agents/docs/harness/harness.meiva.okf.md
 def probe_local_harnesses(
     home: Path | None = None,
@@ -493,26 +536,29 @@ def probe_local_harnesses(
     *,
     now: datetime,
     cli_runner: CliRunner = subprocess.run,
+    model_prober: ModelProber = probe_cli_models,
 ) -> list[HarnessProbe]:
     resolved_home = resolve_user_home(home)
     resolved_bin_dirs = HARNESS_BIN_DIRS if bin_dirs is None else bin_dirs
-    rows: list[HarnessProbe] = []
-    for harness in Harness:
-        if harness is Harness.MEIVA:
-            rows.append(
-                HarnessProbe(
-                    harness, "available", "built-in runtime; needs no external CLI or login"
-                )
-            )
-            continue
-        rows.append(
-            _probe_external(
+    external = [harness for harness in Harness if harness is not Harness.MEIVA]
+    with ThreadPoolExecutor(max_workers=len(external)) as pool:
+        futures = {
+            harness: pool.submit(
+                _probe_external,
                 harness,
                 resolved_home,
                 path_env,
                 resolved_bin_dirs,
                 now=now,
                 cli_runner=cli_runner,
+                model_prober=model_prober,
             )
-        )
-    return rows
+            for harness in external
+        }
+        probed_external = {harness: future.result() for harness, future in futures.items()}
+    return [
+        HarnessProbe(harness, "available", "built-in runtime; needs no external CLI or login")
+        if harness is Harness.MEIVA
+        else probed_external[harness]
+        for harness in Harness
+    ]

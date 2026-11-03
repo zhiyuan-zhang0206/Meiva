@@ -9,16 +9,64 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.api_contracts.agent_contract import Harness, HarnessBilling
 from base.api_contracts.idempotency import keyed_headers
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
-from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
+from gateway.schemas.models import HarnessAvailability, HarnessModelOption
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client, spawn_via_http
 from gateway.tests.test_agents_endpoints import inbound_rows, returned_id, terminate_hosted
 from gateway.tests.test_agents_endpoints import withdrawn_model as withdrawn_model
 
 pytestmark = pytest.mark.usefixtures("gateway_local_runner")
+
+
+def _seed_restart_harnesses(client: GatewayTestClient) -> None:
+    machine = client.app.state.machine.name()
+    client.app.state.harness_cache.store(
+        machine,
+        [
+            HarnessAvailability(
+                harness=Harness.MEIVA,
+                status="available",
+                reason="built-in",
+                launchable=True,
+                billing=HarnessBilling.API,
+            ),
+            HarnessAvailability(
+                harness=Harness.CODEX,
+                status="available",
+                reason="signed in",
+                launchable=True,
+                billing=HarnessBilling.SUBSCRIPTION,
+                models=[
+                    HarnessModelOption(
+                        id="gpt-6.1-sol",
+                        reasoning_effort_options=["low", "medium", "high"],
+                        reasoning_effort_default="medium",
+                    )
+                ],
+                default_model="gpt-6.1-sol",
+            ),
+            HarnessAvailability(
+                harness=Harness.CLAUDE_CODE,
+                status="available",
+                reason="signed in",
+                launchable=True,
+                billing=HarnessBilling.SUBSCRIPTION,
+                models=[
+                    HarnessModelOption(
+                        id="claude-opus-4-6",
+                        reasoning_effort_options=["low", "medium", "high"],
+                        reasoning_effort_default="high",
+                    )
+                ],
+                default_model="claude-opus-4-6",
+            ),
+        ],
+    )
 
 
 def _wait_until_task_is_locked(db_conn: psycopg.Connection, task_id: int) -> None:
@@ -425,13 +473,14 @@ class TestRestart:
         from base.agents.history.timeline_item import TimelineItem
 
         with gateway_test_client() as client:
+            _seed_restart_harnesses(client)
             agent_id = spawn_via_http(client, {}).json()["id"]
 
             resp = client.post(
                 f"/api/agents/{agent_id}/restart",
                 json={
                     "message": "switching to codex",
-                    "config_overlay": {"harness": "codex", "llm_model": "gpt-6.1-sol"},
+                    "config_overlay": {"harness": "codex"},
                 },
             )
             assert resp.status_code == 200, resp.text
@@ -447,6 +496,7 @@ class TestRestart:
                 assert row[0] == "codex"
                 assert row[1].get("harness_model_selection") == 1
                 assert row[2].get("llm_model") == "gpt-6.1-sol"
+                assert row[2].get("reasoning_effort") == "medium"
                 assert "harness" not in row[2]
 
             item = TimelineItem(
@@ -469,6 +519,7 @@ class TestRestart:
         from base.lm.harness.registry import FileSessionRegistry
 
         with gateway_test_client() as client:
+            _seed_restart_harnesses(client)
             agent_id = spawn_via_http(client, {}).json()["id"]
 
             resp = client.post(
@@ -516,6 +567,7 @@ class TestRestart:
     # about a live turn and an open lease, and a dead agent has neither.
     def test_a_terminated_agent_switches_harness(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
+            _seed_restart_harnesses(client)
             agent_id = spawn_via_http(client, {}).json()["id"]
             with db_conn.cursor() as cur:
                 cur.execute(
@@ -577,6 +629,7 @@ class TestRestart:
         self, db_conn: psycopg.Connection
     ) -> None:
         with gateway_test_client() as client:
+            _seed_restart_harnesses(client)
             agent_id = spawn_via_http(client, {}).json()["id"]
 
             resp = client.post(
@@ -636,6 +689,7 @@ class TestRestart:
             )
             assert resp_bad_harness.status_code == 422
 
+            _seed_restart_harnesses(client)
             resp_bad_model = client.post(
                 f"/api/agents/{agent_id}/restart",
                 json={

@@ -224,6 +224,19 @@ def validate_model_config(
             "config.llm_model in the spawn request"
         )
 
+    if harness is not Harness.MEIVA:
+        if not effective_model.strip():
+            raise ValueError(
+                "no model configured — set llm_model in cluster config or pass "
+                "config.llm_model in the spawn request"
+            )
+        _reject_decision_model(effective_model, catalog=catalog)
+        if config is not None:
+            effort = config.get("reasoning_effort")
+            if effort is not None and not isinstance(effort, str):
+                raise ValueError("reasoning_effort must be a string")
+        return effective_model
+
     effective_model = resolve_available_model(effective_model, models=catalog.models)
 
     # 1. Model must be registered.
@@ -234,12 +247,7 @@ def validate_model_config(
             f"unknown model {effective_model!r}. Available models: " + ", ".join(sorted(all_models))
         )
 
-    if harness is Harness.MEIVA:
-        _validate_model_effort(effective_model, config, catalog=catalog)
-    else:
-        catalog.models[effective_model].harness_model(
-            effective_model, harness, config.get("reasoning_effort") if config else None
-        )
+    _validate_model_effort(effective_model, config, catalog=catalog)
     return effective_model
 
 

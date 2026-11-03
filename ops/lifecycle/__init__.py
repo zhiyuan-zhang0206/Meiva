@@ -539,12 +539,11 @@ def _update_harness_transition_meta_blocking(
     config_overlay: dict[str, object] | None,
     catalog: ModelCatalog,
 ) -> None:
-    overlay_without_harness = (
-        {k: v for k, v in config_overlay.items() if k != "harness"} if config_overlay else {}
-    )
+    overlay_without_harness = {k: v for k, v in (config_overlay or {}).items() if k != "harness"}
     with write_transaction(db_pool) as conn:
         if overlay_without_harness:
-            normalize_overlay_llm_model(overlay_without_harness, models=catalog.models)
+            if target_harness == "meiva":
+                normalize_overlay_llm_model(overlay_without_harness, models=catalog.models)
             conn.execute(
                 "UPDATE agents_meta SET harness = %s, config_overlay = COALESCE(config_overlay, '{}'::jsonb) || %s::jsonb WHERE id = %s",
                 (target_harness, json.dumps(overlay_without_harness), agent_id),

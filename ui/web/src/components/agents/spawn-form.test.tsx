@@ -125,7 +125,6 @@ const modelsWithEffort = (): ModelsResponse => ({
   models: {
     "deepseek-v4-pro": {
       provider: "deepseek",
-      harnesses: ["meiva"],
       context_window: 128_000,
       reasoning_effort_options: ["high", "max"],
       reasoning_effort_default: "max",
@@ -133,7 +132,6 @@ const modelsWithEffort = (): ModelsResponse => ({
     },
     "claude-opus-4-8": {
       provider: "claude",
-      harnesses: ["meiva", "claude_code"],
       context_window: 200_000,
       reasoning_effort_options: null,
       reasoning_effort_default: null,
@@ -147,15 +145,12 @@ const modelsWithTwoLadders = (): ModelsResponse => ({
   models: {
     "deepseek-v4-pro": {
       provider: "deepseek",
-      harnesses: ["meiva"],
       context_window: 128_000,
       reasoning_effort_options: ["high", "max"],
       reasoning_effort_default: "max",
     },
     "gpt-5.6": {
       provider: "gpt",
-      harnesses: ["meiva", "codex"],
-      harness_settings: { codex: { reasoning_effort_options: ["low", "medium", "high"], reasoning_effort_default: "medium" } },
       context_window: 400_000,
       reasoning_effort_options: ["minimal", "low", "medium", "high"],
       reasoning_effort_default: "medium",
@@ -164,14 +159,47 @@ const modelsWithTwoLadders = (): ModelsResponse => ({
   default: "deepseek-v4-pro",
 });
 
-const harnessAllAvailable = () =>
-  (["meiva", "claude_code", "codex", "antigravity"] as const).map((harness) => ({
-    harness,
+const harnessAllAvailable = () => [
+  {
+    harness: "meiva" as const,
     status: "available" as const,
     reason: "",
     launchable: true,
-    billing: harness === "meiva" ? ("api" as const) : ("subscription" as const),
-  }));
+    billing: "api" as const,
+    models: [],
+    default_model: null,
+  },
+  {
+    harness: "claude_code" as const,
+    status: "available" as const,
+    reason: "",
+    launchable: true,
+    billing: "subscription" as const,
+    models: [{ id: "claude-opus-4-8", reasoning_effort_options: [], reasoning_effort_default: null }],
+    default_model: "claude-opus-4-8",
+  },
+  {
+    harness: "codex" as const,
+    status: "available" as const,
+    reason: "",
+    launchable: true,
+    billing: "subscription" as const,
+    models: [{ id: "gpt-5.6", reasoning_effort_options: ["low", "medium", "high"], reasoning_effort_default: "medium" }],
+    default_model: "gpt-5.6",
+  },
+  {
+    harness: "antigravity" as const,
+    status: "available" as const,
+    reason: "",
+    launchable: true,
+    billing: "subscription" as const,
+    models: [
+      { id: "gemini-4-argon", reasoning_effort_options: ["low", "medium", "high"], reasoning_effort_default: "high" },
+      { id: "gpt-oss-120b", reasoning_effort_options: ["medium"], reasoning_effort_default: "medium" },
+    ],
+    default_model: "gemini-4-argon",
+  },
+];
 
 const MACHINE_COLUMN = "Machine";
 const HARNESS_COLUMN = "Harness";
@@ -295,13 +323,26 @@ describe("spawn table", () => {
     expect(within(form).getByRole("list", { name: "Model" })).toBeTruthy();
   });
 
-  it("uses the harness effort ladder and sends the execution selection", async () => {
-    const catalog = modelsWithTwoLadders();
-    catalog.models["gpt-5.6"].harness_settings = {
-      codex: { reasoning_effort_options: ["low", "ultra"], reasoning_effort_default: "low" },
-    };
+  it("uses the probed harness effort ladder and sends the execution selection", async () => {
     transport.getSystemStatus.mockResolvedValue(singleMachineStatus());
-    transport.getModels.mockResolvedValue(catalog);
+    transport.getModels.mockResolvedValue(modelsWithTwoLadders());
+    transport.getHarnessAvailability.mockResolvedValue(
+      harnessAllAvailable().map((entry) =>
+        entry.harness === "codex"
+          ? {
+              ...entry,
+              models: [
+                {
+                  id: "gpt-6.1-terra",
+                  reasoning_effort_options: ["low", "ultra"],
+                  reasoning_effort_default: "low",
+                },
+              ],
+              default_model: "gpt-6.1-terra",
+            }
+          : entry,
+      ),
+    );
     setMockSetting("behavior.spawn_reasoning_effort", "minimal");
     const { onSpawn } = wrap();
     const form = await table();
@@ -312,7 +353,7 @@ describe("spawn table", () => {
     pick(form, EFFORT_COLUMN, "ultra");
     fireEvent.click(screen.getByRole("button", { name: "Spawn" }));
     expect(onSpawn).toHaveBeenCalledWith({
-      machine: "test-host", harness: "codex", model: "gpt-5.6", reasoning_effort: "ultra",
+      machine: "test-host", harness: "codex", model: "gpt-6.1-terra", reasoning_effort: "ultra",
     });
   });
 
@@ -372,33 +413,37 @@ describe("spawn table", () => {
     });
   });
 
-  it("follows the registry: a model assigned to another harness shows up there", async () => {
+  it("follows the live probe: an uncatalogued model reported by a harness CLI is selectable", async () => {
     transport.getSystemStatus.mockResolvedValue(singleMachineStatus());
     // meiva:note
-    // The registry - not this frontend - decides which harness runs which model: a
-    // model whose published harnesses name an external CLI appears in that CLI's
-    // column with no frontend change, and one that does not is absent from it. The
-    // DeepSeek model is deliberately not the CLI's own vendor.
+    // External harness models come from the machine's live CLI probe rather than
+    // `/api/models`: an uncatalogued CLI model (`gpt-oss-120b` in `agy models`)
+    // renders and submits with its probed effort ladder even when absent from the
+    // native model catalog.
     // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
     transport.getModels.mockResolvedValue({
       providers: { deepseek: ["deepseek-v4-pro"], gpt: ["gpt-5.6"] },
       models: {
-        "deepseek-v4-pro": {
-          provider: "deepseek",
-          harnesses: ["meiva", "codex"],
-          context_window: 128_000,
-        },
-        "gpt-5.6": { provider: "gpt", harnesses: ["meiva"], context_window: 400_000 },
+        "deepseek-v4-pro": { provider: "deepseek", context_window: 128_000 },
+        "gpt-5.6": { provider: "gpt", context_window: 400_000 },
       },
       default: "deepseek-v4-pro",
     });
-    wrap();
+    const { onSpawn } = wrap();
     const form = await table();
     expect(within(column(form, MODEL_COLUMN)).queryByText(modelLabel("gpt-5.6"))).toBeTruthy();
-    pick(form, HARNESS_COLUMN, "Codex");
-    expect(within(column(form, MODEL_COLUMN)).queryByText(modelLabel("deepseek-v4-pro"))).toBeTruthy();
+    pick(form, HARNESS_COLUMN, "Antigravity");
+    expect(within(column(form, MODEL_COLUMN)).queryByText(modelLabel("gpt-oss-120b"))).toBeTruthy();
     expect(within(column(form, MODEL_COLUMN)).queryByText(modelLabel("gpt-5.6"))).toBeNull();
-    expect(selected(form, MODEL_COLUMN, /deepseek-v4-pro/)).toBe(true);
+    pick(form, MODEL_COLUMN, /gpt-oss-120b/);
+    expect(selected(form, EFFORT_COLUMN, "medium")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Spawn" }));
+    expect(onSpawn).toHaveBeenCalledWith({
+      machine: "test-host",
+      harness: "antigravity",
+      model: "gpt-oss-120b",
+      reasoning_effort: "medium",
+    });
   });
 
   it("a harness the machine cannot start is disabled in its column", async () => {

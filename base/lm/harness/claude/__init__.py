@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from base.lm.harness.cancel import CancelReport
 from base.lm.harness.claude.auth import (
+    SECRET_ENV_NAMES,
     AuthConfig,
     AuthMode,
     MissingApiKeyError,
@@ -19,6 +20,7 @@ from base.lm.harness.session import SessionTotals, TurnOutcome
 # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
 __all__ = [
     "DEFAULT_MODEL",
+    "SECRET_ENV_NAMES",
     "AuthConfig",
     "AuthMode",
     "BridgeConfig",

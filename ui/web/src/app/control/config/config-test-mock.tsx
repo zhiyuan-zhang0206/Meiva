@@ -271,14 +271,12 @@ export const MODELS: ModelsResponse = {
     "deepseek-v4-pro": {
       provider: "deepseek",
       context_window: 1_000_000,
-      harnesses: ["meiva"],
       pricing: null,
       reasoning_effort_options: null,
     },
     "claude-opus-5": {
       provider: "claude",
       context_window: 1_000_000,
-      harnesses: ["meiva"],
       pricing: null,
       reasoning_effort_options: null,
     },

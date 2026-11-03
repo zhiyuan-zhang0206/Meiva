@@ -79,7 +79,7 @@ CATALOG: dict[str, HarnessSpec] = {
         cli="codex",
         runtime="codex",
         binary="codex",
-        pinned_version="0.163.0",
+        pinned_version="0.166.0",
         installer=Installer(kind="npm", target="@openai/codex", pin_template="{version}"),
         config=("~/.codex/config.toml", "~/.codex/AGENTS.md"),
         stores=(

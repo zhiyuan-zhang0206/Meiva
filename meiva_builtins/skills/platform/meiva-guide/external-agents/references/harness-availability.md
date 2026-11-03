@@ -10,17 +10,18 @@ check it in, and the two cases where a machine looks signed out and is not.
 
 `GET /api/cluster/machines/<name>/harnesses` answers with one row per harness: a
 `status` (`available` / `unavailable` / `unknown`), a readable `reason`, the
-resolved `binary`, and `on_path`. The picker keeps only `launchable` — a launcher
-for that harness exists in this build **and** the machine reports `available`
-(the built-in `meiva` runtime needs neither) — and prints the same word for
+resolved `binary`, `on_path`, and the live `models` / `default_model` probed from
+that CLI. The picker keeps only `launchable` — a launcher for that harness exists
+in this build **and** the machine reports `available` with at least one probed
+model (the built-in `meiva` runtime needs neither) — and prints the same word for
 everything else. The row stays on the wire so this page, and you, can tell the
 three apart.
 
 | `status` | what it proves | what it does not |
 |---|---|---|
-| `available` | the CLI was found, and either the CLI itself or the stored credential shows a live sign-in (`meiva`, the built-in runtime, is `available` without either) | that a session starts: the probe starts none and spends no model quota |
+| `available` | the CLI was found, the CLI or stored credential shows a live sign-in, and its live model options were read (`meiva`, the built-in runtime, is `available` without either) | that a turn succeeds: the probe starts no turn and spends no model quota |
 | `unavailable` | the binary was not found on PATH or in a conventional install directory, **or** the CLI reports no sign-in, **or** a credential that cannot renew itself has expired | that the machine has no login — see *Two false alarms* |
-| `unknown` | the CLI is installed, and no login state could be read: the status command timed out or answered nothing recognizable, and the credential store is missing, unreadable, or holds only an account record with no token | **not** "signed out". `unknown` means nobody could prove it either way |
+| `unknown` | the CLI is installed, and login state or live model options could not be read: the status or model command timed out or answered nothing recognizable, or the credential store is missing, unreadable, or holds only an account record with no token | **not** "signed out". `unknown` means nobody could prove it either way |
 
 `unknown` blocks the spawn exactly like `unavailable` does. The picker is right
 to; only the reason is unproven.
