@@ -612,7 +612,7 @@ def test_plugins_activated_counts_and_reports_malformed_rows() -> None:
     drift — it never crashes the weekly collect), but the drop is now counted
     instead of vanishing silently, so an event-contract drift is visible on
     the run record rather than quietly thinning the dataset to empty."""
-    events = [
+    events: list[tuple[str, dict[str, str]]] = [
         ("plugin_activation", {"plugin": "meiva_code", "surface": "hooks"}),
         ("plugin_activation", {}),
         ("plugin_activation", {"identifier": "before_exec"}),
@@ -626,7 +626,7 @@ def test_plugins_activated_counts_and_reports_malformed_rows() -> None:
 # meiva:note
 # Issue #92: the skip count must land on the run record, not just a private counter.
 def test_build_record_surfaces_plugins_activated_skipped() -> None:
-    events = [
+    events: list[tuple[str, dict[str, str]]] = [
         ("plugin_activation", {"plugin": "meiva_code", "surface": "hooks"}),  # malformed
         (
             "plugin_activation",

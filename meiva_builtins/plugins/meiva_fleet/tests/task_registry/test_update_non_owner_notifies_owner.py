@@ -285,7 +285,7 @@ def test_update_publishes_task_updated(
 
 def test_create_and_assign_signature() -> None:
     """create_and_assign has the expected parameter names and defaults."""
-    sig = inspect.signature(task_registry.create_and_assign)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    sig = inspect.signature(task_registry.create_and_assign)
     params = sig.parameters
     assert list(params.keys()) == [
         "title",
@@ -307,11 +307,13 @@ def test_create_and_assign_signature() -> None:
     assert params["priority"].default == "P2"
 
 
-def test_create_duplicate_in_progress_title_raises(redis_url: str, db_conn, root_task_id: int):
+def test_create_duplicate_in_progress_title_raises(
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
+):
     """Creating a task with the same title as an in_progress task raises
     ValueError — a task is born in_progress (post-2026-08-29 the 'open'
     status no longer exists), so any live task blocks its title."""
-    agent_id = seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task_registry.create("unique title", "detail", parent=root_task_id, operation_key=str(uuid4()))
     with pytest.raises(ValueError, match="already exists"):
@@ -320,9 +322,11 @@ def test_create_duplicate_in_progress_title_raises(redis_url: str, db_conn, root
         )
 
 
-def test_create_same_title_done_allowed(redis_url: str, db_conn, root_task_id: int):
+def test_create_same_title_done_allowed(
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
+):
     """Creating a task with the same title as a done task is allowed."""
-    agent_id = seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create(
         "unique title 3", "detail", parent=root_task_id, operation_key=str(uuid4())
@@ -334,55 +338,57 @@ def test_create_same_title_done_allowed(redis_url: str, db_conn, root_task_id: i
     assert task2.id != task.id
 
 
-def test_schema_created_by_rejects_non_agent_value(db_conn):
+def test_schema_created_by_rejects_non_agent_value(db_conn: psycopg.Connection):
     """The created_by CHECK accepts agent ids and 'system'/'user'; anything
     else is rejected at the database, not only in app code."""
-    with db_conn.cursor() as cur, pytest.raises(psycopg.errors.CheckViolation):  # pyright: ignore[reportUnknownMemberType]
-        cur.execute(  # pyright: ignore[reportUnknownMemberType]
+    with db_conn.cursor() as cur, pytest.raises(psycopg.errors.CheckViolation):
+        cur.execute(
             "INSERT INTO agent_tasks (title, description, created_by) "
             "VALUES ('bad-creator', 'd', 'someone-else')"
         )
-    db_conn.rollback()  # pyright: ignore[reportUnknownMemberType]
+    db_conn.rollback()
 
 
-def test_schema_created_by_accepts_system_and_user(db_conn):
+def test_schema_created_by_accepts_system_and_user(db_conn: psycopg.Connection):
     """'system' (the seeded root) and 'user' (historical non-agent rows) stay
     legal under the CHECK."""
-    with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
-        cur.execute(  # pyright: ignore[reportUnknownMemberType]
+    with db_conn.cursor() as cur:
+        cur.execute(
             "INSERT INTO agent_tasks (title, description, status, created_by) "
             "VALUES ('sys-task', 'd', 'done', 'system') RETURNING id"
         )
-        cur.execute(  # pyright: ignore[reportUnknownMemberType]
+        cur.execute(
             "INSERT INTO agent_tasks (title, description, status, created_by) "
             "VALUES ('user-task', 'd', 'done', 'user') RETURNING id"
         )
-    db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+    db_conn.commit()
 
 
-def test_schema_unique_in_progress_title_backstop(db_conn):
+def test_schema_unique_in_progress_title_backstop(db_conn: psycopg.Connection):
     """The partial unique index rejects a second in_progress task with a
     duplicate title, but allows the title once the earlier task leaves
     in_progress — the database mirror of the app-level rule."""
-    with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
-        cur.execute(  # pyright: ignore[reportUnknownMemberType]
+    with db_conn.cursor() as cur:
+        cur.execute(
             "INSERT INTO agent_tasks (title, description, created_by) "
             "VALUES ('dup', 'd', 'system') RETURNING id"
         )
-        first = cur.fetchone()[0]  # type: ignore[index]
+        row = cur.fetchone()
+        assert row is not None
+        first: int = row[0]
         with pytest.raises(psycopg.errors.UniqueViolation):
-            cur.execute(  # pyright: ignore[reportUnknownMemberType]
+            cur.execute(
                 "INSERT INTO agent_tasks (title, description, created_by) "
                 "VALUES ('dup', 'd', 'system')"
             )
-    db_conn.rollback()  # pyright: ignore[reportUnknownMemberType]
-    with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
-        cur.execute("UPDATE agent_tasks SET status = 'done' WHERE id = %s", (first,))  # pyright: ignore[reportUnknownMemberType]
-        cur.execute(  # pyright: ignore[reportUnknownMemberType]
+    db_conn.rollback()
+    with db_conn.cursor() as cur:
+        cur.execute("UPDATE agent_tasks SET status = 'done' WHERE id = %s", (first,))
+        cur.execute(
             "INSERT INTO agent_tasks (title, description, created_by) "
             "VALUES ('dup', 'd', 'system') RETURNING id"
         )
-    db_conn.commit()  # pyright: ignore[reportUnknownMemberType]
+    db_conn.commit()
 
 
 def test_create_unique_violation_race_becomes_value_error(
@@ -391,7 +397,7 @@ def test_create_unique_violation_race_becomes_value_error(
     """When two creates race past the app-level pre-check, the partial unique
     index rejects the second INSERT with UniqueViolation; create() translates
     that into the same ValueError agents see on the normal path."""
-    agent_id = seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
 
     def create() -> object:
@@ -409,7 +415,7 @@ def test_update_rename_race_becomes_value_error(
     """Same backstop on the rename path: a concurrent rename that lands
     between update()'s pre-check and its UPDATE surfaces as ValueError, not a
     raw psycopg error."""
-    agent_id = seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create("free-title", "d", parent=root_task_id, operation_key=str(uuid4()))
 
@@ -421,8 +427,8 @@ def test_update_rename_race_becomes_value_error(
     assert task_registry.get(task.id).title == "free-title"
 
 
-def test_update_title_renames(redis_url: str, db_conn, root_task_id: int):
-    agent_id = seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+def test_update_title_renames(redis_url: str, db_conn: psycopg.Connection, root_task_id: int):
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create(
         "old title", "detail", parent=root_task_id, operation_key=str(uuid4())
@@ -431,10 +437,12 @@ def test_update_title_renames(redis_url: str, db_conn, root_task_id: int):
     assert task_registry.get(task.id).title == "new title"
 
 
-def test_update_title_duplicate_in_progress_raises(redis_url: str, db_conn, root_task_id: int):
+def test_update_title_duplicate_in_progress_raises(
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
+):
     """Renaming to another in_progress task's title raises ValueError —
     the same invariant create() enforces."""
-    agent_id = seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task_registry.create("taken title", "detail", parent=root_task_id, operation_key=str(uuid4()))
     task = task_registry.create(
@@ -460,9 +468,11 @@ def test_update_title_reassign_notifies_with_new_title(
     assert any("new title" in note.content for note in notes.read())
 
 
-def test_create_same_title_cancelled_allowed(redis_url: str, db_conn, root_task_id: int):
+def test_create_same_title_cancelled_allowed(
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
+):
     """Creating a task with the same title as a cancelled task is allowed."""
-    agent_id = seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create(
         "unique title 4", "detail", parent=root_task_id, operation_key=str(uuid4())

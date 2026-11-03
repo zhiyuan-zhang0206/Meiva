@@ -454,31 +454,31 @@ class TestDifferentialByteExact:
     pre-refactor implementations on every corpus input."""
 
     @staticmethod
-    def _check(fixer, src):
-        assert NEW[fixer](src) == LEGACY[fixer](src), (  # pyright: ignore[reportUnknownArgumentType]
+    def _check(fixer: str, src: str) -> None:
+        assert NEW[fixer](src) == LEGACY[fixer](src), (
             f"{fixer} diverged from legacy on {src!r}: "
-            f"new={NEW[fixer](src)!r} legacy={LEGACY[fixer](src)!r}"  # pyright: ignore[reportUnknownArgumentType]
+            f"new={NEW[fixer](src)!r} legacy={LEGACY[fixer](src)!r}"
         )
 
     def test_string_newlines(self):
         for src in CORPUS:
-            self._check("fix_string_newlines", src)  # pyright: ignore[reportUnknownMemberType]
+            self._check("fix_string_newlines", src)
 
     def test_bracket_matching(self):
         for src in CORPUS:
-            self._check("fix_bracket_matching", src)  # pyright: ignore[reportUnknownMemberType]
+            self._check("fix_bracket_matching", src)
 
     def test_unterminated_to_triple(self):
         for src in CORPUS:
-            self._check("fix_unterminated_to_triple", src)  # pyright: ignore[reportUnknownMemberType]
+            self._check("fix_unterminated_to_triple", src)
 
     def test_nested_triple_quote(self):
         for src in CORPUS:
-            self._check("fix_nested_triple_quote", src)  # pyright: ignore[reportUnknownMemberType]
+            self._check("fix_nested_triple_quote", src)
 
     def test_escape_inner_quotes(self):
         for src in CORPUS:
-            self._check("fix_escape_inner_quotes", src)  # pyright: ignore[reportUnknownMemberType]
+            self._check("fix_escape_inner_quotes", src)
 
     def test_known_outputs_byte_exact(self):
         # hardcoded expectations lock the concrete output shape, not just

@@ -5,8 +5,10 @@ through `agent_runtime.contribute()`.
 
 import io
 import subprocess
+from collections.abc import Iterator
 from contextlib import redirect_stdout
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -28,7 +30,9 @@ from meiva_builtins.plugins.meiva_code.tests.surface_support import (
 
 
 @pytest.fixture(autouse=True)
-def load_meiva_code_plugin(model_catalog: ModelCatalog, config_authority: ConfigAuthority):
+def load_meiva_code_plugin(
+    model_catalog: ModelCatalog, config_authority: ConfigAuthority
+) -> Iterator[None]:
     """Install meiva_code's declared SDK surface (cwd namespace, wraps, skill source) for each
     test and uninstall it after."""
     install_code_surface(model_catalog, config_authority)
@@ -63,12 +67,15 @@ def make_state_with_cwd(
     from meiva_builtins.plugins.meiva_code import agent_runtime
 
     state_cls = build_agent_state(ExtensionRegistry((("meiva_code", agent_runtime.contribute()),)))
-    kwargs: dict = {"meiva_code__cwd": cwd, "meiva_code__last_seen_compact": last_seen_compact}
+    kwargs: dict[str, Any] = {
+        "meiva_code__cwd": cwd,
+        "meiva_code__last_seen_compact": last_seen_compact,
+    }
     if injected is not None:
         kwargs["meiva_code__injected_paths"] = injected
     if compact_version:
         kwargs["compact"] = CompactState(version=compact_version)
-    return state_cls(messages=[], halted=False, **kwargs)  # pyright: ignore[reportUnknownArgumentType]
+    return state_cls(messages=[], halted=False, **kwargs)
 
 
 def get_injected_context_notes(state_update: dict[str, object]) -> list[dict[str, str]]:
@@ -95,7 +102,7 @@ def get_injected_context_notes(state_update: dict[str, object]) -> list[dict[str
             # meiva:note
             # system_note_message wraps the content in the system-note envelope.
             # meiva:link agent/messages/docs/message-format.meiva.okf.md
-            content = msg.content  # pyright: ignore[reportUnknownMemberType]
+            content = msg.content
             assert isinstance(content, str)
             assert content.startswith("<system_note>\n") and content.endswith("\n</system_note>")
             head, _, body = content[len("<system_note>\n") : -len("\n</system_note>")].partition(
@@ -120,7 +127,7 @@ def test_get_cwd_returns_state_value(tmp_path: Path):
         process_context.unbind_exec_turn()
 
 
-def test_files_module_docstring_keeps_core_path_claim(load_meiva_code_plugin):
+def test_files_module_docstring_keeps_core_path_claim(load_meiva_code_plugin: None) -> None:
     """The core owns the overview, including the optional coding directory."""
     assert meiva.files.__doc__ is not None
     assert "workspace by default" in meiva.files.__doc__

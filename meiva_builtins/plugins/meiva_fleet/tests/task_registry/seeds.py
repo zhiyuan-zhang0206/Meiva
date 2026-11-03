@@ -15,10 +15,12 @@ from meiva_builtins.plugins.meiva_fleet import task_registry
 def seed_agent(db: psycopg.Connection, *, status: str = "running", spawner: str = "test") -> int:
     with db.cursor() as cur:
         cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
-        aid = cur.fetchone()[0]  # type: ignore[index]
+        row = cur.fetchone()
+        assert row is not None
+        aid: int = row[0]
         cur.execute(
             "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, %s, %s)",
-            (aid, spawner, status),  # pyright: ignore[reportUnknownArgumentType]
+            (aid, spawner, status),
         )
     db.commit()
     return aid

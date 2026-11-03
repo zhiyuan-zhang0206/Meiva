@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -20,7 +21,7 @@ SCRIPT = (
 )
 
 
-def _run(state: dict, report: str | None = None) -> subprocess.CompletedProcess[str]:
+def _run(state: dict[str, Any], report: str | None = None) -> subprocess.CompletedProcess[str]:
     import tempfile
 
     with tempfile.TemporaryDirectory() as td:
@@ -36,7 +37,7 @@ def _run(state: dict, report: str | None = None) -> subprocess.CompletedProcess[
         )
 
 
-def _good_state() -> dict:
+def _good_state() -> dict[str, Any]:
     return {
         "question": {
             "three_part": "studying X to find out Y, so the audience understands Z",

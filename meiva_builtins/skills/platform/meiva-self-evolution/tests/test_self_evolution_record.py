@@ -257,7 +257,7 @@ def test_task_prompt_of_falls_back_to_the_transcript(record: Any) -> None:
             {"type": "human", "content": "Fix the flaky test."},
         ],
     }
-    collected = {"task_prompt": "Fix the flaky test.", "transcript": []}
+    collected: dict[str, object] = {"task_prompt": "Fix the flaky test.", "transcript": []}
 
     assert record.task_prompt_of(legacy) == "Fix the flaky test."
     assert record.task_prompt_of(collected) == "Fix the flaky test."

@@ -57,7 +57,7 @@ def _make_state_with_cwd(cwd: str) -> BaseAgentState:
     return state_cls(messages=[], halted=False, **fields)
 
 
-def _hook_notes(result: dict | None) -> list[tuple[str, str]]:
+def _hook_notes(result: dict[str, object] | None) -> list[tuple[str, str]]:
     """(note tag, text) of every system note the hook returned in its messages delta."""
     from typing import cast
 
@@ -68,7 +68,7 @@ def _hook_notes(result: dict | None) -> list[tuple[str, str]]:
 
     assert result is not None
     return [
-        (  # pyright: ignore[reportUnknownMemberType]
+        (
             read_meiva_kwargs(m).get("meiva_note_tag", ""),
             unwrap_system_note(str(m.content)),
         )

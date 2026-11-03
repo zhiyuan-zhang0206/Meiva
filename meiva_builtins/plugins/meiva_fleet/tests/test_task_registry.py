@@ -555,10 +555,10 @@ def test_log_missing_task_raises(db_conn: psycopg.Connection) -> None:
 # ── create() — owner parameter ────────────────────────────────────────────
 
 
-def _persisted_owner(db_conn, task_id: int) -> int | None:
-    with db_conn.cursor() as cur:  # pyright: ignore[reportUnknownMemberType]
-        cur.execute("SELECT owner FROM agent_tasks WHERE id = %s", (task_id,))  # pyright: ignore[reportUnknownMemberType]
-        row = cur.fetchone()  # pyright: ignore[reportUnknownMemberType]
+def _persisted_owner(db_conn: psycopg.Connection, task_id: int) -> int | None:
+    with db_conn.cursor() as cur:
+        cur.execute("SELECT owner FROM agent_tasks WHERE id = %s", (task_id,))
+        row = cur.fetchone()
     assert row is not None
     return row[0]
 
