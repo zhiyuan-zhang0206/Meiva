@@ -133,3 +133,32 @@ def test_the_measurement_writes_no_baseline(
     measured(root, capsys)
     manifest = root / "app/meizel.toml"
     assert "[debt" not in (manifest.read_text() if manifest.exists() else "")
+
+
+# meiva:note
+# The one place `meizel debt` ignores one of the summary's flags: the report is answered before the
+# flags are judged, so `debt --json propagation` prints what it always printed instead of refusing.
+# The case below it is the other half — the same flag on a mode that is not the summary still
+# refuses — and the pair is what stops a uniform rejection from arriving as a tidy-up.
+def test_the_propagation_report_ignores_a_summary_flag(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _repo(
+        make_repo,
+        {"app/mod.py": "import os\n\ndef read_pid() -> int:\n    return os.getpid()\n"},
+    )
+    assert run(root, "debt", "--json", "propagation") == 0
+    out = capsys.readouterr().out
+    assert out.startswith("meizel: world reads that travel through a function")
+    assert not out.lstrip().startswith("{")
+
+
+# meiva:note
+# `prune` is a mode, not the summary, so the flag that belongs to the summary is still refused there —
+# with the same exit status and message the other summary flag already had.
+def test_a_mode_that_is_not_the_summary_refuses_a_summary_flag(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _repo(make_repo, {})
+    assert run(root, "debt", "--json", "prune") == 2
+    assert "--json belongs to the summary" in capsys.readouterr().err
