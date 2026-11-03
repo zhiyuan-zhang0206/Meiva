@@ -1,40 +1,40 @@
 #!/usr/bin/env python3
-"""Make the number of tests CI actually ran visible: per shard, per directory, and in total.
-
-The backend shards run `pytest -q`: the log is dots without test ids, and the JUnit report
-records the native test result. So "a moved test did not fall out of CI" could only be proved by counting
-around the move (the total changes by exactly the parametrized ids added), once per batch.
-This script reads what pytest already wrote, the shard's JUnit report, so nothing is
-collected a second time:
-
-    shard_counts.py shard --group 3 --junit 'tmp/junit-backend-shard-3-a*.xml' --out tmp/c3.json \\
-                          --summary "$GITHUB_STEP_SUMMARY" [--min-tests 1]
-        counts the tests one shard executed, by directory, into its log and the GitHub job
-        summary, and writes them as JSON (the workflow uploads it as an artifact). It fails
-        when the shard left no JUnit report or executed fewer than `--min-tests` tests;
-
-    shard_counts.py total --dir counts/ --expected "1 2 ... 8 serial" [--baseline b.json] \\
-                          --out test-count-baseline.json --summary "$GITHUB_STEP_SUMMARY" \\
-                          --leak-report test-leak-report.json \\
-                          --sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
-        adds the shards' counts up and prints how the total, and each directory, moved against
-        a baseline (the previous merge-queue run's total). Informational: it never fails a run over a
-        difference. `--out` is written only when every expected count file arrived, so a
-        baseline is never partial.
-
-The root leak guard (`tests/fixtures/leak_guard.py`) writes each finding as a JUnit property of the
-test that leaked. `shard` carries them into its count file (`leaks`, `notes`, `faults`; a clean
-shard's file has none of those keys) and `total` reports them for the whole run from this ONE job:
-the job summary, ONE `::warning title=leak guard` annotation of at most `ANNOTATION_LINES`
-lines (read it with `gh api repos/R/check-runs/<job id>/annotations`; the job summary is not in
-that API), and the full list as `--leak-report`. A fault in this reporting is one annotation,
-never the job's result.
-
-A directory is a bucket: `tests/<area>` or `tests/components/<area>` for the top-level
-tests, and the outermost `<pkg>/tests`
-for a package's own tests, the same directories `scripts/codegen/gen_pyright_test_environments.py`
-lists.
-"""
+# meiva:note
+# Make the number of tests CI actually ran visible: per shard, per directory, and in total.
+#
+# The backend shards run `pytest -q`: the log is dots without test ids, and the JUnit report
+# records the native test result. So "a moved test did not fall out of CI" could only be proved by counting
+# around the move (the total changes by exactly the parametrized ids added), once per batch.
+# This script reads what pytest already wrote, the shard's JUnit report, so nothing is
+# collected a second time:
+#
+#     shard_counts.py shard --group 3 --junit 'tmp/junit-backend-shard-3-a*.xml' --out tmp/c3.json \
+#                           --summary "$GITHUB_STEP_SUMMARY" [--min-tests 1]
+#         counts the tests one shard executed, by directory, into its log and the GitHub job
+#         summary, and writes them as JSON (the workflow uploads it as an artifact). It fails
+#         when the shard left no JUnit report or executed fewer than `--min-tests` tests;
+#
+#     shard_counts.py total --dir counts/ --expected "1 2 ... 8 serial" [--baseline b.json] \
+#                           --out test-count-baseline.json --summary "$GITHUB_STEP_SUMMARY" \
+#                           --leak-report test-leak-report.json \
+#                           --sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
+#         adds the shards' counts up and prints how the total, and each directory, moved against
+#         a baseline (the previous merge-queue run's total). Informational: it never fails a run over a
+#         difference. `--out` is written only when every expected count file arrived, so a
+#         baseline is never partial.
+#
+# The root leak guard (`tests/fixtures/leak_guard.py`) writes each finding as a JUnit property of the
+# test that leaked. `shard` carries them into its count file (`leaks`, `notes`, `faults`; a clean
+# shard's file has none of those keys) and `total` reports them for the whole run from this ONE job:
+# the job summary, ONE `::warning title=leak guard` annotation of at most `ANNOTATION_LINES`
+# lines (read it with `gh api repos/R/check-runs/<job id>/annotations`; the job summary is not in
+# that API), and the full list as `--leak-report`. A fault in this reporting is one annotation,
+# never the job's result.
+#
+# A directory is a bucket: `tests/<area>` or `tests/components/<area>` for the top-level
+# tests, and the outermost `<pkg>/tests` for a package's own tests (the same rule as `tests_roots` in
+# `scripts/codegen/gen_pyright_test_environments.py`).
+#
 
 from __future__ import annotations
 
@@ -324,7 +324,9 @@ def run_total(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n", 1)[0])
+    parser = argparse.ArgumentParser(
+        description="Make the number of tests CI actually ran visible: per shard, per directory, and in total."
+    )
     commands = parser.add_subparsers(dest="command", required=True)
     shard = commands.add_parser("shard", help="count one shard's JUnit report")
     shard.add_argument("--group", required=True)
