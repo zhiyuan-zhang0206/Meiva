@@ -236,6 +236,26 @@ class ScheduleLaunchRefused(TypedDict):
 
 
 # meiva:note
+# `schedule_process_lost` is the detection, and the only event that says a schedule's session is
+# gone. The manager's session scan notices within its five-second tick and records the schedule as
+# `error`; until this event existed that detection went only to a log line, and the earliest
+# anything else spoke was `schedule_stalled` two hours later -- which a manual restart inside those
+# two hours cancelled, so a lost session could pass entirely unreported (schedule 55, 2026-11-03:
+# lost 16:31:09Z, restarted 18:16:38Z, the stall would have fired 18:31:09Z).
+#
+# The two events are two stages of one outage, not duplicates: this one says "it is down, act now",
+# `schedule_stalled` says "it is still down two hours later, nobody has acted". When the relaunch
+# was suppressed by the auto-restart budget, `schedule_auto_restart_suppressed` is emitted on the
+# same tick and names that reason.
+#
+# No `not_live_since` here: the stall pass writes that column, and at detection it is still unset.
+# The detection instant is this event's own timestamp.
+class ScheduleProcessLost(TypedDict):
+    schedule_id: int
+    status: str
+
+
+# meiva:note
 # `schedule_stalled` fires once after an enabled, non-completed schedule has had no live session
 # for more than two hours; a live observation rearms a later outage.
 #
@@ -600,6 +620,13 @@ EVENTS: dict[str, EventSpec] = {
         payload=ScheduleLaunchRefused,
         tier="anomaly",
         site="services/wake/schedule_manager/manager.py:_emit_launch_refused",
+    ),
+    "schedule_process_lost": telemetry_event(
+        "schedule_process_lost",
+        "a schedule's session disappeared and the manager recorded the schedule as an error — the detection itself, emitted once per loss at the moment it is seen; if nothing restarts the schedule, `schedule_stalled` follows two hours later as the second stage of the same outage",
+        payload=ScheduleProcessLost,
+        tier="anomaly",
+        site="services/wake/schedule_manager/manager.py:_mark_lost emit_process_lost",
     ),
     "schedule_not_progressing": telemetry_event(
         "schedule_not_progressing",

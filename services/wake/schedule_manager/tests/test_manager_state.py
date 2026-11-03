@@ -391,11 +391,45 @@ def test_the_window_cap_stops_relaunching_a_host_that_keeps_restarting(
     assert emitted_events.names() == [
         *(["schedule_auto_restart"] * POLICY.auto_restart_max_per_window),
         "schedule_auto_restart_suppressed",
+        "schedule_process_lost",
     ]
-    suppressed = _attributes(emitted_events)[-1]
+    suppressed = next(
+        attributes
+        for name, attributes in zip(
+            emitted_events.names(), _attributes(emitted_events), strict=True
+        )
+        if name == "schedule_auto_restart_suppressed"
+    )
     assert suppressed["previous_generation"] == f"gen-{POLICY.auto_restart_max_per_window}"
     assert suppressed["current_generation"] == "gen-final"
     assert suppressed["restarts_in_window"] == POLICY.auto_restart_max_per_window
+
+
+# meiva:note
+# Losing the session is reported when it is seen, not two hours later. The update behind the event
+# matches only a schedule still `running`, so the second pass has nothing left to say; the pair with
+# `schedule_stalled` (the same outage, still unhandled two hours in) is asserted where the stall
+# pass is tested.
+def test_a_lost_session_is_reported_the_round_it_is_seen(
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    fake_session: tuple[_FakeBackend, list[int]],
+    emitted_events: EmittedEvents,
+) -> None:
+    backend, _launched = fake_session
+    sid = _insert(db_conn, "same-host-loss")
+    _set_status(db_conn, sid, "running")
+    manager = schedule_manager(pool, backend)
+
+    manager.reconcile(now=NOW)
+
+    assert _state(db_conn, sid)[0] == "error"
+    assert emitted_events.names() == ["schedule_process_lost"]
+    assert _attributes(emitted_events) == [{"schedule_id": sid, "status": "error"}]
+
+    manager.reconcile(now=NOW)
+
+    assert emitted_events.names() == ["schedule_process_lost"]
 
 
 def test_a_refused_launch_does_not_consume_the_auto_restart_budget(
@@ -509,7 +543,7 @@ def test_a_sessionless_schedule_reports_the_stall_and_not_the_round(
     _age_not_live(db_conn, sid, round_progress.STALL_ALERT_AFTER_S + 1)
     schedule_manager(pool, backend).reconcile(now=NOW)
 
-    assert emitted_events.names() == ["schedule_stalled"]
+    assert emitted_events.names() == ["schedule_process_lost", "schedule_stalled"]
 
 
 def test_the_stall_report_measures_the_silence_not_the_detection(
