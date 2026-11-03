@@ -52,7 +52,7 @@ def test_every_builtin_script_imports_from_a_materialized_copy(tmp_path: Path) -
         directory = tmp_path / "schedules" / str(index)
         directory.mkdir(parents=True)
         copies.append(Path(shutil.copy(script, directory / script.name)))
-    assert len(copies) == 15
+    assert len(copies) == 16
 
     child = run_bounded(
         [sys.executable, "-I", str(_CHILD), "imports", *map(str, copies)],

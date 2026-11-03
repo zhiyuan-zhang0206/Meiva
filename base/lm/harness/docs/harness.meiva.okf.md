@@ -66,12 +66,14 @@ root pid differs. `client_pid()` is the one best-effort helper: it reads an SDK
 client's private transport, returning `None` rather than guessing. That debt is
 registered in the [tech-debt ledger](../../../../future/tech-debt/ledger.md).
 
-## Where the CLI comes from
+## CLI delivery and convergence
 
 Session environment construction (`wiring.session_environ`), `PATH` rebuilding
 (`with_harness_path`), `MEIVA_PYTHON` interpreter delivery, and per-adapter binary
 resolution (`resolve_harness_binary`) are defined in
 [[base/lm/harness/docs/cli-delivery.meiva.okf.md|Harness CLI and environment delivery]].
+Path resolution, discovery, catalog pinning, host convergence steps, and runner update schedules are described in
+[[base/lm/harness/docs/cli-convergence.meiva.okf.md|External harness CLI convergence and delivery]].
 
 ## The handoff document
 

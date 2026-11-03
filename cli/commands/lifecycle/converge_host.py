@@ -36,11 +36,16 @@ from base.telemetry.lgtm_local import BACKENDS
 from cli.commands.converge.brew_pin import ensure_brew_pin
 from cli.commands.converge.firewall import ensure_firewall_allowlist
 from cli.commands.converge.frontend_env import ensure_no_frontend_env_overrides
+from cli.commands.converge.harness_clis import ensure_external_harness_clis
 from cli.commands.converge.health_preflight import (
     ensure_health_preflight as _ensure_health_preflight,
 )
-from cli.commands.converge.incomplete import clear_incomplete
-from cli.commands.converge.incomplete import record_incomplete as record_incomplete_marker
+from cli.commands.converge.incomplete import (
+    clear_incomplete,
+)
+from cli.commands.converge.incomplete import (
+    record_incomplete as record_incomplete_marker,
+)
 from cli.commands.converge.os_jobs import (
     ensure_cluster_autostart,
     ensure_health_probe_cron,
@@ -396,34 +401,27 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     # contributes exactly Meiva's two skills, and only to the clients registered in
     # `external_skills._CLIENTS` that are present on this host. The private
     # ownership ledger lives under the skeleton created above.
+    ConvergeStep("external agent operator skill", converge_external_agent_skill, host_global=True),
     ConvergeStep(
-        "external agent operator skill",
-        converge_external_agent_skill,
+        "external harness CLIs",
+        ensure_external_harness_clis,
+        roles=frozenset({"agent-runner"}),
+        requires_unit_config=True,
         host_global=True,
     ),
     # Warning-only health preflight: data-plane reachability (pg/redis, local on
     # gateway / remote on runner) + checkout state (dirty marker). Findings are
     # printed and appended to $MEIVA_HOME/logs/health_preflight.log, never blocking.
-    ConvergeStep(
-        "health preflight",
-        _ensure_health_preflight,
-        requires_unit_config=True,
-    ),
+    ConvergeStep("health preflight", _ensure_health_preflight, requires_unit_config=True),
     # Validate the selected installed runtime, or provision the pinned vendor
     # distribution when no installation exists. Gateway-only.
     ConvergeStep(
-        "PostgreSQL 17 + pgvector runtime",
-        ensure_pg_binaries_step,
-        roles=frozenset({"gateway"}),
+        "PostgreSQL 17 + pgvector runtime", ensure_pg_binaries_step, roles=frozenset({"gateway"})
     ),
     # WAL archiving, when MEIVA_WALG_CONFIG_FILE switches it on: the pinned binary, a
     # validated configuration and the pinned key fingerprint, all before Postgres
     # starts. A no-op while the key is unset.
-    ConvergeStep(
-        "WAL-G archiving",
-        converge_walg,
-        roles=frozenset({"gateway"}),
-    ),
+    ConvergeStep("WAL-G archiving", converge_walg, roles=frozenset({"gateway"})),
     # Reconcile the one DB URL (MEIVA_DB_URL) with the pooler toggle + preflight the
     # PgBouncer binary when the pooler is enabled (gateway box's data plane).
     ConvergeStep(

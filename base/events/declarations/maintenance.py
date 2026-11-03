@@ -221,7 +221,25 @@ class TrunkRedWatchRound(TypedDict):
     stale: int
 
 
+# meiva:note
+# One external harness CLI convergence round: status ("ok" | "failed" | "skipped"),
+# count of updated CLIs, count of failed CLIs, reason (when skipped), and list of CLI outcomes.
+# meiva:link base/events/docs/maintenance-payloads.meiva.okf.md
+class HarnessCliUpdateRound(TypedDict):
+    status: str
+    updated_count: NotRequired[int]
+    failed_count: NotRequired[int]
+    reason: NotRequired[str]
+    outcomes: NotRequired[list[dict[str, object]]]
+
+
 EVENTS: dict[str, EventSpec] = {
+    "harness_cli_update_round": telemetry_event(
+        "harness_cli_update_round",
+        "one external harness CLI update round — status, updated/failed counts, and outcome details",
+        payload=HarnessCliUpdateRound,
+        site="schedules/jobs/harness/harness_cli_update.py:execute_round (via emit_system_event)",
+    ),
     "agent_watch_round": telemetry_event(
         "agent_watch_round",
         "one agent-watch round — duties judged, silent, woken, and unreadable",

@@ -16,6 +16,10 @@ row per entry:
 
 - a missing row is created with the manifest's `default_enabled`, plus the same
   `initial` version snapshot the API create writes;
+- placement policy determines target machines: `placement: "gateway"` (the default) assigns
+  the row to the gateway machine, while `placement: "per_machine"` (such as `harness-cli-update`)
+  creates a row `<name>:<machine>` for every machine in the cluster with the `agent-runner` role,
+  queueing sync requests to start or update them;
 - a row whose `script` or `command` differs from the template is resynced to it,
   writing a `schedule_versions` row (`builtin-resync <hash>`) and queueing a
   `schedule_sync_requests` row so a live session relaunches onto the new code;

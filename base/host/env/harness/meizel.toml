@@ -1,0 +1,8 @@
+exports = ["catalog.py", "convergence.py"]
+
+[uses]
+"__init__.py" = ["catalog.py", "convergence.py"]
+"convergence.py" = ["catalog.py"]
+
+[purity]
+"catalog.py" = "strict"

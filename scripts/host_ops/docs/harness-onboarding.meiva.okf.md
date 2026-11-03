@@ -34,7 +34,7 @@ Hosts are `~/.ssh/config` names; `local` is the machine running the script.
 
 | Module | Owns |
 |---|---|
-| `catalog.py` | the vendor install command, the configuration files and the login stores of each harness, plus the rotation verdict `sync` gates on |
+| `catalog.py` | re-exports the vendor install command, pinned versions, and harness specs from `base/host/env/harness/catalog.py`, plus the rotation verdict `sync` gates on |
 | `hostfs.py` | the file half of a remote machine, executed there as one JSON request on stdin |
 | `transport.py` | one command line on one named machine, under one pinned PATH |
 

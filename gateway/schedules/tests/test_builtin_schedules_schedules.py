@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 from pathlib import Path
 
 import psycopg
+from psycopg_pool import ConnectionPool
 
 from base.daemon.schedules.builtin_schedules import (
     ProvisionResult,
     provision_builtin_schedules,
 )
+from gateway.schedules.session_control import run_plugin_schedules_reconciler
 
 _ENTRY: dict[str, object] = {
     "name": "prod-a",
@@ -191,3 +195,101 @@ class TestProvision:
             "prod-a"
         ]
         db_conn.commit()
+
+    def test_per_machine_placement_provisions_for_each_runner(
+        self, db_conn: psycopg.Connection, tmp_path: Path
+    ) -> None:
+        path = _manifest(
+            tmp_path,
+            [
+                {
+                    "name": "per-machine-job",
+                    "class": "product",
+                    "default_enabled": True,
+                    "script": "a.py",
+                    "command": "python a.py",
+                    "description": "Per machine job",
+                    "placement": "per_machine",
+                },
+            ],
+        )
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO machines (name, role) VALUES "
+                "('runner-a', '{agent-runner}'), ('runner-b', '{agent-runner}') "
+                "ON CONFLICT (name) DO UPDATE SET role = EXCLUDED.role"
+            )
+        db_conn.commit()
+
+        result = provision_builtin_schedules(db_conn, machine="gateway", path=path)
+        db_conn.commit()
+
+        assert set(result.created) == {
+            "per-machine-job:runner-a",
+            "per-machine-job:runner-b",
+        }
+        assert _row(db_conn, "per-machine-job:runner-a")[1] is True
+        assert _row(db_conn, "per-machine-job:runner-b")[1] is True
+
+        again = provision_builtin_schedules(db_conn, machine="gateway", path=path)
+        db_conn.commit()
+        assert again == ProvisionResult()
+
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE schedules SET script = 'drifted\n' WHERE name = 'per-machine-job:runner-a'"
+            )
+        db_conn.commit()
+        resynced = provision_builtin_schedules(db_conn, machine="gateway", path=path)
+        db_conn.commit()
+        assert resynced == ProvisionResult(created=[], resynced=["per-machine-job:runner-a"])
+
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO machines (name, role) VALUES ('runner-c', '{agent-runner}') "
+                "ON CONFLICT (name) DO UPDATE SET role = EXCLUDED.role"
+            )
+        db_conn.commit()
+        joined = provision_builtin_schedules(db_conn, machine="gateway", path=path)
+        db_conn.commit()
+        assert joined == ProvisionResult(created=["per-machine-job:runner-c"], resynced=[])
+
+    async def test_reconciler_provisions_harness_cli_update_when_runner_added(
+        self, db_conn: psycopg.Connection, db_url: str, tmp_path: Path
+    ) -> None:
+        with db_conn.cursor() as cur:
+            cur.execute("DELETE FROM machines")
+            cur.execute("DELETE FROM schedules")
+        db_conn.commit()
+
+        pool: ConnectionPool = ConnectionPool(db_url, min_size=1, max_size=2, open=True)
+        try:
+            task = asyncio.create_task(
+                run_plugin_schedules_reconciler(
+                    pool,
+                    tmp_path,
+                    interval_seconds=0.02,
+                    resolve_machine=lambda: "gateway",
+                    provision_builtins=True,
+                )
+            )
+            await asyncio.sleep(0.05)
+
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO machines (name, role) VALUES ('runner-tick', '{agent-runner}') "
+                    "ON CONFLICT (name) DO UPDATE SET role = EXCLUDED.role"
+                )
+            db_conn.commit()
+
+            for _ in range(50):
+                if "harness-cli-update:runner-tick" in _names(db_conn):
+                    break
+                await asyncio.sleep(0.05)
+
+            assert "harness-cli-update:runner-tick" in _names(db_conn)
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        finally:
+            pool.close()

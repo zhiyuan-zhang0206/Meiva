@@ -21,7 +21,6 @@ DEFAULT_INTERPRETER = ".venv/bin/python"
 BACKUP_ROOT = "~/.meiva/backups/onboarding-{stamp}"
 STATE_LOG = "~/.meiva/onboarding/install-log.jsonl"
 
-_VERSION_PATTERN = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?")
 _SECRET_PATTERN = re.compile(r"sk-[A-Za-z0-9_\-]{8,}")
 
 PROBE_SOURCE = """\
@@ -73,8 +72,7 @@ def redact(text: str) -> str:
 
 
 def parse_version(text: str) -> str:
-    match = _VERSION_PATTERN.search(text)
-    return match.group(0) if match else ""
+    return catalog.parse_cli_version(text)
 
 
 def collect_probe(host: Host, checkout: str, interpreter: str) -> list[dict[str, object]]:

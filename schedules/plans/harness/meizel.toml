@@ -1,0 +1,4 @@
+exports = ["update_plan.py"]
+
+[purity]
+"update_plan.py" = "strict"

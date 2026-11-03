@@ -37,6 +37,7 @@ directory. The manifest is the single expression of the built-in policy
 | `self-evolution-weekly` | `self-evolution-weekly-schedule.py` | product | **enabled** |
 | `model-update-tracker` | `model-update-tracker-schedule.py` | product | **enabled** |
 | `trace-ship-tempo` | `trace-ship-tempo-schedule.py` | product | **enabled** |
+| `harness-cli-update` | `harness-cli-update-schedule.py` | product | **enabled** |
 | `db-write-stall-watch` | `db-write-stall-watch-schedule.py` | operator | disabled |
 | `sched-dry-import-weekly` | `sched-dry-import-weekly-schedule.py` | operator | disabled |
 | `log-cred-mask-monthly` | `log-cred-mask-monthly-schedule.py` | operator | disabled |
@@ -62,8 +63,13 @@ newest one back and opens a card for the lead when it is more than an hour old,
 so a watch that stopped reporting is a card rather than silence.
 
 - **product** schedules (adversarial evaluation, self-evolution, memory, model
-  tracking, debt clearing, CI observability, trace shipping) are Meiva's own
+  tracking, debt clearing, CI observability, trace shipping, harness CLI convergence) are Meiva's own
   improvement loops — they ship and start by default.
+- `harness-cli-update` runs at 04:30 cluster time with `placement: "per_machine"`. It provisions
+  a schedule row (`harness-cli-update:<machine>`) on every registered runner host (`role @> '{agent-runner}'`).
+  Each machine independently converges its locally installed external harness CLIs (Claude Code, OpenAI Codex,
+  Antigravity, Droid) to the catalog versions pinned in this checkout, writing non-disruptive update logs to
+  `$MEIVA_HOME/run/harness-cli-update.log` and emitting `harness_cli_update_round` telemetry without waking agents.
 - **operator** schedules (cluster-operator tooling) ship with the product but
   start **disabled**: they exist so they are discoverable, and start only when
   the operator enables them. `db-write-stall-watch` is the first: three
@@ -100,7 +106,9 @@ strict modules under `schedules/plans/` and their effects in shells under
 
 `provision_builtin_schedules(conn, machine=...)` (`base/daemon/schedules/builtin_schedules.py`) creates every
 manifest schedule missing from the `schedules` table, with `enabled` taken
-from the manifest's `default_enabled` and `machine` set to the gateway's machine. It runs:
+from the manifest's `default_enabled`. Schedules with `placement: "gateway"` (the default) are assigned
+to the gateway machine. Schedules with `placement: "per_machine"` (such as `harness-cli-update`) are provisioned
+for each machine in `machines` carrying the `agent-runner` role as `<name>:<machine>`. It runs:
 
 1. **at gateway startup lifespan** (before serving traffic) — gated by
    `settings.gateway.provision_builtin_schedules`, and
