@@ -12,6 +12,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TypeGuard
 
+from base.host.boundary.untyped import object_of
+
 # meiva:note
 # Telegram's hard cap for documents sent through the Bot API.
 MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
@@ -120,7 +122,10 @@ def _json_object(value: object) -> Mapping[str, object] | None:
 def read_response(status_code: int, body: str) -> Mapping[str, object]:
     if status_code != 200:
         raise RuntimeError(f"telegram sendDocument failed: HTTP {status_code} - {body[:200]}")
-    payload = _json_object(json.loads(body))
+    # meiva:note
+    # `json.loads` answers `Any`; `object_of` hands the decoded body over as an `object` for
+    # `_json_object` to check.
+    payload = _json_object(object_of(json.loads, body))
     if payload is None:
         raise RuntimeError("telegram sendDocument failed: API answered with a non-object body")
     if not payload.get("ok"):

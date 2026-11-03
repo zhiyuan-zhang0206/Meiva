@@ -137,6 +137,31 @@ def _row(text: str, date: int, *, id: int = 1, is_from_me: int = 0) -> object:
     )
 
 
+def test_rows_from_the_database_carry_their_columns() -> None:
+    [row] = messages.parse_rows([(7, "hello", 123, 0, "SMS", "+15551231118")])
+    assert (row.id, row.text, row.date, row.is_from_me, row.service, row.phone) == (
+        7,
+        "hello",
+        123,
+        0,
+        "SMS",
+        "+15551231118",
+    )
+
+
+@pytest.mark.parametrize(
+    ("rows", "message"),
+    [
+        ("not a list", "not a list of rows"),
+        ([("five", "columns", 1, 0, "SMS")], "not a 6-column tuple"),
+        ([(1, "text", 1, 0, "SMS", "phone"), (2, b"raw", 1, 0, "SMS", "phone")], "column text"),
+    ],
+)
+def test_a_database_of_another_shape_is_refused(rows: object, message: str) -> None:
+    with pytest.raises(TypeError, match=message):
+        messages.parse_rows(rows)
+
+
 def test_select_messages_maps_rows_and_dates() -> None:
     ns = _apple_ns(NOW)
     [from_ns, from_seconds] = messages.select_messages(

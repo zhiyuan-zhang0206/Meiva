@@ -1,15 +1,19 @@
 # meiva:note
 # The decisions of the sms skill, over values: the verification-code patterns, the
-# chat.db query (SQL and parameters) for a lookback window, the mapping of the rows it
-# returns to messages, and the printed lines. Reading chat.db and printing live in
-# query.py.
+# chat.db query (SQL and parameters) for a lookback window, the parsing of the rows it
+# returns and their mapping to messages, and the printed lines. Reading chat.db and
+# printing live in query.py.
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import TypeGuard
+
+from base.host.boundary.json_values import is_object_list
 
 # meiva:note
 # Apple's epoch (2001-01-01 UTC) is 978307200 seconds after the Unix epoch.
@@ -114,6 +118,52 @@ _SELECT = """
 """
 
 
+# meiva:note
+# The width a row of `_SELECT` must have: one column per `ChatRow` field, so a field added to the
+# dataclass moves the width with it instead of leaving a literal behind.
+_ROW_COLUMNS = len(dataclasses.fields(ChatRow))
+
+
+# meiva:note
+# `value` as the column `name` of a chat.db row, which must already carry the SQL type it was
+# selected as. The database is a boundary: a mismatch is refused by name, never coerced.
+def _column[T](value: object, kind: type[T], name: str) -> T:
+    if not isinstance(value, kind):
+        raise TypeError(f"chat.db column {name} is {type(value).__name__}, not {kind.__name__}")
+    return value
+
+
+def _is_row(value: object) -> TypeGuard[tuple[object, ...]]:
+    return isinstance(value, tuple)
+
+
+# meiva:note
+# The rows a chat.db query answered, in column order, as `ChatRow`s. This is the seam where
+# `sqlite3`'s untyped `fetchall()` stops: a row of another width, or a column of another type,
+# is refused with its name rather than reaching the dataclass.
+def parse_rows(rows: object) -> list[ChatRow]:
+    if not is_object_list(rows):
+        raise TypeError(f"chat.db answered {type(rows).__name__}, not a list of rows")
+    parsed: list[ChatRow] = []
+    for row in rows:
+        if not _is_row(row) or len(row) != _ROW_COLUMNS:
+            raise TypeError(
+                f"chat.db row is {type(row).__name__}, not a {_ROW_COLUMNS}-column tuple"
+            )
+        id_, text, date, is_from_me, service, phone = row
+        parsed.append(
+            ChatRow(
+                id=_column(id_, int, "id"),
+                text=_column(text, str, "text"),
+                date=_column(date, int, "date"),
+                is_from_me=_column(is_from_me, int, "is_from_me"),
+                service=_column(service, str, "service"),
+                phone=_column(phone, str, "phone"),
+            )
+        )
+    return parsed
+
+
 def _apple_epoch_to_datetime(apple_date: int) -> datetime:
     if apple_date > _NANOSECOND_DATES_ABOVE:
         unix_ts = apple_date / 1_000_000_000 + APPLE_EPOCH_OFFSET
@@ -135,10 +185,15 @@ def extract_codes(text: str) -> list[str]:
     seen: set[str] = set()
     for pattern in _VERIFICATION_PATTERNS:
         for match in pattern.finditer(text):
-            code = match.group(1)
-            if code not in seen and len(code) >= 4:
-                seen.add(code)
-                codes.append(code)
+            # meiva:note
+            # `Match.group(1)` is `str | Any`: the typeshed types it `AnyStr | MaybeNone`, and
+            # basedpyright reads `MaybeNone` as `Any`. The capture is named `object` and checked
+            # before anything downstream holds it as a `str`.
+            captured: object = match.group(1)
+            if not isinstance(captured, str) or len(captured) < 4 or captured in seen:
+                continue
+            seen.add(captured)
+            codes.append(captured)
     return codes
 
 
