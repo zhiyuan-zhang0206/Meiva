@@ -287,7 +287,7 @@ class _FakeDateTime(dt.datetime):
     _wall: "_FakeWall | None" = None
 
     @staticmethod
-    def now(_tz=None) -> dt.datetime:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def now(_tz: dt.tzinfo | None = None) -> dt.datetime:  # pyright: ignore[reportIncompatibleMethodOverride]
         assert _FakeDateTime._wall is not None
         return _FakeDateTime._wall.now()
 

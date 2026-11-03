@@ -9,6 +9,7 @@ import contextlib
 import io
 import sys
 from collections.abc import Callable
+from typing import cast
 
 import meiva
 
@@ -25,8 +26,10 @@ def module_hides_from_parent() -> None:
     # Import succeeds and returns the disabled sentinel.
     import meiva.watcher as w
 
+    # meiva:note
+    # The disabled sentinel module has no `anything` attribute, which is the point of the test.
     try:
-        _ = w.anything  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+        _ = cast("object", w.anything)  # pyright: ignore[reportAttributeAccessIssue]
     except AttributeError as e:
         msg = str(e)
         assert "disabled by MEIVA_SDK_DISABLE" in msg, msg
