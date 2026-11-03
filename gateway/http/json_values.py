@@ -2,11 +2,15 @@ from typing import TypeGuard
 
 
 # meiva:note
-# A decoded JSON (or `jsonb`) object: JSON keys are always strings, so the check is the container,
-# and the values stay `object` until a reader narrows them. `json.loads`, psycopg's `jsonb`
+# A decoded JSON (or `jsonb`) object: a dict whose keys are all strings, with the values still
+# `object` until a reader narrows them. `json.loads`, psycopg's `jsonb`
 # adapter and a request's raw body all hand back `Any`; this is the one place that claim is
 # checked, so a reader holds `dict[str, object]` instead.
 def is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_dict(value) and all(isinstance(key, str) for key in value)
+
+
+def _is_dict(value: object) -> TypeGuard[dict[object, object]]:
     return isinstance(value, dict)
 
 

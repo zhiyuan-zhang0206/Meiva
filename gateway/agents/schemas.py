@@ -7,7 +7,7 @@ the wire before.
 """
 
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from pydantic import (
     BaseModel,
@@ -237,7 +237,7 @@ class AgentMessagesResponse(BaseModel):
     next older page.
     """
 
-    messages: list[dict[str, Any]]
+    messages: list[dict[str, object]]
     msg_count: int
     start_index: int
     has_more: bool
@@ -274,7 +274,7 @@ class TraceCheckpointMessagesResponse(BaseModel):
     agent_id: int
     checkpoint_id: str | None
     pruned: bool
-    messages: list[dict[str, Any]]
+    messages: list[dict[str, object]]
 
 
 class TokenUsageResponse(BaseModel):

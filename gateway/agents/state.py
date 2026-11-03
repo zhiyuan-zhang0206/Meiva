@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Sequence
-from typing import Any
+from dataclasses import dataclass
 
+import psycopg
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from langchain_core.messages import AIMessage, BaseMessage
 from psycopg_pool import ConnectionPool
@@ -44,7 +45,9 @@ from gateway.agents.schemas import (
     TraceCheckpointMessagesResponse,
 )
 from gateway.agents.system_note import system_note_blocking as system_note_blocking
-from gateway.http.config import gateway_config, gateway_rpc
+from gateway.http.config import gateway_config, gateway_rpc, gateway_state
+from gateway.http.db_rows import query_one
+from gateway.http.json_values import is_object_dict
 from gateway.http.model_catalog import request_default_model, require_model_catalog
 from ops import lifecycle as _ops
 from ops.agents import get_agent_status
@@ -60,6 +63,26 @@ _MAX_MESSAGE_CONTENT_BYTES = 1_048_576
 
 def _message_content_size_bytes(content: str) -> int:
     return len(content.encode("utf-8"))
+
+
+# meiva:note
+# The two stored config maps of an agent, both `jsonb` and either may be NULL.
+@dataclass(frozen=True)
+class _AgentConfigRow:
+    config_overlay: object
+    birth_config: object
+
+
+# meiva:note
+# The harness an agent runs on; "meiva" when the column is NULL (a row born before it existed).
+@dataclass(frozen=True)
+class _HarnessRow:
+    harness: str | None
+
+
+def agent_harness(conn: psycopg.Connection, agent_id: int) -> str:
+    row = query_one(conn, _HarnessRow, "SELECT harness FROM agents_meta WHERE id = %s", (agent_id,))
+    return row.harness if row is not None and row.harness is not None else "meiva"
 
 
 def scoped_message_key(request: Request, key: str) -> str:
@@ -119,19 +142,19 @@ async def post_agent_message(
             ),
         )
 
-    await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id)
+    await asyncio.to_thread(get_agent_status, gateway_state(request).db, agent_id)
     if idempotency_key is not None:
         try:
             existing = await reconcile_chat_delivery(
-                request.app.state.db_pool,
-                request.app.state.db,
-                request.app.state.bus,
+                gateway_state(request).db_pool,
+                gateway_state(request).db,
+                gateway_state(request).bus,
                 agent_id,
                 client_message_id=idempotency_key,
                 content=body.content,
                 source=body.source,
                 payload=None,
-                local_machine=request.app.state.machine.name(),
+                local_machine=gateway_state(request).machine.name(),
                 rpc=gateway_rpc(request),
             )
         except ClientMessageConflictError as exc:
@@ -146,25 +169,27 @@ async def post_agent_message(
             _completion_delivery_required,
             agent_id,
             notice,
-            request.app.state.db_pool,
-            authority=request.app.state.config_authority,
+            gateway_state(request).db_pool,
+            authority=gateway_state(request).config_authority,
         ):
             return AgentMessageEnqueued(
-                status=await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id),
+                status=await asyncio.to_thread(
+                    get_agent_status, gateway_state(request).db, agent_id
+                ),
                 inbound_id=None,
             )
     try:
         delivery = await deliver_chat_inbound(
-            request.app.state.db_pool,
-            request.app.state.db,
-            request.app.state.bus,
+            gateway_state(request).db_pool,
+            gateway_state(request).db,
+            gateway_state(request).bus,
             agent_id,
             prepare=lambda _conn: body.content,
             source=body.source,
             payload=None,
             client_message_id=idempotency_key,
             provenance=provenance,
-            local_machine=request.app.state.machine.name(),
+            local_machine=gateway_state(request).machine.name(),
             rpc=gateway_rpc(request),
         )
     except ClientMessageConflictError as exc:
@@ -203,12 +228,12 @@ async def post_agent_system_note(
         )
     except PrincipalScopeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id)
+    await asyncio.to_thread(get_agent_status, gateway_state(request).db, agent_id)
     inbound_id = await asyncio.to_thread(
         system_note_blocking,
-        request.app.state.db,
-        request.app.state.bus,
-        request.app.state.db_pool,
+        gateway_state(request).db,
+        gateway_state(request).bus,
+        gateway_state(request).db_pool,
         agent_id,
         body.content,
         body.source,
@@ -221,20 +246,20 @@ async def post_agent_system_note(
 
     note_kind = InboundKind.SYSTEM_NOTE
     await _ops.publish_inbound_arrived(
-        request.app.state.bus, agent_id, inbound_id, note_kind, body.source, body.content
+        gateway_state(request).bus, agent_id, inbound_id, note_kind, body.source, body.content
     )
     if body.resurrect:
         status = await _ops.resurrect_if_terminated(
-            request.app.state.db,
-            request.app.state.bus,
+            gateway_state(request).db,
+            gateway_state(request).bus,
             agent_id,
             trigger_inbound_id=inbound_id,
             trigger_inbound_kind=note_kind,
-            local_machine=request.app.state.machine.name(),
+            local_machine=gateway_state(request).machine.name(),
             rpc=gateway_rpc(request),
         )
     else:
-        status = await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id)
+        status = await asyncio.to_thread(get_agent_status, gateway_state(request).db, agent_id)
     return AgentMessageEnqueued(status=status, inbound_id=inbound_id)
 
 
@@ -258,18 +283,18 @@ async def reconcile_agent_message(
                 "to a file and send the file path instead"
             ),
         )
-    await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id)
+    await asyncio.to_thread(get_agent_status, gateway_state(request).db, agent_id)
     try:
         delivery = await reconcile_chat_delivery(
-            request.app.state.db_pool,
-            request.app.state.db,
-            request.app.state.bus,
+            gateway_state(request).db_pool,
+            gateway_state(request).db,
+            gateway_state(request).bus,
             agent_id,
             client_message_id=idempotency_key,
             content=body.content,
             source=body.source,
             payload=None,
-            local_machine=request.app.state.machine.name(),
+            local_machine=gateway_state(request).machine.name(),
             rpc=gateway_rpc(request),
         )
     except ClientMessageConflictError as exc:
@@ -291,11 +316,11 @@ def get_agent_messages(
     before: int | None = Query(default=None, ge=0),
 ) -> AgentMessagesResponse:
 
-    with request.app.state.db_pool.connection() as conn:
+    with gateway_state(request).db_pool.connection() as conn:
         if not agent_exists(conn, agent_id):
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
     try:
-        messages = load_checkpoint_messages(request.app.state.db, agent_id)
+        messages = load_checkpoint_messages(gateway_state(request).db, agent_id)
     except CheckpointReadError as exc:
         _log.warning("messages endpoint: checkpoint read failed for agent %s: %r", agent_id, exc)
         raise HTTPException(
@@ -326,8 +351,8 @@ def get_trace_checkpoint_messages(
     agent_id: int, trace_id: str, request: Request
 ) -> TraceCheckpointMessagesResponse:
 
-    db = request.app.state.db
-    with request.app.state.db_pool.connection() as conn:
+    db = gateway_state(request).db
+    with gateway_state(request).db_pool.connection() as conn:
         if not agent_exists(conn, agent_id):
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
     try:
@@ -363,7 +388,7 @@ def get_last_message(
 ) -> LastMessageResponse:
 
     del caller
-    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
+    with gateway_state(request).db_pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT last_message_text FROM agents_meta WHERE id = %s", (agent_id,))
         row = cur.fetchone()
     if row is None:
@@ -378,7 +403,7 @@ def get_last_message(
 )
 def get_pending_messages(agent_id: int, request: Request) -> list[PendingInbound]:
 
-    with request.app.state.db_pool.connection() as conn:
+    with gateway_state(request).db_pool.connection() as conn:
         rows = list_pending_inbounds(conn, agent_id)
     return [
         PendingInbound(
@@ -399,15 +424,13 @@ def get_pending_messages(agent_id: int, request: Request) -> list[PendingInbound
     description="The agent's most recent LLM call token usage. `input_tokens` is\ncontext-window occupancy; `max_input_tokens` is the model's context\nwindow ceiling so the frontend can render \"context: 26k/1M tokens\".\nWhen the frontend switches to an existing agent, it uses this endpoint\nto fetch the historical latest value to initialize the token counter\nUI — the SSE `token_usage` event is fire-and-forget without persistence,\nand the previous value is not available without switching to.\n\nReturns (0, 0, 0) on a checkpoint read failure — the intentional\nfail-fast boundary: the read failure is caught here (the SSE\ntoken_usage push refreshes the UI later), but the reverse scan over\nthe loaded messages runs unguarded so a bug surfaces normally rather\nthan being masked as 0/0.",
 )
 def get_token_usage(agent_id: int, request: Request) -> TokenUsageResponse:
-    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT harness FROM agents_meta WHERE id = %s", (agent_id,))
-        row = cur.fetchone()
-    harness = str(row[0]) if row and row[0] is not None else "meiva"
+    with gateway_state(request).db_pool.connection() as conn:
+        harness = agent_harness(conn, agent_id)
     if harness != "meiva":
         messages: list[BaseMessage] = []
     else:
         try:
-            messages = load_checkpoint_messages(request.app.state.db, agent_id)
+            messages = load_checkpoint_messages(gateway_state(request).db, agent_id)
         except CheckpointReadError as exc:
             _log.warning(
                 "token-usage: checkpoint read failed for agent %s, returning 0/0/0: %r",
@@ -416,6 +439,17 @@ def get_token_usage(agent_id: int, request: Request) -> TokenUsageResponse:
             )
             messages = []
     return token_usage_response(agent_id, request, messages)
+
+
+# meiva:note
+# The model an agent's config overlay pins, or None when it pins none.
+def _pinned_model(config_overlay: dict[str, object] | None) -> str | None:
+    pinned = config_overlay.get("llm_model") if config_overlay else None
+    if not pinned:
+        return None
+    if not isinstance(pinned, str):
+        raise TypeError("config_overlay llm_model must be a string")
+    return pinned
 
 
 def token_usage_response(
@@ -427,17 +461,21 @@ def token_usage_response(
     max_input_tokens = soft_compact_tokens = hard_compact_tokens = 0
     catalog = require_model_catalog(request)
     try:
-        with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-            cur.execute(
+        with gateway_state(request).db_pool.connection() as conn:
+            row = query_one(
+                conn,
+                _AgentConfigRow,
                 "SELECT config_overlay, birth_config FROM agents_meta WHERE id = %s",
                 (agent_id,),
             )
-            row = cur.fetchone()
-        config_overlay: dict[str, Any] | None = row[0] if row and row[0] else None
-        overrides = agent_overrides(config_overlay, row[1] if row else None)
-        model: str | None = config_overlay.get("llm_model") if config_overlay else None
-        if not model:
-            model = gateway_config(request).models.llm_model
+        config_overlay = (
+            row.config_overlay if row is not None and is_object_dict(row.config_overlay) else None
+        )
+        birth_config = (
+            row.birth_config if row is not None and is_object_dict(row.birth_config) else None
+        )
+        overrides = agent_overrides(config_overlay or None, birth_config)
+        model = _pinned_model(config_overlay) or gateway_config(request).models.llm_model
         if model:
             budget = resolve_context_budget(model, catalog=catalog, overrides=overrides)
             max_input_tokens = budget.max_context_tokens
@@ -478,15 +516,13 @@ def token_usage_response(
     description="How the agent's context window is spent, for the composer's breakdown\npanel (lazy-loaded on expand).\n\nThe breakdown of the latest LLM request's input: each message's tokens anchored to the\nprovider's reported `input_tokens` (`base/agents/history/message_tokens.py`), buckets summed\nfrom them, only the inside of a message split by an estimator. Pure view logic\n(`base/agents/history/context_breakdown.py`) — one checkpoint read, no kernel/agent involvement.\nA checkpoint read failure / no checkpoint / no LLM request yet yields an empty breakdown\nwith zeroed totals (same tolerance as token-usage: the panel re-opens fine later).",
 )
 def get_context_breakdown(agent_id: int, request: Request) -> ContextBreakdownResponse:
-    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT harness FROM agents_meta WHERE id = %s", (agent_id,))
-        row = cur.fetchone()
-    harness = str(row[0]) if row and row[0] is not None else "meiva"
+    with gateway_state(request).db_pool.connection() as conn:
+        harness = agent_harness(conn, agent_id)
     if harness != "meiva":
         messages: list[BaseMessage] = []
     else:
         try:
-            messages = load_checkpoint_messages(request.app.state.db, agent_id)
+            messages = load_checkpoint_messages(gateway_state(request).db, agent_id)
         except CheckpointReadError as exc:
             _log.warning(
                 "context-breakdown: checkpoint read failed for agent %s, returning empty: %r",
@@ -495,7 +531,7 @@ def get_context_breakdown(agent_id: int, request: Request) -> ContextBreakdownRe
             )
             messages = []
     return context_breakdown_response(
-        request.app.state.db_pool,
+        gateway_state(request).db_pool,
         agent_id,
         latest_request_breakdown(messages),
         catalog=require_model_catalog(request),

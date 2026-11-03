@@ -16,7 +16,7 @@ from gateway.agents.history.read_inputs import (
     understanding_chunk_ratio,
     understanding_enabled,
 )
-from gateway.http.config import GatewayConfig, gateway_clock, gateway_config
+from gateway.http.config import GatewayConfig, gateway_clock, gateway_config, gateway_state
 
 __all__ = [
     "request_timeline_read",
@@ -44,7 +44,7 @@ def understanding_read(
 ) -> UnderstandingRead:
     domain = config.understanding
     aliases = authority.read_env_aliases() if domain.chunk_ratio is None else {}
-    fields = AgentRuntimeSettings.model_fields
+    defaults = AgentRuntimeSettings.model_construct()
     return UnderstandingRead(
         rendering=timeline_rendering(config, clock),
         hierarchy_model=config.models.hierarchy_model,
@@ -52,12 +52,12 @@ def understanding_read(
         chunk_ratio=understanding_chunk_ratio(
             domain_value=domain.chunk_ratio,
             env_aliases=aliases,
-            field_default=fields["understanding_chunk_ratio"].default,
+            field_default=defaults.understanding_chunk_ratio,
         ),
         enabled=understanding_enabled(
             domain_value=domain.enabled,
             env_aliases=aliases,
-            field_default=fields["understanding_enabled"].default,
+            field_default=defaults.understanding_enabled,
         ),
     )
 
@@ -68,5 +68,5 @@ def request_timeline_read(request: Request) -> TimelineRead:
 
 def request_understanding_read(request: Request) -> UnderstandingRead:
     return understanding_read(
-        gateway_config(request), request.app.state.config_authority, gateway_clock(request)
+        gateway_config(request), gateway_state(request).config_authority, gateway_clock(request)
     )

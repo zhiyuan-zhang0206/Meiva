@@ -1,11 +1,17 @@
 """Capture loguru output in tests (pytest's `caplog` only sees stdlib logging)."""
 
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, TypeGuard
 
 import pytest
 
 __all__ = ["LogRecords", "loguru_records"]
+
+
+# meiva:note
+# A record's `extra`: loguru keys it by the keyword names of the log call.
+def _is_extra(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
 
 
 class LogRecords(list[dict[str, Any]]):
@@ -19,6 +25,24 @@ class LogRecords(list[dict[str, Any]]):
     def messages(self, level: str | None = None) -> list[str]:
         """The formatted message of every record, optionally only those of one level name."""
         return [r["message"] for r in self if level is None or r["level"].name == level]
+
+    # meiva:note
+    # The `extra` mapping of every record, optionally only those logged with `event=<event>`
+    # and/or at the level named `level` (as `messages` selects).
+    def extras(
+        self, *, event: str | None = None, level: str | None = None
+    ) -> list[dict[str, object]]:
+        found: list[dict[str, object]] = []
+        for record in self:
+            extra = record.get("extra")
+            if not _is_extra(extra):
+                continue
+            level_name = getattr(record.get("level"), "name", None)
+            if (level is None or level_name == level) and (
+                event is None or extra.get("event") == event
+            ):
+                found.append(extra)
+        return found
 
     def events(self, name: str) -> list[dict[str, Any]]:
         """The records logged with `event=<name>` (the structured-event convention)."""

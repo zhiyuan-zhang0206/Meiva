@@ -20,7 +20,8 @@ from gateway.agents.history.timeline import (
     load_current_messages,
 )
 from gateway.agents.schemas import PendingInbound, TokenUsageResponse
-from gateway.agents.state import get_pending_messages, token_usage_response
+from gateway.agents.state import agent_harness, get_pending_messages, token_usage_response
+from gateway.http.config import gateway_state
 
 router = APIRouter()
 
@@ -50,11 +51,11 @@ def get_conversation_snapshot(agent_id: int, request: Request) -> ConversationSn
     through the timeline read, matching `GET .../timeline` (token usage and
     pending tolerate absence, but are not reached then).
     """
-    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT harness FROM agents_meta WHERE id = %s", (agent_id,))
-        row = cur.fetchone()
-    harness = str(row[0]) if row and row[0] is not None else "meiva"
-    messages = [] if harness != "meiva" else load_current_messages(request.app.state.db, agent_id)
+    with gateway_state(request).db_pool.connection() as conn:
+        harness = agent_harness(conn, agent_id)
+    messages = (
+        [] if harness != "meiva" else load_current_messages(gateway_state(request).db, agent_id)
+    )
     return ConversationSnapshotResponse(
         timeline=head_timeline(agent_id, request, messages),
         token_usage=token_usage_response(agent_id, request, messages),

@@ -18,7 +18,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from collections.abc import Mapping
+from dataclasses import dataclass
 
 from loguru import logger
 from psycopg_pool import ConnectionPool
@@ -27,6 +28,7 @@ from base.api_contracts.agent_contract import AgentNotFound
 from base.db import Database
 from gateway.agents.launch import launch_plan, lifecycle_plan
 from gateway.http.config import GatewayConfig
+from gateway.http.db_rows import query_one
 from ops.cluster import rpc as cluster_rpc
 from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 
@@ -57,14 +59,14 @@ from ops.rpc_schemas import LaunchAgentRequest, SpawnedAgent
 async def forward_to_home_machine(
     agent_id: int,
     path: str,
-    json_body: dict[str, Any],
+    json_body: Mapping[str, object],
     *,
     db: Database,
     pool: ConnectionPool,
     config: GatewayConfig,
     rpc: cluster_rpc.RpcClient,
     idempotency_key: str | None = None,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     target = await asyncio.to_thread(_home_machine_blocking, pool, agent_id)
     return await enqueue_lifecycle(
         db, target, path, json_body, config=config, rpc=rpc, idempotency_key=idempotency_key
@@ -87,12 +89,12 @@ async def enqueue_lifecycle(
     db: Database,
     target: str,
     path: str,
-    json_body: dict[str, Any],
+    json_body: Mapping[str, object],
     *,
     config: GatewayConfig,
     rpc: cluster_rpc.RpcClient,
     idempotency_key: str | None = None,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     op = lifecycle_plan.lifecycle_op(
         path,
         json_body,
@@ -158,11 +160,19 @@ async def forward_spawn_to_remote(
 
 
 # meiva:note
+# The machine an agent lives on.
+@dataclass(frozen=True)
+class _HomeMachineRow:
+    machine: str
+
+
+# meiva:note
 # Sync home-machine lookup for lifecycle ops — via to_thread.
 def _home_machine_blocking(pool: ConnectionPool, agent_id: int) -> str:
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT machine FROM agents_meta WHERE id = %s", (agent_id,))
-        row = cur.fetchone()
+    with pool.connection() as conn:
+        row = query_one(
+            conn, _HomeMachineRow, "SELECT machine FROM agents_meta WHERE id = %s", (agent_id,)
+        )
     if row is None:
         raise AgentNotFound(f"agent {agent_id} does not exist")
-    return row[0]
+    return row.machine

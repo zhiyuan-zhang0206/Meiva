@@ -10,17 +10,32 @@ from base.lm.catalog import ModelCatalog
 from base.lm.factory import process_provider_keys
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.agents.history.configuration import timeline_rendering
+from gateway.agents.reply_suggestion.plan import ReplySuggestionPolicy
 from gateway.agents.reply_suggestion.schemas import ReplySuggestionResponse
 from gateway.agents.reply_suggestion.service import (
     ReplySuggestionConfigurationError,
     ReplySuggestionService,
 )
-from gateway.http.config import gateway_clock, gateway_config
+from gateway.http.config import (
+    GatewayAppState,
+    gateway_clock,
+    gateway_config,
+    state_as,
+)
 from gateway.http.disconnect import run_until_disconnect
 from gateway.http.middleware.error_envelope import error_response
+from gateway.http.model_catalog import request_catalog
 
 router = APIRouter()
 _log = logging.getLogger(__name__)
+
+
+# meiva:note
+# The suggestion service and policy the app root builds once; this directory's route is their only
+# reader, so the directory declares them.
+class ReplySuggestionAppState(GatewayAppState):
+    reply_suggestions: ReplySuggestionService
+    reply_suggestion_policy: ReplySuggestionPolicy
 
 
 @router.post(
@@ -33,8 +48,8 @@ async def post_reply_suggestion(
     agent_id: int, request: Request
 ) -> ReplySuggestionResponse | JSONResponse:
 
-    service: ReplySuggestionService = request.app.state.reply_suggestions
-    catalog = request.app.state.catalog
+    suggestion_state = state_as(request, ReplySuggestionAppState)
+    catalog = request_catalog(request)
     keys = (
         await asyncio.to_thread(process_provider_keys, catalog)
         if isinstance(catalog, ModelCatalog)
@@ -42,10 +57,10 @@ async def post_reply_suggestion(
     )
     try:
         result = await run_until_disconnect(
-            service.suggest(
+            suggestion_state.reply_suggestions.suggest(
                 agent_id,
-                db=request.app.state.db,
-                policy=request.app.state.reply_suggestion_policy,
+                db=suggestion_state.db,
+                policy=suggestion_state.reply_suggestion_policy,
                 rendering=timeline_rendering(gateway_config(request), gateway_clock(request)),
                 catalog=catalog,
                 keys=keys,

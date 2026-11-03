@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import socket
 from contextlib import suppress
 from dataclasses import dataclass
 from functools import partial
@@ -12,9 +13,37 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Event, Thread
 from types import TracebackType
-from typing import Any, Self
+from typing import Self, TypedDict
 
 import httpx
+from pydantic import TypeAdapter
+
+from gateway.http.json_values import is_object_dict
+
+
+class _Receipt(TypedDict):
+    path: str
+    body: dict[str, object]
+
+
+_RECEIPT = TypeAdapter(_Receipt)
+
+
+# meiva:note
+# A decoded JSON object of a recorded request; anything else is a wrong receipt.
+def as_object(value: object) -> dict[str, object]:
+    if not is_object_dict(value):
+        raise TypeError("expected a JSON object")
+    return value
+
+
+# meiva:note
+# The client socket of an HTTP handler, which `StreamRequestHandler` types as `Any`.
+def _socket_of(value: object) -> socket.socket:
+    if not isinstance(value, socket.socket):
+        raise TypeError("an HTTP handler's connection is a socket")
+    return value
+
 
 DEFAULT_REPLY = '{"suggestions": ["Yes, go ahead.", "Wait, explain the plan first."]}'
 
@@ -104,10 +133,11 @@ class ProviderWire:
                 elif self.path == "/responses":
                     wire.started.set()
                     if draft.wait_for_disconnect:
-                        self.connection.settimeout(2)
+                        connection = _socket_of(getattr(self, "connection", None))
+                        connection.settimeout(2)
                         with suppress(TimeoutError):
                             try:
-                                if self.connection.recv(1) == b"":
+                                if connection.recv(1) == b"":
                                     wire.disconnected.set()
                             except ConnectionResetError:
                                 wire.disconnected.set()
@@ -152,14 +182,16 @@ class ProviderWire:
         self._thread.join(timeout=2)
         assert not self._thread.is_alive()
 
-    def gate_receipts(self) -> list[dict[str, Any]]:
+    def gate_receipts(self) -> list[dict[str, object]]:
         return self._receipts("/v1/systemone")
 
-    def draft_receipts(self) -> list[dict[str, Any]]:
+    def draft_receipts(self) -> list[dict[str, object]]:
         return self._receipts("/responses")
 
-    def _receipts(self, path: str) -> list[dict[str, Any]]:
-        records = [json.loads(p.read_text()) for p in sorted(self.directory.glob("*.json"))]
+    def _receipts(self, path: str) -> list[dict[str, object]]:
+        records = [
+            _RECEIPT.validate_json(p.read_text()) for p in sorted(self.directory.glob("*.json"))
+        ]
         return [record["body"] for record in records if record["path"] == path]
 
     def response(self) -> dict[str, object]:

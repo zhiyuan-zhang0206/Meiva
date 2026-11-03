@@ -1,5 +1,6 @@
-import json
 from datetime import UTC, datetime, timedelta
+
+from pydantic import BaseModel, TypeAdapter
 
 from base.agents.tasks.priority import Priority
 from gateway.agents.schemas import (
@@ -7,6 +8,14 @@ from gateway.agents.schemas import (
     NoticeItem,
     ResolveNoticeIn,
 )
+
+_WIRE = TypeAdapter(dict[str, object])
+
+
+# meiva:note
+# The JSON a model puts on the wire, decoded back into an object.
+def _wire(model: BaseModel) -> dict[str, object]:
+    return _WIRE.validate_json(model.model_dump_json())
 
 
 def test_agent_row_wire_shape() -> None:
@@ -32,7 +41,7 @@ def test_agent_row_wire_shape() -> None:
         unread_notice_count=0,
         heartbeat_paused_until=None,
     )
-    d = json.loads(m.model_dump_json())
+    d = _wire(m)
     assert d["agent_id"] == 1
     assert d["label"] == "agent-1"
     assert d["spawner"] == "user"
@@ -60,7 +69,7 @@ def test_notice_item_wire_shape() -> None:
         reply=None,
         expire_at=t + timedelta(days=1),
     )
-    d = json.loads(m.model_dump_json())
+    d = _wire(m)
     assert set(d.keys()) == {
         "id",
         "agent_id",

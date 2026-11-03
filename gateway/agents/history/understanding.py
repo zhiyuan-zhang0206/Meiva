@@ -26,6 +26,7 @@ from base.agents.history.hierarchy.build import (
 )
 from base.agents.history.hierarchy.chunks import chunk_threshold
 from base.agents.history.hierarchy.sessions import (
+    Coverage,
     Session,
     SessionBoundaryError,
     build_sessions,
@@ -41,6 +42,7 @@ from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import UnknownModelWindowError
 from gateway.agents.history.configuration import request_understanding_read
 from gateway.agents.history.read_inputs import UnderstandingRead
+from gateway.http.config import gateway_state
 from gateway.http.model_catalog import require_model_catalog
 
 router = APIRouter()
@@ -239,8 +241,22 @@ class BuildProgressResponse(BaseModel):
     cost_usd: float | None
 
 
+def _session_coverage(coverage: Coverage) -> SessionCoverage:
+    return SessionCoverage(
+        status=coverage.status,
+        ratio=coverage.ratio,
+        covered_messages=coverage.covered_messages,
+        total_messages=coverage.total_messages,
+    )
+
+
 def _estimate_out(estimate: CostEstimate) -> CostEstimateOut:
-    return CostEstimateOut(**asdict(estimate))
+    return CostEstimateOut(
+        jobs=estimate.jobs,
+        input_tokens=estimate.input_tokens,
+        output_tokens=estimate.output_tokens,
+        cost_usd=estimate.cost_usd,
+    )
 
 
 def _job_out(
@@ -259,7 +275,7 @@ def _job_out(
 
 
 def _require_agent(request: Request, agent_id: int) -> None:
-    with request.app.state.db_pool.connection() as conn:
+    with gateway_state(request).db_pool.connection() as conn:
         if not agent_exists(conn, agent_id):
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
 
@@ -290,10 +306,10 @@ def _model_target(
 def _sessions_blocking(request: Request, agent_id: int) -> SessionsResponse:
     _require_agent(request, agent_id)
     catalog = require_model_catalog(request)
-    db: Database = request.app.state.db
+    db: Database = gateway_state(request).db
     read = request_understanding_read(request)
     history, sessions = _load(db, agent_id, read=read)
-    covered = load_covered_spans(request.app.state.db_pool, agent_id)
+    covered = load_covered_spans(gateway_state(request).db_pool, agent_id)
     model, overrides = _model_target(db, agent_id, catalog=catalog, read=read)
     jobs = plan_jobs(
         history,
@@ -320,8 +336,8 @@ def _sessions_blocking(request: Request, agent_id: int) -> SessionsResponse:
                 generation_tokens=totals[s.segment].generation_tokens,
                 estimated=totals[s.segment].estimated,
                 exact_fraction=totals[s.segment].exact_fraction,
-                coverage=SessionCoverage(
-                    **asdict(coverage_of(history, s, covered, timeline_inputs=read.rendering))
+                coverage=_session_coverage(
+                    coverage_of(history, s, covered, timeline_inputs=read.rendering)
                 ),
                 estimate=_estimate_out(
                     estimate_cost(
@@ -372,11 +388,11 @@ def _select(sessions: list[Session], body: BuildRequest) -> list[Session]:
 def _build_blocking(request: Request, agent_id: int, body: BuildRequest) -> BuildResponse:
     _require_agent(request, agent_id)
     catalog = require_model_catalog(request)
-    db: Database = request.app.state.db
+    db: Database = gateway_state(request).db
     read = request_understanding_read(request)
     history, sessions = _load(db, agent_id, read=read)
     chosen = _select(sessions, body)
-    covered = load_covered_spans(request.app.state.db_pool, agent_id)
+    covered = load_covered_spans(gateway_state(request).db_pool, agent_id)
     model, overrides = _model_target(db, agent_id, catalog=catalog, read=read)
     planned = plan_jobs(
         history,
@@ -402,7 +418,7 @@ def _build_blocking(request: Request, agent_id: int, body: BuildRequest) -> Buil
             build_id=None,
             rebuild_id=None,
         )
-    build = enqueue_build(request.app.state.db_pool, agent_id, numbers, planned)
+    build = enqueue_build(gateway_state(request).db_pool, agent_id, numbers, planned)
     return BuildResponse(
         agent_id=agent_id,
         dry_run=False,
@@ -456,7 +472,7 @@ async def post_understanding_build(
 def _progress_blocking(request: Request, agent_id: int, build_id: int) -> BuildProgressResponse:
     _require_agent(request, agent_id)
     catalog = require_model_catalog(request)
-    progress = load_build(request.app.state.db_pool, agent_id, build_id, prices=catalog.prices)
+    progress = load_build(gateway_state(request).db_pool, agent_id, build_id, prices=catalog.prices)
     if progress is None:
         raise HTTPException(
             status_code=404, detail=f"build {build_id} of agent {agent_id} not found"
