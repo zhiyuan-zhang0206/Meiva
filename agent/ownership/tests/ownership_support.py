@@ -13,6 +13,7 @@ from agent.ownership.hosted import admit_hosted_runtime
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.events.tests.async_pubsub_view import async_messages
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
@@ -98,12 +99,12 @@ class BusTap:
         # order. The redis stubs leave `get_message` untyped.
         ids: list[int] = []
         while True:
-            message: dict[str, Any] | None = await self._subscription.get_message(  # pyright: ignore[reportUnknownMemberType]
+            message = await async_messages(self._subscription).get_message(
                 ignore_subscribe_messages=True, timeout=0.3
             )
             if message is None:
                 return ids
-            event: dict[str, Any] = json.loads(message["data"])
+            event: dict[str, Any] = json.loads(str(message["data"]))
             if event["role"] == "agent_updated":
                 ids.append(event["agent_id"])
 
@@ -116,6 +117,6 @@ async def bus_tap(event_bus: EventBus) -> AsyncGenerator[BusTap]:
     client = event_bus.open_async_redis()
     async with client.pubsub() as subscription:  # pyright: ignore[reportUnknownMemberType]
         await subscription.subscribe(event_bus.channel)
-        await subscription.get_message(timeout=1.0)  # pyright: ignore[reportUnknownMemberType]
+        await subscription.get_message(timeout=1.0)
         yield BusTap(subscription)
     await client.aclose()

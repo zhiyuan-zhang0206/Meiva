@@ -40,7 +40,7 @@ class _Ok(Hook):
         runtime: Runtime[MeivaContext],
         config: RunnableConfig,
         /,
-    ) -> dict | None:
+    ) -> dict[str, object] | None:
         return None
 
 
@@ -53,7 +53,7 @@ class _BadParamType(Hook):
         runtime: Runtime[MeivaContext],
         config: RunnableConfig,
         /,
-    ) -> dict | None:
+    ) -> dict[str, object] | None:
         return None
 
 
@@ -78,5 +78,5 @@ class _BadArity(Hook):
         state: AgentState,
         runtime: Runtime[MeivaContext],
         /,
-    ) -> dict | None:
+    ) -> dict[str, object] | None:
         return None

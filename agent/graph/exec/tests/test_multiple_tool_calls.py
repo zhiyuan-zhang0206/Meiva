@@ -50,7 +50,11 @@ def _graph(state_cls: type[AgentState], *, process: ExecProcess, **compile_optio
 
     builder: Any = StateGraph(state_cls, context_schema=MeivaContext)
     builder.add_node("exec", partial(exec_node_impl, process=process), input_schema=state_cls)
-    builder.add_node("after_exec", lambda _state: {})
+
+    def after_exec(_state: object) -> dict[str, object]:
+        return {}
+
+    builder.add_node("after_exec", after_exec)
     builder.add_edge(START, "exec")
     builder.add_edge("after_exec", END)
     return builder.compile(**compile_options)

@@ -21,6 +21,7 @@ from base.agents import impersonation as leases
 from base.agents.impersonation.tests.test_host_transport import FakeAppServer
 from base.agents.impersonation.tests.test_host_transport import short_socket as short_socket
 from base.agents.observation.relay_supervision import RelayChild, RelaySupervision
+from base.log.tests.log_records import LogRecords
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 DEGRADED = STALE_RELAY_REASON
@@ -286,7 +287,7 @@ def _assert_terminal_notice_failure(
 async def test_ended_lease_notice_is_submitted_once_and_a_failure_is_reported_not_retried(
     cluster: Cluster,
     tmp_path: Path,
-    loguru_records: list[dict[str, Any]],
+    loguru_records: LogRecords,
     short_socket: Path,
     delivery: Literal["accepted", "timeout", "refused"],
 ) -> None:

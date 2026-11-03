@@ -25,6 +25,7 @@ from base.agents.history.closing_request import METADATA_KEY as CLOSING_METADATA
 from base.agents.history.closing_request import ClosingRequest
 from base.clock import SYSTEM_TIMERS
 from base.lm.catalog import ModelCatalog
+from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
 
@@ -79,7 +80,7 @@ async def test_stamp_compact_boundary_writes_the_closing_request(
 # largest individual agent provider call. The billing span that usage feeds is pinned by the
 # provider billing tests in `base/packages/tests/lm/providers`.
 async def test_generate_summary_reports_the_compaction_call_as_agent_usage(
-    model_catalog: ModelCatalog, loguru_records: list[dict[str, Any]]
+    model_catalog: ModelCatalog, loguru_records: LogRecords
 ) -> None:
     response = AIMessage(
         content="a complete summary",

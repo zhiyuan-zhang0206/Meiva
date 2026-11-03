@@ -63,8 +63,8 @@ async def test_exec_node_preserves_state_update_on_lifecycle(*, database_gate: P
         process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
 
-    update = cast(dict, cmd.update)
-    assert update.get("plugin__last_action") == "about-to-terminate"  # pyright: ignore[reportUnknownMemberType]
+    update = cast(dict[str, object], cmd.update)
+    assert update.get("plugin__last_action") == "about-to-terminate"
     assert update["halted"] is True
     assert not process_context.in_exec_turn()
 
@@ -157,11 +157,11 @@ async def test_exec_node_checkpoints_child_attachment(
     assert len(messages) == 2
     attach_msg = messages[-1]
     assert isinstance(attach_msg, HumanMessage)
-    assert attach_msg.additional_kwargs["meiva_msg_type"] == MeivaMsgType.ATTACH.value  # pyright: ignore[reportUnknownMemberType]
+    assert attach_msg.additional_kwargs["meiva_msg_type"] == MeivaMsgType.ATTACH.value
     # Interleaved pack: the notice leads, then the file's own caption line.
     # The exec-node context model here is a bare MagicMock (no media
     # capability), so the pack is caption-only — no media block.
-    content = attach_msg.content  # pyright: ignore[reportUnknownMemberType]
+    content = attach_msg.content
     assert isinstance(content, list)
     assert [cast("dict[str, Any]", b)["type"] for b in content] == ["text", "text"]
     assert "Files attached during this turn" in cast("dict[str, Any]", content[0])["text"]
@@ -205,10 +205,10 @@ async def test_exec_node_compact_path_drops_notes_and_findings(
         state, runtime, config, process=SubprocessExecProcess(live_parent_facts(), rng=_rng())
     )
 
-    update = cast(dict, cmd.update)
-    assert update.get("messages") == [], (  # pyright: ignore[reportUnknownMemberType]
-        f"compact path must write no messages back, got {update.get('messages')!r}"  # pyright: ignore[reportUnknownMemberType]
+    update = cast(dict[str, object], cmd.update)
+    assert update.get("messages") == [], (
+        f"compact path must write no messages back, got {update.get('messages')!r}"
     )
-    assert update.get("halted") is True  # pyright: ignore[reportUnknownMemberType]
+    assert update.get("halted") is True
     assert update["security_findings"] == Overwrite([])
     assert "attach" not in update

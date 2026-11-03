@@ -257,7 +257,7 @@ def test_handle_update_add_messages_plain_appends_unchanged():
         "capabilities",
     ],
 )
-def test_plugin_state_schema_rejects_non_messages_core_key(bad_field):
+def test_plugin_state_schema_rejects_non_messages_core_key(bad_field: str) -> None:
     """Declaring any BaseAgentState core key other than `messages` is rejected
     when the schema is built, with a clear error — those fields are framework-managed
     every turn. Pre-fix this silently registered and let the plugin write
@@ -346,23 +346,21 @@ def test_namespace_view_strips_prefix():
     # dynamic AgentState fields (`<plugin>__<field>`) are generated at runtime by build_agent_state,
     # pyright statically sees state_cls as BaseAgentState — use dict[Any, Any] + **spread to bypass
     # pyright keyword-arg check.
-    plugin_fields: dict = {
+    plugin_fields: dict[str, Any] = {
         "meiva_code__injected_paths": {"/a/AGENTS.md", "/b/AGENTS.md"},
         "meiva_code__token_count": 42,
         "other_plugin__data": "x",
     }
-    process_context.set_state(
-        state_cls(messages=[], halted=False, **plugin_fields)  # pyright: ignore[reportUnknownArgumentType]
-    )
+    process_context.set_state(state_cls(messages=[], halted=False, **plugin_fields))
 
     ns = meiva.state.meiva_code  # type: ignore[attr-defined]
-    assert ns.injected_paths == {"/a/AGENTS.md", "/b/AGENTS.md"}  # pyright: ignore[reportUnknownMemberType]
-    assert ns.token_count == 42  # pyright: ignore[reportUnknownMemberType]
+    assert ns.injected_paths == {"/a/AGENTS.md", "/b/AGENTS.md"}
+    assert ns.token_count == 42
     # other_plugin's fields do not appear (cross-plugin isolation)
-    assert not hasattr(ns, "data")  # pyright: ignore[reportUnknownArgumentType]
+    assert not hasattr(ns, "data")
     # base fields also do not enter namespace
-    assert not hasattr(ns, "messages")  # pyright: ignore[reportUnknownArgumentType]
-    assert not hasattr(ns, "halted")  # pyright: ignore[reportUnknownArgumentType]
+    assert not hasattr(ns, "messages")
+    assert not hasattr(ns, "halted")
 
 
 def test_namespace_view_typo_name_raises_attribute_error():
@@ -391,13 +389,11 @@ def test_namespace_view_mutation_does_not_persist():
         counter: int = 0
 
     state_cls = build_agent_state(_registry(plugin=P))
-    plugin_fields: dict = {"plugin__counter": 1}
-    process_context.set_state(
-        state_cls(messages=[], halted=False, **plugin_fields)  # pyright: ignore[reportUnknownArgumentType]
-    )
+    plugin_fields: dict[str, Any] = {"plugin__counter": 1}
+    process_context.set_state(state_cls(messages=[], halted=False, **plugin_fields))
 
     ns = meiva.state.plugin  # type: ignore[attr-defined]
-    assert ns.counter == 1  # pyright: ignore[reportUnknownMemberType]
+    assert ns.counter == 1
     ns.counter = 999  # mutate namespace by-value copy
     # original state unchanged (namespace and state are independent Python objects)
     assert meiva.state.plugin.counter == 1  # type: ignore[attr-defined]
@@ -529,8 +525,8 @@ async def test_exec_node_merges_plugin_state_update_into_command(database_gate: 
         process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
 
-    update = cast(dict, cmd.update)
-    assert update.get("plugin__counter") == 7  # pyright: ignore[reportUnknownMemberType]
+    update = cast(dict[str, object], cmd.update)
+    assert update.get("plugin__counter") == 7
     assert "messages" in update
     assert "halted" in update
 
@@ -550,7 +546,7 @@ async def test_exec_node_commits_the_skill_reads_the_sdk_writes(database_gate: P
         state, runtime, config, process=SubprocessExecProcess(live_parent_facts(), rng=_rng())
     )
 
-    assert cast(dict, cmd.update)["skill_reads"] == ["alpha"]
+    assert cast(dict[str, object], cmd.update)["skill_reads"] == ["alpha"]
 
 
 async def test_exec_node_never_binds_the_slot_in_the_parent(database_gate: ProcessDbGate):
@@ -615,10 +611,10 @@ async def test_plugin_cannot_overwrite_base_field_via_meiva_state(database_gate:
     # real state unchanged
     assert state.halted is False
     # Command update.halted is framework-calculated (_ExecDone hardcodes False), not plugin-injected
-    update = cast(dict, cmd.update)
+    update = cast(dict[str, object], cmd.update)
     assert update["halted"] is False
     # but plugin's explicit state_update["plugin__sentinel"] successfully commits
-    assert update.get("plugin__sentinel") is True  # pyright: ignore[reportUnknownMemberType]
+    assert update.get("plugin__sentinel") is True
 
 
 # ── Integration: state_update key validation fail-fast ───────────────────────────
@@ -629,7 +625,9 @@ async def test_plugin_cannot_overwrite_base_field_via_meiva_state(database_gate:
 # base field, including the nested compact / memory sub-states. A plugin writing any of these
 # via state_update without declaring it raises.
 @pytest.mark.parametrize("base_field", ["messages", "halted", "compact", "memory"])
-async def test_state_update_base_field_key_raises(base_field, database_gate: ProcessDbGate):
+async def test_state_update_base_field_key_raises(
+    base_field: str, database_gate: ProcessDbGate
+) -> None:
     """plugin missing prefix typo writes base field name into state_update → ValueError
     immediately blows up. Without this check, Python dict literal **spread would overwrite,
     plugin silently clobbers framework's base channel (messages / halted / compact / memory)
@@ -688,9 +686,9 @@ async def test_state_update_multiple_plugins_no_conflict(database_gate: ProcessD
         process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
 
-    update = cast(dict, cmd.update)
-    assert update.get("plugin_a__x") == 10  # pyright: ignore[reportUnknownMemberType]
-    assert update.get("plugin_b__y") == "hello"  # pyright: ignore[reportUnknownMemberType]
+    update = cast(dict[str, object], cmd.update)
+    assert update.get("plugin_a__x") == 10
+    assert update.get("plugin_b__y") == "hello"
 
 
 async def test_state_update_non_dict_raises_type_error(database_gate: ProcessDbGate):

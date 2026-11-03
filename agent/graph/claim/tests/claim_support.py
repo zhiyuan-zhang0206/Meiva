@@ -87,7 +87,9 @@ def insert_inbound_kind(
             "VALUES (%s, %s, %s, %s) RETURNING id",
             (tid, content, kind, source),
         )
-        new_id = cur.fetchone()[0]  # type: ignore[index]
+        row = cur.fetchone()
+        assert row is not None
+        new_id: int = row[0]
     db.commit()
     return new_id
 

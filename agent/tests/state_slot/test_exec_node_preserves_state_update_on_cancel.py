@@ -95,7 +95,7 @@ async def test_exec_node_preserves_state_update_on_cancel(
     queue_command(db_conn, agent_id, "cancel")
     cmd = await node_task
 
-    update = cast(dict, cmd.update)
-    assert update.get("plugin__progress") == "before-cancel"  # pyright: ignore[reportUnknownMemberType]
+    update = cast(dict[str, object], cmd.update)
+    assert update.get("plugin__progress") == "before-cancel"
     assert update["halted"] is True
     assert not process_context.in_exec_turn()

@@ -22,7 +22,7 @@ from typing import cast
 
 import psycopg
 import pytest
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AnyMessage, BaseMessage, HumanMessage, SystemMessage
 from langgraph.graph import END
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
@@ -95,13 +95,14 @@ async def test_claim_resurrect_kind_appends_marker_and_continues(
     )
 
     assert cmd.goto == "before_llm"
-    msgs = cmd.update["messages"]  # type: ignore[index]
-    assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert cmd.update is not None
+    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    assert len(msgs) == 1
     lifecycle = msgs[0]
     assert isinstance(lifecycle, HumanMessage)
-    assert "You have been resurrected by user" in lifecycle.content  # pyright: ignore[reportUnknownMemberType]
-    assert lifecycle.additional_kwargs.get("meiva_msg_type") == "system_note"  # pyright: ignore[reportUnknownMemberType]
-    assert lifecycle.additional_kwargs.get("meiva_note_tag") == "lifecycle_resurrect"  # pyright: ignore[reportUnknownMemberType]
+    assert "You have been resurrected by user" in lifecycle.content
+    assert lifecycle.additional_kwargs.get("meiva_msg_type") == "system_note"
+    assert lifecycle.additional_kwargs.get("meiva_note_tag") == "lifecycle_resurrect"
 
 
 async def test_claim_resurrect_batch_appends_only_latest_marker(
@@ -132,9 +133,11 @@ async def test_claim_resurrect_batch_appends_only_latest_marker(
         ),
     )
 
-    msgs = cmd.update["messages"]  # type: ignore[index]
-    assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
-    assert "You have been resurrected by user" in msgs[0].content  # pyright: ignore[reportUnknownMemberType]
+    assert cmd.update is not None
+
+    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    assert len(msgs) == 1
+    assert "You have been resurrected by user" in msgs[0].content
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT id, status FROM inbound_messages WHERE id = ANY(%s)", ([first, latest],)
@@ -208,7 +211,8 @@ async def test_claim_resurrect_then_terminate_still_dies(
     )
 
     assert cmd.goto == END
-    contents = [m.content for m in cmd.update["messages"]]  # type: ignore[index]
+    assert cmd.update is not None
+    contents = [str(m.content) for m in cast("list[AnyMessage]", cmd.update["messages"])]
     assert any("Termination was accepted from user" in c for c in contents)
     assert not any("resurrected" in c for c in contents)
     assert db_conn.execute(
@@ -260,9 +264,9 @@ async def test_claim_auto_resurrect_compact_request_batch_compacts_and_wakes(
     assert cmd.goto == "init_context"
     assert cmd.update["context_reset"].resume == "before_llm"  # type: ignore[index]
     msgs = compact_tail(cmd.update)
-    assert msgs[0].content == compose_summary_message("LLM-generated summary")  # pyright: ignore[reportUnknownMemberType]
+    assert msgs[0].content == compose_summary_message("LLM-generated summary")
     # resurrect marker appended after the summary — the revive still wakes the agent
-    contents = [m.content for m in msgs if isinstance(m.content, str)]  # pyright: ignore[reportUnknownMemberType]
+    contents = [m.content for m in msgs if isinstance(m.content, str)]
     assert any("You have been resurrected by user" in c for c in contents)
 
 
@@ -334,11 +338,12 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
     )
 
     assert cmd.goto == "before_llm"
-    msgs = cmd.update["messages"]  # type: ignore[index]
+    assert cmd.update is not None
+    msgs = cast("list[AnyMessage]", cmd.update["messages"])
     from agent.messages.guard import guarded_add_messages
 
-    assert len(msgs) == 3  # pyright: ignore[reportUnknownArgumentType]
-    assert [m.additional_kwargs.get("meiva_note_tag") for m in msgs] == [  # pyright: ignore[reportUnknownMemberType]
+    assert len(msgs) == 3
+    assert [m.additional_kwargs.get("meiva_note_tag") for m in msgs] == [
         "lifecycle_fork",
         "agent_id",
         "non_human_wake",
@@ -348,16 +353,16 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
         [SystemMessage(content="sys"), HumanMessage(content="inherited")],
         cast(list[BaseMessage], msgs),
     )
-    assert [m.content for m in merged[:2]] == ["sys", "inherited"]  # pyright: ignore[reportUnknownMemberType]
+    assert [m.content for m in merged[:2]] == ["sys", "inherited"]
     assert isinstance(lifecycle, HumanMessage)
-    assert isinstance(lifecycle.content, str)  # pyright: ignore[reportUnknownMemberType]
+    assert isinstance(lifecycle.content, str)
     content = lifecycle.content
     # fork source (M=7, from source) + new agent's own id (N=tid, from config)
     assert "forked from agent:7" in content
     assert f"id {tid}" in content
     assert "inherited from agent:7" in content
-    assert lifecycle.additional_kwargs.get("meiva_msg_type") == "system_note"  # pyright: ignore[reportUnknownMemberType]
-    assert lifecycle.additional_kwargs.get("meiva_note_tag") == "lifecycle_fork"  # pyright: ignore[reportUnknownMemberType]
+    assert lifecycle.additional_kwargs.get("meiva_msg_type") == "system_note"
+    assert lifecycle.additional_kwargs.get("meiva_note_tag") == "lifecycle_fork"
 
 
 async def test_claim_fork_preserves_the_inherited_prefix(

@@ -19,12 +19,12 @@ class TestUncancelCurrentTask:
         import asyncio
 
         called = False
-        orig_uncancel = asyncio.Task.uncancel  # pyright: ignore[reportUnknownMemberType]
+        orig_uncancel = asyncio.Task[object].uncancel
 
-        def fake_uncancel(self):
+        def fake_uncancel(self: asyncio.Task[object]) -> int:
             nonlocal called
             called = True
-            return orig_uncancel(self)  # pyright: ignore[reportUnknownArgumentType]
+            return orig_uncancel(self)
 
         # Can't monkeypatch asyncio.Task.uncancel (extension-type method
         # may be optimized by cpython), so verify the no-op scenario.

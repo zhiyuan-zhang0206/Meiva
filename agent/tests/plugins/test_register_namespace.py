@@ -22,7 +22,7 @@
 
 import io
 import sys
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import redirect_stdout
 from importlib import import_module
 from types import ModuleType, SimpleNamespace
@@ -107,7 +107,9 @@ def test_install_namespace_adds_to_all(installer: _Installer):
         ),
     ],
 )
-def test_install_namespace_visible_in_help(installer: _Installer, make_module):
+def test_install_namespace_visible_in_help(
+    installer: _Installer, make_module: Callable[[], ModuleType | SimpleNamespace]
+) -> None:
     """After installing a ModuleType or SimpleNamespace, `help(meiva)` output includes
     `from . import code` submodule reference — `_public_members` whitelist
     trust mode no longer hard-filters ismodule, SimpleNamespace is also expanded (review-fix #192:
@@ -144,7 +146,7 @@ def test_install_namespace_underscore_prefix_raises(installer: _Installer):
 
 
 @pytest.mark.parametrize("bad_value", [123, None, "string", {"k": "v"}, [1, 2, 3]])
-def test_install_namespace_invalid_module_raises(installer: _Installer, bad_value):
+def test_install_namespace_invalid_module_raises(installer: _Installer, bad_value: object) -> None:
     """Non-ModuleType/SimpleNamespace → InvalidNamespaceModuleError raised immediately,
     prevents plugin authors passing wrong value leading to AttributeError months later when agent runs, losing root cause."""
     with pytest.raises(meiva.InvalidNamespaceModuleError, match="ModuleType or SimpleNamespace"):

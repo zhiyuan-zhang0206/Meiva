@@ -8,6 +8,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 from agent.startup import wrap_saver_writes_with_loud_failure
+from base.log.tests.log_records import LogRecords
 
 
 class _StubSaver(AsyncPostgresSaver):
@@ -33,7 +34,7 @@ _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
 
 async def test_cancellation_passes_through_without_a_write_failure_event(
-    loguru_records: list[dict[str, Any]],
+    loguru_records: LogRecords,
 ) -> None:
     saver = _StubSaver(asyncio.CancelledError())
     wrap_saver_writes_with_loud_failure(saver)
@@ -45,7 +46,7 @@ async def test_cancellation_passes_through_without_a_write_failure_event(
 
 
 async def test_real_failures_still_log(
-    loguru_records: list[dict[str, Any]],
+    loguru_records: LogRecords,
 ) -> None:
     saver = _StubSaver(RuntimeError("write failed"))
     wrap_saver_writes_with_loud_failure(saver)

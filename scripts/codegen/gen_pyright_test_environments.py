@@ -75,7 +75,7 @@ OTHER_RULES = (
 # Roots whose tests directories already meet the production rung (all seven rules at `error`
 # through the package's own entry): they need no tests entry. Promote a root here only after
 # zeroing the five tests-rung rules in every one of its tests directories.
-PROMOTED_ROOTS: tuple[str, ...] = ("scripts", "base", "services", "gateway")
+PROMOTED_ROOTS: tuple[str, ...] = ("scripts", "base", "services", "gateway", "agent")
 # What every test file is held to: the tests ladder rung, wherever the file sits.
 TESTS_STANDARD = {
     **dict.fromkeys(CALL_SIGNATURE_RULES, "error"),

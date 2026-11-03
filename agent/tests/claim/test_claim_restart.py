@@ -77,15 +77,16 @@ async def test_claim_system_note_kind_appends_system_note_and_continues(
     )
 
     assert cmd.goto == "before_llm"
-    msgs = cmd.update["messages"]  # type: ignore[index]
-    assert len(msgs) == 2  # pyright: ignore[reportUnknownArgumentType]
+    assert cmd.update is not None
+    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    assert len(msgs) == 2
     note = msgs[0]
     assert isinstance(note, HumanMessage)
-    assert 'Task #1 "my task" is now assigned to you (by agent #405).' in note.content  # pyright: ignore[reportUnknownMemberType]
-    assert note.additional_kwargs.get("meiva_msg_type") == "system_note"  # pyright: ignore[reportUnknownMemberType]
-    assert note.additional_kwargs.get("meiva_note_tag") == "task"  # pyright: ignore[reportUnknownMemberType]
-    assert note.additional_kwargs.get("meiva_task_id") == 1  # pyright: ignore[reportUnknownMemberType]
-    wake_note = cast(AnyMessage, msgs[1])
+    assert 'Task #1 "my task" is now assigned to you (by agent #405).' in note.content
+    assert note.additional_kwargs.get("meiva_msg_type") == "system_note"
+    assert note.additional_kwargs.get("meiva_note_tag") == "task"
+    assert note.additional_kwargs.get("meiva_task_id") == 1
+    wake_note = msgs[1]
     assert read_meiva_kwargs(wake_note).get("meiva_note_tag") == "non_human_wake"
     # The inbound row is consumed (done at claim, like other lifecycle kinds).
     with db_conn.cursor() as cur:
@@ -258,8 +259,9 @@ async def test_claim_restart_preserves_chat_for_successor(
 
     assert cmd.goto == END
     assert cmd.update["halted"] is True  # type: ignore[index]
-    msgs = cmd.update["messages"]  # type: ignore[index]
-    restart_messages = cast(list[AnyMessage], msgs)
+    assert cmd.update is not None
+    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    restart_messages = msgs
     assert (
         len(restart_messages) == 1
         and "Restart was accepted" in restart_messages[0].model_dump()["content"]

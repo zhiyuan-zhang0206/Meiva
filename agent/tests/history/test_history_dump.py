@@ -21,7 +21,7 @@ import re
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import psycopg
@@ -254,7 +254,9 @@ def _insert_inbound_kind(
             "VALUES (%s, %s, %s, %s) RETURNING id",
             (tid, content, kind, source),
         )
-        new_id = cur.fetchone()[0]  # type: ignore[index]
+        row = cur.fetchone()
+        assert row is not None
+        new_id: int = row[0]
     db.commit()
     return new_id
 
@@ -344,8 +346,9 @@ def test_dump_is_replayable_jsonl(tmp_path: Path):
 
     replayed: list[BaseMessage] = []
     for line in lines:
-        raw = json.loads(line)
-        assert isinstance(raw, dict)
+        decoded = json.loads(line)
+        assert isinstance(decoded, dict)
+        raw = cast("dict[str, object]", decoded)
         # The documented replay recipe: wrap the raw fields in the langchain
         # type/data envelope and let messages_from_dict rebuild the message.
         replayed.extend(
@@ -361,8 +364,8 @@ def test_dump_is_replayable_jsonl(tmp_path: Path):
 
     assert [type(m).__name__ for m in replayed] == [type(m).__name__ for m in messages]
     for original, restored in zip(messages, replayed, strict=True):
-        assert restored.content == original.content  # pyright: ignore[reportUnknownMemberType]
-        assert restored.additional_kwargs == original.additional_kwargs  # pyright: ignore[reportUnknownMemberType]
+        assert restored.content == original.content
+        assert restored.additional_kwargs == original.additional_kwargs
     # The tool round-trip survived: tool_call ids match their ToolMessage.
     tool_msg = replayed[3]
     assert isinstance(tool_msg, ToolMessage)
@@ -415,14 +418,14 @@ async def test_auto_compact_injects_dump_note_after_summary(
 
     tail = _compact_tail(result)
     assert len(tail) == 2
-    assert tail[0].content == compose_summary_message(_LONG_SUMMARY)  # pyright: ignore[reportUnknownMemberType]
+    assert tail[0].content == compose_summary_message(_LONG_SUMMARY)
     note = tail[1]
-    assert note.additional_kwargs["meiva_msg_type"] == "system_note"  # pyright: ignore[reportUnknownMemberType]
-    assert note.additional_kwargs["meiva_note_tag"] == "history_dump"  # pyright: ignore[reportUnknownMemberType]
+    assert note.additional_kwargs["meiva_msg_type"] == "system_note"
+    assert note.additional_kwargs["meiva_note_tag"] == "history_dump"
     # The note names the real, existing dump and advertises the grep recipe.
     (dump_path,) = (ws / "message-history").glob("*.jsonl")
-    assert dump_path.name in note.content  # pyright: ignore[reportUnknownMemberType]
-    assert "grep" in str(note.content).lower()  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    assert dump_path.name in note.content
+    assert "grep" in str(note.content).lower()
     assert dump_path.exists()
 
 
@@ -445,7 +448,7 @@ async def test_auto_compact_no_note_when_disabled(
     )
     assert result is not None
     tail = _compact_tail(result)
-    assert [m.content for m in tail] == [compose_summary_message(_LONG_SUMMARY)]  # pyright: ignore[reportUnknownMemberType]
+    assert [m.content for m in tail] == [compose_summary_message(_LONG_SUMMARY)]
     assert not (agent_workspace / "message-history").exists()
 
 
@@ -467,7 +470,7 @@ async def test_auto_compact_proceeds_when_dump_fails(
     )
     assert result is not None
     tail = _compact_tail(result)
-    assert [m.content for m in tail] == [compose_summary_message(_LONG_SUMMARY)]  # pyright: ignore[reportUnknownMemberType]
+    assert [m.content for m in tail] == [compose_summary_message(_LONG_SUMMARY)]
 
 
 # ── claim path (agent-/user-triggered compact): note injection position ──
@@ -516,11 +519,11 @@ async def test_claim_compact_summary_parks_dump_note_after_summary(
     )
 
     tail = _compact_tail(cmd.update)
-    assert tail[0].content == compose_summary_message("agent-written summary")  # pyright: ignore[reportUnknownMemberType]
+    assert tail[0].content == compose_summary_message("agent-written summary")
     assert len(tail) == 2  # summary + dump note, nothing else
     note = tail[-1]
-    assert note.additional_kwargs["meiva_msg_type"] == "system_note"  # pyright: ignore[reportUnknownMemberType]
-    assert note.additional_kwargs["meiva_note_tag"] == "history_dump"  # pyright: ignore[reportUnknownMemberType]
+    assert note.additional_kwargs["meiva_msg_type"] == "system_note"
+    assert note.additional_kwargs["meiva_note_tag"] == "history_dump"
     # Fresh-context laydown (init_context): [SystemMessage, *notes, *tail] —
     # the note's neighbors are the summary and the next LLM output, never a
     # tool_use/tool_result pair.
@@ -565,6 +568,4 @@ async def test_claim_compact_summary_no_note_when_disabled(
     )
 
     tail = _compact_tail(cmd.update)
-    assert [m.content for m in tail] == [  # pyright: ignore[reportUnknownMemberType]
-        compose_summary_message("agent-written summary")
-    ]
+    assert [m.content for m in tail] == [compose_summary_message("agent-written summary")]

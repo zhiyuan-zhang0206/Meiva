@@ -1,10 +1,6 @@
 # meiva:note
-# Skill recall at the before_llm edge (`agent/graph/hooks/skill_recall.py`).
-#
-# The hook runs against the real `decide()` over a catalog whose decision provider keeps its real
-# id and price but answers from a scripted binding, so questions, scores and failures are exercised
-# end to end without a network call. Skills are real SKILL.md files in a per-test unit home.
-
+# Skill recall at the before_llm edge (`agent/graph/hooks/skill_recall.py`) over the real `decide()`:
+# a scripted binding replaces the Jev client (real id and price), on real SKILL.md files.
 from __future__ import annotations
 
 import asyncio
@@ -110,7 +106,11 @@ def _catalog(binding: _Scorer, *, spec: DecisionModelSpec | None = None) -> Mode
     real = build_model_catalog(home=meiva_home())
     provider = real.decision_provider_of(_MODEL)
     assert provider is not None
-    swapped = replace(provider, build=lambda _ctx: binding)
+
+    def build(_ctx: object) -> _Scorer:
+        return binding
+
+    swapped = replace(provider, build=build)
     models = {**real.decision_models, **({_MODEL: spec} if spec is not None else {})}
     return replace(
         real,

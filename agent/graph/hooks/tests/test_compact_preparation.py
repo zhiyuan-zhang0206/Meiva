@@ -18,6 +18,7 @@ from base.clock import Clock
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
+from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry, PluginContributions
 from base.paths import meiva_home
@@ -153,7 +154,7 @@ async def test_soft_reminder_composes_with_another_message_writer(compact_first:
     [(0, False, 0, False), (0, True, 0, True), (1, True, 0, False), (1, True, 1, True)],
 )
 def test_completion_attributes_only_the_current_windows_reminder(
-    version: int, shown: bool, seen: int, expected: bool, loguru_records: list[dict[str, Any]]
+    version: int, shown: bool, seen: int, expected: bool, loguru_records: LogRecords
 ) -> None:
     emit_compaction_monitoring(
         [HumanMessage(content="history")],

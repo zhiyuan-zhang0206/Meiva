@@ -6,7 +6,7 @@ from typing import Any, cast
 
 import psycopg
 import pytest
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 from langgraph.graph import END
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
@@ -60,14 +60,15 @@ async def test_claim_terminate_kind_appends_lifecycle_marker_and_routes_to_end(
     )
     assert cmd.goto == END
     assert cmd.update["exit_requested"] is True  # type: ignore[index]
-    msgs = cmd.update["messages"]  # type: ignore[index]
+    assert cmd.update is not None
+    msgs = cast("list[AnyMessage]", cmd.update["messages"])
     # Claim appends the lifecycle marker alone; the head belongs to `init_context`.
-    assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert len(msgs) == 1
     lifecycle = msgs[0]
     assert isinstance(lifecycle, HumanMessage)
     # HumanMessage.content type union (str | list[blocks]); system_note_message
     # passes str, narrow with string methods
-    assert isinstance(lifecycle.content, str)  # pyright: ignore[reportUnknownMemberType]
+    assert isinstance(lifecycle.content, str)
     content = lifecycle.content
     assert "Termination was accepted from user" in content
     # meiva:note
@@ -77,8 +78,8 @@ async def test_claim_terminate_kind_appends_lifecycle_marker_and_routes_to_end(
     assert content.startswith("<system_note>\n[")
     assert content.endswith("\n</system_note>")
     assert "[system [" not in content  # anti-regression: double bracket bug
-    assert lifecycle.additional_kwargs.get("meiva_msg_type") == "system_note"  # pyright: ignore[reportUnknownMemberType]
-    assert lifecycle.additional_kwargs.get("meiva_note_tag") == "lifecycle_terminate"  # pyright: ignore[reportUnknownMemberType]
+    assert lifecycle.additional_kwargs.get("meiva_msg_type") == "system_note"
+    assert lifecycle.additional_kwargs.get("meiva_note_tag") == "lifecycle_terminate"
 
 
 async def test_claim_turn_boundary_ends_invocation_instead_of_waiting(
@@ -316,10 +317,11 @@ async def test_claim_cancel_with_chat_cobatch_wakes_to_process_chat(
     assert cmd.goto == "before_llm"
     assert cmd.update["halted"] is False  # type: ignore[index]
     # the co-batched chat is committed and drives the turn
-    msgs = cmd.update["messages"]  # type: ignore[index]
-    assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert cmd.update is not None
+    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    assert len(msgs) == 1
     assert isinstance(msgs[0], HumanMessage)
-    assert "please also do X" in msgs[0].content  # pyright: ignore[reportUnknownMemberType]
+    assert "please also do X" in msgs[0].content
     # Cancelled still emitted so the live UI clears the interrupted turn's state
     assert any("cancelled" in payload.lower() for payload in await live_events.payloads())
 
@@ -362,10 +364,11 @@ async def test_claim_cancel_before_chat_cobatch_wakes_to_process_chat(
 
     assert cmd.goto == "before_llm"
     assert cmd.update["halted"] is False  # type: ignore[index]
-    msgs = cmd.update["messages"]  # type: ignore[index]
-    assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert cmd.update is not None
+    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    assert len(msgs) == 1
     assert isinstance(msgs[0], HumanMessage)
-    assert "new instruction" in msgs[0].content  # pyright: ignore[reportUnknownMemberType]
+    assert "new instruction" in msgs[0].content
 
 
 async def test_claim_cancel_batched_with_terminate_terminate_wins(
@@ -395,10 +398,11 @@ async def test_claim_cancel_batched_with_terminate_terminate_wins(
     )
     assert cmd.goto == END  # terminate wins; agent exits, cancel does not keep it alive
     # the terminate lifecycle marker is still committed
-    msgs = cmd.update["messages"]  # type: ignore[index]
+    assert cmd.update is not None
+    msgs = cast("list[AnyMessage]", cmd.update["messages"])
     assert any(
         isinstance(m, HumanMessage)
-        and isinstance(m.content, str)  # pyright: ignore[reportUnknownMemberType]
+        and isinstance(m.content, str)
         and "Termination was accepted" in m.content
         for m in msgs
     )
@@ -459,9 +463,10 @@ async def test_claim_terminate_self_renders_by_yourself(
         ),
     )
     assert cmd.goto == END
-    msgs = cmd.update["messages"]  # type: ignore[index]
+    assert cmd.update is not None
+    msgs = cast("list[AnyMessage]", cmd.update["messages"])
     lifecycle = msgs[0]
-    assert "Termination was accepted from yourself" in lifecycle.content  # pyright: ignore[reportUnknownMemberType]
+    assert "Termination was accepted from yourself" in lifecycle.content
 
 
 async def test_claim_self_terminate_retains_peer_chat_for_successor(
@@ -496,10 +501,11 @@ async def test_claim_self_terminate_retains_peer_chat_for_successor(
     )
 
     assert cmd.goto == END
-    msgs = cmd.update["messages"]  # type: ignore[index]
-    assert len(msgs) == 1  # pyright: ignore[reportUnknownArgumentType]
+    assert cmd.update is not None
+    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    assert len(msgs) == 1
     assert isinstance(msgs[0], HumanMessage)
-    assert "Termination was accepted" in msgs[0].content  # pyright: ignore[reportUnknownMemberType]
+    assert "Termination was accepted" in msgs[0].content
     assert db_conn.execute(
         "SELECT status,content FROM inbound_messages WHERE agent_id=%s AND kind='chat'", (tid,)
     ).fetchone() == ("pending", "peer message during suicide")
@@ -532,8 +538,9 @@ async def test_claim_self_terminate_retains_older_user_chat(
     )
 
     assert cmd.goto == END
-    msgs = cmd.update["messages"]  # type: ignore[index]
-    assert any("Termination was accepted" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
+    assert cmd.update is not None
+    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    assert any("Termination was accepted" in m.content for m in msgs)
     assert db_conn.execute(
         "SELECT status,content FROM inbound_messages WHERE id=%s", (chat_id,)
     ).fetchone() == ("pending", "queued before the suicide")
@@ -566,8 +573,9 @@ async def test_claim_external_terminate_retains_newer_chat(
     )
 
     assert cmd.goto == END
-    msgs = cmd.update["messages"]  # type: ignore[index]
-    assert any("Termination was accepted" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
+    assert cmd.update is not None
+    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    assert any("Termination was accepted" in m.content for m in msgs)
     assert db_conn.execute(
         "SELECT status,content FROM inbound_messages WHERE id=%s", (chat_id,)
     ).fetchone() == ("pending", "message after the kill")
@@ -604,8 +612,9 @@ async def test_claim_external_terminate_with_older_chat_still_dies(
     )
 
     assert cmd.goto == END
-    msgs = cmd.update["messages"]  # type: ignore[index]
-    assert any("Termination was accepted from user" in m.content for m in msgs)  # pyright: ignore[reportUnknownMemberType]
+    assert cmd.update is not None
+    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    assert any("Termination was accepted from user" in m.content for m in msgs)
     assert db_conn.execute(
         "SELECT status,content FROM inbound_messages WHERE agent_id=%s AND kind='chat'", (tid,)
     ).fetchone() == ("pending", "old message before the kill")
@@ -771,8 +780,9 @@ async def test_claim_terminate_external_source_renders_source_verbatim(
         ),
     )
     assert cmd.goto == END
-    msgs = cmd.update["messages"]  # type: ignore[index]
-    assert isinstance(msgs[0].content, str)  # pyright: ignore[reportUnknownMemberType]
+    assert cmd.update is not None
+    msgs = cast("list[AnyMessage]", cmd.update["messages"])
+    assert isinstance(msgs[0].content, str)
     assert "Termination was accepted from agent:42" in msgs[0].content
     # anti-regression: must not contain 'yourself' (mutation that changed != to == made all sources go through self)
     assert "yourself" not in msgs[0].content

@@ -12,6 +12,7 @@ Pins:
    read time on resume.
 """
 
+from collections.abc import Sequence
 from typing import Annotated, Any, cast
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
@@ -58,10 +59,14 @@ def test_resolve_reducer_never_falls_back_for_the_delta_form() -> None:
 
 
 def test_resolve_reducer_ignores_foreign_delta_channels() -> None:
-    foreign = DeltaChannel(lambda _state, writes: writes, snapshot_frequency=5)
+
+    def keep(_state: list[AnyMessage], writes: Sequence[list[AnyMessage]]) -> list[AnyMessage]:
+        return [message for write in writes for message in write]
 
     class _Foreign(BaseModel):
-        value: Annotated[list[AnyMessage], foreign] = Field(default_factory=list)
+        value: Annotated[list[AnyMessage], DeltaChannel(keep, snapshot_frequency=5)] = Field(
+            default_factory=list
+        )
 
     assert resolve_reducer(_Foreign.model_fields["value"]) is not guarded_add_messages
 

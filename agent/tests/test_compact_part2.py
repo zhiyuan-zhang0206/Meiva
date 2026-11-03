@@ -15,12 +15,14 @@ After compact, history = `[RemoveAll, SystemMessage, HumanMessage(header+summary
 summary is complete memory; framework no longer appends any original messages (no tail).
 """
 
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import psycopg
 import pytest
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
     AnyMessage,
@@ -31,6 +33,7 @@ from langchain_core.messages.modifier import RemoveMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.runtime import Runtime
+from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.hooks.compact import (
     auto_compact_for_llm,
@@ -227,10 +230,17 @@ def _over_threshold_messages() -> list[AnyMessage]:
 # with no conversation to compact.
 
 
-def _reminder_state(state_cls, *, version=0, shown=False, seen=0, messages=None):
+def _reminder_state(
+    state_cls: type[AgentState],
+    *,
+    version: int = 0,
+    shown: bool = False,
+    seen: int = 0,
+    messages: Sequence[AnyMessage] | None = None,
+) -> AgentState:
     """state with the compact reminder bookkeeping fields set explicitly."""
     return state_cls(
-        messages=_over_threshold_messages() if messages is None else messages,
+        messages=_over_threshold_messages() if messages is None else list(messages),
         halted=False,
         compact=CompactState(version=version, reminder_shown=shown, reminder_seen_version=seen),
     )
@@ -266,7 +276,9 @@ def _insert_compact_summary(db: psycopg.Connection, tid: int, content: str) -> N
     db.commit()
 
 
-def _make_runtime(ops_pool=None, llm=None, *, database_gate: ProcessDbGate):
+def _make_runtime(
+    ops_pool: object | None = None, llm: object | None = None, *, database_gate: ProcessDbGate
+) -> Runtime[MeivaContext]:
     if ops_pool is None:
         ops_pool = AsyncMock()
     if llm is None:
@@ -274,8 +286,8 @@ def _make_runtime(ops_pool=None, llm=None, *, database_gate: ProcessDbGate):
     ctx = MeivaContext(
         meiva_home=resolve_meiva_home(),
         user_home=Path.home(),
-        ops_pool=ops_pool,  # pyright: ignore[reportUnknownArgumentType]
-        llm=llm,  # pyright: ignore[reportUnknownArgumentType]
+        ops_pool=cast("AsyncConnectionPool", ops_pool),
+        llm=cast("BaseChatModel", llm),
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
@@ -283,8 +295,6 @@ def _make_runtime(ops_pool=None, llm=None, *, database_gate: ProcessDbGate):
         catalog=build_model_catalog(home=meiva_home()),
         clock_factory=Clock.from_settings,
     )
-    from langgraph.runtime import Runtime
-
     return Runtime(context=ctx)
 
 
@@ -308,10 +318,10 @@ async def test_auto_compact_summary_message_carries_msg_type(
     )
     assert result is not None
 
-    tail = result["context_reset"].tail  # pyright: ignore[reportUnknownMemberType]
+    tail = result["context_reset"].tail
     assert isinstance(tail[0], HumanMessage)
-    kwargs = tail[0].additional_kwargs  # pyright: ignore[reportUnknownMemberType]
-    assert kwargs.get("meiva_msg_type") == "compact_summary"  # pyright: ignore[reportUnknownMemberType]
+    kwargs = tail[0].additional_kwargs
+    assert kwargs.get("meiva_msg_type") == "compact_summary"
     assert "meiva_created_at" in kwargs
 
 

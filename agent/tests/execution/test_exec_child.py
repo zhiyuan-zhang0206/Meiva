@@ -18,6 +18,7 @@ from agent.execution.protocol import (
     read_result,
     write_request,
 )
+from base.log.tests.log_records import LogRecords
 from base.native_process.tests.host_pipe import live_host_control
 from meiva.tests.fixtures.pin_agent import exec_context
 
@@ -448,7 +449,7 @@ def test_child_lifecycle_envelope(tmp_path: Path) -> None:
     assert payload.lifecycle_type == "AgentRestart"
 
 
-def test_child_boot_timing_emits_ready_duration(loguru_records: list[dict[str, Any]]) -> None:
+def test_child_boot_timing_emits_ready_duration(loguru_records: LogRecords) -> None:
     from agent.execution import child as exec_child
     from base.agents.context.clients import ClientSet
 

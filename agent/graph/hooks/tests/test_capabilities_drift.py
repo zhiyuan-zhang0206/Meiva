@@ -16,7 +16,7 @@ import os
 import shutil
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
@@ -100,13 +100,21 @@ def _state(indexed: set[str] | None) -> AgentState:
     return AgentState(capabilities=CapabilitiesState(indexed=indexed))
 
 
+def _notes(update: Mapping[str, object]) -> list[AnyMessage]:
+    return cast("list[AnyMessage]", update["messages"])
+
+
+def _snapshot(update: Mapping[str, object]) -> CapabilitiesState:
+    return cast("CapabilitiesState", update["capabilities"])
+
+
 async def _run_hook(
     indexed: set[str] | None,
     database_gate: ProcessDbGate,
     ops_pool: AsyncConnectionPool,
     *,
     pins: Mapping[str, Any] | None = None,
-) -> dict | None:
+) -> dict[str, object] | None:
     return await newly_installed_skills(
         _state(indexed),
         _runtime(ops_pool=ops_pool, database_gate=database_gate, pins=pins),
@@ -190,10 +198,10 @@ async def test_hook_names_the_new_skill_in_the_index_line_shape(
     update = await _run_hook(snapshot, database_gate, aops_pool)
 
     assert update is not None
-    (note,) = update["messages"]
-    assert note.additional_kwargs["meiva_note_tag"] == NoteTag.NEW_SKILLS.value  # pyright: ignore[reportUnknownMemberType]
-    assert "- `meiva.skills.beta` — Beta desc" in note.content  # pyright: ignore[reportUnknownMemberType]
-    assert "alpha" not in note.content  # pyright: ignore[reportUnknownMemberType]
+    (note,) = _notes(update)
+    assert note.additional_kwargs["meiva_note_tag"] == NoteTag.NEW_SKILLS.value
+    assert "- `meiva.skills.beta` — Beta desc" in note.content
+    assert "alpha" not in note.content
 
 
 async def test_hook_advances_the_snapshot_so_one_install_is_named_once(
@@ -207,10 +215,10 @@ async def test_hook_advances_the_snapshot_so_one_install_is_named_once(
 
     update = await _run_hook(snapshot, database_gate, aops_pool)
     assert update is not None
-    advanced = update["capabilities"].indexed  # pyright: ignore[reportUnknownMemberType]
+    advanced = _snapshot(update).indexed
     assert advanced == {"alpha", "beta"}
 
-    assert await _run_hook(advanced, database_gate, aops_pool) is None  # pyright: ignore[reportUnknownArgumentType]
+    assert await _run_hook(advanced, database_gate, aops_pool) is None
 
 
 async def test_hook_is_silent_when_nothing_was_installed(
@@ -242,7 +250,7 @@ async def test_no_snapshot_adopts_the_live_catalog_without_announcing_it(
 
     assert update is not None
     assert "messages" not in update
-    assert update["capabilities"].indexed == {"alpha", "beta"}  # pyright: ignore[reportUnknownMemberType]
+    assert _snapshot(update).indexed == {"alpha", "beta"}
 
 
 async def test_a_bulk_install_is_capped_with_a_counted_tail(
@@ -258,16 +266,18 @@ async def test_a_bulk_install_is_capped_with_a_counted_tail(
     update = await _run_hook(set(), database_gate, aops_pool)
 
     assert update is not None
-    (note,) = update["messages"]
-    lines = [ln for ln in note.content.splitlines() if ln.startswith("- ")]  # pyright: ignore[reportUnknownMemberType]
-    assert (
-        len(lines) == NEW_SKILLS_MAX_ENTRIES + 1  # pyright: ignore[reportUnknownArgumentType]
-    )  # the cap, plus the tail  # pyright: ignore[reportUnknownArgumentType]
-    assert lines[-1].startswith(f"- … and {extra} more")  # pyright: ignore[reportUnknownMemberType]
+    (note,) = _notes(update)
+    lines = [ln for ln in str(note.content).splitlines() if ln.startswith("- ")]
+    # meiva:note
+    # The cap, plus the tail.
+    assert len(lines) == NEW_SKILLS_MAX_ENTRIES + 1
+    assert lines[-1].startswith(f"- … and {extra} more")
     assert "meiva.help(meiva.skills)" in lines[-1]
     # The snapshot still covers every one of them, so the ones the note left out
     # are never named later — the tail's pointer is what covers them.
-    assert len(update["capabilities"].indexed) == NEW_SKILLS_MAX_ENTRIES + extra  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    indexed = _snapshot(update).indexed
+    assert indexed is not None
+    assert len(indexed) == NEW_SKILLS_MAX_ENTRIES + extra
 
 
 # ── the two turns that write nothing ──
@@ -315,7 +325,7 @@ async def test_hook_defers_when_a_compaction_will_replace_the_window(
         state, _runtime(ops_pool=aops_pool, database_gate=database_gate), _CONFIG
     )  # type: ignore[arg-type]
     assert update is not None
-    assert "meiva.skills.beta" in update["messages"][0].content  # pyright: ignore[reportUnknownMemberType]
+    assert "meiva.skills.beta" in update["messages"][0].content
 
 
 async def test_container_mode_writes_nothing(
@@ -361,10 +371,10 @@ async def test_narrowing_holds_and_a_configured_name_that_arrives_late_drifts_in
     update = await _run_hook(snapshot, database_gate, aops_pool, pins=pins)
 
     assert update is not None
-    (note,) = update["messages"]
-    assert "meiva.skills.beta" in note.content  # pyright: ignore[reportUnknownMemberType]
-    assert "gamma" not in note.content  # pyright: ignore[reportUnknownMemberType]
-    assert update["capabilities"].indexed == {"beta"}  # pyright: ignore[reportUnknownMemberType]
+    (note,) = _notes(update)
+    assert "meiva.skills.beta" in note.content
+    assert "gamma" not in note.content
+    assert _snapshot(update).indexed == {"beta"}
 
 
 async def test_sdk_disabled_skills_never_drift(

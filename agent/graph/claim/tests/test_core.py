@@ -58,7 +58,7 @@ def event_pipeline(
         pipeline.stop(timeout=2)
 
 
-def _inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple]:
+def _inbound_rows(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, str]]:
     with db.cursor() as cur:
         cur.execute(
             "SELECT content, kind, source FROM inbound_messages "
@@ -434,7 +434,7 @@ class TestPauseHeartbeat:
             )
             trail_rows = cur.fetchall()
         assert window_row is not None
-        assert window_row[0] == pytest.approx(1800, abs=5)  # pyright: ignore[reportUnknownMemberType]
+        assert window_row[0] == pytest.approx(1800, abs=5)
         assert [float(row[0]) for row in trail_rows] == [1800.0]
         # The event row lives in the JSONL mirror (the PG events copy was retired at
         # the LGTM cutover, task #1197 close-C, and dropped with the archive
@@ -530,7 +530,7 @@ class TestPauseHeartbeat:
                 )
                 window_row = cur.fetchone()
             assert window_row is not None
-            assert window_row[0] == pytest.approx(3600, abs=5)  # pyright: ignore[reportUnknownMemberType]
+            assert window_row[0] == pytest.approx(3600, abs=5)
             with pytest.raises(ValueError, match=r"at most"):
                 meiva.self.pause_heartbeat(3601)
         finally:

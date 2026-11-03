@@ -30,6 +30,7 @@ from base import paths
 from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.config.service_read import ConfigAuthority
 from base.lm.pricing.archive import load_archive
+from base.log.tests.log_records import LogRecords
 from base.packages.plugins.enable_config import write_local
 from base.paths import meiva_home
 
@@ -100,7 +101,7 @@ def _write_plugin(
 
 
 def test_boot_loader_never_imports_a_disabled_plugin(
-    loguru_records: list[dict[str, Any]], unit_home: Path
+    loguru_records: LogRecords, unit_home: Path
 ) -> None:
     """Issue #2161's first half: `meiva plugins disable` did not stop the boot
     loader — it imported every directory on disk, so the disabled broken plugin
@@ -125,7 +126,7 @@ def test_boot_loader_never_imports_a_disabled_plugin(
 
 
 def test_boot_loader_contains_broken_plugins_and_keeps_going(
-    loguru_records: list[dict[str, Any]],
+    loguru_records: LogRecords,
     unit_home: Path,
 ) -> None:
     """The incident matrix at the boot loader: relative import with no parent
@@ -183,7 +184,7 @@ def test_a_package_relative_sibling_import_resolves_and_a_reload_keeps_the_modul
 
 
 def test_host_boot_restart_loop_survives_a_broken_plugin(
-    loguru_records: list[dict[str, Any]],
+    loguru_records: LogRecords,
     unit_home: Path,
 ) -> None:
     """Issue #2161's second half: the host failed to start on EVERY restart
