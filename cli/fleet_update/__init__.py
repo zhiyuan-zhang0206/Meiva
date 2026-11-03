@@ -21,8 +21,9 @@ from .up import up
 # One window, from argv to exit code. Every ambient fact arrives as a value, read once by the
 # entry point: the repository the NEW commit is resolved in, the environment (the PATH that finds
 # `ssh`, and the agent marker that refuses a run from inside an agent), the time the log and the
-# one-shot job names are stamped with, how often to look again while waiting, and the clock those
-# waits are spent on.
+# one-shot job names are stamped with, how often to look again while waiting, the clock those
+# waits are spent on, and the interpreter this window runs on -- the one the service-roster
+# check, which decides whether a named service exists, starts as a child.
 # Exit codes: 0 done, 1 failed after the first effect, 2 refused before any, 3 a partial `up`.
 # meiva:link cli/docs/fleet-update.meiva.okf.md
 def main(
@@ -35,8 +36,9 @@ def main(
     timers: Timers,
     operation_id: str,
     initiator: str,
+    python: str,
 ) -> int:
-    args = choices.parse(argv, env)
+    args = choices.parse(argv, env, python=python)
     # meiva:note
     # The updater imports no application module, so the agent-shell marker is spelled out here;
     # its owner is `base.host.env.agent_env.AGENT_ID_ENV` (a test pins the two together).

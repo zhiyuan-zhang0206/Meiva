@@ -3,11 +3,13 @@
 # that a missing, conflicting or invalid one is refused before any host is touched.
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
+from cli.fleet_update.choices import parse
 from cli.tests.fleet_update.fleet_update_cluster import Cluster
 
 _STOP_CHOICES = [
@@ -316,3 +318,35 @@ def test_a_read_carries_no_operation_identity(
     assert probe_lines, "the window probed no host"
     for line in probe_lines:
         assert "MEIVA_OPERATION_ID" not in line
+
+
+# meiva:note
+# The roster check runs this checkout's own module under the interpreter the entry point named. A
+# stand-in interpreter that fails proves the value reached the child; a check reading its own
+# `sys.executable` passes this test and is caught by the signature guard below instead.
+def test_the_service_roster_runs_on_the_interpreter_the_entry_named(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    stand_in = tmp_path / "stand-in-python"
+    stand_in.write_text("#!/bin/sh\necho 'stand-in interpreter ran' >&2\nexit 3\n")
+    stand_in.chmod(0o755)
+    with pytest.raises(SystemExit) as refusal:
+        _ = parse(
+            ["run", *_STOP_CHOICES, "--stop-infra", "--gateway", "gw", "--log-dir", "logs"],
+            {},
+            python=str(stand_in),
+        )
+    assert refusal.value.code == 2
+    assert (
+        "cannot list this checkout's services (exit 3): stand-in interpreter ran"
+        in capsys.readouterr().err
+    )
+
+
+# meiva:note
+# The interpreter is the caller's to name. A default would let a window that forgot the argument
+# run the roster check on whatever interpreter this process happens to be, silently.
+def test_the_window_names_the_interpreter_its_checks_run_on() -> None:
+    parameter = inspect.signature(parse).parameters["python"]
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    assert "python" not in (parse.__kwdefaults__ or {})

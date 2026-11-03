@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import time
 from collections.abc import Callable
 from typing import cast
@@ -142,6 +143,7 @@ def test_the_roster_wait_is_spent_on_the_sessions_clock() -> None:
             "2",
         ],
         {},
+        python=sys.executable,
     )
     started = time.monotonic()
 
