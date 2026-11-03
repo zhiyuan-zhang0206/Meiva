@@ -64,7 +64,7 @@ ANY_RULES = ("reportAny", "reportExplicitAny")
 # Roots of hand-written entries that hold the Any rules in production code while the tests under
 # them have not repaid their own Any debt. Add the root in the pull request that adds the entry;
 # remove it when its tests are clean.
-TESTS_OWING_ANY: tuple[str, ...] = ("cli/commands/management",)
+TESTS_OWING_ANY: tuple[str, ...] = ("cli",)
 
 
 def _covers(root: str, directory: str) -> bool:

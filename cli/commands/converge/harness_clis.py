@@ -13,6 +13,7 @@ from base.host.env.harness.convergence import (
     CommandResult,
     converge_local_harness_clis,
 )
+from cli.boundary.process import stderr_text, stdout_text
 from cli.commands.converge.spec import ConvergeCtx
 
 
@@ -30,8 +31,8 @@ def ensure_external_harness_clis(
             )
             return CommandResult(
                 exit_code=res.returncode,
-                stdout=res.stdout or "",
-                stderr=res.stderr or "",
+                stdout=stdout_text(res),
+                stderr=stderr_text(res),
             )
         except subprocess.TimeoutExpired as exc:
             return CommandResult(

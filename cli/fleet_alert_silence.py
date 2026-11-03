@@ -27,8 +27,12 @@ import json
 import sys
 import urllib.error
 import urllib.request
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from datetime import UTC, datetime, timedelta
-from typing import Any, TypeGuard
+from functools import partial
+from http.client import HTTPResponse
+from typing import TypeGuard
 
 CREATED_BY = "meiva-fleet-update"
 SILENCES = "/api/alertmanager/grafana/api/v2/silences"
@@ -48,12 +52,31 @@ class GrafanaError(RuntimeError):
     """Grafana could not be reached or refused the call."""
 
 
-def _is_any_dict(value: object) -> TypeGuard[dict[str, Any]]:
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict)
 
 
 def _is_object_list(value: object) -> TypeGuard[list[object]]:
     return isinstance(value, list)
+
+
+# meiva:note
+# `function(*args)` as an `object`, so a call the standard library types as `Any` is read as
+# `object`. This file is piped to the gateway host as source, so it carries its own copy of
+# `cli.boundary.untyped.object_of`.
+def _object_of[**P](function: Callable[P, object], /, *args: P.args, **kwargs: P.kwargs) -> object:
+    return function(*args, **kwargs)
+
+
+# meiva:note
+# The body of the answer `opener(request)` gives. `urlopen` types its answer `Any`; a parameter
+# typed with the real `HTTPResponse` takes it without naming the `Any`.
+def _read_body(
+    opener: Callable[[urllib.request.Request], AbstractContextManager[HTTPResponse]],
+    request: urllib.request.Request,
+) -> bytes:
+    with opener(request) as response:
+        return response.read()
 
 
 def _call(base: str, credential: str, method: str, path: str, body: object = None) -> object:
@@ -64,33 +87,32 @@ def _call(base: str, credential: str, method: str, path: str, body: object = Non
         headers["Content-Type"] = "application/json"
     request = urllib.request.Request(base + path, data=data, method=method, headers=headers)  # noqa: S310 — the operator's own Grafana
     try:
-        with urllib.request.urlopen(request, timeout=_TIMEOUT_S) as response:  # noqa: S310
-            raw = response.read()
+        raw = _read_body(partial(urllib.request.urlopen, timeout=_TIMEOUT_S), request)
     except urllib.error.HTTPError as error:
         raise GrafanaError(f"{method} {path}: HTTP {error.code}") from error
     except (OSError, urllib.error.URLError) as error:
         raise GrafanaError(f"{method} {path}: {type(error).__name__}") from error
-    return json.loads(raw) if raw else None
+    return _object_of(json.loads, raw) if raw else None
 
 
-def _owned(base: str, credential: str) -> list[dict[str, Any]]:
+def _owned(base: str, credential: str) -> list[dict[str, object]]:
     """Every live silence this program created."""
     rows = _call(base, credential, "GET", SILENCES)
     items = rows if _is_object_list(rows) else []
-    return [
-        row
-        for row in items
-        if _is_any_dict(row)
-        and row.get("createdBy") == CREATED_BY
-        and _is_any_dict(row.get("status"))
-        and row["status"]["state"] in _LIVE_STATES
-    ]
+    owned: list[dict[str, object]] = []
+    for row in items:
+        if not _is_object_dict(row) or row.get("createdBy") != CREATED_BY:
+            continue
+        status = row.get("status")
+        if _is_object_dict(status) and status.get("state") in _LIVE_STATES:
+            owned.append(row)
+    return owned
 
 
 def open_window(base: str, credential: str, *, hours: float, comment: str, now: datetime) -> str:
     """Create (or extend the one already owned) silence over every alert; its id."""
     ends_at = (now + timedelta(hours=hours)).astimezone(UTC).isoformat(timespec="seconds")
-    silence: dict[str, Any] = {
+    silence: dict[str, object] = {
         "matchers": _MATCH_EVERY_ALERT,
         "startsAt": now.astimezone(UTC).isoformat(timespec="seconds"),
         "endsAt": ends_at,
@@ -102,7 +124,7 @@ def open_window(base: str, credential: str, *, hours: float, comment: str, now: 
         silence["id"] = owned[0]["id"]
         silence["startsAt"] = owned[0]["startsAt"]
     created = _call(base, credential, "POST", SILENCES, silence)
-    if not _is_any_dict(created):
+    if not _is_object_dict(created):
         raise GrafanaError(f"POST {SILENCES}: unexpected response payload")
     return str(created["silenceID"])
 
@@ -126,6 +148,14 @@ def colocated_grafana() -> tuple[str, str] | None:
     return settings.observability.telemetry_grafana_url.rstrip("/"), secret.get_secret_value()
 
 
+# meiva:note
+# The options of `main`, as the typed namespace argparse fills in (`open` carries hours and comment).
+class _Arguments(argparse.Namespace):
+    verb: str
+    hours: float
+    comment: str
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="fleet_alert_silence")
     verbs = parser.add_subparsers(dest="verb", required=True)
@@ -133,7 +163,7 @@ def main(argv: list[str]) -> int:
     opened.add_argument("--hours", type=float, required=True)
     opened.add_argument("--comment", required=True)
     verbs.add_parser("close")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=_Arguments())
     grafana = colocated_grafana()
     if grafana is None:
         print("SILENCE skipped: no Grafana admin credential is configured on this host")

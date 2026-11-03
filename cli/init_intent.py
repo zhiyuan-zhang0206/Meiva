@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import io
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import SplitResult, urlsplit
 
@@ -26,6 +27,7 @@ from base.host.env.registry import derived_env_keys, env_identity_keys
 from base.host.net.predicates import is_loopback_host
 from base.native_process.os_platform import file_lock
 from base.paths.private_dir import ensure_private_dir
+from cli.boundary.options import options, raw
 from cli.commands.cluster.unit_join import join_gateway
 from cli.start_identity import (
     CAP_ARGS,
@@ -52,15 +54,31 @@ _FLAGS = (
 )
 
 
+@dataclass(frozen=True)
+class _ConfigFile:
+    config_file: str | None
+
+
+@dataclass(frozen=True)
+class _SslCertFile:
+    ssl_cert_file: str | None
+
+
+@dataclass(frozen=True)
+class _DbCapability:
+    db_capability: str | None
+
+
 def config_values(
     args: argparse.Namespace, home: Path, *, user_home: Path
 ) -> tuple[dict[str, str], str | None]:
-    if args.config_file is None:
+    config_file = options(args, _ConfigFile).config_file
+    if config_file is None:
         return {}, None
     from base.host.env.config_lite_table import FIELD_ALIASES
     from base.paths.expand import expand_home
 
-    path = expand_home(args.config_file, user_home=user_home).resolve(strict=True)
+    path = expand_home(config_file, user_home=user_home).resolve(strict=True)
     if path.is_relative_to(home):
         raise ValueError("first-start config file must be outside the home")
     content = path.read_bytes()
@@ -151,10 +169,17 @@ def _first_time_examples(checkout: Path) -> str:
     )
 
 
+def _flag_value(value: object) -> bool | None:
+    if value is None or isinstance(value, bool):
+        return value
+    raise TypeError(f"a capability flag is {type(value).__name__}, not a boolean")
+
+
 def _inputs(args: argparse.Namespace, site: HomeSite, caller: CallerHost) -> IdentityInput:
     home = site.home
     stored = stored_values(home)
-    explicit = {cap: vars(args)[flag] for cap, flag in CAP_ARGS.items()}
+    explicit = {cap: _flag_value(raw(args, flag)) for cap, flag in CAP_ARGS.items()}
+    db_capability = options(args, _DbCapability).db_capability
     try:
         roles = capability_roles(stored, explicit)
     except ValueError as exc:
@@ -172,11 +197,11 @@ def _inputs(args: argparse.Namespace, site: HomeSite, caller: CallerHost) -> Ide
         join_gateway(
             values,
             home,
-            args.db_capability,
+            db_capability,
             caller.transport_key,
             now=caller.birth.now.timestamp(),
         )
-    elif args.db_capability is not None:
+    elif db_capability is not None:
         raise ValueError(
             "--db-capability is for agent-runner units; a gateway unit keeps its own "
             "write-generation ledger"
@@ -215,9 +240,11 @@ def _apply_identity_options(
     checkout: Path,
 ) -> None:
     for field in IDENTITY_FIELDS:
-        explicit = vars(args)[field]
+        explicit = raw(args, field)
         key = "MEIVA_" + field.upper()
         if explicit is not None:
+            if not isinstance(explicit, str):
+                raise TypeError(f"--{field.replace('_', '-')} is {type(explicit).__name__}")
             if key in stored and stored[key] != explicit:
                 raise ValueError(f"init input conflicts with persisted {key}")
             values[key] = explicit
@@ -226,12 +253,13 @@ def _apply_identity_options(
     for key in ("MEIVA_MACHINE_NAME", "MEIVA_MACHINE_HOST"):
         if any(c in values.get(key, "") for c in "\r\n\x00"):
             raise ValueError(f"invalid {key}")
-    if args.ssl_cert_file is not None:
-        values.update(SSL_CERT_FILE=args.ssl_cert_file, REQUESTS_CA_BUNDLE=args.ssl_cert_file)
+    ssl_cert_file = options(args, _SslCertFile).ssl_cert_file
+    if ssl_cert_file is not None:
+        values.update(SSL_CERT_FILE=ssl_cert_file, REQUESTS_CA_BUNDLE=ssl_cert_file)
 
 
 def _given_flags(args: argparse.Namespace) -> list[str]:
-    return ["--" + name.replace("_", "-") for name in _FLAGS if vars(args)[name] is not None]
+    return ["--" + name.replace("_", "-") for name in _FLAGS if raw(args, name) is not None]
 
 
 def initialize_home(args: argparse.Namespace, site: HomeSite, caller: CallerHost) -> str:
