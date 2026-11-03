@@ -6,7 +6,7 @@ import ast
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Protocol
 
 from radon.visitors import Class, Function
 
@@ -55,11 +55,19 @@ def _block_scores(blocks: Sequence[Class | Function]) -> dict[tuple[int, str], i
     return result
 
 
+# meiva:note
+# What the scorer reads of a radon visitor: the blocks (functions and classes) it found. Radon
+# ships no types, so the callers' `ComplexityVisitor.from_ast` is accepted through this view.
+class BlockVisitor(Protocol):
+    @property
+    def blocks(self) -> Sequence[Class | Function]: ...
+
+
 def complexity_scores(
     tree: ast.AST,
     nodes: dict[str, ast.FunctionDef | ast.AsyncFunctionDef],
     *,
-    visitor_from_ast: Callable[[ast.AST], Any],
+    visitor_from_ast: Callable[[ast.AST], BlockVisitor],
 ) -> dict[str, int]:
     """Use Radon 6.0.1 on the shared AST, including its local-class collection gap."""
     scores = _block_scores(visitor_from_ast(tree).blocks)
@@ -115,7 +123,7 @@ def measure_quality(
     tree: ast.AST,
     path: str,
     *,
-    visitor_from_ast: Callable[[ast.AST], Any],
+    visitor_from_ast: Callable[[ast.AST], BlockVisitor],
 ) -> dict[str, dict[str, int]]:
     nodes = function_nodes(tree, path)
     return {

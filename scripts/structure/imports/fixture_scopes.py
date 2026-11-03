@@ -7,6 +7,9 @@ import tomllib
 from pathlib import Path
 from typing import NamedTuple, TypeGuard
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
+
 SCOPE_FILE = "path_scopes.toml"
 _SKIPPED_DIRS = frozenset({"node_modules", "__pycache__"})
 
@@ -37,7 +40,11 @@ def declarations(root: Path) -> tuple[Declaration, ...]:
         if SCOPE_FILE not in files:
             continue
         directory = Path(current).relative_to(root).as_posix()
-        declared = tomllib.loads((Path(current) / SCOPE_FILE).read_text(encoding="utf-8"))
+        declared = object_of(
+            tomllib.loads, (Path(current) / SCOPE_FILE).read_text(encoding="utf-8")
+        )
+        if not is_object_dict(declared):
+            raise ValueError(f"{directory}/{SCOPE_FILE}: expected a table of module -> names")
         for module, names in declared.items():
             if not _is_str_list(names):
                 raise ValueError(f"{directory}/{SCOPE_FILE}: {module} must be a list of names")

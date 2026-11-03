@@ -25,6 +25,7 @@ from typing import TypeGuard
 
 import yaml
 
+from base.host.boundary.untyped import object_of
 from scripts.structure import skip_sites
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -308,7 +309,7 @@ def _runner_system(runs_on: object) -> str | None:
 
 
 def jobs(root: Path = _REPO_ROOT) -> dict[str, Job]:
-    document: object = yaml.safe_load((root / WORKFLOW).read_text(encoding="utf-8"))
+    document = object_of(yaml.safe_load, (root / WORKFLOW).read_text(encoding="utf-8"))
     if not _is_raw_dict(document):
         raise SystemExit(f"{WORKFLOW}: expected a workflow document")
     raw_jobs: object = document.get("jobs") or {}

@@ -29,6 +29,8 @@ from collections import Counter
 from pathlib import Path
 from typing import TypeGuard
 
+from base.host.boundary.untyped import object_of
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # meiva:note
@@ -253,7 +255,7 @@ def load(root: Path = _REPO_ROOT) -> dict[str, tuple[str, ...]]:
     path = root / BASELINE
     if not path.is_file():
         return {}
-    raw: object = json.loads(path.read_text(encoding="utf-8"))
+    raw = object_of(json.loads, path.read_text(encoding="utf-8"))
     if not _is_str_object_dict(raw):
         raise SystemExit(f"{BASELINE}: expected a JSON object of path -> [what]")
     result: dict[str, tuple[str, ...]] = {}

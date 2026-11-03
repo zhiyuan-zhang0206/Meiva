@@ -472,9 +472,12 @@ def without_patch_evidence(nodes: Sequence[ast.AST], refs: list[Ref]) -> list[Re
 
 def common_dir(dirs: list[str]) -> str:
     """The nearest common ancestor directory of `dirs`."""
+    if not dirs:
+        return ""
+    split = [d.split("/") for d in dirs]
     common: list[str] = []
-    for parts in zip(*(d.split("/") for d in dirs), strict=False):
-        if len(set(parts)) != 1:
+    for index, part in enumerate(split[0]):
+        if any(len(other) <= index or other[index] != part for other in split[1:]):
             break
-        common.append(parts[0])
+        common.append(part)
     return "/".join(common)

@@ -46,6 +46,8 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+from base.host.boundary.options import options
+from base.host.boundary.process import stderr_text
 from scripts.structure import imports
 
 __all__ = ["main"]
@@ -541,6 +543,19 @@ def _window_description(*, branch: str, days: int | None, commits: int | None, t
     return f"last {days} days (since {since.isoformat()}) on {branch}, first-parent"
 
 
+# meiva:note
+# The command line, typed: the window is `days` or `commits` (an exclusive pair), neither when the default applies.
+@dataclass(frozen=True)
+class Options:
+    repo: str
+    branch: str
+    days: int | None
+    commits: int | None
+    min_support: int
+    min_confidence: float
+    as_json: bool
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=str(_REPO_ROOT), help="repo root (default: this repo)")
@@ -555,40 +570,40 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--min-support", type=int, default=_DEFAULT_MIN_SUPPORT)
     parser.add_argument("--min-confidence", type=float, default=_DEFAULT_MIN_CONFIDENCE)
     parser.add_argument("--json", action="store_true", dest="as_json")
-    args = parser.parse_args(argv)
+    opts = options(parser.parse_args(argv), Options)
 
-    repo = Path(args.repo).resolve()
-    if args.days is not None:
-        days = args.days
+    repo = Path(opts.repo).resolve()
+    if opts.days is not None:
+        days = opts.days
     else:
-        days = None if args.commits is not None else _DEFAULT_DAYS
+        days = None if opts.commits is not None else _DEFAULT_DAYS
     window_desc = _window_description(
-        branch=args.branch,
+        branch=opts.branch,
         days=days,
-        commits=args.commits,
+        commits=opts.commits,
         today=datetime.now(UTC).date(),
     )
 
     try:
-        log_text = _run_git_log(repo, args.branch, days=days, commits=args.commits)
-        head = _head_sha(repo, args.branch)
-        tip_files = _tip_files(repo, args.branch)
+        log_text = _run_git_log(repo, opts.branch, days=days, commits=opts.commits)
+        head = _head_sha(repo, opts.branch)
+        tip_files = _tip_files(repo, opts.branch)
     except subprocess.CalledProcessError as exc:
-        stderr = exc.stderr.strip() if exc.stderr else str(exc)
-        print(f"error: git log failed for {repo} ({args.branch}): {stderr}", file=sys.stderr)
+        stderr = stderr_text(exc).strip() or str(exc)
+        print(f"error: git log failed for {repo} ({opts.branch}): {stderr}", file=sys.stderr)
         return 1
 
     report = _build_report(
         _commits_from_log(log_text),
         repo=str(repo),
-        branch=args.branch,
+        branch=opts.branch,
         window=window_desc,
         head=head,
         tip_files=tip_files,
-        min_support=args.min_support,
-        min_confidence=args.min_confidence,
+        min_support=opts.min_support,
+        min_confidence=opts.min_confidence,
     )
-    if args.as_json:
+    if opts.as_json:
         print(json.dumps(dataclasses.asdict(report), indent=2, sort_keys=True))
     else:
         print(_render_markdown(report))
