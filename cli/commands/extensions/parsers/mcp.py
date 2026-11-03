@@ -9,108 +9,152 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Sequence
+from dataclasses import dataclass
+
+from cli.options import options
+
+
+@dataclass(frozen=True)
+class _McpName:
+    name: str
+
+
+@dataclass(frozen=True)
+class _McpAddOptions:
+    name: str
+    json: str | None
+    command: str | None
+    arg: Sequence[str]
+    env: Sequence[str]
+
+
+@dataclass(frozen=True)
+class _McpInstallOptions:
+    source: str
+    ref: str | None
+    path: str | None
+    env: Sequence[str]
+
+
+@dataclass(frozen=True)
+class _MemorySearchOptions:
+    query: str
+    limit: int
+    json: bool
 
 
 def _h_mcp_add(args: argparse.Namespace) -> int:
     from cli.commands.extensions.mcp import cmd_mcp_add
+    from cli.database.runtime import runtime_of
 
-    if args.command is None and (args.arg or args.env):
+    opts = options(args, _McpAddOptions)
+    if opts.command is None and (opts.arg or opts.env):
         print(
             "meiva: --arg/--env belong to --command; pass --command or drop them",
             file=sys.stderr,
         )
         return 2
     return cmd_mcp_add(
-        name=args.name,
-        json_spec=args.json,
-        command=args.command,
-        args=args.arg,
-        env_pairs=args.env,
-        home=args.runtime.home,
+        name=opts.name,
+        json_spec=opts.json,
+        command=opts.command,
+        args=list(opts.arg),
+        env_pairs=list(opts.env),
+        home=runtime_of(args).home,
     )
 
 
 def _h_mcp_list(args: argparse.Namespace) -> int:
     from cli.commands.extensions.mcp import cmd_mcp_list
+    from cli.database.runtime import runtime_of
 
-    return cmd_mcp_list(home=args.runtime.home, user_home=args.runtime.session.user_home)
+    runtime = runtime_of(args)
+    return cmd_mcp_list(home=runtime.home, user_home=runtime.session.user_home)
 
 
 def _h_mcp_remove(args: argparse.Namespace) -> int:
     from cli.commands.extensions.mcp import cmd_mcp_remove
+    from cli.database.runtime import runtime_of
 
-    return cmd_mcp_remove(name=args.name, home=args.runtime.home)
+    return cmd_mcp_remove(name=options(args, _McpName).name, home=runtime_of(args).home)
 
 
 def _h_mcp_enable(args: argparse.Namespace) -> int:
     from cli.commands.extensions.mcp import cmd_mcp_enable
+    from cli.database.runtime import runtime_of
 
-    return cmd_mcp_enable(name=args.name, home=args.runtime.home)
+    return cmd_mcp_enable(name=options(args, _McpName).name, home=runtime_of(args).home)
 
 
 def _h_mcp_disable(args: argparse.Namespace) -> int:
     from cli.commands.extensions.mcp import cmd_mcp_disable
+    from cli.database.runtime import runtime_of
 
-    return cmd_mcp_disable(name=args.name, home=args.runtime.home)
+    return cmd_mcp_disable(name=options(args, _McpName).name, home=runtime_of(args).home)
 
 
 def _h_mcp_install(args: argparse.Namespace) -> int:
     from base.paths.expand import expand_home
     from cli.commands.extensions.mcp import UvBuild, cmd_mcp_install
+    from cli.database.runtime import runtime_of
 
+    opts = options(args, _McpInstallOptions)
+    runtime = runtime_of(args)
     # meiva:note
     # `source` is what the person typed: a leading `~` names the home this invocation read, and a
     # `~someone/...` spelling names another account's home, which this command refuses to guess.
     try:
-        source = str(expand_home(args.source, user_home=args.runtime.session.user_home))
+        source = str(expand_home(opts.source, user_home=runtime.session.user_home))
     except ValueError as exc:
         print(f"[meiva mcp install] {exc}", file=sys.stderr)
         return 1
 
     return cmd_mcp_install(
         source=source,
-        ref=args.ref,
-        path=args.path,
-        env_pairs=args.env,
-        uv=UvBuild(
-            host=args.runtime.host, caller_environ=args.runtime.config.process_environment()
-        ),
-        home=args.runtime.home,
-        now=args.runtime.clock.now(),
+        ref=opts.ref,
+        path=opts.path,
+        env_pairs=list(opts.env),
+        uv=UvBuild(host=runtime.host, caller_environ=runtime.config.process_environment()),
+        home=runtime.home,
+        now=runtime.clock.now(),
     )
 
 
 def _h_mcp_uninstall(args: argparse.Namespace) -> int:
     from cli.commands.extensions.mcp import cmd_mcp_uninstall
+    from cli.database.runtime import runtime_of
 
-    return cmd_mcp_uninstall(name=args.name, home=args.runtime.home)
+    return cmd_mcp_uninstall(name=options(args, _McpName).name, home=runtime_of(args).home)
 
 
 def _h_mcp_upgrade(args: argparse.Namespace) -> int:
     from cli.commands.extensions.mcp import UvBuild, cmd_mcp_upgrade
+    from cli.database.runtime import runtime_of
 
+    runtime = runtime_of(args)
     return cmd_mcp_upgrade(
-        args.name,
-        uv=UvBuild(
-            host=args.runtime.host, caller_environ=args.runtime.config.process_environment()
-        ),
-        home=args.runtime.home,
-        now=args.runtime.clock.now(),
-        user_home=args.runtime.session.user_home,
+        options(args, _McpName).name,
+        uv=UvBuild(host=runtime.host, caller_environ=runtime.config.process_environment()),
+        home=runtime.home,
+        now=runtime.clock.now(),
+        user_home=runtime.session.user_home,
     )
 
 
 def _h_memory_refresh(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.extensions.memory import cmd_memory_refresh
+    from cli.database.runtime import runtime_of
 
-    return cmd_memory_refresh(access=gateway_access_from_boot(args.runtime.config))
+    return cmd_memory_refresh(access=gateway_access_from_boot(runtime_of(args).config))
 
 
 def h_memory_init(args: argparse.Namespace) -> int:
     from cli.commands.extensions.memory import cmd_memory_init, scaffold_facts
+    from cli.database.runtime import runtime_of
 
-    runtime = args.runtime
+    runtime = runtime_of(args)
     return cmd_memory_init(
         machine=runtime.machine, facts=scaffold_facts(runtime.config, home=runtime.home)
     )
@@ -119,12 +163,14 @@ def h_memory_init(args: argparse.Namespace) -> int:
 def h_memory_search(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.extensions.memory import cmd_memory_search
+    from cli.database.runtime import runtime_of
 
+    opts = options(args, _MemorySearchOptions)
     return cmd_memory_search(
-        args.query,
-        limit=args.limit,
-        json_output=args.json,
-        access=gateway_access_from_boot(args.runtime.config),
+        opts.query,
+        limit=opts.limit,
+        json_output=opts.json,
+        access=gateway_access_from_boot(runtime_of(args).config),
     )
 
 
@@ -147,10 +193,10 @@ def _memory_search_limit(value: str) -> int:
 def _server_object_json(value: str) -> str:
     """Argparse type for `mcp add --json`: reject a non-object spec before any command runs."""
     try:
-        parsed = json.loads(value)
+        is_object = isinstance(json.loads(value), dict)
     except json.JSONDecodeError as exc:
         raise argparse.ArgumentTypeError(f"invalid server JSON: {exc}") from exc
-    if not isinstance(parsed, dict):
+    if not is_object:
         raise argparse.ArgumentTypeError("server spec must be a JSON object")
     return value
 

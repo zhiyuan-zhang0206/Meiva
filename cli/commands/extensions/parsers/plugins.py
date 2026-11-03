@@ -9,6 +9,11 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Literal
+
+from cli.options import options
 
 
 def _duration(value: str) -> str:
@@ -22,10 +27,61 @@ def _duration(value: str) -> str:
     return value
 
 
+@dataclass(frozen=True)
+class _Name:
+    name: str
+
+
+@dataclass(frozen=True)
+class _InstallOptions:
+    url: str
+    ref: str | None
+    path: str | None
+    accept_risk: bool
+
+
+@dataclass(frozen=True)
+class _InspectOptions:
+    name: str | None
+
+
+@dataclass(frozen=True)
+class _SkillInstallOptions:
+    source: str
+    ref: str | None
+    path: str | None
+    accept_risk: bool
+    update_mode: Literal["auto", "notify", "off"] | None
+    check_every: str | None
+
+
+@dataclass(frozen=True)
+class _SkillUpdateOptions:
+    names: Sequence[str]
+
+
+@dataclass(frozen=True)
+class _SkillRegisterOptions:
+    name: str
+    accept_risk: bool
+
+
+@dataclass(frozen=True)
+class _SkillScanOptions:
+    target: str
+
+
+@dataclass(frozen=True)
+class _SkillTrustOptions:
+    name: str
+    revoke: bool
+
+
 def _h_plugins_update(args: argparse.Namespace) -> int:
     from cli.commands.extensions.plugins import cmd_plugins_update
+    from cli.database.runtime import runtime_of
 
-    return cmd_plugins_update(home=args.runtime.home)
+    return cmd_plugins_update(home=runtime_of(args).home)
 
 
 def _h_plugins_install(args: argparse.Namespace) -> int:
@@ -33,33 +89,36 @@ def _h_plugins_install(args: argparse.Namespace) -> int:
     from cli.commands.extensions.packages.cluster_registry import HttpExtensionGateway
     from cli.commands.extensions.plugins import cmd_plugins_install
     from cli.commands.extensions.skills_sync import source_binding
+    from cli.database.runtime import runtime_of
 
+    opts = options(args, _InstallOptions)
+    runtime = runtime_of(args)
     return cmd_plugins_install(
-        args.url,
-        args.ref,
-        args.path,
-        accept_risk=args.accept_risk,
-        gateway=HttpExtensionGateway(gateway_access_from_boot(args.runtime.config)),
-        machine=args.runtime.machine,
-        binding=source_binding(
-            args.runtime.session.user_home, args.runtime.config.process_environment()
-        ),
-        home=args.runtime.home,
-        now=args.runtime.clock.now(),
-        environ=args.runtime.config.process_environment(),
+        opts.url,
+        opts.ref,
+        opts.path,
+        accept_risk=opts.accept_risk,
+        gateway=HttpExtensionGateway(gateway_access_from_boot(runtime.config)),
+        machine=runtime.machine,
+        binding=source_binding(runtime.session.user_home, runtime.config.process_environment()),
+        home=runtime.home,
+        now=runtime.clock.now(),
+        environ=runtime.config.process_environment(),
     )
 
 
 def _h_plugins_uninstall(args: argparse.Namespace) -> int:
     from cli.commands.extensions.plugins import cmd_plugins_uninstall
+    from cli.database.runtime import runtime_of
 
-    return cmd_plugins_uninstall(args.name, home=args.runtime.home)
+    return cmd_plugins_uninstall(options(args, _Name).name, home=runtime_of(args).home)
 
 
 def _h_plugins_installed(args: argparse.Namespace) -> int:
     from cli.commands.extensions.plugins import cmd_plugins_installed
+    from cli.database.runtime import runtime_of
 
-    return cmd_plugins_installed(home=args.runtime.home)
+    return cmd_plugins_installed(home=runtime_of(args).home)
 
 
 def _h_plugins_inspect(args: argparse.Namespace) -> int:
@@ -69,73 +128,81 @@ def _h_plugins_inspect(args: argparse.Namespace) -> int:
     from agent.extensions.catalog import build_catalog
     from base.agents.sdk.call_policy import process_sampling_owner
     from cli.commands.extensions.plugins_inspect import cmd_plugins_inspect
+    from cli.database.runtime import runtime_of
 
-    sampling = process_sampling_owner(args.runtime.rng)
+    runtime = runtime_of(args)
+    sampling = process_sampling_owner(runtime.rng)
     with sampling.execution():
         return cmd_plugins_inspect(
-            args.name, catalog=build_catalog(sampling=sampling, home=args.runtime.home)
+            options(args, _InspectOptions).name,
+            catalog=build_catalog(sampling=sampling, home=runtime.home),
         )
 
 
 def _h_plugins_verify(args: argparse.Namespace) -> int:
     # Own module for the same reason as `inspect`: it loads the agent layer.
     from cli.commands.extensions.plugins_inspect import cmd_plugins_verify
+    from cli.database.runtime import runtime_of
 
-    return cmd_plugins_verify(rng=args.runtime.rng, home=args.runtime.home)
+    runtime = runtime_of(args)
+    return cmd_plugins_verify(rng=runtime.rng, home=runtime.home)
 
 
 def _h_plugins_upgrade(args: argparse.Namespace) -> int:
     from cli.commands.extensions.plugins import cmd_plugins_upgrade
     from cli.commands.extensions.skills_sync import source_binding
+    from cli.database.runtime import runtime_of
 
+    runtime = runtime_of(args)
     return cmd_plugins_upgrade(
-        args.name,
-        binding=source_binding(
-            args.runtime.session.user_home, args.runtime.config.process_environment()
-        ),
-        home=args.runtime.home,
-        now=args.runtime.clock.now(),
+        options(args, _Name).name,
+        binding=source_binding(runtime.session.user_home, runtime.config.process_environment()),
+        home=runtime.home,
+        now=runtime.clock.now(),
     )
 
 
 def _h_skill_update(args: argparse.Namespace) -> int:
     from cli.commands.extensions.skill import cmd_skill_update
     from cli.commands.extensions.skills_sync import source_binding
-    from cli.database.runtime import delivered_config
+    from cli.database.runtime import delivered_config, runtime_of
 
+    runtime = runtime_of(args)
     return cmd_skill_update(
-        args.names,
-        config=delivered_config(args.runtime.config),
-        repo=args.runtime.checkout,
-        binding=source_binding(
-            args.runtime.session.user_home, args.runtime.config.process_environment()
-        ),
-        home=args.runtime.home,
-        now=args.runtime.clock.now(),
+        list(options(args, _SkillUpdateOptions).names),
+        config=delivered_config(runtime.config),
+        repo=runtime.checkout,
+        binding=source_binding(runtime.session.user_home, runtime.config.process_environment()),
+        home=runtime.home,
+        now=runtime.clock.now(),
     )
 
 
 def _h_skill_upgrade(args: argparse.Namespace) -> int:
     from cli.commands.extensions.skill import cmd_skill_upgrade
+    from cli.database.runtime import runtime_of
 
+    runtime = runtime_of(args)
     return cmd_skill_upgrade(
-        args.name,
-        home=args.runtime.home,
-        now=args.runtime.clock.now(),
-        user_home=args.runtime.session.user_home,
+        options(args, _Name).name,
+        home=runtime.home,
+        now=runtime.clock.now(),
+        user_home=runtime.session.user_home,
     )
 
 
 def _h_plugins_enable(args: argparse.Namespace) -> int:
     from cli.commands.extensions.plugins import cmd_plugins_enable
+    from cli.database.runtime import runtime_of
 
-    return cmd_plugins_enable(args.name, home=args.runtime.home)
+    return cmd_plugins_enable(options(args, _Name).name, home=runtime_of(args).home)
 
 
 def _h_plugins_disable(args: argparse.Namespace) -> int:
     from cli.commands.extensions.plugins import cmd_plugins_disable
+    from cli.database.runtime import runtime_of
 
-    return cmd_plugins_disable(args.name, home=args.runtime.home)
+    return cmd_plugins_disable(options(args, _Name).name, home=runtime_of(args).home)
 
 
 def _h_skill_install(args: argparse.Namespace) -> int:
@@ -143,75 +210,92 @@ def _h_skill_install(args: argparse.Namespace) -> int:
     from base.paths.expand import expand_home
     from cli.commands.extensions.packages.cluster_registry import HttpExtensionGateway
     from cli.commands.extensions.skill import cmd_skill_install
+    from cli.database.runtime import runtime_of
 
+    opts = options(args, _SkillInstallOptions)
+    runtime = runtime_of(args)
     # meiva:note
     # `source` is what the person typed: a leading `~` names the home this invocation read, and a
     # `~someone/...` spelling names another account's home, which this command refuses to guess.
     try:
-        source = str(expand_home(args.source, user_home=args.runtime.session.user_home))
+        source = str(expand_home(opts.source, user_home=runtime.session.user_home))
     except ValueError as exc:
         print(f"[meiva skill install] {exc}", file=sys.stderr)
         return 1
 
     return cmd_skill_install(
         source,
-        args.ref,
-        args.path,
-        accept_risk=args.accept_risk,
-        update_mode=args.update_mode,
-        check_every=args.check_every,
-        gateway=HttpExtensionGateway(gateway_access_from_boot(args.runtime.config)),
-        machine=args.runtime.machine,
-        home=args.runtime.home,
-        now=args.runtime.clock.now(),
-        environ=args.runtime.config.process_environment(),
+        opts.ref,
+        opts.path,
+        accept_risk=opts.accept_risk,
+        update_mode=opts.update_mode,
+        check_every=opts.check_every,
+        gateway=HttpExtensionGateway(gateway_access_from_boot(runtime.config)),
+        machine=runtime.machine,
+        home=runtime.home,
+        now=runtime.clock.now(),
+        environ=runtime.config.process_environment(),
     )
 
 
 def _h_skill_enable(args: argparse.Namespace) -> int:
     from cli.commands.extensions.skill import cmd_skill_enable
+    from cli.database.runtime import runtime_of
 
-    return cmd_skill_enable(args.name, home=args.runtime.home)
+    return cmd_skill_enable(options(args, _Name).name, home=runtime_of(args).home)
 
 
 def _h_skill_disable(args: argparse.Namespace) -> int:
     from cli.commands.extensions.skill import cmd_skill_disable
+    from cli.database.runtime import runtime_of
 
-    return cmd_skill_disable(args.name, home=args.runtime.home)
+    return cmd_skill_disable(options(args, _Name).name, home=runtime_of(args).home)
 
 
 def _h_skill_register(args: argparse.Namespace) -> int:
     from cli.commands.extensions.skill import cmd_skill_register
+    from cli.database.runtime import runtime_of
 
+    opts = options(args, _SkillRegisterOptions)
+    runtime = runtime_of(args)
     return cmd_skill_register(
-        args.name,
-        accept_risk=args.accept_risk,
-        home=args.runtime.home,
-        now=args.runtime.clock.now(),
+        opts.name,
+        accept_risk=opts.accept_risk,
+        home=runtime.home,
+        now=runtime.clock.now(),
     )
 
 
 def _h_skill_scan(args: argparse.Namespace) -> int:
     from base.paths.expand import expand_home
     from cli.commands.extensions.skill import cmd_skill_scan
+    from cli.database.runtime import runtime_of
 
+    runtime = runtime_of(args)
     # meiva:note
     # Same rule as the install verbs: `~` is the home this invocation read; `~someone/...` is
     # refused rather than resolved through the password database.
     try:
-        target = str(expand_home(args.target, user_home=args.runtime.session.user_home))
+        target = str(
+            expand_home(
+                options(args, _SkillScanOptions).target, user_home=runtime.session.user_home
+            )
+        )
     except ValueError as exc:
         print(f"[meiva skill scan] {exc}", file=sys.stderr)
         return 1
 
-    return cmd_skill_scan(target, home=args.runtime.home)
+    return cmd_skill_scan(target, home=runtime.home)
 
 
 def _h_skill_trust(args: argparse.Namespace) -> int:
     from cli.commands.extensions.skill import cmd_skill_trust
+    from cli.database.runtime import runtime_of
 
+    opts = options(args, _SkillTrustOptions)
+    runtime = runtime_of(args)
     return cmd_skill_trust(
-        args.name, revoke=args.revoke, now=args.runtime.clock.now(), home=args.runtime.home
+        opts.name, revoke=opts.revoke, now=runtime.clock.now(), home=runtime.home
     )
 
 
