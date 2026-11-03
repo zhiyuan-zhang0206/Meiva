@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.host.boundary.options import options
 from base.host.exit_codes import HELPER_CHAIN_BROKEN_EXIT_CODE
 from base.log import logger
 from base.native_process.root_control.instance_lock import (
@@ -103,6 +104,15 @@ _SOCKET_NAME = "meiva-root.sock"
 
 
 @dataclass(frozen=True, slots=True)
+class _Arguments:
+    run_dir: Path
+    manifests: Path
+    wiring: str | None
+    helper_chain_interval: float
+    helper_chain_confirm_rounds: int
+
+
+@dataclass(frozen=True, slots=True)
 class DaemonOptions:
     """Parsed command line of the daemon."""
 
@@ -147,7 +157,7 @@ def parse_args(argv: Sequence[str]) -> DaemonOptions:
         default=HelperChainConfig.confirm_rounds,
         help="consecutive broken ancestry readings before this root retires",
     )
-    parsed = parser.parse_args(argv)
+    parsed = options(parser.parse_args(argv), _Arguments)
     return DaemonOptions(
         run_dir=parsed.run_dir,
         manifests_path=parsed.manifests,

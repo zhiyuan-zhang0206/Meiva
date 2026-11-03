@@ -45,10 +45,26 @@ class BackendStub:
                 if script.query_mode == "drop":
                     self.connection.close()
                     return
-                streams = (
-                    [{"values": [["1", script.last_marker]]}] if script.query_mode == "echo" else []
+                streams: list[dict[str, object]] = (
+                    [
+                        {
+                            "stream": {
+                                "agent_id": "watchdog",
+                                "event_name": "watchdog-write-probe",
+                            },
+                            "values": [["1", script.last_marker]],
+                        }
+                    ]
+                    if script.query_mode == "echo"
+                    else []
                 )
-                self._answer(200, json.dumps({"data": {"result": streams}}).encode())
+                # meiva:note
+                # The real `query_range` envelope: status, resultType, per-entry stream labels and stats.
+                answer: dict[str, object] = {
+                    "status": "success",
+                    "data": {"resultType": "streams", "result": streams, "stats": {"summary": {}}},
+                }
+                self._answer(200, json.dumps(answer).encode())
 
             def do_POST(self) -> None:
                 length = int(self.headers.get("Content-Length", 0))

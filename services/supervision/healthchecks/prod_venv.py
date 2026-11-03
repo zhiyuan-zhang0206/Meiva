@@ -12,6 +12,7 @@ from pathlib import Path
 
 from base.clock import Clock
 from base.deploy.release import editable_install
+from base.host.boundary.process import stderr_text
 from base.host.proc import CommandRunner
 
 _log = logging.getLogger("services.supervision.healthchecks.prod_venv")
@@ -94,12 +95,12 @@ def _probe(
     if result.returncode < 0:
         return _LegFailure(
             f"{label} was killed by signal {-result.returncode} before answering; "
-            f"stderr={_stderr_tail(result.stderr)!r}",
+            f"stderr={_stderr_tail(stderr_text(result))!r}",
             unmeasured=True,
         )
     if result.returncode:
         return _LegFailure(
-            f"{label} failed (rc={result.returncode}); stderr={_stderr_tail(result.stderr)!r}",
+            f"{label} failed (rc={result.returncode}); stderr={_stderr_tail(stderr_text(result))!r}",
             unmeasured=False,
         )
     return None

@@ -429,6 +429,48 @@ def test_a_caller_round_trips_and_a_legacy_record_still_reads(tmp_path: Path) ->
     assert "caller" not in path.read_text()
 
 
+# meiva:note
+# A stored caller block whose argv holds a non-string is evidence that cannot be trusted: it reads
+# as absent, and the record around it still reads.
+def test_a_caller_block_with_a_malformed_list_reads_as_absent(tmp_path: Path) -> None:
+    path = tmp_path / "intent" / "svc.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        '{"intent": "stopped", "source": "operator", "restart_failed": null, "updated_at": 1,'
+        ' "caller": {"pid": 1, "ppid": 1, "uid": 1, "cwd": "/", "argv": ["meiva", 7],'
+        ' "agent_id": null, "machine": "m", "operation_id": null, "env_keys": []}}'
+    )
+    record = intent_store.read(tmp_path, "svc")
+    assert record is not None and record.caller is None
+
+
+# meiva:note
+# The live caller block of a control request reads like a stored one: a malformed block is absent,
+# so the verb still runs and the attribution is simply missing.
+def test_a_live_caller_block_of_the_wrong_type_reads_as_absent() -> None:
+    block: dict[str, object] = {
+        "pid": "12",
+        "ppid": 1,
+        "uid": 1,
+        "cwd": "/",
+        "argv": [],
+        "machine": "m",
+    }
+    assert intent_store.caller_facts(block) is None
+    assert intent_store.caller_facts({**block, "pid": 12}) == CallerFacts(
+        pid=12,
+        ppid=1,
+        uid=1,
+        cwd="/",
+        argv=(),
+        agent_id=None,
+        machine="m",
+        operation_id=None,
+        env_keys=(),
+    )
+    assert intent_store.caller_facts("not a block") is None
+
+
 async def test_the_stop_that_ends_the_tree_keeps_the_caller(tmp_path: Path) -> None:
     owner = _supervisor(tmp_path, [_unit(*_SLEEP_FOREVER)])
     await owner.start()

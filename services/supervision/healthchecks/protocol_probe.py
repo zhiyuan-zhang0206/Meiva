@@ -7,6 +7,8 @@ import socket
 from pathlib import Path
 
 from base.daemon.health import DaemonProbe
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 
 def ping(path: Path | str) -> DaemonProbe:
@@ -22,7 +24,9 @@ def ping(path: Path | str) -> DaemonProbe:
             response.extend(chunk)
             if len(response) > 65536:
                 return DaemonProbe.down("ping response exceeds the protocol limit")
-        payload = json.loads(response.split(b"\n", 1)[0])
+        payload = object_of(json.loads, response.split(b"\n", 1)[0])
+        if not is_object_dict(payload):
+            raise TypeError("the ping answer is not a JSON object")
         if payload["id"] != 0 or payload["ok"] is not True:
             return DaemonProbe.down("Unix endpoint rejected ping")
         return DaemonProbe.up("Unix endpoint answered ping")

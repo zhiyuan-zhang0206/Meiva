@@ -778,6 +778,21 @@ root = "services/entrypoints/im_bridge/ingress/tests"
 [[tool.pyright.executionEnvironments]]
 root = "services/entrypoints/im_bridge/tests"
 
+[[tool.pyright.executionEnvironments]]
+root = "services/supervision/healthchecks/plans/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/supervision/healthchecks/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/supervision/meiva_root/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/supervision/meiva_root_glue/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/supervision/roster/tests"
+
 # END GENERATED pyright tests environments
 
 # Directory entries that raise reportAny / reportExplicitAny to "error" once a directory's count is
@@ -839,6 +854,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "services/desktop"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "services/supervision"
 reportAny = "error"
 reportExplicitAny = "error"
 

@@ -26,7 +26,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+
+from base.host.boundary.fields import int_field, str_field
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 
 _log = logging.getLogger(__name__)
 
@@ -103,26 +106,50 @@ class CallerFacts:
 # generation that served it.
 # meiva:link base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md
 def caller_facts(raw: object) -> CallerFacts | None:
-    raw_any: Any = raw
-    if not isinstance(raw, dict):
+    if not is_object_dict(raw):
         return None
-    values: Mapping[str, Any] = raw_any
-    argv = values.get("argv")
-    argv_any: Any = argv
-    env_keys = values.get("env_keys")
-    env_any: Any = env_keys
-    argv_items: list[Any] = argv_any if isinstance(argv, list) else []
-    env_items: list[Any] = env_any if isinstance(env_keys, list) else []
+    try:
+        return _caller_from(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+# meiva:note
+# The text members of a caller block that are optional: absent or null reads as None, anything
+# but a string is malformed.
+def _optional_text(values: Mapping[str, object], key: str) -> str | None:
+    value = values.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TypeError(f"{key} must be a string or null")
+    return value
+
+
+# meiva:note
+# A list of names from a caller block; an absent or non-list member reads as empty.
+def _names(raw: object) -> tuple[str, ...]:
+    if not is_object_list(raw):
+        return ()
+    names: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            raise TypeError("caller list entries must be strings")
+        names.append(item)
+    return tuple(names)
+
+
+def _caller_from(values: Mapping[str, object]) -> CallerFacts:
     return CallerFacts(
-        pid=int(values["pid"]),
-        ppid=int(values["ppid"]),
-        uid=int(values["uid"]),
-        cwd=str(values["cwd"]),
-        argv=tuple(str(item) for item in argv_items),
-        agent_id=None if values.get("agent_id") is None else str(values["agent_id"]),
-        machine=str(values["machine"]),
-        operation_id=None if values.get("operation_id") is None else str(values["operation_id"]),
-        env_keys=tuple(str(item) for item in env_items),
+        pid=int_field(values, "pid"),
+        ppid=int_field(values, "ppid"),
+        uid=int_field(values, "uid"),
+        cwd=str_field(values, "cwd"),
+        argv=_names(values.get("argv")),
+        agent_id=_optional_text(values, "agent_id"),
+        machine=str_field(values, "machine"),
+        operation_id=_optional_text(values, "operation_id"),
+        env_keys=_names(values.get("env_keys")),
     )
 
 
@@ -231,7 +258,7 @@ def read(run_dir: Path, unit: str) -> IntentRecord | None:
         _log.warning("unit %s: intent record unreadable (%s); boot default applies", unit, exc)
         return None
     try:
-        return _decode(json.loads(text))
+        return _decode(object_of(json.loads, text))
     except (ValueError, TypeError) as exc:
         _log.warning("unit %s: intent record invalid (%s); boot default applies", unit, exc)
         return None
@@ -253,10 +280,9 @@ def _encode(record: IntentRecord) -> str:
 
 
 def _decode(raw: object) -> IntentRecord:
-    raw_any: Any = raw
-    if not isinstance(raw, dict):
+    if not is_object_dict(raw):
         raise TypeError("record must be an object")
-    values: Mapping[str, Any] = raw_any
+    values = raw
     fields = frozenset(values)
     if fields not in (_RECORD_FIELDS, _LEGACY_RECORD_FIELDS):
         raise ValueError(f"record must contain exactly {sorted(_RECORD_FIELDS)}")
@@ -298,32 +324,12 @@ def _encode_caller(caller: CallerFacts) -> dict[str, object]:
 def _decode_caller(raw: object) -> CallerFacts | None:
     if raw is None:
         return None
-    raw_any: Any = raw
-    if not isinstance(raw, dict):
+    if not is_object_dict(raw) or frozenset(raw) != _CALLER_FIELDS:
         return None
-    values: Mapping[str, Any] = raw_any
-    if frozenset(values) != _CALLER_FIELDS:
+    if not is_object_list(raw["argv"]) or not is_object_list(raw["env_keys"]):
         return None
     try:
-        argv_raw = values["argv"]
-        argv_any: Any = argv_raw
-        env_raw = values["env_keys"]
-        env_any: Any = env_raw
-        if not isinstance(argv_raw, list) or not isinstance(env_raw, list):
-            return None
-        argv_items: list[Any] = argv_any
-        env_items: list[Any] = env_any
-        return CallerFacts(
-            pid=int(values["pid"]),
-            ppid=int(values["ppid"]),
-            uid=int(values["uid"]),
-            cwd=str(values["cwd"]),
-            argv=tuple(str(item) for item in argv_items),
-            agent_id=None if values["agent_id"] is None else str(values["agent_id"]),
-            machine=str(values["machine"]),
-            operation_id=None if values["operation_id"] is None else str(values["operation_id"]),
-            env_keys=tuple(str(item) for item in env_items),
-        )
+        return _caller_from(raw)
     except (TypeError, ValueError):
         return None
 
@@ -331,10 +337,9 @@ def _decode_caller(raw: object) -> CallerFacts | None:
 def _decode_failure(raw: object) -> RestartFailure | None:
     if raw is None:
         return None
-    raw_any: Any = raw
-    if not isinstance(raw, dict):
+    if not is_object_dict(raw):
         raise TypeError("restart_failed must be an object or null")
-    values: dict[str, Any] = raw_any
+    values = raw
     if frozenset(values) != _FAILURE_FIELDS:
         raise ValueError(f"restart_failed must contain exactly {sorted(_FAILURE_FIELDS)}")
     stage = _member(RestartStage, values["stage"], "restart_failed.stage")

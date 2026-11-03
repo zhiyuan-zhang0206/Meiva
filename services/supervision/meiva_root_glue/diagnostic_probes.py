@@ -13,6 +13,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
+from typing import TypeGuard
 from urllib.parse import urlsplit
 
 from base.agents.impersonation import live_lease_on_machine
@@ -22,6 +23,8 @@ from base.cluster.record import ClusterRecord
 from base.daemon.health import DaemonProbe
 from base.db import Database
 from base.host import brew_pin, proc
+from base.host.boundary.process import stdout_text
+from base.host.boundary.untyped import object_of
 from base.host.db_authority.api import read_telemetry_token
 from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
 from base.host.net.url_secret import names_foreign_host
@@ -125,7 +128,7 @@ def brew_pins(
             )
             continue
         result.check_returncode()
-        observed.append(set(result.stdout.splitlines()))
+        observed.append(set(stdout_text(result).splitlines()))
     if unmeasured:
         return DaemonProbe.inconclusive("; ".join(unmeasured))
     pinned, installed = observed
@@ -341,6 +344,8 @@ def database_recovery_probe(database: Callable[[], Database]) -> Callable[[], Da
 # daemon delivered 45-130 check-in digests in every 24 hours measured, so a day of
 # deliveries with no stored row is a broken record, never a quiet stretch.
 TASK_TELEMETRY_WINDOW_HOURS = 24
+
+
 _TASK_TELEMETRY_SQL = """
 SELECT
     (SELECT count(*) FROM inbound_messages
@@ -350,6 +355,24 @@ SELECT
       WHERE event_name IN ('task_reminder_digest', 'task_reminder_rerouted', 'task_escalation')
         AND ts > now() - make_interval(hours => %s))
 """
+
+
+def _is_tuple(value: object) -> TypeGuard[tuple[object, ...]]:
+    return isinstance(value, tuple)
+
+
+# meiva:note
+# The (delivered, stored) pair of the one-row answer; no row reads as (0, 0), any other shape is
+# a TypeError.
+def _counts(row: object) -> tuple[int, int]:
+    if row is None:
+        return 0, 0
+    if not _is_tuple(row) or len(row) != 2:
+        raise TypeError("the reminder record answered with an unexpected row")
+    delivered, stored = row
+    if not isinstance(delivered, int) or not isinstance(stored, int):
+        raise TypeError("the reminder record counts must be integers")
+    return delivered, stored
 
 
 # meiva:note
@@ -367,10 +390,10 @@ def task_telemetry(database: Callable[[], Database]) -> Callable[[], DaemonProbe
                     _TASK_TELEMETRY_SQL,
                     (TASK_TELEMETRY_WINDOW_HOURS, TASK_TELEMETRY_WINDOW_HOURS),
                 )
-                row = cur.fetchone()
+                row = object_of(cur.fetchone)
         except psycopg.Error as exc:
             return DaemonProbe.unavailable(f"reminder record unread: {type(exc).__name__}")
-        delivered, stored = (0, 0) if row is None else (int(row[0]), int(row[1]))
+        delivered, stored = _counts(row)
         if delivered and not stored:
             return DaemonProbe.down(
                 f"{delivered} reminder notice(s) delivered in {TASK_TELEMETRY_WINDOW_HOURS}h "

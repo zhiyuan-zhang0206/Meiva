@@ -45,9 +45,10 @@ import re
 import shlex
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, get_args
+from typing import get_args
 
 from base.cluster.machine import MachineRole
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.native_process.stop_timing import STOP_MARGIN_S
 from services.supervision.meiva_root.inputs import InputSeal
 from services.supervision.meiva_root.manifest import (
@@ -149,17 +150,13 @@ def build_units(
 def _validate(manifest: Mapping[str, object]) -> UnitRegistry:
     """Run the manifest validators in memory, before anything touches disk."""
     units_raw = manifest["units"]
-    units_any: Any = units_raw
-    if not isinstance(units_raw, list):
+    if not is_object_list(units_raw):
         raise ManifestError("generated manifest: 'units' must be a list")
-    units_list: list[Any] = units_any
     parsed: list[UnitManifest] = []
-    for index, item in enumerate(units_list):
-        item_any: Any = item
-        if not isinstance(item, dict):
+    for index, item in enumerate(units_raw):
+        if not is_object_dict(item):
             raise ManifestError(f"generated manifest: units[{index}] must be an object")
-        typed_item: dict[str, Any] = item_any
-        parsed.append(UnitManifest.from_mapping(typed_item, origin=f"generated units[{index}]"))
+        parsed.append(UnitManifest.from_mapping(item, origin=f"generated units[{index}]"))
     return UnitRegistry(parsed)
 
 

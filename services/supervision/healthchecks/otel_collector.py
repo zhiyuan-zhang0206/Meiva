@@ -1,7 +1,10 @@
 """Read-only health probes for otel collector; the root supervisor owns recovery."""
 
 import urllib.request
-from http.client import HTTPException
+from collections.abc import Callable
+from contextlib import AbstractContextManager
+from functools import partial
+from http.client import HTTPException, HTTPResponse
 from pathlib import Path
 
 from base.cluster.machine import MachineIdentityReader, MachineRoleMissing
@@ -62,14 +65,21 @@ def probe_collector_at(otlp_port: int) -> DaemonProbe:
 
 
 # meiva:note
+# The body of the answer `opener(url)` gives, as text. `urlopen` types its answer `Any`; a
+# parameter typed with the real `HTTPResponse` takes it without naming the `Any`.
+def _text(opener: Callable[[str], AbstractContextManager[HTTPResponse]], url: str) -> str:
+    with opener(url) as response:
+        return response.read().decode("utf-8", errors="replace")
+
+
+# meiva:note
 # The collector's queue pressure from its self-metrics on `metrics_port`, or None when
 # the endpoint cannot be read. The port is the per-unit one converge renders.
 def queue_pressure(metrics_port: int) -> CollectorPressure | None:
     try:
-        with urllib.request.urlopen(
-            f"http://localhost:{metrics_port}/metrics", timeout=2.0
-        ) as response:
-            payload = response.read().decode("utf-8", errors="replace")
+        payload = _text(
+            partial(urllib.request.urlopen, timeout=2.0), f"http://localhost:{metrics_port}/metrics"
+        )
     except (OSError, HTTPException):
         return None
     return parse_pressure(payload)

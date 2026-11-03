@@ -5,6 +5,8 @@ import logging
 import socket
 from pathlib import Path
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.paths import mcp_daemon_shared_socket
 
 _log = logging.getLogger("services.supervision.healthchecks.mcp_daemon")
@@ -26,7 +28,9 @@ def mcp_daemon_probe(home: Path) -> bool:
             if not chunk:
                 return False
             buf += chunk
-        resp = json.loads(buf.split(b"\n", 1)[0])
+        resp = object_of(json.loads, buf.split(b"\n", 1)[0])
+        if not is_object_dict(resp):
+            raise TypeError("the ping answer is not a JSON object")
         return bool(resp.get("ok"))
     finally:
         sock.close()

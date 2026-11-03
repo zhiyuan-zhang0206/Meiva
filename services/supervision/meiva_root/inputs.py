@@ -12,8 +12,8 @@ import re
 import stat
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.verified_file.plan import stat_changed
 
 
@@ -50,11 +50,9 @@ class InputSeal:
 
     @classmethod
     def from_mapping(cls, raw: object) -> InputSeal:
-        raw_any: Any = raw
-        if not isinstance(raw, dict) or set(raw_any) != {"path", "digest"}:
+        if not is_object_dict(raw) or set(raw) != {"path", "digest"}:
             raise ValueError("service input must contain exactly path and digest")
-        values: dict[str, Any] = raw_any
-        path, digest = values["path"], values["digest"]
+        path, digest = raw["path"], raw["digest"]
         if not isinstance(path, str) or not Path(path).is_absolute():
             raise ValueError("service input path must be absolute")
         if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
@@ -72,11 +70,9 @@ class InputSeal:
 
 
 def parse_inputs(raw: object) -> tuple[InputSeal, ...]:
-    raw_any: Any = raw
-    if not isinstance(raw, list):
+    if not is_object_list(raw):
         raise TypeError("service inputs must be a list")
-    items: list[Any] = raw_any
-    inputs = tuple(InputSeal.from_mapping(item) for item in items)
+    inputs = tuple(InputSeal.from_mapping(item) for item in raw)
     if len({item.path for item in inputs}) != len(inputs):
         raise ValueError("service inputs contain duplicate paths")
     return inputs

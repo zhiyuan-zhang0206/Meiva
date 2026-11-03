@@ -17,8 +17,9 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.native_process.ownership import OwnedProcess
 
 _log = logging.getLogger(__name__)
@@ -80,19 +81,18 @@ def write(run_dir: Path, unit_id: str, record: GenerationRecord) -> None:
 def read(run_dir: Path, unit_id: str) -> GenerationRecord | None:
     path = record_path(run_dir, unit_id)
     try:
-        raw: object = json.loads(path.read_text())
+        raw = object_of(json.loads, path.read_text())
     except FileNotFoundError:
         return None
     except (OSError, json.JSONDecodeError) as exc:
         _log.warning("unit %s: discarding unreadable spawn record %s (%s)", unit_id, path, exc)
         clear(run_dir, unit_id)
         return None
-    raw_any: Any = raw
-    if not isinstance(raw, dict):
+    if not is_object_dict(raw):
         _log.warning("unit %s: discarding a spawn record with an unexpected shape", unit_id)
         clear(run_dir, unit_id)
         return None
-    fields: dict[str, Any] = raw_any
+    fields = raw
     if set(fields) != set(_RECORD_FIELDS):
         _log.warning("unit %s: discarding a spawn record with an unexpected shape", unit_id)
         clear(run_dir, unit_id)

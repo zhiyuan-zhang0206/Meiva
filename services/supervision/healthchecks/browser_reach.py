@@ -13,11 +13,16 @@ import json
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Iterator
-from typing import Any, NamedTuple, Protocol
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager
+from functools import partial
+from http.client import HTTPResponse
+from typing import NamedTuple, Protocol
 
 import websockets
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.log import logger
 from services.desktop.browser.probe import cdp_url
 
@@ -43,30 +48,39 @@ class HostResult(NamedTuple):
     detail: str
 
 
-def read_json(url: str, timeout_s: float) -> dict[str, Any]:
-    with urllib.request.urlopen(url, timeout=timeout_s) as response:  # noqa: S310 — loopback CDP URL
-        parsed = json.loads(response.read())
-    parsed_any: Any = parsed
-    if not isinstance(parsed, dict):
-        return {}
-    typed_parsed: dict[str, Any] = parsed_any
-    return typed_parsed
+# meiva:note
+# The body and status of the answer `opener(url)` gives. `urlopen` types its answer `Any`; a
+# parameter typed with the real `HTTPResponse` takes it without naming the `Any`.
+def _answer(
+    opener: Callable[[str], AbstractContextManager[HTTPResponse]], url: str
+) -> tuple[int, bytes]:
+    with opener(url) as response:
+        return response.status, response.read()
+
+
+def read_json(url: str, timeout_s: float) -> dict[str, object]:
+    _, body = _answer(partial(urllib.request.urlopen, timeout=timeout_s), url)
+    parsed = object_of(json.loads, body)
+    return parsed if is_object_dict(parsed) else {}
 
 
 async def _cdp_call(
     ws: CdpSocket,
     ids: Iterator[int],
     method: str,
-    params: dict[str, Any],
+    params: dict[str, object],
     timeout_s: float,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Send one CDP request and return its ``result``; raises on a protocol error."""
     await ws.send(json.dumps({"id": next(ids), "method": method, "params": params}))
     raw = await asyncio.wait_for(ws.recv(), timeout=timeout_s)
-    resp = json.loads(raw)
+    resp = object_of(json.loads, raw)
+    if not is_object_dict(resp):
+        raise TypeError("a CDP message is not a JSON object")
     if "error" in resp:
         raise RuntimeError(f"CDP {method} failed: {resp['error']}")
-    return resp.get("result") or {}
+    result = resp.get("result")
+    return result if is_object_dict(result) and result else {}
 
 
 async def canary_async(
@@ -121,8 +135,7 @@ async def canary_async(
                 except TimeoutError:
                     return CanaryResult("timeout", f"fetch did not settle within {timeout_s:.1f}s")
             inner = result.get("result")
-            inner_any: Any = inner
-            value: object = inner_any.get("value") if isinstance(inner, dict) else None
+            value = inner.get("value") if is_object_dict(inner) else None
             if value == "ok":
                 return CanaryResult("ok", "fetch settled")
             if isinstance(value, str) and value.startswith("error:"):
@@ -156,8 +169,7 @@ def host_probe(url: str, timeout_s: float) -> HostResult:
     """The same-machine contrast read: any HTTP answer counts as reachability."""
     started = time.monotonic()
     try:
-        with urllib.request.urlopen(url, timeout=timeout_s) as response:  # noqa: S310 — cluster URL from settings
-            status = response.status
+        status, _ = _answer(partial(urllib.request.urlopen, timeout=timeout_s), url)
         return HostResult(ok=True, detail=f"HTTP {status} in {time.monotonic() - started:.2f}s")
     except urllib.error.HTTPError as exc:
         return HostResult(ok=True, detail=f"HTTP {exc.code} in {time.monotonic() - started:.2f}s")

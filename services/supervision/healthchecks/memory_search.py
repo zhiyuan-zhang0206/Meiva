@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from base.daemon.health import DaemonProbe
+from base.host.boundary.untyped import object_of
 from services.derived.memory_indexer.backends.base import EMBEDDING_SPACE_HEADER, INDEX_API_PREFIX
 
 _TIMEOUT_S = 3.0
@@ -28,7 +29,7 @@ def post_search(uri: str, *, embedding_name: str, embedding_revision: str | None
             timeout=_TIMEOUT_S,
         )
         resp.raise_for_status()
-        return resp.json()
+        return object_of(resp.json)
     except Exception as exc:
         return DaemonProbe.down(f"POST /search failed ({type(exc).__name__}: {exc})")
 

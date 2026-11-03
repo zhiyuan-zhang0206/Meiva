@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Protocol
 
 import redis
 
 TIMEOUT_S = 3.0
+
+
+class RedisConnector(Protocol):
+    def from_url(
+        self, url: str, *, socket_connect_timeout: float, socket_timeout: float
+    ) -> RedisPingConnection: ...
 
 
 class RedisPingConnection(Protocol):
@@ -23,8 +29,14 @@ def ping(cluster_url: str, *, connection: RedisPingConnection | None = None) -> 
         with connection as r:
             r.ping()
         return
-    redis_cls: Any = redis.Redis
-    with redis_cls.from_url(
+    _ping_cluster(redis.Redis, cluster_url)
+
+
+# meiva:note
+# PING the cluster Redis through `connector`. The redis client's stubs leave `from_url` partly
+# untyped; a parameter typed with the connector protocol takes the class without naming the `Any`.
+def _ping_cluster(connector: RedisConnector, cluster_url: str) -> None:
+    with connector.from_url(
         cluster_url,
         socket_connect_timeout=TIMEOUT_S,
         socket_timeout=TIMEOUT_S,
