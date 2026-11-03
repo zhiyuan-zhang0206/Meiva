@@ -53,7 +53,11 @@ from services.wake.schedule_manager.convergence import (
     prepare_verdict,
     reclaim_verdict,
 )
-from services.wake.schedule_manager.launch_events import emit_gate_held, emit_launch_refused
+from services.wake.schedule_manager.launch_events import (
+    emit_gate_held,
+    emit_launch_refused,
+    emit_process_lost,
+)
 from services.wake.schedule_manager.manager_policy import ManagerPolicy
 from services.wake.schedule_manager.recovery_gate import GateState, observe_gate, refuse
 from services.wake.schedule_manager.round_progress import report_late_rounds, report_stalled
@@ -327,8 +331,12 @@ class ScheduleManager:
                 self._sync_revision(sid, now)
 
     def _mark_lost(self, schedule_id: int, revision: int) -> None:
+        # meiva:note
+        # The update matches only a schedule still `running`, so this branch runs once per loss and
+        # the event needs no deduplication of its own.
         if revisions.mark_lost(self._pool, schedule_id, revision, self._machine_name):
             _log.warning("schedule %s process lost; automatic relaunch disabled", schedule_id)
+            emit_process_lost(schedule_id)
 
     # meiva:link services/wake/schedule_manager/docs/host-replacement.meiva.okf.md
     def _read_host_generation(self) -> str | None:

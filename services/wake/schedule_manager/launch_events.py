@@ -6,7 +6,7 @@ import logging
 
 from base import telemetry
 
-__all__ = ["emit_gate_held", "emit_launch_refused"]
+__all__ = ["emit_gate_held", "emit_launch_refused", "emit_process_lost"]
 
 _log = logging.getLogger("services.wake.schedule_manager.manager")
 
@@ -22,6 +22,16 @@ def emit_gate_held(held_for_s: float) -> None:
         event_name="schedule_recovery_gated",
         level="warning",
         attributes={"held_for_s": round(held_for_s, 1)},
+    )
+
+
+def emit_process_lost(schedule_id: int) -> None:
+    _log.warning("schedule %s: session lost; recorded as error", schedule_id)
+    telemetry.emit(
+        "telemetry",
+        event_name="schedule_process_lost",
+        level="warning",
+        attributes={"schedule_id": schedule_id, "status": "error"},
     )
 
 
