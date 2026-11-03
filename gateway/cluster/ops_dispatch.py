@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import HTTPException
 
 from base.db import Database
@@ -24,8 +22,13 @@ from ops.rpc_schemas import OpKind
 #     HTTPException 502: the op ran on the target but reported failure
 #         (e.g. an update already in flight there).
 async def dispatch_op(
-    db: Database, target: str, kind: OpKind, payload: dict[str, Any], *, rpc: cluster_rpc.RpcClient
-) -> dict[str, Any]:
+    db: Database,
+    target: str,
+    kind: OpKind,
+    payload: dict[str, object],
+    *,
+    rpc: cluster_rpc.RpcClient,
+) -> dict[str, object]:
     try:
         return await rpc.dispatch_to_machine(db, target_machine=target, kind=kind, payload=payload)
     except cluster_rpc.ClusterOpUnreachable as exc:

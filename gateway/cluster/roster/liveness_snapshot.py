@@ -10,9 +10,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
 
 from base.agents.observation.evidence import (
     LIVENESS_PASS_INTERVAL_S,
@@ -36,7 +36,7 @@ class Snapshot:
     # meiva:note
     # The last ClusterStatus payload (kept across a failed attempt); None when the
     # last reachable answer did not validate as ClusterStatus, or none ever arrived.
-    status: dict[str, Any] | None
+    status: Mapping[str, object] | None
     status_at: datetime | None
 
     # meiva:note

@@ -20,11 +20,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated
 
 import psycopg
 from fastapi import APIRouter, HTTPException, Query, Request
-from psycopg import Cursor
+from psycopg import Connection
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
@@ -67,13 +67,17 @@ from gateway.cluster.schemas import (
     SystemStatus,
 )
 from gateway.http.config import (
+    GatewayAppState,
     GatewayConfig,
     gateway_clock,
     gateway_cluster,
     gateway_config,
     gateway_rpc,
+    gateway_state,
+    state_as,
 )
-from gateway.http.model_catalog import catalog_for_observation
+from gateway.http.db_rows import query_one
+from gateway.http.model_catalog import catalog_for_observation, request_catalog
 from gateway.schemas.stats import StatsWindowHours, window_delta
 from ops.cluster import rpc as cluster_rpc
 from ops.cluster.rpc import RpcClient
@@ -112,6 +116,14 @@ class StatusCache:
             return response
 
 
+# meiva:note
+# The status cache and the roster's identity-mismatch log the app root builds; the status routes
+# are their only readers, so this module declares them.
+class StatusAppState(GatewayAppState):
+    status_cache: StatusCache
+    identity_mismatch_log: roster_probe.IdentityMismatchLog
+
+
 router.add_api_route("/api/health", get_health, methods=["GET"], response_model=None)
 
 
@@ -125,12 +137,12 @@ def get_stats_dashboard(
 ) -> StatsDashboard:
     try:
         return _compute_stats_dashboard(
-            request.app.state.db_pool,
+            gateway_state(request).db_pool,
             hours,
-            request.app.state.gateway_config,
+            gateway_state(request).gateway_config,
             gateway_clock(request),
             cluster=gateway_cluster(request),
-            catalog=catalog_for_observation(request.app.state.catalog),
+            catalog=catalog_for_observation(request_catalog(request)),
         )
     except psycopg.errors.QueryCanceled as exc:
         raise HTTPException(status_code=503, detail="stats read timed out; retry") from exc
@@ -155,8 +167,15 @@ def _provider_api_costs(
     return float(openai), float(anthropic)
 
 
+# meiva:note
+# The answer of a `SELECT COUNT(*)`.
+@dataclass(frozen=True)
+class _CountRow:
+    n: int
+
+
 def _compute_stats_dashboard(
-    pool: ConnectionPool[Any],
+    pool: ConnectionPool,
     hours: StatsWindowHours,
     config: GatewayConfig,
     clock: Clock,
@@ -172,13 +191,12 @@ def _compute_stats_dashboard(
         stats_events.set_statement_timeout(conn, config.stats_statement_timeout_ms)
         totals = stats_events.window_totals(conn, cluster=cluster, start=window_start, end=now)
         alert_classes = read_alert_classes(conn, cluster=cluster, start=window_start, end=now)
-        live_count = int(
-            conn.execute(
-                "SELECT COUNT(*) FROM agents_meta WHERE status != 'terminated'"
-            ).fetchone()[  # type: ignore[index]
-                0
-            ]
+        live = query_one(
+            conn,
+            _CountRow,
+            "SELECT COUNT(*) AS n FROM agents_meta WHERE status != 'terminated'",
         )
+        live_count = live.n if live is not None else 0
     cache_hit_pct = (
         round(totals.cache_read / totals.cache_input * 100, 2)
         if totals.cache_input
@@ -212,7 +230,7 @@ def _compute_stats_dashboard(
 # Not windowed: a plugin value is a point in time (`PluginStat`), and the console
 # joins these rows against `contributions.ui.stats` declarations by `(plugin, id)`.
 # meiva:link gateway/cluster/docs/ops-surfaces.meiva.okf.md
-def _plugin_stat_rows(pool: ConnectionPool[Any]) -> list[PluginStat]:
+def _plugin_stat_rows(pool: ConnectionPool) -> list[PluginStat]:
     return [
         PluginStat(
             plugin=row.plugin,
@@ -271,17 +289,17 @@ class RosterEnv:
 
 def roster_env(request: Request) -> RosterEnv:
     return RosterEnv(
-        db=request.app.state.db,
-        identity_log=request.app.state.identity_mismatch_log,
-        image=request.app.state.process_image,
-        home=request.app.state.gateway_process.home,
-        machine=request.app.state.machine,
+        db=gateway_state(request).db,
+        identity_log=state_as(request, StatusAppState).identity_mismatch_log,
+        image=gateway_state(request).process_image,
+        home=gateway_state(request).gateway_process.home,
+        machine=gateway_state(request).machine,
         probe_timeout_s=gateway_config(request).status_probe_timeout_seconds,
         clock=gateway_clock(request),
         rpc=gateway_rpc(request),
-        observe=request.app.state.gateway_process.observe,
-        environ=request.app.state.gateway_process.config.process_environment(),
-        host=request.app.state.gateway_process.host,
+        observe=gateway_state(request).gateway_process.observe,
+        environ=gateway_state(request).gateway_process.config.process_environment(),
+        host=gateway_state(request).gateway_process.host,
     )
 
 
@@ -464,9 +482,9 @@ async def gather_cluster_status(
 # the per-call loop construction is the only cost, negligible at panel cadence.
 # Migrate the handler to `async def` only if that cadence rises enough to make
 # loop setup measurable.
-def get_cluster_status(env: RosterEnv, cur: Cursor) -> ClusterPanel:
-    rows = readroster_rows(cur)
-    snapshots = read_all(cur)
+def get_cluster_status(env: RosterEnv, conn: Connection) -> ClusterPanel:
+    rows = readroster_rows(conn)
+    snapshots = read_all(conn)
     machines = asyncio.run(gather_cluster_status(env, rows, snapshots)) if rows else []
     role = env.machine.role()
     return ClusterPanel(
@@ -493,7 +511,7 @@ def get_system_status(request: Request) -> SystemStatus:
     the others (each has its own try/except that falls back to a
     degraded value).
     """
-    status_cache: StatusCache = request.app.state.status_cache
+    status_cache = state_as(request, StatusAppState).status_cache
     return status_cache.get(lambda: _compute_system_status(request))
 
 
@@ -505,26 +523,28 @@ def _compute_system_status(request: Request) -> SystemStatus:
     env = roster_env(request)
     # Services
     try:
-        services = get_services_status(request.app.state.service_endpoints)
+        services = get_services_status(gateway_state(request).service_endpoints)
     except Exception:
         _log.exception("GET /api/status: services check failed")
         services = ServicesStatus(items=[])
 
     # Cluster
     try:
-        with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
-            cluster = get_cluster_status(env, cur)
+        with gateway_state(request).db_pool.connection() as conn:
+            cluster = get_cluster_status(env, conn)
     except Exception:
         _log.exception("GET /api/status: cluster query failed")
         # Fallback: at least surface this host's name/role so the frontend
         # does not lose the whole section.
         try:
             cluster = ClusterPanel(
-                current_machine=request.app.state.machine.name(),
-                current_serve_gateway=("gateway" in request.app.state.machine.role()),
-                current_serve_agent_runner=("agent-runner" in request.app.state.machine.role()),
+                current_machine=gateway_state(request).machine.name(),
+                current_serve_gateway=("gateway" in gateway_state(request).machine.role()),
+                current_serve_agent_runner=(
+                    "agent-runner" in gateway_state(request).machine.role()
+                ),
                 current_serve_observability_station=(
-                    "observability-station" in request.app.state.machine.role()
+                    "observability-station" in gateway_state(request).machine.role()
                 ),
                 current_paused=serving_gate_reason(
                     serving=start_serving.is_serving(env.home, observe=env.observe)

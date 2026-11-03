@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-import json
-
 import psycopg
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from psycopg_pool import PoolTimeout
+from pydantic import TypeAdapter
 
 from base.daemon.health_schema import DEGRADED, OK, component, render
+from gateway.http.config import gateway_state
+
+# meiva:note
+# The rendered health document read back as the JSON object it is.
+_HEALTH_OBJECT = TypeAdapter(dict[str, object])
 
 
 def get_health(request: Request) -> dict[str, object] | JSONResponse:
@@ -39,15 +43,15 @@ def get_health(request: Request) -> dict[str, object] | JSONResponse:
     identity: dict[str, object] = {
         "status": "ok",
         "name": "gateway",
-        "home": str(request.app.state.gateway_process.home),
-        "machine": request.app.state.machine.name(),
-        "started_at": request.app.state.started_at,
-        "sha": request.app.state.process_image.sha,
+        "home": str(gateway_state(request).gateway_process.home),
+        "machine": gateway_state(request).machine.name(),
+        "started_at": gateway_state(request).started_at,
+        "sha": gateway_state(request).process_image.sha,
         "liveness": OK,
     }
     components = [component("http", OK, progress="serving")]
     try:
-        with request.app.state.control_db_pool.connection() as conn, conn.cursor() as cur:
+        with gateway_state(request).control_db_pool.connection() as conn, conn.cursor() as cur:
             # PgBouncer drops `options` startup parameters, so the per-request
             # liveness budget must be set inside this borrowed transaction.
             cur.execute("SET LOCAL statement_timeout = '2000'")
@@ -58,9 +62,9 @@ def get_health(request: Request) -> dict[str, object] | JSONResponse:
         status, body = render(identity, components)
         return JSONResponse(
             status_code=status,
-            content=json.loads(body),
+            content=_HEALTH_OBJECT.validate_json(body),
             headers={"Retry-After": "1"},
         )
     components.append(component("db", OK))
     _status, body = render(identity, components)
-    return json.loads(body)
+    return _HEALTH_OBJECT.validate_json(body)

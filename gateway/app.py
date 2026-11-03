@@ -162,6 +162,8 @@ class GatewayServerState(
     insights_router.InsightsAppState,
     memory_router.MemoryAppState,
     pages_router.PageServingAppState,
+    cluster_router.HarnessAppState,
+    status_router.StatusAppState,
 ):
     pass
 

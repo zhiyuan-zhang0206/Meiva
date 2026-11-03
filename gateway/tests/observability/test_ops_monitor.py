@@ -224,11 +224,11 @@ def test_ops_monitor_report_is_anchored_at_the_instant_it_is_handed(
 ) -> None:
     anchor = datetime(2026, 3, 4, 5, 6, 7, tzinfo=UTC)
 
-    meta = fetch_ops_series(db_conn, "1h", anchor=anchor)["meta"]
+    meta = fetch_ops_series(db_conn, "1h", anchor=anchor).meta
 
-    assert meta["generated_at"] == anchor.isoformat()
-    assert meta["bucket_starts"][-1] == datetime(2026, 3, 4, 5, 6, tzinfo=UTC).isoformat()
-    assert meta["bucket_starts"][0] == datetime(2026, 3, 4, 4, 7, tzinfo=UTC).isoformat()
+    assert meta.generated_at == anchor.isoformat()
+    assert meta.bucket_starts[-1] == datetime(2026, 3, 4, 5, 6, tzinfo=UTC).isoformat()
+    assert meta.bucket_starts[0] == datetime(2026, 3, 4, 4, 7, tzinfo=UTC).isoformat()
 
 
 # meiva:note

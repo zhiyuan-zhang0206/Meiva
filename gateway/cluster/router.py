@@ -37,11 +37,27 @@ from gateway.cluster.schemas import AgentMachineRow, HarnessAvailability, Machin
 from gateway.cluster.status import RosterEnv, gather_cluster_status, read_local_facts, roster_env
 from gateway.events import telemetry_rows
 from gateway.events.schemas import AgentEventRow, AgentEventsResponse
-from gateway.http.config import gateway_clock, gateway_config, gateway_rpc
+from gateway.http.config import (
+    GatewayAppState,
+    gateway_clock,
+    gateway_config,
+    gateway_rpc,
+    gateway_state,
+    state_as,
+)
 from ops.cluster import operations as _ops
 from ops.cluster_status import ClusterStatus
 
 router = APIRouter()
+
+
+# meiva:note
+# The harness probe cache the app root builds; the harness routes are its only readers, so this
+# module declares it.
+class HarnessAppState(GatewayAppState):
+    harness_cache: HarnessProbeCache
+
+
 _log = logging.getLogger(__name__)
 
 
@@ -100,7 +116,7 @@ async def post_cluster_stopping(
     """
     return await asyncio.to_thread(
         _ops.cluster_stopping_op,
-        request.app.state.db,
+        gateway_state(request).db,
         machine,
         home,
         maintenance_for_seconds,
@@ -153,7 +169,7 @@ async def get_cluster_roster(
     503 mode so the roster stays visible during pause.
     """
     return await _roster_statuses(
-        roster_env(request), request.app.state.control_db_pool, fresh=fresh
+        roster_env(request), gateway_state(request).control_db_pool, fresh=fresh
     )
 
 
@@ -213,7 +229,7 @@ def get_cluster_admin_events(
         )
     except AdminEventsError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    with request.app.state.db_pool.connection() as conn:
+    with gateway_state(request).db_pool.connection() as conn:
         rows, _ = telemetry_rows.query_events(
             conn,
             agent_id=query.agent_id,
@@ -227,14 +243,16 @@ def get_cluster_admin_events(
         )
     return AgentEventsResponse(
         items=[
-            AgentEventRow(
-                id=row["id"],
-                line_sha256=row["line_sha256"],
-                ts=row["ts"],
-                agent_id=row["agent_id"],
-                level=row["level"],
-                event=row["event_name"],
-                payload=row["attributes"],
+            AgentEventRow.model_validate(
+                {
+                    "id": row.get("id"),
+                    "line_sha256": row.get("line_sha256"),
+                    "ts": row.get("ts"),
+                    "agent_id": row.get("agent_id"),
+                    "level": row.get("level"),
+                    "event": row.get("event_name"),
+                    "payload": row.get("attributes"),
+                }
             )
             for row in rows
         ]
@@ -258,7 +276,7 @@ async def get_cluster_machines(
     over the free-text description, not ops topology.
     """
     statuses = await _roster_statuses(
-        roster_env(request), request.app.state.control_db_pool, fresh=fresh
+        roster_env(request), gateway_state(request).control_db_pool, fresh=fresh
     )
     # This is the AGENT view: it lists only machines that can run agent processes
     # (carry the agent-runner capability). A gateway-only node is intentionally
@@ -293,12 +311,12 @@ async def get_cluster_machines(
     description="Read the last explicit harness check. Empty until refreshed; never probes a runner.",
 )
 async def get_machine_harnesses(name: str, request: Request) -> list[HarnessAvailability]:
-    cache: HarnessProbeCache = request.app.state.harness_cache
+    cache = state_as(request, HarnessAppState).harness_cache
     cached = cache.get(name)
     if cached is not None:
         return cached
     await require_harness_target(
-        name, db=request.app.state.db, local_machine=request.app.state.machine
+        name, db=gateway_state(request).db, local_machine=gateway_state(request).machine
     )
     return []
 
@@ -309,13 +327,13 @@ async def get_machine_harnesses(name: str, request: Request) -> list[HarnessAvai
     description="Explicitly check one runner's harness installations and login state, replacing its snapshot on success.",
 )
 async def refresh_machine_harnesses(name: str, request: Request) -> list[HarnessAvailability]:
-    cache: HarnessProbeCache = request.app.state.harness_cache
+    cache = state_as(request, HarnessAppState).harness_cache
 
     async def probe() -> list[HarnessAvailability]:
         probed = await probe_harnesses(
             name,
-            db=request.app.state.db,
-            local_machine=request.app.state.machine,
+            db=gateway_state(request).db,
+            local_machine=gateway_state(request).machine,
             rpc=gateway_rpc(request),
         )
         return availability_rows(probed, LAUNCHABLE_HARNESSES)
@@ -341,7 +359,7 @@ def set_machine_staging(
     skips is_staging rows). Backed by `base.cluster.machines.set_staging`; the CLI
     verbs `meiva cluster mark-staging` / `unmark-staging` call this endpoint.
     """
-    changed = machines.set_staging(request.app.state.db, name, is_staging=req.is_staging)
+    changed = machines.set_staging(gateway_state(request).db, name, is_staging=req.is_staging)
     if not changed:
         raise HTTPException(status_code=404, detail=f"no machine named {name!r}")
     return MachineDeleteResponse(deleted=True)
@@ -363,13 +381,13 @@ def delete_cluster_machine(name: str, request: Request) -> MachineDeleteResponse
     on startup, so a runtime DELETE wouldn't be repaired until next
     restart).
     """
-    if name == request.app.state.machine.name():
+    if name == gateway_state(request).machine.name():
         raise HTTPException(
             status_code=400,
             detail=f"refusing to delete this host's own machines row ({name!r}); "
             "stop the gateway first if you really want to retire it.",
         )
-    with write_transaction(request.app.state.control_db_pool) as conn, conn.cursor() as cur:
+    with write_transaction(gateway_state(request).control_db_pool) as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM machines WHERE name = %s", (name,))
         deleted = cur.rowcount > 0
     return MachineDeleteResponse(deleted=deleted)
