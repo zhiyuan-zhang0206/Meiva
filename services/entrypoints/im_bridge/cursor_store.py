@@ -11,31 +11,13 @@ Methods are synchronous (psycopg pool): async callers run them in a thread.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, LiteralString, NamedTuple, Protocol, Self
+from typing import LiteralString, NamedTuple
 
+from base.db.rows import query_all
 from base.db.transaction import ConnectionSource
-
-
-class CursorLike(Protocol):
-    def __enter__(self) -> Self: ...
-    def __exit__(self, *exc: object) -> object: ...
-    def execute(
-        self, statement: LiteralString, params: tuple[Any, ...] | None = None
-    ) -> object: ...
-    def fetchall(self) -> Sequence[tuple[Any, ...]]: ...
-
-
-class CursorConnection(Protocol):
-    def cursor(self) -> CursorLike: ...
-
-
-class CursorPool(Protocol):
-    def connection(
-        self, timeout: float | None = None
-    ) -> AbstractContextManager[CursorConnection]: ...
+from services.entrypoints.im_bridge.types import TimelineItem
 
 
 class PushWatermark(NamedTuple):
@@ -53,24 +35,44 @@ class PushWatermark(NamedTuple):
     item_id: str
 
 
+@dataclass(frozen=True)
+class _PushRow:
+    channel: str
+    chat_id: str
+    push_agent_id: int
+    push_item_id: str
+    push_created_at: str | None
+
+
+@dataclass(frozen=True)
+class _PollRow:
+    chat_id: str
+    poll_message_id: str | None
+    poll_create_ms: int
+
+
 class CursorStore:
-    def __init__(self, db_pool: ConnectionSource | CursorPool | None = None) -> None:
-        self._pool: Any = db_pool
+    def __init__(self, db_pool: ConnectionSource | None = None) -> None:
+        self._pool = db_pool
 
     def load_push(self) -> dict[tuple[str, str, int], PushWatermark]:
         """{(channel, chat_id, agent_id): newest accepted item}, one per chat."""
 
         if self._pool is None:
             return {}
-        with self._pool.connection() as conn, conn.cursor() as cur:
-            cur.execute(
+        with self._pool.connection() as conn:
+            rows = query_all(
+                conn,
+                _PushRow,
                 "SELECT channel, chat_id, push_agent_id, push_item_id, push_created_at "
-                "FROM im_bridge_cursors WHERE push_item_id IS NOT NULL"
+                "FROM im_bridge_cursors WHERE push_item_id IS NOT NULL",
             )
-            return {
-                (ch, chat, int(agent)): PushWatermark(created_at=stamp, item_id=item)
-                for ch, chat, agent, item, stamp in cur.fetchall()
-            }
+        return {
+            (row.channel, row.chat_id, row.push_agent_id): PushWatermark(
+                created_at=row.push_created_at, item_id=row.push_item_id
+            )
+            for row in rows
+        }
 
     def save_push(
         self, channel: str, chat_id: str, agent_id: int, watermark: PushWatermark
@@ -89,13 +91,15 @@ class CursorStore:
 
         if self._pool is None:
             return {}
-        with self._pool.connection() as conn, conn.cursor() as cur:
-            cur.execute(
+        with self._pool.connection() as conn:
+            rows = query_all(
+                conn,
+                _PollRow,
                 "SELECT chat_id, poll_message_id, poll_create_ms FROM im_bridge_cursors "
                 "WHERE channel = %s AND poll_create_ms IS NOT NULL",
                 (channel,),
             )
-            return {chat: (message_id or "", int(ms)) for chat, message_id, ms in cur.fetchall()}
+        return {row.chat_id: (row.poll_message_id or "", row.poll_create_ms) for row in rows}
 
     def save_poll(self, channel: str, chat_id: str, message_id: str, create_ms: int) -> None:
         self._upsert(
@@ -106,7 +110,7 @@ class CursorStore:
             (channel, chat_id, message_id or None, create_ms),
         )
 
-    def _upsert(self, statement: LiteralString, params: tuple[Any, ...]) -> None:
+    def _upsert(self, statement: LiteralString, params: tuple[str | int | None, ...]) -> None:
         if self._pool is None:
             return
         from base.db.transaction import write_transaction
@@ -129,7 +133,7 @@ def parse_stamp(raw: object) -> datetime | None:
     return stamp if stamp.tzinfo is not None else stamp.replace(tzinfo=UTC)
 
 
-def watermark_of(item: dict[str, Any]) -> PushWatermark:
+def watermark_of(item: TimelineItem) -> PushWatermark:
     """The push position one timeline item stands for: its created_at when
     stamped (stored verbatim), its item_id always."""
 
@@ -138,7 +142,7 @@ def watermark_of(item: dict[str, Any]) -> PushWatermark:
     return PushWatermark(created_at=stamped, item_id=str(item["item_id"]))
 
 
-def is_after_watermark(item: dict[str, Any], watermark: PushWatermark) -> bool:
+def is_after_watermark(item: TimelineItem, watermark: PushWatermark) -> bool:
     """Whether *item* sits past *watermark* on the chat's push position.
 
     created_at is the primary key: monotone across the session's whole life,

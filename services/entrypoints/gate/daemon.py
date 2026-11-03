@@ -41,7 +41,11 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Sequence
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from email.message import Message
+from functools import partial
+from http.client import HTTPResponse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -51,6 +55,8 @@ from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot, settings
 from base.db import Database
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.host.exit_codes import hard_exit
 from base.log import logger
 from base.native_process.loaded_commit import LoadedCommit
@@ -110,6 +116,26 @@ def _valid_forwarded_header(name: str, value: str) -> bool:
     if name == "x-forwarded-proto":
         return value.lower() in ("http", "https")
     return True
+
+
+# meiva:note
+# The status, headers and body of the answer `opener(request)` gives. `urlopen` types its answer
+# `Any`; a parameter typed with the real `HTTPResponse` takes it without naming the `Any`.
+def _fetch(
+    opener: Callable[[urllib.request.Request], AbstractContextManager[HTTPResponse]],
+    request: urllib.request.Request,
+) -> tuple[int, Message, bytes]:
+    with opener(request) as response:
+        return response.status, response.headers, response.read()
+
+
+# meiva:note
+# Whether the gateway's auth-check answer says the session is authenticated.
+def _authenticated(raw: bytes) -> bool:
+    answer = object_of(json.loads, raw)
+    if not is_object_dict(answer):
+        raise TypeError("the auth check answered something other than an object")
+    return bool(answer.get("authenticated"))
 
 
 PROBE_TIMEOUT_S = 3.0
@@ -214,9 +240,10 @@ class Gate:
         try:
             # meiva:note
             # the URL is the operator-declared gateway base, never request input.
-            with urllib.request.urlopen(req, timeout=self._config.probe_timeout_s) as resp:  # noqa: S310
-                body = json.loads(resp.read())
-                return "up" if body.get("authenticated") else "login"
+            _, _, raw = _fetch(
+                partial(urllib.request.urlopen, timeout=self._config.probe_timeout_s), req
+            )
+            return "up" if _authenticated(raw) else "login"
         except Exception as exc:  # any probe failure means "not serving"; never crash a request
             self._report_probe_failure(exc, latency_ms=round((time.monotonic() - started) * 1000))
             return "down"
@@ -266,8 +293,10 @@ class Gate:
             try:
                 # meiva:note
                 # the target is the loopback app base plus the request path, a fixed internal URL.
-                with urllib.request.urlopen(req, timeout=self._config.probe_timeout_s) as resp:  # noqa: S310
-                    status, headers, body = resp.status, resp.headers, resp.read()
+                status, headers, body = _fetch(
+                    partial(urllib.request.urlopen, timeout=self._config.probe_timeout_s),
+                    req,
+                )
             except urllib.error.HTTPError as e:  # app up, answered with an error status
                 status, headers, body = e.code, e.headers, e.read()
             handler.send_response(status)
@@ -496,11 +525,18 @@ def build_gate(launch: GateLaunch, *, home: Path) -> GateServer:
     return GateServer(("0.0.0.0", launch.port), gate)  # noqa: S104
 
 
-def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
+# meiva:note
+# The flags `_parse_args` registers, declared so the parsed namespace reads as typed values.
+class _Arguments(argparse.Namespace):
+    port: int | None
+    static_dir: Path | None
+
+
+def _parse_args(argv: Sequence[str]) -> _Arguments:
     parser = argparse.ArgumentParser(description="Fleet UI entry service")
     parser.add_argument("--port", type=int, default=None, help="bind port (default: entry port)")
     parser.add_argument("--static-dir", type=Path, default=None, help="static pages directory")
-    return parser.parse_args(argv)
+    return parser.parse_args(argv, namespace=_Arguments())
 
 
 def main(argv: Sequence[str], *, process_config: ConfigBoot) -> None:

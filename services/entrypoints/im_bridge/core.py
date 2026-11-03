@@ -8,7 +8,7 @@ import random
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 from psycopg_pool import ConnectionPool
 
@@ -46,6 +46,7 @@ from services.entrypoints.im_bridge.types import (
     InboundMessage,
     Reply,
     SendNotStartedError,
+    TimelineItem,
     parse_command,
 )
 
@@ -72,7 +73,7 @@ def _display_status(status: str) -> str:
 # user-facing `agent_chat` items. Watcher/schedule/peer-agent inbounds and unprefixed background
 # `agent_chat` items (`user_facing=False`) stay internal.
 # meiva:link base/agents/history/docs/timeline/timeline.meiva.okf.md
-def is_dialog_item(it: dict[str, Any]) -> bool:
+def is_dialog_item(it: TimelineItem) -> bool:
     kind = it.get("kind")
     if kind not in _DIALOG_KINDS:
         return False
@@ -132,8 +133,8 @@ class IMBridgeCore(
         )
         self.chats: dict[tuple[str, str], ChatState] = {}
         self._selection_locks: dict[tuple[str, str], asyncio.Lock] = {}
-        self._subscriptions: dict[tuple[str, str], asyncio.Task[Any]] = {}
-        self._typing_tasks: dict[tuple[str, str], asyncio.Task[Any]] = {}
+        self._subscriptions: dict[tuple[str, str], asyncio.Task[None]] = {}
+        self._typing_tasks: dict[tuple[str, str], asyncio.Task[None]] = {}
         self._last_pushed: dict[tuple[str, str, int], PushWatermark] = {}
         # Post-commit memory cache; the cursor row owns acceptance and selection.
 
@@ -668,7 +669,7 @@ class IMBridgeCore(
                 await asyncio.sleep(5)
 
     async def _push_snapshot(
-        self, key: tuple[str, str], state: ChatState, event: dict[str, Any]
+        self, key: tuple[str, str], state: ChatState, event: dict[str, object]
     ) -> None:
         del event
         # SSE contains live reducer snapshots, not a checkpoint commit receipt.
@@ -688,7 +689,7 @@ class IMBridgeCore(
             await self._push_items(key, state, items)
 
     async def _push_items(
-        self, key: tuple[str, str], state: ChatState, raw_items: list[Any]
+        self, key: tuple[str, str], state: ChatState, raw_items: list[TimelineItem]
     ) -> None:
         if state.current_agent_id is None:
             return
@@ -711,7 +712,7 @@ class IMBridgeCore(
         self,
         state: ChatState,
         agent_id: int,
-        items: list[dict[str, Any]],
+        items: list[TimelineItem],
         *,
         replay_id: str = "",
         switch_arg: str = "",

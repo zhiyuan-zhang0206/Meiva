@@ -7,10 +7,15 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import StrEnum
 from http import HTTPStatus
-from typing import Any, NoReturn, Protocol, TypedDict
+from typing import NoReturn, NotRequired, Protocol, TypedDict
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
+
+# meiva:note
+# One rendered timeline item as the gateway answers it: a JSON object whose members each reader
+# narrows at the point of use.
+type TimelineItem = dict[str, object]
 
 
 class SendNotStartedError(RuntimeError):
@@ -131,15 +136,34 @@ class AgentDirectoryPage(TypedDict):
     next_cursor: int | None
 
 
+# meiva:note
+# Individual agent fields displayed by /status; each is shown only when the gateway sent it.
 class AgentDetail(AgentRow):
-    """Individual agent fields displayed by /status."""
+    machine: NotRequired[str | None]
+    spawned_at: NotRequired[str | None]
+    started_at: NotRequired[str | None]
+    last_active_at: NotRequired[str | None]
+    last_inbound_at: NotRequired[str | None]
+    pid: NotRequired[int | None]
 
-    machine: str | None
-    spawned_at: str | None
-    started_at: str | None
-    last_active_at: str | None
-    last_inbound_at: str | None
-    pid: int | None
+
+# meiva:note
+# One selectable model as the /spawn menu reads it.
+class ModelInfo(TypedDict, total=False):
+    reasoning_effort_options: list[str] | None
+
+
+# meiva:note
+# The model catalog the /spawn menu offers, keyed by model name.
+class ModelsView(TypedDict, total=False):
+    models: dict[str, ModelInfo]
+
+
+# meiva:note
+# One Meiva slash command in the /commands catalog.
+class CommandInfo(TypedDict):
+    name: str
+    description: NotRequired[str | None]
 
 
 @dataclass
@@ -227,7 +251,15 @@ class IMAdapter(ABC):
     push_recovered_at: float | None = None
 
     def __init__(self, core: BridgeCore | None = None) -> None:
-        self.core: Any = core
+        self._core = core
+
+    # meiva:note
+    # The bridge core this adapter delivers inbound messages to.
+    @property
+    def core(self) -> BridgeCore:
+        if self._core is None:
+            raise RuntimeError(f"{type(self).__name__} was built without a bridge core")
+        return self._core
 
     @abstractmethod
     async def start(self, tasks: asyncio.TaskGroup) -> None:
@@ -287,7 +319,13 @@ class IMAdapter(ABC):
         """Send exactly the accepted rendering; never rebuild or change its account."""
         raise NotImplementedError(f"{type(self).__name__} has no durable timeline capability")
 
-    async def send_to_owner(self, text: str, *, markdown: bool = False) -> None:
+    async def send_to_owner(
+        self,
+        text: str,
+        *,
+        markdown: bool = False,
+        buttons: list[tuple[str, str]] | None = None,
+    ) -> None:
         """Send ``text`` to the user's private chat on this channel.
 
         The outbound-notification entry point (``IMBridgeCore.notify_user``):

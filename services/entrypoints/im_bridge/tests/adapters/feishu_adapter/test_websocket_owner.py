@@ -13,6 +13,7 @@ from services.entrypoints.im_bridge.tests.adapters.test_feishu_adapter import (
     FakeWsClient,
     build_patching_adapter,
     make_event,
+    received,
 )
 from services.entrypoints.im_bridge.tests.slices import feishu_config
 from services.entrypoints.im_bridge.types import InboundMessage
@@ -229,4 +230,4 @@ async def test_active_task_creation_fault_reaches_owner(state_dir: Path) -> None
                 adapter.begin_shutdown()
     (fault,) = caught.value.exceptions
     assert isinstance(fault, RuntimeError) and "is finished" in str(fault)
-    assert not adapter.core.received
+    assert not received(adapter)

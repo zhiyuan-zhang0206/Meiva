@@ -298,7 +298,7 @@ def test_two_connections_concurrent_accept_freezes_one_fanout(pool: ConnectionPo
         adapter.owner = owner
         service = bridge(pool, adapter)
         source, _ = service.store.lookup(group)
-        decision = asyncio.run(service._prepare("telegram", adapter, source["text"]))
+        decision = asyncio.run(service._prepare("telegram", adapter, str(source["text"])))
         barrier.wait(timeout=5)
         return service.store.accept(source, (decision,))
 
@@ -400,7 +400,7 @@ async def test_source_change_before_commit_conflicts_without_effect(pool: Connec
     [group] = ingest(pool, [item("a")])
     service = bridge(pool, AlertAdapter())
     source, _ = service.store.lookup(group)
-    decision = await service._prepare("telegram", service.adapters["telegram"], source["text"])
+    decision = await service._prepare("telegram", service.adapters["telegram"], str(source["text"]))
     with pool.connection() as conn:
         conn.execute("UPDATE alert_notification_groups SET text='changed' WHERE id=%s", (group,))
     with pytest.raises(OutboundIdentityConflictError):

@@ -15,7 +15,11 @@ from starlette.routing import Route
 from base.clock.ids import new_uuid
 from base.host.net.tests.local_http import serve_asgi
 from services.entrypoints.im_bridge import push_watchdog
-from services.entrypoints.im_bridge.adapters.feishu_poll_cursor import anchor, pending_after
+from services.entrypoints.im_bridge.adapters.feishu_poll_cursor import (
+    FeishuListedMessage,
+    anchor,
+    pending_after,
+)
 from services.entrypoints.im_bridge.adapters.weixin import post_headers, wechat_uin
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
 from services.entrypoints.im_bridge.ingress.store import WeixinIngressStore
@@ -27,10 +31,10 @@ from services.entrypoints.im_bridge.tests.test_timeline_outbox import candidate
 from services.entrypoints.im_bridge.types import InboundMessage
 
 
-class _Item:
-    def __init__(self, message_id: str, create_time: int) -> None:
-        self.message_id = message_id
-        self.create_time = str(create_time)
+# meiva:note
+# A listed message that carries only the members the cursor functions read; named like a class.
+def _Item(message_id: str, create_time: int) -> FeishuListedMessage:  # noqa: N802
+    return FeishuListedMessage(message_id=message_id, create_time=str(create_time))
 
 
 def test_a_minted_id_is_a_version_four_uuid_that_follows_its_generator() -> None:

@@ -1,9 +1,11 @@
 """Normal notice decisions share the existing IM outbound intent transaction."""
 
-from typing import Any
+from collections.abc import Mapping
+from dataclasses import dataclass
 
 from psycopg.types.json import Jsonb
 
+from base.db.rows import query_one
 from base.db.transaction import write_transaction
 from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
 from services.entrypoints.im_bridge.outbound.types import (
@@ -15,6 +17,22 @@ from services.entrypoints.im_bridge.outbound.types import (
 )
 
 
+@dataclass(frozen=True)
+class _MaximumRow:
+    maximum: int
+
+
+@dataclass(frozen=True)
+class _FloorRow:
+    legacy_floor: int
+
+
+@dataclass(frozen=True)
+class _AcceptanceRow:
+    decision: str
+    intent_ids: list[int]
+
+
 class NoticePollStore:
     """Notice-specific cutover and receipt owner; no separate dispatch queue."""
 
@@ -24,10 +42,12 @@ class NoticePollStore:
     def initialize_notice_poll(self) -> None:
         """Fix the cutover once: notices already committed are never auto-sent."""
         with write_transaction(self.outbound._pool()) as conn:
-            maximum = conn.execute("SELECT COALESCE(max(id), 0) FROM agent_notices").fetchone()
+            maximum = query_one(
+                conn, _MaximumRow, "SELECT COALESCE(max(id), 0) AS maximum FROM agent_notices"
+            )
             if maximum is None:
                 raise RuntimeError("notice cutover aggregate returned no row")
-            floor = int(maximum[0])
+            floor = maximum.maximum
             reason = (
                 NoticePollImportReason.NO_HISTORY
                 if floor == 0
@@ -42,7 +62,7 @@ class NoticePollStore:
     def accept_notice(
         self,
         notice_id: int,
-        snapshot: dict[str, Any],
+        snapshot: Mapping[str, object],
         intent: OutboundIntent | None,
         *,
         filtered: bool,
@@ -56,19 +76,25 @@ class NoticePollStore:
         """
         self._validate_notice(notice_id, intent, filtered=filtered)
         with write_transaction(self.outbound._pool()) as conn:
-            state = conn.execute(
-                "SELECT legacy_floor FROM im_bridge_notice_poll_state WHERE singleton FOR UPDATE"
-            ).fetchone()
+            state = query_one(
+                conn,
+                _FloorRow,
+                "SELECT legacy_floor FROM im_bridge_notice_poll_state WHERE singleton FOR UPDATE",
+            )
             if state is None:
                 raise RuntimeError("normal notice poll must initialize its cutover first")
-            if notice_id <= state[0]:
+            if notice_id <= state.legacy_floor:
                 raise ValueError("notice belongs to the retained legacy cutover range")
-            previous = conn.execute(
+            previous = query_one(
+                conn,
+                _AcceptanceRow,
                 "SELECT decision,intent_ids FROM im_bridge_notice_acceptances WHERE notice_id=%s",
                 (notice_id,),
-            ).fetchone()
+            )
             if previous is not None:
-                return NoticePollReceipt(NoticePollDecision(previous[0]), tuple(previous[1]))
+                return NoticePollReceipt(
+                    NoticePollDecision(previous.decision), tuple(previous.intent_ids)
+                )
             decision = NoticePollDecision.FILTERED if filtered else NoticePollDecision.QUEUED
             ids = () if filtered else (self.outbound.insert_intent(conn, intent),)
             request = {

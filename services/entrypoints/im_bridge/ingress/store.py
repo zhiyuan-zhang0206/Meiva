@@ -3,6 +3,8 @@
 import json
 import random
 from collections.abc import Mapping
+from dataclasses import dataclass
+from uuid import UUID
 
 from psycopg import Connection, sql
 from psycopg.types.json import Jsonb
@@ -10,6 +12,7 @@ from psycopg.types.json import Jsonb
 from base import telemetry
 from base.agents.inbox.chat_delivery import insert_chat_inbound_in_transaction
 from base.clock.ids import new_uuid
+from base.db.rows import query_one
 from base.db.transaction import ConnectionSource, write_transaction
 from services.entrypoints.im_bridge.ingress.types import (
     IngressBindingState,
@@ -23,6 +26,7 @@ from services.entrypoints.im_bridge.ingress.types import (
 )
 from services.entrypoints.im_bridge.outbound.claim_fence import (
     BINDING_SQL,
+    BindingRow,
     StalePollBindingError,
     binding_is_current,
 )
@@ -30,24 +34,58 @@ from services.entrypoints.im_bridge.outbound.claim_fence import (
 _RECEIPT_COLUMNS = "id,namespace,account_id,sender_id,message_id,route,status,attempt_id,inbound_id,outcome_reason,result"
 
 
-def receipt_from_row(row: tuple[object, ...]) -> IngressReceipt:
+# meiva:note
+# The columns of `_RECEIPT_COLUMNS`; `route` and `result` are `jsonb`.
+@dataclass(frozen=True)
+class ReceiptRow:
+    id: int
+    namespace: str
+    account_id: str
+    sender_id: str
+    message_id: str
+    route: object
+    status: str
+    attempt_id: UUID | None
+    inbound_id: int | None
+    outcome_reason: str | None
+    result: object
+
+
+# meiva:note
+# A receipt with the immutable request it was retained under (`jsonb`).
+@dataclass(frozen=True)
+class ReceiptWithRequestRow(ReceiptRow):
+    request: object
+
+
+@dataclass(frozen=True)
+class _CursorRow:
+    cursor: str
+    state: str
+
+
+@dataclass(frozen=True)
+class _StateRow:
+    state: str
+
+
+def receipt_from_row(row: ReceiptRow) -> IngressReceipt:
     return IngressReceipt.model_validate_json(
         json.dumps(
             {
-                "id": row[0],
-                "source": dict(
-                    zip(
-                        ("namespace", "account_id", "sender_id", "message_id"),
-                        row[1:5],
-                        strict=True,
-                    )
-                ),
-                "route": row[5],
-                "status": row[6],
-                "attempt_id": str(row[7]) if row[7] is not None else None,
-                "inbound_id": row[8],
-                "outcome_reason": row[9],
-                "result": row[10],
+                "id": row.id,
+                "source": {
+                    "namespace": row.namespace,
+                    "account_id": row.account_id,
+                    "sender_id": row.sender_id,
+                    "message_id": row.message_id,
+                },
+                "route": row.route,
+                "status": row.status,
+                "attempt_id": str(row.attempt_id) if row.attempt_id is not None else None,
+                "inbound_id": row.inbound_id,
+                "outcome_reason": row.outcome_reason,
+                "result": row.result,
             }
         )
     )
@@ -66,7 +104,7 @@ class WeixinIngressStore:
     @staticmethod
     def lock_binding(conn: Connection, binding: PollBinding) -> None:
         if not binding_is_current(
-            conn.execute(BINDING_SQL).fetchone(),
+            query_one(conn, BindingRow, BINDING_SQL),
             namespace=binding.namespace,
             account_id=binding.account_id,
             epoch=binding.epoch,
@@ -94,14 +132,20 @@ class WeixinIngressStore:
                     "unverified_history",
                 ),
             )
-            row = conn.execute(
+            row = query_one(
+                conn,
+                _CursorRow,
                 "SELECT cursor,state FROM weixin_ingress_cursors WHERE namespace=%s AND account_id=%s",
                 (namespace, account_id),
-            ).fetchone()
+            )
             if row is None:
                 raise RuntimeError("Weixin ingress INSERT did not return its durable row")
             return PollBinding(
-                namespace=namespace, account_id=account_id, epoch=epoch, cursor=row[0], state=row[1]
+                namespace=namespace,
+                account_id=account_id,
+                epoch=epoch,
+                cursor=row.cursor,
+                state=IngressBindingState(row.state),
             )
 
     @staticmethod
@@ -120,20 +164,22 @@ class WeixinIngressStore:
     def lookup_in_transaction(
         self, conn: Connection, source: ProviderSource, request: Mapping[str, object]
     ) -> IngressReceipt | None:
-        row = conn.execute(
+        row = query_one(
+            conn,
+            ReceiptWithRequestRow,
             sql.SQL(
                 "SELECT {},request FROM weixin_ingress_receipts "
                 "WHERE namespace=%s AND account_id=%s AND sender_id=%s AND message_id=%s FOR UPDATE"
             ).format(sql.SQL(_RECEIPT_COLUMNS)),
             (source.namespace, source.account_id, source.sender_id, source.message_id),
-        ).fetchone()
+        )
         if row is None:
             return None
-        if row[-1] != request:
+        if row.request != request:
             raise IngressIdentityConflictError(
                 "Weixin provider source identifies a different immutable message"
             )
-        return receipt_from_row(row[:-1])
+        return receipt_from_row(row)
 
     def retain(
         self,
@@ -151,11 +197,13 @@ class WeixinIngressStore:
             previous = self.lookup_in_transaction(conn, source, request)
             if previous is not None:
                 return previous
-            current_state = conn.execute(
+            current_state = query_one(
+                conn,
+                _StateRow,
                 "SELECT state FROM weixin_ingress_cursors WHERE namespace=%s AND account_id=%s",
                 (binding.namespace, binding.account_id),
-            ).fetchone()
-            if current_state is None or current_state[0] != IngressBindingState.ACTIVE:
+            )
+            if current_state is None or current_state.state != IngressBindingState.ACTIVE:
                 raise RuntimeError("Weixin business admission requires an active binding")
             status, inbound_id = IngressStatus.RETAINED, None
             reason = route.reason
@@ -178,7 +226,9 @@ class WeixinIngressStore:
                     if route.reason == "notice_reply_mode_account_unproven"
                     else IngressStatus.REJECTED
                 )
-            row = conn.execute(
+            row = query_one(
+                conn,
+                ReceiptRow,
                 sql.SQL(
                     "INSERT INTO weixin_ingress_receipts(namespace,account_id,sender_id,message_id,request,provider_payload,route,status,inbound_id,outcome_reason,completed_at) "
                     "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,CASE WHEN %s THEN now() END) RETURNING {}"
@@ -197,7 +247,7 @@ class WeixinIngressStore:
                     status
                     in (IngressStatus.ACCEPTED, IngressStatus.REJECTED, IngressStatus.QUARANTINED),
                 ),
-            ).fetchone()
+            )
             if row is None:
                 raise RuntimeError("Weixin ingress INSERT did not return its durable row")
             receipt = receipt_from_row(row)
@@ -209,12 +259,14 @@ class WeixinIngressStore:
     def get_receipt(self, binding: PollBinding, receipt_id: int) -> IngressReceipt:
         with write_transaction(self.require_pool()) as conn:
             self.lock_binding(conn, binding)
-            row = conn.execute(
+            row = query_one(
+                conn,
+                ReceiptRow,
                 sql.SQL(
                     "SELECT {} FROM weixin_ingress_receipts WHERE id=%s AND namespace=%s AND account_id=%s"
                 ).format(sql.SQL(_RECEIPT_COLUMNS)),
                 (receipt_id, binding.namespace, binding.account_id),
-            ).fetchone()
+            )
             if row is None:
                 raise RuntimeError("retained Weixin source receipt disappeared")
             return receipt_from_row(row)
@@ -222,14 +274,16 @@ class WeixinIngressStore:
     def refresh_binding(self, binding: PollBinding) -> PollBinding:
         with write_transaction(self.require_pool()) as conn:
             self.lock_binding(conn, binding)
-            row = conn.execute(
+            row = query_one(
+                conn,
+                _CursorRow,
                 "SELECT cursor,state FROM weixin_ingress_cursors WHERE namespace=%s AND account_id=%s",
                 (binding.namespace, binding.account_id),
-            ).fetchone()
+            )
             if row is None:
                 raise RuntimeError("Weixin durable cursor disappeared")
             return binding.model_copy(
-                update={"cursor": row[0], "state": IngressBindingState(row[1])}
+                update={"cursor": row.cursor, "state": IngressBindingState(row.state)}
             )
 
     # meiva:note
@@ -245,11 +299,13 @@ class WeixinIngressStore:
         self.check_source(binding, source)
         with write_transaction(self.require_pool()) as conn:
             self.lock_binding(conn, binding)
-            current = conn.execute(
+            current = query_one(
+                conn,
+                _StateRow,
                 "SELECT state FROM weixin_ingress_cursors WHERE namespace=%s AND account_id=%s",
                 (binding.namespace, binding.account_id),
-            ).fetchone()
-            if current is None or current[0] != IngressBindingState.DRAINING:
+            )
+            if current is None or current.state != IngressBindingState.DRAINING:
                 raise StalePollBindingError("Weixin quarantine state changed")
             previous = self.lookup_in_transaction(conn, source, request)
             if previous is not None:
@@ -259,7 +315,9 @@ class WeixinIngressStore:
                 text=text,
                 reason="unproven_history_quarantined",
             )
-            row = conn.execute(
+            row = query_one(
+                conn,
+                ReceiptRow,
                 sql.SQL(
                     "INSERT INTO weixin_ingress_receipts(namespace,account_id,sender_id,message_id,request,provider_payload,route,status,outcome_reason,completed_at) "
                     "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,now()) RETURNING {}"
@@ -275,7 +333,7 @@ class WeixinIngressStore:
                     IngressStatus.QUARANTINED.value,
                     route.reason,
                 ),
-            ).fetchone()
+            )
             if row is None:
                 raise RuntimeError("Weixin quarantine did not return its durable source receipt")
             return receipt_from_row(row)
@@ -283,13 +341,15 @@ class WeixinIngressStore:
     def claim(self, binding: PollBinding, receipt_id: int) -> IngressReceipt | None:
         with write_transaction(self.require_pool()) as conn:
             self.lock_binding(conn, binding)
-            row = conn.execute(
+            row = query_one(
+                conn,
+                ReceiptRow,
                 sql.SQL(
                     "UPDATE weixin_ingress_receipts SET status='claimed',attempt_id=%s "
                     "WHERE id=%s AND namespace=%s AND account_id=%s AND status='retained' AND EXISTS (SELECT 1 FROM weixin_ingress_cursors c WHERE c.namespace=weixin_ingress_receipts.namespace AND c.account_id=weixin_ingress_receipts.account_id AND c.state='active') RETURNING {}"
                 ).format(sql.SQL(_RECEIPT_COLUMNS)),
                 (new_uuid(self._rng), receipt_id, binding.namespace, binding.account_id),
-            ).fetchone()
+            )
             return receipt_from_row(row) if row is not None else None
 
     def finish(
@@ -310,7 +370,9 @@ class WeixinIngressStore:
             raise ValueError("uncertain Weixin commands require a safe diagnostic reason")
         with write_transaction(self.require_pool()) as conn:
             self.lock_binding(conn, binding)
-            row = conn.execute(
+            row = query_one(
+                conn,
+                ReceiptRow,
                 sql.SQL(
                     "UPDATE weixin_ingress_receipts SET status=%s,outcome_reason=%s,result=%s,completed_at=now() "
                     "WHERE id=%s AND namespace=%s AND account_id=%s AND attempt_id=%s AND status='claimed' RETURNING {}"
@@ -324,7 +386,7 @@ class WeixinIngressStore:
                     binding.account_id,
                     receipt.attempt_id,
                 ),
-            ).fetchone()
+            )
             return receipt_from_row(row) if row is not None else None
 
     def recover_claims(self, binding: PollBinding) -> None:
@@ -364,7 +426,9 @@ class WeixinIngressStore:
             ).fetchone()
             if unfinished is not None:
                 raise RuntimeError("Weixin checkpoint cannot abandon unprocessed retained sources")
-            row = conn.execute(
+            row = query_one(
+                conn,
+                _CursorRow,
                 "UPDATE weixin_ingress_cursors SET cursor=%s,updated_at=now(), "
                 "state=CASE WHEN state='draining' AND %s THEN 'active' ELSE state END, "
                 "binding_reason=CASE WHEN state='draining' AND %s THEN 'operator_activated' ELSE binding_reason END "
@@ -377,7 +441,9 @@ class WeixinIngressStore:
                     binding.account_id,
                     expected_cursor,
                 ),
-            ).fetchone()
+            )
             if row is None:
                 raise StalePollBindingError("Weixin opaque cursor compare-and-set rejected")
-        return binding.model_copy(update={"cursor": cursor, "state": IngressBindingState(row[1])})
+        return binding.model_copy(
+            update={"cursor": cursor, "state": IngressBindingState(row.state)}
+        )

@@ -32,7 +32,7 @@ async def inbound_key(state_dir: Path, provider_id: object, text: str = "same") 
     account = load_account(state_dir)
     assert account is not None
     return ordinary_chat_key(
-        base_url=account["base_url"],
+        base_url=str(account["base_url"]),
         account_id=account["account_id"],
         sender_id="peer-1",
         provider_id=provider_id,

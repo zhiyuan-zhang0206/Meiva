@@ -1,9 +1,10 @@
 """Weixin's existing adapter loop owns source retention and first dispatch."""
 
 import asyncio
-import json
+from collections.abc import Mapping
 from dataclasses import asdict
-from typing import Any
+
+from pydantic import TypeAdapter
 
 from base.log import logger
 from services.entrypoints.im_bridge.ingress.identity import (
@@ -25,6 +26,10 @@ from services.entrypoints.im_bridge.outbound.claim_fence import ClaimFence
 from services.entrypoints.im_bridge.timeline_acceptance import SelectionAdmission, TimelineCore
 from services.entrypoints.im_bridge.types import ChatState, IMAdapter, parse_command
 
+# meiva:note
+# The adapter's account identity: the JSON pair of the provider endpoint and the account id.
+_ACCOUNT_IDENTITY = TypeAdapter(tuple[str, str])
+
 
 class WeixinIngress:
     def __init__(self, core: TimelineCore, store: WeixinIngressStore, adapter: IMAdapter) -> None:
@@ -42,7 +47,7 @@ class WeixinIngress:
         if self.core.adapters.get("weixin") is not self.adapter:
             raise ValueError("Weixin ingress adapter is superseded")
         account = await self.adapter.outbound_account_id()
-        endpoint, account_id = json.loads(account)
+        endpoint, account_id = _ACCOUNT_IDENTITY.validate_json(account)
         if provider_namespace(endpoint) != binding.namespace or account_id != binding.account_id:
             raise ValueError("Weixin ingress source account is superseded")
         if not self.adapter.selection_requires_account_proof:
@@ -88,7 +93,7 @@ class WeixinIngress:
         return IngressRoute(kind=IngressRouteKind.CHAT, text=text, agent_id=selected)
 
     @staticmethod
-    def provider_source(binding: PollBinding, message: dict[str, Any]) -> ProviderSource:
+    def provider_source(binding: PollBinding, message: Mapping[str, object]) -> ProviderSource:
         sender_id = message.get("from_user_id")
         message_id = uint64_message_id(message.get("message_id"))
         if not isinstance(sender_id, str) or not sender_id.strip() or message_id is None:
@@ -108,7 +113,7 @@ class WeixinIngress:
         return source
 
     async def accept(
-        self, binding: PollBinding, message: dict[str, Any], text: str
+        self, binding: PollBinding, message: Mapping[str, object], text: str
     ) -> IngressReceipt:
         await self.check_adapter(binding)
         source = self.provider_source(binding, message)

@@ -20,10 +20,11 @@ import contextlib
 import json
 import re
 import ssl
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
 
 import httpx
+from pydantic import BaseModel, ConfigDict, StrictInt
 
 from base.log import logger
 from services.entrypoints.im_bridge.config import TelegramCredentialsConfig
@@ -104,6 +105,57 @@ _POLL_IDLE_SLEEP = 0.05
 def _split_text(text: str, limit: int = _MAX_MESSAGE_LEN) -> list[str]:
     """Split ``text`` into hard slices of at most ``limit`` chars."""
     return [text[i : i + limit] for i in range(0, len(text), limit)]
+
+
+# meiva:note
+# The members of Telegram's answers this adapter reads. Anything else in an answer is ignored; a
+# member that is present with another type fails validation instead of being coerced.
+class _Reply(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+
+class _Chat(_Reply):
+    id: StrictInt | None = None
+
+
+class _Message(_Reply):
+    message_id: StrictInt | None = None
+    chat: _Chat = _Chat()
+    text: str | None = None
+    caption: str | None = None
+
+
+class _CallbackQuery(_Reply):
+    id: str | None = None
+    data: str | None = None
+    message: _Message | None = None
+
+
+class _Update(_Reply):
+    update_id: StrictInt
+    message: _Message | None = None
+    callback_query: _CallbackQuery | None = None
+
+
+class _Updates(_Reply):
+    result: list[dict[str, object]]
+
+
+class _Bot(_Reply):
+    id: StrictInt | None = None
+
+
+class _Me(_Reply):
+    ok: bool | None = None
+    result: _Bot = _Bot()
+
+
+class _Sent(_Reply):
+    message_id: object = ""
+
+
+class _SendAck(_Reply):
+    result: _Sent | None = None
 
 
 class _MarkupRejectedError(Exception):
@@ -214,11 +266,11 @@ class TelegramAdapter(IMAdapter):
                 updates = await self._get_updates()
                 delay = self._config.telegram_reconnect_base_delay_seconds
                 for update in updates:
-                    await self._handle_update(update)
+                    handled = await self._handle_update(update)
                     # Ack only after the update was handled: a failure keeps the
                     # offset put and the update is re-fetched next poll — a
                     # message consumed during a rollout window is never dropped.
-                    self._write_offset(update["update_id"] + 1)
+                    self._write_offset(handled + 1)
                 # Yield even on an instant empty batch so a fast/mocked poll
                 # source cannot monopolize the event loop (see _POLL_IDLE_SLEEP).
                 await asyncio.sleep(_POLL_IDLE_SLEEP)
@@ -233,7 +285,7 @@ class TelegramAdapter(IMAdapter):
                     await asyncio.wait_for(self._stop_event.wait(), timeout=delay)
                 delay = min(delay * 2, self._config.telegram_reconnect_max_delay_seconds)
 
-    async def _get_updates(self) -> list[dict[str, Any]]:
+    async def _get_updates(self) -> list[dict[str, object]]:
         offset = self._read_offset()
         try:
             resp = await self._http.get(
@@ -271,28 +323,36 @@ class TelegramAdapter(IMAdapter):
                 resp.status_code,
                 f"telegram getUpdates failed: HTTP {resp.status_code} - {resp.text[:200]}",
             )
-        return resp.json()["result"]
+        return _Updates.model_validate_json(resp.content).result
 
-    async def _handle_update(self, update: dict[str, Any]) -> None:
-        callback = update.get("callback_query")
-        if callback is not None:
-            await self._handle_callback(callback)
-            return
-        message = update.get("message")
+    # meiva:note
+    # Deliver one update; the id of the update to acknowledge once it was handled.
+    async def _handle_update(self, raw: Mapping[str, object]) -> int:
+        update = _Update.model_validate(raw)
+        if update.callback_query is not None:
+            await self._deliver_callback(update.callback_query)
+            return update.update_id
+        message = update.message
+        # meiva:note
+        # An update that is not a plain inbound message (edited_message, channel_post, ...), one from a
+        # stranger, and media without a caption are consumed: the offset moves past them and nothing
+        # reaches the core.
         if message is None:
-            return  # edited_message / channel_post / ... — not a plain inbound message
-        if message.get("chat", {}).get("id") != self._owner_id:
-            return  # stranger messaged the bot: consumed, never surfaced
-        text = message.get("text") or message.get("caption")
+            return update.update_id
+        if message.chat.id != self._owner_id:
+            return update.update_id
+        text = message.text or message.caption
         if not text:
-            return  # media without a caption carries no text
-        message_id = str(message["message_id"])
+            return update.update_id
+        if message.message_id is None or message.chat.id is None:
+            raise ValueError("telegram message carries no message_id or chat id")
+        message_id = str(message.message_id)
         if message_id in self._handled_message_ids:
-            return  # re-fetched after a crash window — already delivered
+            return update.update_id  # re-fetched after a crash window — already delivered
         await self.core.handle_inbound(
             InboundMessage(
                 channel=self.channel,
-                chat_id=str(message["chat"]["id"]),
+                chat_id=str(message.chat.id),
                 text=text,
                 message_id=message_id,
             )
@@ -300,30 +360,33 @@ class TelegramAdapter(IMAdapter):
         self._handled_message_ids.add(message_id)
         if len(self._handled_message_ids) > 512:  # bound memory
             self._handled_message_ids = set(list(self._handled_message_ids)[-256:])
+        return update.update_id
 
-    async def _handle_callback(self, callback: dict[str, Any]) -> None:
-        """An inline-keyboard tap: run the button's command like a typed
-        message, then acknowledge the tap so Telegram clears the spinner."""
+    async def _handle_callback(self, raw: Mapping[str, object]) -> None:
+        await self._deliver_callback(_CallbackQuery.model_validate(raw))
 
-        message: dict[str, Any] = callback.get("message") or {}
-        chat_id = str(message.get("chat", {}).get("id") or "")
-        data = str(callback.get("data") or "").strip()
+    # meiva:note
+    # An inline-keyboard tap: run the button's command like a typed message, then acknowledge the tap
+    # so Telegram clears the spinner. A tap from a stranger is consumed and never surfaced.
+    async def _deliver_callback(self, callback: _CallbackQuery) -> None:
+
+        message = callback.message or _Message()
+        chat_id = str(message.chat.id or "")
+        data = (callback.data or "").strip()
         if not chat_id or not data:
             return
-        if message.get("chat", {}).get("id") != self._owner_id:
-            return  # stranger tapped a button: consumed, never surfaced
+        if message.chat.id != self._owner_id:
+            return
         await self.core.handle_inbound(
             InboundMessage(
                 channel=self.channel,
                 chat_id=chat_id,
                 text=data,
-                message_id=str(message.get("message_id") or ""),
-                idempotency_key=(
-                    f"telegram-callback:{callback['id']}" if callback.get("id") else None
-                ),
+                message_id=str(message.message_id or ""),
+                idempotency_key=(f"telegram-callback:{callback.id}" if callback.id else None),
             )
         )
-        await self._answer_callback(str(callback.get("id") or ""))
+        await self._answer_callback(callback.id or "")
 
     async def _answer_callback(self, callback_id: str) -> None:
         if not callback_id:
@@ -390,14 +453,9 @@ class TelegramAdapter(IMAdapter):
                     ) from None
                 if response.status_code != 200:
                     raise_http_failure(response.status_code, "telegram identity request failed")
-                body = response.json()
-                bot_id = body.get("result", {}).get("id")
-                if (
-                    body.get("ok") is not True
-                    or not isinstance(bot_id, int)
-                    or isinstance(bot_id, bool)
-                    or bot_id <= 0
-                ):
+                body = _Me.model_validate_json(response.content)
+                bot_id = body.result.id
+                if body.ok is not True or bot_id is None or bot_id <= 0:
                     raise ValueError("telegram getMe returned no valid bot identity")
                 self._bot_id = str(bot_id)
             return self._bot_id
@@ -511,7 +569,7 @@ class TelegramAdapter(IMAdapter):
         buttons: list[tuple[str, str]] | None,
         html: bool,
     ) -> None:
-        payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
+        payload: dict[str, object] = {"chat_id": chat_id, "text": text}
         if html:
             payload["parse_mode"] = "HTML"
         if buttons:
@@ -545,17 +603,13 @@ class TelegramAdapter(IMAdapter):
         # Delivery-count surface (task #4250): one line per API-confirmed
         # chunk, never carrying the token. Guarded so a malformed response
         # body cannot fail a send that already landed.
-        message_id: Any = ""
-        with contextlib.suppress(ValueError):  # a non-JSON 200 body
-            body = resp.json()
-            body_any: Any = body
-            if isinstance(body, dict):
-                body_map: dict[str, Any] = body_any
-                result = body_map.get("result")
-                result_any: Any = result
-                if isinstance(result, dict):
-                    result_map: dict[str, Any] = result_any
-                    message_id = result_map.get("message_id", "")
+        message_id: object = ""
+        # meiva:note
+        # A body that is not the JSON object of an ack is ignored: the send already landed.
+        with contextlib.suppress(ValueError):
+            ack = _SendAck.model_validate_json(resp.content)
+            if ack.result is not None:
+                message_id = ack.result.message_id
         logger.info("telegram send ok chat_id={} message_id={}", chat_id, message_id)
 
     # -- offset persistence ----------------------------------------------

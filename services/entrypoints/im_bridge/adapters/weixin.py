@@ -21,15 +21,17 @@ import contextlib
 import hashlib
 import json
 import random
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
 
 from base.clock import Clock
 from base.clock.ids import new_uuid
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from base.host.private_storage import write_private_bytes
 from base.log import logger
 from services.entrypoints.im_bridge.ingress.identity import (
@@ -111,7 +113,7 @@ class _SessionExpiredError(Exception):
     """iLink session is stale (errcode -14, or -2 with "unknown error")."""
 
 
-def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+def atomic_write_json(path: Path, payload: Mapping[str, object]) -> None:
     """Write all credential-bearing JSON through the private atomic writer."""
     path.parent.mkdir(parents=True, exist_ok=True)
     write_private_bytes(path, json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
@@ -119,14 +121,17 @@ def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
 
 # meiva:note
 # Read the saved iLink account under `state_dir`; None when unconfigured or corrupt.
-def load_account(state_dir: Path) -> dict[str, Any] | None:
+def load_account(state_dir: Path) -> dict[str, object] | None:
     path = state_dir / "weixin_account.json"
     if not path.exists():
         return None
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = object_of(json.loads, path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         logger.warning("weixin: failed to read account file {}: {}", path, exc)
+        return None
+    if not is_object_dict(data):
+        logger.warning("weixin: account file {} is not a JSON object", path)
         return None
     if not str(data.get("bot_token") or "").strip():
         return None
@@ -175,9 +180,12 @@ class ContextTokenStore:
         if not self._path.exists():
             return
         try:
-            data = json.loads(self._path.read_text(encoding="utf-8"))
+            data = object_of(json.loads, self._path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             logger.warning("weixin: failed to restore context tokens: {}", exc)
+            return
+        if not is_object_dict(data):
+            logger.warning("weixin: context token cache is not a JSON object")
             return
         for peer_id, token in data.items():
             if isinstance(token, str) and token:
@@ -235,7 +243,7 @@ def _base_info() -> dict[str, str]:
     return {"channel_version": CHANNEL_VERSION}
 
 
-def _is_stale_session_ret(ret: int | None, errcode: int | None, errmsg: object) -> bool:
+def _is_stale_session_ret(ret: object, errcode: object, errmsg: object) -> bool:
     """ret=-2/errcode=-2 with a stale-session errmsg is a stale session, not rate limit.
 
     iLink reuses ret=-2 for both conditions and only distinguishes them by
@@ -254,7 +262,7 @@ def _is_stale_session_ret(ret: int | None, errcode: int | None, errmsg: object) 
     return msg in ("unknown error", "prepare failed")
 
 
-def extract_text(item_list: list[dict[str, Any]]) -> str:
+def extract_text(item_list: Sequence[Mapping[str, object]]) -> str:
     """First text item; falls back to Weixin's own voice transcription."""
     for item in item_list:
         if item.get("type") == ITEM_TEXT:
@@ -287,13 +295,13 @@ def _split_text(text: str, limit: int = _MAX_MESSAGE_LENGTH) -> list[str]:
 
 def outbound_message(
     to: str, text: str, context_token: str | None, client_id: str
-) -> dict[str, Any]:
+) -> dict[str, dict[str, object]]:
     """One sendmessage ``msg`` payload; context_token is echoed when known.
 
     ``client_id`` is the idempotency key iLink dedups on — the caller owns
     it so a retry of a timed-out send reuses the SAME id (audit round 2,
     P1: a fresh uuid per attempt made the retry a duplicate send)."""
-    message: dict[str, Any] = {
+    message: dict[str, object] = {
         "from_user_id": "",
         "to_user_id": to,
         "client_id": client_id,
@@ -334,9 +342,10 @@ def _safe_id(value: str, keep: int = 8) -> str:
     return value if len(value) <= keep else f"{value[:keep]}…"
 
 
-def get_str(data: dict[str, Any] | None, key: str) -> str:
-    """A string field from a possibly-missing dict ("" when absent)."""
-    if data is None:
+# meiva:note
+# A string field from a possibly-missing object ("" when absent or not an object).
+def get_str(data: object, key: str) -> str:
+    if not is_object_dict(data):
         return ""
     return str(data.get(key) or "")
 
@@ -477,11 +486,15 @@ class WeixinAdapter(IMAdapter):
         if not path.exists():
             return
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = object_of(json.loads, path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             logger.warning("weixin: failed to restore activity: {}", exc)
             return
-        raw_inbound: dict[str, Any] = data.get("last_inbound") or {}
+        if not is_object_dict(data):
+            return
+        raw_inbound = data.get("last_inbound")
+        if not is_object_dict(raw_inbound):
+            return
         for peer_id, ts in raw_inbound.items():
             if isinstance(ts, (int, float)):
                 self._last_inbound[str(peer_id)] = float(ts)
@@ -566,12 +579,17 @@ class WeixinAdapter(IMAdapter):
             sync_buf = self._binding.cursor
         return sync_buf, timeout_ms
 
-    async def _handle_message(self, message: dict[str, Any]) -> IngressReceipt:
+    async def _handle_message(self, message: dict[str, object]) -> IngressReceipt:
         """Durably retain qualified provider source before acknowledging it."""
         ingress, binding = await self._ensure_ingress()
-        item_list: list[dict[str, Any]] = message.get("item_list", [])
-        if not isinstance(item_list, list) or any(not isinstance(item, dict) for item in item_list):
+        raw_items = message.get("item_list", [])
+        if not is_object_list(raw_items):
             raise TypeError("Weixin message items must be objects")
+        item_list: list[dict[str, object]] = []
+        for item in raw_items:
+            if not is_object_dict(item):
+                raise TypeError("Weixin message items must be objects")
+            item_list.append(item)
         validate_message_items(item_list)
         text = extract_text(item_list)
         receipt = await ingress.accept(binding, message, text)
@@ -647,7 +665,13 @@ class WeixinAdapter(IMAdapter):
             if idx < len(chunks) - 1 and self._chunk_delay_seconds > 0:
                 await asyncio.sleep(self._chunk_delay_seconds)
 
-    async def send_to_owner(self, text: str, *, markdown: bool = False) -> None:
+    async def send_to_owner(
+        self,
+        text: str,
+        *,
+        markdown: bool = False,
+        buttons: list[tuple[str, str]] | None = None,
+    ) -> None:
         """Send an outbound notification to the account's own user chat.
 
         The owner is the user who QR-logged the bot in (account file's
@@ -659,7 +683,7 @@ class WeixinAdapter(IMAdapter):
         del markdown  # platform contract: accepted, not rendered
         if not self._configured or not self._user_id:
             raise RuntimeError("weixin not configured — cannot notify")
-        await self.send(self._user_id, text)
+        await self.send(self._user_id, text, buttons=buttons)
 
     async def _send_chunk(
         self, chat_id: str, chunk: str, context_token: str | None, client_id: str
@@ -706,8 +730,8 @@ class WeixinAdapter(IMAdapter):
             )
 
     async def _post(
-        self, endpoint: str, payload: dict[str, Any], *, timeout: float
-    ) -> dict[str, Any]:
+        self, endpoint: str, payload: Mapping[str, object], *, timeout: float
+    ) -> dict[str, object]:
         """Authenticated iLink POST; sanitized errors (never the token/URL).
 
         A getUpdates timeout is transport observation only, never a synthetic
@@ -746,12 +770,10 @@ class WeixinAdapter(IMAdapter):
             ) from None
         if resp.status_code != 200:
             raise_http_failure(resp.status_code, f"iLink POST {endpoint} HTTP {resp.status_code}")
-        raw = resp.json()
-        raw_any: Any = raw
-        if not isinstance(raw, dict):
+        raw = object_of(resp.json)
+        if not is_object_dict(raw):
             raise TypeError("Weixin provider response must be an object")
-        result: dict[str, Any] = raw_any
-        return result
+        return raw
 
 
 # The daemon's _load_adapters looks up this name on every adapter module.

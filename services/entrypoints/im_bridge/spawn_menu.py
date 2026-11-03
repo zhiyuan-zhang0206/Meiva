@@ -34,7 +34,7 @@ class SpawnMenuMixin:
         draft = state.spawn_draft or SpawnDraft()
         state.spawn_draft = draft
         data = await self.gateway.list_models()
-        models = sorted(data.get("models", {}).keys())
+        models = sorted(data.get("models", {}))
         if not models:
             return Reply(copy.SPAWN_NO_MODELS)
         buttons = [(model, f"spawn:model:{model}") for model in models]
@@ -56,8 +56,7 @@ class SpawnMenuMixin:
         if model:
             try:
                 data = await self.gateway.list_models()
-                info = data.get("models", {}).get(model, {})
-                options = info.get("reasoning_effort_options")
+                options = data.get("models", {}).get(model, {}).get("reasoning_effort_options")
                 if options:
                     return options
             except Exception:

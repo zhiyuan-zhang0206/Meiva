@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any
 
 from services.entrypoints.im_bridge.outbound.claim_fence import ClaimFence
 from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
@@ -22,6 +21,7 @@ from services.entrypoints.im_bridge.types import (
     InboundMessage,
     NoticeBridgeOwner,
     Reply,
+    TimelineItem,
 )
 
 
@@ -37,7 +37,7 @@ class TimelineCore(BridgeCore):
     chats: dict[tuple[str, str], ChatState]
     outbound_store: IMOutboxStore
     _last_pushed: dict[tuple[str, str, int], PushWatermark]
-    _subscriptions: dict[tuple[str, str], asyncio.Task[Any]]
+    _subscriptions: dict[tuple[str, str], asyncio.Task[None]]
     _switch_state: dict[str, int]
 
     @property
@@ -90,7 +90,7 @@ async def accept_timeline(
     core: TimelineCore,
     state: ChatState,
     agent_id: int,
-    items: list[dict[str, Any]],
+    items: list[TimelineItem],
     *,
     replay_id: str = "",
     switch_arg: str = "",
@@ -137,12 +137,12 @@ async def accept_timeline(
     return acceptance
 
 
-def render_item(it: dict[str, Any], agent_id: int | None = None) -> str:
+def render_item(it: TimelineItem, agent_id: int | None = None) -> str:
     """One pushed line: the human's own words or the agent's text output,
     tagged so the reader always knows who is speaking (the user's format:
     ``[User]`` / ``[Meiva #<id>]``)."""
 
-    payload = (it.get("payload") or "").strip()
+    payload = str(it.get("payload") or "").strip()
     kind = it.get("kind", "")
     if kind == "inbound_chat":
         return f"[User] {payload}"

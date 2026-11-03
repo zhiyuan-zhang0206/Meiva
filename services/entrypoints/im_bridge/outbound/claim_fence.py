@@ -16,6 +16,7 @@ from uuid import UUID
 __all__ = [
     "ATTEMPT_SQL",
     "BINDING_SQL",
+    "BindingRow",
     "ClaimFence",
     "StalePollBindingError",
     "attempt_parameters",
@@ -56,11 +57,24 @@ ATTEMPT_SQL = (
 
 
 # meiva:note
+# The row `BINDING_SQL` answers: the generation that owns the poll account.
+@dataclass(frozen=True)
+class BindingRow:
+    namespace: str
+    account_id: str
+    epoch: UUID
+
+
+# meiva:note
 # Whether the locked binding row is the generation the caller holds.
 def binding_is_current(
-    row: tuple[object, ...] | None, *, namespace: str, account_id: str, epoch: UUID
+    row: BindingRow | None, *, namespace: str, account_id: str, epoch: UUID
 ) -> bool:
-    return row is not None and tuple(row) == (namespace, account_id, epoch)
+    return row is not None and (row.namespace, row.account_id, row.epoch) == (
+        namespace,
+        account_id,
+        epoch,
+    )
 
 
 # meiva:note
