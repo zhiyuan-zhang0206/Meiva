@@ -1,16 +1,16 @@
 # meiva:note
-# Shared driver for the web-ai skill family: talk to a chat-style AI web app through the user's logged-in Chrome (the `chrome` MCP, reached as `meiva.mcps.chrome` against the shared headed Chrome the web-sources adapters use). The children (console, deep-research, media) do the same four things to a frontier-model web UI: open a fresh chat, type a prompt into the composer, submit it, and wait for the streamed answer to finish. That mechanic lives here once, so a selector fix happens in ONE place. This module is the shell: it takes data from the browser, hands it to the pure decision modules next to it (`_sites` profiles, `_js` script builders, `_pages` parsers, `_idle` completion and pacing, `_rows` result rows, `_landing` paths) and executes the answer. Every wait is a pause the shell owns; `Pacing` carries its lengths. Nothing here is imported into the agent namespace: the children import this module, call its functions and print JSON to stdout. Each navigation opens a fresh tab this driver owns, so concurrent callers never clobber each other's or the user's pages. Selectors are best known as of authoring and WILL drift; when a child raises "composer not found" or "answer empty", open the site in the shared browser, inspect the live DOM and update the selector list in `_sites.py`.
+# Shared driver for the web-ai skill family: talk to a chat-style AI web app through the user's logged-in Chrome (the `chrome` MCP, reached as `meiva.mcps.chrome` against the shared headed Chrome the web-sources adapters use). The children (console, deep-research, media) do the same four things to a frontier-model web UI: open a fresh chat, type a prompt into the composer, submit it, and wait for the streamed answer to finish. That mechanic lives here once, so a selector fix happens in ONE place. This module is the shell: it takes data from the browser, hands it to the pure decision modules next to it (`_sites` profiles, `_js` script builders, `_pages` parsers, `_idle` completion and pacing, `_rows` result rows, `_landing` paths) and executes the answer. Every wait is a pause the shell owns; `Pacing` carries its lengths and the run's `clock` (the monotonic callable the child's entry script hands in) is what a deadline is measured on. Nothing here is imported into the agent namespace: the children import this module, call its functions and print JSON to stdout. Each navigation opens a fresh tab this driver owns, so concurrent callers never clobber each other's or the user's pages. Selectors are best known as of authoring and WILL drift; when a child raises "composer not found" or "answer empty", open the site in the shared browser, inspect the live DOM and update the selector list in `_sites.py`.
 from __future__ import annotations
 
 import contextlib
 import time
-from collections.abc import Generator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeGuard
 
 # meiva:note
-# The sibling modules are in this skill's own scripts/ dir, not an importable package. This module is import-only (no `__main__`), so it is always reached through a child sub-skill script (console, deep-research, media) whose own __file__-derived guard has already put this directory on `sys.path`. The children also reach `SITES`, `Places`, `assert_same_site`, `chat_url`, `download_by_click`, `downloads_root`, `now_stamp` and `system_places` through this module, so those are re-exported here (`X as X`).
+# The sibling modules are in this skill's own scripts/ dir, not an importable package. This module is import-only (no `__main__`), so it is always reached through a child sub-skill script (console, deep-research, media) whose own __file__-derived guard has already put this directory on `sys.path`. The children also reach `SITES`, `Places`, `assert_same_site`, `chat_url`, `download_by_click`, `downloads_root`, `format_stamp` and `system_places` through this module, so those are re-exported here (`X as X`).
 from _dom import (
     click_by_text,
     resolve_clickable,
@@ -28,6 +28,7 @@ from _js import (
     submit_js,
 )
 from _landing import Places as Places
+from _landing import format_stamp as format_stamp
 from _pacing import STANDARD_PACE, Pacing, next_poll_delay
 from _pages import (
     check_inject_result,
@@ -51,7 +52,6 @@ from _sites import SiteProfile, site
 from _sites import assert_same_site as assert_same_site
 from _sites import chat_url as chat_url
 from _utils import downloads_root as downloads_root
-from _utils import now_stamp as now_stamp
 from _utils import system_places as system_places
 
 import meiva
@@ -118,13 +118,15 @@ def _closes_on_error(page_id: int | None) -> Generator[None]:
 
 
 # meiva:note
-# Poll a JS expression every `poll` seconds until it returns truthy, or until `timeout`. Returns whether it became truthy.
-def wait_until(predicate_js: str, *, timeout: float, poll: float) -> bool:
-    deadline = time.monotonic() + timeout
+# Poll a JS expression every `poll` seconds until it returns truthy, or until `timeout` has passed on the run's `clock`. Returns whether it became truthy.
+def wait_until(
+    predicate_js: str, *, clock: Callable[[], float], timeout: float, poll: float
+) -> bool:
+    deadline = clock() + timeout
     while True:
         if evaluate(predicate_js):
             return True
-        delay = next_poll_delay(now=time.monotonic(), deadline=deadline, poll=poll)
+        delay = next_poll_delay(now=clock(), deadline=deadline, poll=poll)
         if delay is None:
             return False
         time.sleep(delay)
@@ -139,10 +141,10 @@ def _composer_missing(prof: SiteProfile, name: str, where: str) -> RuntimeError:
 
 # meiva:note
 # Wait for the composer to render on the current page. Raises if it never appears: not logged in (the site served a sign-in wall) or the composer selector drifted.
-def _wait_composer(name: str, *, where: str, pace: Pacing) -> None:
+def _wait_composer(name: str, *, where: str, pace: Pacing, clock: Callable[[], float]) -> None:
     prof = site(name)
     if not wait_until(
-        any_present_js(prof.composer), timeout=pace.composer_wait, poll=pace.ready_poll
+        any_present_js(prof.composer), clock=clock, timeout=pace.composer_wait, poll=pace.ready_poll
     ):
         raise _composer_missing(prof, name, where)
     time.sleep(pace.editor_settle)
@@ -160,26 +162,31 @@ def _click_path(path: Sequence[str], pace: Pacing) -> bool:
 
 # meiva:note
 # Attempt the site's Google sign-in: each `auto_login` path is walked in turn and the first one after which the composer appears wins.
-def _auto_login(prof: SiteProfile, pace: Pacing) -> bool:
+def _auto_login(prof: SiteProfile, pace: Pacing, clock: Callable[[], float]) -> bool:
     return any(
         _click_path(path, pace)
-        and wait_until(any_present_js(prof.composer), timeout=pace.login_wait, poll=pace.ready_poll)
+        and wait_until(
+            any_present_js(prof.composer),
+            clock=clock,
+            timeout=pace.login_wait,
+            poll=pace.ready_poll,
+        )
         for path in prof.auto_login
     )
 
 
 # meiva:note
 # Open the site's fresh-chat URL in a new owned tab and wait for the composer. When no composer appears in time, the page snapshot tells a sign-in wall (`login_indicators` text, then the `auto_login` click paths attempt a Google sign-in) from selector drift. Raises RuntimeError when no path reaches the composer, closing the tab it opened; any other failure after the tab opened closes it too. Returns the new tab's page id (for a later close_tab), or None if unmarked.
-def open_chat(name: str, *, pace: Pacing = STANDARD_PACE) -> int | None:
+def open_chat(name: str, *, pace: Pacing = STANDARD_PACE, clock: Callable[[], float]) -> int | None:
     prof = site(name)
     page_id = navigate(prof.new_chat_url)
     with _closes_on_error(page_id):
         time.sleep(pace.page_settle)
         composer = any_present_js(prof.composer)
-        if not wait_until(composer, timeout=pace.composer_wait, poll=pace.ready_poll):
+        if not wait_until(composer, clock=clock, timeout=pace.composer_wait, poll=pace.ready_poll):
             if not is_login_wall(page_snapshot(), prof.login_indicators):
                 raise _composer_missing(prof, name, prof.new_chat_url)
-            if not _auto_login(prof, pace):
+            if not _auto_login(prof, pace, clock):
                 raise RuntimeError(
                     f"{prof.label}: not logged in. Please open {prof.new_chat_url} "
                     f"in the shared browser, log in (Continue with Google), then retry."
@@ -218,23 +225,25 @@ def read_answer(name: str) -> str:
 
 # meiva:note
 # One look at the currently selected tab folded into its idle state.
-def _look(name: str, state: IdleState, pace: Pacing) -> IdleState:
-    now = time.monotonic()
+def _look(name: str, state: IdleState, pace: Pacing, clock: Callable[[], float]) -> IdleState:
+    now = clock()
     text = read_answer(name)
     streaming = is_streaming(name)
     return fold_poll(state, text=text, streaming=streaming, now=now, stable_secs=pace.answer_stable)
 
 
 # meiva:note
-# Wait for the streamed answer to finish on the current page. Done means the last assistant message is non-empty, unchanged for `pace.answer_stable`, no stop control is visible and a real answer actually streamed in (see `_idle.fold_poll`). `complete` is False on timeout, with the best partial answer captured. The clock is time.monotonic, read once per look before the page is read, and the deadline is checked after the first look at the earliest.
-def wait_until_idle(name: str, *, timeout: float, pace: Pacing = STANDARD_PACE) -> Answer:
-    deadline = time.monotonic() + timeout
+# Wait for the streamed answer to finish on the current page. Done means the last assistant message is non-empty, unchanged for `pace.answer_stable`, no stop control is visible and a real answer actually streamed in (see `_idle.fold_poll`). `complete` is False on timeout, with the best partial answer captured. The clock is the run's `clock`, read once per look before the page is read, and the deadline is checked after the first look at the earliest.
+def wait_until_idle(
+    name: str, *, timeout: float, pace: Pacing = STANDARD_PACE, clock: Callable[[], float]
+) -> Answer:
+    deadline = clock() + timeout
     state = IdleState()
     while True:
-        state = _look(name, state, pace)
+        state = _look(name, state, pace, clock)
         if state.settled:
             break
-        delay = next_poll_delay(now=time.monotonic(), deadline=deadline, poll=pace.answer_poll)
+        delay = next_poll_delay(now=clock(), deadline=deadline, poll=pace.answer_poll)
         if delay is None:
             break
         time.sleep(delay)
@@ -244,21 +253,25 @@ def wait_until_idle(name: str, *, timeout: float, pace: Pacing = STANDARD_PACE) 
 # meiva:note
 # Wait for several already-open tabs' answers to finish, polled round-robin. `tabs` maps a caller key to the owned tab. The shared browser has one active tab, so each tab is selected right before it is read; that lets independent conversations be polled together without clobbering. Loops until every tab settles or the shared `timeout` elapses, which overlaps the slow part (waiting for each streamed answer) instead of waiting them out one at a time. Returns key to the answer so far; `complete` is False for a tab that did not settle in time.
 def wait_many_idle[K](
-    tabs: Mapping[K, Tab], *, timeout: float, pace: Pacing = STANDARD_PACE
+    tabs: Mapping[K, Tab],
+    *,
+    timeout: float,
+    pace: Pacing = STANDARD_PACE,
+    clock: Callable[[], float],
 ) -> dict[K, Answer]:
     if not tabs:
         return {}
-    deadline = time.monotonic() + timeout
+    deadline = clock() + timeout
     states = {key: IdleState() for key in tabs}
     while True:
         for key, tab in tabs.items():
             if states[key].settled:
                 continue
             select(tab.page_id)
-            states[key] = _look(tab.site, states[key], pace)
+            states[key] = _look(tab.site, states[key], pace, clock)
         if all(state.settled for state in states.values()):
             break
-        delay = next_poll_delay(now=time.monotonic(), deadline=deadline, poll=pace.answer_poll)
+        delay = next_poll_delay(now=clock(), deadline=deadline, poll=pace.answer_poll)
         if delay is None:
             break
         time.sleep(delay)
@@ -267,11 +280,13 @@ def wait_many_idle[K](
 
 # meiva:note
 # Open the conversation at `url` in a new owned tab and wait for its composer, closing the tab again when the composer never shows (a stale conversation, or a sign-in wall).
-def _open_conversation(name: str, url: str, *, pace: Pacing) -> int | None:
+def _open_conversation(
+    name: str, url: str, *, pace: Pacing, clock: Callable[[], float]
+) -> int | None:
     assert_same_site(url, name)
     page_id = navigate(url)
     with _closes_on_error(page_id):
-        _wait_composer(name, where=url, pace=pace)
+        _wait_composer(name, where=url, pace=pace, clock=clock)
     return page_id
 
 
@@ -284,17 +299,18 @@ def _start(
     file: str | Path | None,
     conversation_url: str | None,
     pace: Pacing,
+    clock: Callable[[], float],
 ) -> tuple[int | None, str]:
     if conversation_url is not None:
-        page_id = _open_conversation(name, conversation_url, pace=pace)
+        page_id = _open_conversation(name, conversation_url, pace=pace, clock=clock)
     else:
-        page_id = open_chat(name, pace=pace)
+        page_id = open_chat(name, pace=pace, clock=clock)
     with _closes_on_error(page_id):
         inject_prompt(name, prompt)
         if file is not None:
             # meiva:note
             # Attach AFTER typing: with text present, the send control's disabled state reflects only the upload, which attach_file waits out.
-            attach_file(name, file, pace=pace)
+            attach_file(name, file, pace=pace, clock=clock)
         via = submit(name)
     return page_id, via
 
@@ -311,11 +327,16 @@ def ask(
     wait: bool = True,
     keep_tab: bool = False,
     pace: Pacing = STANDARD_PACE,
+    clock: Callable[[], float],
 ) -> AskRow:
-    page_id, via = _start(name, prompt, file=file, conversation_url=conversation_url, pace=pace)
+    page_id, via = _start(
+        name, prompt, file=file, conversation_url=conversation_url, pace=pace, clock=clock
+    )
     keep = False
     try:
-        answer = wait_until_idle(name, timeout=timeout, pace=pace) if wait else NOT_WAITED
+        answer = (
+            wait_until_idle(name, timeout=timeout, pace=pace, clock=clock) if wait else NOT_WAITED
+        )
         # meiva:note
         # Read the url BEFORE any close: closing moves the selection off this tab.
         url = current_url()
@@ -343,6 +364,7 @@ def ask_many(
     timeout: float = 180.0,
     keep_tab: bool = False,
     pace: Pacing = STANDARD_PACE,
+    clock: Callable[[], float],
 ) -> list[AskRow | FailedRow]:
     rows: dict[int, AskRow | FailedRow] = {}
     live: dict[int, _Live] = {}
@@ -354,6 +376,7 @@ def ask_many(
                 file=spec.file,
                 conversation_url=spec.conversation_url,
                 pace=pace,
+                clock=clock,
             )
         except Exception as exc:
             rows[i] = failed_row(spec.name, f"{type(exc).__name__}: {exc}")
@@ -369,6 +392,7 @@ def ask_many(
             {i: Tab(v.name, v.page_id) for i, v in live.items()},
             timeout=timeout,
             pace=pace,
+            clock=clock,
         )
         for i, v in live.items():
             select(v.page_id)
@@ -395,7 +419,9 @@ def page_snapshot() -> str:
 
 # meiva:note
 # Attach a local file to the message being composed, via the site's own attach control. It walks `attach_path` (a click sequence whose FINAL control opens the OS file chooser, intercepted and fed `path`), then waits for the upload to finish by polling the send control's disabled state. Call it after `inject_prompt`: with an empty composer the send control is disabled anyway and the upload wait could never tell the two apart. Raises if the file is missing, an attach control cannot be found, or the upload does not finish within `pace.upload_wait`.
-def attach_file(name: str, path: str | Path, *, pace: Pacing = STANDARD_PACE) -> None:
+def attach_file(
+    name: str, path: str | Path, *, pace: Pacing = STANDARD_PACE, clock: Callable[[], float]
+) -> None:
     prof = site(name)
     p = Path(path).expanduser()
     if not p.is_file():
@@ -422,13 +448,15 @@ def attach_file(name: str, path: str | Path, *, pace: Pacing = STANDARD_PACE) ->
     # meiva:note
     # The chip proves the file registered. Some sites keep send enabled on text alone, so the send-state probe alone would pass before the file landed; the send probe after this covers the sites that DO disable it mid-upload.
     chip = chip_visible_js(p.name, baseline)
-    if not wait_until(chip, timeout=pace.upload_wait, poll=pace.upload_poll):
+    if not wait_until(chip, clock=clock, timeout=pace.upload_wait, poll=pace.upload_poll):
         raise RuntimeError(
             f"{prof.label}: attachment {p.name!r} never appeared on the page "
             f"within {pace.upload_wait}s — the file chooser was not intercepted, or "
             f"the upload failed"
         )
-    if not wait_until(send_enabled_js(prof.send), timeout=pace.upload_wait, poll=pace.upload_poll):
+    if not wait_until(
+        send_enabled_js(prof.send), clock=clock, timeout=pace.upload_wait, poll=pace.upload_poll
+    ):
         raise RuntimeError(
             f"{prof.label}: attachment upload did not finish within {pace.upload_wait}s "
             f"(send control still disabled)"
@@ -437,12 +465,15 @@ def attach_file(name: str, path: str | Path, *, pace: Pacing = STANDARD_PACE) ->
 
 # meiva:note
 # Whether the site is logged in in the shared browser: a fresh tab opens on the site and the composer is awaited for `pace.login_probe_wait`. A composer means logged in; without one the answer is False whether the page shows a sign-in wall or nothing recognizable, and the caller's next step (`open_chat`) tells them apart. The tab is closed before returning, so this is a non-invasive probe.
-def check_login(name: str, *, pace: Pacing = STANDARD_PACE) -> bool:
+def check_login(name: str, *, pace: Pacing = STANDARD_PACE, clock: Callable[[], float]) -> bool:
     prof = site(name)
     page_id = navigate(prof.new_chat_url)
     try:
         return wait_until(
-            any_present_js(prof.composer), timeout=pace.login_probe_wait, poll=pace.ready_poll
+            any_present_js(prof.composer),
+            clock=clock,
+            timeout=pace.login_probe_wait,
+            poll=pace.ready_poll,
         )
     finally:
         close_tab(page_id)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -32,6 +33,12 @@ FAST = M.pacing.Pacing(
     answer_poll=0.0,
     ready_poll=0.01,
 )
+
+
+# meiva:note
+# The clock the test hands the console entry: the real monotonic clock, since only the
+# deadlines (a fraction of a second) are waited out.
+CLOCK = time.monotonic
 
 
 def test_to_row_error_row_passes_through_as_not_ok() -> None:
@@ -151,6 +158,7 @@ def test_main_asks_the_models_and_lands_the_answers(
         ["--models", "chatgpt,gemini", "--prompt", "What is 2+2?", "--timeout", "5"],
         places=places,
         pace=FAST,
+        clock=CLOCK,
     )
 
     printed = json.loads(capsys.readouterr().out)

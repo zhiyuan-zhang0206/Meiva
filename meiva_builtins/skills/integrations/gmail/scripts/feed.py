@@ -179,11 +179,15 @@ def _run(args: argparse.Namespace, proc: Process) -> object:
                 auth,
                 args.list_id,
                 root=proc.mirror_root,
+                now_ts=proc.now_ts,
                 since_ts=since_to_ts(args.since, proc.now_ts),
                 limit=args.limit,
             )
         case "fetch":
-            return to_s1(fetch(auth, args.message_id, root=proc.mirror_root), root=proc.mirror_root)
+            return to_s1(
+                fetch(auth, args.message_id, root=proc.mirror_root, now_ts=proc.now_ts),
+                root=proc.mirror_root,
+            )
         case "send":
             return send(
                 auth,
@@ -193,6 +197,7 @@ def _run(args: argparse.Namespace, proc: Process) -> object:
                 cc=args.cc,
                 attach=args.attach,
                 dry_run=args.dry_run,
+                now_ts=proc.now_ts,
             )
         case "forward":
             return forward(
@@ -203,6 +208,7 @@ def _run(args: argparse.Namespace, proc: Process) -> object:
                 cc=args.cc,
                 attach=args.attach,
                 dry_run=args.dry_run,
+                now_ts=proc.now_ts,
             )
         case "draft":
             return draft(
@@ -213,6 +219,7 @@ def _run(args: argparse.Namespace, proc: Process) -> object:
                 cc=args.cc,
                 attach=args.attach,
                 dry_run=args.dry_run,
+                now_ts=proc.now_ts,
             )
         case "draft-delete":
             return draft_delete(auth, args.message_id)
@@ -224,6 +231,7 @@ def _run(args: argparse.Namespace, proc: Process) -> object:
                 reply_all=args.reply_all,
                 attach=args.attach,
                 dry_run=args.dry_run,
+                now_ts=proc.now_ts,
             )
         case _:
             raise ValueError(f"unknown command {args.cmd!r}")
