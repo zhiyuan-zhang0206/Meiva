@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+from typing import Any
 
 from meiva_builtins.plugins.meiva_syntax_fix._deterministic_fixes import (
     apply_all_deterministic_fixes,
@@ -23,8 +24,8 @@ class TestFixNestedTripleQuote:
         fixed, n = fix_nested_triple_quote(code)
         assert n >= 1
         compile(fixed, "<t>", "exec")
-        ns: dict = {}
-        exec(fixed, ns)  # pyright: ignore[reportUnknownArgumentType]
+        ns: dict[str, Any] = {}
+        exec(fixed, ns)
         assert '"""doc"""' in ns["src"]  # interior triple survives as text
 
     def test_single_quote_delim_nested(self):

@@ -84,6 +84,7 @@ PROMOTED_ROOTS: tuple[str, ...] = (
     "meiva",
     "meizel",
     "cli",
+    "meiva_builtins",
 )
 # What every test file is held to: the tests ladder rung, wherever the file sits.
 TESTS_STANDARD = {

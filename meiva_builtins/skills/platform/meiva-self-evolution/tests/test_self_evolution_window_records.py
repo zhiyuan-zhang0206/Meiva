@@ -16,7 +16,7 @@ record_mod = cast(
 
 
 def test_group_by_agent_keeps_agent_rows_and_drops_service_level_ones() -> None:
-    rows = [
+    rows: list[dict[str, object]] = [
         {"agent_id": 2, "event_name": "turn_end", "attributes": {"a": 1}},
         {"agent_id": None, "event_name": "service", "attributes": {}},
         {"agent_id": 1, "event_name": "code", "attributes": None},

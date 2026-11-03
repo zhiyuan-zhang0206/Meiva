@@ -21,8 +21,9 @@ from langchain_core.messages import (
 )
 from langchain_core.outputs import ChatGeneration, ChatResult
 
+from agent.graph.interrupt import InterruptEvent
 from agent.messages import InboundTimes, inbound_message, tail_has_agent_inbound
-from agent.state import CompactState
+from agent.state import CompactState, ContextReset
 from base.agents.messages.kwargs import ExecStatus
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
@@ -235,7 +236,7 @@ async def test_defer_predicate_matches_real_gate(
     history_len_kind: str,
     auto_compact_tokens: int | None,
     expect_fire: bool,
-    fake_cancel_event,
+    fake_cancel_event: InterruptEvent,
     model_catalog: ModelCatalog,
     *,
     database_gate: ProcessDbGate,
@@ -251,7 +252,7 @@ async def test_defer_predicate_matches_real_gate(
         # the configured threshold, then set the threshold to that value so the
         # `occupancy <= threshold` gate is exercised right at the boundary.
         msgs = [HumanMessage(content="y" * 400, id=f"h{i}") for i in range(8)]
-        total_chars = sum(len(m.content) for m in msgs)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+        total_chars = sum(len(m.content) for m in msgs)
         auto_compact_tokens = total_chars // 4
     else:  # "long"
         msgs = [HumanMessage(content="z" * 400, id=f"h{i}") for i in range(8)]
@@ -270,7 +271,7 @@ async def test_defer_predicate_matches_real_gate(
     predicate = auto_compact_will_fire(
         state, runtime.context.require_agent(), catalog=model_catalog
     )
-    real = await compact_mod.auto_compact_for_llm(state, runtime, make_config())  # pyright: ignore[reportUnknownMemberType]
+    real = await compact_mod.auto_compact_for_llm(state, runtime, make_config())
     assert predicate is expect_fire
     assert predicate == (real is not None)
 
@@ -279,7 +280,7 @@ async def test_defer_predicate_matches_real_gate(
 async def test_real_runner_compaction_wins_no_note(
     reminder_plugin_loaded: Any,
     reminder_first: bool,
-    fake_cancel_event,
+    fake_cancel_event: InterruptEvent,
     model_catalog: ModelCatalog,
     *,
     database_gate: ProcessDbGate,
@@ -338,7 +339,7 @@ async def test_real_runner_compaction_wins_no_note(
     # Only init_context rebuilds the head; no reminder survives the wipe.
     assert final == []
     # The summary rides in the parked tail the compaction handed to that node.
-    assert [m.content for m in update["context_reset"].tail] == [  # pyright: ignore[reportUnknownMemberType]
+    assert [m.content for m in cast("ContextReset", update["context_reset"]).tail] == [
         compact_mod.compose_summary_message(long_summary)
     ]
     assert cmd.goto == "init_context"
@@ -364,7 +365,7 @@ async def test_after_exec_leaves_exec_output_untouched(reminder_plugin_loaded: A
         created_at=datetime.now(UTC),
     )
     out.id = "out-1"
-    out_kwargs_before = dict(out.additional_kwargs)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    out_kwargs_before = dict(out.additional_kwargs)
     ai = AIMessage(
         content="",
         tool_calls=[
@@ -378,12 +379,12 @@ async def test_after_exec_leaves_exec_output_untouched(reminder_plugin_loaded: A
     [note] = result["messages"]
     # a fresh system-note (id-less -> the reducer appends), not the output message
     assert isinstance(note, HumanMessage)
-    assert note.additional_kwargs["meiva_msg_type"] == "system_note"  # pyright: ignore[reportUnknownMemberType]
+    assert note.additional_kwargs["meiva_msg_type"] == "system_note"
     assert note.id is None
-    assert "meiva.shell.run" in note.content  # pyright: ignore[reportUnknownMemberType]
+    assert "meiva.shell.run" in note.content
     # the real exec-output message is untouched: content + metadata intact
-    assert out.content == "original stdout"  # pyright: ignore[reportUnknownMemberType]
-    assert out.additional_kwargs == out_kwargs_before  # pyright: ignore[reportUnknownMemberType]
+    assert out.content == "original stdout"
+    assert out.additional_kwargs == out_kwargs_before
 
 
 def test_tail_has_agent_inbound_exec_tail_false():

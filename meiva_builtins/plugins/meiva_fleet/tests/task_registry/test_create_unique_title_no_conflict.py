@@ -22,9 +22,11 @@ from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
 )
 
 
-def test_create_unique_title_no_conflict(redis_url: str, db_conn, root_task_id: int):
+def test_create_unique_title_no_conflict(
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
+):
     """Creating a task with a truly unique title succeeds."""
-    agent_id = seed_agent(db_conn)  # pyright: ignore[reportUnknownArgumentType]
+    agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task1 = task_registry.create(
         "title a", "detail", parent=root_task_id, operation_key=str(uuid4())

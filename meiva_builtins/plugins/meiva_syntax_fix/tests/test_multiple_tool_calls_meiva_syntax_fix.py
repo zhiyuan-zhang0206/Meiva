@@ -52,7 +52,11 @@ def _graph(state_cls: type[AgentState], **compile_options: Any) -> Any:
         partial(exec_node_impl, process=SubprocessExecProcess(live_parent_facts(), rng=_rng())),
         input_schema=state_cls,
     )
-    builder.add_node("after_exec", lambda _state: {})
+
+    def after_exec(_state: object) -> dict[str, object]:
+        return {}
+
+    builder.add_node("after_exec", after_exec)
     builder.add_edge(START, "exec")
     builder.add_edge("after_exec", END)
     return builder.compile(**compile_options)

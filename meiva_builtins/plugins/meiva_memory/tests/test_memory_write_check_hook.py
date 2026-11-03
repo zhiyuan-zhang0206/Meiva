@@ -17,7 +17,7 @@ from langgraph.runtime import Runtime
 from langgraph.types import Overwrite
 
 from agent.messages import NoteTag, read_meiva_kwargs
-from agent.state import build_agent_state
+from agent.state import AgentState, build_agent_state
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.gateway_client.memory_search import MemorySearchResult
@@ -120,7 +120,7 @@ def _hit(path: str, score: float, description: str = "") -> MemorySearchResult:
 def _state(
     shared: frozenset[str] | set[str] = frozenset(),
     personal: frozenset[str] | set[str] = frozenset(),
-) -> Any:
+) -> AgentState:
     from meiva_builtins.plugins.meiva_memory import agent_runtime
 
     registry = ExtensionRegistry((("meiva_memory", agent_runtime.contribute()),))
@@ -450,7 +450,7 @@ async def test_records_union_across_calls_and_reset_in_a_real_graph(
     pool, _ = stores
     _write(pool, "a.md", "no frontmatter")
     _write(pool, "b.md", "also none")
-    state_cls: Any = type(_state())
+    state_cls = type(_state())
 
     async def exec_one(_state: Any) -> dict[str, Any]:
         return {_SHARED: {"a.md"}}
