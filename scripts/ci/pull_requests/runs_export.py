@@ -20,7 +20,6 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as day_time
 from pathlib import Path
-from typing import Any, TypeGuard
 from zoneinfo import ZoneInfo
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -31,8 +30,20 @@ if str(_REPO_ROOT) not in sys.path:
 # The script-mode root guard must run before importing the checkout-owned API.
 from base.clock import Timers  # noqa: E402
 from base.telemetry import EventPipeline  # noqa: E402
+from scripts.boundary.fields import optional_int, optional_str  # noqa: E402
+from scripts.boundary.options import options  # noqa: E402
+from scripts.boundary.untyped import is_object_dict, object_of  # noqa: E402
 from scripts.ci.pull_requests import runs_api  # noqa: E402
 from scripts.ci.pull_requests.gh_process import GhProcess  # noqa: E402
+from scripts.ci.pull_requests.runs_api import PullRecord, RunRecord  # noqa: E402
+from scripts.ci.pull_requests.runs_contracts import (  # noqa: E402
+    Metrics,
+    RunCache,
+    Snapshot,
+    SnapshotRepository,
+    SnapshotRun,
+    SnapshotWindow,
+)
 
 DEFAULT_REPO = "zhiyuan-zhang0206/Meiva"
 # Thirty days matches PR flow and lets the next sampler republish a day after
@@ -64,14 +75,26 @@ _FAILED_CONCLUSIONS = frozenset({"failure", "timed_out", "startup_failure"})
 _WATCHDOG_WORKFLOW_NAMES = frozenset({"CI failed-job rerun", "Runner shutdown rerun"})
 
 
+@dataclass(frozen=True)
+class Options:
+    # meiva:note
+    # The flags `main` reads, as the parser answered them.
+
+    repo: list[str] | None
+    window_days: int
+    state_dir: Path | None
+    dry_run: bool
+    print_snapshot: bool
+
+
 @dataclass
 class RepoCollection:
     """One repository's computed state, retained until every repo succeeds."""
 
     repo: str
-    cache: dict[str, Any]
-    daily: dict[str, dict[str, Any]]
-    workflows: dict[str, dict[str, Any]]
+    cache: RunCache
+    daily: dict[str, Metrics]
+    workflows: dict[str, Metrics]
     window_runs: int
     window_prs: int
     api_requests: int
@@ -90,7 +113,25 @@ def complete_days(now: datetime, days: int, tz: ZoneInfo) -> list[date]:
     return [last_complete - timedelta(days=index) for index in range(days - 1, -1, -1)]
 
 
-def wall_seconds(run: dict[str, Any]) -> float | None:
+def _run_id(run: RunRecord) -> int:
+    identifier = optional_int(run, "id")
+    if identifier is None:
+        raise runs_api.CiRunsError("workflow run lacks an integer id")
+    return identifier
+
+
+def _pr_number(pr: PullRecord) -> int:
+    number = optional_int(pr, "number")
+    if number is None:
+        raise runs_api.CiRunsError("pull request lacks an integer number")
+    return number
+
+
+def _attempt(run: RunRecord) -> int:
+    return optional_int(run, "run_attempt") or 0
+
+
+def wall_seconds(run: RunRecord) -> float | None:
     """Return observed wall time from start (or creation) to latest update."""
     started = runs_api.parse_timestamp(run.get("run_started_at")) or runs_api.parse_timestamp(
         run.get("created_at")
@@ -101,19 +142,19 @@ def wall_seconds(run: dict[str, Any]) -> float | None:
     return max(0.0, (updated - started).total_seconds())
 
 
-def is_zombie(run: dict[str, Any]) -> bool:
+def is_zombie(run: RunRecord) -> bool:
     """A six-hour wall clock is a runner-death artifact, not execution time."""
     wall = wall_seconds(run)
     return wall is not None and wall > _ZOMBIE_SECONDS
 
 
-def is_instant_skip(run: dict[str, Any]) -> bool:
+def is_instant_skip(run: RunRecord) -> bool:
     """Skipped wrappers that executed no useful work."""
     wall = wall_seconds(run)
     return run.get("conclusion") == "skipped" and wall is not None and wall <= _INSTANT_SKIP_SECONDS
 
 
-def is_failed(run: dict[str, Any]) -> bool:
+def is_failed(run: RunRecord) -> bool:
     """Whether GitHub gave this run one of the CI-red conclusions."""
     return run.get("conclusion") in _FAILED_CONCLUSIONS
 
@@ -131,9 +172,9 @@ def workflow_class(name: object) -> str:
     return "core"
 
 
-def superseded_ids(runs: Iterable[dict[str, Any]]) -> set[int]:
+def superseded_ids(runs: Iterable[RunRecord]) -> set[int]:
     """Cancelled runs promptly replaced on the same workflow/branch pair."""
-    grouped: dict[tuple[object, object], list[dict[str, Any]]] = defaultdict(list)
+    grouped: dict[tuple[object, object], list[RunRecord]] = defaultdict(list)
     for run in runs:
         grouped[(run.get("workflow_id"), run.get("head_branch"))].append(run)
     result: set[int] = set()
@@ -158,7 +199,7 @@ def superseded_ids(runs: Iterable[dict[str, Any]]) -> set[int]:
                 if delay > _SUPERSEDE_SECONDS:
                     break
                 if abs(delay) <= _SUPERSEDE_SECONDS:
-                    result.add(int(run["id"]))
+                    result.add(_run_id(run))
                     break
     return result
 
@@ -169,54 +210,51 @@ def trunk_merge_pr_number(branch: object) -> int | None:
     return int(match[1]) if match else None
 
 
-def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
-    return isinstance(value, dict)
+# meiva:note
+# The object entries of a cached id-keyed table; anything else is dropped.
+def _records(value: object) -> dict[str, dict[str, object]]:
+    if not is_object_dict(value):
+        return {}
+    return {key: record for key, record in value.items() if is_object_dict(record)}
 
 
-def _is_object_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
-
-
-def load_cache(path: Path) -> dict[str, Any]:
+def load_cache(path: Path) -> RunCache:
     """Load one repository cache; absent or corrupt cache heals via a cold walk."""
+    cold = RunCache(runs={}, prs={}, last_fetch_end=None)
     try:
-        cached = json.loads(path.read_text(encoding="utf-8"))
+        cached = object_of(json.loads, path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {"runs": {}, "prs": {}, "last_fetch_end": None}
-    if not _is_object_dict(cached):
-        return {"runs": {}, "prs": {}, "last_fetch_end": None}
-    return {
-        "runs": cached["runs"] if isinstance(cached.get("runs"), dict) else {},
-        "prs": cached["prs"] if isinstance(cached.get("prs"), dict) else {},
-        "last_fetch_end": cached.get("last_fetch_end"),
-    }
+        return cold
+    if not is_object_dict(cached):
+        return cold
+    return RunCache(
+        runs=_records(cached.get("runs")),
+        prs=_records(cached.get("prs")),
+        last_fetch_end=optional_str(cached, "last_fetch_end"),
+    )
 
 
-def _completed_at(pr: dict[str, Any]) -> datetime | None:
+def _completed_at(pr: PullRecord) -> datetime | None:
     return runs_api.parse_timestamp(pr.get("merged_at")) or runs_api.parse_timestamp(
         pr.get("closed_at")
     )
 
 
 def merge_cache(
-    cache: dict[str, Any],
-    fresh_runs: Iterable[dict[str, Any]],
-    fresh_prs: Iterable[dict[str, Any]],
+    cache: RunCache,
+    fresh_runs: Iterable[RunRecord],
+    fresh_prs: Iterable[PullRecord],
     *,
     cache_start: datetime,
     fetched_end: datetime,
-) -> dict[str, Any]:
+) -> RunCache:
     """Merge updated API records by stable id and prune only old cache state."""
-    runs: dict[str, dict[str, Any]] = {
-        str(key): value for key, value in cache["runs"].items() if isinstance(value, dict)
-    }
-    prs: dict[str, dict[str, Any]] = {
-        str(key): value for key, value in cache["prs"].items() if isinstance(value, dict)
-    }
+    runs = dict(cache["runs"])
+    prs = dict(cache["prs"])
     for run in fresh_runs:
-        runs[str(run["id"])] = run
+        runs[str(_run_id(run))] = run
     for pr in fresh_prs:
-        prs[str(pr["number"])] = pr
+        prs[str(_pr_number(pr))] = pr
     runs = {
         key: run
         for key, run in runs.items()
@@ -228,12 +266,12 @@ def merge_cache(
         for key, pr in prs.items()
         if (completed := _completed_at(pr)) is not None and completed >= cache_start
     }
-    return {
-        "version": 1,
-        "last_fetch_end": fetched_end.astimezone(UTC).isoformat(),
-        "runs": runs,
-        "prs": prs,
-    }
+    return RunCache(
+        version=1,
+        last_fetch_end=fetched_end.astimezone(UTC).isoformat(),
+        runs=runs,
+        prs=prs,
+    )
 
 
 def _cache_path(state_dir: Path, repo: str) -> Path:
@@ -241,7 +279,7 @@ def _cache_path(state_dir: Path, repo: str) -> Path:
     return state_dir / f"{repo.replace('/', '--')}.json"
 
 
-def save_json(path: Path, payload: dict[str, Any]) -> None:
+def save_json(path: Path, payload: RunCache | Snapshot) -> None:
     """Atomically persist cache/snapshot state so crashes preserve the prior file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -253,10 +291,8 @@ def save_json(path: Path, payload: dict[str, Any]) -> None:
         raise
 
 
-def _runs_in_days(
-    runs: Iterable[dict[str, Any]], days: set[date], tz: ZoneInfo
-) -> list[dict[str, Any]]:
-    result: list[dict[str, Any]] = []
+def _runs_in_days(runs: Iterable[RunRecord], days: set[date], tz: ZoneInfo) -> list[RunRecord]:
+    result: list[RunRecord] = []
     for run in runs:
         created = runs_api.parse_timestamp(run.get("created_at"))
         if created is not None and created.astimezone(tz).date() in days:
@@ -265,20 +301,21 @@ def _runs_in_days(
 
 
 def _candidate_prs(
-    run: dict[str, Any],
-    by_number: dict[int, dict[str, Any]],
-    by_branch: dict[str, list[dict[str, Any]]],
-) -> list[dict[str, Any]]:
+    run: RunRecord,
+    by_number: dict[int, PullRecord],
+    by_branch: dict[str, list[PullRecord]],
+) -> list[PullRecord]:
     """The PRs a run may belong to: the trunk-merge synthetic branch's real PR, else its branch's."""
-    synthetic = trunk_merge_pr_number(run.get("head_branch"))
+    branch = run.get("head_branch")
+    synthetic = trunk_merge_pr_number(branch)
     if synthetic is not None and synthetic in by_number:
         return [by_number[synthetic]]
-    if isinstance(run.get("head_branch"), str):
-        return by_branch[run["head_branch"]]
+    if isinstance(branch, str):
+        return by_branch[branch]
     return []
 
 
-def _attributed_pr(candidates: list[dict[str, Any]], created: datetime) -> dict[str, Any] | None:
+def _attributed_pr(candidates: list[PullRecord], created: datetime) -> PullRecord | None:
     """The latest-opened candidate whose branch life (with slack) contains the run's creation."""
     valid = [
         (opened, pr)
@@ -290,10 +327,10 @@ def _attributed_pr(candidates: list[dict[str, Any]], created: datetime) -> dict[
     return max(valid, key=lambda pair: pair[0])[1] if valid else None
 
 
-def attribute_runs(runs: Iterable[dict[str, Any]], prs: Iterable[dict[str, Any]]) -> dict[int, int]:
+def attribute_runs(runs: Iterable[RunRecord], prs: Iterable[PullRecord]) -> dict[int, int]:
     """Return one best closed-PR attribution per run id, based on branch life."""
-    by_number: dict[int, dict[str, Any]] = {}
-    by_branch: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    by_number: dict[int, PullRecord] = {}
+    by_branch: dict[str, list[PullRecord]] = defaultdict(list)
     for pr in prs:
         number = pr.get("number")
         branch = pr.get("head_ref")
@@ -309,7 +346,7 @@ def attribute_runs(runs: Iterable[dict[str, Any]], prs: Iterable[dict[str, Any]]
             continue
         selected = _attributed_pr(_candidate_prs(run, by_number, by_branch), created)
         if selected is not None:
-            attributed[identifier] = int(selected["number"])
+            attributed[identifier] = _pr_number(selected)
     return attributed
 
 
@@ -326,8 +363,9 @@ def percentile(values: Iterable[float], quantile: float) -> float | None:
     return round(ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower), 1)
 
 
-def _flags(run: dict[str, Any], superseded: set[int], abandoned_shas: set[str]) -> dict[str, bool]:
-    identifier = int(run["id"])
+def _flags(run: RunRecord, superseded: set[int], abandoned_shas: set[str]) -> dict[str, bool]:
+    identifier = _run_id(run)
+    head_sha = optional_str(run, "head_sha")
     label = workflow_class(run.get("name"))
     wall = wall_seconds(run)
     return {
@@ -338,19 +376,19 @@ def _flags(run: dict[str, Any], superseded: set[int], abandoned_shas: set[str]) 
         and wall is not None
         and wall <= _INSTANT_SKIP_SECONDS,
         "failed": is_failed(run),
-        "retried_failed": is_failed(run) and int(run.get("run_attempt") or 0) >= 2,
-        "self_healed": int(run.get("run_attempt") or 0) >= 2 and run.get("conclusion") == "success",
-        "abandoned": isinstance(run.get("head_sha"), str) and run["head_sha"] in abandoned_shas,
+        "retried_failed": is_failed(run) and _attempt(run) >= 2,
+        "self_healed": _attempt(run) >= 2 and run.get("conclusion") == "success",
+        "abandoned": head_sha is not None and head_sha in abandoned_shas,
         "watchdog": label == "watchdog",
         "proof": label == "proof",
     }
 
 
-def _abandoned_shas(prs: list[dict[str, Any]]) -> set[str]:
+def _abandoned_shas(prs: list[PullRecord]) -> set[str]:
     return {
-        str(pr["head_sha"])
+        sha
         for pr in prs
-        if pr.get("merged_at") is None and isinstance(pr.get("head_sha"), str)
+        if pr.get("merged_at") is None and (sha := optional_str(pr, "head_sha")) is not None
     }
 
 
@@ -369,9 +407,9 @@ _DAY_FLAG_COUNTS = (
 
 
 def _day_counts(
-    group: list[dict[str, Any]], flags: dict[int, dict[str, bool]], prs_completed: int
-) -> dict[str, Any]:
-    counts: dict[str, Any] = {
+    group: list[RunRecord], flags: dict[int, dict[str, bool]], prs_completed: int
+) -> Metrics:
+    counts: Metrics = {
         f"{name}_runs": sum(value[name] for value in flags.values()) for name in _DAY_FLAG_COUNTS
     }
     counts["runs"] = len(group)
@@ -380,12 +418,12 @@ def _day_counts(
     return counts
 
 
-def _day_shares(group: list[dict[str, Any]], flags: dict[int, dict[str, bool]]) -> dict[str, float]:
+def _day_shares(group: list[RunRecord], flags: dict[int, dict[str, bool]]) -> dict[str, float]:
     white = sum(
         value["instant_skip"] or value["superseded"] or value["abandoned"]
         for value in flags.values()
     )
-    retried = sum(int(run.get("run_attempt") or 0) >= 2 for run in group)
+    retried = sum(_attempt(run) >= 2 for run in group)
     noise = sum(value["watchdog"] or value["proof"] for value in flags.values())
     return {
         "white_run_share": round(white / len(group), 3),
@@ -395,7 +433,7 @@ def _day_shares(group: list[dict[str, Any]], flags: dict[int, dict[str, bool]]) 
 
 
 def _pr_figures(
-    pr_runs: list[dict[str, Any]], superseded: set[int], abandoned_shas: set[str]
+    pr_runs: list[RunRecord], superseded: set[int], abandoned_shas: set[str]
 ) -> tuple[float, int, bool]:
     """One PR's wall minutes, executed-run count, and whether it passed first time."""
     flagged = [(run, _flags(run, superseded, abandoned_shas)) for run in pr_runs]
@@ -404,15 +442,13 @@ def _pr_figures(
     ]
     duration = sum((wall_seconds(run) or 0) / 60 for run, _ in ran)
     executed = [run for run, f in ran if not f["proof"]]
-    first_pass = not any(
-        is_failed(run) or int(run.get("run_attempt") or 0) >= 2 for run in executed
-    )
+    first_pass = not any(is_failed(run) or _attempt(run) >= 2 for run in executed)
     return duration, len(executed), first_pass
 
 
 def _per_pr_stats(
-    per_pr: dict[int, list[dict[str, Any]]], superseded: set[int], abandoned_shas: set[str]
-) -> dict[str, Any]:
+    per_pr: dict[int, list[RunRecord]], superseded: set[int], abandoned_shas: set[str]
+) -> dict[str, float | None]:
     """Duration, run-count and first-pass statistics over one day's completed PRs."""
     figures = [_pr_figures(pr_runs, superseded, abandoned_shas) for pr_runs in per_pr.values()]
     durations = [duration for duration, _, _ in figures]
@@ -428,13 +464,13 @@ def _per_pr_stats(
     }
 
 
-def _by_day(
-    items: list[dict[str, Any]],
-    stamp: Callable[[dict[str, Any]], datetime | None],
+def _by_day[Record: dict[str, object]](
+    items: list[Record],
+    stamp: Callable[[Record], datetime | None],
     days: list[date],
     tz: ZoneInfo,
-) -> dict[date, list[dict[str, Any]]]:
-    grouped: dict[date, list[dict[str, Any]]] = {day: [] for day in days}
+) -> dict[date, list[Record]]:
+    grouped: dict[date, list[Record]] = {day: [] for day in days}
     for item in items:
         moment = stamp(item)
         if moment is not None and (day := moment.astimezone(tz).date()) in grouped:
@@ -443,12 +479,12 @@ def _by_day(
 
 
 def _runs_per_completed_pr(
-    completed_prs: list[dict[str, Any]],
+    completed_prs: list[PullRecord],
     run_pr: dict[int, int],
-    runs_by_id: dict[int, dict[str, Any]],
-) -> dict[int, list[dict[str, Any]]]:
-    numbers = {int(pr["number"]) for pr in completed_prs if isinstance(pr.get("number"), int)}
-    per_pr: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    runs_by_id: dict[int, RunRecord],
+) -> dict[int, list[RunRecord]]:
+    numbers = {number for pr in completed_prs if (number := optional_int(pr, "number")) is not None}
+    per_pr: dict[int, list[RunRecord]] = defaultdict(list)
     for identifier, number in run_pr.items():
         if number in numbers and identifier in runs_by_id:
             per_pr[number].append(runs_by_id[identifier])
@@ -456,50 +492,49 @@ def _runs_per_completed_pr(
 
 
 def daily_aggregates(
-    runs: list[dict[str, Any]],
-    prs: list[dict[str, Any]],
+    runs: list[RunRecord],
+    prs: list[PullRecord],
     days: list[date],
     tz: ZoneInfo,
-) -> dict[str, dict[str, Any]]:
+) -> dict[str, Metrics]:
     """Compute day-labelled count, share, and per-completed-PR absolute state."""
     by_day = _by_day(runs, lambda run: runs_api.parse_timestamp(run.get("created_at")), days, tz)
     prs_by_day = _by_day(prs, _completed_at, days, tz)
     abandoned_shas = _abandoned_shas(prs)
     superseded = superseded_ids(runs)
     run_pr = attribute_runs(runs, prs)
-    runs_by_id = {int(run["id"]): run for run in runs}
-    result: dict[str, dict[str, Any]] = {}
+    runs_by_id = {_run_id(run): run for run in runs}
+    result: dict[str, Metrics] = {}
     for day in days:
         group = by_day[day]
-        flags = {int(run["id"]): _flags(run, superseded, abandoned_shas) for run in group}
+        flags = {_run_id(run): _flags(run, superseded, abandoned_shas) for run in group}
         entry = _day_counts(group, flags, len(prs_by_day[day]))
         if group:
             entry.update(_day_shares(group, flags))
         per_pr = _runs_per_completed_pr(prs_by_day[day], run_pr, runs_by_id)
         entry["prs_with_runs"] = len(per_pr)
         if per_pr:
-            entry.update(_per_pr_stats(per_pr, superseded, abandoned_shas))
-        result[day.isoformat()] = {key: value for key, value in entry.items() if value is not None}
+            for key, figure in _per_pr_stats(per_pr, superseded, abandoned_shas).items():
+                if figure is not None:
+                    entry[key] = figure
+        result[day.isoformat()] = entry
     return result
 
 
-def workflow_aggregates(
-    runs: list[dict[str, Any]], prs: list[dict[str, Any]]
-) -> dict[str, dict[str, Any]]:
+def workflow_aggregates(runs: list[RunRecord], prs: list[PullRecord]) -> dict[str, Metrics]:
     """Compute trailing-window workflow fragility stats and execution percentiles."""
     abandoned_shas = _abandoned_shas(prs)
     superseded = superseded_ids(runs)
     run_pr = attribute_runs(runs, prs)
     completed_with_runs = set(run_pr.values())
-    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    grouped: dict[str, list[RunRecord]] = defaultdict(list)
     for run in runs:
         grouped[str(run.get("name") or "unnamed workflow")].append(run)
-    result: dict[str, dict[str, Any]] = {}
+    result: dict[str, Metrics] = {}
     for workflow, group in grouped.items():
         flags = [_flags(run, superseded, abandoned_shas) for run in group]
-        appeared = {run_pr[int(run["id"])] for run in group if int(run["id"]) in run_pr}
-        entry = _workflow_entry(group, flags, appeared, completed_with_runs)
-        result[workflow] = {key: value for key, value in entry.items() if value is not None}
+        appeared = {run_pr[_run_id(run)] for run in group if _run_id(run) in run_pr}
+        result[workflow] = _workflow_entry(group, flags, appeared, completed_with_runs)
     return result
 
 
@@ -507,12 +542,12 @@ _WORKFLOW_FLAG_COUNTS = ("failed", "self_healed", "retried_failed", "superseded"
 
 
 def _workflow_entry(
-    group: list[dict[str, Any]],
+    group: list[RunRecord],
     flags: list[dict[str, bool]],
     appeared: set[int],
     completed_with_runs: set[int],
-) -> dict[str, Any]:
-    entry: dict[str, Any] = {
+) -> Metrics:
+    entry: Metrics = {
         f"{name}_runs": sum(value[name] for value in flags) for name in _WORKFLOW_FLAG_COUNTS
     }
     entry["runs"] = len(group)
@@ -521,7 +556,7 @@ def _workflow_entry(
     if completed_with_runs:
         entry["pr_appearance_share"] = round(len(appeared) / len(completed_with_runs), 3)
     if group:
-        retried = sum(int(run.get("run_attempt") or 0) >= 2 for run in group)
+        retried = sum(_attempt(run) >= 2 for run in group)
         entry["retry_share"] = round(retried / len(group), 3)
     execution = [
         wall
@@ -529,9 +564,11 @@ def _workflow_entry(
         if not is_zombie(run)
         if (wall := wall_seconds(run)) is not None and wall > _INSTANT_SKIP_SECONDS
     ]
-    if execution:
-        entry["exec_median_seconds"] = percentile(execution, 0.5)
-        entry["exec_p90_seconds"] = percentile(execution, 0.9)
+    median = percentile(execution, 0.5)
+    p90 = percentile(execution, 0.9)
+    if median is not None and p90 is not None:
+        entry["exec_median_seconds"] = median
+        entry["exec_p90_seconds"] = p90
     return entry
 
 
@@ -549,7 +586,7 @@ def collect_repo(
     window_start = datetime.combine(days[0], day_time.min, tzinfo=tz).astimezone(UTC)
     cache_start = window_start - _CACHE_MARGIN
     cache = load_cache(_cache_path(state_dir, repo))
-    watermark = runs_api.parse_timestamp(cache.get("last_fetch_end"))
+    watermark = runs_api.parse_timestamp(cache["last_fetch_end"])
     fetch_start = (
         cache_start if watermark is None else max(cache_start, watermark - _INCREMENTAL_OVERLAP)
     )
@@ -594,34 +631,34 @@ def collect_repo(
 
 def build_snapshot(
     collections: Iterable[RepoCollection], days: list[date], now: datetime, tz: ZoneInfo
-) -> dict[str, Any]:
+) -> Snapshot:
     """Build the reconciliation JSON used by dry-run and persistent snapshots."""
-    return {
-        "version": 1,
-        "generated_at": now.astimezone(UTC).isoformat(),
-        "window": {
-            "days": len(days),
-            "start_day": days[0].isoformat(),
-            "end_day": days[-1].isoformat(),
-            "timezone": str(tz),
-        },
-        "repositories": {
-            item.repo: {
-                "days": item.daily,
-                "workflows": item.workflows,
-                "run": {
-                    "window_days": len(days),
-                    "window_runs": item.window_runs,
-                    "window_prs": item.window_prs,
-                    "api_requests": item.api_requests,
-                },
-            }
+    return Snapshot(
+        version=1,
+        generated_at=now.astimezone(UTC).isoformat(),
+        window=SnapshotWindow(
+            days=len(days),
+            start_day=days[0].isoformat(),
+            end_day=days[-1].isoformat(),
+            timezone=str(tz),
+        ),
+        repositories={
+            item.repo: SnapshotRepository(
+                days=item.daily,
+                workflows=item.workflows,
+                run=SnapshotRun(
+                    window_days=len(days),
+                    window_runs=item.window_runs,
+                    window_prs=item.window_prs,
+                    api_requests=item.api_requests,
+                ),
+            )
             for item in collections
         },
-    }
+    )
 
 
-def emit_snapshot(snapshot: dict[str, Any], *, pipeline: EventPipeline, home: Path) -> None:
+def emit_snapshot(snapshot: Snapshot, *, pipeline: EventPipeline, home: Path) -> None:
     """Emit absolute states after all repositories succeed, using the exporter
     process dimension for both standalone and scheduled invocation."""
     from base import telemetry
@@ -643,7 +680,7 @@ def emit_snapshot(snapshot: dict[str, Any], *, pipeline: EventPipeline, home: Pa
     telemetry.sync()
 
 
-def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+def _parse_args(argv: list[str] | None) -> Options:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument(
         "--repo", action="append", default=None, help="owner/name to sample (repeatable)"
@@ -656,15 +693,15 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--dry-run", action="store_true", help="print JSON without writes or emission"
     )
     parser.add_argument("--print-snapshot", action="store_true", help="print reconciliation JSON")
-    args = parser.parse_args(argv)
+    parsed = options(parser.parse_args(argv), Options)
     # Three default windows cap a cold walk's request budget while preserving
     # enough history for reconciliation beyond Prometheus's retention.
-    if args.window_days < 1 or args.window_days > 90:
+    if parsed.window_days < 1 or parsed.window_days > 90:
         parser.error("--window-days must be between 1 and 90")
-    repos = args.repo or [DEFAULT_REPO]
+    repos = parsed.repo or [DEFAULT_REPO]
     if len(set(repos)) != len(repos):
         parser.error("--repo values must be unique")
-    return args
+    return parsed
 
 
 def main(

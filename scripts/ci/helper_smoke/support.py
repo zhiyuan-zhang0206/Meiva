@@ -8,12 +8,17 @@ import os
 import signal
 import socket
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, NoReturn, TypeGuard
+from typing import NoReturn
 
 from base.clock import Timers
-from base.host.permissions_helper.client import PermissionsHelperClient
+from base.host.permissions_helper.client import PermissionsHelperClient, RootStatus
+from scripts.boundary.untyped import is_object_dict, is_object_list, object_of
+
+# meiva:note
+# A decoded JSON object from the processes the smoke drives as a black box (the root's control socket, the unit probes): the readers below narrow the fields it reads.
+JsonObject = dict[str, object]
 
 ROOT_SOCKET = "meiva-root.sock"
 ROOT_WAIT_S = 30.0
@@ -208,41 +213,88 @@ def ping_or_none(helper_client: PermissionsHelperClient) -> bool | None:
         return None
 
 
+# meiva:note
+# `value` as a JSON object; anything else is a `TypeError` naming `what`.
+def json_object(value: object, what: str) -> JsonObject:
+    if not is_object_dict(value):
+        raise TypeError(f"{what} is {type(value).__name__}, not an object")
+    return value
+
+
+# meiva:note
+# `value` as a JSON array of objects; anything else is a `TypeError` naming `what`.
+def json_objects(value: object, what: str) -> list[JsonObject]:
+    if not is_object_list(value):
+        raise TypeError(f"{what} is {type(value).__name__}, not an array")
+    return [json_object(item, f"{what} item") for item in value]
+
+
+# meiva:note
+# `record[key]` as an int; a missing key or another type is a `TypeError` naming the key.
+def whole_number(record: Mapping[str, object], key: str) -> int:
+    value = record[key]
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise TypeError(f"{key} is {type(value).__name__}, not an int")
+    return value
+
+
+# meiva:note
+# The pid of the root a status document reports as running, else None.
+def running_root_pid(status: JsonObject) -> int | None:
+    root = json_object(status["root"], "status root")
+    pid = root.get("pid")
+    return pid if root.get("running") and isinstance(pid, int) else None
+
+
 def status_if_running(
-    root_status: Callable[[], dict[str, Any]], *, excluding: int | None = None
-) -> dict[str, Any] | None:
+    root_status: Callable[[], JsonObject], *, excluding: int | None = None
+) -> JsonObject | None:
     try:
         status = root_status()
     except _NOT_ANSWERING:
         return None
-    if status["root"]["running"] and isinstance(status["root"]["pid"], int):
-        pid = int(status["root"]["pid"])
-        if excluding is not None and pid == excluding:
-            return None
-        return status
-    return None
+    pid = running_root_pid(status)
+    if pid is None or (excluding is not None and pid == excluding):
+        return None
+    return status
 
 
 def status_if_keeper_running(
-    helper_root_status: Callable[[], dict[str, Any]],
-) -> dict[str, Any] | None:
+    helper_root_status: Callable[[], RootStatus],
+) -> RootStatus | None:
     try:
         status = helper_root_status()
     except _NOT_ANSWERING:
         return None
-    if status.get("state") == "running" and isinstance(status.get("pid"), int):
+    if status["state"] == "running" and "pid" in status:
         return status
     return None
 
 
+# meiva:note
+# The pid of the foreign root a keeper in `conflict` reports, None when it reports none.
+def conflict_pid_of(status: RootStatus) -> int | None:
+    conflict = status.get("conflict")
+    return None if conflict is None else conflict.get("pid")
+
+
+# meiva:note
+# The live root pid a running keeper reports.
+def keeper_pid(status: RootStatus) -> int:
+    pid = status.get("pid")
+    if pid is None:
+        fail("conflict", f"the keeper reports no pid for its root: {status}")
+    return pid
+
+
 def status_if_conflict(
-    helper_root_status: Callable[[], dict[str, Any]],
-) -> dict[str, Any] | None:
+    helper_root_status: Callable[[], RootStatus],
+) -> RootStatus | None:
     try:
         status = helper_root_status()
     except _NOT_ANSWERING:
         return None
-    return status if status.get("state") == "conflict" else None
+    return status if status["state"] == "conflict" else None
 
 
 def relaunched_helper(label: str, old_pid: int):
@@ -252,10 +304,13 @@ def relaunched_helper(label: str, old_pid: int):
     return pid
 
 
-def unit_entry(status: dict[str, Any], unit_id: str) -> dict[str, Any]:
-    for entry in status["units"]:
-        if entry["id"] == unit_id and isinstance(entry["pid"], int):
-            return entry
+# meiva:note
+# The live pid of unit `unit_id` in a root status document.
+def live_unit_pid(status: JsonObject, unit_id: str) -> int:
+    for entry in json_objects(status["units"], "status units"):
+        pid = entry.get("pid")
+        if entry["id"] == unit_id and isinstance(pid, int):
+            return pid
     fail("chain", f"unit {unit_id!r} has no live pid in {json.dumps(status)[:400]}")
 
 
@@ -264,15 +319,7 @@ def ppid_of(pid: int) -> int:
     return int(proc.stdout.strip())
 
 
-def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
-    return isinstance(value, dict)
-
-
-def is_object_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
-
-
-def root_call(run_dir: Path, verb: str) -> dict[str, Any]:
+def root_call(run_dir: Path, verb: str) -> JsonObject:
     """Send one K1 verb over the raw control socket (stdlib only).
 
     The smoke drives the root as a black box — process tree, socket, K1
@@ -283,7 +330,7 @@ def root_call(run_dir: Path, verb: str) -> dict[str, Any]:
         sock.connect(str(run_dir / ROOT_SOCKET))
         sock.sendall(json.dumps({"verb": verb}).encode() + b"\n")
         line = sock.makefile("rb").readline()
-    response = json.loads(line)
+    response = json_object(object_of(json.loads, line), "root reply")
     if not response.get("ok"):
         fail("root", f"{verb} refused: {response}")
     result = response.get("result")

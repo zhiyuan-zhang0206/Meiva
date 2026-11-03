@@ -62,7 +62,7 @@ def _host(responses: list[tuple[str, str | Exception]], calls: list[list[str]]) 
     return fake_host(run)
 
 
-def _collect(host: Host) -> list[dict[str, Any]]:
+def _collect(host: Host) -> list[accounting.LedgerEntry]:
     return accounting.collect("o/r", SINCE, UNTIL, host=host)
 
 

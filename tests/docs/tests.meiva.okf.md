@@ -25,7 +25,7 @@ tags:
 | **E2E tests** | `tests/e2e/` | full-stack end-to-end tests |
 | **Data factories** | `tests/factories/` | test data construction tools |
 
-`scripts/post_deploy_visual/layout_assertions.py` is the shared real-browser structural layer for
+`scripts/verify/post_deploy_visual/layout_assertions.py` is the shared real-browser structural layer for
 document overflow, viewport containment, center-point occlusion, nonempty blocks,
 settle-before-capture, and the bounded wait that absorbs asynchronously mounted
 panels before declared minimum visible counts are probed. The layout-invariant

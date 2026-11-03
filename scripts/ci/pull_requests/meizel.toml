@@ -7,8 +7,9 @@ exports = ["accounting.py", "classify_paths.py", "commands.py", "export_process.
 "owner_operations.py" = ["job_rerun.py"]
 "pr_flow_export.py" = ["export_process.py", "gh_process.py"]
 "runs_api.py" = ["gh_process.py"]
-"runs_export.py" = ["export_process.py", "gh_process.py", "runs_api.py"]
-"tests" = ["accounting.py", "commands.py", "diagnose.py", "export_process.py", "gh_process.py", "job_rerun.py", "monitor.py", "pr_flow_export.py", "pyright_scope.py", "runs_api.py", "runs_export.py", "status.py"]
+"runs_contracts.py" = ["runs_api.py"]
+"runs_export.py" = ["export_process.py", "gh_process.py", "runs_api.py", "runs_contracts.py"]
+"tests" = ["accounting.py", "commands.py", "diagnose.py", "export_process.py", "gh_process.py", "job_rerun.py", "monitor.py", "pr_flow_export.py", "pyright_scope.py", "runs_api.py", "runs_contracts.py", "runs_export.py", "status.py"]
 "watch_pr.py" = ["status.py"]
 
 [roots]

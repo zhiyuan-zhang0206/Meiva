@@ -44,8 +44,148 @@ import json
 import math
 import sys
 import xml.etree.ElementTree as ET
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import Literal, NotRequired, TypedDict
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+# meiva:note
+# Script mode runs this file with the interpreter CI provides and only `scripts/ci/` on sys.path: the
+# checkout root comes first so `scripts.boundary` (standard library only) resolves against this tree.
+from scripts.boundary.options import attribute, options  # noqa: E402
+from scripts.boundary.required import required_int, required_str  # noqa: E402
+from scripts.boundary.untyped import is_object_dict, is_object_list, object_of  # noqa: E402
+
+# meiva:note
+# One leak-guard finding of a test: the test id, the kind of finding and its detail (plus the `shard` whose report it came from once `total` has read it).
+Finding = dict[str, str]
+
+_FindingKey = Literal["leaks", "notes", "faults"]
+_FINDING_KEYS: tuple[_FindingKey, ...] = ("leaks", "notes", "faults")
+
+
+class JunitCounts(TypedDict):
+    # meiva:note
+    # What one JUnit report says: the tests executed, skipped and failed, the tests per directory, and the guard's findings (a key is present only for a kind that occurred).
+
+    tests: int
+    skipped: int
+    failed: int
+    buckets: dict[str, int]
+    leaks: NotRequired[list[Finding]]
+    notes: NotRequired[list[Finding]]
+    faults: NotRequired[list[Finding]]
+
+
+class ShardCounts(JunitCounts):
+    # meiva:note
+    # One shard's count file: its JUnit counts under the shard's group name.
+
+    group: str
+
+
+class Baseline(TypedDict):
+    # meiva:note
+    # The run total `total --out` writes as the next baseline.
+
+    tests: int
+    skipped: int
+    buckets: dict[str, int]
+    sha: str
+    run_id: str
+
+
+@dataclass(frozen=True)
+class ShardOptions:
+    group: str
+    junit: str
+    out: Path
+    summary: Path | None
+    min_tests: int
+
+
+@dataclass(frozen=True)
+class TotalOptions:
+    dir: Path
+    expected: str
+    baseline: Path | None
+    out: Path | None
+    summary: Path | None
+    leak_report: Path | None
+    sha: str
+    run_id: str
+
+
+def _int_map(value: object, where: str) -> dict[str, int]:
+    if not is_object_dict(value):
+        raise TypeError(f"{where} is not an object")
+    counts: dict[str, int] = {}
+    for key, count in value.items():
+        if not isinstance(count, int) or isinstance(count, bool):
+            raise TypeError(f"{where}[{key!r}] is {type(count).__name__}, not int")
+        counts[key] = count
+    return counts
+
+
+def _findings(value: object, where: str) -> list[Finding]:
+    if not is_object_list(value):
+        raise TypeError(f"{where} is not a list")
+    found: list[Finding] = []
+    for item in value:
+        if not is_object_dict(item) or not all(isinstance(text, str) for text in item.values()):
+            raise TypeError(f"{where} holds a finding that is not an object of strings")
+        found.append({key: str(text) for key, text in item.items()})
+    return found
+
+
+def _read_object(path: Path) -> dict[str, object]:
+    data = object_of(json.loads, path.read_text(encoding="utf-8"))
+    if not is_object_dict(data):
+        raise TypeError(f"{path}: expected a JSON object, got {type(data).__name__}")
+    return data
+
+
+# meiva:note
+# A shard's count file as `run_shard` wrote it; a field of another type is a `TypeError` naming the file.
+def read_shard_counts(path: Path) -> ShardCounts:
+    data = _read_object(path)
+    try:
+        counts = ShardCounts(
+            group=required_str(data, "group"),
+            tests=required_int(data, "tests"),
+            skipped=required_int(data, "skipped"),
+            failed=required_int(data, "failed"),
+            buckets=_int_map(data.get("buckets"), "buckets"),
+        )
+        if "leaks" in data:
+            counts["leaks"] = _findings(data["leaks"], "leaks")
+        if "notes" in data:
+            counts["notes"] = _findings(data["notes"], "notes")
+        if "faults" in data:
+            counts["faults"] = _findings(data["faults"], "faults")
+    except TypeError as exc:
+        raise TypeError(f"{path}: {exc}") from exc
+    return counts
+
+
+# meiva:note
+# The baseline file an earlier `total --out` wrote: the total, its directories and the commit and run it describes.
+def read_baseline(path: Path) -> Baseline:
+    data = _read_object(path)
+    try:
+        return Baseline(
+            tests=required_int(data, "tests"),
+            skipped=0,
+            buckets=_int_map(data.get("buckets"), "buckets"),
+            sha=str(data.get("sha", "?")),
+            run_id=str(data.get("run_id", "?")),
+        )
+    except TypeError as exc:
+        raise TypeError(f"{path}: {exc}") from exc
 
 
 def bucket_of(test_file: str) -> str:
@@ -66,12 +206,10 @@ GUARD_PROPERTIES = {"leak_guard": "leaks", "leak_guard_note": "notes", "leak_gua
 ANNOTATION_LINES = 40  # the annotation is the digest; the artifact has the full list
 
 
-def count_junit(path: Path) -> dict[str, Any]:
+def count_junit(path: Path) -> JunitCounts:
     """Tests, skips and failures in one JUnit report, the tests per directory, and the guard's findings."""
     buckets: dict[str, int] = {}
-    guard: dict[
-        str, list[dict[str, str]]
-    ] = {}  # only the kinds that occurred: a clean report adds no key
+    guard: dict[str, list[Finding]] = {}  # only the kinds that occurred: a clean report adds no key
     tests = skipped = failed = 0
     for _, element in ET.iterparse(path):  # noqa: S314 - pytest's own report, written by this job
         if element.tag != "testcase":
@@ -98,7 +236,14 @@ def count_junit(path: Path) -> dict[str, Any]:
         bucket = bucket_of(test_file)
         buckets[bucket] = buckets.get(bucket, 0) + 1
         element.clear()
-    return {"tests": tests, "skipped": skipped, "failed": failed, "buckets": buckets, **guard}
+    counts = JunitCounts(tests=tests, skipped=skipped, failed=failed, buckets=buckets)
+    if "leaks" in guard:
+        counts["leaks"] = guard["leaks"]
+    if "notes" in guard:
+        counts["notes"] = guard["notes"]
+    if "faults" in guard:
+        counts["faults"] = guard["faults"]
+    return counts
 
 
 def latest_report(pattern: str) -> Path:
@@ -127,7 +272,8 @@ def _emit(text: str, summary: str, summary_path: Path | None) -> None:
 
 def run_shard(group: str, junit: str, out: Path, summary_path: Path | None, min_tests: int) -> int:
     report = latest_report(junit)
-    counts: dict[str, Any] = {"group": group, **count_junit(report)}
+    junit_counts = count_junit(report)
+    counts = ShardCounts(group=group, **junit_counts)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(counts, indent=1, sort_keys=True) + "\n", encoding="utf-8")
     rows = sorted(counts["buckets"].items())
@@ -169,9 +315,9 @@ def _baseline_lines(total: int, buckets: dict[str, int], baseline: Path | None) 
     """How the total, and each directory, moved against the baseline (the previous queue run)."""
     if baseline is None or not baseline.is_file():
         return ["  no baseline: no earlier queue run left a total; this run becomes the baseline"]
-    base = json.loads(baseline.read_text(encoding="utf-8"))
+    base = read_baseline(baseline)
     lines = [
-        f"  against queue {base.get('sha', '?')[:9]} (run {base.get('run_id', '?')}): "
+        f"  against queue {base['sha'][:9]} (run {base['run_id']}): "
         f"{base['tests']} -> {total} ({total - base['tests']:+d})"
     ]
     changed = _diff(buckets, base["buckets"])
@@ -185,18 +331,28 @@ def _workflow_command(command: str, title: str, message: str) -> str:
     return f"::{command} title={title}::{escaped}"
 
 
-def _guard_findings(arrived: dict[str, dict[str, Any]]) -> dict[str, list[dict[str, str]]]:
+def _findings_of(counts: ShardCounts, key: _FindingKey) -> list[Finding]:
+    if key == "leaks":
+        return counts.get("leaks", [])
+    if key == "notes":
+        return counts.get("notes", [])
+    return counts.get("faults", [])
+
+
+def _guard_findings(arrived: Mapping[str, ShardCounts]) -> dict[str, list[Finding]]:
     """Every leak-guard finding of the run, each tagged with the shard whose report it came from."""
     return {
         key: [
-            dict(x, shard=group) for group, counts in arrived.items() for x in counts.get(key, [])
+            dict(x, shard=group)
+            for group, counts in arrived.items()
+            for x in _findings_of(counts, key)
         ]
-        for key in GUARD_PROPERTIES.values()
+        for key in _FINDING_KEYS
     }
 
 
 def _leak_lines(
-    found: dict[str, list[dict[str, str]]], arrived: int, expected: list[str], missing: list[str]
+    found: dict[str, list[Finding]], arrived: int, expected: list[str], missing: list[str]
 ) -> list[str]:
     """The run's leak-guard digest: a head, the count by kind, the guard's faults, one line per leak group."""
     leaks = found["leaks"]
@@ -228,10 +384,10 @@ def _leak_lines(
 
 
 def _report_leaks(
-    arrived: dict[str, dict[str, Any]],
+    arrived: Mapping[str, ShardCounts],
     expected: list[str],
     missing: list[str],
-    args: argparse.Namespace,
+    args: TotalOptions,
 ) -> None:
     """The cluster-wide leaker list, readable from this ONE job without pulling any shard log.
 
@@ -245,7 +401,7 @@ def _report_leaks(
     text = "\n".join(lines)
     _emit(text, f"### Leak guard\n\n```\n{text}\n```", args.summary)
     if args.leak_report is not None:
-        payload = {
+        payload: dict[str, object] = {
             "sha": args.sha,
             "run_id": args.run_id,
             "complete": not missing,
@@ -265,14 +421,14 @@ def _report_leaks(
         print(_workflow_command("warning", "leak guard", "\n".join(shown)))
 
 
-def run_total(args: argparse.Namespace) -> int:
-    directory: Path = args.dir
-    expected: list[str] = args.expected.split()
-    baseline: Path | None = args.baseline
-    out: Path | None = args.out
-    arrived: dict[str, dict[str, Any]] = {}
+def run_total(args: TotalOptions) -> int:
+    directory = args.dir
+    expected = args.expected.split()
+    baseline = args.baseline
+    out = args.out
+    arrived: dict[str, ShardCounts] = {}
     for path in sorted(directory.glob("*.json")):
-        counts = json.loads(path.read_text(encoding="utf-8"))
+        counts = read_shard_counts(path)
         arrived[counts["group"]] = counts
     missing = [group for group in expected if group not in arrived]
     buckets: dict[str, int] = {}
@@ -302,14 +458,10 @@ def run_total(args: argparse.Namespace) -> int:
         args.summary,
     )
     if out is not None and not missing:
-        payload = {
-            "tests": total,
-            "skipped": skipped,
-            "buckets": buckets,
-            "sha": args.sha,
-            "run_id": args.run_id,
-        }
-        out.write_text(json.dumps(payload, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+        written = Baseline(
+            tests=total, skipped=skipped, buckets=buckets, sha=args.sha, run_id=args.run_id
+        )
+        out.write_text(json.dumps(written, indent=1, sort_keys=True) + "\n", encoding="utf-8")
     try:
         _report_leaks(arrived, expected, missing, args)
     except (
@@ -352,9 +504,16 @@ def main(argv: list[str]) -> int:
     total.add_argument("--sha", default="", help="the commit the total describes")
     total.add_argument("--run-id", default="", help="the workflow run the total describes")
     args = parser.parse_args(argv)
-    if args.command == "shard":
-        return run_shard(args.group, args.junit, args.out, args.summary, args.min_tests)
-    return run_total(args)
+    if attribute(args, "command", str) == "shard":
+        shard_options = options(args, ShardOptions)
+        return run_shard(
+            shard_options.group,
+            shard_options.junit,
+            shard_options.out,
+            shard_options.summary,
+            shard_options.min_tests,
+        )
+    return run_total(options(args, TotalOptions))
 
 
 if __name__ == "__main__":
@@ -366,25 +525,17 @@ if __name__ == "__main__":
 FULL_FANOUT_SHARDS = 8
 
 
-def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
-    return isinstance(value, dict)
-
-
 # meiva:note
 # Measured pytest node durations, from the file CI restores; an absent timing file has none.
 def load_durations(path: Path) -> dict[str, float]:
     if not path.is_file():
         return {}
-    data: object = json.loads(path.read_text())
-    if not _is_raw_dict(data):
+    data = object_of(json.loads, path.read_text())
+    if not is_object_dict(data):
         raise TypeError(f"duration file must contain a JSON object: {path}")
     durations: dict[str, float] = {}
     for node_id, seconds in data.items():
-        if (
-            isinstance(node_id, str)
-            and isinstance(seconds, (int, float))
-            and not isinstance(seconds, bool)
-        ):
+        if isinstance(seconds, (int, float)) and not isinstance(seconds, bool):
             durations[node_id] = float(seconds)
     return durations
 

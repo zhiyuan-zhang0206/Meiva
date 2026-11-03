@@ -4,9 +4,11 @@ import json
 import re
 import subprocess
 import sys
-from typing import NotRequired, TypedDict, TypeGuard
+from typing import NotRequired, TypedDict
 
 from base.host.system.hostport import Host
+from scripts.boundary.process import stdout_text
+from scripts.boundary.untyped import is_object_dict, is_object_list, object_of
 from scripts.ci.pull_requests.job_rerun import FAILING, CiJobRerunError, list_failed_jobs
 
 _GH_TIMEOUT_S = 30.0
@@ -26,22 +28,10 @@ class Diagnosis(TypedDict):
     mergeable: NotRequired[object]
 
 
-def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
-    return isinstance(value, dict)
-
-
-def _is_table(value: object) -> TypeGuard[dict[str, object]]:
-    return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
-
-
-def _is_object_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
-
-
 def _object_rows(raw: object) -> list[dict[str, object]]:
-    if not _is_object_list(raw):
+    if not is_object_list(raw):
         return []
-    return [row for row in raw if _is_table(row)]
+    return [row for row in raw if is_object_dict(row)]
 
 
 # meiva:note
@@ -87,10 +77,10 @@ def _pr_view(pr: str, repo: str, fields: str, *, host: Host) -> dict[str, object
     if result.returncode != 0:
         return None
     try:
-        data: object = json.loads(result.stdout)
+        data = object_of(json.loads, stdout_text(result))
     except json.JSONDecodeError:
         return None
-    return data if _is_table(data) else None
+    return data if is_object_dict(data) else None
 
 
 def _job_log_tail(job_id: int, repo: str, *, host: Host) -> str:
@@ -105,7 +95,7 @@ def _job_log_tail(job_id: int, repo: str, *, host: Host) -> str:
         return ""
     if result.returncode != 0:
         return ""
-    return result.stdout[-_DIAGNOSE_LOG_TAIL:]
+    return stdout_text(result)[-_DIAGNOSE_LOG_TAIL:]
 
 
 def classify_check(name: str, log: str) -> tuple[str, str]:
@@ -119,7 +109,7 @@ def classify_check(name: str, log: str) -> tuple[str, str]:
 
 def _pull_head_ref(pull: dict[str, object]) -> str:
     head = pull.get("head")
-    if not _is_table(head):
+    if not is_object_dict(head):
         return ""
     return str(head.get("ref") or "")
 
@@ -151,9 +141,10 @@ def _synthetic_test_prs(pr: str, repo: str, *, host: Host) -> list[dict[str, obj
     if result.returncode != 0:
         return []
     try:
-        pulls: object = json.loads(result.stdout)
+        pulls = object_of(json.loads, stdout_text(result))
     except json.JSONDecodeError:
         return []
+
     prefix = f"trunk-merge/pr-{pr}/"
     return [pull for pull in _object_rows(pulls) if _pull_head_ref(pull).startswith(prefix)][
         :_DIAGNOSE_MAX_SYNTHETIC_PRS

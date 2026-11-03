@@ -20,20 +20,23 @@ from base.host.system.hostport import Host
 from scripts.ci.pull_requests.job_rerun import CiJobRerunError, list_failed_jobs, rerun_failed_jobs
 
 
+# meiva:note
+# Re-run (or, with --dry-run, list) the failed jobs of `pr`.
 def _rerun_command(
-    args: argparse.Namespace,
     parser: argparse.ArgumentParser,
     *,
+    pr: str,
+    repo: str,
+    wait: bool,
+    as_json: bool,
+    dry_run: bool,
     host: Host,
-) -> int | None:
-    """Dispatch --rerun-failed-jobs when set; None when not set."""
-    if not args.rerun_failed_jobs:
-        return None
-    if args.wait or args.json:
+) -> int:
+    if wait or as_json:
         parser.error("--rerun-failed-jobs is exclusive with --wait/--json")
     try:
-        if args.dry_run:
-            jobs = list_failed_jobs(args.pr, args.repo, host=host)
+        if dry_run:
+            jobs = list_failed_jobs(pr, repo, host=host)
             if not jobs:
                 print("No failed jobs to re-run")
                 return 0
@@ -43,7 +46,7 @@ def _rerun_command(
                     f"{j['conclusion']}) [run {j['run_status']}]"
                 )
             return 0
-        reran, waiting, errors = rerun_failed_jobs(args.pr, args.repo, host=host)
+        reran, waiting, errors = rerun_failed_jobs(pr, repo, host=host)
     except CiJobRerunError as error:
         # A failed GitHub query must not read as "no failed jobs" (issue #1945).
         print(f"Failed to list failed jobs: {error}", file=sys.stderr, flush=True)
@@ -62,9 +65,13 @@ def _rerun_command(
 
 
 def dispatch(
-    args: argparse.Namespace,
     parser: argparse.ArgumentParser,
     *,
+    pr: str | None,
+    repo: str,
+    wait: bool,
+    as_json: bool,
+    dry_run: bool,
     host: Host,
     clock: Clock,
     open_url: UrlOpener,
@@ -72,9 +79,8 @@ def dispatch(
     env: Mapping[str, str],
 ) -> int:
     _ = (clock, open_url, workflows, env)
-    if args.pr is None:
+    if pr is None:
         parser.error("PR number is required")
-    rerun_rc = _rerun_command(args, parser, host=host)
-    if rerun_rc is None:
-        raise AssertionError("selected re-run command returned no result")
-    return rerun_rc
+    return _rerun_command(
+        parser, pr=pr, repo=repo, wait=wait, as_json=as_json, dry_run=dry_run, host=host
+    )

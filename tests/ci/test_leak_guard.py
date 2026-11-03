@@ -472,12 +472,12 @@ def test_a_replaced_existing_attribute_is_named_at_the_file_boundary(
     run = _run_replace(replace_root, "warn", 0)
     assert run.bad() == {"test_reads_the_real_function"}
     assert {
-        x["test"].rpartition("::")[2] for x in shard_counts.count_junit(run.junit)["leaks"]
+        x["test"].rpartition("::")[2] for x in shard_counts.count_junit(run.junit).get("leaks", [])
     } == {"test_reads_the_real_function"}
-    assert [x["kind"] for x in shard_counts.count_junit(run.junit)["leaks"]] == [
+    assert [x["kind"] for x in shard_counts.count_junit(run.junit).get("leaks", [])] == [
         "module-attr-replaced"
     ]
-    detail = shard_counts.count_junit(run.junit)["leaks"][0]["detail"]
+    detail = shard_counts.count_junit(run.junit).get("leaks", [])[0]["detail"]
     assert detail.startswith(f"{_TESTS}/test_a_replace.py left leakdemo.gate.is_open")
 
 
@@ -539,7 +539,7 @@ def test_a_face_executed_again_in_place_is_not_a_leak(reload_root: Path) -> None
 # the same binding, is still a stand-in, and the file that installed it is still the one named.
 def test_a_stand_in_named_like_the_imported_object_is_still_a_leak(reload_root: Path) -> None:
     run = _pytest(reload_root, f"{_TESTS}/reload_standin", "warn", False, "", 1, plugins=(_GUARD,))
-    leaks = shard_counts.count_junit(run.junit)["leaks"]
+    leaks = shard_counts.count_junit(run.junit).get("leaks", [])
     assert [x["kind"] for x in leaks] == ["module-attr-replaced"]
     assert leaks[0]["detail"].startswith(
         f"{_TESTS}/reload_standin/test_a_standin.py left leakdemo.runtime.Config"
@@ -548,11 +548,11 @@ def test_a_stand_in_named_like_the_imported_object_is_still_a_leak(reload_root: 
 
 def test_the_properties_the_guard_writes_are_what_shard_counts_reads(suite: Suite) -> None:
     counted = shard_counts.count_junit(suite.run().junit)
-    assert {x["test"].rpartition("::")[2]: x["kind"] for x in counted["leaks"]} == LEAKERS
-    assert [x["kind"] for x in counted["notes"]] == ["sys.path"]
-    assert shard_counts.bucket_of(counted["leaks"][0]["test"].partition("::")[0]) == _TESTS
+    assert {x["test"].rpartition("::")[2]: x["kind"] for x in counted.get("leaks", [])} == LEAKERS
+    assert [x["kind"] for x in counted.get("notes", [])] == ["sys.path"]
+    assert shard_counts.bucket_of(counted.get("leaks", [])[0]["test"].partition("::")[0]) == _TESTS
     assert "faults" not in counted
     broken = shard_counts.count_junit(
         suite.run(mode="warn", fault="snapshot", select=_LEAKS_FILE).junit
     )
-    assert [x["kind"] for x in broken["faults"]] == ["snapshot"]
+    assert [x["kind"] for x in broken.get("faults", [])] == ["snapshot"]

@@ -14,7 +14,7 @@ import pytest
 
 from base.clock.tests.manual_timers import ManualTimers
 from base.telemetry import EventPipeline
-from scripts.ci.pull_requests import runs_api, runs_export
+from scripts.ci.pull_requests import runs_api, runs_contracts, runs_export
 from scripts.ci.pull_requests.gh_process import GhProcess
 
 
@@ -187,7 +187,9 @@ def test_cache_merge_is_idempotent_prunes_old_records_and_moves_watermark() -> N
     module = runs_export
     fresh = _run(id=1, updated_at="2026-09-02T11:00:00Z")
     old = _run(id=2, created_at="2026-08-01T10:00:00Z")
-    cache = {"runs": {"1": _run(id=1), "2": old}, "prs": {"1": _pr()}, "last_fetch_end": None}
+    cache = runs_contracts.RunCache(
+        runs={"1": _run(id=1), "2": old}, prs={"1": _pr()}, last_fetch_end=None
+    )
     merged = module.merge_cache(
         cache,
         [fresh],

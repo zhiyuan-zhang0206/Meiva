@@ -56,11 +56,12 @@ import argparse
 import json
 import subprocess
 import sys
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as dtime
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import TypedDict, TypeGuard
 from zoneinfo import ZoneInfo
 
 # Script-mode path guard (PYTHONSAFEPATH=1 removed the implicit script-dir
@@ -73,6 +74,9 @@ if str(_REPO_ROOT) not in sys.path:
 # meiva:note
 # The script-mode root guard must run before importing the checkout-owned API.
 from base.telemetry import EventPipeline  # noqa: E402
+from scripts.boundary.fields import optional_int  # noqa: E402
+from scripts.boundary.options import options  # noqa: E402
+from scripts.boundary.untyped import is_object_dict, is_object_list, object_of  # noqa: E402
 from scripts.ci.pull_requests.gh_process import GhProcess  # noqa: E402
 
 DEFAULT_REPO = "zhiyuan-zhang0206/Meiva"
@@ -91,30 +95,62 @@ _PAGE_SIZE = 100
 _STATE_DIR_RELATIVE = Path("state") / "pr-flow"
 
 
-def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
-    return isinstance(value, dict)
+# meiva:note
+# One `gh api` row projected by jq: a closed PR's list row, or a timeline event.
+GhRow = dict[str, object]
+# meiva:note
+# One day's figures: the merge count and, when the day has samples, the ready-to-merge seconds.
+DayFigures = dict[str, int | float]
 
 
-def _is_raw_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
+def _is_dict_list(value: object) -> TypeGuard[list[GhRow]]:
+    return is_object_list(value) and all(is_object_dict(item) for item in value)
 
 
-def _is_object_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
-
-
-def _is_dict_list(value: object) -> TypeGuard[list[dict[str, Any]]]:
-    return _is_raw_list(value) and all(_is_object_dict(item) for item in value)
-
-
-def _is_entry_map(value: object) -> TypeGuard[dict[str, dict[str, Any]]]:
-    return _is_raw_dict(value) and all(
-        isinstance(key, str) and _is_object_dict(entry) for key, entry in value.items()
-    )
+def _is_entry_map(value: object) -> TypeGuard[dict[str, dict[str, object]]]:
+    return is_object_dict(value) and all(is_object_dict(entry) for entry in value.values())
 
 
 class PrFlowError(RuntimeError):
     """A fetch that the run cannot proceed past (the PR list)."""
+
+
+class SnapshotWindow(TypedDict):
+    days: int
+    start_day: str
+    end_day: str
+    timezone: str
+
+
+class Snapshot(TypedDict):
+    # meiva:note
+    # The latest computed payload: window, per-day figures and the fetch accounting.
+
+    version: int
+    generated_at: str
+    repo: str
+    window: SnapshotWindow
+    days: dict[str, DayFigures]
+    stats: dict[str, int]
+
+
+@dataclass(frozen=True)
+class Options:
+    # meiva:note
+    # The flags `main` reads, as the parser answered them.
+
+    repo: str
+    window_days: int
+    state_dir: Path | None
+    dry_run: bool
+    print_snapshot: bool
+
+
+def _number(meta: Mapping[str, object]) -> int:
+    number = optional_int(meta, "number")
+    if number is None:
+        raise PrFlowError("pull request row lacks an integer number")
+    return number
 
 
 @dataclass
@@ -128,7 +164,7 @@ class PrRecord:
     ready_at: str
     partial: bool = False  # True when the timeline could not be read
 
-    def to_cache(self) -> dict[str, Any]:
+    def to_cache(self) -> dict[str, str | bool]:
         return {
             "updated_at": self.updated_at,
             "created_at": self.created_at,
@@ -138,7 +174,7 @@ class PrRecord:
         }
 
     @classmethod
-    def from_cache(cls, number: int, data: dict[str, Any]) -> PrRecord:
+    def from_cache(cls, number: int, data: Mapping[str, object]) -> PrRecord:
         return cls(
             number=number,
             updated_at=str(data.get("updated_at") or ""),
@@ -158,7 +194,7 @@ class RunStats:
     timeline_cache_hits: int = 0
     timeline_failures: int = 0
 
-    def to_json(self) -> dict[str, Any]:
+    def to_json(self) -> dict[str, int]:
         return {
             "gh_api_calls": self.gh_api_calls,
             "timeline_fetches": self.timeline_fetches,
@@ -204,7 +240,7 @@ def run_gh(args: list[str], *, run_process: GhProcess, timeout: float = _GH_TIME
 
 def fetch_closed_prs(
     repo: str, since: datetime, stats: RunStats, *, run_process: GhProcess, max_pages: int
-) -> list[dict[str, Any]]:
+) -> list[GhRow]:
     """Closed PRs updated since `since`, newest-updated first (paginated).
 
     Sorted by ``updated`` desc, so the walk can stop at the first page whose
@@ -212,7 +248,7 @@ def fetch_closed_prs(
     projected.
     """
     jq = "[.[] | {number, created_at, updated_at, merged_at}] | @json"
-    prs: list[dict[str, Any]] = []
+    prs: list[GhRow] = []
     for page in range(1, max_pages + 1):
         out = run_gh(
             [
@@ -225,7 +261,7 @@ def fetch_closed_prs(
             run_process=run_process,
         )
         stats.gh_api_calls += 1
-        batch = json.loads(out)
+        batch = object_of(json.loads, out)
         if not _is_dict_list(batch):
             raise PrFlowError(f"unexpected pulls payload on page {page}")
         prs.extend(batch)
@@ -244,14 +280,14 @@ def fetch_closed_prs(
 
 def fetch_timeline(
     repo: str, number: int, stats: RunStats, *, run_process: GhProcess, max_pages: int
-) -> list[dict[str, Any]]:
+) -> list[GhRow]:
     """One PR's issue timeline, projected to the events the aggregates read.
 
     Bounded at ``MAX_TIMELINE_PAGES`` pages; a busier timeline is truncated
     (logged via stats) rather than unbounded.
     """
     jq = "[.[] | {event, created_at}] | @json"
-    events: list[dict[str, Any]] = []
+    events: list[GhRow] = []
     for page in range(1, max_pages + 1):
         out = run_gh(
             [
@@ -263,7 +299,7 @@ def fetch_timeline(
             run_process=run_process,
         )
         stats.gh_api_calls += 1
-        batch = json.loads(out)
+        batch = object_of(json.loads, out)
         if not _is_dict_list(batch):
             raise PrFlowError(f"unexpected timeline payload for PR #{number}")
         events.extend(batch)
@@ -277,9 +313,9 @@ def fetch_timeline(
     return events
 
 
-def build_record(meta: dict[str, Any], events: list[dict[str, Any]]) -> PrRecord:
+def build_record(meta: Mapping[str, object], events: Sequence[Mapping[str, object]]) -> PrRecord:
     """The compact per-PR record from one PR's list row + timeline."""
-    number = int(meta["number"])
+    number = _number(meta)
     created_at = str(meta.get("created_at") or "")
     ready_at = created_at
     for event in events:
@@ -334,7 +370,7 @@ def compute_days(
     records: list[PrRecord],
     days: list[date],
     tz: ZoneInfo,
-) -> dict[str, dict[str, Any]]:
+) -> dict[str, DayFigures]:
     by_day: dict[date, list[PrRecord]] = {day: [] for day in days}
     for record in records:
         if not record.merged_at:
@@ -346,10 +382,10 @@ def compute_days(
         if merged_day in by_day:
             by_day[merged_day].append(record)
 
-    payload: dict[str, dict[str, Any]] = {}
+    payload: dict[str, DayFigures] = {}
     for day in days:
         group = by_day[day]
-        entry: dict[str, Any] = {"merged_count": len(group)}
+        entry: DayFigures = {"merged_count": len(group)}
         durations = sorted(
             value for record in group if (value := duration_seconds(record)) is not None
         )
@@ -360,17 +396,17 @@ def compute_days(
     return payload
 
 
-def load_cache(path: Path) -> dict[str, dict[str, Any]]:
+def load_cache(path: Path) -> dict[str, dict[str, object]]:
     """The per-PR cache; a missing or corrupt file reads as empty (heals)."""
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = object_of(json.loads, path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
-    entries = data.get("prs") if _is_object_dict(data) else None
+    entries = data.get("prs") if is_object_dict(data) else None
     return entries if _is_entry_map(entries) else {}
 
 
-def save_json(path: Path, payload: dict[str, Any]) -> None:
+def save_json(path: Path, payload: Mapping[str, object]) -> None:
     """Atomic write (tmp + rename) so a crash never leaves a torn file; a
     failed rename keeps the previous file and clears the stranded tmp."""
     from base.host.atomic_io import write_text_atomic
@@ -385,11 +421,11 @@ def save_json(path: Path, payload: dict[str, Any]) -> None:
 
 
 def collect_records(
-    prs: list[dict[str, Any]],
+    prs: Sequence[Mapping[str, object]],
     window: list[date],
     tz: ZoneInfo,
     repo: str,
-    cache: dict[str, dict[str, Any]],
+    cache: Mapping[str, Mapping[str, object]],
     stats: RunStats,
     *,
     run_process: GhProcess,
@@ -408,7 +444,7 @@ def collect_records(
         merged_raw = _merged_in_window(meta, wanted, tz)
         if merged_raw is None:
             continue
-        number = int(meta["number"])
+        number = _number(meta)
         cached_raw = cache.get(str(number))
         cached = PrRecord.from_cache(number, cached_raw) if cached_raw else None
         if cached is not None and _cache_current(cached, meta):
@@ -420,7 +456,7 @@ def collect_records(
     return records
 
 
-def _merged_in_window(meta: dict[str, Any], wanted: set[date], tz: ZoneInfo) -> str | None:
+def _merged_in_window(meta: Mapping[str, object], wanted: set[date], tz: ZoneInfo) -> str | None:
     """The PR's `merged_at` string when it merged on a day in the window, else None."""
     merged_raw = meta.get("merged_at")
     if not isinstance(merged_raw, str) or not merged_raw:
@@ -432,7 +468,7 @@ def _merged_in_window(meta: dict[str, Any], wanted: set[date], tz: ZoneInfo) -> 
     return merged_raw if merged_day in wanted else None
 
 
-def _cache_current(cached: PrRecord, meta: dict[str, Any]) -> bool:
+def _cache_current(cached: PrRecord, meta: Mapping[str, object]) -> bool:
     return (
         not cached.partial
         and cached.updated_at == str(meta.get("updated_at") or "")
@@ -441,14 +477,14 @@ def _cache_current(cached: PrRecord, meta: dict[str, Any]) -> bool:
 
 
 def _refresh_record(
-    meta: dict[str, Any],
+    meta: Mapping[str, object],
     merged_raw: str,
     cached: PrRecord | None,
     repo: str,
     stats: RunStats,
     run_process: GhProcess,
 ) -> PrRecord:
-    number = int(meta["number"])
+    number = _number(meta)
     try:
         events = fetch_timeline(
             repo, number, stats, run_process=run_process, max_pages=MAX_TIMELINE_PAGES
@@ -473,36 +509,36 @@ def build_snapshot(
     *,
     repo: str,
     days: list[date],
-    day_payload: dict[str, dict[str, Any]],
+    day_payload: dict[str, DayFigures],
     tz: ZoneInfo,
     stats: RunStats,
     merged_in_window: int,
     partial: int,
     now: datetime,
-) -> dict[str, Any]:
-    return {
-        "version": 1,
-        "generated_at": now.astimezone(UTC).isoformat(),
-        "repo": repo,
-        "window": {
-            "days": len(days),
-            "start_day": days[0].isoformat(),
-            "end_day": days[-1].isoformat(),
-            "timezone": str(tz),
-        },
-        "days": day_payload,
-        "stats": {
+) -> Snapshot:
+    return Snapshot(
+        version=1,
+        generated_at=now.astimezone(UTC).isoformat(),
+        repo=repo,
+        window=SnapshotWindow(
+            days=len(days),
+            start_day=days[0].isoformat(),
+            end_day=days[-1].isoformat(),
+            timezone=str(tz),
+        ),
+        days=day_payload,
+        stats={
             "merged_in_window": merged_in_window,
             "partial_records": partial,
             **stats.to_json(),
         },
-    }
+    )
 
 
 # meiva:note
 # Emits the daily events through the unified telemetry pipeline; dry_run keeps the seam silent.
 def emit_snapshot(
-    snapshot: dict[str, Any], *, dry_run: bool, pipeline: EventPipeline, home: Path
+    snapshot: Snapshot, *, dry_run: bool, pipeline: EventPipeline, home: Path
 ) -> None:
     if dry_run:
         return
@@ -511,14 +547,14 @@ def emit_snapshot(
 
 # meiva:note
 # The pipeline write, kept as its own seam so tests can assert dry-run silence.
-def emit_events(snapshot: dict[str, Any], *, pipeline: EventPipeline, home: Path) -> None:
+def emit_events(snapshot: Snapshot, *, pipeline: EventPipeline, home: Path) -> None:
     from base import telemetry
 
     telemetry.init_telemetry(home=home, process=PROCESS_NAME, pipeline=pipeline)
     pipeline.warmup_exports()
     for day, entry in sorted(snapshot["days"].items()):
-        attributes = {key: value for key, value in entry.items() if value is not None}
-        telemetry.emit("telemetry", "pr_flow_daily", attributes={"day": day, **attributes})
+        telemetry.emit("telemetry", "pr_flow_daily", attributes={"day": day, **entry})
+
     telemetry.sync()
 
 
@@ -548,7 +584,7 @@ def main(argv: list[str], *, run_process: GhProcess, home: Path) -> int:
         action="store_true",
         help="print the snapshot JSON to stdout",
     )
-    args = parser.parse_args(argv)
+    args = options(parser.parse_args(argv), Options)
     if args.window_days < 1 or args.window_days > 90:
         parser.error("--window-days must be between 1 and 90")
 

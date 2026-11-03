@@ -22,15 +22,38 @@ import re
 import sys
 import tomllib
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
+
+from scripts.boundary.options import options
+from scripts.boundary.untyped import is_object_dict, is_object_list, object_of
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 
 
+@dataclass(frozen=True)
+class Options:
+    paths_file: Path
+    pyproject: Path
+
+
+def _table(value: object, name: str) -> dict[str, object]:
+    if not is_object_dict(value):
+        raise TypeError(f"pyproject.toml: {name} is not a table")
+    return value
+
+
+def _strings(value: object, name: str) -> list[str]:
+    if not is_object_list(value):
+        raise TypeError(f"pyproject.toml: {name} is not a list")
+    return [str(entry) for entry in value]
+
+
 def _config(pyproject_text: str) -> tuple[list[str], list[str]]:
-    pyright = tomllib.loads(pyproject_text)["tool"]["pyright"]
-    include: list[str] = [str(entry) for entry in pyright.get("include", [])]
-    exclude: list[str] = [str(entry) for entry in pyright.get("exclude", [])]
+    document = _table(object_of(tomllib.loads, pyproject_text), "the document")
+    pyright = _table(_table(document["tool"], "[tool]")["pyright"], "[tool.pyright]")
+    include = _strings(pyright.get("include", []), "[tool.pyright].include")
+    exclude = _strings(pyright.get("exclude", []), "[tool.pyright].exclude")
     return include, exclude
 
 
@@ -69,7 +92,7 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Filter impacted paths to pyright's include.")
     parser.add_argument("paths_file", type=Path, help="one repository-relative path per line")
     parser.add_argument("--pyproject", type=Path, default=_REPOSITORY_ROOT / "pyproject.toml")
-    args = parser.parse_args(argv)
+    args = options(parser.parse_args(argv), Options)
     paths = [line.strip() for line in args.paths_file.read_text().splitlines() if line.strip()]
     kept, skipped = filter_paths(paths, args.pyproject.read_text(encoding="utf-8"))
     for path in kept:

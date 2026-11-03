@@ -679,6 +679,15 @@ root = "cli/tests"
 [[tool.pyright.executionEnvironments]]
 root = "gateway/tests"
 
+[[tool.pyright.executionEnvironments]]
+root = "scripts/ci/helper_smoke/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "scripts/ci/pull_requests/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "scripts/ci/tests"
+
 # END GENERATED pyright tests environments
 
 # Directory entries that raise reportAny / reportExplicitAny to "error" once a directory's count is
@@ -690,6 +699,16 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "gateway"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "scripts/boundary"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "scripts/ci"
 reportAny = "error"
 reportExplicitAny = "error"
 

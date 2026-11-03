@@ -7,7 +7,7 @@ from typing import TypedDict, cast
 import pytest
 from playwright.sync_api import Browser, BrowserContext, Locator, Page, expect
 
-from scripts.post_deploy_visual.layout_assertions import (
+from scripts.verify.post_deploy_visual.layout_assertions import (
     all_elements_within_parents,
     element_within_parent,
     element_within_viewport,

@@ -32,9 +32,11 @@ from __future__ import annotations
 
 import json
 import subprocess
-from typing import TypedDict, TypeGuard
+from typing import TypedDict
 
 from base.host.system.hostport import Host
+from scripts.boundary.process import stderr_text, stdout_text
+from scripts.boundary.untyped import is_object_dict, is_object_list, object_of
 
 _GH_TIMEOUT_S = 30.0
 
@@ -69,27 +71,21 @@ class WorkflowJob(TypedDict):
     run_status: str
 
 
-def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
-    return isinstance(value, dict)
-
-
-def _is_table(value: object) -> TypeGuard[dict[str, object]]:
-    return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
-
-
-def _is_object_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
+# meiva:note
+# What a failed gh call said: its stderr, else its stdout.
+def _detail(result: subprocess.CompletedProcess[object]) -> str:
+    return (stderr_text(result) or stdout_text(result)).strip()
 
 
 def _response_rows(data: object, field: str) -> list[dict[str, object]]:
-    if not _is_table(data):
+    if not is_object_dict(data):
         raise CiJobRerunError(f"gh api {field} response must be an object")
     raw_rows = data.get(field)
-    if not _is_object_list(raw_rows):
+    if not is_object_list(raw_rows):
         raise CiJobRerunError(f"gh api {field} must be a list")
     rows: list[dict[str, object]] = []
     for index, row in enumerate(raw_rows):
-        if not _is_table(row):
+        if not is_object_dict(row):
             raise CiJobRerunError(f"gh api {field}[{index}] must be an object")
         rows.append(row)
     return rows
@@ -124,12 +120,13 @@ def _gh_api_json(args: list[str], what: str, *, host: Host) -> object:
     except subprocess.TimeoutExpired as error:
         raise CiJobRerunError(f"gh api {what} timed out: {error}") from error
     if r.returncode != 0:
-        raise CiJobRerunError(f"gh api {what} failed: {(r.stderr or r.stdout).strip()}")
+        raise CiJobRerunError(f"gh api {what} failed: {_detail(r)}")
+    output = stdout_text(r)
     try:
-        return json.loads(r.stdout or "{}")
+        return object_of(json.loads, output or "{}")
     except json.JSONDecodeError as error:
         raise CiJobRerunError(
-            f"gh api {what} returned unparseable output: {(r.stdout or '').strip()[:200]}"
+            f"gh api {what} returned unparseable output: {output.strip()[:200]}"
         ) from error
 
 
@@ -156,8 +153,8 @@ def _head_sha_of(pr: str | int, repo: str, *, host: Host) -> str:
     except subprocess.TimeoutExpired as error:
         raise CiJobRerunError(f"gh pr view timed out: {error}") from error
     if r.returncode != 0:
-        raise CiJobRerunError(f"gh pr view failed: {(r.stderr or r.stdout).strip()}")
-    sha = r.stdout.strip()
+        raise CiJobRerunError(f"gh pr view failed: {_detail(r)}")
+    sha = stdout_text(r).strip()
     if not sha:
         raise CiJobRerunError(f"gh pr view returned no head commit for {pr}")
     return sha
@@ -287,7 +284,7 @@ def rerun_failed_jobs(
             if r.returncode == 0:
                 reran.append(jobs[0])
             else:
-                errors.append(f"{jobs[0]['name']}: {(r.stderr or r.stdout).strip()}")
+                errors.append(f"{jobs[0]['name']}: {_detail(r)}")
             continue
         try:
             r = host.run(
@@ -308,7 +305,6 @@ def rerun_failed_jobs(
         if r.returncode == 0:
             reran.extend(jobs)
         else:
-            errors.append(
-                f"run {run_id} ({len(jobs)} failed jobs): {(r.stderr or r.stdout).strip()}"
-            )
+            errors.append(f"run {run_id} ({len(jobs)} failed jobs): {_detail(r)}")
+
     return reran, waiting, errors

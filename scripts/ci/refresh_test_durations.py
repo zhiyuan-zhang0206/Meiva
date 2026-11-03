@@ -54,10 +54,13 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol, TypeGuard
 
 from base.host.atomic_io import write_text_atomic
+from scripts.boundary.options import attribute, options
+from scripts.boundary.untyped import object_of
 
 _STATIC_WORKERS = 4
 _BACKEND_WORKERS = 4  # mirrors the backend-shard job (-n 4)
@@ -101,7 +104,7 @@ def _is_table(value: object) -> TypeGuard[dict[str, object]]:
 def load_durations(path: Path) -> dict[str, float]:
     """Load a pytest-split durations file; missing or corrupt -> empty dict."""
     try:
-        data: object = json.loads(path.read_text())
+        data = object_of(json.loads, path.read_text())
     except FileNotFoundError:
         return {}
     except json.JSONDecodeError as exc:
@@ -373,6 +376,19 @@ def _refresh_all(*, target_path: Path, run_process: SuiteProcess) -> int:
     return 0
 
 
+@dataclass(frozen=True)
+class MeasureOptions:
+    suite: Literal["static", "backend", "e2e"]
+    group: int
+    output: Path
+    junit_xml: Path | None
+
+
+@dataclass(frozen=True)
+class MergeOptions:
+    durations_dir: Path
+
+
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command")
@@ -396,23 +412,27 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None, *, target_path: Path, run_process: SuiteProcess) -> int:
     """Dispatch the legacy local refresh or the nightly isolation commands."""
-    args = _parse_args([] if argv is None else argv)
-    if args.command in (None, "refresh"):
+    parsed = _parse_args([] if argv is None else argv)
+    command = attribute(parsed, "command", object)
+    if command in (None, "refresh"):
         return _refresh_all(target_path=target_path, run_process=run_process)
-    if args.command == "measure":
-        if args.junit_xml is not None:
-            args.junit_xml.parent.mkdir(parents=True, exist_ok=True)
+    if command == "measure":
+        measure = options(parsed, MeasureOptions)
+        if measure.junit_xml is not None:
+            measure.junit_xml.parent.mkdir(parents=True, exist_ok=True)
         return _measure_shard(
-            args.suite,
-            args.group,
-            args.output,
+            measure.suite,
+            measure.group,
+            measure.output,
             target_path=target_path,
             run_process=run_process,
-            junit_path=args.junit_xml,
+            junit_path=measure.junit_xml,
         )
-    if args.command == "merge":
-        return _merge_shard_measurements(args.durations_dir, target_path=target_path)
-    raise AssertionError(f"unhandled command: {args.command}")
+    if command == "merge":
+        return _merge_shard_measurements(
+            options(parsed, MergeOptions).durations_dir, target_path=target_path
+        )
+    raise AssertionError(f"unhandled command: {command}")
 
 
 if __name__ == "__main__":

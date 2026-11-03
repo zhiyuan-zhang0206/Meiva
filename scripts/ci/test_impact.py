@@ -24,6 +24,7 @@ from meizel.test_graph.cutoff import (
     package_local_tests as package_local_tests,
 )
 from meizel.test_graph.impact import propagate_test_consumers
+from scripts.boundary.untyped import object_of
 from scripts.structure.imports.facts import UNANCHORED_READ, Fact, FactKind, Unknown, collect
 from scripts.structure.imports.fixture_scopes import declarations
 from scripts.structure.placement import CODE_TOPS, ModuleIndex
@@ -344,7 +345,10 @@ def pyproject_change_is_local(root: Path, base_ref: str | None) -> bool:
 
 def _pyproject_tables(text: str) -> dict[str, object]:
     tables: dict[str, object] = {}
-    for name, value in tomllib.loads(text).items():
+    document = object_of(tomllib.loads, text)
+    if not _is_str_dict(document):
+        raise TypeError("pyproject.toml must be a table")
+    for name, value in document.items():
         if name != "tool":
             tables[name] = value
         elif _is_str_dict(value):
@@ -399,7 +403,7 @@ def member_numbers(body: str) -> list[int]:
 # The same list from the event payload's own body: no token, no network; None means "cannot tell".
 def members_from_event(path: Path) -> tuple[int, ...] | None:
     try:
-        payload: object = json.loads(Path(path).read_text())
+        payload = object_of(json.loads, Path(path).read_text())
     except (OSError, json.JSONDecodeError):
         return None
     if not _is_str_dict(payload):

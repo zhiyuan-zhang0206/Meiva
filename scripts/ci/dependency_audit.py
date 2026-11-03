@@ -8,15 +8,26 @@ import re
 import subprocess
 import sys
 import urllib.request
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from functools import partial
 from http.client import HTTPResponse
 from pathlib import Path
-from typing import Any, Literal, Protocol, TypeGuard
+from typing import Literal, Protocol
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+# meiva:note
+# The weekly workflow runs this file as a script with the interpreter CI provides, so the checkout
+# root comes first on sys.path for `scripts.boundary` (standard library only).
+from scripts.boundary.fields import optional_list, optional_object, optional_str  # noqa: E402
+from scripts.boundary.options import options  # noqa: E402
+from scripts.boundary.required import required_str  # noqa: E402
+from scripts.boundary.untyped import is_object_dict, is_object_list, object_of  # noqa: E402
+
 MARKER = "<!-- weekly-dependency-audit -->"
 _TITLE = "Weekly dependency audit: findings need attention"
 _UV_PIN = ("uv", "base/host/brew_pin.py", r'^UV_VERSION = "([^"]+)"')
@@ -24,7 +35,9 @@ _PNPM_PIN = ("pnpm", "base/host/brew_pin.py", r'^PNPM_VERSION = "([^"]+)"')
 _SEVERITY_RANK = {"critical": 4, "high": 3, "moderate": 2, "low": 1, "unknown": 0}
 _ACTIONABLE_SEVERITIES = frozenset({"critical", "high", "unknown"})
 
-Fetch = Callable[[str], Any]
+# meiva:note
+# A JSON read by URL or API path, handed back as `object` for the caller to narrow.
+Fetch = Callable[[str], object]
 type UrlOpener = Callable[
     [str | urllib.request.Request, float], AbstractContextManager[HTTPResponse]
 ]
@@ -68,25 +81,19 @@ class Binary:
 
 
 def _version_key(version: str) -> tuple[int, ...]:
-    return tuple(int(part) for part in re.findall(r"\d+", version.lstrip("v")))
+    return tuple(int(part[0]) for part in re.finditer(r"\d+", version.lstrip("v")))
 
 
-def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
-    return isinstance(value, dict)
-
-
-def _is_table(value: object) -> TypeGuard[dict[str, Any]]:
-    return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
-
-
-def _is_object_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
+@dataclass(frozen=True)
+class Options:
+    out: Path
+    sync_issue: str | None
 
 
 def _fetch_json(url: str, *, open_url: UrlOpener) -> object:
     request = urllib.request.Request(url, headers={"Accept": "application/json"})
     with open_url(request, 30) as response:
-        return json.load(response)
+        return object_of(json.load, response)
 
 
 def _fetch_text(url: str, *, open_url: UrlOpener) -> str:
@@ -95,7 +102,7 @@ def _fetch_text(url: str, *, open_url: UrlOpener) -> str:
 
 
 def _gh_api(path: str, *, run: AuditProcess) -> object:
-    return json.loads(_gh(["api", path], run=run))
+    return object_of(json.loads, _gh(["api", path], run=run))
 
 
 # meiva:note
@@ -107,30 +114,42 @@ def osv_severity(advisory_ids: list[str], fetch: Fetch) -> str:
             record: object = fetch(f"https://api.osv.dev/v1/vulns/{advisory_id}")
         except OSError:
             continue
-        if not _is_table(record):
+        if not is_object_dict(record):
             continue
-        raw_specific: object = record.get("database_specific")
-        specific = raw_specific if _is_table(raw_specific) else {}
+        specific = optional_object(record, "database_specific") or {}
         severity = specific.get("severity")
         if isinstance(severity, str) and severity.lower() in _SEVERITY_RANK:
             return severity.lower()
     return "unknown"
 
 
-def python_vulnerabilities(audit_json: dict[str, Any], fetch: Fetch) -> list[Vulnerability]:
+def _aliases(entry: Mapping[str, object]) -> list[str]:
+    aliases = optional_list(entry, "aliases") or []
+    return [alias for alias in aliases if isinstance(alias, str) and alias.startswith("GHSA-")]
+
+
+def python_vulnerabilities(audit_json: Mapping[str, object], fetch: Fetch) -> list[Vulnerability]:
+    entries = audit_json["vulnerabilities"]
+    if not is_object_list(entries):
+        raise TypeError("uv audit JSON vulnerabilities is not a list")
     found: list[Vulnerability] = []
-    for entry in audit_json["vulnerabilities"]:
-        dependency = entry["dependency"]
-        ids = [entry["id"], *(a for a in entry.get("aliases", []) if a.startswith("GHSA-"))]
+    for entry in entries:
+        if not is_object_dict(entry):
+            raise TypeError("uv audit JSON vulnerability is not an object")
+        dependency = optional_object(entry, "dependency")
+        if dependency is None:
+            raise TypeError("uv audit JSON vulnerability lacks its dependency")
+        ids = [required_str(entry, "id"), *_aliases(entry)]
+        fix_versions = optional_list(entry, "fix_versions") or []
         found.append(
             Vulnerability(
                 ecosystem="python",
-                package=dependency["name"],
-                version=dependency["version"],
-                advisory=entry["display_id"],
+                package=required_str(dependency, "name"),
+                version=required_str(dependency, "version"),
+                advisory=required_str(entry, "display_id"),
                 severity=osv_severity(ids, fetch),
-                fix=", ".join(entry.get("fix_versions") or []) or "none",
-                summary=entry["summary"],
+                fix=", ".join(str(version) for version in fix_versions) or "none",
+                summary=required_str(entry, "summary"),
             )
         )
     return found
@@ -199,7 +218,7 @@ def pnpm_dev_only_roots(lock_text: str) -> frozenset[str]:
 def _finding_paths_dev_only(paths: object, dev_only_roots: frozenset[str] | None) -> bool:
     if dev_only_roots is None:
         return True
-    if not _is_object_list(paths) or not paths:
+    if not is_object_list(paths) or not paths:
         return False
     for path in paths:
         if not isinstance(path, str) or not path.startswith(".>"):
@@ -211,10 +230,10 @@ def _finding_paths_dev_only(paths: object, dev_only_roots: frozenset[str] | None
 
 
 def _findings_dev_only(findings: object, dev_only_roots: frozenset[str] | None) -> bool:
-    if not _is_object_list(findings) or not findings:
+    if not is_object_list(findings) or not findings:
         return False
     return all(
-        _is_table(finding)
+        is_object_dict(finding)
         and finding.get("dev") is True
         and _finding_paths_dev_only(finding.get("paths"), dev_only_roots)
         for finding in findings
@@ -234,18 +253,18 @@ def _no_forward_fix(patched: str, versions: list[str]) -> bool:
 def _advisory_versions(findings: list[object]) -> list[str]:
     return sorted(
         {
-            finding["version"]
+            version
             for finding in findings
-            if _is_table(finding) and isinstance(finding.get("version"), str)
+            if is_object_dict(finding) and (version := optional_str(finding, "version")) is not None
         }
     )
 
 
 def _advisory_vulnerability(
-    key: str, entry: dict[str, Any], dev_only_roots: frozenset[str] | None
+    key: str, entry: Mapping[str, object], dev_only_roots: frozenset[str] | None
 ) -> Vulnerability:
     raw_findings: object = entry.get("findings")
-    findings: list[object] = raw_findings if _is_object_list(raw_findings) else []
+    findings: list[object] = raw_findings if is_object_list(raw_findings) else []
     versions = _advisory_versions(findings)
     patched = str(entry.get("patched_versions") or "").strip()
     raw_severity = str(entry.get("severity") or "").lower()
@@ -266,15 +285,15 @@ def _advisory_vulnerability(
 
 # meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
 def pnpm_vulnerabilities(
-    audit_json: dict[str, Any], dev_only_roots: frozenset[str] | None = None
+    audit_json: Mapping[str, object], dev_only_roots: frozenset[str] | None = None
 ) -> list[Vulnerability]:
     raw_advisories: object = audit_json.get("advisories")
-    if not _is_table(raw_advisories):
+    if not is_object_dict(raw_advisories):
         raise TypeError("pnpm audit JSON missing advisories map")
     found: list[Vulnerability] = []
     for key in sorted(raw_advisories):
         entry: object = raw_advisories[key]
-        if not _is_table(entry):
+        if not is_object_dict(entry):
             raise TypeError(f"pnpm advisory {key!r} is not an object")
         found.append(_advisory_vulnerability(key, entry, dev_only_roots))
     return found
@@ -283,15 +302,15 @@ def pnpm_vulnerabilities(
 # meiva:note
 # An audit tool exiting 1 with complete JSON findings is accepted; non-JSON output, an error payload or any other exit code raises as an incomplete audit.
 # meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
-def run_json(argv: list[str], cwd: Path, *, run: AuditProcess) -> dict[str, Any]:
+def run_json(argv: list[str], cwd: Path, *, run: AuditProcess) -> dict[str, object]:
     result = run(argv, capture_output=True, text=True, cwd=cwd, timeout=600)
     try:
-        parsed: object = json.loads(result.stdout)
+        parsed = object_of(json.loads, result.stdout)
     except json.JSONDecodeError as exc:
         raise RuntimeError(
             f"{argv[0]} produced no JSON (rc={result.returncode}): {result.stderr[-400:]}"
         ) from exc
-    if not _is_table(parsed):
+    if not is_object_dict(parsed):
         raise TypeError(f"{argv[0]} JSON is not an object")
     if "error" in parsed or result.returncode not in (0, 1):
         raise RuntimeError(f"{argv[0]} reported an audit error (rc={result.returncode})")
@@ -315,7 +334,8 @@ PINS: tuple[tuple[str, str, str], ...] = (
 
 
 def pinned_version(path: str, pattern: str, root: Path = _REPO_ROOT) -> str:
-    matches = re.findall(pattern, (root / path).read_text(encoding="utf-8"), re.MULTILINE)
+    text = (root / path).read_text(encoding="utf-8")
+    matches = [match[1] for match in re.finditer(pattern, text, re.MULTILINE)]
     if len(matches) != 1:
         raise RuntimeError(f"{path}: expected exactly one match for {pattern!r}, found {matches}")
     return matches[0]
@@ -326,7 +346,7 @@ def pinned_version(path: str, pattern: str, root: Path = _REPO_ROOT) -> str:
 # meiva:link scripts/ci/docs/dependency-audit.meiva.okf.md
 def zonky_latest(pinned: str, metadata_xml: str) -> str:
     major = pinned.split(".", 1)[0]
-    versions = re.findall(r"<version>([^<]+)</version>", metadata_xml)
+    versions = [match[1] for match in re.finditer(r"<version>([^<]+)</version>", metadata_xml)]
     same_major = [v for v in versions if v.split(".", 1)[0] == major and re.fullmatch(r"[\d.]+", v)]
     return max(same_major, key=_version_key)
 
@@ -338,10 +358,19 @@ def latest_binaries(
 
     def release(repo: str) -> str:
         data = gh_api(f"repos/{repo}/releases/latest")
-        return str(data["tag_name"])
+        if not is_object_dict(data):
+            raise TypeError(f"{repo} latest release is not an object")
+        return required_str(data, "tag_name")
 
     tags = gh_api("repos/pgvector/pgvector/tags?per_page=100")
-    pgvector_tags = [t["name"] for t in tags if re.fullmatch(r"v\d+\.\d+\.\d+", t["name"])]
+    if not is_object_list(tags):
+        raise TypeError("pgvector tags are not a list")
+    pgvector_tags = [
+        name
+        for tag in tags
+        if is_object_dict(tag)
+        and re.fullmatch(r"v\d+\.\d+\.\d+", name := required_str(tag, "name"))
+    ]
     maven = "https://repo1.maven.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-linux-amd64"
     return [
         Binary(
@@ -443,10 +472,19 @@ def _gh(argv: list[str], *, run: AuditProcess) -> str:
     return result.stdout
 
 
+# meiva:note
+# `urlopen` types its answer `Any`; a parameter typed with the real `HTTPResponse` takes it without naming the `Any`.
+def _opened(
+    opener: Callable[[str | urllib.request.Request], AbstractContextManager[HTTPResponse]],
+    target: str | urllib.request.Request,
+) -> AbstractContextManager[HTTPResponse]:
+    return opener(target)
+
+
 def _system_open(
     target: str | urllib.request.Request, timeout: float
 ) -> AbstractContextManager[HTTPResponse]:
-    return urllib.request.urlopen(target, timeout=timeout)
+    return _opened(partial(urllib.request.urlopen, timeout=timeout), target)
 
 
 # meiva:note
@@ -520,7 +558,7 @@ def main(argv: list[str], *, run: AuditProcess, open_url: UrlOpener) -> int:
     parser.add_argument(
         "--sync-issue", metavar="OWNER/REPO", help="update the tracked issue in this repo"
     )
-    args = parser.parse_args(argv)
+    args = options(parser.parse_args(argv), Options)
 
     uv_json = run_json(
         [

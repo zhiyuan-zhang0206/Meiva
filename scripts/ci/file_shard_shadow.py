@@ -148,6 +148,22 @@ def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
     return isinstance(value, dict)
 
 
+def _option(config: pytest.Config, name: str) -> object:
+    value: object = config.getoption(name)
+    return value
+
+
+def _collect_only(config: pytest.Config) -> bool:
+    return bool(_option(config, "collectonly"))
+
+
+def _report_output(config: pytest.Config) -> str:
+    output = _option(config, "file_shard_report")
+    if not isinstance(output, str) or not output:
+        raise pytest.UsageError("--file-shard-check requires --file-shard-report")
+    return output
+
+
 def _str_option(config: pytest.Config, name: str) -> str:
     value: object = config.getoption(name)
     if not isinstance(value, str):
@@ -179,7 +195,7 @@ def _report_path(config: pytest.Config, option: str) -> Path:
 def _configure_runtime(config: pytest.Config) -> None:
     if config.getoption("file_shard_execute") and (
         not config.getoption("file_shard_check")
-        or config.option.collectonly
+        or _collect_only(config)
         or not config.getoption("file_shard_runtime_report")
     ):
         raise pytest.UsageError(
@@ -187,7 +203,7 @@ def _configure_runtime(config: pytest.Config) -> None:
         )
     if not config.getoption("file_shard_runtime_report"):
         return
-    if config.option.collectonly:
+    if _collect_only(config):
         raise pytest.UsageError("Runtime evidence requires test execution")
     group = config.getoption("file_shard_group") or config.getoption("group")
     if not isinstance(group, int) or group < 1:
@@ -223,8 +239,8 @@ def _configuration_digest(config: pytest.Config) -> str:
         raise pytest.UsageError("Shadow requires a pytest configuration file; pin it with -c")
     context = {
         "overrides": config.getoption("override_ini", default=[]),
-        "markers": config.option.markexpr,
-        "keywords": config.option.keyword,
+        "markers": _option(config, "markexpr"),
+        "keywords": _option(config, "keyword"),
         "omit_static": config.getoption("omit_static_tests", default=False),
     }
     raw = config.inipath.read_bytes() + json.dumps(context, sort_keys=True).encode()
@@ -233,9 +249,7 @@ def _configuration_digest(config: pytest.Config) -> str:
 
 def _load_group(config: pytest.Config) -> None:
     source = Path(_str_option(config, "file_shard_check"))
-    output = config.getoption("file_shard_report")
-    if not output:
-        raise pytest.UsageError("--file-shard-check requires --file-shard-report")
+    output = _report_output(config)
     report = (
         _report_path(config, "file_shard_report")
         if config.getoption("file_shard_execute")
@@ -286,7 +300,7 @@ def pytest_configure(config: pytest.Config) -> None:
         return
     if output and check:
         raise pytest.UsageError("Choose plan creation or group checking, not both")
-    if not config.option.collectonly and not execute:
+    if not _collect_only(config) and not execute:
         raise pytest.UsageError(
             "File shard shadow requires --collect-only; it cannot run a test gate"
         )
@@ -396,14 +410,16 @@ def _check(session: pytest.Session) -> None:
 def pytest_collection_finish(session: pytest.Session) -> None:
     config = session.config
     config.stash[_COLLECTION_SECONDS] = time.perf_counter() - _STARTED
-    output = config.getoption("file_shard_plan")
-    check = config.getoption("file_shard_check")
+    output = _option(config, "file_shard_plan")
+    check = _option(config, "file_shard_check")
     if not output and not check:
         return
     if session.testsfailed:
         raise pytest.UsageError("Collection errors cannot produce a valid shadow result")
     if output:
-        Path(output).write_text(_plan(session).model_dump_json(indent=2) + "\n")
+        Path(_str_option(config, "file_shard_plan")).write_text(
+            _plan(session).model_dump_json(indent=2) + "\n"
+        )
     else:
         _check(session)
 

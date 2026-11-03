@@ -31,6 +31,15 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TypeGuard
 
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPOSITORY_ROOT))
+
+# meiva:note
+# Script mode (`python -S`, no installed project) has only `scripts/ci/` on sys.path: the checkout
+# root comes first so `scripts.boundary` (standard library only) resolves against this tree.
+from scripts.boundary.untyped import object_of  # noqa: E402
+
 # The 85% gate denominator — must match [tool.coverage.run].source's core
 # set and the comment in ci.yml's gate step. ops/services/meiva_builtins are
 # measured into the same data but gated by FLOORS, not by this number.
@@ -220,7 +229,7 @@ def main(
     json_path = args[0] if args else "coverage.json"
     threshold = float(env.get("BACKEND_COVERAGE_THRESHOLD", CORE_THRESHOLD_DEFAULT))
     with Path(json_path).open() as f:
-        data: object = json.load(f)
+        data = object_of(json.load, f)
     if not _is_table(data):
         raise TypeError("coverage report must be an object")
     files = data.get("files")

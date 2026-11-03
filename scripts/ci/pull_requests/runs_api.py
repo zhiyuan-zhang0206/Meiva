@@ -6,14 +6,17 @@ import json
 import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
 from base.clock import Timers
+from scripts.boundary.untyped import is_object_dict, is_object_list, object_of
 from scripts.ci.pull_requests.gh_process import GhProcess
 
 __all__ = [
     "CiRunsError",
     "FetchStats",
+    "PullRecord",
+    "RunRecord",
     "fetch_closed_prs",
     "fetch_runs",
     "parse_timestamp",
@@ -23,6 +26,13 @@ __all__ = [
 _GH_TIMEOUT_SECONDS = 60.0
 _PAGE_SIZE = 100
 _MAX_GH_ATTEMPTS = 4
+
+# meiva:note
+# One jq-projected GitHub workflow run (`id`, `created_at`, `conclusion`, ...): a decoded JSON object whose fields the readers in `scripts.boundary.fields` narrow.
+RunRecord = dict[str, object]
+# meiva:note
+# One jq-projected closed pull request (`number`, `head_ref`, `merged_at`, ...), read the same way.
+PullRecord = dict[str, object]
 
 
 class CiRunsError(RuntimeError):
@@ -79,25 +89,13 @@ def run_gh(args: list[str], stats: FetchStats, *, run_process: GhProcess, timers
     raise AssertionError("bounded gh retry loop exhausted without result")
 
 
-def _is_raw_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
+def _is_dict_list(value: object) -> TypeGuard[list[dict[str, object]]]:
+    return is_object_list(value) and all(is_object_dict(item) for item in value)
 
 
-def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
-    return isinstance(value, dict)
-
-
-def _is_object_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
-
-
-def _is_dict_list(value: object) -> TypeGuard[list[dict[str, Any]]]:
-    return _is_raw_list(value) and all(_is_object_dict(item) for item in value)
-
-
-def _json_list(output: str, description: str) -> list[dict[str, Any]]:
+def _json_list(output: str, description: str) -> list[dict[str, object]]:
     try:
-        parsed = json.loads(output)
+        parsed = object_of(json.loads, output)
     except json.JSONDecodeError as exc:
         raise CiRunsError(f"invalid JSON from {description}") from exc
     if not _is_dict_list(parsed):
@@ -114,11 +112,11 @@ def fetch_runs(
     run_process: GhProcess,
     timers: Timers,
     max_pages: int,
-) -> list[dict[str, Any]]:
+) -> list[RunRecord]:
     # meiva:note
     # Walk runs newest-first using created<= cursors and id deduplication.
     cursor = until
-    seen: dict[int, dict[str, Any]] = {}
+    seen: dict[int, RunRecord] = {}
     jq = (
         "[.workflow_runs[] | {id, workflow_id, name, event, status, conclusion, run_attempt, "
         "head_branch, head_sha, created_at, run_started_at, updated_at}] | @json"
@@ -162,14 +160,14 @@ def fetch_closed_prs(
     run_process: GhProcess,
     timers: Timers,
     max_pages: int,
-) -> list[dict[str, Any]]:
+) -> list[PullRecord]:
     # meiva:note
     # Walk the authoritative closed-PR population newest-updated first.
     jq = (
         "[.[] | {number, head_ref: .head.ref, head_sha: .head.sha, created_at, updated_at, "
         "merged_at, closed_at}] | @json"
     )
-    records: list[dict[str, Any]] = []
+    records: list[PullRecord] = []
     for page in range(1, max_pages + 1):
         path = f"repos/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page={_PAGE_SIZE}&page={page}"
         batch = _json_list(

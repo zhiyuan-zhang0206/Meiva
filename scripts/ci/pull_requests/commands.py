@@ -24,18 +24,39 @@ import argparse
 import json
 import os
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 from base.clock import Clock
 from base.host.net.ports import UrlOpener
 from base.host.system.hostport import Host
+from scripts.boundary.options import options
 from scripts.ci.pull_requests import monitor
 from scripts.ci.pull_requests.accounting import DEFAULT_LEDGER, load_ledger, report_rows
 from scripts.ci.pull_requests.status import DEFAULT_REPO, POLL_INTERVAL
 
 
-def _validate_common_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+@dataclass(frozen=True)
+class Options:
+    # meiva:note
+    # The flags `main` reads, as the parser answered them.
+
+    pr: str | None
+    repo: str
+    json: bool
+    wait: bool
+    every: int
+    timeout: int
+    ci_usage: bool
+    ci_usage_agent: int | None
+    ci_usage_days: int
+    diagnose: bool
+    rerun_failed_jobs: bool
+    dry_run: bool
+
+
+def _validate_common_args(args: Options, parser: argparse.ArgumentParser) -> None:
     """Shared usage validation, kept out of main()'s statement budget."""
     if args.every <= 0:
         parser.error("--every must be positive")
@@ -46,7 +67,7 @@ def _validate_common_args(args: argparse.Namespace, parser: argparse.ArgumentPar
 
 
 def _ci_usage_command(
-    args: argparse.Namespace,
+    args: Options,
     parser: argparse.ArgumentParser,
     *,
     ledger_path: Path,
@@ -84,9 +105,7 @@ def _ci_usage_command(
     return 0
 
 
-def _diagnose_command(
-    args: argparse.Namespace, parser: argparse.ArgumentParser, *, host: Host
-) -> int | None:
+def _diagnose_command(args: Options, parser: argparse.ArgumentParser, *, host: Host) -> int | None:
     """Dispatch --diagnose when set; None when not set."""
     if not args.diagnose:
         return None
@@ -184,7 +203,7 @@ def main(
         action="store_true",
         help="with --rerun-failed-jobs: list failed jobs without re-running them",
     )
-    args = p.parse_args(argv)
+    args = options(p.parse_args(argv), Options)
     _validate_common_args(args, p)
 
     ci_usage_rc = _ci_usage_command(args, p, ledger_path=ledger_path, now=clock.now())
@@ -199,8 +218,19 @@ def main(
         from scripts.ci.pull_requests.owner_operations import dispatch
 
         return dispatch(
-            args, p, host=host, clock=clock, open_url=open_url, env=env, workflows=workflows
+            p,
+            pr=args.pr,
+            repo=args.repo,
+            wait=args.wait,
+            as_json=args.json,
+            dry_run=args.dry_run,
+            host=host,
+            clock=clock,
+            open_url=open_url,
+            env=env,
+            workflows=workflows,
         )
+
     if args.pr is None:
         p.error("PR number is required")
     if args.wait:

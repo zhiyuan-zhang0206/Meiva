@@ -4,11 +4,21 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
+from scripts.boundary.options import options
 from scripts.ci.file_shard_shadow import Plan, RuntimeNode, RuntimeReport
+
+
+@dataclass(frozen=True)
+class Options:
+    plan: Path
+    reports: Path
+    workers: int
+    out: Path
 
 
 class CoverageFile(BaseModel):
@@ -151,7 +161,7 @@ def main() -> None:
     parser.add_argument("--reports", type=Path, required=True)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--out", type=Path, required=True)
-    args = parser.parse_args()
+    args = options(parser.parse_args(), Options)
     args.out.unlink(missing_ok=True)
     result = compare(Plan.model_validate_json(args.plan.read_bytes()), args.reports, args.workers)
     args.out.write_text(json.dumps(result, indent=2) + "\n")

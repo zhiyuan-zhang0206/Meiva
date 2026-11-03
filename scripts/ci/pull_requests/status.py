@@ -5,15 +5,18 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, TypedDict, TypeGuard
+from typing import TypedDict
 
 from base.clock import Clock
 from base.host.proc import run_bounded
 from base.host.system.hostport import Host
+from scripts.boundary.process import stderr_text, stdout_text
+from scripts.boundary.untyped import is_object_dict, is_object_list, object_of
 
 _GH_TIMEOUT_S = 30.0
 PASSING = frozenset({"SUCCESS", "SKIPPED", "NEUTRAL"})
@@ -37,18 +40,6 @@ MAIN_CI_WORKFLOW_NAME = "CI"
 CORE_SUITE_CHECK_PREFIXES = ("backend shard (", "e2e shard (")
 
 
-def _is_raw_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
-
-
-def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
-    return isinstance(value, dict)
-
-
-def _is_object_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
-
-
 class CIStatus(Enum):
     ALL_PASSED = "all_passed"  # every COMPLETED check is SUCCESS / SKIPPED / NEUTRAL
     FAILED = "failed"  # at least one COMPLETED check has a failing conclusion
@@ -68,12 +59,14 @@ class CIStatus(Enum):
 def _derive_repo() -> str:
     """owner/repo from the checkout's origin remote, else the fallback."""
     try:
-        out = run_bounded(
-            ["git", "remote", "get-url", "origin"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        ).stdout.strip()
+        out = stdout_text(
+            run_bounded(
+                ["git", "remote", "get-url", "origin"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        ).strip()
         m = re.search(r"github\.com(?::\d+)?[:/]([^/]+)/([^/]+?)(?:\.git)?$", out)
         if m:
             return f"{m.group(1)}/{m.group(2)}"
@@ -93,6 +86,20 @@ def parse_ts(iso: str | None) -> float | None:
         return None
 
 
+# meiva:note
+# One failing rollup entry: its check name and the conclusion that failed it.
+class FailedCheck(TypedDict):
+    name: str
+    conclusion: str
+
+
+# meiva:note
+# One entry of a PR's `statusCheckRollup`: a decoded JSON object whose fields `partition_checks`
+# and its helpers narrow one by one (a check run carries `name`/`status`/`conclusion`, a commit
+# status carries `context`/`state`).
+RollupCheck = dict[str, object]
+
+
 class LimboRun(TypedDict):
     """One run confirmed stuck in GitHub limbo (task #3275)."""
 
@@ -104,17 +111,17 @@ class LimboRun(TypedDict):
 @dataclass
 class CIResult:
     verdict: CIStatus
-    checks: list[dict[str, Any]] = field(default_factory=list)
+    checks: list[RollupCheck] = field(default_factory=list)
 
     # Derived convenience fields (populated by check_ci)
     completed: list[str] = field(default_factory=list)
     pending: list[str] = field(default_factory=list)
     passed: list[str] = field(default_factory=list)
-    failed: list[dict[str, Any]] = field(default_factory=list)  # {name, conclusion}
+    failed: list[FailedCheck] = field(default_factory=list)
     workflow_checks: list[str] = field(default_factory=list)  # checks a workflow run produced
     # Trunk's queue-state check is likewise not a CI result and must not turn
     # an otherwise green PR into a perpetual PENDING verdict.
-    trunk_checks: list[dict[str, Any]] = field(default_factory=list)
+    trunk_checks: list[RollupCheck] = field(default_factory=list)
     # Runs stuck in GitHub limbo (task #3275): `queued`, zero jobs, aged past
     # `LIMBO_AGE_SECONDS`. Detail on a PENDING verdict — never a basis for
     # green. Queued runs are missing execution evidence.
@@ -170,14 +177,21 @@ def repo_has_workflows(repo_root: Path) -> bool:
     return any(wf_dir.glob("*.yml")) or any(wf_dir.glob("*.yaml"))
 
 
-def core_suite_skipped(checks: list[dict[str, Any]]) -> list[str] | None:
+# meiva:note
+# The check's `name`, `?` when it carries none.
+def _check_name(check: Mapping[str, object]) -> str:
+    name = check.get("name", "?")
+    return name if isinstance(name, str) else "?"
+
+
+def core_suite_skipped(checks: Sequence[Mapping[str, object]]) -> list[str] | None:
     """Names of the core suite checks when every attached core check is SKIPPED."""
     core = [c for c in checks if str(c.get("name", "")).startswith(CORE_SUITE_CHECK_PREFIXES)]
     if not core or any(
         c.get("status") != "COMPLETED" or c.get("conclusion") != "SKIPPED" for c in core
     ):
         return None
-    return [c["name"] for c in core]
+    return [_check_name(c) for c in core]
 
 
 def _draft_gate_skipped(result: CIResult, core_skipped: list[str] | None) -> bool:
@@ -201,7 +215,7 @@ def pending_reason(result: CIResult) -> str:
     )
 
 
-def _drop_unexpanded_cancellations(checks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _drop_unexpanded_cancellations(checks: list[RollupCheck]) -> list[RollupCheck]:
     """Drop the CANCELLED entries a run leaves when it is cut down before its jobs are named.
 
     A run killed in the cancel-in-progress race leaves check entries whose `name` is still the
@@ -228,7 +242,12 @@ def _drop_unexpanded_cancellations(checks: list[dict[str, Any]]) -> list[dict[st
     ]
 
 
-def _latest_completed_per_name(checks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _completed_stamp(check: Mapping[str, object]) -> float:
+    completed_at = check.get("completedAt")
+    return parse_ts(completed_at if isinstance(completed_at, str) else None) or 0
+
+
+def _latest_completed_per_name(checks: list[RollupCheck]) -> list[RollupCheck]:
     """Keep the newest COMPLETED check run per name.
     GitHub lists every check run on a commit, but branch protection and the required-status UI
     treat same-named runs as ONE logical check whose state is the newest COMPLETED run's. A stale
@@ -238,7 +257,7 @@ def _latest_completed_per_name(checks: list[dict[str, Any]]) -> list[dict[str, A
 
     Commit statuses are exempt: GitHub already deduplicates StatusContext by
     context, and they carry `state`, not `status`/`conclusion`."""
-    latest: dict[str, dict[str, Any]] = {}
+    latest: dict[str, RollupCheck] = {}
     for c in checks:
         name = c.get("name")
         if not isinstance(name, str) or c.get("__typename") == "StatusContext":
@@ -249,9 +268,9 @@ def _latest_completed_per_name(checks: list[dict[str, Any]]) -> list[dict[str, A
         if current is None:
             latest[name] = c
             continue
-        if (parse_ts(c.get("completedAt")) or 0) >= (parse_ts(current.get("completedAt")) or 0):
+        if _completed_stamp(c) >= _completed_stamp(current):
             latest[name] = c
-    kept: list[dict[str, Any]] = []
+    kept: list[RollupCheck] = []
     for c in checks:
         name = c.get("name")
         if (
@@ -264,7 +283,14 @@ def _latest_completed_per_name(checks: list[dict[str, Any]]) -> list[dict[str, A
     return kept
 
 
-def partition_checks(checks: list[dict[str, Any]], result: CIResult) -> None:
+# meiva:note
+# `check[key]` when it is a string, else `default`.
+def _text(check: Mapping[str, object], key: str, default: str) -> str:
+    value = check.get(key, default)
+    return value if isinstance(value, str) else default
+
+
+def partition_checks(checks: list[RollupCheck], result: CIResult) -> None:
     """Sort each rollup check into completed / passed / failed / pending on
     `result`, and record which of them a workflow produced.
 
@@ -280,8 +306,8 @@ def partition_checks(checks: list[dict[str, Any]], result: CIResult) -> None:
             # Without this branch they read as a nameless "?" entry with a null status — an
             # eternal PENDING that froze every --wait watcher (2026-09-04: five PRs stalled with
             # all real checks green).
-            context = c.get("context", "?")
-            state = c.get("state", "")
+            context = _text(c, "context", "?")
+            state = _text(c, "state", "")
             if state == "SUCCESS":
                 result.completed.append(context)
                 result.passed.append(context)
@@ -291,9 +317,9 @@ def partition_checks(checks: list[dict[str, Any]], result: CIResult) -> None:
             else:
                 result.pending.append(context)
             continue
-        name = c.get("name", "?")
-        status = c.get("status", "")
-        conclusion = c.get("conclusion", "")
+        name = _check_name(c)
+        status = _text(c, "status", "")
+        conclusion = _text(c, "conclusion", "")
 
         if name.startswith(TRUNK_MERGE_QUEUE_CHECK_NAME):
             result.trunk_checks.append(c)
@@ -365,10 +391,10 @@ def runs_not_yet_reporting(head_sha: str, repo: str | None, *, host: Host) -> li
     if r.returncode != 0:
         return None
     try:
-        names = json.loads(r.stdout.strip() or "[]")
+        names = object_of(json.loads, stdout_text(r).strip() or "[]")
     except json.JSONDecodeError:
         return None
-    return [str(n) for n in names] if _is_raw_list(names) else None
+    return [str(n) for n in names] if is_object_list(names) else None
 
 
 def main_workflow_run_completed(head_sha: str, repo: str | None, *, host: Host) -> bool | None:
@@ -408,7 +434,7 @@ def main_workflow_run_completed(head_sha: str, repo: str | None, *, host: Host) 
     if r.returncode != 0:
         return None
     try:
-        count = int(r.stdout.strip())
+        count = int(stdout_text(r).strip())
     except ValueError:
         return None
     return count > 0
@@ -434,10 +460,10 @@ def _queued_run_candidates(owner: str, head_sha: str, *, host: Host) -> list[obj
     if r.returncode != 0:
         return None
     try:
-        candidates = json.loads(r.stdout.strip() or "[]")
+        candidates = object_of(json.loads, stdout_text(r).strip() or "[]")
     except json.JSONDecodeError:
         return None
-    return candidates if _is_raw_list(candidates) else None
+    return candidates if is_object_list(candidates) else None
 
 
 def _run_job_count(owner: str, run_id: int, *, host: Host) -> int | None:
@@ -454,7 +480,7 @@ def _run_job_count(owner: str, run_id: int, *, host: Host) -> int | None:
     if jobs.returncode != 0:
         return None
     try:
-        return int(jobs.stdout.strip())
+        return int(stdout_text(jobs).strip())
     except ValueError:
         return None
 
@@ -476,7 +502,7 @@ def limbo_runs(
     now = clock.now().timestamp()
     limbo: list[LimboRun] = []
     for candidate in candidates:
-        if not _is_object_dict(candidate):
+        if not is_object_dict(candidate):
             continue
         raw_id = candidate.get("id")
         created_at = candidate.get("created_at")
@@ -522,13 +548,27 @@ def _empty_rollup_verdict(
         result.verdict = CIStatus.NO_CHECKS
 
 
-def _merge_conflict_result(data: dict[str, Any], result: CIResult) -> CIResult:
+# meiva:note
+# The `statusCheckRollup` entries `gh pr view --json` answered (a missing key reads as none).
+def _rollup_checks(data: Mapping[str, object]) -> list[RollupCheck]:
+    rollup = data.get("statusCheckRollup", [])
+    if not is_object_list(rollup):
+        raise TypeError(f"statusCheckRollup is {type(rollup).__name__}, not a list")
+    checks: list[RollupCheck] = []
+    for entry in rollup:
+        if not is_object_dict(entry):
+            raise TypeError(f"statusCheckRollup entry is {type(entry).__name__}, not an object")
+        checks.append(entry)
+    return checks
+
+
+def _merge_conflict_result(data: Mapping[str, object], result: CIResult) -> CIResult:
     """Keep the conflict verdict's check detail without entering CI evaluation."""
     result.verdict = CIStatus.MERGE_CONFLICT
-    checks = data.get("statusCheckRollup", [])
+    checks = _rollup_checks(data)
     result.checks = checks
     for c in checks:
-        name = c.get("name", "?")
+        name = _check_name(c)
         status = c.get("status", "")
         if status == "COMPLETED":
             result.completed.append(name)
@@ -672,17 +712,20 @@ def check_ci(
         result.error_detail = f"gh CLI timed out: {error}"
         return result
     if r.returncode != 0:
-        result.error_detail = f"gh CLI error: {r.stderr.strip()}"
+        result.error_detail = f"gh CLI error: {stderr_text(r).strip()}"
         return result
 
     try:
-        data = json.loads(r.stdout)
+        data = object_of(json.loads, stdout_text(r))
     except json.JSONDecodeError as e:
         result.error_detail = f"JSON parse error: {e}"
         return result
+    if not is_object_dict(data):
+        raise TypeError(f"gh pr view answered {type(data).__name__}, not an object")
 
     # --- Merge conflict detection ---
-    result.mergeable = data.get("mergeable", "UNKNOWN")
+    mergeable = data.get("mergeable", "UNKNOWN")
+    result.mergeable = mergeable if isinstance(mergeable, str) else "UNKNOWN"
     result.is_draft = bool(data.get("isDraft", False))
     if result.mergeable in CONFLICTING:
         return _merge_conflict_result(data, result)
@@ -691,16 +734,15 @@ def check_ci(
     # Pre-expansion cancellation artifacts are dropped before any judging: a run cancelled before
     # matrix expansion leaves CANCELLED entries whose names are still raw templates, which no
     # rerun can ever satisfy (see `_drop_unexpanded_cancellations`).
-    checks = _latest_completed_per_name(
-        _drop_unexpanded_cancellations(data.get("statusCheckRollup", []))
-    )
+    checks = _latest_completed_per_name(_drop_unexpanded_cancellations(_rollup_checks(data)))
     result.checks = checks
+    head_sha = _text(data, "headRefOid", "")
 
     if not checks:
         # An empty rollup is probed before it is called settled: only a
         # confirmed-empty runs API makes NO_CHECKS true (the attach window right
         # after a push looks identical to it — 2026-09-12, PR #2249).
-        _empty_rollup_verdict(result, data.get("headRefOid", ""), repo, host=host, clock=clock)
+        _empty_rollup_verdict(result, head_sha, repo, host=host, clock=clock)
         return result
 
     core_skipped = core_suite_skipped(checks)
@@ -716,7 +758,7 @@ def check_ci(
         result.verdict = CIStatus.PENDING
     else:
         _attached_checks_verdict(
-            result, data.get("headRefOid", ""), repo, host=host, clock=clock, workflows=workflows
+            result, head_sha, repo, host=host, clock=clock, workflows=workflows
         )
 
     return result

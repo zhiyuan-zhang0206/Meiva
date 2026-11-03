@@ -25,6 +25,7 @@ import ast
 import re
 import sys
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -33,6 +34,7 @@ if str(_REPOSITORY_ROOT) not in sys.path:
 
 from meizel.checkout import roles_at  # noqa: E402
 from meizel.roles import select_packages  # noqa: E402
+from scripts.boundary.options import options  # noqa: E402
 
 ROLES = roles_at(_REPOSITORY_ROOT)
 
@@ -224,6 +226,15 @@ def skips_e2e(
     )
 
 
+@dataclass(frozen=True)
+class Options:
+    changed_files: Path
+    event: str
+    mode: str
+    decision: str
+    repo_root: Path
+
+
 def main(argv: list[str]) -> int:
     """Print `skip=true` or `skip=false` for the workflow's step output."""
     parser = argparse.ArgumentParser(description="Whether a pull request can skip the e2e jobs.")
@@ -232,7 +243,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--mode", default="")
     parser.add_argument("--decision", default="")
     parser.add_argument("--repo-root", type=Path, default=_REPOSITORY_ROOT)
-    args = parser.parse_args(argv)
+    args = options(parser.parse_args(argv), Options)
     changed = [line.strip() for line in args.changed_files.read_text().splitlines() if line.strip()]
     repo_root = args.repo_root.resolve()
     skip = skips_e2e(
