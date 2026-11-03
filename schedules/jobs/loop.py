@@ -13,7 +13,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import NoReturn, assert_never
 
 from base.daemon.schedules.watcher import next_fire
@@ -88,11 +88,10 @@ def run_loop(
     *,
     schedule_id: int,
     started_at: datetime,
+    clock: Callable[[], datetime],
 ) -> NoReturn:
     floor = started_at
     while True:
-        tick = loop_once(
-            db, schedule, fire, floor=floor, now=datetime.now(UTC), schedule_id=schedule_id
-        )
+        tick = loop_once(db, schedule, fire, floor=floor, now=clock(), schedule_id=schedule_id)
         floor = tick.floor
         time.sleep(tick.sleep)

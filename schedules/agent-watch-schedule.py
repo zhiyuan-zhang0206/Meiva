@@ -20,11 +20,13 @@ import sys
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from functools import partial
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import meiva
+from base.daemon.schedules.inputs import ScheduleInputs
 from base.paths.home import resolve_meiva_home
-from schedules.jobs.watch.agent_watch import EmitTally, run_round
+from schedules.jobs.watch.agent_watch import EmitTally, SendMessage, run_round
 from schedules.jobs.entry import cluster_timezone, open_schedule_entry
 from schedules.jobs.loop import CronSchedule, Trigger, run_loop
 from schedules.plans.schedule_identity import parse_schedule_id
@@ -57,12 +59,12 @@ def watch_once(
     slot: datetime,
     _payload: str | None,
     *,
-    inputs,
+    inputs: ScheduleInputs,
     report_agent: int,
-    home,
-    state_path,
+    home: Path,
+    state_path: Path,
     tally: EmitTally,
-    send,
+    send: SendMessage,
 ) -> None:
     line = run_round(
         inputs=inputs,
@@ -102,4 +104,5 @@ if __name__ == "__main__":
             watch,
             schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
             started_at=datetime.now(UTC),
+            clock=lambda: datetime.now(UTC),
         )
