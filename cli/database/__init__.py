@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import sys
 from collections.abc import Callable
 from dataclasses import replace
@@ -12,6 +13,7 @@ from typing import TYPE_CHECKING, NoReturn
 from base.cluster.machine import MachineIdentityReader
 from base.host.exit_codes import hard_exit
 from base.telemetry import DrainResult, EventPipeline
+from cli.options import attribute
 
 if TYPE_CHECKING:
     from base.cluster.dataplane.direct_url import ClusterDirectUrl
@@ -23,9 +25,11 @@ __all__ = [
     "OpenDatabase",
     "OperatorDatabaseFactory",
     "OperatorEventPipeline",
+    "database_factory_of",
     "open_operator_database",
     "operator_database_factory",
     "operator_event_pipeline",
+    "producer_of",
 ]
 
 # meiva:note
@@ -263,3 +267,16 @@ def operator_event_pipeline(
         otlp_enabled=otlp_enabled,
         otlp_endpoint=otlp_endpoint,
     )
+
+
+# meiva:note
+# The database factory `cli.main` bound to the parsed command (`args.database_factory`), as the
+# class it is.
+def database_factory_of(args: argparse.Namespace) -> OperatorDatabaseFactory:
+    return attribute(args, "database_factory", OperatorDatabaseFactory)
+
+
+# meiva:note
+# The event pipeline `cli.main` bound to the parsed command (`args.producer`), as the class it is.
+def producer_of(args: argparse.Namespace) -> OperatorEventPipeline:
+    return attribute(args, "producer", OperatorEventPipeline)

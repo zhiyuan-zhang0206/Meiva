@@ -7,6 +7,3 @@ exports = ["cluster.py", "harness.py", "host.py", "logs.py", "permissions.py", "
 
 [debt.ambient-read]
 "host.py#pid sys.stdin" = { count = 1, owner = "#8237", until = "waits for `h_stop` to be handed the stdin stream by the command entry: it passes `sys.stdin` to the stop confirmation" }
-
-[debt.restricted-python]
-"host.py#dynamic attribute name" = { count = 2, owner = "#8266", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }

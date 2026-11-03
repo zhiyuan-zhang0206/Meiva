@@ -4,14 +4,14 @@
 from __future__ import annotations
 
 import argparse
-import os
 from dataclasses import replace
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 
-from base.host.system.hostport import Host
-from base.host.system.tests.fake_commands import fake_host
+from cli.database import OperatorDatabaseFactory, OperatorEventPipeline
+from cli.database.runtime import CommandRuntime
 from cli.parsers import build_parser
 from cli.parsers import host as host_parsers
 
@@ -232,40 +232,15 @@ def test_blank_or_conflicting_message_choice_is_refused_by_parser(
     assert "not allowed with argument" in err
 
 
-class _Machine:
-    def __init__(self, roles: frozenset[str] | None) -> None:
-        self.roles = roles
-
-    def role(self) -> frozenset[str]:
-        from base.cluster.machine import MachineRoleMissing
-
-        if self.roles is None:
-            raise MachineRoleMissing("no capabilities recorded")
-        return self.roles
-
-
-class _Config:
-    def process_environment(self) -> dict[str, str]:
-        return {}
-
-
-class _Runtime:
-    def __init__(self, roles: frozenset[str] | None, home: Path) -> None:
-        self.machine = _Machine(roles)
-        self.helper = None
-        self.config = _Config()
-        self.home = home
-        # meiva:note
-        # The caller block the stop hands the root names the invocation's own pid; the stand-in
-        # states one so the handler never reaches for the process it happens to run in.
-        self.pid = os.getpid()
-
+def _runtime(command: CommandRuntime, roles: frozenset[str] | None, home: Path) -> CommandRuntime:
     # meiva:note
-    # The stop hands the lifecycle audit a host whose environment is the configuration's, which
-    # is what the real runtime answers; this stand-in states the same machine without reading
-    # the one the test runs on.
-    def host_after_config(self) -> Host:
-        return replace(fake_host(environ={}), environ=self.config.process_environment())
+    # The invocation's own runtime answering the capabilities the case names: the flags the
+    # machine identity reads are set, so `role()` is the production answer, and none set is the
+    # unreadable-capabilities refusal.
+    served = roles or frozenset()
+    command.config.set_field("machine_serve_gateway", "gateway" in served)
+    command.config.set_field("machine_serve_agent_runner", "agent-runner" in served)
+    return replace(command, home=home)
 
 
 @pytest.mark.parametrize(
@@ -282,18 +257,19 @@ def test_the_stop_handler_refuses_before_any_command_runs(
     message: str,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
+    command_runtime: CommandRuntime,
 ) -> None:
     args = _parsed(["stop", *FULL_STOP, *extra])
-    args.runtime = _Runtime(roles, tmp_path)
+    args.runtime = _runtime(command_runtime, roles, tmp_path)
     assert host_parsers.h_stop(args) == 2
     assert message in capsys.readouterr().err
 
 
 def test_the_restart_handler_refuses_before_any_command_runs(
-    capsys: pytest.CaptureFixture[str], tmp_path: Path
+    capsys: pytest.CaptureFixture[str], tmp_path: Path, command_runtime: CommandRuntime
 ) -> None:
     args = _parsed(["restart", "--all-services", "--keep-browser", "--mode", "smooth"])
-    args.runtime = _Runtime(GATEWAY, tmp_path)
+    args.runtime = _runtime(command_runtime, GATEWAY, tmp_path)
     assert host_parsers.h_restart(args, retained_children=[]) == 2
     err = capsys.readouterr().err
     for form in (
@@ -304,23 +280,37 @@ def test_the_restart_handler_refuses_before_any_command_runs(
         assert form in err
 
 
-def _refusing_args(argv: list[str], home: Path) -> argparse.Namespace:
+def _refuse(*_unused: object) -> NoReturn:
+    raise AssertionError("a refusal must not open the database")
+
+
+def _refusing_args(argv: list[str], home: Path, command: CommandRuntime) -> argparse.Namespace:
     # meiva:note
-    # A dependency factory that fails loudly: a refusal that reached the database
-    # would fail this test with the factory's own error instead of a clean status.
+    # A refusal that reached the database would fail this test with the factory's own error instead
+    # of a clean status. The factory and the producer are the real classes with a database opener
+    # that raises, and the producer's lazy writer is built on that factory, so opening it trips the
+    # same opener.
+    runtime = _runtime(command, RUNNER, home)
+    database = OperatorDatabaseFactory(
+        local_host=runtime.machine.host, home=home, open_database=_refuse
+    )
     args = _parsed(argv)
-    args.runtime = _Runtime(RUNNER, home)
-
-    def _untouched() -> None:
-        raise AssertionError("a refusal must not open the database")
-
-    args.database_factory = _untouched
-    args.producer = _untouched
+    args.runtime = runtime
+    args.database_factory = database
+    args.producer = OperatorEventPipeline(
+        database,
+        machine=runtime.machine,
+        home=home,
+        otlp_enabled=runtime.otlp_enabled,
+        otlp_endpoint=runtime.otlp_endpoint,
+    )
     return args
 
 
 def test_a_contradictory_stop_answers_the_operator_in_one_line(
-    capsys: pytest.CaptureFixture[str], tmp_path: Path
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    command_runtime: CommandRuntime,
 ) -> None:
     # meiva:note
     # The guard refuses before any unit stops; the operator reads one line naming the
@@ -340,6 +330,7 @@ def test_a_contradictory_stop_answers_the_operator_in_one_line(
             "--no-message",
         ],
         tmp_path,
+        command_runtime,
     )
     assert host_parsers.h_stop(args) == 1
     err = capsys.readouterr().err
@@ -350,7 +341,9 @@ def test_a_contradictory_stop_answers_the_operator_in_one_line(
 
 
 def test_a_dedicated_service_kept_by_the_wrong_choice_answers_in_one_line(
-    capsys: pytest.CaptureFixture[str], tmp_path: Path
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    command_runtime: CommandRuntime,
 ) -> None:
     # meiva:note
     # The same layer answers the other operator-input refusal under the stop kernel:
@@ -371,6 +364,7 @@ def test_a_dedicated_service_kept_by_the_wrong_choice_answers_in_one_line(
             "browser",
         ],
         tmp_path,
+        command_runtime,
     )
     assert host_parsers.h_stop(args) == 1
     err = capsys.readouterr().err
@@ -378,12 +372,14 @@ def test_a_dedicated_service_kept_by_the_wrong_choice_answers_in_one_line(
     assert err.startswith("meiva stop: --keep-service ['browser']: choose ")
 
 
-def test_a_caller_contract_error_still_surfaces_as_a_traceback(tmp_path: Path) -> None:
+def test_a_caller_contract_error_still_surfaces_as_a_traceback(
+    tmp_path: Path, command_runtime: CommandRuntime
+) -> None:
     # meiva:note
     # Only the operator's own contradictions become one line: a missing caller-owned
     # child list is a programming error, so it keeps raising instead of being dressed
     # as an operator message.
-    args = _parsed(
+    args = _refusing_args(
         [
             "restart",
             "--all-services",
@@ -397,8 +393,9 @@ def test_a_caller_contract_error_still_surfaces_as_a_traceback(tmp_path: Path) -
             "--start-timeout",
             "120",
             "--no-message",
-        ]
+        ],
+        tmp_path,
+        command_runtime,
     )
-    args.runtime = _Runtime(GATEWAY, tmp_path)
     with pytest.raises(ValueError, match="caller-owned child retention"):
         host_parsers.h_restart(args)

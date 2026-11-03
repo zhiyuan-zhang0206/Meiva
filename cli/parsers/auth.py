@@ -8,16 +8,28 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
+
+from cli.options import options
 
 
 # meiva:note
 # `args.password` is bound by `cli.main` before dispatch: the process entry owns the terminal, so
 # it prompts or reads standard input and hands the handler the string.
+@dataclass(frozen=True)
+class _SetPasswordOptions:
+    password: str
+
+
 def _h_auth_set_password(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
     from cli.commands.auth import cmd_auth_set_password
+    from cli.database.runtime import runtime_of
 
-    return cmd_auth_set_password(gateway_access_from_boot(args.runtime.config), args.password)
+    return cmd_auth_set_password(
+        gateway_access_from_boot(runtime_of(args).config),
+        options(args, _SetPasswordOptions).password,
+    )
 
 
 def add_auth_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
