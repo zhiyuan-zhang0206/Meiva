@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import random
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any
 from uuid import UUID
 
 from fastapi import Request, Response
@@ -52,7 +51,7 @@ def error_response(
     detail: str,
     retryable: bool,
     reason: ErrorReason | None = None,
-    extensions: Mapping[str, Any] | None = None,
+    extensions: Mapping[str, object] | None = None,
     headers: Mapping[str, str] | None = None,
 ) -> JSONResponse:
     """Create the one JSON error shape used by all gateway API error paths."""

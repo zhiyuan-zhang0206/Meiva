@@ -437,7 +437,8 @@ _PLACEHOLDERS: dict[object, object] = {int: 0, float: 0.0, bool: False, str: ""}
 # optional field. A field of any other type fails here rather than getting a made-up value.
 def _placeholders[G](group: type[G]) -> G:
     values: dict[str, object] = {}
-    for name, hint in get_type_hints(group).items():
+    hints: dict[str, object] = get_type_hints(group)
+    for name, hint in hints.items():
         if hint in _PLACEHOLDERS:
             values[name] = _PLACEHOLDERS[hint]
         elif type(None) in get_args(hint):

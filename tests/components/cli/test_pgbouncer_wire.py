@@ -205,7 +205,7 @@ def test_session_touch_overrides_a_read_only_default(
                 "INSERT INTO web_sessions (id, expires_at) VALUES (%s, now() + interval '1 hour')",
                 ("pgbouncer-session-touch",),
             )
-        db_pool = ConnectionPool(
+        db_pool: ConnectionPool = ConnectionPool(
             pooled,
             min_size=1,
             max_size=2,

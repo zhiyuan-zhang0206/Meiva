@@ -12,7 +12,7 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.host.net.auth import bearer_header, cookie_name
 from base.packages.plugin_providers import build_model_catalog
 from gateway.app import create_app
-from gateway.http.middleware.error_handlers import cors_headers
+from gateway.http.error_handlers import cors_headers
 from gateway.http.model_catalog import load_model_catalog
 from gateway.tests.auth.gateway_auth import LOGIN_PASSWORD
 from gateway.tests.auth.gateway_config import (

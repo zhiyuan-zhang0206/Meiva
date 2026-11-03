@@ -9,7 +9,7 @@ from starlette.requests import Request
 
 from base.host.net.auth import verify_bearer
 from gateway.http.auth.request_principal import cluster_credential
-from gateway.http.config import GatewayConfig, gateway_config
+from gateway.http.config import GatewayConfig, gateway_config, gateway_state
 
 
 class WebhookAuthentication(NamedTuple):
@@ -42,8 +42,8 @@ def authenticate_webhook(request: Request, *, provider: str) -> WebhookAuthentic
     verified_by = cluster_credential(
         request.headers.get("Authorization"),
         config.cluster_secret,
-        home=request.app.state.gateway_process.home,
-        cache=request.app.state.machine_token_acceptance,
+        home=gateway_state(request).gateway_process.home,
+        cache=gateway_state(request).machine_token_acceptance,
     )
     if verified_by is not None:
         return WebhookAuthentication(authorized=True, source_verified_by=verified_by)

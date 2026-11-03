@@ -22,6 +22,11 @@ _POLICY = LagPolicy(tick_interval_s=0.01, emit_interval_s=0.03, slow_tick_thresh
 MAX_IDLE_CHILD_RSS = 64 * 1024 * 1024
 
 
+def _as_int(value: object) -> int:
+    assert isinstance(value, int)
+    return value
+
+
 async def _run_monitor_for(process: psutil.Process, seconds: float) -> None:
     monitor = runtime_metrics.GatewayRuntimeMonitor(
         loop=asyncio.get_running_loop(), process=process, policy=_POLICY
@@ -87,11 +92,11 @@ async def test_start_runtime_monitor_samples_the_process_the_entry_hands_it(
     child = subprocess.Popen(["sleep", "60"])
     child_process = psutil.Process(child.pid)
     try:
-        before = child_process.memory_info().rss
+        before = runtime_metrics.process_rss_bytes(child_process)
         monitor = runtime_metrics.start_runtime_monitor(process=child_process, policy=_POLICY)
         try:
             await asyncio.sleep(0.3)
-            after = child_process.memory_info().rss
+            after = runtime_metrics.process_rss_bytes(child_process)
         finally:
             monitor.stop()
     finally:
@@ -99,7 +104,7 @@ async def test_start_runtime_monitor_samples_the_process_the_entry_hands_it(
         child.wait(timeout=10)
 
     process_event = next(e for e in emitted_events if e.event_name == "gateway_process")
-    rss = process_event.attributes["rss_bytes"]
+    rss = _as_int(process_event.attributes.get("rss_bytes"))
     assert min(before, after) <= rss <= max(before, after)
     assert rss < MAX_IDLE_CHILD_RSS
 

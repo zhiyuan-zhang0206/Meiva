@@ -10,6 +10,7 @@ import stat
 from pathlib import Path
 
 import pytest
+from pydantic import TypeAdapter
 
 from gateway.http.auth.login_password import (
     MIN_PASSWORD_LENGTH,
@@ -35,8 +36,11 @@ def _seeded(seed: int) -> random.Random:
     return random.Random(seed)  # noqa: S311
 
 
+_FIELDS = TypeAdapter(dict[str, object])
+
+
 def _fields(record: bytes) -> dict[str, object]:
-    return json.loads(record)
+    return _FIELDS.validate_json(record)
 
 
 def _encoded(fields: dict[str, object]) -> bytes:

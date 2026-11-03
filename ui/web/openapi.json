@@ -176,8 +176,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "additionalProperties": true,
-                    "type": "object"
+                    "$ref": "#/components/schemas/BrowserSession"
                   },
                   "type": "array",
                   "title": "Response Sessions Api Auth Sessions Get"
@@ -10394,6 +10393,70 @@
         ],
         "title": "BornChainRow",
         "description": "One ancestor in GET /api/agents/{id}/born-chain — the immutable birth\nchain above the queried agent, nearest ancestor first (1 = direct birth\nparent). Carries what the inherited-memory context note needs (`machine`\ndecides which ancestors it can read locally); no tie score, because this\nroute reads no tie graph."
+      },
+      "BrowserSession": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Seen At"
+          },
+          "user_agent": {
+            "type": "string",
+            "title": "User Agent"
+          },
+          "ip": {
+            "type": "string",
+            "title": "Ip"
+          },
+          "current": {
+            "type": "boolean",
+            "title": "Current"
+          },
+          "managed": {
+            "type": "boolean",
+            "title": "Managed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "expires_at",
+          "revoked_at",
+          "last_seen_at",
+          "user_agent",
+          "ip",
+          "current",
+          "managed"
+        ],
+        "title": "BrowserSession"
       },
       "BuildJobOut": {
         "properties": {

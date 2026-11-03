@@ -11,8 +11,8 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -29,6 +29,7 @@ from base.host.net.auth import (
 )
 from gateway.http.auth.login_password import password_problem
 from gateway.http.auth.login_password_store import LoginPasswords
+from gateway.http.auth.rejection_log import AuthRejectionLog
 from gateway.http.auth.request_principal import (
     SessionKeys,
     current_session_fact,
@@ -39,6 +40,9 @@ from gateway.http.auth.request_principal import (
 )
 from gateway.http.auth.session_store import (
     LOGIN_TICKET_TTL_SECONDS,
+    SessionStore,
+    SessionTouchThrottle,
+    WebSessionRow,
     list_sessions,
     minted_session_id,
     minted_ticket_id,
@@ -46,11 +50,28 @@ from gateway.http.auth.session_store import (
     session_mint,
     ticket_mint,
 )
-from gateway.http.config import GatewayConfig, gateway_clock
+from gateway.http.config import (
+    GatewayAppState,
+    GatewayConfig,
+    gateway_clock,
+    gateway_state,
+    state_as,
+)
 from gateway.http.middleware.cors import request_host, session_cookie_secure
 from gateway.http.middleware.error_envelope import error_response
 
 router = APIRouter()
+
+
+# meiva:note
+# The session stores and caches the app root builds; the auth routes and the auth middleware
+# (`gateway/app.py`) are their readers, so this module declares them.
+class AuthAppState(GatewayAppState):
+    sessions: SessionStore
+    session_keys: SessionKeys
+    login_passwords: LoginPasswords
+    session_touch: SessionTouchThrottle
+    auth401_log: AuthRejectionLog
 
 
 # meiva:note
@@ -104,7 +125,7 @@ class LoginTicketRedeemRequest(BaseModel):
 async def login(body: LoginRequest, request: Request) -> JSONResponse:
     ip = request.client.host if request.client else "unknown"
 
-    login_limiter: LoginRateLimiter = request.app.state.login_limiter
+    login_limiter: LoginRateLimiter = gateway_state(request).login_limiter
     remaining = login_limiter.lockout_remaining(ip, now=gateway_clock(request).now().timestamp())
     if remaining > 0:
         return error_response(
@@ -131,11 +152,11 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
 
     mint = await asyncio.to_thread(
         login_mint,
-        request.app.state.session_keys,
-        request.app.state.login_passwords,
+        state_as(request, AuthAppState).session_keys,
+        state_as(request, AuthAppState).login_passwords,
         password,
-        home=request.app.state.gateway_process.home,
-        cache=request.app.state.machine_token_acceptance,
+        home=gateway_state(request).gateway_process.home,
+        cache=gateway_state(request).machine_token_acceptance,
     )
     if mint is None:
         login_limiter.record_failure(ip, now=gateway_clock(request).now().timestamp())
@@ -154,10 +175,10 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
 async def _open_session(request: Request, mint: str, ip: str) -> JSONResponse:
     """Create a session bound to `mint` and answer with its cookie."""
     session_id = minted_session_id(mint)
-    config: GatewayConfig = request.app.state.gateway_config
+    config: GatewayConfig = gateway_state(request).gateway_config
     ttl_seconds = config.session_ttl_seconds
     await asyncio.to_thread(
-        request.app.state.sessions.create,
+        state_as(request, AuthAppState).sessions.create,
         session_id,
         ttl_seconds,
         request.headers.get("user-agent", ""),
@@ -197,8 +218,8 @@ async def set_login_password(body: SetPasswordRequest, request: Request) -> JSON
             request, code="password_too_short", status=422, detail=problem, retryable=False
         )
     await asyncio.to_thread(
-        request.app.state.login_passwords.set,
-        request.app.state.gateway_process.home.resolve(),
+        state_as(request, AuthAppState).login_passwords.set,
+        gateway_state(request).gateway_process.home.resolve(),
         body.password,
     )
     return JSONResponse(content={"ok": True})
@@ -219,17 +240,17 @@ async def set_login_password(body: SetPasswordRequest, request: Request) -> JSON
 # Returns ``{"ticket": "<opaque>", "expires_in_seconds": <int>}``.
 @router.post("/api/auth/login-ticket", dependencies=[Depends(require_human_credential)])
 async def issue_login_ticket(request: Request) -> JSONResponse:
-    config: GatewayConfig = request.app.state.gateway_config
+    config: GatewayConfig = gateway_state(request).gateway_config
     mint = await asyncio.to_thread(
         human_mint,
-        request.app.state.session_keys,
+        state_as(request, AuthAppState).session_keys,
         config.cluster_secret,
-        home=request.app.state.gateway_process.home,
+        home=gateway_state(request).gateway_process.home,
     )
     ticket = minted_ticket_id(mint)
     ip = request.client.host if request.client else "unknown"
     await asyncio.to_thread(
-        request.app.state.sessions.create,
+        state_as(request, AuthAppState).sessions.create,
         ticket,
         LOGIN_TICKET_TTL_SECONDS,
         "login-ticket",
@@ -249,16 +270,18 @@ async def _consume_login_ticket(request: Request, ticket: str) -> str | None:
     rotated, a generation was revoked) is still spent.
     """
     mint = ticket_mint(ticket)
-    if mint is None or not await asyncio.to_thread(request.app.state.sessions.revoke, ticket):
+    if mint is None or not await asyncio.to_thread(
+        state_as(request, AuthAppState).sessions.revoke, ticket
+    ):
         return None
-    config: GatewayConfig = request.app.state.gateway_config
+    config: GatewayConfig = gateway_state(request).gateway_config
     admitted = await asyncio.to_thread(
         session_mints,
-        request.app.state.session_keys,
-        request.app.state.login_passwords,
+        state_as(request, AuthAppState).session_keys,
+        state_as(request, AuthAppState).login_passwords,
         config.cluster_secret,
-        home=request.app.state.gateway_process.home,
-        cache=request.app.state.machine_token_acceptance,
+        home=gateway_state(request).gateway_process.home,
+        cache=gateway_state(request).machine_token_acceptance,
     )
     return mint if mint in admitted else None
 
@@ -275,7 +298,7 @@ async def redeem_login_ticket(body: LoginTicketRedeemRequest, request: Request) 
     (429 while locked), so tickets cannot be guessed at.
     """
     ip = request.client.host if request.client else "unknown"
-    login_limiter: LoginRateLimiter = request.app.state.login_limiter
+    login_limiter: LoginRateLimiter = gateway_state(request).login_limiter
     remaining = login_limiter.lockout_remaining(ip, now=gateway_clock(request).now().timestamp())
     if remaining > 0:
         return error_response(
@@ -308,7 +331,7 @@ async def logout(request: Request) -> JSONResponse:
     """Revoke and clear the current session cookie; repeated calls are safe."""
     session_id = request.cookies.get(cookie_name())
     if session_id:
-        await asyncio.to_thread(request.app.state.sessions.revoke, session_id)
+        await asyncio.to_thread(state_as(request, AuthAppState).sessions.revoke, session_id)
     return JSONResponse(
         content={"ok": True},
         headers=clear_cookie_header(),
@@ -323,17 +346,17 @@ async def check(request: Request) -> JSONResponse:
     Always 200 — the caller uses the body, not the status code.
     """
     token = request.cookies.get(cookie_name())
-    config: GatewayConfig = request.app.state.gateway_config
+    config: GatewayConfig = gateway_state(request).gateway_config
     fact = await asyncio.to_thread(
         current_session_fact,
-        request.app.state.sessions,
-        request.app.state.session_keys,
-        request.app.state.login_passwords,
+        state_as(request, AuthAppState).sessions,
+        state_as(request, AuthAppState).session_keys,
+        state_as(request, AuthAppState).login_passwords,
         token,
         config.cluster_secret,
-        home=request.app.state.gateway_process.home,
+        home=gateway_state(request).gateway_process.home,
         now=gateway_clock(request).now(),
-        cache=request.app.state.machine_token_acceptance,
+        cache=gateway_state(request).machine_token_acceptance,
     )
     # meiva:note
     # In the `trusted_network` mode a request the middleware would serve without a credential
@@ -343,6 +366,20 @@ async def check(request: Request) -> JSONResponse:
         and request_host(request.headers.get("Host")) in config.trusted_hosts
     )
     return JSONResponse(content={"authenticated": fact is not None or anonymous_admitted})
+
+
+# meiva:note
+# One listed browser session; `id` is masked unless it is the caller's own.
+class BrowserSession(BaseModel):
+    id: str
+    created_at: datetime
+    expires_at: datetime
+    revoked_at: datetime | None
+    last_seen_at: datetime
+    user_agent: str
+    ip: str
+    current: bool
+    managed: bool
 
 
 # meiva:note
@@ -357,13 +394,13 @@ def _sessions_that_authenticate(
     *,
     home: Path,
     cache: AcceptanceCache | None = None,
-) -> list[dict[str, Any]]:
+) -> list[WebSessionRow]:
     admitted = session_mints(keys, passwords, secret, home=home, cache=cache)
-    return [row for row in list_sessions(pool) if session_mint(row["id"]) in admitted]
+    return [row for row in list_sessions(pool) if session_mint(row.id) in admitted]
 
 
 @router.get("/api/auth/sessions")
-async def sessions(request: Request) -> list[dict[str, Any]]:
+async def sessions(request: Request) -> list[BrowserSession]:
     """List browser sessions that still authenticate, marking the current cookie.
 
     A session is listed only while the credential that minted it is current,
@@ -376,26 +413,31 @@ async def sessions(request: Request) -> list[dict[str, Any]]:
     mistaken for the caller's own.
     """
     current_session_id = request.cookies.get(cookie_name())
-    config: GatewayConfig = request.app.state.gateway_config
+    config: GatewayConfig = gateway_state(request).gateway_config
     rows = await asyncio.to_thread(
         _sessions_that_authenticate,
-        request.app.state.db_pool,
-        request.app.state.session_keys,
-        request.app.state.login_passwords,
+        gateway_state(request).db_pool,
+        state_as(request, AuthAppState).session_keys,
+        state_as(request, AuthAppState).login_passwords,
         config.cluster_secret,
-        home=request.app.state.gateway_process.home,
-        cache=request.app.state.machine_token_acceptance,
+        home=gateway_state(request).gateway_process.home,
+        cache=gateway_state(request).machine_token_acceptance,
     )
-    result: list[dict[str, Any]] = []
+    result: list[BrowserSession] = []
     for row in rows:
-        is_current = row["id"] == current_session_id
+        is_current = row.id == current_session_id
         result.append(
-            {
-                **row,
-                "id": row["id"] if is_current else row["id"][-8:],
-                "current": is_current,
-                "managed": is_managed_browser_user_agent(row["user_agent"]),
-            }
+            BrowserSession(
+                id=row.id if is_current else row.id[-8:],
+                created_at=row.created_at,
+                expires_at=row.expires_at,
+                revoked_at=row.revoked_at,
+                last_seen_at=row.last_seen_at,
+                user_agent=row.user_agent,
+                ip=row.ip,
+                current=is_current,
+                managed=is_managed_browser_user_agent(row.user_agent),
+            )
         )
     return result
 
@@ -417,8 +459,8 @@ async def revoke_other_session(session_id: str, request: Request) -> JSONRespons
             status_code=409,
             detail="current session must be revoked via logout",
         )
-    pool = request.app.state.db_pool
-    revoked = await asyncio.to_thread(request.app.state.sessions.revoke, session_id)
+    pool = gateway_state(request).db_pool
+    revoked = await asyncio.to_thread(state_as(request, AuthAppState).sessions.revoke, session_id)
     if not revoked and len(session_id) == 8:
         # The masked suffix from the list — nothing else falls back here. The
         # current session is excluded: its only revocation path is logout, and
@@ -434,7 +476,9 @@ async def revoke_other_session(session_id: str, request: Request) -> JSONRespons
                 detail="session suffix is ambiguous",
             )
         if len(matches) == 1:
-            revoked = await asyncio.to_thread(request.app.state.sessions.revoke, matches[0])
+            revoked = await asyncio.to_thread(
+                state_as(request, AuthAppState).sessions.revoke, matches[0]
+            )
     if not revoked:
         raise HTTPException(status_code=404, detail="session not found")
     return JSONResponse(content={"ok": True})

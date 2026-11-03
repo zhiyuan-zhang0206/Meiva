@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from collections.abc import Iterator
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
-import psycopg
 import pytest
+from psycopg.rows import class_row
 from psycopg_pool import ConnectionPool
 
 from base.config import settings
@@ -20,6 +20,17 @@ from gateway.http.auth.session_store import (
     touch_session,
 )
 
+
+@dataclass(frozen=True)
+class _SeenRow:
+    last_seen_at: datetime
+
+
+@dataclass(frozen=True)
+class _IdRow:
+    id: str
+
+
 _MINT = "human-" + "0" * 32
 _ADMITTED = frozenset({_MINT})
 
@@ -29,8 +40,8 @@ def _id(name: str) -> str:
 
 
 @pytest.fixture
-def pool(db_url: str) -> Iterator[ConnectionPool[psycopg.Connection[Any]]]:
-    session_pool: ConnectionPool[psycopg.Connection[Any]] = ConnectionPool(
+def pool(db_url: str) -> Iterator[ConnectionPool]:
+    session_pool: ConnectionPool = ConnectionPool(
         settings.data_plane.db_url,
         min_size=1,
         max_size=2,
@@ -43,12 +54,12 @@ def pool(db_url: str) -> Iterator[ConnectionPool[psycopg.Connection[Any]]]:
 
 
 @pytest.fixture
-def store(pool: ConnectionPool[psycopg.Connection[Any]]) -> SessionStore:
+def store(pool: ConnectionPool) -> SessionStore:
     return SessionStore(pool)
 
 
 def test_create_validate_revoke_lifecycle(
-    pool: ConnectionPool[psycopg.Connection[Any]],
+    pool: ConnectionPool,
     store: SessionStore,
 ) -> None:
     store.create(_id("session-one"), 3600, "test-agent", "127.0.0.1")
@@ -61,7 +72,7 @@ def test_create_validate_revoke_lifecycle(
 
 
 def test_revoke_expired_session_returns_false_without_marking_revoked(
-    pool: ConnectionPool[psycopg.Connection[Any]],
+    pool: ConnectionPool,
     store: SessionStore,
 ) -> None:
     with pool.connection() as conn, conn.cursor() as cur:
@@ -82,7 +93,7 @@ def test_revoke_expired_session_returns_false_without_marking_revoked(
 
 
 def test_cache_never_outlives_row_expiry(
-    pool: ConnectionPool[psycopg.Connection[Any]],
+    pool: ConnectionPool,
     store: SessionStore,
 ) -> None:
     checked_at = datetime.now(UTC)
@@ -105,7 +116,7 @@ def test_cache_never_outlives_row_expiry(
 
 
 def test_valid_cache_hit_does_not_borrow_connection(
-    pool: ConnectionPool[psycopg.Connection[Any]],
+    pool: ConnectionPool,
     store: SessionStore,
 ) -> None:
     checked_at = datetime.now(UTC)
@@ -128,7 +139,7 @@ def test_valid_cache_hit_does_not_borrow_connection(
 
 
 def test_a_session_whose_mint_is_no_longer_admitted_is_refused_before_any_lookup(
-    pool: ConnectionPool[psycopg.Connection[Any]],
+    pool: ConnectionPool,
     store: SessionStore,
 ) -> None:
     """The minting credential is checked first: a live row (even a cached one)
@@ -168,11 +179,11 @@ def test_minted_ids_carry_their_mint_and_fresh_randomness(store: SessionStore) -
 
 
 def test_touch_advances_last_seen_at(
-    pool: ConnectionPool[psycopg.Connection[Any]],
+    pool: ConnectionPool,
     store: SessionStore,
 ) -> None:
     store.create("touched-session", 3600, "", "")
-    with pool.connection() as conn, conn.cursor() as cur:
+    with pool.connection() as conn, conn.cursor(row_factory=class_row(_SeenRow)) as cur:
         cur.execute(
             "UPDATE web_sessions SET last_seen_at = now() - interval '1 day' WHERE id = %s",
             ("touched-session",),
@@ -180,20 +191,20 @@ def test_touch_advances_last_seen_at(
         cur.execute("SELECT last_seen_at FROM web_sessions WHERE id = %s", ("touched-session",))
         before_row = cur.fetchone()
         assert before_row is not None
-        before = before_row[0]
+        before = before_row.last_seen_at
 
     touch_session(pool, "touched-session")
 
-    with pool.connection() as conn, conn.cursor() as cur:
+    with pool.connection() as conn, conn.cursor(row_factory=class_row(_SeenRow)) as cur:
         cur.execute("SELECT last_seen_at FROM web_sessions WHERE id = %s", ("touched-session",))
         after_row = cur.fetchone()
         assert after_row is not None
-        after = after_row[0]
+        after = after_row.last_seen_at
     assert after > before
 
 
 def test_list_sessions_filters_inactive_and_sorts_newest_first(
-    pool: ConnectionPool[psycopg.Connection[Any]],
+    pool: ConnectionPool,
 ) -> None:
     now = datetime.now(UTC)
     with pool.connection() as conn, conn.cursor() as cur:
@@ -228,21 +239,21 @@ def test_list_sessions_filters_inactive_and_sorts_newest_first(
     active = list_sessions(pool)
     all_sessions = list_sessions(pool, exclude_revoked=False)
 
-    assert [row["id"] for row in active] == ["newer", "older"]
-    assert active[0]["user_agent"] == "ua-2"
-    assert active[0]["ip"] == "ip-2"
-    assert {row["id"] for row in all_sessions} == {
+    assert [row.id for row in active] == ["newer", "older"]
+    assert active[0].user_agent == "ua-2"
+    assert active[0].ip == "ip-2"
+    assert {row.id for row in all_sessions} == {
         "older",
         "newer",
         "revoked",
         "expired",
     }
-    revoked = next(row for row in all_sessions if row["id"] == "revoked")
-    assert revoked["revoked_at"] is not None
+    revoked = next(row for row in all_sessions if row.id == "revoked")
+    assert revoked.revoked_at is not None
 
 
 def test_create_session_leaves_expired_rows_for_the_ttl_reaper(
-    pool: ConnectionPool[psycopg.Connection[Any]],
+    pool: ConnectionPool,
     store: SessionStore,
 ) -> None:
     with pool.connection() as conn, conn.cursor() as cur:
@@ -253,13 +264,13 @@ def test_create_session_leaves_expired_rows_for_the_ttl_reaper(
 
     store.create("live-row", 3600, "", "")
 
-    with pool.connection() as conn, conn.cursor() as cur:
+    with pool.connection() as conn, conn.cursor(row_factory=class_row(_IdRow)) as cur:
         cur.execute("SELECT id FROM web_sessions ORDER BY id")
-        assert [row[0] for row in cur.fetchall()] == ["expired-row", "live-row"]
+        assert [row.id for row in cur.fetchall()] == ["expired-row", "live-row"]
 
 
 def test_session_cache_evicts_least_recently_used_entry(
-    pool: ConnectionPool[psycopg.Connection[Any]], monkeypatch: pytest.MonkeyPatch
+    pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A long-lived gateway retains only the most recently used session cache entries."""
     store = SessionStore(pool, max_cache_entries=2)
@@ -279,7 +290,7 @@ def test_session_cache_evicts_least_recently_used_entry(
 
 
 def test_session_cache_tolerates_an_entry_evicted_while_touched(
-    pool: ConnectionPool[psycopg.Connection[Any]], monkeypatch: pytest.MonkeyPatch
+    pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A concurrent cache eviction never turns a valid session into a 500."""
 
@@ -303,7 +314,7 @@ def test_session_cache_tolerates_an_entry_evicted_while_touched(
 
 
 def test_session_cache_tolerates_an_entry_evicted_after_db_lookup(
-    pool: ConnectionPool[psycopg.Connection[Any]], monkeypatch: pytest.MonkeyPatch
+    pool: ConnectionPool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An eviction after a database read never turns session validation into a 500."""
 
@@ -321,7 +332,7 @@ def test_session_cache_tolerates_an_entry_evicted_after_db_lookup(
 
 
 def test_session_ids_with_suffix_matches_active_rows_only(
-    pool: ConnectionPool[psycopg.Connection[Any]],
+    pool: ConnectionPool,
     store: SessionStore,
 ) -> None:
     now = datetime.now(UTC)
