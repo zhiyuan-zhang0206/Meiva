@@ -27,7 +27,6 @@ from scripts.hooks.diff_checks_fields import ChangeSet, Run, kinds, reverse_clos
 # `python -c "import base; print(base.__file__)"` names this worktree.
 PYRIGHT_ERROR_BASELINE = 0
 
-_BIN = Path(sys.executable).parent
 _GLOBAL_TYPE_CONFIGS = frozenset({"pyproject.toml", "pyrightconfig.json", "uv.lock"})
 
 
@@ -38,8 +37,18 @@ class ScheduledGroup:
     blocking: bool = True
 
 
-def _tool(name: str) -> str:
-    candidate = _BIN / name
+# meiva:note
+# Which interpreter a command runs under is the caller's value, with one exception kept below: a
+# command whose target is a first-party entry (`python -m scripts.ci.test_selector`, a
+# `scripts/content_lint/*.py` script) reads the interpreter at the site where it is composed,
+# because that read is also the fact edge the graph uses to know this file runs that entry. Handing
+# the value in there makes `PythonCommands.is_interpreter` stop recognising the command, and the
+# manifests that declare the edge go stale -- the checker says so, and deleting those declarations
+# would trade a debt repayment for a blind spot in test selection. A tool a check runs
+# (`basedpyright`, `ruff`) is installed beside the interpreter the caller names, so its directory
+# comes from that value instead: one receipt naming one installation.
+def _tool(name: str, *, python: str) -> str:
+    candidate = Path(python).parent / name
     return str(candidate) if candidate.exists() else name
 
 
@@ -60,7 +69,7 @@ def _resolved_closure(change: ChangeSet, cache: CacheContext | None) -> set[str]
 
 
 def _incremental_pyright_runs(
-    change: ChangeSet, *, cache: CacheContext | None = None
+    change: ChangeSet, *, cache: CacheContext | None = None, python: str
 ) -> tuple[Run, ...]:
     if not _global_type_config_changed(change) and change.root.is_dir():
         reached = _resolved_closure(change, cache)
@@ -77,20 +86,20 @@ def _incremental_pyright_runs(
             return (
                 Run(
                     "pyright",
-                    (_tool("basedpyright"), "--threads", "2", *targets),
+                    (_tool("basedpyright", python=python), "--threads", "2", *targets),
                     "errors in the changed files and their reverse-import closure must stay 0",
                 ),
             )
     return (
         Run(
             "pyright",
-            (_tool("basedpyright"), "--threads", "2"),
+            (_tool("basedpyright", python=python), "--threads", "2"),
             f"whole-tree errors must stay at the base's {PYRIGHT_ERROR_BASELINE}",
         ),
     )
 
 
-def _incremental_ruff_runs(change: ChangeSet) -> tuple[Run, ...]:
+def _incremental_ruff_runs(change: ChangeSet, *, python: str) -> tuple[Run, ...]:
     python_paths = (
         tuple(path for path in change.python_files() if (change.root / path).is_file())
         if change.root.is_dir()
@@ -98,21 +107,26 @@ def _incremental_ruff_runs(change: ChangeSet) -> tuple[Run, ...]:
     )
     if not python_paths:
         return ()
-    return (Run("ruff", (_tool("ruff"), "check", *python_paths), "exit code"),)
+    return (Run("ruff", (_tool("ruff", python=python), "check", *python_paths), "exit code"),)
 
 
-def _python_runs(change: ChangeSet, *, cache: CacheContext | None = None) -> tuple[Run, ...]:
-    return (*_incremental_pyright_runs(change, cache=cache), *_incremental_ruff_runs(change))
+def _python_runs(
+    change: ChangeSet, *, cache: CacheContext | None = None, python: str
+) -> tuple[Run, ...]:
+    return (
+        *_incremental_pyright_runs(change, cache=cache, python=python),
+        *_incremental_ruff_runs(change, python=python),
+    )
 
 
-def _full_python_runs() -> tuple[Run, ...]:
+def _full_python_runs(*, python: str) -> tuple[Run, ...]:
     return (
         Run(
             "pyright",
-            (_tool("basedpyright"), "--threads", "2"),
+            (_tool("basedpyright", python=python), "--threads", "2"),
             f"whole-tree errors must stay at the base's {PYRIGHT_ERROR_BASELINE}",
         ),
-        Run("ruff", (_tool("ruff"), "check"), "exit code"),
+        Run("ruff", (_tool("ruff", python=python), "check"), "exit code"),
     )
 
 
@@ -133,32 +147,32 @@ def _can_scope_meizel(change: ChangeSet) -> bool:
 # one: a documentation-only pull request can still leave a stale export or a role list behind.
 # Incremental mode scopes facts to `--changed` when no manifest, policy or meizel source moved and
 # every changed path still exists on disk; otherwise it runs the whole-tree check.
-def _meizel_runs(change: ChangeSet) -> tuple[Run, ...]:
+def _meizel_runs(change: ChangeSet, *, python: str) -> tuple[Run, ...]:
     if _can_scope_meizel(change):
         return (
             Run(
                 "meizel",
-                (sys.executable, "-m", "meizel", "check", "--changed", *change.files),
+                (python, "-m", "meizel", "check", "--changed", *change.files),
                 "exit code",
             ),
         )
-    return _full_meizel_runs()
+    return _full_meizel_runs(python=python)
 
 
-def _full_meizel_runs() -> tuple[Run, ...]:
-    return (Run("meizel", (sys.executable, "-m", "meizel", "check"), "exit code"),)
+def _full_meizel_runs(*, python: str) -> tuple[Run, ...]:
+    return (Run("meizel", (python, "-m", "meizel", "check"), "exit code"),)
 
 
 # meiva:note
 # A recorded total moves only when a manifest moves: a new violation is what `meizel check` already
 # refuses, and a repayment deletes the line that recorded it. Comparing against the base costs
 # minutes, so it runs for a manifest change and says why it did not for any other.
-def _debt_runs(change: ChangeSet) -> tuple[Run, ...]:
+def _debt_runs(change: ChangeSet, *, python: str) -> tuple[Run, ...]:
     return (
         Run(
             "debt",
             (
-                sys.executable,
+                python,
                 "-m",
                 "meizel",
                 "debt",
@@ -278,16 +292,19 @@ def schedule_groups(
     mode: CheckMode,
     debt_reduced: bool,
     cache: CacheContext | None = None,
+    python: str,
 ) -> tuple[ScheduledGroup, ...]:
     if mode == "incremental":
         groups: list[ScheduledGroup] = []
         changed_kinds = kinds(change)
         if change.files:
-            groups.append(ScheduledGroup("repository-change", _meizel_runs(change)))
+            groups.append(ScheduledGroup("repository-change", _meizel_runs(change, python=python)))
         if change.python_files():
-            groups.append(ScheduledGroup("python-change", _python_runs(change, cache=cache)))
+            groups.append(
+                ScheduledGroup("python-change", _python_runs(change, cache=cache, python=python))
+            )
         if "manifests" in changed_kinds:
-            groups.append(ScheduledGroup("manifest-change", _debt_runs(change)))
+            groups.append(ScheduledGroup("manifest-change", _debt_runs(change, python=python)))
         if "docs" in changed_kinds:
             groups.append(ScheduledGroup("docs-change", _docs_runs()))
         if _touches_rsc_boundary(change):
@@ -299,9 +316,9 @@ def schedule_groups(
         return tuple(groups)
     if mode == "full":
         groups = [
-            ScheduledGroup("full-meizel", _full_meizel_runs()),
-            ScheduledGroup("full-python", _full_python_runs()),
-            ScheduledGroup("full-debt", _debt_runs(change)),
+            ScheduledGroup("full-meizel", _full_meizel_runs(python=python)),
+            ScheduledGroup("full-python", _full_python_runs(python=python)),
+            ScheduledGroup("full-debt", _debt_runs(change, python=python)),
             ScheduledGroup("full-docs", _docs_runs()),
             ScheduledGroup("full-frontend-rsc", _FRONTEND_RUNS),
             ScheduledGroup("full-frontend-app", _APP_TEST_RUNS),

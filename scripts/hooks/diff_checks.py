@@ -62,6 +62,7 @@ from scripts.hooks.diff_checks_plan import (  # noqa: E402
 from scripts.hooks.diff_checks_pytest import (  # noqa: E402
     PytestCounts,
     pytest_argv,
+    pytest_command,
     pytest_counts,
 )
 
@@ -349,8 +350,9 @@ def _run_pytest(
     execute: Callable[[Sequence[str], Path], tuple[int, str, float]],
     mode: CheckMode,
     cache: CacheContext | None,
+    python: str,
 ) -> tuple[PytestCounts, bool]:
-    logical_argv = (sys.executable, "-m", "pytest", "-q", *tests)
+    logical_argv = pytest_command(tests, python=python)
     key = ""
     report_dir = Path(tempfile.mkdtemp(prefix="diff-checks-"))
     report = report_dir / "pytest-report.xml"
@@ -368,7 +370,7 @@ def _run_pytest(
                 report.write_text(cached.output, encoding="utf-8")
                 counts = pytest_counts(report, selected_files=len(tests), seconds=0.0)
                 return counts, counts.broken
-        code, _output, seconds = execute(pytest_argv(report, tests), change.root)
+        code, _output, seconds = execute(pytest_argv(report, tests, python=python), change.root)
         counts = pytest_counts(report, selected_files=len(tests), seconds=seconds)
         if (
             cache is not None
@@ -388,12 +390,13 @@ def check(
     *,
     skip_tests: bool,
     execute: Callable[[Sequence[str], Path], tuple[int, str, float]],
+    python: str,
     choose: Callable[[ChangeSet], Selection] = select_tests,
     mode: CheckMode = "incremental",
     cache: CacheContext | None = None,
 ) -> tuple[dict[str, str], bool]:
     groups = schedule_groups(
-        change, mode=mode, debt_reduced=_net_debt_reduction(change), cache=cache
+        change, mode=mode, debt_reduced=_net_debt_reduction(change), cache=cache, python=python
     )
     values: dict[str, str] = {"scope": scope_of(change)}
     selection = _choose_selection(change, choose=choose, mode=mode, cache=cache)
@@ -419,7 +422,7 @@ def check(
         values["errors"] = "n/a(no-test-ran)"
         return values, failed
     counts, pytest_failed = _run_pytest(
-        change, selection.tests, execute=execute, mode=mode, cache=cache
+        change, selection.tests, execute=execute, mode=mode, cache=cache, python=python
     )
     values.update(counts.values)
     return values, failed or pytest_failed
@@ -429,9 +432,12 @@ def plan(
     change: ChangeSet,
     *,
     skip_tests: bool,
+    python: str,
     mode: CheckMode = "incremental",
 ) -> list[str]:
-    groups = schedule_groups(change, mode=mode, debt_reduced=_net_debt_reduction(change))
+    groups = schedule_groups(
+        change, mode=mode, debt_reduced=_net_debt_reduction(change), python=python
+    )
     return render_plan(change, groups, skip_tests=skip_tests, mode=mode)
 
 
@@ -470,6 +476,12 @@ def _validated_mode(raw: object) -> CheckMode:
 
 def main(argv: Sequence[str]) -> int:
     arguments = parse_args(argv)
+    # meiva:note
+    # This process's interpreter, read once for the commands that do not name a first-party entry:
+    # the checks, the tools beside it, pytest. The selector keeps its own read in `select_tests`,
+    # because that command names `scripts.ci.test_selector` and the read is what puts it in the
+    # graph.
+    python = sys.executable
     mode = _validated_mode(arguments.mode)
     root = arguments.repo_root.resolve()
     files = (
@@ -487,7 +499,7 @@ def main(argv: Sequence[str]) -> int:
         print(f"{RECEIPT_VERSION} @{sha} no-changes")
         return 0
     if arguments.dry_run:
-        print("\n".join(plan(change, skip_tests=arguments.skip_tests, mode=mode)))
+        print("\n".join(plan(change, skip_tests=arguments.skip_tests, mode=mode, python=python)))
         return 0
     cache = (
         None
@@ -501,6 +513,7 @@ def main(argv: Sequence[str]) -> int:
         execute=judged,
         mode=mode,
         cache=cache,
+        python=python,
     )
     print(build_receipt(values, sha, _git(root, "rev-parse", arguments.base)))
     return 1 if failed else 0

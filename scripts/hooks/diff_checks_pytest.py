@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from xml.etree import ElementTree
@@ -88,7 +87,16 @@ def pytest_counts(report: Path, *, selected_files: int, seconds: float) -> Pytes
 
 
 # meiva:note
-# The command line the reader above expects: pytest's own report file, named so this run's reader
-# cannot pick up another run's.
-def pytest_argv(report: Path, tests: tuple[str, ...]) -> tuple[str, ...]:
-    return (sys.executable, "-m", "pytest", "-q", f"--junitxml={report}", *tests)
+# The command line this runner starts pytest with, on the interpreter the caller hands in rather
+# than on one read here -- a receipt that counted a run of a different interpreter would be
+# measuring another tree. It is also what the verdict cache keys on, which is why the report path
+# is not part of it: that path is fresh for every run.
+def pytest_command(tests: tuple[str, ...], *, python: str) -> tuple[str, ...]:
+    return (python, "-m", "pytest", "-q", *tests)
+
+
+# meiva:note
+# The command line the reader above expects: the same command with pytest's own report file named
+# so this run's reader cannot pick up another run's.
+def pytest_argv(report: Path, tests: tuple[str, ...], *, python: str) -> tuple[str, ...]:
+    return (*pytest_command(tests, python=python), f"--junitxml={report}")
