@@ -59,7 +59,7 @@ def _row(
     ts: datetime,
     event: str,
     verb: str,
-    machine: str,
+    machine: str | None,
     operation_id: str | None,
     initiator: str | None = None,
     gate: str | None = None,
@@ -68,13 +68,14 @@ def _row(
 ) -> tuple[datetime, str, str]:
     attributes: dict[str, Any] = {
         "verb": verb,
-        "caller": {"machine": machine, "agent_id": None},
         "spawn": {"ssh_connection": "100.0.0.1 1 100.0.0.2 22"},
         "operation_id": operation_id,
         "initiator": initiator,
         "gate": gate,
         "gate_reason": gate_reason,
     }
+    if machine is not None:
+        attributes["caller"] = {"machine": machine, "agent_id": None}
     if outcome is not None:
         attributes["outcome"] = outcome
     return ts, event, json.dumps(attributes)
@@ -217,3 +218,38 @@ def test_an_unknown_operation_is_reported_rather_than_answered_with_nothing(
 def test_an_empty_window_says_so(capsys: pytest.CaptureFixture[str]) -> None:
     assert cmd_cluster_ops(database_factory=_factory([])) == 0
     assert "no lifecycle operations" in capsys.readouterr().out
+
+
+# meiva:note
+# A result row carries no caller, so the machine it ran on is unknown. That unknown bucket used to
+# be counted as a host, and on 2026-11-03 a five-machine fleet read as "6 host(s)" — the lead then
+# had to go looking for a sixth machine that never existed. The count answers "how many machines
+# this window touched", so an unattributed row must not raise it.
+def test_an_unattributed_result_row_does_not_add_a_host(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rows = [
+        _row(
+            ts=_T0, event="lifecycle_request", verb="down", machine="macmini", operation_id="op-e"
+        ),
+        _row(
+            ts=_T0 + timedelta(seconds=1),
+            event="lifecycle_request",
+            verb="down",
+            machine="ubuntu",
+            operation_id="op-e",
+        ),
+        _row(
+            ts=_T0 + timedelta(seconds=9),
+            event="lifecycle_result",
+            verb="down",
+            machine=None,
+            operation_id="op-e",
+            outcome="failed",
+        ),
+    ]
+    assert cmd_cluster_ops(database_factory=_factory(rows)) == 0
+    out = capsys.readouterr().out
+    assert "2 host(s)" in out
+    assert "3 host(s)" not in out
+    assert "1 failed" in out
