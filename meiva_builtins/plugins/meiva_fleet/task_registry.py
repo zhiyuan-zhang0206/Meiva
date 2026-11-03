@@ -392,7 +392,9 @@ def _reminder_target(
         None
         if reminders_paused_until is None
         else pause_deadline(
-            reminders_paused_until, max_seconds=policy.task_reminder_pause_max_seconds
+            reminders_paused_until,
+            max_seconds=policy.task_reminder_pause_max_seconds,
+            clock=context.require_clock(),
         )
     )
     return frozenset(policy.task_reminder_reset_on), paused_until
@@ -556,6 +558,7 @@ def commit_update(
             write,
             reset_on,
             actor,
+            clock=context.require_clock(),
         )
         if parent_id is not UNSET_FIELD:
             changes.append("parent → root" if parent_id is None else f"parent → #{parent_id}")
