@@ -73,13 +73,28 @@ def alert_marks_path(home: Path) -> Path:
 # Written after a round finishes and before the loop sleeps, so the deadline that lands
 # on disk covers the gap the loop is about to take. `alive_by` is absolute, which keeps
 # the comparison immune to how long the writer took to reach us.
-def write_beat(home: Path, schedule_id: int, *, written_at: datetime, alive_by: datetime) -> Path:
+def write_beat(
+    home: Path,
+    schedule_id: int,
+    *,
+    written_at: datetime,
+    alive_by: datetime,
+    budget_s: float | None = None,
+) -> Path:
     path = beat_path(home, schedule_id)
-    payload = {
+    payload: dict[str, object] = {
         "schedule_id": schedule_id,
         "written_at": _as_utc(written_at).isoformat(timespec="seconds"),
         "alive_by": _as_utc(alive_by).isoformat(timespec="seconds"),
     }
+    # meiva:note
+    # The manager reads the promise, not this number: it is written for the person who later asks
+    # why a dead loop went unnamed for forty minutes, which is the one way a self-calibrating
+    # promise can decay -- a single slow round widens every promise after it. Recording the term
+    # in the file makes that answer one `cat` away instead of a log hunt. Readers that predate this
+    # key ignore it; `Beat` still validates only the three it needs.
+    if budget_s is not None:
+        payload["round_budget_s"] = round(budget_s, 3)
     _write_atomically(path, json.dumps(payload, sort_keys=True) + "\n")
     return path
 

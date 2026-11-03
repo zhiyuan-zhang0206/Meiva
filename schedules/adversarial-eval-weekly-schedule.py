@@ -29,6 +29,7 @@ if __name__ == "__main__":
             CronSchedule((Trigger(CRON),), timezone=cluster_timezone(), timing=_TIMING),
             partial(fire_weekly_batch, config=config, clock=lambda: datetime.now(UTC)),
             schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
+            home=inputs.home,
             started_at=datetime.now(UTC),
             clock=lambda: datetime.now(UTC),
         )

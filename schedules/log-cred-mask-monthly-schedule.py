@@ -198,6 +198,7 @@ def main(home: Path) -> None:
             ),
             partial(_fire, home=home),
             schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
+            home=inputs.home,
             started_at=datetime.now(UTC),
             clock=lambda: datetime.now(UTC),
         )
