@@ -28,40 +28,40 @@ def _decide(hours_ago: float | None, *, busy: bool = False, uncertified: int | N
     return decide_slot(facts, now=NOW, since=None, stale_after=RELEASE_GATE_SLOT_STALE_AFTER)
 
 
-def test_a_slot_inside_the_late_band_is_not_missing() -> None:
-    decision = _decide(6.0)
+def test_a_late_arrival_is_not_a_missing_slot() -> None:
+    decision = _decide(8.0)
 
     assert decision.card is None
-    assert decision.gap_id == (NOW - timedelta(hours=6)).isoformat(timespec="seconds")
+    assert decision.gap_id == (NOW - timedelta(hours=8)).isoformat(timespec="seconds")
 
 
 def test_a_slot_past_the_band_opens_a_card_that_publishes_nothing() -> None:
-    decision = _decide(7.5)
+    decision = _decide(13.5)
 
     assert decision.card is not None
     assert decision.card.fingerprint == "main-red-watch/release-gate-slot"
-    assert "7.5h" in decision.card.title
+    assert "13.5h" in decision.card.title
     assert decision.card.body.startswith("**This card publishes nothing.**")
     assert "gh workflow run release-gate.yml" in decision.card.body
     assert decision.note is not None
 
 
 def test_a_slot_nothing_was_waiting_on_opens_no_card() -> None:
-    decision = _decide(7.5, uncertified=0)
+    decision = _decide(13.5, uncertified=0)
 
     assert decision.card is None
     assert decision.note is not None and "nothing uncertified" in decision.note
 
 
 def test_an_unreadable_commit_distance_still_opens_the_card() -> None:
-    decision = _decide(7.5, uncertified=None)
+    decision = _decide(13.5, uncertified=None)
 
     assert decision.card is not None
     assert "could not be read" in decision.card.body
 
 
 def test_the_gap_keeps_its_name_across_rounds() -> None:
-    facts = replace(_facts(7.5), uncertified_commits=3)
+    facts = replace(_facts(13.5), uncertified_commits=3)
 
     first = decide_slot(facts, now=NOW, since=None, stale_after=RELEASE_GATE_SLOT_STALE_AFTER)
     second = decide_slot(
@@ -75,7 +75,7 @@ def test_the_gap_keeps_its_name_across_rounds() -> None:
 
 
 def test_a_running_workflow_is_not_a_missing_slot() -> None:
-    decision = _decide(7.5, busy=True)
+    decision = _decide(13.5, busy=True)
 
     assert decision.card is None
 
@@ -96,7 +96,7 @@ def test_no_run_on_record_waits_out_one_threshold_from_the_first_round() -> None
     old = decide_slot(
         SlotFacts(None, busy=False, uncertified_commits=2),
         now=NOW,
-        since=NOW - timedelta(hours=9),
+        since=NOW - timedelta(hours=13),
         stale_after=RELEASE_GATE_SLOT_STALE_AFTER,
     )
 

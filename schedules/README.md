@@ -258,9 +258,11 @@ Every schedule row records a target `machine` (defaulting to the gateway machine
   times and ran six, the latest slot starting 1h48m late. The watch reads the
   newest `event=schedule` run of that workflow each round
   (`schedules/plans/watch/release_gate_slot.py`). Past
-  `RELEASE_GATE_SLOT_STALE_AFTER` (seven hours: one slot plus the measured late
-  band), with nothing of that workflow running and commits uncertified, it opens
-  one card. The round never dispatches: `release-gate.yml` certifies on success,
+  `RELEASE_GATE_SLOT_STALE_AFTER` (two whole slots, twelve hours -- at seven
+  hours the check reports lateness instead: 164 scheduled runs across every
+  scheduled workflow here arrived 45m to 7h50m after their slot, and four of the
+  last five release-gate gaps exceeded seven hours), with nothing of that
+  workflow running and commits uncertified, it opens one card. The round never dispatches: `release-gate.yml` certifies on success,
   so a dispatched run mints a `v*` tag and moves `channel/latest`, and a release
   is the user's decision -- the card carries the command and says so in its first
   line. A slot the gate would have skipped anyway (nothing uncertified) opens no
