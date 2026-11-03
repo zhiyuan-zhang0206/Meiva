@@ -18,16 +18,19 @@ Semantics: compact modifies messages in-place, **does not create a new agent** â
 from datetime import UTC, datetime
 
 import psycopg
+import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent import db as agent_db
-from agent.db import finalize_claimed_inbounds
+from agent.db import PendingInterrupt, finalize_claimed_inbounds
+from base.agents.messages.inbound import InterruptReason
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, agent_exists, create_agent, list_agents
 from base.db.code_version_gate import ProcessDbGate
+from base.db.rows import IdRow, query_one
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 
@@ -54,17 +57,17 @@ def _insert_inbound(
 ) -> int:
     """chat kind defaults to source='user' (consistent with production); for non-chat kinds tests usually
     don't care about source, and using 'user' also does not affect claim results (claim does not filter by source)."""
-    with conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-            "VALUES (%s, %s, %s, %s) RETURNING id",
-            (agent_id, content, kind, source),
-        )
-        row = cur.fetchone()
-        assert row is not None
-        pid = row[0]
+    row = query_one(
+        conn,
+        IdRow,
+        "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+        "VALUES (%s, %s, %s, %s) RETURNING id",
+        (agent_id, content, kind, source),
+    )
     conn.commit()
-    return pid
+    if row is None:
+        raise RuntimeError("inserting an inbound returned no id")
+    return row.id
 
 
 class TestCreateThread:
@@ -146,19 +149,16 @@ class TestFatalProviderReport:
 
 def test_inbound_messages_table_exists(db_conn: psycopg.Connection):
     """After schema rename, the inbound_messages table is available."""
-    with db_conn.cursor() as cur:
-        cur.execute("INSERT INTO agents (label) VALUES ('t1') RETURNING id")
-        row = cur.fetchone()
-        assert row is not None
-        agent_id = row[0]
-        cur.execute(
-            "INSERT INTO inbound_messages (agent_id, content, kind, source) "
-            "VALUES (%s, 'hi', 'chat', 'kernel') RETURNING id",
-            (agent_id,),
-        )
-        row = cur.fetchone()
-        assert row is not None
-        assert row[0] is not None
+    agent = query_one(db_conn, IdRow, "INSERT INTO agents (label) VALUES ('t1') RETURNING id")
+    assert agent is not None
+    inbound = query_one(
+        db_conn,
+        IdRow,
+        "INSERT INTO inbound_messages (agent_id, content, kind, source) "
+        "VALUES (%s, 'hi', 'chat', 'kernel') RETURNING id",
+        (agent.id,),
+    )
+    assert inbound is not None
     db_conn.commit()
 
 
@@ -172,19 +172,19 @@ class TestFinalizeClaimedInbounds:
     def _insert_claimed(
         db_conn: psycopg.Connection, agent_id: int, content: str, age: str = "60 seconds"
     ) -> int:
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO inbound_messages "
-                "(agent_id, content, kind, source, status, claimed_at, created_at) "
-                "VALUES (%s, %s, 'chat', 'user', 'claimed', "
-                "now() - %s::interval, now() - %s::interval) RETURNING id",
-                (agent_id, content, age, age),
-            )
-            row = cur.fetchone()
-            assert row is not None
-            row_id: int = row[0]
+        row = query_one(
+            db_conn,
+            IdRow,
+            "INSERT INTO inbound_messages "
+            "(agent_id, content, kind, source, status, claimed_at, created_at) "
+            "VALUES (%s, %s, 'chat', 'user', 'claimed', "
+            "now() - %s::interval, now() - %s::interval) RETURNING id",
+            (agent_id, content, age, age),
+        )
         db_conn.commit()
-        return row_id
+        if row is None:
+            raise RuntimeError("inserting a claimed inbound returned no id")
+        return row.id
 
     @staticmethod
     def _statuses(db_conn: psycopg.Connection, ids: list[int]) -> dict[int, str]:
@@ -352,3 +352,31 @@ def test_claimed_inbound_from_row_keeps_created_at_and_claimed_at():
     assert ci.id == 7
     assert ci.created_at == dt
     assert ci.claimed_at == claimed
+
+
+# meiva:note
+# The pending-interrupt reader stands on a pool a test fakes (the cancel watcher's), so its row is
+# validated by hand; a row of the wrong width or column type must fail naming the shape, not raise
+# `IndexError` and not read as "no interrupt" â€” a silently-ignored abort would let a paused turn
+# keep running.
+@pytest.mark.parametrize(
+    "row",
+    [(), ("cancel",), ("cancel", "user", "extra"), (1, "user"), ("cancel", 2), (None, None)],
+)
+def test_a_pending_interrupt_row_of_another_shape_is_refused(row: tuple[object, ...]) -> None:
+    with pytest.raises(TypeError, match="pending interrupt row"):
+        PendingInterrupt.from_row(row)
+
+
+@pytest.mark.parametrize(
+    ("row", "reason"),
+    [
+        (("cancel", "user"), InterruptReason.USER),
+        (("terminate", "agent:0"), InterruptReason.SYSTEM),
+        (("restart", "user"), InterruptReason.RESTART),
+    ],
+)
+def test_a_pending_interrupt_row_names_the_reason(
+    row: tuple[str, str], reason: InterruptReason
+) -> None:
+    assert PendingInterrupt.from_row(row).reason is reason

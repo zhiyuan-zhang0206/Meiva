@@ -5,10 +5,11 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from time import monotonic
-from typing import Any, NamedTuple, TypeVar
+from typing import NamedTuple, TypeVar
 from weakref import WeakKeyDictionary
 
 import psycopg
+from psycopg.rows import class_row
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent.ownership.inbound import lock_inbound_owner
@@ -16,8 +17,10 @@ from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.messages.inbound import InterruptReason
 from base.api_contracts.agent_contract import AgentStatus
 from base.db import Database
+from base.db.rows import IdRow, aquery_one
 from base.db.transaction import AsyncConnectionSource, async_write_transaction
 from base.events.live.bus import EventBus
+from base.host.boundary.json_values import is_object_dict
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.stop_timing import RESTART_INTERRUPT_GRACE_S
@@ -31,7 +34,7 @@ from base.native_process.stop_timing import RESTART_INTERRUPT_GRACE_S
 CLAIM_ACQUIRE_TIMEOUT_CAP_S = 5.0
 
 
-_CT = TypeVar("_CT", bound=psycopg.AsyncConnection[Any])
+_CT = TypeVar("_CT", bound=psycopg.AsyncConnection[tuple[object, ...]])
 
 
 @dataclass
@@ -67,7 +70,9 @@ class LoggingConnectionPool(AsyncConnectionPool[_CT]):
         # meiva:link agent/db/docs/db.meiva.okf.md
         self._pool_name = pool_name
         self._slow_acquire_warn_seconds = slow_acquire_warn_seconds
-        self._borrow_spans: WeakKeyDictionary[asyncio.Task[Any], _BorrowSpan] = WeakKeyDictionary()
+        self._borrow_spans: WeakKeyDictionary[asyncio.Task[object], _BorrowSpan] = (
+            WeakKeyDictionary()
+        )
         super().__init__(conninfo, **kwargs)  # pyright: ignore[reportArgumentType]
 
     def _acquire_stats(self) -> dict[str, int]:
@@ -169,14 +174,64 @@ class ClaimedInbound(NamedTuple):
     # Internal dispatch fact: the claimed restart/terminate command, never payload input.
     durable_lifecycle: bool = False
 
+    # meiva:note
+    # The eight `RETURNING` columns of a claim, matched by type rather than trusted: a row of
+    # another shape fails here, naming the class, instead of carrying an unchecked value into the
+    # envelope the claim node builds from it. `payload` is jsonb, which psycopg hands back as a
+    # `dict` of whatever the writer put there, so it goes through `is_object_dict`.
     @classmethod
-    def from_row(cls, row: tuple[Any, ...]) -> "ClaimedInbound":
-        id_, tid, content, kind, source, payload, created_at, claimed_at = row[:8]
-        return cls(id_, tid, content, kind, source, payload, created_at, claimed_at)
+    def from_row(cls, row: tuple[object, ...]) -> "ClaimedInbound":
+        match row[:8]:
+            case (
+                int() as id_,
+                int() as agent_id,
+                str() as content,
+                str() as kind,
+                str() as source,
+                object() as raw_payload,
+                object() as raw_created,
+                object() as raw_claimed,
+            ) if (
+                (raw_payload is None or is_object_dict(raw_payload))
+                and (raw_created is None or isinstance(raw_created, datetime))
+                and (raw_claimed is None or isinstance(raw_claimed, datetime))
+            ):
+                return cls(
+                    id_,
+                    agent_id,
+                    content,
+                    kind,
+                    source,
+                    raw_payload,
+                    raw_created,
+                    raw_claimed,
+                )
+            case _:
+                raise TypeError("a claimed inbound row has columns of unexpected types")
 
 
 _MAX_SPAWNER_ANCESTOR_DEPTH = 32
 _LIVE_STATUSES = (AgentStatus.RUNNING.value, AgentStatus.IDLING.value)
+# meiva:note
+# The nearest live birth ancestor: a recursive walk over the immutable `agent:<id>` spawn edge
+# only, stopping before a cycle and returning the shallowest live row.
+_NEAREST_LIVE_ANCESTOR_SQL = (
+    "WITH RECURSIVE spawner_walk(agent_id, spawner, status, path, depth) "
+    "AS ("
+    "  SELECT id, born_spawner, status, ARRAY[id], 0 "
+    "  FROM agents_meta WHERE id = %s "
+    "  UNION ALL "
+    "  SELECT parent.id, parent.born_spawner, parent.status, "
+    "         walk.path || parent.id, walk.depth + 1 "
+    "  FROM spawner_walk walk "
+    "  JOIN agents_meta parent "
+    "    ON parent.id = substring(walk.spawner FROM '^agent:([0-9]+)$')::bigint "
+    "  WHERE walk.depth < %s AND NOT parent.id = ANY(walk.path)"
+    ") "
+    "SELECT agent_id AS id FROM spawner_walk "
+    "WHERE depth > 0 AND status = ANY(%s) "
+    "ORDER BY depth ASC LIMIT 1"
+)
 _FATAL_PROVIDER_REPORT_LOCATION = "agent.turn.runloop._handle_fatal_llm_error"
 
 
@@ -215,38 +270,30 @@ async def enqueue_fatal_provider_report_to_nearest_alive_ancestor(
         f"error_class={error_class} vendor={vendor} provider={provider} status={status} reason={reason} "
         f"timestamp={occurred_at.isoformat()} where={_FATAL_PROVIDER_REPORT_LOCATION}"
     )
-    async with async_write_transaction(pool) as conn, conn.cursor() as cur:
-        await cur.execute(
-            "WITH RECURSIVE spawner_walk(agent_id, spawner, status, path, depth) "
-            "AS ("
-            "  SELECT id, born_spawner, status, ARRAY[id], 0 "
-            "  FROM agents_meta WHERE id = %s "
-            "  UNION ALL "
-            "  SELECT parent.id, parent.born_spawner, parent.status, "
-            "         walk.path || parent.id, walk.depth + 1 "
-            "  FROM spawner_walk walk "
-            "  JOIN agents_meta parent "
-            "    ON parent.id = substring(walk.spawner FROM '^agent:([0-9]+)$')::bigint "
-            "  WHERE walk.depth < %s AND NOT parent.id = ANY(walk.path)"
-            ") "
-            "SELECT agent_id FROM spawner_walk "
-            "WHERE depth > 0 AND status = ANY(%s) "
-            "ORDER BY depth ASC LIMIT 1",
+    # meiva:note
+    # Both statements answer one `id` column, so each is read through `aquery_one` with `IdRow`:
+    # the cursor is opened per statement and closed, which is why a row of a different shape in
+    # the same transaction gets its own row class instead of sharing one positional tuple.
+    async with async_write_transaction(pool) as conn:
+        ancestor = await aquery_one(
+            conn,
+            IdRow,
+            _NEAREST_LIVE_ANCESTOR_SQL,
             (failed_agent_id, _MAX_SPAWNER_ANCESTOR_DEPTH, list(_LIVE_STATUSES)),
         )
-        row = await cur.fetchone()
-        if row is None:
+        if ancestor is None:
             return None
-        ancestor_id = int(row[0])
-        await cur.execute(
+        ancestor_id = ancestor.id
+        inbound_row = await aquery_one(
+            conn,
+            IdRow,
             "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
             "VALUES (%s, %s, 'system_note', 'system', %s::jsonb) RETURNING id",
             (ancestor_id, content, json.dumps({"note_tag": "agent_reply"})),
         )
-        inbound_row = await cur.fetchone()
         if inbound_row is None:
             raise RuntimeError("expected inbound row after fatal provider ancestor report insert")
-        inbound_id = int(inbound_row[0])
+        inbound_id = inbound_row.id
     await asyncio.to_thread(publish_inbound_wake, db, bus, ancestor_id, str(inbound_id))
     return ancestor_id
 
@@ -256,8 +303,8 @@ async def enqueue_fatal_provider_report_to_nearest_alive_ancestor(
 #
 #     A command the previous incarnation claimed but never applied is claimed
 #     again, so a host that died between the two steps loses nothing.
-async def _claim_lifecycle_command(
-    cur: psycopg.AsyncCursor[Any], agent_id: int
+async def _claim_lifecycle_command[RowT: tuple[object, ...]](
+    cur: psycopg.AsyncCursor[RowT], agent_id: int
 ) -> list[ClaimedInbound] | None:
     await cur.execute(
         "UPDATE inbound_messages SET status='claimed',claimed_at=COALESCE(claimed_at,now()) "
@@ -273,7 +320,9 @@ async def _claim_lifecycle_command(
     return [ClaimedInbound.from_row(row)._replace(durable_lifecycle=True)]
 
 
-async def _refuse_unadmitted_lifecycle(cur: psycopg.AsyncCursor[Any], agent_id: int) -> None:
+async def _refuse_unadmitted_lifecycle[RowT: tuple[object, ...]](
+    cur: psycopg.AsyncCursor[RowT], agent_id: int
+) -> None:
     await cur.execute(
         "SELECT id FROM inbound_messages WHERE agent_id=%s AND status='pending' "
         "AND kind IN ('restart','terminate') ORDER BY id LIMIT 1 FOR UPDATE",
@@ -358,6 +407,17 @@ async def claim_inbound_batch(
     return [ClaimedInbound.from_row(r) for r in rows]
 
 
+# meiva:note
+# One claimed chat the finalize pass consumed: its id, kind and content, and how many seconds it
+# waited since `created_at`. The column is aliased `AS age_s` so `class_row` binds it by name.
+@dataclass(frozen=True)
+class _ConsumedRow:
+    id: int
+    kind: str
+    content: str
+    age_s: float
+
+
 async def finalize_claimed_inbounds(
     pool: AsyncConnectionPool | None,
     agent_id: int,
@@ -376,27 +436,28 @@ async def finalize_claimed_inbounds(
     """
     if pool is None:
         return 0
-    async with async_write_transaction(pool) as conn, conn.cursor() as cur:
+    async with async_write_transaction(pool) as conn:
         await lock_inbound_owner(conn, agent_id, incarnation=incarnation)
-        await cur.execute(
-            "UPDATE inbound_messages SET status = 'done', "
-            "payload = CASE WHEN %s THEN COALESCE(payload, '{}'::jsonb) "
-            "|| jsonb_build_object('consumed_without_execution', true) ELSE payload END "
-            "WHERE status = 'claimed' AND kind = 'chat' AND agent_id = %s "
-            "RETURNING id, kind, content, "
-            "EXTRACT(EPOCH FROM (now() - created_at))::float8",
-            (unknown_execution, agent_id),
-        )
-        rows = await cur.fetchall()
-    for inbound_id, kind, content, age_s in rows if unknown_execution else ():
+        async with conn.cursor(row_factory=class_row(_ConsumedRow)) as cur:
+            await cur.execute(
+                "UPDATE inbound_messages SET status = 'done', "
+                "payload = CASE WHEN %s THEN COALESCE(payload, '{}'::jsonb) "
+                "|| jsonb_build_object('consumed_without_execution', true) ELSE payload END "
+                "WHERE status = 'claimed' AND kind = 'chat' AND agent_id = %s "
+                "RETURNING id, kind, content, "
+                "EXTRACT(EPOCH FROM (now() - created_at))::float8 AS age_s",
+                (unknown_execution, agent_id),
+            )
+            rows = await cur.fetchall()
+    for consumed in rows if unknown_execution else ():
         logger.warning(
             "claimed inbound {inbound_id} consumed without execution evidence",
             event="inbound_consumed_unknown",
             agent_id=agent_id,
-            inbound_id=int(inbound_id),
-            kind=str(kind),
-            age_s=float(age_s),
-            content_preview=content[:200],
+            inbound_id=consumed.id,
+            kind=consumed.kind,
+            age_s=consumed.age_s,
+            content_preview=consumed.content[:200],
         )
     return len(rows)
 
@@ -450,6 +511,43 @@ async def has_pending_interrupt(pool: AsyncConnectionSource, agent_id: int) -> b
 #     so would race the clean lifecycle exit with an external cancel. Only
 #     external interrupts (user / admin / peer) need the in-flight abort; the
 #     self row is still dispatched normally at claim.
+# meiva:note
+# The kind and source of a pending external abort. Read positionally rather than through
+# `class_row` because this query runs through pools a test fakes (the cancel watcher's): a fake
+# cursor answers with a tuple and needs no `row_factory`, while psycopg's `class_row` needs a real
+# `pgresult`. A row of another width or column type fails in `from_row` instead of being unpacked
+# blind — a silently ignored abort would let a paused turn keep running.
+@dataclass(frozen=True)
+class PendingInterrupt:
+    kind: str
+    source: str
+
+    @classmethod
+    def from_row(cls, row: tuple[object, ...]) -> "PendingInterrupt":
+        if len(row) != 2:
+            raise TypeError(f"a pending interrupt row has {len(row)} columns, not 2")
+        kind, source = row
+        if not isinstance(kind, str) or not isinstance(source, str):
+            raise TypeError("a pending interrupt row has columns of unexpected types")
+        return cls(kind, source)
+
+    # meiva:note
+    # The interrupt this row names: a restart is its own reason; a cancel or terminate is the
+    # user's when it carries `source='user'` and the system's otherwise.
+    @property
+    def reason(self) -> InterruptReason:
+        if self.kind == "restart":
+            return InterruptReason.RESTART
+        return InterruptReason.USER if self.source == "user" else InterruptReason.SYSTEM
+
+
+# meiva:note
+# The reason a selected row names, or None when the query found no row. Separate from
+# `pending_interrupt_reason` so the row never has to be bound to a name in the caller.
+def _reason_of(row: tuple[object, ...] | None) -> InterruptReason | None:
+    return None if row is None else PendingInterrupt.from_row(row).reason
+
+
 async def pending_interrupt_reason(
     pool: AsyncConnectionSource, agent_id: int
 ) -> InterruptReason | None:
@@ -462,10 +560,4 @@ async def pending_interrupt_reason(
             "ORDER BY i.id LIMIT 1",
             (agent_id, RESTART_INTERRUPT_GRACE_S),
         )
-        row = await cur.fetchone()
-    if row is None:
-        return None
-    kind, source = row
-    if kind == "restart":
-        return InterruptReason.RESTART
-    return InterruptReason.USER if source == "user" else InterruptReason.SYSTEM
+        return _reason_of(await cur.fetchone())
