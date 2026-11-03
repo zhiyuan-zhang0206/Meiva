@@ -37,10 +37,13 @@ import sys
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Literal, TypeGuard
+from typing import Literal
 
 from dotenv import dotenv_values
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.options import options
+from base.host.boundary.untyped import object_of
 from base.host.env.dotenv_file import upsert_env
 from base.host.private_storage import write_private_bytes
 from base.host.verified_file.reader import regular_bytes
@@ -58,14 +61,6 @@ class RotationRefusedError(RuntimeError):
     """The home's bearer, staged secret or pin contradicts the rotation record."""
 
 
-def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
-    return isinstance(value, dict)
-
-
-def _is_str_object_dict(value: object) -> TypeGuard[dict[str, object]]:
-    return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
-
-
 @dataclass(frozen=True)
 class Rotation:
     """One rotation's journal record: fingerprints only, never a secret."""
@@ -77,7 +72,7 @@ class Rotation:
 
     @classmethod
     def parse(cls, raw: object) -> Rotation:
-        record = raw if _is_str_object_dict(raw) else {}
+        record = raw if is_object_dict(raw) else {}
         state, old, new, pin = (record.get(key) for key in ("state", "old", "new", "pin"))
         if (
             set(record) != {"state", "old", "new", "pin"}
@@ -200,7 +195,7 @@ def read_journal(home: Path) -> Rotation | None:
     path = journal_path(home)
     if not path.exists():
         return None
-    return Rotation.parse(json.loads(regular_bytes(path)))
+    return Rotation.parse(object_of(json.loads, regular_bytes(path)))
 
 
 def _save(home: Path) -> Callable[[Rotation], None]:
@@ -211,13 +206,21 @@ def _save(home: Path) -> Callable[[Rotation], None]:
     return save
 
 
+# meiva:note
+# The flags `main` declares, read once so the rotation holds `bool` values instead of the parser's `Any`.
+@dataclass(frozen=True)
+class Options:
+    execute: bool
+    yes: bool
+
+
 def main(argv: list[str]) -> int:
     from base.paths import meiva_home
 
     parser = argparse.ArgumentParser(description="Rotate the gateway's MEIVA_CLUSTER_SECRET.")
     parser.add_argument("--execute", action="store_true", help="perform the rotation")
     parser.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
-    args = parser.parse_args(argv)
+    args = options(parser.parse_args(argv), Options)
     home = meiva_home().resolve()
     recorded = read_journal(home)
     resuming = recorded is not None and recorded.state != "done"

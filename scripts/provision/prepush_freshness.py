@@ -23,7 +23,20 @@ from pathlib import Path
 
 import yaml
 
+# meiva:note
+# A standalone script: the repository root goes on the path before the first import of the
+# repository's own packages.
 _ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(_ROOT))
+
+from base.host.env.boot_actions import enter_scratch_home  # noqa: E402
+
+if __name__ == "__main__":
+    enter_scratch_home()
+
+from base.host.boundary.json_values import is_object_dict, is_object_list  # noqa: E402
+from base.host.boundary.process import stderr_text  # noqa: E402
+from base.host.boundary.untyped import object_of  # noqa: E402
 
 # The generated-artifact family. tests/ci/test_prepush_hooks.py pins it against the config: a new
 # `files:`-filtered artifact hook that does not join this list keeps the delete-only blind spot.
@@ -82,11 +95,43 @@ def hooks_to_run(
     ]
 
 
+# meiva:note
+# Every hook the config declares, by id. A config whose shape is not `repos: [{hooks: [{id: ...}]}]`
+# stops this check with a message, not with an indexing error from the middle of the loop.
+def _declared_hooks(config: object) -> dict[str, dict[str, object]]:
+    repos = config.get("repos") if is_object_dict(config) else None
+    if not is_object_list(repos):
+        raise SystemExit(".pre-commit-config.yaml: `repos` must be a list")
+    declared: dict[str, dict[str, object]] = {}
+    for repo in repos:
+        hooks = repo.get("hooks") if is_object_dict(repo) else None
+        if not is_object_list(hooks):
+            raise SystemExit(".pre-commit-config.yaml: every repo needs a `hooks` list")
+        for hook in hooks:
+            hook_id = hook.get("id") if is_object_dict(hook) else None
+            if not isinstance(hook_id, str) or not is_object_dict(hook):
+                raise SystemExit(".pre-commit-config.yaml: every hook needs a string `id`")
+            declared[hook_id] = hook
+    return declared
+
+
+def _files_pattern(declared: dict[str, dict[str, object]], hook: str) -> str:
+    pattern = declared[hook].get("files")
+    if not isinstance(pattern, str):
+        raise SystemExit(f".pre-commit-config.yaml: hook {hook} needs a string `files` pattern")
+    return pattern
+
+
 def main() -> int:
-    config = yaml.safe_load((_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8"))
-    declared = {hook["id"]: hook for repo in config["repos"] for hook in repo["hooks"]}
+    config = object_of(
+        yaml.safe_load, (_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+    )
+    declared = _declared_hooks(config)
     patterns = {
-        hook: (re.compile(declared[hook]["files"]), declared[hook].get("pass_filenames") is False)
+        hook: (
+            re.compile(_files_pattern(declared, hook)),
+            declared[hook].get("pass_filenames") is False,
+        )
         for hook in HOOKS
     }
     paths = branch_paths()
@@ -121,5 +166,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except subprocess.CalledProcessError as error:
-        print(error.stderr or str(error), file=sys.stderr)
+        print(stderr_text(error) or str(error), file=sys.stderr)
         raise SystemExit(error.returncode) from None

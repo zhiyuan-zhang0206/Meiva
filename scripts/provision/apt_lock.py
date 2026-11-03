@@ -93,12 +93,24 @@ def wait_for_lock(path: Path, timeout: float, interval: float) -> tuple[bool, fl
         waited += interval
 
 
+# meiva:note
+# The parsed flags as a typed namespace. This is the one script in the repository that runs as root
+# (`wait_apt_lock.sh` calls it under `sudo`, before any venv exists), so it imports nothing from the
+# repository: that keeps the root-executed surface to this file, and keeps root-owned `__pycache__`
+# out of the working tree. Each field is the flag `main` declares, and argparse fills it (every flag
+# has a default).
+class _Arguments(argparse.Namespace):
+    lock: Path
+    timeout: float
+    interval: float
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Wait for the dpkg frontend lock, bounded.")
     parser.add_argument("--lock", type=Path, default=DEFAULT_LOCK)
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--interval", type=float, default=1.0)
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=_Arguments())
 
     try:
         free, waited = wait_for_lock(args.lock, args.timeout, args.interval)

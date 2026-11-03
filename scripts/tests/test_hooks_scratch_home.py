@@ -53,16 +53,29 @@ _PYTHON_ENTRY = re.compile(r"(?:python3?|\.venv/bin/python)\s+(scripts/[\w./-]+\
 _SHELL_ENTRY = re.compile(r"(scripts/[\w./-]+\.sh)")
 
 
+# meiva:note
+# The first capture group of every match of `pattern` in `text`. Each pattern here has exactly one
+# group and it always takes part in a match, so `isinstance` is the check, not a fallback.
+def _captured(pattern: re.Pattern[str], text: str) -> list[str]:
+    found: list[str] = []
+    for match in pattern.finditer(text):
+        group = match[1]
+        if not isinstance(group, str):
+            raise TypeError(f"{pattern.pattern!r} matched without its capture group")
+        found.append(group)
+    return found
+
+
 @functools.cache
 def _hook_scripts() -> tuple[str, ...]:
     """Every `scripts/*.py` a hook launches: named in an `entry:`, or run by a shell
     script an `entry:` names."""
     config = (_REPO / ".pre-commit-config.yaml").read_text(encoding="utf-8")
     found: set[str] = set()
-    for entry in re.findall(r"^\s*entry:\s+(.+)$", config, re.MULTILINE):
-        found.update(_PYTHON_ENTRY.findall(entry))
-        for shell in _SHELL_ENTRY.findall(entry):
-            found.update(_PYTHON_ENTRY.findall((_REPO / shell).read_text(encoding="utf-8")))
+    for entry in _captured(re.compile(r"^\s*entry:\s+(.+)$", re.MULTILINE), config):
+        found.update(_captured(_PYTHON_ENTRY, entry))
+        for shell in _captured(_SHELL_ENTRY, entry):
+            found.update(_captured(_PYTHON_ENTRY, (_REPO / shell).read_text(encoding="utf-8")))
     return tuple(sorted(found))
 
 
@@ -150,7 +163,11 @@ def _is_enter_call(node: ast.stmt) -> bool:
 def _guarded_call_line(rel: str) -> int | None:
     """Line of the module-level `if __name__ == "__main__":` that calls it."""
     for node in _tree(rel).body:
-        if _is_main_guard(node) and any(_is_enter_call(s) for s in getattr(node, "body", [])):
+        if (
+            isinstance(node, ast.If)
+            and _is_main_guard(node)
+            and any(_is_enter_call(s) for s in node.body)
+        ):
             return node.lineno
     return None
 

@@ -7,7 +7,6 @@ import subprocess
 from collections.abc import Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -43,7 +42,7 @@ def _meta(
     created: str = "2026-09-12T02:00:00Z",
     merged: str = "2026-09-12T03:00:00Z",
     updated: str | None = None,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     return {
         "number": number,
         "created_at": created,

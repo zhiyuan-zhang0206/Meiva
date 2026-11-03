@@ -16,10 +16,19 @@ from pathlib import Path
 from time import perf_counter
 
 import pytest
+from pydantic import BaseModel, TypeAdapter
 
 from meizel.checkout import roles_at
 from scripts.ci import shard_counts, test_selector
 from scripts.ci.test_impact import python_files
+
+
+class _SelectorOutput(BaseModel):
+    decision: str
+    mode: str
+    tests: list[str]
+    map_source_count: int
+
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -379,7 +388,9 @@ def test_measured_fast_files_keep_their_cost_instead_of_the_unknown_average(tmp_
     repo_root = _selector_repo(tmp_path)
     _write(repo_root, "tests/unit/test_fast.py", "def test_fast(): pass\n")
     _write(repo_root, "tests/unit/test_zero.py", "def test_zero(): pass\n")
-    timings = json.loads((repo_root / ".test_durations").read_text())
+    timings = TypeAdapter(dict[str, float]).validate_json(
+        (repo_root / ".test_durations").read_text()
+    )
     timings.update(
         {
             "tests/unit/test_fast.py::test_fast": 0.019,
@@ -440,21 +451,22 @@ def test_json_cli_output_is_machine_readable_and_deterministic(
         )
         == 0
     )
-    payload = json.loads(capsys.readouterr().out)
+    printed = capsys.readouterr().out
+    payload = _SelectorOutput.model_validate_json(printed)
 
-    assert payload["decision"] == "SELECTED"
-    assert payload["mode"] == "enforce"  # ci.yml default when the env is unset
-    assert payload["tests"] == [
+    assert payload.decision == "SELECTED"
+    assert payload.mode == "enforce"  # ci.yml default when the env is unset
+    assert payload.tests == [
         "cli/tests/test_owner.py",
         "tests/unit/test_changed.py",
         "tests/unit/test_imports.py",
     ]
-    assert payload["map_source_count"] >= 4
+    assert payload.map_source_count >= 4
 
     repeated = test_selector.select_tests(
         ["cli/commands.py", "tests/unit/test_changed.py"], repo_root=repo_root
     )
-    assert repeated.as_json() == payload
+    assert repeated.as_json() == TypeAdapter(dict[str, object]).validate_json(printed)
 
 
 def test_selector_mode_is_audit_metadata_from_the_workflow_env() -> None:
@@ -522,18 +534,18 @@ def test_real_repository_map_covers_the_tree_and_stays_fine_grained(tmp_path: Pa
         text=True,
     )
     elapsed = perf_counter() - started
-    payload = json.loads(completed.stdout)
+    payload = _SelectorOutput.model_validate_json(completed.stdout)
 
     tracked_sources = sum(1 for _ in python_files(_REPO_ROOT))
     assert tracked_sources > 0
-    assert payload["map_source_count"] >= 0.9 * tracked_sources, (
-        f"the map covers {payload['map_source_count']} inputs for {tracked_sources} tracked "
+    assert payload.map_source_count >= 0.9 * tracked_sources, (
+        f"the map covers {payload.map_source_count} inputs for {tracked_sources} tracked "
         "Python files: a code top or a package dropped out of the static pass"
     )
 
     collectable = len(test_selector.load_checkout(_REPO_ROOT).collectable)
-    selected = payload["tests"]
-    assert payload["decision"] == "SELECTED"
+    selected = payload.tests
+    assert payload.decision == "SELECTED"
     assert 0 < len(selected) < 0.2 * collectable, (
         f"one leaf source selected {len(selected)} of {collectable} tests: the map is not "
         "fine-grained"

@@ -6,7 +6,20 @@ import sys
 from collections.abc import Iterable
 from pathlib import Path
 
-_SCRIPTS = Path(__file__).resolve().parents[1]
+# meiva:note
+# A standalone script: the repository root goes on the path before the first import of the
+# repository's own packages.
+_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_ROOT))
+
+from base.host.env.boot_actions import enter_scratch_home  # noqa: E402
+
+if __name__ == "__main__":
+    enter_scratch_home()
+
+from base.host.boundary.process import stderr_text  # noqa: E402
+
+_SCRIPTS = _ROOT / "scripts"
 _WEB = "ui/web/"
 _CODE = (".ts", ".tsx", ".js", ".mjs", ".mts")
 # meiva:note
@@ -359,12 +372,12 @@ if __name__ == "__main__":
         try:
             raise SystemExit(run_ci_incremental(sys.argv[2]))
         except subprocess.CalledProcessError as error:
-            print(error.stderr or str(error), file=sys.stderr)
+            print(stderr_text(error) or str(error), file=sys.stderr)
             raise SystemExit(error.returncode) from None
     if len(sys.argv) != 2 or sys.argv[1] not in {"tsc", "eslint", "vitest"}:
         raise SystemExit("usage: prepush_frontend.py (tsc|eslint|vitest | --base <sha>)")
     try:
         raise SystemExit(main(sys.argv[1]))
     except subprocess.CalledProcessError as error:
-        print(error.stderr or str(error), file=sys.stderr)
+        print(stderr_text(error) or str(error), file=sys.stderr)
         raise SystemExit(error.returncode) from None
