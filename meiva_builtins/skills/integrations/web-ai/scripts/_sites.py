@@ -209,7 +209,13 @@ def chat_id_from_url(name: str, url: str) -> str | None:
     for pattern in site(name).chat_id_patterns:
         found = re.search(pattern, url)
         if found:
-            return found.group(1)
+            # meiva:note
+            # `Match.group` is typed `str | Any` (the stub cannot see the pattern's groups), and a
+            # union carrying `Any` is one `reportAny` leaves alone: the guard is what makes the
+            # capture a `str`, so a pattern whose group did not participate is not an id.
+            chat_id = found.group(1)
+            if isinstance(chat_id, str):
+                return chat_id
     return None
 
 

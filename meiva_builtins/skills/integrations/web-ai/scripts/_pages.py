@@ -7,6 +7,8 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from base.host.boundary.untyped import object_of
+
 _JSON_OPEN = "```json"
 _SELECTED_RE = re.compile(r"^\s*(\d+):.*\[selected\]\s*$", re.MULTILINE)
 
@@ -31,20 +33,38 @@ def parse_evaluate_response(response: str) -> object:
     end = response.rfind("```")
     if start < 0 or end <= start + len(_JSON_OPEN):
         raise RuntimeError(f"evaluate_script returned no JSON block: {response[:300]!r}")
-    return json.loads(response[start + len(_JSON_OPEN) : end])
+    # meiva:note
+    # `json.loads` answers `Any`: `object_of` hands back the decoded value as an `object`, which
+    # each reader narrows itself (`webchat` passes it to `_is_str_dict` and its siblings).
+    return object_of(json.loads, response[start + len(_JSON_OPEN) : end])
 
 
 # meiva:note
 # The numeric page id of the `[selected]` tab of a page-list dump, or None. new_page and list_pages render `  <id>: <url> [selected]` for the active tab and that id is what closing the tab feeds back. None means no line is marked (format drift); callers treat that as "nothing safe to close" and leave tabs be.
 def selected_page_id(listing: str) -> int | None:
     found = _SELECTED_RE.search(listing)
-    return int(found.group(1)) if found else None
+    if found is None:
+        return None
+    # meiva:note
+    # `Match.group` is typed `str | Any` — the stub cannot see how many groups the pattern has, and
+    # `reportAny` leaves a union that carries the `Any` alone — so the capture is not a `str` until
+    # this guard makes it one.
+    page_id = found.group(1)
+    return int(page_id) if isinstance(page_id, str) else None
 
 
 # meiva:note
 # The first control of the snapshot whose accessible name matches one of `texts`, case-insensitively. An exact pass over EVERY text runs before any substring pass, so an early broad text cannot steal the match from a later text's exact hit ("Start" grabbing the "Start dictation" mic button while "Start research" sits right there). The substring pass requires a short label, which guards against a huge container that merely contains the word.
 def find_clickable(snapshot: str, texts: Sequence[str]) -> Clickable | None:
-    nodes = [Clickable(uid, label.strip()) for uid, label in _SNAPSHOT_NODE_RE.findall(snapshot)]
+    # meiva:note
+    # `finditer` rather than `findall` (whose elements are `Any`), and the two captures are guarded:
+    # `Match.group` is typed `str | Any`, which `reportAny` leaves alone because the union carries
+    # the `Any`, so a plain read would be an unchecked value wearing a `str`.
+    nodes: list[Clickable] = []
+    for match in _SNAPSHOT_NODE_RE.finditer(snapshot):
+        uid, label = match.group(1), match.group(2)
+        if isinstance(uid, str) and isinstance(label, str):
+            nodes.append(Clickable(uid, label.strip()))
     wants = [text.lower() for text in texts]
     exact = next((n for w in wants for n in nodes if n.label.lower() == w), None)
     if exact is not None:

@@ -26,11 +26,13 @@ import json
 import re
 import sys
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 
+from base.host.boundary.options import options
 from base.paths.home import resolve_meiva_home, user_home
 
 # `webchat` lives in the parent skill's scripts/ dir, a sibling tree within
@@ -40,18 +42,69 @@ from base.paths.home import resolve_meiva_home, user_home
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts"))
 
 import webchat
+from _rows import AskRow, FailedRow
 
 _DEFAULT_MODELS = ["chatgpt", "gemini", "claude"]
 
 
+# meiva:note
+# The row the console prints and lands in `result.json` for a model that answered: how it was
+# submitted, the answer captured, whether that answer finished, and the conversation handle to
+# resume it. `ok` is False for an answer that never landed (empty text), even when it finished.
+class ConsoleAnswer(TypedDict):
+    site: str
+    label: str
+    ok: bool
+    complete: bool
+    chars: int
+    url: str
+    chat_id: str | None
+    tab_kept: bool
+    submitted_via: str
+    answer: str
+
+
+# meiva:note
+# The row the console prints for a model whose setup failed. It is a row instead of a raise so one
+# dead model never sinks the panel's JSON.
+class ConsoleFailure(TypedDict):
+    site: str
+    label: str
+    ok: bool
+    error: str
+
+
+# meiva:note
+# One row of the console's answer table: an answered model, or one the console could not set up.
+ConsoleRow = ConsoleAnswer | ConsoleFailure
+
+
+# meiva:note
+# The flags this entry reads, as argparse left them. `options` checks each against its annotation
+# once, so nothing below reads the `Any` a `Namespace` attribute would hand it.
+@dataclass(frozen=True)
+class _Options:
+    prompt: str | None
+    models: str
+    timeout: float
+    file: str | None
+    continue_url: str | None
+    chat_id: str | None
+    keep_tab: bool
+
+
 def _slug(text: str, *, max_len: int = 40) -> str:
     """A short filesystem-safe slug from the prompt's first words."""
-    words = re.findall(r"[A-Za-z0-9]+", text.lower())
+    # meiva:note
+    # `re.sub` answers a `str`; `re.findall` answers `list[Any]` (the stub cannot see that the
+    # pattern has no groups), and joining that list is the unchecked path this rule closes. Both
+    # spell the same tokens: the alphanumeric runs, lowercased.
+    words = re.sub(r"[^A-Za-z0-9]+", " ", text.lower()).split()
     slug = "-".join(words)[:max_len].strip("-")
     return slug or "query"
 
 
-def _to_row(r: Mapping[str, Any]) -> dict[str, Any]:
+def _to_row(row: AskRow | FailedRow) -> ConsoleRow:
     """Map one `webchat.ask_many` row to the console result row the agent reads.
 
     A setup-failure row (carrying `error`) becomes an `ok: False` row. A completed
@@ -59,42 +112,47 @@ def _to_row(r: Mapping[str, Any]) -> dict[str, Any]:
     just text, since a timed-out run can hand back a transient placeholder (e.g.
     ChatGPT's "Thinking") as the partial.
     """
-    if "error" in r:
+    # meiva:note
+    # `error` is the failure row's own key: a row that has it is a `FailedRow`, one that does not is
+    # an `AskRow` (an answer that never landed keeps its full row and reports `ok: False`).
+    if "error" in row:
         return {
-            "site": r["site"],
-            "label": r.get("label", r["site"]),
+            "site": row["site"],
+            "label": row["label"],
             "ok": False,
-            "error": r["error"],
+            "error": row["error"],
         }
     return {
-        "site": r["site"],
-        "label": r["label"],
-        "ok": bool(r["answer"]) and r["complete"],
-        "complete": r["complete"],
-        "chars": len(r["answer"]),
-        "url": r["url"],
-        "chat_id": r.get("chat_id"),
-        "tab_kept": r["tab_kept"],
-        "submitted_via": r["submitted_via"],
-        "answer": r["answer"],
+        "site": row["site"],
+        "label": row["label"],
+        "ok": bool(row["answer"]) and row["complete"],
+        "complete": row["complete"],
+        "chars": len(row["answer"]),
+        "url": row["url"],
+        "chat_id": row["chat_id"],
+        "tab_kept": row["tab_kept"],
+        "submitted_via": row["submitted_via"],
+        "answer": row["answer"],
     }
 
 
-def _render_markdown(prompt: str, results: list[dict[str, Any]]) -> str:
+def _render_markdown(prompt: str, results: Sequence[ConsoleRow]) -> str:
     lines = ["# Console — multi-model answers", "", "## Question", "", prompt, ""]
     for r in results:
-        label = r.get("label", r["site"])
-        lines += ["---", "", f"## {label}"]
-        if not r["ok"]:
-            lines += ["", f"_failed: {r.get('error', 'no answer')}_", ""]
+        lines += ["---", "", f"## {r['label']}"]
+        if "error" in r:
+            lines += ["", f"_failed: {r['error']}_", ""]
             continue
-        if not r.get("complete", True):
+        if not r["ok"]:
+            lines += ["", "_failed: no answer_", ""]
+            continue
+        if not r["complete"]:
             lines += ["", "_(answer did not finish within the timeout — partial)_"]
         lines += ["", r["answer"], ""]
     return "\n".join(lines)
 
 
-def _save(prompt: str, results: list[dict[str, Any]], places: webchat.Places) -> Path:
+def _save(prompt: str, results: Sequence[ConsoleRow], places: webchat.Places) -> Path:
     outdir = webchat.downloads_root("console", places=places) / f"{_run_stamp()}-{_slug(prompt)}"
     outdir.mkdir(parents=True, exist_ok=True)
     (outdir / "answers.md").write_text(_render_markdown(prompt, results), encoding="utf-8")
@@ -151,20 +209,20 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _continue_url(args: argparse.Namespace) -> str | None:
+def _continue_url(opts: _Options) -> str | None:
     """The conversation to continue: --continue-url, or --chat-id resolved via the first model's site."""
-    continue_url = args.continue_url
-    if args.chat_id:
+    continue_url = opts.continue_url
+    if opts.chat_id:
         if continue_url:
             sys.exit("pass --chat-id or --continue-url, not both")
         # We need a site to resolve the chat_id -> URL. Use the first model.
-        models_early = [m.strip() for m in args.models.split(",") if m.strip()]
+        models_early = [m.strip() for m in opts.models.split(",") if m.strip()]
         if not models_early:
             sys.exit("--chat-id requires at least one --models site to resolve the URL")
         try:
-            continue_url = webchat.chat_url(models_early[0], args.chat_id)
+            continue_url = webchat.chat_url(models_early[0], opts.chat_id)
         except Exception as exc:
-            sys.exit(f"bad --chat-id {args.chat_id!r}: {exc}")
+            sys.exit(f"bad --chat-id {opts.chat_id!r}: {exc}")
     return continue_url
 
 
@@ -181,11 +239,11 @@ def _models_of(models_arg: str, *, single: bool) -> list[str]:
     return models
 
 
-def _note_kept_tabs(results: list[dict[str, Any]]) -> None:
+def _note_kept_tabs(results: Sequence[ConsoleRow]) -> None:
     # stdout is the JSON contract the agent parses; the kept-tab note (and
     # each resume url) lives in the result rows. Mirror a human breadcrumb to
     # stderr so it is visible in a terminal without disturbing that contract.
-    kept = [r["url"] for r in results if r.get("tab_kept") and r.get("url")]
+    kept = [r["url"] for r in results if "error" not in r and r["tab_kept"] and r["url"]]
     if kept:
         print(f"[console] left {len(kept)} tab(s) open: {', '.join(kept)}", file=sys.stderr)
 
@@ -197,15 +255,15 @@ def main(
     pace: webchat.Pacing = webchat.STANDARD_PACE,
     clock: Callable[[], float],
 ) -> None:
-    args = _build_parser().parse_args(argv)
-    continue_url = _continue_url(args)
+    opts = options(_build_parser().parse_args(argv), _Options)
+    continue_url = _continue_url(opts)
 
-    prompt = _read_prompt(args.prompt)
+    prompt = _read_prompt(opts.prompt)
     if not prompt.strip():
         sys.exit("empty prompt")
-    models = _models_of(args.models, single=continue_url is not None)
+    models = _models_of(opts.models, single=continue_url is not None)
     specs = [
-        webchat.AskSpec(name=m, prompt=prompt, file=args.file, conversation_url=continue_url)
+        webchat.AskSpec(name=m, prompt=prompt, file=opts.file, conversation_url=continue_url)
         for m in models
     ]
     # Login check happens inside open_chat() (called by ask_many for fresh chats):
@@ -213,12 +271,12 @@ def main(
     # via "Continue with Google".  A login failure becomes an error row in the
     # result — one model's sign-in wall never sinks the others.
     rows = webchat.ask_many(
-        specs, timeout=args.timeout, keep_tab=args.keep_tab, pace=pace, clock=clock
+        specs, timeout=opts.timeout, keep_tab=opts.keep_tab, pace=pace, clock=clock
     )
     results = [_to_row(r) for r in rows]
     outdir = _save(prompt, results, places)
 
-    if args.keep_tab:
+    if opts.keep_tab:
         _note_kept_tabs(results)
 
     print(
