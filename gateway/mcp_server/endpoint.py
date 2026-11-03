@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
-from typing import Any, Literal, TypeGuard
+from collections.abc import Awaitable, Callable, Mapping
+from typing import Literal
 
 import httpx
 from fastapi import FastAPI, Request
 from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+from pydantic import TypeAdapter, ValidationError
 from starlette.types import Receive, Scope, Send
 
 from base.api_contracts.idempotency import keyed_headers
@@ -20,10 +22,7 @@ _FORWARDED_HEADERS = ("authorization", "cookie", "host", "origin")
 _API_BASE_URL = "http://mcp-forward.invalid"
 _SPAWNER = "mcp"
 _MESSAGE_SOURCE = "user"
-
-
-def _is_str_any_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
+_JSON_OBJECT = TypeAdapter(dict[str, object])
 
 
 async def _call_api(
@@ -32,10 +31,10 @@ async def _call_api(
     method: str,
     path: str,
     *,
-    params: dict[str, Any] | None = None,
-    body: dict[str, Any] | None = None,
+    params: Mapping[str, str | int | None] | None = None,
+    body: Mapping[str, object] | None = None,
     headers: dict[str, str] | None = None,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     from mcp.server.mcpserver.exceptions import ToolError
 
     origin = ctx.request_context.request
@@ -57,10 +56,10 @@ async def _call_api(
         )
     if response.is_error:
         raise ToolError(response.text)
-    payload: object = response.json()
-    if not _is_str_any_dict(payload):
-        raise TypeError("expected JSON object from gateway API")
-    return payload
+    try:
+        return _JSON_OBJECT.validate_json(response.content)
+    except ValidationError as exc:
+        raise TypeError("expected JSON object from gateway API") from exc
 
 
 def _register_tools(server: MCPServer, app: FastAPI) -> None:
@@ -72,16 +71,16 @@ def _register_tools(server: MCPServer, app: FastAPI) -> None:
         query: str | None = None,
         before_id: int | None = None,
         limit: int | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         params = {"scope": scope, "query": query, "before_id": before_id, "limit": limit}
         return await _call_api(app, ctx, "GET", "/api/agents", params=params)
 
     @server.tool(description=tool_description("get_agent"))
-    async def get_agent(agent_id: int, ctx: Context) -> dict[str, Any]:
+    async def get_agent(agent_id: int, ctx: Context) -> dict[str, object]:
         return await _call_api(app, ctx, "GET", f"/api/agents/{agent_id}")
 
     @server.tool(description=tool_description("cluster_status"))
-    async def cluster_status(ctx: Context) -> dict[str, Any]:
+    async def cluster_status(ctx: Context) -> dict[str, object]:
         return await _call_api(app, ctx, "GET", "/api/cluster/status")
 
     @server.tool(description=tool_description("spawn_agent_guarded_v1"))
@@ -91,10 +90,10 @@ def _register_tools(server: MCPServer, app: FastAPI) -> None:
         ctx: Context,
         label: str | None = None,
         machine: str | None = None,
-        config_overlay: dict[str, Any] | None = None,
+        config_overlay: dict[str, object] | None = None,
         prompt_source: str = _MESSAGE_SOURCE,
         spawner: str = _SPAWNER,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         body = {
             "prompt": prompt,
             "prompt_source": prompt_source,
@@ -120,7 +119,7 @@ def _register_tools(server: MCPServer, app: FastAPI) -> None:
         *,
         source: str = _MESSAGE_SOURCE,
         idempotency_key: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         return await _call_api(
             app,
             ctx,
@@ -131,7 +130,9 @@ def _register_tools(server: MCPServer, app: FastAPI) -> None:
         )
 
     @server.tool(description=tool_description("get_messages"))
-    async def get_messages(agent_id: int, ctx: Context, limit: int | None = None) -> dict[str, Any]:
+    async def get_messages(
+        agent_id: int, ctx: Context, limit: int | None = None
+    ) -> dict[str, object]:
         return await _call_api(
             app, ctx, "GET", f"/api/agents/{agent_id}/messages", params={"limit": limit}
         )
@@ -143,7 +144,7 @@ def _register_tools(server: MCPServer, app: FastAPI) -> None:
         *,
         message: str | None = None,
         force: bool = False,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         return await _call_api(
             app,
             ctx,
@@ -155,7 +156,6 @@ def _register_tools(server: MCPServer, app: FastAPI) -> None:
 
 # meiva:link gateway/mcp_server/docs/mcp-endpoint/model-capability-failures.meiva.okf.md
 def build_manager(app: FastAPI):  # noqa: ANN201
-    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
     server = MCPServer("meiva", instructions=server_instructions())
     _register_tools(server, app)
@@ -170,7 +170,7 @@ def mcp_gateway(app: FastAPI) -> Callable[[Scope, Receive, Send], Awaitable[None
         if scope["type"] != "http":
             return
         manager = getattr(app.state, "mcp_manager", None)
-        if manager is None:
+        if not isinstance(manager, StreamableHTTPSessionManager):
             response = error_response(
                 Request(scope),
                 code="mcp_endpoint_disabled",
