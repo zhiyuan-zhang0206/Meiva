@@ -259,7 +259,7 @@ def test_the_native_snapshot_is_the_checkpoint_the_attachment_never_writes(
     handle = state_module.PluginStateHandle(ExamplePlugin, "sample")
     with impersonation.attach(attached_runtime.lease_id) as attachment:
         handle.update({"seen": {"external"}})
-        assert attachment.native_snapshot().sample__seen == {"native"}
+        assert handle.view(attachment.native_snapshot()).seen == {"native"}
     stored, _, _ = load_snapshot(
         attached_runtime.agent_id, database=attached_runtime.cluster.database, home=meiva_home()
     )

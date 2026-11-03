@@ -39,8 +39,9 @@ class Target:
 
 
 # meiva:note
-# `native_snapshot()` answers `Any` — the borrowed agent's saved state — so its message list is read
-# as `object` and checked here instead of annotated: a snapshot with no message sequence, or one
+# `native_snapshot()` answers `object` — the borrowed agent's saved state, named no closer at the SDK
+# edge so that `import meiva` stays free of the state schema — so its message list is read with
+# `object_of` and checked here instead of annotated: a snapshot with no message sequence, or one
 # holding something that is not a message, is refused by name before `instruction_text` decides
 # which of the messages are the inherited instructions.
 def snapshot_messages(snapshot: object) -> Sequence[BaseMessage]:
@@ -65,7 +66,7 @@ def snapshot_messages(snapshot: object) -> Sequence[BaseMessage]:
 # inherited instructions.
 def read_instructions(target: Target) -> str:
     with impersonation.attach(target.session_id, agent_id=target.agent_id) as attached:
-        messages = snapshot_messages(object_of(attached.native_snapshot))
+        messages = snapshot_messages(attached.native_snapshot())
     return instruction_text(messages)
 
 

@@ -18,7 +18,7 @@ import dataclasses
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, assert_never
+from typing import assert_never
 from uuid import uuid4
 
 from base.agents.context import MeivaContext
@@ -91,7 +91,7 @@ class _Codec:
 
     def load_snapshot(
         self, agent_id: int
-    ) -> tuple[BaseAgentState, Mapping[str, Any] | None, Mapping[str, Any] | None]:
+    ) -> tuple[BaseAgentState, Mapping[str, object] | None, Mapping[str, object] | None]:
         from base.agents.context.external_attachment import plugin_state_codec
 
         return plugin_state_codec.load_snapshot(
@@ -107,20 +107,20 @@ class _Codec:
         return plugin_state_codec.plugin_state_schema
 
     def encode_plugin_delta(
-        self, update: Mapping[str, Any], state_cls: type[Any]
+        self, update: Mapping[str, object], state_cls: type[BaseAgentState]
     ) -> dict[str, str]:
         from base.agents.context.external_attachment import plugin_state_codec
 
         return plugin_state_codec.encode_plugin_delta(dict(update), state_cls)
 
     def decode_plugin_delta(
-        self, encoded: Mapping[str, object], state_cls: type[Any]
-    ) -> dict[str, Any]:
+        self, encoded: Mapping[str, object], state_cls: type[BaseAgentState]
+    ) -> Mapping[str, object]:
         from base.agents.context.external_attachment import plugin_state_codec
 
         return plugin_state_codec.decode_plugin_delta(encoded, state_cls)
 
-    def apply_plugin_delta(self, state: BaseAgentState, delta: Mapping[str, Any]) -> None:
+    def apply_plugin_delta(self, state: BaseAgentState, delta: Mapping[str, object]) -> None:
         from base.agents.context.external_attachment import plugin_state_codec
 
         plugin_state_codec.apply_plugin_delta(state, dict(delta))
@@ -130,7 +130,7 @@ class _LeaseIdentity:
     def __init__(self, attachment: Attachment) -> None:
         self._attachment = attachment
 
-    def require(self) -> Mapping[str, Any]:
+    def require(self) -> PublicLease:
         return self._attachment._lease()
 
     def validate(self) -> int:
@@ -164,7 +164,7 @@ class Attachment(ExternalAttachment):
         self._pid = inputs.pid
         self._suffix = inputs.suffix
         self.lease_id = inputs.target.lease_id
-        self.config: tuple[Mapping[str, Any], PluginConfigView] | None = None
+        self.config: tuple[Mapping[str, object], PluginConfigView] | None = None
         self._seal_authority: ConfigAuthority | None = None
         self.agent_id: int = 0
         self.session_id: int = 0
@@ -215,19 +215,22 @@ class Attachment(ExternalAttachment):
             case _:
                 assert_never(boot)
 
-    def _applied_version(self, state: BaseAgentState, lease: Mapping[str, Any]) -> int:
+    def _applied_version(self, state: BaseAgentState, lease: Mapping[str, object]) -> int:
         receipt = state.impersonation_applied
         lease_id = receipt.get("lease_id")
         version = receipt.get("version", 0)
+        applied = lease["applied_version"]
+        if not isinstance(applied, int) or isinstance(applied, bool):
+            raise TypeError(f"an external lease applied_version must be an int: {applied!r}")
         return applied_version(
-            lease["applied_version"],
+            applied,
             lease_id if isinstance(lease_id, str) else None,
             version if isinstance(version, int) and not isinstance(version, bool) else 0,
             self.lease_id,
         )
 
     def _resolve_config(
-        self, overlay: Mapping[str, Any] | None, birth: Mapping[str, Any] | None
+        self, overlay: Mapping[str, object] | None, birth: Mapping[str, object] | None
     ) -> None:
         installation = installed()
         if installation is None:
@@ -327,9 +330,14 @@ class Attachment(ExternalAttachment):
                     raise RuntimeError(
                         "the attachment holds no configuration owner for its seal wait"
                     )
-                raw_wait: Any = self._seal_authority.service_field_value(
+                raw_wait = self._seal_authority.service_field_value(
                     "impersonation_event_seal_wait_seconds"
                 )
+                if isinstance(raw_wait, bool) or not isinstance(raw_wait, int | float):
+                    raise TypeError(
+                        "impersonation_event_seal_wait_seconds must be a number, got "
+                        f"{type(raw_wait).__name__}"
+                    )
                 return float(raw_wait)
             case _:
                 assert_never(boot)
