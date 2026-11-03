@@ -2,9 +2,9 @@
 
 from collections.abc import AsyncGenerator, Iterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
-from typing import Any
 
 import psycopg
 import pytest
@@ -13,10 +13,12 @@ from fastapi.testclient import TestClient
 
 from base.clock.tests.fakes import system_clock
 from base.db import Database
+from base.log.tests.log_records import LogRecords
 from base.telemetry.metrics.observed_metrics import MetricObservation, write_observations
-from gateway.http.config import GatewayAppState
+from gateway.http.db_rows import query_one
 from gateway.inspect import _metrics
-from gateway.inspect.router import build_query_cache, router
+from gateway.inspect.router import InspectAppState, build_query_cache, router
+from gateway.inspect.tests.rows import returned_id
 
 
 @pytest.fixture
@@ -33,7 +35,7 @@ def app(database: Database) -> Iterator[FastAPI]:
             await queries.aclose()
 
     application = FastAPI(lifespan=lifespan)
-    application.state = GatewayAppState()
+    application.state = InspectAppState()
     application.include_router(router)
     application.state.clock = system_clock()
     with database.pool(max_size=2) as pool:
@@ -41,14 +43,20 @@ def app(database: Database) -> Iterator[FastAPI]:
         yield application
 
 
+# meiva:note
+# The birth time of one agent.
+@dataclass(frozen=True)
+class _SpawnedRow:
+    spawned_at: datetime
+
+
 def _agent(conn: psycopg.Connection, born: datetime) -> int:
-    row = conn.execute("INSERT INTO agents(label) VALUES ('metrics') RETURNING id").fetchone()
-    assert row is not None
+    agent_id = returned_id(conn, "INSERT INTO agents(label) VALUES ('metrics') RETURNING id")
     conn.execute(
         "INSERT INTO agents_meta(id,spawner,status,spawned_at) VALUES (%s,'user','running',%s)",
-        (row[0], born),
+        (agent_id, born),
     )
-    return row[0]
+    return agent_id
 
 
 def _read(
@@ -59,10 +67,12 @@ def _read(
     *,
     collection: datetime | None = None,
 ) -> _metrics.MetricsSnapshot:
-    born = conn.execute("SELECT spawned_at FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
+    born = query_one(
+        conn, _SpawnedRow, "SELECT spawned_at FROM agents_meta WHERE id=%s", (agent_id,)
+    )
     assert born is not None
     return _metrics.read_snapshot(
-        conn, agent_id, start, end, born[0], collection or start - timedelta(seconds=1)
+        conn, agent_id, start, end, born.spawned_at, collection or start - timedelta(seconds=1)
     )
 
 
@@ -308,7 +318,7 @@ def test_statistics_http_serves_the_persisted_sql_read_model(
 # The coverage note is wired into the statistics read (#3869 review): a
 # change that drops the call must fail here, not just in review.
 def test_statistics_read_logs_the_coverage_limits(
-    app: FastAPI, db_conn: psycopg.Connection, loguru_records: list[dict[str, Any]]
+    app: FastAPI, db_conn: psycopg.Connection, loguru_records: LogRecords
 ) -> None:
     # meiva:note
     # born before the collection
@@ -318,11 +328,11 @@ def test_statistics_read_logs_the_coverage_limits(
         response = client.get(f"/api/agents/{aid}/inspect/statistics")
     assert response.status_code == 200, response.text
     limits = [
-        record
-        for record in loguru_records
-        if "coverage limit" in str(record["message"]) and record["extra"]["agent_id"] == aid
+        extra
+        for extra in loguru_records.extras(message="coverage limit")
+        if extra["agent_id"] == aid
     ]
-    assert {record["extra"]["condition"] for record in limits} == {"historical_coverage_unknown"}
+    assert {extra["condition"] for extra in limits} == {"historical_coverage_unknown"}
 
 
 def test_recent_window_for_old_agent_preserves_activity_and_lm_throughput(

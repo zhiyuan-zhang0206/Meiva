@@ -1,7 +1,7 @@
 """Independent live state and evidence-bearing persisted agent statistics."""
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import (
     BaseModel,
@@ -161,7 +161,7 @@ class AgentInspectLive(BaseModel):
     shells_available: bool | None = None
     spawned_at: datetime
     shells: list[ShellInfo]
-    config_overlay: dict[str, Any]
+    config_overlay: dict[str, object]
     notice: OpenNotice | None = None
     heartbeat: HeartbeatInfo
 

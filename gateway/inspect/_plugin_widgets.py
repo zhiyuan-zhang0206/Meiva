@@ -30,16 +30,17 @@ from __future__ import annotations
 
 import importlib
 from collections.abc import Collection, Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from fastapi import HTTPException
-from psycopg import Cursor
+from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
 from base.agents.tasks.priority import Priority
 from base.packages.plugins import data_registry
 from base.packages.plugins.surface.inspector import InspectWidgetSpec
+from gateway.http.db_rows import query_all
 from gateway.inspect._plugin_faces import enabled_face_files
 from gateway.inspect.schemas import InspectWidgetResult, InspectWidgetTask
 
@@ -74,7 +75,16 @@ def load_inspect_widgets(plugins_dir: Path, enabled: Collection[str]) -> list[In
     return list(registry.inspect_widgets())
 
 
-def _resolve_tasks(cur: Cursor[Any], agent_id: int) -> list[InspectWidgetTask]:
+# meiva:note
+# An active task of the agent.
+@dataclass(frozen=True)
+class _TaskRow:
+    id: int
+    title: str
+    priority: str
+
+
+def _resolve_tasks(conn: Connection, agent_id: int) -> list[InspectWidgetTask]:
     """The agent's active tasks, priority-first — the ``taskList`` payload.
 
     "Active" = ``in_progress``; the system root is excluded by its NULL
@@ -83,30 +93,31 @@ def _resolve_tasks(cur: Cursor[Any], agent_id: int) -> list[InspectWidgetTask]:
     legible). The list is complete — every active task renders; there is no
     display cap (user ruling 2026-09-17). Each row carries its own
     ``priority`` (the P0..P3 stakes rung the console badges — task #3819)."""
-    cur.execute(
+    rows = query_all(
+        conn,
+        _TaskRow,
         "SELECT id, title, priority FROM agent_tasks "
         "WHERE owner = %s AND status = 'in_progress' "
         "ORDER BY priority ASC, id ASC",
         (agent_id,),
     )
     return [
-        InspectWidgetTask(id=int(row[0]), title=str(row[1]), priority=Priority(str(row[2])))
-        for row in cur.fetchall()
+        InspectWidgetTask(id=row.id, title=row.title, priority=Priority(row.priority))
+        for row in rows
     ]
 
 
 def widgets_for_agent(
-    pool: ConnectionPool[Any],
+    pool: ConnectionPool,
     agent_id: int,
     *,
     specs: Sequence[InspectWidgetSpec],
 ) -> list[InspectWidgetResult]:
     """Sync twin of the widgets endpoint — runs via asyncio.to_thread."""
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute("SELECT 1 FROM agents_meta WHERE id = %s", (agent_id,))
-        if cur.fetchone() is None:
+    with pool.connection() as conn:
+        if conn.execute("SELECT 1 FROM agents_meta WHERE id = %s", (agent_id,)).fetchone() is None:
             raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
-        tasks = _resolve_tasks(cur, agent_id)
+        tasks = _resolve_tasks(conn, agent_id)
 
     results: list[InspectWidgetResult] = []
     for spec in specs:

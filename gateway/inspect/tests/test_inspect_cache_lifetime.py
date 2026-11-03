@@ -1,6 +1,5 @@
 import asyncio
 import threading
-from typing import Any
 
 import pytest
 from opentelemetry.sdk.trace import Span, TracerProvider
@@ -88,7 +87,7 @@ async def test_orphaned_native_error_reaches_existing_loop_diagnostics() -> None
     failure = RuntimeError("native query failed after HTTP cancellation")
     loop = asyncio.get_running_loop()
     previous = loop.get_exception_handler()
-    reports: list[dict[str, Any]] = []
+    reports: list[dict[str, object]] = []
     loop.set_exception_handler(lambda _loop, context: reports.append(context))
 
     def load() -> str:
@@ -122,7 +121,7 @@ async def test_native_query_keeps_parent_span_without_mutating_its_lifetime() ->
     assert isinstance(parent, Span)
     loop = asyncio.get_running_loop()
     previous = loop.get_exception_handler()
-    reports: list[dict[str, Any]] = []
+    reports: list[dict[str, object]] = []
     loop.set_exception_handler(lambda _loop, context: reports.append(context))
     failure = RuntimeError("query error leaves the parent span unchanged")
 

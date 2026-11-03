@@ -22,22 +22,26 @@ cycles — no depth cap).
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
 
 from psycopg_pool import ConnectionPool
 
 from base.events.reads import audit_rows
 from base.events.reads.audit_rows import LINEAGE_EVENT_NAMES
+from gateway.http.db_rows import query_all
 
 # Bound on the tie read, below the route's client timeouts.
 _TIE_READ_STATEMENT_TIMEOUT_MS = 8_000
 
 
-def _fetch_edge_counts(pool: ConnectionPool[Any]) -> list[tuple[int, int, str, int, datetime]]:
+def _fetch_edge_counts(pool: ConnectionPool) -> list[tuple[int, int, str, int, datetime]]:
     """Per-edge `(agent, target, event_name, count, last_seen)` from the audit record."""
     with pool.connection() as conn:
-        conn.execute(f"SET LOCAL statement_timeout = {_TIE_READ_STATEMENT_TIMEOUT_MS}")
+        conn.execute(
+            "SELECT set_config('statement_timeout', %s, true)",
+            (str(_TIE_READ_STATEMENT_TIMEOUT_MS),),
+        )
         return audit_rows.edge_counts(conn)
 
 
@@ -69,9 +73,15 @@ def _weights(
     return weights
 
 
-def _fetch_born_spawner_parents(
-    pool: ConnectionPool[Any], *, root: int
-) -> dict[int, dict[int, float]]:
+# meiva:note
+# A child agent and its born-spawner parent.
+@dataclass(frozen=True)
+class _ParentEdge:
+    child_id: int
+    parent_id: int
+
+
+def _fetch_born_spawner_parents(pool: ConnectionPool, *, root: int) -> dict[int, dict[int, float]]:
     """The immutable birth chain above ``root`` as child -> parent edges.
 
     Each child has at most one born_spawner parent, so every edge carries the
@@ -79,8 +89,10 @@ def _fetch_born_spawner_parents(
     canonical agent identifiers and prevents malformed cycles from revisiting
     a row before `_walk_ancestors` applies its own defensive guard.
     """
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
+    with pool.connection() as conn:
+        rows = query_all(
+            conn,
+            _ParentEdge,
             """
             WITH RECURSIVE spawner_walk(child_id, parent_id, path) AS (
                 SELECT id,
@@ -101,8 +113,7 @@ def _fetch_born_spawner_parents(
             """,
             (root,),
         )
-        rows = cur.fetchall()
-    return {child: {parent: math.log1p(1)} for child, parent in rows}
+    return {row.child_id: {row.parent_id: math.log1p(1)} for row in rows}
 
 
 def _walk_ancestors(
@@ -182,7 +193,7 @@ def _walk(
 
 
 def born_chain(
-    pool: ConnectionPool[Any], *, root: int, gamma: float = 0.5
+    pool: ConnectionPool, *, root: int, gamma: float = 0.5
 ) -> list[tuple[int, int, float]]:
     """The immutable birth-parent chain above `root` — (agent_id, depth, score)
     rows, nearest ancestor first.
@@ -200,7 +211,7 @@ def compute(
     root: int,
     max_depth: int,
     limit: int,
-    db_pool: ConnectionPool[Any],
+    db_pool: ConnectionPool,
     now: datetime,
     k: float = 0.5,
     gamma: float = 0.5,

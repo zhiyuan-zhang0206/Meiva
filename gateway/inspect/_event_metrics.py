@@ -19,11 +19,15 @@ no rows counts as 0; a ratio step whose denominator is 0 is left out. Anything e
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, LiteralString
+from decimal import Decimal
+from typing import LiteralString
 
 import psycopg
 from psycopg import sql
+
+from gateway.http.db_rows import query_all
 
 _TERM = re.compile(
     r"sum\((?P<fn>count_over_time|sum_over_time)\(\{(?P<selector>[^}]*)\}\s*\|\s*json"
@@ -75,11 +79,11 @@ def _unescape(value: str) -> str:
     return re.sub(r"\\(.)", r"\1", value)
 
 
-def _matcher_clause(field: str, op: str, value: str) -> tuple[LiteralString, list[Any]]:
+def _matcher_clause(field: str, op: str, value: str) -> tuple[LiteralString, list[object]]:
     """One `field op "value"` filter as a SQL clause on the event table's columns."""
     if field.startswith("attributes_"):
         expr: LiteralString = "COALESCE(e.attributes ->> %s, '')"
-        head: list[Any] = [field.removeprefix("attributes_")]
+        head: list[object] = [field.removeprefix("attributes_")]
     elif field in _COLUMN_SQL:
         expr = _COLUMN_SQL[field]
         head = []
@@ -97,13 +101,22 @@ def _matcher_clause(field: str, op: str, value: str) -> tuple[LiteralString, lis
             return f"{expr} !~ %s", [*head, f"^(?:{value})$"]
 
 
+# meiva:note
+# One step of an evaluated term: the step time and the value at it (numeric, so `Decimal` or `float`).
+@dataclass(frozen=True)
+class _StepValue:
+    at: datetime
+    value: Decimal | float
+
+
 class _Term:
     """One `sum(count_over_time|sum_over_time(...))` term, ready to run."""
 
     def __init__(self, match: re.Match[str]) -> None:
         self.window = int(match["window"][:-1]) * _SECONDS[match["window"][-1]]
-        clauses: list[tuple[LiteralString, list[Any]]] = []
-        for field, op, value in _MATCHER.findall(match["selector"]):
+        clauses: list[tuple[LiteralString, list[object]]] = []
+        for matcher in _MATCHER.finditer(match["selector"]):
+            field, op, value = matcher.groups()
             if field == "event_name":
                 clauses.append(_matcher_clause(field, op, value))
         self.audit = False
@@ -142,7 +155,7 @@ class _Term:
     def table(self) -> LiteralString:
         return "audit_events" if self.audit else "telemetry_events"
 
-    def value(self) -> tuple[LiteralString, list[Any]]:
+    def value(self) -> tuple[LiteralString, list[object]]:
         if self.unwrap is None:
             return "count(e.event_uid)", []
         return (
@@ -152,11 +165,11 @@ class _Term:
         )
 
     def evaluate(
-        self, conn: psycopg.Connection[Any], start: datetime, stop: datetime, step_s: int
+        self, conn: psycopg.Connection, start: datetime, stop: datetime, step_s: int
     ) -> dict[datetime, float]:
         """The term's value at every step from `start` to `stop`."""
         filters: list[sql.Composable] = []
-        params: list[Any] = []
+        params: list[object] = []
         for text, values in self.clauses:
             filters.append(sql.SQL(text))
             params.extend(values)
@@ -165,7 +178,7 @@ class _Term:
             params.append(self.categories)
         value_sql, value_params = self.value()
         query = sql.SQL(
-            "SELECT t.at, {value} FROM generate_series(%s::timestamptz, %s::timestamptz, %s::interval) "
+            "SELECT t.at, {value} AS value FROM generate_series(%s::timestamptz, %s::timestamptz, %s::interval) "
             "AS t(at) LEFT JOIN {table} e ON e.ts > t.at - %s::interval AND e.ts <= t.at"
             "{filters} GROUP BY t.at ORDER BY t.at"
         ).format(
@@ -173,7 +186,9 @@ class _Term:
             table=sql.SQL(self.table()),
             filters=sql.SQL("").join([sql.SQL(" AND ") + clause for clause in filters]),
         )
-        rows = conn.execute(
+        rows = query_all(
+            conn,
+            _StepValue,
             query,
             [
                 *value_params,
@@ -183,12 +198,12 @@ class _Term:
                 timedelta(seconds=self.window),
                 *params,
             ],
-        ).fetchall()
-        return {row[0]: float(row[1]) for row in rows}
+        )
+        return {row.at: float(row.value) for row in rows}
 
 
 def points(
-    conn: psycopg.Connection[Any], query: str, start: datetime, stop: datetime, step_s: int
+    conn: psycopg.Connection, query: str, start: datetime, stop: datetime, step_s: int
 ) -> list[tuple[datetime, float]]:
     """Evaluate one LogQL template to `(step time, value)` points; raise `UnsupportedQueryError` otherwise."""
     terms: list[_Term] = []

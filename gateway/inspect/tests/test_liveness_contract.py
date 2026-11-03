@@ -12,18 +12,18 @@ from base.api_contracts.agent_contract import LivenessState
 from base.db import Database
 from base.telemetry.metrics.observed_metrics import MetricObservation, write_observations
 from gateway.inspect._live import db_rows_blocking
+from gateway.inspect.tests.rows import returned_id
 
 
 def _agent(conn: psycopg.Connection, *, liveness_state: str, harness: str = "meiva") -> int:
-    row = conn.execute("INSERT INTO agents(label) VALUES ('liveness') RETURNING id").fetchone()
-    assert row is not None
+    agent_id = returned_id(conn, "INSERT INTO agents(label) VALUES ('liveness') RETURNING id")
     conn.execute(
         "INSERT INTO agents_meta(id, spawner, status, machine, liveness_state, harness) "
         "VALUES (%s, 'user', 'idling', 'machine', %s, %s)",
-        (row[0], liveness_state, harness),
+        (agent_id, liveness_state, harness),
     )
     conn.commit()
-    return row[0]
+    return agent_id
 
 
 @pytest.mark.parametrize("state", ["online", "offline", "unknown"])

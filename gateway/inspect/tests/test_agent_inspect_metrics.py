@@ -21,7 +21,6 @@ import sys
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
 
 import psycopg
 import pytest
@@ -31,6 +30,7 @@ from psycopg_pool import ConnectionPool
 import meiva_builtins.plugins as shipped_plugins
 from base.clock.tests.fakes import system_clock
 from base.db import Database
+from base.log.tests.log_records import LogRecords
 from base.paths import meiva_home
 from base.telemetry.metrics.plugin_metrics import MetricSpec
 from gateway.inspect import _plugin_metrics
@@ -40,6 +40,8 @@ from gateway.inspect._plugin_metrics import (
     render_metric_query,
     translate_macros,
 )
+from gateway.inspect.schemas import PluginMetricResult
+from gateway.inspect.tests.rows import returned_id
 
 # A valid inspector query — the static-SQL shape (task #180 PR C): the
 # template era (macros + {event_name}/{category}/{{agent_id}} placeholders)
@@ -75,7 +77,7 @@ def _metric(
     query: str = _DEMO_QUERY,
     output: list[str] | None = None,
     unit: str = "percent",
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """A registry-row dict (the shape a MetricSpec registration carries)."""
     return {
         "name": name,
@@ -93,21 +95,19 @@ def _metric(
 
 # meiva:note
 # The inspector results of `agent_id` for these registry rows, as the route serializes them.
-def _run(pool: ConnectionPool, agent_id: int, *metrics: dict[str, Any]) -> list[dict[str, Any]]:
+def _run(
+    pool: ConnectionPool, agent_id: int, *metrics: dict[str, object]
+) -> list[PluginMetricResult]:
     registry = [MetricSpec.model_validate(m) for m in metrics]
     clock = system_clock()
     results = metrics_for_agent(pool, agent_id, registry=registry, clock=clock)
-    return [result.model_dump(mode="json") for result in results]
+    return list(results)
 
 
 def _insert_agent(db: psycopg.Connection, label: str = "t") -> int:
     """INSERT an agents row + its agents_meta row (the /inspect family checks
     agents_meta; a bare `agents` row would 404)."""
-    with db.cursor() as cur:
-        cur.execute("INSERT INTO agents (label) VALUES (%s) RETURNING id", (label,))
-        row = cur.fetchone()
-    assert row is not None
-    tid = row[0]
+    tid = returned_id(db, "INSERT INTO agents (label) VALUES (%s) RETURNING id", (label,))
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'user', 'running')",
@@ -157,7 +157,7 @@ def test_metrics_filters_inspector_output(
             output=["grafana"],
         ),
     )
-    assert [m["name"] for m in body] == ["insp_metric"]
+    assert [m.name for m in body] == ["insp_metric"]
 
 
 def test_metrics_stat_scalar(pool: ConnectionPool, db_conn: psycopg.Connection) -> None:
@@ -169,11 +169,11 @@ def test_metrics_stat_scalar(pool: ConnectionPool, db_conn: psycopg.Connection) 
     db_conn.commit()
     body = _run(pool, aid, _metric(name="stat_count", panel="stat", query=_STAT_QUERY))
     assert len(body) == 1
-    assert body[0]["name"] == "stat_count"
-    assert body[0]["panel"] == "stat"
-    assert body[0]["value"] == 2
-    assert body[0]["series"] == []
-    assert body[0]["error"] is None
+    assert body[0].name == "stat_count"
+    assert body[0].panel == "stat"
+    assert body[0].value == 2
+    assert body[0].series == []
+    assert body[0].error is None
 
 
 def test_metrics_macro_translation_unit() -> None:
@@ -268,10 +268,12 @@ def test_metrics_runtime_query_error_per_metric(
         ),
         _metric(name="healthy", panel="stat", query=_STAT_QUERY),
     )
-    by_name = {m["name"]: m for m in body}
-    assert "bigint" in by_name["broken"]["error"].lower()
-    assert by_name["healthy"]["error"] is None
-    assert by_name["healthy"]["value"] == 1.0  # the seeded agents_meta row
+    by_name = {m.name: m for m in body}
+    broken_error = by_name["broken"].error
+    assert broken_error is not None
+    assert "bigint" in broken_error.lower()
+    assert by_name["healthy"].error is None
+    assert by_name["healthy"].value == 1.0  # the seeded agents_meta row
 
 
 # meiva:note
@@ -289,7 +291,7 @@ def test_metrics_read_only_is_transaction_scoped(
     aid = _insert_agent(db_conn)
     db_conn.commit()
     body = _run(pool, aid, _metric(name="stat_count", panel="stat", query=_STAT_QUERY))
-    assert body[0]["value"] == 1
+    assert body[0].value == 1
     # meiva:note
     # Same pool the read used — a write must succeed on a fresh borrow.
     with pool.connection() as conn, conn.cursor() as cur:
@@ -305,7 +307,7 @@ def _logql_metric(
     panel: str = "timeseries",
     query: str | None = None,
     output: list[str] | None = None,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """A registry-row dict for a logql inspector metric."""
     return {
         "name": name,
@@ -350,8 +352,8 @@ def test_metrics_logql_timeseries_is_answered_from_telemetry_events(
     _usage(db_conn, other, 9.0, minutes_ago=30)
     db_conn.commit()
     [m] = _run(pool, aid, _logql_metric())
-    assert m["error"] is None and m["value"] is None
-    values = [point["value"] for point in m["series"]]
+    assert m.error is None and m.value is None
+    values = [point.value for point in m.series]
     assert len(values) == 25  # 24 hours of hourly steps, both ends
     assert sum(values) == pytest.approx(0.75)
     assert sorted(v for v in values if v)[-1] == 0.5
@@ -379,9 +381,9 @@ def test_metrics_logql_stat_is_the_last_step_over_the_whole_range(
             ),
         ),
     )[0]
-    assert m["panel"] == "stat"
-    assert m["value"] == pytest.approx(0.75)
-    assert m["series"] == []
+    assert m.panel == "stat"
+    assert m.value == pytest.approx(0.75)
+    assert m.series == []
 
 
 def test_metrics_logql_outside_the_evaluator_vocabulary_is_per_metric(
@@ -392,7 +394,7 @@ def test_metrics_logql_outside_the_evaluator_vocabulary_is_per_metric(
     aid = _insert_agent(db_conn)
     db_conn.commit()
     body = {
-        m["name"]: m
+        m.name: m
         for m in _run(
             pool,
             aid,
@@ -406,8 +408,10 @@ def test_metrics_logql_outside_the_evaluator_vocabulary_is_per_metric(
             _metric(name="still_fine"),
         )
     }
-    assert "query failed" in body["rate_query"]["error"]
-    assert body["still_fine"]["error"] is None
+    rate_error = body["rate_query"].error
+    assert rate_error is not None
+    assert "query failed" in rate_error
+    assert body["still_fine"].error is None
 
 
 def test_metrics_logql_tampered_query_500(
@@ -553,7 +557,7 @@ def fixture_plugins_dir(tmp_path: Path, request: pytest.FixtureRequest) -> Path:
 
 
 def test_in_process_loader_skips_a_failing_module_and_recovers(
-    fixture_plugins_dir: Path, loguru_records: list[dict[str, Any]]
+    fixture_plugins_dir: Path, loguru_records: LogRecords
 ) -> None:
     """A metrics.py that raises is reported and contributes nothing, while the
     rest still load; a declaration is admitted whole or not at all, so
@@ -566,8 +570,8 @@ def test_in_process_loader_skips_a_failing_module_and_recovers(
     assert [s for s in specs if s.plugin == "fx_drop_partial"] == []
     assert {s.plugin for s in specs if s.plugin != "core"} == set()
     assert any(
-        "fx_drop_partial" in r["message"] and "failed to load" in r["message"]
-        for r in loguru_records
+        "fx_drop_partial" in message and "failed to load" in message
+        for message in loguru_records.messages()
     )
 
     metrics_py.write_text(

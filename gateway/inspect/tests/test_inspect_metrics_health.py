@@ -10,10 +10,10 @@ never raise into the statistics read path.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
 
 import pytest
 
+from base.log.tests.log_records import LogRecords
 from gateway.inspect import _metrics_health as imh
 from gateway.inspect._coverage import (
     CoverageFacts,
@@ -81,20 +81,24 @@ def _facts(
     )
 
 
-def _gap_events(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [r for r in records if r["extra"].get("event") == "inspect_metrics_coverage_gap"]
+def _gap_events_at(records: LogRecords, level: str) -> list[dict[str, object]]:
+    return records.extras(event="inspect_metrics_coverage_gap", level=level)
+
+
+def _gap_events(records: LogRecords) -> list[dict[str, object]]:
+    return records.extras(event="inspect_metrics_coverage_gap")
 
 
 def test_expected_limit_logs_at_debug_and_emits_no_event(
-    loguru_records: list[dict[str, Any]],
+    loguru_records: LogRecords,
 ) -> None:
     md = _md(cost=_ev("partial", "historical_coverage_unknown"))
     imh.note_inspect_metrics_coverage(42, md, spawned_at=T0)  # window reaches before collection
-    limits = [r for r in loguru_records if "coverage limit" in str(r["message"])]
+    limits = loguru_records.extras(message="coverage limit")
     assert len(limits) == 1
-    assert limits[0]["level"].name == "DEBUG"
-    assert limits[0]["extra"]["condition"] == "historical_coverage_unknown"
-    assert limits[0]["extra"]["family"] == "cost"
+    assert len(loguru_records.extras(message="coverage limit", level="DEBUG")) == 1
+    assert limits[0]["condition"] == "historical_coverage_unknown"
+    assert limits[0]["family"] == "cost"
     assert _gap_events(loguru_records) == []
 
 
@@ -148,7 +152,7 @@ def test_a_window_is_historical_when_it_reaches_before_the_collection_started() 
 
 
 def test_unexpected_missing_durations_emits_the_gap_event_on_every_read(
-    loguru_records: list[dict[str, Any]],
+    loguru_records: LogRecords,
 ) -> None:
     # Window starts inside the collection era -> the gap is live (unexpected).
     bad = _md(turns=_ev("partial", "missing_turn_durations"), window_start=T1)
@@ -156,8 +160,8 @@ def test_unexpected_missing_durations_emits_the_gap_event_on_every_read(
     imh.note_inspect_metrics_coverage(42, bad, spawned_at=T0)  # still true: emitted again
     events = _gap_events(loguru_records)
     assert len(events) == 2
-    assert events[0]["level"].name == "WARNING"
-    extra = events[0]["extra"]
+    assert len(_gap_events_at(loguru_records, "WARNING")) == 2
+    extra = events[0]
     assert (extra["agent_id"], extra["family"], extra["condition"]) == (
         42,
         "turns",
@@ -167,24 +171,24 @@ def test_unexpected_missing_durations_emits_the_gap_event_on_every_read(
 
 
 def test_missing_durations_in_a_historical_window_is_not_a_gap(
-    loguru_records: list[dict[str, Any]],
+    loguru_records: LogRecords,
 ) -> None:
     md = _md(turns=_ev("partial", "missing_turn_durations"), window_start=T0)
     imh.note_inspect_metrics_coverage(42, md, spawned_at=T0)
     assert _gap_events(loguru_records) == []
 
 
-def test_a_clean_read_emits_nothing(loguru_records: list[dict[str, Any]]) -> None:
+def test_a_clean_read_emits_nothing(loguru_records: LogRecords) -> None:
     imh.note_inspect_metrics_coverage(42, _md(window_start=T1), spawned_at=T0)
     assert _gap_events(loguru_records) == []
-    assert not [r for r in loguru_records if "coverage limit" in str(r["message"])]
+    assert not loguru_records.extras(message="coverage limit")
 
 
 def test_note_never_raises_into_the_read_path(
-    loguru_records: list[dict[str, Any]],
+    loguru_records: LogRecords,
 ) -> None:
     # meiva:note
     # A metadata value built without its fields: reading any of them fails.
     broken = InspectMetricsMetadata.model_construct()
     imh.note_inspect_metrics_coverage(42, broken, spawned_at=T0)
-    assert any("note failed" in str(r["message"]) for r in loguru_records)
+    assert any("note failed" in message for message in loguru_records.messages())

@@ -156,6 +156,7 @@ _log = logging.getLogger(__name__)
 # object the root assigns them to.
 class GatewayServerState(
     CatalogAppState,
+    inspect_router.InspectAppState,
     fleet_graph_router.FleetGraphAppState,
     frontend_telemetry_router.FrontendTelemetryAppState,
     grafana_router.GrafanaAppState,

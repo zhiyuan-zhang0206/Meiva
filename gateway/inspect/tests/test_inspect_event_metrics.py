@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import Literal
 
 import psycopg
 import pytest
@@ -25,7 +25,7 @@ def _put(
     table: Literal["telemetry_events", "audit_events"] = "telemetry_events",
     agent_id: int = 7,
     level: str = "info",
-    attributes: dict[str, Any] | None = None,
+    attributes: dict[str, object] | None = None,
 ) -> None:
     columns = "(event_uid, ts, agent_id, machine, process, event_name, level, source, attributes"
     values = "VALUES (%s, %s - (%s * interval '1 minute'), %s, 'm', 'p', %s, %s, 'test', %s::jsonb"

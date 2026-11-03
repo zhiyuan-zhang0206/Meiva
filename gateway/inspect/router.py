@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import time as time_mod
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from opentelemetry import metrics
@@ -17,7 +18,16 @@ from psycopg_pool import ConnectionPool, PoolTimeout
 from base.api_contracts.agent_contract import AgentNotFound
 from base.clock import Clock
 from base.db import Database
-from gateway.http.config import gateway_clock, gateway_config, gateway_rpc
+from gateway.http.config import (
+    GatewayAppState,
+    gateway_clock,
+    gateway_config,
+    gateway_rpc,
+    gateway_state,
+    state_as,
+)
+from gateway.http.db_rows import query_one
+from gateway.http.json_values import is_object_list
 from gateway.inspect import _metrics, _plugin_metrics, _plugin_widgets, neighbors
 from gateway.inspect._cache import InspectCacheFullError, InspectQueryCache
 from gateway.inspect._heartbeat import HeartbeatCadence, HeartbeatState
@@ -48,7 +58,7 @@ _HEARTBEAT_PAUSE_LOOKBACK = timedelta(hours=24)
 
 
 def _heartbeat_last_pause(
-    pool: ConnectionPool[Any], agent_id: int, *, now: datetime
+    pool: ConnectionPool, agent_id: int, *, now: datetime
 ) -> HeartbeatLastPause | None:
     """Read the newest recent committed pause from the indexed durable trail.
 
@@ -56,15 +66,15 @@ def _heartbeat_last_pause(
     the pause deadline. The fixed 24-hour display horizon is unchanged;
     current-state reads never depend on telemetry delivery or Loki health.
     """
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT created_at, duration_s FROM heartbeat_pause_log "
+    with pool.connection() as conn:
+        return query_one(
+            conn,
+            HeartbeatLastPause,
+            "SELECT created_at AS at, duration_s FROM heartbeat_pause_log "
             "WHERE agent_id = %s AND created_at >= %s "
             "ORDER BY created_at DESC, id DESC LIMIT 1",
             (agent_id, now - _HEARTBEAT_PAUSE_LOOKBACK),
         )
-        row = cur.fetchone()
-    return HeartbeatLastPause(at=row[0], duration_s=row[1]) if row is not None else None
 
 
 # Per-op probe deadline for the inspector's shell list. The panel polls every
@@ -126,7 +136,12 @@ async def _probe_agent_shells(
             "shell observation unavailable agent_id=%s reason=%s", agent_id, type(exc).__name__
         )
         return [], False
-    shells = [ShellInfo.model_validate(s) for s in result["shells"]]
+    if "shells" not in result:
+        raise KeyError("shells")
+    raw_shells = result.get("shells")
+    if not is_object_list(raw_shells):
+        raise TypeError("the shell op answered a `shells` that is not a list")
+    shells = [ShellInfo.model_validate(s) for s in raw_shells]
     if shells:
         ttls = await asyncio.to_thread(_shell_ttls_blocking, pool, agent_id)
         shells = [s.model_copy(update={"expires_at": ttls.get(s.id)}) for s in shells]
@@ -140,6 +155,13 @@ _InspectKey = tuple[int, int | None]
 InspectCache = InspectQueryCache[_InspectKey, _metrics.MetricsSnapshot]
 
 
+# meiva:note
+# The statistics query cache the app root builds; the inspector routes are its only readers, so this
+# module declares it.
+class InspectAppState(GatewayAppState):
+    inspect_query_cache: InspectCache
+
+
 def build_query_cache() -> InspectCache:
     """The inspector's query admission cache; the app lifespan builds one per process."""
     return InspectCache(max_entries=32, max_inflight=32, max_concurrent_loads=4)
@@ -147,7 +169,7 @@ def build_query_cache() -> InspectCache:
 
 async def _inspect_rows_cached_async(
     cache: InspectCache,
-    pool: ConnectionPool[Any],
+    pool: ConnectionPool,
     agent_id: int,
     hours: StatsWindowHours | None,
     *,
@@ -181,13 +203,13 @@ async def get_agent_inspect_live(agent_id: int, request: Request) -> AgentInspec
     queries. Unknown agents return 404; shell probe failures report
     shells_available=False. No part of this response is cached.
     """
-    pool = request.app.state.db_pool
+    pool = gateway_state(request).db_pool
     heartbeat = gateway_config(request).heartbeat
     db = await asyncio.to_thread(db_rows_blocking, pool, agent_id)
     notice, shells, last_pause = await asyncio.gather(
         asyncio.to_thread(notice_blocking, pool, agent_id),
         _probe_agent_shells(
-            request.app.state.db, agent_id, db.machine, pool, rpc=gateway_rpc(request)
+            gateway_state(request).db, agent_id, db.machine, pool, rpc=gateway_rpc(request)
         ),
         asyncio.to_thread(_heartbeat_last_pause, pool, agent_id, now=gateway_clock(request).now()),
     )
@@ -238,13 +260,13 @@ async def get_agent_inspect_statistics(
     in-flight work and have database and admission deadlines. The requested
     window is preserved; unavailable historical coverage is explicit.
     """
-    pool = request.app.state.db_pool
+    pool = gateway_state(request).db_pool
     applied_window_hours = None if hours is None else int(hours)
     try:
         spawned_at = await asyncio.to_thread(_statistics_spawned_at, pool, agent_id)
         aggregates = await asyncio.wait_for(
             _inspect_rows_cached_async(
-                request.app.state.inspect_query_cache,
+                state_as(request, InspectAppState).inspect_query_cache,
                 pool,
                 agent_id,
                 hours,
@@ -277,15 +299,23 @@ async def get_agent_inspect_statistics(
     )
 
 
-def _statistics_spawned_at(pool: ConnectionPool[Any], agent_id: int) -> datetime:
+# meiva:note
+# When an agent was spawned.
+@dataclass(frozen=True)
+class _SpawnedRow:
+    spawned_at: datetime
+
+
+def _statistics_spawned_at(pool: ConnectionPool, agent_id: int) -> datetime:
     """Read the immutable lifecycle origin without loading a live snapshot."""
-    with pool.connection(timeout=1.0) as conn, conn.cursor() as cur:
-        cur.execute("SET LOCAL statement_timeout = '2s'")
-        cur.execute("SELECT spawned_at FROM agents_meta WHERE id = %s", (agent_id,))
-        row = cur.fetchone()
+    with pool.connection(timeout=1.0) as conn:
+        conn.execute("SET LOCAL statement_timeout = '2s'")
+        row = query_one(
+            conn, _SpawnedRow, "SELECT spawned_at FROM agents_meta WHERE id = %s", (agent_id,)
+        )
     if row is None:
         raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
-    return row[0]
+    return row.spawned_at
 
 
 @router.get("/api/agents/{agent_id}/neighbors")
@@ -316,7 +346,7 @@ def get_agent_neighbors(
 
     404: agent_id does not exist (AgentNotFound -> handler returns 404 + reason).
     """
-    with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
+    with gateway_state(request).db_pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT 1 FROM agents_meta WHERE id = %s", (agent_id,))
         if cur.fetchone() is None:
             raise AgentNotFound(f"agent {agent_id} does not exist")
@@ -330,7 +360,7 @@ def get_agent_neighbors(
             root=agent_id,
             max_depth=depth,
             limit=limit,
-            db_pool=request.app.state.db_pool,
+            db_pool=gateway_state(request).db_pool,
             now=gateway_clock(request).now(),
         )
     except QueryCanceled as exc:
@@ -338,7 +368,7 @@ def get_agent_neighbors(
     ids = list({r[0] for r in ranked} | {r[0] for r in ancestors_ranked})
     label_status: dict[int, tuple[str | None, str]] = {}
     if ids:
-        with request.app.state.db_pool.connection() as conn, conn.cursor() as cur:
+        with gateway_state(request).db_pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 SELECT t.id, t.label, m.status
@@ -399,11 +429,11 @@ async def get_agent_plugin_metrics(agent_id: int, request: Request) -> list[Plug
     registry = await asyncio.to_thread(
         _plugin_metrics.load_plugin_metrics,
         SHIPPED_PLUGINS_DIR,
-        enabled_plugin_names(home=request.app.state.gateway_process.home),
+        enabled_plugin_names(home=gateway_state(request).gateway_process.home),
     )
     return await asyncio.to_thread(
         _plugin_metrics.metrics_for_agent,
-        request.app.state.db_pool,
+        gateway_state(request).db_pool,
         agent_id,
         registry=registry,
         clock=gateway_clock(request),
@@ -428,8 +458,8 @@ async def get_agent_inspect_widgets(agent_id: int, request: Request) -> list[Ins
     specs = await asyncio.to_thread(
         _plugin_widgets.load_inspect_widgets,
         SHIPPED_PLUGINS_DIR,
-        enabled_plugin_names(home=request.app.state.gateway_process.home),
+        enabled_plugin_names(home=gateway_state(request).gateway_process.home),
     )
     return await asyncio.to_thread(
-        _plugin_widgets.widgets_for_agent, request.app.state.db_pool, agent_id, specs=specs
+        _plugin_widgets.widgets_for_agent, gateway_state(request).db_pool, agent_id, specs=specs
     )
