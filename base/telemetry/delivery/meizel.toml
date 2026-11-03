@@ -14,5 +14,5 @@ exports = ["defer_plan.py", "loss.py", "mirror.py", "pipeline.py", "receipts.py"
 [debt.ambient-read]
 "loss.py#clock datetime.datetime.now" = { count = 1, owner = "#5816", until = "permanently: a loss report carries the instant the loss happened, stamped where the loss is observed" }
 "mirror.py#clock datetime.datetime.now" = { count = 1, owner = "#5816", until = "permanently: the mirror's retention cutoff is the wall clock at prune time, the same fact as the trace mirror's" }
-"pipeline.py#pid threading.current_thread" = { count = 2, owner = "#8237", until = "unreviewed: recorded by #8237 on 2026-11-03" }
+"pipeline.py#pid threading.current_thread" = { count = 2, owner = "#8237", until = "waits for nothing that can arrive: `EventPipeline.sync` and `EventPipeline.stop` compare the caller against the pipeline's own worker thread to refuse a drain the worker would end up waiting on itself, and which thread is executing the call is a fact only the running thread can report — a caller passing it would be naming itself" }
 "state.py#platform socket.gethostname" = { count = 1, owner = "#5816", until = "permanently: process_state names the mirror's owner by this host's kernel name, and the configured cluster name is a different fact that would mislabel two units on one host" }
