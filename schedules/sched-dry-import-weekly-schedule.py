@@ -76,16 +76,20 @@ def _log(lines: list[str], *, home: Path) -> None:
 
 
 # meiva:note
-# The schedule's own actor sends through the SDK; a bare manual process has none, so the tool's
-# system actor is established first instead of letting the send fail for lack of one.
+# The runner binds this schedule's owner before the script runs, so the send carries that agent as
+# its identity and `schedule:<id>` as its actor. A process with no identity raises on the send, and
+# that is the honest outcome: this script never asserts an identity of its own.
 def _send_sdk(message: str) -> None:
-    from meiva import agent_identity
-
-    try:
-        agent_identity.require_actor()
-    except RuntimeError:
-        agent_identity.establish_actor("system:sched-dry-import")
     meiva.agents.send_message(TARGET_AGENT, message)
+
+
+# meiva:note
+# The CLI fallback's provenance. The runner sets `MEIVA_SCHEDULE_ID`, so the truthful source is
+# `schedule:<id>` -- not a system name this process invents for itself. Without that id there is
+# nothing honest to claim, so the fallback declines instead of sending under a made-up name.
+def _cli_source() -> str | None:
+    raw = os.environ.get("MEIVA_SCHEDULE_ID", "").strip()
+    return "schedule:%s" % raw if raw.isdigit() and int(raw) > 0 else None
 
 
 # meiva:note
@@ -125,7 +129,10 @@ def _notify(
     except Exception as exc:
         print("sdk notify failed: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
     cli = Path(sys.executable).parent / "meiva"
-    if cli.is_file():
+    source = _cli_source()
+    if source is None:
+        print("no MEIVA_SCHEDULE_ID: the CLI fallback has no provenance to claim", file=sys.stderr)
+    elif cli.is_file():
         try:
             proc = subprocess.run(
                 [
@@ -133,7 +140,7 @@ def _notify(
                     "agents",
                     "send",
                     "--source",
-                    "system:sched-dry-import",
+                    source,
                     str(TARGET_AGENT),
                     message,
                 ],
