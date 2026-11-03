@@ -16,6 +16,14 @@ Two resident sequential loops under one `TaskGroup` (`services/wake/schedule_man
 - **`reconcile`** (`manager.py`) — every 5 s.
 - **`requests`** (`requests.py`) — every second, converges each queued `schedule_sync_requests` row to its latest desired revision (adopt a matching live execution; officially reap a predecessor before replacement), then deletes it only if unchanged. A failed reap or uncertain live provenance leaves work queued, for a bounded window (ten minutes of one failure streak), then the manager records the schedule as an error, emits `schedule_convergence_abandoned` and consumes the request. A consumed launch attempt is terminal for that revision, even if its outcome is unknown. See [[gateway/schedules/docs/schedule-convergence.meiva.okf.md]] for transactional receipts and advisory ownership.
 
+## What `schedules.status` answers
+It answers *what the launch/exit path last recorded*, never *whether the process runs*. The manager
+writes it on a launch or a lost session, and the runner writes it when it starts or finishes cleanly;
+but a runner that dies inside its live session records only `last_error` (`engine.record_error`)
+without touching `status`. So `status='running'` beside a non-empty `last_error` is the designed
+shape of "the process died inside a live session", not a contradiction, and no read path may treat
+`status` as a liveness check — the round beats above are the only observable liveness fact.
+
 ## What the two silence reports say
 `report_late_rounds` (`round_progress.py`) answers *the session is live -- is the loop still
 iterating*: it compares the schedule's own heartbeat deadline with the database clock.

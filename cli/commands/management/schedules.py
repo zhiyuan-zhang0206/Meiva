@@ -39,11 +39,20 @@ from cli.database.runtime import runtime_of
 
 _TIMEOUT_S = 15.0
 
+# meiva:note
+# `schedules.status` is the manager's launch/exit bookkeeping, never a liveness answer: the runner
+# records its own death in `last_error` without touching `status` (services/wake/schedule_manager/
+# engine.py `record_error`), so `running` with an error beside it is the designed shape of "the
+# process died inside a live session". The two lines are printed adjacent for that reason, and the
+# status line says what it is, because 2026-11-04 an operator read `running` and a scheduled job
+# that had already died went unattended (task #6163).
+_STATUS_NOTE = "launch/exit record, not a liveness check"
+
 
 # meiva:note
 # One schedule as the gateway lists it, with the fields the CLI prints. `script` is present only
 # on the single-schedule read. Other fields of the answer are ignored.
-class _Schedule(BaseModel):
+class ScheduleRow(BaseModel):
     id: int
     name: str
     command: str | None = None
@@ -67,7 +76,7 @@ class _Run(BaseModel):
     note: str | None
 
 
-_SCHEDULES = TypeAdapter(list[_Schedule])
+_SCHEDULES = TypeAdapter(list[ScheduleRow])
 _RUNS = TypeAdapter(list[_Run])
 
 
@@ -78,11 +87,11 @@ class _LogsView(BaseModel):
     lines: list[str] = []
 
 
-def _schedule(resp: httpx.Response) -> _Schedule:
-    return _Schedule.model_validate_json(resp.content)
+def _schedule(resp: httpx.Response) -> ScheduleRow:
+    return ScheduleRow.model_validate_json(resp.content)
 
 
-def _schedules(resp: httpx.Response) -> list[_Schedule]:
+def _schedules(resp: httpx.Response) -> list[ScheduleRow]:
     return _SCHEDULES.validate_json(resp.content)
 
 
@@ -147,7 +156,7 @@ def cmd_schedules_get(access: GatewayAccess, identifier: str) -> int:
     row = _fetch(access, identifier)
     if row is None:
         return 1
-    _print_schedule(row, with_script=True)
+    print_schedule(row, with_script=True)
     return 0
 
 
@@ -202,7 +211,7 @@ def cmd_schedules_create(
     _die_on_unexpected_error(resp)
     row = _schedule(resp)
     print(f"  ✓ created schedule #{row.id} ({row.name})")
-    _print_schedule(row, with_script=False)
+    print_schedule(row, with_script=False)
     return 0
 
 
@@ -273,7 +282,7 @@ def cmd_schedules_update(
     _die_on_unexpected_error(resp)
     row = _schedule(resp)
     print(f"  ✓ updated schedule #{row.id} ({row.name})")
-    _print_schedule(row, with_script=False)
+    print_schedule(row, with_script=False)
     return 0
 
 
@@ -503,7 +512,7 @@ def _resolve_id(access: GatewayAccess, identifier: str) -> int | None:
     return match.id
 
 
-def _fetch(access: GatewayAccess, identifier: str) -> _Schedule | None:
+def _fetch(access: GatewayAccess, identifier: str) -> ScheduleRow | None:
     """GET one full schedule (with script) by name or id."""
     from base.host.net.http_dial import get as dial_get
 
@@ -544,16 +553,19 @@ def _die_on_unexpected_error(resp: httpx.Response) -> None:
     resp.raise_for_status()
 
 
-def _print_schedule(row: _Schedule, *, with_script: bool) -> None:
-    """Pretty-print a schedule row. `with_script` includes the (potentially
-    large) script body — on for `get`, off for the create/update echo."""
+# meiva:note
+# `with_script` includes the (potentially large) script body -- on for `get`, off for the
+# create/update echo.
+def print_schedule(row: ScheduleRow, *, with_script: bool) -> None:
     print(f"  id:          {row.id}")
     print(f"  name:        {row.name}")
     if row.description:
         print(f"  description: {row.description}")
     print(f"  command:     {row.command}")
     print(f"  enabled:     {row.enabled}")
-    print(f"  status:      {row.status}")
+    print(f"  status:      {row.status}  ({_STATUS_NOTE})")
+    if row.last_error:
+        print(f"  last_error:  {row.last_error.splitlines()[-1]}")
     if row.machine:
         print(f"  machine:     {row.machine}")
     if row.owner_plugin:
@@ -563,8 +575,6 @@ def _print_schedule(row: _Schedule, *, with_script: bool) -> None:
         if row.placement_reason:
             p_str += f" ({row.placement_reason})"
         print(f"  placement:   {p_str}")
-    if row.last_error:
-        print(f"  last_error:  {row.last_error.splitlines()[-1]}")
     if with_script:
         print("  script:")
         for line in (row.script or "").splitlines():

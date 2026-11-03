@@ -33,7 +33,7 @@ The built-in cron slot mechanism — at-most-once claims per `(schedule_id, slot
 
 | status | meaning | reconcile behavior |
 |---|---|---|
-| `running` | manager has launched, session alive | maintain |
+| `running` | manager's last recorded launch (bookkeeping, not liveness) | maintain |
 | `completed` | script exited cleanly with rc=0 (**terminal**) | **no restart**; `start`/`restart` can rerun |
 | `error` | failed, lost or unknown launch/execution outcome | no auto restart; explicit start/restart creates a new revision; the silence alert still applies |
 | `stopped` | disabled / killed by manager | don't restart |
