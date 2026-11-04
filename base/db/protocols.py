@@ -164,11 +164,33 @@ class AsyncQueryResult(Protocol):
 
 
 # meiva:note
-# Minimal asynchronous database connection contract for awaiting a query result.
+# Minimal asynchronous database cursor contract: statement execution and row retrieval, with the row type
+# the cursor's row factory builds.
+class AsyncCursor[RowT](Protocol):
+    def execute(
+        self, query: LiteralString, params: Sequence[object] | Mapping[str, object] | None = None
+    ) -> Awaitable[AsyncCursor[RowT]]: ...
+
+    def fetchall(self) -> Awaitable[list[RowT]]: ...
+
+    def fetchone(self) -> Awaitable[RowT | None]: ...
+
+
+# meiva:note
+# Minimal asynchronous database connection contract for awaiting a query result, and for opening a cursor
+# whose rows a row factory (`psycopg.rows.class_row(RowCls)`) builds as typed objects.
 class AsyncConnectionLike(Protocol):
     def execute(
         self, query: LiteralString, params: Sequence[object] | Mapping[str, object] | None = None
     ) -> Awaitable[AsyncQueryResult]: ...
+
+    @overload
+    def cursor(self) -> AbstractAsyncContextManager[AsyncCursor[tuple[object, ...]]]: ...
+
+    @overload
+    def cursor[RowT](
+        self, *, row_factory: Callable[..., Callable[..., RowT]]
+    ) -> AbstractAsyncContextManager[AsyncCursor[RowT]]: ...
 
     def transaction(self) -> AbstractAsyncContextManager[object]: ...
 

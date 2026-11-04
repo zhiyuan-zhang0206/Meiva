@@ -179,6 +179,9 @@ class _RecordedConnection:
 
         return Cursor()
 
+    def cursor(self, **_kwargs: object) -> Any:
+        raise AssertionError("the move is one statement and opens no cursor")
+
     def transaction(self) -> Any:
         raise AssertionError("the move is one statement and needs no savepoint")
 

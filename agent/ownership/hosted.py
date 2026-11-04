@@ -10,6 +10,7 @@ from typing import assert_never
 from uuid import UUID
 
 from loguru import logger
+from psycopg.rows import class_row
 
 from agent.ownership.audit_payloads import (
     AdoptedLease,
@@ -41,6 +42,7 @@ from base.agents.impersonation.replacement import (
     end_for_replacement,
 )
 from base.db.protocols import AsyncConnectionLike, AsyncPool, DatabaseLike
+from base.db.rows import IdRow
 from base.db.transaction import async_write_transaction
 from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
@@ -604,20 +606,16 @@ async def settle_and_stamp_turn(
 # (one host per machine and home), so each becomes idling. The next wake admits
 # it under the new boot. This is the only place a stale row is settled.
 async def settle_running_rows_at_start(pool: AsyncPool, machine: str) -> list[int]:
-    async with async_write_transaction(pool) as conn:
-        rows = await (
-            await conn.execute(
-                "UPDATE agents_meta SET status = 'idling' "
-                "WHERE status = 'running' AND machine = %s RETURNING id",
-                (machine,),
-            )
-        ).fetchall()
-    settled: list[int] = []
-    for row in rows:
-        agent_id = row[0]
-        if not isinstance(agent_id, int):
-            raise TypeError(f"the settle statement returned a non-integer id: {agent_id!r}")
-        settled.append(agent_id)
+    async with (
+        async_write_transaction(pool) as conn,
+        conn.cursor(row_factory=class_row(IdRow)) as cur,
+    ):
+        await cur.execute(
+            "UPDATE agents_meta SET status = 'idling' "
+            "WHERE status = 'running' AND machine = %s RETURNING id",
+            (machine,),
+        )
+        settled = [row.id for row in await cur.fetchall()]
     if settled:
         logger.info(
             "hosted start: settled {n} running row(s) {ids}",

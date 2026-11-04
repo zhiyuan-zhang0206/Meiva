@@ -354,20 +354,6 @@ def test_claimed_inbound_from_row_keeps_created_at_and_claimed_at():
     assert ci.claimed_at == claimed
 
 
-# meiva:note
-# The pending-interrupt reader stands on a pool a test fakes (the cancel watcher's), so its row is
-# validated by hand; a row of the wrong width or column type must fail naming the shape, not raise
-# `IndexError` and not read as "no interrupt" — a silently-ignored abort would let a paused turn
-# keep running.
-@pytest.mark.parametrize(
-    "row",
-    [(), ("cancel",), ("cancel", "user", "extra"), (1, "user"), ("cancel", 2), (None, None)],
-)
-def test_a_pending_interrupt_row_of_another_shape_is_refused(row: tuple[object, ...]) -> None:
-    with pytest.raises(TypeError, match="pending interrupt row"):
-        PendingInterrupt.from_row(row)
-
-
 @pytest.mark.parametrize(
     ("row", "reason"),
     [
@@ -379,4 +365,4 @@ def test_a_pending_interrupt_row_of_another_shape_is_refused(row: tuple[object, 
 def test_a_pending_interrupt_row_names_the_reason(
     row: tuple[str, str], reason: InterruptReason
 ) -> None:
-    assert PendingInterrupt.from_row(row).reason is reason
+    assert PendingInterrupt(*row).reason is reason

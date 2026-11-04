@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Final, LiteralString
 
 import psycopg
+from psycopg.rows import class_row
 from psycopg_pool import AsyncConnectionPool
 
 from base.db.protocols import AsyncConnectionLike, AsyncPool
@@ -122,6 +123,15 @@ async def _operator_restart_waiting(conn: AsyncConnectionLike, agent_id: int) ->
 
 
 # meiva:note
+# The two facts `admit_pending_wake` reads from the locked agent row: the permanent-reject streak, and
+# whether an operator restart or terminate is already claimed.
+@dataclass(frozen=True)
+class _HaltRow:
+    permanent_reject_streak: int
+    operator_restart_claimed: bool
+
+
+# meiva:note
 # Keep background inputs halted; a fresh peer/user chat or an operator restart can retry.
 #
 # The grant does not clear the streak: only a turn that actually makes progress does
@@ -129,20 +139,21 @@ async def _operator_restart_waiting(conn: AsyncConnectionLike, agent_id: int) ->
 # the halt ends when the model works again, not when someone pokes it.
 async def admit_pending_wake(pool: AsyncPool, agent_id: int) -> bool:
     async with async_write_transaction(pool) as conn:
-        row = await (
-            await conn.execute(
+        async with conn.cursor(row_factory=class_row(_HaltRow)) as cur:
+            await cur.execute(
                 "SELECT permanent_reject_streak,EXISTS (SELECT 1 FROM inbound_messages "
                 "WHERE agent_id=agents_meta.id AND kind IN ('restart','terminate') "
-                "AND status='claimed') FROM agents_meta WHERE id=%s FOR UPDATE",
+                "AND status='claimed') AS operator_restart_claimed "
+                "FROM agents_meta WHERE id=%s FOR UPDATE",
                 (agent_id,),
             )
-        ).fetchone()
+            row = await cur.fetchone()
         if row is None:
             return False
-        streak, operator_restart_claimed = row
-        if not isinstance(streak, int):
-            raise TypeError(f"permanent_reject_streak is not an integer: {streak!r}")
-        if streak < HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS or operator_restart_claimed:
+        if (
+            row.permanent_reject_streak < HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
+            or row.operator_restart_claimed
+        ):
             return True
         if await _operator_restart_waiting(conn, agent_id):
             return True
