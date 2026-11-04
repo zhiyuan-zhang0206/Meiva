@@ -36,7 +36,7 @@ When `meizel` reports an `impure-call` inside a module that should be `"strict"`
 
 ### 3. Ambient process reads (`ambient-read`)
 
-When code reads `settings`, `os.environ`, the command line (`sys.argv`), the clock (`time.time`, `datetime.now`), paths (`resolve_meiva_home`, `Path.home`, `Path.cwd`), platform/process facts (`sys.platform`, `os.getpid`, `sys.executable`), randomness (`uuid.uuid4`, `secrets`), or process-global DB/Redis/endpoint handles ([`ambient-read`](../../../meizel/docs/checker/ambient.meiva.okf.md)):
+When code reads `settings`, `os.environ`, the command line (`sys.argv`), the clock (`time.time`, `datetime.now`), an interval clock (`time.monotonic`, `perf_counter`), paths (`resolve_meiva_home`, `Path.home`, `Path.cwd`), platform/process facts (`sys.platform`, `os.getpid`, `sys.executable`), randomness (`uuid.uuid4`, `secrets`), or process-global DB/Redis/endpoint handles ([`ambient-read`](../../../meizel/docs/checker/ambient.meiva.okf.md)):
 
 - **Lift the read to the composition root** (`wiring.py`, `daemon.py`, `app.py`, `CommandRuntime.create()`) that already owns `[roots]` in `meizel.toml`.
 - **Pass a value or a frozen config dataclass down.** At a component boundary, pass a frozen `XxxConfig` containing only the fields that component reads; inside the component, pass plain values (`now: datetime`, `home: Path`, `timeout_s: float`).
@@ -51,6 +51,17 @@ When code reads `settings`, `os.environ`, the command line (`sys.argv`), the clo
   call graph: `python -m meizel debt diff --against <base>` on the branch and on the unmodified
   tree. The entry must disappear; a `+1` on the file that now holds the read is a relocation,
   and the change is reverted rather than reviewed.
+- **The duration is not the instant, and the two kinds cover in one direction only.**
+  `time.monotonic` and its family acquire `monotonic`; `time.time` and `datetime.now`
+  acquire `clock`. A `[roots]` entry for `clock` also allows `monotonic`, because a
+  duration says less about the world than the instant the same file already reads: it
+  orders events inside one process and is compared with deadlines that process wrote
+  itself. The reverse does not hold — a file that declares only `monotonic` (a poll loop
+  timing a wait) still fails on `time.time()` and `datetime.now()` — and it is the
+  reverse that the second kind exists for. Making the coverage symmetric, or folding
+  `monotonic` back into `clock`, silently licenses the wall clock at every site that only
+  times a wait; that is the failure this pair prevents, so change it in
+  `meizel/contracts/ambient_read.py` (`_COVERED`) only with the red case in hand.
 - **Wrapping a read in a function does not move it.** A repository function that returns what the world decides (`meiva_home()`, `process_environment()` and the like) is listed under `[ambient-readers.<kind>]` in `meizel.policy.toml`, and a call to it is a read of that kind at the call site ([readers](../../../meizel/docs/checker/ambient-readers.meiva.okf.md)).
 - **Never add an ambient fallback in the callee** (`env: Mapping[str, str] | None = None` that falls back to `os.environ`, or `now: datetime | None = None` that calls `datetime.now()`). Defaults on parameters are reserved for pure constants and tuning numbers.
 

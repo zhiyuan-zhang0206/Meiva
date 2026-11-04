@@ -310,7 +310,7 @@ class AmbientRecorder:
 
     def _interval(self, line: int, target: str) -> None:
         if self._reads:
-            self._reads[-1].append(Acquisition(line, AmbientKind.CLOCK, target))
+            self._reads[-1].append(Acquisition(line, AmbientKind.MONOTONIC, target))
 
     # meiva:note
     # Whether `expr` is built from values of the function's own caller (its parameters and what is
@@ -436,7 +436,7 @@ class AmbientRecorder:
             if frame.sleeps or waiting.intersection(frame.calls):
                 self.items.extend(frame.reads)
                 self.items.extend(
-                    Acquisition(line, AmbientKind.CLOCK, f"{name}()")
+                    Acquisition(line, AmbientKind.MONOTONIC, f"{name}()")
                     for name, line in frame.calls.items()
                     if name in clocks
                 )

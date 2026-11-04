@@ -5,10 +5,10 @@ exports = ["client.py", "grants", "wire.py"]
 "client_stateful.py" = ["wire.py"]
 "grants" = ["client.py", "wire.py"]
 
+[roots]
+"client.py" = { kinds = ["monotonic"], why = "_ping_within() times a wait on the helper's socket and not an event: it compares `clock() < deadline` against a deadline it wrote itself and never records the value, so a duration read here has no better provider. The kind is the narrow one; `time.time()` or `datetime.now()` in this file still fails" }
+
 [purity]
 "__init__.py" = "strict"
 "client_stateful.py" = "strict"
 "wire.py" = "strict"
-
-[debt.ambient-read]
-"client.py#clock time.monotonic" = { count = 1, owner = "#5816", until = "permanently: _ping_within() defaults to time.monotonic for a deadline against the helper's socket, the same duration source its callers cannot improve on" }

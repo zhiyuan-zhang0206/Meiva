@@ -15,6 +15,7 @@ exports = ["child_env.py", "code_version.py", "evidence.py", "exec_domain.py", "
 
 [roots]
 "child_env.py" = { kinds = ["environ"], why = "centralized process-protocol seam: copies the complete live env, consumes one-shot markers, and adopts a child's committed handoff; Settings cannot model dynamic per-process state" }
+"os_platform.py" = { kinds = ["monotonic"], why = "_monotonic() reports a duration, not an instant: `_bounded_file_lock` polls a non-blocking take and compares `now >= deadline` against a deadline it wrote itself, and never records the value. The kind is the narrow one, so `time.time()` or `datetime.now()` here still fails; the lock call sites keep taking no clock, because a duration compared with a deadline this process chose has no better provider above it" }
 
 [purity]
 "evidence.py" = "strict"
@@ -22,14 +23,8 @@ exports = ["child_env.py", "code_version.py", "evidence.py", "exec_domain.py", "
 "stop_timing.py" = "strict"
 "untyped.py" = "strict"
 
-# meiva:note
-# `os_platform.py#clock _monotonic()` is a duration source, not a wall-clock moment: it only compares
-# `now >= deadline` inside `_bounded_file_lock` and never records the value. The read stays, and the
-# entry stays booked because the checker has no duration class to book it as — recorded here so the
-# next reader does not "repay" it by threading a clock through 57 lock call sites.
 [debt.ambient-read]
 "kernel_identity.py#environ ctypes.util.find_library" = { count = 1, owner = "#5816", until = "waits for `_darwin_boot_session_uuid` to take the loaded libc from its caller: it asks the library search path (LD_LIBRARY_PATH, PATH) for libc itself" }
-"os_platform.py#clock _monotonic()" = { count = 1, owner = "#5816", until = "waits for the checker to have a duration class: the value only answers now >= deadline inside the file-lock loop and is never recorded, and threading a clock through every lock call site would make each lock a caller decision" }
 "os_platform.py#pid os.getpid" = { count = 1, owner = "#5816", until = "waits for nothing that can arrive: the pid this module reports is the one the platform assigned to the running process, and a caller handing in its own pid restates the same syscall while being unable to answer for another process" }
 "os_platform.py#pid resource.getrlimit" = { count = 1, owner = "#5816", until = "waits for nothing that can arrive: `raise_fd_limit` compares the `desired` ceiling against the soft and hard limits this process inherited, and the soft limit is the one number a launcher cannot supply — it is whatever the parent left behind, which only the kernel can answer for this process" }
 "os_platform.py#pid sys.executable" = { count = 1, owner = "#5816", until = "waits for nothing that can arrive: `Platform.current` records the interpreter binary this process runs on beside the platform it runs on, and a caller can only supply the path it was itself started with, which is the path this read returns" }

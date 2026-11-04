@@ -29,7 +29,9 @@ __all__ = [
 # What reading a name is, and why: no `kinds` is "not an ambient read". A call that reads several
 # channels (`email.utils.make_msgid` the clock, the process id, entropy and the host name) lists
 # every one of them, and each is acquired at the call. An `unless` clause spares the call as a
-# whole, so it is written only where the parameter spares every kind the entry lists.
+# whole, so it is written only where the parameter spares every kind the entry lists. `interval`
+# marks a name that reports a duration rather than an instant: its judgment is the duration kind and
+# nothing else, because how far apart two readings are is the one fact the flag is about.
 @dataclass(frozen=True, slots=True)
 class Judgment:
     kinds: tuple[AmbientKind, ...]
@@ -40,8 +42,8 @@ class Judgment:
     def __post_init__(self) -> None:
         if len(set(self.kinds)) != len(self.kinds):
             raise ValueError(f"a kind is listed twice in {self.kinds!r}")
-        if self.interval and self.kinds != (AmbientKind.CLOCK,):
-            raise ValueError("an interval clock reads the clock and nothing else")
+        if self.interval and self.kinds != (AmbientKind.MONOTONIC,):
+            raise ValueError("an interval clock reads the duration and nothing else")
         if self.unless is not None and not self.kinds:
             raise ValueError("an `unless` clause spares a read, and this name reads nothing")
 

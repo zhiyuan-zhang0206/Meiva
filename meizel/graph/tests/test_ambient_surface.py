@@ -324,7 +324,6 @@ _READS: dict[AmbientKind, list[str]] = {
             "email.utils.localtime",
             "email.utils.make_msgid",
             "email.utils.mktime_tz",
-            "os.times",
             "time.altzone",
             "time.asctime",
             "time.clock_gettime",
@@ -334,15 +333,7 @@ _READS: dict[AmbientKind, list[str]] = {
             "time.gmtime",
             "time.localtime",
             "time.mktime",
-            "time.monotonic",
-            "time.monotonic_ns",
-            "time.perf_counter",
-            "time.perf_counter_ns",
-            "time.process_time",
-            "time.process_time_ns",
             "time.strftime",
-            "time.thread_time",
-            "time.thread_time_ns",
             "time.time",
             "time.time_ns",
             "time.timezone",
@@ -351,6 +342,19 @@ _READS: dict[AmbientKind, list[str]] = {
             "uuid.uuid1",
             "uuid.uuid6",
             "uuid.uuid7",
+        ]
+    ),
+    AmbientKind.MONOTONIC: (
+        [
+            "os.times",
+            "time.monotonic",
+            "time.monotonic_ns",
+            "time.perf_counter",
+            "time.perf_counter_ns",
+            "time.process_time",
+            "time.process_time_ns",
+            "time.thread_time",
+            "time.thread_time_ns",
         ]
     ),
     AmbientKind.HOME: (
@@ -679,6 +683,8 @@ def test_a_judgment_that_lists_a_kind_twice_or_reads_nothing_under_a_clause_is_r
         g("time", "time", None, "a clause on a name that reads nothing", unless=later(0, "x"))
     with pytest.raises(ValueError, match="nothing else"):
         g("time", "time", (AmbientKind.CLOCK, AmbientKind.PID), "two kinds", interval=True)
+    with pytest.raises(ValueError, match="nothing else"):
+        g("time", "time", AmbientKind.CLOCK, "the wall clock is not a duration", interval=True)
 
 
 @pytest.mark.parametrize("dotted", _NOT_READS)
@@ -749,6 +755,17 @@ def test_only_an_unjudged_member_of_a_channel_module_is_unjudged(
 def test_the_interval_clocks_are_the_judged_names_that_say_so() -> None:
     assert {"time.monotonic", "time.perf_counter_ns", "time.process_time"} <= INTERVAL_CLOCKS
     assert "time.time" not in INTERVAL_CLOCKS
+
+
+def test_an_interval_clock_is_a_duration_and_the_wall_clock_is_an_instant() -> None:
+    judged_monotonic = judged("time.monotonic")
+    judged_wall = judged("time.time")
+    assert judged_monotonic is not None and judged_wall is not None
+    assert judged_monotonic.judgment.kinds == (AmbientKind.MONOTONIC,)
+    assert judged_wall.judgment.kinds == (AmbientKind.CLOCK,)
+    judged_times = judged("os.times")
+    assert judged_times is not None
+    assert judged_times.judgment.kinds == (AmbientKind.MONOTONIC,)
 
 
 def test_a_method_read_names_a_kind_and_a_target() -> None:

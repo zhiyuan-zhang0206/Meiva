@@ -763,7 +763,8 @@ _TOP_LEVEL = frozenset(module.split(".")[0] for module in CHANNEL_MODULES) | {
 # The interval clocks: reading one for a deadline, a duration or a TTL is the plain use of `time`
 # that the conventions allow in code no test needs to steer; the read is a decision worth a root
 # only where the same function also waits, because then how long to wait next is decided in a loop.
-# The wall clock is always a window onto the world.
+# Their kind is `monotonic`, never `clock`: a duration is not an instant, and a file allowed the
+# first has not been allowed the second. The wall clock is always a window onto the world.
 INTERVAL_CLOCKS = frozenset(name for name, judgment in _index()[0].items() if judgment.interval)
 
 # meiva:note

@@ -113,12 +113,12 @@ def test_a_seeded_generator_a_value_or_a_look_alike_is_not(
         ("import time\n\nDEADLINE = time.monotonic()\n", []),
         (
             "import time\n\ndef f():\n    time.sleep(1)\n    return time.monotonic()\n",
-            [("clock", "time.monotonic")],
+            [("monotonic", "time.monotonic")],
         ),
         (
             "import asyncio\nimport time\n\nasync def f():\n    await asyncio.sleep(1)\n"
             "    return time.perf_counter()\n",
-            [("clock", "time.perf_counter")],
+            [("monotonic", "time.perf_counter")],
         ),
         (
             "import time\n\ndef f():\n    def inner():\n        time.sleep(1)\n    return time.monotonic()\n",
@@ -240,21 +240,21 @@ def test_a_path_the_function_builds_itself_still_reads_the_home(
         (
             "import time\n\ndef _pause():\n    time.sleep(1)\n\n\ndef f():\n    _pause()\n"
             "    return time.monotonic()\n",
-            [("clock", "time.monotonic")],
+            [("monotonic", "time.monotonic")],
         ),
         (
             "import time\n\ndef _inner():\n    time.sleep(1)\n\n\ndef _outer():\n    _inner()\n\n\n"
             "def f():\n    _outer()\n    return time.monotonic()\n",
-            [("clock", "time.monotonic")],
+            [("monotonic", "time.monotonic")],
         ),
         (
             "import time\nfrom lib.backoff import retry_sleep\n\ndef f(n):\n    retry_sleep(n)\n"
             "    return time.monotonic()\n",
-            [("clock", "time.monotonic")],
+            [("monotonic", "time.monotonic")],
         ),
         (
             "import time\n\nasync def f(timers):\n    await timers.asleep(1)\n    return time.monotonic()\n",
-            [("clock", "time.monotonic")],
+            [("monotonic", "time.monotonic")],
         ),
         (
             "import time\n\ndef _pause():\n    time.sleep(1)\n\n\ndef f():\n    return time.monotonic()\n",
@@ -263,7 +263,7 @@ def test_a_path_the_function_builds_itself_still_reads_the_home(
         (
             "import time\n\ndef _monotonic():\n    return time.monotonic()\n\n\n"
             "def wait():\n    time.sleep(1)\n    return _monotonic()\n",
-            [("clock", "_monotonic()")],
+            [("monotonic", "_monotonic()")],
         ),
         (
             "import time\n\ndef _monotonic():\n    return time.monotonic()\n\n\n"
@@ -273,11 +273,11 @@ def test_a_path_the_function_builds_itself_still_reads_the_home(
         (
             "import asyncio\n\nasync def f():\n    await asyncio.sleep(1)\n"
             "    return asyncio.get_running_loop().time()\n",
-            [("clock", "asyncio.loop.time")],
+            [("monotonic", "asyncio.loop.time")],
         ),
         (
             "import asyncio\n\nasync def f(loop):\n    await asyncio.sleep(1)\n    return loop.time()\n",
-            [("clock", "asyncio.loop.time")],
+            [("monotonic", "asyncio.loop.time")],
         ),
         ("import asyncio\n\nasync def f():\n    return asyncio.get_running_loop().time()\n", []),
         (
@@ -290,12 +290,12 @@ def test_a_path_the_function_builds_itself_still_reads_the_home(
         ),
         (
             "import time\n\nasync def f(timers):\n    await timers.Sleep(1)\n    return time.monotonic()\n",
-            [("clock", "time.monotonic")],
+            [("monotonic", "time.monotonic")],
         ),
         (
             "import time\n\ndef monotonic():\n    return time.monotonic()\n\n\n"
             "def wait():\n    time.sleep(1)\n    return monotonic()\n",
-            [("clock", "monotonic()")],
+            [("monotonic", "monotonic()")],
         ),
         (
             "import time\n\ndef _scaled(factor):\n    return time.monotonic()\n\n\n"
@@ -315,11 +315,11 @@ def test_a_path_the_function_builds_itself_still_reads_the_home(
         (
             "import asyncio\n\nasync def f(event_loop):\n    await asyncio.sleep(1)\n"
             "    return event_loop.time()\n",
-            [("clock", "asyncio.loop.time")],
+            [("monotonic", "asyncio.loop.time")],
         ),
         (
             "import asyncio\n\nasync def f(_loop):\n    await asyncio.sleep(1)\n    return _loop.time()\n",
-            [("clock", "asyncio.loop.time")],
+            [("monotonic", "asyncio.loop.time")],
         ),
         (
             "import asyncio\n\nasync def f(loop):\n    await asyncio.sleep(1)\n    return loop.time(1)\n",
@@ -449,6 +449,34 @@ def test_a_declared_root_may_read_its_kinds_and_only_those(make_repo: RepoFactor
     source = "import os\nfrom cfg import settings\n\nx = os.environ['A']\ny = settings.a\n"
     _, sites = read_sites(make_repo, source, manifest)
     assert [d.debt.key for d in sites if d.debt] == ["mod.py#settings cfg.settings"]
+
+
+TIMES_A_WAIT = "import time\n\ndef wait():\n    time.sleep(1)\n    return time.monotonic()\n"
+STAMPS_A_WAIT = "import time\n\ndef wait():\n    time.sleep(1)\n    return time.time()\n"
+
+
+# meiva:note
+# The two clock kinds cover in one direction: a root declared for the duration licenses the wait and
+# nothing else, so the instant beside it is still a read to pay for and the declaration goes stale,
+# while a root declared for the instant licenses the wait too, because a duration says less than the
+# clock it is measured on.
+@pytest.mark.parametrize(
+    ("kinds", "source", "key", "stale"),
+    [
+        ("monotonic", TIMES_A_WAIT, None, False),
+        ("monotonic", STAMPS_A_WAIT, "mod.py#clock time.time", True),
+        ("clock", TIMES_A_WAIT, None, False),
+    ],
+)
+def test_a_duration_root_licenses_the_wait_and_the_instant_root_licenses_both(
+    make_repo: RepoFactory, kinds: str, source: str, key: str | None, stale: bool
+) -> None:
+    manifest = f'[roots]\n"mod.py" = {{ kinds = ["{kinds}"], why = "w" }}\n'
+    root, sites = read_sites(make_repo, source, manifest)
+    assert [d.debt.key for d in sites if d.debt] == ([key] if key else [])
+    assert [d.path for d in diagnostics(root, "stale-root")] == (
+        ["app/meizel.toml"] if stale else []
+    )
 
 
 def test_a_root_may_say_why(make_repo: RepoFactory) -> None:
