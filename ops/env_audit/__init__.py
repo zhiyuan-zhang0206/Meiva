@@ -93,7 +93,7 @@ def env_key_names(env_path: Path) -> list[str]:
 # Only declarations are read, never runtime values or panel metadata, so the projection works
 # in a process that has no settings image yet.
 def load_alias_metadata() -> dict[str, AliasMeta]:
-    from base.config.config_registry import field_alias, fields, schema_extra
+    from base.config.config_registry import field_alias, fields, schema_extra, scope_of
 
     declarations: list[FieldDeclaration] = []
     for name, ref in fields().items():
@@ -102,7 +102,7 @@ def load_alias_metadata() -> dict[str, AliasMeta]:
             FieldDeclaration(
                 name=name,
                 alias=field_alias(name),
-                scope=extra["scope"],
+                scope=scope_of(extra),
                 sensitive=extra.get("sensitive", False),
             )
         )

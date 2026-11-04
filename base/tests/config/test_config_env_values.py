@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from base import config
 from base.config.service_read import ConfigAuthority
+from base.host.boundary.json_values import is_object_list
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 
@@ -115,7 +116,9 @@ def test_current_field_values_decodes_nodecode_comma_list_without_warning(
 
     assert values["im_disabled_adapters"] == ["weixin", "feishu"]
     assert values["im_send_retry_delays"] == [0.5, 1.0]
-    assert all(isinstance(delay, float) for delay in values["im_send_retry_delays"])
+    delays = values["im_send_retry_delays"]
+    assert is_object_list(delays)
+    assert all(isinstance(delay, float) for delay in delays)
     assert rec.warnings == []
 
 

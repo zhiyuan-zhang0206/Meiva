@@ -167,12 +167,16 @@ from base.config.config_registry import (
 from base.config.config_registry import (
     schema_extra as schema_extra,
 )
+from base.config.config_registry import (
+    scope_of as scope_of,
+)
 from base.config.profiles import (
     PROCESS_PROFILES as PROCESS_PROFILES,
 )
 from base.config.profiles import (
     PROFILE_UNSET as PROFILE_UNSET,
 )
+from base.host.boundary.untyped import object_mapping
 from base.host.env.bootstrap import (
     CONFIG_FETCH_ENV as CONFIG_FETCH_ENV,
 )
@@ -494,7 +498,7 @@ def __getattr__(name: str) -> object:
     if not _lite.maybe_upgrade(f"module attribute {name!r}"):
         raise AttributeError(_lite.build_window_message(f"module attribute {name!r}"))
     try:
-        return globals()[name]
+        return object_mapping(globals())[name]
     except KeyError:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
 

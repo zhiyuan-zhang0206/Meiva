@@ -17,8 +17,8 @@ exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains",
 
 [uses]
 "__init__.py" = ["_full.py", "_lite.py", "admin", "agent_pins.py", "config_registry.py", "profiles.py", "service_read.py"]
-"_full.py" = ["admin", "agent_pins.py", "config_registry.py", "domains", "profiles.py", "service_read.py"]
-"_lite.py" = ["_full.py", "config_registry.py", "domain_shape.py", "lite_parse.py", "profiles.py"]
+"_full.py" = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains", "profiles.py", "service_read.py"]
+"_lite.py" = ["_full.py", "config_registry.py", "domain_shape.py", "lite_access.py", "lite_parse.py", "profiles.py"]
 "admin" = ["config_registry.py"]
 "agent_pins.py" = ["config_registry.py"]
 "config_registry.py" = ["domains", "profiles.py"]
@@ -40,10 +40,6 @@ exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains",
 "_lite.py#home base.paths.home.resolve_meiva_home" = { count = 2, owner = "#5816", until = "permanently: read_process_environment() loads the unit .env from the process's own home and prepare() resolves that home before any caller holds it" }
 "_lite.py#pid threading.get_ident" = { count = 3, owner = "#5816", until = "permanently: the build gate compares the calling thread with the thread that owns the in-flight eager build, and a thread id handed in would let a caller claim to be the builder" }
 "base.py#home base.paths.home.resolve_meiva_home" = { count = 1, owner = "#5816", until = "permanently: unit_home() is this module's statement of which home its sub-models default under, and it is the place that answers the question" }
-
-[debt.any-collaborator]
-"_lite.py#any ConfigBoot.get_field.return" = { count = 1, owner = "#6018", until = "waits for a typed reflective accessor (a per-field accessor table, or a get_field a caller binds to a TypeVar): the leaf type is known only at the call site, so replacing Any with object here turns every int(get_field(...)) at the port and health maps into int(object), and typing.cast is forbidden by the type-cast ratchet" }
-"_lite.py#any get_field.return" = { count = 1, owner = "#6018", until = "waits for a typed reflective accessor (a per-field accessor table, or a get_field a caller binds to a TypeVar): this is the module-level door onto ConfigBoot.get_field, so it exits with that entry and on the same seam" }
 
 [debt.impure-edge]
 "base.py#base/paths/home.py" = { count = 1, owner = "#7240", until = "permanently: unit_home() is a pydantic default_factory that runs while a sub-model is constructed, before any settings object exists to carry the home — the home is the input that locates the .env the settings are built from, which is the same boundary base/paths declares with [roots] kinds=[environ, home]" }

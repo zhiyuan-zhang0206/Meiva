@@ -30,7 +30,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from functools import lru_cache
-from typing import Any
+
+from pydantic import BaseModel
 
 from base.api_contracts.config import Capability as Capability
 from base.config.profiles import (
@@ -64,6 +65,9 @@ from base.config.profiles import (
     schema_extra as schema_extra,
 )
 from base.config.profiles import (
+    scope_of as scope_of,
+)
+from base.config.profiles import (
     validate_field_metadata,
 )
 
@@ -92,7 +96,7 @@ DOMAIN_ATTRS = frozenset(attr for attr, _label, _model, _cap in DOMAIN_MODELS)
 
 # meiva:note
 # The sub-model class behind each `DOMAIN_MODELS` name.
-def _model_classes() -> dict[str, Any]:
+def _model_classes() -> dict[str, type[BaseModel]]:
     from base.config.domains.agent.settings import AgentSettings
     from base.config.domains.channels.feishu import FeishuSettings
     from base.config.domains.channels.telegram import TelegramSettings
@@ -134,7 +138,7 @@ def _model_classes() -> dict[str, Any]:
 
 # meiva:note
 # Resolve registry class metadata without constructing any Settings.
-def _domain_model_classes() -> dict[str, type[Any]]:
+def _domain_model_classes() -> dict[str, type[BaseModel]]:
     classes = _model_classes()
     return {
         attr: classes[model] if isinstance(model, str) else classes[attr]
@@ -145,13 +149,27 @@ def _domain_model_classes() -> dict[str, type[Any]]:
 domain_model_classes = _domain_model_classes
 
 
+# meiva:note
+# The pydantic field table of one sub-model: a `BaseModel` subclass (the real domain classes and a
+# test's synthetic one) or an object that exposes `model_fields` itself. Any other class is not a
+# model and is refused here, where it names itself, instead of failing on a missing attribute.
+def _model_fields(model: type[object] | _DomainModelLike) -> Mapping[str, _FieldInfoLike]:
+    if isinstance(model, type):
+        from pydantic import BaseModel
+
+        if not issubclass(model, BaseModel):
+            raise TypeError(f"config sub-model {model.__qualname__!r} is not a pydantic model")
+        return model.model_fields
+    return model.model_fields
+
+
 def validate_domain_models(
     domain_models: tuple[tuple[str, str, str | type[object] | _DomainModelLike, str], ...],
 ) -> dict[str, _FieldRef]:
     reg: dict[str, _FieldRef] = {}
     for attr, label, model_name, default_capability in domain_models:
-        model: Any = _model_classes()[model_name] if isinstance(model_name, str) else model_name
-        fields_map: Mapping[str, _FieldInfoLike] = model.model_fields
+        model = _model_classes()[model_name] if isinstance(model_name, str) else model_name
+        fields_map = _model_fields(model)
         for name, info in fields_map.items():
             if name in reg:
                 raise RuntimeError(

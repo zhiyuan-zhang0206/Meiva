@@ -16,12 +16,19 @@ from collections.abc import Callable, Generator, Mapping, MutableMapping
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from threading import RLock, get_ident
-from typing import Any, Protocol
 
 from base.config.config_registry import DOMAIN_ATTRS
 from base.config.domain_shape import SettingsDomains
+from base.config.lite_access import (
+    BootState,
+    EagerSettings,
+    InstalledBundle,
+    explicitly_provided,
+    is_eager_settings,
+)
 from base.config.lite_parse import parse_field
 from base.config.profiles import PROCESS_PROFILES, profile_domain_error
+from base.host.boundary.untyped import object_of
 from base.host.env.boot_actions import apply_process_timezone
 from base.host.env.boot_policy import BootstrapFetch
 from base.host.env.bootstrap import (
@@ -77,23 +84,6 @@ BUILD_WAIT_TIMEOUT_SECONDS = 30.0
 _LITE_REDIS_URL = "redis://config-lite@127.0.0.1:1/0"
 
 
-class EagerSettings(Protocol):
-    @property
-    def profile(self) -> str | None: ...
-
-    env_boot: EnvBootResult
-
-    def has_domain(self, name: str) -> bool: ...
-
-
-class _InstalledBundle(Protocol):
-    @property
-    def settings(self) -> EagerSettings: ...
-
-    @property
-    def exports(self) -> Mapping[str, object]: ...
-
-
 def _default_value(owner: ConfigBoot, name: str, default_kind: str, literal: object) -> object:
     """The field's default, per the named default kind recorded in the table."""
     if default_kind == "literal":
@@ -130,7 +120,9 @@ class _DomainView:
     def __getattr__(self, name: str) -> object:
         domain = self._domain
         if self._owner.mode == _FULL:
-            return getattr(getattr(self._owner._current_settings(), domain), name)
+            return object_of(
+                getattr, object_of(getattr, self._owner._current_settings(), domain), name
+            )
         if name in self._owner.pending and FIELD_DOMAINS.get(name) == domain:
             return self._owner.pending[name]
         row = LITE_FIELDS.get(name)
@@ -140,13 +132,13 @@ class _DomainView:
             raise AttributeError(name)
         if not self._owner._maybe_upgrade(f"settings.{domain}.{name}"):
             raise AttributeError(build_window_message(f"settings.{domain}.{name}"))
-        return getattr(getattr(self._owner._current_settings(), domain), name)
+        return object_of(getattr, object_of(getattr, self._owner._current_settings(), domain), name)
 
     def __setattr__(self, name: str, value: object) -> None:
-        domain = object.__getattribute__(self, "_domain")
+        domain = self._domain
         if self._owner.mode != _FULL:
             self._owner.upgrade(f"settings.{domain}.{name} assignment")
-        setattr(getattr(self._owner._current_settings(), domain), name, value)
+        setattr(object_of(getattr, self._owner._current_settings(), domain), name, value)
 
 
 class _SettingsView(SettingsDomains):
@@ -188,19 +180,19 @@ class _SettingsView(SettingsDomains):
 
     def __getattr__(self, name: str) -> object:
         if self._owner.mode == _FULL:
-            return getattr(self._owner._current_settings(), name)
+            return object_of(getattr, self._owner._current_settings(), name)
         if name.startswith("__") and name.endswith("__"):
             raise AttributeError(name)
         if name in DOMAIN_ATTRS:
             self._owner._check_domain_allowed(name)
-            domains: dict[str, _DomainView] = object.__getattribute__(self, "_domains")
+            domains = self._domains
             view = domains.get(name)
             if view is None:
                 view = domains[name] = _DomainView(self._owner, name)
             return view
         if not self._owner._maybe_upgrade(f"settings attribute {name!r}"):
             raise AttributeError(build_window_message(f"settings.{name}"))
-        return getattr(self._owner._current_settings(), name)
+        return object_of(getattr, self._owner._current_settings(), name)
 
     def __setattr__(self, name: str, value: object) -> None:
         if self._owner.mode != _FULL:
@@ -320,13 +312,16 @@ class ConfigBoot:
         self.prepared = False
         self.profile: ProcessProfile | None = None
         # Overlay writes made in lite mode, in insertion order: name -> raw value.
-        self.pending: dict[str, Any] = {}
+        self.pending: dict[str, object] = {}
         # This owner's constructed model, set by _install().
-        self.settings: Any = None
+        self.settings: EagerSettings | None = None
         self.wait_timeout_seconds: float | None = wait_timeout_seconds
 
     def _current_settings(self) -> EagerSettings:
-        return self.settings
+        settings = self.settings
+        if settings is None:
+            raise RuntimeError("config boot: the eager settings are not installed yet")
+        return settings
 
     # meiva:note
     # The launch environment this owner reads: the captured delivery of a read-only
@@ -346,7 +341,7 @@ class ConfigBoot:
         return launch_facts(env, env_file=read_env_aliases(env_file_path(home)))
 
     def _apply_cluster_timezone(self) -> None:
-        name = self.get_field("timezone") if self.field_explicitly_set("timezone") else None
+        name = self.view.general.timezone if self.field_explicitly_set("timezone") else None
         apply_process_timezone(name)
 
     # meiva:note
@@ -423,7 +418,8 @@ class ConfigBoot:
         on this: the field default alone does not make a value authoritative."""
         self.prepare()
         if self.mode == _FULL:
-            return name in getattr(self._current_settings(), FIELD_DOMAINS[name]).model_fields_set
+            domain = object_of(getattr, self._current_settings(), FIELD_DOMAINS[name])
+            return explicitly_provided(object_of(getattr, domain, "model_fields_set"), name)
         environment = os.environ if self.environment is None else self.environment
         return name in self.pending or environment.get(FIELD_ALIASES[name]) is not None
 
@@ -434,7 +430,7 @@ class ConfigBoot:
         if profile is not None and domain not in PROCESS_PROFILES[profile]:
             raise profile_domain_error(profile, domain)
 
-    def get_field(self, name: str) -> Any:
+    def get_field(self, name: str) -> object:
         """Current value of a leaf field by name, resolved to its owning sub-model.
 
         The escape hatch for reflective / dynamic access — a flat
@@ -442,9 +438,14 @@ class ConfigBoot:
         `settings.<domain>`. Static access should use the nested attribute directly
         (`settings.lm.llm_state.model`); this is for call sites that hold the field name as a
         runtime string (health-port map, model-key map, capability probes)."""
+        return self._field_value(name)
+
+    # meiva:note
+    # `get_field` before it is widened to the caller's leaf type: the value is `object` here.
+    def _field_value(self, name: str) -> object:
         domain = FIELD_DOMAINS[name]
         if self.mode == _FULL:
-            return getattr(getattr(self._current_settings(), domain), name)
+            return object_of(getattr, object_of(getattr, self._current_settings(), domain), name)
         self._check_domain_allowed(domain)
         if name in self.pending:
             return self.pending[name]
@@ -453,7 +454,7 @@ class ConfigBoot:
         if self.upgrading and self.upgrading_thread != get_ident():
             self._wait_for_in_flight_build(f"get_field({name!r})")
         self.upgrade(f"get_field({name!r})")
-        return getattr(getattr(self._current_settings(), domain), name)
+        return object_of(getattr, object_of(getattr, self._current_settings(), domain), name)
 
     def set_field(self, name: str, value: object) -> None:
         """Set a field on this owner; existing views/readers see the same model.
@@ -469,7 +470,7 @@ class ConfigBoot:
         the eager path."""
         domain = FIELD_DOMAINS[name]
         if self.mode == _FULL:
-            setattr(getattr(self._current_settings(), domain), name, value)
+            setattr(object_of(getattr, self._current_settings(), domain), name, value)
             return
         self._check_domain_allowed(domain)
         self.pending[name] = value
@@ -562,7 +563,7 @@ class ConfigBoot:
         lands in the debug log and `boot_state()`."""
         with self._lock:
             if self.mode == _FULL:
-                return self.settings
+                return self._current_settings()
             with self.in_flight_build():
                 from base.config._full import build
 
@@ -577,13 +578,14 @@ class ConfigBoot:
                     )
                 )
                 self._install(bundle, reason)
+                installed = self._current_settings()
                 for name, value in tuple(self.pending.items()):
-                    setattr(getattr(self.settings, FIELD_DOMAINS[name]), name, value)
+                    setattr(object_of(getattr, installed, FIELD_DOMAINS[name]), name, value)
                 self.pending.clear()
         _log_upgrade(reason)
-        return self.settings
+        return self._current_settings()
 
-    def _install(self, bundle: _InstalledBundle, reason: str) -> None:
+    def _install(self, bundle: InstalledBundle, reason: str) -> None:
         self.settings = bundle.settings
         self.mode = _FULL
         self.prepared = True
@@ -680,7 +682,7 @@ class ConfigBoot:
         """Whether this process has upgraded to the eager config chain."""
         return self.mode == _FULL
 
-    def boot_state(self) -> dict[str, Any]:
+    def boot_state(self) -> BootState:
         """Private test/acceptance hook: the boot-lite state machine snapshot."""
         return {
             "mode": self.mode,
@@ -700,17 +702,23 @@ class _LegacyConfigBoot(ConfigBoot):
 
     __slots__ = ("_apply_timezone", "_facade")
 
-    def bind_facade(self, namespace: dict[str, Any], apply_timezone: Callable[[], None]) -> None:
+    def bind_facade(self, namespace: dict[str, object], apply_timezone: Callable[[], None]) -> None:
         self._facade = namespace
         self._apply_timezone = apply_timezone
 
     def _current_settings(self) -> EagerSettings:
-        return self._facade["settings"]
+        settings = self._facade["settings"]
+        installed = self.settings
+        if installed is not None and settings is installed:
+            return installed
+        if not is_eager_settings(settings):
+            raise RuntimeError("config boot: the eager settings are not installed yet")
+        return settings
 
     def _apply_cluster_timezone(self) -> None:
         self._apply_timezone()
 
-    def _install(self, bundle: _InstalledBundle, reason: str) -> None:
+    def _install(self, bundle: InstalledBundle, reason: str) -> None:
         self._facade.update(bundle.exports)
         self._facade["settings"] = bundle.settings
         super()._install(bundle, reason)
@@ -728,8 +736,8 @@ def field_explicitly_set(name: str) -> bool:
     return _state.field_explicitly_set(name)
 
 
-def get_field(name: str) -> Any:
-    return _state.get_field(name)
+def get_field(name: str) -> object:
+    return _state._field_value(name)
 
 
 def set_field(name: str, value: object) -> None:
@@ -752,7 +760,7 @@ def ensure_eager() -> None:
     _state.ensure_eager()
 
 
-def boot(namespace: dict[str, Any], apply_timezone: Callable[[], None]) -> None:
+def boot(namespace: dict[str, object], apply_timezone: Callable[[], None]) -> None:
     """Bind the facade (its namespace and timezone applier), then prepare or go eager."""
     _state.bind_facade(namespace, apply_timezone)
     _state.boot()
@@ -762,7 +770,7 @@ def is_full() -> bool:
     return _state.is_full()
 
 
-def boot_state() -> dict[str, Any]:
+def boot_state() -> BootState:
     return _state.boot_state()
 
 

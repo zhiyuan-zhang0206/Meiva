@@ -50,9 +50,7 @@ class ServiceEndpoints:
     # Both inputs are required and neither has a default: a default reader would let this module
     # read the process's own settings again, which is the ambient read it no longer carries.
     @classmethod
-    def from_fields(
-        cls, read_field: Callable[[str], int | None], *, runtime: Path
-    ) -> ServiceEndpoints:
+    def from_fields(cls, read_field: Callable[[str], object], *, runtime: Path) -> ServiceEndpoints:
         return cls(
             {
                 name: ServiceEndpoint(

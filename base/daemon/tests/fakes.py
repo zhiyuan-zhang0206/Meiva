@@ -10,7 +10,9 @@ from base.host.env.health_ports import HEALTH_PORT_OVERRIDES
 
 class _PortFields(MutableMapping[str, int | None]):
     def __getitem__(self, field: str) -> int | None:
-        return get_field(field)
+        value = get_field(field)
+        assert value is None or isinstance(value, int)
+        return value
 
     def __setitem__(self, field: str, value: int | None) -> None:
         set_field(field, value)

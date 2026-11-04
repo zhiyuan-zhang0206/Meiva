@@ -3,13 +3,12 @@
 # meiva:link base/config/docs/to-user-limits.meiva.okf.md
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import Field
+from pydantic.config import JsonDict
 
 from base.config.base import EnvSettings
 
-_TO_USER_FIELD: Any = {
+_TO_USER_FIELD: JsonDict = {
     "restart_required": "all",
     "writable": True,
     "sensitive": False,

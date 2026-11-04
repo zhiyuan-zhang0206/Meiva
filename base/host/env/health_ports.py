@@ -33,7 +33,7 @@ HEALTH_PORT_OVERRIDES: dict[str, str] = {
 }
 
 
-def health_port(name: str, *, read_field: Callable[[str], int | None]) -> int:
+def health_port(name: str, *, read_field: Callable[[str], object]) -> int:
     """Resolve a daemon's registered health port through the caller's config reader.
 
     First reads ``settings.<name>_health_port`` (overridable by env
@@ -44,4 +44,8 @@ def health_port(name: str, *, read_field: Callable[[str], int | None]) -> int:
     """
     override_attr = HEALTH_PORT_OVERRIDES.get(name)
     override = None if override_attr is None else read_field(override_attr)
-    return DEFAULT_PORTS[name] if override is None else int(override)
+    if override is None:
+        return DEFAULT_PORTS[name]
+    if not isinstance(override, int | str):
+        raise TypeError(f"{override_attr} must be a port number, got {type(override).__name__}")
+    return int(override)

@@ -16,7 +16,6 @@ import re
 from dataclasses import dataclass
 from functools import cache
 from io import StringIO
-from typing import Any
 
 from dotenv import dotenv_values
 from pydantic import ValidationError
@@ -83,9 +82,11 @@ def validate_env_patch_for_write(
     errors_by_domain: dict[str, list[str]] = {}
     for domain in sorted(patched_domains):
         source_model = models[domain]
+        if not issubclass(source_model, BaseSettings):
+            raise TypeError(f"domain {domain!r} is not a settings class")
         model = _candidate_validation_model(source_model)
         try:
-            model.model_validate(
+            _ = model.model_validate(
                 _candidate_payload(source_model, source_model(), aliases, updates, removals)
             )
         except ValidationError as exc:
@@ -105,7 +106,7 @@ def _env_aliases(payload: bytes) -> dict[str, str]:
 
 
 def _candidate_payload(
-    model: type[Any],
+    model: type[BaseSettings],
     source: BaseSettings,
     aliases: dict[str, str],
     updates: dict[str, object],
@@ -150,12 +151,12 @@ def validate_env_patch_or_raise(
         raise ValueError("; ".join(errors))
 
 
-def _render_validation_errors(error: ValidationError, model: type[Any]) -> list[str]:
+def _render_validation_errors(error: ValidationError, model: type[BaseSettings]) -> list[str]:
     """Render Pydantic errors with `.env` aliases and never secret values."""
     return [_render_validation_error(detail, model) for detail in error.errors()]
 
 
-def _render_validation_error(detail: ErrorDetails, model: type[Any]) -> str:
+def _render_validation_error(detail: ErrorDetails, model: type[BaseSettings]) -> str:
     """Add the best matching `.env` alias to one Pydantic error message."""
     message = str(detail["msg"])
     names: set[str] = set()
@@ -171,7 +172,7 @@ def _render_validation_error(detail: ErrorDetails, model: type[Any]) -> str:
     return f"{aliases}: {message}" if aliases else message
 
 
-def _field_name_for_location(location: str, model: type[Any]) -> str | None:
+def _field_name_for_location(location: str, model: type[BaseSettings]) -> str | None:
     """Resolve either a field name or its validation alias to a field name."""
     if location in model.model_fields:
         return location
@@ -181,7 +182,7 @@ def _field_name_for_location(location: str, model: type[Any]) -> str | None:
     )
 
 
-def _names_described_by_error(message: str, model: type[Any]) -> set[str]:
+def _names_described_by_error(message: str, model: type[BaseSettings]) -> set[str]:
     """Find fields whose descriptions name a model-level invariant's subject.
 
     Pydantic gives cross-field model validators an empty location. Matching the
@@ -198,7 +199,7 @@ def _names_described_by_error(message: str, model: type[Any]) -> set[str]:
 
 
 @cache
-def _candidate_validation_model(model: type[Any]) -> type[Any]:
+def _candidate_validation_model(model: type[BaseSettings]) -> type[BaseSettings]:
     """Return a Settings model that validates only explicit candidate values.
 
     A full payload normally prevents pydantic-settings from consulting the
@@ -212,9 +213,12 @@ def _candidate_validation_model(model: type[Any]) -> type[Any]:
         @classmethod
         def settings_customise_sources(
             cls,
-            _settings_cls: type[Any],
-            **sources: PydanticBaseSettingsSource,
+            settings_cls: type[BaseSettings],
+            init_settings: PydanticBaseSettingsSource,
+            *_rest: PydanticBaseSettingsSource,
+            **_sources: PydanticBaseSettingsSource,
         ) -> tuple[PydanticBaseSettingsSource, ...]:
-            return (sources["init_settings"],)
+            del settings_cls
+            return (init_settings,)
 
     return CandidateValidationModel

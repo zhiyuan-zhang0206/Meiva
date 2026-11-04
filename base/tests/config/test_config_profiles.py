@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from base.config.base import EnvSettings
 from base.config.service_read import ConfigAuthority
 
 
@@ -121,8 +123,10 @@ def test_keys_of_the_retired_stack_are_inert() -> None:
         "MEIVA_PITR_SPOOL_HARD_BYTES": "2362232013",
         "MEIVA_PITR_UPLOADER_HEALTH_PORT": "8117",
     }
-    domains = {
-        name: model.from_environment(retired_env) for name, model in domain_model_classes().items()
+    domains: dict[str, Any] = {
+        name: model.from_environment(retired_env)
+        for name, model in domain_model_classes().items()
+        if issubclass(model, EnvSettings)
     }
     settings = config.Settings(**domains)
 

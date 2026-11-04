@@ -9,9 +9,9 @@ in `base/config/__init__.py` holds one instance of each.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Self
+from typing import Self
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 from pydantic_settings.sources import EnvSettingsSource
 
 from base.paths.home import is_default_home, resolve_meiva_home
@@ -50,13 +50,12 @@ class EnvSettings(BaseSettings):
         The source instance belongs only to this construction; no process source
         or model class is modified.
         """
-        model: Any = cls
 
-        class DeliveredSettings(model):
+        class DeliveredSettings(cls):
             @classmethod
             def settings_customise_sources(
-                cls, settings_cls: type[BaseSettings], **_sources: object
-            ) -> tuple[EnvSettingsSource]:
+                cls, settings_cls: type[BaseSettings], *_args: object, **_sources: object
+            ) -> tuple[PydanticBaseSettingsSource, ...]:
                 source = EnvSettingsSource(settings_cls)
                 source.env_vars = {
                     key if source.case_sensitive else key.lower(): value
@@ -64,4 +63,7 @@ class EnvSettings(BaseSettings):
                 }
                 return (source,)
 
-        return DeliveredSettings()
+        delivered = DeliveredSettings()
+        if not isinstance(delivered, cls):
+            raise TypeError(f"{type(delivered).__name__} is not a {cls.__name__}")
+        return delivered

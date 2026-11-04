@@ -79,7 +79,7 @@ def patch_owner(fields: set[str], *, home: Path) -> PluginConfigOwner | None:
 
 def plugin_metadata(*, home: Path) -> list[ConfigFieldMeta]:
     """Derive panel metadata from image values and the owning schema."""
-    from base.config import schema_extra
+    from base.config import schema_extra, scope_of
     from base.config.config_registry import field_editor_type
 
     result: list[ConfigFieldMeta] = []
@@ -107,7 +107,7 @@ def plugin_metadata(*, home: Path) -> list[ConfigFieldMeta]:
                     writable=extra.get("writable", True),
                     sensitive=extra.get("sensitive", False),
                     env_var=extra.get("env_var", ""),
-                    scope=extra["scope"],
+                    scope=scope_of(extra),
                     capability=extra.get("capability", "common"),
                     remote_writable=extra.get("remote_writable", False),
                     per_agent=extra.get("per_agent", False),

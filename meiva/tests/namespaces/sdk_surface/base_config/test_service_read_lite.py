@@ -45,6 +45,7 @@ def test_explicit_config_authority_import_stays_lite(tmp_path: Path) -> None:
         "base.config._lite",
         "base.config.config_registry",
         "base.config.domain_shape",
+        "base.config.lite_access",
         "base.config.lite_parse",
         "base.config.profiles",
         "base.config.service_read",

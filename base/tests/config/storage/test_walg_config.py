@@ -21,9 +21,9 @@ def test_the_key_can_be_set_and_unset_and_stays_on_its_host() -> None:
     extra = schema_extra(ref.info)
 
     assert ref.domain == "walg"
-    assert extra["writable"] is True
-    assert extra["scope"] == "host"
-    assert extra["remote_writable"] is False
-    assert extra["bootstrap"] is False
-    assert extra["restart_required"] == "all"
-    assert extra["sensitive"] is False
+    assert extra.get("writable") is True
+    assert extra.get("scope") == "host"
+    assert extra.get("remote_writable") is False
+    assert extra.get("bootstrap") is False
+    assert extra.get("restart_required") == "all"
+    assert extra.get("sensitive") is False

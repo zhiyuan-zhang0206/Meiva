@@ -17,19 +17,20 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import KW_ONLY, dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol
 
-from pydantic.fields import FieldInfo
+from pydantic import SecretStr
 from pydantic_core import PydanticUndefined
 
 from base.config.config_registry import (
     Capability,
-    domain_model_classes,
     field_alias,
     field_editor_type,
     fields,
     schema_extra,
+    scope_of,
 )
+from base.host.boundary.json_values import is_object_list
 
 # Stand-in a sensitive field carries in `raw_overrides` instead of its cleartext
 # value: the panel/CLI round-trips it unchanged on a full-replace PUT, and the
@@ -38,12 +39,31 @@ from base.config.config_registry import (
 CONFIG_UNCHANGED_SENTINEL = "__meiva_unchanged__"
 
 
-type _ConfigFieldValue = str | int | float | bool | list[str] | list[float] | None
+type _ConfigFieldValue = str | int | float | bool | list[str] | list[float] | SecretStr | None
 type _ConfigChoices = list[str] | None
 
 
+# meiva:note
+# A settings value as the config panel carries it: a path becomes its text and a list keeps only
+# the element types the panel renders. Every other value is a field type this registry does not
+# declare, which fails here instead of reaching the wire in a shape no reader expects.
+def _panel_value(value: object) -> _ConfigFieldValue:
+    if isinstance(value, Path):
+        return str(value)
+    if value is None or isinstance(value, str | int | float | SecretStr):
+        return value
+    if is_object_list(value):
+        texts = [item for item in value if isinstance(item, str)]
+        if len(texts) == len(value):
+            return texts
+        numbers = [float(item) for item in value if isinstance(item, int | float)]
+        if len(numbers) == len(value):
+            return numbers
+    raise TypeError(f"unsupported config field value of type {type(value).__name__}")
+
+
 class ConfigMetadataAuthority(Protocol):
-    def current_field_values(self) -> Mapping[str, Any]: ...
+    def current_field_values(self) -> Mapping[str, object]: ...
 
     def read_env_aliases(self) -> Mapping[str, str]: ...
 
@@ -54,7 +74,7 @@ class ConfigFieldMeta:
 
     name: str
     field_type: str
-    current_value: _ConfigFieldValue
+    current_value: object
     default_value: _ConfigFieldValue
     description: str
     group: str
@@ -83,29 +103,30 @@ def get_config_metadata(*, authority: ConfigMetadataAuthority) -> list[ConfigFie
     composes them on top (`panel_metadata`)."""
     values = authority.current_field_values()
     result: list[ConfigFieldMeta] = []
-    models = domain_model_classes()
     for name, ref in fields().items():
-        field_info: FieldInfo = models[ref.domain].model_fields[name]
+        field_info = ref.info
         extra = schema_extra(field_info)
         type_name, choices = field_editor_type(field_info.annotation)
 
-        current = values[name]
-        if isinstance(current, Path):
-            current = str(current)
+        current = _panel_value(values[name])
 
-        default = field_info.default
-        if default is PydanticUndefined:
+        if field_info.default is PydanticUndefined:
             # Required fields (db_url / redis_url etc. with no default) leaking the
             # sentinel would cause FastAPI's ConfigFieldView serialization of the
             # whole response to blow up with 500.
             default = None
-        elif isinstance(default, Path):
-            default = str(default)
+        else:
+            default = _panel_value(field_info.default)
 
         # remote_writable is required on host-scope fields (hard index raises
         # KeyError if a host field forgot to declare it); non-host fields default False.
-        scope = extra["scope"]
-        remote_writable = extra["remote_writable"] if scope == "host" else False
+        scope = scope_of(extra)
+        remote_writable = False
+        if scope == "host":
+            declared = extra.get("remote_writable")
+            if declared is None:
+                raise KeyError("remote_writable")
+            remote_writable = declared
 
         result.append(
             ConfigFieldMeta(

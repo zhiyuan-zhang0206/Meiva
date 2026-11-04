@@ -15,7 +15,7 @@ import threading
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Protocol, overload
+from typing import Literal, Protocol, overload
 from urllib.parse import urlsplit
 
 from dotenv import dotenv_values
@@ -28,6 +28,9 @@ from base.config.config_registry import (
     fields,
     schema_extra,
 )
+from base.host.boundary.fields import str_field
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.host.env.config_lite_table import FIELD_DOMAINS
 from base.host.net.url_secret import credential_free, url_with_host
 
@@ -70,7 +73,7 @@ class _DeferredReadModel:
                 _validate_complete_model(model)
                 self._model = model
                 self._build = None
-            return getattr(self._model, name)
+            return object_of(getattr, self._model, name)
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,17 +215,17 @@ class ConfigAuthority:
     def service_field_value(self, name: str) -> object:
         domain = FIELD_DOMAINS[name]
         source = self.runtime if self.runtime.has_domain(domain) else self.all_domains
-        return getattr(getattr(source, domain), name)
+        return object_of(getattr, object_of(getattr, source, domain), name)
 
-    def flat_dump(self, mode: str = "python") -> dict[str, Any]:
+    def flat_dump(self, mode: str = "python") -> dict[str, object]:
         """The complete boot snapshot used when binding an agent overlay."""
-        out: dict[str, Any] = {}
+        out: dict[str, object] = {}
         for domain, *_rest in DOMAIN_MODELS:
             source = self.runtime if self.runtime.has_domain(domain) else self.all_domains
-            out.update(getattr(source, domain).model_dump(mode=mode))
+            out.update(_dump_domain(object_of(getattr, source, domain), domain, mode))
         return out
 
-    def current_field_values(self) -> dict[str, Any]:
+    def current_field_values(self) -> dict[str, object]:
         """Decode fresh file fields in complete domain batches, failing on invalid values.
 
         Once the complete read model is constructed, providing every domain
@@ -230,8 +233,10 @@ class ConfigAuthority:
         from supplying or poisoning values.
         Domain validation keeps field coercion and cross-field invariants.
         """
+        from pydantic_settings import BaseSettings
+
         aliases = self.read_env_aliases()
-        out: dict[str, Any] = {}
+        out: dict[str, object] = {}
         pending: dict[str, dict[str, str]] = {}
         for name, ref in fields().items():
             alias = field_alias(name)
@@ -242,17 +247,19 @@ class ConfigAuthority:
         models = domain_model_classes()
         for domain, file_values in pending.items():
             model = models[domain]
-            payload: dict[str, Any] = {
+            if not issubclass(model, BaseSettings):
+                raise TypeError(f"domain {domain!r} is not a settings class")
+            payload: dict[str, object] = {
                 name: self.service_field_value(name) for name in model.model_fields
             }
             payload.update(file_values)
             if domain == "data_plane":
                 self._project_runner_db_url(payload)
             decoded = model.model_validate(payload)
-            out.update({name: getattr(decoded, name) for name in file_values})
+            out.update({name: object_of(getattr, decoded, name) for name in file_values})
         return out
 
-    def _project_runner_db_url(self, payload: dict[str, Any]) -> None:
+    def _project_runner_db_url(self, payload: dict[str, object]) -> None:
         """Choose the delivered runner login before validating the owner file.
 
         A local owner URL at the default home is an endpoint for launchers,
@@ -262,16 +269,17 @@ class ConfigAuthority:
         """
         from base.config.domains.storage.data_plane import project_service_db_url
 
-        raw = payload["db_url"]
-        payload["db_url"] = project_service_db_url(
-            payload["db_url"],
+        raw = str_field(payload, "db_url")
+        projected = project_service_db_url(
+            raw,
             self.service_field_value("db_url"),
             profile=self.runtime.profile,
             home=self.env_path.parent,
-            cluster_secret=payload["cluster_secret"],
+            cluster_secret=str_field(payload, "cluster_secret"),
             machine_host=self.service_field_value("machine_host"),
         )
-        if payload["db_url"] != raw:
+        payload["db_url"] = projected
+        if projected != raw:
             from base.log import logger
 
             logger.debug("current_field_values: serving the delivered runner MEIVA_DB_URL")
@@ -344,6 +352,20 @@ class ConfigAuthority:
         return url_with_host(f"http://localhost:{port}", host)
 
 
+# meiva:note
+# One domain sub-model's `model_dump(mode=...)`. The domain is a pydantic model on a full process
+# and a lite read proxy that forwards `model_dump` to the real model on a lite one, so the dump
+# method is looked up by name and the answer checked instead of narrowing the domain by class.
+def _dump_domain(domain_model: object, domain: str, mode: str) -> dict[str, object]:
+    dump = object_of(getattr, domain_model, "model_dump")
+    if not callable(dump):
+        raise TypeError(f"config domain {domain!r} has no model_dump")
+    dumped = object_of(dump, mode=mode)
+    if not is_object_dict(dumped):
+        raise TypeError(f"config domain {domain!r} model_dump returned {type(dumped).__name__}")
+    return dumped
+
+
 def _serve_reachable_data_plane_hosts(out: dict[str, str], reachable: str) -> None:
     """Rewrite served loopback endpoints to the root's reachable address."""
     from base.host.net.predicates import is_loopback_host
@@ -359,7 +381,7 @@ def _serve_reachable_data_plane_hosts(out: dict[str, str], reachable: str) -> No
             out[alias] = url_with_host(value, reachable)
 
 
-def current_field_values(authority: ConfigAuthority) -> dict[str, Any]:
+def current_field_values(authority: ConfigAuthority) -> dict[str, object]:
     """Read fresh values through the caller's explicit authority."""
     return authority.current_field_values()
 

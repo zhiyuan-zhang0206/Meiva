@@ -21,15 +21,23 @@ class LgtmSettings:
     storage_dir_setting: str
 
     @classmethod
-    def from_fields(cls, read_field: Callable[[str], int | str]) -> LgtmSettings:
+    def from_fields(cls, read_field: Callable[[str], object]) -> LgtmSettings:
         return cls(
-            loki_port=int(read_field("lgtm_loki_port")),
-            prometheus_port=int(read_field("lgtm_prometheus_port")),
-            grafana_port=int(read_field("lgtm_grafana_port")),
+            loki_port=_port(read_field("lgtm_loki_port")),
+            prometheus_port=_port(read_field("lgtm_prometheus_port")),
+            grafana_port=_port(read_field("lgtm_grafana_port")),
             listen_host=str(read_field("lgtm_listen_host")),
             grafana_listen_host=str(read_field("lgtm_grafana_listen_host")),
             storage_dir_setting=str(read_field("lgtm_storage_dir")),
         )
+
+
+# meiva:note
+# A configured port as an int: a number or numeric text.
+def _port(value: object) -> int:
+    if not isinstance(value, int | str):
+        raise TypeError(f"an LGTM port must be a number, got {type(value).__name__}")
+    return int(value)
 
 
 @dataclass(frozen=True)
