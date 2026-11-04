@@ -108,6 +108,25 @@ def test_parse_claude_initialize_keeps_uncatalogued_and_effortless_models() -> N
     )
 
 
+def test_parse_claude_initialize_preserves_a_separate_one_million_context_option() -> None:
+    result = parse_claude_initialize(
+        {
+            "models": [
+                {"value": "default", "resolvedModel": "claude-sonnet-4-6"},
+                {"value": "sonnet[1M]", "resolvedModel": "claude-sonnet-4-6"},
+                {"value": "claude-fable-5-1[1m]", "resolvedModel": "claude-fable-5-1"},
+            ]
+        }
+    )
+
+    assert result.default_model == "claude-sonnet-4-6"
+    assert [model.id for model in result.models] == [
+        "claude-sonnet-4-6",
+        "sonnet[1M]",
+        "claude-fable-5-1[1m]",
+    ]
+
+
 def test_parse_antigravity_models_groups_effort_suffixes_and_uncatalogued_rows() -> None:
     stdout = "\n".join(
         [

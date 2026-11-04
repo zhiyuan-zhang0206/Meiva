@@ -121,11 +121,13 @@ def parse_codex_model_list(pages: Sequence[object]) -> CatalogProbeResult:
 
 
 def _claude_model_id(entry: Mapping[str, object]) -> str | None:
+    value = _non_empty_str(entry.get("value"))
+    if value is not None and value.lower().endswith("[1m]"):
+        return value
     resolved = _non_empty_str(entry.get("resolvedModel"))
     if resolved is not None:
         return resolved
-    value = _non_empty_str(entry.get("value"))
-    return value if value is not None and value != "default" else None
+    return value if value != "default" else None
 
 
 def _claude_entry_model(entry: Mapping[str, object]) -> ProbedHarnessModel | None:

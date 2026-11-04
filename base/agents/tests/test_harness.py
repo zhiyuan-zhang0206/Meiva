@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -481,41 +482,47 @@ def test_harness_not_launchable_is_a_wire_error() -> None:
     assert HarnessNotLaunchable.http_status == 400
 
 
-def test_probe_cli_models_codex_strips_openai_api_key_and_reads_model_list(tmp_path: Path) -> None:
-    captured: dict[str, Any] = {}
+def test_codex_model_probe_keeps_stdin_open_for_model_list(tmp_path: Path) -> None:
+    binary = _external_cli(tmp_path, "bin", "codex")
+    _ = binary.write_text(
+        f"#!{sys.executable}\n"
+        + """\
+import json
+import os
+import select
+import sys
 
-    def fake_runner(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
-        captured["argv"] = argv
-        captured["env"] = kwargs["env"]
-        captured["input"] = kwargs["input"]
-        reply = {
-            "jsonrpc": "2.0",
-            "id": 2,
-            "result": {
-                "data": [
-                    {
-                        "id": "gpt-6.1-terra",
-                        "isDefault": True,
-                        "defaultReasoningEffort": "low",
-                        "supportedReasoningEfforts": [
-                            {"reasoningEffort": "low"},
-                            {"reasoningEffort": "ultra"},
-                        ],
-                    }
-                ]
-            },
-        }
-        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(reply) + "\n", stderr="")
+assert len(sys.argv) == 4 and sys.argv[1:] == ["app-server", "--listen", "stdio://"]
+assert "OPENAI_API_KEY" not in os.environ
+init = json.loads(sys.stdin.buffer.readline())
+assert init["method"] == "initialize"
+print(json.dumps({"id": init["id"], "result": {}}), flush=True)
+assert json.loads(sys.stdin.buffer.readline())["method"] == "initialized"
+request = json.loads(sys.stdin.buffer.readline())
+assert request["method"] == "model/list"
+assert not select.select([sys.stdin], [], [], 0)[0], "stdin closed before model/list reply"
+print(json.dumps({"id": request["id"], "result": {"data": [{
+    "id": "gpt-6.1-terra",
+    "isDefault": True,
+    "defaultReasoningEffort": "low",
+    "supportedReasoningEfforts": [
+        {"reasoningEffort": "low"},
+        {"reasoningEffort": "ultra"},
+    ],
+}]}}), flush=True)
+sys.stdin.buffer.read()
+""",
+        encoding="utf-8",
+    )
 
     result = probe_cli_models(
         Harness.CODEX,
-        "/usr/local/bin/codex",
+        str(binary),
         home=tmp_path,
         environment={"OPENAI_API_KEY": "sk-native", "PATH": "/usr/local/bin"},
-        runner=fake_runner,
     )
-    assert "OPENAI_API_KEY" not in captured["env"]
-    assert "model/list" in captured["input"]
+
+    assert result.error is None
     assert result.default_model == "gpt-6.1-terra"
     assert result.models == (
         ProbedHarnessModel(
