@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     # Annotation-only (`build` return): keeps the chat-model stack off the
@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     # `_TYPE_CHECKING_ALLOWED`).
     from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
+from pydantic import SecretStr
 
 from base.lm.compat.stop import StopSpec
 from base.lm.effort import validate_effort
@@ -41,7 +42,7 @@ from meiva_builtins.plugins.lm_anthropic.prices import PRICES
 _CLAUDE_EXTENDED_THINKING_DEFAULT_BUDGET = 8192
 
 
-def served_speed(metadata: Mapping[str, Any]) -> InferenceSpeed:
+def served_speed(metadata: Mapping[str, object]) -> InferenceSpeed:
     """Parse the actual speed retained from Anthropic usage by the adapter."""
     return InferenceSpeed(metadata.get("speed"))
 
@@ -49,11 +50,11 @@ def served_speed(metadata: Mapping[str, Any]) -> InferenceSpeed:
 def claude_extended_thinking_kwarg(
     model: str,
     *,
-    thinking: Mapping[str, Any] | None,
+    thinking: Mapping[str, object] | None,
     budget_tokens: int,
     reasoning_effort: str,
     spec: ModelSpec | None,
-) -> dict[str, Any] | None:
+) -> dict[str, object] | None:
     """Resolve the `thinking` kwarg for extended-thinking-only claude models
     (`ModelSpec.extended_thinking_only`, currently haiku-4-5) when the caller
     passed none explicitly.
@@ -77,7 +78,7 @@ def claude_extended_thinking_kwarg(
     return None
 
 
-def _effective_thinking(ctx: BuildContext, spec: ModelSpec) -> Mapping[str, Any] | None:
+def _effective_thinking(ctx: BuildContext, spec: ModelSpec) -> Mapping[str, object] | None:
     thinking = ctx.thinking
     if thinking is not None and thinking.get("type") == "disabled" and spec.thinking_always_on:
         logger.warning(
@@ -87,27 +88,45 @@ def _effective_thinking(ctx: BuildContext, spec: ModelSpec) -> Mapping[str, Any]
     return thinking
 
 
-def _service_kwargs(spec: ModelSpec) -> dict[str, Any]:
-    """Declare caching and opt into the provider's Fast service when selected."""
-    model_kwargs: dict[str, Any] = {"cache_control": {"type": "ephemeral"}}
-    kwargs: dict[str, Any] = {"model_kwargs": model_kwargs}
+# meiva:note
+# Declare caching and opt into the provider's Fast service when selected.
+def _model_kwargs(spec: ModelSpec) -> dict[str, object]:
+    model_kwargs: dict[str, object] = {"cache_control": {"type": "ephemeral"}}
     if spec.fast_of is not None:
         model_kwargs["speed"] = InferenceSpeed.FAST.value
-        kwargs["betas"] = ["fast-mode-2026-02-01"]
-    return kwargs
+    return model_kwargs
 
 
-def _effort_kwargs(ctx: BuildContext, spec: ModelSpec, *, disabled: bool) -> dict[str, Any]:
-    """Adaptive effort uses the model's exact vocabulary; binary thinking is separate."""
+# meiva:note
+# The efforts `ChatAnthropic.effort` declares. `validate_effort` returns a plain string checked
+# against the model's own vocabulary; this table is the step from that string to the field's
+# literal type, and a level outside it is a registry that names an effort the SDK cannot send.
+_CLAUDE_EFFORTS: dict[str, Literal["max", "xhigh", "high", "medium", "low"]] = {
+    "max": "max",
+    "xhigh": "xhigh",
+    "high": "high",
+    "medium": "medium",
+    "low": "low",
+}
+
+
+# meiva:note
+# Adaptive effort uses the model's exact vocabulary; binary thinking is separate.
+def _effort(
+    ctx: BuildContext, spec: ModelSpec, *, disabled: bool
+) -> Literal["max", "xhigh", "high", "medium", "low"] | None:
     effort = ctx.resolved_effort
     if not effort or disabled or spec.extended_thinking_only:
-        return {}
+        return None
     if spec.effort_levels is not None:
-        return {"effort": validate_effort(effort, spec.effort_levels, target=ctx.model)}
+        level = validate_effort(effort, spec.effort_levels, target=ctx.model)
+        if level not in _CLAUDE_EFFORTS:
+            raise ValueError(f"{ctx.model} effort {level!r} is not one the Anthropic SDK sends")
+        return _CLAUDE_EFFORTS[level]
     logger.warning(
         f"{ctx.model} does not support reasoning effort; MEIVA_REASONING_EFFORT={effort!r} ignored"
     )
-    return {}
+    return None
 
 
 def build(ctx: BuildContext) -> BaseChatModel:
@@ -139,11 +158,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
 
     thinking = _effective_thinking(ctx, spec)
     thinking_disabled = thinking is not None and thinking.get("type") == "disabled"
-    extra_kwargs = _service_kwargs(spec)
-    if thinking is not None:
-        extra_kwargs["thinking"] = thinking
-    if ctx.disable_streaming:
-        extra_kwargs["disable_streaming"] = True
+    wire_thinking: dict[str, object] | None = None if thinking is None else dict(thinking)
 
     # Reasoning effort rides ChatAnthropic's `effort` field
     # (output_config.effort on the wire), gated per model — extended-
@@ -153,7 +168,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # an explicit cheap/fast path shouldn't have the global env push
     # reasoning back in.
     effort = ctx.resolved_effort
-    claude_kwargs = _effort_kwargs(ctx, spec, disabled=thinking_disabled)
+    wire_effort = _effort(ctx, spec, disabled=thinking_disabled)
 
     # Extended-thinking-only models (haiku-4-5) map budget_tokens / effort
     # onto their thinking on/off binary.
@@ -165,7 +180,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
         reasoning_effort=effort,
     )
     if extended_thinking is not None:
-        extra_kwargs["thinking"] = extended_thinking
+        wire_thinking = extended_thinking
     elif not thinking_disabled and not spec.extended_thinking_only:
         # Adaptive-thinking claude models (everything on the current API
         # except the extended-thinking-only ones) default to
@@ -175,11 +190,8 @@ def build(ctx: BuildContext) -> BaseChatModel:
         # an empty thinking block, so the timeline has nothing to render.
         # Opt into summarized thinking text explicitly; a caller-passed
         # config keeps its own `display` when it set one.
-        wire_thinking: dict[str, Any] = (
-            dict(thinking) if thinking is not None else {"type": "adaptive"}
-        )
+        wire_thinking = dict(thinking) if thinking is not None else {"type": "adaptive"}
         wire_thinking.setdefault("display", "summarized")
-        extra_kwargs["thinking"] = wire_thinking
 
     # ThinkingTokensChatAnthropic subclasses ChatAnthropic to also surface
     # thinking_tokens in usage_metadata.output_token_details (the base
@@ -188,12 +200,16 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # eligible message blocks get cached server-side for 5 minutes (default TTL),
     # reducing input token cost and latency on repeated turns.
     return ThinkingTokensChatAnthropic(
-        model=spec.fast_of or ctx.model,  # type: ignore[call-arg]
-        api_key=api_key,
-        max_tokens=spec.max_output_tokens,  # type: ignore[call-arg]
+        model_name=spec.fast_of or ctx.model,
+        api_key=SecretStr(api_key),
+        max_tokens_to_sample=spec.max_output_tokens,
         timeout=ctx.timeout,
-        **claude_kwargs,
-        **extra_kwargs,
+        stop=None,
+        model_kwargs=_model_kwargs(spec),
+        betas=["fast-mode-2026-02-01"] if spec.fast_of is not None else None,
+        thinking=wire_thinking,
+        effort=wire_effort,
+        disable_streaming=ctx.disable_streaming,
     )
 
 
