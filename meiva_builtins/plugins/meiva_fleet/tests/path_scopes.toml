@@ -12,6 +12,7 @@
     "task_registry/test_create_unique_title_no_conflict.py",
     "task_registry/test_creation_receipt_identity.py",
     "task_registry/test_creation_receipts.py",
+    "task_registry/test_list.py",
     "task_registry/test_notification_fences.py",
     "task_registry/test_reminder_window.py",
     "task_registry/test_notification_recovery.py",

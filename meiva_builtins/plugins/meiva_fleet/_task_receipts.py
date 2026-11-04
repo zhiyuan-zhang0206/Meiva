@@ -1,7 +1,5 @@
 """Agent-scoped task update receipts, owned by the SDK mutation transaction."""
 
-from typing import Any
-
 import psycopg
 from psycopg.types.json import Jsonb
 
@@ -17,7 +15,7 @@ def update_identity(key: str, *, context: MeivaContext) -> tuple[int, str]:
 
 
 def replay_update(
-    cur: psycopg.Cursor[Any],
+    cur: psycopg.Cursor[tuple[object, ...]],
     actor: int,
     task_id: int,
     key: str,
@@ -46,7 +44,7 @@ def replay_update(
 
 
 def record_update(
-    cur: psycopg.Cursor[Any],
+    cur: psycopg.Cursor[tuple[object, ...]],
     actor: int,
     task_id: int,
     key: str,

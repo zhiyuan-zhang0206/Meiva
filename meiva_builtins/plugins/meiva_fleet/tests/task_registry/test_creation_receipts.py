@@ -287,7 +287,7 @@ def test_a_stored_receipt_without_the_pause_field_replays(
             cur, actor, key, row[0], context=meiva.context
         )
     assert replayed is not None
-    assert replayed["reminders_paused_until"] is None
+    assert replayed.reminders_paused_until is None
 
 
 def test_snapshot_validation_never_defaults_or_accepts_unknown_enum(

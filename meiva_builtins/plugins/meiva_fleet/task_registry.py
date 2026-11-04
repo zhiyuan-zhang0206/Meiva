@@ -9,13 +9,13 @@ from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import meiva
 import meiva.sdk_surface.agent_identity
 from base.agents.context import MeivaContext
-from base.agents.tasks.model import TASK_COLUMNS, task_from_row
 from base.agents.tasks.model import Task as Task
+from base.agents.tasks.model import task_from_row
 from base.agents.tasks.owner_notifications import TaskOwnerNotification, owner_change_notifications
 from base.agents.tasks.reminder_window import UpdateWrite
 from base.agents.tasks.reparent import resolve_reparent
@@ -210,9 +210,9 @@ def commit_creation(
         remind_interval_seconds=remind_interval_seconds,
     )
     with context.sql.transaction(), context.sql.cursor() as cur:
-        snapshot = replay_creation(cur, actor, operation_key, request, context=context)
-        if snapshot is not None:
-            return CreationResult(Task(**snapshot), None)
+        replayed = replay_creation(cur, actor, operation_key, request, context=context)
+        if replayed is not None:
+            return CreationResult(replayed, None)
         task, created_event, note_events = create_task_in_transaction(
             cur,
             title,
@@ -260,7 +260,7 @@ def create_and_assign(
     *,
     operation_key: str,
     label: str | None = None,
-    config_overlay: dict[str, Any] | None = None,
+    config_overlay: dict[str, object] | None = None,
     machine: str | None = None,
     parent: int,
     remind_interval_seconds: int | None = None,
@@ -721,53 +721,20 @@ def log(task_id: int, message: str, *, operation_key: str) -> None:
 def get(task_id: int) -> Task:
     """Return the task with this id."""
     task_id = coerce_typed(task_id, "task_id", int)
-    with meiva.DB.cursor() as cur:
-        cur.execute(f"SELECT {TASK_COLUMNS} FROM agent_tasks WHERE id = %s", (task_id,))  # noqa: S608
+    # meiva:note
+    # Deferred: `_task_list_query` imports psycopg, which plugin autoload keeps off (task #3816).
+    from psycopg import sql
+
+    from ._task_list_query import task_columns
+
+    with meiva.context.sql.cursor() as cur:
+        cur.execute(
+            sql.SQL("SELECT {} FROM agent_tasks WHERE id = %s").format(task_columns()), (task_id,)
+        )
         row = cur.fetchone()
     if row is None:
         raise ValueError(f"task {task_id} does not exist")
     return task_from_row(row)
-
-
-def _where_clause(filters: builtins.list[str]) -> str:
-    """' WHERE a AND b' for the given filters, or '' when there are none."""
-    return (" WHERE " + " AND ".join(filters)) if filters else ""
-
-
-def _build_list_query(
-    parent: int | None,
-    owner: int | None,
-    status: str | None,
-    recursive: bool,  # noqa: FBT001 — internal helper flag, always passed by name
-) -> tuple[str, builtins.list[object]]:
-    """SQL + params for list(): a plain filter query, or a recursive CTE over
-    the whole subtree rooted at `parent`. parent_id always points at an older
-    row (a child is created after its parent), so the tree cannot cycle and the
-    recursion terminates. owner / status filter the subtree at the end."""
-    filters: builtins.list[str] = []
-    params: builtins.list[object] = []
-    if owner is not None:
-        filters.append("owner = %s")
-        params.append(owner)
-    if status is not None:
-        filters.append("status = %s")
-        params.append(status)
-
-    if recursive and parent is not None:
-        sql = (
-            "WITH RECURSIVE subtree AS ("  # noqa: S608
-            " SELECT * FROM agent_tasks WHERE parent_id = %s"
-            " UNION ALL"
-            " SELECT c.* FROM agent_tasks c JOIN subtree s ON c.parent_id = s.id"
-            f") SELECT {TASK_COLUMNS} FROM subtree{_where_clause(filters)} ORDER BY created_at, id"
-        )
-        return sql, [parent, *params]
-
-    if parent is not None:
-        filters.append("parent_id = %s")
-        params.append(parent)
-    sql = f"SELECT {TASK_COLUMNS} FROM agent_tasks{_where_clause(filters)} ORDER BY created_at, id"  # noqa: S608
-    return sql, params
 
 
 def list(
@@ -790,7 +757,9 @@ def list(
     if status is not None and status not in TASK_STATUS_VALUES:
         raise ValueError(f"status must be one of {sorted(TASK_STATUS_VALUES)}, got {status!r}")
 
-    sql, params = _build_list_query(parent, owner, status, recursive)
-    with meiva.DB.cursor() as cur:
-        cur.execute(sql, params)
+    from ._task_list_query import build_list_query
+
+    query, params = build_list_query(parent, owner, status, recursive=recursive)
+    with meiva.context.sql.cursor() as cur:
+        cur.execute(query, params)
         return [task_from_row(r) for r in cur.fetchall()]
