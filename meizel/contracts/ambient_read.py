@@ -1,11 +1,11 @@
 # meiva:note
 # `ambient-read`: only a composition root reaches the world a process runs in.
 #
-# A file that takes the clock, the environment, the home or working directory, the platform, a
-# process id, randomness, or the process state the repository keeps (the kinds its policy declares
-# under `[ambient]`) instead of being handed it is a decision that cannot be tested by value. The
-# files that may do so are declared under `[roots]` in their directory's `meizel.toml`, each with
-# the kinds it may acquire; every other acquisition in non-test code is a violation.
+# A file that takes the clock, an interval clock, the environment, the home or working directory, the
+# platform, a process id, randomness, or the process state the repository keeps (the kinds its policy
+# declares under `[ambient]`) instead of being handed it is a decision that cannot be tested by
+# value. The files that may do so are declared under `[roots]` in their directory's `meizel.toml`,
+# each with the kinds it may acquire; every other acquisition in non-test code is a violation.
 # Recorded like any other, a violation can be carried as debt except where the file is `strict`.
 
 from __future__ import annotations
@@ -52,6 +52,7 @@ _GOVERNED_ROLES = ("application", "standalone", "templates", "tooling", "fronten
 _WHAT: dict[str, str] = {
     AmbientKind.ENVIRON: "the environment",
     AmbientKind.CLOCK: "the clock",
+    AmbientKind.MONOTONIC: "an interval clock",
     AmbientKind.HOME: "the home directory",
     AmbientKind.CWD: "the working directory",
     AmbientKind.PLATFORM: "the platform",
@@ -125,6 +126,25 @@ def sources_from(manifests: Mapping[str, Manifest], policy: Policy, universe: Un
 
 
 # meiva:note
+# The kinds a `[roots]` declaration of one kind also allows, and why the relation has one direction.
+#
+# `clock` covers `monotonic`: a file already allowed the instant is allowed the duration, because a
+# reading of `time.monotonic` says less about the world than the wall clock the same root reads — it
+# orders events inside one process and is compared with deadlines that process wrote.
+#
+# `monotonic` does not cover `clock`, and that direction is the reason the kind exists: a root
+# declared only for `monotonic` still fails on `time.time()` and `datetime.now()`. Making this map
+# symmetric, or dropping `monotonic` back into `clock`, would silently license the wall clock in every
+# poll loop that times a wait — the exact read the narrow kind was introduced to keep out — so a
+# change here needs the failing case, not a tidy-up.
+_COVERED: dict[str, frozenset[str]] = {AmbientKind.CLOCK: frozenset({AmbientKind.MONOTONIC})}
+
+
+def _covers(kind: str) -> frozenset[str]:
+    return _COVERED.get(kind, frozenset()) | {kind}
+
+
+# meiva:note
 # Whether the rule governs this file: a governed top-level role (tests record no acquisitions).
 def in_scope(path: str, manifests: Mapping[str, Manifest]) -> bool:
     root = manifests.get("")
@@ -163,7 +183,11 @@ def ambient_diagnostics(
         owner, _, name = scan.path.rpartition("/")
         manifest = manifests.get(owner)
         root = None if manifest is None else manifest.roots.get(name)
-        allowed = frozenset(() if root is None else root.kinds)
+        allowed = frozenset(
+            covered
+            for declared in (() if root is None else root.kinds)
+            for covered in _covers(declared)
+        )
         mode = effective_purity(scan.path, manifests)
         found.extend(
             _diagnostic(scan, acquisition, mode, owner)
@@ -195,7 +219,7 @@ def stale_roots(
                     ("remove the kind from [roots]; a root declares what it reads, not more",),
                 )
                 for kind in root.kinds
-                if kind not in acquired
+                if not acquired.intersection(_covers(kind))
             )
     return found
 

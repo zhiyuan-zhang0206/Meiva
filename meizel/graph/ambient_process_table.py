@@ -60,8 +60,8 @@ _OS = (
     g(
         "os",
         "times",
-        K.CLOCK,
-        "process times with the elapsed real time: an interval clock",
+        K.MONOTONIC,
+        "process times with the elapsed real time: a duration, not an instant",
         interval=True,
     ),
     g("os", "sep altsep extsep pathsep linesep curdir pardir devnull defpath", None, SYNTAX),
@@ -253,9 +253,9 @@ _TIME = (
         "time",
         "monotonic monotonic_ns perf_counter perf_counter_ns process_time process_time_ns "
         "thread_time thread_time_ns",
-        K.CLOCK,
-        "an interval clock: a deadline or a duration is the plain use of `time`; the read is a "
-        "decision only where the same function waits",
+        K.MONOTONIC,
+        "a duration, not an instant: a deadline or an elapsed time is the plain use of `time`; the "
+        "read is a decision only where the same function waits",
         interval=True,
     ),
     g(

@@ -11,8 +11,8 @@ tags:
 
 ## What is it
 
-Code that takes the command line, the clock, the environment, the home directory, the platform, a process id,
-randomness or the state the repository keeps itself (its process configuration, a database handle,
+Code that takes the command line, the clock, an interval clock, the environment, the home
+directory, the platform, a process id, randomness or the state the repository keeps itself (its process configuration, a database handle,
 an event bus: whatever its policy declares) instead of being handed it cannot be tested by handing
 it a value, and answers differently on another
 machine or at another time. The rule is the red line of
@@ -85,6 +85,11 @@ place to read it. Only direct children are named; a deeper file is declared in i
 "daemon.py" = { kinds = ["settings", "db"], why = "process entry point: builds ConfigBoot and opens the database" }
 "boot.py" = { kinds = ["environ", "home"], why = "reads the launch environment before Settings exists" }
 ```
+
+One declaration covers more than it names: `clock` covers `monotonic`, because a duration says less
+about the world than the instant the same file already reads. The reverse does not hold, so a file
+declared only for `monotonic` — a poll loop timing a wait against a deadline it wrote itself — still
+fails on `time.time()` and `datetime.now()`, and that is what the narrow kind is for.
 
 The reason says what the file reads, not that it is allowed to. A file that many modules outside the roots
 import is a middle layer, not a root: changing it asks the `root-middle-layer`

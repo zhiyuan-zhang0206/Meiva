@@ -120,9 +120,16 @@ type KindName = str
 # and the machine, as a closed vocabulary. The state a repository keeps itself (its configuration,
 # a database handle, a bus) is not in it: each repository declares those kinds as the keys of the
 # policy's `[ambient]` table, and a kind of either family travels as a `KindName`.
+#
+# `clock` and `monotonic` are two kinds because they answer two different questions: `clock` is the
+# instant, which a decision records and which differs between two machines at the same moment;
+# `monotonic` is the distance between two readings, which is only ever compared against a deadline
+# the same process wrote. A root that may read a duration has not thereby said it may read the
+# date, so a file that declares `monotonic` still fails on `time.time()` and `datetime.now()`.
 class AmbientKind(StrEnum):
     ENVIRON = "environ"
     CLOCK = "clock"
+    MONOTONIC = "monotonic"
     HOME = "home"
     CWD = "cwd"
     PLATFORM = "platform"

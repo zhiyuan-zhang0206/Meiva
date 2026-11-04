@@ -11,7 +11,8 @@ tags:
 
 An interval clock read for a deadline, a duration or a TTL is the plain use of `time`; it is a
 window onto the world only where the same function waits, because then how long to wait next is
-decided in a loop. A function waits when it calls a name that contains `sleep` (`time.sleep`,
+decided in a loop. What it acquires is `monotonic`, the duration kind, and never `clock`: a file
+allowed the duration has not been allowed the instant, and `time.time()` beside it still fails. A function waits when it calls a name that contains `sleep` (`time.sleep`,
 `asyncio.sleep`, `timers.asleep`, `retry_sleep`) or a function of its module that does, however
 the helper is named (`_pause()` that sleeps). A function without parameters that is only
 `return time.monotonic()` is a clock under another name: a call of it in a function that waits is
