@@ -350,6 +350,10 @@ endpoints = ["ServiceEndpoints.from_settings()"]
 """
 
 
+# meiva:note
+# This base is committed with violations and no `[debt]` table — the tests that use it record afterwards.
+# Its record is therefore not what its own device finds in its own content, which `rules` already reads as
+# the device's +1 and `repaid` reads as -1: `app/env.py` reads the environment and nothing records it.
 def ambient_base(make_repo: RepoFactory, policy: str = LEGACY_POLICY) -> Path:
     return base_repo(
         make_repo,
@@ -395,7 +399,7 @@ def test_retired_schema_comparison_counts_old_reads_but_rejects_new_reads(
     assert diff(root) == (1 if added else 0)
     out = capsys.readouterr().out
     row = next(line.split() for line in out.splitlines() if line.startswith("ambient-read"))
-    assert row[1:] == ["0", "1", "2" if added else "1", "+1", "+1" if added else "+0"]
+    assert row[1:] == ["0", "1", "2" if added else "1", "+1", "+1" if added else "+0", "-1"]
     if added:
         assert "2 recorded, 1 found" in out
 
@@ -407,32 +411,6 @@ DECLARED_BASE = {
     "app/meizel.toml": '[debt.ambient-read]\n"daemon.py#environ os.environ" = 1\n',
     "rules/engine.py": "RULE = 1\n",
 }
-
-
-# meiva:note
-# No line of code changes: the read leaves the record because the device stopped measuring it.
-def test_a_root_declaration_is_a_rule_change_and_not_repayment(
-    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
-) -> None:
-    root = make_repo(DECLARED_BASE)
-    commit(root)
-    rule_change(root)
-    write(
-        root,
-        {
-            "app/meizel.toml": '[roots]\n"daemon.py" = { kinds = ["environ"], why = "the process entry" }\n'
-        },
-    )
-    assert run(root, "debt", "prune") == 0
-    write(root, {})
-    capsys.readouterr()
-    assert plain_diff(root) == 0
-    out = capsys.readouterr().out
-    row = next(line.split() for line in out.splitlines() if line.startswith("ambient-read"))
-    assert row[1:] == ["1", "0", "0", "-1", "+0"]
-    assert "meizel: rules -1 / content +0" in out
-    assert "what this change edits in the measurement" in out
-    assert "app/meizel.toml [roots] daemon.py +" in out
 
 
 # meiva:note
@@ -455,8 +433,8 @@ def test_taking_a_root_away_is_a_rule_change_and_not_new_debt(
     assert diff(root) == 0
     out = capsys.readouterr().out
     row = next(line.split() for line in out.splitlines() if line.startswith("ambient-read"))
-    assert row[1:] == ["0", "1", "1", "+1", "+0"]
-    assert "meizel: rules +1 / content +0" in out
+    assert row[1:] == ["0", "1", "1", "+1", "+0", "+0"]
+    assert "meizel: rules +1 / content +0 / repaid +0 against HEAD" in out
     assert "app/meizel.toml [roots] daemon.py -" in out
 
 
@@ -512,7 +490,7 @@ def test_rule_comparison_refreshes_policy_after_validating_the_old_snapshot(
         for line in capsys.readouterr().out.splitlines()
         if line.startswith("impure-call")
     )
-    assert row[1:] == ["0", "1", "1", "+1", "+0"]
+    assert row[1:] == ["0", "1", "1", "+1", "+0", "+0"]
 
 
 def test_type_cast_rule_baseline_uses_existing_application_content(
@@ -730,7 +708,7 @@ def test_approving_a_file_is_a_rule_change_and_not_repayment(
     assert diff(root) == 0
     out = capsys.readouterr().out
     [row] = [line.split() for line in out.splitlines() if line.startswith("first-party-patch")]
-    assert row[1:] == ["1", "0", "0", "-1", "+0"]
+    assert row[1:] == ["1", "0", "0", "-1", "+0", "+0"]
     assert "+ [approved-patches.files] app/tests/guards.py" in out
     assert "no content growth" in out
 

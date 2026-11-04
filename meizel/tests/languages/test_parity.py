@@ -234,7 +234,7 @@ def test_typescript_rule_comparison_refreshes_policy_after_the_old_snapshot(
         for line in capsys.readouterr().out.splitlines()
         if line.startswith("impure-call")
     )
-    assert row[1:] == ["0", "1", "1", "+1", "+0"]
+    assert row[1:] == ["0", "1", "1", "+1", "+0", "+0"]
 
 
 @pytest.mark.parametrize("extension", ["py", "ts"])

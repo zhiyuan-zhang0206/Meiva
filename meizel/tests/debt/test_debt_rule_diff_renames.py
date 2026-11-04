@@ -47,7 +47,7 @@ def test_a_moved_file_keeps_its_debt_out_of_the_content_column(
     assert plain_diff(root) == 0
     out = capsys.readouterr().out
     assert "no content growth" in out
-    assert "meizel: rules +0 / content +0" in out
+    assert "meizel: rules +0 / content +0 / repaid +0 against HEAD" in out
 
 
 DIRECTORY = {
@@ -72,7 +72,7 @@ def test_a_renamed_directory_takes_its_recorded_debt_along(
     capsys.readouterr()
     assert plain_diff(root) == 0
     out = capsys.readouterr().out
-    assert "meizel: rules +0 / content +0" in out
+    assert "meizel: rules +0 / content +0 / repaid +0 against HEAD" in out
     assert "no content growth" in out
 
 
@@ -102,7 +102,7 @@ def test_an_edge_debt_of_a_renamed_file_is_measured_where_the_change_puts_it(
     capsys.readouterr()
     assert plain_diff(root) == 0
     out = capsys.readouterr().out
-    assert "meizel: rules +0 / content +0" in out
+    assert "meizel: rules +0 / content +0 / repaid +0 against HEAD" in out
 
 
 ROOTED = {
@@ -131,7 +131,7 @@ def test_a_declaration_that_follows_a_rename_is_still_a_rule_change(
     capsys.readouterr()
     assert plain_diff(root) == 0
     out = capsys.readouterr().out
-    assert "meizel: rules +0 / content +0" in out
+    assert "meizel: rules +0 / content +0 / repaid +0 against HEAD" in out
 
 
 # meiva:note
@@ -186,7 +186,7 @@ def test_a_file_moved_into_the_rule_code_runs_the_change_s_own_bytes(
     capsys.readouterr()
     assert plain_diff(root) == 0
     out = capsys.readouterr().out
-    assert "meizel: rules +1 / content +0" in out
+    assert "meizel: rules +1 / content +0 / repaid +0 against HEAD" in out
 
 
 OUT_OF_DEVICE = {
@@ -212,7 +212,7 @@ def test_a_file_moved_out_of_the_rule_code_is_measured_as_content(
     capsys.readouterr()
     assert plain_diff(root) == 0
     out = capsys.readouterr().out
-    assert "meizel: rules +0 / content +0" in out
+    assert "meizel: rules +0 / content +0 / repaid +0 against HEAD" in out
 
 
 def test_a_read_added_while_the_file_moves_is_content_growth(
@@ -232,6 +232,7 @@ def test_a_read_added_while_the_file_moves_is_content_growth(
     assert plain_diff(root) == 1
     out = capsys.readouterr().out
     assert "worker.py#environ os.environ (ambient-read) 2 recorded, 1 found" in out
+    assert "meizel: rules +0 / content +1 / repaid -1 against HEAD" in out
 
 
 # meiva:note
@@ -259,4 +260,4 @@ def test_a_rename_into_a_directory_without_a_manifest_is_not_growth(
     capsys.readouterr()
     assert plain_diff(root) == 0
     out = capsys.readouterr().out
-    assert "meizel: rules +0 / content +0" in out
+    assert "meizel: rules +0 / content +0 / repaid +0 against HEAD" in out

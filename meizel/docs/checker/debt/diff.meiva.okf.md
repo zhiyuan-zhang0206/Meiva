@@ -1,13 +1,13 @@
 ---
 type: doc
-title: "meizel/ — The two measures of a debt diff"
+title: "meizel/ — The three measures of a debt diff"
 description: "What a debt diff counts as the measuring device (rule code, policy and manifest declarations) and what it counts as content, how the reference is regenerated under the change's device, and how the rules and content columns are judged."
 tags:
   - locality
   - tool
 ---
 
-# meizel/ — The two measures of a debt diff
+# meizel/ — The three measures of a debt diff
 
 A change moves a recorded number in two ways: the code got better, or the device that measures it
 changed. `debt diff` reports them apart, because a declaration that removes a read from the record is
@@ -29,10 +29,10 @@ not a repair and must not look like one.
   until then the change's own number can accuse a change of debt it did not add, but it can never
   hide debt the change did add. The totals column reads the same three trees, so `--by-target`
   groups them the same way.
-- A change that edits **what is measured** is judged in two parts
-  (`meizel/contracts/debt_rules.py`): `debt diff` detects it by itself and prints `rules −N` and
-  `content −M` on their own line, plus one line per declaration, policy entry or rule file it
-  edits. The measuring device is the checker's rule code, `meizel.policy.toml`, and the
+- A change that edits **what is measured** is judged in two parts, and reported in three
+  (`meizel/contracts/debt_rules.py`): `debt diff` detects it by itself and prints
+  `rules −N / content −M / repaid +K` on its own line, plus one line per declaration, policy entry or
+  rule file it edits. The measuring device is the checker's rule code, `meizel.policy.toml`, and the
   **declarations** of every `meizel.toml` — everything but its `[debt]` tables: `exports`, `uses`,
   `loads`, `external`, `roles`, `purity`, `state`, `roots`. A change that edits only `[debt]` tables
   is not a rule change and keeps the totals-only report: it prints one line saying no rule code,
@@ -54,6 +54,26 @@ not a repair and must not look like one.
   manifest that is malformed rather than merely ahead of the ref's content stops the comparison.
   Historical snapshots keep the unreadable gate.
   See [[meizel/docs/checker/policy/policy.meiva.okf.md|historical policy comparisons]].
+- **repaid** is the corner neither of those two can see, and the reason the third number exists. Write `D`
+  for the device — the rule code, `meizel.policy.toml` and the declarations — and `C` for the content:
+
+  | | the ref's content | the change's content |
+  |---|---|---|
+  | **the ref's device** | the ref's record, `base` | **repaid**: what the ref records, minus what the ref's declarations find here |
+  | **the change's device** | the found baseline | the change's record, `tree` |
+
+  `rules` reads the left column top to bottom; `content` reads the bottom row left to right. Repaid is
+  the top row: the device held where the ref left it, so it answers *did the code stop doing what the old
+  rules measured?* **content** cannot answer it, because it subtracts the change's own device from the
+  ref's content: deleting a read the new device no longer measures moves neither of its two terms, so a
+  change that deletes such a read and declares a root for it prints exactly like a change that only
+  declares the root. Repaid reports `+K` when the code really stopped carrying `K` entries, `0` when a
+  declaration only stopped measuring them, and a negative number when the change's content does something
+  the old device still measures.
+  A file the change moved is measured at the path the ref had it — the declarations are the ref's and name
+  that path — so a rename is no repayment and no growth in this column either, and a read added while its
+  file moves is the negative number it is.
+  Repaid is reported, never judged: the gate still fails on content growth alone.
 - Deleting a whole `[uses]` or `[exports]` entry is **not** a rule change: the reference's replay
   declares the legal edges it finds again, so the debt it uncovers is recorded as **content** growth.
   Adding an entry, or narrowing one, is the direction that splits.

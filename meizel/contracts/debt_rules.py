@@ -1,16 +1,37 @@
 # meiva:note
-# `debt diff` for a change that edits the rules: the growth the rules cause, apart from the growth the content causes.
+# `debt diff` for a change that edits the rules: the repayment the content made, apart from the change
+# the device made.
 #
-# A rule change makes the checker find debt that was always in the code, so the recorded total grows
-# by design. That growth must not hide a content change that grows it too. Two measures:
+# A rule change makes the checker find debt that was always in the code, so the recorded total moves
+# by design. That movement must not hide a content change that moves it too, and a content change must
+# not hide behind it. Three measures over one 2x2 — the device `D` is the rule code, `meizel.policy.toml`
+# and the declarations of every `meizel.toml` (everything but its `[debt]` tables); `C` is the content:
+#
+#                        | the ref's content           | the change's content
+#   the ref's device     | the ref's record (`base`)   | REPAID (this change's subject)
+#   the change's device  | the found baseline          | the change's record (`tree`)
 #
 # - Rules: what this checker finds in the BASE tree's content, minus what the base records.
 # - Content: what the change records, minus what this checker finds in the base tree's content.
+# - Repaid: what the base records, minus what the ref's own declarations find in the change's content.
+#   The left term is the ref's RECORD, the same anchor `rules` uses, and for a ref this comparison is
+#   meant for — a green one — the record is what its own device finds there.
+#
+# Repaid is the one measure content cannot be. `Content` subtracts the CHANGE's device from the base's
+# content, so deleting a read that the new device no longer measures moves neither of its two terms: a
+# change that deletes a read and declares a root for it would read exactly like a change that only
+# declares the root, and the repayment would be invisible. Repaid holds the device at the ref, so it
+# asks the other question — does the code still do what the old rules measured? (Pull request 8369 is
+# the case: two `sys.executable` reads deleted from `bisect_train.py` and its `[roots]` given `pid`
+# read as `rules -2 / content +0` alone.)
 #
 # "What this checker finds in the base tree" is the baseline it would write for the base: this checker
 # (the code being judged) runs on a throwaway checkout of the base commit, declaring the legal edges and
-# recording the rest, exactly as a rule change's own baseline commit does. The base's recorded debt is
-# the old rule's result, since the base is green. Rules are reported and never judged. Content growth is
+# recording the rest, exactly as a rule change's own baseline commit does. "What the ref's own
+# declarations find in the change's content" is the same replay with the pair swapped: the ref's
+# manifests over a checkout of the change's content, because a checker cannot run another version's code
+# and only the manifests are the device it can hold still. The base's recorded debt is the old rule's
+# result, since the base is green. Rules are reported and never judged. Content growth is
 # judged: every key the change records must be one the regenerated base records, with no greater count,
 # so a declaration cannot hide new violations and a violation cannot ride along. The base's content is
 # measured at the paths the change uses: a file git reports as renamed is moved in the base before it
@@ -27,6 +48,7 @@ from __future__ import annotations
 import tomllib
 from collections import Counter
 from collections.abc import Collection, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeGuard
 
@@ -82,13 +104,24 @@ RULE_PATHS = (
 RULE_CODE = tuple(path for path in RULE_PATHS if path != POLICY)
 
 
-class RuleDiff:
-    """The two measures for one change, per code, and the keys that make the content measure fail."""
+# meiva:note
+# The two replays one comparison runs, kept together because they are one decision made twice: the
+# change's device over the ref's content (`found`), and the ref's device over the change's content
+# (`under_reference`, the corner `repaid` reads). A caller that passed one without the other would be
+# reporting a comparison it did not make.
+@dataclass(frozen=True, slots=True)
+class Replays:
+    under_change: Baselines
+    under_reference: Baselines
 
+
+# meiva:note
+# The three measures for one change, per code, and the keys that make the content measure fail.
+class RuleDiff:
     def __init__(
         self,
         base: Counter[str],
-        regenerated: Baselines,
+        replays: Replays,
         tree: Recorded,
         ref: str,
         rewritten: Sequence[str] = (),
@@ -96,9 +129,10 @@ class RuleDiff:
     ) -> None:
         self.ref = ref
         self.base = base
-        self.found = _totals(regenerated)
+        self.found = _totals(replays.under_change)
         self.tree = _count_totals(tree)
-        self.excess = _excess(tree, regenerated)
+        self.repaid = _repaid(base, replays.under_reference)
+        self.excess = _excess(tree, replays.under_change)
         self.rewritten = tuple(rewritten)
         self.ignored = tuple(ignored)
 
@@ -106,28 +140,34 @@ class RuleDiff:
     def content_grew(self) -> bool:
         return bool(self.excess)
 
-    def measures(self) -> tuple[int, int]:
+    def measures(self) -> tuple[int, int, int]:
         return (
             sum(self.found.values()) - sum(self.base.values()),
             sum(self.tree.values()) - sum(self.found.values()),
+            sum(self.repaid.values()),
         )
 
     def lines(self) -> list[str]:
         codes = sorted(set(self.base) | set(self.found) | set(self.tree))
         out = [
-            f"{'code':<20}{self.ref[:12]:>14}{'new rules':>11}{'tree':>8}{'rules':>8}{'content':>9}"
+            f"{'code':<20}{self.ref[:12]:>14}{'new rules':>11}{'tree':>8}{'rules':>8}"
+            f"{'content':>9}{'repaid':>8}"
         ]
         for code in codes:
             out.append(
                 f"{code:<20}{self.base[code]:>14}{self.found[code]:>11}{self.tree[code]:>8}"
                 f"{self.found[code] - self.base[code]:>+8}{self.tree[code] - self.found[code]:>+9}"
+                f"{self.repaid[code]:>+8}"
             )
-        rules, content = self.measures()
+        rules, content, repaid = self.measures()
         out.append(
             f"{'total':<20}{sum(self.base.values()):>14}{sum(self.found.values()):>11}"
-            f"{sum(self.tree.values()):>8}{rules:>+8}{content:>+9}"
+            f"{sum(self.tree.values()):>8}{rules:>+8}{content:>+9}{repaid:>+8}"
         )
-        out.append(f"meizel: rules {rules:+d} / content {content:+d} against {self.ref[:12]}")
+        out.append(
+            f"meizel: rules {rules:+d} / content {content:+d} / repaid {repaid:+d} "
+            f"against {self.ref[:12]}"
+        )
         out.extend(self.rewritten)
         return out
 
@@ -158,6 +198,16 @@ def _totals(baselines: Baselines) -> Counter[str]:
         for code, rows in table.items():
             counts[code.value] += total({code: rows})
     return counts
+
+
+# meiva:note
+# What the ref's recorded debt lost to the change's content alone: every code's base count minus what
+# the ref's own declarations find in the change's content. A negative number is debt the old device
+# finds in the new code and the ref does not record: the change's content does something the old rules
+# measured, which is the one thing a reader of `content` alone cannot tell from a rule change.
+def _repaid(base: Counter[str], under_reference: Baselines) -> Counter[str]:
+    found = _totals(under_reference)
+    return Counter({code: base[code] - found[code] for code in set(base) | set(found)})
 
 
 def _count_totals(recorded: Recorded) -> Counter[str]:
@@ -401,6 +451,40 @@ def _apply_declarations(repo: Checkout, base: Checkout) -> None:
 
 
 # meiva:note
+# The change's content at a checkout of the ref: every path the diff touches takes the working tree's
+# bytes, and a path the working tree no longer has is deleted there. This is the same replay as
+# `_apply_declarations` with the pair swapped — the device stays where the ref left it and only what it
+# measures moves — so `repaid` and `found` are read against one another.
+def _apply_content(repo: Checkout, ref: str, checkout: Checkout, moved: Mapping[str, str]) -> None:
+    byte_writes: dict[Path, bytes] = {}
+    deletes: list[Path] = []
+    dirs: list[Path] = []
+    # meiva:note
+    # The device stays at the ref and only what it measures moves. A manifest, the policy and every rule
+    # file are the device, never the content: a manifest the change adds is not written here and one it
+    # deletes is not removed, and a policy entry the change adds moves no debt in this column. A file the
+    # change moved is measured where the ref had it, because the ref's declarations name that path — the
+    # mirror of `_apply_renames`, which moves the ref's content to the change's paths for `found`.
+    device = set(_changed_under(repo, ref, list(RULE_PATHS)))
+    back = {new: old for old, new in moved.items()}
+    for rel in _changed_under(repo, ref, []):
+        if rel in device or rel.rsplit("/", 1)[-1] == MANIFEST:
+            continue
+        target = back.get(rel, rel)
+        if repo.has_file(rel):
+            path = checkout.root / target
+            dirs.append(path.parent)
+            byte_writes[path] = repo.load_bytes(rel)
+        elif checkout.has_file(target):
+            deletes.append(checkout.root / target)
+    kept = [path for path in deletes if path not in byte_writes]
+    if not byte_writes and not kept:
+        return
+    checkout.apply_plan(EditPlan(byte_writes=byte_writes, deletes=tuple(kept), dirs=tuple(dirs)))
+    checkout.stage_all()
+
+
+# meiva:note
 # The declared symbol moves, applied to the base's own content: each import that names a moved symbol
 # at its old home is pointed at the new one, so the change's device measures the same site at the same
 # count instead of missing it. Only a declared move applies, only when the change really made it — the
@@ -488,4 +572,17 @@ def rule_diff(
         rewritten, ignored = _apply_symbol_moves(repo, ref, checkout, symbols)
         invalidate_policy_caches()
         found = regenerated(checkout, ref, jobs)
-    return RuleDiff(base, found, recorded_when_merged(repo, ref), ref, rewritten, ignored)
+    with repo.checkout(ref) as checkout:
+        prepare_policy_snapshot(checkout)
+        _apply_content(repo, ref, checkout, moved)
+        checkout.stage_all()
+        invalidate_policy_caches()
+        under_reference = regenerated(checkout, ref, jobs)
+    return RuleDiff(
+        base,
+        Replays(under_change=found, under_reference=under_reference),
+        recorded_when_merged(repo, ref),
+        ref,
+        rewritten,
+        ignored,
+    )
