@@ -424,12 +424,69 @@ def test_the_last_tests_directory_leaving_a_prefix_stops_the_generator(
 
 
 # meiva:note
-# The prefixes are a data file so that pull requests adding neighboring prefixes stop conflicting at
-# every rebase. Reading it sorts and de-duplicates, skips comments and refuses what could never match.
-def test_the_data_file_is_read_sorted_deduplicated_and_without_comments() -> None:
-    text = "# a comment\n\n  gateway/tests  \nbase/lm\n# base/other\ngateway/tests\n\nbase/lm\n"
+# The prefixes are a data file in byte order so that pull requests adding prefixes insert them in
+# place instead of piling up at one end. Reading it skips comments and refuses what could never
+# match, what is listed twice and what is out of order; it never sorts or repairs on its own.
+def test_the_data_file_is_read_in_file_order_without_comments_and_blank_lines() -> None:
+    text = "# a comment\n\n  base/lm  \n# base/other\n\ngateway/tests\n"
     assert gen.parse_owing_any(text) == ("base/lm", "gateway/tests")
     assert gen.parse_owing_any("# nothing is owed\n") == ()
+
+
+@pytest.mark.parametrize(
+    ("text", "complaint"),
+    [
+        (
+            "# header\nbase/lm\ngateway/tests\nbase/cluster\ncli\n",
+            r":4: 'base/cluster' is out of order, it sorts before 'gateway/tests' on line 3; "
+            r".*insert in sorted position",
+        ),
+        # meiva:note
+        # Byte order, not a locale's: an upper-case letter sorts before every lower-case one.
+        (
+            "base/lm\nbase/Lm\n",
+            r":2: 'base/Lm' is out of order, it sorts before 'base/lm' on line 1; ",
+        ),
+    ],
+)
+def test_a_line_out_of_order_stops_the_reader_naming_it(text: str, complaint: str) -> None:
+    with pytest.raises(SystemExit, match=r"pyright_tests_owing_any\.txt" + complaint):
+        gen.parse_owing_any(text)
+
+
+@pytest.mark.parametrize(
+    ("text", "complaint"),
+    [
+        ("base/lm\nbase/lm\ncli\n", r":2: 'base/lm' is listed twice \(first on line 1\); "),
+        # meiva:note
+        # A repeat that is also out of order is reported as the repeat, the more specific fault.
+        ("base/lm\ncli\nbase/lm\n", r":3: 'base/lm' is listed twice \(first on line 1\); "),
+    ],
+)
+def test_a_prefix_listed_twice_stops_the_reader_naming_the_repeat(
+    text: str, complaint: str
+) -> None:
+    with pytest.raises(SystemExit, match=r"pyright_tests_owing_any\.txt" + complaint + "remove"):
+        gen.parse_owing_any(text)
+
+
+@pytest.mark.parametrize(
+    "content", ["gateway/routers\nbase/x\n", "gateway/routers\ngateway/routers\n"]
+)
+def test_check_and_generation_both_stop_on_a_data_file_that_is_unsorted_or_repeats(
+    checkout: _Checkout, content: str
+) -> None:
+    checkout.add("gateway/routers/tests/test_a.py")
+    checkout.add("base/x/tests/test_b.py")
+    data = checkout.root / gen.OWING_ANY_FILE
+    data.write_text(content, encoding="utf-8")
+    pyproject = checkout.pyproject.read_text(encoding="utf-8")
+
+    for run in (checkout.check, checkout.regenerate):
+        with pytest.raises(SystemExit, match=r"pyright_tests_owing_any\.txt:2: "):
+            run()
+    assert data.read_text(encoding="utf-8") == content
+    assert checkout.pyproject.read_text(encoding="utf-8") == pyproject
 
 
 @pytest.mark.parametrize(
@@ -518,11 +575,32 @@ def test_two_branches_adding_neighboring_prefixes_merge_only_with_the_union_attr
     assert union.prefixes() == ("base/agents", "base/config", "base/host", "base/lm")
 
 
-def test_a_prefix_added_by_both_branches_in_different_places_is_read_once(tmp_path: Path) -> None:
+# meiva:note
+# A union merge keeps ours then theirs, so the order of the two lines depends on the direction of
+# the merge: the other direction leaves the second prefix out of place, and the reader names it.
+def test_a_union_merge_can_leave_a_prefix_out_of_place_and_the_reader_names_it(
+    tmp_path: Path,
+) -> None:
     repo = _Branches(tmp_path, (_REPO_ROOT / ".gitattributes").read_text(encoding="utf-8"))
-    repo.branch("one", "base/config\nbase/agents\nbase/lm\n")
+    repo.branch("one", "base/agents\nbase/config\nbase/lm\n")
+    repo.branch("two", "base/agents\nbase/host\nbase/lm\n")
+    _git(repo.root, "checkout", "-q", "two")
+    repo.merge("one")
+    with pytest.raises(SystemExit, match=r":3: 'base/config' is out of order, it sorts before"):
+        repo.prefixes()
+
+
+# meiva:note
+# One branch inserted a prefix in place, the other appended it at the end: the two hunks do not
+# touch, so the merge is clean and lists the prefix twice, which the reader refuses.
+def test_a_prefix_inserted_by_one_branch_and_appended_by_the_other_is_refused_as_a_repeat(
+    tmp_path: Path,
+) -> None:
+    repo = _Branches(tmp_path, (_REPO_ROOT / ".gitattributes").read_text(encoding="utf-8"))
+    repo.branch("one", "base/agents\nbase/config\nbase/lm\n")
     repo.branch("two", "base/agents\nbase/lm\nbase/config\n")
     _git(repo.root, "checkout", "-q", "one")
     repo.merge("two")
     assert repo.data.read_text(encoding="utf-8").count("base/config") == 2
-    assert repo.prefixes() == ("base/agents", "base/config", "base/lm")
+    with pytest.raises(SystemExit, match=r":4: 'base/config' is listed twice \(first on line 2\)"):
+        repo.prefixes()
