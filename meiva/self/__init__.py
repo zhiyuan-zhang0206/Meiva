@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import LiteralString, NamedTuple, NoReturn, Protocol
 
 from base.agents.lifecycle_signals import AgentRestart, AgentTermination, SystemHalt
+from base.host.boundary.untyped import object_of
 from meiva.boot import maybe_load_plugins_for_missing
 from meiva.files import workspace_base_for
 from meiva.sdk_surface import attachment_transport, process_context
@@ -92,7 +93,7 @@ def __getattr__(name: str) -> object:
     import sys as _sys
 
     if maybe_load_plugins_for_missing(name):
-        return getattr(_sys.modules[__name__], name)
+        return object_of(getattr, _sys.modules[__name__], name)
     raise AttributeError(f"module 'meiva.self' has no attribute {name!r}")
 
 

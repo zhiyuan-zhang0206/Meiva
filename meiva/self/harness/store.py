@@ -6,6 +6,7 @@ import tempfile
 from dataclasses import asdict
 from pathlib import Path
 
+from base.host.boundary.untyped import object_of
 from base.paths import harness_registrations_dir
 from meiva.self.harness.registration import (
     HarnessRegistration,
@@ -36,7 +37,7 @@ class FileRegistrationStore:
     def load(self, agent_id: int) -> HarnessRegistration | None:
         path = self.path(agent_id)
         try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
+            raw = object_of(json.loads, path.read_text(encoding="utf-8"))
         except FileNotFoundError:
             return None
         except json.JSONDecodeError as exc:
@@ -72,7 +73,7 @@ class FileRegistrationStore:
         for path in sorted(self._root.glob("*.json")):
             try:
                 registration = decode_registration(
-                    json.loads(path.read_text(encoding="utf-8")), path
+                    object_of(json.loads, path.read_text(encoding="utf-8")), path
                 )
             except (OSError, RegistrationError):
                 continue

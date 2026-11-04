@@ -8,7 +8,6 @@ import sys
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -73,24 +72,31 @@ def test_a_bound_borrowed_identity_is_refused() -> None:
         attachable_context()
 
 
-def row(**overrides: Any) -> HarnessRegistration:
-    values: dict[str, Any] = {
-        "agent_id": 41,
-        "harness": "deepseek",
-        "external_session_id": "session-1",
-        "machine": "ubuntu",
-        "controller_pid": 4242,
-        "handle_sha256": handle_digest("hx_test"),
-        "created_at": "2026-10-19T00:00:00+00:00",
-    }
-    values.update(overrides)
-    return HarnessRegistration(**values)
+def row(
+    *,
+    status: str = "attached",
+    expires_at: str | None = None,
+    machine: str = "ubuntu",
+    controller_pid: int = 4242,
+    handle_sha256: str = handle_digest("hx_test"),
+) -> HarnessRegistration:
+    return HarnessRegistration(
+        agent_id=41,
+        harness="deepseek",
+        external_session_id="session-1",
+        machine=machine,
+        controller_pid=controller_pid,
+        handle_sha256=handle_sha256,
+        created_at="2026-10-19T00:00:00+00:00",
+        expires_at=expires_at,
+        status=status,
+    )
 
 
-def admit(registration: HarnessRegistration, **overrides: Any) -> HarnessRegistration:
-    arguments: dict[str, Any] = {"machine": "ubuntu", "lineage": LINEAGE, "now": NOW}
-    arguments.update(overrides)
-    return require_live_registration(registration, **arguments)
+def admit(
+    registration: HarnessRegistration, *, machine: str = "ubuntu", now: datetime = NOW
+) -> HarnessRegistration:
+    return require_live_registration(registration, machine=machine, lineage=LINEAGE, now=now)
 
 
 def test_a_live_registration_passes() -> None:

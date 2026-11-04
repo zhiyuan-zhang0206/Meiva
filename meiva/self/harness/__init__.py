@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 
+from base.host.boundary.untyped import object_of
 from meiva import boot
 from meiva.sdk_surface import process_context, sdk_disable
 
@@ -19,15 +20,15 @@ def __getattr__(name: str) -> object:
     if name in _REGISTRATION_NAMES:
         from . import registration
 
-        return getattr(registration, name)
+        return object_of(getattr, registration, name)
     if name in _STORE_NAMES:
         from . import store
 
-        return getattr(store, name)
+        return object_of(getattr, store, name)
     if name in _ATTACHMENT_NAMES:
         from . import attachment
 
-        return getattr(attachment, name)
+        return object_of(getattr, attachment, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

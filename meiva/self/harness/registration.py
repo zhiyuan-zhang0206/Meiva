@@ -4,12 +4,9 @@ import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol, TypeGuard
+from typing import Protocol
 
-
-def _is_str_dict(val: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(val, dict)
-
+from base.host.boundary.json_values import is_object_dict
 
 # meiva:note
 # A harness registration is the record a bridge writes when it starts a provider
@@ -82,7 +79,7 @@ def handle_digest(handle: str) -> str:
 
 
 def decode_registration(raw: object, path: Path) -> HarnessRegistration:
-    if not _is_str_dict(raw):
+    if not is_object_dict(raw):
         raise RegistrationError(f"harness registration at {path} is not an object")
     payload = raw
     unknown = set(payload) - _REQUIRED_FIELDS - _OPTIONAL_FIELDS
@@ -94,20 +91,39 @@ def decode_registration(raw: object, path: Path) -> HarnessRegistration:
         )
     try:
         return HarnessRegistration(
-            agent_id=int(payload["agent_id"]),
-            harness=str(payload["harness"]),
-            external_session_id=str(payload["external_session_id"]),
-            machine=str(payload["machine"]),
-            controller_pid=int(payload["controller_pid"]),
-            handle_sha256=str(payload["handle_sha256"]),
-            created_at=str(payload["created_at"]),
-            expires_at=None if payload.get("expires_at") is None else str(payload["expires_at"]),
-            status=str(payload.get("status", "attached")),
+            agent_id=_int(payload, "agent_id"),
+            harness=_str(payload, "harness"),
+            external_session_id=_str(payload, "external_session_id"),
+            machine=_str(payload, "machine"),
+            controller_pid=_int(payload, "controller_pid"),
+            handle_sha256=_str(payload, "handle_sha256"),
+            created_at=_str(payload, "created_at"),
+            expires_at=None if payload.get("expires_at") is None else _str(payload, "expires_at"),
+            status=_str(payload, "status") if "status" in payload else "attached",
         )
     except (TypeError, ValueError) as exc:
         raise RegistrationError(
             f"harness registration at {path} has invalid values: {exc}"
         ) from exc
+
+
+# meiva:note
+# The whole number `payload[key]`; a stored registration holds exactly the types it was written with,
+# so another type (a bool included) is a `TypeError` naming the key.
+def _int(payload: dict[str, object], key: str) -> int:
+    value = payload[key]
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    raise TypeError(f"{key} must be an int, got {type(value).__name__}")
+
+
+# meiva:note
+# The string `payload[key]`, or a `TypeError` naming the key.
+def _str(payload: dict[str, object], key: str) -> str:
+    value = payload[key]
+    if isinstance(value, str):
+        return value
+    raise TypeError(f"{key} must be a str, got {type(value).__name__}")
 
 
 def _parse(value: str) -> datetime:
