@@ -16,6 +16,7 @@ from meizel.graph.model import MeizelError
 from meizel.lint_common import read_utf8_text, tracked_files
 from meizel.source_evidence.decode import decode_index
 from meizel.source_evidence.model import Index, TsReport
+from meizel.source_text import object_of
 
 _ADAPTER = "meizel/source_evidence/typescript/"
 
@@ -105,7 +106,7 @@ def _is_table(value: object) -> TypeGuard[dict[str, object]]:
 
 def _package_version(text: str) -> str:
     try:
-        value: object = json.loads(text)
+        value = object_of(json.loads, text)
     except ValueError as error:
         raise MeizelError("invalid TS compiler installation metadata") from error
     if not _is_table(value) or "version" not in value:

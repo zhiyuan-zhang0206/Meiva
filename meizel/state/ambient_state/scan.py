@@ -51,7 +51,6 @@ import ast
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
 
 from meizel.state.ambient_state.allowlist import AmbientAllowlist
 from meizel.state.ambient_state.module import (
@@ -425,7 +424,7 @@ class _Walker:
         self.loop_names: set[str] = set()
         self.owned_threads = owned_calls(module)
         self.owned_tasks = owned_task_calls(module)
-        self._handlers: dict[type[ast.AST], Callable[[Any], None]] = {
+        self._handlers: dict[type[ast.AST], Callable[..., None]] = {
             ast.Name: self._on_name,
             ast.Call: self._on_call,
             ast.Assign: self._on_store,

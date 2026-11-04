@@ -14,6 +14,7 @@ from typing import TypeGuard
 
 from meizel.graph.scopes import absolute_base, dotted_chain
 from meizel.graph.universe import Checkout, Universe, parent_of
+from meizel.source_text import object_of
 
 __all__ = ["python_reverse_closure"]
 
@@ -153,7 +154,7 @@ def _is_object_list(value: object) -> TypeGuard[list[object]]:
 
 def _decode_deps(text: str) -> tuple[str, ...] | None:
     try:
-        raw: object = json.loads(text)
+        raw = object_of(json.loads, text)
     except ValueError:
         return None
     if not _is_object_list(raw):

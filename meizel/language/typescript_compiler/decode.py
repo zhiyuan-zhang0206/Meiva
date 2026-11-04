@@ -19,6 +19,7 @@ from meizel.graph.model import (
     known_kind,
 )
 from meizel.language.typescript_compiler.model import TsScan
+from meizel.source_text import object_of
 
 
 def _is_object(value: object) -> TypeGuard[dict[str, object]]:
@@ -154,7 +155,7 @@ def _unique(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 
 def decode_batch(text: str, expected: frozenset[str], kinds: Collection[str]) -> dict[str, TsScan]:
-    raw: object = json.loads(text, object_pairs_hook=_unique)
+    raw = object_of(json.loads, text, object_pairs_hook=_unique)
     result = _record(raw, "version sources")
     if type(result["version"]) is not int or result["version"] != 1:
         raise ValueError("unsupported TypeScript compiler result version")

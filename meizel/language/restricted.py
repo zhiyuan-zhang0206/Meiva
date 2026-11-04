@@ -244,7 +244,7 @@ class RestrictedForms(ImportAccess):
             self.check_source(text, node.lineno)
 
     def check_source(self, text: str, line: int) -> None:
-        if any(self.u.is_first_party_name(m) for m in _IMPORT_IN_SOURCE.findall(text)):
+        if any(self.u.is_first_party_name(m.group(1)) for m in _IMPORT_IN_SOURCE.finditer(text)):
             self.restrict(line, "python -c source that imports first-party code")
 
     def string_value(self, node: ast.expr, depth: int = 0) -> str | None:

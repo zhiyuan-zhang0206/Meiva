@@ -8,6 +8,7 @@ from collections.abc import Iterable, Mapping
 from typing import TypeGuard
 
 from meizel.roles import parse_roles, pytest_test_hosts, select_packages
+from meizel.source_text import object_mapping
 from meizel.test_graph.model import ModuleTable, RawFileTestFacts, TestCheckout
 
 __all__ = ["build_test_checkout", "hash_test_tree", "is_test_config_file"]
@@ -135,7 +136,7 @@ def _parse_path_scopes(
         if rel_path != "path_scopes.toml" and not rel_path.endswith("/path_scopes.toml"):
             continue
         directory = rel_path.rpartition("/")[0]
-        doc = tomllib.loads(config_texts[rel_path])
+        doc = object_mapping(tomllib.loads(config_texts[rel_path]))
         for mod_name, raw_names in sorted(doc.items()):
             if not _is_str_list(raw_names):
                 raise ValueError(f"{rel_path}: {mod_name} must be a list of path strings")

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -31,20 +32,31 @@ def open_repository(root: Path) -> GitRepo:
 
 
 # meiva:note
+# The two namespace fields the entry reads. `parse_args` returns an `argparse.Namespace`, whose
+# attributes are `Any`, so they are read once into typed values through the checker's own reader
+# (`contracts.cli.read_args`, which also refuses a value of the wrong type).
+@dataclass(frozen=True)
+class _EntryOptions:
+    jobs: int | None
+    repo: Path | None
+
+
+# meiva:note
 # Run one checker command from argv and return the process exit status.
 def main(argv: list[str]) -> int:
     args = cli.build_parser().parse_args(argv)
-    if args.jobs is None:
-        # meiva:note
-        # The one place the processor count is read: below the entry, `jobs=None` is serial.
-        args.jobs = min(os.cpu_count() or 1, 8)
+    options = cli.read_args(args, _EntryOptions)
+    # meiva:note
+    # The one place the processor count is read: below the entry, `jobs=None` is serial.
+    jobs = options.jobs if options.jobs is not None else min(os.cpu_count() or 1, 8)
+    args.jobs = jobs
     try:
-        base = args.repo if args.repo is not None else Path.cwd()
+        base = options.repo if options.repo is not None else Path.cwd()
         # meiva:note
         # The one repository seat of the command: this checkout, read through one value that the
         # commands are handed instead of a path they would build their own from. A command that
         # judges reads a snapshot of it (`repo.universe()`).
-        repo = open_repository(args.repo if args.repo is not None else toplevel(base))
+        repo = open_repository(options.repo if options.repo is not None else toplevel(base))
         deps = cli.CommandDeps(
             tool_root=_TOOL_ROOT,
             read_roles=read_roles,

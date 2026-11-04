@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
 from meizel import allowances
 from meizel.graph.imports import (
@@ -183,6 +183,14 @@ def _is_object_list(value: object) -> TypeGuard[list[object]]:
     return isinstance(value, list)
 
 
+# meiva:note
+# `ast.iter_fields` yields `tuple[str, Any]`. Reading the value through this parameter makes it an
+# `object`: annotating the loop target instead does not work -- `for _, value in ...` binds an
+# `Any` name whatever the body does with it.
+def _field_value(field: tuple[str, object]) -> object:
+    return field[1]
+
+
 def _unwrap_annotation_expr(expr: ast.expr) -> ast.expr | None:
     if not (isinstance(expr, ast.Constant) and isinstance(expr.value, str)):
         return expr
@@ -240,7 +248,7 @@ class Scanner(AmbientAccess):
             isinstance(n, ast.ImportFrom) and any(a.name == "*" for a in n.names)
             for n in ast.walk(tree)
         )
-        self._handlers: dict[type[ast.AST], Callable[[Any], None]] = {
+        self._handlers: dict[type[ast.AST], Callable[..., None]] = {
             ast.If: self.visit_if,
             ast.Import: self.visit_import,
             ast.ImportFrom: self.visit_import_from,
@@ -356,7 +364,8 @@ class Scanner(AmbientAccess):
 
     def children(self, node: ast.AST) -> None:
         handlers = self._handlers
-        for _, value in ast.iter_fields(node):
+        for pair in ast.iter_fields(node):
+            value = _field_value(pair)
             if _is_object_list(value):
                 for child in value:
                     if isinstance(child, ast.AST) and type(child) not in _LEAVES:

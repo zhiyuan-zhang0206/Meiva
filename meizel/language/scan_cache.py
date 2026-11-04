@@ -34,6 +34,7 @@ from meizel.language.fixtures import FixtureFunction, FixtureRequest, FixtureSta
 from meizel.language.input_mutations import InputListAppend
 from meizel.language.scan import FileScan, scan_file, scan_typescript_files
 from meizel.language.typescript import load_ts_config, typescript_files
+from meizel.source_text import object_of
 
 __all__ = [
     "cached_module_imports",
@@ -374,7 +375,7 @@ def encode_file_scan(scan: FileScan) -> str:
 
 
 def decode_file_scan(text: str, kinds: Collection[str]) -> FileScan:
-    raw: object = json.loads(text)
+    raw = object_of(json.loads, text)
     return _scan_from_raw(raw, kinds)
 
 
@@ -389,7 +390,7 @@ def _sources_to_json(sources: Sources) -> str:
 
 
 def _sources_from_json(text: str) -> Sources:
-    raw_obj: object = json.loads(text)
+    raw_obj = object_of(json.loads, text)
     raw = _record(raw_obj)
     names = {_text(k): _text(v) for k, v in (_row(item, 2) for item in _array(raw["names"]))}
     calls = {_text(k): _text(v) for k, v in (_row(item, 2) for item in _array(raw["calls"]))}
@@ -458,7 +459,7 @@ def store_cached_sources(universe: Universe, cache_key: str, sources: Sources) -
 
 def _decode_imports_json(hit: str) -> dict[str, str] | None:
     try:
-        raw: object = json.loads(hit)
+        raw = object_of(json.loads, hit)
         return {_text(k): _text(v) for k, v in _record(raw).items()}
     except (ValueError, TypeError, KeyError):
         return None
@@ -542,7 +543,7 @@ def _decode_py_entry(
     text: str, digests: Mapping[str, str], kinds: Collection[str]
 ) -> _CachedPyScan | None:
     try:
-        raw_obj: object = json.loads(text)
+        raw_obj = object_of(json.loads, text)
         entry = _record(raw_obj)
         deps = tuple(
             (_text(dep), _text(expected))
@@ -590,7 +591,7 @@ def _scan_python_misses(
         pairs = list(pool.map(_scan_in_worker, paths, chunksize=chunk))
     out: list[tuple[FileScan, dict[str, object]]] = []
     for scan, text in pairs:
-        raw: object = json.loads(text)
+        raw = object_of(json.loads, text)
         out.append((scan, _record(raw)))
     return out
 
@@ -735,7 +736,7 @@ def _scan_ts_cached(
     hit = repo.cache_get_many((key,)).get(key)
     if hit is not None:
         try:
-            raw_obj: object = json.loads(hit)
+            raw_obj = object_of(json.loads, hit)
             decoded = {
                 s.path: s
                 for s in (_scan_from_raw(item, policy.reader_kinds) for item in _array(raw_obj))

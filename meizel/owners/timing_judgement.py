@@ -14,6 +14,8 @@ import ast
 from collections.abc import Iterator
 from itertools import pairwise
 
+from meizel.source_text import object_of
+
 MARKER = "# timing-guard:"
 # meiva:note
 # `monotonic`, `perf_counter`, `process_time` and `time` are clock attributes no library reuses for
@@ -184,7 +186,14 @@ def _normalise(compare: ast.Compare) -> str:
     # meiva:note
     # The comparison with its literals masked, so retuning one keeps its baseline entry.
     fresh = ast.parse(ast.unparse(compare), mode="eval").body
-    return ast.unparse(_MaskNumbers().visit(fresh))
+    # meiva:note
+    # `NodeTransformer.visit` is typed to return `Any`; read through `object_of` and check the shape
+    # instead of trusting the annotation. A visitor that returns anything but a node is a bug in
+    # this module, so it stops here rather than reaching `ast.unparse`.
+    masked = object_of(_MaskNumbers().visit, fresh)
+    if not isinstance(masked, ast.AST):
+        raise TypeError(f"masking a comparison returned {type(masked).__name__}, not a node")
+    return ast.unparse(masked)
 
 
 def _functions(tree: ast.Module) -> Iterator[ast.FunctionDef | ast.AsyncFunctionDef]:

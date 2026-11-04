@@ -33,6 +33,7 @@ from meizel.graph import project_metadata_paths, python_reverse_closure, standal
 from meizel.graph.model import MeizelError
 from meizel.graph.universe import MANIFEST, SOURCE_EXTENSIONS, Checkout, EditPlan, Universe
 from meizel.roles import parse_roles
+from meizel.source_text import object_of, object_pairs
 from meizel.test_graph import (
     build_test_checkout,
     decode_raw_facts,
@@ -348,8 +349,8 @@ class GitRepo:
             if not db_path.is_file():
                 return {}
             with closing(sqlite3.connect(db_path, timeout=5.0)) as conn:
-                rows = conn.execute(_CACHE_GET_SQL, (json.dumps(unique),)).fetchall()
-            return {str(key): str(val) for key, val in rows}
+                rows = object_of(conn.execute(_CACHE_GET_SQL, (json.dumps(unique),)).fetchall)
+            return {str(key): str(val) for key, val in object_pairs(rows)}
         except (sqlite3.Error, OSError):
             return {}
 
