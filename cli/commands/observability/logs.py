@@ -32,14 +32,20 @@ _ROTATED_LOG_ARCHIVE = re.compile(r".+\.log\.[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
 _AGENT_SHELL_SERVICE = re.compile(r"agent-[0-9]+-shell-[0-9]+-")
 
+# meiva:note
+# Every family keeps seven days, matching base.host.system.logs_content.FAMILY_DAYS.
+#
+# The two tables must move together:
+# cli/parsers/tests/test_logs_retention.py::test_retention_family_sets_stay_in_sync fails when
+# only one of them changes, which is why both are updated in the same change.
 FAMILY_DEFAULT_DAYS = {
-    "agent": 15,
+    "agent": 7,
     "shell": 7,
-    "gateway": 30,
-    "ops": 30,
-    "watchdog": 30,
+    "gateway": 7,
+    "ops": 7,
+    "watchdog": 7,
     "snapshot": 7,
-    "other": 15,
+    "other": 7,
 }
 
 

@@ -63,7 +63,7 @@ def test_family_days_apply_tier_defaults_and_report_each_candidate_family(
         ),
     ]
     retained = [
-        _file_at(tmp_path, "meiva-agent-13.out.log", _NOW - timedelta(days=15)),
+        _file_at(tmp_path, "meiva-agent-13.out.log", _NOW - timedelta(days=6)),
         _file_at(
             tmp_path,
             "meiva-agent-13-shell-3-review.out.log",
@@ -72,12 +72,12 @@ def test_family_days_apply_tier_defaults_and_report_each_candidate_family(
         _file_at(
             tmp_path,
             "gateway.2026-08-01_00-00-00_54321.log",
-            _NOW - timedelta(days=30),
+            _NOW - timedelta(days=6),
         ),
         _file_at(
             tmp_path,
             "restarter.2026-08-01_00-00-00_54321.log",
-            _NOW - timedelta(days=15),
+            _NOW - timedelta(days=6),
         ),
     ]
 
@@ -94,12 +94,12 @@ def test_family_days_apply_tier_defaults_and_report_each_candidate_family(
     assert all(path.exists() for path in expired + retained)
     out = capsys.readouterr().out
     for family, days in {
-        "agent": 15,
+        "agent": 7,
         "shell": 7,
-        "gateway": 30,
-        "ops": 30,
-        "watchdog": 30,
-        "other": 15,
+        "gateway": 7,
+        "ops": 7,
+        "watchdog": 7,
+        "other": 7,
     }.items():
         assert f"retention_family\tfamily={family}\tdays={days}\tfiles=1\tbytes=" in out
     assert "retention_summary\tmode=dry-run\tfiles=6\tbytes=" in out
@@ -150,13 +150,13 @@ def test_family_days_dry_run_reports_empty_policy_families(
     assert rc == 0
     out = capsys.readouterr().out
     for family, days in {
-        "agent": 15,
+        "agent": 7,
         "shell": 7,
-        "gateway": 30,
-        "ops": 30,
-        "watchdog": 30,
+        "gateway": 7,
+        "ops": 7,
+        "watchdog": 7,
         "snapshot": 7,
-        "other": 15,
+        "other": 7,
     }.items():
         assert f"retention_family\tfamily={family}\tdays={days}\tfiles=0\tbytes=0" in out
 
@@ -534,7 +534,7 @@ def test_catch_all_reports_unnamed_services_at_any_age(
 
     out = capsys.readouterr().out
     assert rc == 0
-    assert "retention_catch_all\tservices=wibble\tdays=15\tfiles=2" in out
+    assert "retention_catch_all\tservices=wibble\tdays=7\tfiles=2" in out
     assert "retention_summary\tmode=delete\tdeleted=2" in out
     assert not expired.exists()
     assert not native_archive.exists()
@@ -560,7 +560,7 @@ def test_catch_all_says_none_explicitly_when_every_service_has_a_family(
 
     out = capsys.readouterr().out
     assert rc == 0
-    assert "retention_catch_all\tservices=-\tdays=15\tfiles=0" in out
+    assert "retention_catch_all\tservices=-\tdays=7\tfiles=0" in out
 
 
 def test_dry_run_reports_the_catch_all_line_too(
@@ -581,7 +581,7 @@ def test_dry_run_reports_the_catch_all_line_too(
     )
 
     assert rc == 0
-    assert "retention_catch_all\tservices=wibble\tdays=15\tfiles=1" in capsys.readouterr().out
+    assert "retention_catch_all\tservices=wibble\tdays=7\tfiles=1" in capsys.readouterr().out
 
 
 def test_agent_and_shell_names_keep_precedence_over_service_stdout() -> None:
