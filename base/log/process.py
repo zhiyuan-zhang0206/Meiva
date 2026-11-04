@@ -7,14 +7,21 @@ points) lives in `base.telemetry.process_logging`, which composes this module's
 
 from __future__ import annotations
 
+import logging
 import sys
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 
 from base.log import logger
 from base.log.sinks import HUMAN_FORMAT, add_file_sink, add_sink, install_stdlib_intercept
 
-__all__ = ["init_subprocess_logger", "start_process_logging"]
+__all__ = [
+    "buffer_startup_records",
+    "flush_startup_records",
+    "init_subprocess_logger",
+    "start_process_logging",
+]
 
 
 # Process-level idempotency guard. The init_* functions add
@@ -55,6 +62,47 @@ def init_subprocess_logger(*, agent_id: int, home: Path) -> None:
     init_done = True
 
 
+# meiva:note
+# The records a process emits before its sinks exist are the ones a reader needs most: they are the
+# startup itself. On 2026-11-04 a whole generation of `unit … started` lines went to a stderr
+# nobody reads, because the root spawns every unit before the participant that installs the file
+# sink has started. Holding them here and replaying them into the sink keeps the message, the
+# logger name and the instant each was written with.
+_STARTUP_RECORD_LIMIT = 2000
+_startup_records: list[logging.LogRecord] = []
+
+
+class _StartupRecordBuffer(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        if len(_startup_records) < _STARTUP_RECORD_LIMIT:
+            _startup_records.append(record)
+
+
+# meiva:note
+# Installed by an entry point right after `logging.basicConfig`, so everything logged while the
+# process is still coming up is kept. Idempotent: a second call adds no second handler.
+def buffer_startup_records() -> None:
+    root = logging.getLogger()
+    if any(isinstance(handler, _StartupRecordBuffer) for handler in root.handlers):
+        return
+    root.addHandler(_StartupRecordBuffer())
+
+
+# meiva:note
+# One replay, then the buffer is empty: the records already reached the sink, and a second call
+# would duplicate them. `install_stdlib_intercept` replaces the root handlers (its own
+# `basicConfig(force=True)`), which is what removes the buffer handler.
+def flush_startup_records() -> None:
+    records, _startup_records[:] = list(_startup_records), []
+    for record in records:
+        stamped = logger.patch(
+            lambda entry, when=record.created, name=record.name: entry.update(
+                time=datetime.fromtimestamp(when, tz=UTC), name=name
+            )
+        )
+        stamped.opt(exception=record.exc_info).log(record.levelname, record.getMessage())
+
+
 def _add_stderr_sink_before_settings() -> None:
     """The human stderr sink, opened before the init imports `base.paths`.
 
@@ -92,6 +140,7 @@ def start_process_logging(
     add_file_sink(logs_dir(home=home) / f"{name}.log")
     attach_events()
     install_stdlib_intercept()
+    flush_startup_records()
     if announce is not None:
         announce()
     init_done = True
