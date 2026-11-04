@@ -10,10 +10,12 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, TypeGuard
 
 import psycopg
 
+from base.db.rows import IdRow, query_all, query_one
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from base.paths import repo_root
 
 # The manifest ships in the repo checkout every deployed unit runs from
@@ -45,16 +47,36 @@ class BuiltinSchedule:
     placement: str = "gateway"
 
 
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
+# meiva:note
+# The columns the drift check of one existing schedule row reads.
+@dataclass(frozen=True)
+class _ScheduleCodeRow:
+    id: int
+    script: str
+    command: str
+    machine: str
 
 
-def _is_any_list(value: object) -> TypeGuard[list[Any]]:
-    return isinstance(value, list)
+# meiva:note
+# `_ScheduleCodeRow` plus the row's name, for the per-machine sweep over `name:%` rows.
+@dataclass(frozen=True)
+class _NamedScheduleCodeRow:
+    id: int
+    name: str
+    script: str
+    command: str
+    machine: str
+
+
+# meiva:note
+# One `machines.name` read.
+@dataclass(frozen=True)
+class _MachineNameRow:
+    name: str
 
 
 def _parse_manifest_entry(item: object, manifest_dir: Path) -> BuiltinSchedule:
-    if not _is_str_dict(item):
+    if not is_object_dict(item):
         raise ManifestError(f"malformed manifest entry: {item!r} — expected an object")
     entry = item
     name = entry.get("name")
@@ -66,12 +88,14 @@ def _parse_manifest_entry(item: object, manifest_dir: Path) -> BuiltinSchedule:
     placement = entry.get("placement", "gateway")
     if not isinstance(name, str) or not name:
         raise ManifestError(f"malformed manifest entry: {entry!r} — missing 'name'")
-    if klass not in _BUILTIN_CLASSES:
+    if not isinstance(klass, str) or klass not in _BUILTIN_CLASSES:
         raise ManifestError(
             f"manifest schedule {name!r}: unknown class {klass!r} (expected {sorted(_BUILTIN_CLASSES)})"
         )
     if not isinstance(default_enabled, bool):
         raise ManifestError(f"manifest schedule {name!r}: 'default_enabled' must be a bool")
+    if not isinstance(description, str):
+        raise ManifestError(f"manifest schedule {name!r}: 'description' must be a string")
     if not isinstance(script, str) or not isinstance(command, str):
         raise ManifestError(f"manifest schedule {name!r}: 'script' and 'command' are required")
     if not isinstance(placement, str) or placement not in _BUILTIN_PLACEMENTS:
@@ -103,11 +127,11 @@ def load_manifest(path: Path | None = None) -> list[BuiltinSchedule]:
     """
     manifest_path = path or MANIFEST_PATH
     with manifest_path.open() as f:
-        payload: object = json.load(f)
-    if not _is_str_dict(payload):
+        payload = object_of(json.load, f)
+    if not is_object_dict(payload):
         raise ManifestError(f"malformed manifest {manifest_path}: expected a JSON object")
     entries_raw = payload.get("builtin_schedules")
-    if not _is_any_list(entries_raw):
+    if not is_object_list(entries_raw):
         raise ManifestError(
             f"malformed manifest {manifest_path}: expected {{builtin_schedules: [...]}}"
         )
@@ -127,13 +151,13 @@ def template_for_schedule_name(
     return None
 
 
-def runner_machine_names(
-    conn: psycopg.Connection[Any], *, fallback_machine: str
-) -> tuple[str, ...]:
-    with conn.cursor() as cur:
-        cur.execute("SELECT name FROM machines WHERE 'agent-runner' = ANY(role) ORDER BY name")
-        rows = cur.fetchall()
-    return tuple(r[0] for r in rows) if rows else (fallback_machine,)
+def runner_machine_names(conn: psycopg.Connection, *, fallback_machine: str) -> tuple[str, ...]:
+    rows = query_all(
+        conn,
+        _MachineNameRow,
+        "SELECT name FROM machines WHERE 'agent-runner' = ANY(role) ORDER BY name",
+    )
+    return tuple(r.name for r in rows) if rows else (fallback_machine,)
 
 
 def _no_names() -> list[str]:
@@ -153,7 +177,7 @@ def _digest(script: str, command: str) -> str:
 
 
 def _provision_gateway_schedule(
-    cur: psycopg.Cursor[Any],
+    conn: psycopg.Connection,
     sched: BuiltinSchedule,
     *,
     script_text: str,
@@ -161,13 +185,16 @@ def _provision_gateway_schedule(
     machine: str,
     result: ProvisionResult,
 ) -> None:
-    cur.execute(
+    existing = query_one(
+        conn,
+        _ScheduleCodeRow,
         "SELECT id, script, command, machine FROM schedules WHERE name = %s FOR UPDATE",
         (sched.name,),
     )
-    existing = cur.fetchone()
     if existing is None:
-        cur.execute(
+        row = query_one(
+            conn,
+            IdRow,
             "INSERT INTO schedules (name, description, script, command, enabled, machine) "
             "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
             (
@@ -179,40 +206,38 @@ def _provision_gateway_schedule(
                 machine,
             ),
         )
-        row = cur.fetchone()
         if row is None:
             raise RuntimeError(f"failed to insert schedule {sched.name}")
-        cur.execute(
+        conn.execute(
             "INSERT INTO schedule_versions (schedule_id, script, command, note) "
             "VALUES (%s, %s, %s, %s)",
-            (row[0], script_text, sched.command, "initial"),
+            (row.id, script_text, sched.command, "initial"),
         )
         result.created.append(sched.name)
         return
 
-    schedule_id, current_script, current_command, existing_machine = existing
-    if _digest(current_script or "", current_command or "") == want:
+    if _digest(existing.script, existing.command) == want:
         return
-    cur.execute(
+    conn.execute(
         "UPDATE schedules SET script = %s, command = %s, desired_revision = desired_revision + 1, "
         "launch_count = 0, next_launch_at = NULL, updated_at = now() WHERE id = %s",
-        (script_text, sched.command, schedule_id),
+        (script_text, sched.command, existing.id),
     )
-    cur.execute(
+    conn.execute(
         "INSERT INTO schedule_versions (schedule_id, script, command, note) "
         "VALUES (%s, %s, %s, %s)",
-        (schedule_id, script_text, sched.command, f"builtin-resync {want}"),
+        (existing.id, script_text, sched.command, f"builtin-resync {want}"),
     )
-    cur.execute(
+    conn.execute(
         "INSERT INTO schedule_sync_requests (schedule_id, machine) VALUES (%s, %s) "
         "ON CONFLICT (schedule_id, machine) DO UPDATE SET requested_at = clock_timestamp()",
-        (schedule_id, existing_machine),
+        (existing.id, existing.machine),
     )
     result.resynced.append(sched.name)
 
 
 def _provision_per_machine_schedule(
-    conn: psycopg.Connection[Any],
+    conn: psycopg.Connection,
     sched: BuiltinSchedule,
     *,
     script_text: str,
@@ -221,75 +246,70 @@ def _provision_per_machine_schedule(
     result: ProvisionResult,
 ) -> None:
     targets = runner_machine_names(conn, fallback_machine=fallback_machine)
-    with conn.cursor() as cur:
-        for target_machine in targets:
-            row_name = f"{sched.name}:{target_machine}"
-            cur.execute("SELECT id FROM schedules WHERE name = %s FOR UPDATE", (row_name,))
-            existing = cur.fetchone()
-            if existing is None:
-                cur.execute(
-                    "INSERT INTO schedules (name, description, script, command, enabled, machine) "
-                    "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
-                    (
-                        row_name,
-                        sched.description,
-                        script_text,
-                        sched.command,
-                        sched.default_enabled,
-                        target_machine,
-                    ),
-                )
-                row = cur.fetchone()
-                if row is None:
-                    raise RuntimeError(f"failed to insert schedule {row_name}")
-                schedule_id = row[0]
-                cur.execute(
-                    "INSERT INTO schedule_versions (schedule_id, script, command, note) "
-                    "VALUES (%s, %s, %s, %s)",
-                    (schedule_id, script_text, sched.command, "initial"),
-                )
-                if sched.default_enabled:
-                    cur.execute(
-                        "INSERT INTO schedule_sync_requests (schedule_id, machine) VALUES (%s, %s) "
-                        "ON CONFLICT (schedule_id, machine) DO UPDATE SET requested_at = clock_timestamp()",
-                        (schedule_id, target_machine),
-                    )
-                result.created.append(row_name)
-
-        cur.execute(
-            "SELECT id, name, script, command, machine FROM schedules "
-            "WHERE name LIKE %s AND owner_plugin IS NULL ORDER BY id FOR UPDATE",
-            (f"{sched.name}:%",),
+    for target_machine in targets:
+        row_name = f"{sched.name}:{target_machine}"
+        existing = query_one(
+            conn, IdRow, "SELECT id FROM schedules WHERE name = %s FOR UPDATE", (row_name,)
         )
-        for (
-            schedule_id,
-            row_name,
-            current_script,
-            current_command,
-            existing_machine,
-        ) in cur.fetchall():
-            if _digest(current_script or "", current_command or "") == want:
-                continue
-            cur.execute(
-                "UPDATE schedules SET script = %s, command = %s, desired_revision = desired_revision + 1, "
-                "launch_count = 0, next_launch_at = NULL, updated_at = now() WHERE id = %s",
-                (script_text, sched.command, schedule_id),
+        if existing is None:
+            row = query_one(
+                conn,
+                IdRow,
+                "INSERT INTO schedules (name, description, script, command, enabled, machine) "
+                "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+                (
+                    row_name,
+                    sched.description,
+                    script_text,
+                    sched.command,
+                    sched.default_enabled,
+                    target_machine,
+                ),
             )
-            cur.execute(
+            if row is None:
+                raise RuntimeError(f"failed to insert schedule {row_name}")
+            conn.execute(
                 "INSERT INTO schedule_versions (schedule_id, script, command, note) "
                 "VALUES (%s, %s, %s, %s)",
-                (schedule_id, script_text, sched.command, f"builtin-resync {want}"),
+                (row.id, script_text, sched.command, "initial"),
             )
-            cur.execute(
-                "INSERT INTO schedule_sync_requests (schedule_id, machine) VALUES (%s, %s) "
-                "ON CONFLICT (schedule_id, machine) DO UPDATE SET requested_at = clock_timestamp()",
-                (schedule_id, existing_machine),
-            )
-            result.resynced.append(row_name)
+            if sched.default_enabled:
+                conn.execute(
+                    "INSERT INTO schedule_sync_requests (schedule_id, machine) VALUES (%s, %s) "
+                    "ON CONFLICT (schedule_id, machine) DO UPDATE SET requested_at = clock_timestamp()",
+                    (row.id, target_machine),
+                )
+            result.created.append(row_name)
+
+    for drifted in query_all(
+        conn,
+        _NamedScheduleCodeRow,
+        "SELECT id, name, script, command, machine FROM schedules "
+        "WHERE name LIKE %s AND owner_plugin IS NULL ORDER BY id FOR UPDATE",
+        (f"{sched.name}:%",),
+    ):
+        if _digest(drifted.script, drifted.command) == want:
+            continue
+        conn.execute(
+            "UPDATE schedules SET script = %s, command = %s, desired_revision = desired_revision + 1, "
+            "launch_count = 0, next_launch_at = NULL, updated_at = now() WHERE id = %s",
+            (script_text, sched.command, drifted.id),
+        )
+        conn.execute(
+            "INSERT INTO schedule_versions (schedule_id, script, command, note) "
+            "VALUES (%s, %s, %s, %s)",
+            (drifted.id, script_text, sched.command, f"builtin-resync {want}"),
+        )
+        conn.execute(
+            "INSERT INTO schedule_sync_requests (schedule_id, machine) VALUES (%s, %s) "
+            "ON CONFLICT (schedule_id, machine) DO UPDATE SET requested_at = clock_timestamp()",
+            (drifted.id, drifted.machine),
+        )
+        result.resynced.append(drifted.name)
 
 
 def provision_builtin_schedules(
-    conn: psycopg.Connection[Any], *, machine: str, path: Path | None = None
+    conn: psycopg.Connection, *, machine: str, path: Path | None = None
 ) -> ProvisionResult:
     manifest = load_manifest(path)
     manifest_path = (path or MANIFEST_PATH).parent
@@ -298,15 +318,14 @@ def provision_builtin_schedules(
         script_text = (manifest_path / sched.script).read_text()
         want = _digest(script_text, sched.command)
         if sched.placement == "gateway":
-            with conn.cursor() as cur:
-                _provision_gateway_schedule(
-                    cur,
-                    sched,
-                    script_text=script_text,
-                    want=want,
-                    machine=machine,
-                    result=result,
-                )
+            _provision_gateway_schedule(
+                conn,
+                sched,
+                script_text=script_text,
+                want=want,
+                machine=machine,
+                result=result,
+            )
         else:
             _provision_per_machine_schedule(
                 conn,

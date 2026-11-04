@@ -11,10 +11,10 @@ from pathlib import Path
 
 @contextmanager
 def wire_response(response: bytes) -> Generator[str]:
-    class Handler(socketserver.BaseRequestHandler):
+    class Handler(socketserver.StreamRequestHandler):
         def handle(self) -> None:
-            self.request.recv(8192)
-            self.request.sendall(response)
+            self.rfile.read1(8192)
+            self.wfile.write(response)
 
     with (
         socketserver.TCPServer(("127.0.0.1", 0), Handler) as server,

@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from base.daemon.http_transport import start_daemon_http
+from base.daemon.tests._health_helpers import bound_port
 
 CHILD = Path(__file__).with_name("_transport_import_child.py")
 
@@ -63,7 +64,7 @@ async def test_only_explicit_route_and_authenticated_challenge_can_run() -> None
         extra_routes={("POST", "/ops/bootstrap-observation"): observe},
         auth_digests=frozenset({hashlib.sha256(b"test-cluster-secret").hexdigest()}),
     )
-    port = server.sockets[0].getsockname()[1]
+    port = bound_port(server.sockets[0])
     try:
         status, body = await _request(port, "GET", "/healthz", None)
         assert status == 503
