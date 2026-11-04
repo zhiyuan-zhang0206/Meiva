@@ -10,6 +10,7 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.inbox.insert import insert_inbound_message_in_transaction
 from base.agents.tasks.status import TaskStatus
+from base.db.rows import query_all
 from base.db.transaction import write_transaction
 from meiva_builtins.plugins.meiva_fleet.task_maintenance.routing import (
     nearest_manager,
@@ -47,31 +48,65 @@ class _Task:
     is_root: bool
 
 
+# meiva:note
+# A task and its parent, as the candidate query selects them.
+@dataclass(frozen=True)
+class _Edge:
+    id: int
+    parent_id: int | None
+
+
+# meiva:note
+# A locked task row, named as the table names its columns; `status` is converted to `TaskStatus`
+# when the row becomes a `_Task`.
+@dataclass(frozen=True)
+class _TaskRow:
+    id: int
+    parent_id: int | None
+    owner: int | None
+    title: str
+    status: str
+    reminder_count: int
+    escalated_at: datetime | None
+    priority: str
+    is_root: bool
+
+
 def _lock_candidates(cur: psycopg.Cursor, threshold: int) -> tuple[list[int], dict[int, _Task]]:
     # Discovery never authorizes an effect. Lock the union in stable id order;
     # SKIP LOCKED avoids reversing a writer's child -> parent lock order.
     # NO KEY UPDATE still fences mutations while allowing a gateway notice
     # creator holding the agent identity lock to reference task_id by FK.
-    cur.execute(
+    candidates = query_all(
+        cur.connection,
+        _Edge,
         "SELECT id,parent_id FROM agent_tasks WHERE status='in_progress' "
         "AND reminder_count >= %s AND NOT is_root "
         "AND (reminders_paused_until IS NULL OR reminders_paused_until <= now()) ORDER BY id",
         (threshold,),
     )
-    candidates = cur.fetchall()
-    ids = sorted({i for task, parent in candidates for i in (task, parent) if i is not None})
-    cur.execute(
-        "SELECT id,parent_id,owner,title,status,reminder_count,escalated_at,priority,is_root "
-        "FROM agent_tasks WHERE id=ANY(%s) ORDER BY id FOR NO KEY UPDATE SKIP LOCKED",
-        (ids,),
-    )
+    ids = sorted({i for edge in candidates for i in (edge.id, edge.parent_id) if i is not None})
     locked = {
-        row[0]: _Task(
-            row[0], row[1], row[2], row[3], TaskStatus(row[4]), row[5], row[6], row[7], row[8]
+        row.id: _Task(
+            row.id,
+            row.parent_id,
+            row.owner,
+            row.title,
+            TaskStatus(row.status),
+            row.reminder_count,
+            row.escalated_at,
+            row.priority,
+            row.is_root,
         )
-        for row in cur.fetchall()
+        for row in query_all(
+            cur.connection,
+            _TaskRow,
+            "SELECT id,parent_id,owner,title,status,reminder_count,escalated_at,priority,is_root "
+            "FROM agent_tasks WHERE id=ANY(%s) ORDER BY id FOR NO KEY UPDATE SKIP LOCKED",
+            (ids,),
+        )
     }
-    return [row[0] for row in candidates], locked
+    return [edge.id for edge in candidates], locked
 
 
 # meiva:note

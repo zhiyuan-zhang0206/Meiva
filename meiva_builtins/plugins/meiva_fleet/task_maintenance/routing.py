@@ -6,10 +6,12 @@
 # neither can route to an agent that is already gone.
 # meiva:link meiva_builtins/plugins/meiva_fleet/task_maintenance/docs/task-maintenance/task-maintenance.meiva.okf.md
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 import psycopg
 
 from base.api_contracts.agent_contract import AgentStatus
+from base.db.rows import IdRow, query_all, query_one
 from base.events.notifications.notices import stage_notice_notification
 
 
@@ -26,30 +28,64 @@ from base.events.notifications.notices import stage_notice_notification
 # looping. A recursive CTE would carry the same two stop conditions in SQL and could not
 # be read against the message copy. Reads only: the caller owns the transaction, and an
 # ancestor's owner may change under it.
+# meiva:note
+# A task and its parent, as the first lookup of the walk selects them.
+@dataclass(frozen=True)
+class _Edge:
+    id: int
+    parent_id: int | None
+
+
+# meiva:note
+# An ancestor task with its owner's liveness, named as the walk's statement selects them. `owner`
+# is null on the ownerless system root, and `status` is null when the owner has no `agents_meta` row.
+@dataclass(frozen=True)
+class _Ancestor:
+    id: int
+    parent_id: int | None
+    owner: int | None
+    status: str | None
+
+
 def nearest_manager(cur: psycopg.Cursor, task_ids: Iterable[int]) -> dict[int, int | None]:
     ids = list(task_ids)
     resolved: dict[int, int | None] = dict.fromkeys(ids)
     if not ids:
         return resolved
-    cur.execute("SELECT id, parent_id FROM agent_tasks WHERE id = ANY(%s)", (ids,))
-    pending = {task_id: int(parent) for task_id, parent in cur.fetchall() if parent is not None}
+    pending = {
+        edge.id: edge.parent_id
+        for edge in query_all(
+            cur.connection,
+            _Edge,
+            "SELECT id, parent_id FROM agent_tasks WHERE id = ANY(%s)",
+            (ids,),
+        )
+        if edge.parent_id is not None
+    }
     visited: dict[int, set[int]] = {task_id: set() for task_id in ids}
     while pending:
-        cur.execute(
-            "SELECT t.id, t.parent_id, t.owner, m.status FROM agent_tasks t "
-            "LEFT JOIN agents_meta m ON m.id = t.owner WHERE t.id = ANY(%s)",
-            (sorted(set(pending.values())),),
-        )
-        nodes = {int(row[0]): row[1:] for row in cur.fetchall()}
+        nodes = {
+            row.id: row
+            for row in query_all(
+                cur.connection,
+                _Ancestor,
+                "SELECT t.id, t.parent_id, t.owner, m.status FROM agent_tasks t "
+                "LEFT JOIN agents_meta m ON m.id = t.owner WHERE t.id = ANY(%s)",
+                (sorted(set(pending.values())),),
+            )
+        }
         next_pending: dict[int, int] = {}
         for task_id, node in pending.items():
-            parent_id, owner, status = nodes.get(node, (None, None, None))
-            if owner is not None and status != AgentStatus.TERMINATED:
-                resolved[task_id] = int(owner)
+            ancestor = nodes.get(node)
+            if ancestor is None:
+                visited[task_id].add(node)
+                continue
+            if ancestor.owner is not None and ancestor.status != AgentStatus.TERMINATED:
+                resolved[task_id] = ancestor.owner
                 continue
             visited[task_id].add(node)
-            if parent_id is not None and int(parent_id) not in visited[task_id]:
-                next_pending[task_id] = int(parent_id)
+            if ancestor.parent_id is not None and ancestor.parent_id not in visited[task_id]:
+                next_pending[task_id] = ancestor.parent_id
         pending = next_pending
     return resolved
 
@@ -80,7 +116,9 @@ def stage_human_notice(
     )
     if cur.fetchone() is not None:
         return None
-    cur.execute(
+    inserted = query_one(
+        conn,
+        IdRow,
         "INSERT INTO agent_notices "
         "(agent_id,local_id,task_id,title,content,priority,require_response,blocking,expire_at,"
         "source_verified_by) "
@@ -96,8 +134,7 @@ def stage_human_notice(
             notice_ttl_limit_seconds,
         ),
     )
-    row = cur.fetchone()
-    if row is None:
+    if inserted is None:
         raise RuntimeError("human notice insert returned no row")
-    notice_id = int(row[0])
+    notice_id = inserted.id
     return notice_id, stage_notice_notification(conn, agent_id=agent_id, notice_id=notice_id)

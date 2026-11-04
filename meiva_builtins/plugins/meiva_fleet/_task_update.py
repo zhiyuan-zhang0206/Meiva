@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import builtins
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -223,6 +224,22 @@ def collect_update_fields(
 
 
 # meiva:note
+# The columns `write_task_update` reads from the row it locks, named as the table names them (all
+# of them NOT NULL in `agent_tasks` except the four that are nullable here).
+@dataclass(frozen=True)
+class _LockedTask:
+    owner: int | None
+    title: str
+    is_root: bool
+    status: str
+    description: str
+    results: str | None
+    priority: str
+    parent_id: int | None
+    remind_interval_seconds: int | None
+
+
+# meiva:note
 # Restarts the task's reminder window when this write changed something `reset_on` names, and only
 # then: the change set is measured against the row this function locks, so restating the current
 # value cannot pass for progress. `updated_at` moves in the same branch, because the due clock and
@@ -246,36 +263,33 @@ def write_task_update(
     title-uniqueness rules, writes the row + optional note, and records the
     event log. Returns (old_owner, current_title, new_owner) for the
     post-commit notification."""
+    # meiva:note
+    # Deferred: `base.db.rows` imports psycopg, which plugin autoload keeps off (task #3816).
+    from base.db.rows import query_one
+
     # FOR UPDATE holds the row across the read -> write so two concurrent
     # reassignments cannot both act on the same stale owner.
-    cur.execute(
+    locked = query_one(
+        cur.connection,
+        _LockedTask,
         "SELECT owner, title, is_root, status, description, results, priority, parent_id, "
         "remind_interval_seconds FROM agent_tasks WHERE id = %s FOR UPDATE",
         (task_id,),
     )
-    row = cur.fetchone()
-    if row is None:
+    if locked is None:
         raise ValueError(f"task {task_id} does not exist")
-    (
-        old_owner,
-        current_title,
-        is_root,
-        old_status,
-        old_description,
-        old_results,
-        old_priority,
-        old_parent_id,
-        old_interval,
-    ) = row
+    old_owner = locked.owner
+    current_title = locked.title
+    is_root = locked.is_root
     snapshot = TaskSnapshot(
-        status=old_status,
-        title=current_title,
-        description=old_description,
-        results=old_results,
-        owner=old_owner,
-        priority=old_priority,
-        parent_id=old_parent_id,
-        remind_interval_seconds=old_interval,
+        status=locked.status,
+        title=locked.title,
+        description=locked.description,
+        results=locked.results,
+        owner=locked.owner,
+        priority=locked.priority,
+        parent_id=locked.parent_id,
+        remind_interval_seconds=locked.remind_interval_seconds,
     )
     # The system root task is immutable: it is the anchor of the task tree
     # and the parent of the cluster's top-level tasks, so it can never be

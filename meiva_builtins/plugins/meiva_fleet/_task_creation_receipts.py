@@ -1,23 +1,23 @@
 """Immutable agent-scoped SDK task creation results."""
 
-from typing import Any
-
 import psycopg
 from psycopg.types.json import Jsonb
 
 from base.agents.context import MeivaContext
+from base.agents.tasks.model import Task, parse_task_snapshot
 from base.agents.tasks.model import validate_task_snapshot as validate_snapshot
+from base.host.boundary.json_values import is_object_dict
 from meiva.sdk_surface import agent_identity
 
 
 def replay_creation(
-    cur: psycopg.Cursor[Any],
+    cur: psycopg.Cursor[tuple[object, ...]],
     actor: int,
     key: str,
     request: dict[str, object],
     *,
     context: MeivaContext,
-) -> dict[str, Any] | None:
+) -> Task | None:
     """Serialize admission, then return the frozen original result if accepted."""
     cur.execute(
         "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
@@ -40,13 +40,14 @@ def replay_creation(
     # and absent means "never paused", so the stored snapshot replays with that field defaulted.
     # Only the stored copy is upcast — `validate_task_snapshot` stays strict for a live snapshot,
     # where a missing field is a caller's omission (task #5311).
-    stored = dict(row[1])
-    stored.setdefault("reminders_paused_until", None)
-    return validate_snapshot(stored)
+    stored = row[1]
+    if not is_object_dict(stored):
+        raise TypeError("a stored task creation result must be an object")
+    return parse_task_snapshot({"reminders_paused_until": None, **stored})
 
 
 def record_creation(
-    cur: psycopg.Cursor[Any],
+    cur: psycopg.Cursor[tuple[object, ...]],
     actor: int,
     key: str,
     request: dict[str, object],

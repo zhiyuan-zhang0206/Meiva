@@ -1,6 +1,6 @@
 """Atomic compound task and agent acceptance for the Fleet SDK."""
 
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 import meiva.self
 from base.agents.context.gateway_client import transport
@@ -29,7 +29,7 @@ def create_and_assign_guarded(
     *,
     parent: int,
     label: str | None,
-    config_overlay: dict[str, Any] | None,
+    config_overlay: dict[str, object] | None,
     machine: str | None,
     remind_interval_seconds: int | None,
     priority: str,

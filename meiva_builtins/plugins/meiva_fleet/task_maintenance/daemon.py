@@ -29,6 +29,7 @@ from base.daemon.shutdown import install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
+from base.db.rows import query_all
 from base.db.transaction import write_transaction
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
@@ -127,6 +128,21 @@ _REMINDER_SQL = """
       )
     ORDER BY t.priority, t.id
 """
+
+
+# meiva:note
+# A row of `_REMINDER_SQL`, named as its columns are. The statement filters on `owner` and
+# `remind_interval_seconds` being non-null, and the `LEFT JOIN` leaves the owner's status null for
+# an owner with no `agents_meta` row.
+@dataclass(frozen=True)
+class _DueRow:
+    id: int
+    owner: int
+    title: str
+    remind_interval_seconds: int
+    elapsed: int
+    priority: str
+    owner_status: str | None
 
 
 @dataclass(frozen=True)
@@ -428,12 +444,17 @@ def run_reminders(
     backoff_seconds: float,
 ) -> int:
     with write_transaction(pool) as conn, conn.cursor() as cur:
-        cur.execute(_REMINDER_SQL + " FOR NO KEY UPDATE OF t SKIP LOCKED", (backoff_seconds,))
         live: dict[int, list[_DueTask]] = defaultdict(list)
         orphaned: dict[int, list[_DueTask]] = defaultdict(list)
-        for task_id, owner, title, interval, elapsed, priority, status in cur.fetchall():
-            task = _DueTask(task_id, owner, title, interval, elapsed, priority)
-            (orphaned if status == AgentStatus.TERMINATED else live)[owner].append(task)
+        for due in query_all(
+            conn, _DueRow, _REMINDER_SQL + " FOR NO KEY UPDATE OF t SKIP LOCKED", (backoff_seconds,)
+        ):
+            task = _DueTask(
+                due.id, due.owner, due.title, due.remind_interval_seconds, due.elapsed, due.priority
+            )
+            (orphaned if due.owner_status == AgentStatus.TERMINATED else live)[due.owner].append(
+                task
+            )
         digests = _accept_owner_digests(cur, live)
         reroutes, notices = _accept_reroutes(
             cur,
