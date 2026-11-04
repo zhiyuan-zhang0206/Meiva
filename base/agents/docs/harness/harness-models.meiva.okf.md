@@ -28,13 +28,17 @@ are selectable and runnable without native catalog registration,
 Each external CLI is probed through a non-agentic protocol query under a bounded
 timeout without starting a turn or spending model quota:
 
-- `codex`: `codex app-server --listen stdio://` (`initialize` -> `model/list`),
-  reading visible `id`, `supportedReasoningEfforts` (including `ultra` when the
+- `codex`: `codex app-server --listen stdio://` using the same
+  transport and handshake as the session bridge. The probe awaits the
+  `initialize` reply before sending `initialized` and keeps stdin open until
+  the `model/list` reply arrives. It reads visible `id`, `supportedReasoningEfforts` (including `ultra` when the
   installed CLI and account support it), `defaultReasoningEffort`, and
   `isDefault`.
 - `claude_code`: `claude -p --input-format stream-json --output-format stream-json --verbose --no-session-persistence`
   (`control_request` `initialize`), reading `resolvedModel` / `value`,
-  `supportsEffort`, `supportedEffortLevels`, and `defaultEffort`.
+  `supportsEffort`, `supportedEffortLevels`, and `defaultEffort`. A selector
+  with `[1m]` keeps the exact CLI value so the selection retains its context
+  window when passed back to Claude.
 - `antigravity`: `agy models`, reusing stdout from the login check, stripping
   progress output and grouping `<base>-<effort>` suffixes into canonical effort
   ladders while preserving effort-less model IDs verbatim.

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
+import subprocess
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 from base.host.env.harness_binaries import resolve_harness_binary
 from base.lm.harness.base_session import BaseHarnessSession, SessionBinding, TurnTicket
@@ -91,6 +94,26 @@ def resolved_binary(
     config: CodexConfig, environ: Mapping[str, str], *, bin_dirs: Sequence[str] | None = None
 ) -> str:
     return resolve_harness_binary(config.binary, path_env=environ.get("PATH"), bin_dirs=bin_dirs)
+
+
+async def list_models(
+    binary: str, *, cwd: Path, environ: Mapping[str, str], timeout: float
+) -> JsonObject:
+    config = CodexConfig(cwd=cwd)
+    server = StdioAppServer(
+        config.command(binary),
+        cwd=config.cwd,
+        environ=build_env(environ),
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        async with asyncio.timeout(timeout):
+            await server.start()
+            _ = await server.request(*initialize_request())
+            await server.notify(INITIALIZED)
+            return await server.request("model/list", {})
+    finally:
+        await server.close()
 
 
 class CodexSession(BaseHarnessSession[CodexConfig]):

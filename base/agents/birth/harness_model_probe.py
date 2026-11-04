@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
 from collections.abc import Callable, Mapping
@@ -15,7 +16,8 @@ from base.agents.model.harness_models import (
 from base.api_contracts.agent_contract import Harness
 from base.host.boundary.untyped import object_of
 from base.lm.harness.claude import SECRET_ENV_NAMES as CLAUDE_SECRET_ENV_NAMES
-from base.lm.harness.codex.auth import build_env as build_codex_env
+from base.lm.harness.codex import JsonRpcError, TransportClosedError
+from base.lm.harness.codex.session import list_models as list_codex_models
 
 StdinRunner = Callable[..., "subprocess.CompletedProcess[str]"]
 ModelProber = Callable[..., CatalogProbeResult]
@@ -54,16 +56,6 @@ def _json_lines(stdout: str) -> list[dict[str, object]]:
     return parsed
 
 
-def _rpc_error_text(error_field: object, fallback: str) -> str:
-    if _is_dict(error_field):
-        msg = error_field.get("message")
-        if isinstance(msg, str) and msg.strip():
-            return msg.strip()
-    if isinstance(error_field, str) and error_field.strip():
-        return error_field.strip()
-    return fallback
-
-
 def _run_cli(
     argv: list[str],
     *,
@@ -98,44 +90,20 @@ def _run_cli(
 
 
 def _probe_codex_models(
-    binary: str, *, environment: Mapping[str, str], runner: StdinRunner
+    binary: str, *, home: Path, environment: Mapping[str, str]
 ) -> CatalogProbeResult:
-    stdin_payload = (
-        "\n".join(
-            (
-                json.dumps(
-                    {
-                        "jsonrpc": "2.0",
-                        "id": 1,
-                        "method": "initialize",
-                        "params": {"clientInfo": {"name": "meiva-probe", "version": "1.0"}},
-                    }
-                ),
-                json.dumps({"jsonrpc": "2.0", "method": "initialized", "params": {}}),
-                json.dumps({"jsonrpc": "2.0", "id": 2, "method": "model/list", "params": {}}),
-            )
+    timeout = _MODEL_PROBE_TIMEOUT_S[Harness.CODEX]
+    try:
+        page = asyncio.run(
+            list_codex_models(binary, cwd=home, environ=environment, timeout=timeout)
         )
-        + "\n"
-    )
-    stdout, err = _run_cli(
-        [binary, "app-server", "--listen", "stdio://"],
-        stdin_payload=stdin_payload,
-        timeout=_MODEL_PROBE_TIMEOUT_S[Harness.CODEX],
-        env=build_codex_env(environment),
-        runner=runner,
-    )
-    if stdout is None:
-        return CatalogProbeResult(error=err or "codex app-server produced no output")
-    for message in _json_lines(stdout):
-        if message.get("id") != 2:
-            continue
-        if "error" in message:
-            return CatalogProbeResult(
-                error=_rpc_error_text(message["error"], "codex model/list failed")
-            )
-        if "result" in message:
-            return parse_codex_model_list([message["result"]])
-    return CatalogProbeResult(error=err or "codex app-server returned no model/list response")
+    except TimeoutError:
+        return CatalogProbeResult(
+            error=f"codex app-server model probe timed out after {timeout:.0f}s"
+        )
+    except (OSError, JsonRpcError, TransportClosedError) as exc:
+        return CatalogProbeResult(error=f"codex app-server model probe failed: {exc}")
+    return parse_codex_model_list([page])
 
 
 def _probe_claude_models(
@@ -186,7 +154,6 @@ def probe_cli_models(
     agy_stdout: str | None = None,
     runner: StdinRunner = subprocess.run,
 ) -> CatalogProbeResult:
-    _ = home
     if harness is Harness.ANTIGRAVITY:
         if agy_stdout is not None:
             return parse_antigravity_models(agy_stdout)
@@ -201,7 +168,7 @@ def probe_cli_models(
             return CatalogProbeResult(error=err or "agy models produced no output")
         return parse_antigravity_models(stdout)
     if harness is Harness.CODEX:
-        return _probe_codex_models(binary, environment=environment, runner=runner)
+        return _probe_codex_models(binary, home=home, environment=environment)
     if harness is Harness.CLAUDE_CODE:
         return _probe_claude_models(binary, environment=environment, runner=runner)
     raise AssertionError(f"built-in harness {harness.value!r} has no external CLI model probe")
