@@ -725,13 +725,13 @@ def test_snapshot_retention_scans_the_nested_computer_dir(
 
 
 def test_retention_family_sets_stay_in_sync() -> None:
-    from base.host.system.logs_content import FAMILY_DAYS
-    from cli.commands.observability.logs import FAMILY_DEFAULT_DAYS
-    from cli.parsers.logs import FAMILY_DAYS_NAMES
+    from base.config.domains.observability.settings import ObservabilitySettings
+    from cli.commands.observability.logs import FAMILY_DAYS_NAMES, FAMILY_DEFAULT_DAYS
 
     assert set(FAMILY_DEFAULT_DAYS) == set(FAMILY_DAYS_NAMES) - {"default"}
-    job_families: dict[str, str] = {}
-    for item in FAMILY_DAYS.split(","):
-        family, _, days = item.partition("=")
-        job_families[family] = days
-    assert job_families == {family: str(days) for family, days in FAMILY_DEFAULT_DAYS.items()}
+    # meiva:note
+    # The daily job reads MEIVA_LOG_FAMILY_DAYS; the interactive default must describe the
+    # same policy, or `meiva logs retention` and the job would quietly disagree.
+    configured = ObservabilitySettings().log_family_days
+    parsed = {item.partition("=")[0]: int(item.partition("=")[2]) for item in configured.split(",")}
+    assert parsed == dict(FAMILY_DEFAULT_DAYS)

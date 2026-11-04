@@ -9,10 +9,6 @@ from pathlib import Path
 
 from base.host.boundary.options import options
 
-FAMILY_DAYS_NAMES = frozenset(
-    {"agent", "shell", "gateway", "ops", "watchdog", "snapshot", "other", "default"}
-)
-
 
 def _positive_days(value: str) -> int:
     try:
@@ -35,23 +31,12 @@ def _positive_mib(value: str) -> int:
 
 
 def _family_days(value: str) -> dict[str, int]:
-    family_days: dict[str, int] = {}
-    for assignment in value.split(","):
-        family, separator, days = assignment.partition("=")
-        if not separator or not family or not days:
-            raise argparse.ArgumentTypeError(
-                "family days must use FAMILY=DAYS pairs separated by commas"
-            )
-        if family not in FAMILY_DAYS_NAMES:
-            raise argparse.ArgumentTypeError(
-                "family must be agent, shell, gateway, ops, watchdog, snapshot, other, or default"
-            )
-        if family == "default":
-            family = "other"
-        if family in family_days:
-            raise argparse.ArgumentTypeError(f"family {family!r} is repeated")
-        family_days[family] = _positive_days(days)
-    return family_days
+    from cli.commands.observability.logs import parse_family_days
+
+    try:
+        return parse_family_days(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 @dataclass(frozen=True)
@@ -103,6 +88,19 @@ def _h_logs_rotate(args: argparse.Namespace) -> int:
     )
 
 
+def _h_logs_maintenance(args: argparse.Namespace) -> int:
+    from base.paths import logs_dir
+    from cli.commands.observability.logs import cmd_logs_maintenance
+    from cli.database.runtime import runtime_of
+
+    runtime = runtime_of(args)
+    return cmd_logs_maintenance(
+        family_days_text=runtime.config.view.observability.log_family_days,
+        logs_path=logs_dir(home=runtime.home),
+        now=runtime.clock.now(),
+    )
+
+
 def add_logs_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     logs_p = sub.add_parser("logs", help="manage local log files")
     logs_sub = logs_p.add_subparsers(dest="logs_cmd", required=True)
@@ -143,6 +141,17 @@ def add_logs_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
         help="list matching expired files and totals without deleting",
     )
     retention_p.set_defaults(func=_h_logs_retention)
+    maintenance_p = logs_sub.add_parser(
+        "maintenance",
+        help="rotate then retain, using the configured retention policy",
+        description=(
+            "The daily job's entry point: rotate every managed log, then delete expired "
+            "files using MEIVA_LOG_FAMILY_DAYS. The job command names this behaviour and "
+            "carries no policy of its own, so a release cannot rewrite the operator's "
+            "retention window."
+        ),
+    )
+    maintenance_p.set_defaults(func=_h_logs_maintenance)
 
     rotate_p = logs_sub.add_parser(
         "rotate",
@@ -162,6 +171,11 @@ def add_logs_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     rotate_p.add_argument(
         "--size-mib",
         type=_positive_mib,
+        # meiva:note
+        # The literal stays here on purpose. `cli.parsers` must build the whole argument
+        # tree without importing settings, and reaching the command module for its
+        # DEFAULT_ROTATE_SIZE_MIB would do exactly that (test_command_import_boundary...).
+        # The two values are pinned together by the command module's own default.
         default=64,
         metavar="N",
         help="rotation size threshold in MiB (default: 64)",

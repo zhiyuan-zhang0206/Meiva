@@ -97,7 +97,7 @@ def test_linux_registration_replaces_only_its_own_lines(
     assert old not in body
     assert body.count("# meiva-logs-maintenance") == 1
     assert "40 4 * * *" in body
-    assert "logs rotate" in body and "logs retention" in body
+    assert "logs maintenance" in body
 
 
 def test_linux_crontab_failures_and_empty_table(
