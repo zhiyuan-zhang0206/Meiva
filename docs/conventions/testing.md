@@ -142,6 +142,28 @@ instead of asking a reader to diff the tree. Regenerate both blocks with
 `.venv/bin/python -m scripts.structure.skip_sites --write-baseline` after
 removing a skip.
 
+### Test doubles that keep their bookkeeping untyped
+
+A double that stands in for an external program — the fake `ssh` a window runs
+from `PATH`, a stand-in daemon that speaks a service's protocol — may keep its
+own bookkeeping as `dict[str, Any]`. That state is not a format production
+reads: it is the double's model of a machine, and typing the model is
+re-implementing the program being imitated. Three conditions hold it honest:
+
+1. It is a program-level double — a child process or a peer over a socket — not
+   a helper function a test calls.
+2. The file head declares the state in a `meiva:note`: every field, its type and
+   its meaning, and a rename changes the note in the same edit. Where a producer
+   module writes the same state, the note names it.
+3. The file's untyped-site count only decreases. A new double of this kind needs
+   the approval of the owner of the type-checking ladder, recorded in the pull
+   request that adds it.
+
+This exemption covers nothing else. An ordinary test that reads an external
+format — rendered YAML, another tool's JSON, a plugin's output — writes the
+model it needs: there the `Any` says "nobody wrote the type", not "the type is
+unknowable".
+
 ## Frontend
 
 From `ui/web`, run the affected tests and eslint, then check generated Next.js
