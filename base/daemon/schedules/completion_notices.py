@@ -6,7 +6,7 @@ from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
 import psycopg
 
@@ -15,6 +15,7 @@ from base.config.domains.agent.completion_policy import (
     validate_completion_notice_policy,
 )
 from base.config.service_read import ConfigAuthority
+from base.db.rows import IdRow, query_all, query_one
 
 _MAX_DIGEST_LOGS = 20
 
@@ -30,6 +31,24 @@ class CompletionNotice:
     def summary(self) -> str:
         """The completion line without its optional output-tail rider."""
         return self.content.split("\n\n", maxsplit=1)[0]
+
+
+# meiva:note
+# One `agents_meta.config_overlay` read: a jsonb object (or NULL) the caller validates.
+@dataclass(frozen=True)
+class _OverlayRow:
+    config_overlay: object
+
+
+# meiva:note
+# One undelivered `completion_notice_events` row with the UTC hour it belongs to.
+@dataclass(frozen=True)
+class _PendingEventRow:
+    id: int
+    agent_id: int
+    source: str
+    content: str
+    window_start: datetime
 
 
 @dataclass(frozen=True)
@@ -71,22 +90,22 @@ def _is_str_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
 
 
 def policy_for_agent(
-    conn: psycopg.Connection[Any], agent_id: int, default: str
+    conn: psycopg.Connection, agent_id: int, default: str
 ) -> CompletionNoticePolicy:
     """Read the agent's live completion-notice policy from its config overlay."""
-    with conn.cursor() as cursor:
-        cursor.execute("SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,))
-        row = cursor.fetchone()
+    row = query_one(
+        conn, _OverlayRow, "SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,)
+    )
     if row is None:
         raise LookupError(f"agent {agent_id} does not exist")
-    overlay: object = row[0]
+    overlay = row.config_overlay
     if overlay is not None and not _is_str_mapping(overlay):
         raise ValueError(f"agent {agent_id} config_overlay is not an object: {overlay!r}")
     return effective_completion_notice_policy(overlay, default)
 
 
 def delivery_required_for_agent(
-    conn: psycopg.Connection[Any],
+    conn: psycopg.Connection,
     agent_id: int,
     notice: CompletionNotice,
     default: str,
@@ -111,15 +130,18 @@ def delivery_required_for_agent(
 
 
 def hourly_notice_recorded(
-    conn: psycopg.Connection[Any], agent_id: int, notice: CompletionNotice
+    conn: psycopg.Connection, agent_id: int, notice: CompletionNotice
 ) -> bool:
     """Whether this exact event was already admitted to the digest."""
-    with conn.cursor() as cursor:
-        cursor.execute(
-            "SELECT 1 FROM completion_notice_events WHERE agent_id = %s AND source = %s",
+    return (
+        query_one(
+            conn,
+            IdRow,
+            "SELECT id FROM completion_notice_events WHERE agent_id = %s AND source = %s",
             (agent_id, notice.source),
         )
-        return cursor.fetchone() is not None
+        is not None
+    )
 
 
 def format_digest(*, agent_id: int, window_start: datetime, notices: list[CompletionNotice]) -> str:
@@ -139,9 +161,7 @@ def format_digest(*, agent_id: int, window_start: datetime, notices: list[Comple
     return "\n".join(lines)
 
 
-def record_hourly_notice(
-    conn: psycopg.Connection[Any], agent_id: int, notice: CompletionNotice
-) -> None:
+def record_hourly_notice(conn: psycopg.Connection, agent_id: int, notice: CompletionNotice) -> None:
     """Persist one hourly-policy event before either immediate or digest delivery."""
     with conn.cursor() as cursor:
         cursor.execute(
@@ -152,24 +172,22 @@ def record_hourly_notice(
         )
 
 
-def pending_digests(conn: psycopg.Connection[Any], now: datetime) -> list[CompletionDigest]:
+def pending_digests(conn: psycopg.Connection, now: datetime) -> list[CompletionDigest]:
     """Read every completed, non-empty hour that still needs its digest."""
-    with conn.cursor() as cursor:
-        cursor.execute(
-            "SELECT id, agent_id, source, content, "
-            "date_trunc('hour', created_at) "
-            "FROM completion_notice_events "
-            "WHERE digest_inbound_id IS NULL AND created_at < date_trunc('hour', %s) "
-            "ORDER BY agent_id, date_trunc('hour', created_at), id",
-            (now,),
-        )
-        rows = cursor.fetchall()
+    rows = query_all(
+        conn,
+        _PendingEventRow,
+        "SELECT id, agent_id, source, content, "
+        "date_trunc('hour', created_at) AS window_start "
+        "FROM completion_notice_events "
+        "WHERE digest_inbound_id IS NULL AND created_at < date_trunc('hour', %s) "
+        "ORDER BY agent_id, date_trunc('hour', created_at), id",
+        (now,),
+    )
     grouped: dict[tuple[int, datetime], list[tuple[int, CompletionNotice]]] = defaultdict(list)
-    for event_id, agent_id, source, content, window_start in rows:
-        if not isinstance(window_start, datetime):
-            raise TypeError(f"window_start must be a datetime, got {window_start!r}")
-        grouped[(int(agent_id), window_start)].append(
-            (int(event_id), CompletionNotice(source=str(source), content=str(content)))
+    for row in rows:
+        grouped[(row.agent_id, row.window_start)].append(
+            (row.id, CompletionNotice(source=row.source, content=row.content))
         )
     return [
         CompletionDigest(
@@ -182,9 +200,7 @@ def pending_digests(conn: psycopg.Connection[Any], now: datetime) -> list[Comple
     ]
 
 
-def mark_digest_delivered(
-    conn: psycopg.Connection[Any], event_ids: list[int], inbound_id: int
-) -> None:
+def mark_digest_delivered(conn: psycopg.Connection, event_ids: list[int], inbound_id: int) -> None:
     """Attach one committed digest inbound to every event it summarizes."""
     with conn.cursor() as cursor:
         cursor.execute(
@@ -194,7 +210,7 @@ def mark_digest_delivered(
         )
 
 
-def prune_delivered_notices(conn: psycopg.Connection[Any], before: datetime) -> int:
+def prune_delivered_notices(conn: psycopg.Connection, before: datetime) -> int:
     """Delete delivered buffer rows once their canary inspection window closes."""
     with conn.cursor() as cursor:
         cursor.execute(

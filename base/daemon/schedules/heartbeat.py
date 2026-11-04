@@ -25,6 +25,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TypeGuard
 
+from base.host.boundary.untyped import object_of
+
 __all__ = [
     "Beat",
     "alert_marks_path",
@@ -178,7 +180,7 @@ def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
 
 def _read_json(path: Path) -> dict[str, object] | None:
     try:
-        payload: object = json.loads(path.read_text())
+        payload = object_of(json.loads, path.read_text())
     except (OSError, ValueError):
         return None
     return payload if _is_object_dict(payload) else None

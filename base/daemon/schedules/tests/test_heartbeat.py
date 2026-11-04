@@ -21,18 +21,30 @@ from base.daemon.schedules.heartbeat import (
     write_beat,
     write_round_beat,
 )
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 NOW = datetime(2026, 11, 3, 18, 0, tzinfo=UTC)
+
+
+# meiva:note
+# The heartbeat file as the plain JSON object an outside reader sees.
+def _loaded(path: Path) -> dict[str, object]:
+    loaded = object_of(json.loads, path.read_text())
+    assert is_object_dict(loaded)
+    return loaded
 
 
 def test_a_round_lands_as_plain_json_under_a_stable_path(tmp_path: Path) -> None:
     path = write_beat(tmp_path, 42, written_at=NOW, alive_by=NOW + timedelta(hours=1))
 
     assert path == beat_path(tmp_path, 42) == tmp_path / "state/schedules/42.heartbeat.json"
-    loaded = json.loads(path.read_text())
+    loaded = _loaded(path)
     assert loaded["schedule_id"] == 42
-    assert loaded["alive_by"].startswith("2026-11-03T19:00")
-    assert loaded["written_at"].startswith("20")
+    alive_by = loaded["alive_by"]
+    written_at = loaded["written_at"]
+    assert isinstance(alive_by, str) and alive_by.startswith("2026-11-03T19:00")
+    assert isinstance(written_at, str) and written_at.startswith("20")
 
 
 def test_a_deadline_passes_only_after_its_own_instant_plus_the_skew(tmp_path: Path) -> None:
@@ -73,7 +85,7 @@ def test_the_measured_budget_rides_along_without_changing_the_contract(tmp_path:
     path = write_beat(
         tmp_path, 55, written_at=NOW, alive_by=NOW + timedelta(hours=1), budget_s=640.5
     )
-    loaded = json.loads(path.read_text())
+    loaded = _loaded(path)
 
     assert loaded["round_budget_s"] == 640.5
     beat = read_beat(tmp_path, 55)

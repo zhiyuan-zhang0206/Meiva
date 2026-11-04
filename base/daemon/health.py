@@ -69,8 +69,11 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from enum import Enum
+from functools import partial
+from http.client import HTTPResponse
 from pathlib import Path
 from typing import TypeGuard
 from urllib.parse import urlsplit
@@ -81,6 +84,7 @@ from base.daemon.http_transport import RouteHandler as RouteHandler
 from base.daemon.http_transport import start_daemon_http
 from base.daemon.loop_health import LivenessGroup
 from base.daemon.loop_health import LoopProgress as LoopProgress
+from base.host.boundary.untyped import object_of
 from base.native_process.loaded_commit import LoadedCommit
 
 # Re-export trackers moved to loop_health after this module crossed the 800-line ceiling.
@@ -390,6 +394,19 @@ def _is_object_list(value: object) -> TypeGuard[list[object]]:
     return isinstance(value, list)
 
 
+# meiva:note
+# The status of a GET on `url` and, for a 2xx, its body (capped at `MAX_BODY_BYTES`). The opener is
+# a loopback URL from settings. `urlopen` types its answer `Any`; a parameter typed with the real
+# `HTTPResponse` takes it without naming the `Any`.
+def _get_capped(
+    opener: Callable[[str], AbstractContextManager[HTTPResponse]], url: str
+) -> tuple[int, bytes]:
+    with opener(url) as resp:
+        if not (200 <= resp.status < 300):
+            return resp.status, b""
+        return resp.status, resp.read(MAX_BODY_BYTES)
+
+
 def _health_payload(url: str, timeout_s: float) -> dict[str, object] | DaemonProbe:
     """The JSON object a health endpoint answered with, or the not-alive verdict
     that trying to read one produced.
@@ -408,14 +425,13 @@ def _health_payload(url: str, timeout_s: float) -> dict[str, object] | DaemonPro
     bound port).
     """
     try:
-        with urllib.request.urlopen(url, timeout=timeout_s) as resp:  # noqa: S310 — loopback URL from settings
-            if not (200 <= resp.status < 300):
-                return DaemonProbe.down(f"healthz returned HTTP {resp.status}")
-            body = resp.read(MAX_BODY_BYTES)
+        status, body = _get_capped(partial(urllib.request.urlopen, timeout=timeout_s), url)
+        if not (200 <= status < 300):
+            return DaemonProbe.down(f"healthz returned HTTP {status}")
     except urllib.error.HTTPError as exc:
         detail = f"healthz returned HTTP {exc.code}"
         try:
-            parsed = json.loads(exc.read(MAX_BODY_BYTES))
+            parsed = object_of(json.loads, exc.read(MAX_BODY_BYTES))
         except json.JSONDecodeError:
             return DaemonProbe.down(detail)
         if _is_str_object_dict(parsed):
@@ -428,7 +444,7 @@ def _health_payload(url: str, timeout_s: float) -> dict[str, object] | DaemonPro
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         return DaemonProbe.down(f"healthz unreachable: {type(exc).__name__}: {exc}")
     try:
-        parsed: object = json.loads(body)
+        parsed = object_of(json.loads, body)
     except json.JSONDecodeError:
         return DaemonProbe.port_taken(f"healthz body is not JSON — foreign process on {url}")
     if not _is_str_object_dict(parsed):

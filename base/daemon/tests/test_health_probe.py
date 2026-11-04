@@ -15,7 +15,13 @@ import pytest
 from base.config import ConfigBoot, get_field
 from base.daemon import health
 from base.daemon.health_schema import DEGRADED, component
-from base.daemon.tests._health_helpers import find_free_port, http_get, probe_url
+from base.daemon.tests._health_helpers import (
+    bound_port,
+    find_free_port,
+    http_get,
+    json_object,
+    probe_url,
+)
 from base.daemon.tests.health_support import unknown_image
 from base.daemon.tests.probe_resources import commit_source, json_response, wire_response
 from base.host.env.health_ports import health_port
@@ -157,7 +163,7 @@ async def test_healthz_retains_explicit_loaded_image_after_source_changes(
     try:
         for _ in range(2):
             status, body = await http_get(port, "/healthz")
-            payload = json.loads(body)
+            payload = json_object(body)
             assert status == 200
             assert payload["sha"] == sha
             assert payload["readiness"] == "ok"
@@ -520,7 +526,7 @@ def test_probe_home_rejects_a_body_with_no_identity() -> None:
 def test_probe_home_unreachable_is_down_not_terminal() -> None:
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
-        probe = health.probe_home(probe_url(listener.getsockname()[1]), expected_home=meiva_home())
+        probe = health.probe_home(probe_url(bound_port(listener)), expected_home=meiva_home())
     assert probe.verdict is health.ProbeVerdict.DOWN
     assert probe.terminal is False
 

@@ -1082,6 +1082,11 @@ reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/daemon"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/events"
 reportAny = "error"
 reportExplicitAny = "error"

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import get_args
-from unittest.mock import MagicMock
 
+import psycopg
 import pytest
 from pydantic import ValidationError
 from pydantic_settings import DotEnvSettingsSource
@@ -19,14 +19,21 @@ from base.daemon.schedules.completion_notices import (
     effective_completion_notice_policy,
     pending_digests,
 )
+from base.host.boundary.untyped import object_sequence
 
 
-def test_database_digest_reader_returns_plain_notices() -> None:
-    conn = MagicMock()
-    conn.cursor.return_value.__enter__.return_value.fetchall.return_value = [
-        (1, 7, "watcher:1", "done", datetime.now(UTC))
-    ]
-    (digest,) = pending_digests(conn, datetime.now(UTC))
+def test_database_digest_reader_returns_plain_notices(db_conn: psycopg.Connection) -> None:
+    from base.db import create_agent
+
+    agent_id = create_agent(db_conn)
+    now = datetime.now(UTC)
+    db_conn.execute(
+        "INSERT INTO completion_notice_events (agent_id, source, content, created_at) "
+        "VALUES (%s, 'watcher:1', 'done', %s)",
+        (agent_id, now - timedelta(hours=2)),
+    )
+    (digest,) = pending_digests(db_conn, now)
+    assert digest.agent_id == agent_id
     assert (digest.notices[0].source, digest.notices[0].content) == ("watcher:1", "done")
 
 
@@ -69,6 +76,9 @@ def test_runtime_and_config_share_the_policy_owner() -> None:
     field = AgentRuntimeSettings.model_fields["completion_notice_policy"]
     assert completion_notices.CompletionNoticePolicy is CompletionNoticePolicy
     assert completion_notices.validate_completion_notice_policy is validate_completion_notice_policy
+    members = object_sequence(get_args(field.annotation))
     assert all(
-        member is CompletionNoticePolicy(member.value) for member in get_args(field.annotation)
+        isinstance(member, CompletionNoticePolicy)
+        and member is CompletionNoticePolicy(member.value)
+        for member in members
     )

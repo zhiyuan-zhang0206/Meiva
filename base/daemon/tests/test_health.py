@@ -12,8 +12,9 @@ from base.clock.tests.manual_timers import ManualTimers
 from base.config import get_field
 from base.daemon import health
 from base.daemon.health_schema import DEGRADED, OK, component
-from base.daemon.tests._health_helpers import find_free_port, http_get
+from base.daemon.tests._health_helpers import child_object, find_free_port, http_get, json_object
 from base.daemon.tests.health_support import token_digest, unknown_image
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.env.health_ports import DEFAULT_PORTS, health_port
 from base.paths import meiva_home
 
@@ -27,7 +28,7 @@ async def test_healthz_returns_200_with_json_body() -> None:
     try:
         status, body = await http_get(port, "/healthz")
         assert status == 200
-        payload = json.loads(body)
+        payload = json_object(body)
         assert payload["name"] == "agent_host"
         assert isinstance(payload["pid"], int)
         assert isinstance(payload["started_at"], float)
@@ -127,11 +128,12 @@ async def test_healthz_group_exposes_loops_and_wedged_loop_is_not_masked() -> No
     )
     try:
         status, body = await http_get(port, "/healthz")
-        payload = json.loads(body)
+        payload = json_object(body)
         assert status == 503
-        assert set(payload["loops"]) == {"dispatch", "trim"}
-        assert payload["loops"]["dispatch"]["wedged"] is True
-        assert payload["loops"]["trim"]["wedged"] is False
+        loops = child_object(payload, "loops")
+        assert set(loops) == {"dispatch", "trim"}
+        assert child_object(loops, "dispatch")["wedged"] is True
+        assert child_object(loops, "trim")["wedged"] is False
     finally:
         await health.stop_health_server(server)
 
@@ -146,11 +148,13 @@ async def test_healthz_503_when_liveness_stale() -> None:
     try:
         status, body = await http_get(port, "/healthz")
         assert status == 503
-        payload = json.loads(body)
+        payload = json_object(body)
         assert payload["name"] == "agent_host"
         assert "stale_for" in payload
         assert payload["liveness"] == "stale"
-        assert payload["components"][0]["status"] == "stale"
+        components = payload["components"]
+        assert is_object_list(components) and is_object_dict(components[0])
+        assert components[0]["status"] == "stale"
         assert payload["degraded_reasons"] == ["loop: stale"]
     finally:
         await health.stop_health_server(server)
@@ -184,7 +188,7 @@ async def test_healthz_component_failure_surfaces_the_component_reason() -> None
     try:
         status, body = await http_get(port, "/healthz")
         assert status == 503
-        payload = json.loads(body)
+        payload = json_object(body)
         assert payload["status"] == "degraded"
         assert payload["readiness"] == "degraded"
         assert payload["degraded_reasons"] == ["worker: job stuck"]
