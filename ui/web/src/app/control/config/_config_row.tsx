@@ -101,9 +101,7 @@ export function MachineSelector({
   onChange: (next: MachineSelection) => void;
 }) {
   const t = useTranslations("config");
-  const clusterLabel = gatewayName
-    ? t("clusterGateway", { name: gatewayName })
-    : t("clusterGatewayPlain");
+  const clusterLabel = gatewayName ?? t("gatewayMachine");
   return (
     <div className={cn("items-center gap-2", FLEX)}>
       <label htmlFor="config-machine" className="text-xs text-muted-foreground">
@@ -127,6 +125,15 @@ export function MachineSelector({
   );
 }
 
+const COMMON_KEYS: Record<string, "reasoning" | "timeout" | "compaction" | "timezone" | "searchProvider" | "searchResults"> = {
+  MEIVA_REASONING_EFFORT: "reasoning",
+  MEIVA_EXEC_TIMEOUT_SECONDS: "timeout",
+  MEIVA_AUTO_COMPACT_FRACTION: "compaction",
+  MEIVA_TIMEZONE: "timezone",
+  MEIVA_WEB_SEARCH_PROVIDER: "searchProvider",
+  MEIVA_WEB_MAX_RESULTS: "searchResults",
+};
+
 function TagBadge({ children }: { children: React.ReactNode }) {
   return (
     <span className="rounded border border-border px-1 text-[11px] text-muted-foreground">
@@ -137,6 +144,7 @@ function TagBadge({ children }: { children: React.ReactNode }) {
 
 export function ConfigRow({
   field,
+  simple,
   editable,
   highlighted,
   remoteReadOnly,
@@ -153,6 +161,7 @@ export function ConfigRow({
   onEditKeyDown,
 }: {
   field: ConfigFieldView;
+  simple: boolean;
   editable: boolean;
   highlighted: boolean;
   remoteReadOnly: boolean;
@@ -170,7 +179,11 @@ export function ConfigRow({
 }) {
   const t = useTranslations("config");
   const isEditing = editingField === field.name;
-  const displayValue = displayFieldValue(field);
+  const commonKey = simple ? COMMON_KEYS[field.env_var] : undefined;
+  const label = commonKey ? t(`common.${commonKey}.label`) : fieldLabel(field.env_var);
+  const description = commonKey ? t(`common.${commonKey}.description`) : field.description;
+  const displayValue = simple && (field.current_value == null || field.current_value === "")
+    ? t("automaticDefault") : displayFieldValue(field);
   const defaultText = formatConfigValue(field.default_value);
   const capabilityBlocked = field.field_type === "bool" && field.can_enable === false;
   const toggleDisabled = busy || capabilityBlocked;
@@ -178,25 +191,17 @@ export function ConfigRow({
   return (
     <div
       id={`config-field-${field.name}`}
-      className={`flex items-start justify-between gap-4 px-3 py-2 scroll-mt-12 ${
+      className={`flex items-start justify-between gap-4 px-4 py-4 scroll-mt-12 ${
         editable ? "" : "bg-muted/40"
       } ${highlighted ? "ring-1 ring-primary ring-inset" : ""}`}
     >
       <div className={cn("space-y-0.5", FLEX_1, MIN_W_0)}>
         <div className={cn("items-center gap-2 flex-wrap", FLEX)}>
           <span className="font-medium break-all" title={field.env_var}>
-            {fieldLabel(field.env_var)}
+            {label}
           </span>
-          {field.writable ? (
-            <TagBadge>{t("runtime")}</TagBadge>
-          ) : (
-            <span className="rounded border border-border bg-muted px-1 text-[11px] font-medium">
-              {t("cliOnly")}
-            </span>
-          )}
-          <TagBadge>{field.scope}</TagBadge>
-          {isPerAgent(field) && <TagBadge>{t("perAgent")}</TagBadge>}
-          {field.restart_required && <TagBadge>Startup: {field.restart_required}</TagBadge>}
+          {!field.writable && <span className="text-xs text-muted-foreground">{t("readOnly")}</span>}
+          {field.restart_required && <TagBadge>{t("needsRestart")}</TagBadge>}
           {remoteReadOnly && (
             <span className="text-[11px] text-muted-foreground italic">
               {t("editOnCluster")}
@@ -208,9 +213,27 @@ export function ConfigRow({
             </span>
           )}
         </div>
-        {field.description && (
+        {!simple && <details className="pt-1 text-xs text-muted-foreground">
+          <summary className="cursor-pointer">{t("details")}</summary>
+          <div className={cn(FLEX, "flex-wrap items-center gap-2 py-2")}>
+            <code>{field.env_var}</code>
+          {field.writable ? (
+            <TagBadge>{t("runtime")}</TagBadge>
+          ) : (
+            <span className="rounded border border-border bg-muted px-1 text-[11px] font-medium">
+              {t("cliOnly")}
+            </span>
+          )}
+          <TagBadge>{field.scope}</TagBadge>
+          {isPerAgent(field) && <TagBadge>{t("perAgent")}</TagBadge>}
+          {field.restart_required && <TagBadge>Startup: {field.restart_required}</TagBadge>}
+            <span>Default: {defaultText}</span>
+          </div>
+          {field.description && <p className="leading-relaxed">{field.description}</p>}
+        </details>}
+        {simple && description && (
           <p className="text-xs text-muted-foreground leading-snug">
-            {field.description}
+            {description}
           </p>
         )}
         {editable && capabilityBlocked && field.reason && (
@@ -281,6 +304,7 @@ export function ConfigRow({
                   variant="ghost"
                   size="sm"
                   onClick={onStartEdit}
+                  title={t("editSetting", { name: label })}
                   disabled={busy}
                   className="h-7 px-1"
                   aria-label={`Replace ${field.env_var}`}
@@ -302,6 +326,7 @@ export function ConfigRow({
         ) : field.field_type === "enum" ? (
           editable ? (
             <select
+              aria-label={label}
               value={String(field.current_value ?? "")}
               disabled={busy}
               data-testid={`select-${field.name}`}
@@ -376,6 +401,7 @@ export function ConfigRow({
                 variant="ghost"
                 size="sm"
                 onClick={onStartEdit}
+                  title={t("editSetting", { name: label })}
                 disabled={busy}
                 className="h-7 px-1"
                 data-testid={`edit-${field.name}`}
@@ -386,7 +412,7 @@ export function ConfigRow({
           </>
         )}
         </div>
-        <span className="text-[11px] text-muted-foreground">Default: {defaultText}</span>
+
       </div>
     </div>
   );

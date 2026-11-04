@@ -101,7 +101,6 @@ export const CONTROL_SECTIONS: ControlSectionDef[] = [
   { id: "mcp", label: "MCP", labelKey: "mcp" },
   { id: "skills", label: "Skills", labelKey: "skills" },
   { id: "schedules", label: "Schedules", labelKey: "schedules" },
-  { id: "okf-graph", label: "OKF graph", labelKey: "okf-graph" },
 ];
 
 // meiva:note

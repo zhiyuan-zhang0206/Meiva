@@ -13,7 +13,7 @@ import {
   VIEW,
   wrap,
 } from "./config-test-mock";
-import ConfigPage from "./page";
+import ConfigEditor from "./editor";
 import { transport } from "@/test-support/fake-api";
 
 afterEach(cleanup);
@@ -22,7 +22,7 @@ beforeEach(setupConfigTest);
 describe("ConfigPage text inline edit", () => {
   it("click edit enters edit mode → input has current value", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="advanced" />);
     await waitFor(() => screen.getByTestId("edit-log_level"));
     fireEvent.click(screen.getByTestId("edit-log_level"));
     const input = screen.getByTestId("input-log_level");
@@ -33,7 +33,7 @@ describe("ConfigPage text inline edit", () => {
     transport.getConfig.mockResolvedValue(VIEW);
     const putSpy = transport.putConfig
       .mockResolvedValue(OK_RESULT(["log_level"]));
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="advanced" />);
     await waitFor(() => screen.getByTestId("edit-log_level"));
     fireEvent.click(screen.getByTestId("edit-log_level"));
     const input = screen.getByTestId("input-log_level");
@@ -51,7 +51,7 @@ describe("ConfigPage text inline edit", () => {
     transport.getConfig.mockResolvedValue(VIEW);
     const putSpy = transport.putConfig
       .mockResolvedValue(OK_RESULT([]));
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="advanced" />);
     await waitFor(() => screen.getByTestId("edit-log_level"));
     fireEvent.click(screen.getByTestId("edit-log_level"));
     const input = screen.getByTestId("input-log_level");
@@ -67,7 +67,7 @@ describe("ConfigPage text inline edit", () => {
     transport.getConfig.mockResolvedValue(VIEW);
     const putSpy = transport.putConfig
       .mockResolvedValue(OK_RESULT([]));
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="advanced" />);
     await waitFor(() => screen.getByTestId("edit-log_level"));
     fireEvent.click(screen.getByTestId("edit-log_level"));
     fireEvent.click(screen.getByTestId("save-log_level"));
@@ -78,7 +78,7 @@ describe("ConfigPage text inline edit", () => {
     transport.getConfig.mockResolvedValue(VIEW);
     const putSpy = transport.putConfig
       .mockResolvedValue(OK_RESULT(["max_retries"]));
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="advanced" />);
     await waitFor(() => screen.getByTestId("edit-max_retries"));
     fireEvent.click(screen.getByTestId("edit-max_retries"));
     const input = screen.getByTestId("input-max_retries");
@@ -101,7 +101,7 @@ describe("ConfigPage restart banner from write result", () => {
     transport.putConfig.mockResolvedValue(
       OK_RESULT(["log_level"], ["all"]),
     );
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="advanced" />);
     await waitFor(() => screen.getByTestId("edit-log_level"));
     expect(
       screen.queryByText(/restart the following processes/),
@@ -120,19 +120,19 @@ describe("ConfigPage restart banner from write result", () => {
 describe("ConfigPage machine selector", () => {
   it("selector renders Cluster + every online machine, not offline", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="machines" />);
     const select = await waitFor(() =>
       screen.getByLabelText<HTMLSelectElement>("Machine"),
     );
     const optionValues = Array.from(select.options).map((o) => o.value);
-    expect(optionValues).toEqual(["", GATEWAY, AGENT_RUNNER]);
-    expect(select.options[0].textContent).toMatch(/Cluster/);
+    expect(optionValues).toEqual(["", AGENT_RUNNER]);
+    expect(select.options[0].textContent).not.toMatch(/Cluster/);
     expect(select.options[0].textContent).toMatch(new RegExp(GATEWAY));
   });
 
   it("selecting agent-runner refetches getConfig with machine name", async () => {
     const getSpy = transport.getConfig.mockResolvedValue(VIEW);
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="machines" />);
     const select = await waitFor(() =>
       screen.getByLabelText<HTMLSelectElement>("Machine"),
     );
@@ -145,7 +145,7 @@ describe("ConfigPage machine selector", () => {
 
   it("agent-runner view: host remote_writable field editable, cluster field read-only", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="machines" />);
     const select = await waitFor(() =>
       screen.getByLabelText<HTMLSelectElement>("Machine"),
     );
@@ -156,7 +156,7 @@ describe("ConfigPage machine selector", () => {
 
   it("agent-runner view: can_enable=false bool is disabled with reason", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="machines" />);
     const select = await waitFor(() =>
       screen.getByLabelText<HTMLSelectElement>("Machine"),
     );
@@ -172,15 +172,14 @@ describe("ConfigPage machine selector", () => {
 
   it("remote view shows edit-on-Cluster hint for non-host fields", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="machines" />);
     const select = await waitFor(() =>
       screen.getByLabelText<HTMLSelectElement>("Machine"),
     );
     fireEvent.change(select, { target: { value: AGENT_RUNNER } });
     await waitFor(() => screen.getByText("HOST LABEL"));
-    expect(
-      screen.getAllByText(/edit on Cluster view/i).length,
-    ).toBeGreaterThan(0);
+    expect(screen.queryByText("LOG LEVEL")).toBeNull();
+    expect(screen.queryByText(/edit on Cluster view/i)).toBeNull();
   });
 
   it("PUT result with !ok field shows reason and reverts value", async () => {
@@ -192,7 +191,7 @@ describe("ConfigPage machine selector", () => {
       },
       restart_required: [],
     });
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="machines" />);
     const select = await waitFor(() =>
       screen.getByLabelText<HTMLSelectElement>("Machine"),
     );
@@ -223,15 +222,15 @@ describe("Fix 1 — onSettled invalidates written machine's query key", () => {
     const putInflight = new Promise<ConfigWriteResult>((res) => {
       resolvePut = res;
     });
-    transport.getConfig.mockResolvedValue(VIEW);
+    transport.getConfig.mockResolvedValue({ ...VIEW, fields: VIEW.fields.map((field) => ({ ...field, can_enable: true })) });
     transport.putConfig.mockReturnValue(putInflight);
 
     const qc = makeQc();
 
-    wrap(<ConfigPage />, qc);
+    wrap(<ConfigEditor mode="machines" />, qc);
 
     const toggle = await waitFor(() =>
-      screen.getByTestId("toggle-enable_compact"),
+      screen.getByTestId("toggle-browser_enabled"),
     );
     fireEvent.click(toggle);
 
@@ -240,7 +239,7 @@ describe("Fix 1 — onSettled invalidates written machine's query key", () => {
 
     resolvePut({
       applied: true,
-      results: { enable_compact: { ok: true, reason: null } },
+      results: { browser_enabled: { ok: true, reason: null } },
       restart_required: [],
     });
 
@@ -286,13 +285,13 @@ describe("Fix 2 — capability reason hidden on non-editable rows", () => {
     };
     transport.getConfig.mockResolvedValue(clusterBoolGated);
 
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="machines" />);
 
     const select = await waitFor(() =>
       screen.getByLabelText<HTMLSelectElement>("Machine"),
     );
     fireEvent.change(select, { target: { value: AGENT_RUNNER } });
-    await waitFor(() => screen.getByText("CLUSTER FLAG"));
+    await screen.findByText("No matching settings.");
 
     expect(screen.queryByTestId("capability-cluster_flag")).toBeNull();
     expect(screen.queryByText("should not appear")).toBeNull();
@@ -302,7 +301,7 @@ describe("Fix 2 — capability reason hidden on non-editable rows", () => {
 describe("ConfigPage per-model resolution view", () => {
   it("labels each row with the layer that produced its value", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="advanced" />);
     await waitFor(() => screen.getByTestId("per-model-source-auto_compact_fraction"));
 
     expect(screen.getByTestId("per-model-source-auto_compact_fraction").textContent).toBe(
@@ -326,7 +325,7 @@ describe("ConfigPage per-model resolution view", () => {
   it("shows a disabled loading placeholder before models resolve", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
     transport.getModels.mockReturnValue(new Promise(() => undefined));
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="advanced" />);
 
     await screen.findByText("LOG LEVEL");
     const select = screen.getByLabelText<HTMLSelectElement>("Model");
@@ -337,7 +336,7 @@ describe("ConfigPage per-model resolution view", () => {
 
   it("shows the layers a value shadowed, and nothing when the floor itself won", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="advanced" />);
     await waitFor(() => screen.getByTestId("per-model-shadowed-max_retries"));
 
     expect(screen.getByTestId("per-model-shadowed-max_retries").textContent).toBe(
@@ -353,7 +352,7 @@ describe("ConfigPage per-model resolution view", () => {
 
   it("re-resolves when another model is picked", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="advanced" />);
     await waitFor(() => screen.getByTestId("per-model-source-max_retries"));
 
     const select = screen.getByLabelText<HTMLSelectElement>("Model");
@@ -367,7 +366,7 @@ describe("ConfigPage per-model resolution view", () => {
 
   it("row link reveals its editor even when the filter had it hidden", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="advanced" />);
     await waitFor(() => screen.getByTestId("per-model-goto-max_retries"));
 
     fireEvent.click(screen.getByTestId("filter-sensitive"));
@@ -395,7 +394,7 @@ describe("ConfigPage per-model resolution view", () => {
       JSON.stringify(["config-llm"]),
     );
     transport.getConfig.mockResolvedValue(VIEW);
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="advanced" />);
     await screen.findByTestId("per-model-goto-max_retries");
     await waitFor(() =>
       expect(document.getElementById("config-field-max_retries")).toBeNull(),
@@ -418,7 +417,7 @@ describe("ConfigPage per-model resolution view", () => {
       model: "some-unknown-model",
       registered: false,
     });
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="advanced" />);
     await waitFor(() => screen.getByTestId("per-model-unregistered"));
   });
 });
@@ -429,7 +428,7 @@ describe("ConfigPage without a model catalog", () => {
     transport.getModels.mockRejectedValue(new Error("provider private diagnostic"));
     transport.getDefaultModel.mockRejectedValue(new Error("model unavailable"));
     const put = transport.putConfig.mockResolvedValue(OK_RESULT(["log_level"]));
-    wrap(<ConfigPage />);
+    wrap(<ConfigEditor mode="advanced" />);
     await screen.findByText("Model settings are unavailable. Check the gateway configuration and reload.");
     expect(screen.getByLabelText<HTMLSelectElement>("Model").disabled).toBe(true);
     expect(screen.queryByText("Loading…")).toBeNull();

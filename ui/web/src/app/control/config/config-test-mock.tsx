@@ -16,7 +16,7 @@ import type {
   SystemStatus,
 } from "@/lib/contracts/types";
 
-import ConfigPage from "./page";
+import ConfigEditor from "./editor";
 import { resetTransport, transport } from "@/test-support/fake-api";
 import { ApiProvider } from "@/lib/transport/transport-context";
 
@@ -59,7 +59,7 @@ export function wrap(ui: React.ReactElement, qc?: QueryClient) {
 }
 
 export async function renderSettled() {
-  const rendered = wrap(<ConfigPage />);
+  const rendered = wrap(<ConfigEditor mode="advanced" />);
   await screen.findByText("LOG LEVEL");
 
   await screen.findByTestId("per-model-source-auto_compact_fraction");

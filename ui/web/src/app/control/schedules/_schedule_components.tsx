@@ -29,12 +29,16 @@ import { useStore } from "@/lib/state/store";
 import { useSectionVisible } from "../visibility";
 import { useApi } from "@/lib/transport/transport-context";
 
-const STATUS_DOT: Record<string, string> = {
-  running: "bg-green-500",
-  stopped: "bg-muted-foreground/40",
-  error: "bg-destructive",
-  completed: "bg-blue-500",
-};
+function schedulePresentation(schedule: ScheduleSummary) {
+  if (schedule.placement_status !== "ok") return { label: "needsAttention", tone: "bg-destructive/10 text-destructive" } as const;
+  if (schedule.status === "error") return { label: "needsAttention", tone: "bg-destructive/10 text-destructive" } as const;
+  if (schedule.status === "completed") return { label: "completedState", tone: "bg-muted text-muted-foreground" } as const;
+  if (!schedule.enabled && schedule.status === "running") return { label: "stopUnconfirmed", tone: "bg-amber-500/10 text-amber-700 dark:text-amber-300" } as const;
+  if (!schedule.enabled && schedule.status === "stopped") return { label: "stoppedState", tone: "bg-muted text-muted-foreground" } as const;
+  if (schedule.enabled && schedule.status === "running") return { label: "enabledState", tone: "bg-blue-500/10 text-blue-700 dark:text-blue-300" } as const;
+  if (schedule.enabled && schedule.status === "stopped") return { label: "startUnconfirmed", tone: "bg-amber-500/10 text-amber-700 dark:text-amber-300" } as const;
+  return { label: "unknownState", tone: "bg-muted text-muted-foreground" } as const;
+}
 
 export function ScheduleRow({
   schedule,
@@ -45,6 +49,7 @@ export function ScheduleRow({
   onRestart,
   onDelete,
   onEdited,
+  pending,
 }: {
   schedule: ScheduleSummary;
   expanded: boolean;
@@ -54,11 +59,13 @@ export function ScheduleRow({
   onRestart: () => void;
   onDelete: () => void;
   onEdited: () => void;
+  pending: boolean;
 }) {
   const t = useTranslations("schedules");
   const now = useWallDate();
   const highlighter = usePythonCodeHighlighter();
   const [editing, setEditing] = useState(false);
+  const presentation = schedulePresentation(schedule);
 
   return (
     <>
@@ -76,18 +83,12 @@ export function ScheduleRow({
           </button>
         </TableCell>
         <TableCell>
-          <span className={cn("items-center gap-1.5 text-xs text-muted-foreground", FLEX)}>
-            <span
-              className={`inline-block size-2 rounded-full ${STATUS_DOT[schedule.status] ?? "bg-muted-foreground/40"}`}
-            />
-            {schedule.status}
+          <span className={cn("inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium", presentation.tone)}>
+            {pending ? t("updatingState") : t(presentation.label)}
           </span>
         </TableCell>
-        <TableCell className="font-mono text-xs font-medium">
+        <TableCell className="text-sm font-medium">
           {schedule.name}
-          {!schedule.enabled && (
-            <span className="ml-1.5 text-muted-foreground/60">{t("off")}</span>
-          )}
         </TableCell>
         <TableCell
           className="text-xs max-w-[280px] truncate text-muted-foreground"
@@ -101,7 +102,8 @@ export function ScheduleRow({
         <TableCell>
           <div className={cn("items-center gap-0.5", FLEX)}>
             <IconButton
-              label={schedule.enabled ? "Stop" : "Start"}
+              label={schedule.enabled ? t("stopAction") : t("startAction")}
+              disabled={pending}
               onClick={onToggle}
               icon={
                 schedule.enabled ? (
@@ -111,16 +113,17 @@ export function ScheduleRow({
                 )
               }
             />
-            <IconButton label={t("restart")} onClick={onRestart} icon={<RotateCcw className="size-3.5" />} />
+            <IconButton label={t("restart")} disabled={pending || !schedule.enabled} onClick={onRestart} icon={<RotateCcw className="size-3.5" />} />
             <IconButton
               label={t("edit")}
+              disabled={pending}
               onClick={() => {
                 onEnsureExpanded();
                 setEditing(true);
               }}
               icon={<Pencil className="size-3.5" />}
             />
-            <IconButton label={t("delete")} onClick={onDelete} icon={<Trash2 className="size-3.5" />} />
+            <IconButton label={t("delete")} disabled={pending} onClick={onDelete} icon={<Trash2 className="size-3.5" />} />
           </div>
         </TableCell>
       </TableRow>
@@ -200,6 +203,7 @@ function ScheduleDetail({
 
   return (
     <div className="space-y-3 py-2 text-xs">
+      <p className="text-muted-foreground">{t("reportedState", { state: s.status, machine: s.machine })}</p>
       {editing ? (
         <div className="rounded-md border border-border p-3 space-y-2">
           <label htmlFor={`schedule-edit-desc-${String(s.id)}`} className="block text-muted-foreground">
@@ -381,10 +385,12 @@ function IconButton({
   label,
   onClick,
   icon,
+  disabled,
 }: {
   label: string;
   onClick: () => void;
   icon: React.ReactNode;
+  disabled: boolean;
 }) {
   return (
     <Button
@@ -393,6 +399,7 @@ function IconButton({
       variant="ghost"
       className="size-7 text-muted-foreground"
       onClick={onClick}
+      disabled={disabled}
       aria-label={label}
     >
       {icon}

@@ -5,7 +5,7 @@ description: Independently loading model views and ordinary configuration editor
 tags: [frontend, configuration]
 ---
 
-# Control configuration panels
+# Settings configuration panels
 
 The ordinary field editor, cluster default-model selector and per-model resolved
 view load independently. Failure to load a model catalog must not disable the
@@ -53,3 +53,22 @@ rotation touches no remote unit (the telemetry token is an independent random va
 The two hidden gateway retry fields tune the SDK transport and remain available
 through ordinary config tools.
 The panel preserves their existing overrides rather than choosing new values.
+
+
+## Settings presentation
+
+Settings mounts one selected category at a time. General shows the default model
+and a small curated set of agent defaults. Advanced contains non-host configuration,
+search, optional technical filters and the effective per-model values. Machines
+contains only host-scoped fields, with the gateway host selected initially and each
+other online runner listed once. Selecting a machine never changes agent defaults.
+The editor preserves the existing config API, owner routing and hidden overrides.
+Technical identifiers, scope and default values are available in each advanced
+row's details; a required restart stays visible before editing.
+
+The navigation retains old config and display deep links. OKF Graph has no Settings
+entry. Schedules shows desired enablement separately from historical process facts:
+`enabled=false,status=running` is Stop unconfirmed, not Stopped. `running` alone
+is not live health evidence, so the normal enabled badge is blue and says Enabled.
+Errors and unresolved placement remain visible. Restart is unavailable while
+stopped, and lifecycle buttons are disabled during a pending request.

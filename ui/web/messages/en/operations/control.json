@@ -11,7 +11,7 @@
   "skills": "Skills",
   "skillsDescription": "Install a skill; see each one's source layer and local drift.",
   "schedules": "Schedules",
-  "schedulesDescription": "Cron-driven agent runs, one supervised session each.",
+  "schedulesDescription": "Manage your automations and see their latest reported state.",
   "okfGraph": "OKF graph",
   "okfGraphDescription": "D3 force-directed view of the repo knowledge graph.",
   "sections": {
@@ -57,11 +57,22 @@
     "alerts": "Alerts",
     "app": "App"
   },
-  "title": "Control",
+  "title": "Settings",
   "backToAgents": "Back to agents",
   "openOkfGraph": "Open OKF graph",
   "app": "App",
   "appDescription": "Settings of the Meiva app on this device: server address and updates.",
   "appOpenSettings": "Open app settings",
-  "appOpenSettingsFailed": "The app did not open its settings page."
+  "appOpenSettingsFailed": "The app did not open its settings page.",
+  "navigation": "Settings sections",
+  "general": "General",
+  "machines": "Machines",
+  "advanced": "Advanced",
+  "preferences": "Preferences",
+  "manage": "Manage",
+  "system": "System",
+  "generalDescription": "Defaults for how your agents work.",
+  "machinesDescription": "Device capabilities and local services. Changes apply to one machine.",
+  "advancedDescription": "Detailed configuration for models, execution, and infrastructure.",
+  "moreSettings": "Looking for more? Open advanced settings"
 }

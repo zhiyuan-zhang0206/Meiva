@@ -28,5 +28,44 @@
   "allProcesses": "所有进程（Gateway + Agent）",
   "clusterGatewayPlain": "集群（gateway）",
   "defaultModelSaved": "默认模型已保存——适用于此后创建的 agent。",
-  "couldntResolve": "无法解析此模型的设置——请检查 gateway 后刷新。"
+  "couldntResolve": "无法解析此模型的设置——请检查 gateway 后刷新。",
+  "machineScope": "这里的更改仅影响所选机器。",
+  "searchSettings": "搜索设置…",
+  "technicalFilters": "按技术属性筛选",
+  "noMatches": "没有匹配的设置。",
+  "gatewayMachine": "Gateway 所在机器",
+  "needsRestart": "需要重启",
+  "details": "技术详情",
+  "defaultModelHelp": "用于新建 agent；现有 agent 保留当前模型。",
+  "usingDefault": "正在使用系统默认值",
+  "automaticDefault": "模型默认值",
+  "editSetting": "编辑{name}",
+  "agentDefaults": "Agent 默认设置",
+  "webSearch": "网页搜索",
+  "common": {
+    "reasoning": {
+      "label": "推理强度",
+      "description": "Agent 回答问题前投入的推理程度。"
+    },
+    "timeout": {
+      "label": "执行超时（秒）",
+      "description": "单次代码执行允许使用的最长时间。"
+    },
+    "compaction": {
+      "label": "上下文压缩阈值",
+      "description": "上下文占用达到这个比例时，将历史记录压缩为摘要。"
+    },
+    "timezone": {
+      "label": "时区",
+      "description": "用于 Agent 的时间显示和新建定时任务。"
+    },
+    "searchProvider": {
+      "label": "搜索服务",
+      "description": "Agent 搜索网页时使用的服务。"
+    },
+    "searchResults": {
+      "label": "每次搜索的结果数量",
+      "description": "一次网页搜索最多返回的结果数。"
+    }
+  }
 }

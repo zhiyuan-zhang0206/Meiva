@@ -188,7 +188,7 @@ export function SchedulesPageView({ navigate }: SchedulesPageViewProps) {
       <div className={cn("items-center gap-2", FLEX)}>
         <Input
           className="h-8 text-xs"
-          placeholder="Describe a scheduled task — e.g. “consolidate memory nightly, or when it grows a lot”"
+          placeholder={t("describeTask")}
           value={nl}
           onChange={(e) => setNl(e.target.value)}
           onKeyDown={(e) => {
@@ -206,7 +206,7 @@ export function SchedulesPageView({ navigate }: SchedulesPageViewProps) {
           ) : (
             <Sparkles className="size-3.5 mr-1" />
           )}
-          Describe
+          {t("createSchedule")}
         </Button>
       </div>
 
@@ -243,6 +243,7 @@ export function SchedulesPageView({ navigate }: SchedulesPageViewProps) {
                 <ScheduleRow
                   key={s.id}
                   schedule={s}
+                  pending={[startMutation, stopMutation, restartMutation, deleteMutation].some((mutation) => mutation.isPending && mutation.variables === s.id)}
                   expanded={expandedId === s.id}
                   onExpand={() => setExpandedId((id) => (id === s.id ? null : s.id))}
                   // meiva:note

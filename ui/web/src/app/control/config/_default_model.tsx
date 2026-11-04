@@ -63,8 +63,7 @@ export function DefaultModelPanel({ id }: { id: string }) {
     <div id={id} className="scroll-mt-4 space-y-2" data-testid="config-default-model">
       <h3 className="text-sm font-semibold text-muted-foreground">{t("defaultModel")}</h3>
       <p className="text-xs leading-snug text-muted-foreground">
-        The model a new agent is born on when the spawn names none. Agents that already
-        exist keep the model frozen at their own birth — changing this moves nobody.
+        {t("defaultModelHelp")}
       </p>
 
       {current.error || models.error ? (
@@ -116,7 +115,7 @@ export function DefaultModelPanel({ id }: { id: string }) {
               className="text-[11px] italic text-muted-foreground"
               data-testid="default-model-source"
             >
-              no cluster choice yet — showing the .env / code default
+              {t("usingDefault")}
             </span>
           )}
         </div>
