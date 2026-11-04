@@ -12,19 +12,20 @@ env alias so the .env surface is unchanged. Aggregated by base/config.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import Field
+from pydantic.config import JsonDict
 
 from base.config.base import EnvSettings
 
 UpdateModeSetting = Literal["auto", "notify", "off"]
 
+# meiva:note
 # The json_schema_extra metadata every field in this domain carries: host-
-# scoped (per-machine), operator-writable, nothing to restart. `Any` because
-# pydantic types json_schema_extra as dict[str, JsonValue] and a shared
-# constant cannot infer its way into that JsonValue union.
-_HOST_FIELD: Any = {
+# scoped (per-machine), operator-writable, nothing to restart. Declared as pydantic's `JsonDict`
+# because a shared constant cannot infer its way into the JsonValue union `Field` accepts.
+_HOST_FIELD: JsonDict = {
     "restart_required": "",
     "writable": True,
     "sensitive": False,

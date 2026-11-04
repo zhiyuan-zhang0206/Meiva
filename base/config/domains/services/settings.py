@@ -18,6 +18,8 @@ from pydantic_settings import NoDecode
 from base.config.base import unit_home
 from base.config.domains.services.health_ports_fields import ServiceHealthPortFields
 from base.config.domains.services.runtime import ServiceRuntimeSettings
+from base.host.boundary.json_values import is_object_list
+from base.host.boundary.untyped import object_of
 
 
 class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
@@ -406,7 +408,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
         a JSON array ("[1.0, 5.0]") or a comma-separated list ("1.0,5.0")."""
         if isinstance(v, str):
             try:
-                return json.loads(v)
+                return object_of(json.loads, v)
             except json.JSONDecodeError:
                 return [float(x.strip()) for x in v.split(",") if x.strip()]
         return v
@@ -425,12 +427,8 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
             if not s:
                 return []
             with suppress(json.JSONDecodeError):  # not JSON -> fall through to comma split
-                parsed: object = json.loads(s)
-                if isinstance(parsed, list):
-                    # meiva:note
-                    # Narrowing `object` via `isinstance(..., list)` yields `list[Unknown]` in
-                    # basedpyright; copy into `list[object]` before filtering `str` members.
-                    items: list[object] = list(parsed)  # pyright: ignore[reportUnknownArgumentType]
-                    return [x for x in items if isinstance(x, str)]
+                parsed = object_of(json.loads, s)
+                if is_object_list(parsed):
+                    return [x for x in parsed if isinstance(x, str)]
             return [x.strip() for x in s.split(",") if x.strip()]
         return v

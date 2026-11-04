@@ -98,7 +98,7 @@ def test_browser_identity_is_the_profile_probe_not_a_curl(unit_home: Path) -> No
     probe = declared.identity_probe
     assert isinstance(probe, partial)
     assert probe.func is composition.browser_probe
-    assert probe.args == (int(get_field("browser_cdp_port")), profile_dir(unit_home))
+    assert probe.args == (int(str(get_field("browser_cdp_port"))), profile_dir(unit_home))
 
 
 # meiva:note

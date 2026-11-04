@@ -683,6 +683,15 @@ root = "base/agents/tests"
 root = "base/agents/upload_delivery/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/config/domains/daemon/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/config/domains/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/config/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/host/db_authority/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -1018,6 +1027,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "base/agents"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/config"
 reportAny = "error"
 reportExplicitAny = "error"
 

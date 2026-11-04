@@ -7,7 +7,6 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import UnionType
 from typing import (
-    Any,
     Literal,
     NotRequired,
     Protocol,
@@ -16,6 +15,8 @@ from typing import (
     get_args,
     get_origin,
 )
+
+from pydantic import TypeAdapter
 
 from base.api_contracts.config import Capability
 from base.host.env.process_profile import ProcessProfile
@@ -109,10 +110,13 @@ class FieldInfoLike(Protocol):
     def validation_alias(self) -> object: ...
 
     @property
-    def json_schema_extra(self) -> dict[str, Any] | Callable[[dict[str, Any]], None] | None: ...
+    def json_schema_extra(self) -> Mapping[str, object] | Callable[..., object] | None: ...
 
     def get_default(
-        self, *, call_default_factory: Literal[True], validated_data: dict[str, Any] | None = None
+        self,
+        *,
+        call_default_factory: Literal[True],
+        validated_data: dict[str, object] | None = None,
     ) -> object: ...
 
 
@@ -121,7 +125,7 @@ class DomainModelLike(Protocol):
     def model_fields(self) -> Mapping[str, FieldInfoLike]: ...
 
 
-class SchemaExtra(TypedDict):
+class SchemaExtra(TypedDict, total=False):
     scope: str
     remote_writable: bool
     writable: bool
@@ -132,6 +136,9 @@ class SchemaExtra(TypedDict):
     per_agent: NotRequired[bool]
     lifecycle: NotRequired[str]
     env_var: NotRequired[str]
+
+
+_SCHEMA_EXTRA = TypeAdapter(SchemaExtra)
 
 
 @dataclass(frozen=True)
@@ -160,8 +167,16 @@ RESTART_REQUIRED_PROFILE: dict[str, ProcessProfile] = {
 # The field's `json_schema_extra` as a plain dict (empty if unset / callable).
 def schema_extra(info: FieldInfoLike) -> SchemaExtra:
     extra = info.json_schema_extra
-    out: Any = {} if callable(extra) or extra is None else extra
-    return out
+    return _SCHEMA_EXTRA.validate_python({} if callable(extra) or extra is None else extra)
+
+
+# meiva:note
+# The scope a field declares; a field that declared none is a broken registration (`KeyError`).
+def scope_of(extra: SchemaExtra) -> str:
+    scope = extra.get("scope")
+    if scope is None:
+        raise KeyError("scope")
+    return scope
 
 
 # meiva:note
@@ -257,7 +272,7 @@ def _validate_restart_required(name: str, attr: str, extra: SchemaExtra) -> None
 # meiva:note
 # Return the config editor type and enum choices declared by `annotation`.
 def field_editor_type(annotation: object) -> tuple[str, list[str] | None]:
-    union_args = get_args(annotation)
+    union_args: tuple[object, ...] = get_args(annotation)
     if get_origin(annotation) in (Union, UnionType) and type(None) in union_args:
         non_none = [item for item in union_args if item is not type(None)]
         if len(non_none) == 1:
@@ -269,5 +284,6 @@ def field_editor_type(annotation: object) -> tuple[str, list[str] | None]:
     if annotation is float:
         return "float", None
     if get_origin(annotation) is Literal:
-        return "enum", [str(item) for item in get_args(annotation)]
+        literal_values: tuple[object, ...] = get_args(annotation)
+        return "enum", [str(item) for item in literal_values]
     return "string", None

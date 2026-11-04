@@ -31,8 +31,9 @@ processes that is (`restart_required`) and never restarts anything itself.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, get_origin
+from typing import get_origin
 
 from dotenv import set_key, unset_key
 
@@ -87,7 +88,7 @@ def env_value_text(value: object) -> str:
 
 
 def _pending_changes(
-    path: Path, amap: dict[str, str], updates: dict[str, Any], removals: set[str]
+    path: Path, amap: dict[str, str], updates: Mapping[str, object], removals: set[str]
 ) -> list[dict[str, str | None]]:
     """The pre-write audit diff of one `write_fields` call, sorted by alias.
 
@@ -133,7 +134,7 @@ def _check_digest(path: Path, expected_digest: str | None) -> None:
 
 
 def _rewrite_env(
-    path: Path, amap: dict[str, str], updates: dict[str, Any], removals: set[str]
+    path: Path, amap: dict[str, str], updates: Mapping[str, object], removals: set[str]
 ) -> None:
     """Snapshot the `.env`, apply the updates and removals, and pin it private."""
     snapshot_env(path)
@@ -148,7 +149,7 @@ def _rewrite_env(
 
 
 def write_fields(
-    updates: dict[str, Any],
+    updates: Mapping[str, object],
     removals: set[str],
     *,
     capture_bytes: bool = False,

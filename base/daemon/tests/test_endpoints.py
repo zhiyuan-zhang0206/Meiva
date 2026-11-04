@@ -16,7 +16,7 @@ def test_every_health_daemon_has_an_endpoint_from_its_setting_and_the_run_dir() 
     table = ServiceEndpoints.from_fields(get_field, runtime=run_dir(home))
     assert {e.name for e in table} == set(health_port_env_aliases())
     for endpoint in table:
-        assert endpoint.health_port == int(get_field(f"{endpoint.name}_health_port"))
+        assert endpoint.health_port == int(str(get_field(f"{endpoint.name}_health_port")))
         assert endpoint.pidfile == run_dir(home) / f"{endpoint.name}.pid"
 
 

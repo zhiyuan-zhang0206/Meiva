@@ -16,11 +16,12 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Never
+from typing import Never
 
 from pydantic import BaseModel, Field
 
 import base.config.config_registry as _config_registry
+from base.config.base import EnvSettings
 from base.config.config_registry import DOMAIN_ATTRS, DOMAIN_MODELS, schema_extra
 from base.config.domains.agent.settings import AgentSettings
 from base.config.domains.channels.feishu import FeishuSettings
@@ -164,7 +165,7 @@ class FullBundle:
     facade publishes only in full mode (Settings, FIELD_REFS, the re-exports)."""
 
     settings: Settings
-    exports: dict[str, Any]
+    exports: dict[str, object]
 
 
 def build(
@@ -181,17 +182,23 @@ def build(
     if environment is None:
         settings = Settings(env_boot=env_boot)
     else:
-        from base.config.config_registry import domain_model_classes
-
-        domains = {
-            name: model.from_environment(environment)
-            for name, model in domain_model_classes().items()
-        }
-        settings = Settings(profile=profile, env_boot=env_boot, **domains)
+        settings = Settings(profile=profile, env_boot=env_boot, **_delivered_domains(environment))
     return FullBundle(settings=settings, exports=facade_exports())
 
 
-def facade_exports() -> dict[str, Any]:
+# meiva:note
+# One sub-model per registered domain, validated from the supplied delivery values only. The
+# registry hands the classes back untyped, so each is checked to be a config sub-model here.
+def _delivered_domains(environment: dict[str, str]) -> dict[str, EnvSettings]:
+    domains: dict[str, EnvSettings] = {}
+    for name, model in _config_registry.domain_model_classes().items():
+        if not issubclass(model, EnvSettings):
+            raise TypeError(f"config domain {name!r} is not an EnvSettings sub-model")
+        domains[name] = model.from_environment(environment)
+    return domains
+
+
+def facade_exports() -> dict[str, object]:
     """The names `base.config` gains when a lite process upgrades."""
     from base.config.admin.metadata import (
         CONFIG_UNCHANGED_SENTINEL,
@@ -257,7 +264,7 @@ def _bootstrap_fields() -> tuple[str, ...]:
     )
 
 
-def flat_dump(authority: ConfigAuthority, mode: str = "python") -> dict[str, Any]:
+def flat_dump(authority: ConfigAuthority, mode: str = "python") -> dict[str, object]:
     """Flat boot values from an explicitly supplied configuration authority."""
     return authority.flat_dump(mode=mode)
 

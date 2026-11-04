@@ -134,7 +134,7 @@ def test_liveness_loop_beats_periodically() -> None:
 async def test_run_serves_health_and_the_send_route_then_stops_cleanly(
     served_config: ConfigBoot, database: Database, tmp_path: Path
 ) -> None:
-    port = served_config.get_field("im_bridge_health_port")
+    port = int(str(served_config.get_field("im_bridge_health_port")))
     task = _run(served_config, database, tmp_path)
     try:
         await _until(lambda: _get(port) is not None, "the health endpoint")
@@ -158,7 +158,7 @@ async def test_a_child_fault_fails_the_daemon_and_every_resource_is_cleaned_up(
     db_conn: psycopg.Connection,
     tmp_path: Path,
 ) -> None:
-    port = served_config.get_field("im_bridge_health_port")
+    port = int(str(served_config.get_field("im_bridge_health_port")))
     task = _run(served_config, database, tmp_path)
     try:
         await _until(lambda: _get(port) is not None, "the health endpoint")
