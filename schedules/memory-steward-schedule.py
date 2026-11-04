@@ -19,15 +19,19 @@ MEMORY_ARBITRATOR_LABEL = "memory-arbiter"
 TRIGGERS = (
     Trigger(
         "0 4 * * *",
-        "Daily consolidation (rebuild indexes, commit, push, PR merge) — first run, in this"
-        " order: `~/.meiva/source/.venv/bin/python ~/.meiva/source/meiva_builtins/plugins/"
-        "meiva_memory/skills/scripts/rebuild_memory_index.py`, then the same interpreter on"
-        " `~/.meiva/source/meiva_builtins/plugins/meiva_memory/skills/scripts/gen_indexes.py`"
-        " (both take no arguments and resolve the Meiva home themselves; bare script names are"
-        " not on PATH and `python3` cannot import `base`),"
-        " then merge only PRs whose `validate` check is green, whose author is not the merger,"
-        " and write the collector snapshot (each face's HEAD + dirty count) into the PR body"
-        " first",
+        "Daily consolidation (rebuild indexes, commit, push, PR merge) — first run, in this order"
+        ": `W=$(mktemp -d)/pool; FH=$(dirname $W)/fh; git -C ~/.meiva/memory worktree add -q -B m"
+        "em/rebuild-$(date +%m%d-%H%M) $W origin/main; mkdir -p $FH; ln -sfn $W $FH/memory; cd $W"
+        "; MEIVA_HOME=$FH ~/.meiva/source/.venv/bin/python ~/.meiva/source/meiva_builtins/plugins"
+        "/meiva_memory/skills/scripts/rebuild_memory_index.py; MEIVA_HOME=$FH ~/.meiva/source/.ve"
+        "nv/bin/python ~/.meiva/source/meiva_builtins/plugins/meiva_memory/skills/scripts/gen_ind"
+        "exes.py` (the two scripts resolve the pool from MEIVA_HOME and take no arguments; the fa"
+        "ke home is what points them at the worktree), then commit + push that branch + open a PR"
+        " and squash-merge it once `validate` is green — a pure generated artifact, so the author"
+        " may merge it; **never commit on the shared checkout's main: the pool pre-commit refuses"
+        " it**, then merge only review PRs whose `validate` check is green, whose author is not t"
+        "he merger, and write the collector snapshot (each face's HEAD + dirty count) into the PR"
+        " body first",
     ),
     Trigger("0 7 * * *", "Daily health check — OKF, size, dedup, stale"),
 )
