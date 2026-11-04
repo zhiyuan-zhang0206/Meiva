@@ -9,15 +9,17 @@
 
 from __future__ import annotations
 
-import json
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import pytest
 
+from base.deploy.lifecycle import status_journal
+from base.deploy.lifecycle.status_journal import LifecycleOp
 from base.deploy.tests.containers import free_port
+from base.host.boundary.json_values import is_object_list
+from base.host.db_authority.model import GenerationSecret
 from base.host.db_authority.tests.generation import (
     seed_write_generation as seed_write_generation,
 )
@@ -45,8 +47,17 @@ def _served(calls: list[tuple[str, str | None]]) -> list[tuple[str, str | None]]
     return [call for call in calls if call[0] != "status"]
 
 
-def _journal(process_home: Path) -> dict[str, Any]:
-    return json.loads((process_home / "run/lifecycle-op.json").read_text())
+def _journal(process_home: Path) -> LifecycleOp:
+    journal = status_journal.read(process_home)
+    assert journal is not None, "the run wrote no journal"
+    return journal
+
+
+# meiva:note
+# The `result` object the finished journal records, refused when the run wrote none.
+def _result(journal: LifecycleOp) -> dict[str, object]:
+    assert journal.result is not None, "the journal records no result"
+    return journal.result
 
 
 # meiva:note
@@ -96,8 +107,8 @@ def test_a_restart_stops_the_tree_but_the_browser_and_brings_the_selection_back(
     )
     assert run.serving_published, "the start leg published serving again"
     journal = _journal(run.home)
-    assert journal["complete"] and journal["result"] == {"rc": 0, "error": None}
-    assert [phase["name"] for phase in journal["phases"]] == [
+    assert journal.complete and journal.result == {"rc": 0, "error": None}
+    assert [phase.name for phase in journal.phases] == [
         "preflight",
         "preflight",
         "stop",
@@ -121,7 +132,7 @@ def test_a_restart_stops_the_tree_but_the_browser_and_brings_the_selection_back(
 def test_the_start_leg_waits_only_as_long_as_the_operators_start_timeout(
     start_run: StartRun,
     tmp_path: Path,
-    seed_write_generation: Callable[[Path], Any],
+    seed_write_generation: Callable[[Path], GenerationSecret],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     run = start_run
@@ -146,11 +157,14 @@ def test_the_start_leg_waits_only_as_long_as_the_operators_start_timeout(
     served = _served(root.calls)
     assert served[-1] == ("up", "gate") and set(served[:-1]) == {("down", "gate")}
     journal = _journal(run.home)
-    assert journal["complete"] and journal["result"]["rc"] == rc
-    assert journal["result"]["error"] == f"start leg failed with rc={rc}"
-    assert any(
-        "1 service(s) not ready" in line for line in journal["result"]["start_leg_output"]
-    ), "the journal keeps the words the start leg printed"
+    result = _result(journal)
+    assert journal.complete and result["rc"] == rc
+    assert result["error"] == f"start leg failed with rc={rc}"
+    output = result["start_leg_output"]
+    assert is_object_list(output), "the journal keeps the words the start leg printed"
+    assert any(isinstance(line, str) and "1 service(s) not ready" in line for line in output), (
+        "the journal keeps the words the start leg printed"
+    )
     assert not run.serving_published
     err = capsys.readouterr().err
     assert "1 service(s) not ready" in err and "meiva-gate" in err
@@ -200,7 +214,7 @@ def test_a_restart_that_the_probes_decline_stops_nothing_and_leaves_the_root_alo
         "browser": "running",
     }
     journal = _journal(run.home)
-    assert journal["complete"] and journal["result"] == {
+    assert journal.complete and journal.result == {
         "rc": rc,
         "error": "preflight probes failed",
     }

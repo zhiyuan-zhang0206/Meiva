@@ -80,7 +80,9 @@ _IDLE_PROMPT = "meiva-idle-shell>"
 
 
 def names(conn: psycopg.Connection) -> list[str]:
-    return [notice["name"] for notice in written_notices(conn)]
+    values = [notice["name"] for notice in written_notices(conn)]
+    assert all(isinstance(value, str) for value in values), "every closure notice names its session"
+    return [value for value in values if isinstance(value, str)]
 
 
 # meiva:note

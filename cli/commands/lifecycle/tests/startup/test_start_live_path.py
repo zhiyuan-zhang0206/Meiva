@@ -17,6 +17,8 @@ import psycopg
 import pytest
 
 from base.deploy.lifecycle import home_lifecycle_locks, launch_failures, start_serving
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.host.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from cli.commands.lifecycle.tests.scripted_root import UnitRow
 from cli.commands.lifecycle.tests.startup.start_harness import (
@@ -82,7 +84,8 @@ def test_an_identical_live_generation_is_reused_and_the_start_serves(
         "nothing converged beyond the start's own bookmark"
     )
     lock = home_lifecycle_locks.lifecycle_lock_path(run.home)
-    holder = json.loads(home_lifecycle_locks.holder_path(lock).read_text())
+    holder = object_of(json.loads, home_lifecycle_locks.holder_path(lock).read_text())
+    assert is_object_dict(holder), "the lock holder is a JSON object"
     assert holder["purpose"] == "cli.cmd_start_body" and holder["state"] == "released"
     assert holder["pid"] == run.command.pid != os.getpid()
     out = capsys.readouterr().out

@@ -4,11 +4,11 @@ import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 from base.deploy.release.start_inputs import configuration_digest
+from base.host.db_authority.model import GenerationSecret
 from base.host.runtime_interpreter import source_digest
 from cli.commands.lifecycle.root_control.generation import launch_digest
 
@@ -132,7 +132,7 @@ def test_loaded_verifier_imports_without_settings() -> None:
 
 
 def test_generation_binds_the_delivered_write_generation(
-    tmp_path: Path, seed_write_generation: Callable[[Path], Any]
+    tmp_path: Path, seed_write_generation: Callable[[Path], GenerationSecret]
 ) -> None:
     from base.host.db_authority.ledger import ledger_path, load_ledger
 
