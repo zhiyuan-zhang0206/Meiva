@@ -12,9 +12,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
 from psycopg import Connection
 from psycopg.rows import DictRow
@@ -27,6 +28,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.cluster.machines import mark_stopping
 from base.config.agent_pins import resolve_agent_config_pins
 from base.db import Database
+from base.db.rows import query_one
 from base.host.system.hostport import Host
 from base.native_process.loaded_commit import LoadedCommit
 from base.packages.composer_commands import Command
@@ -165,7 +167,7 @@ def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
     return isinstance(value, dict)
 
 
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
     return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
 
 
@@ -182,6 +184,15 @@ def _is_saver_conn(value: object) -> TypeGuard[Connection[DictRow]]:
 
 
 # meiva:note
+# The `agents_meta` columns the skill view reads; the two config columns are JSON objects or NULL.
+@dataclass(frozen=True)
+class _SkillViewRow:
+    config_overlay: Mapping[str, object] | None
+    birth_config: Mapping[str, object] | None
+    harness: str
+
+
+# meiva:note
 # The persisted cwd and effective skill-index narrowing for one agent.
 #
 # The daemon's shared pool keeps this read on the agent's machine. ``cwd`` is the meiva-code
@@ -195,17 +206,18 @@ def agent_skill_view_inputs(
 
     from base.agents.history.checkpoint_serializer import CheckpointSerializer
 
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
+    with pool.connection() as conn:
+        row = query_one(
+            conn,
+            _SkillViewRow,
             "SELECT config_overlay, birth_config, harness FROM agents_meta WHERE id = %s",
             (agent_id,),
         )
-        row = cur.fetchone()
         if row is None:
             return None, None, "meiva"
-        overlay = row[0] if _is_str_dict(row[0]) else {}
-        birth = row[1] if _is_str_dict(row[1]) else {}
-        harness = str(row[2]) if len(row) > 2 and row[2] is not None else "meiva"
+        overlay = row.config_overlay if _is_str_dict(row.config_overlay) else {}
+        birth = row.birth_config if _is_str_dict(row.birth_config) else {}
+        harness = row.harness
         pins = resolve_agent_config_pins(overlay, birth)
         wanted = pins.get("skills_to_inject_into_system_prompt")
         if not _is_saver_conn(conn):

@@ -16,6 +16,7 @@ from base.api_contracts.agent_contract import ForkSourceEmpty, Harness, ProbedHa
 from base.config.agent_pins import resolve_agent_config_pins
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.rows import query_one
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
@@ -62,14 +63,15 @@ async def launch_agent_op(
 def validate_launch_row(
     db_pool: ConnectionPool, body: LaunchAgentRequest, *, local_machine: str
 ) -> Harness:
-    with db_pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
+    with db_pool.connection() as conn:
+        row = query_one(
+            conn,
+            StoredLaunch,
             "SELECT machine, last_launch_attempt_id, status, harness FROM agents_meta WHERE id=%s",
             (body.agent_id,),
         )
-        row = cur.fetchone()
     return require_current_launch_row(
-        None if row is None else StoredLaunch(*row),
+        row,
         agent_id=body.agent_id,
         launch_attempt_id=body.launch_attempt_id,
         local_machine=local_machine,

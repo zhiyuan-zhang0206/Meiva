@@ -10,9 +10,22 @@ Read failures propagate: a failed read must never degrade into a wake the
 policy forbids.
 """
 
+from collections.abc import Mapping
+from dataclasses import dataclass
+
 from base.agents.incarnation.lifecycle_commands import is_system_notice_source
 from base.api_contracts.agent_contract import AgentNotFound
 from base.db import Database
+from base.db.rows import query_one
+
+
+# meiva:note
+# The wake trigger's kind, source and JSON payload, named as `inbound_messages` names them.
+@dataclass(frozen=True)
+class _Trigger:
+    kind: str
+    source: str
+    payload: Mapping[str, object] | None
 
 
 def recovery_halted(db: Database, agent_id: int) -> bool:
@@ -50,15 +63,16 @@ def system_notice_source_of_trigger(
     above fail loudly the same way).
     """
     with db.connect() as conn:
-        row = conn.execute(
+        row = query_one(
+            conn,
+            _Trigger,
             "SELECT kind, source, payload FROM inbound_messages WHERE id=%s AND agent_id=%s",
             (trigger_inbound_id, agent_id),
-        ).fetchone()
+        )
     if row is None:
         return None
-    kind, source, payload = row
-    if kind == "chat" and is_system_notice_source(source, payload):
-        return str(source)
+    if row.kind == "chat" and is_system_notice_source(row.source, row.payload):
+        return row.source
     return None
 
 

@@ -9,6 +9,9 @@ from pathlib import Path
 
 import httpx
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
+
 _log = logging.getLogger(__name__)
 
 
@@ -37,7 +40,11 @@ async def cancel_hosted_turn(agent_id: int, *, host: LocalAgentHost) -> bool:
             json={"agent_id": agent_id},
         )
         resp.raise_for_status()
-    return bool(resp.json()["cancelled"])
+    answer = object_of(resp.json)
+    cancelled = answer.get("cancelled") if is_object_dict(answer) else None
+    if not isinstance(cancelled, bool):
+        raise TypeError(f"cancel-turn answered {answer!r}, not an object with a boolean cancelled")
+    return cancelled
 
 
 # meiva:note

@@ -1,5 +1,7 @@
 """Placement and termination boundaries for a queued resurrection."""
 
+from dataclasses import dataclass
+
 import psycopg
 
 from base.api_contracts.agent_contract import (
@@ -7,6 +9,7 @@ from base.api_contracts.agent_contract import (
     MachinePaused,
     ResurrectError,
 )
+from base.db.rows import query_one
 from base.log import logger
 
 
@@ -14,15 +17,21 @@ class ResurrectTriggerStaleError(ResurrectError):
     """The exact pending wake no longer qualifies; the local op returns a no-op."""
 
 
+# meiva:note
+# The placement column of an `agents_meta` row, which a queued resurrection is bound to.
+@dataclass(frozen=True)
+class _Placement:
+    machine: str
+
+
 def lock_active_home_machine(cur: psycopg.Cursor, agent_id: int) -> str:
     """Share the pause latch before metadata/inbound locks or budget writes."""
-    cur.execute("SELECT machine FROM agents_meta WHERE id = %s", (agent_id,))
-    agent_row = cur.fetchone()
+    agent_row = query_one(
+        cur.connection, _Placement, "SELECT machine FROM agents_meta WHERE id = %s", (agent_id,)
+    )
     if agent_row is None:
         raise AgentNotFound(f"agent {agent_id} does not exist")
-    home_machine = agent_row[0]
-    if not isinstance(home_machine, str):
-        raise ResurrectTriggerStaleError("resurrection target has no registered placement")
+    home_machine = agent_row.machine
     cur.execute("SELECT paused_at FROM machines WHERE name = %s FOR SHARE", (home_machine,))
     machine_row = cur.fetchone()
     if machine_row is not None and machine_row[0] is not None:
