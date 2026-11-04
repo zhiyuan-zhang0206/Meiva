@@ -8,15 +8,31 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from contextlib import AbstractContextManager
+from functools import partial
+from http.client import HTTPResponse
 from typing import TypeGuard
 
+from base.host.boundary.untyped import object_of
 from meiva_builtins.plugins.meiva_usage.probes.transport import HttpJsonRequest, HttpStatusError
 from meiva_builtins.plugins.meiva_usage.types import UsageProbeError
 
 
 def _is_mapping(val: object) -> TypeGuard[Mapping[str, object]]:
     return isinstance(val, Mapping)
+
+
+# meiva:note
+# The body of the answer `opener(request)` gives. `urlopen` types its answer `Any`; a parameter typed
+# with the real `HTTPResponse` takes it without naming the `Any`. The scheme check in the caller
+# keeps the answer an `HTTPResponse` for the http/https URLs it admits.
+def _read_body(
+    opener: Callable[[urllib.request.Request], AbstractContextManager[HTTPResponse]],
+    request: urllib.request.Request,
+) -> bytes:
+    with opener(request) as response:
+        return response.read()
 
 
 # meiva:note
@@ -38,8 +54,7 @@ def urllib_json_fetcher(req: HttpJsonRequest) -> Mapping[str, object]:
     )
 
     try:
-        with urllib.request.urlopen(request, timeout=req.timeout_s) as response:  # noqa: S310
-            content_bytes = response.read()
+        content_bytes = _read_body(partial(urllib.request.urlopen, timeout=req.timeout_s), request)
     except urllib.error.HTTPError as exc:
         raise HttpStatusError(exc.code, str(exc.reason)) from None
     except urllib.error.URLError as exc:
@@ -50,7 +65,7 @@ def urllib_json_fetcher(req: HttpJsonRequest) -> Mapping[str, object]:
         raise UsageProbeError(f"HTTP request to {host} failed: {exc}") from None
 
     try:
-        decoded: object = json.loads(content_bytes.decode("utf-8"))
+        decoded = object_of(json.loads, content_bytes.decode("utf-8"))
     except Exception:
         raise UsageProbeError(f"Invalid JSON response from {host}") from None
 

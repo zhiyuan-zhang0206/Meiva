@@ -15,6 +15,7 @@ from datetime import UTC, datetime, tzinfo
 from pathlib import Path
 from typing import TypeGuard
 
+from base.host.boundary.untyped import object_of
 from meiva_builtins.plugins.meiva_usage.default_config import CollectorConfig
 from meiva_builtins.plugins.meiva_usage.formatters import format_codex_window_card
 from meiva_builtins.plugins.meiva_usage.parsers import (
@@ -69,7 +70,7 @@ def find_codex_binary(
 
 def _parse_json_object(line: str) -> Mapping[str, object] | None:
     try:
-        raw: object = json.loads(line)
+        raw = object_of(json.loads, line)
     except (json.JSONDecodeError, ValueError):
         return None
     return raw if _is_mapping(raw) else None
@@ -77,7 +78,7 @@ def _parse_json_object(line: str) -> Mapping[str, object] | None:
 
 def _read_json_file(path: Path) -> Mapping[str, object] | None:
     try:
-        raw: object = json.loads(path.read_text("utf-8"))
+        raw = object_of(json.loads, path.read_text("utf-8"))
     except (OSError, UnicodeDecodeError, ValueError):
         return None
     return raw if _is_mapping(raw) else None

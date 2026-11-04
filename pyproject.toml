@@ -776,6 +776,9 @@ root = "meiva/mcps/tests"
 root = "meiva_builtins/plugins/meiva_to_user/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_usage/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -1201,6 +1204,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/plugins/meiva_to_user"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_usage"
 reportAny = "error"
 reportExplicitAny = "error"
 
