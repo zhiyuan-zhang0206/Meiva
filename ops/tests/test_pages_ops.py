@@ -6,7 +6,7 @@ import psycopg
 import pytest
 
 from base.db import create_agent
-from ops.pages import PageRow, register_page_in_transaction
+from ops.pages import PageRow, get_open_page_target, register_page_in_transaction
 
 _HOST = "127.0.0.1"
 _NOW = datetime(2026, 10, 24, 12, 0, tzinfo=UTC)
@@ -140,3 +140,27 @@ def test_explicit_registration_resets_admission_only_for_a_changed_server(
         "SELECT session_name, server_token FROM agent_pages WHERE id = %s", (original.id,)
     ).fetchone()
     assert state == ((None, None) if changed else ("known-page-session", "token"))
+
+
+# meiva:note
+# The proxy dials the host a page registered with, so an open row whose nullable `host` is NULL
+# (no registration writes one; only a legacy row can carry it) is refused by name, not handed out as
+# a target with no host.
+def test_open_page_target_refuses_an_open_row_without_a_host(db_conn: psycopg.Connection) -> None:
+    aid = create_agent(db_conn)
+    db_conn.execute(
+        "INSERT INTO agent_pages (agent_id, name, port, host) VALUES (%s, 'legacy', 8001, NULL)",
+        (aid,),
+    )
+    db_conn.commit()
+
+    with pytest.raises(ValueError, match=r"open page 'legacy' of agent \d+ has no host to dial"):
+        get_open_page_target(db_conn, aid, "legacy")
+
+
+def test_open_page_target_is_the_registered_host_and_port(db_conn: psycopg.Connection) -> None:
+    aid = create_agent(db_conn)
+    _register(db_conn, aid, "p", 8001, _HOST, None)
+
+    assert get_open_page_target(db_conn, aid, "p") == (_HOST, 8001)
+    assert get_open_page_target(db_conn, aid, "absent") is None
