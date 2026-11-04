@@ -1,5 +1,6 @@
 [uses]
 "provider.py" = ["chat.py"]
+"tests" = ["chat.py", "provider.py"]
 
 [purity]
 "chat.py" = "strict"
