@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Literal
+from typing import Literal
 from uuid import UUID
 
 import meiva.sdk_surface.agent_identity
@@ -42,14 +40,37 @@ from base.api_contracts.agent_contract import (
     ShellSessionKillTiming as ShellSessionKillTiming,
 )
 from base.api_contracts.agent_contract import SpawnTargetNotAgentRunner as SpawnTargetNotAgentRunner
+from base.host.boundary.json_values import is_object_dict
 from meiva import gateway_client
-from meiva.agents import peers, row_text, schedule_capability
+from meiva.agents import peers, schedule_capability
 from meiva.agents.contracts import (
     CommandInfo,
     HarnessAvailability,
     Machine,
     Neighbor,
     ShellSessionsKill,
+)
+from meiva.agents.gateway_rows import (
+    AgentDirectoryPage as AgentDirectoryPage,
+)
+from meiva.agents.gateway_rows import (
+    AgentRow as AgentRow,
+)
+from meiva.agents.gateway_rows import (
+    OpenTaskRow as OpenTaskRow,
+)
+from meiva.agents.gateway_rows import (
+    OpenTasksHint as OpenTasksHint,
+)
+from meiva.agents.gateway_rows import (
+    machines_from_rows,
+    neighbor_from_row,
+    object_rows,
+    open_tasks_from_dict,
+    optional_integer,
+    row_from_dict,
+    shell_sessions_from_dict,
+    text,
 )
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
@@ -91,92 +112,6 @@ __all_for_meiva__ = [
     "spawn",
     "terminate",
 ]
-
-
-@dataclass
-class AgentRow:
-    agent_id: int
-    label: str | None
-    status: AgentStatus
-    spawner: str
-    fork_source_agent_id: int | None
-    machine: str
-    spawned_at: datetime
-    # The agent's real-activity clock (every completed LLM turn) — the value
-    # triage surfaces should use for "is it alive". The API also carries
-    # `last_inbound_at` ("when did anyone last talk to it") since the two
-    # diverge during long single turns (issue #183).
-    last_active_at: datetime
-    last_inbound_at: datetime
-    heartbeat_paused_until: datetime | None
-    # meiva:note
-    # How this agent's external harness session ended (task #5616). None means
-    # "still running, or never recorded" — including every built-in meiva agent,
-    # which has no CLI child at all; it never means "exited cleanly". 0 = the child
-    # exited normally, non-zero = it exited abnormally. `harness_exit_at` is when that
-    # status was read (the session's retirement, after the child was reaped).
-    harness_exit_code: int | None = None
-    harness_exit_at: datetime | None = None
-
-    def __str__(self) -> str:
-        label_part = f"{self.label} " if self.label else ""
-        parts = [f"#{self.agent_id} {label_part} {self.status.value}"]
-        parts.append(f"machine={self.machine}")
-        parts.append(f"spawned={_relative_time(self.spawned_at)}")
-        if self.last_active_at != self.spawned_at:
-            parts.append(f"last_active={_relative_time(self.last_active_at)}")
-        return "  ".join(parts)
-
-
-@dataclass
-class AgentDirectoryPage:
-    """One page, newest agent IDs first. Pass `next_cursor` as `before_id`
-    with the same filters to read the next page; None means no more results.
-    """
-
-    agents: list[AgentRow]
-    next_cursor: int | None
-
-
-def _relative_time(dt: datetime) -> str:
-    """Convert a datetime into a human-readable relative time string."""
-    from meiva.sdk_surface.settings import clock
-
-    current_clock = clock()
-    zone = current_clock.zone()
-    now = current_clock.now().astimezone(zone)
-    return row_text.relative_age(dt.astimezone(zone), now=now)
-
-
-@dataclass
-class OpenTaskRow:
-    """One open task a terminated agent still owns: its id, title, status and
-    last update time."""
-
-    id: int
-    title: str
-    status: str
-    updated_at: datetime
-
-    def __str__(self) -> str:
-        return f"#{self.id} | {self.title} | {self.status} | {_relative_time(self.updated_at)}"
-
-
-@dataclass
-class OpenTasksHint:
-    """The open tasks a terminated agent still owns as it goes down: the total
-    `count`, at most the five most recently updated `tasks`, and `more` — how
-    many beyond those five remain."""
-
-    count: int
-    tasks: list[OpenTaskRow]
-    more: int
-
-    def __str__(self) -> str:
-        lines = [f"{self.count} open task(s):", *(str(task) for task in self.tasks)]
-        if self.more:
-            lines.append(f"... and {self.more} more")
-        return "\n".join(lines)
 
 
 class TerminateOutcome(str):
@@ -235,16 +170,11 @@ def get_neighbors(
         resolved_limit = config_authority().service_field_value("neighbors_default_limit")
     else:
         resolved_limit = coerce_typed(limit, "limit", int)
-    return [
-        Neighbor(
-            agent_id=n["agent_id"],
-            label=n.get("label"),
-            status=AgentStatus(n["status"]),
-            depth=n["depth"],
-            score=n["score"],
-        )
-        for n in gateway_client.get_neighbors(agent_id, depth=resolved_depth, limit=resolved_limit)
-    ]
+    rows = object_rows(
+        gateway_client.get_neighbors(agent_id, depth=resolved_depth, limit=resolved_limit),
+        "neighbors",
+    )
+    return [neighbor_from_row(row) for row in rows]
 
 
 def get_ancestors(agent_id: int) -> list[Neighbor]:
@@ -254,16 +184,8 @@ def get_ancestors(agent_id: int) -> list[Neighbor]:
     with no recorded spawn) returns [].
     """
     agent_id = coerce_typed(agent_id, "agent_id", int)
-    return [
-        Neighbor(
-            agent_id=n["agent_id"],
-            label=n.get("label"),
-            status=AgentStatus(n["status"]),
-            depth=n["depth"],
-            score=n["score"],
-        )
-        for n in gateway_client.get_ancestors(agent_id)
-    ]
+    rows = object_rows(gateway_client.get_ancestors(agent_id), "ancestors")
+    return [neighbor_from_row(row) for row in rows]
 
 
 # meiva:note
@@ -302,19 +224,16 @@ def list_agents(
     page = gateway_client.list_agents(
         scope=requested_scope, query=query, before_id=before_id, limit=limit
     )
+    if not is_object_dict(page):
+        raise TypeError(f"agents page must be an object, got {type(page).__name__}")
     return AgentDirectoryPage(
-        agents=[_row_from_dict(row) for row in page["agents"]],
-        next_cursor=page["next_cursor"],
+        agents=[row_from_dict(row) for row in object_rows(page.get("agents"), "agents")],
+        next_cursor=optional_integer(page.get("next_cursor"), "next_cursor"),
     )
 
 
 def list_machines() -> list[Machine]:
     return machines_from_rows(gateway_client.list_machines())
-
-
-def machines_from_rows(rows: list[dict[str, Any]]) -> list[Machine]:
-    """Gateway machine rows -> Machine dataclasses."""
-    return [Machine(name=r["name"], description=r.get("description"), live=r["live"]) for r in rows]
 
 
 def harness_availability() -> list[HarnessAvailability]:
@@ -345,49 +264,6 @@ def harness_availability() -> list[HarnessAvailability]:
             environ=process_context.current_context().require_environ(),
         )
     ]
-
-
-def _row_from_dict(data: dict[str, Any]) -> AgentRow:
-    """Gateway JSON dict → AgentRow dataclass."""
-    return AgentRow(
-        agent_id=data["agent_id"],
-        label=data.get("label"),
-        status=AgentStatus(data["status"]),
-        spawner=data["spawner"],
-        fork_source_agent_id=data["fork_source_agent_id"],
-        machine=data["machine"],
-        spawned_at=datetime.fromisoformat(data["spawned_at"]),
-        last_active_at=datetime.fromisoformat(data["last_active_at"]),
-        last_inbound_at=datetime.fromisoformat(data["last_inbound_at"]),
-        heartbeat_paused_until=(
-            datetime.fromisoformat(data["heartbeat_paused_until"])
-            if data.get("heartbeat_paused_until")
-            else None
-        ),
-        harness_exit_code=data.get("harness_exit_code"),
-        harness_exit_at=(
-            datetime.fromisoformat(data["harness_exit_at"]) if data.get("harness_exit_at") else None
-        ),
-    )
-
-
-def _open_tasks_from_dict(data: dict[str, Any] | None) -> OpenTasksHint | None:
-    """Gateway JSON dict → OpenTasksHint; null passes through."""
-    if data is None:
-        return None
-    return OpenTasksHint(
-        count=data["count"],
-        tasks=[
-            OpenTaskRow(
-                id=row["id"],
-                title=row["title"],
-                status=row["status"],
-                updated_at=datetime.fromisoformat(row["updated_at"]),
-            )
-            for row in data["tasks"]
-        ],
-        more=data["more"],
-    )
 
 
 def spawn(
@@ -581,15 +457,12 @@ def terminate(
         force=force,
         kill_all_shell_sessions=kill_all_shell_sessions,
     )
-    shell = data.get("shell_sessions")
+    if not is_object_dict(data):
+        raise TypeError(f"terminate reply must be an object, got {type(data).__name__}")
     return TerminateOutcome(
-        TerminateResult(data["status"]),
-        _open_tasks_from_dict(data["open_tasks"]),
-        shell_sessions=None
-        if shell is None
-        else ShellSessionsKill(
-            when=ShellSessionKillTiming(shell["when"]), killed=list(shell["killed"])
-        ),
+        TerminateResult(text(data["status"], "status")),
+        open_tasks_from_dict(data.get("open_tasks")),
+        shell_sessions=shell_sessions_from_dict(data.get("shell_sessions")),
     )
 
 
