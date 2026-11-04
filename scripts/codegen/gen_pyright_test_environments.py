@@ -21,14 +21,18 @@
 # neighbors in that order; run this script again to resolve.
 #
 # Why the prefixes are a data file and not a Python list: every pull request of the Any ratchet adds
-# one prefix, and two prefixes inserted next to each other conflict at every rebase. `.gitattributes`
-# gives the data file `merge=union`, which keeps the lines of both sides instead of stopping at a
-# conflict, so concurrent additions merge without help. A union merge has two costs. A prefix both
-# sides added in different places appears twice, so the reader de-duplicates and sorts: the order
-# of the file is never significant and nothing checks it. A line one side deleted next to a line the
-# other side added comes back, because a union keeps what either side holds, so remove a prefix in
-# a pull request of its own and look at the file after the rebase. The pyproject region cannot be
-# merged that way (the file holds much else); it is regenerated, never merged by hand.
+# one prefix, and a list appended to at its end conflicts at every rebase. The file is kept in byte
+# order without repeats and a new prefix goes in its sorted position, so two pull requests collide
+# only where their prefixes are neighbors; the reader refuses a line out of order or listed twice,
+# naming its line number, and neither `--check` nor the generation sorts or writes the file back.
+# GitHub's own merge does not run the merge driver `.gitattributes` names (#8458 and #8467 both
+# appended a line and were judged conflicting), but a local `git rebase` or `git merge` does, and
+# `merge=union` there keeps the lines of both sides instead of stopping at a conflict. A union
+# merge can leave a line out of place or a prefix both sides added twice, which the reader then
+# names so the line can be moved or removed by hand, and it brings back a line one side deleted
+# next to a line the other side added, because a union keeps what either side holds: remove a
+# prefix in a pull request of its own and look at the file after the rebase. The pyproject region
+# cannot be merged that way (the file holds much else); it is regenerated, never merged by hand.
 #
 # Add a prefix in the pull request that adds the covering entry; remove it when its tests are
 # clean (the ratchet only tightens). A prefix must name a directory of the checkout that holds a
@@ -100,24 +104,50 @@ def _covers(root: str, directory: str) -> bool:
 
 
 # meiva:note
-# The prefixes `text` lists: one per line, whitespace trimmed, blank lines and lines starting with
-# `#` skipped, duplicates collapsed and the result sorted. A line that is not a normalized
-# repository-relative path (a trailing slash, `./`, `..`, a leading slash) would never match a
-# tests directory and so would sit in the ledger doing nothing; it stops the script instead.
+# A line of the data file that is not a normalized repository-relative path (a trailing slash, `./`,
+# `..`, a leading slash) would never match a tests directory and so would sit in the ledger doing
+# nothing; it stops the script instead.
+def _require_normalized(number: int, line: str) -> None:
+    normalized = PurePosixPath(line).as_posix() == line and line != "."
+    if not normalized or line.startswith("/") or ".." in line.split("/"):
+        raise SystemExit(
+            f"{OWING_ANY_FILE}:{number}: {line!r} is not a normalized repository-relative "
+            "directory path (no leading or trailing slash, no '.' or '..' segment)"
+        )
+
+
+# meiva:note
+# The file stays in byte order without repeats, so insertions spread over it instead of piling up at
+# one end. `listed` maps each earlier prefix to its line number, in file order; the first line that
+# repeats one, or sorts before the last, stops the script.
+def _require_in_place(number: int, line: str, listed: dict[str, int]) -> None:
+    if line in listed:
+        raise SystemExit(
+            f"{OWING_ANY_FILE}:{number}: {line!r} is listed twice (first on line {listed[line]}); "
+            "remove the repeat"
+        )
+    before = next(reversed(listed), None)
+    if before is not None and line < before:
+        raise SystemExit(
+            f"{OWING_ANY_FILE}:{number}: {line!r} is out of order, it sorts before {before!r} on "
+            f"line {listed[before]}; keep the file in byte order: insert in sorted position"
+        )
+
+
+# meiva:note
+# The prefixes `text` lists, in file order: one per line, whitespace trimmed, blank lines and lines
+# starting with `#` skipped. A malformed, repeated or out-of-order line stops the script at the first
+# such line; nothing is sorted or de-duplicated on the reader's behalf.
 def parse_owing_any(text: str) -> tuple[str, ...]:
-    prefixes: set[str] = set()
+    listed: dict[str, int] = {}
     for number, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        normalized = PurePosixPath(line).as_posix() == line and line != "."
-        if not normalized or line.startswith("/") or ".." in line.split("/"):
-            raise SystemExit(
-                f"{OWING_ANY_FILE}:{number}: {line!r} is not a normalized repository-relative "
-                "directory path (no leading or trailing slash, no '.' or '..' segment)"
-            )
-        prefixes.add(line)
-    return tuple(sorted(prefixes))
+        _require_normalized(number, line)
+        _require_in_place(number, line, listed)
+        listed[line] = number
+    return tuple(listed)
 
 
 # meiva:note
