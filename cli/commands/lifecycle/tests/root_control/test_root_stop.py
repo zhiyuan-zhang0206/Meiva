@@ -176,3 +176,50 @@ def test_a_stop_whose_deadline_has_passed_takes_nothing_down(short_tmp: Path) ->
         )
 
     assert root.units["gateway"].state == "running"
+
+
+def test_tiered_stop_drains_agent_host_first_then_stops_slow_siblings_in_parallel(
+    short_tmp: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rows = [
+        UnitRow("agent-host", stop_tier=0, exit_delay_s=0.15),
+        UnitRow("gateway", stop_tier=1, exit_delay_s=0.3),
+        UnitRow("browser-mcp", stop_tier=1, exit_delay_s=0.3),
+        UnitRow("ops", stop_tier=1, exit_delay_s=0.3),
+        UnitRow("browser", stop_tier=2, exit_delay_s=0.05),
+        UnitRow("pty-sessions", stop_tier=1),
+    ]
+
+    with scripted_root(short_tmp, rows) as root:
+        driver.stop_root_service_tree(
+            preserve=frozenset({"pty-sessions"}),
+            timeout_s=10.0,
+            force=False,
+            helper=None,
+            home=short_tmp,
+            facts=LAUNCHD_FACTS,
+            run=refuse_launchctl,
+            timers=SYSTEM_TIMERS,
+            environ=os.environ,
+            pid=_PID,
+        )
+
+    events = root.events
+    names = [name for name, _ in events]
+    assert names[:2] == ["down agent-host", "exited agent-host"]
+    assert set(names[2:5]) == {"down gateway", "down browser-mcp", "down ops"}
+    assert set(names[5:8]) == {"exited gateway", "exited browser-mcp", "exited ops"}
+    assert names[8:] == ["down browser", "exited browser"]
+    tier_one_began = events[1][1]
+    tier_one_ended = events[-2][1]
+    assert tier_one_ended - tier_one_began < 0.55, (
+        f"expected parallel <0.55s tier-1 wave (serial sum 0.9s), took {tier_one_ended - tier_one_began:.3f}s"
+    )
+    out_lines = [line.strip() for line in capsys.readouterr().out.splitlines() if "stopped" in line]
+    assert out_lines == [
+        "✓ meiva-root unit meiva-agent-host stopped",
+        "✓ meiva-root unit meiva-gateway stopped",
+        "✓ meiva-root unit meiva-browser-mcp stopped",
+        "✓ meiva-root unit meiva-ops stopped",
+        "✓ meiva-root unit meiva-browser stopped",
+    ]

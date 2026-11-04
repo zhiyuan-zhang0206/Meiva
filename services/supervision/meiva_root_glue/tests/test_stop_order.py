@@ -63,3 +63,43 @@ def test_otel_collector_stops_after_producers_and_before_storage_backends(tmp_pa
         "tempo",
         "prometheus",
     ]
+
+
+def test_browser_mcp_stops_before_browser_collector_and_storage_backends(tmp_path: Path) -> None:
+    sessions = [
+        "tempo",
+        "browser",
+        "otel-collector",
+        "gateway",
+        "loki",
+        "browser-mcp",
+        STOPS_FIRST,
+        "prometheus",
+        "ops",
+    ]
+    units = build_units(
+        [_spec(session) for session in sessions],
+        capabilities={"agent-runner"},
+        repo_root=tmp_path,
+        environments={session: {} for session in sessions},
+        home=meiva_home(),
+    )
+    assert [(unit["id"], unit["stop_tier"]) for unit in units] == [
+        (STOPS_FIRST, 0),
+        ("gateway", 1),
+        ("browser-mcp", 1),
+        ("ops", 1),
+        ("browser", 2),
+        ("otel-collector", 3),
+        ("tempo", 4),
+        ("loki", 4),
+        ("prometheus", 4),
+    ]
+    registry = UnitRegistry([UnitManifest.from_mapping(unit, origin="test") for unit in units])
+    assert registry.all_stop_waves() == (
+        (STOPS_FIRST,),
+        ("gateway", "browser-mcp", "ops"),
+        ("browser",),
+        ("otel-collector",),
+        ("tempo", "loki", "prometheus"),
+    )

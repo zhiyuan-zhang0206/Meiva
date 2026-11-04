@@ -5,10 +5,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from typing import TypeGuard
 
-__all__ = ["unit_digests"]
+from cli.commands.lifecycle.root_control.reconcile_plan import changed_inputs, generation_refusal
+from cli.commands.lifecycle.root_control.snapshot import RootSnapshot
+
+__all__ = ["manifest_generation_refusal", "run_stop_waves", "unit_digests"]
 
 
 def _is_object_list(value: object) -> TypeGuard[list[object]]:
@@ -33,3 +37,30 @@ def unit_digests(manifest: Mapping[str, object]) -> dict[str, str]:
         if _is_object_dict(row)
     )
     return {unit.id: unit.digest() for unit in desired}
+
+
+def manifest_generation_refusal(
+    manifest: Mapping[str, object], snapshot: RootSnapshot, *, reconcile: bool
+) -> str | None:
+    digest = manifest["launch_digest"]
+    if not isinstance(digest, str):
+        raise TypeError("the launch manifest carries no launch digest")
+    changed = changed_inputs(unit_digests(manifest), digest, snapshot, reconcile=reconcile)
+    return generation_refusal(changed) if changed else None
+
+
+# meiva:note
+# Run independent stop waves in order: multi-unit waves run concurrently and report
+# outcomes in the wave's deterministic declaration order.
+def run_stop_waves(waves: Iterable[Sequence[str]], stop_one: Callable[[str], str]) -> None:
+    for wave in waves:
+        if not wave:
+            continue
+        if len(wave) == 1:
+            names = [stop_one(wave[0])]
+        else:
+            with ThreadPoolExecutor(max_workers=len(wave)) as pool:
+                futures = [pool.submit(stop_one, item) for item in wave]
+                names = [future.result() for future in futures]
+        for name in names:
+            print(f"  ✓ meiva-root unit {name} stopped")

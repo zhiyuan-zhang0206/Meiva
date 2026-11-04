@@ -9,7 +9,8 @@ from __future__ import annotations
 import asyncio
 import math
 import signal
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable, Sequence
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -126,6 +127,50 @@ class StoppingMixin:
     _config: SupervisorConfig
     _process_control: ProcessControl
     _root_pid: int
+    _tree_lock: asyncio.Lock
+    _unit_locks: dict[str, asyncio.Lock]
+
+    def _init_locks(self, top_ids: Iterable[str]) -> None:
+        self._tree_lock = asyncio.Lock()
+        self._unit_locks = {top_id: asyncio.Lock() for top_id in top_ids}
+
+    @asynccontextmanager
+    async def _lock_tree(self) -> AsyncGenerator[None]:
+        async with self._tree_lock, AsyncExitStack() as stack:
+            for lock in self._unit_locks.values():
+                await stack.enter_async_context(lock)
+            yield
+
+    @asynccontextmanager
+    async def _lock_top(self, top_id: str) -> AsyncGenerator[None]:
+        if self._tree_lock.locked():
+            async with self._tree_lock:
+                pass
+        async with self._unit_locks[top_id]:
+            yield
+
+    # meiva:note
+    # Independent units in one wave stop concurrently while preserving per-unit refusal order.
+    async def _stop_wave(
+        self,
+        runtimes: Sequence[UnitRuntime],
+        *,
+        force: bool = False,
+        escalate: bool = True,
+    ) -> list[Exception | None]:
+        outcomes = await asyncio.gather(
+            *(self._stop_unit(runtime, force=force, escalate=escalate) for runtime in runtimes),
+            return_exceptions=True,
+        )
+        errors: list[Exception | None] = []
+        for outcome in outcomes:
+            if outcome is None:
+                errors.append(None)
+            elif isinstance(outcome, Exception):
+                errors.append(outcome)
+            else:
+                raise outcome
+        return errors
 
     async def _stop_unit(
         self, runtime: UnitRuntime, *, force: bool = False, escalate: bool = True
@@ -270,6 +315,30 @@ class StoppingMixin:
             own_group=self._own_group(),
             process_control=self._process_control,
         )
+
+    @staticmethod
+    def _is_active(runtime: UnitRuntime) -> bool:
+        generation = runtime.generation
+        return generation is not None and generation.proc.returncode is None
+
+    @staticmethod
+    def _pid(runtime: UnitRuntime) -> int | None:
+        generation = runtime.generation
+        if generation is None or generation.proc.returncode is not None:
+            return None
+        return generation.proc.pid
+
+    @staticmethod
+    def _unit_result(runtime: UnitRuntime, action: str) -> dict[str, object]:
+        result: dict[str, object] = {
+            "id": runtime.manifest.id,
+            "action": action,
+            "state": runtime.state.value,
+            "pid": StoppingMixin._pid(runtime),
+        }
+        if runtime.last_error is not None:
+            result["error"] = runtime.last_error
+        return result
 
 
 # meiva:note

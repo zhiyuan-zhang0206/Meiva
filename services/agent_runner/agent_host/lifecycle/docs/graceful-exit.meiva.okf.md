@@ -96,14 +96,15 @@ resumes nothing.
 
 ## Ordering
 
-The generated manifest declares the agent-host first (`STOPS_FIRST` in
-`meiva_root_glue/manifests.py`). Root's whole-tree stop (`all_stop_order`, used
-when launchd or systemd stops root) and `meiva stop`/`meiva restart`
-(`root_driver.down_units`) both go down the units in that declaration order, one
-at a time, so the agent-host stops first: its draining turns still call ops and
-the gateway, and the data plane stops last. Root answers `down` only once the
-unit has exited. Nothing drains the turns ahead of it: this exit is the only
-settling of running turns a stop does.
+The generated manifest places the agent-host alone in stop tier `0`
+(`STOPS_FIRST` in `meiva_root_glue/manifests.py`). Root's whole-tree stop
+(`all_stop_waves`, used when launchd or systemd stops root) and
+`meiva stop`/`meiva restart` (`root_driver.down_units`) both drain tier `0` to
+completion before signaling later stop waves concurrently, so the agent-host
+stops first: its draining turns still call ops, browser-mcp and the gateway, and
+the data plane stops last. Root answers `down` only once the unit has exited.
+Nothing drains the turns ahead of it: this exit is the only settling of running
+turns a stop does.
 
 Why: [the decision](../../../../../docs/decisions/runtime/processes/2026-10-20-host-graceful-exit-writes-own-restart.md)
 and [the restart that interrupts and resumes](../../../../../docs/decisions/runtime/processes/2026-10-20-restart-interrupts-after-a-grace-and-resumes-by-a-note.md).

@@ -22,9 +22,15 @@ def _manifest(**overrides: object) -> dict[str, object]:
     return base
 
 
-def _unit(unit_id: str, *, attach: str = ROOT_ID, restart: str = "always") -> UnitManifest:
+def _unit(
+    unit_id: str, *, attach: str = ROOT_ID, restart: str = "always", stop_tier: int = 1
+) -> UnitManifest:
     return UnitManifest(
-        id=unit_id, exec=("/usr/bin/true",), restart=RestartPolicy(restart), attach=attach
+        id=unit_id,
+        exec=("/usr/bin/true",),
+        restart=RestartPolicy(restart),
+        attach=attach,
+        stop_tier=stop_tier,
     )
 
 
@@ -129,6 +135,25 @@ class TestRegistry:
         assert registry.stop_order("alpha") == ("child", "alpha")
         assert registry.all_stop_order() == ("child", "alpha")
 
+    def test_stop_waves_orders_children_before_parents_and_tiers_in_parallel(self) -> None:
+        registry = UnitRegistry(
+            [
+                _unit("browser", stop_tier=2),
+                _unit("gateway", stop_tier=1),
+                _unit("gateway-helper", attach="gateway", stop_tier=1),
+                _unit("agent-host", stop_tier=0),
+                _unit("browser-mcp", stop_tier=1),
+            ]
+        )
+        assert registry.all_stop_waves() == (
+            ("agent-host",),
+            ("gateway-helper",),
+            ("gateway", "browser-mcp"),
+            ("browser",),
+        )
+        assert registry.stop_waves("gateway") == (("gateway-helper",), ("gateway",))
+        assert registry.top_of("gateway-helper") == "gateway"
+
     def test_duplicate_id_is_rejected(self) -> None:
         with pytest.raises(ManifestError, match="duplicate unit id"):
             UnitRegistry([_unit("alpha"), _unit("alpha")])
@@ -214,6 +239,23 @@ def test_stop_timeout_is_optional_typed_and_part_of_the_generation() -> None:
 def test_invalid_stop_timeout_is_rejected(bad: object) -> None:
     with pytest.raises(ManifestError, match="stop_timeout_s"):
         UnitManifest.from_mapping(_manifest(stop_timeout_s=bad), origin="t")
+
+
+def test_stop_tier_is_optional_typed_and_part_of_the_generation() -> None:
+    default = UnitManifest.from_mapping(_manifest(), origin="t")
+    assert default.stop_tier == 1
+    first = UnitManifest.from_mapping(_manifest(stop_tier=0), origin="t")
+    assert first.stop_tier == 0
+    assert first.digest() != default.digest()
+    assert (
+        default.digest() == UnitManifest.from_mapping(_manifest(stop_tier=1), origin="t").digest()
+    )
+
+
+@pytest.mark.parametrize("bad", [-1, True, False, 1.5, "1", [1]])
+def test_invalid_stop_tier_is_rejected(bad: object) -> None:
+    with pytest.raises(ManifestError, match="stop_tier"):
+        UnitManifest.from_mapping(_manifest(stop_tier=bad), origin="t")
 
 
 def test_load_manifests_missing_file(tmp_path: Path) -> None:

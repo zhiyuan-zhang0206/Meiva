@@ -78,6 +78,25 @@ def _closes_slowly(ready: str, close_s: str) -> None:
     time.sleep(60)
 
 
+def _closes_recording(ready: str, events: str, label: str, close_s: str) -> None:
+    events_path = pathlib.Path(events)
+
+    def record(line: str) -> None:
+        with events_path.open("a", encoding="utf-8") as handle:
+            handle.write(f"{line}\n")
+            handle.flush()
+
+    def close(*_: object) -> None:
+        record(f"term {label}")
+        time.sleep(float(close_s))
+        record(f"exit {label}")
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, close)
+    pathlib.Path(ready).touch()
+    time.sleep(60)
+
+
 def _restart_down(ready: str, release: str) -> None:
     if pathlib.Path(release).exists():
         time.sleep(60)
@@ -131,6 +150,7 @@ _SCENARIOS = {
     "spawn_child": _spawn_child,
     "wait_for_file": _wait_for_file,
     "closes_slowly": _closes_slowly,
+    "closes_recording": _closes_recording,
     "restart_down": _restart_down,
     "forked_late_child": _forked_late_child,
     "code_gate_exit": _code_gate_exit,

@@ -48,6 +48,8 @@ class UnitRow:
     unit_id: str
     state: str = "running"
     intent: str = "running"
+    attach: str | None = None
+    stop_tier: int | None = None
     manifest_digest: str | None = None
     last_error: str | None = None
     restart_limit_reached: bool = False
@@ -76,6 +78,10 @@ class UnitRow:
             "intent": self.intent,
             "last_error": self.last_error,
         }
+        if self.attach is not None:
+            row["attach"] = self.attach
+        if self.stop_tier is not None:
+            row["stop_tier"] = self.stop_tier
         if self.manifest_digest is not None:
             row["manifest_digest"] = self.manifest_digest
         return row
@@ -106,6 +112,7 @@ class ScriptedRoot:
     # Raw wire rows answered in place of the unit table: a root whose status passes the client's
     # check but not the lifecycle commands' own reading of it.
     raw_unit_rows: list[dict[str, object]] | None = None
+    _guard: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def status(self) -> dict[str, object]:
         me = OwnedProcess.capture(psutil.Process())
@@ -134,14 +141,15 @@ class ScriptedRoot:
         }
 
     def serve(self, verb: str, name: str | None) -> dict[str, object]:
-        self.calls.append((verb, name))
-        self.asked_at.append(datetime.now(UTC))
-        if verb == "status":
-            return dict(ok_response(self.status()))
-        row = self.units.get(name or "")
-        if row is None:
-            return dict(error_response(ErrorCode.UNKNOWN_UNIT, f"unknown unit {name!r}"))
-        self.events.append((f"{verb} {row.unit_id}", time.monotonic()))
+        with self._guard:
+            self.calls.append((verb, name))
+            self.asked_at.append(datetime.now(UTC))
+            if verb == "status":
+                return dict(ok_response(self.status()))
+            row = self.units.get(name or "")
+            if row is None:
+                return dict(error_response(ErrorCode.UNKNOWN_UNIT, f"unknown unit {name!r}"))
+            self.events.append((f"{verb} {row.unit_id}", time.monotonic()))
         if verb == "up":
             if row.begins_rival_start:
                 start_serving.begin_start(self.home)
@@ -150,13 +158,20 @@ class ScriptedRoot:
                 row.writes_on_up.write_text("written while the unit launched\n")
             if row.refuse_up:
                 return dict(error_response(ErrorCode.INTERNAL, f"refused to bring up {name!r}"))
-            row.intent = "running"
-            row.state = "stopped" if row.stays_down else "running"
+            with self._guard:
+                row.intent = "running"
+                row.state = "stopped" if row.stays_down else "running"
+                state = row.state
         elif verb in ("down", "force-down"):
             time.sleep(row.exit_delay_s)
-            row.state = row.intent = "stopped"
-            self.events.append((f"exited {row.unit_id}", time.monotonic()))
-        return dict(ok_response({"unit": row.unit_id, "state": row.state}))
+            with self._guard:
+                row.state = row.intent = "stopped"
+                self.events.append((f"exited {row.unit_id}", time.monotonic()))
+                state = row.state
+        else:
+            with self._guard:
+                state = row.state
+        return dict(ok_response({"unit": row.unit_id, "state": state}))
 
 
 class _Handler(socketserver.StreamRequestHandler):
@@ -171,7 +186,8 @@ class _Handler(socketserver.StreamRequestHandler):
             return
         caller = request.get("caller")
         if isinstance(caller, dict):
-            tree.callers.append(dict(caller))
+            with tree._guard:
+                tree.callers.append(dict(caller))
         self.wfile.write(encode(tree.serve(request["verb"], request.get("name"))))
 
 

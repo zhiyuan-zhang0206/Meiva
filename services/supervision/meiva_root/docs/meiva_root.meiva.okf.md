@@ -17,8 +17,8 @@ whole preparation and readiness operation for that home. Admission runs before
 converge, schema mutation, or desired service publication. A live identical root
 skips those preparation writes and only reconciles its existing units and readiness.
 
-The manifest freezes command arguments and service environment. Service specs
-declare external `config_inputs`; the manifest seals their paths and contents.
+The manifest freezes command arguments, service environment, stop window, and
+`stop_tier`. Service specs declare external `config_inputs`; the manifest seals their paths and contents.
 Root checks these seals before every native birth, including recovery. Changed
 or missing inputs refuse that birth before spawning the process. Collector
 YAML and the complete native LGTM configuration directory use this contract;

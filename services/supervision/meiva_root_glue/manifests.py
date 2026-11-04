@@ -66,20 +66,22 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _KNOWN_CAPABILITIES = frozenset(get_args(MachineRole))
 
 # meiva:note
-# Declared first, so it is stopped first: root's whole-tree stop and `meiva stop` both go
-# down the units in declaration order, and the agent-host's graceful exit still runs
-# turns that call ops and the gateway and writes their restarts to the data plane.
-# The local `otel-collector` stops after application producers have flushed to it, and the
-# LGTM storage backends (`loki`, `prometheus`, `tempo`) stop last so the collector's own
-# shutdown flush lands cleanly. Startup is concurrent, so the position changes nothing at start.
+# Stop waves run in ascending `stop_tier` order, and independent units in the same tier stop
+# concurrently. `agent-host` (`STOPS_FIRST`, tier 0) drains its active turns before any sibling
+# service is signalled; application producers including `browser-mcp` (default tier 1) stop
+# before `browser` (tier 2) so `browser-mcp` closes its upstream session against a live Chrome;
+# `otel-collector` (tier 3) stops after producers have flushed; and the LGTM storage backends
+# (`loki`, `prometheus`, `tempo`, tier 4) stop last so the collector's shutdown flush lands.
+# Startup is concurrent, so tier position changes nothing at start.
 # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
 STOPS_FIRST = "agent-host"
 _STOP_ORDER_TIER: dict[str, int] = {
     STOPS_FIRST: 0,
-    "otel-collector": 2,
-    "loki": 3,
-    "prometheus": 3,
-    "tempo": 3,
+    "browser": 2,
+    "otel-collector": 3,
+    "loki": 4,
+    "prometheus": 4,
+    "tempo": 4,
 }
 
 # G6b attach values for classes that spawn at RUNTIME (never static manifest
@@ -149,6 +151,7 @@ def build_units(
             "attach": "root",
             "env": {} if environments is None else environments[spec.session],
             "inputs": [InputSeal.capture(path).as_mapping() for path in spec.config_inputs],
+            "stop_tier": _STOP_ORDER_TIER.get(spec.session, 1),
         }
         if spec.stop_ceiling_s is not None:
             unit["stop_timeout_s"] = spec.stop_ceiling_s + STOP_MARGIN_S

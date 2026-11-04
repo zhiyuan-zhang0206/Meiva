@@ -27,6 +27,16 @@ round, so a longer window would stall every other unit's probe. The service
 roster derives declared windows from each service's own stop ceiling plus
 `STOP_MARGIN_S` in `services/supervision/meiva_root_glue/manifests.py`.
 
+Each unit manifest also carries an optional nonnegative integer `stop_tier`
+(default `1`), included in the unit's manifest digest and exposed in `status()`.
+`UnitRegistry.stop_waves` and `all_stop_waves` order attach children strictly
+ahead of their attach parents and group siblings at the same attach depth by
+ascending `stop_tier` in declaration order. Daemon shutdown, `down`, and
+`restart` stop each wave concurrently via `asyncio.gather` and begin the next
+wave only after every unit in the current wave has settled, while disjoint
+top-level attach subtrees hold independent locks so concurrent per-unit `down`
+requests inside the same wave also run in parallel.
+
 The declared window is the whole budget. When it expires, root re-checks the
 captured birth and sends one SIGKILL to the leader's group, then waits
 `stop_kill_reap_s` (2 seconds) for the reap; `root_unit_stop_escalated` records
