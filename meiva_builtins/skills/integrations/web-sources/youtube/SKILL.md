@@ -89,7 +89,7 @@ When no captions (music video / just published a few minutes ago / author disabl
 digest falls back to title+description.
 
 **No-captions fallback (opt-in)**: `fetch(..., whisper_fallback=True)` when yt-dlp fails to get captions,
-uses [`audio-transcribe`](../../audio-transcribe/SKILL.md) to extract audio and do OpenAI transcription,
+uses the YouTube adapter's transcription subprocess to extract audio and do OpenAI transcription,
 `transcript_kind="whisper"`. Requires `OPENAI_API_KEY` + ffmpeg; if truly fails, it raises (not silently swallowed).
 Default is off, so without configuring the key it runs fine (just leaves `null` for videos without captions).
 

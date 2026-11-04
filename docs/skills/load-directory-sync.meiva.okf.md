@@ -66,8 +66,7 @@ Meiva's install registry nor restores `.agents/skills/` as an Meiva runtime sour
 See [[docs/skills/external-agent-operator-bridge.meiva.okf.md]].
 
 General methodology and user-service skills — `meiva-serious-engineering`,
-`meiva-serious-research`, `meiva-deep-research`, `meiva-corp`, and
-`telegram-send-file` — are repo built-ins, so this first source lands them in
+`meiva-serious-research`, `meiva-deep-research`, and `meiva-corp` — are repo built-ins, so this first source lands them in
 the load directory and makes them available to the gateway's command index.
 Their `.agents/skills/` entries are open-standard symlink mirrors, not
 project-skill sources.

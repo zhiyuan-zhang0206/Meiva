@@ -41,13 +41,7 @@ R2 single-source-of-truth discipline, applied to research.
 **When NOT to use:**
 
 - Quick lookup → answer directly with `meiva.web.search`, no skill.
-- Zero API spend, or a frontier seat is preferable → `web-ai/deep-research`
-  (drives Gemini/ChatGPT/Perplexity seats, fetches their finished report —
-  their citations, no process control).
 - An ML/experimental project → `meiva-serious-research`.
-
-The two compose: run an external seat for an extra perspective and cite its
-report as a source like any other.
 
 ## The pipeline
 
@@ -235,6 +229,5 @@ over-spawning: `references/anti-patterns.md`.
 
 - `meiva-serious-research` — the epistemology layer (question, literature, verify, present)
 - `meiva-dynamic-workflow` — the parallel-collection engine; read it before spawning workers
-- `web-ai/deep-research` — external seats; the zero-API-spend alternative
 - `web-sources` — adapters for sources `meiva.web` cannot reach
 - `meiva.web.search` / `meiva.web.fetch` — the base tools this skill orchestrates

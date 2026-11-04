@@ -1,30 +1,8 @@
-"""Audio transcription via OpenAI's hosted speech-to-text.
-
-The transcription fallback for the `web-sources` feed adapters: when a feed
-item has no captions (most non-YouTube sources, music videos, brand-new
-uploads), pull the audio and transcribe it here. `web-sources:youtube` calls
-this CLI as a subprocess on its `transcript is None` path — audio-transcribe
-and web-sources are separate skills, so the call crosses a skill boundary and
-goes through the CLI rather than an in-process import.
-
-Cloud-only by design (the user picked the hosted service over a local model):
-default model `gpt-4o-transcribe` — OpenAI's most accurate transcription model
-(lower WER than `whisper-1`). It returns text only (no segment timestamps); the
-digest wants prose, so that is the right trade. Pass `model="whisper-1"` if you
-later need SRT/VTT timestamps.
-
-Handles the OpenAI **25 MB per-request limit**: audio is first transcoded to a
-compact mono 16 kHz mp3 (16 kHz is the model's native rate, so this is lossless
-for ASR while shrinking ~10x), and anything still over the limit (very long
-talks) is split into time segments, each transcribed and concatenated.
-
-Requires `ffmpeg` on PATH, `yt-dlp` (only when the source is a URL/video id),
-and `OPENAI_API_KEY` in `~/.meiva/.env` (read via `base.config.settings`).
-
-Usage:
-
-    .venv/bin/python skills/audio-transcribe/scripts/transcribe.py <source> ...
-"""
+# meiva:note
+# YouTube's opt-in fallback invokes this subprocess when caption tracks are unavailable.
+# It extracts compact mono audio and splits requests that exceed the OpenAI upload limit.
+# The CLI requires ffmpeg, yt-dlp for video sources, and a configured OpenAI API key.
+# meiva:link meiva_builtins/skills/integrations/web-sources/youtube/SKILL.md
 
 from __future__ import annotations
 

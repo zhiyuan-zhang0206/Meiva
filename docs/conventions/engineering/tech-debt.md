@@ -12,8 +12,13 @@ A confirmed finding names concrete files or symbols and the defect or shared
 decision. A grep hit, old date, available upgrade, or co-change score is a
 candidate, not proof. If a broad repair is outside the authorized change,
 record actionable evidence in the ledger. Do not create a parallel tracker.
-The optional [generic sweeper skill](../../../meiva_builtins/skills/practice/sweeper/SKILL.md)
-can reconcile the ledger using this document as its project input.
+For a requested reconciliation, re-verify each open entry and leave `wontfix`
+entries alone. Check the requested debt classes and deduplicate new findings
+against existing fingerprints. Follow the ledger's entry format. If entries
+change, update the verification watermark with the inspected commit and date,
+and open one PR describing added and resolved entries. Keep full mechanical
+scan lists in the PR body. If entries are unchanged, report the result without
+opening a PR.
 
 ## Rule ownership
 

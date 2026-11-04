@@ -1519,22 +1519,7 @@ reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
-root = "meiva_builtins/skills/integrations/audio-transcribe"
-reportAny = "error"
-reportExplicitAny = "error"
-
-[[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/skills/integrations/gmail"
-reportAny = "error"
-reportExplicitAny = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "meiva_builtins/skills/integrations/sms"
-reportAny = "error"
-reportExplicitAny = "error"
-
-[[tool.pyright.executionEnvironments]]
-root = "meiva_builtins/skills/integrations/telegram-send-file"
 reportAny = "error"
 reportExplicitAny = "error"
 
@@ -1560,12 +1545,6 @@ reportExplicitAny = "error"
 # its OWN same-directory siblings without help (a file's containing directory
 # is always on pyright's implicit search path); only the parent-reaching case
 # needs extraPaths.
-[[tool.pyright.executionEnvironments]]
-root = "meiva_builtins/skills/integrations/web-ai"
-reportAny = "error"
-reportExplicitAny = "error"
-extraPaths = ["meiva_builtins/skills/integrations/web-ai/scripts"]
-
 [[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/skills/integrations/web-sources"
 reportAny = "error"

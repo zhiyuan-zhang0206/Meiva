@@ -31,11 +31,9 @@ from yt_post import to_s1 as project_to_s1
 
 # meiva:note
 # The configuration of this process: the mirror dir under this process's home, the `yt-dlp` on
-# PATH, and this interpreter running the sibling `audio-transcribe` skill's CLI. That skill is
-# separate, so its CLI runs as a subprocess and neither skill directory reaches into the other's
-# files.
+# PATH, and this interpreter running the local transcription subprocess.
 def _process_config() -> yt_run.YoutubeConfig:
-    script = Path(__file__).resolve().parents[3] / "audio-transcribe" / "scripts" / "transcribe.py"
+    script = Path(__file__).resolve().with_name("transcribe.py")
     return yt_run.YoutubeConfig(
         ytdlp="yt-dlp",
         transcribe=(sys.executable, str(script)),
@@ -81,7 +79,7 @@ def sync(
 # meiva:note
 # Fetch one video into the raw mirror and return its post: metadata, description and (best-effort)
 # transcript, plus the video file when `with_video`. `whisper_fallback=True` (opt-in; needs
-# `OPENAI_API_KEY` + ffmpeg) routes a caption-less video through the `audio-transcribe` skill; a
+# `OPENAI_API_KEY` + ffmpeg) routes a caption-less video through the local transcription subprocess; a
 # real transcription failure propagates. `prefer_lang` is the caption language asked for first.
 def fetch(
     video_id: str,

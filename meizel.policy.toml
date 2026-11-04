@@ -89,8 +89,6 @@
 "meiva_builtins/skills/platform/meiva-guide/external-agents/tests/test_impersonation_launch.py" = ["meiva_builtins/skills"]
 "meiva_builtins/skills/tests/skill_script.py" = ["meiva_builtins/skills"]
 "meiva_builtins/skills/tests/test_rss_feed.py" = ["meiva_builtins/skills"]
-"meiva_builtins/skills/tests/test_sms.py" = ["meiva_builtins/skills"]
-"meiva_builtins/skills/tests/test_telegram_send_file.py" = ["meiva_builtins/skills"]
 "meiva_builtins/skills/tests/test_youtube_feed.py" = ["meiva_builtins/skills"]
 "meiva_builtins/tests/test_watcher_wake_delivery.py" = ["meiva_builtins/skills"]
 "base/events/loader.py" = ["base/events/declarations"]

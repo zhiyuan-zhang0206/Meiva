@@ -10,7 +10,6 @@
         "gmail"
       ],
       "forbidden": [
-        "web-ai",
         "meiva-guide:onboarding"
       ]
     },
@@ -23,27 +22,6 @@
         "gmail",
         "meiva-guide:onboarding",
         "meiva-guide:packages:install"
-      ]
-    },
-    {
-      "id": "r3",
-      "kind": "positive",
-      "prompt": "Generate an illustration through the logged-in Gemini web app and return the resulting image.",
-      "required": [
-        "web-ai:media"
-      ],
-      "forbidden": [
-        "audio-transcribe"
-      ]
-    },
-    {
-      "id": "r4",
-      "kind": "negative",
-      "prompt": "Fix a CSS alignment bug in an existing image gallery. All assets already exist.",
-      "required": [],
-      "forbidden": [
-        "web-ai:media",
-        "web-ai:deep-research"
       ]
     },
     {
@@ -163,7 +141,6 @@
       "required": [],
       "forbidden": [
         "gmail",
-        "web-ai:media",
         "meiva-guide:models",
         "meiva-guide:mcp",
         "meiva-guide:onboarding",
