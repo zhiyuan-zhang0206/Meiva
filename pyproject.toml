@@ -1135,6 +1135,11 @@ reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/lm_google"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/plugins/lm_moonshot"
 reportAny = "error"
 reportExplicitAny = "error"

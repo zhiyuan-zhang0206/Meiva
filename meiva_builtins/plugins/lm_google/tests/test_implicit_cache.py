@@ -1,5 +1,3 @@
-from typing import Any
-
 import pytest
 from google.genai import types
 from google.genai.errors import ClientError
@@ -9,11 +7,13 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 from agent.llm.invoke import ainvoke_tool_call
 from base.config import settings
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.factory import build_chat_model
 from base.lm.usage import log_usage_from_message
+from base.log.tests.log_records import LogRecords
 from meiva_builtins.plugins.lm_google.tests.gemini_server import GeminiServer
 
 
@@ -31,9 +31,25 @@ def _gemini_flash(model_catalog: ModelCatalog, server: GeminiServer) -> ChatGoog
     return llm
 
 
+def _declared_tool_names(body: dict[str, object]) -> list[str]:
+    tools = body["tools"]
+    assert is_object_list(tools)
+    names: list[str] = []
+    for tool in tools:
+        assert is_object_dict(tool)
+        declarations = tool["functionDeclarations"]
+        assert is_object_list(declarations)
+        for declaration in declarations:
+            assert is_object_dict(declaration)
+            name = declaration["name"]
+            assert isinstance(name, str)
+            names.append(name)
+    return names
+
+
 async def test_google_tool_call_uses_complete_prefix_and_accounts_cache_reads(
     model_catalog: ModelCatalog,
-    loguru_records: list[dict[str, Any]],
+    loguru_records: LogRecords,
     gemini_server: GeminiServer,
 ) -> None:
     llm = _gemini_flash(model_catalog, gemini_server)
@@ -62,14 +78,14 @@ async def test_google_tool_call_uses_complete_prefix_and_accounts_cache_reads(
     [request] = gemini_server.received
     assert request.path == "/v1beta/models/gemini-3.8-flash:generateContent"
     assert "cachedContent" not in request.body
-    assert request.body["systemInstruction"]["parts"][0]["text"] == "stable system head"
-    assert request.body["tools"][0]["functionDeclarations"][0]["name"] == "execute_code"
-    assert request.body["contents"][0]["parts"][0]["text"] == "history"
+    assert request.body["systemInstruction"] == {"parts": [{"text": "stable system head"}]}
+    assert request.body["contents"] == [{"parts": [{"text": "history"}], "role": "user"}]
+    assert _declared_tool_names(request.body) == ["execute_code"]
     assert response.usage_metadata is not None
     assert response.usage_metadata.get("input_token_details", {}).get("cache_read") == 200
 
     log_usage_from_message(response, "gemini-3.8-flash", catalog=model_catalog)
-    usage = next(r["extra"] for r in loguru_records if r["extra"].get("event") == "llm_usage")
+    [usage] = loguru_records.extras(event="llm_usage")
     assert usage["cache_read"] == 200
 
 

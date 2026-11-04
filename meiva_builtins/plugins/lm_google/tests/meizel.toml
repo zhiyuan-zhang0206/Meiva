@@ -1,3 +1,4 @@
 [uses]
 "conftest.py" = ["gemini_server.py"]
 "test_implicit_cache.py" = ["gemini_server.py"]
+"test_sampling_parameters.py" = ["gemini_server.py"]

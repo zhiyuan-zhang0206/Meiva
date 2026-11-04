@@ -1,15 +1,15 @@
-from typing import Any, cast
-
 import pytest
+from google.genai import types
 from langchain_core.messages import HumanMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
 
+from base.host.boundary.json_values import is_object_dict
 from base.lm.provider_api import BuildContext, ProviderKeys
-from meiva_builtins.plugins.lm_google.provider import PROVIDER, chat_model_kwargs
+from meiva_builtins.plugins.lm_google.provider import PROVIDER, build_gemini
+from meiva_builtins.plugins.lm_google.tests.gemini_server import GeminiServer
 
 
 @pytest.mark.parametrize("model", sorted(PROVIDER.models))
-def test_request_has_no_sampling_parameters(model: str) -> None:
+def test_request_has_no_sampling_parameters(model: str, gemini_server: GeminiServer) -> None:
     ctx = BuildContext(
         model=model,
         spec=PROVIDER.models[model],
@@ -19,15 +19,27 @@ def test_request_has_no_sampling_parameters(model: str) -> None:
         timeout=None,
         thinking_budget_tokens=0,
         keys=ProviderKeys({}),
+        base_url=gemini_server.url,
     )
-    llm = ChatGoogleGenerativeAI(**chat_model_kwargs(ctx, api_key="test-not-a-real-key"))
+    gemini_server.answer(
+        types.GenerateContentResponse(
+            candidates=[
+                types.Candidate(
+                    content=types.Content(role="model", parts=[types.Part(text="ok")]),
+                    finish_reason=types.FinishReason.STOP,
+                )
+            ]
+        )
+    )
+    llm = build_gemini(ctx, api_key="test-not-a-real-key")
 
-    config = cast(Any, llm)._prepare_request([HumanMessage(content="hi")])["config"]
+    llm.invoke([HumanMessage(content="hi")])
 
     assert llm.temperature is None
-    assert config.temperature is None
-    assert config.top_p is None
-    assert config.top_k is None
+    [request] = gemini_server.received
+    config = request.body["generationConfig"]
+    assert is_object_dict(config)
+    assert config.keys().isdisjoint({"temperature", "topP", "topK"})
 
 
 @pytest.mark.parametrize("model", ("gemini-3.5-flash", "gemini-3.7-flash"))
