@@ -1,0 +1,4 @@
+exports = ["anchor-scroll.ts"]
+
+[uses]
+"anchor-scroll.test.tsx" = ["anchor-scroll.ts"]

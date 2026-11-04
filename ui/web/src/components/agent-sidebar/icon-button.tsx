@@ -14,6 +14,9 @@ import { cn } from "@/lib/format/utils";
 // full-width create button for discovery.
 // meiva:link ui/web/src/docs/frontend-components/agent-sidebar.meiva.okf.md
 
+export const SIDEBAR_ICON_CLASS =
+  "p-1.5 rounded shrink-0 transition-colors text-muted-foreground hover:bg-sidebar-accent hover:text-foreground";
+
 interface Props extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "className"> {
   label: string;
   title?: string;
@@ -31,10 +34,7 @@ export function SidebarIconButton({ label, title, className, testid, ref, childr
       aria-label={label}
       title={title}
       data-testid={testid}
-      className={cn(
-        "p-1.5 rounded shrink-0 transition-colors text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
-        className,
-      )}
+      className={cn(SIDEBAR_ICON_CLASS, className)}
       {...rest}
     >
       {children}

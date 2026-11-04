@@ -10,6 +10,7 @@ import {
   Waypoints,
 } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 
 import { AlertsBadge } from "@/components/notifications/alerts-badge";
@@ -44,7 +45,7 @@ import { useWallDate } from "@/lib/format/now/use-wall-date";
 import { markNavIntent } from "@/lib/telemetry/nav-timing";
 
 import { fleetHref } from "./links";
-import { SidebarIconButton } from "./icon-button";
+import { SIDEBAR_ICON_CLASS, SidebarIconButton } from "./icon-button";
 
 /** Shared by the expanded footer and collapsed rail. */
 export const STATUS_POPOVER_CLASS =
@@ -351,6 +352,7 @@ function PluginStatCard({ card }: { card: PluginStatCardModel }) {
 export function SidebarFooter({ activeAgentId }: { activeAgentId: number | null }) {
   const t = useTranslations("sidebar");
   const navT = useTranslations("nav");
+  const browser = useBrowser();
   const navigation = useNavigation();
   const { windowHours, setWindowHours } = useStatsWindow();
   const { stats, error: statsError, isFetching, refetch } = useStatsDashboard(windowHours);
@@ -409,9 +411,16 @@ export function SidebarFooter({ activeAgentId }: { activeAgentId: number | null 
           <SidebarNavButton href="/insights" onClick={() => navigation.push("/insights")} label={navT("insights")}>
             <Activity className={ICON_SIZE_CLASS} />
           </SidebarNavButton>
-          <SidebarNavButton href="/control" onClick={() => navigation.push("/control")} label={navT("control")}>
+          <Link
+            href="/control"
+            prefetch={true}
+            aria-label={navT("control")}
+            title={navT("control")}
+            className={SIDEBAR_ICON_CLASS}
+            onNavigate={() => markNavIntent(browser.navigation, "/control")}
+          >
             <Settings className={ICON_SIZE_CLASS} />
-          </SidebarNavButton>
+          </Link>
           <PluginNavIcons location="sidebar" />
         </div>
       </div>
