@@ -163,8 +163,10 @@ def _report_round_failure(
 
 
 # meiva:note
-# `schedules.last_error` is where a person looks -- `meiva schedules ls` and `get` print it -- and
-# it is where the previous failure mode wrote by accident: a round that raised killed the process,
+# `schedules.last_error` is where a person looks -- `meiva schedules get` prints it, and the
+# mutating commands echo the row they changed; `meiva schedules ls` shows only the summary columns,
+# so the reason is one `get` away rather than in the list -- and it is where the previous failure
+# mode wrote by accident: a round that raised killed the process,
 # and the manager recorded the loss in this column. A loop that survives the same round is the
 # quieter outcome, so it fills the column itself; otherwise the only trace is one line in a
 # session log nobody reads, which is not a signal.

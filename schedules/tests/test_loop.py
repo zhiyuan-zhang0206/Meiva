@@ -676,6 +676,59 @@ def test_an_escalated_failure_lands_in_the_schedule_row_and_recovery_clears_it(
 
 
 # meiva:note
+# The round budget is a promise about a *working* round: `alive_by = now + sleep + budget`, and
+# `schedule_not_progressing` judges the loop against it. A failed round must therefore leave it
+# alone -- a single forty-minute failure absorbed into the number would widen every later promise
+# and blunt the alarm the promise exists for. The rule holds by code position today (the budget is
+# updated on the success path, after the `except ... continue`); this test is what keeps a later
+# edit from moving the update and taking the rule with it, silently and with every other test green.
+# `clock` answers the opening beat and then one start/end pair per round: the first pair is the
+# failed round, so the forty minutes sit between its start and its end, and the values after it are
+# the fast round that recovers (`next`'s default answers anything past them the same way).
+def test_a_failed_round_does_not_raise_the_round_budget(
+    db_conn: psycopg.Connection, database: Database, tmp_path: Path
+) -> None:
+    schedule_id = _schedule_row(db_conn)
+    slow_slot = _NOON + timedelta(minutes=1)
+    after_the_failure = slow_slot + timedelta(minutes=40)
+
+    def fire(slot: datetime, trigger: str | None) -> None:
+        if slot == slow_slot:
+            raise RuntimeError("a round that took forty minutes and then failed")
+
+    remaining = iter(
+        (slow_slot, slow_slot, after_the_failure, after_the_failure, after_the_failure)
+    )
+
+    def clock() -> datetime:
+        return next(remaining, after_the_failure)
+
+    pauses = _drive(
+        lambda sleep: run_loop(
+            database,
+            _MINUTE,
+            fire,
+            schedule_id=schedule_id,
+            started_at=_NOON + timedelta(seconds=30),
+            clock=clock,
+            home=tmp_path,
+            sleep=sleep,
+        ),
+        rounds=2,
+        observe=_nothing,
+    )
+
+    assert pauses == [60.0, LoopTiming().rest]
+    beat = _beat(tmp_path, schedule_id)
+    payload = json.loads(beat_path(tmp_path, schedule_id).read_text())
+    assert payload["round_budget_s"] == SCHEDULE_FIRST_ROUND_BUDGET_S, (
+        "the forty-minute failure was charged to the round budget"
+    )
+    promised = timedelta(seconds=LoopTiming().rest + SCHEDULE_FIRST_ROUND_BUDGET_S)
+    assert abs((beat.alive_by - beat.written_at) - promised) <= timedelta(seconds=1)
+
+
+# meiva:note
 # The weekly loop is the second entry point into `run_rounds`, and it was the one loop left with no
 # protection at all when the daily one was fixed -- its own `while True` over `weekly_once`, with no
 # except and not even a heartbeat. The same proof, with a different round: the callback raises, and
