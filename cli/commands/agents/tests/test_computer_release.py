@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.host.tests.short_tmp import short_tmp as short_tmp
 from base.paths import computer_mcp_socket
 from cli.commands.agents.computer import cmd_computer_release
@@ -32,9 +34,11 @@ def daemon(home: Path, reply: bytes | None) -> Generator[list[dict[str, object]]
     listener.listen(1)
 
     def serve() -> None:
-        connection, _ = listener.accept()
+        connection = listener.accept()[0]
         with connection:
-            requests.append(json.loads(connection.makefile("rb").readline()))
+            request = object_of(json.loads, connection.makefile("rb").readline())
+            assert is_object_dict(request)
+            requests.append(request)
             if reply is not None:
                 connection.sendall(reply + b"\n")
 

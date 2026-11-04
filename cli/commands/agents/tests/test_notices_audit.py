@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
-from typing import Any
 from urllib.parse import parse_qs, urlsplit
 from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
+from pydantic import JsonValue
 
 from base.api_contracts.notification_audit import NotificationAuditResponse
 from cli.commands.agents.notices_audit import (
@@ -19,7 +19,7 @@ from cli.commands.cluster.tests.gateway_server import Reply, access_to, serving
 
 _LAST_DAY = (datetime(2026, 10, 2, tzinfo=UTC) - timedelta(days=1)).date().isoformat()
 
-_REPORT: dict[str, Any] = {
+_REPORT: dict[str, JsonValue] = {
     "window": {
         "start": "2026-09-30T00:00:00+00:00",
         "end": "2026-10-02T00:00:00+00:00",

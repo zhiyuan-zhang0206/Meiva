@@ -1,7 +1,7 @@
 exports = ["lease_support.py", "loopback_hosts.py"]
 
 [uses]
-"relay_harness.py" = []
+"relay_harness.py" = ["lease_support.py"]
 "test_delivery.py" = ["lease_support.py"]
 "test_impersonation_adapters.py" = ["loopback_hosts.py"]
 "test_relay_budget.py" = ["lease_support.py", "loopback_hosts.py", "relay_harness.py"]

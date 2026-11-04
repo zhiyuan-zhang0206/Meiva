@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import io
 from pathlib import Path
-from typing import Any
 
 import psycopg
 import pytest
@@ -21,6 +20,7 @@ from base.agents.impersonation import RELAY_CONNECTION_RETRY_DELAYS
 from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.db import Database
 from base.events.live.bus import EventBus
 from cli.commands.agents.impersonation_relay import (
     EXIT_TEMPORARY_FAILURE,
@@ -28,7 +28,7 @@ from cli.commands.agents.impersonation_relay import (
     cmd_relay,
 )
 from cli.commands.agents.relay.steps import ConnectionRetry, connection_retry_delay
-from cli.commands.agents.tests.lease_support import ActiveSession
+from cli.commands.agents.tests.lease_support import ActiveSession, ControllerSession
 from cli.commands.agents.tests.lease_support import active as active
 from cli.commands.agents.tests.relay_harness import REAL_CLOCK
 from cli.database import OperatorDatabaseFactory
@@ -44,7 +44,7 @@ USER_HOME = Path("/nonexistent-relay-user-home")
 TIMERS = ManualTimers()
 
 
-def _relay_args(lease: dict[str, Any]) -> argparse.Namespace:
+def _relay_args(lease: ControllerSession) -> argparse.Namespace:
     return argparse.Namespace(
         lease_id=lease["id"],
         agent_id=lease["agent_id"],
@@ -58,7 +58,7 @@ def _relay_args(lease: dict[str, Any]) -> argparse.Namespace:
 
 
 def _inputs(
-    lease: dict[str, Any], *, home: Path, redis_url: str, bus: EventBus, stdout: io.StringIO
+    lease: ControllerSession, *, home: Path, redis_url: str, bus: EventBus, stdout: io.StringIO
 ) -> RelayInputs:
     return RelayInputs(
         token=lease["relay_token"],
@@ -83,7 +83,7 @@ class _RefusedPool:
         self.refusals = refusals
         self.calls = 0
 
-    def __call__(self) -> Any:
+    def __call__(self) -> Database:
         self.calls += 1
         if self.calls <= self.refusals:
             raise PoolTimeout("couldn't get a connection after 30.00 sec")

@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import psycopg
 import pytest
@@ -23,6 +22,7 @@ from cli.commands.agents.impersonation_adapters import CodexSteer
 from cli.commands.agents.impersonation_relay import RelayLease
 from cli.commands.agents.tests.lease_support import (
     ActiveSession,
+    ControllerSession,
     assert_message_pending,
     delivery_attempts,
     elapse,
@@ -44,7 +44,7 @@ from cli.commands.agents.tests.relay_harness import (
 # for it, and the database, bus and Redis the relay serves it from.
 @dataclass(frozen=True)
 class World:
-    lease: dict[str, Any]
+    lease: ControllerSession
     message_id: int
     relay: RelayLease
     db_conn: psycopg.Connection

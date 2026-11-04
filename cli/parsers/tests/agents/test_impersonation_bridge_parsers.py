@@ -19,7 +19,11 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from cli.commands.agents.relay.push_text import ack_command
 from cli.commands.agents.relay.steps import PUSH_MAX_CHARS
-from cli.commands.agents.tests.lease_support import ActiveSession, assert_message_pending
+from cli.commands.agents.tests.lease_support import (
+    ActiveSession,
+    ControllerSession,
+    assert_message_pending,
+)
 from cli.commands.agents.tests.lease_support import active as active
 from cli.commands.agents.tests.loopback_hosts import codex_app_server, short_socket_path
 from cli.database import OperatorDatabaseFactory
@@ -33,7 +37,7 @@ TRUNCATION = " (truncated — run the inbox command to read the full body before
 
 
 def _relay_handler_args(
-    lease: dict[str, object],
+    lease: ControllerSession,
     remote: str,
     *,
     runtime: CommandRuntime,
