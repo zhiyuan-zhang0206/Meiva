@@ -14,19 +14,25 @@ successful build, and reuses the existing `.next` output when they did not.
 
 ## Why
 
-`pnpm run build` was 13 s on a warm Next.js cache and ~30 s cold (of which ~21 s
-is the TypeScript pass), and `meiva start` paid it on every start — including a
-`meiva stop`/`meiva start` cycle that changed nothing. It was the dominant cost
-of a start that had no work to do.
+`pnpm run build` was ~12 s on a warm Next.js cache and ~35 s cold (TypeScript
+typechecking plus Turbopack compilation), and `meiva start` previously paid it on
+every backend-only commit when the build key bound the monorepo's `HEAD`. A
+start whose frontend inputs did not change should reuse `.next` in ~0.1 s, and a
+start whose frontend inputs did change should hit warm `.next/cache/turbopack`
+and `.next/cache/.tsbuildinfo` without triggering an implicit `pnpm install`.
 
 ## The key
 
 `build_key` hashes:
 
-- `source_digest(frontend_dir)` — HEAD plus every tracked or untracked,
-  non-ignored file under `ui/web`. Gitignored outputs (`.next`,
-  `node_modules`, `*.tsbuildinfo`, `next-env.d.ts`) are outside it by
-  construction, so a build does not invalidate its own key.
+- `frontend_source_digest(frontend_dir)` — the relative paths, file modes and
+  SHA-256 contents (or symlink targets) of every tracked or untracked,
+  non-ignored file under `ui/web` (`git -C ui/web ls-files --cached --others
+  --exclude-standard -z`), deliberately **without** hashing the monorepo's
+  `HEAD` commit SHA. Commits outside `ui/web` keep the exact same digest and
+  reuse `.next`. Gitignored outputs (`.next`, `node_modules`, `*.tsbuildinfo`,
+  `next-env.d.ts`) are outside it by construction, so a build does not
+  invalidate its own key.
 - `node --version`.
 - the `NEXT_PUBLIC_*` values baked into the bundle (`gateway_port`,
   `browser_origins`, the ordered list of same-origin browser entries).
@@ -41,11 +47,19 @@ start builds and then records.
   after `pnpm run build` exits zero. An interrupted rebuild still carries the
   previous key, whose inputs differ from the current ones by construction.
 - **Deleting the build deletes the claim.** The key file lives inside `.next`.
-- **An unprovable key builds.** A checkout git cannot read (`source_digest`
-  raises), or a missing `node`, yields `None` — and `None` always builds.
-- **A node_modules that drifted from the lockfile is caught before the build
-  decision**: `ensure_frontend_deps` still runs first and reinstalls on a lock
-  change or drift, and the lockfile is part of the digest.
+- **An unprovable or mid-flight key builds.** A checkout git cannot read, a file
+  whose `lstat` changes while being read, a file list that changes mid-scan
+  (`frontend_source_digest` raises), or a missing `node`, yields `None` — and
+  `None` always builds.
+- **A node_modules that drifted from the lockfile or workspace settings is
+  caught before the build decision**: `ensure_frontend_deps` runs first and
+  reinstalls on a `pnpm-lock.yaml` / `pnpm-workspace.yaml` change or drift, and
+  both files are part of `frontend_source_digest`. Pinning
+  `enableGlobalVirtualStore: false` and `verifyDepsBeforeRun: false` in
+  `ui/web/pnpm-workspace.yaml` keeps `CI=true pnpm install --frozen-lockfile`
+  and non-CI `pnpm run build` / `pnpm run start` on identical workspace state
+  and prevents `pnpm`'s pre-script hook from spawning an unfrozen install that
+  would dirty `node_modules` timestamps against `.next/cache/turbopack`.
 
 ## Forcing a rebuild
 
