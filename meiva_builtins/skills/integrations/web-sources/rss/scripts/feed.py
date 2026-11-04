@@ -51,6 +51,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeGuard
 
+from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.options import attribute, options
 from base.host.boundary.untyped import object_of
 from base.paths.home import resolve_meiva_home
@@ -78,7 +79,7 @@ from rss_post import (
     render_markdown,
     to_s1,
 )
-from scrape_wire import ScrapeConfig, WebScrapeError, config_from_env, curl_argv, refusal
+from scrape_wire import ScrapeConfig, config_from_env, curl_argv, refusal
 
 
 # meiva:note
@@ -160,8 +161,58 @@ def save(post: Post, root: Path) -> Path:
     return outdir
 
 
+# meiva:note
+# What a saved `post.json` must carry to be read as a `Post`: every field the `Post` TypedDict
+# declares, and the type its value must have. A field the adapter writes as `None` when the entry
+# names nothing (a link, a title, a date, an author) accepts `None` — that is a value, not a
+# missing field, so such a post still reads. No field is `NotRequired`, so this is the whole
+# record.
+_POST_FIELDS: dict[str, tuple[type, ...]] = {
+    "platform": (str,),
+    "url": (str, type(None)),
+    "source_id": (str,),
+    "feed_url": (str,),
+    "feed_title": (str,),
+    "title": (str, type(None)),
+    "text": (str,),
+    "summary_html": (str,),
+    "author": (dict,),
+    "published_at": (str, type(None)),
+    "fetched_at": (str,),
+    "fetched_via": (str,),
+    "_full": (bool,),
+}
+
+# meiva:note
+# The same for the `Author` record `post["author"]` holds, whose fields the renderers read.
+_AUTHOR_FIELDS: dict[str, tuple[type, ...]] = {
+    "id": (str, type(None)),
+    "name": (str, type(None)),
+}
+
+
+# meiva:note
+# True when `record` carries every field of `fields` with one of the types that field accepts.
+def _fields_match(record: dict[str, object], fields: dict[str, tuple[type, ...]]) -> bool:
+    return all(
+        key in record and isinstance(record[key], accepted) for key, accepted in fields.items()
+    )
+
+
+# meiva:note
+# A decoded `post.json` proven to be a `Post`: `isinstance(value, dict)` is only the precondition
+# for the field checks, never the claim itself. A document that lost a required field — a
+# truncated write, a hand-edited mirror, a post some other adapter wrote — is refused here, where
+# the file is read, so the caller rebuilds instead of handing a half-record to
+# `render_markdown` / `to_s1` / `is_complete`, which would raise `KeyError` far from the file it
+# came from.
 def _is_post(value: object) -> TypeGuard[Post]:
-    return isinstance(value, dict)
+    if not is_object_dict(value):
+        return False
+    if not _fields_match(value, _POST_FIELDS):
+        return False
+    author = value["author"]
+    return is_object_dict(author) and _fields_match(author, _AUTHOR_FIELDS)
 
 
 # meiva:note
@@ -191,12 +242,21 @@ def _is_saved_complete(root: Path, entry_id: str, full: bool) -> bool:
 # page) does it raise; that is swallowed here, the feed summary stays, and the post is left not
 # `_full` so a later --full run retries this one. The whole feed sync must not abort here.
 # `webscrape` imports trafilatura, so it is loaded only when `--full` is actually used.
+
+
+# meiva:note
+# The class caught is `webscrape.WebScrapeError`, not this module's own import of the same name.
+# A `WebScrapeError` belongs to the copy of `scrape_wire` the raising module was built with, and a
+# process that loads this script twice (another adapter's tests, a reload) leaves the second copy's
+# classes in `sys.modules` while this module keeps the first — two distinct class objects under one
+# name. Catching the copy this module imported would then miss the raise and abort the whole feed
+# sync instead of falling back to the summary.
 def _full_text(scrape: ScrapeConfig, url: str) -> str | None:
     import webscrape
 
     try:
         article, _via = webscrape.fetch_article(scrape, url)
-    except WebScrapeError as e:
+    except webscrape.WebScrapeError as e:
         print(f"[full-fallback] {url}: {e}", file=sys.stderr)
         return None
     return article["text"]
