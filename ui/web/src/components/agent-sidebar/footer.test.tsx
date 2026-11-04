@@ -101,5 +101,6 @@ describe("SidebarFooter icon row", () => {
     const row = screen.getByTestId("alerts-badge").parentElement!;
     const labels = [...row.querySelectorAll("[aria-label]")].map((node) => node.getAttribute("aria-label"));
     expect(labels.slice(0, 4)).toEqual(["3 unresolved alerts", "Fleet", "Insights", "Control"]);
+    expect(screen.getByRole("link", { name: "Control" }).getAttribute("href")).toBe("/control");
   });
 });

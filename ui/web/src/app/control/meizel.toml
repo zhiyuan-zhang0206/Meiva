@@ -1,7 +1,6 @@
-exports = ["anchor-scroll.ts", "nav.tsx", "section.tsx", "sections.ts", "visibility.tsx"]
+exports = ["anchor", "nav.tsx", "section.tsx", "sections.ts", "visibility.tsx"]
 
 [uses]
-"anchor-scroll.test.tsx" = ["anchor-scroll.ts"]
 "config" = ["config-group-defs.ts", "config-groups.ts", "visibility.tsx"]
 "config-group-defs.ts" = ["sections.ts"]
 "config-groups.test.ts" = ["config-group-defs.ts", "config-groups.ts"]
@@ -10,7 +9,7 @@ exports = ["anchor-scroll.ts", "nav.tsx", "section.tsx", "sections.ts", "visibil
 "nav.test.tsx" = ["nav.tsx"]
 "nav.tsx" = ["sections.ts"]
 "page.test.tsx" = ["page.tsx", "sections.ts"]
-"page.tsx" = ["anchor-scroll.ts", "config", "display", "guide", "inventory", "nav.tsx", "schedules", "section.tsx", "sections.ts", "skills"]
+"page.tsx" = ["anchor", "config", "display", "guide", "inventory", "nav.tsx", "schedules", "section.tsx", "sections.ts", "skills"]
 "schedules" = ["visibility.tsx"]
 "section.test.tsx" = ["section.tsx"]
 "section.tsx" = ["visibility.tsx"]

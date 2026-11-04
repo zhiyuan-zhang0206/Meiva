@@ -381,7 +381,7 @@ describe("awaiting-reply indicator (notification.awaiting_reply)", () => {
     state.userSettings = { "notification.awaiting_reply": true };
     state.agents = [makeAgent({ agent_id: 1 })];
     wrap(<AgentSidebar {...handlers} />);
-    expect(screen.queryByRole("link")).toBeNull();
+    expect(screen.queryByRole("link", { name: /^\d+$/ })).toBeNull();
   });
 });
 

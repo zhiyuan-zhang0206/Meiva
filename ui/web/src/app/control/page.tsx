@@ -18,7 +18,7 @@ import Link from "next/link";
 import { useState } from "react";
 import type { ComponentProps, ComponentType } from "react";
 
-import { useSettledAnchorScroll } from "./anchor-scroll";
+import { useSettledAnchorScroll } from "./anchor/anchor-scroll";
 
 import ConfigPage from "@/app/control/config/page";
 import DisplaySettingsPage from "@/app/control/display/page";

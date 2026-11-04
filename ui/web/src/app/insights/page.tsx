@@ -20,7 +20,7 @@ import Link from "next/link";
 import { useState } from "react";
 import type { ComponentProps, ComponentType } from "react";
 
-import { useSettledAnchorScroll } from "@/app/control/anchor-scroll";
+import { useSettledAnchorScroll } from "@/app/control/anchor/anchor-scroll";
 import { ControlNav } from "@/app/control/nav";
 import {
   INSIGHTS_SCROLL_ID,

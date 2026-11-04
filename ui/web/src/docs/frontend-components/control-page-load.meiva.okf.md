@@ -12,7 +12,12 @@ renders its heading and anchor immediately and mounts its body after the first
 paint, one slice at a time — see the mount queue below
 (`lib/layout/use-client-ready.ts`).
 
-The reason is the route transition, not the data. Control mounts nine section
+The home sidebar uses a Next.js link to prefetch the Control route in
+production. A warm route can render as soon as the user clicks. The route's
+loading boundary can show the Control title and loading status while the
+page arrives. Section API queries start when their bodies mount.
+
+The original bottleneck was rendering during the route transition. Control mounts nine section
 bodies — Config alone carries nineteen groups of fields — and the App Router does
 not commit the new URL until the incoming tree has rendered. Measured on the
 deployed build with real data, 4x CPU throttling, and the API proxied on the same
