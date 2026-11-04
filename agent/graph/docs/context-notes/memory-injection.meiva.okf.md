@@ -14,7 +14,7 @@ tags:
 `meiva_memory` owns every memory context note; disabling the plugin removes the
 stores, the SDK surface, the notes, and the write-discipline section together
 (`notes.py` builds the two index notes —
-[[meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.meiva.okf.md]] — `inherit.py` the
+[[meiva_builtins/plugins/meiva_memory/docs/memory-index-notes.meiva.okf.md]] — `inheritance/inherit.py` the
 inherited one —
 [[meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md]] — and `plugin.py`
 registers all three). All are laid down by `init_context` behind
@@ -32,7 +32,7 @@ Context]] for the registry itself.
   created if missing. **Only the index is injected**; past
   `memory_per_agent_index_max_lines` (default 200, 0=off) a maintenance
   reminder is appended — no truncation.
-- **Inherited memory** (rank 45; `inherit.py`): the `inheritable` blocks an
+- **Inherited memory** (rank 45; `inheritance/inherit.py`): the `inheritable` blocks an
   agent's ancestors fenced inside their personal entries
   (`<!-- meiva:inheritable -->` … `<!-- /meiva:inheritable -->`), read at every
   window establishment from the first `memory_inherit_depth` hops (default 1,

@@ -812,6 +812,18 @@ root = "meiva/mcps/tests"
 root = "meiva_builtins/plugins/meiva_code/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_fleet/task_maintenance/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_fleet/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_memory/skills/scripts/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_memory/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/plugins/meiva_syntax_fix/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -1256,6 +1268,26 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/plugins/meiva_code"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_fleet/task_maintenance"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_fleet"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_memory/service_declaration"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_memory"
 reportAny = "error"
 reportExplicitAny = "error"
 

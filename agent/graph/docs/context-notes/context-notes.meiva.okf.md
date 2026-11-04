@@ -37,7 +37,7 @@ Notes tell the agent what changed and what to do, in its own terms.
 - **Agent identity** (rank 30): states id, label, host machine, and workspace. The wording is a function of the facts it states (`agent/graph/prompt/note_text.py:agent_id_text`, a `strict` module); `context_notes.py` reads them: the label row through `ctx.sql`, the machine through `ctx.machine`, the workspace folder and its shared document through `workspace_facts(path, home)`. Missing rows or empty labels omit the label clause; transient connection drops on `ctx.sql` close the cached connection and retry boundedly, while persistent connection failures, query timeouts, and SQL or programming errors propagate to the context-building caller. An unset machine name omits its clause. The `# Workspace` prompt section is id-free for fork safety: this `on_fork` note holds the concrete path, and a fork regrafts its own. Each builder receives `MeivaContext`: identity uses `agent_id(ctx)` with lease validation, labels use `ctx.sql`, and settings use `ctx.agent`; there is no host-wide SDK binding.
 - **Forks**: a fork keeps the inherited head untouched; `_handle_fork` appends the `lifecycle_fork` marker, `fork_notes()` and any tail-graft skills at the tail, so the source's cached prefix is reused. The shared memory index stays NOT `on_fork`. See [[agent/graph/docs/context-notes/fork-context.meiva.okf.md|Fork Context]].
 
-### Memory Injection (`plugins/meiva_memory/notes.py` + `inherit.py`, declared by the plugin)
+### Memory Injection (`plugins/meiva_memory/notes.py` + `inheritance/inherit.py`, declared by the plugin)
 - Both stores belong to `meiva_memory`; disabling it removes stores, SDK surface, notes, and discipline section together. The three notes — shared pool index, per-agent index, and the `inheritable` blocks read from the ancestor chain — their ranks, switches, fork behavior, and guardrails are documented in [[agent/graph/docs/context-notes/memory-injection.meiva.okf.md|Memory Injection]].
 
 ### Passive Recall (`memory_recall.py`, decisions in `memory_note.py`)
@@ -58,5 +58,5 @@ Notes tell the agent what changed and what to do, in its own terms.
 ## Entry Points
 - `agent/graph/_init_context.py` — the node that lays down the head
 - `agent/graph/prompt/context_notes.py` — `context_notes` / `fork_notes`, framework notes; `note_text.py` — their wording
-- `meiva_builtins/plugins/meiva_memory/notes.py` — the two memory index notes; `inherit.py` — the inherited-memory note (ancestor chain, block parsing, guardrails)
+- `meiva_builtins/plugins/meiva_memory/notes.py` — the two memory index notes; `inheritance/inherit.py` — the inherited-memory note (ancestor chain, block parsing, guardrails)
 - `agent/graph/recall/memory_recall.py` — passive recall

@@ -106,8 +106,8 @@ def frontmatter(pool: Path, rel: str) -> dict[str, object]:
         return {}
     try:
         loaded = object_of(yaml.safe_load, m.group(1))
-    except yaml.YAMLError:
-        return {}
+    except yaml.YAMLError as error:
+        raise ValueError(f"{rel}: frontmatter is not valid YAML: {error}") from error
     if loaded is None:
         return {}
     if not is_object_dict(loaded):

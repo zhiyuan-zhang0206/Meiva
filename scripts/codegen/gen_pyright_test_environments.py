@@ -98,6 +98,8 @@ TESTS_OWING_ANY: tuple[str, ...] = (
     "gateway/tests",
     "meiva/mcps/tests",
     "meiva_builtins/plugins/meiva_code",
+    "meiva_builtins/plugins/meiva_fleet",
+    "meiva_builtins/plugins/meiva_memory",
     "meiva_builtins/plugins/meiva_syntax_fix",
     "meiva_builtins/plugins/meiva_to_user",
     "meiva_builtins/plugins/meiva_usage",

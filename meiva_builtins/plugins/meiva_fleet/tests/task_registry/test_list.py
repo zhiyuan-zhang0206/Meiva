@@ -45,6 +45,12 @@ def test_list_filters_by_owner_status_parent_and_subtree(
         found = task_registry.list(parent=parent, owner=owner, status=status, recursive=recursive)
         return [task.id for task in found]
 
+    everything = [root_task_id, top, child, grandchild, other]
+    assert ids() == everything
+    assert ids(owner=owner) == [top, child, grandchild, other]
+    assert ids(status="done") == [other]
+    assert ids(status="in_progress") == [root_task_id, top, child, grandchild]
+    assert ids(recursive=True) == everything
     assert ids(parent=top) == [child]
     assert ids(parent=top, recursive=True) == [child, grandchild]
     assert ids(parent=top, recursive=True, status="in_progress") == [child, grandchild]

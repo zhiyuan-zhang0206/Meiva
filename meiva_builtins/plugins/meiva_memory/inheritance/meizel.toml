@@ -1,0 +1,7 @@
+exports = ["inherit.py", "inherited_blocks.py"]
+
+[uses]
+"inherit.py" = ["inherited_blocks.py"]
+
+[purity]
+"inherited_blocks.py" = "strict"
