@@ -2,6 +2,7 @@ import { useMemo, useState, type RefObject } from "react";
 
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 import { canonicalBufferCoordinate, type CompactTransitionBuffer } from "@/lib/layout/compact-transition";
+import { useUserSettings } from "@/lib/state/use-user-settings";
 import { parseItemIdParts } from "@/lib/timeline/timeline";
 
 import { LiveClockGate } from "../model/reasoning-clock";
@@ -163,6 +164,8 @@ export function useTimelineGroupWindow({
   restoreTop: number | null;
 }) {
   const { activationRows, turnRows, measureRows } = useTimelineWindowLimits();
+  const { settings } = useUserSettings();
+  const expandWorkingBlock = settings["display.expand_working_block"] === true;
 
   const groups = useMemo(
     () => groupTimelineSegments(canonicalItems, compactBuffer, currentItems),
@@ -188,16 +191,15 @@ export function useTimelineGroupWindow({
     const virtualKey = activeTurnKeys.virtualKeys[index];
     const isLastTurn = group === groups[groups.length - 1];
     // meiva:note
-    // While turnActive is true, the trailing TurnBlock defaults open unless manually
-    // overridden; settled TurnBlocks default collapsed. Every expanded TurnBlock
-    // scrolls inside its own max-height ScrollArea.
+    // Manual toggles take precedence over the live expansion preference,
+    // including when the turn settles.
     // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
     const isLiveTurn = group.kind === "turn" && isLastTurn && turnActive;
     const runExpanded = group.kind === "turn" && (turnOverrides.has(groupKey)
       ? (turnOverrides.get(groupKey) ?? false)
-      : isLiveTurn);
+      : isLiveTurn && expandWorkingBlock);
     return { group, groupKey, virtualKey, isLiveTurn, runExpanded };
-  }), [groups, activeTurnKeys, turnOverrides, turnActive]);
+  }), [groups, activeTurnKeys, turnOverrides, turnActive, expandWorkingBlock]);
 
   const renderedRows = groupEntries.reduce(
     (total, { group, runExpanded }) =>

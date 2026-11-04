@@ -1,6 +1,6 @@
 import { fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render, revealCollapsedCards } from "./timeline-test-mock";
+import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render, revealCollapsedCards, setUserSettings } from "./timeline-test-mock";
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
 import { TimelineView } from "..";
@@ -8,7 +8,7 @@ import { formatItemTime } from "../timestamp";
 afterEach(cleanupTimelineTest);
 
 describe("Settled vs live expansion behavior", () => {
-  it("settled detail blocks start collapsed while primary content stays visible and turn headers show summaries", () => {
+  it("settled detail blocks hide the summary until expanded while primary content stays visible", () => {
     render(
       <TimelineView
         items={[
@@ -26,7 +26,9 @@ describe("Settled vs live expansion behavior", () => {
     expect(screen.queryByText("hidden thought")).toBeNull();
     expect(screen.getByText("visible chat")).toBeTruthy();
     expect(screen.getByText(/worked for 8s/i)).toBeTruthy();
-    expect(screen.getByText(/1 turn/i)).toBeTruthy();
+    expect(screen.queryByText("1 turn")).toBeNull();
+    fireEvent.click(screen.getByTestId("turn-toggle"));
+    expect(screen.getByText("1 turn")).toBeTruthy();
   });
 
   it("primary messages stay visible in flow without a card-toggle header", () => {
@@ -44,6 +46,7 @@ describe("Settled vs live expansion behavior", () => {
   });
 
   it("live trailing turn expands secondary items by default and clicking card header collapses content", () => {
+    setUserSettings({ "display.expand_working_block": true });
     render(
       <TimelineView
         turnActive
@@ -110,6 +113,7 @@ describe("Settled turn expansion keeps non-chat child blocks collapsed (#4780)",
 
 describe("streamingCode last-item only", () => {
   it("last is agent_code + streamingCode=true → last streaming=1, previous agent_code streaming=0", () => {
+    setUserSettings({ "display.expand_working_block": true });
     render(
       <TimelineView
         turnActive

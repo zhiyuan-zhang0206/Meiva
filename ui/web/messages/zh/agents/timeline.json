@@ -11,6 +11,7 @@
   "output": "输出",
   "working": "工作中…",
   "workingFor": "工作中 {duration}",
+  "workActivity": "活动",
   "workedFor": "工作了 {duration}",
   "ranFor": "运行了 {duration}",
   "compactSummaries": "{count} {unit}",
