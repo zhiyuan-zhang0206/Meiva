@@ -9,8 +9,8 @@ import io
 import subprocess
 import sys
 import threading
+from dataclasses import replace
 from pathlib import Path
-from typing import Any, cast
 
 import pytest
 
@@ -163,7 +163,7 @@ def test_a_supported_sys_platform_reduces_to_linux_or_darwin(
 ) -> None:
     built = Platform.from_sys_platform(sys_platform, machine="arm64", executable="/usr/bin/python")
     assert built.system == system
-    assert built == Platform(cast("Any", system), "arm64", "/usr/bin/python")
+    assert built == replace(Platform("linux", "arm64", "/usr/bin/python"), system=system)
 
 
 @pytest.mark.parametrize("sys_platform", ["win32", "cygwin", "freebsd14", ""])
@@ -184,4 +184,9 @@ def test_a_platform_rejects_values_it_cannot_describe(
     system: str, machine: str, executable: str, message: str
 ) -> None:
     with pytest.raises(ValueError, match=message):
-        Platform(cast("Any", system), machine, executable)
+        replace(
+            Platform("linux", "arm64", "/usr/bin/python"),
+            system=system,
+            machine=machine,
+            executable=executable,
+        )

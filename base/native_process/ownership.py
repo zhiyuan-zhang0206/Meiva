@@ -12,12 +12,11 @@ from __future__ import annotations
 import os
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol, TypeGuard
+from typing import Protocol, TypeGuard
 
 import psutil
 
 from base.native_process import pidfd
-from base.native_process.birth_key import process_birth_key
 from base.native_process.kernel_identity import native_boot_id, pid_starttime_ticks
 from base.native_process.os_platform import is_macos
 
@@ -125,6 +124,20 @@ class LiveReading:
     pid_exists: bool
     status: str
     identity: OwnedProcess | None
+
+
+def process_birth_key(
+    pid: int, birth: float, starttime: int | None, *, platform: str
+) -> tuple[int, str, int | float]:
+    # meiva:note
+    # The exact native key; Linux never substitutes a wall-clock timestamp.
+    if starttime is not None:
+        if type(starttime) is not int or starttime <= 0:
+            raise ValueError("native start ticks must be a positive integer")
+        return pid, "ticks", starttime
+    if platform == "linux":
+        raise RuntimeError(f"missing Linux start ticks for PID {pid}")
+    return pid, "timestamp", birth
 
 
 @dataclass(frozen=True)
@@ -466,7 +479,7 @@ def assemble_process_metadata(
 # later reader compares against the same value the kernel keeps. The parent
 # walk is bounded and records what it could observe instead of failing: a
 # permission gap on an ancestor path must not lose the facts below it.
-def process_metadata(*, pid: int, codex_home: str | None) -> dict[str, Any]:
+def process_metadata(*, pid: int, codex_home: str | None) -> dict[str, object]:
     nodes: list[dict[str, object]] = []
     observation_error: str | None = None
     process = psutil.Process(pid)

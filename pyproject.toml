@@ -1121,6 +1121,11 @@ reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/native_process"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/packages"
 reportAny = "error"
 reportExplicitAny = "error"

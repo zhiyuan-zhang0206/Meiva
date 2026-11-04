@@ -7,7 +7,7 @@ from collections.abc import Coroutine, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import partial
-from typing import Any
+from typing import Never
 
 from base.log import logger
 from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
@@ -39,8 +39,8 @@ class HostedServiceResources:
         self._started = False
         self._closed = False
         self._joined = False
-        self._pending: set[asyncio.Task[Any]] = set()
-        self._turns: set[asyncio.Task[Any]] = set()
+        self._pending: set[asyncio.Task[object]] = set()
+        self._turns: set[asyncio.Task[object]] = set()
         self.failures: list[tuple[HostedTurnResources, BaseException]] = []
 
     async def turn(self) -> HostedTurnResources:
@@ -52,7 +52,7 @@ class HostedServiceResources:
         return HostedTurnResources(service=self)
 
     @contextmanager
-    def hold_turn(self, task: asyncio.Task[Any] | None) -> Generator[None]:
+    def hold_turn(self, task: asyncio.Task[object] | None) -> Generator[None]:
         """Pool closure also waits for the actual roots that can create more resource work."""
         if task is None:
             raise RuntimeError("a hosted turn requires its actual task owner")
@@ -62,7 +62,7 @@ class HostedServiceResources:
         finally:
             self._turns.discard(task)
 
-    def watch(self, operation: Coroutine[Any, Any, None], *, name: str) -> asyncio.Task[None]:
+    def watch(self, operation: Coroutine[object, Never, None], *, name: str) -> asyncio.Task[None]:
         """Start a subscription whose invocation consumes its observed result."""
         task = self._tasks.create_task(operation, name=name)
         self._pending.add(task)
@@ -78,7 +78,7 @@ class HostedServiceResources:
     # meiva:note
     # Keep a foreground child inside the service join span while its caller classifies its outcome.
     # meiva:link base/native_process/docs/native_process.meiva.okf.md
-    def hold_task(self, scope: HostedTurnResources, task: asyncio.Task[Any]) -> None:
+    def hold_task(self, scope: HostedTurnResources, task: asyncio.Task[object]) -> None:
         self._require_task_scope(scope)
         self._pending.add(task)
         task.add_done_callback(self._pending.discard)
@@ -92,7 +92,7 @@ class HostedServiceResources:
     def retain_task(
         self,
         scope: HostedTurnResources,
-        task: asyncio.Task[Any],
+        task: asyncio.Task[object],
         *,
         settled: tuple[type[BaseException], ...] = (),
     ) -> None:
@@ -104,7 +104,7 @@ class HostedServiceResources:
         self,
         scope: HostedTurnResources,
         settled: tuple[type[BaseException], ...],
-        task: asyncio.Task[Any],
+        task: asyncio.Task[object],
     ) -> None:
         self._pending.discard(task)
         if not task.cancelled():
@@ -128,10 +128,10 @@ class HostedServiceResources:
 
     async def _wait_until_deadline(
         self, deadline: float
-    ) -> tuple[set[asyncio.Task[Any]], asyncio.CancelledError | None]:
+    ) -> tuple[set[asyncio.Task[object]], asyncio.CancelledError | None]:
         loop = asyncio.get_running_loop()
         cancellation: asyncio.CancelledError | None = None
-        pending: set[asyncio.Task[Any]] = {
+        pending: set[asyncio.Task[object]] = {
             task for task in self._pending | self._turns if not task.done()
         }
         while pending and loop.time() < deadline:

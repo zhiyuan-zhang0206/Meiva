@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, TextIO
 
+from base.native_process.untyped import object_of
+
 
 @dataclass(frozen=True)
 class Platform:
@@ -217,8 +219,13 @@ def pty_max(*, macos: bool | None = None) -> int | None:
         libc = ctypes.CDLL("libc.dylib", use_errno=True)
         value = ctypes.c_int(0)
         size = ctypes.c_size_t(ctypes.sizeof(value))
-        rc = libc.sysctlbyname(
-            b"kern.tty.ptmx_max", ctypes.byref(value), ctypes.byref(size), None, 0
+        rc = object_of(
+            libc.sysctlbyname,
+            b"kern.tty.ptmx_max",
+            ctypes.byref(value),
+            ctypes.byref(size),
+            None,
+            0,
         )
         return value.value if rc == 0 else None
     except (OSError, AttributeError, ValueError):

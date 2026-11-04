@@ -23,7 +23,8 @@ import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TypeGuard
+
+from base.native_process.untyped import is_object_dict, object_of
 
 _SOURCE_ROOT = Path(__file__).resolve().parents[2]
 _GIT_TIMEOUT_S = 10
@@ -81,10 +82,10 @@ class ReleaseRecord:
     @classmethod
     def parse(cls, raw: str, *, origin: str) -> ReleaseRecord:
         try:
-            data: object = json.loads(raw)
+            data = object_of(json.loads, raw)
         except json.JSONDecodeError as exc:
             raise ReleaseRecordError(f"{origin}: not JSON: {exc}") from exc
-        if not _is_str_dict(data):
+        if not is_object_dict(data):
             raise ReleaseRecordError(f"{origin}: a release record is a JSON object")
         if frozenset(data) != _RECORD_FIELDS:
             raise ReleaseRecordError(
@@ -101,14 +102,6 @@ class ReleaseRecord:
             return cls(commit=commit, code_version=version, committed_at=committed)
         except ReleaseRecordError as exc:
             raise ReleaseRecordError(f"{origin}: {exc}") from exc
-
-
-def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
-    return isinstance(value, dict)
-
-
-def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
-    return _is_object_dict(value) and all(isinstance(key, str) for key in value)
 
 
 # meiva:note

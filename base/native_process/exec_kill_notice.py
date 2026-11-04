@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from base.native_process.untyped import is_object_dict, object_of
+
 
 def notice_path(result_path: Path) -> Path:
     """Where the host records why it killed the exec writing `result_path`."""
@@ -25,8 +27,11 @@ def read_notice(result_path: Path) -> str | None:
     """The host's kill reason for this run, consumed so it never outlives the run."""
     path = notice_path(result_path)
     try:
-        text = json.loads(path.read_text(encoding="utf-8"))["notice"]
+        body = object_of(json.loads, path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return None
+    if not is_object_dict(body):
+        raise TypeError(f"{path}: a kill notice is a JSON object")
+    text = str(body["notice"])
     path.unlink(missing_ok=True)
-    return str(text)
+    return text

@@ -47,7 +47,7 @@ distinct from ordinary log attribution.
 
 ## Native birth identity
 
-`birth_key.process_birth_key` compares explicit PID, timestamp, kernel ticks and platform facts.
+`ownership.process_birth_key` compares explicit PID, timestamp, kernel ticks and platform facts.
 Linux requires positive integer start ticks and never substitutes a wall timestamp; other
 platforms retain their existing timestamp fallback when ticks are absent.
 `kernel_identity` reads `/proc/<pid>/stat`, the Linux boot UUID and the Darwin boot-session UUID.
