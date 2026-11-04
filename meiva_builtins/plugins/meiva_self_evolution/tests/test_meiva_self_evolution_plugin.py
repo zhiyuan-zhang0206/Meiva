@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from langchain_core.messages import HumanMessage
 from langgraph.runtime import Runtime
@@ -12,6 +11,7 @@ from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
 from base.config.tests.configuration import defaults
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry
@@ -21,7 +21,7 @@ from meiva_builtins.plugins.meiva_self_evolution import agent_runtime
 from meiva_builtins.plugins.meiva_self_evolution.agent_runtime import TO_DO_BETTER_FILENAME
 
 
-def _slices(**agent_settings: Any) -> AgentSlices:
+def _slices(*, workspace_in_system_prompt: bool = True) -> AgentSlices:
     return AgentSlices.resolve(
         {
             "llm_model": "deepseek-flash",
@@ -29,7 +29,7 @@ def _slices(**agent_settings: Any) -> AgentSlices:
             "auto_compact_fraction": 0.4,
             "auto_compact_ceiling_tokens": 0,
         },
-        default_reader=defaults(**agent_settings),
+        default_reader=defaults(agent__workspace_in_system_prompt=workspace_in_system_prompt),
     )
 
 
@@ -43,6 +43,19 @@ def _runtime(slices: AgentSlices) -> Runtime[MeivaContext]:
             meiva_home=resolve_meiva_home(),
         )
     )
+
+
+# meiva:note
+# The compact-reminder hook returns `dict[str, Any]` in `agent`; taking it as `object` and narrowing
+# keeps the `Any` out of the test, and the single injected note is narrowed to its text.
+def _note_text(update: object) -> str:
+    assert is_object_dict(update)
+    messages = update["messages"]
+    assert is_object_list(messages)
+    [note] = messages
+    assert isinstance(note, HumanMessage)
+    assert isinstance(note.content, str)
+    return note.content
 
 
 def test_reminder_names_the_file_and_stays_optional() -> None:
@@ -59,7 +72,7 @@ def test_reminder_names_the_file_and_stays_optional() -> None:
 
 def test_reminder_is_silent_when_the_workspace_is_not_in_the_prompt() -> None:
     text = agent_runtime.self_evolution_compact_reminder(
-        _slices(agent__workspace_in_system_prompt=False),
+        _slices(workspace_in_system_prompt=False),
         catalog=build_model_catalog(home=meiva_home()),
     )
 
@@ -68,23 +81,19 @@ def test_reminder_is_silent_when_the_workspace_is_not_in_the_prompt() -> None:
 
 async def test_compact_reminder_carries_the_plugin_section() -> None:
     state = AgentState(messages=[HumanMessage(content="history " * 200)])
-    result = await compact_reminder(state, _runtime(_slices()), {})
+    text = _note_text(await compact_reminder(state, _runtime(_slices()), {}))
 
-    assert result is not None
-    [note] = result["messages"]
-    assert "[meiva_self_evolution]" in note.content
-    assert TO_DO_BETTER_FILENAME in note.content
+    assert "[meiva_self_evolution]" in text
+    assert TO_DO_BETTER_FILENAME in text
 
 
 async def test_compact_reminder_omits_the_section_without_a_workspace_path() -> None:
     state = AgentState(messages=[HumanMessage(content="history " * 200)])
-    result = await compact_reminder(
-        state, _runtime(_slices(agent__workspace_in_system_prompt=False)), {}
+    text = _note_text(
+        await compact_reminder(state, _runtime(_slices(workspace_in_system_prompt=False)), {})
     )
 
-    assert result is not None
-    [note] = result["messages"]
-    assert "[meiva_self_evolution]" not in note.content
+    assert "[meiva_self_evolution]" not in text
 
 
 async def test_after_init_seeds_a_missing_file_and_keeps_an_existing_one(

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
@@ -50,7 +49,7 @@ class SeedToDoBetterHook(Hook):
         runtime: Runtime[MeivaContext],
         _config: RunnableConfig,
         /,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, object] | None:
         identity = runtime.context.identity
         agent_id = None if identity is None else identity.agent_id
         if agent_id is not None:
