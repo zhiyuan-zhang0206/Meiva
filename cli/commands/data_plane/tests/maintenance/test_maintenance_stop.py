@@ -242,6 +242,11 @@ def test_a_redis_connection_ended_after_capture_cannot_shut_down_another_connect
 # A native custody failure is never reported as a stop: the identity handed to the Postgres leg
 # is a replacement of the real postmaster (its start identity altered), the leg raises, and
 # the real Postgres keeps running.
+# meiva:note
+# Linux lane only: the custody receipt this test writes names `NATIVE_TEST_SYSTEM`, and reading it
+# back asks for the native start ticks that only `/proc` provides. On darwin the receipt is refused
+# before the leg under test runs, which reads as a failure of the stop rather than of the host.
+@pytest.mark.requires_host("linux")
 def test_a_replaced_postmaster_identity_fails_the_leg_and_leaves_postgres_running(
     postgres_access: None,
     redis_access: None,
@@ -304,6 +309,11 @@ def test_a_replaced_postmaster_identity_fails_the_leg_and_leaves_postgres_runnin
 # Postgres, a real Redis and a real pooler of this home. The stop ends the pooler first so its
 # clients are disconnected before Postgres goes down, then Postgres, then Redis; says what it
 # stopped; and leaves no process of the home, no recorded birth and no listener behind.
+# meiva:note
+# Linux lane only: the custody receipt this test writes names `NATIVE_TEST_SYSTEM`, and reading it
+# back asks for the native start ticks that only `/proc` provides. On darwin the receipt is refused
+# before the leg under test runs, which reads as a failure of the stop rather than of the host.
+@pytest.mark.requires_host("linux")
 def test_the_stop_ends_a_whole_local_data_plane_in_order(
     postgres_access: None,
     redis_access: None,

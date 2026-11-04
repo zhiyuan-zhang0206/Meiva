@@ -111,6 +111,11 @@ def _start_with_hung_archive(
     )
 
 
+# meiva:note
+# Linux lane only: the custody receipt this test writes names `NATIVE_TEST_SYSTEM`, and reading it
+# back asks for the native start ticks that only `/proc` provides. On darwin the receipt is refused
+# before the leg under test runs, which reads as a failure of the stop rather than of the host.
+@pytest.mark.requires_host("linux")
 def test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget(
     postgres_access: None,
     unit_home: Path,
