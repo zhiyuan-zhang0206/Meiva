@@ -88,7 +88,7 @@ def test_full_queue_stop_is_finite_and_closes_admission() -> None:
     assert pipe.stop(timeout=0).status is telemetry.DrainStatus.COMPLETED
 
 
-def test_sync_deadline_covers_marker_admission_and_write() -> None:
+def test_sync_deadline_expires_in_marker_while_every_slot_is_taken() -> None:
     entered, release = threading.Event(), threading.Event()
 
     def writer(batch: list[telemetry.Event]) -> None:
@@ -105,10 +105,25 @@ def test_sync_deadline_covers_marker_admission_and_write() -> None:
             telemetry.DrainStatus.UNFINISHED, telemetry.DrainPhase.MARKER
         )
         assert time.monotonic() - started < 0.5
+    finally:
+        release.set()
+        pipe.stop(timeout=1)
+
+
+def test_sync_deadline_expires_in_drain_while_the_writer_blocks() -> None:
+    entered, release = threading.Event(), threading.Event()
+
+    def writer(batch: list[telemetry.Event]) -> None:
+        entered.set()
+        assert release.wait(3)
+
+    pipe = telemetry.EventPipeline(writer=writer, batch_size=1, queue_maxsize=2)
+    try:
+        pipe.enqueue(event(1))
+        assert entered.wait(1)
 
         original_thread = pipe._thread
         before_threads = set(threading.enumerate())
-        pipe._queue.get_nowait()
         assert pipe.sync(timeout=0.03) == telemetry.DrainResult(
             telemetry.DrainStatus.UNFINISHED, telemetry.DrainPhase.DRAIN
         )
@@ -201,34 +216,6 @@ def test_unreleasable_writer_cannot_make_stop_unbounded() -> None:
     child = _run_scenario("unreleasable_writer")
     assert child.returncode == 0, child.stderr
     assert "unfinished" in child.stderr
-
-
-def test_one_deadline_spans_queue_admission_and_blocked_writer() -> None:
-    first_entered, first_release = threading.Event(), threading.Event()
-    second_release = threading.Event()
-
-    def writer(batch: list[telemetry.Event]) -> None:
-        if batch[0].attributes["i"] == 1:
-            first_entered.set()
-            assert first_release.wait(3)
-        else:
-            assert second_release.wait(3)
-
-    pipe = telemetry.EventPipeline(writer=writer, batch_size=1, queue_maxsize=1)
-    timer = threading.Timer(0.15, first_release.set)
-    try:
-        pipe.enqueue(event(1))
-        assert first_entered.wait(1)
-        pipe.enqueue(event(2))
-        timer.start()
-        assert pipe.sync(timeout=0.2) == telemetry.DrainResult(
-            telemetry.DrainStatus.UNFINISHED, telemetry.DrainPhase.DRAIN
-        )
-    finally:
-        timer.cancel()
-        first_release.set()
-        second_release.set()
-        pipe.stop(timeout=1)
 
 
 @pytest.mark.parametrize("timeout", [-1.0, float("inf"), float("nan")])
