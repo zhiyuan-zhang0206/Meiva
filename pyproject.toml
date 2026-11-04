@@ -873,6 +873,12 @@ root = "gateway/tests"
 root = "meiva/mcps/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "meiva/shell/coding_tools/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva/shell/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/plugins/meiva_code/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -1386,6 +1392,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "meiva/self"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva/shell"
 reportAny = "error"
 reportExplicitAny = "error"
 

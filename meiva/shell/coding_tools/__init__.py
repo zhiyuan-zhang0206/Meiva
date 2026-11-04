@@ -9,6 +9,7 @@ impersonates the launching agent. The ``meiva-guide.external-agents`` skill's
 """
 
 import argparse
+from dataclasses import dataclass
 from datetime import datetime
 
 _PRIORITIES = ("P0", "P1", "P2", "P3")
@@ -56,6 +57,16 @@ def owner_terminated(agent_id: int) -> bool:
 
 
 # meiva:note
+# The flags `add_lineage_arguments` adds, as `require_lineage` reads them from the parsed namespace.
+@dataclass(frozen=True)
+class _LineageOptions:
+    why: str | None
+    for_task: int | None
+    task_label: str | None
+    priority: str | None
+
+
+# meiva:note
 # A missing --why is a usage error: the reason is the one field the launcher cannot derive, and a worker without it cannot judge whether the work fits. Takeover launches get the three-line form because they create no task or work file. The facts of who dispatched the launch are read from the cluster here, once; the block itself is a pure function of them.
 def require_lineage(
     parser: argparse.ArgumentParser,
@@ -64,21 +75,26 @@ def require_lineage(
     now: datetime,
     takeover: bool = False,
 ) -> str:
+    from base.host.boundary.options import options
     from base.sessions import provenance as provenance_block
 
     from ._common import read_dispatch_facts
     from .plans.lineage import dispatch_provenance, lineage_error
 
-    why = (args.why or "").strip()
-    error = lineage_error(why, args.for_task, args.task_label, args.priority)
+    flags = options(args, _LineageOptions)
+    why = (flags.why or "").strip()
+    for_task = flags.for_task
+    task_label = flags.task_label
+    priority = flags.priority
+    error = lineage_error(why, for_task, task_label, priority)
     if error is not None:
         parser.error(error)
     block = dispatch_provenance(
         read_dispatch_facts(),
-        for_task=args.for_task,
+        for_task=for_task,
         why=why,
-        task_label=args.task_label,
-        priority=args.priority,
+        task_label=task_label,
+        priority=priority,
         now=now,
     )
     return provenance_block.render_takeover(block) if takeover else provenance_block.render(block)
