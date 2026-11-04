@@ -3,7 +3,8 @@ from pathlib import Path
 import pytest
 
 from agent.execution.protocol import ResultPayload, write_result
-from agent.graph.exec._child_boundary import payload_without_envelope
+from agent.graph.exec._child_boundary import payload_without_envelope, result_from_payload
+from agent.graph.exec._result import ExecChildError, ExecCrashed
 from agent.graph.exec._subprocess import read_result_envelope
 
 
@@ -55,3 +56,46 @@ def test_a_malformed_envelope_comes_back_as_an_error_instead_of_a_guessed_outcom
 
     assert payload is None
     assert error is not None and error.startswith("exec result envelope could not be decoded:")
+
+
+@pytest.mark.parametrize(
+    ("returncode", "expected_detail"),
+    [
+        (0, "returncode=0; SIGKILLed, watchdog, or the agent's own os._exit"),
+        (99, "returncode=99; SIGKILLed, watchdog, or the agent's own os._exit"),
+        (-9, "returncode=-9 [SIGKILL]; SIGKILLed, watchdog, or the agent's own os._exit"),
+        (-11, "returncode=-11 [SIGSEGV]; SIGKILLed, watchdog, or the agent's own os._exit"),
+        (-999, "returncode=-999; SIGKILLed, watchdog, or the agent's own os._exit"),
+    ],
+)
+def test_missing_envelope_crash_includes_returncode_and_signal_name(
+    returncode: int, expected_detail: str
+) -> None:
+    result = result_from_payload(
+        "",
+        None,
+        cancelled=False,
+        timed_out=False,
+        returncode=returncode,
+    )
+
+    assert isinstance(result, ExecCrashed)
+    assert isinstance(result.exc, ExecChildError)
+    assert result.exc.exc_type == "exec_subprocess_aborted"
+    assert result.exc.exc_msg == (
+        f"the exec child exited without writing a result envelope ({expected_detail})"
+    )
+
+
+def test_missing_envelope_crash_without_returncode_omits_none_text() -> None:
+    result = result_from_payload("", None, cancelled=False, timed_out=False, returncode=None)
+
+    assert isinstance(result, ExecCrashed)
+    assert isinstance(result.exc, ExecChildError)
+    assert result.exc.exc_type == "exec_subprocess_aborted"
+    assert result.exc.exc_msg == (
+        "the exec child exited without writing a result envelope "
+        "(SIGKILLed, watchdog, or the agent's own os._exit)"
+    )
+    assert "None" not in str(result.exc)
+    assert "returncode=" not in str(result.exc)

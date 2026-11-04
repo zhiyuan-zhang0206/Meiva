@@ -10,9 +10,17 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+import pytest
+
 from agent.execution.protocol import ResultPayload, read_request, write_result
 from agent.graph.exec._remote import exec_host_socket
-from agent.graph.exec._result import ExecCancelled, ExecCrashed, ExecDone, ExecTimedOut
+from agent.graph.exec._result import (
+    ExecCancelled,
+    ExecChildError,
+    ExecCrashed,
+    ExecDone,
+    ExecTimedOut,
+)
 from agent.graph.exec._stream import ExecOutputChunkPublisher
 from agent.graph.exec._subprocess import run_in_subprocess
 from agent.graph.exec.tests.process_inputs import real_parent
@@ -296,3 +304,53 @@ async def test_run_in_subprocess_falls_back_to_local_child_when_exec_host_socket
     assert result.output == "local fallback\n"
     assert payload is not None
     assert payload.kind == "done"
+
+
+@pytest.mark.parametrize(
+    ("returncode", "expected_detail"),
+    [
+        (99, "returncode=99"),
+        (-9, "returncode=-9 [SIGKILL]"),
+    ],
+)
+async def test_run_in_subprocess_surfaces_exec_host_abort_returncode_without_envelope(
+    tmp_path: Path, returncode: int, expected_detail: str
+) -> None:
+    exec_dir = tmp_path / "run" / "exec"
+    sock_path = exec_host_socket(exec_dir)
+
+    async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            raw = await reader.readline()
+            req = protocol.decode_object(raw.rstrip(b"\r\n"))
+            writer.write(
+                protocol.encode(
+                    protocol.ok(
+                        req["id"],
+                        {"returncode": returncode, "cancelled": False, "timed_out": False},
+                    )
+                )
+            )
+            await writer.drain()
+        finally:
+            writer.close()
+
+    async with _unix_exec_host_server(sock_path, handle):
+        result, payload = await run_in_subprocess(
+            "import os; os._exit(99)",
+            exec_context(_AGENT_ID),
+            asyncio.Event(),
+            10.0,
+            accumulation_max_chars=1_000_000,
+            parent=real_parent(),
+            exec_dir=exec_dir,
+            request_id=UUID(int=1),
+            result_id=UUID(int=2),
+        )
+
+    assert isinstance(result, ExecCrashed)
+    assert isinstance(result.exc, ExecChildError)
+    assert result.exc.exc_type == "exec_subprocess_aborted"
+    assert "the exec child exited without writing a result envelope" in str(result.exc)
+    assert expected_detail in str(result.exc)
+    assert payload is None

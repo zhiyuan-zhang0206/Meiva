@@ -430,6 +430,42 @@ def test_dispatch_boot_crash_emits_the_boot_failed_event(
     assert not [r for r in loguru_records if r["extra"].get("event") == "exec_child_boot_failed"]
 
 
+@pytest.mark.parametrize(
+    ("returncode", "expected_detail"),
+    [
+        (99, "returncode=99"),
+        (-9, "returncode=-9 [SIGKILL]"),
+    ],
+)
+def test_dispatch_aborted_subprocess_surfaces_returncode_to_agent_and_telemetry(
+    returncode: int,
+    expected_detail: str,
+    loguru_records: LogRecords,
+    limits: OutputLimits,
+    output_now: datetime,
+) -> None:
+    from agent.graph.exec._child_boundary import result_from_payload
+
+    result = result_from_payload(
+        "",
+        None,
+        cancelled=False,
+        timed_out=False,
+        returncode=returncode,
+    )
+    halted, text = _dispatch(result, limits, output_now, agent_id=42)
+
+    assert halted is False
+    assert "exec_subprocess_aborted:" in text
+    assert "the exec child exited without writing a result envelope" in text
+    assert expected_detail in text
+
+    failed = [r for r in loguru_records if r["extra"].get("event") == "exec_failed"]
+    assert len(failed) == 1
+    assert expected_detail in str(failed[0]["extra"]["body"])
+    assert expected_detail in failed[0]["message"]
+
+
 def test_archive_stamp_is_the_callers_instant_in_the_callers_zone(
     limits: OutputLimits,
 ) -> None:

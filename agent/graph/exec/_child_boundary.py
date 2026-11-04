@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import signal
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -92,13 +93,36 @@ def payload_without_envelope(returncode: int | None) -> ResultPayload | None:
     return None
 
 
+def _format_returncode(returncode: int) -> str:
+    if returncode < 0:
+        try:
+            sig_name = signal.Signals(-returncode).name
+        except ValueError:
+            return f"returncode={returncode}"
+        return f"returncode={returncode} [{sig_name}]"
+    return f"returncode={returncode}"
+
+
+def _abort_message(returncode: int | None) -> str:
+    causes = "SIGKILLed, watchdog, or the agent's own os._exit"
+    if returncode is None:
+        return f"the exec child exited without writing a result envelope ({causes})"
+    return (
+        "the exec child exited without writing a result envelope "
+        f"({_format_returncode(returncode)}; {causes})"
+    )
+
+
 # meiva:note
 # The lifecycle kind or exception the child's outcome stands for, or None for a clean exit. A
 # crash, or a signal exception the agent raised itself (KeyboardInterrupt / TimeoutError written
 # by its own code), is an `ExecChildError`: when the parent's flags confirm the signal,
 # `construct_exec_result` still lets cancel and timeout outrank it.
 def _child_outcome(
-    payload: ResultPayload | None, envelope_error: str | None
+    payload: ResultPayload | None,
+    envelope_error: str | None,
+    *,
+    returncode: int | None,
 ) -> ExecLifecycleKind | BaseException | None:
     if envelope_error is not None:
         return ExecChildError("exec_result_envelope_invalid", envelope_error, None)
@@ -116,8 +140,7 @@ def _child_outcome(
     if payload is None:
         return ExecChildError(
             "exec_subprocess_aborted",
-            "the exec child exited without writing a result envelope "
-            "(SIGKILLed, watchdog, or the agent's own os._exit)",
+            _abort_message(returncode),
             None,
         )
     return None
@@ -132,6 +155,7 @@ def result_from_payload(
     envelope_error: str | None = None,
     stream_cap: StreamCap | None = None,
     memory_guard_notice: str | None = None,
+    returncode: int | None = None,
 ) -> ExecResult:
     """Map the child's outcome onto the `ExecResult` sum type.
 
@@ -149,7 +173,7 @@ def result_from_payload(
             "exec_memory_guard_killed", memory_guard_notice, None
         )
     else:
-        outcome = _child_outcome(payload, envelope_error)
+        outcome = _child_outcome(payload, envelope_error, returncode=returncode)
     result = construct_exec_result(
         output,
         outcome,
