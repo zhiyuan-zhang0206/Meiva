@@ -36,7 +36,7 @@ import redis
 from base.agents.context.clients import ClientSet
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config.tests.configuration import snapshot_process_config
-from base.db import PG_KEEPALIVE_KWARGS
+from base.db import connect_url
 from meiva.boot import derived_clients
 
 # The control test waits this long and asserts a bare connect is STILL pending;
@@ -137,10 +137,12 @@ def _assert_fails_fast(attempt: Callable[[], object]) -> None:
     )
 
 
+# meiva:note
+# `PG_KEEPALIVE_KWARGS` itself is what converts the hang into an error: the property every call site
+# below inherits by passing that one constant. An unbounded `connect_url` dial carries that constant
+# and nothing else.
 def test_resilience_kwargs_bound_the_connect(silent_peer_url: str, postgres_access: None) -> None:
-    """`PG_KEEPALIVE_KWARGS` itself is what converts the hang into an error —
-    the property every call site below inherits by passing that one constant."""
-    _assert_fails_fast(lambda: psycopg.connect(silent_peer_url, **PG_KEEPALIVE_KWARGS))
+    _assert_fails_fast(lambda: connect_url(silent_peer_url, unbounded=True))
 
 
 def test_assert_schema_current_fails_fast(silent_peer_url: str) -> None:

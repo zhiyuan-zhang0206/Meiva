@@ -139,7 +139,10 @@ async def admit_pending_wake(pool: AsyncPool, agent_id: int) -> bool:
         ).fetchone()
         if row is None:
             return False
-        if row[0] < HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS or row[1]:
+        streak, operator_restart_claimed = row
+        if not isinstance(streak, int):
+            raise TypeError(f"permanent_reject_streak is not an integer: {streak!r}")
+        if streak < HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS or operator_restart_claimed:
             return True
         if await _operator_restart_waiting(conn, agent_id):
             return True

@@ -7,7 +7,8 @@ exports = ["code_version_gate.py", "config.py", "connections.py", "pooled_sessio
 "protocols.py" = "strict"
 
 [uses]
-"__init__.py" = ["config.py", "connections.py", "handle.py", "pooled_session.py"]
+"__init__.py" = ["config.py", "connections.py", "handle.py", "pooled_session.py", "rows.py"]
+"code_version_gate.py" = ["rows.py"]
 "config.py" = ["protocols.py"]
 "connections.py" = ["code_version_gate.py", "config.py", "pooled_session.py"]
 "handle.py" = ["code_version_gate.py", "config.py", "connections.py"]

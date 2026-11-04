@@ -12,6 +12,7 @@ kernel-only (inbound claim, wait/mark/revert) is in `agent/db/__init__.py`.
 """
 
 import psycopg
+from psycopg.rows import class_row
 
 from base.db.config import DbConfig as DbConfig
 from base.db.connections import PG_KEEPALIVE_KWARGS as PG_KEEPALIVE_KWARGS
@@ -23,6 +24,7 @@ from base.db.connections import connect_url as connect_url
 from base.db.connections import pool as pool
 from base.db.handle import Database as Database
 from base.db.pooled_session import PG_STATEMENT_TIMEOUT_SET_SQL as PG_STATEMENT_TIMEOUT_SET_SQL
+from base.db.rows import IdRow
 
 
 def fetch_one[RowT](cur: psycopg.Cursor[RowT], context: str) -> RowT:
@@ -56,9 +58,9 @@ def create_agent(db: psycopg.Connection) -> int:
     (this function, eval callers) do not auto-name; the caller is
     expected to PATCH /api/agents/{id} manually as needed.
     """
-    with db.cursor() as cur:
+    with db.cursor(row_factory=class_row(IdRow)) as cur:
         cur.execute("INSERT INTO agents DEFAULT VALUES RETURNING id")
-        new_id = fetch_one(cur, "insert new agent")[0]
+        new_id = fetch_one(cur, "insert new agent").id
     db.commit()
     return new_id
 

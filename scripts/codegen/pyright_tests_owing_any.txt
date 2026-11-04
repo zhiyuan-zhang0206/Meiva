@@ -12,6 +12,7 @@ agent/messages/tests
 base/agents
 base/cluster
 base/config
+base/db/tests
 base/events/live
 base/events/notifications
 base/events/signals

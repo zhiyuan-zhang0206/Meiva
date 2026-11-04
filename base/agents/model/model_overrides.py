@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from pydantic import TypeAdapter
+
 from base.config.agent_pins import resolve_agent_config_pins
 from base.db.protocols import SyncPool
 from base.host.env.agent_slices import ModelOverrides
@@ -21,11 +23,18 @@ def agent_overrides(
     return ModelOverrides.from_pins(resolve_agent_config_pins(config_overlay, birth_config))
 
 
+# meiva:note
+# The two stored config maps of an agent's `agents_meta` row (`config_overlay`, `birth_config`), validated
+# where they are read.
+_CONFIG_ROW = TypeAdapter(tuple[dict[str, object] | None, dict[str, object] | None])
+
+
 def read_agent_overrides(pool: SyncPool, agent_id: int) -> ModelOverrides:
     """`agent_overrides` of the agent's stored row; none for an agent without one."""
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT config_overlay, birth_config FROM agents_meta WHERE id = %s", (agent_id,)
         )
-        row = cur.fetchone()
+        fetched = cur.fetchone()
+    row = _CONFIG_ROW.validate_python(fetched) if fetched is not None else None
     return agent_overrides(row[0] if row else None, row[1] if row else None)

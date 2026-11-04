@@ -259,6 +259,16 @@ def _abandoned(started: float, *, deadline: float, gate: ProcessDbGate) -> Resto
     )
 
 
+# meiva:note
+# The third column of the restore-with-minimum answer is the cluster's `min_code_version`; the row is read
+# as a plain tuple of `object` and a column that is not an integer stops the restore.
+def _restored_minimum(row: tuple[object, ...]) -> int:
+    minimum = row[2]
+    if not isinstance(minimum, int):
+        raise TypeError(f"the restore statement answered a non-integer minimum: {minimum!r}")
+    return minimum
+
+
 def restore_pooled_session(
     conn: psycopg.Connection,
     *,
@@ -324,7 +334,7 @@ def restore_pooled_session(
                 row = cur.fetchone()
             if row is None:
                 raise RuntimeError("the restore statement returned no row")
-            gate.observe_minimum(int(row[2]))
+            gate.observe_minimum(_restored_minimum(row))
         else:
             conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[1], name)
         conn.commit()
@@ -417,7 +427,7 @@ async def restore_pooled_session_async(
                     row = await cur.fetchone()
                 if row is None:
                     raise RuntimeError("the restore statement returned no row")
-                gate.observe_minimum(int(row[2]))
+                gate.observe_minimum(_restored_minimum(row))
             else:
                 await conn.execute(PG_POOLED_BASELINE_RESTORE_SQL[1], name)
             await conn.commit()

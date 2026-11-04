@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, AbstractContextManager
 from dataclasses import dataclass, field
-from typing import Any, LiteralString, Protocol, overload
+from typing import LiteralString, Protocol, overload
 
 
 class _DataPlaneView(Protocol):
@@ -83,19 +83,21 @@ def db_config_from_boot(boot: _ConfigBoot) -> DbConfig:
 # meiva:note
 # Minimal row-fetching surface returned by a synchronous database query execution.
 class QueryResult(Protocol):
-    def fetchall(self) -> list[tuple[Any, ...]]: ...
+    def fetchall(self) -> list[tuple[object, ...]]: ...
 
-    def fetchone(self) -> tuple[Any, ...] | None: ...
+    def fetchone(self) -> tuple[object, ...] | None: ...
 
 
 # meiva:note
 # Minimal synchronous database cursor contract for statement execution and row retrieval.
 class SyncCursor[RowT](Protocol):
     def execute(
-        self, query: LiteralString, params: Sequence[Any] | dict[str, Any] | None = None
+        self, query: LiteralString, params: Sequence[object] | Mapping[str, object] | None = None
     ) -> SyncCursor[RowT]: ...
 
-    def executemany(self, query: LiteralString, params_seq: Iterable[Sequence[Any]]) -> object: ...
+    def executemany(
+        self, query: LiteralString, params_seq: Iterable[Sequence[object]]
+    ) -> object: ...
 
     def fetchall(self) -> list[RowT]: ...
 
@@ -110,11 +112,11 @@ class SyncCursor[RowT](Protocol):
 # Minimal synchronous database connection contract for query execution, cursors, and commits.
 class SyncConnection(Protocol):
     def execute(
-        self, query: LiteralString, params: Sequence[Any] | dict[str, Any] | None = None
+        self, query: LiteralString, params: Sequence[object] | Mapping[str, object] | None = None
     ) -> QueryResult: ...
 
     @overload
-    def cursor(self) -> AbstractContextManager[SyncCursor[tuple[Any, ...]]]: ...
+    def cursor(self) -> AbstractContextManager[SyncCursor[tuple[object, ...]]]: ...
 
     @overload
     def cursor[RowT](
@@ -156,16 +158,16 @@ class AsyncQueryResult(Protocol):
     @property
     def rowcount(self) -> int: ...
 
-    def fetchall(self) -> Awaitable[list[tuple[Any, ...]]]: ...
+    def fetchall(self) -> Awaitable[list[tuple[object, ...]]]: ...
 
-    def fetchone(self) -> Awaitable[tuple[Any, ...] | None]: ...
+    def fetchone(self) -> Awaitable[tuple[object, ...] | None]: ...
 
 
 # meiva:note
 # Minimal asynchronous database connection contract for awaiting a query result.
 class AsyncConnectionLike(Protocol):
     def execute(
-        self, query: LiteralString, params: Sequence[Any] | dict[str, Any] | None = None
+        self, query: LiteralString, params: Sequence[object] | Mapping[str, object] | None = None
     ) -> Awaitable[AsyncQueryResult]: ...
 
     def transaction(self) -> AbstractAsyncContextManager[object]: ...
