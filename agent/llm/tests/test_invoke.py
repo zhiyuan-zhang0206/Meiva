@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
-from typing import Any
 
 import httpx
 import pytest
@@ -10,6 +9,7 @@ from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.tools import BaseTool
 from pydantic import Field
 
 from agent.llm import execute_code
@@ -28,11 +28,20 @@ class _Model(BaseChatModel):
     def _llm_type(self) -> str:
         return "invoke-test"
 
-    def bind_tools(self, tools: Sequence[Any], **kwargs: Any) -> _Model:
+    # meiva:note
+    # The names of the tools this model was bound to, in order. The base accepts dicts, types and
+    # callables too; this fake states the narrower contract it honours rather than dropping a tool
+    # it cannot name.
+    def bind_tools(self, tools: Sequence[object], **kwargs: object) -> _Model:
         del kwargs
-        return self.model_copy(update={"tools": tuple(tool.name for tool in tools)})
+        names: list[str] = []
+        for tool in tools:
+            if not isinstance(tool, BaseTool):
+                raise TypeError(f"this model binds BaseTool instances, not {type(tool).__name__}")
+            names.append(tool.name)
+        return self.model_copy(update={"tools": tuple(names)})
 
-    def _generate(self, *args: Any, **kwargs: Any) -> ChatResult:
+    def _generate(self, *args: object, **kwargs: object) -> ChatResult:
         raise NotImplementedError("the compaction call is asynchronous")
 
     async def _agenerate(
@@ -40,7 +49,7 @@ class _Model(BaseChatModel):
         messages: list[BaseMessage],
         stop: list[str] | None = None,
         run_manager: AsyncCallbackManagerForLLMRun | None = None,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> ChatResult:
         del stop, run_manager, kwargs
         if self.failures:
