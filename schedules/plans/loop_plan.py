@@ -5,7 +5,8 @@
 # result to `plan_step`, which returns either the longest safe sleep or the slot to claim. The
 # claim itself, the sleeping and the clock read are the shell's. Every built-in loop is one
 # `LoopTiming`: the defaults are the daily loops, and a loop that fires early, rests less or
-# sleeps in shorter hops overrides only that field.
+# sleeps in shorter hops overrides only that field. `FailurePolicy` is the other half of one
+# loop's shape: what it waits after a round raised, and when that round becomes a report.
 # meiva:link schedules/README.md
 
 from __future__ import annotations
@@ -13,7 +14,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-__all__ = ["Fire", "LoopTiming", "Sleep", "Step", "Upcoming", "plan_step", "search_base"]
+__all__ = [
+    "FailurePolicy",
+    "Fire",
+    "LoopTiming",
+    "Sleep",
+    "Step",
+    "Upcoming",
+    "failure_backoff_s",
+    "plan_step",
+    "search_base",
+]
 
 
 # meiva:note
@@ -29,6 +40,45 @@ class LoopTiming:
     fire_ahead: float = 0.0
     max_sleep: float = 3600.0
     rest: float = 120.0
+
+
+# meiva:note
+# What a loop does with a round that raised: how long it waits before trying the same work again,
+# and when one more line in a log stops being enough. The delay doubles from `first_delay_s` and
+# stops at `max_delay_s`, so a loop that cannot get past the planning step retries every five
+# minutes instead of spinning -- long enough that a persistent cause is not a busy-loop, short
+# enough that a schedule with an hourly slot still gets several attempts inside the hour.
+# `report_after` counts failed rounds in a row, not elapsed time: a loop that fails twice an hour
+# is not the same as one failing every minute, and only the second is worth a person's attention.
+@dataclass(frozen=True)
+class FailurePolicy:
+    first_delay_s: float = 60.0
+    max_delay_s: float = 300.0
+    report_after: int = 3
+
+    def __post_init__(self) -> None:
+        if self.first_delay_s <= 0:
+            raise ValueError(f"first_delay_s must be positive, got {self.first_delay_s}")
+        if self.max_delay_s < self.first_delay_s:
+            raise ValueError(
+                f"max_delay_s ({self.max_delay_s}) must not be below first_delay_s "
+                f"({self.first_delay_s})"
+            )
+        if self.report_after < 1:
+            raise ValueError(f"report_after must be at least 1, got {self.report_after}")
+
+
+# meiva:note
+# The pause after `failures` failed rounds in a row: `first_delay_s` doubled once per earlier
+# failure, never above `max_delay_s`. The doubling is a product over the rounds already failed,
+# not a power of the count, because the first failed round waits the first delay, not twice it.
+def failure_backoff_s(failures: int, policy: FailurePolicy) -> float:
+    if failures < 1:
+        raise ValueError(f"failures must be at least 1, got {failures}")
+    delay = policy.first_delay_s
+    for _ in range(failures - 1):
+        delay = min(delay * 2.0, policy.max_delay_s)
+    return delay
 
 
 # meiva:note
