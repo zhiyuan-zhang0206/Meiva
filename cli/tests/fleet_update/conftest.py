@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+import os
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
 
-from cli.tests.fleet_update.fleet_update_cluster import Cluster, certify_commit, git
+from cli.tests.fleet_update.fleet_update_cluster import (
+    Cluster,
+    assert_isolated_home,
+    certify_commit,
+    git,
+)
 
 Group = tuple[frozenset[str], tuple[str, ...]]
 
@@ -39,6 +45,32 @@ _STOP: tuple[Group, ...] = (
     _group("--message --no-message", "--no-message"),
 )
 _START: tuple[Group, ...] = (_group("--roster-timeout", "--roster-timeout", "90"),)
+
+
+@pytest.fixture(autouse=True)
+def isolate_operator_home(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Path | None]:
+    """Isolate `HOME` for every `fleet_update` test so `host_commands.HOME` cannot reach `~/.meiva`.
+
+    `default_home` (`base/paths/tests/homes.py`) already isolates `HOME` onto `monkeypatch`, whose
+    root-level teardown runs after this `conftest.py` tears down; deferring to it avoids recording
+    our temporary `HOME` on `monkeypatch`'s undo stack.
+    """
+    if "default_home" in request.fixturenames:
+        yield None
+        assert_isolated_home(os.environ.get("HOME"))
+        return
+    isolated = tmp_path / "isolated-user-home"
+    isolated.mkdir()
+    assert_isolated_home(isolated)
+    previous = os.environ.get("HOME")
+    os.environ["HOME"] = str(isolated)
+    try:
+        yield isolated
+    finally:
+        if previous is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = previous
 
 
 @pytest.fixture

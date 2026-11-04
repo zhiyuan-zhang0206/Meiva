@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import pwd
 import subprocess
 import sys
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -77,14 +79,67 @@ _FAKE_SSH = Path(__file__).with_name("fake_ssh.py")
 
 
 # meiva:note
+# The OS passwd home of the user running pytest. `host_commands.HOME` derives `$H` from `$HOME`,
+# ignoring `MEIVA_HOME`, so every host-shell helper refuses to run if `HOME` still resolves here.
+# meiva:link cli/tests/fleet_update/docs/fleet-update-harness.meiva.okf.md
+def operator_home() -> Path:
+    return Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
+
+
+def assert_isolated_home(home: str | os.PathLike[str] | None) -> None:
+    raw = "" if home is None else os.fspath(home).strip()
+    if not raw:
+        raise AssertionError("refusing to run fleet_update host shell with an empty HOME")
+    resolved = Path(raw).resolve()
+    if resolved == operator_home():
+        raise AssertionError(
+            f"refusing to run fleet_update host shell against operator HOME: {resolved}"
+        )
+
+
+def run_host_shell(
+    argv: Sequence[str],
+    *,
+    env: Mapping[str, str] | None = None,
+    cwd: Path | None = None,
+    check: bool = False,
+    timeout: float | None = None,
+) -> subprocess.CompletedProcess[str]:
+    effective_env = dict(os.environ if env is None else env)
+    assert_isolated_home(effective_env.get("HOME"))
+    return subprocess.run(
+        list(argv),
+        env=effective_env,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=check,
+        timeout=timeout,
+    )
+
+
+# meiva:note
+# Write a stub executable in a test-owned directory without ever writing through a symlink (such
+# as `.venv/bin/python` pointing into `~/.local/share/uv/python`).
+def write_executable(path: Path, body: str) -> Path:
+    if path.is_symlink():
+        raise AssertionError(f"refusing to write stub executable through symlink: {path}")
+    path.unlink(missing_ok=True)
+    path.write_text(body, encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+# meiva:note
 # The `ssh` a window finds on its PATH: a shell wrapper that runs `script` with this interpreter.
 # The wrapper is a real executable in a directory the test owns, so the window launches it exactly
 # as it launches the operator's `ssh`.
 def ssh_on_path(bin_dir: Path, script: Path) -> Path:
     bin_dir.mkdir(parents=True, exist_ok=True)
-    wrapper = bin_dir / "ssh"
-    wrapper.write_text(f'#!/bin/sh\nexec "{sys.executable}" -I -S "{script}" "$@"\n')
-    wrapper.chmod(0o755)
+    write_executable(
+        bin_dir / "ssh",
+        f'#!/bin/sh\nexec "{sys.executable}" -I -S "{script}" "$@"\n',
+    )
     return bin_dir
 
 
@@ -160,7 +215,9 @@ class Cluster:
             "HOME": str(self.workdir),
             "FLEET_CLUSTER_STATE": str(self.state_path),
         }
-        return {**base, **self.environ}
+        merged = {**base, **self.environ}
+        assert_isolated_home(merged.get("HOME"))
+        return merged
 
     def _state(self) -> dict[str, Any]:
         return {

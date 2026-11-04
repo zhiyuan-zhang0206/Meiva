@@ -7,13 +7,25 @@
 from __future__ import annotations
 
 import os
+import pwd
 import subprocess
 import sys
+from pathlib import Path
 
 
 def main(argv: list[str]) -> int:
+    local_home_raw = os.environ.get("FLEET_LOCAL_HOME", "").strip()
+    if not local_home_raw:
+        raise AssertionError(
+            "refusing to run fleet_update local_ssh with an empty FLEET_LOCAL_HOME"
+        )
+    local_home = Path(local_home_raw).resolve()
+    if local_home == Path(pwd.getpwuid(os.getuid()).pw_dir).resolve():
+        raise AssertionError(
+            f"refusing to run fleet_update local_ssh against operator HOME: {local_home}"
+        )
     command = argv[-1]
-    env = {**os.environ, "HOME": os.environ["FLEET_LOCAL_HOME"]}
+    env = {**os.environ, "HOME": str(local_home)}
     done = subprocess.run(
         [os.environ["FLEET_LOCAL_SHELL"], "-c", command],
         env=env,

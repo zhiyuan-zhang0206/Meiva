@@ -20,7 +20,12 @@ from cli.fleet_update.plan.release_target import (
     ReleaseCertificate,
     format_tag_message,
 )
-from cli.tests.fleet_update.fleet_update_cluster import Cluster, certify_commit, git
+from cli.tests.fleet_update.fleet_update_cluster import (
+    Cluster,
+    certify_commit,
+    git,
+    run_host_shell,
+)
 
 
 def test_drift_checks_run_after_the_refresh(
@@ -166,8 +171,7 @@ def test_a_dirty_tree_is_shown_not_cleaned(tmp_path: Path) -> None:
     git(repo, "init", "-q", "--initial-branch=main")
 
     def check() -> subprocess.CompletedProcess[str]:
-        argv = ["bash", "-c", CLEAN]
-        return subprocess.run(argv, cwd=repo, capture_output=True, text=True, check=False)
+        return run_host_shell(["bash", "-c", CLEAN], cwd=repo)
 
     assert check().returncode == 0
     for n in range(25):

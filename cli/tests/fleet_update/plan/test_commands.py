@@ -33,6 +33,7 @@ from cli.fleet_update.plan.host_commands import (
 )
 from cli.fleet_update.plan.redaction import redact
 from cli.fleet_update.prestage import prestage_command
+from cli.tests.fleet_update.fleet_update_cluster import run_host_shell, write_executable
 
 _NEW = "0123456789abcdef0123456789abcdef01234567"
 
@@ -131,18 +132,7 @@ class _PrestageRig:
             **extra_env,
         }
         env.pop("UV_HTTP_TIMEOUT", None)
-        return subprocess.run(
-            ["bash", "-c", prestage_command(target)],
-            check=False,
-            capture_output=True,
-            text=True,
-            env=env,
-        )
-
-
-def _write_executable(path: Path, body: str) -> None:
-    path.write_text(body, encoding="utf-8")
-    path.chmod(0o755)
+        return run_host_shell(["bash", "-c", prestage_command(target)], env=env)
 
 
 def _git_in(repo: Path, *args: str) -> str:
@@ -170,10 +160,10 @@ def _build_prestage_rig(tmp_path: Path) -> _PrestageRig:
     bin_dir.mkdir()
     (home / ".env").write_text("", encoding="utf-8")
     source_py = repo / ".venv" / "bin" / "python"
-    _write_executable(source_py, f'#!/bin/sh\necho "python:$0" >> "{log_file}"\nexit 0\n')
+    write_executable(source_py, f'#!/bin/sh\necho "python:$0" >> "{log_file}"\nexit 0\n')
     source_sentinel = repo / ".venv" / "sentinel.txt"
     source_sentinel.write_text("immutable\n", encoding="utf-8")
-    _write_executable(
+    write_executable(
         bin_dir / "uv",
         "#!/bin/sh\n"
         f'echo "uv:timeout=$UV_HTTP_TIMEOUT:pyproject=$([ -f pyproject.toml ] && echo yes || echo no)" >> "{log_file}"\n'
@@ -183,7 +173,7 @@ def _build_prestage_rig(tmp_path: Path) -> _PrestageRig:
         'chmod +x "$UV_PROJECT_ENVIRONMENT/bin/python"\n'
         'exit "${FAKE_UV_RC:-0}"\n',
     )
-    _write_executable(
+    write_executable(
         bin_dir / "pnpm",
         f'#!/bin/sh\necho "pnpm:$*" >> "{log_file}"\nexit "${{FAKE_PNPM_RC:-0}}"\n',
     )
