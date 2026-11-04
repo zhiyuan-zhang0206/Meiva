@@ -35,9 +35,11 @@ syncing producer and consumer; not forward-compat.
 """
 
 from enum import StrEnum
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+
+from base.host.boundary.untyped import object_of
 
 # One SSE event per window: the agent-side publisher coalesces deltas / chunks
 # into this window and the frontend throttles stream parsing to the same value
@@ -381,7 +383,7 @@ class TimelineSnapshot(_Base):
     """
 
     role: Literal["timeline_snapshot"] = "timeline_snapshot"
-    items: list[dict[str, Any]]  # list of TimelineItem.model_dump()
+    items: list[dict[str, object]]  # list of TimelineItem.model_dump()
     msg_count: int
 
 
@@ -648,12 +650,23 @@ EVENT_ADAPTER: TypeAdapter[Event] = TypeAdapter(
     ]
 )
 
+
+# meiva:note
+# The `role` literal an event class declares, read from its field default: pydantic types `default` as
+# `Any`, and an event class whose `role` is not a string is a declaration bug that stops the import.
+def _role_of(cls: type[Event]) -> str:
+    default = object_of(getattr, cls.model_fields["role"], "default")
+    if not isinstance(default, str):
+        raise TypeError(
+            f"{cls.__name__}.role must default to a string, got {type(default).__name__}"
+        )
+    return default
+
+
 # All events publish to settings.data_plane.events_channel (default 'meiva:events');
 # the UI subscribes to that one channel to receive every role. Derived from the
 # registry — each class's `role` literal is the single declaration.
-SYSTEM_ROLES: frozenset[str] = frozenset(
-    cls.model_fields["role"].default for cls, _ in ROLE_CLASSES
-)
+SYSTEM_ROLES: frozenset[str] = frozenset(_role_of(cls) for cls, _ in ROLE_CLASSES)
 
 # Cross-agent, low-frequency subset forwarded on the global /api/system
 # broadcast — every connected client sees these for *all* agents. Only the
@@ -667,6 +680,4 @@ SYSTEM_ROLES: frozenset[str] = frozenset(
 # not fan every token slice out N*M-fold. GLOBAL_ROLES is a strict subset of
 # SYSTEM_ROLES; the per-agent endpoint still forwards the full SYSTEM_ROLES
 # (filtered by agent_id). The `True` flags in _ROLE_CLASSES are the derivation.
-GLOBAL_ROLES: frozenset[str] = frozenset(
-    cls.model_fields["role"].default for cls, g in ROLE_CLASSES if g
-)
+GLOBAL_ROLES: frozenset[str] = frozenset(_role_of(cls) for cls, g in ROLE_CLASSES if g)

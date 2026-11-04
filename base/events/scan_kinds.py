@@ -35,6 +35,8 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
+from base.host.boundary.options import options
+
 # Directories never scanned (mirrors the repo hygiene excludes).
 EXCLUDE_DIRS = {
     ".git",
@@ -266,10 +268,17 @@ def scan_label_only_calls(repo: Path) -> list[LabelOnlyCall]:
     return sorted(findings, key=lambda f: (f.path, f.lineno))
 
 
+# meiva:note
+# The command line, typed: `--repo` is the checkout to scan.
+@dataclass(frozen=True)
+class Options:
+    repo: str
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
     ap.add_argument("--repo", default=str(Path(__file__).resolve().parents[2]))
-    args = ap.parse_args()
+    args = options(ap.parse_args(), Options)
 
     event_kinds, event_type_kinds, sse_roles = scan_code(Path(args.repo))
 

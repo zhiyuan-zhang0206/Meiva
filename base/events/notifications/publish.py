@@ -4,7 +4,7 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Protocol
+from typing import Protocol
 
 import psycopg
 from psycopg_pool import ConnectionPool
@@ -54,7 +54,7 @@ def _record(
     overrides: dict[str, bool] | None,
     inputs: tuple[dict[str, bool], datetime | None, datetime],
     catalog: Mapping[str, NotificationCategory] | None = None,
-) -> tuple[NotificationCategory, tuple[Any, ...]] | None:
+) -> tuple[NotificationCategory, tuple[object, ...]] | None:
     declared = category(category_id, catalog)
     if not subject.strip():
         raise ValueError(f"notification {declared.id} needs a subject")
@@ -194,7 +194,10 @@ def announce_sync(pool: ConnectionPool, bus: SyncPublisher | None, notification_
     if row is None:
         return False
     published = bus.publish_best_effort_sync(
-        _emitted(*row).model_dump_json(), context="notification_emitted"
+        _emitted(
+            row.id, row.category, row.subject, row.body, row.href, row.importance, row.agent_id
+        ).model_dump_json(),
+        context="notification_emitted",
     )
     if published is None:
         return False

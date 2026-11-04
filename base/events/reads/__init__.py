@@ -5,7 +5,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
-from typing import Any, LiteralString, TypedDict
+from typing import LiteralString, NamedTuple, TypedDict
+
+from pydantic import TypeAdapter
 
 from base.db.protocols import SyncConnection
 from base.events.contract import EventTier
@@ -60,22 +62,34 @@ def _stream_id(event_uid: int) -> int:
     return event_uid + (1 << 64) if event_uid < 0 else event_uid
 
 
-def _row(record: tuple[Any, ...]) -> EventRecord:
-    (
-        event_uid,
-        ts,
-        trace_id,
-        span_id,
-        agent_id,
-        machine,
-        process,
-        event_name,
-        level,
-        source,
-        target_agent_id,
-        attributes,
-    ) = record
-    ts = ts.astimezone(UTC)
+# meiva:note
+# The columns of `_COLUMNS`, in order: a `TypeAdapter` validates each `audit_events` row into one of these.
+class _AuditRow(NamedTuple):
+    event_uid: int
+    ts: datetime
+    trace_id: str | None
+    span_id: str | None
+    agent_id: int | None
+    machine: str
+    process: str
+    event_name: str
+    level: str
+    source: str
+    target_agent_id: int | None
+    attributes: dict[str, object]
+
+
+_AUDIT_ROWS = TypeAdapter(list[_AuditRow])
+_COUNT_ROW = TypeAdapter(tuple[int])
+
+
+def _row(record: _AuditRow) -> EventRecord:
+    event_uid = record.event_uid
+    trace_id, span_id, agent_id = record.trace_id, record.span_id, record.agent_id
+    machine, process, event_name = record.machine, record.process, record.event_name
+    level, source, target_agent_id = record.level, record.source, record.target_agent_id
+    attributes = record.attributes
+    ts = record.ts.astimezone(UTC)
     digest = json.dumps(
         [
             ts.isoformat(),
@@ -121,9 +135,9 @@ def _tier_clause(tiers: Sequence[EventTier]) -> tuple[LiteralString | None, bool
     return ("level = ANY(%s)" if wants_anomaly else "NOT (level = ANY(%s))"), True
 
 
-def _where(filters: AuditFilter) -> tuple[LiteralString, list[Any]] | None:
+def _where(filters: AuditFilter) -> tuple[LiteralString, list[object]] | None:
     clauses: list[LiteralString] = []
-    params: list[Any] = []
+    params: list[object] = []
 
     def add(clause: LiteralString, *values: object) -> None:
         clauses.append(clause)
@@ -142,7 +156,7 @@ def _where(filters: AuditFilter) -> tuple[LiteralString, list[Any]] | None:
             involved_list,
             [f"agent:{involved}" for involved in involved_list],
         )
-    optional: tuple[tuple[LiteralString, Any], ...] = (
+    optional: tuple[tuple[LiteralString, object], ...] = (
         ("agent_id = %s", filters.agent_id),
         (
             "event_name = ANY(%s)",
@@ -185,7 +199,9 @@ def query_audit_rows(
         f"SELECT {_COLUMNS} FROM audit_events WHERE {clause} "  # noqa: S608
         f"ORDER BY ts {order}, id {order} LIMIT %s OFFSET %s"
     )
-    records = conn.execute(query, [*params, limit + 1, offset]).fetchall()
+    records = _AUDIT_ROWS.validate_python(
+        conn.execute(query, [*params, limit + 1, offset]).fetchall()
+    )
     return [_row(record) for record in records[:limit]], len(records) > limit
 
 
@@ -202,7 +218,29 @@ def count_audit_rows(
     query: LiteralString = f"SELECT count(*) FROM audit_events WHERE {clause}"  # noqa: S608
     row = conn.execute(query, params).fetchone()
     assert row is not None  # noqa: S101
-    return int(row[0])
+    (count,) = _COUNT_ROW.validate_python(row)
+    return count
+
+
+class _EdgeWeightRow(NamedTuple):
+    target_agent_id: int
+    agent_id: int
+    event_name: str
+    weight: float
+    events: int
+    last_seen: datetime
+
+
+class _EdgeCountRow(NamedTuple):
+    agent_id: int
+    target_agent_id: int
+    event_name: str
+    events: int
+    last_seen: datetime
+
+
+_EDGE_WEIGHT_ROWS = TypeAdapter(list[_EdgeWeightRow])
+_EDGE_COUNT_ROWS = TypeAdapter(list[_EdgeCountRow])
 
 
 def edge_weights(
@@ -217,8 +255,8 @@ def edge_weights(
         SELECT target_agent_id, agent_id, event_name,
                sum(CASE WHEN event_name = 'send_message'
                         THEN exp(-%(lam)s * extract(epoch FROM (%(now)s - ts)) / 86400.0)
-                        ELSE 2.0 END)::float8,
-               count(*), max(ts)
+                        ELSE 2.0 END)::float8 AS weight,
+               count(*) AS events, max(ts) AS last_seen
         FROM audit_events
         WHERE event_name = ANY(%(names)s)
           AND agent_id IS NOT NULL AND target_agent_id IS NOT NULL
@@ -227,24 +265,31 @@ def edge_weights(
                OR (agent_id = ANY(%(live)s) AND target_agent_id = ANY(%(live)s)))
         GROUP BY target_agent_id, agent_id, event_name
     """
-    records = conn.execute(
-        query,
-        {
-            "lam": decay_lambda,
-            "now": now,
-            "names": list(EDGE_EVENT_NAMES),
-            "win": win_start,
-            "live": sorted(live_ids) if live_ids is not None else None,
-        },
-    ).fetchall()
-    return [(int(t), int(a), str(n), float(w), int(c), last) for t, a, n, w, c, last in records]
+    records = _EDGE_WEIGHT_ROWS.validate_python(
+        conn.execute(
+            query,
+            {
+                "lam": decay_lambda,
+                "now": now,
+                "names": list(EDGE_EVENT_NAMES),
+                "win": win_start,
+                "live": sorted(live_ids) if live_ids is not None else None,
+            },
+        ).fetchall()
+    )
+    return [
+        (r.target_agent_id, r.agent_id, r.event_name, r.weight, r.events, r.last_seen)
+        for r in records
+    ]
 
 
 def edge_counts(conn: SyncConnection) -> list[tuple[int, int, str, int, datetime]]:
-    records = conn.execute(
-        "SELECT agent_id, target_agent_id, event_name, count(*), max(ts) FROM audit_events "
-        "WHERE event_name = ANY(%s) AND agent_id IS NOT NULL AND target_agent_id IS NOT NULL "
-        "GROUP BY agent_id, target_agent_id, event_name",
-        [list(EDGE_EVENT_NAMES)],
-    ).fetchall()
-    return [(int(a), int(t), str(n), int(c), last) for a, t, n, c, last in records]
+    records = _EDGE_COUNT_ROWS.validate_python(
+        conn.execute(
+            "SELECT agent_id, target_agent_id, event_name, count(*), max(ts) FROM audit_events "
+            "WHERE event_name = ANY(%s) AND agent_id IS NOT NULL AND target_agent_id IS NOT NULL "
+            "GROUP BY agent_id, target_agent_id, event_name",
+            [list(EDGE_EVENT_NAMES)],
+        ).fetchall()
+    )
+    return [(r.agent_id, r.target_agent_id, r.event_name, r.events, r.last_seen) for r in records]

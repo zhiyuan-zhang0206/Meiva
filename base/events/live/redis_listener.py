@@ -25,12 +25,11 @@ from __future__ import annotations
 
 import asyncio
 import math
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from enum import StrEnum
-from typing import Any, TypeGuard
+from typing import Protocol, TypeGuard
 
 import redis.asyncio as aredis
-from redis.asyncio.client import PubSub as _RedisPubSub
 
 from base.clock import Timers
 from base.cluster import inbound_channel
@@ -86,7 +85,7 @@ class _Phase(StrEnum):
     STOP_CLEANUP = "stop-cleanup"
 
 
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict)
 
 
@@ -94,6 +93,30 @@ def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
 # The channel prefix and the timers are handed in: the caller that read the configuration and owns
 # the process clock passes both, so no record in this class answers "which channel" or "how much
 # time is left" from the process it runs in, and a test drives a wait budget with `ManualTimers`.
+# meiva:note
+# The part of a redis-py `PubSub` this listener drives: subscribe to its channel, probe the socket,
+# read one message, close. A test's in-memory double provides these and nothing more.
+class _PubSubHandle(Protocol):
+    def subscribe(self, *args: str) -> Awaitable[object]: ...
+
+    def ping(self) -> Awaitable[object]: ...
+
+    def get_message(
+        self, *, ignore_subscribe_messages: bool = False, timeout: float | None = 0.0
+    ) -> Awaitable[object]: ...
+
+    def aclose(self) -> Awaitable[object]: ...
+
+
+# meiva:note
+# The part of a redis-py async `Redis` client this listener drives: open a pub/sub handle on its own
+# connection, and close.
+class _RedisHandle(Protocol):
+    def pubsub(self, *, ignore_subscribe_messages: bool = False) -> _PubSubHandle: ...
+
+    def aclose(self) -> Awaitable[object]: ...
+
+
 class RedisInboundListener:
     """Per-agent Redis pub/sub listener for inbound message wake-ups.
 
@@ -119,7 +142,7 @@ class RedisInboundListener:
         events_channel: str,
         timers: Timers,
         consume_abandon_grace: float = _CONSUME_ABANDON_GRACE,
-        redis_factory: Callable[..., Any] | None = None,
+        redis_factory: Callable[..., _RedisHandle] | None = None,
     ) -> None:
         self._redis_url = redis_url
         self._agent_id = agent_id
@@ -129,16 +152,16 @@ class RedisInboundListener:
         # `redis_factory` lets unit tests inject an in-memory Redis double without
         # patching `redis.asyncio.Redis.from_url`; `redis-py` types `from_url` as
         # partially unknown under strict pyright.
-        self._redis_factory: Callable[..., aredis.Redis] = redis_factory or aredis.Redis.from_url  # pyright: ignore[reportUnknownMemberType]
+        self._redis_factory: Callable[..., _RedisHandle] = redis_factory or aredis.Redis.from_url  # pyright: ignore[reportUnknownMemberType]
         self._channel = inbound_channel(agent_id, events_channel)
-        self._redis: aredis.Redis | None = None
-        self._pubsub: _RedisPubSub | None = None
+        self._redis: _RedisHandle | None = None
+        self._pubsub: _PubSubHandle | None = None
         self._lock = asyncio.Lock()
         self._stopped = False
         self._generation = 0
-        self._operations: dict[asyncio.Task[Any], _Phase] = {}
+        self._operations: dict[asyncio.Task[object], _Phase] = {}
         self._operation_number = 0
-        self._abandoned: set[asyncio.Task[Any]] = set()
+        self._abandoned: set[asyncio.Task[object]] = set()
         self._late_errors: list[BaseException] = []
         self._stop_cleanup: asyncio.Task[None] | None = None
         # Serialize concurrent wait_one() calls so they never run two
@@ -158,7 +181,7 @@ class RedisInboundListener:
         """Known operations still running; returning from wait/stop is not termination."""
         return tuple(sorted(task.get_name() for task in self._operations if not task.done()))
 
-    def _own_operation(self, task: asyncio.Task[Any], phase: _Phase) -> None:
+    def _own_operation(self, task: asyncio.Task[object], phase: _Phase) -> None:
         self._operation_number += 1
         task.set_name(
             f"redis-inbound:{self._agent_id}:{phase.value}:{self._generation}:{self._operation_number}"
@@ -166,7 +189,7 @@ class RedisInboundListener:
         self._operations[task] = phase
         task.add_done_callback(self._operation_done)
 
-    def _operation_done(self, task: asyncio.Task[Any]) -> None:
+    def _operation_done(self, task: asyncio.Task[object]) -> None:
         if task.cancelled():
             if task in self._abandoned:
                 self._abandoned.remove(task)
@@ -187,7 +210,7 @@ class RedisInboundListener:
             return  # The existing Redis dead-transport quirk contract excludes cleanup.
         self._report_late_error(error, task)
 
-    def _report_late_error(self, error: BaseException, task: asyncio.Task[Any] | None) -> None:
+    def _report_late_error(self, error: BaseException, task: asyncio.Task[object] | None) -> None:
         self._late_errors.append(error)
         asyncio.get_running_loop().call_exception_handler(
             {
@@ -198,7 +221,7 @@ class RedisInboundListener:
             }
         )
 
-    def _release_operation(self, task: asyncio.Task[Any], *, claimed: bool) -> None:
+    def _release_operation(self, task: asyncio.Task[object], *, claimed: bool) -> None:
         if claimed:
             self._operations.pop(task)
             return
@@ -210,7 +233,7 @@ class RedisInboundListener:
             task.cancel()
 
     async def _wait_for_operation(
-        self, task: asyncio.Task[Any], timeout: float, *, opening: bool = False
+        self, task: asyncio.Task[object], timeout: float, *, opening: bool = False
     ) -> bool:
         claimed = False
         try:
@@ -227,7 +250,7 @@ class RedisInboundListener:
             raise RuntimeError("Redis inbound listener has stopped")
 
     def _subscription_is_current(
-        self, pubsub: _RedisPubSub | None, redis: aredis.Redis | None, generation: int
+        self, pubsub: _PubSubHandle | None, redis: _RedisHandle | None, generation: int
     ) -> bool:
         return (
             pubsub is not None
@@ -293,7 +316,7 @@ class RedisInboundListener:
             wake_reason=reason or "",
         )
 
-    async def _open_and_subscribe(self) -> _RedisPubSub:
+    async def _open_and_subscribe(self) -> _PubSubHandle:
         """Open a fresh Redis connection, subscribe to the agent's channel.
 
         Caller must hold `self._lock`.  The new connection + pubsub are
@@ -322,7 +345,7 @@ class RedisInboundListener:
             # (agent 2613, 2026-08-04).
             connection_class=TransportAwareAsyncConnection,
         )
-        pubsub: _RedisPubSub | None = None
+        pubsub: _PubSubHandle | None = None
         try:
             # redis-py types pubsub()'s **kwargs as Unknown; the call itself is fully typed.
             pubsub = redis.pubsub(ignore_subscribe_messages=True)  # pyright: ignore[reportUnknownMemberType]
@@ -337,7 +360,7 @@ class RedisInboundListener:
         self._pubsub = pubsub
         return pubsub
 
-    async def _ensure_subscribed(self) -> _RedisPubSub:
+    async def _ensure_subscribed(self) -> _PubSubHandle:
         """Return a subscribed pubsub handle, reconnecting if needed.
 
         Idempotent — if the current connection is alive, returns it as-is.
@@ -430,7 +453,7 @@ class RedisInboundListener:
             ch=self._channel,
         )
 
-    async def _consume_one(self, pubsub: _RedisPubSub, timeout: float) -> bool:
+    async def _consume_one(self, pubsub: _PubSubHandle, timeout: float) -> bool:
         """Consume one message from pubsub, or return when `timeout` expires.
 
         `pubsub.get_message(timeout=timeout)` returns None on timeout.
@@ -447,10 +470,7 @@ class RedisInboundListener:
             remaining = deadline - self._timers.monotonic()
             if remaining <= 0:
                 return False
-            raw_pubsub: Any = pubsub
-            msg: Any = await raw_pubsub.get_message(
-                timeout=remaining, ignore_subscribe_messages=True
-            )
+            msg = await pubsub.get_message(timeout=remaining, ignore_subscribe_messages=True)
             if _is_str_dict(msg) and msg.get("type") == "message":
                 return True  # Got a real inbound wake-up
             # msg is None (timeout) or a subscribe/unsubscribe confirmation — loop
@@ -593,8 +613,8 @@ class RedisInboundListener:
     async def _abandon_consume(
         self,
         remaining: float,
-        pubsub: _RedisPubSub,
-        redis: aredis.Redis | None,
+        pubsub: _PubSubHandle,
+        redis: _RedisHandle | None,
         generation: int,
     ) -> None:
         """Record the stalled consume and discard its unusable connection."""
@@ -619,8 +639,8 @@ class RedisInboundListener:
     async def _close_inner(
         self,
         *,
-        expected_pubsub: _RedisPubSub | None = None,
-        expected_redis: aredis.Redis | None = None,
+        expected_pubsub: _PubSubHandle | None = None,
+        expected_redis: _RedisHandle | None = None,
         expected_generation: int | None = None,
     ) -> None:
         """Close the underlying Redis connection + pubsub.  Caller must hold
@@ -638,8 +658,8 @@ class RedisInboundListener:
 
     async def _close_handles(
         self,
-        pubsub: _RedisPubSub | None,
-        redis: aredis.Redis | None,
+        pubsub: _PubSubHandle | None,
+        redis: _RedisHandle | None,
         *,
         primary: BaseException | None = None,
     ) -> None:
@@ -667,7 +687,7 @@ class RedisInboundListener:
                     first.add_note(f"Redis cleanup also failed: {error!r}")
                 raise first
 
-    async def _aclose_handle(self, handle: _RedisPubSub | aredis.Redis, what: str) -> None:
+    async def _aclose_handle(self, handle: _PubSubHandle | _RedisHandle, what: str) -> None:
         """Close one redis handle during teardown; a close failure must not abort the rest.
 
         A transport that is already dead fails its close with an OSError / RedisError —

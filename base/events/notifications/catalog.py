@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
 
 Importance = Literal["low", "normal", "high"]
 IMPORTANCES: frozenset[str] = frozenset({"low", "normal", "high"})
@@ -70,19 +70,58 @@ def core_catalog() -> dict[str, NotificationCategory]:
 
 
 # meiva:note
+# One field of a plugin's manifest entry as the type the category needs. The manifest validator checked
+# the entry's shape when the plugin loaded; a field of another type here is a manifest that was not
+# validated, and it stops with the field's name. A missing key is a `KeyError`.
+def _text(entry: Mapping[str, object], key: str) -> str:
+    value = entry[key]
+    if not isinstance(value, str):
+        raise TypeError(f"notification category {key} must be a string, got {type(value).__name__}")
+    return value
+
+
+def _flag(entry: Mapping[str, object], key: str) -> bool:
+    value = entry[key]
+    if not isinstance(value, bool):
+        raise TypeError(
+            f"notification category {key} must be a boolean, got {type(value).__name__}"
+        )
+    return value
+
+
+def _whole(entry: Mapping[str, object], key: str) -> int:
+    value = entry[key]
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise TypeError(
+            f"notification category {key} must be an integer, got {type(value).__name__}"
+        )
+    return value
+
+
+def _importance(entry: Mapping[str, object]) -> Importance:
+    value = entry["importance"]
+    if value == "low":
+        return "low"
+    if value == "normal":
+        return "normal"
+    if value == "high":
+        return "high"
+    raise ValueError(f"unknown notification importance: {value!r}")
+
+
+# meiva:note
 # One owner for the manifest-to-category mapping: the gateway reads plugins to serve
 # the switch list, and the CLI reads the same manifests to replay their categories, so
 # the field names and the `<plugin>.` namespace rule may not be spelled twice.
 # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
 def category_from_manifest(entry: Mapping[str, object], *, plugin: str) -> NotificationCategory:
-    raw_entry: Any = entry
     category = NotificationCategory(
-        id=raw_entry["id"],
-        label=raw_entry["label"],
-        description=raw_entry["description"],
-        importance=raw_entry["importance"],
-        default_enabled=raw_entry["defaultEnabled"],
-        dedupe_window_seconds=raw_entry["dedupeWindowSeconds"],
+        id=_text(entry, "id"),
+        label=_text(entry, "label"),
+        description=_text(entry, "description"),
+        importance=_importance(entry),
+        default_enabled=_flag(entry, "defaultEnabled"),
+        dedupe_window_seconds=_whole(entry, "dedupeWindowSeconds"),
     )
     if not category.id.startswith(f"{plugin}."):
         raise ValueError(f"plugin {plugin!r} declared {category.id!r} outside its own namespace")

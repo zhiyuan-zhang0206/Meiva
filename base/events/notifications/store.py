@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
 import psycopg
 from psycopg.rows import class_row
@@ -13,7 +13,9 @@ from base.db.transaction import write_transaction
 SETTINGS_KEY = "notifications.categories"
 
 _SELECT_OVERRIDES = "SELECT value FROM user_settings WHERE key = %s"
-_SELECT_INPUT_BASE = "SELECT (SELECT value FROM user_settings WHERE key = %s), now()"
+_SELECT_INPUT_BASE = (
+    "SELECT (SELECT value FROM user_settings WHERE key = %s) AS overrides, now() AS now"
+)
 _SELECT_LAST_KEYED = (
     "SELECT created_at FROM notification_events "
     "WHERE category = %s AND dedupe_key = %s ORDER BY created_at DESC LIMIT 1"
@@ -51,7 +53,7 @@ _SELECT_RECENT = (
     "SELECT id, category, subject, body, href, importance, agent_id, created_at "
     "FROM notification_events WHERE id > %s ORDER BY id DESC LIMIT %s"
 )
-_SELECT_LATEST = "SELECT COALESCE(MAX(id), 0) FROM notification_events"
+_SELECT_LATEST = "SELECT COALESCE(MAX(id), 0) AS id FROM notification_events"
 
 
 def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
@@ -71,42 +73,75 @@ def parse_overrides(value: object) -> dict[str, bool]:
     return switches
 
 
-def _last(row: tuple[Any, ...] | None) -> datetime | None:
-    return None if row is None else row[0]
+# meiva:note
+# The single column of each read below, by name: `class_row` builds one of these per row.
+@dataclass(frozen=True)
+class _InputBase:
+    overrides: object
+    now: datetime
+
+
+@dataclass(frozen=True)
+class _CreatedAt:
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class _Value:
+    value: object
+
+
+@dataclass(frozen=True)
+class _Id:
+    id: int
+
+
+# meiva:note
+# One row still owed its live event, as `unannounced_sync` returns it (the columns of `NotificationRecord`).
+@dataclass(frozen=True)
+class UnannouncedRow:
+    id: int
+    category: str
+    subject: str
+    body: str | None
+    href: str | None
+    importance: str
+    agent_id: int
 
 
 def read_inputs(
     conn: psycopg.Connection, *, category: str, dedupe_key: str | None
 ) -> tuple[dict[str, bool], datetime | None, datetime]:
-    base_row = conn.execute(_SELECT_INPUT_BASE, (SETTINGS_KEY,)).fetchone()
+    with conn.cursor(row_factory=class_row(_InputBase)) as cur:
+        base_row = cur.execute(_SELECT_INPUT_BASE, (SETTINGS_KEY,)).fetchone()
     if base_row is None:
         raise RuntimeError("notification input query returned no row")
-    raw_overrides, now = base_row
-    overrides = parse_overrides(raw_overrides)
-    last = (
-        None
-        if dedupe_key is None
-        else _last(conn.execute(_SELECT_LAST_KEYED, (category, dedupe_key)).fetchone())
-    )
-    return overrides, last, now
+    overrides = parse_overrides(base_row.overrides)
+    last = None
+    if dedupe_key is not None:
+        with conn.cursor(row_factory=class_row(_CreatedAt)) as cur:
+            keyed = cur.execute(_SELECT_LAST_KEYED, (category, dedupe_key)).fetchone()
+        last = None if keyed is None else keyed.created_at
+    return overrides, last, base_row.now
 
 
-def insert(conn: psycopg.Connection, params: tuple[Any, ...]) -> int:
-    row = conn.execute(_INSERT, params).fetchone()
+def insert(conn: psycopg.Connection, params: tuple[object, ...]) -> int:
+    with conn.cursor(row_factory=class_row(_Id)) as cur:
+        row = cur.execute(_INSERT, params).fetchone()
     if row is None:
         raise RuntimeError("notification insert returned no id")
-    return int(row[0])
+    return row.id
 
 
 def read_overrides_sync(pool: ConnectionPool) -> dict[str, bool]:
-    with pool.connection() as conn:
-        row = conn.execute(_SELECT_OVERRIDES, (SETTINGS_KEY,)).fetchone()
-    return parse_overrides(None if row is None else row[0])
+    with pool.connection() as conn, conn.cursor(row_factory=class_row(_Value)) as cur:
+        row = cur.execute(_SELECT_OVERRIDES, (SETTINGS_KEY,)).fetchone()
+    return parse_overrides(None if row is None else row.value)
 
 
-def unannounced_sync(pool: ConnectionPool, notification_id: int) -> tuple[Any, ...] | None:
-    with pool.connection() as conn:
-        return conn.execute(_SELECT_UNANNOUNCED, (notification_id,)).fetchone()
+def unannounced_sync(pool: ConnectionPool, notification_id: int) -> UnannouncedRow | None:
+    with pool.connection() as conn, conn.cursor(row_factory=class_row(UnannouncedRow)) as cur:
+        return cur.execute(_SELECT_UNANNOUNCED, (notification_id,)).fetchone()
 
 
 def mark_announced_sync(pool: ConnectionPool, notification_id: int) -> bool:
@@ -115,9 +150,9 @@ def mark_announced_sync(pool: ConnectionPool, notification_id: int) -> bool:
 
 
 def pending_sync(pool: ConnectionPool, *, min_age_seconds: float, limit: int) -> list[int]:
-    with pool.connection() as conn:
-        rows = conn.execute(_SELECT_PENDING, (min_age_seconds, limit)).fetchall()
-    return [int(row[0]) for row in rows]
+    with pool.connection() as conn, conn.cursor(row_factory=class_row(_Id)) as cur:
+        rows = cur.execute(_SELECT_PENDING, (min_age_seconds, limit)).fetchall()
+    return [row.id for row in rows]
 
 
 # meiva:note
@@ -142,6 +177,6 @@ def recent_sync(pool: ConnectionPool, *, after_id: int, limit: int) -> list[Noti
 
 
 def latest_id_sync(pool: ConnectionPool) -> int:
-    with pool.connection() as conn:
-        row = conn.execute(_SELECT_LATEST).fetchone()
-    return 0 if row is None else int(row[0])
+    with pool.connection() as conn, conn.cursor(row_factory=class_row(_Id)) as cur:
+        row = cur.execute(_SELECT_LATEST).fetchone()
+    return 0 if row is None else row.id

@@ -11,10 +11,11 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, tzinfo
-from typing import Any
+from typing import NotRequired, TypedDict
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-import psycopg
+from psycopg import Connection
+from psycopg.rows import TupleRow, class_row
 from psycopg_pool import ConnectionPool
 
 from base.events.notifications.catalog import NotificationCategory
@@ -23,7 +24,7 @@ from base.events.notifications.policy import SuppressionReason, decide
 from base.events.notifications.store import read_overrides_sync
 
 _NEEDS_INPUT_SQL = """
-SELECT id, agent_id, created_at, updated_at, question
+SELECT id AS notice_id, agent_id, created_at, updated_at, question
   FROM agent_notices
  WHERE require_response
    AND (created_at >= %s AND created_at < %s OR updated_at >= %s AND updated_at < %s)
@@ -81,17 +82,31 @@ class _Query:
     requestion: bool
 
 
-def _load_needs_input(cur: psycopg.Cursor[Any], query: _Query) -> list[Candidate]:
-    cur.execute(_NEEDS_INPUT_SQL, (query.start, query.end, query.start, query.end))
+# meiva:note
+# The columns of `_NEEDS_INPUT_SQL`, by name; `question` is whatever JSON the agent attached.
+@dataclass(frozen=True)
+class _NoticeRow:
+    notice_id: int
+    agent_id: int
+    created_at: datetime
+    updated_at: datetime | None
+    question: object
+
+
+def _load_needs_input(conn: Connection[TupleRow], query: _Query) -> list[Candidate]:
+    with conn.cursor(row_factory=class_row(_NoticeRow)) as cur:
+        rows = cur.execute(
+            _NEEDS_INPUT_SQL, (query.start, query.end, query.start, query.end)
+        ).fetchall()
     found: list[Candidate] = []
-    for notice_id, agent_id, created_at, updated_at, question in cur.fetchall():
+    for row in rows:
         found.extend(
             notice_candidates(
-                notice_id=int(notice_id),
-                agent_id=int(agent_id),
-                created_at=created_at,
-                updated_at=updated_at,
-                question=question,
+                notice_id=row.notice_id,
+                agent_id=row.agent_id,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+                question=row.question,
                 start=query.start,
                 end=query.end,
                 requestion=query.requestion,
@@ -104,7 +119,7 @@ def _load_needs_input(cur: psycopg.Cursor[Any], query: _Query) -> list[Candidate
 class _Source:
     category: str
     origin: str
-    load: Callable[[psycopg.Cursor[Any], _Query], list[Candidate]]
+    load: Callable[[Connection[TupleRow], _Query], list[Candidate]]
 
 
 _SOURCES: tuple[_Source, ...] = (
@@ -160,7 +175,7 @@ def replay(
 
 
 def load_candidates(
-    pool: ConnectionPool[Any],
+    pool: ConnectionPool[Connection[TupleRow]],
     *,
     start: datetime,
     end: datetime,
@@ -170,10 +185,10 @@ def load_candidates(
     wanted = set(categories)
     query = _Query(start=start, end=end, requestion=requestion)
     found: list[Candidate] = []
-    with pool.connection() as conn, conn.cursor() as cur:
+    with pool.connection() as conn:
         for source in _SOURCES:
             if source.category in wanted:
-                found.extend(source.load(cur, query))
+                found.extend(source.load(conn, query))
     return found
 
 
@@ -303,7 +318,7 @@ def _variants(
     simulations: Sequence[tuple[str, bool]],
     selected: Sequence[str],
     window: Window,
-    pool: ConnectionPool[Any],
+    pool: ConnectionPool[Connection[TupleRow]],
     catalog: Mapping[str, NotificationCategory],
     overrides: Mapping[str, bool],
     baseline: Replay,
@@ -322,6 +337,63 @@ def _variants(
     return variants
 
 
+class ReportWindow(TypedDict):
+    start: str
+    end: str
+    days: int
+    timezone: str
+
+
+class ReportDay(TypedDict):
+    day: str
+    by_category: dict[str, int]
+    total: int
+
+
+class ReportDelivered(TypedDict):
+    total: int
+    per_day: list[ReportDay]
+    per_category: dict[str, int]
+    per_hour: list[int]
+
+
+class ReportCandidates(TypedDict):
+    category: str
+    candidates: int
+    delivered: int
+    suppressed: int
+    repeat_deliveries: int
+
+
+class ReportSimulation(TypedDict):
+    variant: str
+    delivered: int
+    delta: int
+    per_day: float
+
+
+class ReportExplained(TypedDict):
+    at: str
+    category: str
+    agent_id: int
+    dedupe_key: str | None
+    outcome: str
+
+
+# meiva:note
+# The audit report, as the gateway serves it and the CLI prints it. `explain` is present only when the
+# replay was asked to explain each delivery.
+class AuditReport(TypedDict):
+    window: ReportWindow
+    switches: dict[str, bool]
+    categories: list[str]
+    sources: dict[str, str]
+    delivered: ReportDelivered
+    candidates: list[ReportCandidates]
+    simulations: list[ReportSimulation]
+    explain: NotRequired[list[ReportExplained]]
+
+
 def build_report(
     *,
     window: Window,
@@ -329,9 +401,9 @@ def build_report(
     switches: Mapping[str, bool],
     baseline: Replay,
     variants: Sequence[tuple[str, Replay]],
-) -> dict[str, Any]:
+) -> AuditReport:
     totals: Counter[str] = Counter()
-    per_day_rows: list[dict[str, Any]] = []
+    per_day_rows: list[ReportDay] = []
     for day, counts in per_day(
         baseline.delivered, start=window.start, end=window.end, tz=window.tz
     ):
@@ -343,7 +415,7 @@ def build_report(
                 "total": sum(counts.values()),
             }
         )
-    candidates_rows: list[dict[str, Any]] = []
+    candidates_rows: list[ReportCandidates] = []
     for category in categories:
         delivered = [c for c in baseline.delivered if c.category == category.id]
         keys = {c.dedupe_key for c in delivered if c.dedupe_key is not None}
@@ -358,7 +430,7 @@ def build_report(
         )
     base_total = len(baseline.delivered)
     origins = {source.category: source.origin for source in _SOURCES}
-    report: dict[str, Any] = {
+    report: AuditReport = {
         "window": {
             "start": window.start.isoformat(),
             "end": window.end.isoformat(),
@@ -390,7 +462,7 @@ def build_report(
     return report
 
 
-def explained_rows(items: Sequence[Explained], *, tz: tzinfo) -> list[dict[str, Any]]:
+def explained_rows(items: Sequence[Explained], *, tz: tzinfo) -> list[ReportExplained]:
     return [
         {
             "at": item.candidate.at.astimezone(tz).isoformat(),
@@ -413,7 +485,7 @@ def _on_off(*, value: bool) -> str:
 # Raises ValueError for an input the caller got wrong (window, zone, category, simulation);
 # `catalog` is the merged declared categories the spine would honor right now.
 def run_audit(
-    pool: ConnectionPool[Any],
+    pool: ConnectionPool[Connection[TupleRow]],
     *,
     catalog: Mapping[str, NotificationCategory],
     days: int,
@@ -422,7 +494,7 @@ def run_audit(
     now: datetime,
     simulate: Sequence[str],
     explain: bool,
-) -> dict[str, Any]:
+) -> AuditReport:
     window = window_for(days=days, tz_name=tz_name, now=now)
     selected, simulations = _selection(category=category, simulate=simulate)
     if missing := [name for name in selected if name not in catalog]:

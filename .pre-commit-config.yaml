@@ -742,8 +742,10 @@ repos:
         # load_events) must re-run the freshness check locally, not only in the CI
         # --all-files pass. The pattern covers the whole package, so a new domain
         # module needs no entry here; CI verifies the recursive source-module
-        # closure against it.
-        files: ^(base/events/__init__\.py$|base/events/contract\.py$|base/events/vocabulary\.py$|base/events/loader\.py$|base/events/declarations/|base/events/live/projection\.py$|scripts/codegen/gen_event_registry\.py$|base/events/registry\.md$)
+        # closure against it. `loader` and `projection` read declaration tables and
+        # role defaults through the `base/host/boundary` guards, so those two
+        # modules are part of the closure.
+        files: ^(base/events/__init__\.py$|base/events/contract\.py$|base/events/vocabulary\.py$|base/events/loader\.py$|base/events/declarations/|base/events/live/projection\.py$|base/host/boundary/(json_values|untyped)\.py$|scripts/codegen/gen_event_registry\.py$|base/events/registry\.md$)
         pass_filenames: false
 
       # base/host/env/config_lite_table.json must stay in sync with the config

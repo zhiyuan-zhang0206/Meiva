@@ -19,7 +19,7 @@ class _PubSub:
         self.parent: asyncio.Task[object] | None = None
         self.closed = False
 
-    async def subscribe(self, channel: str) -> None:
+    async def subscribe(self, *channels: str) -> None:
         self.open_task = asyncio.current_task()
         self.entered.set()
         try:
@@ -29,6 +29,14 @@ class _PubSub:
             raise
         if self.parent is not None:
             asyncio.get_running_loop().call_soon(self.parent.cancel)
+
+    async def ping(self) -> bool:
+        return True
+
+    async def get_message(
+        self, ignore_subscribe_messages: bool = False, timeout: float | None = 0.0
+    ) -> None:
+        return None
 
     async def aclose(self) -> None:
         self.closed = True
