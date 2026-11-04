@@ -49,6 +49,43 @@ FAMILY_DEFAULT_DAYS = {
 }
 
 
+# meiva:note
+# One parser for `FAMILY=DAYS,...`, shared by the `--family-days` flag and the
+# config value the daily job reads (`MEIVA_LOG_FAMILY_DAYS`). Two parsers would let the
+# flag and the job disagree about what a valid policy is.
+def _positive_days(value: str) -> int:
+    try:
+        days = int(value)
+    except ValueError as exc:
+        raise ValueError("days must be a positive integer") from exc
+    if days <= 0:
+        raise ValueError("days must be a positive integer")
+    return days
+
+
+FAMILY_DAYS_NAMES = frozenset(
+    {"agent", "shell", "gateway", "ops", "watchdog", "snapshot", "other", "default"}
+)
+
+
+def parse_family_days(value: str) -> dict[str, int]:
+    parsed: dict[str, int] = {}
+    for assignment in value.split(","):
+        family, separator, days = assignment.partition("=")
+        if not separator or not family or not days:
+            raise ValueError("family days must use FAMILY=DAYS pairs separated by commas")
+        if family not in FAMILY_DAYS_NAMES:
+            raise ValueError(
+                "family must be agent, shell, gateway, ops, watchdog, snapshot, other, or default"
+            )
+        if family == "default":
+            family = "other"
+        if family in parsed:
+            raise ValueError(f"family {family!r} is repeated")
+        parsed[family] = _positive_days(days)
+    return parsed
+
+
 @dataclass(frozen=True)
 class RetentionCandidate:
     path: Path
@@ -124,6 +161,38 @@ def log_service(match: re.Match[str]) -> str | None:
     if service_stdout is None:
         return None
     return service_stdout.removeprefix("meiva-").split(".out.log", 1)[0]
+
+
+# meiva:note
+# The daily job's single entry point: rotate, then retain, with the retention policy
+# read when it runs instead of baked into the job command.
+#
+# The split matters because a generated job command is rewritten by whichever install
+# runs converge. Keeping the tiers out of it means a release can no longer carry the
+# operator's decision away; the cost is that a CLI too old to know this subcommand exits
+# non-zero, which shows up as launchd `last exit code != 0` rather than as a silently
+# wrong policy window.
+DEFAULT_ROTATE_SIZE_MIB = 64
+
+
+def cmd_logs_maintenance(
+    *,
+    family_days_text: str,
+    logs_path: Path,
+    now: datetime,
+    rotate_size_mib: int = DEFAULT_ROTATE_SIZE_MIB,
+) -> int:
+    rotated = cmd_logs_rotate(dry_run=False, size_mib=rotate_size_mib, logs_path=logs_path, now=now)
+    if rotated != 0:
+        return rotated
+    return cmd_logs_retention(
+        older_than_days=None,
+        family_days=parse_family_days(family_days_text),
+        default_retention_days=None,
+        dry_run=False,
+        logs_path=logs_path,
+        now=now,
+    )
 
 
 def log_family(match: re.Match[str]) -> str:

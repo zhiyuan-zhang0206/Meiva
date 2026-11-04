@@ -10,7 +10,7 @@ from base.host.system import logs_content, packages_content, pr_flow_content, wa
 from base.host.system.job_values import JobPaths, JobRoots
 
 
-def test_launchd_plist_runs_rotate_then_retention_daily(
+def test_launchd_plist_runs_maintenance_daily(
     job_roots: JobRoots,
 ) -> None:
     content = logs_content.launchd_plist_content(
@@ -26,9 +26,15 @@ def test_launchd_plist_runs_rotate_then_retention_daily(
     assert "<string>com.meiva.logs-maintenance</string>" in content
     assert values[0:2] == ["/bin/sh", "-c"]
     assert command is not None
-    assert "'/work tree/.venv/bin/meiva' logs rotate" in command
-    assert "&& '/work tree/.venv/bin/meiva' logs retention" in command
-    assert f"--family-days {logs_content.FAMILY_DAYS}" in command
+    assert command == "'/work tree/.venv/bin/meiva' logs maintenance"
+    # meiva:note
+    # The job command must carry no policy. A generated plist is rewritten by whichever
+    # install runs converge, so a tier list baked here is a copy that any release can
+    # overwrite - on 2026-11-05 an update restored the older tiers eight minutes after a
+    # seven-day policy was applied. The retention window now lives in
+    # MEIVA_LOG_FAMILY_DAYS and is read when the command runs.
+    assert "--family-days" not in command
+    assert "agent=7" not in command
     assert "<key>Hour</key>\n            <integer>4</integer>" in content
     assert "<key>Minute</key>\n            <integer>40</integer>" in content
     assert "<key>RunAtLoad</key>\n    <false/>" in content

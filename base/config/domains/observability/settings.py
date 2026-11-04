@@ -71,6 +71,30 @@ class ObservabilitySettings(EnvSettings):
         },
     )
 
+    # meiva:note
+    # The retention policy is data, not code: the maintenance job renders without any
+    # `--family-days`, and reads this value at run time. A policy baked into the job
+    # command travels with every release and gets silently rewritten by the next
+    # converge - on 2026-11-05 an update reverted a seven-day policy to the older tiers
+    # eight minutes after it was applied.
+    log_family_days: str = Field(
+        default="agent=7,shell=7,gateway=7,ops=7,watchdog=7,snapshot=7,other=7",
+        alias="MEIVA_LOG_FAMILY_DAYS",
+        description=(
+            "Retention in days per log family, in the same FAMILY=DAYS form as "
+            "`meiva logs retention --family-days`. Read by `meiva logs maintenance`, "
+            "the command the daily job runs, so changing the policy is a config write "
+            "rather than a release."
+        ),
+        json_schema_extra={
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     log_retention_days: int = Field(
         default=14,
         ge=1,

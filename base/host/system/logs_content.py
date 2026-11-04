@@ -13,7 +13,6 @@ from base.host.system.job_values import (
 )
 
 __all__ = [
-    "FAMILY_DAYS",
     "HOUR",
     "LABEL",
     "MARKER",
@@ -24,18 +23,6 @@ __all__ = [
     "shell_command",
 ]
 
-
-# meiva:note
-# Every log family keeps seven days.
-#
-# Tiering kept agent logs 15 days and gateway/ops/watchdog 30, on the assumption that those
-# families were worth more and cost less. A measurement on 2026-11-05 says otherwise: the
-# directory held 3.62 GiB across 3358 files, and nothing in the long-retention families still
-# held bytes past seven days - running with seven days deleted 85 files and 6.2 MiB. What sets
-# the directory's size is its generation rate (~520 MiB/day), not the retention window. The user
-# chose seven from a 7/14 choice: a full working week, weekends included. Collapsing the tiers
-# also leaves one answer to "how long do we keep logs" instead of seven.
-FAMILY_DAYS = "agent=7,shell=7,gateway=7,ops=7,watchdog=7,snapshot=7,other=7"
 
 MARKER = "# meiva-logs-maintenance"
 
@@ -50,9 +37,22 @@ def log_path(roots: JobRoots) -> Path:
     return roots.home / "logs" / "logs-maintenance.out.log"
 
 
+# meiva:note
+# The job names behaviour, not policy.
+#
+# It used to spell the tiers out (`--family-days agent=15,...`), which made every
+# generated plist a copy of a decision that belongs to the operator. A converge run from
+# an older install then rewrote the plist with its own copy: on 2026-11-05 an update
+# reverted a seven-day policy eight minutes after it was applied. `logs maintenance`
+# reads `MEIVA_LOG_FAMILY_DAYS` when it runs, so the value lives in one place that no
+# release carries.
+#
+# The trade-off is a version skew: a CLI too old to know `logs maintenance` exits
+# non-zero and the job stops visibly (launchd `last exit code` is not 0) instead of
+# silently applying the wrong tiers.
 def shell_command(paths: JobPaths) -> str:
     meiva = shlex.quote(paths.meiva)
-    return f"{meiva} logs rotate && {meiva} logs retention --family-days {FAMILY_DAYS}"
+    return f"{meiva} logs maintenance"
 
 
 def launchd_plist_content(*, paths: JobPaths, path_env: str) -> str:

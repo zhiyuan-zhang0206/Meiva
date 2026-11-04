@@ -265,6 +265,17 @@ def test_logs_retention_parser_accepts_the_public_flags() -> None:
     assert args.dry_run is True
 
 
+# meiva:note
+# `logs maintenance` is the daily job's entry point and takes no flags: the policy it
+# applies comes from MEIVA_LOG_FAMILY_DAYS, not from the command line, which is what lets
+# the generated job command stay free of the operator's decision.
+def test_logs_maintenance_parser_is_reachable_and_flagless() -> None:
+    args = _parsers.parse_args(["logs", "maintenance"])
+
+    assert args.logs_cmd == "maintenance"
+    assert not hasattr(args, "family_days")
+
+
 def test_logs_retention_parser_accepts_default_as_the_other_family() -> None:
     args = _parsers.parse_args(["logs", "retention", "--family-days", "agent=15,default=14"])
 

@@ -20,7 +20,7 @@ from base.host.system.job_values import JobPaths, JobRoots
 _RECORDER = """import json, os, sys
 with open(os.environ['CAPTURE'], 'a') as output:
     output.write(json.dumps({'argv': sys.argv[1:], 'home': os.environ['MEIVA_HOME']}) + '\\n')
-if sys.argv[1:] == ['logs', 'rotate']:
+if sys.argv[1:] == ['logs', 'maintenance']:
     sys.exit(int(os.environ.get('ROTATE_RC', '0')))
 """
 
@@ -100,10 +100,7 @@ def test_generated_job_delivers_real_argv_and_environment(
     assert (result.returncode, result.stderr) == (0, "")
     records = [json.loads(line) for line in capture.read_text().splitlines()]
     expected: dict[str, list[list[str]]] = {
-        "logs": [
-            ["logs", "rotate"],
-            ["logs", "retention", "--family-days", logs_content.FAMILY_DAYS],
-        ],
+        "logs": [["logs", "maintenance"]],
         "packages": [["packages", "refresh", "--from-job"]],
         "pr-flow": [[]],
         "walg": [["backup", "walg", "run"]],
@@ -111,7 +108,14 @@ def test_generated_job_delivers_real_argv_and_environment(
     assert records == [{"argv": args, "home": str(paths.roots.home)} for args in expected[kind]]
 
 
-def test_rotate_failure_stops_retention_in_the_real_shell(tmp_path: Path) -> None:
+# meiva:note
+# The job must fail when maintenance fails.
+#
+# This is the whole visibility story for a version skew: a CLI too old to know
+# `logs maintenance` exits non-zero, and the only place that becomes observable is
+# launchd's `last exit code`. A shell that swallowed the exit code would turn a broken
+# log-maintenance job into silence - worse than the wrong retention window it replaced.
+def test_the_job_reports_the_maintenance_exit_code(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
     body, _ = _definitions("logs", paths)
     plist = plistlib.loads(body.encode())
@@ -131,5 +135,5 @@ def test_rotate_failure_stops_retention_in_the_real_shell(tmp_path: Path) -> Non
     )
     assert result.returncode == 19
     assert [json.loads(line)["argv"] for line in capture.read_text().splitlines()] == [
-        ["logs", "rotate"]
+        ["logs", "maintenance"]
     ]
