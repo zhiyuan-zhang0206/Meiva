@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from pydantic import SecretStr
 
 if TYPE_CHECKING:
     # Annotation-only (`build` return): keeps the chat-model stack off the
@@ -47,7 +49,7 @@ class OpenAIServiceTier(StrEnum):
     PRIORITY = "priority"
 
 
-def served_speed(metadata: Mapping[str, Any]) -> InferenceSpeed:
+def served_speed(metadata: Mapping[str, object]) -> InferenceSpeed:
     """GPT-5.6 reports priority for Fast; ramp-rate downgrades report default."""
     tier = OpenAIServiceTier(metadata.get("service_tier"))
     return InferenceSpeed.STANDARD if tier == OpenAIServiceTier.DEFAULT else InferenceSpeed.FAST
@@ -90,12 +92,12 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # without a declared vocabulary keep the historic verbatim passthrough.
     if model_levels is not None:
         gpt_effort = validate_effort(gpt_effort, model_levels, target=ctx.model)
-    gpt_reasoning: dict[str, Any] = (
+    gpt_reasoning: dict[str, str] = (
         {"effort": gpt_effort} if thinking_disabled else {"effort": gpt_effort, "summary": "auto"}
     )
     return ChatOpenAI(
-        model=(ctx.spec.fast_of if ctx.spec and ctx.spec.fast_of else ctx.model),  # type: ignore[call-arg]
-        api_key=api_key,  # type: ignore[arg-type]
+        model=(ctx.spec.fast_of if ctx.spec and ctx.spec.fast_of else ctx.model),
+        api_key=SecretStr(api_key),
         use_responses_api=True,
         reasoning=gpt_reasoning,
         service_tier="fast" if ctx.spec and ctx.spec.fast_of else "default",
