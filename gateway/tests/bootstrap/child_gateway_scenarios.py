@@ -20,7 +20,7 @@ import os
 import subprocess
 import sys
 from collections.abc import AsyncGenerator, AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -43,13 +43,37 @@ def _mark(name: str) -> None:
         fh.write(f"{name}\n")
 
 
-@asynccontextmanager
-async def _lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-    _mark("lifespan-startup")
-    try:
-        yield
-    finally:
-        _mark("lifespan-shutdown")
+# meiva:note
+# The longest the lifespan waits for the cleanup of a cancelled stream. The wait ends on the
+# cleanup itself; the bound only applies when the cancellation never reaches the generator, which
+# the parent then reports through the missing marker instead of through its own kill deadline.
+_STREAM_CLEANUP_WAIT_S = 5.0
+
+
+# meiva:note
+# The test app's lifespan.
+#
+# uvicorn cancels the unfinished tasks when the drain budget runs out and then runs the lifespan
+# shutdown without waiting for them; the process ends on the re-raised SIGTERM as soon as that
+# returns. A stream whose own sleep has just expired when the cancellation arrives is skipped by
+# anyio's first delivery (its wake-up is already due) and cancelled a loop turn later, so its
+# cleanup can run after the process is gone. The lifespan therefore waits for the cleanup of a
+# stream it saw open, so the `stream-closed` marker is an observation, not a race with the exit.
+class _Lifespan:
+    def __init__(self) -> None:
+        self.stream_open = asyncio.Event()
+        self.stream_cleaned = asyncio.Event()
+
+    @asynccontextmanager
+    async def __call__(self, _app: FastAPI) -> AsyncGenerator[None]:
+        _mark("lifespan-startup")
+        try:
+            yield
+        finally:
+            if self.stream_open.is_set():
+                with suppress(TimeoutError):
+                    await asyncio.wait_for(self.stream_cleaned.wait(), _STREAM_CLEANUP_WAIT_S)
+            _mark("lifespan-shutdown")
 
 
 def build_app() -> FastAPI:
@@ -58,18 +82,21 @@ def build_app() -> FastAPI:
 
     from gateway.http.middleware import stopping
 
-    app = FastAPI(lifespan=_lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+    lifespan = _Lifespan()
+    app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.get("/stream")
     async def _stream() -> StreamingResponse:
         async def _frames() -> AsyncIterator[bytes]:
             _mark("stream-open")
+            lifespan.stream_open.set()
             try:
                 while True:
                     yield b"data: tick\n\n"
                     await asyncio.sleep(0.1)
             except (asyncio.CancelledError, GeneratorExit) as exc:
                 _mark(f"stream-closed:{type(exc).__name__}")
+                lifespan.stream_cleaned.set()
                 raise
 
         return StreamingResponse(_frames(), media_type="text/event-stream")

@@ -17,6 +17,12 @@
 # cleanup. The parent holds its client connection open through the whole
 # shutdown — closing it would make shutdown pass for the wrong reason.
 #
+# uvicorn cancels the unfinished tasks at the budget and runs the lifespan shutdown without
+# waiting for them; the process then ends on the re-raised SIGTERM. The stuck stream's cleanup
+# can therefore land after the exit, and the parent would read a marker that was never written.
+# The test app's lifespan (in ``child_gateway_scenarios``) waits for that cleanup, so the
+# marker is written before the process ends on every run.
+#
 # The drain budget reaches the child through a throwaway `$MEIVA_HOME/.env`, the
 # operator's real channel; a bare environment variable is dropped for
 # cluster-scope fields before Settings reads it.
