@@ -14,20 +14,37 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
+from types import ModuleType
 
 from base.host.boundary.untyped import object_of
 from meiva_builtins.skills.tests.skill_script import load_skill_script
 
 _SCRAPE = ("integrations", "web-sources", "scripts")
 _RSS = ("integrations", "web-sources", "rss", "scripts")
-load_skill_script(*_SCRAPE, "scrape_wire.py", name="scrape_wire")
-ladder = load_skill_script(*_SCRAPE, "scrape_ladder.py", name="scrape_ladder")
-post_view = load_skill_script(*_SCRAPE, "scrape_post.py", name="scrape_post")
-scrape = load_skill_script(*_SCRAPE, "webscrape.py", name="webscrape")
-post_mod = load_skill_script(*_RSS, "rss_post.py", name="rss_post")
-load_skill_script(*_RSS, "rss_plan.py", name="rss_plan")
-feed = load_skill_script(*_RSS, "feed.py", name="rss_feed_under_test")
+
+
+# meiva:note
+# A skill script under the name the adapters' plain imports resolve through (`from scrape_wire
+# import ...`, `import webscrape`), reusing the copy this process already holds. Loading a second
+# copy would put it in `sys.modules` under a name another module's reader still resolves, and a
+# `WebScrapeError` raised from the new copy is a different class object from the one that reader
+# catches — a test module must not change what the adapter it is testing sees.
+def _loaded(*parts: str, name: str) -> ModuleType:
+    existing = sys.modules.get(name)
+    if existing is not None:
+        return existing
+    return load_skill_script(*parts, name=name)
+
+
+_loaded(*_SCRAPE, "scrape_wire.py", name="scrape_wire")
+ladder = _loaded(*_SCRAPE, "scrape_ladder.py", name="scrape_ladder")
+post_view = _loaded(*_SCRAPE, "scrape_post.py", name="scrape_post")
+scrape = _loaded(*_SCRAPE, "webscrape.py", name="webscrape")
+post_mod = _loaded(*_RSS, "rss_post.py", name="rss_post")
+_loaded(*_RSS, "rss_plan.py", name="rss_plan")
+feed = _loaded(*_RSS, "feed.py", name="rss_feed_under_test")
 
 _URL = "https://example.com/a"
 _FETCHED_AT = "2026-06-08T10:00:05Z"

@@ -79,7 +79,7 @@ from rss_post import (
     render_markdown,
     to_s1,
 )
-from scrape_wire import ScrapeConfig, WebScrapeError, config_from_env, curl_argv, refusal
+from scrape_wire import ScrapeConfig, config_from_env, curl_argv, refusal
 
 
 # meiva:note
@@ -242,12 +242,21 @@ def _is_saved_complete(root: Path, entry_id: str, full: bool) -> bool:
 # page) does it raise; that is swallowed here, the feed summary stays, and the post is left not
 # `_full` so a later --full run retries this one. The whole feed sync must not abort here.
 # `webscrape` imports trafilatura, so it is loaded only when `--full` is actually used.
+
+
+# meiva:note
+# The class caught is `webscrape.WebScrapeError`, not this module's own import of the same name.
+# A `WebScrapeError` belongs to the copy of `scrape_wire` the raising module was built with, and a
+# process that loads this script twice (another adapter's tests, a reload) leaves the second copy's
+# classes in `sys.modules` while this module keeps the first — two distinct class objects under one
+# name. Catching the copy this module imported would then miss the raise and abort the whole feed
+# sync instead of falling back to the summary.
 def _full_text(scrape: ScrapeConfig, url: str) -> str | None:
     import webscrape
 
     try:
         article, _via = webscrape.fetch_article(scrape, url)
-    except WebScrapeError as e:
+    except webscrape.WebScrapeError as e:
         print(f"[full-fallback] {url}: {e}", file=sys.stderr)
         return None
     return article["text"]
