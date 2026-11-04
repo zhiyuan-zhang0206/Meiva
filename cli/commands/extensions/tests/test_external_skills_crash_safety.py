@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import json
 import os
 import random
 import shutil
 import stat
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, cast
 
 import pytest
 
@@ -26,8 +24,13 @@ from cli.commands.converge.tests.external_skills import (
 )
 from cli.commands.extensions import external_skills as bridge
 from cli.commands.extensions.external_skill_host import filesystem as bridge_fs
-from cli.commands.extensions.external_skill_host.ledger import load_retained_items
-from cli.commands.extensions.external_skill_host.records import Claim, CleanupItem, Ledger
+from cli.commands.extensions.external_skill_host.ledger import load_ledger, load_retained_items
+from cli.commands.extensions.external_skill_host.records import (
+    Claim,
+    CleanupItem,
+    Ledger,
+    Transaction,
+)
 from cli.commands.extensions.tests.support import killed_converge as killed
 from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import UserSession
@@ -94,9 +97,18 @@ def _ledger_path(context: ConvergeCtx) -> Path:
     return context.meiva_home / "configs" / "external-agent-skills" / "codex.json"
 
 
-def _ledger(context: ConvergeCtx) -> dict[str, Any]:
-    value: object = json.loads(_ledger_path(context).read_text())
-    return cast(dict[str, Any], value)
+def _ledger(context: ConvergeCtx) -> Ledger:
+    ledger = load_ledger(_ledger_path(context), "codex")
+    assert ledger is not None, "the plugin wrote a ledger"
+    return ledger
+
+
+# meiva:note
+# The transaction the ledger records right now; a case that asserts on it runs while one is open.
+def _transaction(context: ConvergeCtx) -> Transaction:
+    transaction = _ledger(context)["transaction"]
+    assert transaction is not None, "the plugin recorded a transaction"
+    return transaction
 
 
 def _retained(context: ConvergeCtx) -> list[CleanupItem]:
@@ -148,7 +160,7 @@ def test_interrupted_stage_publication_is_reported_and_never_resumed(
     target = _target(client)
     site = _site(context, client, source)
     killed.forget_publication(site, killed.stage(site))
-    assert _ledger(context)["transaction"]["stage_state"] == "publishing"
+    assert _transaction(context)["stage_state"] == "publishing"
     ledger_before = _ledger(context)
     residues_before = sorted(_residues(client))
     assert len(residues_before) == 1
@@ -194,7 +206,7 @@ def test_interrupted_target_claim_is_reported_and_leaves_a_late_target_alone(
     ledger = killed.stage(site)
     killed.claim_target(site, ledger)
 
-    assert _ledger(context)["transaction"]["claim_state"] == "claiming"
+    assert _transaction(context)["claim_state"] == "claiming"
     assert not target.exists()
     target.mkdir()
     (target / "user.txt").write_text("late user target\n")
@@ -692,7 +704,8 @@ def test_cleanup_retains_private_residue_without_path_unlink(
     _converge(context, host_home=client.parent)
 
     ledger_root = context.meiva_home / "configs" / "external-agent-skills"
-    ledger = json.loads((ledger_root / "codex.json").read_text())
+    ledger = load_ledger(ledger_root / "codex.json", "codex")
+    assert ledger is not None, "the plugin wrote a ledger"
     assert ledger["transaction"] is None
     assert ledger["garbage"] == []
     assert ledger["retained"] == []
