@@ -187,6 +187,8 @@ class ConfigAuthority:
             "max_document_bytes",
             "max_references",
             "max_resource_bytes",
+            "max_workspace_bytes",
+            "max_workspace_files",
             "neighbors_default_depth",
             "neighbors_default_limit",
             "ops_concurrency",

@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from ops.agent_transfer import (
     WorkspaceTransferConflictError,
     WorkspaceTransferCorruptError,
+    WorkspaceTransferLimits,
     WorkspaceTransferTooLargeError,
 )
 from ops.agent_transfer.operations import export_workspace_bundle
@@ -25,11 +26,18 @@ from services.agent_runner.agent_ops import in_flight
 
 
 def workspace_export_response(
-    body: bytes, *, pool: ConnectionPool, machine: str, home: Path
+    body: bytes,
+    *,
+    pool: ConnectionPool,
+    machine: str,
+    home: Path,
+    limits: WorkspaceTransferLimits,
 ) -> tuple[int, bytes, str]:
     try:
         request = WorkspaceExportRequest.model_validate_json(body)
-        bundle = export_workspace_bundle(pool, request, local_machine=machine, home=home)
+        bundle = export_workspace_bundle(
+            pool, request, local_machine=machine, home=home, limits=limits
+        )
     except ValidationError:
         return 422, b"Invalid workspace export request", "text/plain"
     except WorkspaceTransferConflictError as exc:
@@ -47,6 +55,7 @@ async def workspace_export_route(
     pool: ConnectionPool,
     machine: str,
     home: Path,
+    limits: WorkspaceTransferLimits,
     executor: ThreadPoolExecutor,
     dispatch_sem: asyncio.Semaphore,
     requests: in_flight.RequestTokens,
@@ -57,7 +66,12 @@ async def workspace_export_route(
             future = asyncio.get_running_loop().run_in_executor(
                 executor,
                 functools.partial(
-                    workspace_export_response, body, pool=pool, machine=machine, home=home
+                    workspace_export_response,
+                    body,
+                    pool=pool,
+                    machine=machine,
+                    home=home,
+                    limits=limits,
                 ),
             )
             in_flight.track_worker(future, workers=workers)

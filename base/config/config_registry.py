@@ -77,6 +77,7 @@ DOMAIN_MODELS: tuple[tuple[str, str, str | type[object] | _DomainModelLike, str]
     ("agent", "Agent", "AgentSettings", "agent-runner"),
     ("web", "Web", "WebSettings", "agent-runner"),
     ("to_user", "To user", "ToUserSettings", "common"),
+    ("transfer", "Workspace transfer", "TransferSettings", "common"),
     ("gateway", "Gateway", "GatewaySettings", "gateway"),
     ("daemon", "Daemon", "DaemonSettings", "gateway"),
     ("alerts", "Alerts", "AlertsSettings", "gateway"),
@@ -113,6 +114,7 @@ def _model_classes() -> dict[str, type[BaseModel]]:
     from base.config.domains.storage.data_plane import DataPlaneSettings
     from base.config.domains.storage.walg import WalgSettings
     from base.config.domains.to_user import ToUserSettings
+    from base.config.domains.transfer import TransferSettings
     from base.config.domains.web import WebSettings
 
     return {
@@ -121,6 +123,7 @@ def _model_classes() -> dict[str, type[BaseModel]]:
         "AgentSettings": AgentSettings,
         "WebSettings": WebSettings,
         "ToUserSettings": ToUserSettings,
+        "TransferSettings": TransferSettings,
         "GatewaySettings": GatewaySettings,
         "DaemonSettings": DaemonSettings,
         "AlertsSettings": AlertsSettings,

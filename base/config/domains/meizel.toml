@@ -1,7 +1,7 @@
-exports = ["agent", "channels", "daemon", "display.py", "gateway.py", "general.py", "lm.py", "observability", "packages.py", "sandbox.py", "services", "storage", "tests", "to_user.py", "web.py"]
+exports = ["agent", "channels", "daemon", "display.py", "gateway.py", "general.py", "lm.py", "observability", "packages.py", "sandbox.py", "services", "storage", "tests", "to_user.py", "transfer.py", "web.py"]
 
 [uses]
-"tests" = ["display.py", "gateway.py", "sandbox.py", "to_user.py"]
+"tests" = ["display.py", "gateway.py", "sandbox.py", "to_user.py", "transfer.py"]
 
 [purity]
 "__init__.py" = "strict"
@@ -12,4 +12,5 @@ exports = ["agent", "channels", "daemon", "display.py", "gateway.py", "general.p
 "packages.py" = "strict"
 "sandbox.py" = "strict"
 "to_user.py" = "strict"
+"transfer.py" = "strict"
 "web.py" = "strict"

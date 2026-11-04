@@ -36,6 +36,7 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "observability",
             "display",
             "to_user",
+            "transfer",
         }
     ),
     "agent": frozenset(
@@ -65,6 +66,7 @@ PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
             "sandbox",
             "observability",
             "to_user",
+            "transfer",
         }
     ),
 }

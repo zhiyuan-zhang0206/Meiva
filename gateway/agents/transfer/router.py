@@ -60,11 +60,13 @@ from gateway.agents.transfer.transfer_plan import (
 )
 from gateway.http.config import GatewayAppState, gateway_rpc, state_as
 from ops.agent_transfer import (
-    MAX_BUNDLE_STREAM_BYTES,
     WorkspaceTransferCorruptError,
+    WorkspaceTransferLimits,
     WorkspaceTransferTooLargeError,
+    check_bundle_stream_size,
     decode_bundle,
 )
+from ops.agent_transfer.limits import workspace_transfer_limits_from_read_model
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable, RpcClient
 from ops.lifecycle.events import publish_page_closed
 from ops.pages import close_all_agent_pages_in_transaction
@@ -101,6 +103,10 @@ class TransferDeps:
     bundles: TransferBundleStore
     access: GatewayAccess
     rng: random.Random
+    # meiva:note
+    # The ceilings the runners enforce, read from the same cluster-pinned pair so the gateway refuses
+    # exactly what the source was configured to send and the target is configured to accept.
+    limits: WorkspaceTransferLimits
 
 
 # meiva:note
@@ -120,6 +126,7 @@ def _deps_from_request(request: Request) -> TransferDeps:
         bundles=state.agent_transfer_bundles,
         access=state.gateway_access,
         rng=state.gateway_config.rng,
+        limits=workspace_transfer_limits_from_read_model(state.config_authority),
     )
 
 
@@ -287,6 +294,8 @@ async def _fetch_source_export(
     source_ops_url: str,
     export_req: WorkspaceExportRequest,
     headers: dict[str, str],
+    *,
+    limits: WorkspaceTransferLimits,
 ) -> bytes:
     url = f"{source_ops_url.rstrip('/')}/workspace/export"
     try:
@@ -306,10 +315,7 @@ async def _fetch_source_export(
             buf = bytearray()
             async for chunk in response.aiter_bytes():
                 buf.extend(chunk)
-                if len(buf) > MAX_BUNDLE_STREAM_BYTES:
-                    raise HTTPException(
-                        413, f"workspace export stream exceeds {MAX_BUNDLE_STREAM_BYTES}-byte limit"
-                    )
+                check_bundle_stream_size(len(buf), limits=limits)
             return bytes(buf)
     except httpx.HTTPError as exc:
         raise HTTPException(
@@ -318,10 +324,17 @@ async def _fetch_source_export(
 
 
 def _decode_and_digest_bundle(
-    bundle_bytes: bytes, *, agent_id: int, transfer_id: str
+    bundle_bytes: bytes,
+    *,
+    agent_id: int,
+    transfer_id: str,
+    limits: WorkspaceTransferLimits,
 ) -> tuple[WorkspaceBundleManifest, str]:
     manifest, _tar = decode_bundle(
-        bundle_bytes, expected_agent_id=agent_id, expected_transfer_id=transfer_id
+        bundle_bytes,
+        expected_agent_id=agent_id,
+        expected_transfer_id=transfer_id,
+        limits=limits,
     )
     return manifest, hashlib.sha256(bundle_bytes).hexdigest()
 
@@ -629,11 +642,15 @@ async def execute_agent_transfer(
         ) from exc
 
     export_req = WorkspaceExportRequest(agent_id=agent_id, transfer_id=transfer_id)
-    bundle_bytes = await _fetch_source_export(
-        decision.source_ops_url,
-        export_req,
-        gateway_auth_headers(deps.access),
-    )
+    try:
+        bundle_bytes = await _fetch_source_export(
+            decision.source_ops_url,
+            export_req,
+            gateway_auth_headers(deps.access),
+            limits=deps.limits,
+        )
+    except WorkspaceTransferTooLargeError as exc:
+        raise HTTPException(413, str(exc)) from exc
 
     try:
         manifest, bundle_sha256 = await asyncio.to_thread(
@@ -641,6 +658,7 @@ async def execute_agent_transfer(
             bundle_bytes,
             agent_id=agent_id,
             transfer_id=transfer_id,
+            limits=deps.limits,
         )
     except WorkspaceTransferTooLargeError as exc:
         raise HTTPException(413, str(exc)) from exc
