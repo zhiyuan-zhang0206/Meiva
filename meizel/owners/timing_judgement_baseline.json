@@ -148,7 +148,7 @@
     },
     {
       "path": "base/telemetry/tests/test_emitter_lifecycle.py",
-      "function": "test_sync_deadline_covers_marker_admission_and_write",
+      "function": "test_sync_deadline_expires_in_marker_while_every_slot_is_taken",
       "comparison": "time.monotonic() - started < N"
     },
     {

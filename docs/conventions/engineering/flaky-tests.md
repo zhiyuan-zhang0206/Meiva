@@ -23,6 +23,7 @@ reports are allowed; ordinary test jobs must execute tests. See the
 | Pin wall-clock values or counts | lintable now | Existing: clock-lattice lint and topology tests |
 | Judge a duration by the real wall clock | lintable now | New: `meizel/owners/timing_judgement.py` (a bound loose enough not to flake passes the defect it names) |
 | Generate visual references outside the comparison runner | not lintable (operational) | Runner-native check and refresh workflow |
+| Race a timer against a deadline to reach the asserted branch | not lintable (operational) | Operational: section 11 (establish the input, do not win the race) |
 
 ## 1. Do not assert process-table disappearance immediately after a kill
 
@@ -354,6 +355,35 @@ every wall-clock comparison in an `assert`; the sites that predate the rule are 
 `meizel/owners/timing_judgement_baseline.json`, so the gate reds only on new ones. The
 rule's parts, and who owns the decision when it fires, are in
 [the rule's own document](../../../meizel/docs/lint/timing-judgement.meiva.okf.md).
+
+## 11. Do not race a timer to produce the state you assert on
+
+**Rule.** A test establishes the state it asserts; it does not win a race for it. When a
+branch is only reachable after another thread acts, arrange the input so that branch is the
+only outcome the code can reach. A margin between a timer and a deadline is a bet whose odds
+move with machine load, and its result carries no information about the change under review.
+
+**Signature.** A `threading.Timer` or `sleep` on one side and a `timeout=` on the other, with
+a margin small enough that the assertion depends on which lands first. The failure names the
+two branches (`phase: marker != drain`) instead of a value the code computed.
+
+**Evidence.** `test_one_deadline_spans_queue_admission_and_blocked_writer` (removed here)
+needed a sync receipt admitted into a one-slot queue while the worker was blocked, which
+could happen only after a `threading.Timer(0.15)` released the writer inside a
+`sync(timeout=0.2)` deadline: a 50 ms margin, against a timer whose own overshoot measured
+6-77 ms. It was red **11/30 (37%)** on an idle machine, and the rate was the same on `main`
+(5/15) as on the branch under review (6/15), so its red identified neither tree. With the race
+removed both branches reach 10/10: a taken one-slot queue always reports `MARKER`, and a
+two-slot queue always admits and reports `DRAIN`.
+
+**Correct form.** Hand the test the input the branch needs — a second queue slot, not a timer
+that opens the first one. When the state genuinely needs another thread, complete a handshake
+the test controls (an `Event` the test sets, a poll for the observed condition) rather than a
+duration it guesses.
+
+**Lintability — not lintable (operational).** A `threading.Timer` beside a `timeout=` is a
+review signal, not a verdict: the shape is legitimate when the margin is orders of magnitude
+and the assertion does not depend on which side won.
 
 ## Historical appendix: CI ruling adopted 2026-09-01 21:01
 
