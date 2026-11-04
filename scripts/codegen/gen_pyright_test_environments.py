@@ -10,18 +10,31 @@
 # directory under such a root therefore needs an entry of its own, listed before the covering
 # entry, to opt out of its Any rules until its tests have paid that debt.
 #
-# This script owns those entries. `TESTS_OWING_ANY` lists the path prefixes of tests that still owe
-# Any debt; for every tracked `<pkg>/**/tests/` directory (read from the test hosts of pytest
-# `testpaths`) under a listed prefix whose covering entry holds the Any rules it writes one entry
-# into the region of `pyproject.toml` fenced by the BEGIN/END comments below, carrying the
-# covering entry's other settings (`extraPaths` and the like) and no Any rule. Everything outside the region is
-# hand-written and left byte-for-byte alone. The region is sorted by root, one block per
-# directory, so two changes collide only where their roots are neighbors in that order; run this
-# script again to resolve.
+# This script owns those entries. The data file `scripts/codegen/pyright_tests_owing_any.txt`
+# lists the path prefixes of tests that still owe Any debt, one per line (blank lines and lines
+# starting with `#` are ignored); for every tracked `<pkg>/**/tests/` directory (read from the test
+# hosts of pytest `testpaths`) under a listed prefix whose covering entry holds the Any rules it
+# writes one entry into the region of `pyproject.toml` fenced by the BEGIN/END comments below,
+# carrying the covering entry's other settings (`extraPaths` and the like) and no Any rule.
+# Everything outside the region is hand-written and left byte-for-byte alone. The region is sorted
+# by root, one block per directory, so two changes collide there only where their roots are
+# neighbors in that order; run this script again to resolve.
 #
-# Add a prefix to the list in the pull request that adds the covering entry; remove it when its
-# tests are clean (the ratchet only tightens). This script, its hook and its tests go when
-# the last root leaves the list, that is when `reportAny` is a global error.
+# Why the prefixes are a data file and not a Python list: every pull request of the Any ratchet adds
+# one prefix, and two prefixes inserted next to each other conflict at every rebase. `.gitattributes`
+# gives the data file `merge=union`, which keeps the lines of both sides instead of stopping at a
+# conflict, so concurrent additions merge without help. A union merge has two costs. A prefix both
+# sides added in different places appears twice, so the reader de-duplicates and sorts: the order
+# of the file is never significant and nothing checks it. A line one side deleted next to a line the
+# other side added comes back, because a union keeps what either side holds, so remove a prefix in
+# a pull request of its own and look at the file after the rebase. The pyproject region cannot be
+# merged that way (the file holds much else); it is regenerated, never merged by hand.
+#
+# Add a prefix in the pull request that adds the covering entry; remove it when its tests are
+# clean (the ratchet only tightens). A prefix must name a directory of the checkout that holds a
+# tests directory: a typo or a prefix whose tests all left fails loud instead of lingering. This
+# script, its hook, its tests and the data file go when the last root leaves the file, that is when
+# `reportAny` is a global error.
 #
 # Run after adding, moving or removing a tests directory under a listed root, or let the
 # pre-commit `lint-pyright-test-environments` hook fail loud:
@@ -41,7 +54,7 @@ import sys
 import tomllib
 from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TypeGuard
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -75,63 +88,75 @@ END = "# END GENERATED pyright tests environments"
 # them, so its tests stay at the global level until their own Any debt is repaid.
 ANY_RULES = ("reportAny", "reportExplicitAny")
 # meiva:note
-# Path prefixes of tests that have not repaid their Any debt while the entry covering them holds the
-# Any rules in production code. A tests directory under a listed prefix gets a generated entry only
-# when its covering entry holds those rules (otherwise there is nothing to opt out of). Add the
-# prefix in the pull request that adds the covering entry; remove it when the tests are clean.
-TESTS_OWING_ANY: tuple[str, ...] = (
-    "agent/execution/tests",
-    "agent/extensions/tests",
-    "agent/messages/tests",
-    "base/agents",
-    "base/cluster",
-    "base/config",
-    "base/events/live",
-    "base/events/notifications",
-    "base/events/signals",
-    "base/events/tests",
-    "base/host/db_authority",
-    "base/host/env",
-    "base/host/net",
-    "base/host/permissions_helper",
-    "base/host/system",
-    "base/host/tests",
-    "base/lm",
-    "base/packages/plugins",
-    "base/packages/tests",
-    "base/telemetry",
-    "cli",
-    "gateway/tests",
-    "meiva/mcps/tests",
-    "meiva_builtins/plugins/meiva_code",
-    "meiva_builtins/plugins/meiva_fleet",
-    "meiva_builtins/plugins/meiva_memory",
-    "meiva_builtins/plugins/meiva_syntax_fix",
-    "meiva_builtins/plugins/meiva_to_user",
-    "meiva_builtins/plugins/meiva_usage",
-    "meiva_builtins/skills/coordination",
-    "meiva_builtins/skills/platform/meiva-guide",
-    "meiva_builtins/skills/platform/meiva-self-evolution",
-    "scripts/ci",
-    "scripts/data_plane_ops",
-    "scripts/host_ops",
-    "scripts/lint",
-    "scripts/model_registry",
-    "scripts/structure",
-    "scripts/verify",
-    "services/agent_runner",
-    "services/backup",
-    "services/derived",
-    "services/desktop",
-    "services/entrypoints",
-    "services/supervision",
-    "services/upkeep",
-    "services/wake",
-)
+# The data file (relative to the checkout root) that lists the path prefixes of tests that have not
+# repaid their Any debt while the entry covering them holds the Any rules in production code. A
+# tests directory under a listed prefix gets a generated entry only when its covering entry holds
+# those rules (otherwise there is nothing to opt out of).
+OWING_ANY_FILE = "scripts/codegen/pyright_tests_owing_any.txt"
 
 
 def _covers(root: str, directory: str) -> bool:
     return directory == root or directory.startswith(f"{root}/")
+
+
+# meiva:note
+# The prefixes `text` lists: one per line, whitespace trimmed, blank lines and lines starting with
+# `#` skipped, duplicates collapsed and the result sorted. A line that is not a normalized
+# repository-relative path (a trailing slash, `./`, `..`, a leading slash) would never match a
+# tests directory and so would sit in the ledger doing nothing; it stops the script instead.
+def parse_owing_any(text: str) -> tuple[str, ...]:
+    prefixes: set[str] = set()
+    for number, raw in enumerate(text.splitlines(), start=1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        normalized = PurePosixPath(line).as_posix() == line and line != "."
+        if not normalized or line.startswith("/") or ".." in line.split("/"):
+            raise SystemExit(
+                f"{OWING_ANY_FILE}:{number}: {line!r} is not a normalized repository-relative "
+                "directory path (no leading or trailing slash, no '.' or '..' segment)"
+            )
+        prefixes.add(line)
+    return tuple(sorted(prefixes))
+
+
+# meiva:note
+# Every directory that holds a tracked file: the ancestors of each path.
+def _directories(paths: Iterable[str]) -> set[str]:
+    return {
+        "/".join(parts[:depth])
+        for parts in (path.split("/") for path in paths)
+        for depth in range(1, len(parts))
+    }
+
+
+# meiva:note
+# One line per prefix that is not a directory of the checkout or covers no tests directory.
+def _unusable_prefixes(
+    prefixes: Collection[str], directories: Collection[str], roots: Collection[str]
+) -> list[str]:
+    problems: list[str] = []
+    for prefix in sorted(prefixes):
+        if prefix not in directories:
+            problems.append(f"{prefix}: not a directory of this checkout")
+        elif not any(_covers(prefix, root) for root in roots):
+            problems.append(f"{prefix}: covers no tests directory")
+    return problems
+
+
+# meiva:note
+# Every prefix must name a directory that holds a tracked Python file and must cover at least one
+# tests directory. A union merge can resurrect a prefix whose tests are gone, and a typo would
+# otherwise match nothing for ever; both stop the script with the line to fix.
+def _require_usable_prefixes(
+    prefixes: Collection[str], paths: Iterable[str], roots: Collection[str]
+) -> None:
+    problems = _unusable_prefixes(prefixes, _directories(paths), roots)
+    if problems:
+        raise SystemExit(
+            f"{OWING_ANY_FILE} lists a prefix that does not name a directory holding tests; "
+            "fix or remove the line:\n" + "\n".join(f"  {problem}" for problem in problems)
+        )
 
 
 # meiva:note
@@ -227,7 +252,7 @@ def generate(
     pyproject_text: str,
     tracked: Iterable[str],
     *,
-    owing_any: Collection[str] = TESTS_OWING_ANY,
+    owing_any: Collection[str],
 ) -> str:
     """`pyproject_text` with its generated region rewritten for the tracked tests directories."""
     region = _region(pyproject_text)
@@ -237,7 +262,9 @@ def generate(
     config = tool.get("pyright") if is_object_dict(tool) else None
     if not is_object_dict(config):
         raise SystemExit("pyproject.toml has no [tool.pyright] table")
-    roots = tests_roots(tracked, pytest_test_hosts(handwritten))
+    paths = list(tracked)
+    roots = tests_roots(paths, pytest_test_hosts(handwritten))
+    _require_usable_prefixes(owing_any, paths, roots)
     rendered = _render(_entries(config, roots, owing_any=owing_any))
     return pyproject_text[: region.start()] + rendered + pyproject_text[region.end() :]
 
@@ -274,12 +301,7 @@ class Options:
     check: bool
 
 
-def main(
-    argv: list[str],
-    *,
-    repo_root: Path = _REPO_ROOT,
-    owing_any: Collection[str] = TESTS_OWING_ANY,
-) -> int:
+def main(argv: list[str], *, repo_root: Path = _REPO_ROOT) -> int:
     parser = argparse.ArgumentParser(
         description="Generate the pyright executionEnvironments entries for tests directories under roots that owe Any debt."
     )
@@ -289,6 +311,7 @@ def main(
     args = options(parser.parse_args(argv), Options)
     pyproject = repo_root / "pyproject.toml"
     current = pyproject.read_text(encoding="utf-8")
+    owing_any = parse_owing_any((repo_root / OWING_ANY_FILE).read_text(encoding="utf-8"))
     fresh = generate(current, _tracked_python_files(repo_root), owing_any=owing_any)
     if fresh == current:
         return 0
