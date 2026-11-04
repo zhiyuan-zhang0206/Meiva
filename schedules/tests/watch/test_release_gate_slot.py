@@ -42,6 +42,8 @@ def test_a_slot_past_the_band_opens_a_card_that_publishes_nothing() -> None:
     assert decision.card.fingerprint == "main-red-watch/release-gate-slot"
     assert "13.5h" in decision.card.title
     assert decision.card.body.startswith("**This card publishes nothing.**")
+    assert "gh workflow run main-typecheck.yml" in decision.card.body
+    assert "type surface only" in decision.card.body
     assert "gh workflow run release-gate.yml" in decision.card.body
     assert decision.note is not None
 
@@ -102,3 +104,15 @@ def test_no_run_on_record_waits_out_one_threshold_from_the_first_round() -> None
 
     assert young.card is None
     assert old.card is not None
+
+
+# meiva:note
+# The threshold has to be replayed against the gaps that were actually observed, not argued about.
+# Five consecutive release-gate gaps, of which two really missed a slot: a threshold that opens a
+# card anywhere else than on those two reports lateness as a missing slot.
+def test_the_measured_gaps_open_only_the_windows_that_missed_a_slot() -> None:
+    gaps = (4 + 9 / 60, 8 + 9 / 60, 9 + 59 / 60, 8 + 49 / 60, 13 + 21 / 60)
+
+    opened = tuple(_decide(gap).card is not None for gap in gaps)
+
+    assert opened == (False, False, True, False, True)

@@ -9,7 +9,12 @@
 # immutable `v*` tag, moves `channel/latest` and creates a GitHub Release, and a release is the
 # user's decision (2026-10-28). Letting "the cron drifted" trigger that would hand the release
 # decision to the drift. So the round opens a card whose first line says it publishes nothing, and
-# the make-up run stays a human action.
+# the run that closes the gap stays a human action.
+#
+# The gap the card names is "no full-population check for nine hours", not "no release for nine
+# hours". Those are different debts, and only the first one is the watch's to report: a type-only
+# pass (`main-typecheck.yml`) pays the first in minutes without touching the second, so the card
+# tells the reader to run that one and says plainly what it does not restore.
 #
 # Two silent slots look alike and are not: the cron may not have run, or it may have run and
 # skipped (`release-gate.yml` certifies only when `channel/latest` is behind `main`). The second is
@@ -31,22 +36,25 @@ __all__ = [
 ]
 
 # meiva:note
-# Seven hours is inside the band this repository's crons arrive in, so at seven hours the check
-# reports lateness, not a missing slot. It cannot count arrivals; it can only see when the newest
-# scheduled run started. Measured on
-# 2026-11-04 across every scheduled workflow here: 164 scheduled runs arrived 45m to 7h50m after the
-# slot they served (median 4h34m), and the last five gaps between release-gate starts were 4h05m,
-# 8h05m, 9h59m, 8h49m and 13h18m. Four of those five exceed seven hours, yet one of them contained
-# no missing slot at all -- only a run that served its slot 5h57m late. A seven-hour threshold would
-# therefore have opened a card in four of five windows, which is the opposite of reporting a
-# missing slot.
+# How still the gate has to be before a round calls a slot missing.
 #
-# Two whole slots is the smallest silence this data never produced by lateness alone, and it still
-# speaks before a third slot would have come due. The two factors stay separate because the second
-# one is a judgement about arrivals, not a duration someone should tune in hours.
-RELEASE_GATE_SLOT_INTERVAL = timedelta(hours=6)
-SLOTS_BEFORE_MISSING = 2
-RELEASE_GATE_SLOT_STALE_AFTER = RELEASE_GATE_SLOT_INTERVAL * SLOTS_BEFORE_MISSING
+# Two quantities are in play and they must not be confused. The first is lateness: how long after
+# the slot it served a run actually started. Measured on 2026-11-04 across every scheduled workflow
+# in this repository, 164 scheduled runs arrived 45m to 7h50m after their slot (median 4h34m), so a
+# threshold inside that band reports lateness and calls a healthy pair of runs a missing slot. The
+# second is the gap between two starts of this workflow, which is what the round can actually see;
+# one slot plus that arrival band is an ordinary late pair.
+#
+# The five most recent release-gate gaps replay as 4h09m, 8h09m, 9h59m, 8h49m and 13h21m, and the
+# 9h59m and 13h21m windows are the two that really missed a slot. Seven hours opens four of the
+# five -- the 8h09m pair had no missing slot at all, one run simply served its slot 5h57m late.
+# Twelve hours opens one and leaves the 9h59m gap unreported. Nine hours opens exactly the two that
+# missed.
+#
+# So it is not a whole number of slots on purpose: the slot length belongs to the workflow's
+# schedule, and this constant is a judgement about arrivals. Nine hours sits between the slowest gap
+# that was merely late (8h49m) and the fastest gap that really missed a slot (9h59m).
+RELEASE_GATE_SLOT_STALE_AFTER = timedelta(hours=9)
 
 FINGERPRINT = "main-red-watch/release-gate-slot"
 _NO_GAP = ""
@@ -111,13 +119,17 @@ def _card(facts: SlotFacts, age: timedelta, *, threshold: timedelta) -> Card:
             f"(threshold {threshold.total_seconds() / 3600:.0f}h).\n\n"
             "This reports the schedule, not the code: `main` has had no full-population check in "
             "that window, so a red merged in it is invisible rather than absent.\n\n"
-            "The make-up run is `gh workflow run release-gate.yml --ref main`. It certifies on "
-            "success, so it releases: that is the user's call, not the watch's.\n\n"
-            "Why the threshold is where it is: across every scheduled workflow in this repository, "
-            "164 scheduled runs arrived 45m to 7h50m after the slot they served (median 4h34m, "
-            "2026-11-04), so one late slot is not a missing one. The gate has also missed about half "
-            "its slots -- twelve expected in three days, six observed -- and two whole slots of "
-            "silence is the smallest gap that data never produced by lateness alone.\n\n"
+            "**What to run instead.** `gh workflow run main-typecheck.yml --ref main` takes about "
+            "two and a half minutes and restores the type surface only: the full tree stays "
+            "unchecked, and nothing is certified. The full run is "
+            "`gh workflow run release-gate.yml --ref main`; it certifies on success, so it releases "
+            "-- that is the user's call, not the watch's.\n\n"
+            "Why nine hours: across every scheduled workflow in this repository, 164 scheduled runs "
+            "arrived 45m to 7h50m after the slot they served (median 4h34m, 2026-11-04), so one "
+            "late slot is not a missing one. The gate has also missed about half its slots -- "
+            "twelve expected in three days, six observed. Nine hours sits between the slowest gap "
+            "that was merely late (8h49m) and the fastest gap that really missed a slot (9h59m) in "
+            "the five most recent gaps.\n\n"
             "Closes when a scheduled run appears again."
         ),
     )

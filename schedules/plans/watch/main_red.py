@@ -339,6 +339,10 @@ def card_body(
 # a stopped schedule once one threshold has passed since then: before that the cron has simply not
 # come round yet, and a card about it would name a problem nobody can act on. Streams older than
 # the watch itself pass no `since`, and their silence means what it always did.
+#
+# `make_up` is the command that closes the gap, supplied by the stream's owner because only it knows
+# what its own workflow costs to run. A note that ends at "check whether GitHub delayed it" hands
+# the reader a diagnosis and no action, which is the half of the report they already had.
 def liveness_alert(
     label: str,
     last_start: datetime | None,
@@ -346,12 +350,14 @@ def liveness_alert(
     *,
     stale_after: timedelta,
     since: datetime | None = None,
+    make_up: str | None = None,
 ) -> str | None:
+    action = f" Make-up: {make_up}" if make_up else ""
     if last_start is None:
         if since is not None and now - since < stale_after:
             return None
         watching = f" since {since.isoformat()}" if since is not None else " at all"
-        return f"{label} has no run on record{watching}: the schedule never started here."
+        return f"{label} has no run on record{watching}: the schedule never started here.{action}"
     age = now - last_start
     if age < stale_after:
         return None
@@ -359,4 +365,5 @@ def liveness_alert(
         f"{label} has had no new run for {age.total_seconds() / 3600:.1f}h "
         f"(threshold {stale_after.total_seconds() / 3600:.0f}h, newest {last_start.isoformat()}). "
         "This reports the schedule, not the code: check whether GitHub delayed or disabled it."
+        f"{action}"
     )

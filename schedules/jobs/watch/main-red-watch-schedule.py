@@ -197,6 +197,31 @@ def _commit_subject(sha: str, run_process: RunProcess) -> str:
     return result.stdout.strip().splitlines()[0][:120] if result.stdout.strip() else ""
 
 
+# meiva:note
+# The commits between the last green and the red, newest first, which is the list the card's heading
+# promises. The compare answers oldest-first, so the reversal here is what makes the truncation in
+# `card_body` keep the newest: the change that broke the run is the last one before the red.
+def compare_commits(base: str, head: str, run_process: RunProcess) -> tuple[str, ...]:
+    import json
+
+    payload = json.loads(_api(f"repos/{_REPO}/compare/{base}...{head}", run_process))
+    commits = payload.get("commits")
+    if not is_object_list(commits):
+        return ()
+    lines: list[str] = []
+    for commit in commits:
+        if not is_object_dict(commit):
+            continue
+        sha = commit.get("sha")
+        inner = commit.get("commit")
+        message = inner.get("message", "") if is_object_dict(inner) else ""
+        if not isinstance(sha, str) or not sha:
+            continue
+        subject = str(message).split("\n", 1)[0].strip()
+        lines.append(f"{sha[:10]} {subject}".strip())
+    return tuple(reversed(lines))
+
+
 def _last_run_start(workflow: str, run_process: RunProcess) -> datetime | None:
     import json
 
@@ -298,9 +323,18 @@ def watch_round(
             home=inputs.home,
         ),
         workflows=(_RELEASE_GATE, _NIGHTLY, _CI_NIGHTLY, _MAIN_PUSH),
+        compare=partial(compare_commits, run_process=run_process),
         liveness=(
             LivenessStream("nightly", _NIGHTLY, NIGHTLY_STALE_AFTER),
-            LivenessStream("nightly-full", _CI_NIGHTLY, NIGHTLY_STALE_AFTER),
+            LivenessStream(
+                "nightly-full",
+                _CI_NIGHTLY,
+                NIGHTLY_STALE_AFTER,
+                make_up=(
+                    "`gh workflow run ci.yml --ref main` (full suite, publishes nothing, about ten "
+                    "to fifteen minutes)."
+                ),
+            ),
         ),
     )
     uncertified, channel_latest = _uncertified_commits(run_process)
