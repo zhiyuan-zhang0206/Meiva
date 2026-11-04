@@ -472,7 +472,10 @@ def test_inbound_consumed_unknown_rule_counts_the_event_over_a_day() -> None:
 # The dead-man pair is judged as a pair: the watchdog's period (5m, its route's
 # repeat_interval) is the N the silence rule multiplies by three, and the gauge it
 # reads is the one the gateway's ingest refreshes. Pinning only one half lets the
-# other drift into a switch that never fires -- or fires on a quiet night.
+# other drift into a switch that never fires -- or fires on a quiet night. The silent
+# rule's no-data state stays OK because the gauge rides the gateway's own OTLP push: a
+# stopped gateway takes it along, so absence would report the gateway (the metrics-silent
+# rule's subject) and would page on every collector restart and fresh install.
 def test_alert_pipeline_watchdog_and_silence_rule_agree_on_the_period() -> None:
     rules = {rule["uid"]: rule for rule in load_rules()}
     watchdog = rules["meiva-ops-alert-pipeline-watchdog"]
@@ -482,10 +485,10 @@ def test_alert_pipeline_watchdog_and_silence_rule_agree_on_the_period() -> None:
     assert watchdog["for"] == "0m"
     assert rule_query_exprs(watchdog, "prometheus") == ["vector(1)"]
     assert silent["labels"]["metric"] == "alert_pipeline_silent"
-    exprs = rule_query_exprs(silent, "prometheus")
-    assert any(
-        "meiva_alerts_last_ingest_timestamp_seconds" in expr and "time() -" in expr
-        for expr in exprs
-    ), exprs
+    assert rule_query_exprs(silent, "prometheus") == [
+        "time() - max(meiva_alerts_last_ingest_timestamp_seconds)"
+    ]
+    assert silent["noDataState"] == "OK"
+    assert silent["execErrState"] == "OK"
     (threshold,) = threshold_params(silent)
     assert threshold == [900]

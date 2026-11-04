@@ -5479,15 +5479,24 @@ groups:
       # The dead-man half. It reads the gauge R27 refreshes on every accepted ingest, so the
       # judgment is on a metric derived from the ingest itself (`time() - gauge`), not on how
       # many alerts happened to fire: a quiet night cannot trip it, and a rotated webhook token
-      # or a stopped gateway does. 900s = three watchdog periods (R27's route repeats at 5m);
-      # the `for: 5m` keeps one dropped POST from firing it.
+      # or a misrouted contact point does. 900s = three watchdog periods (R27's route repeats at
+      # 5m); the `for: 5m` keeps one dropped POST from firing it.
+      #
+      # `noDataState: OK` is deliberate. The gauge rides the gateway's own OTLP push, so a
+      # stopped gateway takes its gauge with it and this query returns nothing; absence then says
+      # nothing about the ingest path (a dead gateway is `meiva-ops-gateway-metrics-silent`'s
+      # job), and reading it as an alert here would page on every collector restart and during
+      # the first minutes of a fresh install, before any heartbeat has been accepted. The price
+      # is a series lost for longer than the 5m lookback staying silent until the next accepted
+      # POST re-establishes it; a gauge that never appears at all is the host sentinel's job
+      # (task #6220).
       - uid: meiva-ops-alert-pipeline-silent
         title: "Alert pipeline silent (webhook ingest stopped)"
         condition: D
         for: 5m
         keepFiringFor: *recovery-window
         missing_series_evals_to_resolve: *slow-missing-evals
-        noDataState: Alerting
+        noDataState: OK
         execErrState: OK
         labels:
           severity: error
@@ -5499,9 +5508,11 @@ groups:
           description: >-
             The synthetic watchdog's last accepted ingest is older than 900s. The
             delivery path is broken somewhere between Grafana and the `alerts` table —
-            a rotated webhook token the gateway rejects, a stopped gateway, or a
-            misrouted contact point. Every other rule is silent for the same reason,
-            which is why this one routes straight to Telegram.
+            a rotated webhook token the gateway rejects, or a contact point routed
+            somewhere the gateway does not answer. Every other rule is silent for the
+            same reason, which is why this one routes straight to Telegram. A gateway
+            that stopped entirely is `meiva-ops-gateway-metrics-silent`'s report, not
+            this one's.
         data:
           - refId: A
             datasourceUid: prometheus
