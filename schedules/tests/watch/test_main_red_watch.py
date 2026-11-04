@@ -264,6 +264,7 @@ def test_a_round_that_stopped_opens_one_card() -> None:
         now,
         database=cast("Database", _Database(now - timedelta(minutes=61))),
         open_card=lambda card: opened.append(card) or 900,
+        close_card=lambda: None,
     )
 
     assert [card.fingerprint for card in opened] == ["main-red-watch/liveness"]
@@ -278,9 +279,41 @@ def test_a_round_inside_the_hour_opens_nothing() -> None:
         now,
         database=cast("Database", _Database(now - timedelta(minutes=31))),
         open_card=lambda card: opened.append(card) or 900,
+        close_card=lambda: None,
     )
 
     assert opened == []
+
+
+# meiva:note
+# The card promises "closes when a round lands again"; this is the test that keeps that sentence
+# true. Remove the `close_card()` call in `liveness_once` and it goes red.
+def test_a_round_that_lands_again_closes_the_card() -> None:
+    now = datetime(2026, 11, 3, 10, 40, tzinfo=UTC)
+    closed: list[str] = []
+
+    liveness_once(
+        now,
+        database=cast("Database", _Database(now - timedelta(minutes=2))),
+        open_card=lambda card: 900,
+        close_card=lambda: closed.append("closed"),
+    )
+
+    assert closed == ["closed"]
+
+
+def test_a_watch_still_silent_opens_without_closing() -> None:
+    now = datetime(2026, 11, 3, 10, 35, tzinfo=UTC)
+    closed: list[str] = []
+
+    liveness_once(
+        now,
+        database=cast("Database", _Database(now - timedelta(minutes=61))),
+        open_card=lambda card: 900,
+        close_card=lambda: closed.append("closed"),
+    )
+
+    assert closed == []
 
 
 # meiva:note
@@ -293,6 +326,7 @@ def test_a_watch_with_no_round_on_record_opens_nothing() -> None:
         datetime(2026, 11, 3, 10, 35, tzinfo=UTC),
         database=cast("Database", _Database(None)),
         open_card=lambda card: opened.append(card) or 900,
+        close_card=lambda: None,
     )
 
     assert opened == []

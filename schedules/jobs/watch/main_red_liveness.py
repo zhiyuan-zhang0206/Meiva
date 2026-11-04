@@ -35,10 +35,16 @@ def liveness_once(
     *,
     database: Database,
     open_card: Callable[[Card], int],
+    close_card: Callable[[], None],
 ) -> int | None:
     last = newest_round_at(database)
     card = Card.for_stale_watch(last, slot, stale_after=WATCH_STALE_AFTER)
     if card is None:
+        # meiva:note
+        # A round is on record again, so the card this check opened has been answered. Closing it
+        # here is what makes the card's own sentence -- "closes when a round lands again" -- true;
+        # opening without a closer leaves a promise nobody keeps.
+        close_card()
         seen = last.isoformat() if last is not None else "none on record"
         print(f"[{slot.isoformat()}] watch alive: newest round {seen}", flush=True)
         return None
