@@ -24,15 +24,19 @@ tags:
   message/exit-1 handling and interrupt exit 130. A terminal or revoked lease
   stops the heartbeat normally; the heartbeat never renews executor authority.
 
-- `meiva agents ls/send/cancel/restart/resurrect/terminate/kill/transfer`: `ls` renders the
+- `meiva agents ls/timeline/send/cancel/compact/restart/resurrect/terminate/kill/transfer`: `ls` renders the
   authenticated agent summary projection as stable `id / status / machine /
-  label` columns. It does not expose runner-local workspace paths. `restart`,
-  `resurrect`, `terminate`, `kill` and `transfer --to MACHINE` require
+  label` columns. It does not expose runner-local workspace paths. `timeline`
+  reads standing context and recent conversation items. `send` delivers a chat
+  message (auto-resurrecting a terminated target) and requires explicit
+  `--source` provenance (`user`, `external_agent:<subject>[:<instance>]`,
+  `shell:N`, `watcher:N`, or `schedule:N`;
+  [[base/agents/messages/docs/external_caller.meiva.okf.md|external caller provenance]]).
+  `restart`, `resurrect`, `terminate`, `kill` and `transfer --to MACHINE` require
   `--message TEXT | --no-message` (blank `--message` exits 2 at parse); `cancel`
-  is an immediate turn interruption and takes neither. `transfer` relocates an
-  `idling` or `terminated` native agent and its workspace across machines and
-  refuses running agents with 409
-  ([[gateway/agents/docs/agent-transfer.meiva.okf.md|agent transfer]]).
+  and `compact` take neither. `transfer` relocates an `idling` or `terminated`
+  native agent and its workspace across machines and refuses running agents with
+  409 ([[gateway/agents/docs/agent-transfer.meiva.okf.md|agent transfer]]).
 - `meiva notices list/resolve/clear/audit`: `resolve` reports success only when the
   gateway accepts the action. A 409 conflict is an error, including an absent
   notice, an action-kind mismatch, or an already-resolved answer/dismissal.

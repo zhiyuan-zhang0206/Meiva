@@ -27,6 +27,10 @@ Follow the user's authorized scope.
   import application code. Pytest supplies its own isolation. A preview of a
   frontend or gateway change runs on a cluster of its own (own home, data plane,
   gateway and frontend); it never uses a production home, database or gateway.
+  Inspecting or messaging agents on a running host uses that host's `meiva` CLI
+  (`meiva agents ls`, `meiva agents timeline <id>`, `meiva agents send <id> <text>
+  --source external_agent:<subject>`; see [meiva-guide](.agents/skills/meiva-guide/SKILL.md)),
+  never `.venv/bin/meiva` against the production home or raw gateway HTTP calls.
 - Merged migrations are immutable. Fix forward, synchronize `db/schema.sql`,
   and use expand-contract for lossy changes. See the [migration guide](db/docs/migrations.md).
 

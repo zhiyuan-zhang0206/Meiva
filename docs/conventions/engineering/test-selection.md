@@ -113,7 +113,7 @@ matching row decides.
 | 5 | A collectable test file | TEST | itself and its transitive test consumers |
 | 6a | A root meizel manifest (`meizel.toml`, `meizel.policy.toml`) | MANIFEST | runtime readers, meizel's own tests, every test naming the file and the tests of each source module that names it (below) |
 | 6b | A global path (below) | GLOBAL | full suite (impact unknown: it applies to every test) |
-| 7a | `.github/`, `.agents/`, `.meiva/` | TREE_SCAN_ONLY | tree-scan tests plus every collectable test whose source names that top-level directory (below) |
+| 7a | `.github/`, `.agents/`, `.meiva/`, `.claude/skills` | TREE_SCAN_ONLY | tree-scan tests plus every collectable test whose source names that top-level directory (below) |
 | 7b | `demos/`, `tests/e2e/`, `.pre-commit-config.yaml`, `.gitignore`, `.gitattributes`, `.gitleaks.toml`, `LICENSE`, `NOTICE`, and Markdown under a global prefix (below) | TREE_SCAN_ONLY | tree-scan tests plus recognized runtime consumers |
 | 8 | A non-Python file under `ui/` | FRONTEND | recognized backend resource consumers, when backend selection runs; the frontend job also owns it |
 | 9 | Any other file under agent/, meiva/, meiva_builtins/, base/, cli/, gateway/, ops/, schedules/, scripts/, services/, tests/ or ui/ | PACKAGE | transitive runtime consumers plus the owning package's tests |
@@ -148,7 +148,7 @@ looked global are not, because their impact is computable rather than unknown:
   hosts, coverage, an unlisted tool) keeps it global, and so does a missing base: `--base-ref`
   absent, or `pyproject.toml` new in the change. The listed set is closed.
 
-Tests read `.github/`, `.agents/` and `.meiva/` by path. Recognized
+Tests read `.github/`, `.agents/`, `.meiva/`, and the `.claude/skills` mirror by path. Recognized
 resource facts reach their transitive consumers. A change there selects, besides the tree-scan tests, every
 collectable test whose source contains the directory as a string literal: the
 unquoted `.github/` (not preceded by a word character or a dot, so the module

@@ -1,6 +1,6 @@
 ---
 name: agents
-description: "Manages Meiva agents and configuration overlays. Use when spawning, inspecting, restarting, stopping, or configuring agents."
+description: "Manages and communicates with Meiva agents and configuration overlays. Use when listing, reading timelines, messaging, spawning, restarting, stopping, or configuring agents."
 ---
 
 # Agent-Level Concepts
@@ -30,13 +30,27 @@ An **agent** is a running AI process — you are one. The lifecycle verbs:
 
 State machine: `idling (unclaimed) → running ⇄ idling → terminated`.
 
-Agent-to-agent communication: `meiva.agents.send_message(agent_id, content)` —
-pure INSERT, no status check, no wait, no delivery receipt. If the target is
-`terminated`, it is auto-resurrected to handle the message. Use
-`get_neighbors` to see which agents are most closely tied to you (ties form on
-spawn/fork/resurrect/send_message and decay over time), and `get_ancestors`
-to see the spawn chain above an agent (who spawned whom, nearest first —
-the responsibility-attribution read).
+Agent-to-agent and external-to-agent communication:
+
+- **Inside a Meiva agent (SDK):** `meiva.agents.send_message(agent_id, content)` —
+  pure INSERT, no status check, no wait, no delivery receipt. If the target is
+  `terminated`, it is auto-resurrected to handle the message. Use
+  `get_neighbors` to see which agents are most closely tied to you (ties form on
+  spawn/fork/resurrect/send_message and decay over time), and `get_ancestors`
+  to see the spawn chain above an agent (who spawned whom, nearest first —
+  the responsibility-attribution read).
+- **From a shell (human operator or external coding agent):** use the host's
+  `meiva` CLI (`meiva agents ls`, `meiva agents timeline <agent_id> [--limit N]`,
+  and `meiva agents send <agent_id> "<content>" --source <provenance>`).
+  `--source` is required and declares who is speaking:
+  - External coding agents pass `--source external_agent:<subject>[:<instance>]`
+    (for example `external_agent:claude_code`, `external_agent:codex:run-1`, or
+    `external_agent:antigravity`), keeping external-agent turns distinct from
+    the human operator on the target agent's timeline.
+  - Pass `--source user` only when acting directly as the human operator.
+  - Never craft raw HTTP requests against gateway endpoints using local cluster
+    secrets; always go through `meiva agents send` so provenance and idempotency
+    contracts hold.
 
 Each agent can have a **label** (`meiva.self.set_label`) — a
 human-readable role/name that persists once set; it is also stated in the

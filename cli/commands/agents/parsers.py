@@ -441,7 +441,8 @@ def _add_send_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -
         type=_validated_source,
         help="provenance of the message (required). 'user' sends as the human operator; "
         "'external_agent:NAME[:INSTANCE]' declares you as an external agent distinct from the user "
-        "(self-asserted); 'shell:N' / 'watcher:N' mark a machine notice; 'schedule:N' a gateway schedule",
+        "(e.g. external_agent:claude_code, external_agent:codex:run-1, external_agent:antigravity; "
+        "self-asserted); 'shell:N' / 'watcher:N' mark a machine notice; 'schedule:N' a gateway schedule",
     )
     agents_send_p.add_argument(
         "--tail-file",
@@ -514,7 +515,7 @@ def add_agents_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) 
     # by escalating force (cancel < restart < terminate < kill) plus ls.
     agents_p = sub.add_parser(
         "agents",
-        help="observe + control agents: ls / cancel / compact / restart / resurrect / terminate / kill / transfer",
+        help="observe + control agents: ls / timeline / send / cancel / compact / restart / resurrect / terminate / kill / transfer",
     )
     agents_sub = agents_p.add_subparsers(dest="agents_cmd", required=True)
 

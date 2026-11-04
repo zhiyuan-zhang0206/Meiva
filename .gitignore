@@ -1,5 +1,5 @@
 # Claude Code session artifacts
-.claude/
+**/.claude/*
 .claude-agent/
 .superpowers/
 .worktrees/

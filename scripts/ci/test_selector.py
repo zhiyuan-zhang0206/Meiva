@@ -81,6 +81,7 @@ _MANIFEST_FILES = frozenset({"meizel.toml", "meizel.policy.toml"})
 # can observe them.
 _TREE_SCAN_ONLY_FILES = frozenset(
     {
+        ".claude/skills",
         ".pre-commit-config.yaml",
         ".gitignore",
         ".gitattributes",
@@ -100,7 +101,7 @@ _TREE_SCAN_ONLY_PREFIXES = (
 # Hidden tool directories that tests read by path rather than import. A change
 # there also selects every collectable test whose source text names the directory
 # (`referencing_tests`), so the set of readers is derived, never listed by hand.
-_REFERENCED_ROOTS = (".github", ".agents", ".meiva")
+_REFERENCED_ROOTS = (".github", ".agents", ".meiva", ".claude")
 # Top-level directories whose files belong to a package with an owning `tests/`.
 _PACKAGE_ROOTS = frozenset(all_packages(roles_at(_SCRIPT_REPOSITORY_ROOT)))
 # meiva:note

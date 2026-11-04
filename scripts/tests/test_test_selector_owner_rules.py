@@ -234,6 +234,7 @@ def test_the_real_repository_readers_of_hidden_directories_remain_covered(
             "tests/ci/test_workflow_paths.py",
         ),
         ".agents/skills/inspect-a-trace/SKILL.md": ("tests/skills/test_inspect_a_trace_fetch.py",),
+        ".claude/skills": ("cli/commands/extensions/tests/test_external_skills.py",),
     }
     for changed, readers in expectations.items():
         assert test_selector.classify_path(changed, real_checkout) is PathClass.TREE_SCAN_ONLY, (
