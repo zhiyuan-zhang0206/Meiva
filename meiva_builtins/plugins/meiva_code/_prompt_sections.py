@@ -7,6 +7,7 @@ import contextlib
 import io
 
 import meiva
+from base.host.boundary.untyped import object_of
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 
@@ -27,7 +28,11 @@ def coding_tools_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
         )
     )
     pieces: list[str] = []
-    for name, mod in (("cwd", meiva.cwd), ("files", meiva.files), ("shell", meiva.shell)):
+    for name, mod in (
+        ("cwd", object_of(getattr, meiva, "cwd")),
+        ("files", meiva.files),
+        ("shell", meiva.shell),
+    ):
         if name in expanded:
             continue
         buf = io.StringIO()

@@ -8,9 +8,11 @@ handle at each call; this module imports neither, so both can depend on it.
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from collections.abc import Mapping
+from typing import Protocol
 
 import meiva
+from base.host.boundary.untyped import object_of
 from meiva.sdk_surface import process_context
 
 
@@ -31,7 +33,7 @@ class _StateSnapshot(Protocol):
 class _StateHandle(Protocol):
     def read(self) -> _StateSnapshot: ...
 
-    def update(self, delta: dict[str, Any]) -> object: ...
+    def update(self, delta: Mapping[str, object]) -> object: ...
 
 
 # The state class and the real handle live in the agent-runtime face
@@ -50,9 +52,10 @@ def _handle(method: str, slot: str) -> _StateHandle:
             f"PluginStateHandle[MeivaCodeState].{method}() called outside exec turn—"
             f"{slot} only valid inside execute_code (the exec turn)."
         )
-    materialize = getattr(meiva.state, "materialize", None)
-    if materialize is not None:
-        materialize()
+    state_slot = object_of(getattr, meiva, "state")
+    materialize = object_of(getattr, state_slot, "materialize", None)
+    if callable(materialize):
+        _ = materialize()
     from .agent_runtime import state_handle
 
     return state_handle()
@@ -63,6 +66,6 @@ def read_state() -> _StateSnapshot:
     return _handle("read", "meiva.state").read()
 
 
-def update_state(delta: dict[str, Any]) -> None:
+def update_state(delta: Mapping[str, object]) -> None:
     """Apply a field update to the plugin's state."""
     _handle("update", "meiva.state_update").update(delta)

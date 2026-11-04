@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import stat
 from pathlib import Path
-from typing import Any
 
 from langchain_core.messages import BaseMessage
 from langgraph.runtime import Runtime
@@ -34,11 +33,11 @@ class _InjectCwdNotesAfterExecHook(Hook):
         runtime: Runtime[MeivaContext],
         _config: object,
         /,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, object] | None:
 
         current = state_handle().view(state)
         notes: list[BaseMessage] = []
-        update: dict[str, Any] = {}
+        update: dict[str, object] = {}
 
         now = runtime.context.require_clock().now()
         if current.cwd_note is not None:
