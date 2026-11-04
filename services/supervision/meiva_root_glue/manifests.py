@@ -69,9 +69,18 @@ _KNOWN_CAPABILITIES = frozenset(get_args(MachineRole))
 # Declared first, so it is stopped first: root's whole-tree stop and `meiva stop` both go
 # down the units in declaration order, and the agent-host's graceful exit still runs
 # turns that call ops and the gateway and writes their restarts to the data plane.
-# Startup is concurrent, so the position changes nothing at start.
+# The local `otel-collector` stops after application producers have flushed to it, and the
+# LGTM storage backends (`loki`, `prometheus`, `tempo`) stop last so the collector's own
+# shutdown flush lands cleanly. Startup is concurrent, so the position changes nothing at start.
 # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
 STOPS_FIRST = "agent-host"
+_STOP_ORDER_TIER: dict[str, int] = {
+    STOPS_FIRST: 0,
+    "otel-collector": 2,
+    "loki": 3,
+    "prometheus": 3,
+    "tempo": 3,
+}
 
 # G6b attach values for classes that spawn at RUNTIME (never static manifest
 # rows — see the module docstring). Kept here so the spawn slice (W1.3) has
@@ -130,7 +139,7 @@ def build_units(
     )
     caps = _validated_capabilities(capabilities)
     units: list[dict[str, object]] = []
-    for spec in sorted(chosen, key=lambda spec: spec.session != STOPS_FIRST):
+    for spec in sorted(chosen, key=lambda spec: _STOP_ORDER_TIER.get(spec.session, 1)):
         if not (spec.capabilities & caps):
             continue
         unit: dict[str, object] = {

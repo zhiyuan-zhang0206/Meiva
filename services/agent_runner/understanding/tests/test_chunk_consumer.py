@@ -642,6 +642,44 @@ async def test_the_forever_loop_works_the_queue_and_stops_cleanly_on_cancel(
     assert [s for s, *_ in jobs] == ["done"] * 3, jobs
 
 
+async def test_max_in_flight_caps_concurrent_claims_and_drains_remaining_jobs(
+    chunk_timestamps: TimestampPolicy,
+    model_catalog: ModelCatalog,
+    aops_pool: AsyncConnectionPool,
+    chunk_seams: ChunkSeams,
+) -> None:
+    active = 0
+    peak = 0
+    guard = threading.Lock()
+
+    def answer(located: LocatedChunk) -> ChunkResult:
+        nonlocal active, peak
+        with guard:
+            active += 1
+            peak = max(peak, active)
+        time.sleep(0.03)
+        with guard:
+            active -= 1
+        return chunk_result(located, timeline_inputs=chunk_timestamps)
+
+    chunk_seams.state["answer"] = answer
+    for agent in (1, 2, 3, 4):
+        await _enqueue_ends(aops_pool, agent, "m1")
+    await loop.Consumer(
+        aops_pool,
+        db_without_agent_meta(),
+        [],
+        clock=CLOCK,
+        **lm_wiring(model_catalog),
+        config=consumer_config(),
+        max_in_flight=2,
+        describe=chunk_seams.describe,
+        load_segments=chunk_seams.load_segments,
+    ).run_until_idle()
+    assert peak == 2
+    assert [s for s, *_ in await job_statuses(aops_pool)] == ["done"] * 4
+
+
 async def test_a_replay_describes_one_agents_segments_together_and_skips_the_upper_checks(
     chunk_timestamps: TimestampPolicy,
     model_catalog: ModelCatalog,

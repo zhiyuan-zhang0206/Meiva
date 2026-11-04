@@ -46,6 +46,7 @@ from cli.startup.entry_plan import (
     needs_transport_key,
     normalize_profile_env,
     select_lite_api_token,
+    stops_local_collector,
     uses_lite_config,
 )
 from cli.startup.log_sinks import pre_dispatch_log_sink
@@ -216,10 +217,20 @@ def bind_entry_facts(
     transport_key = _take_transport_key(args_in)
     if transport_key is not None:
         args.transport_key = transport_key
-    if tuple(args_in[:1]) in (("init",), ("start",)):
+    verb = tuple(args_in[:1])
+    if verb == ("init",):
         from cli.start_runtime import HomeSite
 
         args.site = HomeSite(home, checkout)
+    elif verb == ("start",):
+        from cli.start_runtime import HomeSite
+
+        args.site = HomeSite(
+            home,
+            checkout,
+            pid=os.getpid(),
+            started_at=datetime.now(UTC).isoformat(),
+        )
 
 
 # meiva:note
@@ -350,7 +361,7 @@ def dispatch_parsed(
     # The one place the operator's home is created (owner-only, a symlinked home refused); the
     # runtime built next only holds the path.
     ensure_private_dir(declared)
-    command = CommandRuntime.create(home)
+    command = CommandRuntime.create(home, suppress_local_otlp=stops_local_collector(args_in))
     args.runtime = command
     database_factory = operator_database_factory(
         local_host=command.machine.host,

@@ -35,3 +35,31 @@ def test_root_stops_the_agent_host_before_every_other_unit(tmp_path: Path) -> No
     assert [unit["id"] for unit in units] == [STOPS_FIRST, "gateway", "alpha-sidecar", "ops"]
     registry = UnitRegistry([UnitManifest.from_mapping(unit, origin="test") for unit in units])
     assert registry.all_stop_order() == (STOPS_FIRST, "gateway", "alpha-sidecar", "ops")
+
+
+def test_otel_collector_stops_after_producers_and_before_storage_backends(tmp_path: Path) -> None:
+    sessions = [
+        "loki",
+        "otel-collector",
+        "gateway",
+        "tempo",
+        STOPS_FIRST,
+        "pty-sessions",
+        "prometheus",
+    ]
+    units = build_units(
+        [_spec(session) for session in sessions],
+        capabilities={"agent-runner"},
+        repo_root=tmp_path,
+        environments={session: {} for session in sessions},
+        home=meiva_home(),
+    )
+    assert [unit["id"] for unit in units] == [
+        STOPS_FIRST,
+        "gateway",
+        "pty-sessions",
+        "otel-collector",
+        "loki",
+        "tempo",
+        "prometheus",
+    ]

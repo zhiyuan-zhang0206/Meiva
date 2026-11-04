@@ -468,3 +468,27 @@ def test_private_file_problem_sees_a_fifo(tmp_path: Path) -> None:
     path = tmp_path / "marker"
     os.mkfifo(path)
     assert private_storage.private_file_problem(path) == "is not a regular file"
+
+
+@pytest.mark.requires_host("darwin")
+def test_converge_leaves_already_private_nodes_untouched_without_chmod(
+    request: pytest.FixtureRequest, tmp_path: Path
+) -> None:
+    tree = tmp_path / "tree"
+    nested = tree / "agent"
+    nested.mkdir(parents=True)
+    tree.chmod(0o700)
+    nested.chmod(0o700)
+    secret = nested / "secret.txt"
+    secret.write_text("already-private")
+    secret.chmod(0o600)
+    _make_chmod_refuse(nested, request)
+    _make_chmod_refuse(secret, request)
+    cap = _Captured(request.addfinalizer)
+
+    private_storage.converge_private_tree(tree, euid=os.geteuid())
+
+    assert _mode(nested) == 0o700
+    assert _mode(secret) == 0o600
+    assert cap.debugs == []
+    assert cap.warnings == []

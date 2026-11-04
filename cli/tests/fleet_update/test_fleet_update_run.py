@@ -38,7 +38,10 @@ def test_runners_stop_first_and_start_last(
         assert run(step) == 0
     _assert_wave_order(cluster)
     kinds = [kind for kind, _ in cluster.effects if not kind.startswith("silence-")]
-    assert kinds.index("fetch") < kinds.index("stop") < kinds.index("switch")
+    assert (
+        kinds.index("fetch") < kinds.index("prestage") < kinds.index("stop") < kinds.index("switch")
+    )
+    assert set(_effect_aliases(cluster, "prestage")) == {"gw", "mac", "lin"}
     assert kinds[-7:-4] == ["refresh"] * 3
     assert set(kinds[-4:]) == {"schedules-verify", "plugins-verify"}
     assert set(_effect_aliases(cluster, "refresh")) == {"gw", "mac", "lin"}
@@ -51,6 +54,7 @@ def test_independent_waves_fan_out_concurrently_without_breaking_gateway_order(
 ) -> None:
     cluster, run = env
     cluster.barriers = {
+        "prestage": ["gw", "mac", "lin"],
         "stop": ["mac", "lin"],
         "switch": ["gw", "mac", "lin"],
         "start": ["mac", "lin"],
@@ -196,7 +200,7 @@ def test_run_uses_one_log_and_accepts_both_halves_options(
     logs = list((tmp_path / "logs").glob("*.log"))
     assert len(logs) == 1 and logs[0].name.endswith("-run.log")
     output = logs[0].read_text()
-    assert "--mode smooth --timeout 30" in output and " -ge 12 " in output
+    assert "--mode smooth --timeout 30" in output and " -ge 120 " in output
     assert "packages refresh" in output
     assert "down complete" in output and "up complete" in output
     assert "run `up` when ready" not in output

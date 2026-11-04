@@ -33,6 +33,7 @@ from .plan.recovery import Recovery, recovery_action, recovery_report
 from .plan.stop_wave import StopChoices, StopStep, stop_steps
 from .plan.stored_schedules import schedule_check
 from .plan.wave_order import start_order
+from .prestage import prestage_command
 from .programs import (
     CHECK_ROWS_SCRIPT,
     VERIFY_SCRIPTS,
@@ -313,6 +314,8 @@ def down(s: Session, args: FleetArgs, resolved_new: str | None) -> None:
         raise RefusedError("refused: " + "; ".join(pre.reasons))
     announce_leases(s, args.gateway, _chosen(args).lease_confirm_seconds)
     _stored_schedules(s, args, new)
+    hosts = start_order(args.gateway, tuple(args.runner))
+    s.run_all(hosts, lambda alias: s.run(alias, prestage_command(new)))
     silence_note = f" ({args.message_text})" if args.message_text else ""
     run_silence(
         s,
@@ -325,7 +328,7 @@ def down(s: Session, args: FleetArgs, resolved_new: str | None) -> None:
     )
     _stop_wave(s, args, pre)
     s.run_all(
-        start_order(args.gateway, tuple(args.runner)),
+        hosts,
         lambda alias: s.run(alias, switch_command(new)),
     )
     next_step = "continuing with `up`" if args.half == "run" else "run `up` when ready"

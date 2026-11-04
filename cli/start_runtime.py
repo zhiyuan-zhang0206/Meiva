@@ -29,6 +29,8 @@ from base.host.runtime_interpreter import LoadedRuntimeIdentity
 class HomeSite:
     home: Path
     checkout: Path
+    pid: int | None = None
+    started_at: str | None = None
 
 
 # meiva:note

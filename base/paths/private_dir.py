@@ -65,14 +65,16 @@ def ensure_private_dir(path: Path, *, euid: int | None = None) -> Path:
         before = path.lstat()
     except FileNotFoundError:
         path.mkdir(parents=True, mode=0o700, exist_ok=True)
+        current = path.lstat()
     else:
         refusal = dir_refusal(before, euid=euid)
         if refusal is not None:
             raise private_path_error(path, refusal)
+        current = before
 
-    current = path.lstat()
     refusal = dir_refusal(current, euid=euid)
     if refusal is not None:
         raise private_path_error(path, refusal)
-    path.chmod(0o700)
+    if stat.S_IMODE(current.st_mode) != 0o700:
+        path.chmod(0o700)
     return path

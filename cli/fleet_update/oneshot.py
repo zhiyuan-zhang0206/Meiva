@@ -35,8 +35,8 @@ MEIVA_FLEET_PLIST
 chmod 600 "$D/job.plist"
 launchctl bootstrap "gui/$(id -u)" "$D/job.plist" || {{ echo "not logged in to the GUI?"; exit 71; }}
 n=0; until grep -q '^ONESHOT_RC=' "{log}"; do
-  [ "$n" -ge {timeout_s // 5} ] && {{ echo "still running: gui/$(id -u)/{label}, {log}"; exit 72; }}
-  sleep 5; n=$((n+1)); done
+  [ "$n" -ge {timeout_s * 2} ] && {{ echo "still running: gui/$(id -u)/{label}, {log}"; exit 72; }}
+  sleep 0.5; n=$((n+1)); done
 cat "{log}"; rc=$(sed -n 's/^ONESHOT_RC=//p' "{log}" | tail -n 1)
 launchctl bootout "gui/$(id -u)/{label}" || echo "bootout of {label} failed"
 rm -rf "$D"; exit "$rc\""""

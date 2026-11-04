@@ -151,6 +151,7 @@ class CommandRuntime:
     # other process facts. The entry's checkout gate has already accepted it for `home`.
     checkout: Path
     terminal: Terminal
+    suppress_local_otlp: bool = False
 
     # meiva:note
     # The host as it answers once the configuration has been read: its environment is the launch
@@ -166,11 +167,23 @@ class CommandRuntime:
     # attempted, not when the command is dispatched: a verb that emits nothing never asks, and a
     # lite verb keeps its promise not to read the configuration. This owner is the root for that
     # read (the process `settings`), so the command's writer takes the two answers as callables
-    # instead of reaching for the process singleton itself.
+    # instead of reaching for the process singleton itself. When the command itself tears down the
+    # local `otel-collector` sidecar (`suppress_local_otlp`), loopback OTLP HTTP export is skipped
+    # so exit drain does not block retrying a collector the command just stopped; JSONL mirror,
+    # `telemetry_events` and `observed_metrics` still record every event, and an explicit external
+    # `MEIVA_TELEMETRY_OTLP_ENDPOINT` still exports.
     def otlp_enabled(self) -> bool:
         from base.config import settings
 
-        return bool(settings.observability.telemetry_otlp_enabled)
+        if not settings.observability.telemetry_otlp_enabled:
+            return False
+        if not self.suppress_local_otlp:
+            return True
+        from base.telemetry.observability import endpoint_override_is_explicit
+
+        return endpoint_override_is_explicit(
+            "MEIVA_TELEMETRY_OTLP_ENDPOINT", self.config.process_environment()
+        )
 
     def otlp_endpoint(self) -> str:
         from base.config import settings
@@ -209,7 +222,7 @@ class CommandRuntime:
     # the helper's port when a macOS code path asks for one, and the host only answers when a step
     # asks it to find or run something.
     @classmethod
-    def create(cls, home: Path) -> CommandRuntime:
+    def create(cls, home: Path, *, suppress_local_otlp: bool = False) -> CommandRuntime:
         config = ConfigBoot()
         host = Host.system(environ=config.process_environment())
         return cls(
@@ -228,6 +241,7 @@ class CommandRuntime:
             ),
             checkout=repo_root(),
             terminal=Terminal.current(),
+            suppress_local_otlp=suppress_local_otlp,
         )
 
 

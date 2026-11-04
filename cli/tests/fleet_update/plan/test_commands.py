@@ -28,6 +28,7 @@ from cli.fleet_update.plan.host_commands import (
     switch_command,
 )
 from cli.fleet_update.plan.redaction import redact
+from cli.fleet_update.prestage import prestage_command
 
 _NEW = "0123456789abcdef0123456789abcdef01234567"
 
@@ -73,12 +74,26 @@ def test_a_host_runs_its_command_in_its_own_login_shell(os_name: str, shell: str
 
 def test_the_helper_probe_reads_the_target_commits_objects_not_the_installed_checkout() -> None:
     command = helper_probe_command(_NEW)
-    assert f'git -C "$S" archive {_NEW} | tar -x -C "$tmp"' in command
+    assert (
+        f'git -C "$S" archive {_NEW} -- scripts/host_ops/tcc base services/desktop | tar -x -C "$tmp"'
+        in command
+    )
     assert (
         'PYTHONPATH="$tmp"' in command
         and '"$tmp/scripts/host_ops/tcc/helper-signing.py"' in command
     )
     assert '"$S/scripts/host_ops/tcc/helper-signing.py"' not in command
+
+
+def test_prestage_warms_dependencies_and_harnesses_from_target_objects_without_mutating_source() -> (
+    None
+):
+    command = prestage_command(_NEW)
+    assert "meiva-prestage" in command
+    assert f'git -C "$S" archive {_NEW} -- pyproject.toml uv.lock .python-version' in command
+    assert 'UV_PROJECT_ENVIRONMENT="$tmp/.venv"' in command
+    assert "converge_local_harness_clis" in command
+    assert "git checkout" not in command
 
 
 def test_the_gateway_programs_are_asked_by_verb() -> None:
@@ -110,9 +125,9 @@ def test_a_linux_host_starts_over_ssh_and_a_macos_host_through_a_one_shot_job() 
     assert "com.meiva.fleet-update.mac.S" in job
 
 
-def test_the_one_shot_waits_a_fifth_of_the_start_timeout_in_five_second_polls() -> None:
+def test_the_one_shot_waits_the_start_timeout_in_half_second_polls() -> None:
     job = start_script(macos=True, alias="mac", stamp="S", timeout_s=1800, flags="--all-services")
-    assert '[ "$n" -ge 360 ]' in job and "sleep 5" in job
+    assert '[ "$n" -ge 3600 ]' in job and "sleep 0.5" in job
 
 
 def test_an_alias_is_made_safe_for_the_job_label() -> None:

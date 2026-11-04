@@ -38,7 +38,7 @@ accepts (`--roster-timeout 1`, `--lease-confirm-seconds 1`).
 
 ## Contracts
 
-The fake `ssh` refuses production's forbidden order at the offending command — a gateway stop or start while a runner is up, a runner start before the gateway, a switch before its stop, a macOS start that is not the one-shot LaunchAgent — and its pre-verify simulation accepts only the gateway, only against NEW, with the table read before the worktree check and the check before any stop of the run; each refusal is recorded as a violation the test reads back and fails on.
+The fake `ssh` refuses production's forbidden order at the offending command — a gateway stop or start while a runner is up, a runner start before the gateway, a prestage after its stop in the same run, a switch before its stop, a macOS start that is not the one-shot LaunchAgent — and its pre-verify simulation accepts only the gateway, only against NEW, with the table read before the worktree check and the check before any stop of the run; each refusal is recorded as a violation the test reads back and fails on.
 
 `hosts`, `names`, `silent`, `hidden`, `roster_lag`, `stored_schedules`, `silence_reply`, `leases`, `lease_reply` and `fail` are per-test knobs. `lease_reads` records how many effects the cluster had already accepted at each lease read, so a test can prove the leases are named before anything stops; a read is never an effect, so `--dry-run` stays effect-free.
 
