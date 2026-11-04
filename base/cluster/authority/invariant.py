@@ -22,6 +22,7 @@ reported together in one ``CatalogRefusedError``:
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 
 from base.cluster.authority.catalog import (
@@ -42,6 +43,7 @@ from base.cluster.authority.checks import (
 from base.cluster.authority.groups import group_violations
 from base.cluster.authority.monitor import monitor_violations
 from base.cluster.authority.roles import verify_generation
+from base.db.rows import query_one
 from base.host.db_authority.ledger import require_ledger
 from base.host.db_authority.model import (
     AuthorityRefusedError,
@@ -154,19 +156,29 @@ ORDER BY 1, 2, 3
 """
 
 
+# meiva:note
+# The answer of the `has_database_privilege` probe in `_acl_violations`.
+@dataclass(frozen=True)
+class _PublicConnectRow:
+    public_can_connect: bool
+
+
 def _acl_violations(conn: Conn, ledger: Ledger, readonly: frozenset[str]) -> list[str]:
     acls = list(conn.execute(_ACLS))
     default_acls = list(conn.execute(_DEFAULT_ACLS))
-    row = conn.execute(
+    row = query_one(
+        conn,
+        _PublicConnectRow,
         "SELECT has_database_privilege('public', current_database(), 'CONNECT')"
-    ).fetchone()
+        " AS public_can_connect",
+    )
     return check_acl_facts(
         owner=ledger.owner,
         groups=(ledger.groups.gateway, ledger.groups.runner),
         readonly=readonly,
         acls=acls,
         default_acls=default_acls,
-        public_can_connect=row is None or bool(row[0]),
+        public_can_connect=row is None or row.public_can_connect,
     )
 
 

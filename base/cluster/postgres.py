@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from types import FrameType
-from typing import Any, Literal, Protocol
+from typing import Literal, Protocol
 
 import psutil
 from pydantic import Field, model_validator
@@ -345,7 +345,7 @@ def observe(data: Path) -> OwnedProcess | None:
 @contextmanager
 def admission() -> Generator[Callable[[], None]]:
     pending: list[int] = []
-    previous: dict[int, Callable[[int, FrameType | None], Any] | int | None] = {}
+    previous: dict[int, Callable[[int, FrameType | None], object] | int | None] = {}
 
     def capture(signum: int, _frame: FrameType | None) -> None:
         pending.append(signum)

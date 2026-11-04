@@ -12,7 +12,6 @@ import time
 from collections.abc import Mapping
 from ipaddress import ip_address
 from pathlib import Path
-from typing import Any
 from urllib.parse import urlsplit
 
 import psutil
@@ -91,7 +90,7 @@ def postgres(data: Path) -> OwnedProcess | None:
 
 
 def redis_server(
-    info: Mapping[str, object], config: Mapping[Any, object], data: Path
+    info: Mapping[str, object], config: Mapping[str | None, object], data: Path
 ) -> OwnedProcess:
     directory, pid = config["dir"], info["process_id"]
     if not isinstance(directory, str) or not isinstance(pid, int):
@@ -131,8 +130,8 @@ def require_postgres(data: Path, port: int, *, required: bool = True) -> OwnedPr
     return identity
 
 
-def require_postgres_connection(
-    conn: psycopg.Connection[Any], data: Path, socket_dir: Path
+def require_postgres_connection[Row](
+    conn: psycopg.Connection[Row], data: Path, socket_dir: Path
 ) -> None:
     """Bind the connected backend to this home's postmaster before any DDL.
 

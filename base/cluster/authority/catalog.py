@@ -8,7 +8,7 @@ module never opens a connection and never infers authority from a role name.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any
+from dataclasses import dataclass
 
 import psycopg
 
@@ -17,6 +17,7 @@ from base.cluster.authority.checks import (
     Membership,
     RoleFacts,
 )
+from base.db.rows import query_all
 from base.host.db_authority.model import AuthorityRefusedError, Groups
 
 __all__ = [
@@ -32,7 +33,14 @@ __all__ = [
     "transitive_members",
 ]
 
-Conn = psycopg.Connection[Any]
+Conn = psycopg.Connection
+
+
+# meiva:note
+# The answer of the statements that select one `rolname` column.
+@dataclass(frozen=True)
+class _RolnameRow:
+    rolname: str
 
 
 def require_admin(conn: Conn) -> None:
@@ -54,15 +62,17 @@ def require_admin(conn: Conn) -> None:
 
 
 _ROLE_FACTS = """
-SELECT a.oid, a.rolname, a.rolcanlogin, a.rolsuper, a.rolinherit, a.rolcreaterole,
-       a.rolcreatedb, a.rolreplication, a.rolbypassrls, a.rolconnlimit, a.rolvaliduntil,
-       a.rolpassword,
-       EXISTS (SELECT 1 FROM pg_db_role_setting s WHERE s.setrole = a.oid),
+SELECT a.oid AS oid, a.rolname AS name, a.rolcanlogin AS login, a.rolsuper AS superuser,
+       a.rolinherit AS inherit, a.rolcreaterole AS createrole, a.rolcreatedb AS createdb,
+       a.rolreplication AS replication, a.rolbypassrls AS bypassrls,
+       a.rolconnlimit AS connection_limit, a.rolvaliduntil AS valid_until,
+       a.rolpassword AS password,
+       EXISTS (SELECT 1 FROM pg_db_role_setting s WHERE s.setrole = a.oid) AS configured,
        EXISTS (SELECT 1 FROM pg_shdepend d
-               WHERE d.refclassid = 'pg_authid'::regclass AND d.refobjid = a.oid),
+               WHERE d.refclassid = 'pg_authid'::regclass AND d.refobjid = a.oid) AS depended,
        EXISTS (SELECT 1 FROM pg_shdepend d
                WHERE d.refclassid = 'pg_authid'::regclass AND d.refobjid = a.oid
-                 AND d.deptype = 'o')
+                 AND d.deptype = 'o') AS owns
 FROM pg_authid a
 WHERE a.rolname = ANY(%s)
 """
@@ -70,18 +80,20 @@ WHERE a.rolname = ANY(%s)
 
 def role_facts(conn: Conn, names: Iterable[str]) -> dict[str, RoleFacts]:
     """Catalog facts for the named roles that exist (absent names are omitted)."""
-    rows = conn.execute(_ROLE_FACTS, (sorted(set(names)),)).fetchall()
-    return {row[1]: RoleFacts(*row) for row in rows}
+    rows = query_all(conn, RoleFacts, _ROLE_FACTS, (sorted(set(names)),))
+    return {row.name: row for row in rows}
 
 
 def login_roles(conn: Conn) -> dict[str, RoleFacts]:
     """Facts for every role that can currently log in."""
-    names = [row[0] for row in conn.execute("SELECT rolname FROM pg_roles WHERE rolcanlogin")]
+    rows = query_all(conn, _RolnameRow, "SELECT rolname FROM pg_roles WHERE rolcanlogin")
+    names = [row.rolname for row in rows]
     return role_facts(conn, names)
 
 
 _MEMBERSHIPS = """
-SELECT g.rolname, m.rolname, gr.rolname, am.admin_option, am.inherit_option, am.set_option
+SELECT g.rolname AS role, m.rolname AS member, gr.rolname AS grantor,
+       am.admin_option AS admin, am.inherit_option AS inherit, am.set_option AS "set"
 FROM pg_auth_members am
 JOIN pg_roles g ON g.oid = am.roleid
 JOIN pg_roles m ON m.oid = am.member
@@ -93,8 +105,7 @@ ORDER BY 1, 2, 3
 
 def memberships(conn: Conn, names: Iterable[str]) -> tuple[Membership, ...]:
     """Every membership row in which a named role is the role or the member."""
-    rows = conn.execute(_MEMBERSHIPS, {"names": sorted(set(names))}).fetchall()
-    return tuple(Membership(*row) for row in rows)
+    return tuple(query_all(conn, Membership, _MEMBERSHIPS, {"names": sorted(set(names))}))
 
 
 _TRANSITIVE_MEMBERS = """
@@ -111,7 +122,8 @@ SELECT r.rolname FROM members JOIN pg_roles r ON r.oid = members.oid ORDER BY 1
 
 def transitive_members(conn: Conn, roles: Iterable[str]) -> tuple[str, ...]:
     """Every role holding membership in ``roles``, directly or through another role."""
-    return tuple(row[0] for row in conn.execute(_TRANSITIVE_MEMBERS, (sorted(set(roles)),)))
+    rows = query_all(conn, _RolnameRow, _TRANSITIVE_MEMBERS, (sorted(set(roles)),))
+    return tuple(row.rolname for row in rows)
 
 
 def group_members(conn: Conn, groups: Groups) -> tuple[str, ...]:

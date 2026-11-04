@@ -28,7 +28,9 @@ source as [[machine]] / [[memory_repo]]: the home's `.env`).
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import datetime
 from urllib.parse import urlparse
 
 import psycopg
@@ -40,6 +42,7 @@ from base.cluster.machine import (
     gateway_api_base,
 )
 from base.db import Database
+from base.db.rows import query_all, query_one
 from base.host.net.predicates import is_loopback_host
 
 __all__ = [
@@ -325,24 +328,57 @@ def mark_stopping(
         conn.commit()
 
 
-def _composed_role(live: list[tuple[Any, ...]]) -> list[str]:
+# meiva:note
+# One live `machine_units` row, as `_recompute_machine_row` composes the machine from it.
+@dataclass(frozen=True)
+class _LiveUnitRow:
+    serve_gateway: bool
+    serve_agent_runner: bool
+    serve_observability_station: bool
+    url: str | None
+    up_since_at: datetime | None
+
+
+# meiva:note
+# The answer of `lookup`: the machine's advertised `gateway_url`.
+@dataclass(frozen=True)
+class _GatewayUrlRow:
+    gateway_url: str | None
+
+
+# meiva:note
+# The answer of `lookup_role`: the machine's capability set.
+@dataclass(frozen=True)
+class _RoleRow:
+    role: Sequence[str]
+
+
+# meiva:note
+# The answer of `is_paused`: whether the pause latch is set.
+@dataclass(frozen=True)
+class _PausedRow:
+    paused: bool
+
+
+def _composed_role(live: list[_LiveUnitRow]) -> list[str]:
     """Sorted union of the capabilities the live units serve."""
-    return sorted(
-        cap
-        for cap, index in (("gateway", 0), ("agent-runner", 1), ("observability-station", 2))
-        if any(row[index] for row in live)
-    )
+    served = {
+        "gateway": any(row.serve_gateway for row in live),
+        "agent-runner": any(row.serve_agent_runner for row in live),
+        "observability-station": any(row.serve_observability_station for row in live),
+    }
+    return sorted(cap for cap, held in served.items() if held)
 
 
-def _composed_gateway_url(live: list[tuple[Any, ...]]) -> str | None:
+def _composed_gateway_url(live: list[_LiveUnitRow]) -> str | None:
     """Dial URL: ops URL of the live agent-runner unit when present, else the gateway unit's URL,
     else the station unit's advertised OTLP ingress URL (WP4: a pure station advertises the
     address remote consumers dial — the bearer-authenticated OTLP ingress; see
     docs/conventions/data/reachability-and-credentials.md)."""
-    runner_url = next((row[3] for row in live if row[1]), None)
-    gateway_only_url = next((row[3] for row in live if row[0]), None)
-    station_only_url = next((row[3] for row in live if row[2]), None)
-    if any(row[1] for row in live):
+    runner_url = next((row.url for row in live if row.serve_agent_runner), None)
+    gateway_only_url = next((row.url for row in live if row.serve_gateway), None)
+    station_only_url = next((row.url for row in live if row.serve_observability_station), None)
+    if any(row.serve_agent_runner for row in live):
         return runner_url
     return gateway_only_url if gateway_only_url is not None else station_only_url
 
@@ -374,7 +410,9 @@ def _recompute_machine_row(cur: psycopg.Cursor, name: str) -> None:
     `cur` is the caller's open cursor (same transaction as the unit UPSERT /
     stop stamp, so the read-then-write is atomic).
     """
-    cur.execute(
+    live = query_all(
+        cur.connection,
+        _LiveUnitRow,
         # up_since_at is the #981-renamed stamp; the expand-window COALESCE
         # (up_since_at, last_seen_at) was removed with the contract migration —
         # a unit whose host is still on pre-#981 code registers itself
@@ -385,7 +423,6 @@ def _recompute_machine_row(cur: psycopg.Cursor, name: str) -> None:
         "FROM machine_units WHERE machine_name = %s AND stopped_at IS NULL",
         (name,),
     )
-    live = cur.fetchall()
 
     role = _composed_role(live)
     if not role:
@@ -406,7 +443,9 @@ def _recompute_machine_row(cur: psycopg.Cursor, name: str) -> None:
     # The composed "up since" is the LATEST announce across live units; a unit
     # whose up_since_at is NULL (pre-#981 registration, never backfilled)
     # contributes nothing to the max instead of raising.
-    up_since_at = max((row[4] for row in live if row[4] is not None), default=None)
+    up_since_at = max(
+        (row.up_since_at for row in live if row.up_since_at is not None), default=None
+    )
 
     # description is host-level config, written only by register_self (which runs
     # on the host itself). recompute does not touch it: a fresh row inserts NULL,
@@ -434,19 +473,20 @@ def lookup(db: Database, name: str) -> str:
             misspelled).
         MachineGatewayUrlMissing: row exists but gateway_url is NULL.
     """
-    with db.connect() as conn, conn.cursor() as cur:
-        cur.execute("SELECT gateway_url FROM machines WHERE name = %s", (name,))
-        row = cur.fetchone()
+    with db.connect() as conn:
+        row = query_one(
+            conn, _GatewayUrlRow, "SELECT gateway_url FROM machines WHERE name = %s", (name,)
+        )
     if row is None:
         raise MachineNotRegistered(
             f"no machine named {name!r} (it has not registered itself yet, or the name is "
             f"misspelled); see meiva.agents.list_machines() for the valid names."
         )
-    if row[0] is None:
+    if row.gateway_url is None:
         raise MachineGatewayUrlMissing(
             f"machine {name!r} exists in machines table but does not advertise a gateway_url."
         )
-    return row[0]
+    return row.gateway_url
 
 
 def lookup_role(db: Database, name: str) -> list[str]:
@@ -459,15 +499,14 @@ def lookup_role(db: Database, name: str) -> list[str]:
         MachineNotRegistered: no such row (the host has not run `meiva start`, or
             the name is misspelled).
     """
-    with db.connect() as conn, conn.cursor() as cur:
-        cur.execute("SELECT role FROM machines WHERE name = %s", (name,))
-        row = cur.fetchone()
+    with db.connect() as conn:
+        row = query_one(conn, _RoleRow, "SELECT role FROM machines WHERE name = %s", (name,))
     if row is None:
         raise MachineNotRegistered(
             f"no machine named {name!r} (it has not registered itself yet, or the name is "
             f"misspelled); see meiva.agents.list_machines() for the valid names."
         )
-    return row[0]
+    return list(row.role)
 
 
 def list_all(db: Database) -> list[tuple[str, str | None]]:
@@ -663,15 +702,19 @@ def is_paused(db: Database, name: str) -> bool:
     Raises:
         MachineNotRegistered: no such row.
     """
-    with db.connect() as conn, conn.cursor() as cur:
-        cur.execute("SELECT paused_at IS NOT NULL FROM machines WHERE name = %s", (name,))
-        row = cur.fetchone()
+    with db.connect() as conn:
+        row = query_one(
+            conn,
+            _PausedRow,
+            "SELECT paused_at IS NOT NULL AS paused FROM machines WHERE name = %s",
+            (name,),
+        )
     if row is None:
         raise MachineNotRegistered(
             f"no machine named {name!r} (it has not registered itself yet, or the name is "
             f"misspelled); see meiva.agents.list_machines() for the valid names."
         )
-    return row[0]
+    return row.paused
 
 
 def list_paused(db: Database) -> list[tuple[str, str | None]]:

@@ -26,7 +26,6 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 import psycopg
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
@@ -68,28 +67,27 @@ def pg_admin_url(pg_port: int, *, home: Path) -> str:
 
 
 @contextmanager
-def connect(
+def connect[Row](
     url: str,
     *,
     expected_data_dir: Path | None = None,
     autocommit: bool = False,
     connect_timeout: int | None = None,
     prepare_threshold: int | None = 5,
-    row_factory: RowFactory[Any] | None = None,
-) -> Generator[psycopg.Connection[Any]]:
+    row_factory: RowFactory[Row] = tuple_row,
+) -> Generator[psycopg.Connection[Row]]:
     """Open explicit admin authority; owned startup validates the actual connection.
 
     A caller managing native storage must supply its recorded data directory.
     Provider-managed provisioning helpers retain their explicit URL authority.
     Psycopg connections never reconnect, so validated custody lasts until close.
     """
-    actual_row_factory: RowFactory[Any] = tuple_row if row_factory is None else row_factory
-    with psycopg.connect(
+    with psycopg.Connection[Row].connect(
         url,
         autocommit=autocommit,
         connect_timeout=connect_timeout,
         prepare_threshold=prepare_threshold,
-        row_factory=actual_row_factory,
+        row_factory=row_factory,
     ) as conn:
         if expected_data_dir is not None:
             require_postgres_connection(
@@ -119,7 +117,7 @@ def owner_conninfo(admin_url: str, *, database: str, owner: str) -> str:
 
 
 @contextmanager
-def owner_session(
+def owner_session[Row](
     admin_url: str,
     *,
     database: str,
@@ -128,8 +126,8 @@ def owner_session(
     autocommit: bool = False,
     connect_timeout: int | None = None,
     prepare_threshold: int | None = 5,
-    row_factory: RowFactory[Any] | None = None,
-) -> Generator[psycopg.Connection[Any]]:
+    row_factory: RowFactory[Row] = tuple_row,
+) -> Generator[psycopg.Connection[Row]]:
     conninfo = owner_conninfo(admin_url, database=database, owner=owner)
     with connect(
         conninfo,
@@ -186,7 +184,7 @@ class OwnerAuthority:
         return self.conninfo
 
     @contextmanager
-    def session(self, *, autocommit: bool = False) -> Generator[psycopg.Connection[Any]]:
+    def session(self, *, autocommit: bool = False) -> Generator[psycopg.Connection]:
         """A custody-checked `owner_session` on this home's database."""
         with owner_session(
             self.admin_url,
