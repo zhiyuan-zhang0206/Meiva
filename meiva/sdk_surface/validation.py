@@ -19,9 +19,38 @@ validates its own arguments instead:
 
 from __future__ import annotations
 
-from typing import Any, Literal, overload
+from typing import Literal, TypeGuard, overload
 
-from . import STATE_KEY, UPDATE_KEY, ContextOutsideProcessError, meiva_module
+from . import STATE_KEY, UPDATE_KEY, meiva_module
+
+
+# meiva:note
+# A `list`/`tuple` whose elements are still `object`. `isinstance(value, (list, tuple))` alone
+# narrows to `list[Unknown]`, and every read of an element then trips the unknown-type rules.
+def _is_sequence(value: object) -> TypeGuard[list[object] | tuple[object, ...]]:
+    return isinstance(value, (list, tuple))
+
+
+# meiva:note
+# The string a one-element sequence of one string stands for — the trailing-comma class that made
+# this module necessary (`("line1" "line2",)` is a one-element tuple). None for anything else,
+# including a multi-element sequence and a sequence whose element is not a string.
+def _unwrapped_string(value: object) -> str | None:
+    if _is_sequence(value) and len(value) == 1 and isinstance(value[0], str):
+        return value[0]
+    return None
+
+
+# meiva:note
+# The refusal an `allow_types` argument earns when it arrived as a sequence whose elements are not
+# all dicts: an all-string array is exactly the shape the gateway's string fields reject, so it is
+# refused here instead of unwrapped.
+def _refuse_flat_sequence(value: object, name: str, type_name: str) -> None:
+    if _is_sequence(value) and not all(isinstance(part, dict) for part in value):
+        raise TypeError(
+            f"{name} must be a string or a list of dicts, got a "
+            f"{type_name} of {type(value[0]).__name__} elements"
+        )
 
 
 def set_state(value: object) -> None:
@@ -42,15 +71,6 @@ def unbind_exec_turn() -> None:
     slots.pop(UPDATE_KEY, None)
 
 
-def is_launched_child() -> bool:
-    try:
-        context = meiva_module().context
-    except ContextOutsideProcessError:
-        return False
-    identity = context.identity
-    return bool(identity is not None and identity.agent_id is not None and not identity.owns_loop)
-
-
 def _type_names(expected: type | tuple[type, ...]) -> str:
     """Render a type union as an error-message phrase ("int", "int or None",
     "int, float, or str")."""
@@ -61,44 +81,37 @@ def _type_names(expected: type | tuple[type, ...]) -> str:
     return ", ".join(names[:-1]) + f" or {names[-1]}"
 
 
+# meiva:note
+# Normalize one string-expected argument at an `meiva.*` entry point: `str` passes through, a
+# one-element `list`/`tuple` whose element is a `str` unwraps to that element (the trailing-comma
+# class — the second arm of the return type, and a no-op where the parameter already admits a
+# `str`), and anything else — a multi-element sequence, a sequence with a non-string element, or a
+# different type — raises `TypeError` naming the parameter.
+#
+# `allow_types` admits a parameter's legitimate non-string forms by isinstance, without expansion
+# (e.g. `watcher.at`'s datetime/timedelta, `files`' os.PathLike). A sequence admitted through
+# `allow_types` must be a list of dicts — the multimodal content-block shape — because an
+# all-string array is exactly the shape the gateway rejects.
 def coerce_str[T](
     value: T,
     name: str,
     *,
     allow_none: bool = False,
     allow_types: tuple[type, ...] = (),
-) -> T:
-    """Normalize one string-expected argument at an meiva.* entry point.
-
-    `str` passes through; a one-element `list`/`tuple` whose element is a
-    `str` unwraps to that element (the trailing-comma class). Anything else —
-    a multi-element sequence, a sequence with a non-string element, or a
-    different type — raises TypeError naming the parameter.
-
-    `allow_types` admits a parameter's legitimate non-string forms by
-    isinstance, without expansion (e.g. `watcher.at`'s datetime/timedelta,
-    `files`' os.PathLike). A sequence admitted through `allow_types` must be a
-    list of dicts — the multimodal content-block shape — because an
-    all-string array is exactly the shape the gateway rejects.
-    """
+) -> T | str:
     if value is None:
         if allow_none:
             return value
         raise TypeError(f"{name} must be a string, got None")
     if isinstance(value, str):
         return value
-    raw: Any = value
-    type_name = type(raw).__name__
-    if isinstance(value, (list, tuple)) and len(raw) == 1 and isinstance(raw[0], str):
-        unwrapped: Any = raw[0]
+    type_name = type(value).__name__
+    unwrapped = _unwrapped_string(value)
+    if unwrapped is not None:
         return unwrapped
     if allow_types and isinstance(value, allow_types):
-        if isinstance(value, (list, tuple)) and not all(isinstance(part, dict) for part in raw):
-            raise TypeError(
-                f"{name} must be a string or a list of dicts, got a "
-                f"{type_name} of {type(raw[0]).__name__} elements"
-            )
-        return raw
+        _refuse_flat_sequence(value, name, type_name)
+        return value
     raise TypeError(f"{name} must be a string, got {type_name}")
 
 

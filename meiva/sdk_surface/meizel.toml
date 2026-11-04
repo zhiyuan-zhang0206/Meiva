@@ -2,7 +2,7 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 
 [uses]
 "pure" = ["installation.py", "validation.py"]
-"agent_identity.py" = ["installation.py", "process_context.py", "pure", "sdk_disable.py", "validation.py"]
+"agent_identity.py" = ["installation.py", "process_context.py", "pure", "sdk_disable.py"]
 "attachment_transport.py" = ["process_context.py", "pure", "settings.py"]
 "batch.py" = ["pure"]
 "discovery.py" = ["pure"]

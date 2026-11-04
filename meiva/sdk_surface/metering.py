@@ -35,13 +35,16 @@ from __future__ import annotations
 
 import functools
 import inspect
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from types import ModuleType
-from typing import Any, assert_never
+from typing import TypeGuard, assert_never
 
 from base.agents.sdk.capture import SdkCaptureOwner
 from base.agents.sdk.tally import SdkCallTally
+from base.agents.sdk.telemetry import run_metered, run_metered_async
+from base.api_contracts.agent_contract import EventSink
+from base.host.boundary.untyped import object_of
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.discovery import agent_visible_names
 from meiva.sdk_surface.installation import EventPipelines, SamplingPolicyOwner, installed
@@ -60,7 +63,7 @@ from meiva.sdk_surface.pure.plans.metering.recorder_plan import (
 )
 
 
-def _recorder(fn: Callable[..., Any], sampling: SamplingPolicyOwner) -> Callable[..., Any]:
+def _recorder[F: Callable[..., object]](fn: F, sampling: SamplingPolicyOwner) -> F:
     setattr(fn, RECORDER_MARK, fn)
     setattr(fn, SAMPLING_MARK, sampling)
     return fn
@@ -74,10 +77,10 @@ def _check_sampling(fn: object, sampling: SamplingPolicyOwner) -> None:
 def _caller(
     clients: EventPipelines | None,
 ) -> tuple[
-    dict[str, Any],
+    dict[str, object],
     SdkCallTally | None,
     SdkCaptureOwner | None,
-    Callable[[], Any] | None,
+    Callable[[], EventSink] | None,
     Callable[[], str] | None,
 ]:
     """Snapshot this call's provenance; invalid identity rejects admission."""
@@ -98,24 +101,27 @@ def _caller(
     )
 
 
-def _telemetry_runners() -> tuple[Callable[..., Any], Callable[..., Any]]:
-    from base.agents.sdk.telemetry import run_metered, run_metered_async
+# meiva:note
+# The callable its own `async def` returned. `run_metered_async` meters through the awaited result
+# type, which a `Callable[..., object]` does not carry; the check is the same one that picks which
+# recorder to build.
+def _coroutine_callable(
+    fn: Callable[..., object],
+) -> TypeGuard[Callable[..., Coroutine[object, object, object]]]:
+    return inspect.iscoroutinefunction(fn)
 
-    return run_metered, run_metered_async
 
-
-def make_recorder[F: Callable[..., object]](
-    original: F,
+def make_recorder(
+    original: Callable[..., object],
     fq: str,
     sampling: SamplingPolicyOwner,
     clients: EventPipelines | None,
-) -> F:
+) -> Callable[..., object]:
     """Transparent proxy around ``original`` that meters the call as ``fq`` (the call /
     tally / emit logic lives in ``base.agents.sdk.telemetry.run_metered``)."""
 
     @functools.wraps(original)
     def recorder(*args: object, **kwargs: object) -> object:
-        run_metered, _ = _telemetry_runners()
         identity, tally, capture_owner, call_producer, machine_reader = _caller(clients)
         return run_metered(
             fq,
@@ -130,11 +136,10 @@ def make_recorder[F: Callable[..., object]](
             machine_reader=machine_reader,
         )
 
-    if inspect.iscoroutinefunction(original):
+    if _coroutine_callable(original):
 
         @functools.wraps(original)
         async def async_recorder(*args: object, **kwargs: object) -> object:
-            _, run_metered_async = _telemetry_runners()
             identity, tally, capture_owner, call_producer, machine_reader = _caller(clients)
             return await run_metered_async(
                 fq,
@@ -149,11 +154,9 @@ def make_recorder[F: Callable[..., object]](
                 machine_reader=machine_reader,
             )
 
-        wrapped_async: Any = _recorder(async_recorder, sampling)
-        return wrapped_async
+        return _recorder(async_recorder, sampling)
 
-    wrapped_sync: Any = _recorder(recorder, sampling)
-    return wrapped_sync
+    return _recorder(recorder, sampling)
 
 
 # meiva.mcps exposes its tools dynamically (the servers come from configuration), so the namespace
@@ -164,16 +167,15 @@ def make_recorder[F: Callable[..., object]](
 _MCP_CALL_FUNNEL = "call_raw"
 
 
-def make_mcp_recorder[F: Callable[..., object]](
-    original: F,
+def make_mcp_recorder(
+    original: Callable[..., object],
     sampling: SamplingPolicyOwner,
     clients: EventPipelines | None,
-) -> F:
+) -> Callable[..., object]:
     """Recorder for the MCP call funnel — derives the fq from the runtime args."""
 
     @functools.wraps(original)
     def recorder(source: object, server: str, tool: str, *args: object, **kwargs: object) -> object:
-        run_metered, _ = _telemetry_runners()
         identity, tally, capture_owner, call_producer, machine_reader = _caller(clients)
         return run_metered(
             mcp_call_name(server, tool),
@@ -188,8 +190,7 @@ def make_mcp_recorder[F: Callable[..., object]](
             machine_reader=machine_reader,
         )
 
-    wrapped_mcp: Any = _recorder(recorder, sampling)
-    return wrapped_mcp
+    return _recorder(recorder, sampling)
 
 
 # meiva:note
@@ -218,7 +219,7 @@ def _instrument_targets(root: object) -> list[tuple[object, str, str]]:
             # evaluated — it can raise (MachineNameMissing when unset) and crash install() ->
             # load_extensions. Statically-resolvable functions and submodules (the only things
             # we wrap / recurse) are all real attributes.
-            attr = inspect.getattr_static(container, name, None)
+            attr = object_of(inspect.getattr_static, container, name, None)
             if attr is None:
                 continue
             fq = f"{prefix}{name}"
@@ -268,14 +269,14 @@ def install(
     sampling: SamplingPolicyOwner, *, clients: EventPipelines | None, surface: MeterSurface
 ) -> tuple[tuple[object, str], ...]:
     funnel_mod = surface.funnel_module
-    funnel = None if funnel_mod is None else getattr(funnel_mod, _MCP_CALL_FUNNEL, None)
+    funnel = None if funnel_mod is None else object_of(getattr, funnel_mod, _MCP_CALL_FUNNEL, None)
     for parent, attr, _fq in surface.routines:
-        _check_sampling(getattr(parent, attr, None), sampling)
+        _check_sampling(object_of(getattr, parent, attr, None), sampling)
     _check_sampling(funnel, sampling)
     wrapped: list[tuple[object, str]] = []
     for parent, attr, fq in surface.routines:
-        current = getattr(parent, attr, None)
-        if current is None or is_recorder(current):
+        current = object_of(getattr, parent, attr, None)
+        if current is None or is_recorder(current) or not callable(current):
             continue
         setattr(parent, attr, make_recorder(current, fq, sampling, clients))
         wrapped.append((parent, attr))

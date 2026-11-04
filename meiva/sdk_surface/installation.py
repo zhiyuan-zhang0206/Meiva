@@ -16,7 +16,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import MappingProxyType, ModuleType
-from typing import Any, Protocol, TypedDict
+from typing import Protocol, TypedDict
 
 from pydantic import BaseModel
 
@@ -26,6 +26,7 @@ from base.agents.sdk import (
 from base.agents.sdk import (
     SamplingPolicyLike as SamplingPolicyOwner,
 )
+from base.api_contracts.agent_contract import EventSink
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import Clock
 from base.lm.catalog import ModelCatalog
@@ -49,7 +50,7 @@ from . import meiva_module
 class WrapLayer:
     target: str
     plugin: str
-    wrapper: Callable[..., Any]
+    wrapper: Callable[..., object]
 
 
 SkillProvider = Callable[[], list[Path]]
@@ -82,8 +83,8 @@ class WrapAdded:
     layer: WrapLayer
     parent: object
     attr: str
-    chained: Callable[..., Any]
-    original: Callable[..., Any]
+    chained: Callable[..., object]
+    original: Callable[..., object]
 
 
 @dataclass(frozen=True)
@@ -105,7 +106,7 @@ type Reversal = NamespaceAdded | MemberAdded | WrapAdded | ProviderAdded | Confi
 # pipeline. A `base.agents.context.clients.ClientSet` satisfies it; naming only the capability
 # keeps this module free of the client stack's imports.
 class EventPipelines(Protocol):
-    def event_pipeline(self) -> object: ...
+    def event_pipeline(self) -> EventSink: ...
 
 
 # meiva:note
@@ -138,7 +139,7 @@ class Installation:
     expansions: tuple[str, ...]
     wrap_layers: Mapping[str, tuple[WrapLayer, ...]]
     skill_providers: tuple[SkillProvider, ...]
-    metered: tuple[tuple[Any, str], ...]
+    metered: tuple[tuple[object, str], ...]
     disabled: frozenset[str]
     faces: bool
     undo: tuple[Reversal, ...]

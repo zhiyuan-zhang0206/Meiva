@@ -18,12 +18,14 @@ imports help).
 import dataclasses as _dataclasses
 import enum as _enum
 import inspect
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import Any
+from typing import TypeGuard
 
 from base.api_contracts.agent_contract import Harness
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.lm.catalog import ModelCatalog
 from meiva.sdk_surface import meiva_module
 
@@ -96,15 +98,23 @@ def doc_variants[T](**texts: str) -> Callable[[T], T]:
     return attach
 
 
+# meiva:note
+# The member map of a function or class — its `__dict__`, a dict for a function and a read-only
+# `mappingproxy` for a class, which a `dict` test would refuse.
+def _is_member_map(value: object) -> TypeGuard[Mapping[str, object]]:
+    return isinstance(value, Mapping)
+
+
 def _variant_text(obj: object, style: str | None) -> str | None:
     if not style:
         return None
-    holder: dict[str, Any] = getattr(obj, "__dict__", {})
-    texts = holder.get(VARIANT_ATTR)
-    mapping: Any = texts
-    if not isinstance(texts, dict):
+    holder = object_of(getattr, obj, "__dict__", {})
+    if not _is_member_map(holder):
         return None
-    text = mapping.get(style)
+    texts = holder.get(VARIANT_ATTR)
+    if not is_object_dict(texts):
+        return None
+    text = texts.get(style)
     return text if isinstance(text, str) and text else None
 
 
@@ -141,9 +151,9 @@ class ModelHelpProfile:
         catalog: ModelCatalog,
         harness: Harness = Harness.MEIVA,
     ) -> "ModelHelpProfile":
-        spec: Any = catalog.models.get(model)
+        spec = catalog.models.get(model)
         declared: frozenset[str] = spec.sdk_hidden_members if spec is not None else frozenset()
-        style: Any = spec.sdk_doc_style if spec is not None else None
+        style = None if spec is None else spec.sdk_doc_style
         harness_hidden = (
             HARNESS_HIDDEN_SELF_MEMBERS if harness is not Harness.MEIVA else frozenset[str]()
         )
@@ -271,7 +281,7 @@ class HelpRouter:
     # door that knows what this process runs as, and this strict module must not reach for it.
     def __init__(
         self,
-        original_help: Callable[..., Any],
+        original_help: Callable[..., object],
         *,
         meiva_help: Callable[[object], None],
     ) -> None:
@@ -287,7 +297,7 @@ class HelpRouter:
             if is_meiva_target(target):
                 self._meiva_help(target)
             else:
-                self._original_help(target)
+                _ = self._original_help(target)
         return None
 
 
@@ -415,7 +425,7 @@ def _find_agent_visible_binding(
     The submodule prefix prefers the namespace's `_qualname` (plugin
     namespaces register that) so the heading reflects the agent-facing name
     rather than the internal module path."""
-    members: dict[str, Any] = vars(mod)
+    members: dict[str, object] = vars(mod)
     for attr_name in agent_visible_names(mod):
         attr_value = members.get(attr_name)
         if attr_value is target and (inspect.isroutine(attr_value) or inspect.isclass(attr_value)):
@@ -479,8 +489,9 @@ def _format_child(name: str, child: object, render: _Render = _DEFAULT_RENDER) -
     if formatter is _format_class_stub:
         # The class formatter is the one that reads the render parameters
         # (compact classes; the recursion into nested members).
-        cls: Any = child
-        return _format_class_stub(name, cls, render)
+        if not inspect.isclass(child):
+            return f"# {name}: {type(child).__name__}"
+        return _format_class_stub(name, child, render)
     if formatter is _format_function_stub or formatter is _format_submodule_ref:
         # meiva:note
         # Both read the render's `doc_style` to pick a declared variant.
@@ -585,7 +596,7 @@ def _format_multiline_const_block(name: str, base: type, value: str, doc: str | 
     return f"{doc}\n{block}" if doc else block
 
 
-def _format_class_stub(name: str, cls: type[Any], render: _Render = _DEFAULT_RENDER) -> str:
+def _format_class_stub(name: str, cls: type, render: _Render = _DEFAULT_RENDER) -> str:
     # Class child: `class name(Bases):` + indented docstring + indented members
     # (fields as `name: type`, methods as `def name(sig): doc`), the same
     # expansion functions get. Bases are shown (minus object) so an exception's
@@ -594,9 +605,10 @@ def _format_class_stub(name: str, cls: type[Any], render: _Render = _DEFAULT_REN
     # would render Exception's built-in doc for a deliberately doc-less class.
     head = _class_head(name, cls)
     parts = _class_doc_parts(name, cls, render)
-    if issubclass(cls, _enum.Enum):
+    members = _enum_members(cls)
+    if members is not None:
         # Enum members are the contract (legal values) — always keep them.
-        parts.extend(f"    {m.name} = {m.value!r}" for m in cls)
+        parts.extend(_enum_member_line(member) for member in members)
     else:
         # Compact mode keeps field annotations (Constant children) so the
         # agent sees attribute names, but drops methods and nested classes.
@@ -604,6 +616,22 @@ def _format_class_stub(name: str, cls: type[Any], render: _Render = _DEFAULT_REN
     if not parts:
         return f"{head} ..."
     return f"{head}\n" + "\n".join(parts)
+
+
+# meiva:note
+# The members of `cls` when it is an Enum, whose values are the contract the stub documents; None
+# for any other class, so the caller keeps the class itself un-narrowed for the member walk.
+def _enum_members(cls: type) -> list[_enum.Enum] | None:
+    if not issubclass(cls, _enum.Enum):
+        return None
+    return list(cls)
+
+
+# meiva:note
+# One enum member as the stub shows it. `Enum.value` is declared `Any` in the typeshed, so the value
+# is read as `object` and rendered rather than bound to an unchecked name.
+def _enum_member_line(member: _enum.Enum) -> str:
+    return f"    {member.name} = {object_of(getattr, member, 'value')!r}"
 
 
 def _class_head(name: str, cls: type) -> str:

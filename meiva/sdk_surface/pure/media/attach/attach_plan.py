@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.lm.attach.constants import (
     ATTACH_MAX_FILE_BYTES,
     ATTACH_MAX_LABEL_CHARS,
@@ -101,7 +102,32 @@ def refusal(facts: AttachFacts) -> Refusal | None:
     return None
 
 
+# meiva:note
+# The registrations already in the attach channel, checked one by one. The channel rides the
+# agent-writable `meiva.state_update`, so a value of another shape is refused here rather than
+# carried into the next turn as if it were a registration.
+def _recorded_entries(existing: object) -> list[dict[str, str | None]]:
+    if not is_object_list(existing):
+        raise TypeError(
+            f"meiva.state_update attach channel must be a list, got {type(existing).__name__}"
+        )
+    entries: list[dict[str, str | None]] = []
+    for recorded in existing:
+        if not is_object_dict(recorded):
+            raise TypeError(
+                f"an attach channel entry must be a dict, got {type(recorded).__name__}"
+            )
+        path = recorded.get("path")
+        label = recorded.get("label")
+        if not isinstance(path, str):
+            raise TypeError("an attach channel entry must name its path as a string")
+        if label is not None and not isinstance(label, str):
+            raise TypeError("an attach channel entry's label must be a string or None")
+        entries.append({"path": path, "label": label})
+    return entries
+
+
 def appended_channel(
-    existing: list[dict[str, str | None]], resolved_path: str, label: str | None
+    existing: object, resolved_path: str, label: str | None
 ) -> list[dict[str, str | None]]:
-    return [*existing, {"path": resolved_path, "label": label}]
+    return [*_recorded_entries(existing), {"path": resolved_path, "label": label}]

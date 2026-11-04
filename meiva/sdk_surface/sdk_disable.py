@@ -16,7 +16,10 @@ import sys as _sys
 import types as _types
 from collections.abc import Mapping
 from dataclasses import replace
-from typing import Any, Never
+from typing import Never
+
+from base.host.boundary.json_values import is_object_list
+from base.host.boundary.untyped import object_of
 
 from . import meiva_module
 from .installation import SLOT, installed, slot
@@ -168,8 +171,8 @@ def _disable_top_level_module(name: str) -> None:
     if hasattr(pkg, name):
         delattr(pkg, name)
     _sys.modules[f"meiva.{name}"] = DisabledSDKModule(f"meiva.{name}")
-    surface = getattr(pkg, "__all_for_meiva__", None)
-    if surface is not None and name in surface:
+    surface = object_of(getattr, pkg, "__all_for_meiva__", None)
+    if is_object_list(surface) and name in surface:
         surface.remove(name)
 
 
@@ -180,13 +183,13 @@ def _disable_dotted_entry(entry: str) -> None:
     ``sys.modules`` entry for the sentinel); a plain attribute / function is
     just deleted. Missing parents or leaves are skipped."""
     parts = entry.split(".")
-    parent: Any = getattr(meiva_module(), parts[0], None)
+    parent = object_of(getattr, meiva_module(), parts[0], None)
     for p in parts[1:-1]:
-        parent = getattr(parent, p, None)
+        parent = object_of(getattr, parent, p, None)
     if parent is None:
         return
     leaf = parts[-1]
-    target = getattr(parent, leaf, None)
+    target = object_of(getattr, parent, leaf, None)
     if target is None:
         return
     delattr(parent, leaf)

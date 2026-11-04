@@ -9,8 +9,8 @@ registering turn (user ruling 2026-08-26). The SDK keeps no buffer of its own.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
+from base.host.boundary.json_values import is_object_dict
 from base.lm.catalog import ModelCatalog
 from base.paths.expand import expand_home
 from meiva.sdk_surface import process_context
@@ -66,12 +66,11 @@ def plan_media(
 # Append one registration to the exec turn's state-update dict, the channel the exec node takes
 # the entries out of. `update` is that dict (anything else is a framework bug and raises).
 def record_media(update: object, entry: tuple[str, str | None]) -> None:
-    state: Any = update
-    if not isinstance(update, dict):
+    if not is_object_dict(update):
         raise TypeError(
             f"meiva.state_update must stay a dict, got {type(update).__name__} (attachment)"
         )
-    state[ATTACH_CHANNEL] = appended_channel(state.get(ATTACH_CHANNEL, []), *entry)
+    update[ATTACH_CHANNEL] = appended_channel(update.get(ATTACH_CHANNEL, []), *entry)
 
 
 # meiva:note

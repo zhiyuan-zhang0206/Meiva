@@ -287,19 +287,21 @@ def list_agents(
     `limit` agents (1 through 200). Continue explicitly with `next_cursor`
     as `before_id`, retaining the same scope and query.
     """
-    scope = coerce_str(scope, "scope")
+    requested_scope = coerce_str(scope, "scope")
     query = coerce_str(query, "query")
     if len(query) > 200:
         raise ValueError("query must be at most 200 characters")
     before_id = coerce_typed(before_id, "before_id", int, allow_none=True)
     limit = coerce_typed(limit, "limit", int)
-    if scope not in _DIRECTORY_SCOPES:
+    if requested_scope not in _DIRECTORY_SCOPES:
         raise ValueError("scope must be 'live', 'terminated', or 'all'")
     if not 1 <= limit <= 200:
         raise ValueError("limit must be between 1 and 200")
     if before_id is not None and not 1 <= before_id <= 9223372036854775807:
         raise ValueError("before_id must be a positive bigint agent ID")
-    page = gateway_client.list_agents(scope=scope, query=query, before_id=before_id, limit=limit)
+    page = gateway_client.list_agents(
+        scope=requested_scope, query=query, before_id=before_id, limit=limit
+    )
     return AgentDirectoryPage(
         agents=[_row_from_dict(row) for row in page["agents"]],
         next_cursor=page["next_cursor"],

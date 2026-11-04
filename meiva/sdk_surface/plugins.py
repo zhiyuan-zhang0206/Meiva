@@ -13,9 +13,21 @@ from collections.abc import Mapping
 from types import ModuleType, SimpleNamespace
 from typing import assert_never
 
+from base.host.boundary.json_values import is_object_list
+from base.host.boundary.untyped import object_of
+
 from . import CONTEXT_KEY, SdkProcessPurpose, meiva_module
 from .installation import MemberAdded, NamespaceAdded
 from .sdk_disable import DisabledSDKModule
+
+
+# meiva:note
+# The live `__all_for_meiva__` list a namespace declares: the object this module appends plugin
+# names to and removes them from, not a copy of the names it holds. A container that declares none
+# cannot host a member, which each caller reports in its own terms.
+def _surface_list(container: object) -> list[object] | None:
+    declared = object_of(getattr, container, "__all_for_meiva__", None)
+    return declared if is_object_list(declared) else None
 
 
 def is_host_process() -> bool:
@@ -142,6 +154,8 @@ def _materialize_namespace(name: str, ns: SimpleNamespace) -> ModuleType:
 # PluginNamespaceConflictError: `name` already installed by another plugin.
 # FrameworkNamespaceConflictError: `name` already taken by a framework-builtin submodule or top-
 # level attr, or disabled by MEIVA_SDK_DISABLE.
+# RegisterNamespaceError: the `meiva` package itself declares no `__all_for_meiva__` surface to
+# register the namespace on — a broken install, not a plugin's mistake.
 def install_namespace(
     plugin: str, name: str, module: object, taken: Mapping[str, str]
 ) -> NamespaceAdded:
@@ -161,6 +175,11 @@ def install_namespace(
         )
 
     pkg = meiva_module()
+    surface = _surface_list(pkg)
+    if surface is None:
+        raise RegisterNamespaceError(
+            "the meiva package declares no __all_for_meiva__ surface to register a namespace on"
+        )
     if name in taken:
         raise PluginNamespaceConflictError(
             f"meiva.{name} already installed by plugin {taken[name]!r} — same-name override not allowed; "
@@ -193,9 +212,9 @@ def install_namespace(
     # `_target_depth` compute heading depth correctly. Underscore prefix avoids being treated as an
     # exposable attr by child discovery.
     module._qualname = f"meiva.{name}"  # type: ignore[attr-defined]
-    added_to_surface = name not in pkg.__all_for_meiva__
+    added_to_surface = name not in surface
     if added_to_surface:
-        pkg.__all_for_meiva__.append(name)
+        surface.append(name)
 
     return NamespaceAdded(name=name, module=module, on_surface=added_to_surface)
 
@@ -233,13 +252,12 @@ def install_member(plugin: str, namespace: str, name: str, fn: object) -> Member
         )
 
     pkg = meiva_module()
-    parent = getattr(pkg, namespace, None)
+    parent = object_of(getattr, pkg, namespace, None)
     # Member discovery (help) + this attach both rely on the parent being a real module with an
     # `__all_for_meiva__` whitelist; SimpleNamespace plugin namespaces and disabled-module sentinels are
     # not valid member hosts.
-    if not isinstance(parent, ModuleType) or not isinstance(
-        getattr(parent, "__all_for_meiva__", None), list
-    ):
+    surface = _surface_list(parent) if isinstance(parent, ModuleType) else None
+    if not isinstance(parent, ModuleType) or surface is None:
         raise UnknownNamespaceError(
             f"meiva.{namespace} is not an existing namespace that can host members — "
             f"check the name (or it may be disabled by MEIVA_SDK_DISABLE)."
@@ -251,7 +269,7 @@ def install_member(plugin: str, namespace: str, name: str, fn: object) -> Member
         )
 
     setattr(parent, name, fn)
-    parent.__all_for_meiva__.append(name)
+    surface.append(name)
 
     return MemberAdded(namespace=namespace, name=name, parent=parent)
 
@@ -269,13 +287,15 @@ def uninstall(added: NamespaceAdded | MemberAdded) -> None:
         case NamespaceAdded():
             _remove_attr(pkg, added.name)
             if added.on_surface:
-                _remove_from_surface(pkg.__all_for_meiva__, added.name)
+                _remove_from_surface(object_of(getattr, pkg, "__all_for_meiva__", None), added.name)
             _sys.modules.pop(f"meiva.{added.name}", None)
             added.module.__dict__.pop("_qualname", None)
         case MemberAdded():
             if getattr(pkg, added.namespace, None) is added.parent:
                 _remove_attr(added.parent, added.name)
-                _remove_from_surface(getattr(added.parent, "__all_for_meiva__", None), added.name)
+                _remove_from_surface(
+                    object_of(getattr, added.parent, "__all_for_meiva__", None), added.name
+                )
         case _:
             assert_never(added)
 
@@ -286,8 +306,8 @@ def _remove_attr(obj: object, name: str) -> None:
         delattr(obj, name)
 
 
-def _remove_from_surface(surface: list[str] | None, name: str) -> None:
+def _remove_from_surface(surface: object, name: str) -> None:
     """Remove `name` from an `__all_for_meiva__`-style surface list when it is
     one (the member host may be gone, in which case there is nothing to do)."""
-    if isinstance(surface, list) and name in surface:
+    if is_object_list(surface) and name in surface:
         surface.remove(name)

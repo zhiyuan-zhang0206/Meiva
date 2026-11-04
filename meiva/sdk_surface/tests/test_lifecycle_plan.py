@@ -11,15 +11,24 @@ from dataclasses import replace
 import pytest
 
 from base.agents.sdk import InertSamplingPolicy
+from base.api_contracts.agent_contract import Event
 from base.clock import Clock
 from base.clock.tests.fakes import system_clock
 from meiva.sdk_surface.installation import Installation
 from meiva.sdk_surface.pure.plans.installation.lifecycle_plan import carry_over, rollback_outcome
 
 
+# meiva:note
+# The client set a load carries: the plan hands the set to the next installation and never writes
+# an event, so the sink refuses instead of pretending to accept one.
 class _Pipelines:
-    def event_pipeline(self) -> object:
-        return object()
+    def event_pipeline(self) -> _Sink:
+        return _Sink()
+
+
+class _Sink:
+    def enqueue(self, event: Event) -> None:
+        raise AssertionError("the lifecycle plan carries the client set; it never writes an event")
 
 
 def _previous(

@@ -52,7 +52,6 @@ framework module such as this package.
 import sys as _sys
 from enum import StrEnum
 from types import ModuleType
-from typing import Any
 
 
 def meiva_module() -> ModuleType:
@@ -79,7 +78,7 @@ UPDATE_KEY = "_exec_state_update"
 IMAGE_KEY = "_LOADED_IMAGE"
 
 
-def _slots() -> dict[str, Any]:
+def _slots() -> dict[str, object]:
     return meiva_module().__dict__
 
 
