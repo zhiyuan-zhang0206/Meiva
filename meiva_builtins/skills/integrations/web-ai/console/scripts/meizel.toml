@@ -1,2 +1,0 @@
-[roots]
-"ask.py" = { kinds = ["clock", "home", "argv", "pid"], why = "Web-AI console driver is a command entry: it reads the run's clock once, hands it to the driver as a value and stamps the console run's directory with it, since the driver it calls may not read one of its own; it resolves the Meiva home once for its landing places; it also reads its command line (argv) once, as the process entry, and reads its standard input" }

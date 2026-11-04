@@ -24,9 +24,8 @@ skill load directory. One deliberately narrower host integration copies the comp
 supported external agent clients present on the host; it is an external-client
 projection, not an Meiva runtime skill source — see
 [[docs/skills/external-agent-operator-bridge.meiva.okf.md]].
-The five general skills mirrored alongside them — `meiva-serious-engineering`,
-`meiva-serious-research`, `meiva-deep-research`, `meiva-corp`, and
-`telegram-send-file` — are instead built-ins converged into `~/.meiva/skills/`;
+The four general skills mirrored alongside them — `meiva-serious-engineering`,
+`meiva-serious-research`, `meiva-deep-research`, and `meiva-corp` — are instead built-ins converged into `~/.meiva/skills/`;
 the mirror preserves the open-standard path while content-hash dedup keeps the
 same skill from loading twice in a checkout.
 

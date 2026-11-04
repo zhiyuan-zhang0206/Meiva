@@ -1,5 +1,5 @@
 # meiva:note
-# The decisions of the audio-transcribe skill, over values: where a source comes from, the
+# The decisions of the YouTube transcription subprocess, over values: where a source comes from, the
 # commands that fetch and transcode it, whether the audio fits one request or must be cut
 # into segments (and how long a segment is), whether the parts fit the API, and the shape
 # of the answer. Running the programs, the OpenAI call and printing live in transcribe.py.

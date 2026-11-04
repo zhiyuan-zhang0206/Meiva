@@ -76,8 +76,7 @@ from yt_wire import (
 
 # meiva:note
 # Where the adapter's effects land: the yt-dlp program, the argv prefix that runs the
-# `audio-transcribe` skill's CLI (a separate skill, run as a subprocess so the two skill
-# directories stay independently deployable) and the raw-mirror dir `<home>/state/mirrors/youtube`
+# local transcription subprocess and the raw-mirror dir `<home>/state/mirrors/youtube`
 # — shared derived state doubling as the sync watermark. The per-content subdir is the stable
 # video id, so a re-run reuses it (dedup).
 @dataclass(frozen=True)
@@ -89,7 +88,7 @@ class YoutubeConfig:
 
 # meiva:note
 # What `fetch` pulls: the video file as well (`with_video`), the transcript at all
-# (`want_transcript`), and the audio-transcribe fallback for a video with no captions
+# (`want_transcript`), and the transcription fallback for a video with no captions
 # (`whisper_fallback`; needs `OPENAI_API_KEY` + ffmpeg). `prefer_lang` is the caption language
 # to ask yt-dlp for first.
 @dataclass(frozen=True)
@@ -196,7 +195,7 @@ def fetch_transcript(config: YoutubeConfig, video_id: str, prefer_lang: str) -> 
 
 
 # meiva:note
-# Transcribe a caption-less video's audio via the sibling `audio-transcribe` skill (OpenAI).
+# Transcribe a caption-less video's audio via the local transcription subprocess (OpenAI).
 # Opt-in through `FetchOptions.whisper_fallback`. A real failure (missing key / ffmpeg / network)
 # propagates — only empty output yields None, so this never silently masks a transcription
 # error.
@@ -217,7 +216,7 @@ def whisper_transcript(config: YoutubeConfig, video_id: str) -> str | None:
 # Transcript is **best-effort**: many videos legitimately have no captions, so a missing
 # transcript is `None` with `transcript_kind=None`, not an error. Metadata fetch, by contrast,
 # fails fast (`check=True`). `whisper_fallback` routes a caption-less video through the
-# `audio-transcribe` skill, setting `transcript_kind="whisper"`; a real transcription failure
+# local transcription subprocess, setting `transcript_kind="whisper"`; a real transcription failure
 # propagates, only "video genuinely has no captions" yields None.
 def _fetch_with_version(
     config: YoutubeConfig, video_id: str, options: FetchOptions, version: str

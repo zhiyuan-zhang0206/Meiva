@@ -12,7 +12,7 @@ agent reaches for it.
 | `GEMINI_API_KEY` | any gemini-* model, including one configured for `meiva.understand` (`MEIVA_UNDERSTAND_{PDF,AUDIO,VIDEO}_MODEL`) | whenever a gemini-* model is configured for an agent or an understand type |
 | `BRAVE_API_KEY` | `meiva.web.search` | you want web search |
 | `JINA_API_KEY` | `meiva.web.fetch` (higher rate limit) | optional — empty = anonymous tier |
-| `MEIVA_TELEGRAM_BOT_TOKEN` / `MEIVA_TELEGRAM_OWNER_ID` | push to your phone (the `telegram-send-file` skill) | optional |
+| `MEIVA_TELEGRAM_BOT_TOKEN` / `MEIVA_TELEGRAM_OWNER_ID` | Telegram channel and watchdog notifications | optional |
 | `MEIVA_TRACE_ENABLED` | record OTel spans to the local `$MEIVA_HOME/traces/` mirror | optional — on by default (network-free) |
 
 ### `MEIVA_CLUSTER_SECRET` — the cluster control credential

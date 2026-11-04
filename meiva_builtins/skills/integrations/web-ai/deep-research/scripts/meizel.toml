@@ -1,2 +1,0 @@
-[roots]
-"research.py" = { kinds = ["clock", "home", "argv"], why = "Web-AI deep-research driver polls browser progress against monotonic deadlines and resolves the Meiva home once for its landing places; it also reads its command line (argv) once, as the process entry" }

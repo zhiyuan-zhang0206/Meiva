@@ -20,7 +20,7 @@ TranscriptKind = Literal["human", "auto", "whisper"]
 
 # meiva:note
 # A video's transcript as prose, and where it came from: author-provided subtitles (`human`),
-# ASR auto-captions (`auto`) or the audio-transcribe skill (`whisper`).
+# ASR auto-captions (`auto`) or the local transcription subprocess (`whisper`).
 @dataclass(frozen=True)
 class Transcript:
     text: str

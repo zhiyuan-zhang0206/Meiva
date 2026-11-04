@@ -28,4 +28,3 @@ How a run reaches the outside is a value: a `ScrapeConfig` (the `curl` program, 
 ## Key dependencies
 - [[meiva_builtins/skills/docs/skills.meiva.okf.md|Skills index]] — full skills catalog
 - [[meiva/web/docs/web.meiva.okf.md|meiva.web]] — fetching lands on `meiva.web.search/fetch`
-- [[meiva_builtins/skills/integrations/audio-transcribe/docs/audio-transcribe.meiva.okf.md|audio-transcribe]] — transcription of audio/video items without subtitles relies on it

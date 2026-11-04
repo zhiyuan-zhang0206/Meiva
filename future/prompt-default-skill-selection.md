@@ -22,11 +22,7 @@ or turn a general-agent shortlist into a capability boundary.
 | meiva-serious-engineering | Domain entry | Covers consequential software work; individual practices load through the root. |
 | meiva-serious-research | Domain entry | Covers research evidence and evaluation; individual practices load through the root. |
 | web-sources | Installed capability entry | Makes web retrieval discoverable without advertising each source adapter permanently. |
-| web-ai | Installed capability entry | Distinct browser-backed model capability; not a substitute for web retrieval. |
-| audio-transcribe | Installed capability entry | Clear media-specific trigger and dependency requirements. |
 | gmail | Installed capability entry | Mail capability must be discoverable; installation is not authority to send. |
-| sms | Installed capability entry | Host-specific capability; expose only where actually available. |
-| telegram-send-file | Installed capability entry | Distinct file delivery capability; not a standing reporting channel. |
 | meiva-fleet | Enabled-plugin entry | Optional collaboration implementation; not a default topology. |
 | meiva-memory | Enabled-plugin entry | Memory operations and stewardship on relevant tasks. |
 

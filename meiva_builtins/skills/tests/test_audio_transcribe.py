@@ -1,5 +1,5 @@
 # meiva:note
-# Hermetic tests for the audio-transcribe skill (no network, no real ffmpeg).
+# Hermetic tests for the YouTube transcription subprocess (no network, no real ffmpeg).
 #
 # The real OpenAI + ffmpeg path was verified live by hand during the build (single-chunk and
 # forced multi-chunk segmentation). The decisions are tested as values (source resolution, the
@@ -28,9 +28,14 @@ from meiva_builtins.skills.tests.local_post_server import (
 from meiva_builtins.skills.tests.skill_script import load_skill_script
 
 plan = load_skill_script(
-    "integrations", "audio-transcribe", "scripts", "transcribe_plan.py", name="transcribe_plan"
+    "integrations",
+    "web-sources",
+    "youtube",
+    "scripts",
+    "transcribe_plan.py",
+    name="transcribe_plan",
 )
-T = load_skill_script("integrations", "audio-transcribe", "scripts", "transcribe.py")
+T = load_skill_script("integrations", "web-sources", "youtube", "scripts", "transcribe.py")
 
 
 _STAND_IN = """

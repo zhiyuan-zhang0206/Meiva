@@ -126,7 +126,7 @@ _WHAT_MCPS = "live MCP tool servers"
 _SKILLS_HOWTO = (
     "Before using a skill, load its full body with `meiva.help(meiva.skills.<path>)` "
     "with a path exactly as the skill list gives it, e.g. "
-    "`meiva.skills.web_ai.deep_research`; the render also names the skill's "
+    "`meiva.skills.web_sources.youtube`; the render also names the skill's "
     "directory, where its other files live. "
     "This listing may be a subset of what is installed — "
     "`meiva.help(meiva.skills)` enumerates the full catalog, and an unlisted skill "

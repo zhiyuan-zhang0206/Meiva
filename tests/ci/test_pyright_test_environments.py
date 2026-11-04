@@ -177,7 +177,6 @@ def test_every_tests_directory_is_held_to_the_seven_rules_at_error() -> None:
     "root",
     [
         "meiva_builtins/plugins/lm_deepseek",
-        "meiva_builtins/skills/integrations/web-ai",
         "meiva_builtins/skills/integrations/web-sources/rss/scripts",
     ],
 )
