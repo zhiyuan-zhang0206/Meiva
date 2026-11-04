@@ -6,10 +6,13 @@ at top level and each scenario imports first-party code itself, in the order it
 is checking.
 """
 
+from __future__ import annotations
+
 import importlib.abc
 import socket
 import sys
-from typing import Any
+from dataclasses import dataclass
+from pathlib import Path
 
 from base.host.exit_codes import hard_exit
 
@@ -39,47 +42,89 @@ class _DenyConfig(importlib.abc.MetaPathFinder):
             raise AssertionError("forbidden early import: " + fullname)
 
 
+# meiva:note
+# What each command's parser must produce, read through `options` so a renamed or retyped flag
+# fails here with its name instead of reading `Any` off the namespace. `options` is imported
+# inside the scenario: this module checks what a fresh interpreter imports, so nothing
+# first-party loads at module import.
+@dataclass(frozen=True)
+class _IssuedUnit:
+    machine: str
+
+
+@dataclass(frozen=True)
+class _AgentRestart:
+    agent_id: int
+    config: str
+
+
+@dataclass(frozen=True)
+class _NoticesList:
+    agent: int
+
+
+@dataclass(frozen=True)
+class _ImpersonateList:
+    agent_id: int
+
+
+@dataclass(frozen=True)
+class _ImpersonateRelay:
+    session_id: int
+    provider: str
+
+
 def _parse_real_subcommands() -> None:
     """Build the real argparse tree and parse real subcommands without dispatching."""
+    from base.host.boundary.options import options
     from cli.parsers import build_parser
 
     parser = build_parser()
-    args = parser.parse_args(
-        [
-            "cluster",
-            "db-authority",
-            "issue-unit",
-            "--machine",
-            "unit",
-            "--home",
-            "/unit",
-            "--out",
-            "/unused/bundle",
-        ]
+    issued = options(
+        parser.parse_args(
+            [
+                "cluster",
+                "db-authority",
+                "issue-unit",
+                "--machine",
+                "unit",
+                "--home",
+                "/unit",
+                "--out",
+                "/unused/bundle",
+            ]
+        ),
+        _IssuedUnit,
     )
-    assert args.machine == "unit"
-    args = parser.parse_args(["agents", "restart", "7", "--config", "{}", "-m", "restarting"])
-    assert args.agent_id == 7
-    assert args.config == "{}"
-    args = parser.parse_args(["notices", "list", "--agent", "7"])
-    assert args.agent == 7
-    args = parser.parse_args(["impersonate", "list", "--agent", "7"])
-    assert args.agent_id == 7
-    args = parser.parse_args(
-        [
-            "impersonate",
-            "relay",
-            "7",
-            "--session",
-            "0",
-            "--provider",
-            "codex",
-            "--thread-id",
-            "thread",
-        ]
+    assert issued.machine == "unit"
+    restart = options(
+        parser.parse_args(["agents", "restart", "7", "--config", "{}", "-m", "restarting"]),
+        _AgentRestart,
     )
-    assert args.session_id == 0
-    assert args.provider == "codex"
+    assert restart.agent_id == 7
+    assert restart.config == "{}"
+    notices = options(parser.parse_args(["notices", "list", "--agent", "7"]), _NoticesList)
+    assert notices.agent == 7
+    listing = options(parser.parse_args(["impersonate", "list", "--agent", "7"]), _ImpersonateList)
+    assert listing.agent_id == 7
+    relay = options(
+        parser.parse_args(
+            [
+                "impersonate",
+                "relay",
+                "7",
+                "--session",
+                "0",
+                "--provider",
+                "codex",
+                "--thread-id",
+                "thread",
+            ]
+        ),
+        _ImpersonateRelay,
+    )
+    assert relay.session_id == 0
+    assert relay.provider == "codex"
     loaded = {name for name in sys.modules if name.startswith("cli.commands.")}
     assert loaded == {
         "cli.commands.agents",
@@ -193,7 +238,7 @@ def _init_and_start_settings_free() -> None:
 # The command runtime and database factory `cli.main` gives a start, before it enters its home.
 
 
-def _boot_start_delivery(scenario: str, home: Any) -> None:
+def _boot_start_delivery(scenario: str, home: Path) -> None:
     # run_command imports this before start_once enters the admitted home.
     from cli.database.runtime import CommandRuntime
 
@@ -202,19 +247,21 @@ def _boot_start_delivery(scenario: str, home: Any) -> None:
         _inherit_foreign_delivery(home)
 
 
-def _prepare_start_delivery(scenario: str, home: Any) -> Any:
+def _prepare_start_delivery(scenario: str, home: Path):
     import json
     import os
 
     from base.host.db_authority.tests.generation import seed_active_generation
     from base.host.env.dotenv_boot import LAUNCHER_PROFILE_ENV_KEY
+    from cli.start_identity import read_intent
 
     if scenario == "start_delivery_cold":
         return None
     secret = seed_active_generation(home)
     if scenario == "start_delivery_refused":
         path = home / "start-intent.json"
-        intent = json.loads(path.read_text())
+        intent = read_intent(home)
+        assert intent is not None
         intent["checkout"] = str(home.parent / "foreign-checkout")
         path.write_text(json.dumps(intent))
     elif scenario == "start_delivery_launcher":
@@ -222,7 +269,7 @@ def _prepare_start_delivery(scenario: str, home: Any) -> Any:
     return secret
 
 
-def _inherit_foreign_delivery(home: Any) -> None:
+def _inherit_foreign_delivery(home: Path) -> None:
     import os
 
     from base.host.db_authority.delivery import GENERATION_ENV, write_grant
@@ -294,6 +341,7 @@ def _transport_key(argv: list[str]) -> None:
     import os
     from pathlib import Path
 
+    from base.host.boundary.untyped import object_of
     from base.host.db_authority.unit import CAPABILITY_KEY_ENV
     from cli import main
 
@@ -301,12 +349,12 @@ def _transport_key(argv: list[str]) -> None:
     main.bind_entry_facts(args, argv, home=Path("/unit/home"), checkout=Path("/unit/checkout"))
     if argv[:1] == ["init"]:
         main.bind_init_inputs(args)
-    caller: Any = getattr(args, "caller_host", None)
+    caller = object_of(getattr, args, "caller_host", None)
     print(
         json.dumps(
             {
-                "arg": getattr(args, "transport_key", None),
-                "caller": None if caller is None else caller.transport_key,
+                "arg": object_of(getattr, args, "transport_key", None),
+                "caller": None if caller is None else object_of(getattr, caller, "transport_key"),
                 "environment": os.environ.get(CAPABILITY_KEY_ENV),
             }
         )
