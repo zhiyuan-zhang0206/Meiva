@@ -114,9 +114,12 @@ placeholder `record` writes and the three numbers `debt` counts are in
 - `debt approved [--json]` lists the files `[approved-patches.files]` approves
   with the patches each holds now. They are not debt and no baseline counts them.
 - `debt diff --against <ref> --on-growth fail|warn` compares the recorded totals per code with those at
-  a git ref, and reports `rules` and `content` apart whenever the change edits what is measured.
+  a git ref, and reports `rules`, `content` and `repaid` apart whenever the change edits what is
+  measured: what the device moved, what the ledger says the change did, and how much of the ref's
+  recorded debt the ref's own declarations no longer find in this code — the one number that tells a
+  repayment from a declaration that stopped measuring a read.
   `--by-target` adds the recorded patch debt per target group. The caller chooses `fail` or `warn`;
-  there is no default. See [[meizel/docs/checker/debt/diff.meiva.okf.md|the two measures of a debt diff]].
+  there is no default. See [[meizel/docs/checker/debt/diff.meiva.okf.md|the three measures of a debt diff]].
 
 ## Depths of `check`
 
