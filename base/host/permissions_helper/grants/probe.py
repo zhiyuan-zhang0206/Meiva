@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.host.permissions_helper.grants.catalog import (
     CATALOG,
     PING_KEYS,
@@ -137,6 +139,23 @@ def read_result(path: Path) -> str | None:
         return None
 
 
+# meiva:note
+# The child's result file: one `{service: {"code": int, ...}}` object. A document of any other shape
+# means the child wrote something else than it promised, so it is a probe error, not a grant.
+def _grants_of(data: object) -> dict[str, Grant]:
+    if not is_object_dict(data):
+        raise PermissionsProbeError("preflight probe result is not an object")
+    grants: dict[str, Grant] = {}
+    for service, entry in data.items():
+        code = entry.get("code") if is_object_dict(entry) else None
+        if not isinstance(code, int):
+            raise PermissionsProbeError(
+                f"preflight probe result for {service!r} has no integer code"
+            )
+        grants[service] = _RESULT_WORDS.get(code, Grant.UNKNOWN)
+    return grants
+
+
 # meiva:link base/host/permissions_helper/grants/docs/grants.meiva.okf.md
 def run_preflight(
     client: HelperChannel,
@@ -163,11 +182,7 @@ def run_preflight(
     while timers.monotonic() < deadline:
         text = read_result(result_path)
         if text is not None:
-            data = json.loads(text)
-            return {
-                service: _RESULT_WORDS.get(entry["code"], Grant.UNKNOWN)
-                for service, entry in data.items()
-            }
+            return _grants_of(object_of(json.loads, text))
         timers.sleep(POLL_S)
     raise PermissionsProbeError(
         f"preflight probe produced no result within {wait_s:.0f}s"

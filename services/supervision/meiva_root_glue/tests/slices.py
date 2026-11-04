@@ -4,11 +4,12 @@ import subprocess
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Unpack
 
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
-from base.host.proc import CommandRunner, run_bounded
+from base.host.proc import CommandRunner, PopenOptions, run_bounded
+from base.host.system.tests.fake_commands import runner_from
 from base.native_process.ownership import OwnedProcess
 from services.desktop.permissions_helper.launchd_job import LaunchdFacts
 from services.supervision.meiva_root_glue import diagnostic_probes as probes
@@ -36,7 +37,7 @@ def refuse_launchctl(
     timeout: float,
     capture_output: bool = False,
     input: bytes | str | None = None,
-    **popen_kwargs: object,
+    **popen_kwargs: Unpack[PopenOptions],
 ) -> subprocess.CompletedProcess[bytes]:
     del timeout, capture_output, input, popen_kwargs
     raise AssertionError(f"this test must not run {list(argv)}")
@@ -49,10 +50,16 @@ def checks_for(
     *,
     root: OwnedProcess = ROOT,
     launchd: LaunchdFacts = LAUNCHD,
-    run: CommandRunner = refuse_launchctl,
+    run: CommandRunner | None = None,
     **inputs: Any,
 ) -> list[Diagnostic]:
-    return probes.build_diagnostics(requested, launchd=launchd, run=run, root=root, **inputs)
+    return probes.build_diagnostics(
+        requested,
+        launchd=launchd,
+        run=runner_from(refuse_launchctl) if run is None else run,
+        root=root,
+        **inputs,
+    )
 
 
 # meiva:note
@@ -69,17 +76,23 @@ def runner_that_hangs_on(program: str, timers: ManualTimers) -> tuple[CommandRun
         timeout: float,
         capture_output: bool = False,
         input: bytes | str | None = None,
-        **popen_kwargs: object,
-    ) -> subprocess.CompletedProcess[Any]:
+        text: bool | None = None,
+        **popen_kwargs: Unpack[PopenOptions],
+    ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
         allowances.append(timeout)
         if argv[0] == program:
             timers.advance(timeout)
             raise subprocess.TimeoutExpired(list(argv), timeout)
         return run_bounded(
-            argv, timeout=timeout, capture_output=capture_output, input=input, **popen_kwargs
+            argv,
+            timeout=timeout,
+            capture_output=capture_output,
+            input=input,
+            text=text,
+            **popen_kwargs,
         )
 
-    return run, allowances
+    return runner_from(run), allowances
 
 
 # meiva:note

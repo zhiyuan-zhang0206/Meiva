@@ -30,7 +30,9 @@ import pkgutil
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any
+
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 
 LiteField = tuple[str, str, str, str, object, str | None]
 
@@ -47,6 +49,40 @@ class _Index:
     required_fields: frozenset[str]
 
 
+# meiva:note
+# One section of the index as a `str -> str` map. The generator writes these, so a section of any
+# other shape is a stale or hand-edited index, and it stops the import with the section's name.
+def _str_map(index: Mapping[str, object], section: str) -> dict[str, str]:
+    value = index.get(section)
+    if not is_object_dict(value) or not all(isinstance(item, str) for item in value.values()):
+        raise TypeError(f"config_lite_table.json: {section} must map names to strings")
+    return {name: item for name, item in value.items() if isinstance(item, str)}
+
+
+def _str_set(index: Mapping[str, object], section: str) -> frozenset[str]:
+    value = index.get(section)
+    if not is_object_list(value) or not all(isinstance(item, str) for item in value):
+        raise TypeError(f"config_lite_table.json: {section} must be a list of strings")
+    return frozenset(item for item in value if isinstance(item, str))
+
+
+# meiva:note
+# One `lite_fields` row: (domain, env alias, parse kind, default kind, literal default, validity check).
+def _lite_row(name: str, row: object) -> LiteField:
+    if not is_object_list(row) or len(row) != 6:
+        raise TypeError(f"config_lite_table.json: lite_fields[{name!r}] must be a 6-item list")
+    domain, alias, parse_kind, default_kind, default, check = row
+    if (
+        not isinstance(domain, str)
+        or not isinstance(alias, str)
+        or not isinstance(parse_kind, str)
+        or not isinstance(default_kind, str)
+        or not (check is None or isinstance(check, str))
+    ):
+        raise TypeError(f"config_lite_table.json: lite_fields[{name!r}] has a mistyped column")
+    return (domain, alias, parse_kind, default_kind, default, check)
+
+
 def _read_index() -> tuple[
     Mapping[str, LiteField],
     Mapping[str, str],
@@ -61,20 +97,21 @@ def _read_index() -> tuple[
     data = pkgutil.get_data(__package__ or "base.host.env", "config_lite_table.json")
     if data is None:
         raise FileNotFoundError("config_lite_table.json is missing from base.host.env")
-    raw: dict[str, Any] = json.loads(data.decode("utf-8"))
-    raw_lite: dict[str, list[Any]] = raw["lite_fields"]
-    lite_fields: dict[str, LiteField] = {
-        name: (row[0], row[1], row[2], row[3], row[4], row[5]) for name, row in raw_lite.items()
-    }
+    raw = object_of(json.loads, data.decode("utf-8"))
+    if not is_object_dict(raw):
+        raise TypeError("config_lite_table.json must hold a JSON object")
+    lite = raw.get("lite_fields")
+    if not is_object_dict(lite):
+        raise TypeError("config_lite_table.json: lite_fields must be an object")
     return (
-        MappingProxyType(lite_fields),
-        MappingProxyType(raw["field_domains"]),
-        MappingProxyType(raw["field_aliases"]),
-        MappingProxyType(raw["field_scopes"]),
-        MappingProxyType(raw["field_capabilities"]),
-        frozenset(raw["per_agent_fields"]),
-        frozenset(raw["sensitive_fields"]),
-        frozenset(raw["required_fields"]),
+        MappingProxyType({name: _lite_row(name, row) for name, row in lite.items()}),
+        MappingProxyType(_str_map(raw, "field_domains")),
+        MappingProxyType(_str_map(raw, "field_aliases")),
+        MappingProxyType(_str_map(raw, "field_scopes")),
+        MappingProxyType(_str_map(raw, "field_capabilities")),
+        _str_set(raw, "per_agent_fields"),
+        _str_set(raw, "sensitive_fields"),
+        _str_set(raw, "required_fields"),
     )
 
 

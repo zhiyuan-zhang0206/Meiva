@@ -37,11 +37,13 @@ from __future__ import annotations
 import socket
 import ssl
 import typing
+from collections.abc import Mapping, Sequence
 from urllib.parse import urlsplit
 
 import httpcore
 import httpx
 
+from base.host.boundary.untyped import object_of
 from base.host.net.predicates import is_ipv4_literal
 
 
@@ -102,9 +104,9 @@ class _PinnedStream(httpcore.NetworkStream):
 
     def get_extra_info(self, info: str) -> object:
         if info == "client_addr":
-            return self._sock.getsockname()
+            return object_of(self._sock.getsockname)
         if info == "server_addr":
-            return self._sock.getpeername()
+            return object_of(self._sock.getpeername)
         if info == "socket":
             return self._sock
         return None
@@ -190,59 +192,96 @@ def transport_for_url(url: str) -> httpx.HTTPTransport | None:
     return PinnedIPv4Transport() if is_ipv4_literal(host) else None
 
 
-def get(url: str, **kwargs: object) -> httpx.Response:
-    """`httpx.get` for a cluster-internal dial: pins an IPv4-literal `url`
-    host, otherwise identical — literally `httpx.get` for a hostname target
-    (including test suites that `monkeypatch.setattr("httpx.get", ...)`;
-    that keeps working since this calls the real thing). `kwargs` forwards
-    to `Client.get` (params / headers / cookies / auth / follow_redirects /
-    timeout / extensions) — matches every call site this repo has today; a
-    caller needing a Client-construction-level kwarg (`verify` / `proxy` /
-    `trust_env`) should build its own
-    `httpx.Client(transport=transport_for_url(url), ...)` instead."""
-    call_kwargs: dict[str, typing.Any] = kwargs
+# meiva:note
+# httpx's own default request timeout (`httpx.Timeout(5.0)`), which the verbs below keep when a
+# caller names none: the dial must not become unbounded just because the call site said nothing.
+_DEFAULT_TIMEOUT_S = 5.0
+
+_Primitive = str | int | float | bool | None
+QueryParams = Mapping[str, _Primitive | Sequence[_Primitive]]
+Headers = Mapping[str, str]
+Timeout = float | httpx.Timeout | None
+
+
+# meiva:note
+# `httpx.get` for a cluster-internal dial: pins an IPv4-literal `url` host, otherwise identical, literally
+# `httpx.get` for a hostname target. The keywords are the ones this repo's call sites use (`params`,
+# `headers`, `timeout`, and `json` for a body); a caller needing another (`cookies`, `auth`,
+# `follow_redirects`, `extensions`) adds it here, or builds its own
+# `httpx.Client(transport=transport_for_url(url), ...)`, which is also the way to a
+# Client-construction-level setting (`verify` / `proxy` / `trust_env`).
+def get(
+    url: str,
+    *,
+    params: QueryParams | None = None,
+    headers: Headers | None = None,
+    timeout: Timeout = _DEFAULT_TIMEOUT_S,
+) -> httpx.Response:
     transport = transport_for_url(url)
     if transport is None:
-        return httpx.get(url, **call_kwargs)
+        return httpx.get(url, params=params, headers=headers, timeout=timeout)
     with httpx.Client(transport=transport) as client:
-        return client.get(url, **call_kwargs)
+        return client.get(url, params=params, headers=headers, timeout=timeout)
 
 
-def post(url: str, **kwargs: object) -> httpx.Response:
+def post(
+    url: str,
+    *,
+    params: QueryParams | None = None,
+    headers: Headers | None = None,
+    timeout: Timeout = _DEFAULT_TIMEOUT_S,
+    json: object | None = None,
+) -> httpx.Response:
     """`httpx.post` for a cluster-internal dial. See `get`."""
-    call_kwargs: dict[str, typing.Any] = kwargs
     transport = transport_for_url(url)
     if transport is None:
-        return httpx.post(url, **call_kwargs)
+        return httpx.post(url, params=params, headers=headers, timeout=timeout, json=json)
     with httpx.Client(transport=transport) as client:
-        return client.post(url, **call_kwargs)
+        return client.post(url, params=params, headers=headers, timeout=timeout, json=json)
 
 
-def put(url: str, **kwargs: object) -> httpx.Response:
+def put(
+    url: str,
+    *,
+    params: QueryParams | None = None,
+    headers: Headers | None = None,
+    timeout: Timeout = _DEFAULT_TIMEOUT_S,
+    json: object | None = None,
+) -> httpx.Response:
     """`httpx.put` for a cluster-internal dial. See `get`."""
-    call_kwargs: dict[str, typing.Any] = kwargs
     transport = transport_for_url(url)
     if transport is None:
-        return httpx.put(url, **call_kwargs)
+        return httpx.put(url, params=params, headers=headers, timeout=timeout, json=json)
     with httpx.Client(transport=transport) as client:
-        return client.put(url, **call_kwargs)
+        return client.put(url, params=params, headers=headers, timeout=timeout, json=json)
 
 
-def patch(url: str, **kwargs: object) -> httpx.Response:
+def patch(
+    url: str,
+    *,
+    params: QueryParams | None = None,
+    headers: Headers | None = None,
+    timeout: Timeout = _DEFAULT_TIMEOUT_S,
+    json: object | None = None,
+) -> httpx.Response:
     """`httpx.patch` for a cluster-internal dial. See `get`."""
-    call_kwargs: dict[str, typing.Any] = kwargs
     transport = transport_for_url(url)
     if transport is None:
-        return httpx.patch(url, **call_kwargs)
+        return httpx.patch(url, params=params, headers=headers, timeout=timeout, json=json)
     with httpx.Client(transport=transport) as client:
-        return client.patch(url, **call_kwargs)
+        return client.patch(url, params=params, headers=headers, timeout=timeout, json=json)
 
 
-def delete(url: str, **kwargs: object) -> httpx.Response:
+def delete(
+    url: str,
+    *,
+    params: QueryParams | None = None,
+    headers: Headers | None = None,
+    timeout: Timeout = _DEFAULT_TIMEOUT_S,
+) -> httpx.Response:
     """`httpx.delete` for a cluster-internal dial. See `get`."""
-    call_kwargs: dict[str, typing.Any] = kwargs
     transport = transport_for_url(url)
     if transport is None:
-        return httpx.delete(url, **call_kwargs)
+        return httpx.delete(url, params=params, headers=headers, timeout=timeout)
     with httpx.Client(transport=transport) as client:
-        return client.delete(url, **call_kwargs)
+        return client.delete(url, params=params, headers=headers, timeout=timeout)

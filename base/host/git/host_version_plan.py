@@ -10,7 +10,9 @@ import re
 import tomllib
 from dataclasses import dataclass
 from functools import total_ordering
-from typing import Any
+
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 # meiva:note
 # The three-segment version every gate compares: the host's own and a plugin manifest's
@@ -88,11 +90,11 @@ def unreadable_pyproject_message(repo: str) -> str:
 # wrong.
 def version_from_pyproject(raw: str, pyproject_path: str) -> str:
     try:
-        data: dict[str, Any] = tomllib.loads(raw)
+        data = object_of(tomllib.loads, raw)
     except tomllib.TOMLDecodeError as e:
         raise PyprojectVersionError(f"{_NO_VERSION}{e}") from e
-    project: dict[str, Any] | None = data.get("project")
-    version = project.get("version") if project is not None else None
+    project = data.get("project") if is_object_dict(data) else None
+    version = project.get("version") if is_object_dict(project) else None
     if not isinstance(version, str) or parse_version(version) is None:
         raise PyprojectVersionError(f"{_NO_VERSION}{pyproject_path} [project].version invalid")
     return version

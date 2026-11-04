@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, fields
-from typing import Any
 
 from base.host.env.config_lite_table import FIELD_ALIASES, FIELD_SCOPES
 
@@ -23,6 +22,7 @@ __all__ = [
     "NETWORK_PROXY_KEYS",
     "SESSION_CREDENTIAL_KEYS",
     "ModelOverrides",
+    "built_from_values",
     "session_child_env_keys",
 ]
 
@@ -96,6 +96,18 @@ def session_child_env_keys() -> frozenset[str]:
     )
 
 
+# meiva:note
+# A frozen dataclass of `slice_type` holding `values` by field name. The values are `object` (a pin
+# or a live default, already validated by the settings that produced it), and a constructor call
+# cannot take them without naming `Any`, so the fields are set directly; like the constructor call
+# it replaces, this does not re-validate them. The caller names every field.
+def built_from_values[S](slice_type: type[S], values: Mapping[str, object]) -> S:
+    built = object.__new__(slice_type)
+    for name, value in values.items():
+        object.__setattr__(built, name, value)
+    return built
+
+
 @dataclass(frozen=True)
 class ModelOverrides:
     llm_stream_ttft_timeout_seconds: float | None
@@ -109,5 +121,5 @@ class ModelOverrides:
 
     @classmethod
     def from_pins(cls, pins: Mapping[str, object] | None) -> ModelOverrides:
-        raw: Mapping[str, Any] = pins or {}
-        return cls(**{f.name: raw.get(f.name) for f in fields(cls)})
+        raw = pins or {}
+        return built_from_values(cls, {f.name: raw.get(f.name) for f in fields(cls)})

@@ -26,7 +26,7 @@ from base.deploy.release.collector.plan import (
     content_length,
     release_asset,
 )
-from base.host.net.ports import UrlOpener
+from base.host.net.ports import StreamingUrlOpener
 from base.host.net.resilience import Policy, retry
 
 
@@ -49,7 +49,7 @@ def stream_download(
     url: str,
     dest: Path,
     *,
-    open_url: UrlOpener,
+    open_url: StreamingUrlOpener,
     timers: Timers,
     limits: DownloadLimits,
     progress: DownloadProgress,
@@ -103,7 +103,7 @@ def _download_policy(limits: DownloadLimits) -> Policy:
 
 # meiva:link base/deploy/release/docs/collector-artifact.meiva.okf.md
 def download_with_retry(
-    url: str, tarball: Path, *, open_url: UrlOpener, timers: Timers, limits: DownloadLimits
+    url: str, tarball: Path, *, open_url: StreamingUrlOpener, timers: Timers, limits: DownloadLimits
 ) -> str:
     started = timers.monotonic()
     deadline = limits.deadline(started)
@@ -150,7 +150,12 @@ def download_with_retry(
 # meiva:note
 # Download + SHA256-verify + install the pinned tarball's binary into dest_dir.
 def download_and_verify(
-    tag: str, dest_dir: Path, *, open_url: UrlOpener, timers: Timers, limits: DownloadLimits
+    tag: str,
+    dest_dir: Path,
+    *,
+    open_url: StreamingUrlOpener,
+    timers: Timers,
+    limits: DownloadLimits,
 ) -> None:
     asset = release_asset(tag)
     with tempfile.TemporaryDirectory() as tmp:

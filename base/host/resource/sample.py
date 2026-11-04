@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Callable
+from typing import Protocol
 
 from base.host.resource.reading import (
     BATTERY_READ_ARGV,
@@ -20,6 +21,40 @@ from base.host.resource.reading import (
     parse_battery,
 )
 from base.native_process.os_platform import primary_disk_path
+
+
+# meiva:note
+# What is read of `psutil.virtual_memory()`; psutil types its fields `Any`, so a parameter typed
+# with this view takes the answer without naming the `Any`.
+class _VirtualMemory(Protocol):
+    @property
+    def total(self) -> int: ...
+
+    @property
+    def available(self) -> int: ...
+
+    @property
+    def percent(self) -> float: ...
+
+
+# meiva:note
+# What is read of `psutil.disk_usage()`, as `_VirtualMemory` is for memory.
+class _DiskUsage(Protocol):
+    @property
+    def used(self) -> int: ...
+
+    @property
+    def free(self) -> int: ...
+
+    @property
+    def percent(self) -> float: ...
+
+
+def _figures(mem: _VirtualMemory, disk: _DiskUsage) -> tuple[MemoryFigures, DiskFigures]:
+    return (
+        MemoryFigures(mem.total, mem.available, mem.percent),
+        DiskFigures(disk.used, disk.free, disk.percent),
+    )
 
 
 # meiva:note
@@ -65,10 +100,11 @@ def resource_sample(
     read_cpu = psutil.cpu_percent if cpu_percent is None else cpu_percent
     mem = psutil.virtual_memory()
     disk = psutil.disk_usage(primary_disk_path())
+    memory, disk_figures = _figures(mem, disk)
     return assemble_sample(
         ts=now,
         cpu_pct=read_cpu(CPU_INTERVAL_S),
-        memory=MemoryFigures(mem.total, mem.available, mem.percent),
-        disk=DiskFigures(disk.used, disk.free, disk.percent),
+        memory=memory,
+        disk=disk_figures,
         battery=battery,
     )

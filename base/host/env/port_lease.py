@@ -57,6 +57,8 @@ import tempfile
 from pathlib import Path
 from typing import TypeGuard
 
+from base.host.boundary.untyped import object_of
+
 
 def _is_object_list(value: object) -> TypeGuard[list[object]]:
     return isinstance(value, list)
@@ -273,7 +275,7 @@ def _pid_from(fd: int) -> int:
 def _body(fd: int) -> dict[str, object]:
     os.lseek(fd, 0, os.SEEK_SET)
     try:
-        body: object = json.loads(os.read(fd, 1 << 20))
+        body = object_of(json.loads, os.read(fd, 1 << 20))
     except (ValueError, UnicodeDecodeError):
         return {}
     return body if _is_object_dict(body) else {}

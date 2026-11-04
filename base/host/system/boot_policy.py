@@ -66,6 +66,8 @@ from typing import Final
 from loguru import logger
 
 from base.host.atomic_io import write_text_atomic
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 # Seconds between two `meiva start` attempts — launchd's ThrottleInterval on
 # macOS and systemd RestartSec on Linux.
@@ -85,13 +87,27 @@ def _attempts_path(home: Path) -> Path:
     return home / "run" / _ATTEMPTS_FILE
 
 
+# meiva:note
+# The boot time and attempt count of the recorded attempts file. A document that is not an object with
+# a numeric `boot_time` and `attempts` is a `TypeError` (the reader treats it as an unreadable file).
+def _attempt_record(raw: object) -> tuple[float, int]:
+    if not is_object_dict(raw):
+        raise TypeError("the boot attempts record is not an object")
+    boot_field, attempts_field = raw["boot_time"], raw["attempts"]
+    if not isinstance(boot_field, int | float | str) or not isinstance(
+        attempts_field, int | float | str
+    ):
+        raise TypeError("the boot attempts record has a mistyped field")
+    return float(boot_field), int(attempts_field)
+
+
 def _recorded_attempts(home: Path, boot_time: float) -> int:
     """Attempts already made in the boot at ``boot_time`` (0 for any other boot)."""
     path = _attempts_path(home)
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        recorded_boot = float(raw["boot_time"])
-        attempts = int(raw["attempts"])
+        recorded_boot, attempts = _attempt_record(
+            object_of(json.loads, path.read_text(encoding="utf-8"))
+        )
     except FileNotFoundError:
         return 0
     except (OSError, ValueError, KeyError, TypeError) as exc:

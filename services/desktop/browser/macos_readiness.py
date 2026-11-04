@@ -59,9 +59,8 @@ class ProbeResult:
 
 
 # meiva:note
-# The result of a finished probe. `run_bounded` types its output `Any`; a parameter typed with
-# `CompletedProcess[object]` takes it without naming the `Any`.
-def _result(completed: subprocess.CompletedProcess[object]) -> ProbeResult:
+# The result of a finished probe: an uncaptured stream (None) reads as empty.
+def _result(completed: subprocess.CompletedProcess[str]) -> ProbeResult:
     return ProbeResult(
         completed.returncode, str(completed.stdout or ""), str(completed.stderr or "")
     )

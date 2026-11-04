@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import json
 import subprocess
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import NotRequired, TypedDict, assert_never
 
-from base.host.proc import CommandRunner
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import Reply, fake_host
 from scripts.ci.pull_requests.status import CIStatus, LimboRun
@@ -106,7 +105,7 @@ def _probe_reply(evidence: Evidence, args: list[str]) -> Reply | None:
 def monitor_host(
     *evidence: Evidence,
     calls: list[list[str]] | None = None,
-    other: CommandRunner | None = None,
+    other: Callable[..., subprocess.CompletedProcess[str]] | None = None,
 ) -> Host:
     assert evidence
     index = 0

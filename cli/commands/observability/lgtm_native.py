@@ -18,8 +18,6 @@ import tempfile
 import time
 import zipfile
 from collections.abc import Callable
-from contextlib import AbstractContextManager
-from http.client import HTTPResponse
 from pathlib import Path
 from typing import TypeGuard, assert_never
 
@@ -109,15 +107,6 @@ def _remaining(deadline: float) -> float:
     return deadline - time.monotonic()
 
 
-# meiva:note
-# `opener(url, timeout)` as a context manager of the answer the download reads. The port types its
-# answer `Any`; a parameter typed with the real `HTTPResponse` takes it without naming the `Any`.
-def _opened(
-    opener: Callable[[str, float], AbstractContextManager[HTTPResponse]], url: str, timeout: float
-) -> AbstractContextManager[HTTPResponse]:
-    return opener(url, timeout)
-
-
 # meiva:link cli/commands/observability/docs/lgtm/lgtm.meiva.okf.md
 def stream_download(
     url: str, destination: Path, *, limits: DownloadLimits, deadline: float
@@ -137,7 +126,7 @@ def stream_download(
         return limits.total_budget_s - _remaining(deadline)
 
     with (
-        _opened(SYSTEM_URL_OPENER, url, min(limits.socket_timeout_s, require_budget())) as response,
+        SYSTEM_URL_OPENER(url, min(limits.socket_timeout_s, require_budget())) as response,
         destination.open("wb") as output,
     ):
         total = content_length(response.headers.get("Content-Length"))

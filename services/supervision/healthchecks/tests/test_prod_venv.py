@@ -6,13 +6,14 @@ import subprocess
 import venv
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import Unpack
 
 import pytest
 
 from base.clock import Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
-from base.host.proc import CommandRunner, run_bounded
+from base.host.proc import CommandRunner, PopenOptions, run_bounded
+from base.host.system.tests.fake_commands import runner_from
 from services.supervision.healthchecks import prod_venv as hc
 
 _HEALTHY_ENV = {"PATH": os.environ.get("PATH", "")}
@@ -41,17 +42,23 @@ def _runner_that_hangs_on(uv: str, timers: ManualTimers) -> tuple[CommandRunner,
         timeout: float,
         capture_output: bool = False,
         input: bytes | str | None = None,
-        **popen_kwargs: object,
-    ) -> subprocess.CompletedProcess[Any]:
+        text: bool | None = None,
+        **popen_kwargs: Unpack[PopenOptions],
+    ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
         allowances.append(timeout)
         if argv[0] == uv:
             timers.advance(timeout)
             raise subprocess.TimeoutExpired(list(argv), timeout)
         return run_bounded(
-            argv, timeout=timeout, capture_output=capture_output, input=input, **popen_kwargs
+            argv,
+            timeout=timeout,
+            capture_output=capture_output,
+            input=input,
+            text=text,
+            **popen_kwargs,
         )
 
-    return run, allowances
+    return runner_from(run), allowances
 
 
 # meiva:note
