@@ -341,6 +341,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "keeps the per-test TRUNCATE list in step with db/schema.sql and migrations/",
     ),
+    "tests/contracts/test_workflow_trigger_contract.py": (
+        "contract",
+        "compares every workflow's trigger set with the table this repository declares",
+    ),
     "tests/contracts/test_task_status_wire_contract.py": (
         "contract",
         "keeps the TaskStatus enum in step with ui/web/openapi.json and the frontend contract types",
