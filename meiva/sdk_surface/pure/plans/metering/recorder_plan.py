@@ -36,17 +36,26 @@ def foreign_recorder(fn: object, sampling: object) -> bool:
 # `current` with every recorder layer stripped. A recorder always carries `__wrapped__`
 # (`functools.wraps`); a plugin wrap chained over one would keep a stale recorder alive.
 # meiva:note
-# The callable a recorder wraps, or None for anything that is not one.
+# The callable a recorder wraps. `None` means "this object carries no `__wrapped__` at all" — a
+# wrapper that is not a recorder. A `__wrapped__` that exists but is not callable is a broken
+# recorder, and reading it as "nothing to unwrap" would silently leave a recorder installed.
+_MISSING = object()
+
+
 def _wrapped(fn: object) -> Callable[..., object] | None:
-    inner = object_of(getattr, fn, "__wrapped__", None)
-    return inner if callable(inner) else None
+    inner = object_of(getattr, fn, "__wrapped__", _MISSING)
+    if inner is _MISSING:
+        return None
+    if not callable(inner):
+        raise TypeError(f"a recorder's __wrapped__ must be callable, got {type(inner).__name__}")
+    return inner
 
 
 def strip_recorders(current: Callable[..., object]) -> Callable[..., object]:
     while is_recorder(current):
         inner = _wrapped(current)
         if inner is None:
-            break
+            raise TypeError(f"the recorder {current!r} carries no __wrapped__ to strip")
         current = inner
     return current
 
@@ -55,6 +64,9 @@ def strip_recorders(current: Callable[..., object]) -> Callable[..., object]:
 # What an uninstall puts back at a target: the callable the recorder wraps, or None when the
 # target holds no recorder any more (replaced or removed since), which is then left alone.
 def restore_target(current: object) -> object | None:
-    if current is not None and is_recorder(current):
-        return _wrapped(current)
-    return None
+    if not is_recorder(current):
+        return None
+    inner = _wrapped(current)
+    if inner is None:
+        raise TypeError(f"the recorder {current!r} carries no __wrapped__ to restore")
+    return inner

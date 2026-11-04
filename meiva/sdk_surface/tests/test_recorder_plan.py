@@ -9,6 +9,8 @@ from __future__ import annotations
 import functools
 from collections.abc import Callable
 
+import pytest
+
 from meiva.sdk_surface.pure.plans.metering.recorder_plan import (
     RECORDER_MARK,
     SAMPLING_MARK,
@@ -87,3 +89,51 @@ def test_an_uninstall_restores_what_a_recorder_wraps_and_leaves_the_rest_alone()
     assert restore_target(_base) is None
     assert restore_target(None) is None
     assert restore_target(_plugin_wrapper_over(recorder)) is None
+
+
+# meiva:note
+# A callable that carries the recorder mark; `__wrapped__` is whatever the test puts there.
+class _RecorderShaped:
+    __wrapped__: object = None
+
+    def __call__(self) -> int:
+        return 0
+
+
+# meiva:note
+# The same callable without a `__wrapped__` attribute at all.
+class _RecorderWithNothingToUnwrap:
+    def __call__(self) -> int:
+        return 0
+
+
+def _broken_recorder(wrapped: object) -> Callable[..., int]:
+    recorder = _RecorderShaped()
+    recorder.__wrapped__ = wrapped
+    setattr(recorder, RECORDER_MARK, recorder)
+    return recorder
+
+
+def _recorder_without_wrapped() -> Callable[..., int]:
+    recorder = _RecorderWithNothingToUnwrap()
+    setattr(recorder, RECORDER_MARK, recorder)
+    return recorder
+
+
+def test_a_recorder_wrapped_value_that_is_not_callable_is_an_error() -> None:
+    with pytest.raises(TypeError, match="__wrapped__ must be callable"):
+        strip_recorders(_broken_recorder(42))
+
+
+def test_a_recorder_with_no_wrapped_value_is_an_error() -> None:
+    with pytest.raises(TypeError, match="carries no __wrapped__"):
+        strip_recorders(_recorder_without_wrapped())
+
+
+def test_restoring_a_recorder_with_no_wrapped_value_is_an_error() -> None:
+    with pytest.raises(TypeError, match="carries no __wrapped__"):
+        restore_target(_recorder_without_wrapped())
+
+
+def test_a_plain_wrapper_without_the_mark_still_restores_to_none() -> None:
+    assert restore_target(_plugin_wrapper_over(_base)) is None

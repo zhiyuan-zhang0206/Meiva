@@ -255,6 +255,12 @@ def read_surface(root: ModuleType) -> MeterSurface:
 
 
 # meiva:note
+# A member the walk enumerated but the namespace no longer carries (`MEIVA_SDK_DISABLE` deletes the
+# global). Distinct from a member that is still there and stopped being callable, which raises.
+_MISSING = object()
+
+
+# meiva:note
 # Wrap every public ``meiva.*`` callable of `surface` with the recording proxy. Idempotent.
 #
 # Called by ``meiva.sdk_surface.install`` after plugins load, so plugin namespaces / members /
@@ -275,9 +281,14 @@ def install(
     _check_sampling(funnel, sampling)
     wrapped: list[tuple[object, str]] = []
     for parent, attr, fq in surface.routines:
-        current = object_of(getattr, parent, attr, None)
-        if current is None or is_recorder(current) or not callable(current):
+        current = object_of(getattr, parent, attr, _MISSING)
+        if current is _MISSING or is_recorder(current):
             continue
+        if not callable(current):
+            raise TypeError(
+                f"meiva.{fq} is no longer callable ({type(current).__name__}); "
+                "the surface changed since install() enumerated it"
+            )
         setattr(parent, attr, make_recorder(current, fq, sampling, clients))
         wrapped.append((parent, attr))
 

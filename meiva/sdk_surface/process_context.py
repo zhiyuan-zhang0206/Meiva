@@ -90,11 +90,23 @@ def _slots() -> dict[str, object]:
     return meiva_module().__dict__
 
 
+# meiva:note
+# A slot that was never written is unbounded, and that is what `None` says. A slot that holds
+# anything else was written by something that is not this module, so it raises instead of reading
+# as "no context" — the two states have different causes and only one of them is normal.
+_MISSING = object()
+
+
 def _bound() -> MeivaContext | SdkProcessPurpose | None:
-    value = _slots().get(CONTEXT_KEY)
+    value = _slots().get(CONTEXT_KEY, _MISSING)
+    if value is _MISSING:
+        return None
     if isinstance(value, (MeivaContext, SdkProcessPurpose)):
         return value
-    return None
+    raise TypeError(
+        f"meiva.{CONTEXT_KEY} must be a MeivaContext or an SdkProcessPurpose, "
+        f"got {type(value).__name__}"
+    )
 
 
 def bound_context() -> MeivaContext | None:
@@ -141,8 +153,12 @@ def unbind_context() -> MeivaContext | None:
     """
     if is_host_process():
         raise RuntimeError("the shared agent host cannot release its startup posture")
-    value = _slots().pop(CONTEXT_KEY, None)
-    return value if isinstance(value, MeivaContext) else None
+    value = _slots().pop(CONTEXT_KEY, _MISSING)
+    if value is _MISSING:
+        return None
+    if isinstance(value, MeivaContext):
+        return value
+    raise TypeError(f"meiva.{CONTEXT_KEY} must be a MeivaContext, got {type(value).__name__}")
 
 
 # meiva:note
