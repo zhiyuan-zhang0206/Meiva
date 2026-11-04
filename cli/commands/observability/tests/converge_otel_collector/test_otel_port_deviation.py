@@ -6,9 +6,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
-
 import pytest
 
 from base import db
@@ -21,11 +18,13 @@ from cli.commands.observability.tests.converge_otel_collector.collector_harness 
     RUNNER,
     CollectorUnit,
     never_dialed,
+    value_at,
 )
 from cli.commands.observability.tests.converge_otel_collector.collector_harness import (
     collector_unit as collector_unit,
 )
 from cli.commands.observability.tests.observability_inputs import observability
+from cli.database import OperatorDatabaseFactory
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from services.wake.heartbeat import station_probe
@@ -36,7 +35,7 @@ def test_remote_station_advertisement_drives_render_and_probe(
     db_url: str,
     station_port: int,
     collector_unit: CollectorUnit,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     database_gate: ProcessDbGate,
 ) -> None:
     values = observability(
@@ -58,8 +57,10 @@ def test_remote_station_advertisement_drives_render_and_probe(
         )
         endpoint = f"http://10.0.0.46:{station_port}"
         for name in ("tempo", "loki", "prometheus"):
-            assert config["exporters"][f"otlphttp/{name}"]["endpoint"] == endpoint
-        assert config["receivers"]["otlp"]["protocols"]["http"]["endpoint"] == "127.0.0.1:4319"
+            assert value_at(config, "exporters", f"otlphttp/{name}", "endpoint") == endpoint
+        assert value_at(config, "receivers", "otlp", "protocols", "http", "endpoint") == (
+            "127.0.0.1:4319"
+        )
         assert oc.lgtm_fanout_bases(values, remote=True, database_factory=operator_database) == (
             endpoint,
             endpoint,
@@ -78,7 +79,7 @@ def test_remote_station_advertisement_drives_render_and_probe(
 
 
 def test_unregistered_station_uses_remote_port_projection(
-    db_url: str, operator_database: Callable[[], Any]
+    db_url: str, operator_database: OperatorDatabaseFactory
 ) -> None:
     values = observability(
         telemetry_otlp_port=4319,
@@ -106,4 +107,4 @@ def test_runner_does_not_discover_station(collector_unit: CollectorUnit) -> None
         database_factory=never_dialed,
     )
 
-    assert config["exporters"]["otlphttp/tempo"]["endpoint"] == GATEWAY_INGRESS
+    assert value_at(config, "exporters", "otlphttp/tempo", "endpoint") == GATEWAY_INGRESS
