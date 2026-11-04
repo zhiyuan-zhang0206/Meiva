@@ -3,7 +3,7 @@ exports = ["cluster.py", "harness.py", "host.py", "logs.py", "permissions.py", "
 [uses]
 "__init__.py" = ["auth.py", "backup.py", "cluster.py", "computer.py", "harness.py", "host.py", "logs.py", "management.py", "observability.py", "permissions.py", "pty.py"]
 "observability.py" = ["host.py"]
-"tests" = ["__init__.py", "logs.py"]
+"tests" = ["__init__.py"]
 
 [debt.ambient-read]
 "host.py#pid sys.stdin" = { count = 1, owner = "#5816", until = "waits for `h_stop` to be handed the stdin stream by the command entry: it passes `sys.stdin` to the stop confirmation" }
