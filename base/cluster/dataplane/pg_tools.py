@@ -23,10 +23,10 @@ import shutil
 import socket
 import subprocess
 import tempfile
-from collections.abc import Generator, Iterator, Mapping
+from collections.abc import Generator, Iterator, Mapping, Sequence
 from contextlib import closing, contextmanager
 from pathlib import Path
-from typing import NamedTuple, TypedDict, TypeGuard
+from typing import NamedTuple, Protocol, TypedDict, TypeGuard
 
 from base.cluster.dataplane import pg_throwaway_base as _throwaway_base
 from base.cluster.dataplane.pg_foreground import (
@@ -46,6 +46,7 @@ from base.cluster.dataplane.pg_stall_watchdog import (
     stall_guard,
 )
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
+from base.host.boundary.untyped import object_of
 from base.log import logger
 from base.native_process.child_env import filter_daemon_env
 from base.native_process.os_platform import is_macos
@@ -129,13 +130,25 @@ def has_pg_tool(
     return True
 
 
+# meiva:note
+# `socket.getsockname()` is typed `Any`; an IPv4 socket answers a `(host, port)` tuple.
+def _is_address(value: object) -> TypeGuard[tuple[object, ...]]:
+    return isinstance(value, tuple)
+
+
 def free_port() -> int:
     """Ask the OS for an unused localhost TCP port. The socket is closed
     immediately, so the port is only a PROBE — it is not reserved; `allocate_port`
     makes the reservation atomic."""
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
         s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+        address = object_of(s.getsockname)
+    if not _is_address(address) or len(address) < 2:
+        raise TypeError(f"the OS bound an unusable address {address!r}")
+    port = address[1]
+    if not isinstance(port, int):
+        raise TypeError(f"the OS bound an unusable port {port!r}")
+    return port
 
 
 # ── Orphaned throwaway clusters: owner lock + start-of-run sweep ──
@@ -281,7 +294,7 @@ def _read_lock_body(fd: int) -> _OwnerRecord | None:
     aborting the sweep or the port registry."""
     os.lseek(fd, 0, os.SEEK_SET)
     try:
-        rec = json.loads(os.read(fd, 4096))
+        rec = object_of(json.loads, os.read(fd, 4096))
     except (ValueError, UnicodeDecodeError):
         return None
     if not _is_owner_record(rec):
@@ -476,6 +489,27 @@ def _read_log_tail(log: Path, lines: int = 40) -> str:
     return ""
 
 
+# meiva:note
+# The `cmd` of a `CalledProcessError`: typeshed's `_CMD`, which it does not export.
+type _Argv = (
+    str
+    | bytes
+    | os.PathLike[str]
+    | os.PathLike[bytes]
+    | Sequence[str | bytes | os.PathLike[str] | os.PathLike[bytes]]
+)
+
+
+# meiva:note
+# The fields of a failed `subprocess.run(check=True)` that this module reads. typeshed types the
+# `CalledProcessError` attributes as `Any`; this view gives them the types the call really holds.
+class _FailedProcess(Protocol):
+    returncode: int
+    cmd: _Argv
+    output: str | bytes | None
+    stderr: str | bytes | None
+
+
 class ThrowawayPgStartError(subprocess.CalledProcessError):
     """A throwaway cluster failed initdb or `pg_ctl start`.
 
@@ -486,7 +520,7 @@ class ThrowawayPgStartError(subprocess.CalledProcessError):
 
     def __init__(
         self,
-        exc: subprocess.CalledProcessError,
+        exc: _FailedProcess,
         log: Path,
         preserved: Path | None,
     ) -> None:
@@ -523,7 +557,7 @@ def _preserve_failed_fixture_log(
 _PG_START_ATTEMPTS = 3
 
 
-def _is_port_bind_failure(exc: subprocess.CalledProcessError, log: Path) -> bool:
+def _is_port_bind_failure(exc: _FailedProcess, log: Path) -> bool:
     return "Address already in use" in f"{exc.stderr or ''}\n{_read_log_tail(log)}"
 
 

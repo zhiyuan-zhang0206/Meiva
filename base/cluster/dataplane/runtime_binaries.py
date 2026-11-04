@@ -11,6 +11,8 @@ import urllib.request
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
 from base.host.net.resilience import Policy, retry, retry_sleep
 from base.log import logger
@@ -166,7 +168,10 @@ def _is_transient_download_error(exc: Exception) -> bool:
 
 
 def _download_backoff(attempt: int) -> float:
-    return float(2 ** (attempt + 1))
+    # meiva:note
+    # `1 << (attempt + 1)` is 2**(attempt + 1): the stubs type `int ** int` as Any, which the Any
+    # rules refuse, so the doubling is written as a shift.
+    return float(1 << (attempt + 1))
 
 
 _DOWNLOAD_POLICY = Policy(
@@ -206,7 +211,10 @@ def download_with_opener(
                 return data
         except urllib.error.URLError as exc:
             if attempt < DOWNLOAD_ATTEMPTS and _is_transient_download_error(exc):
-                delay = 2**attempt
+                # meiva:note
+                # `1 << attempt` is 2**attempt: the stubs type `int ** int` as Any, which the Any
+                # rules refuse, so the doubling is written as a shift.
+                delay = 1 << attempt
                 logger.warning(
                     f"[runtime] transient error fetching {url} ({exc}); "
                     f"retry {attempt}/{DOWNLOAD_ATTEMPTS - 1} in {delay}s"
@@ -412,8 +420,9 @@ def download_ghcr_blob_with_opener(
         open_url=open_url,
         policy=policy,
     )
-    token = json.loads(token_json).get("token")
-    if not token:
+    answer = object_of(json.loads, token_json)
+    token = answer.get("token") if is_object_dict(answer) else None
+    if not isinstance(token, str) or not token:
         raise RuntimeError(f"ghcr.io token endpoint answered without a token for {repository}")
     return download_with_opener(
         url,

@@ -20,6 +20,7 @@ is on the `import meiva` path, which stays driver-free (task #3816).
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import assert_never
 
@@ -55,6 +56,20 @@ __all__ = [
     "ensure_pgvector_extension",
     "provision_database",
 ]
+
+
+# meiva:note
+# The answer of the `pg_roles` probe in `ensure_cluster_role`.
+@dataclass(frozen=True)
+class _RoleOidRow:
+    oid: int
+
+
+# meiva:note
+# One applied version of the LangGraph checkpoint migrations (`checkpoint_migrations.v`).
+@dataclass(frozen=True)
+class _MigrationVersionRow:
+    v: int
 
 
 def _schema_applied(admin_url: str, target: str, *, expected_data_dir: Path | None = None) -> bool:
@@ -101,10 +116,13 @@ def ensure_cluster_role(
     from psycopg import sql as pgsql
 
     from base.cluster.dataplane.pg_admin import connect
+    from base.db.rows import query_one
 
     with connect(base_admin_url, expected_data_dir=expected_data_dir, autocommit=True) as conn:
-        row = conn.execute("SELECT oid FROM pg_roles WHERE rolname = %s", (identity,)).fetchone()
-        if row is not None and int(row[0]) == 10:
+        row = query_one(
+            conn, _RoleOidRow, "SELECT oid FROM pg_roles WHERE rolname = %s", (identity,)
+        )
+        if row is not None and row.oid == 10:
             raise RuntimeError(
                 f"schema owner {identity!r} is the initdb bootstrap superuser; the owner "
                 "must be a NOLOGIN role distinct from the OS user"
@@ -174,6 +192,7 @@ def provision_database(
     from psycopg import sql as pgsql
 
     from base.cluster.dataplane.pg_admin import connect, owner_session
+    from base.db.rows import count_one
 
     ensure_cluster_role(
         identity, base_admin_url=base_admin_url, expected_data_dir=expected_data_dir
@@ -193,10 +212,9 @@ def provision_database(
         with connect(
             swap_db(base_admin_url, identity), expected_data_dir=expected_data_dir
         ) as conn:
-            row = conn.execute(
-                "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'"
-            ).fetchone()
-        table_count = None if row is None else int(row[0])
+            table_count = count_one(
+                conn, "SELECT count(*) AS n FROM pg_tables WHERE schemaname = 'public'"
+            )
     action = plan_database_provision(
         identity,
         db_exists=db_exists,
@@ -346,13 +364,14 @@ def checkpoint_schema_versions(
     """Return the complete applied set, or ``None`` when no schema exists."""
 
     from base.cluster.dataplane.pg_admin import connect
+    from base.db.rows import query_all
 
     with connect(db_url, expected_data_dir=expected_data_dir, autocommit=True) as conn:
         table = conn.execute("SELECT to_regclass('public.checkpoint_migrations')").fetchone()
         if table is None or table[0] is None:
             return None
-        rows = conn.execute("SELECT v FROM checkpoint_migrations").fetchall()
-    return frozenset(int(row[0]) for row in rows)
+        rows = query_all(conn, _MigrationVersionRow, "SELECT v FROM checkpoint_migrations")
+    return frozenset(row.v for row in rows)
 
 
 def assert_checkpoint_schema_current(db_url: str, *, expected_data_dir: Path | None = None) -> None:

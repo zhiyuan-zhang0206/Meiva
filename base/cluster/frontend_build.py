@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, assert_never
 
+from base.host.boundary.options import attribute, options
 from base.host.net.browser_origins import parse_browser_origins, split_browser_origins
 from base.host.runtime_interpreter import source_digest
 
@@ -160,6 +161,15 @@ def ensure_build(
             assert_never(decision.action)
 
 
+# meiva:note
+# The options of the `ensure` command, the only one, read from the parsed namespace by `options`.
+@dataclass(frozen=True)
+class _EnsureOptions:
+    dir: str
+    gateway_port: int
+    browser_origins: str
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="base.cluster.frontend_build")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -168,11 +178,12 @@ def main(argv: list[str]) -> int:
     ensure.add_argument("--gateway-port", type=int, required=True)
     ensure.add_argument("--browser-origins", default="")
     args = parser.parse_args(argv)
-    if args.command == "ensure":
+    if attribute(args, "command", str) == "ensure":
+        chosen = options(args, _EnsureOptions)
         return ensure_build(
-            Path(args.dir),
-            gateway_port=args.gateway_port,
-            browser_origins=parse_browser_origins(split_browser_origins(args.browser_origins)),
+            Path(chosen.dir),
+            gateway_port=chosen.gateway_port,
+            browser_origins=parse_browser_origins(split_browser_origins(chosen.browser_origins)),
         )
     return 2
 

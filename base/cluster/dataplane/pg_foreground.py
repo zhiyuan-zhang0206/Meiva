@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 import psycopg
@@ -14,6 +15,7 @@ from base.cluster.dataplane.pg_plan import (
     foreground_stop_argv,
     verify_foreground_data_dir,
 )
+from base.db.rows import query_one
 
 __all__ = [
     "POSTMASTER_SHUTDOWN_S",
@@ -21,6 +23,13 @@ __all__ = [
     "stop_foreground_postgres",
     "wait_foreground_postgres",
 ]
+
+
+# meiva:note
+# The answer of `SHOW data_directory`.
+@dataclass(frozen=True)
+class _DataDirectoryRow:
+    data_directory: str
 
 
 def start_foreground_postgres(
@@ -61,12 +70,12 @@ def wait_foreground_postgres(
                 connect_timeout=1,
                 options="-c statement_timeout=1000",
             ) as connection:
-                row = connection.execute("SHOW data_directory").fetchone()
+                row = query_one(connection, _DataDirectoryRow, "SHOW data_directory")
         except psycopg.OperationalError:
             timers.sleep(0.1)
             continue
         verify_foreground_data_dir(
-            None if row is None else Path(str(row[0])).resolve(), data.resolve()
+            None if row is None else Path(row.data_directory).resolve(), data.resolve()
         )
         if process.poll() is not None:
             raise RuntimeError(f"foreground Postgres exited {process.returncode}: {log}")

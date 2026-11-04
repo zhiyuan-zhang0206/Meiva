@@ -15,6 +15,7 @@ from base.cluster import port_preflight
 from base.cluster.dataplane.pg_tools import is_macos
 from base.cluster.listener_plan import public_listener_bound
 from base.cluster.machine import MachineIdentityReader
+from base.host.boundary.untyped import object_mapping
 from base.host.brew_pin import brew_prefix
 from base.host.db_authority.delivery import POOLER_ADMIN
 
@@ -150,15 +151,18 @@ def clients(listen_port: int, admin_password: str, host: str = "127.0.0.1") -> l
     ):
         cur.execute("SHOW CLIENTS")
         rows = cur.fetchall()
-    found = [
-        PoolerClient(
-            address=f"{row['addr']}:{row['port']}",
-            database=str(row["database"]),
-            user=str(row["user"]),
-            state=str(row["state"]),
-            application=str(row.get("application_name") or ""),
+    found: list[PoolerClient] = []
+    for raw in rows:
+        row = object_mapping(raw)
+        if row["database"] == "pgbouncer":
+            continue
+        found.append(
+            PoolerClient(
+                address=f"{row['addr']}:{row['port']}",
+                database=str(row["database"]),
+                user=str(row["user"]),
+                state=str(row["state"]),
+                application=str(row.get("application_name") or ""),
+            )
         )
-        for row in rows
-        if row["database"] != "pgbouncer"
-    ]
     return sorted(found, key=lambda client: client.address)

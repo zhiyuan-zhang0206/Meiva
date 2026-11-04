@@ -83,11 +83,24 @@ def _has_vector_install_script(extension: Path) -> bool:
     control = extension / "vector.control"
     if not control.is_file():
         return False
-    assignments = re.findall(r"^\s*default_version\s*=(.*)$", control.read_text(), re.MULTILINE)
+    assignments: list[str] = []
+    for match in re.finditer(r"^\s*default_version\s*=(.*)$", control.read_text(), re.MULTILINE):
+        # meiva:note
+        # `Match.group` is typed `str | Any` (it is None for an unmatched optional group); this
+        # group always participates, and the check keeps the stub's Any out of the list.
+        assignment = match.group(1)
+        if not isinstance(assignment, str):
+            raise TypeError("default_version assignment is not text")
+        assignments.append(assignment)
     if len(assignments) != 1:
         return False
     version = re.fullmatch(r"\s*'([0-9]+(?:\.[0-9]+)+)'\s*(?:#.*)?", assignments[0])
-    return version is not None and (extension / f"vector--{version[1]}.sql").is_file()
+    if version is None:
+        return False
+    number = version.group(1)
+    if not isinstance(number, str):
+        raise TypeError("default_version is not text")
+    return (extension / f"vector--{number}.sql").is_file()
 
 
 def ensure_pg_runtime(
