@@ -51,6 +51,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeGuard
 
+from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.options import attribute, options
 from base.host.boundary.untyped import object_of
 from base.paths.home import resolve_meiva_home
@@ -160,8 +161,58 @@ def save(post: Post, root: Path) -> Path:
     return outdir
 
 
+# meiva:note
+# What a saved `post.json` must carry to be read as a `Post`: every field the `Post` TypedDict
+# declares, and the type its value must have. A field the adapter writes as `None` when the entry
+# names nothing (a link, a title, a date, an author) accepts `None` — that is a value, not a
+# missing field, so such a post still reads. No field is `NotRequired`, so this is the whole
+# record.
+_POST_FIELDS: dict[str, tuple[type, ...]] = {
+    "platform": (str,),
+    "url": (str, type(None)),
+    "source_id": (str,),
+    "feed_url": (str,),
+    "feed_title": (str,),
+    "title": (str, type(None)),
+    "text": (str,),
+    "summary_html": (str,),
+    "author": (dict,),
+    "published_at": (str, type(None)),
+    "fetched_at": (str,),
+    "fetched_via": (str,),
+    "_full": (bool,),
+}
+
+# meiva:note
+# The same for the `Author` record `post["author"]` holds, whose fields the renderers read.
+_AUTHOR_FIELDS: dict[str, tuple[type, ...]] = {
+    "id": (str, type(None)),
+    "name": (str, type(None)),
+}
+
+
+# meiva:note
+# True when `record` carries every field of `fields` with one of the types that field accepts.
+def _fields_match(record: dict[str, object], fields: dict[str, tuple[type, ...]]) -> bool:
+    return all(
+        key in record and isinstance(record[key], accepted) for key, accepted in fields.items()
+    )
+
+
+# meiva:note
+# A decoded `post.json` proven to be a `Post`: `isinstance(value, dict)` is only the precondition
+# for the field checks, never the claim itself. A document that lost a required field — a
+# truncated write, a hand-edited mirror, a post some other adapter wrote — is refused here, where
+# the file is read, so the caller rebuilds instead of handing a half-record to
+# `render_markdown` / `to_s1` / `is_complete`, which would raise `KeyError` far from the file it
+# came from.
 def _is_post(value: object) -> TypeGuard[Post]:
-    return isinstance(value, dict)
+    if not is_object_dict(value):
+        return False
+    if not _fields_match(value, _POST_FIELDS):
+        return False
+    author = value["author"]
+    return is_object_dict(author) and _fields_match(author, _AUTHOR_FIELDS)
 
 
 # meiva:note
