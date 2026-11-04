@@ -13,6 +13,8 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Literal, TypeGuard
 
+from base.host.boundary.untyped import object_of
+
 ERROR_STALE_AFTER_S: float = 30.0 * 60.0
 
 
@@ -143,7 +145,7 @@ def email_from_jwt(token: object) -> str | None:
     try:
         padding = "=" * (-len(payload_b64) % 4)
         decoded = base64.urlsafe_b64decode(payload_b64 + padding)
-        raw: object = json.loads(decoded.decode("utf-8"))
+        raw = object_of(json.loads, decoded.decode("utf-8"))
         if _is_dict_mapping(raw):
             email_val = raw.get("email")
             if isinstance(email_val, str) and email_val.strip():

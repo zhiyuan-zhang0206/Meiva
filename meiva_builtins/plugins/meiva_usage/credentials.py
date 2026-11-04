@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import TypeGuard
 
+from base.host.boundary.untyped import object_of
 from meiva_builtins.plugins.meiva_usage.types import (
     AntigravityCredentials,
     ClaudeOAuthCredentials,
@@ -26,7 +27,7 @@ def parse_claude_oauth_blob(data: Mapping[str, object] | str) -> ClaudeOAuthCred
     parsed: Mapping[str, object]
     if isinstance(data, str):
         try:
-            raw: object = json.loads(data)
+            raw = object_of(json.loads, data)
         except Exception as exc:
             raise UsageProbeError("Invalid Claude credentials JSON") from exc
         if not _is_mapping(raw):
@@ -54,7 +55,7 @@ def parse_claude_oauth_blob(data: Mapping[str, object] | str) -> ClaudeOAuthCred
 def _load_credentials_mapping(data: Mapping[str, object] | str, name: str) -> Mapping[str, object]:
     if isinstance(data, str):
         try:
-            raw: object = json.loads(data)
+            raw = object_of(json.loads, data)
         except Exception as exc:
             raise UsageProbeError(f"Invalid {name} credentials JSON") from exc
         if not _is_mapping(raw):

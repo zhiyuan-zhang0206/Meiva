@@ -8,12 +8,14 @@ import os
 import sys
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime, tzinfo
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
+from base.db.rows import query_one
 from base.log import logger
 from base.packages.plugins.config_face import disk_image_path
 from base.packages.plugins.config_view import read_plugin_config
@@ -30,21 +32,32 @@ from meiva_builtins.plugins.meiva_usage.types import CardReading, should_write_f
 _log = logger
 
 
+# meiva:note
+# The cached card row, selected by its primary key. Every column is NOT NULL in `plugin_stats`, so
+# a found row always carries all three and only a missing row means "nothing cached".
+@dataclass(frozen=True)
+class _CachedCard:
+    status: str
+    updated_at: datetime
+    value: str
+
+
 def _resolve_error_hysteresis(
     db: Database,
     card_id: str,
     reading: CardReading,
     now: datetime,
 ) -> tuple[CardReading, bool]:
-    with db.write_transaction() as conn, conn.cursor() as cur:
-        cur.execute(
+    with db.write_transaction() as conn:
+        cached = query_one(
+            conn,
+            _CachedCard,
             "SELECT status, updated_at, value FROM plugin_stats WHERE plugin = %s AND id = %s",
             ("meiva_usage", card_id),
         )
-        row = cur.fetchone()
-        existing_status = str(row[0]) if row and row[0] is not None else None
-        existing_updated_at = row[1] if row else None
-        existing_value = str(row[2]) if row and row[2] is not None else None
+    existing_status = None if cached is None else cached.status
+    existing_updated_at = None if cached is None else cached.updated_at
+    existing_value = cached.value if cached is not None and cached.value else None
 
     if not should_write_failure(existing_status, existing_updated_at, now):
         status = existing_status if existing_status in ("ok", "warn", "error") else "ok"
