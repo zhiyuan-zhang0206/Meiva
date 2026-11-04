@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
 
@@ -13,6 +12,7 @@ from base.agents.observation.roster import LIVE_SQL, AgentCard, list_directory, 
 from base.config import ConfigBoot, settings
 from base.db import Database
 from base.db.tests.fakes import fake_database
+from base.db.tests.row_fakes import FakeConnection
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 
@@ -283,60 +283,10 @@ def test_roster_attention_skips_resolved_and_unrelated_notices(db_conn: psycopg.
     assert visited_notices(plan) < 100
 
 
-_RowFactory = Callable[["_FakeCursor"], Callable[[tuple[object, ...]], object]]
+def _install_conn(row: tuple[object, ...] | None) -> tuple[Database, FakeConnection]:
+    conn = FakeConnection(("config_overlay", "birth_config"), [] if row is None else [row])
 
-
-class _FakeResult:
-    status = psycopg.pq.ExecStatus.TUPLES_OK
-    nfields = 2
-
-    def fname(self, index: int) -> bytes:
-        return (b"config_overlay", b"birth_config")[index]
-
-
-class _FakeCursor:
-    pgresult = _FakeResult()
-    _encoding = "utf-8"
-
-    def __init__(self, conn: _FakeConn, row_factory: _RowFactory):
-        self.conn = conn
-        self.row_factory = row_factory
-
-    def execute(self, sql: str, params: tuple[object, ...]) -> _FakeCursor:
-        self.conn.queries.append((sql, tuple(params)))
-        return self
-
-    def fetchone(self) -> object:
-        if self.conn.row is None:
-            return None
-        return self.row_factory(self)(self.conn.row)
-
-    def __enter__(self) -> _FakeCursor:
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        return None
-
-
-class _FakeConn:
-    def __init__(self, row: tuple[object, ...] | None) -> None:
-        self.row = row
-        self.queries: list[tuple[str, tuple[object, ...]]] = []
-
-    def cursor(self, *, row_factory: _RowFactory) -> _FakeCursor:
-        return _FakeCursor(self, row_factory)
-
-    def __enter__(self) -> _FakeConn:
-        return self
-
-    def __exit__(self, *args: object) -> None:
-        return None
-
-
-def _install_conn(row: tuple[object, ...] | None) -> tuple[Database, _FakeConn]:
-    conn = _FakeConn(row)
-
-    def _connect(**_kwargs: object) -> _FakeConn:
+    def _connect(**_kwargs: object) -> FakeConnection:
         return conn
 
     return fake_database(_connect), conn
@@ -354,7 +304,7 @@ def test_effective_model_overlay_wins(model_catalog: ModelCatalog) -> None:
         )[0]
         == "deepseek-v4-pro"
     )
-    ((sql, params),) = conn.queries
+    ((sql, params),) = conn.statements
     assert "agents_meta" in sql and params == (42,)
 
 
