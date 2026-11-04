@@ -378,6 +378,7 @@ async def run_in_subprocess(
                 envelope_error=envelope_error,
                 stream_cap=stream.cap(),
                 memory_guard_notice=read_notice(result_path),
+                returncode=returncode,
             ),
             payload,
         )

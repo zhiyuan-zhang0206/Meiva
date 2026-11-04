@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import re
 import sys
 import threading
 import time
@@ -265,10 +266,14 @@ async def test_subprocess_crashed_carries_child_traceback(tmp_path: Path) -> Non
     assert "ValueError: boom" in result.output
 
 
-async def test_subprocess_os_exit_without_envelope_is_crash(tmp_path: Path) -> None:
-    result = await run_exec_child(tmp_path, "import os\nos._exit(5)")
+@pytest.mark.parametrize("exit_code", [5, 99])
+async def test_subprocess_os_exit_without_envelope_is_crash(tmp_path: Path, exit_code: int) -> None:
+    result = await run_exec_child(tmp_path, f"import os\nos._exit({exit_code})")
     assert isinstance(result, ExecCrashed)
+    assert isinstance(result.exc, ExecChildError)
+    assert result.exc.exc_type == "exec_subprocess_aborted"
     assert "without writing a result envelope" in str(result.exc)
+    assert f"returncode={exit_code}" in str(result.exc)
 
 
 @pytest.mark.parametrize("exit_code", [5, 124])
@@ -301,14 +306,14 @@ async def test_abrupt_root_exit_stops_descendant_before_reader_cleanup(
 
 
 @pytest.mark.parametrize(
-    ("fault", "trigger"),
+    ("fault", "trigger", "expected_pattern"),
     [
-        ("sigkill", "os.kill(os.getpid(), signal.SIGKILL)"),
-        ("segfault", "ctypes.string_at(0)"),
+        ("sigkill", "os.kill(os.getpid(), signal.SIGKILL)", r"returncode=-9 \[SIGKILL\]"),
+        ("segfault", "ctypes.string_at(0)", r"returncode=-\d+ \[SIG(SEGV|BUS)\]"),
     ],
 )
 async def test_signal_killed_child_is_a_crash_and_the_host_keeps_serving(
-    tmp_path: Path, fault: str, trigger: str
+    tmp_path: Path, fault: str, trigger: str, expected_pattern: str
 ) -> None:
     pid_file = tmp_path / f"{fault}.pid"
     code = (
@@ -324,7 +329,10 @@ async def test_signal_killed_child_is_a_crash_and_the_host_keeps_serving(
     try:
         result = await run_exec_child(tmp_path, code)
         assert isinstance(result, ExecCrashed)
+        assert isinstance(result.exc, ExecChildError)
+        assert result.exc.exc_type == "exec_subprocess_aborted"
         assert "without writing a result envelope" in str(result.exc)
+        assert re.search(expected_pattern, str(result.exc))
         assert "before the fault" in result.output
         descendant_pid = int(pid_file.read_text(encoding="utf-8"))
         await _assert_tree_gone([descendant_pid])
