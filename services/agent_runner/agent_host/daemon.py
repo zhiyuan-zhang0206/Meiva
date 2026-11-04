@@ -98,7 +98,10 @@ from meiva import skills as meiva_skills
 from meiva.boot import clients_over, process_disable_entries
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.installation import Installation
-from services.agent_runner.understanding.chunk_consumer import understanding_loop_forever
+from services.agent_runner.understanding.chunk_consumer import (
+    DEFAULT_STARTUP_DELAY_SECONDS,
+    understanding_loop_forever,
+)
 
 from ...pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from .dispatcher import InboundWakeDispatcher, TurnScheduler
@@ -268,6 +271,7 @@ def background_loops(
             llm_override=config.view.lm.llm_override,
             config=config,
             clock=clock,
+            startup_delay_seconds=DEFAULT_STARTUP_DELAY_SECONDS,
         ),
     }
 

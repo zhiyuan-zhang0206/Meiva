@@ -93,6 +93,9 @@ def login_shell(os_name: str, script: str) -> str:
     return f"{'zsh' if os_name == 'Darwin' else 'bash'} -lc {shlex.quote(script)}"
 
 
+_HELPER_PROBE_PATHS = "scripts/host_ops/tcc base services/desktop"
+
+
 # meiva:note
 # The helper facts of the commit the wave switches to, read by that commit's own module: the
 # script and the package it imports are extracted from NEW's objects, because the installed
@@ -101,7 +104,7 @@ def helper_probe_command(new: str) -> str:
     return (
         f"{HOME}\n"
         "tmp=$(mktemp -d)\n"
-        f'git -C "$S" archive {shlex.quote(new)} | tar -x -C "$tmp"\n'
+        f'git -C "$S" archive {shlex.quote(new)} -- {_HELPER_PROBE_PATHS} | tar -x -C "$tmp"\n'
         'out=$(cd "$tmp" && PYTHONPATH="$tmp" "$S/.venv/bin/python" '
         '"$tmp/scripts/host_ops/tcc/helper-signing.py" facts 2>&1); rc=$?\n'
         'echo "h_rc=$rc"\n'

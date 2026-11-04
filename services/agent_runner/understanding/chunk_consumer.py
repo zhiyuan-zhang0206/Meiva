@@ -3,11 +3,12 @@
 #
 # Producers (the llm node and the compact paths, `agent/hooks/understanding_chunks.py`)
 # enqueue chunks into `understanding_chunk_jobs`; this loop claims them
-# (`FOR UPDATE SKIP LOCKED`, so every runner's loop shares one queue) as soon as they are due, with no
-# cap on how many run at once — one agent's jobs still run strictly in order (the claim only hands
-# out an agent's oldest live job, so the jobs in flight never outnumber the agents with work),
-# different agents' side by side; rate limiting is the provider's 429 and the shared retry
-# backoff of `invoke_response` —
+# (`FOR UPDATE SKIP LOCKED`, so every runner's loop shares one queue) as soon as they are due, up to
+# `max_in_flight` concurrent jobs per consumer when bounded (`DEFAULT_MAX_IN_FLIGHT` on the live
+# host loop so a post-outage backlog cannot saturate the runner's CPU or database pool while
+# interrupted turns recover; unbounded when `None`) — one agent's jobs still run strictly in order
+# (the claim only hands out an agent's oldest live job), different agents' side by side; rate
+# limiting is the provider's 429 and the shared retry backoff of `invoke_response` —
 # reads the chunk's segment from the checkpoint, asks the agent's own model to
 # divide it into groups of message units and summarize each, and writes one depth-1
 # `understanding_nodes` row per group. The request is the
@@ -105,6 +106,8 @@ from services.agent_runner.understanding.group_consumer import (
 from services.agent_runner.understanding.rebuild import run_rebuild
 
 POLL_SECONDS = 2.0
+DEFAULT_MAX_IN_FLIGHT = 2
+DEFAULT_STARTUP_DELAY_SECONDS = 15.0
 
 # meiva:note
 # A database error that a retry can outlive (a restart, a dropped connection, a pool wait).
@@ -307,7 +310,8 @@ async def run_job(
     except ValueError:
         return Outcome("failed", f"boundary checkpoint {job.boundary_checkpoint_id} is gone")
     try:
-        located = locate_chunk(
+        located = await asyncio.to_thread(
+            locate_chunk,
             history,
             start_index=job.start_index,
             end_index=job.end_index,
@@ -325,16 +329,15 @@ async def run_job(
     located, left_over = await _undescribed_part(pool, job, located)
     if located is None:
         return Outcome("skipped", "the chunk is already described")
-    if all(
-        unit.kind == "note"
-        for unit in divide_units(
-            list(located.messages),
-            timeline_inputs=TimestampPolicy.from_clock(
-                clock,
-                timestamps_enabled=config.view.general.message_timestamps,
-            ),
-        )
-    ):
+    units = await asyncio.to_thread(
+        divide_units,
+        list(located.messages),
+        timeline_inputs=TimestampPolicy.from_clock(
+            clock,
+            timestamps_enabled=config.view.general.message_timestamps,
+        ),
+    )
+    if all(unit.kind == "note" for unit in units):
         # meiva:note
         # Nothing but framework-injected notes: there is no matter to describe.
         return Outcome("skipped", "the chunk holds only framework notes")
@@ -432,6 +435,7 @@ class Consumer:
         config: ConfigBoot,
         clock: Clock,
         poll_seconds: float = POLL_SECONDS,
+        max_in_flight: int | None = None,
         load_segments: Callable[
             [Database, int, str | None], tuple[FullHistory, int | None]
         ] = load_segments,
@@ -450,6 +454,7 @@ class Consumer:
         self.config = config
         self.clock = clock
         self.poll_seconds = poll_seconds
+        self.max_in_flight = max_in_flight
         self.in_flight = 0
         # meiva:note
         # set whenever a job ends
@@ -470,7 +475,9 @@ class Consumer:
 
     async def claim(self, tg: asyncio.TaskGroup) -> bool:
         # meiva:note
-        # Claim one due job and start it; False when nothing is due.
+        # Claim one due job and start it; False when nothing is due or this consumer's cap is full.
+        if self.max_in_flight is not None and self.in_flight >= self.max_in_flight:
+            return False
         # meiva:note
         # reserved before the await: this is the only claimer
         self.in_flight += 1
@@ -741,6 +748,8 @@ async def understanding_loop_forever(
     config: ConfigBoot,
     clock: Clock,
     poll_seconds: float = POLL_SECONDS,
+    max_in_flight: int | None = DEFAULT_MAX_IN_FLIGHT,
+    startup_delay_seconds: float = 0.0,
     load_segments: Callable[
         [Database, int, str | None], tuple[FullHistory, int | None]
     ] = load_segments,
@@ -755,10 +764,11 @@ async def understanding_loop_forever(
     #
     # `tools` is the agent's tool schema (`[execute_code]`), bound for cache parity;
     # the host hands it in because the kernel's schema lives above this package.
-    # Every due job runs at once, one agent's never together.
     if not config.view.agent.understanding_enabled:
         logger.info("[agent-host] understanding consumer idle — MEIVA_UNDERSTANDING_ENABLED is off")
         return
+    if startup_delay_seconds > 0:
+        await asyncio.sleep(startup_delay_seconds)
     await Consumer(
         pool,
         db,
@@ -769,6 +779,7 @@ async def understanding_loop_forever(
         config=config,
         clock=clock,
         poll_seconds=poll_seconds,
+        max_in_flight=max_in_flight,
         load_segments=load_segments,
         describe=describe,
         settle_chunk_job=settle_chunk_job,

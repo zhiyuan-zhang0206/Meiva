@@ -40,14 +40,19 @@ before any SSH. The flags, their modes and the forwarded stop and start choices 
    that cannot get it is found before anything stops.
 4. NEW's offline `meiva schedules verify` over the gateway's stored schedule
    table — a red or an unevaluable check refuses `down` before any stop.
-5. Open the window's Grafana silence on the gateway host.
-6. `meiva stop --yes` with the operator's flags across all runners in parallel,
+5. Pre-stage NEW across every host in parallel while the cluster is still serving:
+   warm changed `uv` wheels and `pnpm` store entries in a temporary directory and
+   converge external agent harness CLIs (`claude`, `codex`, `agy`, `dsh`) on
+   `agent-runner` hosts so neither `switch` nor `meiva start` spends the outage
+   downloading packages or harness binaries.
+6. Open the window's Grafana silence on the gateway host.
+7. `meiva stop --yes` with the operator's flags across all runners in parallel,
    waiting for every in-flight runner stop to finish before stopping the gateway
    (which also gets `--keep-infra` or `--stop-infra`). A stop must exit 0 and leave
    a completed stop in the host's journal; a failure prints the retry step and brings back, with the
    operator's start selection, the hosts this run already stopped
    ([[cli/docs/fleet-update-window/failed-stop-recovery.meiva.okf.md]]).
-7. Switch every checkout in parallel: check out NEW detached, repair legacy read-only
+8. Switch every checkout in parallel: check out NEW detached, repair legacy read-only
    `.venv` directories (early converge passes left them 0555, which `uv sync`
    cannot write through), `uv sync --frozen --compile-bytecode --reinstall-package meiva`, then require a clean tree. The
    check shows a dirty tree and never cleans it: untracked files are the

@@ -78,9 +78,13 @@ class Sim:
         self.s["effects"].append([kind, alias])
         if rc := self._failure(kind, alias):
             return rc
-        if kind == "stop":
+        if kind == "prestage":
+            fresh = [k for k, a in self.s["effects"][self.s["run_started_at"] : -1] if a == alias]
+            assert "stop" not in fresh, "prestaged after stopping"
+            assert self.s["new"] in command, "prestage did not target NEW"
+        elif kind == "stop":
             return self._stop(alias, host, command)
-        if kind == "switch":
+        elif kind == "switch":
             self._switch(host, command)
         elif kind in ("start", "oneshot"):
             return self._start(kind, alias, host)
@@ -168,6 +172,7 @@ class Sim:
     def _effect_for(self, alias: str, host: State, command: str, emit: list[str]) -> int:
         kinds = {
             "git fetch": "fetch",
+            "meiva-prestage": "prestage",
             'meiva" stop': "stop",
             "--detach": "switch",
             "launchctl bootstrap": "oneshot",
@@ -267,6 +272,8 @@ class Sim:
 
 
 def _barrier_participant(alias: str, command: str) -> tuple[str, str] | None:
+    if "meiva-prestage" in command:
+        return "prestage", alias
     if 'meiva" stop' in command:
         return "stop", alias
     if "--detach" in command:

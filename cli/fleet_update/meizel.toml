@@ -1,20 +1,22 @@
-exports = ["__init__.py", "__main__.py", "choices.py", "fleet_gate.py", "fleet_verify.py", "oneshot.py", "plan", "programs.py", "schedules_verify_check_rows.py", "session.py", "timers.py"]
+exports = ["__init__.py", "__main__.py", "choices.py", "fleet_gate.py", "fleet_verify.py", "oneshot.py", "plan", "prestage.py", "programs.py", "schedules_verify_check_rows.py", "session.py", "timers.py"]
 
 [uses]
 "__init__.py" = ["choices.py", "down.py", "fleet_gate.py", "plan", "session.py", "up.py"]
 "__main__.py" = ["__init__.py", "session.py", "timers.py"]
 "choices.py" = ["plan", "untyped.py"]
-"down.py" = ["choices.py", "fleet_gate.py", "oneshot.py", "plan", "programs.py", "session.py"]
+"down.py" = ["choices.py", "fleet_gate.py", "oneshot.py", "plan", "prestage.py", "programs.py", "session.py"]
 "fleet_gate.py" = ["plan", "session.py", "untyped.py"]
 "fleet_verify.py" = ["choices.py", "plan", "session.py"]
 "oneshot.py" = ["plan"]
 "plan" = ["untyped.py"]
+"prestage.py" = ["plan"]
 "programs.py" = ["plan", "session.py"]
 "session.py" = ["plan"]
 "up.py" = ["choices.py", "fleet_verify.py", "oneshot.py", "plan", "programs.py", "session.py"]
 
 [purity]
 "oneshot.py" = "strict"
+"prestage.py" = "strict"
 "untyped.py" = "strict"
 
 [roots]

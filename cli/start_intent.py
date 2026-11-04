@@ -14,26 +14,29 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
 from collections.abc import Generator, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypedDict
 
 import psutil
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from base import telemetry
 from base.deploy import start_trace
+from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.host.boundary.options import options
 from base.host.db_authority.delivery import GENERATION_ENV
 from base.host.env.registry import derived_env_keys, env_identity_keys
 from base.host.permissions_helper.client import HelperFactory
 from base.host.system import boot_policy
 from base.host.system.hostport import Host
-from base.native_process.os_platform import file_lock, is_macos
+from base.native_process.os_platform import LockTimeoutError, file_lock, is_macos
 from base.paths.private_dir import ensure_private_dir
 from cli.database import OperatorDatabaseFactory, OperatorEventPipeline
 from cli.start_identity import require_initialized
@@ -60,20 +63,73 @@ def _enter_home(home: Path) -> None:
     os.environ["MEIVA_HOME"] = str(home)
 
 
+class _HolderRecord(TypedDict):
+    pid: int
+    purpose: str
+    since: str
+
+
+_HOLDER_ADAPTER: TypeAdapter[_HolderRecord] = TypeAdapter(_HolderRecord)
+_HOLDER_WRITER = AtomicWriter(SYSTEM_FS)
+
+
+def _holder_path(lock_path: Path) -> Path:
+    return lock_path.with_name(f"{lock_path.name}.holder.json")
+
+
+def _active_holder(lock_path: Path) -> str:
+    try:
+        data = _HOLDER_ADAPTER.validate_json(_holder_path(lock_path).read_text())
+        return f"pid={data['pid']} purpose={data['purpose']!r} since={data['since']}"
+    except (OSError, ValidationError):
+        return "unknown"
+
+
 # meiva:note
 # Admit the home, hold its lifecycle lock and enter this process into it.
 #
 # Raises why the home cannot start before anything is created: a start never makes a
 # home, so the lock below can rely on the directory existing. Once entered, the process's
-# configuration is built from the home's own `.env`.
+# configuration is built from the home's own `.env`. While the OS lock is held, a best-effort
+# `.holder.json` sidecar names the holding PID and start timestamp for contending starts, and
+# is removed before release so a refused pre-sink start leaves no extra artifact in the home.
 @contextmanager
-def admitted_home(home: Path) -> Generator[None]:
+def admitted_home(
+    home: Path,
+    *,
+    pid: int | None = None,
+    started_at: str | None = None,
+    timeout_s: float = 30,
+) -> Generator[None]:
     require_initialized(home)
     ensure_private_dir(home)
-    with file_lock(home / "start-intent.lock", timeout_s=30):
-        require_initialized(home)
-        _enter_home(home)
-        yield
+    lock_path = home / "start-intent.lock"
+    sidecar = _holder_path(lock_path)
+    acquired = False
+    try:
+        with file_lock(lock_path, timeout_s=timeout_s):
+            acquired = True
+            if pid is not None and started_at is not None:
+                with suppress(OSError):
+                    _HOLDER_WRITER.write_text(
+                        sidecar,
+                        json.dumps(
+                            {"pid": pid, "purpose": "cli.start_intent", "since": started_at},
+                            separators=(",", ":"),
+                            sort_keys=True,
+                        ),
+                        prefix=".start-intent-",
+                    )
+            try:
+                require_initialized(home)
+                _enter_home(home)
+                yield
+            finally:
+                sidecar.unlink(missing_ok=True)
+    except LockTimeoutError as exc:
+        if acquired:
+            raise
+        raise LockTimeoutError(f"{exc}; active holder: {_active_holder(lock_path)}") from exc
 
 
 # meiva:note
@@ -127,7 +183,7 @@ def start_once(
     boot: bool,
 ) -> int:
     try:
-        with admitted_home(site.home):
+        with admitted_home(site.home, pid=site.pid, started_at=site.started_at):
             # meiva:note
             # The runtime is admitted under the home's lock, so no other lifecycle operation
             # changes the source while it is hashed. It needs no Settings and fails before any

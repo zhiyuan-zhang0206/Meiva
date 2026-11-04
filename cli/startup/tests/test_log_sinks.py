@@ -11,6 +11,7 @@ from cli.startup.entry_plan import (
     needs_transport_key,
     normalize_profile_env,
     select_lite_api_token,
+    stops_local_collector,
     uses_lite_config,
 )
 from cli.startup.log_sinks import START_SINK, cli_log_name, pre_dispatch_log_sink
@@ -83,3 +84,12 @@ def test_entry_plan_profile_and_token_selection() -> None:
         )
         is None
     )
+
+
+def test_stops_local_collector_only_when_stop_does_not_preserve_collector() -> None:
+    assert stops_local_collector(["stop", "--yes"])
+    assert stops_local_collector(["stop", "--force"])
+    assert not stops_local_collector(["stop", "--keep-service", "otel-collector"])
+    assert not stops_local_collector(["stop", "--keep-service=otel-collector"])
+    assert not stops_local_collector(["restart"])
+    assert not stops_local_collector(["status"])

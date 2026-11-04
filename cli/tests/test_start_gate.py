@@ -256,3 +256,11 @@ def test_a_home_with_an_identity_but_no_intent_is_refused(
 
     assert "no recorded identity" in _refusal(home)
     assert not (home / start_identity.INTENT_NAME).exists(), "a start never writes an identity"
+
+
+def test_admitted_home_records_live_holder_while_held_and_cleans_sidecar_on_exit(
+    tmp_path: Path, tools: str
+) -> None:
+    home = _home(tmp_path, tools, _GATEWAY)
+    _admit_in_child(home, tmp_path)
+    assert not (home / "start-intent.lock.holder.json").exists()

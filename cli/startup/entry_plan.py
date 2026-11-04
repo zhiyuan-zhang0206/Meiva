@@ -14,6 +14,7 @@ __all__ = [
     "needs_transport_key",
     "normalize_profile_env",
     "select_lite_api_token",
+    "stops_local_collector",
     "uses_lite_config",
 ]
 
@@ -103,3 +104,23 @@ def needs_transport_key(args_in: Sequence[str]) -> bool:
         "db-authority",
         "install-unit",
     )
+
+
+def _keeps_collector(args_in: Sequence[str]) -> bool:
+    for idx, arg in enumerate(args_in):
+        if arg == "--keep-service=otel-collector":
+            return True
+        if (
+            arg == "--keep-service"
+            and idx + 1 < len(args_in)
+            and args_in[idx + 1] == "otel-collector"
+        ):
+            return True
+    return False
+
+
+# meiva:note
+# Whether `args_in` is a `meiva stop` that tears down this unit's local `otel-collector` sidecar,
+# leaving no loopback collector alive when the `stop` command itself flushes at process exit.
+def stops_local_collector(args_in: Sequence[str]) -> bool:
+    return bool(args_in) and args_in[0] == "stop" and not _keeps_collector(args_in)

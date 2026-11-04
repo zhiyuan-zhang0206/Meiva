@@ -215,3 +215,44 @@ def test_no_snapshot_means_no_verdicts_and_no_probe_is_run() -> None:
         raise AssertionError("an unreachable root must not be probed")
 
     assert readiness.health_verdicts((service(probe=refuse),), None) == {}
+
+
+def test_optional_probes_run_only_once_core_settles_and_only_for_running_units(
+    short_tmp: Path,
+) -> None:
+    core_verdicts = iter([down(), down(), up()])
+    running_optional_calls = 0
+
+    def optional_probe() -> DaemonProbe:
+        nonlocal running_optional_calls
+        running_optional_calls += 1
+        return up()
+
+    def stopped_probe() -> DaemonProbe:
+        raise AssertionError("a stopped unit must not be probed")
+
+    core = service(probe=lambda: next(core_verdicts))
+    live_optional = service("grafana", probe=optional_probe)
+    stopped_optional = service("browser-mcp", probe=stopped_probe)
+
+    with scripted_root(
+        short_tmp,
+        [
+            UnitRow("gateway"),
+            UnitRow("grafana"),
+            UnitRow("browser-mcp", state="stopped"),
+        ],
+    ):
+        result = readiness.wait_for_service_tree(
+            (core, live_optional, stopped_optional),
+            timeout_s=FAR_S,
+            home=short_tmp,
+            poll_interval_s=POLL_S,
+            timers=SYSTEM_TIMERS,
+            environ=os.environ,
+            pid=_PID,
+        )
+
+    assert result.unready == ()
+    assert result.non_critical_unready == (stopped_optional,)
+    assert running_optional_calls == 1

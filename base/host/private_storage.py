@@ -26,6 +26,12 @@ def _file_refusal(current: os.stat_result) -> str | None:
     return None
 
 
+def _repair_regular_file(path: Path, current: os.stat_result) -> None:
+    desired = 0o700 if current.st_mode & stat.S_IXUSR else 0o600
+    if stat.S_IMODE(current.st_mode) != desired:
+        path.chmod(desired)
+
+
 def ensure_private_file(path: Path) -> None:
     """Repair an existing regular file to owner-only mode; ignore a missing file."""
     try:
@@ -35,7 +41,7 @@ def ensure_private_file(path: Path) -> None:
     refusal = _file_refusal(current)
     if refusal is not None:
         raise private_path_error(path, refusal)
-    path.chmod(0o700 if current.st_mode & stat.S_IXUSR else 0o600)
+    _repair_regular_file(path, current)
 
 
 def private_file_problem(path: Path) -> str | None:
@@ -119,7 +125,11 @@ def converge_private_tree(path: Path, *, euid: int) -> Path:
     itself is still converged like any other child.
     """
     skips = SkipReport()
-    _converge_tree(path, skips, euid=euid)
+    try:
+        root_stat: os.stat_result | None = path.lstat()
+    except FileNotFoundError:
+        root_stat = None
+    _converge_tree(path, skips, current=root_stat, euid=euid)
     report_skips(path, skips)
     return path
 
@@ -143,24 +153,34 @@ def report_skips(path: Path, skips: SkipReport) -> None:
         )
 
 
-def _converge_tree(path: Path, skips: SkipReport, *, euid: int) -> None:
-    try:
-        current = path.lstat()
-    except FileNotFoundError:
-        current = None
+def _converge_tree(
+    path: Path, skips: SkipReport, *, current: os.stat_result | None, euid: int
+) -> None:
     if current is not None and foreign_owned(current, euid=euid):
         # A directory owned by another account can never be chmod'd by
         # converge — warn and leave it (and its subtree) alone instead of
         # aborting the whole converge run (2026-09-02 boot loop).
         logger.warning("private storage convergence skipped foreign-owned path {path}", path=path)
         return
-    ensure_private_dir(path, euid=euid)
-    for child in path.iterdir():
-        converge_child(child, skips, euid=euid)
+    if current is not None and dir_refusal(current, euid=euid) is None:
+        if stat.S_IMODE(current.st_mode) != 0o700:
+            path.chmod(0o700)
+    else:
+        ensure_private_dir(path, euid=euid)
+    with os.scandir(path) as entries:
+        for entry in entries:
+            _converge_child_stat(
+                Path(entry.path), entry.stat(follow_symlinks=False), skips, euid=euid
+            )
 
 
 def converge_child(child: Path, skips: SkipReport, *, euid: int) -> None:
-    current = child.lstat()
+    _converge_child_stat(child, child.lstat(), skips, euid=euid)
+
+
+def _converge_child_stat(
+    child: Path, current: os.stat_result, skips: SkipReport, *, euid: int
+) -> None:
     if stat.S_ISLNK(current.st_mode):
         # meiva:note
         # Workspace trees can link tooling outside MEIVA_HOME; private-tree
@@ -191,10 +211,11 @@ def converge_child(child: Path, skips: SkipReport, *, euid: int) -> None:
 def _repair_child(child: Path, current: os.stat_result, skips: SkipReport, *, euid: int) -> None:
     if stat.S_ISDIR(current.st_mode):
         if child.name == _NODE_MODULES_DIRNAME:
-            ensure_private_dir(child, euid=euid)
+            if stat.S_IMODE(current.st_mode) != 0o700:
+                child.chmod(0o700)
             skips.node_modules_dirs += 1
             return
-        _converge_tree(child, skips, euid=euid)
+        _converge_tree(child, skips, euid=euid, current=current)
         return
     if not stat.S_ISREG(current.st_mode):
         # meiva:note
@@ -205,7 +226,7 @@ def _repair_child(child: Path, current: os.stat_result, skips: SkipReport, *, eu
         logger.debug("private storage convergence skipped non-regular file {path}", path=child)
         skips.non_regular.append(child)
         return
-    ensure_private_file(child)
+    _repair_regular_file(child, current)
 
 
 def private_tree_root_problem(path: Path, *, euid: int) -> str | None:
@@ -247,16 +268,18 @@ def scan_non_regular_nodes(root: Path, *, euid: int) -> list[Path]:
         return out
     if foreign_owned(current, euid=euid):
         return out
-    for child in root.iterdir():
-        child_stat = child.lstat()
-        if stat.S_ISLNK(child_stat.st_mode) or foreign_owned(child_stat, euid=euid):
-            continue
-        if stat.S_ISDIR(child_stat.st_mode):
-            if child.name == _NODE_MODULES_DIRNAME:
+    with os.scandir(root) as entries:
+        for entry in entries:
+            child = Path(entry.path)
+            child_stat = entry.stat(follow_symlinks=False)
+            if stat.S_ISLNK(child_stat.st_mode) or foreign_owned(child_stat, euid=euid):
                 continue
-            out += scan_non_regular_nodes(child, euid=euid)
-        elif not stat.S_ISREG(child_stat.st_mode):
-            out.append(child)
+            if stat.S_ISDIR(child_stat.st_mode):
+                if child.name == _NODE_MODULES_DIRNAME:
+                    continue
+                out += scan_non_regular_nodes(child, euid=euid)
+            elif not stat.S_ISREG(child_stat.st_mode):
+                out.append(child)
     return out
 
 

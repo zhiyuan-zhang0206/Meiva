@@ -30,8 +30,8 @@ are spent on. Nothing below reads the environment, the clock or `sys.argv`.
   (`host_probe`, `helper_gate`, `old_target`), how the shipped programs' replies are read
   (`stored_schedules`, `lease_announcement`, `silence_replies`), the roster gate and the
   verification steps (`roster`, `verify_steps`, `host_failures`), and the command text each host
-  receives (`host_commands`, `gateway_commands`, `oneshot`). The shell reads facts, runs the
-  commands and prints the lines these return.
+  receives (`host_commands`, `gateway_commands`, `prestage`, `oneshot`). The shell reads facts,
+  runs the commands and prints the lines these return.
 
 ## Contract
 
