@@ -23,9 +23,11 @@ import logging
 import os
 import tempfile
 from pathlib import Path
-from typing import Any, TypeGuard
 
 from pydantic import BaseModel, ValidationError
+
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 _log = logging.getLogger(__name__)
 
@@ -50,7 +52,7 @@ class SchemaInvalid(McpEnabledConfigError):  # noqa: N818
     """JSON is valid but does not match the McpEnabledConfig schema (Pydantic validation failed)."""
 
 
-def _validate_schema(data: dict[str, Any]) -> McpEnabledConfig:
+def _validate_schema(data: dict[str, object]) -> McpEnabledConfig:
     try:
         return McpEnabledConfig.model_validate(data)
     except ValidationError as e:
@@ -70,11 +72,7 @@ class _MalformedOverlayError(McpEnabledConfigError):
     state change with no visible error)."""
 
 
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
-
-
-def _read_local(*, home: Path) -> dict[str, Any] | None:
+def _read_local(*, home: Path) -> dict[str, object] | None:
     """Read the per-machine MCP-enable overlay file. None = absent; a
     present-but-malformed file raises `_MalformedOverlay` — the caller decides
     the fail-closed behavior instead of inheriting fail-open."""
@@ -82,11 +80,11 @@ def _read_local(*, home: Path) -> dict[str, Any] | None:
     if not p.exists():
         return None
     try:
-        data = json.loads(p.read_text())
+        data = object_of(json.loads, p.read_text())
     except (OSError, json.JSONDecodeError) as e:
         _log.error("mcp_enabled: local file %s is malformed — refusing MCP configuration", p)
         raise _MalformedOverlayError(f"mcp_enabled.json unreadable: {e}") from e
-    if not _is_str_dict(data):
+    if not is_object_dict(data):
         raise SchemaInvalid(f"mcp_enabled.json must be a JSON object, got {type(data).__name__}")
     return dict(data)
 

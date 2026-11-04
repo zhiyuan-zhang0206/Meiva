@@ -23,8 +23,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
 
+from psycopg import Connection
+from psycopg.rows import TupleRow, class_row
 from psycopg_pool import ConnectionPool
 
 from base.db import Database
@@ -135,25 +136,13 @@ def upsert(
         conn.execute(_UPSERT, (name, card, shown, detail, status, updated_by))
 
 
-def read_all(pool: ConnectionPool[Any]) -> list[PluginStatRow]:
+def read_all(pool: ConnectionPool[Connection[TupleRow]]) -> list[PluginStatRow]:
     """Every card value, ordered by `(plugin, id)` — a stable read order.
 
     Unfiltered on purpose: declarations are the console's side of the join,
     so a row whose card was never declared (or whose plugin is now gone) is
     the console's to ignore, not this read's to guess about. `pool` is the caller's.
     """
-    with pool.connection() as conn, conn.cursor() as cur:
+    with pool.connection() as conn, conn.cursor(row_factory=class_row(PluginStatRow)) as cur:
         cur.execute(_SELECT_ALL)
-        rows = cur.fetchall()
-    return [
-        PluginStatRow(
-            plugin=str(row[0]),
-            id=str(row[1]),
-            value=str(row[2]),
-            detail=str(row[3]) if row[3] is not None else None,
-            status=str(row[4]),
-            updated_at=row[5],
-            updated_by=str(row[6]) if row[6] is not None else None,
-        )
-        for row in rows
-    ]
+        return cur.fetchall()

@@ -1,3 +1,4 @@
+import dataclasses
 import json
 from pathlib import Path
 
@@ -51,3 +52,19 @@ def test_merged_runtime_declarations_keep_reminder_order() -> None:
     registry = ExtensionRegistry((("example", merged),))
     assert list(registry.compact_reminder_sections()) == [("example", preparation)]
     assert list(ExtensionRegistry().compact_reminder_sections()) == []
+
+
+# meiva:note
+# `merged` lists the fields one by one; a field added to `PluginContributions` and not there would be
+# dropped silently when a plugin's faces merge.
+def test_merge_joins_every_declared_field() -> None:
+    marker = ("marker",)
+    for field in dataclasses.fields(PluginContributions):
+        if field.name == "config":
+            continue
+        only_here = dataclasses.replace(PluginContributions(), **{field.name: marker})
+        merged = PluginContributions().merged(only_here)
+        assert dataclasses.asdict(merged)[field.name] == marker, field.name
+        assert dataclasses.asdict(only_here.merged(only_here))[field.name] == marker + marker, (
+            field.name
+        )

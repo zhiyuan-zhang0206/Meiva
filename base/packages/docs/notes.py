@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
 from base.packages.docs.frontmatter import parse_frontmatter_typed
 
@@ -36,7 +36,7 @@ class Note:
     meiva_agent: str | None
     meiva_machine: str | None
     body: str
-    fm: dict[str, Any]
+    fm: dict[str, object]
 
 
 def normalize_tags(raw: object) -> tuple[str, ...]:

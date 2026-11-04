@@ -24,6 +24,7 @@ from agent.graph.interrupt import (
 )
 from agent.graph.llm_errors import FatalLLMStreamError
 from agent.graph.node_log import StallConfig, node_lifecycle
+from agent.hooks import call_graph_hook
 from agent.messages import exec_output_message
 from agent.nodes import CLAIM, HARNESS_TURN
 from base.agents.context import MeivaContext, agent_id_from_config
@@ -52,6 +53,7 @@ from base.events.live.projection import (
     TimelineSnapshot,
 )
 from base.events.live.publisher import AgentEventPublisher
+from base.host.boundary.json_values import is_object_dict
 from base.lm.catalog import ModelCatalog
 from base.lm.content import message_content
 from base.lm.harness import (
@@ -516,8 +518,8 @@ async def _run_pre_turn_hooks(
     pre_messages: list[BaseMessage] = []
     hook_updates: dict[str, Any] = {}
     for _plugin, hook in harness_pre_turn_hooks(ctx.plugin_registry()):
-        result = await hook(state, runtime, config)
-        if not result:
+        result = await call_graph_hook(hook, state, runtime, config)
+        if not is_object_dict(result) or not result:
             continue
         for key, value in result.items():
             if key == "messages" and _is_object_sequence(value):

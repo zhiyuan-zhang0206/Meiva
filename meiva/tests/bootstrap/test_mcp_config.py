@@ -131,7 +131,9 @@ def test_builtin_mcps_folder_surfaces_chrome(unit_home: Path) -> None:
     merged = cfg_mod.load_mcp_config(home=unit_home)
     assert "chrome" in merged
     assert merged["chrome"]["command"] == ".venv/bin/python"
-    assert "services.desktop.browser.mcp_wrapper" in merged["chrome"]["args"]
+    chrome_args = merged["chrome"]["args"]
+    assert isinstance(chrome_args, list)
+    assert "services.desktop.browser.mcp_wrapper" in chrome_args
     assert merged["chrome"]["requires"] == {"display": True}
 
 
@@ -369,7 +371,9 @@ def test_builtin_mcps_folder_surfaces_computer_use(unit_home: Path) -> None:
     assert "computer_use" in merged
     assert merged["computer_use"]["shared"] == "computer_use"
     assert merged["computer_use"]["command"] == ".venv/bin/python"
-    assert "services.desktop.computer.mcp_wrapper" in merged["computer_use"]["args"]
+    computer_args = merged["computer_use"]["args"]
+    assert isinstance(computer_args, list)
+    assert "services.desktop.computer.mcp_wrapper" in computer_args
     assert merged["computer_use"]["requires"] == {"display": True}
 
 

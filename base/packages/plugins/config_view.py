@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
 from pydantic import BaseModel, ValidationError
 
+from base.host.boundary.untyped import object_of
 from base.packages.plugins import enable_config
 from base.packages.plugins.config_face import (
     declared_config_class,
@@ -21,15 +22,15 @@ from base.packages.plugins.plugin_errors import InvalidConfigData, SchemaDriftEr
 # An agent's flat overlay routes each key to its single owning plugin; framework-scope keys stay with base/config/agent_pins.py. A key whose owner is unknown or ambiguous is dropped rather than raised, matching the framework pins reader's drift tolerance: the stored map was validated against a schema that may no longer exist, and a read must not be stricter than the boot that would consume it. Absent and empty overlays resolve to no pins.
 # meiva:link base/packages/plugins/docs/plugin-config/config-view.meiva.okf.md
 def resolve_agent_plugin_pins(
-    config_overlay: Mapping[str, Any] | None,
+    config_overlay: Mapping[str, object] | None,
     configs: Mapping[str, BaseModel],
-) -> dict[str, dict[str, Any]]:
+) -> dict[str, dict[str, object]]:
     if not config_overlay:
         return {}
     from base.config import field_names
 
     framework = field_names()
-    pins: dict[str, dict[str, Any]] = {}
+    pins: dict[str, dict[str, object]] = {}
     for key, value in config_overlay.items():
         if key in framework:
             continue
@@ -122,7 +123,7 @@ def read_service_config[C: BaseModel](
     if packet is None:
         return None
     try:
-        data: object = json.loads(packet)
+        data = object_of(json.loads, packet)
     except json.JSONDecodeError as exc:
         raise InvalidConfigData(f"invalid service plugin config JSON: {exc}") from exc
     if not _is_object_dict(data):

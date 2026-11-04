@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 
+from base.host.boundary.untyped import object_of
 from base.packages.plugins import load_report
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 from base.packages.plugins.gate import check_manifest
@@ -49,10 +50,12 @@ class DeclaredFace:
 
 def declaration_of(module: ModuleType) -> PluginContributions:
     """`module.contribute()`, refused unless it is a `PluginContributions`."""
-    contribute = getattr(module, "contribute", None)
+    contribute = object_of(getattr, module, "contribute", None)
     if contribute is None:
         raise AttributeError(f"{module.__name__} has no contribute()")
-    contributions = contribute()
+    if not callable(contribute):
+        raise TypeError(f"{module.__name__}.contribute is not callable")
+    contributions = object_of(contribute)
     if not isinstance(contributions, PluginContributions):
         raise TypeError(
             f"{module.__name__}.contribute() returned {type(contributions).__name__}, "

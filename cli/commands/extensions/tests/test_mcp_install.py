@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from base.host.boundary.json_values import is_object_dict
 from base.host.system.tests.fake_commands import fake_host
 from base.packages.extensions import install_registry as reg
 from cli.commands.extensions.mcp import (
@@ -282,7 +283,9 @@ def test_install_env_injected_into_landed_copy(
     src = json.loads((pkg / ".mcp.json").read_text(encoding="utf-8"))
     assert "TOKEN" not in (src["mcpServers"]["acme"].get("env") or {})
     # and the merged config the daemon reads carries it
-    assert load_mcp_config(home=unit_home)["acme"]["env"]["TOKEN"] == _FAKE_TOKEN
+    merged_env = load_mcp_config(home=unit_home)["acme"]["env"]
+    assert is_object_dict(merged_env)
+    assert merged_env["TOKEN"] == _FAKE_TOKEN
 
 
 def test_install_env_overrides_package_default(

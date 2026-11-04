@@ -91,6 +91,8 @@ TESTS_OWING_ANY: tuple[str, ...] = (
     "base/host/system",
     "base/host/tests",
     "base/lm",
+    "base/packages/plugins",
+    "base/packages/tests",
     "base/telemetry",
     "cli",
     "gateway/tests",
@@ -115,8 +117,8 @@ TESTS_OWING_ANY: tuple[str, ...] = (
     "services/desktop",
     "services/entrypoints",
     "services/supervision",
-    "services/wake",
     "services/upkeep",
+    "services/wake",
 )
 
 

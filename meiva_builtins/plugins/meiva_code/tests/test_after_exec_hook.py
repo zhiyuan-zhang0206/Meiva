@@ -11,16 +11,19 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from langchain_core.messages import BaseMessage
 from langgraph.runtime import Runtime
 
 import meiva
+from agent.hooks import call_graph_hook
 from agent.state import BaseAgentState, CompactState, build_agent_state
 from base.agents.context import MeivaContext
 from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.clock import Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.packages.plugin_config_images import DiskPluginConfigImages
-from base.packages.plugins.extensions import ExtensionRegistry
+from base.packages.plugins.extensions import ExtensionRegistry, GraphHook
 from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install, process_context
 from meiva_builtins.plugins.meiva_code.tests.surface_support import code_registry
@@ -55,6 +58,14 @@ def _make_state_with_cwd(cwd: str) -> BaseAgentState:
     state_cls = build_agent_state(ExtensionRegistry((("meiva_code", agent_runtime.contribute()),)))
     fields: dict[str, Any] = {"meiva_code__cwd": cwd}
     return state_cls(messages=[], halted=False, **fields)
+
+
+async def _run(hook: GraphHook, state: object) -> dict[str, object] | None:
+    result = await call_graph_hook(hook, state, _runtime(), None)
+    if result is None:
+        return None
+    assert is_object_dict(result)
+    return result
 
 
 def _hook_notes(result: dict[str, object] | None) -> list[tuple[str, str]]:
@@ -105,16 +116,18 @@ async def test_after_exec_hook_injects_cwd_and_project_skills_notes(tmp_path: Pa
 
     with pytest.raises(AttributeError):
         _ = meiva.state
-    result = await hook(committed, _runtime(), None)
+    result = await _run(hook, committed)
 
     notes = _hook_notes(result)
     assert [tag for tag, _ in notes] == ["context", "project_skills"]
     assert notes[0][1] == f"Working directory set to {repo}"
     assert "demo-proj" in notes[1][1]
     assert result is not None
-    assert {m.additional_kwargs["meiva_created_at"] for m in result["messages"]} == {
-        _NOW.isoformat()
-    }
+    messages = result["messages"]
+    assert is_object_list(messages)
+    assert {
+        m.additional_kwargs["meiva_created_at"] for m in messages if isinstance(m, BaseMessage)
+    } == {_NOW.isoformat()}
     assert result["meiva_code__cwd_note"] is None
     assert result["meiva_code__project_skills_seen_compact"] == 0
 
@@ -138,8 +151,8 @@ async def test_after_exec_hook_reinjects_project_skills_only_after_compact(tmp_p
             messages=[], halted=False, compact=CompactState(version=compact_version), **fields
         )
 
-    assert await hook(state_at(0, 0), _runtime(), None) is None
-    result = await hook(state_at(1, 0), _runtime(), None)
+    assert await _run(hook, state_at(0, 0)) is None
+    result = await _run(hook, state_at(1, 0))
     assert [tag for tag, _ in _hook_notes(result)] == ["project_skills"]
     assert result is not None
     assert result["meiva_code__project_skills_seen_compact"] == 1
@@ -150,7 +163,7 @@ async def test_after_exec_hook_is_noop_without_pending_notes(tmp_path: Path):
     from meiva_builtins.plugins.meiva_code import agent_runtime
 
     hook = agent_runtime.contribute().after_exec[0]
-    assert await hook(_make_state_with_cwd(str(tmp_path)), _runtime(), None) is None
+    assert await _run(hook, _make_state_with_cwd(str(tmp_path))) is None
 
 
 async def test_after_exec_hook_on_a_state_without_the_plugin_fields_fails_loudly():
@@ -160,4 +173,4 @@ async def test_after_exec_hook_on_a_state_without_the_plugin_fields_fails_loudly
 
     hook = agent_runtime.contribute().after_exec[0]
     with pytest.raises(AttributeError):
-        await hook(BaseAgentState(), _runtime(), None)
+        await _run(hook, BaseAgentState())

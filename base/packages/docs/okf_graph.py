@@ -21,7 +21,7 @@ import os
 import re
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import TypedDict
 
 from base.packages.docs.frontmatter import parse_frontmatter_typed
 from base.packages.docs.notes import normalize_tags
@@ -42,11 +42,35 @@ def _posix(p: str) -> str:
     return p.replace(os.sep, "/")
 
 
+# meiva:note
+# One note of the graph. `title`, `description` and `type` are the frontmatter values as the note wrote
+# them (any YAML value, defaulted when absent): the page serializes them as they are.
+class GraphNode(TypedDict):
+    id: str
+    title: object
+    description: object
+    type: object
+    tags: list[str]
+    parent: str | None
+    body: str
+
+
+class TreeEdge(TypedDict):
+    source: str
+    target: str
+
+
+class CrossEdge(TypedDict):
+    source: str
+    target: str
+    weight: int
+
+
 class OkfGraphData(TypedDict):
     name: str
-    nodes: list[dict[str, object]]
-    treeEdges: list[dict[str, object]]
-    crossEdges: list[dict[str, object]]
+    nodes: list[GraphNode]
+    treeEdges: list[TreeEdge]
+    crossEdges: list[CrossEdge]
     tags: list[str]
 
 
@@ -181,14 +205,14 @@ def resolve_wikilink(current_path: str, target: str, all_paths: set[str]) -> str
 
 
 def _cross_edges(
-    nodes: dict[str, dict[str, Any]], raw_links: list[tuple[str, str, str | None]]
-) -> list[dict[str, Any]]:
+    nodes: dict[str, GraphNode], raw_links: list[tuple[str, str, str | None]]
+) -> list[CrossEdge]:
     """Non-tree wikilinks, deduplicated by unordered pair and weighted by multiplicity."""
     tree_pairs: set[frozenset[str]] = {
-        frozenset((path, n["parent"])) for path, n in nodes.items() if n["parent"]
+        frozenset((path, parent)) for path, n in nodes.items() if (parent := n["parent"])
     }
 
-    pair_info: dict[tuple[str, str], dict[str, Any]] = {}
+    pair_info: dict[tuple[str, str], CrossEdge] = {}
     pair_order: list[tuple[str, str]] = []
     for s, _raw, r in raw_links:
         if r is None:
@@ -229,7 +253,7 @@ def build_graph_data(
     path_set = set(paths)
     root = _find_root(path_set)
 
-    nodes: dict[str, dict[str, Any]] = {}
+    nodes: dict[str, GraphNode] = {}
     raw_links: list[tuple[str, str, str | None]] = []
 
     for path in paths:
@@ -254,12 +278,12 @@ def build_graph_data(
             raw_links.append((path, target_raw, resolved))
 
     # Build tree edges
-    tree_edges: list[dict[str, object]] = []
+    tree_edges: list[TreeEdge] = []
     for path, n in nodes.items():
         if n["parent"] is not None:
             tree_edges.append({"source": n["parent"], "target": path})
 
-    cross_edges: list[dict[str, object]] = list(_cross_edges(nodes, raw_links))
+    cross_edges = _cross_edges(nodes, raw_links)
 
     # Collect all unique tags
     all_tags: list[str] = sorted({tag for n in nodes.values() for tag in n["tags"]})

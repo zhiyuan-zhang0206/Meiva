@@ -3,8 +3,10 @@ from __future__ import annotations
 import errno
 import json
 from pathlib import Path
-from typing import Any, TypedDict, TypeGuard
+from typing import TypedDict, TypeGuard
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.host.runtime_interpreter import external_plugin_read_root
 from base.host.system.hostport import Host
 from base.host.system.probes import display_available
@@ -15,11 +17,7 @@ def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
     return isinstance(value, dict)
 
 
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
-
-
-def _is_server_map(value: object) -> TypeGuard[dict[str, dict[str, Any]]]:
+def _is_server_map(value: object) -> TypeGuard[dict[str, dict[str, object]]]:
     return isinstance(value, dict)
 
 
@@ -55,11 +53,11 @@ class MCPCallError(MCPError):
 class ToolInfo(TypedDict):
     name: str
     description: str
-    input_schema: dict[str, Any]
+    input_schema: dict[str, object]
 
 
 # meiva:link meiva/mcps/docs/mcps.meiva.okf.md
-def validate_requirements(spec: dict[str, Any]) -> dict[str, bool]:
+def validate_requirements(spec: dict[str, object]) -> dict[str, bool]:
     requires: object = spec.get("requires")
     if requires is None:
         return {}
@@ -76,7 +74,7 @@ def validate_requirements(spec: dict[str, Any]) -> dict[str, bool]:
 
 
 # meiva:link meiva/mcps/docs/mcps.meiva.okf.md
-def assert_requirements(spec: dict[str, Any], *, host: Host) -> None:
+def assert_requirements(spec: dict[str, object], *, host: Host) -> None:
     requires = validate_requirements(spec)
     for key, want in requires.items():
         if key == "display" and want and not display_available(host=host):
@@ -86,7 +84,7 @@ def assert_requirements(spec: dict[str, Any], *, host: Host) -> None:
 
 
 # meiva:link meiva/mcps/docs/mcps.meiva.okf.md
-def server_capability(spec: dict[str, Any], *, host: Host) -> tuple[bool, str | None]:
+def server_capability(spec: dict[str, object], *, host: Host) -> tuple[bool, str | None]:
     requires = validate_requirements(spec)
     if requires.get("display") and not display_available(host=host):
         return (False, "requires a display, but this host has none")
@@ -94,7 +92,7 @@ def server_capability(spec: dict[str, Any], *, host: Host) -> tuple[bool, str | 
 
 
 # meiva:link meiva/mcps/docs/mcps.meiva.okf.md
-def server_url(spec: dict[str, Any]) -> str | None:
+def server_url(spec: dict[str, object]) -> str | None:
     url = spec.get("url")
     if url is None:
         return None
@@ -122,14 +120,14 @@ def machine_config_path(*, home: Path) -> Path:
 
 
 # meiva:link meiva/mcps/docs/mcps.meiva.okf.md
-def read_servers(path: Path) -> dict[str, dict[str, Any]]:
+def read_servers(path: Path) -> dict[str, dict[str, object]]:
     if not path.is_file():
         return {}
     try:
-        data: object = json.loads(path.read_text(encoding="utf-8"))
+        data = object_of(json.loads, path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as e:
         raise MCPError(f"Failed to read {path}: {type(e).__name__}: {e}") from e
-    if not _is_str_dict(data):
+    if not is_object_dict(data):
         raise MCPError(f"`{path}` is not a JSON object (got {type(data).__name__})")
     section: object = data.get("mcpServers")
     if section is None:
@@ -219,8 +217,8 @@ def plugin_config_paths(*, home: Path) -> list[Path]:
 # `.mcp.json` < installed `$MEIVA_HOME/mcps/` < `$MEIVA_HOME/mcp.json`) and filters out
 # servers disabled in `mcp_enabled.json` unless `include_disabled=True`.
 # meiva:link meiva/mcps/docs/mcps.meiva.okf.md
-def load_mcp_config(*, include_disabled: bool = False, home: Path) -> dict[str, dict[str, Any]]:
-    merged: dict[str, dict[str, Any]] = {}
+def load_mcp_config(*, include_disabled: bool = False, home: Path) -> dict[str, dict[str, object]]:
+    merged: dict[str, dict[str, object]] = {}
     for path in builtin_mcp_paths():
         merged.update(read_servers(path))
     for path in plugin_config_paths(home=home):

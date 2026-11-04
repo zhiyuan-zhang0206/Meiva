@@ -25,7 +25,8 @@
 from __future__ import annotations
 
 import re
-from typing import Any, TypeGuard
+
+from base.host.boundary.json_values import is_object_dict, is_object_list
 
 # Contribution types (v1). Closed — see the module docstring.
 UI_KEYS = ("agentInspect", "nav", "stats", "statsFace", "themes")
@@ -190,21 +191,13 @@ _HEX_RE = re.compile(r"^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
 _PATH_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._~-]+$")
 
 
-def _is_any_list(value: object) -> TypeGuard[list[Any]]:
-    return isinstance(value, list)
-
-
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
-
-
 def _entry_fields(
     entry: object,
     what: str,
     required: tuple[str, ...],
     errors: list[str],
     optional: tuple[str, ...] = (),
-) -> dict[str, Any] | None:
+) -> dict[str, object] | None:
     """The entry as a dict once it is an object with exactly the known fields.
 
     None when it is not usable at all (the caller skips it); missing/unknown
@@ -213,7 +206,7 @@ def _entry_fields(
     known for the unknown-field report and is never required.
     """
     known = required + optional
-    if not _is_str_dict(entry):
+    if not is_object_dict(entry):
         errors.append(f"{what}: expected an object with {', '.join(required)}")
         return None
     data = entry
@@ -283,12 +276,12 @@ def _color_literal(value: object, what: str, errors: list[str]) -> str | None:
     return literal
 
 
-def _validate_agent_inspect(value: object, errors: list[str]) -> list[dict[str, Any]]:
+def _validate_agent_inspect(value: object, errors: list[str]) -> list[dict[str, object]]:
     """`agentInspect` — sections appended to the agent-inspect view."""
-    if not _is_any_list(value):
+    if not is_object_list(value):
         errors.append("contributions.ui.agentInspect: expected a list of sections")
         return []
-    sections: list[dict[str, Any]] = []
+    sections: list[dict[str, object]] = []
     for i, entry in enumerate(value):
         what = f"contributions.ui.agentInspect[{i}]"
         data = _entry_fields(entry, what, ("title", "source", "render"), errors)
@@ -303,12 +296,12 @@ def _validate_agent_inspect(value: object, errors: list[str]) -> list[dict[str, 
     return sections
 
 
-def _validate_nav(value: object, errors: list[str]) -> list[dict[str, Any]]:
+def _validate_nav(value: object, errors: list[str]) -> list[dict[str, object]]:
     """`nav` — entries opening the plugin's own page in a sandboxed iframe."""
-    if not _is_any_list(value):
+    if not is_object_list(value):
         errors.append("contributions.ui.nav: expected a list of nav entries")
         return []
-    entries: list[dict[str, Any]] = []
+    entries: list[dict[str, object]] = []
     for i, entry in enumerate(value):
         what = f"contributions.ui.nav[{i}]"
         data = _entry_fields(entry, what, ("location", "label", "icon", "page"), errors)
@@ -333,11 +326,11 @@ def _validate_nav(value: object, errors: list[str]) -> list[dict[str, Any]]:
 # the declaration the right place for the card's existence — a machine with
 # the plugin installed but no credentials shows the card, not nothing.
 # meiva:link future/frontend-plugin-contributions.md
-def _validate_stats(value: object, errors: list[str]) -> list[dict[str, Any]]:
-    if not _is_any_list(value):
+def _validate_stats(value: object, errors: list[str]) -> list[dict[str, object]]:
+    if not is_object_list(value):
         errors.append("contributions.ui.stats: expected a list of status cards")
         return []
-    cards: list[dict[str, Any]] = []
+    cards: list[dict[str, object]] = []
     seen: set[str] = set()
     for i, entry in enumerate(value):
         what = f"contributions.ui.stats[{i}]"
@@ -363,7 +356,7 @@ def _validate_stats(value: object, errors: list[str]) -> list[dict[str, Any]]:
 
 
 def _validate_theme_tokens(value: object, what: str, errors: list[str]) -> dict[str, str] | None:
-    if not _is_str_dict(value):
+    if not is_object_dict(value):
         errors.append(f"{what}: expected an object of token -> color literal")
         return None
     tokens = value
@@ -387,7 +380,7 @@ def _validate_theme_tokens(value: object, what: str, errors: list[str]) -> dict[
     return parsed
 
 
-def _validate_themes(value: object, errors: list[str]) -> list[dict[str, Any]]:
+def _validate_themes(value: object, errors: list[str]) -> list[dict[str, object]]:
     """`themes` — named token packs the settings theme picker offers.
 
     `darkTokens` is optional and is the pack's dark-mode half: with it, `tokens`
@@ -399,10 +392,10 @@ def _validate_themes(value: object, errors: list[str]) -> list[dict[str, Any]]:
     sets. Both halves validate identically: same closed token vocabulary, same
     color-literal rule.
     """
-    if not _is_any_list(value):
+    if not is_object_list(value):
         errors.append("contributions.ui.themes: expected a list of token packs")
         return []
-    themes: list[dict[str, Any]] = []
+    themes: list[dict[str, object]] = []
     seen: set[str] = set()
     for i, entry in enumerate(value):
         what = f"contributions.ui.themes[{i}]"
@@ -420,7 +413,7 @@ def _validate_themes(value: object, errors: list[str]) -> list[dict[str, Any]]:
         tokens = _validate_theme_tokens(data["tokens"], f"{what}.tokens", errors)
         if tokens is None:
             continue
-        theme: dict[str, Any] = {"name": name, "tokens": tokens}
+        theme: dict[str, object] = {"name": name, "tokens": tokens}
         if "darkTokens" in data:
             dark = _validate_theme_tokens(data["darkTokens"], f"{what}.darkTokens", errors)
             if dark is None:
@@ -441,7 +434,7 @@ def validate_ui_contributions(value: object, errors: list[str]) -> dict[str, obj
     manifest validator raises on a non-empty `errors`, so a partially parsed
     return is never handed to a consumer.
     """
-    if not _is_str_dict(value):
+    if not is_object_dict(value):
         errors.append(f"contributions.ui must be an object with {'/'.join(UI_KEYS)}")
         return {}
     parsed: dict[str, object] = {}

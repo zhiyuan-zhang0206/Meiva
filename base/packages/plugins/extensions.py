@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import Any, Literal, Protocol
+from typing import Literal, Never, Protocol
 
 from pydantic import BaseModel
 
@@ -31,13 +31,19 @@ HookPoint = Literal["after_init", "before_llm", "before_exec", "after_exec"]
 HOOK_POINTS: tuple[HookPoint, ...] = ("after_init", "before_llm", "before_exec", "after_exec")
 
 
+# meiva:note
+# A graph hook as the plugin ABI declares it: a named async callable the kernel calls with its state,
+# runtime and config. The kernel's own types live above this package, so the parameters are `Never`
+# here: a hook written against the kernel's types (`AgentState`, `Runtime`, `RunnableConfig`) is
+# assignable to it, and the kernel, which knows those types, narrows a hook back to its own view
+# (`agent.hooks`) before it calls it. The answer is the state update (or None).
 class GraphHook(Protocol):
     @property
     def name(self) -> str: ...
 
     def __call__(
-        self, state: Any, runtime: Any, config: Any, /
-    ) -> Awaitable[dict[str, Any] | None]: ...
+        self, state: Never, runtime: Never, config: Never, /
+    ) -> Awaitable[Mapping[str, object] | None]: ...
 
 
 PLUGIN_WRITABLE_BASE_FIELDS: frozenset[str] = frozenset({"messages"})
@@ -67,13 +73,13 @@ class SdkNamespace:
 class SdkMember:
     namespace: str
     name: str
-    fn: Callable[..., Any]
+    fn: Callable[..., object]
 
 
 @dataclass(frozen=True)
 class SdkWrap:
     target: str
-    wrapper: Callable[..., Any]
+    wrapper: Callable[..., object]
 
 
 # meiva:link base/packages/plugins/docs/runtime-contributions.meiva.okf.md
@@ -103,12 +109,29 @@ class PluginContributions:
     def merged(self, other: PluginContributions) -> PluginContributions:
         if self.config is not None and other.config is not None:
             raise ValueError("config is declared by more than one face")
-        theirs = vars(other)
-        values: dict[str, Any] = {
-            name: mine + theirs[name] if isinstance(mine, tuple) else mine or theirs[name]
-            for name, mine in vars(self).items()
-        }
-        return PluginContributions(**values)
+        return PluginContributions(
+            system_prompt_sections=self.system_prompt_sections + other.system_prompt_sections,
+            compact_reminder_sections=self.compact_reminder_sections
+            + other.compact_reminder_sections,
+            context_notes=self.context_notes + other.context_notes,
+            after_init=self.after_init + other.after_init,
+            before_llm=self.before_llm + other.before_llm,
+            before_exec=self.before_exec + other.before_exec,
+            after_exec=self.after_exec + other.after_exec,
+            state=self.state + other.state,
+            metrics=self.metrics + other.metrics,
+            inspect_widgets=self.inspect_widgets + other.inspect_widgets,
+            providers=self.providers + other.providers,
+            decision_providers=self.decision_providers + other.decision_providers,
+            sdk_namespaces=self.sdk_namespaces + other.sdk_namespaces,
+            sdk_members=self.sdk_members + other.sdk_members,
+            sdk_wraps=self.sdk_wraps + other.sdk_wraps,
+            skill_sources=self.skill_sources + other.skill_sources,
+            sdk_expansions=self.sdk_expansions + other.sdk_expansions,
+            harness_contributions=self.harness_contributions + other.harness_contributions,
+            config=self.config or other.config,
+            flags=self.flags + other.flags,
+        )
 
     def hooks(self, point: HookPoint) -> tuple[GraphHook, ...]:
         match point:

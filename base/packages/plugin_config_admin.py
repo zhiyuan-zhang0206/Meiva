@@ -9,12 +9,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ValidationError
 
 from base.config.admin.metadata import ConfigFieldMeta, env_override_values, get_config_metadata
 from base.config.service_read import ConfigAuthority
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.packages.plugin_config_images import (
     PluginConfigChangedError,
     PluginConfigOwner,
@@ -97,7 +99,7 @@ def plugin_metadata(*, home: Path) -> list[ConfigFieldMeta]:
                 ConfigFieldMeta(
                     name=name,
                     field_type=kind,
-                    current_value=getattr(config, name),
+                    current_value=object_of(getattr, config, name),
                     default_value=(
                         None if info.is_required() else info.get_default(call_default_factory=True)
                     ),
@@ -125,7 +127,9 @@ def plugin_overrides(*, home: Path) -> dict[str, object]:
     for owner in config_owners(home=home).values():
         if not owner.path.exists():
             continue
-        data = read_config_image(owner.cls, owner.path).model_dump(mode="json")
+        data = object_of(read_config_image(owner.cls, owner.path).model_dump, mode="json")
+        if not is_object_dict(data):
+            raise TypeError(f"{owner.path}: a plugin config image dumps as an object")
         values.update(
             {
                 name: value
@@ -173,7 +177,7 @@ def panel_metadata(*, authority: ConfigAuthority, home: Path) -> list[ConfigFiel
 
 def panel_overrides(
     *, authority: ConfigAuthority, local: bool = False, home: Path
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """The editable override set of core `.env` fields and plugin-owned images."""
     return env_override_values(
         authority=authority,
