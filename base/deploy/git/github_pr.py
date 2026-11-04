@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 import subprocess
 
+from base.host.boundary.process import stdout_text
 from base.host.system.hostport import Host
 
 __all__ = ["github_auth_blocker", "github_permission_blocker", "memory_repo_slug"]
@@ -83,7 +84,7 @@ def github_permission_blocker(*, host: Host, slug: str) -> str | None:
         return f"reading permission on {slug} via gh timed out"
     if perm.returncode != 0:
         return f"could not read permission on {slug} via gh"
-    value = perm.stdout.strip()
+    value = stdout_text(perm).strip()
     if not value:
         return f"could not read permission on {slug} via gh"
     if value not in _WRITE_OR_BETTER:

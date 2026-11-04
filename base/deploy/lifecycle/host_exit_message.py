@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TypeGuard
 
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
+from base.host.boundary.untyped import object_of
 from base.host.verified_file.reader import regular_bytes
 from base.native_process.os_platform import file_lock
 from base.paths import run_dir
@@ -81,7 +82,7 @@ def consume_host_exit_message(home: Path) -> str | None:
             return None
         target.unlink(missing_ok=True)
     try:
-        loaded: object = json.loads(raw.decode("utf-8"))
+        loaded = object_of(json.loads, raw.decode("utf-8"))
     except (UnicodeDecodeError, ValueError) as exc:
         _log.warning("[host-exit-message] discarding malformed exit message: %s", exc)
         return None

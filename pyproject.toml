@@ -708,6 +708,24 @@ root = "base/config/domains/tests"
 root = "base/config/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/deploy/git/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/deploy/lifecycle/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/deploy/release/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/deploy/schema/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/deploy/sealed_release/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/deploy/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/events/live/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -1102,6 +1120,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "base/daemon"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/deploy"
 reportAny = "error"
 reportExplicitAny = "error"
 

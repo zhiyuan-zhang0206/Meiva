@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import TypeGuard
 
 import base.paths
+from base.host.boundary.untyped import object_of
 from base.log import logger
 
 
@@ -80,7 +81,7 @@ def take(home: Path) -> list[str]:
         with suppress(OSError):  # see the docstring
             target.unlink(missing_ok=True)
     try:
-        parsed: object = json.loads(raw)
+        parsed = object_of(json.loads, raw)
     except json.JSONDecodeError as exc:
         _report_unreadable(target, exc)
         return []

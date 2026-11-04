@@ -34,6 +34,8 @@ from typing import TypeGuard
 
 import psutil
 
+from base.host.boundary.fields import int_field, optional_str_field
+from base.host.boundary.untyped import object_mapping
 from base.sessions.pty import client
 from base.sessions.pty.paths import service_socket_path
 
@@ -155,14 +157,15 @@ def _process_anchors(target: Path, *, fold: bool, invoker: Invoker) -> list[str]
     skip = _caller_chain(invoker.pid)
     group = invoker.pgid
     for proc in psutil.process_iter(["pid", "cwd", "exe", "cmdline"]):
-        pid = proc.info["pid"]
+        info = object_mapping(proc.info)
+        pid = int_field(info, "pid")
         if pid in skip:
             continue
         if _pgid_of(pid) == group:
             continue
-        cwd = proc.info["cwd"]
-        exe = proc.info["exe"]
-        raw_cmdline = proc.info["cmdline"]
+        cwd = optional_str_field(info, "cwd")
+        exe = optional_str_field(info, "exe")
+        raw_cmdline = info["cmdline"]
         cmdline = (
             [tok for tok in raw_cmdline if isinstance(tok, str)]
             if _is_obj_list(raw_cmdline)

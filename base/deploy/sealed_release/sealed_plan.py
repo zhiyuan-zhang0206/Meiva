@@ -15,6 +15,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TypeGuard
 
+from base.host.boundary.untyped import object_of
+
 MANIFEST_SCHEMA = "meiva-sealed-tree/v1"
 MAX_REPORTED = 50
 
@@ -162,7 +164,7 @@ class Manifest:
     @classmethod
     def parse(cls, raw: str, *, origin: str) -> Manifest:
         try:
-            data: object = json.loads(raw)
+            data = object_of(json.loads, raw)
         except json.JSONDecodeError as exc:
             raise ManifestError(f"{origin}: not JSON: {exc}") from exc
         if not _is_str_dict(data) or frozenset(data) != _MANIFEST_FIELDS:

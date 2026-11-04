@@ -20,6 +20,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from base.host.boundary.process import stdout_text
 from base.host.git.gitenv import git_env
 from base.host.system.hostport import Host
 
@@ -62,7 +63,7 @@ def _git_ro(repo: Path, *args: str, host: Host) -> str | None:
         return None
     if result.returncode != 0:
         return None
-    return result.stdout.strip() or None
+    return stdout_text(result).strip() or None
 
 
 # meiva:note

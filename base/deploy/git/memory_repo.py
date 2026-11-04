@@ -9,6 +9,8 @@ from pathlib import Path
 import httpx
 
 from base.cluster.machine import GatewayAccess, MachineIdentityReader
+from base.host.boundary.fields import optional_str_field
+from base.host.boundary.process import stderr_text, stdout_text
 from base.host.proc import run_bounded
 
 _DEFAULT_GITIGNORE = """\
@@ -92,9 +94,9 @@ def run_git(*args: str, cwd: Path, timeout: float = GIT_TIMEOUT_S) -> str:
 
     if result.returncode != 0:
         raise subprocess.CalledProcessError(
-            result.returncode, argv, output=result.stdout, stderr=result.stderr
+            result.returncode, argv, output=stdout_text(result), stderr=stderr_text(result)
         )
-    return result.stdout.strip()
+    return stdout_text(result).strip()
 
 
 def init_local_repo(branch: str, cwd: Path) -> None:
@@ -131,7 +133,7 @@ def _stream_pool(
     with client.stream("GET", url, headers=headers) as resp:
         if resp.status_code != 200:
             raise MemoryPoolBootstrapFailed(f"GET {url} -> HTTP {resp.status_code}")
-        declared = resp.headers.get("Content-Length")
+        declared = optional_str_field(resp.headers, "Content-Length")
         if declared and int(declared) > max_bytes:
             raise MemoryPoolBootstrapFailed(
                 f"pool snapshot declared at {declared} bytes, over the {max_bytes}-byte cap"
@@ -141,7 +143,7 @@ def _stream_pool(
             buf += chunk
             if len(buf) > max_bytes:
                 raise MemoryPoolBootstrapFailed(f"pool snapshot exceeds the {max_bytes}-byte cap")
-        head = resp.headers.get("X-Pool-Head")
+        head = optional_str_field(resp.headers, "X-Pool-Head")
         return head, bytes(buf)
 
 
@@ -197,7 +199,7 @@ def _unpack_bundle(bundle_bytes: bytes, head: str | None, tmp_dir: Path, *, bran
     )
     if result.returncode != 0:
         raise MemoryPoolBootstrapFailed(
-            f"git clone from bundle failed: {(result.stderr or '').strip()[:200]}"
+            f"git clone from bundle failed: {stderr_text(result).strip()[:200]}"
         )
     if head:
         actual = run_git("rev-parse", "HEAD", cwd=checkout_dir)

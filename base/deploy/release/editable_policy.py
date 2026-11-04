@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeGuard
 
+from base.host.boundary.untyped import object_of
+
 __all__ = [
     "EditableReadings",
     "MetadataRecord",
@@ -113,7 +115,7 @@ def direct_url_is_allowed(raw_text: str, allowed_urls: frozenset[str]) -> bool:
     if not raw_text.strip():
         return False
     try:
-        payload = json.loads(raw_text)
+        payload = object_of(json.loads, raw_text)
     except json.JSONDecodeError:
         return False
     if not _is_str_dict(payload):

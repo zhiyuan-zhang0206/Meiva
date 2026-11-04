@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tarfile
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import assert_never
 
@@ -41,6 +42,8 @@ from base.deploy.sealed_release.stage_plan import (
     switch_refusal,
 )
 from base.host.atomic_io import fsync_parent
+from base.host.boundary.options import attribute, options
+from base.host.boundary.process import stderr_bytes, stderr_text, stdout_bytes, stdout_text
 from base.host.git.gitenv import git_env
 from base.host.system.hostport import Host
 from base.native_process.code_version import CodeVersionError, first_parent_count
@@ -86,9 +89,9 @@ def _git(host: Host, repo: Path, *args: str) -> str:
     )
     if done.returncode != 0:
         raise StageError(
-            f"`git {' '.join(args)}` in {repo} exited {done.returncode}: {done.stderr}"
+            f"`git {' '.join(args)}` in {repo} exited {done.returncode}: {stderr_text(done)}"
         )
-    return done.stdout.strip()
+    return stdout_text(done).strip()
 
 
 # meiva:note
@@ -152,9 +155,11 @@ def _extract(repo: Path, sha: str, release: Path, *, host: Host) -> None:
         timeout=_GIT_TIMEOUT_S,
     )
     if done.returncode != 0:
-        raise StageError(f"`git archive {sha}` in {repo} exited {done.returncode}: {done.stderr!r}")
+        raise StageError(
+            f"`git archive {sha}` in {repo} exited {done.returncode}: {stderr_bytes(done)!r}"
+        )
     release.mkdir()
-    with tarfile.open(fileobj=io.BytesIO(done.stdout)) as archive:
+    with tarfile.open(fileobj=io.BytesIO(stdout_bytes(done))) as archive:
         archive.extractall(release, filter="data")
 
 
@@ -170,18 +175,22 @@ def build_python(release: Path, *, host: Host) -> None:
     _check(
         host.run(
             sync, cwd=release, env=env, capture_output=True, text=True, timeout=_SYNC_TIMEOUT_S
-        )
+        ),
+        argv=sync,
     )
     compile_all = compile_argv(release / ".venv" / "bin" / "python", release)
     _check(
-        host.run(compile_all, env=env, capture_output=True, text=True, timeout=_COMPILE_TIMEOUT_S)
+        host.run(compile_all, env=env, capture_output=True, text=True, timeout=_COMPILE_TIMEOUT_S),
+        argv=compile_all,
     )
 
 
-def _check(done: subprocess.CompletedProcess[str]) -> None:
+def _check(done: subprocess.CompletedProcess[str], *, argv: Sequence[str]) -> None:
     if done.returncode != 0:
-        tail = "\n".join((done.stderr or done.stdout or "no output").strip().splitlines()[-5:])
-        raise StageError(f"`{' '.join(map(str, done.args))}` exited {done.returncode}:\n{tail}")
+        tail = "\n".join(
+            (stderr_text(done) or stdout_text(done) or "no output").strip().splitlines()[-5:]
+        )
+        raise StageError(f"`{' '.join(argv)}` exited {done.returncode}:\n{tail}")
 
 
 # meiva:note
@@ -232,22 +241,48 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+# meiva:note
+# The options of each verb, read from the parsed namespace by `options` (each verb sets its own
+# subset, so there is one shape per verb).
+@dataclass(frozen=True)
+class _StageOptions:
+    repo: Path
+    commit: str
+    home: Path
+
+
+@dataclass(frozen=True)
+class _SwitchOptions:
+    home: Path
+    release: Path
+
+
+@dataclass(frozen=True)
+class _VerifyOptions:
+    release: Path
+    content: bool
+
+
 def _run_verb(args: argparse.Namespace, *, host: Host) -> int:
-    match args.verb:
+    verb = attribute(args, "verb", str)
+    match verb:
         case "stage":
+            chosen = options(args, _StageOptions)
             build: Build = functools.partial(build_python, host=host)
-            staged = stage(args.repo, args.commit, home=args.home, host=host, build=build)
+            staged = stage(chosen.repo, chosen.commit, home=chosen.home, host=host, build=build)
             sys.stdout.write(f"{staged}\n")
             return 0
         case "switch":
-            sys.stdout.write(f"{switch(args.home, args.release)}\n")
+            switching = options(args, _SwitchOptions)
+            sys.stdout.write(f"{switch(switching.home, switching.release)}\n")
             return 0
         case "verify":
-            findings = verify(args.release, content=args.content)
+            checking = options(args, _VerifyOptions)
+            findings = verify(checking.release, content=checking.content)
             sys.stdout.writelines(f"{line}\n" for line in report(findings))
             return 1 if findings else 0
         case _:
-            raise ValueError(f"unknown verb {args.verb!r}")
+            raise ValueError(f"unknown verb {verb!r}")
 
 
 _FAILURES = (
