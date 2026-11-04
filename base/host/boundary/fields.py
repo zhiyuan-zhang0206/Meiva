@@ -6,10 +6,18 @@
 # accepts that without naming the `Any`, and each read here checks the field it hands on, so a
 # reader holds an `int` or a `str` instead of an unchecked value.
 #
-# `int_field` / `str_field` / `bool_field` are for a field the record must carry: a missing key or a
-# value of another type is a `TypeError` naming the key. `optional_*_field` answers `None` for an
-# absent key or a value of another type, so a caller keeps its `.get(...) or default` shape. A bool
-# is not a whole number in either family.
+# Pick the reader by what a wrong type means at the call site, in this order:
+#
+# 1. `int_field` / `str_field` / `bool_field` when the record must carry the field: a missing key or a
+#    value of another type is a `TypeError` naming the key.
+# 2. `typed_optional_*_field` by default for an optional field. It answers `None` for an absent or
+#    null key and raises a `TypeError` naming the key for a value of another type, so a corrupt value
+#    is never mistaken for a missing one and the code that follows may safely go on with a default.
+# 3. `optional_*_field` only where a wrong type may honestly read as "not given" — a caller that
+#    keeps its `.get(...) or default` shape over a record whose producer writes best-effort values.
+#    Do not reach for this family to silence a reader: it is the one that hides corruption.
+#
+# A bool is not a whole number in any family.
 
 from __future__ import annotations
 
@@ -27,6 +35,12 @@ __all__ = [
     "optional_object_field",
     "optional_str_field",
     "str_field",
+    "typed_optional_bool_field",
+    "typed_optional_float_field",
+    "typed_optional_int_field",
+    "typed_optional_list_field",
+    "typed_optional_object_field",
+    "typed_optional_str_field",
 ]
 
 
@@ -103,3 +117,75 @@ def optional_object_field(record: Mapping[str, object], key: str) -> dict[str, o
 def optional_list_field(record: Mapping[str, object], key: str) -> list[object] | None:
     value = record.get(key)
     return value if is_object_list(value) else None
+
+
+# meiva:note
+# The string `record[key]`, or None when the key is absent or null; any other type is a `TypeError`
+# naming the key (unlike `optional_str_field`, which reads it as absent).
+def typed_optional_str_field(record: Mapping[str, object], key: str) -> str | None:
+    value = record.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TypeError(f"{key} is {type(value).__name__}, not str")
+    return value
+
+
+# meiva:note
+# The whole number `record[key]`, or None when the key is absent or null; any other type, a bool
+# included, is a `TypeError` naming the key.
+def typed_optional_int_field(record: Mapping[str, object], key: str) -> int | None:
+    value = record.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{key} is {type(value).__name__}, not int")
+    return value
+
+
+# meiva:note
+# The number `record[key]` as a float, or None when the key is absent or null; any other type, a bool
+# included, is a `TypeError` naming the key.
+def typed_optional_float_field(record: Mapping[str, object], key: str) -> float | None:
+    value = record.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise TypeError(f"{key} is {type(value).__name__}, not a number")
+    return float(value)
+
+
+# meiva:note
+# The boolean `record[key]`, or None when the key is absent or null; any other type is a `TypeError`
+# naming the key (a `0` or a `"false"` is refused, where `optional_bool_field` reads it as absent).
+def typed_optional_bool_field(record: Mapping[str, object], key: str) -> bool | None:
+    value = record.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise TypeError(f"{key} is {type(value).__name__}, not bool")
+    return value
+
+
+# meiva:note
+# The JSON object `record[key]`, or None when the key is absent or null; any other type is a
+# `TypeError` naming the key.
+def typed_optional_object_field(record: Mapping[str, object], key: str) -> dict[str, object] | None:
+    value = record.get(key)
+    if value is None:
+        return None
+    if not is_object_dict(value):
+        raise TypeError(f"{key} is {type(value).__name__}, not an object")
+    return value
+
+
+# meiva:note
+# The JSON array `record[key]`, or None when the key is absent or null; any other type is a
+# `TypeError` naming the key.
+def typed_optional_list_field(record: Mapping[str, object], key: str) -> list[object] | None:
+    value = record.get(key)
+    if value is None:
+        return None
+    if not is_object_list(value):
+        raise TypeError(f"{key} is {type(value).__name__}, not a list")
+    return value

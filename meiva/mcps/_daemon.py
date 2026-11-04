@@ -41,6 +41,11 @@ from mcp import ClientSession
 from mcp.types import CallToolResult, ListToolsResult
 
 from base.config import settings
+from base.host.boundary.fields import (
+    typed_optional_int_field,
+    typed_optional_object_field,
+    typed_optional_str_field,
+)
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
 from base.host.system.hostport import Host
@@ -304,41 +309,6 @@ async def connect_http(
     return session, local_stack
 
 
-# meiva:note
-# An optional field of a request with a type contract: absent (or an explicit null, the wire's
-# spelling of "not provided") answers `default`, and a value of another type is refused. This is not
-# the `optional_*_field` family, which reads a wrong type as absent on purpose: here a wrong-typed
-# `args` would call the tool with no arguments at all and a wrong-typed `agent_id` would silently
-# drop the caller's identity from the direct-dial services.
-def _optional_str(record: Mapping[str, object], key: str, default: str) -> str:
-    value = record.get(key)
-    if value is None:
-        return default
-    if not isinstance(value, str):
-        raise TypeError(f"{key} is {type(value).__name__}, not str")
-    return value
-
-
-def _optional_object(
-    record: Mapping[str, object], key: str, default: dict[str, object]
-) -> dict[str, object]:
-    value = record.get(key)
-    if value is None:
-        return default
-    if not is_object_dict(value):
-        raise TypeError(f"{key} is {type(value).__name__}, not an object")
-    return value
-
-
-def _optional_int(record: Mapping[str, object], key: str, default: int | None) -> int | None:
-    value = record.get(key)
-    if value is None:
-        return default
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError(f"{key} is {type(value).__name__}, not int")
-    return value
-
-
 async def _handle_list_tools(req_id: object, server: str, scope: Scope) -> dict[str, object]:
     """List the configured server's tools in the daemon wire format."""
     session = await get_session(server, scope)
@@ -354,14 +324,14 @@ async def _handle_call_tool(
     scope: Scope,
 ) -> dict[str, object]:
     """Call one MCP tool and serialize its result for the daemon wire protocol."""
-    tool = _optional_str(params, "tool", "")
-    args = _optional_object(params, "args", {})
+    tool = typed_optional_str_field(params, "tool") or ""
+    args = typed_optional_object_field(params, "args") or {}
     session = await get_session(server, scope)
     # meiva:note
     # The direct-dial sessions carry the calling agent's identity to their
     # respective daemons (page affinity + governance/audit).
     if isinstance(session, (BrowserLineSession, ComputerLineSession)):
-        session.client_agent_id = _optional_int(req, "agent_id", None)
+        session.client_agent_id = typed_optional_int_field(req, "agent_id")
     try:
         result = await session.call_tool(tool, args)
     except Exception as e:
@@ -400,8 +370,8 @@ async def _dispatch_request(
 async def dispatch_with_retry(req: Mapping[str, object], scope: Scope) -> dict[str, object]:
     req_id = req.get("id")
     method = req.get("method")
-    params = _optional_object(req, "params", {})
-    server = _optional_str(params, "server", "")
+    params = typed_optional_object_field(req, "params") or {}
+    server = typed_optional_str_field(params, "server") or ""
     attempt = 0
     try:
         while True:

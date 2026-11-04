@@ -19,6 +19,7 @@ import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from base.host.boundary.fields import typed_optional_int_field, typed_optional_str_field
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
 from base.native_process.kernel_identity import pid_starttime_ticks
@@ -83,11 +84,6 @@ class SessionRecord:
             return None
         record = data
         starttime = record.get("starttime")
-        generation = record.get("generation")
-        pgid = record.get("pgid")
-        control_mode = record.get("control_mode")
-        if control_mode is not None and not isinstance(control_mode, str):
-            raise TypeError(f"control_mode is {type(control_mode).__name__}, not text")
         return cls(
             pid=_int_of(record["pid"]),
             create_time=_float_of(record.get("create_time", 0.0)),
@@ -95,9 +91,12 @@ class SessionRecord:
             cwd=str(record.get("cwd", "")),
             started_at=_float_of(record.get("started_at", 0.0)),
             starttime=None if starttime is None else _int_of(starttime),
-            generation=generation if isinstance(generation, str) and generation else None,
-            control_mode=control_mode,
-            pgid=pgid if isinstance(pgid, int) else None,
+            # meiva:note
+            # An empty generation is not a generation: `typed_optional_str_field` reads a wrong type
+            # as an error, and this `or None` keeps the older "`""` means none recorded" reading.
+            generation=typed_optional_str_field(record, "generation") or None,
+            control_mode=typed_optional_str_field(record, "control_mode"),
+            pgid=typed_optional_int_field(record, "pgid"),
         )
 
     def identifies(
