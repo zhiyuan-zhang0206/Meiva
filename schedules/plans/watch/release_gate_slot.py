@@ -56,6 +56,13 @@ __all__ = [
 # that was merely late (8h49m) and the fastest gap that really missed a slot (9h59m).
 RELEASE_GATE_SLOT_STALE_AFTER = timedelta(hours=9)
 
+# meiva:note
+# The workflow's own cadence and how far back the card counts arrivals. These are not the threshold:
+# the cadence says how many runs the silence should have contained, which is what lets a reader
+# judge one card on its own instead of waiting for an interval that happens to look suspicious.
+RELEASE_GATE_SLOT_CADENCE = timedelta(hours=6)
+RELEASE_GATE_SLOT_LOOKBACK = timedelta(hours=24)
+
 FINGERPRINT = "main-red-watch/release-gate-slot"
 _NO_GAP = ""
 # meiva:note
@@ -74,6 +81,12 @@ class SlotFacts:
     busy: bool
     uncertified_commits: int | None = None
     channel_latest: str | None = None
+    # meiva:note
+    # Every scheduled start the round could read, newest first, and the cadence they were due on.
+    # Together they let the card state how many arrivals the silence should have contained, which is
+    # a fact a reader can check against GitHub instead of having to trust the threshold.
+    scheduled_starts: tuple[datetime, ...] = ()
+    cadence: timedelta = RELEASE_GATE_SLOT_CADENCE
 
 
 # meiva:note
@@ -101,13 +114,25 @@ def _behind(facts: SlotFacts) -> str:
     return f"`main` is {facts.uncertified_commits} commit(s) past the last certification."
 
 
-def _card(facts: SlotFacts, age: timedelta, *, threshold: timedelta) -> Card:
+# meiva:note
+# How many arrivals the lookback should have contained, and how many it did. Stated on the card
+# because it is the one number a reader can check against the workflow's own run list: a card whose
+# count matches what GitHub shows is about a cron that stopped, and one that does not is about a
+# reading that failed.
+def _arrivals(facts: SlotFacts, now: datetime) -> tuple[int, int]:
+    window_start = now - RELEASE_GATE_SLOT_LOOKBACK
+    observed = sum(1 for started in facts.scheduled_starts if started >= window_start)
+    return observed, int(RELEASE_GATE_SLOT_LOOKBACK / facts.cadence)
+
+
+def _card(facts: SlotFacts, age: timedelta, *, threshold: timedelta, now: datetime) -> Card:
     newest = (
         facts.last_schedule_start.isoformat()
         if facts.last_schedule_start is not None
         else "no scheduled run on record"
     )
     hours = age.total_seconds() / 3600
+    observed, expected = _arrivals(facts, now)
     return Card(
         fingerprint=FINGERPRINT,
         title=f"release-gate has not run on its schedule for {hours:.1f}h",
@@ -119,6 +144,11 @@ def _card(facts: SlotFacts, age: timedelta, *, threshold: timedelta) -> Card:
             f"(threshold {threshold.total_seconds() / 3600:.0f}h).\n\n"
             "This reports the schedule, not the code: `main` has had no full-population check in "
             "that window, so a red merged in it is invisible rather than absent.\n\n"
+            f"In the {RELEASE_GATE_SLOT_LOOKBACK.total_seconds() / 3600:.0f}h to "
+            f"{now.isoformat()}, this {facts.cadence.total_seconds() / 3600:.0f}-hourly cron should "
+            f"have started {expected} run(s) and started {observed}. Confirm that count against the "
+            "workflow's own run list before acting on this card: it is the difference between a "
+            "cron that stopped and a round that could not read.\n\n"
             "**What to run instead.** `gh workflow run main-typecheck.yml --ref main` takes about "
             "two and a half minutes and restores the type surface only: the full tree stays "
             "unchecked, and nothing is certified. The full run is "
@@ -168,7 +198,7 @@ def decide_slot(
             note=f"release-gate slot {age.total_seconds() / 3600:.1f}h late, nothing uncertified",
         )
     return SlotDecision(
-        card=_card(facts, age, threshold=stale_after),
+        card=_card(facts, age, threshold=stale_after, now=now),
         gap_id=gap_id,
         note=f"release-gate slot missing: newest scheduled run {age.total_seconds() / 3600:.1f}h ago",
     )
