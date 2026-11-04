@@ -28,11 +28,12 @@ import dataclasses
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Self, assert_never
+from typing import Self, assert_never
 
 import psutil
 
 from base.agents.context import MeivaContext
+from base.agents.context.clients import DatabaseFactory
 from base.agents.context.external_attachment import ExternalAttachment
 from base.agents.context.external_attachment.state_schema import BaseAgentState
 from base.agents.context.identity import AgentIdentity, ExternalLease
@@ -134,10 +135,10 @@ class HarnessAttachment(ExternalAttachment):
         self.session_id = inputs.registration.external_session_id
         self._registration = inputs.registration
         self.agent_id = inputs.registration.agent_id
-        self.config: tuple[Any, PluginConfigView] | None = None
+        self.config: tuple[Mapping[str, object], PluginConfigView] | None = None
         self._boot: ExternalBoot = inputs.boot
         self._machine: MachineIdentityReader = inputs.boot.machine
-        self._database: Any = inputs.boot.database
+        self._database: DatabaseFactory = inputs.boot.database
         self._pid = inputs.pid
         self._clock = inputs.clock
         super().__init__(identity=_RegistrationIdentity(self), codec=_RegistrationCodec(self))
@@ -211,7 +212,7 @@ class HarnessAttachment(ExternalAttachment):
                 assert_never(boot)
 
     def _resolve_config(
-        self, overlay: Mapping[str, Any] | None, birth: Mapping[str, Any] | None
+        self, overlay: Mapping[str, object] | None, birth: Mapping[str, object] | None
     ) -> None:
         from meiva.sdk_surface.installation import installed
 
@@ -257,7 +258,7 @@ class _RegistrationIdentity:
     def __init__(self, attachment: HarnessAttachment) -> None:
         self._attachment = attachment
 
-    def require(self) -> Mapping[str, Any]:
+    def require(self) -> Mapping[str, object]:
         registration = self._attachment._require_registration()
         return {"agent_id": registration.agent_id, "applied_version": 0, "plugin_delta": []}
 
@@ -284,7 +285,7 @@ class _RegistrationCodec:
 
     def load_snapshot(
         self, agent_id: int
-    ) -> tuple[BaseAgentState, Mapping[str, Any] | None, Mapping[str, Any] | None]:
+    ) -> tuple[BaseAgentState, Mapping[str, object] | None, Mapping[str, object] | None]:
         from base.agents.context.external_attachment import plugin_state_codec
 
         return plugin_state_codec.load_snapshot(
@@ -300,20 +301,20 @@ class _RegistrationCodec:
         return plugin_state_codec.plugin_state_schema
 
     def encode_plugin_delta(
-        self, update: Mapping[str, Any], state_cls: type[Any]
+        self, update: Mapping[str, object], state_cls: type[BaseAgentState]
     ) -> dict[str, str]:
         from base.agents.context.external_attachment import plugin_state_codec
 
         return plugin_state_codec.encode_plugin_delta(dict(update), state_cls)
 
     def decode_plugin_delta(
-        self, encoded: Mapping[str, object], state_cls: type[Any]
-    ) -> dict[str, Any]:
+        self, encoded: Mapping[str, object], state_cls: type[BaseAgentState]
+    ) -> Mapping[str, object]:
         from base.agents.context.external_attachment import plugin_state_codec
 
         return plugin_state_codec.decode_plugin_delta(encoded, state_cls)
 
-    def apply_plugin_delta(self, state: BaseAgentState, delta: Mapping[str, Any]) -> None:
+    def apply_plugin_delta(self, state: BaseAgentState, delta: Mapping[str, object]) -> None:
         from base.agents.context.external_attachment import plugin_state_codec
 
         plugin_state_codec.apply_plugin_delta(state, dict(delta))
