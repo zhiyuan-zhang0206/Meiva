@@ -30,6 +30,7 @@ import {
   ContextSection,
   CostActivitySection,
   InspectReadError,
+  useAgentHarness,
 } from "./inspector-cost-section";
 import {
   ConfigOverlaySection,
@@ -51,6 +52,7 @@ function matchesInspectWindow(
 export function InspectorPanel({ agentId }: { agentId: number }) {
   const client = useApi();
   const t = useTranslations("inspector");
+  const harness = useAgentHarness(agentId);
   const { open } = useInspectorOpen();
   const { inspectorHours: hours, setInspectorHours: setHours } = useInspectorHours();
   const queryClient = useQueryClient();
@@ -146,28 +148,30 @@ export function InspectorPanel({ agentId }: { agentId: number }) {
 
   // meiva:link ui/web/src/docs/frontend-components/inspector/inspector.meiva.okf.md
   const sections: { order: number; tie: number; key: string; node: ReactNode }[] = [];
-  const runLinkNode = (
-    <div className={cn("items-center gap-2", FLEX)}>
-      <Link
-        href={`/insights/run/${agentId}`}
-        className={cn(
-          "items-center gap-2 rounded bg-sidebar-accent/40 dark:bg-[#2a2926] px-2.5 py-1.5 font-mono text-[11.5px] leading-[17px] text-foreground dark:text-[#f0ede7] hover:bg-sidebar-accent group",
-          FLEX,
-          MIN_W_0,
-          FLEX_1,
-        )}
-      >
-        <ExternalLink className="size-3 shrink-0 text-muted-foreground group-hover:text-foreground" aria-hidden />
-        <span className="truncate">{t("openRunTimeline")}</span>
-      </Link>
-    </div>
-  );
-  sections.push({
-    order: INSPECT_SECTION_ORDER.runLink,
-    tie: 0,
-    key: "run-link",
-    node: runLinkNode,
-  });
+  if (harness === "meiva") {
+    const runLinkNode = (
+      <div className={cn("items-center gap-2", FLEX)}>
+        <Link
+          href={`/insights/run/${agentId}`}
+          className={cn(
+            "items-center gap-2 rounded bg-sidebar-accent/40 dark:bg-[#2a2926] px-2.5 py-1.5 font-mono text-[11.5px] leading-[17px] text-foreground dark:text-[#f0ede7] hover:bg-sidebar-accent group",
+            FLEX,
+            MIN_W_0,
+            FLEX_1,
+          )}
+        >
+          <ExternalLink className="size-3 shrink-0 text-muted-foreground group-hover:text-foreground" aria-hidden />
+          <span className="truncate">{t("openRunTimeline")}</span>
+        </Link>
+      </div>
+    );
+    sections.push({
+      order: INSPECT_SECTION_ORDER.runLink,
+      tie: 0,
+      key: "run-link",
+      node: runLinkNode,
+    });
+  }
   sections.push({
     order: INSPECT_SECTION_ORDER.costActivity,
     tie: 0,

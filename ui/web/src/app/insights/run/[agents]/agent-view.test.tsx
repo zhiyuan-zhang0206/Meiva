@@ -82,6 +82,15 @@ const response = (agent: number, window: [number, number], tree: boolean): RunTi
   units: [unit(0, window[0] + 5, window[0] + 10, "l"), unit(1, window[0] + 20, window[0] + 25, "l")],
 });
 
+const emptyResponse = (agent: number): RunTimelineResponse => ({
+  agent_id: agent,
+  units_omitted: 0,
+  window: { from: at(0), to: at(60) },
+  lifetime: { from: at(0), to: at(60) },
+  nodes: [],
+  units: [],
+});
+
 const BY_AGENT: Record<number, RunTimelineResponse> = {
   7: response(7, [0, 60], true),
   8: response(8, [30, 120], false),
@@ -268,5 +277,43 @@ describe("agent view", () => {
     getRunTimeline.mockImplementation((agent) => Promise.resolve(BY_AGENT[agent]));
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(rowIn(8, "run-timeline-row-units")).not.toBeNull());
+  });
+
+  it("shows quiet unsupported note and suppresses empty footer for external-harness agent with empty timeline", async () => {
+    getRunTimeline.mockImplementation((agent) => Promise.resolve(emptyResponse(agent)));
+    getAgentRoster.mockResolvedValue({
+      agents: [
+        { agent_id: 42, label: "forty-two", status: "running", harness: "claude_code" },
+      ],
+      ancestors: [],
+    });
+
+    renderAgentView("42", { contextSize: false });
+    await screen.findByTestId("agent-view-agent-42");
+
+    const unsupported = await screen.findByTestId("run-timeline-unsupported-42");
+    expect(unsupported.textContent).toBe(
+      "Run timeline is only available for native Meiva agents (this agent runs on Claude Code).",
+    );
+    expect(unsupported.className).toContain("text-muted-foreground");
+    expect(rowIn(42, "run-timeline-row-units")).toBeNull();
+    expect(rowIn(42, "run-timeline-row-context")).toBeNull();
+    expect(screen.queryByText("Nothing in this window.")).toBeNull();
+  });
+
+  it("draws historical native tracks normally if an external-harness agent has past timeline activity", async () => {
+    getAgentRoster.mockResolvedValue({
+      agents: [
+        { agent_id: 7, label: "seven", status: "running", harness: "claude_code" },
+      ],
+      ancestors: [],
+    });
+
+    renderAgentView("7");
+    await screen.findByTestId("agent-view-agent-7");
+
+    expect(screen.queryByTestId("run-timeline-unsupported-7")).toBeNull();
+    await waitFor(() => expect(rowIn(7, "run-timeline-row-units")).not.toBeNull());
+    expect(rowIn(7, "run-timeline-row-level-1")).not.toBeNull();
   });
 });

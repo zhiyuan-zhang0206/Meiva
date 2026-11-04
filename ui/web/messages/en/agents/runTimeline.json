@@ -6,6 +6,7 @@
   "agentId": "Agent ID",
   "open": "Open agent view",
   "invalidAgent": "The agent id in this URL is invalid.",
+  "externalHarnessUnsupported": "Run timeline is only available for native Meiva agents (this agent runs on {harness}).",
   "loading": "Loading run timeline…",
   "retry": "Retry",
   "windowSummary": "{from} – {to} · {nodes} summary nodes · {units} message units",

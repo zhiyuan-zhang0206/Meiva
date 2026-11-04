@@ -301,6 +301,7 @@ describe("InspectorPanel plugin widgets", () => {
   });
 
   it("a widgets fetch failure leaves the rest of the panel intact", async () => {
+    getAgentRoster.mockResolvedValue(rosterFixture({ harness: "meiva" }));
     getAgentInspectWidgets.mockRejectedValue(new Error("HTTP 500: widgets unavailable"));
     render(<InspectorPanel agentId={1} />);
 

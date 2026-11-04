@@ -6,6 +6,7 @@
   "agentId": "Agent ID",
   "open": "打开 Agent 视图",
   "invalidAgent": "此 URL 中的 agent id 无效。",
+  "externalHarnessUnsupported": "运行时间轴仅支持原生 Meiva agent（当前 agent 运行在 {harness}）。",
   "loading": "正在加载运行时间线…",
   "retry": "重试",
   "windowSummary": "{from} – {to} · {nodes} 个总结节点 · {units} 个消息单元",
