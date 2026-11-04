@@ -283,10 +283,9 @@ def spawn(
     lost response; use a new key for another agent. Acceptance does not prove
     execution, and uncertain transport outcomes are not automatically retried.
 
-    `harness` is the runtime loop the agent runs on: "meiva" (the default) or an external
-    harness such as "claude_code", "codex" or "antigravity"; unknown names are
-    refused, never replaced by the default. It is fixed for the agent's whole life: no restart or
-    resurrect changes it. Omit it to run the built-in runtime; forking (`fork_from`) is only
+    `harness` selects the initial runtime loop. It defaults to "meiva" and also
+    accepts "claude_code", "codex" or "antigravity". Unknown names are refused.
+    Use `restart` to switch harnesses later. Forking (`fork_from`) is only
     supported for native "meiva" agents, and asking a fork for an external harness or forking an
     external harness agent fails with `ForkHarnessMismatch`.
     `harness_availability()` reports which ones this machine can run. A harness no launcher
@@ -469,11 +468,12 @@ def terminate(
 def restart(
     agent_id: int, message: str, *, config_overlay: dict[str, object] | None = None
 ) -> RestartResult:
-    """Restart an agent under the same id and continue any turn in progress.
+    """Restart an agent under the same id.
 
     `message` is a mandatory, non-blank explanation shown to the agent.
-    `config_overlay` is an optional flat {field_name: value} mapping merged
-    into the agent's persistent configuration (such as harness or llm_model)."""
+    `config_overlay` carries persistent configuration changes such as `llm_model`.
+    Set its `harness` field to switch the runtime loop of an idling or terminated agent.
+    An agent staying on "meiva" can restart and continue a turn in progress."""
     agent_id = coerce_typed(agent_id, "agent_id", int)
     schedule_capability.assert_schedule_capability("agents.restart", target_agent_id=agent_id)
     message = coerce_str(message, "message")
@@ -506,7 +506,7 @@ def compact(agent_id: int) -> None:
 
 
 def resurrect(agent_id: int, prompt: str) -> ResurrectResult:
-    """Wake a terminated agent with its previous conversation state intact."""
+    """Wake a terminated agent on its current harness with its previous conversation state intact."""
     agent_id = coerce_typed(agent_id, "agent_id", int)
     schedule_capability.assert_schedule_capability("agents.resurrect", target_agent_id=agent_id)
     prompt = coerce_str(prompt, "prompt")
