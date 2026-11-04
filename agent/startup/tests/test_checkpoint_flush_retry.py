@@ -3,7 +3,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 from uuid import uuid4
 
 import pytest
@@ -11,6 +11,8 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import ChannelVersions, Checkpoint, CheckpointMetadata
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END, START, StateGraph
+from psycopg import AsyncConnection
+from psycopg.rows import DictRow
 from psycopg_pool import AsyncConnectionPool
 from typing_extensions import TypedDict
 
@@ -46,7 +48,7 @@ class _FaultSaver(AsyncPostgresSaver):
 
 @pytest.mark.parametrize("failure", [None, "before_save", "after_save"])
 async def test_final_flush_retry_is_durable_and_idempotent(
-    aops_pool: AsyncConnectionPool[Any],
+    aops_pool: AsyncConnectionPool[AsyncConnection[DictRow]],
     tmp_path: Path,
     failure: Literal["before_save", "after_save"] | None,
 ) -> None:
