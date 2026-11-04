@@ -16,7 +16,11 @@ from cli.commands.extensions.external_skill_host.filesystem import (
     validate_manifest_subset,
     verify_cleanup_file,
 )
-from cli.commands.extensions.external_skill_host.ledger import SKILL_NAME, write_ledger
+from cli.commands.extensions.external_skill_host.ledger import (
+    SKILL_NAME,
+    write_ledger,
+    write_retained_item,
+)
 from cli.commands.extensions.external_skill_host.records import (
     Claim,
     CleanupItem,
@@ -107,64 +111,50 @@ def _manifest_files(item: CleanupItem) -> dict[str, FileEntry]:
     return {entry["path"]: entry for entry in item["manifest"] if entry["kind"] == "file"}
 
 
-def _preserve_file_claim(
-    ledger_path: Path,
-    ledger: Ledger,
-    claim: Claim,
-    root: Path,
-    expected: FileEntry,
-    rename: Callable[[Path, Path], None],
-) -> None:
-    """Isolate one file, then terminally preserve it instead of path-unlinking."""
+def _flush_inline_retained(ledger_path: Path, ledger: Ledger) -> None:
+    while ledger["retained"]:
+        write_retained_item(ledger_path, ledger["retained"][0])
+        ledger["retained"].pop(0)
+
+
+def _prepare_claim(
+    claim: Claim, root: Path, expected: FileEntry
+) -> tuple[Claim, Path, Path] | None:
     source = root / claim["path"]
-    quarantine = root / claim["quarantine"]
-    if claim["state"] == "source":
-        if not exists(source) or exists(quarantine):
+    dest = root / claim["quarantine"]
+    state = claim["state"]
+    if state == "source":
+        if not exists(source) or exists(dest):
             claim["state"] = "retained"
-            write_ledger(ledger_path, ledger)
-            return
+            return None
         try:
             verify_cleanup_file(source, expected)
         except (OSError, ClientConflictError):
             claim["state"] = "retained"
-            write_ledger(ledger_path, ledger)
-            return
+            return None
         claim["state"] = "claiming"
-        write_ledger(ledger_path, ledger)
-        try:
-            rename(source, quarantine)
-        except OSError:
-            # The root is already private. Whether the rename failed or
-            # completed before reporting failure, terminal preservation is
-            # safe and avoids inferring ownership or retrying a mutable path.
-            claim["state"] = "retained"
-            write_ledger(ledger_path, ledger)
-            return
-        claim["state"] = "quarantine"
-        write_ledger(ledger_path, ledger)
-    elif claim["state"] == "claiming":
-        source_exists = exists(source)
-        quarantine_exists = exists(quarantine)
-        if source_exists and not quarantine_exists:
-            claim["state"] = "source"
-            write_ledger(ledger_path, ledger)
-            _preserve_file_claim(ledger_path, ledger, claim, root, expected, rename)
-            return
-        # A crash left the rename outcome ambiguous. The write-ahead record
-        # names both paths, but path shape or matching bytes cannot establish
-        # that the destination is the object Meiva moved. Preserve both.
+        return (claim, source, dest)
+    if state == "claiming":
+        if exists(source) and not exists(dest):
+            try:
+                verify_cleanup_file(source, expected)
+            except (OSError, ClientConflictError):
+                claim["state"] = "retained"
+                return None
+            return (claim, source, dest)
+        # meiva:note
+        # A crash left the rename outcome ambiguous. The write-ahead record names both
+        # paths, but path shape or matching bytes cannot establish that the destination is
+        # the object Meiva moved. Preserve both.
         claim["state"] = "retained"
-        write_ledger(ledger_path, ledger)
-        return
-    if claim["state"] == "quarantine":
-        # The root is already isolated under Meiva's private ledger. A changed
-        # pathname is never retried or adopted for deletion.
-        with suppress(OSError, ClientConflictError):
-            verify_cleanup_file(quarantine, expected)
-        claim["state"] = "retained"
-        write_ledger(ledger_path, ledger)
+        return None
+    return None
 
 
+# meiva:note
+# Isolate every file in a quarantined tree using one batched write-ahead ledger commit
+# before the renames and one terminal commit after, then archive the retired record out
+# of the hot ledger.
 def preserve_claimed_tree(
     ledger_path: Path,
     ledger: Ledger,
@@ -173,12 +163,36 @@ def preserve_claimed_tree(
     rename: Callable[[Path, Path], None],
 ) -> None:
     files = _manifest_files(item)
+    to_rename: list[tuple[Claim, Path, Path]] = []
     for claim in item["file_claims"]:
-        expected = files[claim["path"]]
-        _preserve_file_claim(ledger_path, ledger, claim, quarantine, expected, rename)
+        prepared = _prepare_claim(claim, quarantine, files[claim["path"]])
+        if prepared is not None:
+            to_rename.append(prepared)
+    if to_rename:
+        write_ledger(ledger_path, ledger)
+    for claim, source, dest in to_rename:
+        try:
+            rename(source, dest)
+        except OSError:
+            # meiva:note
+            # The root is already private. Whether the rename failed or completed before
+            # reporting failure, terminal preservation is safe and avoids inferring
+            # ownership or retrying a mutable path.
+            claim["state"] = "retained"
+            continue
+        claim["state"] = "quarantine"
+    for claim in item["file_claims"]:
+        if claim["state"] == "quarantine":
+            # meiva:note
+            # The root is already isolated under Meiva's private ledger. A changed
+            # pathname is never retried or adopted for deletion.
+            with suppress(OSError, ClientConflictError):
+                verify_cleanup_file(quarantine / claim["quarantine"], files[claim["path"]])
+            claim["state"] = "retained"
     item["location"] = "retained"
+    write_retained_item(ledger_path, item)
     ledger["garbage"].remove(item)
-    ledger["retained"].append(item)
+    _flush_inline_retained(ledger_path, ledger)
     write_ledger(ledger_path, ledger)
 
 
@@ -211,6 +225,10 @@ def _claim_from_source(
     return False
 
 
+# meiva:note
+# Resolve an in-flight claim; False when the source is back and cleanup must be retried.
+# Once verified, `location = "quarantine"` rides the immediate `preserve_claimed_tree`
+# write-ahead commit rather than taking a separate fsync of its own.
 def _settle_claim(
     ledger_path: Path,
     ledger: Ledger,
@@ -219,7 +237,6 @@ def _settle_claim(
     quarantine: Path,
     rename: Callable[[Path, Path], None],
 ) -> bool:
-    """Resolve an in-flight claim; False when the source is back and cleanup must be retried."""
     source_exists = exists(source)
     quarantine_exists = exists(quarantine)
     if source_exists and quarantine_exists:
@@ -236,7 +253,6 @@ def _settle_claim(
         _restore_cleanup_candidate(ledger_path, ledger, item, source, quarantine, rename)
         raise
     item["location"] = "quarantine"
-    write_ledger(ledger_path, ledger)
     return True
 
 
@@ -286,7 +302,18 @@ def cleanup_garbage_impl(
                 and item in ledger["garbage"]
             ):
                 ledger["garbage"].remove(item)
+                _flush_inline_retained(ledger_path, ledger)
                 write_ledger(ledger_path, ledger)
+        except (OSError, ClientConflictError) as exc:
+            print(
+                f"  ! {label} external operator skill skipped: conflict: "
+                f"transaction cleanup conflict ({type(exc).__name__})",
+                file=sys.stderr,
+            )
+    if ledger["retained"] and ledger["transaction"] is None:
+        try:
+            _flush_inline_retained(ledger_path, ledger)
+            write_ledger(ledger_path, ledger)
         except (OSError, ClientConflictError) as exc:
             print(
                 f"  ! {label} external operator skill skipped: conflict: "

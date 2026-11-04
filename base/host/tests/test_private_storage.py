@@ -25,7 +25,7 @@ def _format_summary(kwargs: dict[str, object]) -> str:
         f"private storage convergence skipped {kwargs['n']} node(s) under {kwargs['path']} "
         f"(symlink={kwargs['symlinks']}, foreign_owned={kwargs['foreign_owned']}, "
         f"non_regular={kwargs['non_regular']}, permission_denied={kwargs['permission_denied']}; "
-        f"node_modules dirs not descended={kwargs['node_modules']}) "
+        f"pruned dirs not descended={kwargs['pruned_dirs']}) "
         f"— first: {kwargs['examples']}"
     )
 
@@ -87,7 +87,7 @@ def test_converge_skips_foreign_nodes(request: pytest.FixtureRequest, tmp_path: 
     assert kwargs["foreign_owned"] == 2
     assert kwargs["symlinks"] == 0
     assert kwargs["non_regular"] == 0
-    assert kwargs["node_modules"] == 0
+    assert kwargs["pruned_dirs"] == 0
     examples = str(kwargs["examples"])
     assert str(foreign_file) in examples and str(foreign_dir) in examples
 
@@ -209,7 +209,7 @@ def test_private_tree_skips_nested_symlink(request: pytest.FixtureRequest, tmp_p
         "foreign_owned": 0,
         "non_regular": 0,
         "permission_denied": 0,
-        "node_modules": 0,
+        "pruned_dirs": 0,
         "examples": f"{link} (symlink)",
     }
     assert cap.warnings == [
@@ -301,7 +301,7 @@ def test_private_tree_skips_live_unix_socket(request: pytest.FixtureRequest) -> 
             "foreign_owned": 0,
             "non_regular": 1,
             "permission_denied": 0,
-            "node_modules": 0,
+            "pruned_dirs": 0,
             "examples": f"{socket_path} (non-regular)",
         }
         assert cap.warnings == [
@@ -336,7 +336,7 @@ def test_private_tree_skips_fifo(request: pytest.FixtureRequest, tmp_path: Path)
         "foreign_owned": 0,
         "non_regular": 1,
         "permission_denied": 0,
-        "node_modules": 0,
+        "pruned_dirs": 0,
         "examples": f"{fifo} (non-regular)",
     }
     assert cap.warnings == [
@@ -375,16 +375,68 @@ def test_converge_does_not_descend_node_modules(
     assert private_storage.scan_non_regular_nodes(root, euid=os.geteuid()) == []
 
 
+@pytest.mark.parametrize(
+    "dirname",
+    [".venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".next"],
+)
+def test_converge_prunes_virtualenv_and_tool_cache_subtrees_after_sealing_root(
+    request: pytest.FixtureRequest, tmp_path: Path, dirname: str
+) -> None:
+    root = tmp_path / "workspaces"
+    pruned = root / "agent-1" / dirname
+    inner = pruned / "nested"
+    inner.mkdir(parents=True)
+    pruned.chmod(0o755)
+    wheel_file = inner / "artifact.py"
+    wheel_file.write_text("x = 1\n")
+    wheel_file.chmod(0o644)
+    (inner / "python").symlink_to(wheel_file)
+    os.mkfifo(inner / "pipe")
+    cap = _Captured(request.addfinalizer)
+
+    assert private_storage.converge_private_tree(root, euid=os.geteuid()) == root
+
+    assert _mode(root) == 0o700
+    assert _mode(root / "agent-1") == 0o700
+    assert _mode(pruned) == 0o700
+    assert _mode(wheel_file) == 0o644
+    assert cap.debugs == []
+    assert cap.warnings == []
+    assert private_storage.scan_non_regular_nodes(root, euid=os.geteuid()) == []
+
+
+def test_symlinked_pruned_dirname_is_still_skipped_without_following(
+    request: pytest.FixtureRequest, tmp_path: Path
+) -> None:
+    root = tmp_path / "workspaces"
+    root.mkdir()
+    outside = tmp_path / "shared-venv"
+    outside.mkdir()
+    outside.chmod(0o755)
+    link = root / ".venv"
+    link.symlink_to(outside, target_is_directory=True)
+    cap = _Captured(request.addfinalizer)
+
+    assert private_storage.converge_private_tree(root, euid=os.geteuid()) == root
+
+    assert link.is_symlink()
+    assert _mode(outside) == 0o755
+    assert len(cap.warnings) == 1
+    assert cap.warnings[0][1]["symlinks"] == 1
+    assert cap.warnings[0][1]["pruned_dirs"] == 0
+
+
 def test_summary_caps_examples_and_counts_every_skip(
     request: pytest.FixtureRequest, tmp_path: Path
 ) -> None:
     root = tmp_path / "private"
     root.mkdir()
     links: list[Path] = []
-    for index in range(5):
+    for index in reversed(range(5)):
         link = root / f"link{index}"
         link.symlink_to(tmp_path / "missing-target")
         links.append(link)
+    links.sort()
     cap = _Captured(request.addfinalizer)
 
     assert private_storage.converge_private_tree(root, euid=os.geteuid()) == root
@@ -394,9 +446,9 @@ def test_summary_caps_examples_and_counts_every_skip(
     assert message == _format_summary(kwargs)
     assert kwargs["n"] == 5
     assert kwargs["symlinks"] == 5
-    examples = str(kwargs["examples"])
-    assert examples.endswith("…")
-    assert sum(str(link) in examples for link in links) == 3
+    assert kwargs["examples"] == (
+        f"{links[0]} (symlink); {links[1]} (symlink); {links[2]} (symlink); …"
+    )
 
 
 def test_scan_non_regular_nodes_matches_what_converge_skips(

@@ -26,6 +26,7 @@ from cli.commands.converge.tests.external_skills import (
 )
 from cli.commands.extensions import external_skills as bridge
 from cli.commands.extensions.external_skill_host import filesystem as bridge_fs
+from cli.commands.extensions.external_skill_host.ledger import load_retained_items
 from cli.commands.extensions.external_skill_host.records import Claim, CleanupItem, Ledger
 from cli.commands.extensions.tests.support import killed_converge as killed
 from cli.database import OperatorDatabaseFactory
@@ -89,11 +90,17 @@ def _target(client: Path) -> Path:
     return client / "skills" / SKILL
 
 
+def _ledger_path(context: ConvergeCtx) -> Path:
+    return context.meiva_home / "configs" / "external-agent-skills" / "codex.json"
+
+
 def _ledger(context: ConvergeCtx) -> dict[str, Any]:
-    value: object = json.loads(
-        (context.meiva_home / "configs" / "external-agent-skills" / "codex.json").read_text()
-    )
+    value: object = json.loads(_ledger_path(context).read_text())
     return cast(dict[str, Any], value)
+
+
+def _retained(context: ConvergeCtx) -> list[CleanupItem]:
+    return load_retained_items(_ledger_path(context))
 
 
 def _residues(client: Path) -> list[Path]:
@@ -271,7 +278,8 @@ def test_cleanup_root_claim_restores_tree_modified_before_private_isolation(
 
     assert _residues(client) == []
     assert _ledger(context)["garbage"] == []
-    assert len(_ledger(context)["retained"]) == 1
+    assert _ledger(context)["retained"] == []
+    assert len(_retained(context)) == 1
 
 
 # meiva:note
@@ -300,7 +308,8 @@ def test_restart_reconciles_cleanup_claim_before_post_write(
 
     assert (_target(client) / "SKILL.md").read_text() == "operator v2\n"
     assert _ledger(context)["garbage"] == []
-    assert len(_ledger(context)["retained"]) == 1
+    assert _ledger(context)["retained"] == []
+    assert len(_retained(context)) == 1
     assert _residues(client) == []
 
 
@@ -363,8 +372,10 @@ def test_restart_does_not_adopt_ambiguous_per_file_claim(
 
     ledger = _ledger(context)
     assert ledger["garbage"] == []
-    assert len(ledger["retained"]) == 1
-    assert all(claim["state"] == "retained" for claim in ledger["retained"][0]["file_claims"])
+    assert ledger["retained"] == []
+    retained = _retained(context)
+    assert len(retained) == 1
+    assert all(claim["state"] == "retained" for claim in retained[0]["file_claims"])
     assert (_target(client) / "SKILL.md").read_text() == "operator v2\n"
 
 
@@ -394,7 +405,8 @@ def test_preexisting_per_file_quarantine_is_preserved_without_adoption(
     _converge(context, host_home=client.parent)
 
     assert collision.read_text() == "late user path\n"
-    retained = _ledger(context)["retained"]
+    assert _ledger(context)["retained"] == []
+    retained = _retained(context)
     assert len(retained) == 1
     assert _claim_of(retained[0], "SKILL.md")["state"] == "retained"
     assert (collision.parent / "SKILL.md").read_text() == "operator v1\n"
@@ -429,7 +441,8 @@ def test_per_file_claim_failure_is_terminal_after_private_root_claim(
 
     ledger = _ledger(context)
     assert ledger["garbage"] == []
-    (retained,) = ledger["retained"]
+    assert ledger["retained"] == []
+    (retained,) = _retained(context)
     assert {claim["path"]: claim["state"] for claim in retained["file_claims"]} == {
         ".meiva-managed.json": "retained",
         "SKILL.md": "retained",
@@ -513,8 +526,10 @@ def test_converge_terminally_records_post_verification_replacement(
     assert stat.S_IMODE(outside.stat().st_mode) == stat.S_IMODE(outside_before.st_mode)
     ledger = _ledger(context)
     assert ledger["garbage"] == []
-    assert len(ledger["retained"]) == 1
-    assert all(claim["state"] == "retained" for claim in ledger["retained"][0]["file_claims"])
+    assert ledger["retained"] == []
+    retained = _retained(context)
+    assert len(retained) == 1
+    assert all(claim["state"] == "retained" for claim in retained[0]["file_claims"])
 
     _converge(context, host_home=client.parent)
 
@@ -680,8 +695,10 @@ def test_cleanup_retains_private_residue_without_path_unlink(
     ledger = json.loads((ledger_root / "codex.json").read_text())
     assert ledger["transaction"] is None
     assert ledger["garbage"] == []
-    assert [item["kind"] for item in ledger["retained"]] == ["previous"]
-    assert ledger["retained"][0]["location"] == "retained"
+    assert ledger["retained"] == []
+    archived = load_retained_items(ledger_root / "codex.json")
+    assert [item["kind"] for item in archived] == ["previous"]
+    assert archived[0]["location"] == "retained"
     (retained,) = ledger_root.glob(".codex-retained-previous-*")
     old_copies = [
         p for p in retained.rglob("*") if p.is_file() and p.read_text() == "operator v1\n"

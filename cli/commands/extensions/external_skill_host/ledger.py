@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
 from pathlib import Path
 from typing import TypeGuard
 
@@ -13,10 +15,16 @@ from cli.boundary.json_text import loads
 from cli.commands.extensions.external_skill_host.filesystem import (
     ClientConflictError,
     exists,
+    lstat,
     manifest_digest,
     read_regular,
 )
-from cli.commands.extensions.external_skill_host.records import FileEntry, Ledger, ManifestEntry
+from cli.commands.extensions.external_skill_host.records import (
+    CleanupItem,
+    FileEntry,
+    Ledger,
+    ManifestEntry,
+)
 
 FORMAT = 6
 _MARKER_NAME = ".meiva-managed.json"
@@ -24,6 +32,7 @@ SKILL_NAME = "operating-meiva-cluster"
 _HEX = re.compile(r"^[0-9a-f]{64}$")
 _ID = re.compile(r"^[0-9a-f]{32}$")
 _LEDGER: TypeAdapter[Ledger] = TypeAdapter(Ledger)
+_CLEANUP_ITEM: TypeAdapter[CleanupItem] = TypeAdapter(CleanupItem)
 
 
 def ownership_marker(
@@ -279,3 +288,51 @@ def load_ledger(path: Path, client_key: str) -> Ledger | None:
 
 def write_ledger(path: Path, ledger: Ledger) -> None:
     write_private_bytes(path, (json.dumps(ledger, indent=2, sort_keys=True) + "\n").encode())
+
+
+# meiva:note
+# Retired cleanup records are archived as per-generation sidecar files under a private
+# sibling directory so the active `<client>-<skill>.json` ledger stays bounded in size
+# across arbitrarily many releases while remaining format-6 compatible.
+def retained_dir_path(ledger_path: Path) -> Path:
+    return ledger_path.parent / f".{ledger_path.stem}-retained"
+
+
+def retained_record_path(ledger_path: Path, kind: str, generation_id: str) -> Path:
+    return retained_dir_path(ledger_path) / f"{kind}-{generation_id}.json"
+
+
+def write_retained_item(ledger_path: Path, item: CleanupItem) -> Path:
+    directory = retained_dir_path(ledger_path)
+    if exists(directory) and not stat.S_ISDIR(lstat(directory).st_mode):
+        raise ClientConflictError("retained ownership record directory is not a directory")
+    record_path = retained_record_path(ledger_path, item["kind"], item["path_generation_id"])
+    payload = (json.dumps(item, indent=2, sort_keys=True) + "\n").encode()
+    try:
+        write_private_bytes(record_path, payload)
+    except RuntimeError as exc:
+        raise ClientConflictError("retained ownership record path is invalid") from exc
+    return record_path
+
+
+def load_retained_items(ledger_path: Path) -> list[CleanupItem]:
+    directory = retained_dir_path(ledger_path)
+    if not exists(directory):
+        return []
+    if not stat.S_ISDIR(lstat(directory).st_mode):
+        raise ClientConflictError("retained ownership record directory is not a directory")
+    try:
+        with os.scandir(directory) as entries:
+            children = sorted(
+                (Path(entry.path) for entry in entries if entry.name.endswith(".json")),
+                key=lambda item: item.name,
+            )
+    except OSError as exc:
+        raise ClientConflictError("retained ownership records cannot be enumerated") from exc
+    retained: list[CleanupItem] = []
+    for child in children:
+        record = parse_record(child)
+        if record is None or not _valid_cleanup_item(record, retained=True):
+            raise ClientConflictError("Meiva ownership ledger is invalid")
+        retained.append(_CLEANUP_ITEM.validate_python(record))
+    return retained

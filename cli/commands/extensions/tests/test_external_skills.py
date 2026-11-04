@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import os
 import random
@@ -13,12 +14,15 @@ import pytest
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
+from base.host.private_storage import write_private_bytes
 from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge import spec as converge_host
 from cli.commands.extensions import external_skills as external_skills_module
 from cli.commands.extensions.external_skill_host import filesystem as filesystem_module
+from cli.commands.extensions.external_skill_host.ledger import load_ledger, load_retained_items
+from cli.commands.extensions.external_skill_host.records import CleanupItem
 from cli.commands.extensions.tests.support import killed_converge as killed
 from cli.commands.extensions.tests.support.source_bindings import PROD_ELSEWHERE
 from cli.database import OperatorDatabaseFactory
@@ -683,3 +687,91 @@ def test_client_homes_are_found_under_the_sessions_user_home(
     _converge(replace(ctx, session=session))
 
     assert _target(home / ".codex").is_dir()
+
+
+def _seed_legacy_inline_retained(ledger_path: Path, count: int) -> None:
+    (seed_item,) = load_retained_items(ledger_path)
+    legacy_ledger = load_ledger(ledger_path, "codex")
+    assert legacy_ledger is not None
+    legacy_retained: list[CleanupItem] = []
+    for index in range(1, count):
+        retired = copy.deepcopy(seed_item)
+        retired["path_generation_id"] = f"{index:032x}"
+        legacy_retained.append(retired)
+    legacy_ledger["retained"] = legacy_retained
+    write_private_bytes(
+        ledger_path, (json.dumps(legacy_ledger, indent=2, sort_keys=True) + "\n").encode()
+    )
+
+
+# meiva:note
+# Live format-6 ledgers that accumulated inline `retained` entries before sidecar compaction
+# load without conflict, archive every retired entry to its per-generation sidecar, and update
+# a 120-file skill in a small bounded number of ledger writes instead of per-file fsyncs.
+def test_large_skill_with_twenty_retained_generations_compacts_and_batches_ledger_writes(
+    home: Path,
+    tmp_path: Path,
+    operator_database: OperatorDatabaseFactory,
+    operator_pipeline: Callable[[], EventPipeline],
+    *,
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
+) -> None:
+    repo = tmp_path / "repo"
+    source = _write_source(repo)
+    for index in range(118):
+        (source / "references" / f"doc_{index:03d}.md").write_text(f"reference {index}\n")
+    (home / ".codex").mkdir()
+    ctx = _ctx(
+        repo,
+        home,
+        operator_database=operator_database,
+        producer=operator_pipeline,
+        command_config_machine=command_config_machine,
+    )
+    _converge(ctx, host_home=home)
+    (source / "SKILL.md").write_text("operator v2\n")
+    _converge(ctx, host_home=home)
+
+    ledger_path = ctx.meiva_home / "configs" / "external-agent-skills" / "codex.json"
+    _seed_legacy_inline_retained(ledger_path, 20)
+    assert ledger_path.stat().st_size > 700_000
+
+    _converge(ctx, host_home=home)
+    compacted_ledger = load_ledger(ledger_path, "codex")
+    assert compacted_ledger is not None
+    assert compacted_ledger["retained"] == []
+    assert len(load_retained_items(ledger_path)) == 20
+    assert ledger_path.stat().st_size < 40_000
+
+    (source / "SKILL.md").write_text("operator v3\n")
+    observed_payloads: set[bytes] = set()
+    per_file_inodes: set[int] = set()
+    per_file_renames = 0
+
+    def record_materialize(snapshot: filesystem_module.SourceSnapshot, destination: Path) -> None:
+        observed_payloads.add(ledger_path.read_bytes())
+        external_skills_module.materialize_source_snapshot(snapshot, destination)
+
+    def record_rename(src: Path, dst: Path) -> None:
+        nonlocal per_file_renames
+        observed_payloads.add(ledger_path.read_bytes())
+        if ".meiva-retained-" in dst.name and src.parent == dst.parent:
+            per_file_renames += 1
+            per_file_inodes.add(ledger_path.lstat().st_ino)
+        external_skills_module.rename_no_replace(src, dst)
+
+    external_skills_module.converge_external_agent_skill(
+        ctx,
+        host_home=home,
+        skill_names=(SKILL_NAME,),
+        materialize=record_materialize,
+        rename=record_rename,
+    )
+    observed_payloads.add(ledger_path.read_bytes())
+
+    assert per_file_renames == 121
+    assert len(per_file_inodes) == 1
+    assert len(observed_payloads) <= 8
+    assert ledger_path.stat().st_size < 40_000
+    assert len(load_retained_items(ledger_path)) == 21
+    assert (_target(home / ".codex") / "SKILL.md").read_text() == "operator v3\n"
