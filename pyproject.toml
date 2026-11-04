@@ -791,6 +791,9 @@ root = "gateway/tests"
 root = "meiva/mcps/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_code/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/plugins/meiva_syntax_fix/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -1220,6 +1223,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/plugins/lm_zhipu"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_code"
 reportAny = "error"
 reportExplicitAny = "error"
 

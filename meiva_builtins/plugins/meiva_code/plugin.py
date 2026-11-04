@@ -42,7 +42,7 @@ outside an exec turn.
 from __future__ import annotations
 
 import hashlib
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
 __description__ = "Meiva Code conventions — maintains cwd and auto-injects project AGENTS.md / CLAUDE.md (walking up from meiva.files.read paths)"
 
@@ -259,7 +259,7 @@ def _wrapped_read(
     # 5. Commit state. injected_paths has no reducer, so it follows
     # last-value semantics — the wrap is the sole writer, so just pass the
     # full new set.
-    update_dict: dict[str, Any] = {}
+    update_dict: dict[str, object] = {}
     if injected != current.injected_paths:
         update_dict["injected_paths"] = injected
     if hashes != current.injected_hashes:
