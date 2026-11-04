@@ -228,3 +228,123 @@ async def test_down_over_the_control_socket_succeeds_for_a_unit_closing_past_ten
     finally:
         await owner.shutdown()
         await server.close()
+
+
+@pytest.mark.parametrize("mode", ["down", "shutdown"])
+async def test_stop_tiers_drain_strictly_in_order_across_down_and_shutdown(
+    tmp_path: Path, mode: str
+) -> None:
+    events = tmp_path / "events.log"
+    specs = [
+        ("browser", 2, 0.05),
+        ("worker-a", 1, 0.1),
+        ("agent-host", 0, 0.15),
+        ("worker-b", 1, 0.1),
+    ]
+    manifests = [
+        UnitManifest(
+            name,
+            (
+                sys.executable,
+                "-u",
+                str(_CHILD),
+                "closes_recording",
+                str(tmp_path / f"ready-{name}"),
+                str(events),
+                name,
+                str(delay_s),
+            ),
+            RestartPolicy.ALWAYS,
+            "root",
+            stop_timeout_s=5.0,
+            stop_tier=tier,
+        )
+        for name, tier, delay_s in specs
+    ]
+    owner = Supervisor(
+        UnitRegistry(manifests),
+        environ=dict(os.environ),
+        run_dir=tmp_path / "run",
+        clock=system_clock(),
+        root_pid=os.getpid(),
+    )
+    await owner.start()
+    for name, _, _ in specs:
+        await wait_file(tmp_path / f"ready-{name}")
+    try:
+        if mode == "down":
+            result = await owner.down("root")
+            units = cast("list[dict[str, object]]", result["units"])
+            assert [row["id"] for row in units] == ["agent-host", "worker-a", "worker-b", "browser"]
+            assert all(row["action"] == "stopped" for row in units)
+        else:
+            await owner.shutdown()
+        recorded = events.read_text(encoding="utf-8").splitlines()
+        assert recorded[:2] == ["term agent-host", "exit agent-host"]
+        assert set(recorded[2:6]) == {
+            "term worker-a",
+            "exit worker-a",
+            "term worker-b",
+            "exit worker-b",
+        }
+        assert recorded[6:] == ["term browser", "exit browser"]
+    finally:
+        await owner.shutdown()
+
+
+@pytest.mark.parametrize("mode", ["down_root", "concurrent_down", "shutdown"])
+async def test_same_tier_slow_units_stop_in_parallel_preserving_result_order(
+    tmp_path: Path, mode: str
+) -> None:
+    events = tmp_path / "events.log"
+    names = ("alpha", "beta", "gamma")
+    manifests = [
+        UnitManifest(
+            name,
+            (
+                sys.executable,
+                "-u",
+                str(_CHILD),
+                "closes_recording",
+                str(tmp_path / f"ready-{name}"),
+                str(events),
+                name,
+                "0.3",
+            ),
+            RestartPolicy.ALWAYS,
+            "root",
+            stop_timeout_s=5.0,
+            stop_tier=1,
+        )
+        for name in names
+    ]
+    owner = Supervisor(
+        UnitRegistry(manifests),
+        environ=dict(os.environ),
+        run_dir=tmp_path / "run",
+        clock=system_clock(),
+        root_pid=os.getpid(),
+    )
+    await owner.start()
+    for name in names:
+        await wait_file(tmp_path / f"ready-{name}")
+    try:
+        if mode == "down_root":
+            result = await asyncio.wait_for(owner.down("root"), timeout=0.55)
+            units = cast("list[dict[str, object]]", result["units"])
+            assert [row["id"] for row in units] == list(names)
+            assert all(row["action"] == "stopped" for row in units)
+        elif mode == "concurrent_down":
+            results = await asyncio.wait_for(
+                asyncio.gather(*(owner.down(name) for name in names)), timeout=0.55
+            )
+            assert [cast("list[dict[str, object]]", r["units"])[0]["id"] for r in results] == list(
+                names
+            )
+        else:
+            await asyncio.wait_for(owner.shutdown(), timeout=0.55)
+        recorded = events.read_text(encoding="utf-8").splitlines()
+        assert set(recorded[:3]) == {f"term {name}" for name in names}
+        assert set(recorded[3:]) == {f"exit {name}" for name in names}
+    finally:
+        await owner.shutdown()

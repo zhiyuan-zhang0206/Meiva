@@ -9,7 +9,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping, Sequence
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import psutil
@@ -42,7 +43,12 @@ from services.supervision.meiva_root.intent_store import (
     merge_record_for_boot,
 )
 from services.supervision.meiva_root.left_behind import LeftBehindMixin
-from services.supervision.meiva_root.manifest import RestartPolicy, UnitRegistry, UnknownUnitError
+from services.supervision.meiva_root.manifest import (
+    ROOT_ID,
+    RestartPolicy,
+    UnitRegistry,
+    UnknownUnitError,
+)
 from services.supervision.meiva_root.stopping import (
     StoppingMixin,
     SupervisorConfig,
@@ -67,14 +73,11 @@ type ChildSpawn = Callable[..., Awaitable[asyncio.subprocess.Process]]
 type ArgvTransform = Callable[[str, Sequence[str]], Sequence[str]]
 
 
+# meiva:note
+# Owns the lifecycle of every unit in one registry. Whole-tree transitions and overlapping
+# mutations on the same attach subtree serialize while disjoint subtrees stop or start
+# concurrently; `status` is lock-free (one event-loop turn reads a consistent snapshot).
 class Supervisor(LeftBehindMixin, StoppingMixin):
-    """Owns the lifecycle of every unit in one registry.
-
-    All mutating verbs serialize on one lock, so overlapping commands are
-    ordered instead of racing; `status` is lock-free (a single event-loop turn
-    reads a consistent snapshot).
-    """
-
     def __init__(
         self,
         registry: UnitRegistry,
@@ -110,7 +113,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         self._units: dict[str, UnitRuntime] = {
             manifest.id: UnitRuntime(manifest=manifest) for manifest in registry.units
         }
-        self._lock = asyncio.Lock()
+        self._init_locks(registry.children_of(ROOT_ID))
         self._started_at: float | None = None
         self._running = False
         self._closed = False
@@ -124,12 +127,21 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
     def _now(self) -> float:
         return self._clock.now().timestamp()
 
+    @asynccontextmanager
+    async def _lock_subtree(self, unit_id: str) -> AsyncGenerator[None]:
+        if unit_id == ROOT_ID:
+            async with self._lock_tree():
+                yield
+            return
+        async with self._lock_top(self._registry.top_of(unit_id)):
+            yield
+
     # ── lifecycle ────────────────────────────────────────────────────────────
 
     async def start(self) -> None:
         """Start selected units, preserving recorded operator intent and failures."""
         self._log_dir.mkdir(parents=True, exist_ok=True)
-        async with self._lock:
+        async with self._lock_tree():
             self._require_admission()
             self._running = True
             self._started_at = self._clock.monotonic()
@@ -169,21 +181,21 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         if failures:
             raise BaseExceptionGroup("root shutdown failed", failures)
 
+    # meiva:note
+    # Close birth admission and attempt every child's declared stop window wave by wave.
     async def _stop_units(self) -> list[Exception]:
-        """Close birth admission and attempt every child's declared stop window."""
         refusals: list[Exception] = []
-        async with self._lock:
+        async with self._lock_tree():
             self._closed = True
             self._running = False
-            for unit_id in self._registry.all_stop_order():
-                runtime = self._units[unit_id]
-                self._set_intent(
-                    runtime, UnitIntent.STOPPED, IntentSource.SELF, caller=runtime.intent_caller
-                )
-                try:
-                    await self._stop_unit(runtime, escalate=False)
-                except Exception as exc:
-                    refusals.append(exc)
+            for wave in self._registry.all_stop_waves():
+                runtimes = [self._units[unit_id] for unit_id in wave]
+                for runtime in runtimes:
+                    self._set_intent(
+                        runtime, UnitIntent.STOPPED, IntentSource.SELF, caller=runtime.intent_caller
+                    )
+                errors = await self._stop_wave(runtimes, escalate=False)
+                refusals.extend(err for err in errors if err is not None)
         return refusals
 
     def _clear_completed_watches(self) -> None:
@@ -220,7 +232,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
 
     async def up(self, unit_id: str, *, caller: CallerFacts | None = None) -> dict[str, object]:
         """Ensure a unit and its subtree are running; idempotent per unit."""
-        async with self._lock:
+        async with self._lock_subtree(unit_id):
             return await self._up_locked(unit_id, caller=caller)
 
     async def _up_locked(
@@ -239,24 +251,34 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
             results.append(self._unit_result(runtime, action))
         return {"verb": Verb.UP.value, "units": results}
 
+    # meiva:note
+    # Stop a unit and its subtree (or `ROOT_ID` for the whole tree) wave by wave.
     async def down(
         self, unit_id: str, *, force: bool = False, caller: CallerFacts | None = None
     ) -> dict[str, object]:
-        """Stop a unit and its subtree, children before parents."""
-        async with self._lock:
+        async with self._lock_subtree(unit_id):
             return await self._down_locked(unit_id, force=force, caller=caller)
 
     async def _down_locked(
         self, unit_id: str, *, force: bool = False, caller: CallerFacts | None = None
     ) -> dict[str, object]:
         results: list[dict[str, object]] = []
-        for member in self._registry.stop_order(unit_id):
-            runtime = self._units[member]
-            self._set_intent(runtime, UnitIntent.STOPPED, IntentSource.OPERATOR, caller=caller)
-            was_active = self._is_active(runtime)
-            await self._stop_unit(runtime, force=force)
-            action = "stopped" if was_active else "already-stopped"
-            results.append(self._unit_result(runtime, action))
+        for wave in self._registry.stop_waves(unit_id):
+            runtimes = [self._units[member] for member in wave]
+            active = [self._is_active(runtime) for runtime in runtimes]
+            for runtime in runtimes:
+                self._set_intent(runtime, UnitIntent.STOPPED, IntentSource.OPERATOR, caller=caller)
+            errors = [
+                err for err in await self._stop_wave(runtimes, force=force) if err is not None
+            ]
+            if len(errors) == 1:
+                raise errors[0]
+            if errors:
+                raise ExceptionGroup(f"root down refused to stop {len(errors)} unit(s)", errors)
+            for runtime, was_active in zip(runtimes, active, strict=True):
+                results.append(
+                    self._unit_result(runtime, "stopped" if was_active else "already-stopped")
+                )
         return {"verb": Verb.DOWN.value, "units": results}
 
     async def restart(
@@ -274,7 +296,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         together afterwards. Spawn acceptance is not readiness; callers must
         observe the new generation.
         """
-        async with self._lock:
+        async with self._lock_subtree(unit_id):
             self._require_admission()
             members = self._registry.subtree(unit_id)
             for member in members:
@@ -285,14 +307,13 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
                     )
             refusals: list[Exception] = []
             refused: set[str] = set()
-            for member in self._registry.stop_order(unit_id):
-                runtime = self._units[member]
-                try:
-                    await self._stop_unit(runtime)
-                except Exception as exc:
-                    refused.add(member)
-                    refusals.append(exc)
-                    self._record_restart_failure(runtime, RestartStage.DOWN, str(exc))
+            for wave in self._registry.stop_waves(unit_id):
+                runtimes = [self._units[member] for member in wave]
+                for runtime, err in zip(runtimes, await self._stop_wave(runtimes), strict=True):
+                    if err is not None:
+                        refused.add(runtime.manifest.id)
+                        refusals.append(err)
+                        self._record_restart_failure(runtime, RestartStage.DOWN, str(err))
             results: list[dict[str, object]] = []
             for member in members:
                 runtime = self._units[member]
@@ -330,6 +351,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
             entry: dict[str, object] = {
                 "id": runtime.manifest.id,
                 "attach": runtime.manifest.attach,
+                "stop_tier": runtime.manifest.stop_tier,
                 "exec": list(runtime.manifest.exec),
                 "manifest_digest": runtime.manifest.digest(),
                 "restart": runtime.manifest.restart.value,
@@ -754,36 +776,9 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         if outcome.warning is not None:
             _log.warning("%s", outcome.warning)
 
-    @staticmethod
-    def _is_active(runtime: UnitRuntime) -> bool:
-        """True when the unit has a live generation process."""
-        generation = runtime.generation
-        return generation is not None and generation.proc.returncode is None
-
     def _require_admission(self) -> None:
         if self._closed:
             raise RuntimeError("root supervisor admission closed")
-
-    @staticmethod
-    def _pid(runtime: UnitRuntime) -> int | None:
-        """The live generation's pid, or None when nothing is running."""
-        generation = runtime.generation
-        if generation is None or generation.proc.returncode is not None:
-            return None
-        return generation.proc.pid
-
-    @staticmethod
-    def _unit_result(runtime: UnitRuntime, action: str) -> dict[str, object]:
-        """One per-unit entry for a control-verb response."""
-        result: dict[str, object] = {
-            "id": runtime.manifest.id,
-            "action": action,
-            "state": runtime.state.value,
-            "pid": Supervisor._pid(runtime),
-        }
-        if runtime.last_error is not None:
-            result["error"] = runtime.last_error
-        return result
 
 
 def _describe_exit(returncode: int) -> str:

@@ -16,7 +16,7 @@ import json
 import signal
 import subprocess
 import sys
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import NamedTuple, assert_never
 
@@ -62,9 +62,7 @@ from cli.commands.lifecycle.root_control.poll_plan import (
 from cli.commands.lifecycle.root_control.reconcile_plan import (
     LeaveTree,
     StopUnits,
-    changed_inputs,
     classify_launch,
-    generation_refusal,
     plan_resume,
     plan_tree_stop,
 )
@@ -74,7 +72,13 @@ from cli.commands.lifecycle.root_control.snapshot import (
     parse_snapshot,
     root_units,
 )
-from cli.commands.lifecycle.root_units import unit_digests
+from cli.commands.lifecycle.root_units import (
+    manifest_generation_refusal,
+    run_stop_waves,
+)
+from cli.commands.lifecycle.root_units import (
+    unit_digests as unit_digests,
+)
 from cli.database.lifecycle_audit import record_lifecycle_request
 from cli.start_runtime import StartRuntime
 from services.desktop.permissions_helper.launchd_job import BoundedRunner, LaunchdFacts
@@ -523,12 +527,8 @@ def _launch_outcome(roster: tuple[ServiceSpec, ...], snapshot: RootSnapshot) -> 
 def require_same_generation(
     manifest: Mapping[str, object], snapshot: RootSnapshot, *, reconcile: bool
 ) -> None:
-    digest = manifest["launch_digest"]
-    if not isinstance(digest, str):
-        raise TypeError("the launch manifest carries no launch digest")
-    changed = changed_inputs(unit_digests(manifest), digest, snapshot, reconcile=reconcile)
-    if changed:
-        raise RootDriverError(generation_refusal(changed))
+    if refusal := manifest_generation_refusal(manifest, snapshot, reconcile=reconcile):
+        raise RootDriverError(refusal)
 
 
 def admit_live_start(
@@ -716,31 +716,33 @@ def stop_dormant_helper_root(
 
 
 # meiva:note
-# Units go down one at a time in root's declaration order, the order root's own
-# whole-tree stop uses, so the agent-host the manifest declares first is stopped first.
-# Root answers `down` only once the unit has exited (or been killed at the end of its
-# TERM window), so nothing else is stopped while the agent-host drains. Each call dials a
-# client bounded by the time left of the shared deadline.
+# Stop waves run in dependency order: tier-0 (`agent-host`) drains first, same-wave units stop
+# concurrently, and each `down` call takes the time left of the shared deadline.
 # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
 def down_units(
     unit_ids: Iterable[str],
     *,
+    waves: Iterable[Sequence[str]] | None = None,
     deadline: Deadline,
     force: bool,
     home: Path,
     environ: Mapping[str, str],
     pid: int,
 ) -> None:
-    for unit_id in unit_ids:
+    def stop_one(unit_id: str) -> str:
         remaining_s = deadline.left()
         if remaining_s is None:
             raise RootDriverError("service stop deadline expired; custody retained")
         client = root_client(home, environ=environ, pid=pid, timeout=remaining_s)
-        response = client.force_down(unit_id) if force else client.down(unit_id)
-        _call_ok(response, f"down {unit_id}")
-        print(f"  ✓ meiva-root unit {session_name(unit_id)} stopped")
+        _call_ok(client.force_down(unit_id) if force else client.down(unit_id), f"down {unit_id}")
+        return session_name(unit_id)
+
+    run_stop_waves(((unit_id,) for unit_id in unit_ids) if waves is None else waves, stop_one)
 
 
+# meiva:note
+# `preserve` holds bare service names (restart's browser, `--keep-service`): stopping every
+# unit also stops root itself, while keeping at least one unit leaves root running to host it.
 def stop_root_service_tree(
     *,
     preserve: frozenset[str],
@@ -754,13 +756,6 @@ def stop_root_service_tree(
     environ: Mapping[str, str],
     pid: int,
 ) -> None:
-    """Stop the root-owned tree — everything, or only the units not preserved.
-
-    `preserve` holds bare service names (restart's browser, `--keep-service`).
-    Stopping every unit also stops the root itself; keeping at least one unit
-    leaves the root running to host it. Raises `RootDriverError` when the
-    tree cannot be brought down; the caller's phase accounting reports it.
-    """
     deadline = Deadline.after(timers, timeout_s)
     client = root_client(home, environ=environ, pid=pid, timeout=timeout_s)
     snapshot = root_status(client)
@@ -776,10 +771,16 @@ def stop_root_service_tree(
     match tree_stop:
         case LeaveTree():
             print("  meiva-root: every unit is preserved — tree left running")
-        case StopUnits(unit_ids, stop_root):
+        case StopUnits(unit_ids=unit_ids, stop_root=stop_root):
             record_lifecycle_request("force-down" if force else "down", unit_ids)
             down_units(
-                unit_ids, deadline=deadline, force=force, home=home, environ=environ, pid=pid
+                unit_ids,
+                waves=tree_stop.stop_waves,
+                deadline=deadline,
+                force=force,
+                home=home,
+                environ=environ,
+                pid=pid,
             )
             if stop_root:
                 print(

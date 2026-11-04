@@ -424,7 +424,8 @@ def test_stopping_the_daemon_drops_in_flight_tab_groupings(
             in_flight = [t for t in asyncio.all_tasks() if t.get_name() == "tab-group-agent-7"]
             assert len(in_flight) == 1 and not in_flight[0].done()
             stop.set()
-            await asyncio.wait_for(task, timeout=20)
+            await asyncio.wait_for(task, timeout=5)
+            assert await asyncio.wait_for(reader.read(), timeout=5) == b""
             assert in_flight[0].cancelled()
             writer.close()
 

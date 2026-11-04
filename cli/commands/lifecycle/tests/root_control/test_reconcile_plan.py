@@ -176,3 +176,54 @@ def test_preserving_a_unit_the_root_does_not_run_does_not_keep_the_root() -> Non
 
 def test_a_root_hosting_no_unit_is_stopped_too() -> None:
     assert plan_tree_stop([], frozenset()) == StopUnits((), stop_root=True)
+
+
+def test_tiered_snapshot_plans_parallel_stop_waves_preserving_tier_and_attach_order() -> None:
+    from cli.commands.lifecycle.root_control.snapshot import root_units
+
+    snapshot = snapshot_of(
+        UnitRow("agent-host", attach="root", stop_tier=0),
+        UnitRow("browser", attach="root", stop_tier=2),
+        UnitRow("gateway", attach="root", stop_tier=1),
+        UnitRow("gateway-child", attach="gateway", stop_tier=1),
+        UnitRow("browser-mcp", attach="root", stop_tier=1),
+        UnitRow("pty-sessions", attach="root", stop_tier=1),
+        UnitRow("otel-collector", attach="root", stop_tier=3),
+        UnitRow("loki", attach="root", stop_tier=4),
+        UnitRow("tempo", attach="root", stop_tier=4),
+    )
+
+    plan = plan_tree_stop(root_units(snapshot), frozenset({"pty-sessions"}))
+
+    assert plan == StopUnits(
+        (
+            "agent-host",
+            "gateway-child",
+            "gateway",
+            "browser-mcp",
+            "browser",
+            "otel-collector",
+            "loki",
+            "tempo",
+        ),
+        stop_root=False,
+        waves=(
+            ("agent-host",),
+            ("gateway-child",),
+            ("gateway", "browser-mcp"),
+            ("browser",),
+            ("otel-collector",),
+            ("loki", "tempo"),
+        ),
+    )
+
+
+def test_snapshot_without_stop_tier_falls_back_to_single_unit_waves() -> None:
+    from cli.commands.lifecycle.root_control.snapshot import root_units
+
+    snapshot = snapshot_of(UnitRow("agent-host"), UnitRow("gateway"), UnitRow("ops"))
+    plan = plan_tree_stop(root_units(snapshot), frozenset())
+
+    assert isinstance(plan, StopUnits)
+    assert plan.waves is None
+    assert plan.stop_waves == (("agent-host",), ("gateway",), ("ops",))

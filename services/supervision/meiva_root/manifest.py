@@ -37,7 +37,7 @@ _UNIT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*\Z")
 # validators reject anything else, so field drift fails loudly instead of
 # being carried around silently.
 _REQUIRED_FIELDS = frozenset({"id", "exec", "restart"})
-_MANIFEST_FIELDS = _REQUIRED_FIELDS | {"attach", "env", "inputs", "stop_timeout_s"}
+_MANIFEST_FIELDS = _REQUIRED_FIELDS | {"attach", "env", "inputs", "stop_timeout_s", "stop_tier"}
 _FILE_FIELDS = frozenset({"units", "launch_digest"})
 
 
@@ -72,6 +72,9 @@ class UnitManifest:
 
     A unit whose own SIGTERM cleanup can outlast root's default declares it here,
     so root never gives up on a unit that is still closing inside its own bound."""
+    # meiva:note
+    # Nonnegative stop-wave tier among siblings at the same attach level (0 stops first).
+    stop_tier: int = 1
 
     def digest(self) -> str:
         """Bind executable and private environment without exposing credentials."""
@@ -84,6 +87,7 @@ class UnitManifest:
                 "env": self.env,
                 "inputs": [item.as_mapping() for item in self.inputs],
                 "stop_timeout_s": self.stop_timeout_s,
+                "stop_tier": self.stop_tier,
             },
             separators=(",", ":"),
             sort_keys=True,
@@ -139,6 +143,7 @@ class UnitManifest:
             env=_parse_environment(raw.get("env", {}), origin),
             inputs=inputs,
             stop_timeout_s=_parse_stop_timeout(raw.get("stop_timeout_s"), origin),
+            stop_tier=_parse_stop_tier(raw.get("stop_tier"), origin),
         )
 
 
@@ -169,6 +174,14 @@ def _parse_stop_timeout(raw: object, origin: str, field: str = "stop_timeout_s")
             f"({ROOT_HEALTH_INTERVAL_S:g}s) — a replacement stop runs inside a health round"
         )
     return float(raw)
+
+
+def _parse_stop_tier(raw: object, origin: str) -> int:
+    if raw is None:
+        return 1
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
+        raise ManifestError(f"{origin}: stop_tier must be a nonnegative integer")
+    return raw
 
 
 def _parse_environment(raw: object, origin: str) -> tuple[tuple[str, str], ...]:
@@ -255,6 +268,12 @@ class UnitRegistry:
             self.get(unit_id)
         return self._children.get(unit_id, ())
 
+    def top_of(self, unit_id: str) -> str:
+        manifest = self.get(unit_id)
+        while manifest.attach != ROOT_ID:
+            manifest = self._manifests[manifest.attach]
+        return manifest.id
+
     def subtree(self, unit_id: str) -> tuple[str, ...]:
         """`unit_id` and all attach descendants, parents before children."""
         self.get(unit_id)
@@ -266,19 +285,50 @@ class UnitRegistry:
             stack.extend(reversed(self._children.get(current, ())))
         return tuple(out)
 
-    def stop_order(self, unit_id: str) -> tuple[str, ...]:
-        """`unit_id`'s subtree, children before parents (reverse of startup)."""
-        return tuple(reversed(self.subtree(unit_id)))
+    def _children_waves(self, parent_id: str) -> list[tuple[str, ...]]:
+        kids = self._children.get(parent_id, ())
+        if not kids:
+            return []
+        by_tier: dict[int, list[str]] = {}
+        for kid in kids:
+            by_tier.setdefault(self._manifests[kid].stop_tier, []).append(kid)
+        waves: list[tuple[str, ...]] = []
+        for tier in sorted(by_tier):
+            subtrees = [self._unit_waves(kid) for kid in by_tier[tier]]
+            depth = max(len(sub) for sub in subtrees)
+            padded = [[()] * (depth - len(sub)) + sub for sub in subtrees]
+            for level in range(depth):
+                merged = tuple(unit for sub in padded for unit in sub[level])
+                if merged:
+                    waves.append(merged)
+        return waves
+
+    def _unit_waves(self, unit_id: str) -> list[tuple[str, ...]]:
+        return [*self._children_waves(unit_id), (unit_id,)]
 
     # meiva:note
-    # Every unit, children before parents, the top-level units in declaration order: root's
-    # whole-tree stop, so the unit a manifest declares first is stopped first.
+    # Attach children finish in earlier waves than their parent; siblings at the same attach
+    # level group by ascending `stop_tier` in declaration order.
+    # meiva:link services/supervision/meiva_root/docs/closure.meiva.okf.md
+    def stop_waves(self, unit_id: str = ROOT_ID) -> tuple[tuple[str, ...], ...]:
+        if unit_id == ROOT_ID:
+            return tuple(self._children_waves(ROOT_ID))
+        self.get(unit_id)
+        return tuple(self._unit_waves(unit_id))
+
+    def all_stop_waves(self) -> tuple[tuple[str, ...], ...]:
+        return self.stop_waves(ROOT_ID)
+
+    def stop_order(self, unit_id: str) -> tuple[str, ...]:
+        self.get(unit_id)
+        return tuple(unit for wave in self.stop_waves(unit_id) for unit in wave)
+
+    # meiva:note
+    # Every unit, children before parents and tier by tier, preserving declaration order within
+    # each wave so tier-0 units stop before later tiers.
     # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
     def all_stop_order(self) -> tuple[str, ...]:
-        out: list[str] = []
-        for top in self.children_of(ROOT_ID):
-            out.extend(self.stop_order(top))
-        return tuple(out)
+        return tuple(unit for wave in self.all_stop_waves() for unit in wave)
 
 
 def load_manifests(path: Path) -> UnitRegistry:

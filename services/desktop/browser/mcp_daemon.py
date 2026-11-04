@@ -412,6 +412,7 @@ async def handle_client(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
     daemon_ref: list[ChromeMcpDaemon | None],
+    clients: set[asyncio.Task[None]] | None = None,
 ) -> None:
     """One agent bridge connection. Requests carrying an `agent_id` resolve
     their page from the per-agent registry (a fresh connection — exec
@@ -419,12 +420,17 @@ async def handle_client(
     page (see ``forward_legacy_call``). `daemon_ref` is a
     mutable cell so the handler always sees the current daemon across
     connects; when None (starting), it returns a pre-execution error."""
+    task = asyncio.current_task()
+    if clients is not None and task is not None:
+        clients.add(task)
     conn_page: _ConnPage = None
     try:
-        with suppress(ConnectionResetError, BrokenPipeError):
+        with suppress(ConnectionResetError, BrokenPipeError, asyncio.CancelledError):
             while line := await reader.readline():
                 conn_page = await _serve_line(line, writer, daemon_ref, conn_page)
     finally:
+        if clients is not None and task is not None:
+            clients.discard(task)
         writer.close()
         with suppress(OSError):
             await writer.wait_closed()
@@ -456,7 +462,10 @@ async def socket_in_use(path: Path) -> bool:
 
 
 async def _open_daemon_socket(
-    home: Path, browser_cdp_port: int, daemon_ref: list[ChromeMcpDaemon | None]
+    home: Path,
+    browser_cdp_port: int,
+    daemon_ref: list[ChromeMcpDaemon | None],
+    clients: set[asyncio.Task[None]],
 ) -> tuple[Path, asyncio.Server]:
     browser_url = f"http://127.0.0.1:{browser_cdp_port}"
     sock = chrome_mcp_socket(home, browser_cdp_port)
@@ -474,7 +483,7 @@ async def _open_daemon_socket(
         sock.unlink()
 
     server = await asyncio.start_unix_server(
-        lambda r, w: handle_client(r, w, daemon_ref), path=str(sock), limit=_LINE_LIMIT
+        lambda r, w: handle_client(r, w, daemon_ref, clients), path=str(sock), limit=_LINE_LIMIT
     )
     logger.info(f"[browser-mcp] listening on {sock} (upstream {browser_url})")
     return sock, server
@@ -483,14 +492,18 @@ async def _open_daemon_socket(
 async def _shutdown_daemon(
     *,
     session_task: asyncio.Task[None],
+    reapply_task: asyncio.Task[None] | None,
     gateway: GatewaySession,
     tab_groups: AgentTabGroups,
     current_stack: AsyncExitStack | None,
     server: asyncio.Server,
+    clients: set[asyncio.Task[None]],
     sock: Path,
 ) -> None:
     logger.info("[browser-mcp] shutting down")
     session_task.cancel()
+    if reapply_task is not None:
+        reapply_task.cancel()
     gateway.cancel_one_shots()
     tab_groups.cancel_pending()
     # meiva:note
@@ -499,6 +512,8 @@ async def _shutdown_daemon(
     # is derived from that total.
     await bounded_stack_close(current_stack, "upstream stack close during shutdown")
     server.close()
+    for client in tuple(clients):
+        client.cancel()
     await bounded(server.wait_closed(), "server close")
     with suppress(OSError):
         sock.unlink()
@@ -516,7 +531,8 @@ async def _serve_daemon_loop(
     reapply_session: bool,
 ) -> None:
     daemon_ref: list[ChromeMcpDaemon | None] = [None]
-    sock, server = await _open_daemon_socket(home, browser_cdp_port, daemon_ref)
+    clients: set[asyncio.Task[None]] = set()
+    sock, server = await _open_daemon_socket(home, browser_cdp_port, daemon_ref, clients)
     pages = PageRegistry(default_ttl_seconds=default_ttl_seconds, clock=clock)
     async with asyncio.TaskGroup() as tasks:
         gateway = GatewaySession(tasks, browser_cdp_port, access=gateway_access, clock=clock)
@@ -529,6 +545,7 @@ async def _serve_daemon_loop(
         session_task = tasks.create_task(
             contained(gateway.refresh_loop(stop), "gateway session refresh")
         )
+        reapply_task: asyncio.Task[None] | None = None
         current_stack: AsyncExitStack | None = None
         try:
             try:
@@ -539,7 +556,7 @@ async def _serve_daemon_loop(
                 # meiva:note
                 # Restore saved pins and tab groups in the background once Chrome answers.
                 # meiva:link services/desktop/browser/docs/browser-session-restore.meiva.okf.md
-                tasks.create_task(
+                reapply_task = tasks.create_task(
                     contained(
                         session_restore.reapply(
                             home,
@@ -556,10 +573,12 @@ async def _serve_daemon_loop(
         finally:
             await _shutdown_daemon(
                 session_task=session_task,
+                reapply_task=reapply_task,
                 gateway=gateway,
                 tab_groups=tab_groups,
                 current_stack=current_stack,
                 server=server,
+                clients=clients,
                 sock=sock,
             )
 
@@ -649,7 +668,9 @@ async def _serve_generation(
         # extension update or a race is merged here, with a WARNING, before any
         # page is created. Idempotent, so a healthy browser costs one query.
         # meiva:link services/desktop/browser/docs/tab-groups.meiva.okf.md
-        helpers.create_task(contained(daemon.tab_groups.converge_all(), "tab group convergence"))
+        converge = helpers.create_task(
+            contained(daemon.tab_groups.converge_all(), "tab group convergence")
+        )
         # meiva:note
         # Chrome is confirmed up here — inject the gateway session cookie
         # right away (the periodic loop covers expiry; this covers the
@@ -661,6 +682,7 @@ async def _serve_generation(
         finally:
             watchdog.cancel()
             reaper.cancel()
+            converge.cancel()
 
 
 # meiva:note

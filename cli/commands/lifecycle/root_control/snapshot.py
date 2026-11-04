@@ -52,6 +52,8 @@ class RootBlock(TypedDict):
 class UnitRow(TypedDict):
     id: str
     state: str
+    attach: NotRequired[str]
+    stop_tier: NotRequired[int]
     intent: NotRequired[str]
     manifest_digest: NotRequired[str]
     last_error: NotRequired[str]
@@ -144,6 +146,13 @@ def _unit_row(value: object) -> UnitRow:
     if not isinstance(unit_id, str) or not unit_id or not isinstance(state, str):
         raise SnapshotError("a unit row lacks its id or state")
     built: UnitRow = {"id": unit_id, "state": state}
+    if (attach := _optional_unit_text(row, unit_id, "attach")) is not None:
+        built["attach"] = attach
+    raw_tier = row.get("stop_tier")
+    if raw_tier is not None:
+        if not _is_int(raw_tier) or raw_tier < 0:
+            raise SnapshotError(f"unit {unit_id!r} reports an invalid stop_tier")
+        built["stop_tier"] = raw_tier
     if (intent := _optional_unit_text(row, unit_id, "intent")) is not None:
         built["intent"] = intent
     if (manifest_digest := _optional_unit_text(row, unit_id, "manifest_digest")) is not None:

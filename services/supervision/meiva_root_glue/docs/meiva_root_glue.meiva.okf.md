@@ -23,13 +23,19 @@ also follows the public pidfile owner; a source mutation of either standard daem
 shutdown name must remain visible. This is static identity evidence, not a running
 daemon readiness test.
 
-The manifest generator (`manifests.py`) also derives each unit's stop window: a
-`ServiceSpec` that declares `stop_ceiling_s` (its own SIGTERM cleanup can outlast
-root's default window) gets `stop_timeout_s = ceiling + STOP_MARGIN_S`. The
-gateway's ceiling is uvicorn's drain budget
+The manifest generator (`manifests.py`) also derives each unit's stop window and
+`stop_tier`: a `ServiceSpec` that declares `stop_ceiling_s` (its own SIGTERM
+cleanup can outlast root's default window) gets `stop_timeout_s = ceiling + STOP_MARGIN_S`.
+The gateway's ceiling is uvicorn's drain budget
 (`gateway.gateway_graceful_shutdown_timeout_seconds`) plus the lifespan cleanup
 allowance, read from the same setting the launch hands uvicorn; browser-mcp's is
-its bounded shutdown steps (`services/desktop/browser/shutdown_budget.py`). See
+its bounded shutdown steps (`services/desktop/browser/shutdown_budget.py`). Stop
+tiers order shutdown into five waves while letting independent units inside a
+tier stop concurrently: tier `0` (`agent-host`) drains active turns first; tier
+`1` stops application producers including `browser-mcp`; tier `2` stops
+`browser` once `browser-mcp` has disconnected from Chrome; tier `3` stops
+`otel-collector` after producers flush; and tier `4` stops `loki`, `prometheus`,
+and `tempo` in parallel once the collector's shutdown flush lands. See
 [[services/supervision/meiva_root/docs/closure.meiva.okf.md]].
 
 `HealthMonitor` owns application-service retry scheduling. Only a fresh DOWN
