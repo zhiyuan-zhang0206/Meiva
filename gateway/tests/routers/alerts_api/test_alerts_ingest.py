@@ -23,6 +23,7 @@ from fastapi.testclient import TestClient
 from psycopg.types.json import Jsonb
 
 from base.events.live.bus import EventBus
+from base.telemetry.tests.capture.event_capture import capturing_events
 from gateway.tests.agents.gateway_auth import without_credentials
 from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.routers.alerts_api.alerts_support import (
@@ -64,6 +65,23 @@ def test_ingest_firing_inserts_row_and_notifies(db_conn: psycopg.Connection) -> 
     assert alertname == "test-rule"
     assert fp == "abc123"
     assert notified_at is not None
+
+
+# meiva:note
+# Every accepted ingest refreshes the heartbeat the pipeline's own dead-man rule reads.
+# The assertion is on the emitted event rather than on the alert row: a row can also be
+# written by a direct loopback caller, while the metric (`alerts_last_ingest_timestamp_
+# seconds`) is the only thing the rule sees -- and a pipeline that stops refreshing it is
+# exactly what "nothing reached the ingest" looks like from outside.
+def test_ingest_refreshes_the_alert_pipeline_heartbeat(db_conn: psycopg.Connection) -> None:
+    with alerts_client() as client, capturing_events() as events:
+        assert ingest(client, webhook()).status_code == 200
+
+    captured = [event for event in events if event.event_name == "alerts"]
+    assert len(captured) == 1
+    stamp = captured[0].attributes["last_ingest_timestamp_seconds"]
+    assert isinstance(stamp, float)
+    assert stamp > 0
 
 
 # meiva:note

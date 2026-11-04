@@ -137,6 +137,27 @@ policies:
         group_wait: 0s
         group_interval: 5m
         repeat_interval: 4h
+      # meiva:note
+      # The alert pipeline's own dead-man pair. R27 (the synthetic watchdog) is the only alert
+      # whose delivery must NOT fall through to the catch-all: it repeats every five minutes and
+      # `continue: false` keeps that to one POST per period. R28 (the pipeline silent rule) goes
+      # straight to Telegram because the path it reports on is the one every other alert rides.
+      - receiver: meiva-alerts-webhook
+        object_matchers:
+          - [metric, "=", alert_pipeline_watchdog]
+        continue: false
+        group_by: [alertname]
+        group_wait: 0s
+        group_interval: 5m
+        repeat_interval: 5m
+      - receiver: meiva-alerts-telegram
+        object_matchers:
+          - [metric, "=", alert_pipeline_silent]
+        continue: true
+        group_by: [alertname]
+        group_wait: 0s
+        group_interval: 5m
+        repeat_interval: 1h
       - receiver: meiva-alerts-webhook
         object_matchers:
           - [severity, "=", critical]

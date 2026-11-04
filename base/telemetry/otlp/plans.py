@@ -35,6 +35,7 @@ BASE_METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
     ("checkpoint_table_sizes", "blobs_live"): "gauge",
     ("checkpoint_table_sizes", "checkpoints_live"): "gauge",
     ("checkpoint_table_sizes", "writes_live"): "gauge",
+    ("alerts", "last_ingest_timestamp_seconds"): "gauge",
     ("sse", "active_connections"): "gauge",
     ("gateway_process", "cpu_percent"): "gauge",
     ("gateway_process", "rss_bytes"): "gauge",

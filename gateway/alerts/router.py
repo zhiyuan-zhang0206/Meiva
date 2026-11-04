@@ -40,6 +40,7 @@ from fastapi.responses import StreamingResponse
 from psycopg.rows import kwargs_row
 from pydantic import TypeAdapter
 
+from base import telemetry
 from base.db.rows import count_one
 from base.db.transaction import write_transaction
 from base.telemetry.alerts import (
@@ -144,6 +145,20 @@ def ingest_alerts(body: AlertWebhookPayload, request: Request) -> AlertIngestRes
         conn.commit()
 
     publish_alert_rows(gateway_state(request).bus, rows)
+
+    if rows:
+        # meiva:note
+        # The heartbeat the alert pipeline's dead-man rule reads: one event per accepted POST
+        # that wrote a row. The gauge keeps moving while the webhook path works and stops when
+        # it does not — a rotated token the gateway now rejects, a stopped gateway — without
+        # depending on an alert that the broken path would have had to deliver.
+        telemetry.emit(
+            "telemetry",
+            "alerts",
+            attributes={
+                "last_ingest_timestamp_seconds": gateway_clock(request).now().timestamp(),
+            },
+        )
 
     if alert_settings.im_notify_enabled:
         for group_id in sorted(shadow.native_ids):

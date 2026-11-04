@@ -311,6 +311,8 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 | `meiva-ops-root-diagnostic-no-verdict` | `root_diagnostic` verdict `inconclusive` / `unavailable` per machine and diagnostic, >2 samples in 3m (three rounds at the 60s cadence) | 0m | warning | nothing: a host busy enough to starve a read-only check reported itself as a broken venv or brew pin set instead (2026-10-27, #5656). No-verdict samples are excluded from the failure rules above, so the run needs its own rule |
 | `meiva-ops-root-diagnostic-browser-reach` | `root_diagnostic` verdict `down` / `unavailable` / `port-taken`, >2 samples in 16m | 0m | warning | the per-probe consecutive-failure thresholds; its cadence (300s) is why one debounce covers both classes over ~10-15 minutes |
 | `meiva-ops-root-diagnostic-task-telemetry` | `root_diagnostic` verdict `down`, >1 hourly sample in 6h | 0m | warning | nothing: the daemon delivered over 100 reminder digests a day while a storage filter dropped every task_reminder_digest / task_escalation row (2026-10-03 → 10-25). Only `down` counts — an unreadable database is the recovery probe's finding, not this one |
+| `meiva-ops-alert-pipeline-watchdog` | Prometheus `vector(1)` — always firing, carries `notify_im: "false"` | 0s | warning | synthetic heartbeat: it exists only so R28 has something whose absence means something. Its route repeats every 5m and does not fall through, so it costs one webhook POST per period and no IM |
+| `meiva-ops-alert-pipeline-silent` | `time() - meiva_alerts_last_ingest_timestamp_seconds` > 900 (three watchdog periods) | 5m | error | nothing: a rotated webhook token or a misrouted contact point silences **every** rule at once, and no rule rode a path that could report it (2026-11-04). Routes straight to Telegram |
 
 Unhealthy-for-3-minutes and unhealthy-for-10-minutes are two coexisting rules per condition
 (Grafana's file provisioning has no inhibition rules), so a long outage holds a warning and an
@@ -319,6 +321,34 @@ The observatory station's own reachability has no rule: Loki and Grafana live on
 the events travel the very path it would watch. An ingress that rejects events and a station that is
 down both surface as the health probe's `health_probe_ran` going absent; a whole-machine outage is the
 out-of-band probe's.
+
+## The alert pipeline's own dead-man pair
+
+Every rule above rides one path: Grafana → `POST /api/alerts` → the `alerts` row → the im_bridge
+fan-out. When that path breaks — a webhook token the gateway no longer accepts after a rotation, a
+stopped gateway, a contact point pointing at the wrong port — **all 70 rules go quiet together**, and
+the silence looks exactly like a quiet night. Two rules close that hole and nothing else:
+
+- `meiva-ops-alert-pipeline-watchdog` fires unconditionally (`vector(1)`) every evaluation. It asserts
+  nothing about the system; its only job is to walk the whole path and refresh one row. Its route
+  repeats every 5 minutes and carries `continue: false`, so the heartbeat costs one POST per period
+  and never reaches the catch-all or the user's IM (`notify_im: "false"`).
+- `meiva-ops-alert-pipeline-silent` reads the gauge the ingest refreshes
+  (`alerts_last_ingest_timestamp_seconds`, emitted by `gateway/alerts/router.py:ingest_alerts` on every
+  accepted POST) and fires when it is older than 900 s — three missed periods — for 5 minutes. It routes
+  **straight to Telegram**, because the path it reports on is the one every other alert would have used.
+
+The judgment is on the *age of the last accepted ingest*, not on how many alerts fired: a quiet night
+cannot trip it and a broken token cannot hide behind one. The period (5 m) and the threshold (3 × 5 m)
+are asserted together in `tests/scripts/test_alert_notification_policy.py`, so one cannot drift from the
+other.
+
+What this pair still cannot see: (a) the Grafana alert engine itself — if it stops evaluating, neither
+rule runs, and that gap is covered outside Grafana (a 15-minute host cron that asks whether the watchdog
+row arrived; task #6220), not by another rule; (b) a gateway that stopped entirely — the gauge rides the
+gateway's own OTLP push, so it disappears with its emitter and the silent rule reads *no data*, which it
+treats as silence. That case is `meiva-ops-gateway-metrics-silent`'s report. The pair's subject is the
+path between Grafana and the `alerts` table, not the gateway process.
 
 ## Notifications — the policy, the webhook, the window silence
 
