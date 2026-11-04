@@ -191,7 +191,6 @@ def test_frame_churn_finishes_with_complete_tracebacks(
     ("workflow", "counts"),
     [
         ("ci.yml", ["8", "${{ needs.classify.outputs.shards }}"]),
-        ("file-shard-proof.yml", ["16"]),
     ],
 )
 def test_workflow_runs_the_planner_module(workflow: str, counts: list[str]) -> None:

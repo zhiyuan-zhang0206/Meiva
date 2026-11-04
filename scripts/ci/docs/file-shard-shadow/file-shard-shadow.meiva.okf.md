@@ -70,17 +70,16 @@ collection and resolved runtime bindings with real xdist workers.
 
 ## Paired Linux runtime proof
 
-`Whole-file runtime proof` runs by manual dispatch. Its paired experiment executes
-two complete test populations, so ordinary pull requests and merge-queue trees
-do not start it automatically. Use `plan_only=true` to diagnose complete Linux
-collection without starting either test population; that run cannot certify
-execution equivalence. The default dispatch runs the complete comparison.
-It pins all jobs to the same source SHA, snapshots once, then
-runs the existing node split and checked whole-file split sequentially on each
-of 16 runners, with the same four workers, native environment and coverage
-sources. Neither population retries. The baseline always runs first; this
-experiment establishes execution equivalence and reports collection/test-phase
-costs, but one pair does not establish a statistically stable latency gain.
+The paired experiment ran as the manual-dispatch workflow `file-shard-proof.yml`
+("Whole-file runtime proof"), which was retired once its one-off verification was
+complete; restore its last version from git history to repeat it. It executed two
+complete test populations from one snapshot at one source SHA: the existing node
+split and the checked whole-file split, sequentially on each of 16 runners, with
+the same four workers, native environment and coverage sources and no retries.
+The baseline always ran first; the experiment established execution equivalence and
+reported collection/test-phase costs, but one pair does not establish a
+statistically stable latency gain. The rest of this section describes the evidence
+the scripts below require of such a run.
 
 Each worker records setup/call/teardown outcomes and times, plus the actual
 resolved fixture name, implementation and scope after the call. This includes
@@ -97,7 +96,7 @@ their planned node IDs and declared closure before any test body executes.
 
 Planning owns a 60-second repeating Python diagnostic thread through
 `scripts.ci.collection_tracebacks.periodic_tracebacks` before importing pytest.
-Both required CI and this proof use that owner, which stops and joins the thread
+Required CI (and the retired proof) used that owner, which stops and joins the thread
 before closing its separate stack file. Direct `faulthandler.dump_traceback`
 calls hold the GIL while reading interpreter frames; the native
 `dump_traceback_later` watchdog can race frame changes on supported CPython 3.12.
