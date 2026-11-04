@@ -128,6 +128,13 @@ class Entry:
     task_id: int | None = None
 
 
+# meiva:note
+# The one field of the liveness card that never changes: its body carries the age of the last round,
+# so a second `create` with today's body is a different call. Whoever closes the card finds it by
+# this title.
+STALE_WATCH_TITLE = "The main-red watch stopped reporting: no round heartbeat"
+
+
 @dataclass(frozen=True)
 class Card:
     fingerprint: str
@@ -152,7 +159,7 @@ class Card:
         hours = stale_after.total_seconds() / 3600
         return cls(
             fingerprint="main-red-watch/liveness",
-            title="The main-red watch stopped reporting: no round heartbeat",
+            title=STALE_WATCH_TITLE,
             body=(
                 f"The watch's last round was {age.total_seconds() / 3600:.1f}h ago "
                 f"(threshold {hours:.0f}h, newest {last_round_at.isoformat()}).\n\n"

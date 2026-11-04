@@ -31,6 +31,7 @@ from schedules.jobs.telemetry_event import emit_system_event
 from schedules.plans.schedule_identity import parse_schedule_id
 from schedules.jobs.watch.main_red_liveness import liveness_once
 from schedules.plans.watch.main_red import (
+    STALE_WATCH_TITLE,
     Card,
     Failure,
     GATE_CHECK_STEPS,
@@ -341,6 +342,21 @@ def _open_card(card: Card, report_agent: int) -> int:
     )
 
 
+# meiva:note
+# The liveness card is found by its title, not by an operation key: its body carries the age of the
+# last round, so the next `create` would not be the same call. The title is the one field that does
+# not move, and it lives next to the card that uses it.
+def _close_liveness_card(report_agent: int) -> None:
+    for task in meiva.tasks.list(owner=report_agent, status="in_progress"):
+        if task.title == STALE_WATCH_TITLE:
+            meiva.tasks.update(
+                task.id,
+                status="done",
+                results="watch reporting again: a round landed",
+                operation_key=f"main-red-close-{task.id}",
+            )
+
+
 def _close_card(task_id: int, reason: str) -> None:
     meiva.tasks.update(
         task_id,
@@ -410,6 +426,7 @@ def liveness_tick(
         slot,
         database=inputs.database(),
         open_card=partial(_open_card, report_agent=report_agent),
+        close_card=partial(_close_liveness_card, report_agent),
     )
 
 
