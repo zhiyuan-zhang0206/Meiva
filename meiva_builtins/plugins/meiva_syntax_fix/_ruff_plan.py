@@ -8,7 +8,9 @@ import json
 import re
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 
 RUFF_TIMEOUT_SECONDS = 5
 
@@ -84,14 +86,17 @@ def undefined_names(returncode: int, stdout: str) -> frozenset[str]:
     if returncode > 1 or not stdout.strip():
         return frozenset()
     try:
-        diagnostics: list[dict[str, Any]] = json.loads(stdout)
+        diagnostics = object_of(json.loads, stdout)
     except json.JSONDecodeError:
+        return frozenset()
+    if not is_object_list(diagnostics):
         return frozenset()
     names: set[str] = set()
     for diagnostic in diagnostics:
-        if diagnostic["code"] != "F821":
+        if not is_object_dict(diagnostic) or diagnostic.get("code") != "F821":
             continue
-        match = _F821_MSG_RE.search(diagnostic["message"])
+        message = diagnostic.get("message")
+        match = _F821_MSG_RE.search(message) if isinstance(message, str) else None
         if match:
             names.add(match.group(1))
     return frozenset(names)

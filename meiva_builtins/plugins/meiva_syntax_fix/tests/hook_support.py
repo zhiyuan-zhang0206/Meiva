@@ -19,6 +19,7 @@ from base.agents.context import MeivaContext
 from base.clock import Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
 from base.config.tests.configuration import defaults
+from base.host.boundary.json_values import is_object_list
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.model_catalog import inert_keys
@@ -35,6 +36,26 @@ FAILS_TO_ANSWER = f"{_MODELS}:fails_to_answer"
 ANSWERS_BLANK = f"{_MODELS}:answers_blank"
 
 REPAIRED = "x = 'fixed'\nprint(x)"
+
+
+# meiva:note
+# The messages of a hook update. The hook's contract is `dict[str, object]`, so a test narrows what
+# it reads from `update["messages"]` here instead of indexing an untyped value.
+def update_messages(update: dict[str, object] | None) -> list[BaseMessage]:
+    assert update is not None
+    messages = update["messages"]
+    assert is_object_list(messages)
+    narrowed = [message for message in messages if isinstance(message, BaseMessage)]
+    assert len(narrowed) == len(messages)
+    return narrowed
+
+
+# meiva:note
+# The first message of a hook update, which a repair that rewrote a call returns as an AIMessage.
+def fixed_ai(update: dict[str, object] | None) -> AIMessage:
+    first = update_messages(update)[0]
+    assert isinstance(first, AIMessage)
+    return first
 
 
 class ScriptedRepairModel(BaseChatModel):

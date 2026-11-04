@@ -5,7 +5,9 @@
 from __future__ import annotations
 
 import re
-from typing import Any, TypeGuard
+from typing import TypeGuard
+
+from base.host.boundary.json_values import is_object_dict
 
 REPAIR_MAX_ATTEMPTS = 3
 
@@ -62,10 +64,6 @@ def _is_object_list(value: object) -> TypeGuard[list[object]]:
     return isinstance(value, list)
 
 
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
-
-
 # meiva:note
 # A model reply flattened to plain text. A thinking model returns a list of blocks (thinking and
 # text); only the text blocks are kept.
@@ -75,7 +73,7 @@ def extract_text(content: object) -> str:
     if _is_object_list(content):
         parts: list[str] = []
         for block in content:
-            if _is_str_dict(block):
+            if is_object_dict(block):
                 text = block.get("text")
                 if block.get("type") == "text" and isinstance(text, str):
                     parts.append(text)

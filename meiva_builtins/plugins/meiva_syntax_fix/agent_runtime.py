@@ -10,7 +10,6 @@ surface module carries only the description (task #3633).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from langchain_core.messages import AIMessage, ToolCall
 from langchain_core.runnables import RunnableConfig
@@ -27,6 +26,7 @@ from agent.messages import exec_output_message
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.messages.kwargs import ExecStatus
+from base.host.boundary.json_values import is_object_list
 from base.packages.plugins.extensions import PluginContributions
 
 from ._deterministic_fixes import apply_all_deterministic_fixes
@@ -75,7 +75,7 @@ def emit_syntax_fix_event(
     block size (KB-scale), which is the design point: long retention, no
     information loss.
     """
-    attrs: dict[str, Any] = {
+    attrs: dict[str, object] = {
         "fix_type": fix_type,
         "fixes": fixes,
         "before": before,
@@ -266,7 +266,7 @@ class FixInputs:
 
 async def _fix_call(
     last_msg: AIMessage, call: ToolCall, inputs: FixInputs
-) -> dict[str, Any] | None:
+) -> dict[str, object] | None:
     """Repair one invocation without inspecting or rewriting sibling code."""
     if call["name"] != "execute_code":
         return None
@@ -286,6 +286,17 @@ async def _fix_call(
     return _finalize_success(fixed_msg, fixes_applied, before_code=code)
 
 
+# meiva:note
+# Every non-`goto` result of `_fix_call` is `{"messages": [<the AIMessage with the repaired call>]}`;
+# the loop carries that message into the next call, so a shape change is a bug to surface here
+# rather than a value to forward.
+def _replacement_message(result: dict[str, object]) -> AIMessage:
+    messages = result["messages"]
+    if not is_object_list(messages) or len(messages) != 1 or not isinstance(messages[0], AIMessage):
+        raise TypeError(f"syntax_fix call result must carry one AIMessage, got {result!r}")
+    return messages[0]
+
+
 class _SyntaxFixHook(Hook):
     """Repair each execute_code invocation separately, preserving IDs and order.
 
@@ -299,7 +310,7 @@ class _SyntaxFixHook(Hook):
         runtime: Runtime[MeivaContext],
         _config: RunnableConfig,
         /,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, object] | None:
         original = state.messages[-1]
         if not isinstance(original, AIMessage):
             return None
@@ -323,7 +334,7 @@ class _SyntaxFixHook(Hook):
                 continue
             if "goto" in result:
                 return result
-            last_msg = result["messages"][0]
+            last_msg = _replacement_message(result)
             changed = True
         return {"messages": [last_msg]} if changed else None
 

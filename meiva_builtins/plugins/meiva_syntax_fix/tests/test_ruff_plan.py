@@ -79,7 +79,14 @@ def test_undefined_names_keeps_only_the_f821_names():
 
 @pytest.mark.parametrize(
     ("returncode", "stdout"),
-    [(2, _DIAGNOSTICS), (0, ""), (1, "not json"), (1, "[]")],
+    [
+        (2, _DIAGNOSTICS),
+        (0, ""),
+        (1, "not json"),
+        (1, "[]"),
+        (1, '{"code": "F821"}'),
+        (1, '["F821", 1]'),
+    ],
 )
 def test_a_crash_empty_or_unreadable_output_names_nothing(returncode: int, stdout: str):
     assert undefined_names(returncode, stdout) == frozenset()
