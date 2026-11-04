@@ -1,13 +1,15 @@
 exports = ["peers.py", "schedule_capability.py"]
 
 [uses]
-"__init__.py" = ["contracts.py", "peers.py", "row_text.py", "schedule_capability.py"]
+"__init__.py" = ["contracts.py", "gateway_rows.py", "peers.py", "schedule_capability.py"]
 "contracts.py" = []
+"gateway_rows.py" = ["contracts.py", "row_text.py"]
 "schedule_capability.py" = []
-"tests" = ["__init__.py", "peers.py", "row_text.py"]
+"tests" = ["__init__.py", "gateway_rows.py", "peers.py", "row_text.py"]
 
 [purity]
 "contracts.py" = "strict"
+"gateway_rows.py" = { mode = "none", why = "the gateway JSON -> SDK contract boundary: the field readers and row mappers, plus the relative-age rendering the row `__str__`s need; it reads the clock for that rendering and builds the mutable public row dataclasses, so it is neither a pure decision module nor an effect shell" }
 "peers.py" = "strict"
 "row_text.py" = "strict"
 "schedule_capability.py" = { mode = "none", why = "the schedule steering rule: it reads the bound caller through the SDK identity door and refuses an action aimed at the agent that caller speaks for; the action table and the refusal text are the whole rule" }
