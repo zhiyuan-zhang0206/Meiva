@@ -11,6 +11,7 @@ import { renderWithBrowser } from "@/test-support/render";
 import { WallClockProvider } from "@/lib/transport/transport-context";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { AGENTS_QUERY_KEY } from "@/lib/fold/agents";
 import { INSIGHTS_SECTIONS } from "@/app/control/sections";
 
 import { InsightsShell } from "./page";
@@ -48,10 +49,12 @@ beforeEach(() => {
 
 // meiva:note
 // The shell's alert section states ages on the page's clock, which the app root mounts.
-function wrap(ui: React.ReactElement) {
-  const qc = new QueryClient({
+function wrap(
+  ui: React.ReactElement,
+  qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
+  }),
+) {
   return renderWithBrowser(
     <WallClockProvider wallNow={() => Date.now()}>
       <QueryClientProvider client={qc}>{ui}</QueryClientProvider>
@@ -105,6 +108,55 @@ describe("InsightsPage shell", () => {
     expect(screen.getByRole("link", { name: "Open agent view" }).getAttribute("href")).toBe(
       "/insights/run/405",
     );
+  });
+
+  it("disables opening and shows neutral unsupported explanation when external-harness agent ID is entered", async () => {
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    qc.setQueryData(AGENTS_QUERY_KEY, {
+      agents: [
+        { agent_id: 10, harness: "meiva", label: "ten", status: "running" },
+        { agent_id: 42, harness: "codex", label: "forty-two", status: "running" },
+        { agent_id: 43, harness: "claude_code", label: "forty-three", status: "running" },
+        { agent_id: 44, harness: "antigravity", label: "forty-four", status: "running" },
+      ],
+      ancestors: [],
+    });
+    wrap(<InsightsPage />, qc);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Open agent view" })).toBeTruthy());
+
+    const input = screen.getByRole("spinbutton", { name: "Agent ID" });
+    fireEvent.change(input, { target: { value: "42" } });
+    expect(screen.getByRole("button", { name: "Open agent view" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByRole("link", { name: "Open agent view" })).toBeNull();
+    const explanation = screen.getByText(
+      "Run timeline is only available for native Meiva agents (this agent runs on Codex).",
+    );
+    expect(explanation).toBeTruthy();
+    expect(explanation.className).toContain("text-muted-foreground");
+    expect(explanation.className).not.toContain("text-destructive");
+
+    fireEvent.change(input, { target: { value: "43" } });
+    expect(screen.getByRole("button", { name: "Open agent view" }).hasAttribute("disabled")).toBe(true);
+    expect(
+      screen.getByText(
+        "Run timeline is only available for native Meiva agents (this agent runs on Claude Code).",
+      ),
+    ).toBeTruthy();
+
+    fireEvent.change(input, { target: { value: "10" } });
+    expect(screen.getByRole("link", { name: "Open agent view" }).getAttribute("href")).toBe(
+      "/insights/run/10",
+    );
+    expect(screen.queryByText(/Run timeline is only available/)).toBeNull();
+
+    fireEvent.change(input, { target: { value: "999" } });
+    expect(screen.getByRole("link", { name: "Open agent view" }).getAttribute("href")).toBe(
+      "/insights/run/999",
+    );
+    expect(screen.queryByText(/Run timeline is only available/)).toBeNull();
   });
 
   it("does NOT render the Control-only sections (they live on /control)", () => {

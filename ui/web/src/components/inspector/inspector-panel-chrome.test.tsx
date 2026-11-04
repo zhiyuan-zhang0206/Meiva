@@ -278,6 +278,7 @@ describe("InspectorPanel section layout", () => {
   });
 
   it("renders without its own header bar or category selector", async () => {
+    getAgentRoster.mockResolvedValue(rosterFixture({ harness: "meiva" }));
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.queryByLabelText("Activity loading")).toBeNull());
 

@@ -8,6 +8,7 @@ import type {
   InspectWidget,
   PageRow,
 } from "@/lib/contracts/types";
+import { AGENTS_QUERY_KEY } from "@/lib/fold/agents";
 import {
   cleanupInspectorTest,
   createInspectorQueryClient,
@@ -15,10 +16,12 @@ import {
   getAgentInspectLive,
   getAgentInspectStatistics,
   getAgentInspectWidgets,
+  getAgentRoster,
   liveFixture,
   QueryClientProvider,
   render,
   renderWithGlobalRetries,
+  rosterFixture,
   setupInspectorTest,
   inspectorPageReads,
   setInspectorPages,
@@ -173,6 +176,7 @@ describe("InspectorPanel", () => {
   });
 
   it("links the active agent to its run timeline", async () => {
+    getAgentRoster.mockResolvedValue(rosterFixture({ harness: "meiva" }));
     render(<InspectorPanel agentId={1} />);
 
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
@@ -220,11 +224,13 @@ describe("InspectorPanel", () => {
   });
 
   it("renders in-place metric breathing bars for persistent sections without speculative sparse sections while pending", () => {
+    const qc = createInspectorQueryClient();
+    qc.setQueryData(AGENTS_QUERY_KEY, rosterFixture({ harness: "meiva" }));
     getAgentInspectLive.mockReturnValue(new Promise<AgentInspectLive>(() => undefined));
     getAgentInspectStatistics.mockReturnValue(new Promise<AgentInspectStatistics>(() => undefined));
     getAgentInspectWidgets.mockReturnValue(new Promise<InspectWidget[]>(() => undefined));
 
-    render(<InspectorPanel agentId={1} />);
+    render(<InspectorPanel agentId={1} />, qc);
 
     expect(screen.getByRole("link", { name: "Open run timeline" })).toBeTruthy();
 
@@ -415,5 +421,33 @@ describe("InspectorPanel", () => {
 
     await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
     expect(screen.getByText("1.50T / 999")).toBeTruthy();
+  });
+
+  it("renders Open run timeline for native meiva harness", async () => {
+    getAgentRoster.mockResolvedValue(rosterFixture({ harness: "meiva" }));
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: "Open run timeline" })).toBeTruthy(),
+    );
+    expect(screen.getByRole("link", { name: "Open run timeline" }).getAttribute("href")).toBe(
+      "/insights/run/1",
+    );
+  });
+
+  it.each(["claude_code", "codex", "antigravity"] as const)(
+    "hides Open run timeline for external harness %s",
+    async (harness) => {
+      getAgentRoster.mockResolvedValue(rosterFixture({ harness }));
+      render(<InspectorPanel agentId={1} />);
+      await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
+      expect(screen.queryByRole("link", { name: "Open run timeline" })).toBeNull();
+    },
+  );
+
+  it("hides Open run timeline while harness is unresolved", async () => {
+    getAgentRoster.mockReturnValue(new Promise(() => undefined));
+    render(<InspectorPanel agentId={1} />);
+    await waitFor(() => expect(screen.getByText("Persistent shells")).toBeTruthy());
+    expect(screen.queryByRole("link", { name: "Open run timeline" })).toBeNull();
   });
 });

@@ -4,13 +4,14 @@
 // label) and what stands in for an agent whose timeline is not there yet. The view is a review of what
 // happened, so it shows nothing about an agent's present state.
 
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { buttonVariants } from "@/components/ui/button";
 import { useAgentRoster } from "@/lib/agents/use-agents";
 import { AGENT_DETAIL_QUERY_KEY } from "@/lib/fold/agents";
+import type { Harness } from "@/lib/harness/harness";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
@@ -30,6 +31,29 @@ function useAgentLabel(agentId: number): string | undefined {
     retry: false,
   });
   return (live ?? detail.data)?.label ?? undefined;
+}
+
+export function useAgentsHarness(agentIds: readonly number[]): Map<number, Harness | undefined> {
+  const client = useApi();
+  const roster = useAgentRoster();
+  const details = useQueries({
+    queries: agentIds.map((agentId) => {
+      const live = roster.data?.agents.find((agent) => agent.agent_id === agentId);
+      return {
+        queryKey: [...AGENT_DETAIL_QUERY_KEY, agentId],
+        queryFn: ({ signal }: { signal: AbortSignal }) => client.getAgent(agentId, signal),
+        enabled: roster.isSuccess && live === undefined,
+        staleTime: 30_000,
+        retry: false,
+      };
+    }),
+  });
+  const result = new Map<number, Harness | undefined>();
+  agentIds.forEach((agentId, index) => {
+    const live = roster.data?.agents.find((agent) => agent.agent_id === agentId);
+    result.set(agentId, live?.harness ?? details[index]?.data?.harness);
+  });
+  return result;
 }
 
 export function AgentGroupHeader({

@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
 import { externalAgentName, EXTERNAL_AGENT_PREFIX } from "@/lib/format/inbound-source";
@@ -15,8 +15,9 @@ import { type ViewportStore } from "./viewport/viewport-store";
 import { INPUT_ROW, UNITS_ROW, levelRowId, navRowIds, selectionKey, type RowOptions } from "./model/timeline-nav-rows";
 import { SELECTION_LINE_BELOW_PX, selectionRoles } from "./model/timeline-nav";
 import { type AgentSelection, type ViewAgent } from "./agent-view/agent-view-nav";
-import { AgentGroupHeader, AgentPending } from "./agent-view/agent-view-group";
+import { AgentGroupHeader, AgentPending, useAgentsHarness } from "./agent-view/agent-view-group";
 import { useLinkKindLabels } from "./agent-view/agent-view-link-labels";
+import { harnessLabel } from "@/lib/harness/harness";
 import { LinkRowGroup } from "./agent-view/agent-view-link-group";
 import { LinksCanvas, type LinkHit, type LinkHitResult } from "./canvas/run-timeline-links-canvas";
 import { endIn, groupLinks, type LinkKind, type ResolvedLink } from "./model/links/resolve";
@@ -161,12 +162,28 @@ export function RunTimelineRows({
       entries.flatMap((entry) => (entry.status === "loaded" ? [{ id: entry.id, data: entry.data }] : [])),
     [entries],
   );
+  const loadedIds = useMemo(() => loaded.map((a) => a.id), [loaded]);
+  const harnesses = useAgentsHarness(loadedIds);
+  const isAgentUnsupported = useCallback(
+    (agent: { id: number; data: RunTimelineResponse }) => {
+      const harness = harnesses.get(agent.id);
+      const hasNativeHistory =
+        agent.data.nodes.length > 0 || agent.data.units.length > 0 || agent.data.units_omitted > 0;
+      return harness !== undefined && harness !== "meiva" && !hasNativeHistory;
+    },
+    [harnesses],
+  );
   const baseFrom = base.from;
   const baseTo = base.to;
   const axis = useMemo(() => timeAxis({ from: baseFrom, to: baseTo }), [baseFrom, baseTo]);
   const agents: ViewAgent[] = useMemo(
-    () => loaded.map(({ id, data }) => ({ id, data, rows: navRowIds(data, options) })),
-    [loaded, options],
+    () =>
+      loaded.map(({ id, data }) => ({
+        id,
+        data,
+        rows: isAgentUnsupported({ id, data }) ? [] : navRowIds(data, options),
+      })),
+    [loaded, options, isAgentUnsupported],
   );
   const byId = new Map(agents.map((agent) => [agent.id, agent]));
   const chartRef = useRef<HTMLDivElement>(null);
@@ -328,10 +345,34 @@ export function RunTimelineRows({
   );
 
   const spoken = describe(selection);
-  const empty = loaded.every(({ data }) => data.nodes.length === 0 && data.units.length === 0 && data.units_omitted === 0);
+  const allUnsupported = loaded.length > 0 && loaded.every(isAgentUnsupported);
+  const empty =
+    !allUnsupported &&
+    loaded.every(({ data }) => data.nodes.length === 0 && data.units.length === 0 && data.units_omitted === 0);
 
   const renderAgent = (agent: ViewAgent) => {
     const { data } = agent;
+    const harness = harnesses.get(agent.id);
+
+    if (isAgentUnsupported(agent) && harness !== undefined) {
+      return (
+        <section
+          key={agent.id}
+          aria-label={t("agentGroupAria", { id: agent.id })}
+          data-testid={`agent-view-agent-${agent.id}`}
+          className="space-y-1.5"
+        >
+          <AgentGroupHeader agentId={agent.id} onRemove={onRemove} />
+          <p
+            className="pl-[88px] text-xs text-muted-foreground"
+            data-testid={`run-timeline-unsupported-${agent.id}`}
+          >
+            {t("externalHarnessUnsupported", { harness: harnessLabel(harness) })}
+          </p>
+        </section>
+      );
+    }
+
     const paintState = paintStateOf(agent);
     const levels = levelsTopFirst(data.nodes).filter((level) => agent.rows.includes(levelRowId(level)));
     return (
