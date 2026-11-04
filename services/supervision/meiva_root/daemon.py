@@ -22,6 +22,7 @@ from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.host.boundary.options import options
 from base.host.exit_codes import HELPER_CHAIN_BROKEN_EXIT_CODE
 from base.log import logger
+from base.log.process import buffer_startup_records
 from base.native_process.root_control.instance_lock import (
     AlreadyRunningError,
     acquire_instance_lock,
@@ -334,6 +335,11 @@ def main(argv: Sequence[str]) -> int:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    # meiva:note
+    # Everything this process logs from here on is kept until the file sink exists: the first
+    # thing it does is spawn every unit, and that is exactly the moment whose record a reader
+    # otherwise has to reconstruct from `ps`.
+    buffer_startup_records()
     tokens = list(argv)
     options = parse_args(tokens)
     try:
