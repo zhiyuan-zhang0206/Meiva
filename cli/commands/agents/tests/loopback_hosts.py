@@ -19,10 +19,12 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
 
 import pytest
 from websockets.sync.server import ServerConnection, unix_serve
+
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 
 __all__ = [
     "AntigravityPost",
@@ -52,7 +54,7 @@ class AppServerLog:
 class AntigravityPost:
     path: str
     csrf_token: str | None
-    body: dict[str, Any]
+    body: dict[str, object]
 
 
 # meiva:note
@@ -64,7 +66,12 @@ class AntigravityServerLog:
 
     @property
     def texts(self) -> list[str]:
-        return [post.body["content"] for post in self.posts]
+        texts: list[str] = []
+        for post in self.posts:
+            content = post.body["content"]
+            assert isinstance(content, str)
+            texts.append(content)
+        return texts
 
 
 # meiva:note
@@ -106,12 +113,20 @@ def codex_app_server(path: Path, accepts: Sequence[bool]) -> Generator[AppServer
 
     def answer(conn: ServerConnection) -> None:
         for raw in conn:
-            request = json.loads(raw)
+            request = object_of(json.loads, raw)
+            assert is_object_dict(request)
             if request.get("method") == "initialize":
                 conn.send(json.dumps({"id": request["id"], "result": {"userAgent": "scripted"}}))
             elif request.get("method") == "turn/start":
                 params = request["params"]
-                log.turns.append((params["threadId"], params["input"][0]["text"]))
+                assert is_object_dict(params)
+                inputs = params["input"]
+                assert is_object_list(inputs) and inputs
+                first = inputs[0]
+                assert is_object_dict(first)
+                thread_id, text = params["threadId"], first["text"]
+                assert isinstance(thread_id, str) and isinstance(text, str)
+                log.turns.append((thread_id, text))
                 accepted = accepts[min(len(log.turns), len(accepts)) - 1]
                 if accepted:
                     reply = {"id": request["id"], "result": {"turn": {"id": "turn-1"}}}
@@ -142,7 +157,8 @@ def antigravity_server() -> Generator[AntigravityServerLog]:
             pass
 
         def do_POST(self) -> None:
-            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            body = object_of(json.loads, self.rfile.read(int(self.headers["Content-Length"])))
+            assert is_object_dict(body)
             token = self.headers.get("x-codeium-csrf-token")
             log.posts.append(AntigravityPost(self.path, token, body))
             self.send_response(200)

@@ -9,7 +9,6 @@ import asyncio
 import io
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager, suppress
-from typing import Any
 from uuid import UUID
 
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
@@ -21,6 +20,7 @@ from base.events.live.redis_listener import RedisInboundListener
 from cli.commands.agents.impersonation_adapters import RelayAdapter
 from cli.commands.agents.impersonation_relay import RelayLease, push_inbox
 from cli.commands.agents.relay.steps import ConnectionRetry, RelayTuning
+from cli.commands.agents.tests.lease_support import ControllerSession
 
 # meiva:note
 # A relay harness never waits: these tests drive the loop's decisions, and a retry budget would
@@ -51,7 +51,7 @@ SLOW = 30.0
 CSRF = "recorded-csrf"
 
 
-def relay_lease(lease: dict[str, Any], machine: MachineIdentityReader) -> RelayLease:
+def relay_lease(lease: ControllerSession, machine: MachineIdentityReader) -> RelayLease:
     return RelayLease(
         agent_id=lease["agent_id"],
         lease_id=UUID(lease["id"]),

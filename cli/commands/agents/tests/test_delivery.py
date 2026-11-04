@@ -4,7 +4,6 @@
 import json
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
 
 import psycopg
 import pytest
@@ -24,12 +23,16 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.tests.pubsub_view import messages
 from cli.commands.agents.tests.lease_support import ActiveSession as ActiveSession
+from cli.commands.agents.tests.lease_support import (
+    ControllerSession,
+    assert_message_pending,
+    elapse,
+)
 from cli.commands.agents.tests.lease_support import active as active
-from cli.commands.agents.tests.lease_support import assert_message_pending, elapse
 
 
 def reserve(
-    lease: dict[str, Any],
+    lease: ControllerSession,
     message_id: int,
     *,
     database_gate: ProcessDbGate,
@@ -57,7 +60,7 @@ def assert_expiry_note_explains_pending_messages(
 
 def _assert_exhaustion_preserved(
     ended: PublicLease,
-    lease: dict[str, Any],
+    lease: ControllerSession,
     mid: int,
     db_conn: psycopg.Connection,
     *,

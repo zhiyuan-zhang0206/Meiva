@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import io
 from pathlib import Path
-from typing import Any
 from uuid import UUID
 
 import psycopg
@@ -35,6 +34,7 @@ from cli.commands.agents.relay.steps import ConnectionRetry
 from cli.commands.agents.tests.lease_support import (
     START_MESSAGE,
     ActiveSession,
+    ControllerSession,
     LeaseAt,
     assert_message_pending,
     delivery_attempts,
@@ -59,8 +59,8 @@ USER_HOME = Path("/nonexistent-relay-user-home")
 RETRY = ConnectionRetry(RELAY_CONNECTION_RETRY_DELAYS, ManualTimers())
 
 
-def _relay_args(lease: dict[str, Any], **overrides: Any) -> argparse.Namespace:
-    values: dict[str, Any] = {
+def _relay_args(lease: ControllerSession, **overrides: object) -> argparse.Namespace:
+    values: dict[str, object] = {
         "lease_id": lease["id"],
         "agent_id": lease["agent_id"],
         "session_id": None,

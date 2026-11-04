@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import io
-from typing import Any
 
 import httpx
 import pytest
@@ -362,7 +361,7 @@ def test_a_gateway_failure_reading_the_queue_is_not_swallowed() -> None:
 def test_list_cuts_a_long_notice_body_to_one_line(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    decision: dict[str, Any] = _notice(4, 7, title="Pick one", require_response=True)
+    decision: dict[str, JsonValue] = _notice(4, 7, title="Pick one", require_response=True)
     decision["content"] = "x" * 200
     with serving({OPEN: Reply(body=[decision])}) as gateway:
         code = cmd_notices_list(

@@ -11,14 +11,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from pathlib import Path
 from uuid import uuid4
 
 import psycopg
 import pytest
 
 from base.agents import impersonation as leases
-from base.agents.impersonation.status import ImpersonationStatus
+from base.agents.impersonation.status import ImpersonationStatus, PublicLease
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.inbox.insert import insert_inbound_message
 from base.api_contracts.caller_identity import CallerIdentity
@@ -27,11 +27,13 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
+from base.host.boundary.untyped import object_of
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 __all__ = [
     "START_MESSAGE",
     "ActiveSession",
+    "ControllerSession",
     "LeaseAt",
     "active",
     "assert_message_pending",
@@ -44,7 +46,16 @@ __all__ = [
 
 START_MESSAGE = "Process and ACK the test message"
 
-type ActiveSession = tuple[dict[str, Any], RuntimeIncarnation, int]
+
+# meiva:note
+# A lease as the controller session holds it: the public row the service hands out, plus the
+# relay token the request minted for this session. The token never reaches `PublicLease`, which is
+# the same row without credentials.
+class ControllerSession(PublicLease):
+    relay_token: str
+
+
+type ActiveSession = tuple[ControllerSession, RuntimeIncarnation, int]
 type LeaseAt = Callable[[ImpersonationStatus], ActiveSession]
 
 
@@ -75,7 +86,7 @@ def _seed(
     window: int,
     attempts: int,
     db_conn: psycopg.Connection,
-    unit_home: Any,
+    unit_home: Path,
     database: Database,
     event_bus: EventBus,
     authority: ConfigAuthority,
@@ -115,10 +126,10 @@ def _seed(
         leases.activate(database, event_bus, lease["id"], owner)
     token = lease.get("relay_token")
     assert token is not None
-    controller: dict[str, Any] = {
+    controller = ControllerSession(
         **leases.relay_get(database, event_bus, lease["id"], token, local_machine=machine.name()),
-        "relay_token": token,
-    }
+        relay_token=token,
+    )
     assert controller["status"] == stage
     message_id = insert_inbound_message(
         db_conn,
@@ -139,7 +150,7 @@ def _seed(
 def active(
     db_conn: psycopg.Connection,
     request: pytest.FixtureRequest,
-    unit_home: Any,
+    unit_home: Path,
     database: Database,
     event_bus: EventBus,
     *,
@@ -173,7 +184,7 @@ def idle_agent(
 @pytest.fixture
 def lease_at(
     db_conn: psycopg.Connection,
-    unit_home: Any,
+    unit_home: Path,
     database: Database,
     event_bus: EventBus,
     *,
@@ -201,7 +212,7 @@ def lease_at(
 # meiva:note
 # Age the lease's deliveries by `seconds`, as if that long had passed since they were pushed:
 # the database owns the ACK windows, so this is how a test crosses one without waiting.
-def elapse(db_conn: psycopg.Connection, lease: dict[str, Any], seconds: int = 181) -> None:
+def elapse(db_conn: psycopg.Connection, lease: PublicLease, seconds: int = 181) -> None:
     db_conn.execute(
         "UPDATE agent_impersonation_messages SET last_delivery_at="
         "clock_timestamp() - %s*interval '1 second' WHERE lease_id=%s AND delivery_attempts>0",
@@ -216,7 +227,9 @@ def delivery_attempts(db_conn: psycopg.Connection, message_id: int) -> int:
         (message_id,),
     ).fetchone()
     assert row is not None
-    return row[0]
+    attempts = object_of(row.__getitem__, 0)
+    assert isinstance(attempts, int)
+    return attempts
 
 
 def assert_message_pending(db_conn: psycopg.Connection, message_id: int) -> None:
