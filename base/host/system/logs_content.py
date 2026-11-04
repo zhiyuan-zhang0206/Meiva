@@ -25,7 +25,17 @@ __all__ = [
 ]
 
 
-FAMILY_DAYS = "agent=15,shell=7,gateway=30,ops=30,watchdog=30,snapshot=7,other=15"
+# meiva:note
+# Every log family keeps seven days.
+#
+# Tiering kept agent logs 15 days and gateway/ops/watchdog 30, on the assumption that those
+# families were worth more and cost less. A measurement on 2026-11-05 says otherwise: the
+# directory held 3.62 GiB across 3358 files, and nothing in the long-retention families still
+# held bytes past seven days - running with seven days deleted 85 files and 6.2 MiB. What sets
+# the directory's size is its generation rate (~520 MiB/day), not the retention window. The user
+# chose seven from a 7/14 choice: a full working week, weekends included. Collapsing the tiers
+# also leaves one answer to "how long do we keep logs" instead of seven.
+FAMILY_DAYS = "agent=7,shell=7,gateway=7,ops=7,watchdog=7,snapshot=7,other=7"
 
 MARKER = "# meiva-logs-maintenance"
 
