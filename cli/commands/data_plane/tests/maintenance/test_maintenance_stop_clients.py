@@ -56,7 +56,13 @@ def test_remaining_clients_are_named_in_stderr_and_returned_for_the_report(
     assert "2 client(s) still connected when the pooler stops" in err
     assert "app=probe-a" in err and "app=probe-b" in err
     assert "user=meiva state=" in err
-    assert line == err.strip().removeprefix("! ")
+    # meiva:note
+    # Read the report line back out of the lines this function actually wrote, instead of
+    # assuming it is the whole of stderr: anything else on stderr (a library, another
+    # fixture) would otherwise change `line`'s expected value.
+    reported = [row for row in err.splitlines() if row.strip().startswith("! ")]
+    assert len(reported) == 1
+    assert line == reported[0].strip().removeprefix("! ")
 
 
 def test_a_console_with_no_clients_says_nothing(
@@ -65,7 +71,15 @@ def test_a_console_with_no_clients_says_nothing(
     with running_pooler(unit_home, console_password=_admin_password(unit_home)) as running:
         line = maintenance_stop.report_pooler_clients(running.identity, home=unit_home)
 
-    assert capsys.readouterr().err == "" and line is None
+    # meiva:note
+    # The contract is that this function reports nothing, not that the whole process is
+    # silent. A bare `err == ""` also catches *foreign* stderr — loguru reports a sink
+    # bound to an already-closed capsys stream that way — and made this case fail
+    # depending on which test ran before it. Every line this function writes goes out as
+    # `"  ! <text>"` (see `report_pooler_clients`), so the contract is readable as "no
+    # such line", whatever else shares stderr.
+    reported = [row for row in capsys.readouterr().err.splitlines() if row.strip().startswith("! ")]
+    assert reported == [] and line is None
 
 
 # meiva:note
