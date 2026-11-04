@@ -551,6 +551,7 @@ Two scheduled workflows run the whole population on `main`, each for a different
 | `.github/workflows/refresh-test-durations.yml` (nightly, main) | daily (`30 19 * * *`) | was main green last night — the `verdict` job reads junit only, so a retried measurement cannot wash a first-attempt failure green |
 | `.github/workflows/ci.yml` (nightly, main) | daily (`0 18 * * *` = 02:00 +08) | runs the same full matrix a manual dispatch does, so a merge that landed between two gates is verified the same night; `main-red-watch` turns its red runs into a card |
 | `.github/workflows/main-push.yml` (the gate) | every push to `main` | not the suite: the full `meizel check` graph and `scripts/tests/test_hooks_scratch_home.py`, the two checks whose verdict cannot depend on a diff. Its green run never closes a card a full run opened |
+| `.github/workflows/main-typecheck.yml` | on demand only (`workflow_dispatch`, `ref` defaults to `main`); dispatched to backfill a `release-gate.yml` slot GitHub never started | not the suite: the full-tree `basedpyright` and the pyright test-environment drift check, with `contents: read` and nothing that tags or publishes, which dispatching `release-gate.yml` would |
 
 The nightly run is the honest answer to "is main broken", and a red night blocks the release
 gate. It does **not** stop main from accepting merges: a nightly flake must not become a

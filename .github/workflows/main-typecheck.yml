@@ -1,0 +1,76 @@
+# Check-only backfill for a `release-gate.yml` cron slot that GitHub never started.
+#
+# `release-gate.yml` type-checks the whole tree of `main` every six hours, but the same workflow
+# also certifies and publishes a release: a passing run mints a `v*` tag, moves `channel/latest`
+# and creates a GitHub Release. GitHub's cron does not start every slot (see the release-gate
+# slot watch in `schedules/README.md`), so a missed slot leaves the full-tree type verdict of
+# `main` stale, and dispatching `release-gate.yml` to fill the hole would publish. This workflow
+# runs only that type check and the pyright-environment drift check beside it, with
+# `contents: read` and no step that tags, pushes or releases. The full `meizel check` is not
+# repeated here: `main-push.yml` runs it on every push to `main`.
+#
+# It runs only when dispatched, never on an event:
+#
+#   gh workflow run main-typecheck.yml -f ref=main
+#
+# A pull request gets the impacted-closure form of the same check in `ci.yml` (`backend-static`
+# runs `basedpyright` over the `meizel impacted` closure of the diff), so the full tree is only
+# checked here, in `release-gate.yml`, and in the nightly full run of `ci.yml`.
+#
+# `uses:` is pinned to a commit SHA with the version in a trailing comment, exactly as in
+# `ci.yml`.
+
+name: Main typecheck
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag, or commit to type-check (default main)
+        required: false
+        default: 'main'
+
+permissions:
+  contents: read
+
+env:
+  # uv reads UV_FROZEN=1 as --frozen: CI never rewrites uv.lock; a stale lock fails the run.
+  UV_FROZEN: "1"
+  # Sentinel ports: a check that quietly reached a real data plane fails loudly instead.
+  MEIVA_DB_URL: postgresql://unused@127.0.0.1:1/unused
+  MEIVA_REDIS_URL: redis://127.0.0.1:1/0
+
+concurrency:
+  # One run per ref at a time. A second dispatch of the same ref waits instead of cancelling the
+  # run whose verdict the first dispatch is waiting for.
+  group: main-typecheck-${{ inputs.ref }}
+  cancel-in-progress: false
+
+jobs:
+  typecheck:
+    name: main typecheck (full basedpyright, pyright environments)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Record the checked commit
+        run: echo "Type-checking commit $(git rev-parse HEAD)" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: 0.13.1
+          enable-cache: true
+
+      - name: Install Python deps
+        uses: ./.github/actions/uv-sync
+
+      - name: Run full basedpyright
+        # Pyright rejects --stats with --threads; time retains elapsed/CPU cost.
+        run: time uv run basedpyright --threads 2
+
+      - name: Pyright test environments match the tests directories
+        run: uv run python scripts/codegen/gen_pyright_test_environments.py --check

@@ -11,6 +11,10 @@
 #     certifying `refs/heads/main` (non-hotfix);
 #   - a corresponding GitHub Release (`--latest=false`; `promote-release.yml` promotes to
 #     `channel/stable` and `--latest`).
+#
+# A cron slot GitHub never started is backfilled with `main-typecheck.yml` (`workflow_dispatch`),
+# which runs the full-tree type check and publishes nothing. Do not dispatch this workflow to
+# fill a missed slot: a passing run mints a tag and moves `channel/latest`.
 
 name: Release gate
 
