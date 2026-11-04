@@ -771,7 +771,7 @@ repos:
         name: "lint pyright tests environments (pyproject.toml matches the tests directories; drift: run .venv/bin/python scripts/codegen/gen_pyright_test_environments.py)"
         entry: .venv/bin/python scripts/codegen/gen_pyright_test_environments.py --check
         language: system
-        files: ^(pyproject\.toml$|scripts/codegen/gen_pyright_test_environments\.py$|.+/tests/.*\.py$)
+        files: ^(pyproject\.toml$|scripts/codegen/gen_pyright_test_environments\.py$|scripts/codegen/pyright_tests_owing_any\.txt$|.+/tests/.*\.py$)
         pass_filenames: false
 
       # `git rebase` / `cherry-pick` / `merge` never invoke the pre-commit

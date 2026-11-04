@@ -7,3 +7,8 @@
 *.ico binary
 *.woff binary
 *.woff2 binary
+
+# Parallel pull requests each add a line to this list of path prefixes; keep both sides' lines
+# instead of stopping at a conflict. The generator sorts and de-duplicates what it reads (see the
+# note at the top of scripts/codegen/gen_pyright_test_environments.py).
+scripts/codegen/pyright_tests_owing_any.txt merge=union

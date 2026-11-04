@@ -1,0 +1,55 @@
+# Path prefixes of tests that still owe their Any debt, one per line. Blank lines and lines that
+# start with '#' are ignored; the generator sorts and de-duplicates what it reads, so the order of
+# this file means nothing. Read by scripts/codegen/gen_pyright_test_environments.py, which explains
+# the rules (each prefix must name a directory that holds a tests directory).
+#
+# Add a prefix in the pull request that adds the covering entry. Remove one in a pull request of
+# its own, once its tests are clean: .gitattributes merges this file with merge=union, which keeps a
+# line that either side of a merge still holds.
+agent/execution/tests
+agent/extensions/tests
+agent/messages/tests
+base/agents
+base/cluster
+base/config
+base/events/live
+base/events/notifications
+base/events/signals
+base/events/tests
+base/host/db_authority
+base/host/env
+base/host/net
+base/host/permissions_helper
+base/host/system
+base/host/tests
+base/lm
+base/packages/plugins
+base/packages/tests
+base/telemetry
+cli
+gateway/tests
+meiva/mcps/tests
+meiva_builtins/plugins/meiva_code
+meiva_builtins/plugins/meiva_fleet
+meiva_builtins/plugins/meiva_memory
+meiva_builtins/plugins/meiva_syntax_fix
+meiva_builtins/plugins/meiva_to_user
+meiva_builtins/plugins/meiva_usage
+meiva_builtins/skills/coordination
+meiva_builtins/skills/platform/meiva-guide
+meiva_builtins/skills/platform/meiva-self-evolution
+scripts/ci
+scripts/data_plane_ops
+scripts/host_ops
+scripts/lint
+scripts/model_registry
+scripts/structure
+scripts/verify
+services/agent_runner
+services/backup
+services/derived
+services/desktop
+services/entrypoints
+services/supervision
+services/upkeep
+services/wake
