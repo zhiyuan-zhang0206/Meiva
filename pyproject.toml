@@ -638,6 +638,9 @@ reportUnusedCallResult = "warning"
 root = "agent/execution/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "agent/extensions/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "agent/messages/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -1031,6 +1034,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "agent/llm"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "agent/extensions"
 reportAny = "error"
 reportExplicitAny = "error"
 

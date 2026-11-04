@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TypeGuard
 
 from base.agents.sdk.call_policy import SamplingPolicyOwner
+from base.host.boundary.untyped import object_of
 from base.lm.provider_api import DecisionProviderContribution, ProviderContribution
 from base.packages.plugins import enable_config
 from base.packages.plugins.contributions import Contribution
@@ -225,6 +226,14 @@ def _unquoted(annotation: object) -> object:
     return _SourceText(annotation) if isinstance(annotation, str) else annotation
 
 
+# meiva:note
+# The declared return annotation, read as `object`. typeshed types it `Any` (it may be a string, a
+# type or the `empty` sentinel), and `_unquoted` only asks whether it is a string, so the value is
+# widened here instead of at every reader.
+def _return_annotation(signature: inspect.Signature) -> object:
+    return object_of(getattr, signature, "return_annotation")
+
+
 # meiva:link agent/extensions/docs/catalog.meiva.okf.md
 def entry_point_signature(entry_point: type) -> str:
     signature = inspect.signature(entry_point)
@@ -232,7 +241,7 @@ def entry_point_signature(entry_point: type) -> str:
         parameters=[
             p.replace(annotation=_unquoted(p.annotation)) for p in signature.parameters.values()
         ],
-        return_annotation=_unquoted(signature.return_annotation),
+        return_annotation=_unquoted(_return_annotation(signature)),
     )
     return f"{entry_point.__module__}.{entry_point.__qualname__}{signature}"
 
