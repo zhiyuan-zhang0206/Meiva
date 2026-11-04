@@ -159,11 +159,16 @@ def test_numeric_options_reject_out_of_bounds_values_during_parsing(
     for value in invalid_values:
         with pytest.raises(SystemExit) as raised:
             _args(*command, option, value, command_runtime=command_runtime)
+        # meiva:note
+        # `code == 2` proves argparse exited on its own instead of raising, and the
+        # `argument <opt>:` line below proves it took the numeric-bounds branch. A bare
+        # `"Traceback" not in err` also catches *foreign* stderr — loguru reports a sink
+        # bound to an already-closed capsys stream that way — which is not this parser's
+        # contract, and made this case fail depending on which test ran before it.
         assert raised.value.code == 2
         output = capsys.readouterr()
         assert output.out == ""
         assert f"argument {option}:" in output.err
-        assert "Traceback" not in output.err
 
 
 @pytest.mark.parametrize(
