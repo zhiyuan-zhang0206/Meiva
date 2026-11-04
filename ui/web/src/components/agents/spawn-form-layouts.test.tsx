@@ -189,7 +189,16 @@ const MODEL_COLUMN = "Model";
 const EFFORT_COLUMN = "Effort";
 
 async function table(): Promise<HTMLElement> {
-  return await screen.findByTestId("spawn-table");
+  const form = screen.getByTestId("spawn-table");
+  await within(column(form, MACHINE_COLUMN)).findAllByRole("button");
+  return form;
+}
+
+async function readyPicker(layout: "table" | "stack"): Promise<HTMLElement> {
+  const picker = screen.getByTestId(`spawn-${layout}`);
+  const refresh = screen.getByRole<HTMLButtonElement>("button", { name: "Refresh" });
+  await waitFor(() => expect(refresh.disabled).toBe(false));
+  return picker;
 }
 
 function column(element: HTMLElement, name: string): HTMLElement {
@@ -399,7 +408,9 @@ describe.each(["table", "stack"] as const)("%s API model visibility", (layout) =
     setMockSetting("models.hidden", [model]);
     setMockSetting("models.hidden_providers", [provider]);
     const { onSpawn } = wrap(layout);
-    const form = await screen.findByTestId(`spawn-${layout}`);
+    const form = await readyPicker(layout);
+    const spawn = screen.getByRole<HTMLButtonElement>("button", { name: "Spawn" });
+    await waitFor(() => expect(spawn.disabled).toBe(false));
     if (layout === "stack") {
       expect(within(form).getByRole("button", { name: `Model ${modelLabel(model)}` })).toBeTruthy();
       fireEvent.click(within(form).getByRole("button", { name: "Effort Medium" }));
@@ -428,7 +439,9 @@ describe.each(["table", "stack"] as const)("%s API model visibility", (layout) =
 
 describe("stacked picker", () => {
   async function stack(): Promise<HTMLElement> {
-    return await screen.findByTestId("spawn-stack");
+    const form = screen.getByTestId("spawn-stack");
+    await within(form).findByRole("button", { name: /Machine (?!—)/ });
+    return form;
   }
 
   function section(form: HTMLElement, name: string): HTMLElement {
@@ -582,7 +595,7 @@ describe.each(["table", "stack"] as const)("manual harness refresh (%s)", (layou
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const view = () => render(<QueryClientProvider client={qc}><SpawnForm onSpawn={vi.fn()} onDone={vi.fn()} layout={layout} /></QueryClientProvider>);
     const first = view();
-    const form = await screen.findByTestId(`spawn-${layout}`);
+    const form = await readyPicker(layout);
     if (layout === "stack") {
       fireEvent.click(within(form).getByRole("button", { name: "Model DeepSeek V4 Pro" }));
     }
@@ -598,7 +611,7 @@ describe.each(["table", "stack"] as const)("manual harness refresh (%s)", (layou
     expect(transport.refreshHarnessAvailability).not.toHaveBeenCalled();
     first.unmount();
     view();
-    await screen.findByTestId(`spawn-${layout}`);
+    await readyPicker(layout);
     expect(transport.refreshHarnessAvailability).not.toHaveBeenCalled();
     const refresh = screen.getByRole("button", { name: "Refresh" });
     const spawn = screen.getByRole("button", { name: "Spawn" });
@@ -626,7 +639,7 @@ describe.each(["table", "stack"] as const)("manual harness refresh (%s)", (layou
     resetMockSettings({ "behavior.spawn_harness": "codex", "behavior.spawn_model": "gpt-5.6", "behavior.spawn_reasoning_effort": "high" });
     transport.refreshHarnessAvailability.mockRejectedValue(new Error("offline"));
     const { onSpawn } = wrap(layout);
-    await screen.findByTestId(`spawn-${layout}`);
+    await readyPicker(layout);
     await waitFor(() => expect(transport.getHarnessAvailability).toHaveBeenCalled());
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     await screen.findByRole("alert");
@@ -641,7 +654,7 @@ describe.each(["table", "stack"] as const)("manual harness refresh (%s)", (layou
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const view = () => render(<QueryClientProvider client={qc}><SpawnForm onSpawn={vi.fn()} onDone={vi.fn()} layout={layout} /></QueryClientProvider>);
     const first = view();
-    await screen.findByTestId(`spawn-${layout}`);
+    await readyPicker(layout);
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     const busy = await screen.findByRole("button", { name: "Refreshing…" });
     expect(busy.hasAttribute("disabled")).toBe(true);
@@ -668,7 +681,7 @@ describe.each(["table", "stack"] as const)("manual harness refresh (%s)", (layou
     );
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(<QueryClientProvider client={qc}><SpawnForm onSpawn={vi.fn()} onDone={vi.fn()} layout={layout} /></QueryClientProvider>);
-    const form = await screen.findByTestId(`spawn-${layout}`);
+    const form = await readyPicker(layout);
     fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() =>
       expect(transport.refreshHarnessAvailability.mock.calls.map(([m]) => m)).toEqual(["a-host", "b-host"]),

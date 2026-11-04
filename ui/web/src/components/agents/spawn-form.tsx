@@ -11,7 +11,7 @@
 // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 
 import { useIsMutating, useQuery } from "@tanstack/react-query";
-import { Loader2, Plus, RefreshCw } from "lucide-react";
+import { Plus, RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
@@ -78,15 +78,20 @@ interface Props {
   layout?: "table" | "stack";
 }
 
+export function useSpawnStatus(poll: boolean) {
+  const client = useApi();
+  return useQuery({
+    queryKey: SYSTEM_STATUS_QUERY_KEY,
+    queryFn: () => client.getSystemStatus(),
+    refetchInterval: poll ? 15_000 : false,
+    staleTime: 15_000,
+  });
+}
+
 export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   const client = useApi();
   const t = useTranslations("spawn");
-  const statusQuery = useQuery({
-    queryKey: SYSTEM_STATUS_QUERY_KEY,
-    queryFn: () => client.getSystemStatus(),
-    refetchInterval: 15_000,
-    staleTime: 15_000,
-  });
+  const statusQuery = useSpawnStatus(true);
   const statusData = statusQuery.data;
   const modelsQuery = useQuery({
     queryKey: ["models"],
@@ -164,7 +169,10 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
       : undefined;
   const selectedMachine = pickedMachine ?? spawnable.at(0)?.name;
   const pickMachine = (v: string) => setPicks((p) => ({ ...p, machine: v }));
-  const harnessByMachine = useHarnessAvailabilityByMachine(machines.map((row) => row.name));
+  const { snapshots: harnessByMachine, pending: pendingHarnesses } =
+    useHarnessAvailabilityByMachine(machines.map((row) => row.name));
+  const availabilityPending = statusQuery.isPending ||
+    (selectedMachine !== undefined && pendingHarnesses.has(selectedMachine));
   // meiva:note
   // This machine's harnesses: a harness the machine cannot start keeps its row,
   // disabled and titled "unavailable", because an agent born on it would sit
@@ -173,7 +181,9 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   // never lands on a dead end - the pick itself is left alone, so switching back
   // restores it.
   // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
-  const tableHarnessRows = harnessRows(harnessByMachine.get(selectedMachine ?? "") ?? []);
+  const tableHarnessRows = availabilityPending
+    ? []
+    : harnessRows(harnessByMachine.get(selectedMachine ?? "") ?? []);
   const pickedHarness = picks.harness ?? storedHarness;
   const selectedHarness: Harness =
     tableHarnessRows.find((row) => row.harness === pickedHarness)?.launchable
@@ -293,18 +303,8 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   }
 
   // meiva:note
-  // Status check loading and cold failure states must not read as zero runners.
-  // Stale cached data is preserved during background refetch errors (stale-while-error).
+  // Keep the picker visible on a cold cache without treating pending data as a refusal.
   // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
-  if (statusQuery.isPending) {
-    return (
-      <div role="status" className={cn("items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground", FLEX)}>
-        <Loader2 className="size-3.5 animate-spin" />
-        <span>{t("loadingStatus")}</span>
-      </div>
-    );
-  }
-
   if (statusQuery.error && !statusData) {
     return (
       <InlineError
@@ -318,7 +318,7 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
     );
   }
 
-  if (spawnable.length === 0) {
+  if (statusData && spawnable.length === 0) {
     const reason = eligible.length === 1
       ? eligible[0].agent_host_online === false ? t("hostUnavailable") : t("hostUnknown")
       : t("noReadyRunner");
@@ -329,12 +329,14 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   const refreshMachines = machines.filter((row) => row.reason === undefined).map((row) => row.name);
   const modelsBlocked =
     selectedHarness === DEFAULT_HARNESS ? Boolean(modelsQuery.error) : visibleModels.length === 0;
-  const spawnReason = target?.reason ?? (harnessBlocked
+  const modelsPending = availabilityPending ||
+    (selectedHarness === DEFAULT_HARNESS && modelsQuery.isPending);
+  const spawnReason = availabilityPending ? undefined : target?.reason ?? (harnessBlocked
     ? t("harnessStatus.unavailable")
     : modelsBlocked ? t("modelsUnavailable") : undefined);
   const refreshNotice = refresh.isError
     ? t("refreshFailed")
-    : !harnessByMachine.get(selectedMachine ?? "")?.length ? t("refreshNeeded") : undefined;
+    : !availabilityPending && !harnessByMachine.get(selectedMachine ?? "")?.length ? t("refreshNeeded") : undefined;
   // meiva:note
   // Rates are the decision only when the harness meters them. A subscription
   // harness pays nothing per token, so the price column stays empty there
@@ -348,6 +350,7 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
     harness: selectedHarness,
     onHarness: pickHarness,
     modelIds: visibleModels,
+    modelsPending,
     models: modelsData?.models,
     model: effectiveModel,
     onModel: pickModel,
@@ -360,7 +363,7 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   const spawnButton = (className?: string) => (
     <button
       type="button"
-      disabled={spawnReason !== undefined || selectedMachine === undefined}
+      disabled={modelsPending || spawnReason !== undefined || selectedMachine === undefined}
       title={spawnReason}
       onClick={() => { if (selectedMachine !== undefined) spawnOn(selectedMachine); }}
       className={cn(

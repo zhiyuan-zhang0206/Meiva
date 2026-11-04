@@ -5,7 +5,7 @@ import { Plus } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
-import { SpawnForm } from "@/components/agents/spawn-form";
+import { SpawnForm, useSpawnStatus } from "@/components/agents/spawn-form";
 import { useCoarsePointer } from "@/lib/input/use-coarse-pointer";
 import { useBreakpoint } from "@/lib/layout/breakpoint";
 import { cn } from "@/lib/format/utils";
@@ -32,6 +32,7 @@ export function SpawnPopover({ onSpawn, variant }: Props) {
   const coarsePointer = useCoarsePointer();
   const stacked = isNarrow || coarsePointer;
   const [open, setOpen] = useState(false);
+  useSpawnStatus(false);
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>

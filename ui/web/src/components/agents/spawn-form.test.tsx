@@ -208,7 +208,9 @@ const MODEL_COLUMN = "Model";
 const EFFORT_COLUMN = "Effort";
 
 async function table(): Promise<HTMLElement> {
-  return await screen.findByTestId("spawn-table");
+  const form = screen.getByTestId("spawn-table");
+  await within(column(form, MACHINE_COLUMN)).findAllByRole("button");
+  return form;
 }
 
 function column(element: HTMLElement, name: string): HTMLElement {
@@ -240,7 +242,7 @@ beforeEach(() => {
 });
 
 describe("status loading and error states", () => {
-  it("pending getSystemStatus() renders loading state without noReadyRunner, then resolves to table", async () => {
+  it("pending getSystemStatus() shows the table immediately and keeps Spawn disabled until status arrives", async () => {
     let resolveStatus!: (status: SystemStatus) => void;
     transport.getSystemStatus.mockImplementation(
       () => new Promise((resolve) => { resolveStatus = resolve; }),
@@ -248,15 +250,16 @@ describe("status loading and error states", () => {
     transport.getModels.mockResolvedValue(modelsDefault());
     wrap();
 
-    const loadingStatus = screen.getByRole("status");
-    expect(loadingStatus.textContent).toContain("Checking available runners…");
-    expect(screen.queryByText("No agent runner with an available host")).toBeNull();
-    expect(screen.queryByTestId("spawn-table")).toBeNull();
+    expect(screen.getByTestId("spawn-table")).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByText("Models unavailable")).toBeNull();
+    const spawn = screen.getByRole<HTMLButtonElement>("button", { name: "Spawn" });
+    expect(spawn.disabled).toBe(true);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Refresh" }).disabled).toBe(true);
 
     resolveStatus(singleMachineStatus());
-    expect(await screen.findByTestId("spawn-table")).toBeTruthy();
-    expect(screen.queryByText("Checking available runners…")).toBeNull();
-    expect(screen.queryByText("No agent runner with an available host")).toBeNull();
+    await waitFor(() => expect(spawn.disabled).toBe(false));
+
   });
 
   it("rejected getSystemStatus() on cold cache renders statusUnavailable without noReadyRunner", async () => {
@@ -274,7 +277,7 @@ describe("status loading and error states", () => {
     transport.getModels.mockResolvedValue(modelsDefault());
     const { qc } = wrap();
 
-    expect(await screen.findByTestId("spawn-table")).toBeTruthy();
+    await table();
 
     transport.getSystemStatus.mockRejectedValue(new Error("transient poll error"));
     await qc.refetchQueries({ queryKey: SYSTEM_STATUS_QUERY_KEY }).catch(() => undefined);

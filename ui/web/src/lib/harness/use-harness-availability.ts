@@ -27,12 +27,14 @@ export function useHarnessAvailability(machine: string | undefined) {
 export function useHarnessAvailabilityByMachine(machines: readonly string[]) {
   const client = useApi();
   const results = useQueries({ queries: machines.map((machine) => snapshotQuery(machine, client)) });
-  const answered = new Map<string, HarnessAvailability[]>();
+  const pending = new Set<string>();
+  const snapshots = new Map<string, HarnessAvailability[]>();
   machines.forEach((machine, index) => {
     const data = results[index]?.data;
-    if (data !== undefined) answered.set(machine, data);
+    if (data !== undefined) snapshots.set(machine, data);
+    if (results[index]?.isPending) pending.add(machine);
   });
-  return answered;
+  return { snapshots, pending };
 }
 
 export function useRefreshHarnessAvailability() {
