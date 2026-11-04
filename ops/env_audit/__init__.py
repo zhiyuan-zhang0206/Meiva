@@ -26,6 +26,7 @@ from typing import TypeGuard, assert_never
 
 import psutil
 
+from base.host.boundary.untyped import object_of
 from base.host.env.dotenv_content import env_line_key
 from base.host.env.dotenv_file import ENV_LOCK_TIMEOUT_S, env_lock_path
 from base.host.private_storage import write_private_bytes
@@ -301,7 +302,7 @@ def read_env_write_records(limit: int, env_path: Path) -> list[dict[str, object]
     text = audit_path.read_bytes()[-_AUDIT_TAIL_BYTES:].decode("utf-8", errors="replace")
     for line in reversed(text.splitlines()):
         try:
-            record = json.loads(line)
+            record = object_of(json.loads, line)
         except json.JSONDecodeError:
             corrupt += 1
             continue
@@ -332,7 +333,7 @@ def _read_history(audit_path: Path) -> History:
         line = _last_audit_line(audit_path)
         if line is None:
             return EmptyHistory()
-        record = json.loads(line)
+        record = object_of(json.loads, line)
     except (OSError, ValueError):
         return UnreadableHistory()
     if not _is_str_dict(record):

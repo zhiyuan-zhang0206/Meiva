@@ -25,12 +25,12 @@ against a registration that races the check.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
 
 import psycopg
 
-from base.db import fetch_one
+from base.db.rows import query_all, query_one
 from ops.rpc_schemas import PageRow
 
 _SELECT_COLUMNS = (
@@ -52,31 +52,67 @@ def _page_url(agent_id: int, name: str) -> str:
     return f"/pages/{agent_id}-{name}/"
 
 
-def _row_to_record(row: tuple[Any, ...]) -> PageRow:
-    (
-        pid,
-        agent_id,
-        name,
-        port,
-        _host,
-        title,
-        serve_dir,
-        created_at,
-        closed_at,
-        _expires_at,
-        _expired_at,
-    ) = row
+# meiva:note
+# An `agent_pages` row as `_SELECT_COLUMNS` selects it, named as the table names its columns. `host`
+# is nullable in the table; `expires_at` / `expired_at` are read for the row shape only.
+@dataclass(frozen=True)
+class _PageDbRow:
+    id: int
+    agent_id: int
+    name: str
+    port: int
+    host: str | None
+    title: str | None
+    serve_dir: str | None
+    created_at: datetime
+    closed_at: datetime | None
+    expires_at: datetime | None
+    expired_at: datetime | None
+
+
+def _row_to_record(row: _PageDbRow) -> PageRow:
     return PageRow(
-        id=pid,
-        agent_id=agent_id,
-        name=name,
-        port=port,
-        title=title,
-        serve_dir=serve_dir,
-        url=_page_url(agent_id, name),
-        created_at=created_at,
-        closed_at=closed_at,
+        id=row.id,
+        agent_id=row.agent_id,
+        name=row.name,
+        port=row.port,
+        title=row.title,
+        serve_dir=row.serve_dir,
+        url=_page_url(row.agent_id, row.name),
+        created_at=row.created_at,
+        closed_at=row.closed_at,
     )
+
+
+# meiva:note
+# The row a statement that contractually yields exactly one (an `INSERT ... RETURNING`) answered.
+def _exactly_one(row: _PageDbRow | None, context: str) -> _PageDbRow:
+    if row is None:
+        raise RuntimeError(f"expected exactly one row: {context}")
+    return row
+
+
+# meiva:note
+# One column of an `agent_pages` lookup that selects a single name.
+@dataclass(frozen=True)
+class _NameRow:
+    name: str
+
+
+# meiva:note
+# An agent and the page name of another live page holding a (host, port).
+@dataclass(frozen=True)
+class _OccupantRow:
+    agent_id: int
+    name: str
+
+
+# meiva:note
+# The dial target of an open page; `host` is nullable in the table.
+@dataclass(frozen=True)
+class _TargetRow:
+    host: str | None
+    port: int
 
 
 _LIVE_PORT_INDEX = "agent_pages_unique_live_port"
@@ -116,16 +152,16 @@ def find_live_page_on_port(
     Rows of ``exclude_agent_id`` are ignored — registration replaces the
     registering agent's own page, so its own row is not a conflict.
     """
-    with db.cursor() as cur:
-        cur.execute(
-            "SELECT agent_id, name FROM agent_pages "
-            "WHERE closed_at IS NULL AND expired_at IS NULL "
-            "AND host = %s AND port = %s AND agent_id <> %s "
-            "ORDER BY id LIMIT 1",
-            (host, port, exclude_agent_id),
-        )
-        row = cur.fetchone()
-    return (int(row[0]), str(row[1])) if row is not None else None
+    occupant = query_one(
+        db,
+        _OccupantRow,
+        "SELECT agent_id, name FROM agent_pages "
+        "WHERE closed_at IS NULL AND expired_at IS NULL "
+        "AND host = %s AND port = %s AND agent_id <> %s "
+        "ORDER BY id LIMIT 1",
+        (host, port, exclude_agent_id),
+    )
+    return (occupant.agent_id, occupant.name) if occupant is not None else None
 
 
 def assert_port_free(db: psycopg.Connection, agent_id: int, host: str, port: int) -> None:
@@ -173,8 +209,10 @@ def register_page_in_transaction(
     lock_page_agent(db, agent_id)
     expires_at = now + timedelta(seconds=ttl_seconds)
     try:
-        with db.transaction(), db.cursor() as cur:
-            cur.execute(
+        with db.transaction():
+            row = query_one(
+                db,
+                _PageDbRow,
                 "UPDATE agent_pages SET port = %s, host = %s, title = %s, serve_dir = %s, "  # noqa: S608
                 "expires_at = %s, expired_at = NULL, "
                 "session_name = CASE WHEN (port, host, serve_dir) IS DISTINCT FROM (%s, %s, %s) "
@@ -199,16 +237,19 @@ def register_page_in_transaction(
                     name,
                 ),
             )
-            row = cur.fetchone()
             if row is None:
-                cur.execute(
-                    "INSERT INTO agent_pages "
-                    "(agent_id, name, port, host, title, serve_dir, expires_at) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s) "
-                    "RETURNING " + _SELECT_COLUMNS,
-                    (agent_id, name, port, host, title, serve_dir, expires_at),
+                row = _exactly_one(
+                    query_one(
+                        db,
+                        _PageDbRow,
+                        "INSERT INTO agent_pages "
+                        "(agent_id, name, port, host, title, serve_dir, expires_at) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s) "
+                        "RETURNING " + _SELECT_COLUMNS,
+                        (agent_id, name, port, host, title, serve_dir, expires_at),
+                    ),
+                    f"insert page agent={agent_id} name={name!r}",
                 )
-                row = fetch_one(cur, f"insert page agent={agent_id} name={name!r}")
     except psycopg.errors.UniqueViolation as exc:
         # meiva:note
         # The live-port index is the authority; the router's pre-check can be raced by a
@@ -236,27 +277,31 @@ def get_open_page_target(
 
     Returns the bare host:port instead of a PageRow: the wire schema carries
     no host (it stays inside the gateway), so the proxy reads it here."""
-    with db.cursor() as cur:
-        cur.execute(
-            "SELECT host, port FROM agent_pages "
-            "WHERE agent_id = %s AND name = %s "
-            "AND closed_at IS NULL AND expired_at IS NULL",
-            (agent_id, name),
-        )
-        row = cur.fetchone()
-    return (row[0], row[1]) if row is not None else None
+    target = query_one(
+        db,
+        _TargetRow,
+        "SELECT host, port FROM agent_pages "
+        "WHERE agent_id = %s AND name = %s "
+        "AND closed_at IS NULL AND expired_at IS NULL",
+        (agent_id, name),
+    )
+    if target is None:
+        return None
+    if target.host is None:
+        raise ValueError(f"open page {name!r} of agent {agent_id} has no host to dial")
+    return target.host, target.port
 
 
 def list_open_pages(db: psycopg.Connection, agent_id: int) -> list[PageRow]:
     """Main frontend page-load entry: fetch the agent's currently open page list."""
-    with db.cursor() as cur:
-        cur.execute(
-            "SELECT " + _SELECT_COLUMNS + " FROM agent_pages "  # noqa: S608
-            "WHERE agent_id = %s AND closed_at IS NULL AND expired_at IS NULL "
-            "ORDER BY created_at ASC",
-            (agent_id,),
-        )
-        rows = cur.fetchall()
+    rows = query_all(
+        db,
+        _PageDbRow,
+        "SELECT " + _SELECT_COLUMNS + " FROM agent_pages "  # noqa: S608
+        "WHERE agent_id = %s AND closed_at IS NULL AND expired_at IS NULL "
+        "ORDER BY created_at ASC",
+        (agent_id,),
+    )
     return [_row_to_record(r) for r in rows]
 
 
@@ -264,12 +309,12 @@ def list_all_open_pages(db: psycopg.Connection) -> list[PageRow]:
     """Fleet view page-load: every agent's currently open pages in one fetch
     (the per-agent GET would be N requests across the fleet). SSE
     PageOpened/PageClosed handles deltas after load."""
-    with db.cursor() as cur:
-        cur.execute(
-            "SELECT " + _SELECT_COLUMNS + " FROM agent_pages "  # noqa: S608
-            "WHERE closed_at IS NULL AND expired_at IS NULL ORDER BY created_at ASC",
-        )
-        rows = cur.fetchall()
+    rows = query_all(
+        db,
+        _PageDbRow,
+        "SELECT " + _SELECT_COLUMNS + " FROM agent_pages "  # noqa: S608
+        "WHERE closed_at IS NULL AND expired_at IS NULL ORDER BY created_at ASC",
+    )
     return [_row_to_record(r) for r in rows]
 
 
@@ -289,17 +334,20 @@ def close_all_agent_pages_in_transaction(db: psycopg.Connection, agent_id: int) 
     guarantees at most one open row at a time in normal operation.
     """
     lock_page_agent(db, agent_id)
-    with db.cursor() as cur:
-        cur.execute(
-            "SELECT name FROM agent_pages WHERE agent_id = %s AND closed_at IS NULL", (agent_id,)
+    names = [
+        row.name
+        for row in query_all(
+            db,
+            _NameRow,
+            "SELECT name FROM agent_pages WHERE agent_id = %s AND closed_at IS NULL",
+            (agent_id,),
         )
-        names = [r[0] for r in cur.fetchall()]
-        if names:
-            cur.execute(
-                "UPDATE agent_pages SET closed_at = now() "
-                "WHERE agent_id = %s AND closed_at IS NULL",
-                (agent_id,),
-            )
+    ]
+    if names:
+        _ = db.execute(
+            "UPDATE agent_pages SET closed_at = now() WHERE agent_id = %s AND closed_at IS NULL",
+            (agent_id,),
+        )
     return names
 
 
@@ -315,14 +363,17 @@ def list_open_page_names(db: psycopg.Connection, agent_id: int) -> list[str]:
     fields are only agent_id + name). Separate SELECT to avoid the
     url-composition in _row_to_record (not needed by the terminate
     path)."""
-    with db.cursor() as cur:
-        cur.execute(
+    return [
+        row.name
+        for row in query_all(
+            db,
+            _NameRow,
             "SELECT name FROM agent_pages "
             "WHERE agent_id = %s AND closed_at IS NULL AND expired_at IS NULL "
             "AND serve_dir IS NULL",
             (agent_id,),
         )
-        return [r[0] for r in cur.fetchall()]
+    ]
 
 
 class PageTargetChangedError(ValueError):
@@ -338,23 +389,27 @@ def close_observed_page_in_transaction(
     registration makes the observation stale even when that newer row is closed.
     """
     lock_page_agent(db, agent_id)
-    with db.cursor() as cur:
-        cur.execute(
-            "SELECT " + _SELECT_COLUMNS + " FROM agent_pages "  # noqa: S608
-            "WHERE agent_id = %s AND name = %s ORDER BY id DESC LIMIT 1 FOR UPDATE",
-            (agent_id, name),
+    row = query_one(
+        db,
+        _PageDbRow,
+        "SELECT " + _SELECT_COLUMNS + " FROM agent_pages "  # noqa: S608
+        "WHERE agent_id = %s AND name = %s ORDER BY id DESC LIMIT 1 FOR UPDATE",
+        (agent_id, name),
+    )
+    if row is None or row.id != expected_page_id:
+        raise PageTargetChangedError(
+            "observed page is no longer the latest registration for this name"
         )
-        row = cur.fetchone()
-        if row is None or row[0] != expected_page_id:
-            raise PageTargetChangedError(
-                "observed page is no longer the latest registration for this name"
-            )
-        changed = row[8] is None
-        if changed:
-            cur.execute(
+    changed = row.closed_at is None
+    if changed:
+        row = _exactly_one(
+            query_one(
+                db,
+                _PageDbRow,
                 "UPDATE agent_pages SET closed_at = now() WHERE id = %s RETURNING "  # noqa: S608 — owned fixed projection
                 + _SELECT_COLUMNS,
                 (expected_page_id,),
-            )
-            row = fetch_one(cur, "close observed page")
+            ),
+            "close observed page",
+        )
     return _row_to_record(row), changed

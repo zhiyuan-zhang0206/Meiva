@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Literal, TypeGuard, get_args
+from typing import Literal, TypeGuard, get_args
 from uuid import UUID
 
 from pydantic import (
@@ -393,7 +393,7 @@ class OpResponse(BaseModel):
     on 'completed', or an OpFailure dict on 'failed'."""
 
     status: OpStatus
-    result: dict[str, Any]
+    result: dict[str, object]
 
 
 class OpFailure(BaseModel):
@@ -419,7 +419,7 @@ class LifecyclePayload(BaseModel):
     manual lifecycle calls omit both."""
 
     path: str
-    body: dict[str, Any] = Field(default_factory=dict)
+    body: dict[str, object] = Field(default_factory=dict)
     trigger_inbound_id: int | None = Field(default=None, gt=0)
     trigger_inbound_kind: WakeTriggerKind | None = None
 
@@ -432,7 +432,7 @@ class ConfigWritePayload(BaseModel):
     request state for the write audit — deliberately not part of the caller's
     JSON contract (`gateway/http/auth/docs/request_principal.meiva.okf.md`)."""
 
-    overrides: dict[str, Any]
+    overrides: dict[str, object]
     local: bool = False
     actor: str | None = None
     trace_id: str | None = None

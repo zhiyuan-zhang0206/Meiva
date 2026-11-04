@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from psycopg_pool import ConnectionPool
 from base import paths
 from base.agents.lifecycle import release_browser_pages
 from base.cluster.machine import GatewayAccess, gateway_api_base, gateway_auth_headers
+from base.db.rows import query_one
 from base.host.net.http_dial import get as http_get
 from ops.agent_transfer.archive_io import (
     abort_target_workspace,
@@ -52,39 +54,49 @@ _FETCH_TIMEOUT_S = 90.0
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
+# meiva:note
+# The `agents_meta` columns the export fence reads, named as the table names them.
+@dataclass(frozen=True)
+class _ExportFence:
+    machine: str
+    status: str
+    session_index: int
+
+
 def _verify_export_fence(
     pool: ConnectionPool,
     request: WorkspaceExportRequest,
     *,
     local_machine: str,
 ) -> int:
-    with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(
+    with pool.connection() as conn:
+        fence = query_one(
+            conn,
+            _ExportFence,
             "SELECT machine, status, session_index FROM agents_meta WHERE id = %s",
             (request.agent_id,),
         )
-        row = cur.fetchone()
-        if row is None:
+        if fence is None:
             raise WorkspaceTransferConflictError(f"agent {request.agent_id} does not exist")
-        machine, status, session_index = row
-        if machine != local_machine:
+        if fence.machine != local_machine:
             raise WorkspaceTransferConflictError(
-                f"agent {request.agent_id} is hosted on {machine!r}, not {local_machine!r}"
+                f"agent {request.agent_id} is hosted on {fence.machine!r}, not {local_machine!r}"
             )
-        if status != "terminated":
+        if fence.status != "terminated":
             raise WorkspaceTransferConflictError(
-                f"agent {request.agent_id} status is {status!r}; transfer requires 'terminated'"
+                f"agent {request.agent_id} status is {fence.status!r}; transfer requires "
+                "'terminated'"
             )
-        cur.execute(
+        in_flight = conn.execute(
             "SELECT 1 FROM inbound_messages WHERE agent_id = %s "
             "AND kind IN ('restart', 'terminate') AND status IN ('pending', 'claimed') LIMIT 1",
             (request.agent_id,),
-        )
-        if cur.fetchone() is not None:
+        ).fetchone()
+        if in_flight is not None:
             raise WorkspaceTransferConflictError(
                 f"agent {request.agent_id} has an in-flight lifecycle command"
             )
-        return int(session_index)
+        return fence.session_index
 
 
 # meiva:note
