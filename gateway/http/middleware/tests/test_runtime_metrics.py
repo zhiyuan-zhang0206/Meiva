@@ -27,6 +27,11 @@ def _as_int(value: object) -> int:
     return value
 
 
+def _as_float(value: object) -> float:
+    assert isinstance(value, (int, float))
+    return value
+
+
 async def _run_monitor_for(process: psutil.Process, seconds: float) -> None:
     monitor = runtime_metrics.GatewayRuntimeMonitor(
         loop=asyncio.get_running_loop(), process=process, policy=_POLICY
@@ -48,10 +53,11 @@ async def test_runtime_monitor_emits_process_and_loop_metrics_from_a_real_loop(
     loop_event = next(e for e in emitted_events if e.event_name == "gateway_event_loop")
     process_event = next(e for e in emitted_events if e.event_name == "gateway_process")
     assert loop_event.attributes["slow_ticks"] == 0
-    assert 0.0 <= loop_event.attributes["lag_ms"] < 5_000.0
-    assert process_event.attributes["rss_bytes"] > 0
-    assert process_event.attributes["fd_count"] > 0
-    assert process_event.attributes["cpu_percent"] >= 0.0
+    lag_ms = _as_float(loop_event.attributes["lag_ms"])
+    assert 0.0 <= lag_ms < 5_000.0
+    assert _as_int(process_event.attributes["rss_bytes"]) > 0
+    assert _as_int(process_event.attributes["fd_count"]) > 0
+    assert _as_float(process_event.attributes["cpu_percent"]) >= 0.0
 
 
 async def test_runtime_monitor_stops_sampling_once_stopped(

@@ -1117,6 +1117,11 @@ reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/api_contracts"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/cluster"
 reportAny = "error"
 reportExplicitAny = "error"

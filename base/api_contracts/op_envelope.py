@@ -6,8 +6,6 @@ admission or idempotency writes. Unknown kinds receive a failed op response.
 
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, Field
 
 
@@ -27,5 +25,5 @@ class OpEnvelope(BaseModel):
     idempotent ops -- no dedup then."""
 
     kind: str
-    payload: dict[str, Any] = Field(default_factory=dict)
+    payload: dict[str, object] = Field(default_factory=dict)
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)

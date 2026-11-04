@@ -59,4 +59,9 @@ def test_every_public_sdk_entry_reaches_the_admission_seam_of_an_attached_lease(
         sampling.close()
 
     assert len(executed) == len(entries)
-    assert sorted(event.attributes["fn"] for event in emitted_events.named("sdk_call")) == entries
+    recorded: list[str] = []
+    for event in emitted_events.named("sdk_call"):
+        fn = event.attributes["fn"]
+        assert isinstance(fn, str), fn
+        recorded.append(fn)
+    assert sorted(recorded) == entries

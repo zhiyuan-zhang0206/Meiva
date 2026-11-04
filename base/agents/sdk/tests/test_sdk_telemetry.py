@@ -38,10 +38,12 @@ def sampling_owner() -> call_policy.SamplingPolicyOwner:
     return fixed_sampling_owner()
 
 
-def _emitted_calls(emitted_events: EmittedEvents) -> list[tuple[str, dict[str, Any]]]:
+# meiva:note
+# (fn, detail) of every emitted call, in emit order. The emitter omits `detail` when the call
+# carried none, so its absence reads as `None` here rather than as an empty mapping.
+def _emitted_calls(emitted_events: EmittedEvents) -> list[tuple[str, object]]:
     return [
-        (str(event.attributes["fn"]), dict(event.attributes.get("detail") or {}))
-        for event in emitted_events
+        (str(event.attributes["fn"]), event.attributes.get("detail")) for event in emitted_events
     ]
 
 
@@ -62,7 +64,7 @@ def test_emit_without_execution_tally(
         )
         == "ok"
     )
-    assert _emitted_calls(emitted_events) == [("ns.fn", {})]
+    assert _emitted_calls(emitted_events) == [("ns.fn", None)]
 
 
 def test_call_owns_its_entry_identity_snapshot(
@@ -107,7 +109,7 @@ def test_emit_with_explicit_execution_tally(
         )
         == "ok"
     )
-    assert _emitted_calls(emitted_events) == [("ns.fn", {})]
+    assert _emitted_calls(emitted_events) == [("ns.fn", None)]
 
 
 # ── independent public entries ───────────────────────────────────────────────
@@ -138,7 +140,7 @@ def test_each_public_entry_emits(
         sampling_owner=sampling_owner,
     )
     assert out == "inner"
-    assert _emitted_calls(emitted_events) == [("ns.inner", {}), ("ns.outer", {})]
+    assert _emitted_calls(emitted_events) == [("ns.inner", None), ("ns.outer", None)]
 
 
 def test_return_and_exception_pass_through(
@@ -196,7 +198,7 @@ def test_failed_call_still_emits(
             sampling_owner=sampling_owner,
         )
     assert _emitted_calls(emitted_events) == [
-        ("ns.boom", {})
+        ("ns.boom", None)
     ]  # invocation counts even when the call raises
 
 
@@ -676,7 +678,7 @@ def test_no_local_participant_uses_the_real_optional_gate(
         )
         == "without-participant"
     )
-    assert _emitted_calls(emitted_events) == [("capture.call", {})]
+    assert _emitted_calls(emitted_events) == [("capture.call", None)]
 
 
 @pytest.mark.parametrize("error_type", ["ImportError", "RuntimeError"])

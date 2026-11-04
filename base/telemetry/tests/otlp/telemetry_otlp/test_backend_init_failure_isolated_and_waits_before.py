@@ -142,7 +142,9 @@ def test_backend_retry_recovers_and_emits_real_status_events(
         recovered = emitted_events.named("otlp_backend_recovered")
         assert len(recovered) == 1
         assert recovered[0].attributes["endpoint"] == "http://127.0.0.1:4318"
-        assert recovered[0].attributes["disabled_s"] >= 0.05
+        disabled_s = recovered[0].attributes["disabled_s"]
+        assert isinstance(disabled_s, float)
+        assert disabled_s >= 0.05
         assert backend._init_failed_at is None
     finally:
         backend.shutdown()

@@ -124,7 +124,10 @@ def test_concurrent_sync_receipts_wait_for_their_own_fifo_batch() -> None:
     written: list[int] = []
 
     def writer(batch: list[telemetry.Event]) -> None:
-        written.extend(e.attributes["i"] for e in batch)
+        for emitted in batch:
+            index = emitted.attributes["i"]
+            assert isinstance(index, int), index
+            written.append(index)
         if 2 in written:
             entered.set()
             assert release.wait(3)
