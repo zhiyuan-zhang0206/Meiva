@@ -70,3 +70,15 @@ async def test_a_host_that_answers_with_an_error_status_is_an_error(
         host = LocalAgentHost(home=unit_home, health_port=served.port)
         with pytest.raises(httpx.HTTPStatusError):
             await cancel_agent_op(database, agent_id, host=host)
+
+
+@pytest.mark.parametrize("answer", [{}, {"cancelled": "yes"}])
+async def test_a_host_answer_without_a_boolean_cancelled_is_an_error(
+    db_conn: psycopg.Connection, database: Database, unit_home: Path, answer: dict[str, object]
+) -> None:
+    agent_id = _agent(db_conn)
+
+    with serve_post({"/cancel-turn": lambda _body: Reply(answer)}) as served:
+        host = LocalAgentHost(home=unit_home, health_port=served.port)
+        with pytest.raises(TypeError, match="cancel-turn answered"):
+            await cancel_agent_op(database, agent_id, host=host)

@@ -1,5 +1,6 @@
 """Resume a terminated agent by preserving its identity and enqueuing a wake."""
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import LiteralString
 
@@ -20,12 +21,22 @@ from base.api_contracts.agent_contract import (
     ResurrectAlreadyAlive,
 )
 from base.db import Database
+from base.db.rows import IdRow, query_one
 from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from base.log import logger
 from base.telemetry.audit_events import prepare_event_log, record_audit
 from ops.agents.resurrection_retry import ResurrectTriggerStaleError as ResurrectTriggerStaleError
 from ops.agents.resurrection_retry import lock_active_home_machine as _lock_active_home_machine
+
+
+# meiva:note
+# The `status_changed_at` an `UPDATE ... RETURNING status_changed_at` of the terminated -> idling
+# transition answers.
+@dataclass(frozen=True)
+class _StatusChange:
+    status_changed_at: datetime
+
 
 # meiva:note
 # The locked row the gate judges.
@@ -55,7 +66,9 @@ def transition_terminated_to_unclaimed_idling(
         from base.agents.recovery.breaker import RECOVERY_BREAKER_CLEAR
 
         assert trigger_inbound_kind is not None  # validated at public helper boundary  # noqa: S101
-        cur.execute(
+        transition_row = query_one(
+            cur.connection,
+            _StatusChange,
             sql.SQL(
                 "UPDATE agents_meta SET status = %s, termination_source = NULL, "
                 "last_turn_fatal_at = NULL, runtime_generation = NULL, runtime_owner = NULL "
@@ -80,13 +93,14 @@ def transition_terminated_to_unclaimed_idling(
             ),
         )
     else:
-        cur.execute(
+        transition_row = query_one(
+            cur.connection,
+            _StatusChange,
             "UPDATE agents_meta SET status = %s, termination_source = NULL, "
             "last_turn_fatal_at = NULL, runtime_generation = NULL, runtime_owner = NULL "
             "WHERE id = %s AND status = %s RETURNING status_changed_at",
             (AgentStatus.IDLING, agent_id, AgentStatus.TERMINATED),
         )
-    transition_row = cur.fetchone()
     if transition_row is not None:
         if trigger_inbound_kind == "chat":
             cur.execute(
@@ -95,7 +109,7 @@ def transition_terminated_to_unclaimed_idling(
                 "wake_suppress_reason=NULL WHERE id=%s",
                 (agent_id,),
             )
-        return transition_row[0]
+        return transition_row.status_changed_at
     cur.execute(
         "SELECT home.paused_at IS NOT NULL "
         "FROM agents_meta a JOIN machines home ON home.name = a.machine "
@@ -168,15 +182,16 @@ def _prepare_resurrect_attempt(
         # act on the new one. A refusal below rolls the whole transaction back.
         # Stamp after the lock: a transaction begun before termination committed
         # must not sort its resurrection ahead of the interruption notices.
-        cur.execute(
+        resurrect_row = query_one(
+            conn,
+            IdRow,
             "INSERT INTO inbound_messages (agent_id, content, kind, source, created_at, payload) "
             "VALUES (%s, '', 'resurrect', %s, clock_timestamp(), NULL) RETURNING id",
             (agent_id, resurrected_by),
         )
-        resurrect_row = cur.fetchone()
         if resurrect_row is None:
             raise RuntimeError("resurrect lifecycle inbound INSERT returned no id")
-        supersede_lifecycle_for_resurrect(conn, agent_id, resurrect_row[0])
+        supersede_lifecycle_for_resurrect(conn, agent_id, resurrect_row.id)
         transition_terminated_to_unclaimed_idling(
             cur,
             agent_id,

@@ -83,8 +83,11 @@ def dispatch_budget(
     )
 
 
+# meiva:note
+# `1 << attempt` rather than `2**attempt`: the type checker widens an int power to `Any` because the
+# exponent could be negative, and an attempt number never is.
 def _backoff_s(attempt: int) -> float:
-    return min(_RETRY_BASE_DELAY_S * (2**attempt), _RETRY_MAX_DELAY_S)
+    return min(_RETRY_BASE_DELAY_S * (1 << attempt), _RETRY_MAX_DELAY_S)
 
 
 # meiva:note

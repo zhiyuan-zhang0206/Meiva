@@ -16,7 +16,6 @@ from base.agents.inbox.insert import insert_inbound_message
 from base.agents.lifecycle import release_browser_pages
 from base.agents.messages.inbound import WakeTriggerKind, validate_wake_trigger_kind
 from base.api_contracts.agent_contract import (
-    AgentNotFound,
     AgentStatus,
     CancelResult,
     InvalidModelConfig,
@@ -71,12 +70,10 @@ from ops.lifecycle.hosted_turn import (
     cancel_hosted_turn_best_effort,
     prepare_harness_switch,
 )
-
-# Re-exported (explicit-alias form) from `launch` so the gateway routers and
-# tests keep their module-qualified call sites.
 from ops.lifecycle.launch import (
     launch_agent_op as launch_agent_op,
 )
+from ops.lifecycle.restart_row import read_restart_status_and_harness_blocking
 
 # Re-exported (explicit-alias form) from `resurrect_gates` so the
 # module-qualified callers — tests — keep their call sites.
@@ -560,18 +557,6 @@ def _update_harness_transition_meta_blocking(
             )
 
 
-def _read_restart_status_and_harness_blocking(
-    db_pool: ConnectionPool, agent_id: int
-) -> tuple[str, str]:
-    with db_pool.connection() as conn:
-        row = conn.execute(
-            "SELECT status, harness FROM agents_meta WHERE id = %s", (agent_id,)
-        ).fetchone()
-    if row is None:
-        raise AgentNotFound(f"agent {agent_id} does not exist")
-    return str(row[0]), str(row[1])
-
-
 async def _execute_harness_transition(
     db: Database,
     bus: EventBus,
@@ -650,7 +635,7 @@ async def restart_agent_op(
     home: Path,
 ) -> RestartAgentResponse:
     status, old_harness = await asyncio.to_thread(
-        _read_restart_status_and_harness_blocking, db_pool, agent_id
+        read_restart_status_and_harness_blocking, db_pool, agent_id
     )
     target_harness = (
         str(body.config_overlay["harness"])

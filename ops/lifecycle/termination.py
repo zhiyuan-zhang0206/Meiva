@@ -13,6 +13,7 @@ from base.agents.incarnation.lifecycle_commands import KILL_ALL_SHELL_SESSIONS
 from base.agents.messages.envelope import validate_source
 from base.api_contracts.agent_contract import AgentNotFound, AgentStatus
 from base.db import Database
+from base.db.rows import IdRow, query_one
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 from base.log import logger
@@ -36,31 +37,32 @@ def insert_termination_pair(
     kill_all_shell_sessions: bool = False,
 ) -> tuple[int | None, int]:
     message_id: int | None = None
-    with conn.cursor() as cur:
-        if message is not None:
-            validate_source(source)
-            cur.execute(
-                "INSERT INTO inbound_messages (agent_id,content,kind,source) "
-                "VALUES (%s,%s,'chat',%s) RETURNING id",
-                (agent_id, message, source),
-            )
-            message_row = cur.fetchone()
-            if message_row is None:
-                raise RuntimeError("termination message INSERT returned no id")
-            message_id = int(message_row[0])
-        cur.execute(
-            "INSERT INTO inbound_messages (agent_id,content,kind,source,payload) "
-            "VALUES (%s,'','terminate',%s,%s) RETURNING id",
-            (
-                agent_id,
-                source,
-                Jsonb({KILL_ALL_SHELL_SESSIONS: True}) if kill_all_shell_sessions else None,
-            ),
+    if message is not None:
+        validate_source(source)
+        message_row = query_one(
+            conn,
+            IdRow,
+            "INSERT INTO inbound_messages (agent_id,content,kind,source) "
+            "VALUES (%s,%s,'chat',%s) RETURNING id",
+            (agent_id, message, source),
         )
-        terminate_row = cur.fetchone()
-        if terminate_row is None:
-            raise RuntimeError("terminate inbound INSERT returned no id")
-    return message_id, int(terminate_row[0])
+        if message_row is None:
+            raise RuntimeError("termination message INSERT returned no id")
+        message_id = message_row.id
+    terminate_row = query_one(
+        conn,
+        IdRow,
+        "INSERT INTO inbound_messages (agent_id,content,kind,source,payload) "
+        "VALUES (%s,'','terminate',%s,%s) RETURNING id",
+        (
+            agent_id,
+            source,
+            Jsonb({KILL_ALL_SHELL_SESSIONS: True}) if kill_all_shell_sessions else None,
+        ),
+    )
+    if terminate_row is None:
+        raise RuntimeError("terminate inbound INSERT returned no id")
+    return message_id, terminate_row.id
 
 
 def insert_pending_termination_message(
@@ -72,16 +74,16 @@ def insert_pending_termination_message(
 ) -> int:
     """Retry only the final chat after the termination command is durable."""
     validate_source(source)
-    with conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO inbound_messages (agent_id,content,kind,source) "
-            "VALUES (%s,%s,'chat',%s) RETURNING id",
-            (agent_id, message, source),
-        )
-        row = cur.fetchone()
-        if row is None:
-            raise RuntimeError("termination message retry INSERT returned no id")
-        return int(row[0])
+    row = query_one(
+        conn,
+        IdRow,
+        "INSERT INTO inbound_messages (agent_id,content,kind,source) "
+        "VALUES (%s,%s,'chat',%s) RETURNING id",
+        (agent_id, message, source),
+    )
+    if row is None:
+        raise RuntimeError("termination message retry INSERT returned no id")
+    return row.id
 
 
 def _insert_termination_inbounds(

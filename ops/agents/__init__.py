@@ -19,11 +19,21 @@ admission binds the next turn to the host owner and a new generation.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from base.api_contracts.agent_contract import AgentNotFound, AgentStatus
 from base.db import Database
+from base.db.rows import query_one
 from ops.agents.wake import (
     resurrect_agent as resurrect_agent,
 )
+
+
+# meiva:note
+# The home machine column of an `agents_meta` row.
+@dataclass(frozen=True)
+class _MachineRow:
+    machine: str
 
 
 def get_agent_status(db: Database, agent_id: int) -> AgentStatus:
@@ -47,9 +57,10 @@ def get_agent_machine(db: Database, agent_id: int) -> str:
     Raises:
         AgentNotFound: agent_id does not exist in agents_meta.
     """
-    with db.connect() as conn, conn.cursor() as cur:
-        cur.execute("SELECT machine FROM agents_meta WHERE id = %s", (agent_id,))
-        row = cur.fetchone()
+    with db.connect() as conn:
+        row = query_one(
+            conn, _MachineRow, "SELECT machine FROM agents_meta WHERE id = %s", (agent_id,)
+        )
     if row is None:
         raise AgentNotFound(f"agent {agent_id} does not exist")
-    return row[0]
+    return row.machine
