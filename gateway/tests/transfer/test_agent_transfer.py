@@ -36,6 +36,11 @@ from ops.agent_transfer.archive_io import (
     pack_workspace,
     stage_and_activate_workspace,
 )
+from ops.agent_transfer.budget import (
+    WORKSPACE_TRANSFER_BYTES_SETTING,
+    WORKSPACE_TRANSFER_FILES_SETTING,
+)
+from ops.agent_transfer.limits import workspace_transfer_limits_from_read_model
 from ops.rpc_schemas import TransferAgentRequest
 
 
@@ -365,11 +370,13 @@ def test_transfer_refuses_invalid_or_paused_targets(
 def test_cutover_cas_conflict_aborts_target_and_keeps_source_intact(
     two_runners: TwoRunnerCluster,
     db_conn: psycopg.Connection,
+    config_authority: ConfigAuthority,
 ) -> None:
     agent_id = _seed_native_agent(db_conn, machine="runner-a", status="idling")
     ws_a = paths.workspace_path(two_runners.home_a, agent_id)
     ws_a.mkdir(parents=True)
     (ws_a / "important.txt").write_text("do-not-lose", encoding="utf-8")
+    limits = workspace_transfer_limits_from_read_model(config_authority)
 
     manifest, bundle = pack_workspace(
         home=two_runners.home_a,
@@ -377,12 +384,14 @@ def test_cutover_cas_conflict_aborts_target_and_keeps_source_intact(
         transfer_id="99" * 16,
         source_machine="runner-a",
         killed_shell_sessions=[],
+        limits=limits,
     )
     stage_and_activate_workspace(
         home=two_runners.home_b,
         agent_id=agent_id,
         transfer_id="99" * 16,
         bundle_bytes=bundle,
+        limits=limits,
     )
     assert paths.workspace_path(two_runners.home_b, agent_id).is_dir()
 
@@ -411,3 +420,41 @@ def test_cutover_cas_conflict_aborts_target_and_keeps_source_intact(
         (agent_id,),
     ).fetchone()
     assert meta_after == ("runner-a", "running")
+
+
+def test_transfer_refuses_an_over_budget_workspace_and_reports_both_axes(
+    two_runners: TwoRunnerCluster,
+    db_conn: psycopg.Connection,
+    config_authority: ConfigAuthority,
+) -> None:
+    limits = workspace_transfer_limits_from_read_model(config_authority)
+    agent_id = _seed_native_agent(db_conn, machine="runner-a", status="terminated")
+    ws_a = paths.workspace_path(two_runners.home_a, agent_id)
+    ws_a.mkdir(parents=True)
+    for index in range(limits.max_files + 1):
+        (ws_a / f"entry-{index}").write_bytes(b"x")
+
+    resp = two_runners.client.post(
+        f"/api/agents/{agent_id}/transfer",
+        json={"to_machine": "runner-b"},
+    )
+
+    assert resp.status_code == 413, resp.text
+    detail = resp.json()["detail"]
+    # meiva:note
+    # The refusal states what the workspace holds beside the ceiling that refused it — in entries,
+    # in bytes, and by the setting an operator raises — before anything is packed or moved.
+    assert (
+        f"{limits.max_files + 1} entries against the {limits.max_files}-entry ceiling "
+        f"({WORKSPACE_TRANSFER_FILES_SETTING})" in detail
+    )
+    assert (
+        f"{limits.max_files + 1} bytes against the {limits.max_bytes}-byte ceiling "
+        f"({WORKSPACE_TRANSFER_BYTES_SETTING})" in detail
+    )
+    assert ws_a.is_dir()
+    assert not paths.workspace_path(two_runners.home_b, agent_id).exists()
+    meta_row = db_conn.execute(
+        "SELECT machine, status FROM agents_meta WHERE id = %s", (agent_id,)
+    ).fetchone()
+    assert meta_row == ("runner-a", "terminated")

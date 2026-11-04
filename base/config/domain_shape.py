@@ -19,6 +19,7 @@ if TYPE_CHECKING:
         ServiceSettings,
         TelegramSettings,
         ToUserSettings,
+        TransferSettings,
         WalgSettings,
         WebSettings,
     )
@@ -41,6 +42,7 @@ class SettingsDomains:
     agent: AgentSettings
     web: WebSettings
     to_user: ToUserSettings
+    transfer: TransferSettings
     gateway: GatewaySettings
     daemon: DaemonSettings
     data_plane: DataPlaneSettings

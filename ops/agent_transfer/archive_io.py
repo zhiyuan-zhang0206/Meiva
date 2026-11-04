@@ -14,17 +14,23 @@ import tarfile
 from pathlib import Path, PurePosixPath
 
 from base import paths
+from ops.agent_transfer.budget import (
+    WORKSPACE_TRANSFER_BYTES_SETTING,
+    WorkspaceTransferLimits,
+    over_budget_during_walk_error,
+    over_budget_error,
+)
 from ops.agent_transfer.bundle_plan import (
-    MAX_WORKSPACE_TRANSFER_BYTES,
-    MAX_WORKSPACE_TRANSFER_FILES,
     SYMLINK_NORMALIZED_MODE,
-    WorkspaceTransferCorruptError,
-    WorkspaceTransferTooLargeError,
     check_workspace_limits,
     decode_bundle,
     encode_bundle,
     validate_relpath,
     verify_disk_snapshot,
+)
+from ops.agent_transfer.errors import (
+    WorkspaceTransferCorruptError,
+    WorkspaceTransferTooLargeError,
 )
 from ops.rpc_schemas.transfer import WorkspaceBundleManifest, WorkspaceManifestEntry
 
@@ -43,7 +49,16 @@ def _retired_dir(workspaces: Path, agent_id: int, transfer_id: str) -> Path:
     return workspaces / f".retired-{agent_id}-{transfer_id}"
 
 
-def _sha256_and_bytes(path: Path, *, max_remaining: int) -> tuple[str, bytes]:
+# meiva:note
+# Read one regular file into memory while hashing it, refusing the moment its bytes pass what the
+# byte ceiling leaves for it, so a file over the ceiling is never buffered whole.
+def _sha256_and_bytes(
+    path: Path,
+    *,
+    relpath: str,
+    max_remaining: int,
+    limits: WorkspaceTransferLimits,
+) -> tuple[str, bytes]:
     digest = hashlib.sha256()
     chunks: list[bytes] = []
     total = 0
@@ -56,7 +71,9 @@ def _sha256_and_bytes(path: Path, *, max_remaining: int) -> tuple[str, bytes]:
             total += len(chunk)
             if total > max_remaining:
                 raise WorkspaceTransferTooLargeError(
-                    f"workspace exceeds the {MAX_WORKSPACE_TRANSFER_BYTES}-byte transfer limit"
+                    f"workspace file {relpath!r} is {total} bytes, past the {max_remaining}-byte "
+                    f"remainder of the {limits.max_bytes}-byte transfer ceiling "
+                    f"({WORKSPACE_TRANSFER_BYTES_SETTING})"
                 )
             digest.update(chunk)
             chunks.append(chunk)
@@ -64,21 +81,53 @@ def _sha256_and_bytes(path: Path, *, max_remaining: int) -> tuple[str, bytes]:
 
 
 # meiva:note
-# Walk `root` without following symlinks and return canonical `WorkspaceManifestEntry` items sorted
-# by `relpath`. Refuses FIFOs, sockets, and device nodes fail-closed so an unrepresentable entry is
-# never silently skipped.
-def scan_workspace_tree(
-    root: Path,
-    *,
-    max_files: int = MAX_WORKSPACE_TRANSFER_FILES,
-    max_bytes: int = MAX_WORKSPACE_TRANSFER_BYTES,
-) -> list[WorkspaceManifestEntry]:
+# The workspace a transfer may carry: `root` when it is a real directory, None when the agent never
+# created one. A symlinked root or a non-directory fails closed.
+def _workspace_root(root: Path) -> Path | None:
     if root.is_symlink():
         raise WorkspaceTransferCorruptError("workspace root itself must not be a symlink")
     if not root.exists():
-        return []
+        return None
     if not root.is_dir():
         raise WorkspaceTransferCorruptError("workspace root is not a directory")
+    return root
+
+
+# meiva:note
+# Count a workspace's entries (files, directories and symlinks) and its original file bytes from
+# `lstat` alone, reading no file content, and refuse it when either axis is over `limits`. This is
+# the budget the source checks before it kills the agent's persistent shells or streams a bundle: a
+# workspace an order of magnitude over the entry ceiling is refused after one walk instead of after
+# hashing and buffering every byte it holds.
+def preflight_workspace_budget(root: Path, *, limits: WorkspaceTransferLimits) -> None:
+    if _workspace_root(root) is None:
+        return
+    entries = 0
+    total_bytes = 0
+    for dirpath, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
+        current = Path(dirpath)
+        entries += len(dirnames) + len(filenames)
+        for name in filenames:
+            st = os.lstat(current / name)
+            if stat.S_ISREG(st.st_mode):
+                total_bytes += st.st_size
+    if entries > limits.max_files or total_bytes > limits.max_bytes:
+        raise over_budget_error(limits, entries=entries, total_bytes=total_bytes)
+
+
+# meiva:note
+# Walk `root` without following symlinks and return canonical `WorkspaceManifestEntry` items sorted
+# by `relpath`. Refuses FIFOs, sockets, and device nodes fail-closed so an unrepresentable entry is
+# never silently skipped. The two inline ceilings stop the walk early — entries before any content
+# is read, bytes before an oversized file is buffered — and the manifest check at the end reports
+# the complete totals.
+def scan_workspace_tree(
+    root: Path,
+    *,
+    limits: WorkspaceTransferLimits,
+) -> list[WorkspaceManifestEntry]:
+    if _workspace_root(root) is None:
+        return []
 
     relpaths: list[str] = []
     for dirpath, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
@@ -89,10 +138,8 @@ def scan_workspace_tree(
             rel = (current / name).relative_to(root).as_posix()
             validate_relpath(rel)
             relpaths.append(rel)
-            if len(relpaths) > max_files:
-                raise WorkspaceTransferTooLargeError(
-                    f"workspace exceeds the {max_files}-entry transfer limit"
-                )
+            if len(relpaths) > limits.max_files:
+                raise over_budget_during_walk_error(limits, entries=len(relpaths), bytes_read=0)
 
     relpaths.sort()
     entries: list[WorkspaceManifestEntry] = []
@@ -131,9 +178,11 @@ def scan_workspace_tree(
                     if not chunk:
                         break
                     size += len(chunk)
-                    if total_bytes + size > max_bytes:
-                        raise WorkspaceTransferTooLargeError(
-                            f"workspace regular files exceed the {max_bytes}-byte transfer limit"
+                    if total_bytes + size > limits.max_bytes:
+                        raise over_budget_during_walk_error(
+                            limits,
+                            entries=len(relpaths),
+                            bytes_read=total_bytes + size,
                         )
                     digest.update(chunk)
             total_bytes += size
@@ -150,7 +199,7 @@ def scan_workspace_tree(
             raise WorkspaceTransferCorruptError(
                 f"unsupported special file in workspace: {rel!r} (mode={oct(file_mode)})"
             )
-    check_workspace_limits(entries, max_files=max_files, max_bytes=max_bytes)
+    check_workspace_limits(entries, limits=limits)
     return entries
 
 
@@ -160,6 +209,7 @@ def _empty_workspace_bundle(
     transfer_id: str,
     source_machine: str,
     killed_shell_sessions: list[int],
+    limits: WorkspaceTransferLimits,
 ) -> tuple[WorkspaceBundleManifest, bytes]:
     tar_buf = io.BytesIO()
     with tarfile.open(fileobj=tar_buf, mode="w:gz", format=tarfile.PAX_FORMAT):
@@ -176,7 +226,7 @@ def _empty_workspace_bundle(
         tar_sha256=hashlib.sha256(tar_bytes).hexdigest(),
         killed_shell_sessions=killed_shell_sessions,
     )
-    return manifest, encode_bundle(manifest, tar_bytes)
+    return manifest, encode_bundle(manifest, tar_bytes, limits=limits)
 
 
 def _pack_single_entry(
@@ -185,6 +235,7 @@ def _pack_single_entry(
     rel: str,
     *,
     max_remaining: int,
+    limits: WorkspaceTransferLimits,
 ) -> tuple[WorkspaceManifestEntry, int]:
     target = ws_dir / PurePosixPath(rel)
     st = os.lstat(target)
@@ -221,7 +272,9 @@ def _pack_single_entry(
         return WorkspaceManifestEntry(relpath=rel, kind="dir", mode=perm, size=0), 0
     if stat.S_ISREG(file_mode):
         perm = stat.S_IMODE(file_mode) & 0o777
-        sha256, content = _sha256_and_bytes(target, max_remaining=max_remaining)
+        sha256, content = _sha256_and_bytes(
+            target, relpath=rel, max_remaining=max_remaining, limits=limits
+        )
         info.type = tarfile.REGTYPE
         info.mode = perm
         info.size = len(content)
@@ -254,21 +307,17 @@ def pack_workspace(
     transfer_id: str,
     source_machine: str,
     killed_shell_sessions: list[int],
-    max_files: int = MAX_WORKSPACE_TRANSFER_FILES,
-    max_bytes: int = MAX_WORKSPACE_TRANSFER_BYTES,
+    limits: WorkspaceTransferLimits,
 ) -> tuple[WorkspaceBundleManifest, bytes]:
     ws_dir = paths.workspace_path(home, agent_id)
-    if ws_dir.is_symlink():
-        raise WorkspaceTransferCorruptError("workspace root itself must not be a symlink")
-    if not ws_dir.exists():
+    if _workspace_root(ws_dir) is None:
         return _empty_workspace_bundle(
             agent_id=agent_id,
             transfer_id=transfer_id,
             source_machine=source_machine,
             killed_shell_sessions=killed_shell_sessions,
+            limits=limits,
         )
-    if not ws_dir.is_dir():
-        raise WorkspaceTransferCorruptError("workspace root is not a directory")
 
     relpaths: list[str] = []
     for dirpath, dirnames, filenames in os.walk(ws_dir, topdown=True, followlinks=False):
@@ -279,10 +328,8 @@ def pack_workspace(
             rel = (current / name).relative_to(ws_dir).as_posix()
             validate_relpath(rel)
             relpaths.append(rel)
-            if len(relpaths) > max_files:
-                raise WorkspaceTransferTooLargeError(
-                    f"workspace exceeds the {max_files}-entry transfer limit"
-                )
+            if len(relpaths) > limits.max_files:
+                raise over_budget_during_walk_error(limits, entries=len(relpaths), bytes_read=0)
     relpaths.sort()
 
     entries: list[WorkspaceManifestEntry] = []
@@ -291,17 +338,19 @@ def pack_workspace(
     with tarfile.open(fileobj=tar_buf, mode="w:gz", format=tarfile.PAX_FORMAT) as archive:
         for rel in relpaths:
             entry, added_bytes = _pack_single_entry(
-                archive, ws_dir, rel, max_remaining=max_bytes - total_bytes
+                archive,
+                ws_dir,
+                rel,
+                max_remaining=limits.max_bytes - total_bytes,
+                limits=limits,
             )
             total_bytes += added_bytes
             entries.append(entry)
 
-    after_entries = scan_workspace_tree(ws_dir, max_files=max_files, max_bytes=max_bytes)
+    after_entries = scan_workspace_tree(ws_dir, limits=limits)
     verify_disk_snapshot(entries, after_entries)
 
-    files_count, checked_bytes = check_workspace_limits(
-        entries, max_files=max_files, max_bytes=max_bytes
-    )
+    files_count, checked_bytes = check_workspace_limits(entries, limits=limits)
     tar_bytes = tar_buf.getvalue()
     manifest = WorkspaceBundleManifest(
         agent_id=agent_id,
@@ -314,7 +363,7 @@ def pack_workspace(
         tar_sha256=hashlib.sha256(tar_bytes).hexdigest(),
         killed_shell_sessions=killed_shell_sessions,
     )
-    return manifest, encode_bundle(manifest, tar_bytes)
+    return manifest, encode_bundle(manifest, tar_bytes, limits=limits)
 
 
 def _ensure_no_symlink_ancestors(stage_dir: Path, relpath: str) -> Path:
@@ -450,11 +499,13 @@ def stage_and_activate_workspace(
     agent_id: int,
     transfer_id: str,
     bundle_bytes: bytes,
+    limits: WorkspaceTransferLimits,
 ) -> WorkspaceBundleManifest:
     manifest, tar_bytes = decode_bundle(
         bundle_bytes,
         expected_agent_id=agent_id,
         expected_transfer_id=transfer_id,
+        limits=limits,
     )
     workspaces = paths.workspaces_root(home=home)
     workspaces.mkdir(parents=True, exist_ok=True)
@@ -470,7 +521,7 @@ def stage_and_activate_workspace(
     stage_dir.mkdir(mode=0o755)
     try:
         _extract_tar_to_stage(tar_bytes, manifest, stage_dir)
-        actual_entries = scan_workspace_tree(stage_dir)
+        actual_entries = scan_workspace_tree(stage_dir, limits=limits)
         verify_disk_snapshot(manifest.entries, actual_entries)
 
         backed_up = False

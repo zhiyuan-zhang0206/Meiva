@@ -47,6 +47,7 @@ from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home, resolve_meiva_home, run_dir
 from gateway.tests.support.runner_ops.ops_stub import OpsCall, RunnerOps, register_machine
+from ops.agent_transfer.limits import workspace_transfer_limits_from_read_model
 from ops.upload_delivery import ReceiverConfig
 from services.agent_runner.agent_ops import boot, in_flight
 from services.agent_runner.agent_ops.daemon import ops_route
@@ -176,6 +177,7 @@ async def _serve(
         pool=pool,
         machine=machine.name(),
         home=home,
+        limits=workspace_transfer_limits_from_read_model(authority),
         executor=executor,
         dispatch_sem=sem,
         requests=requests,

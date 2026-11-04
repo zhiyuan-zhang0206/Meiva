@@ -63,6 +63,7 @@ from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 from base.telemetry import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 from ops import lifecycle
+from ops.agent_transfer.limits import workspace_transfer_limits_from_read_model
 from ops.cluster_status import ShellNotFoundError, cluster_now
 from ops.rpc_schemas import LaunchAgentRequest, LifecyclePayload, OpStatus, is_op_kind
 from ops.upload_delivery import ReceiverConfig
@@ -615,6 +616,7 @@ async def serve_ops_daemon(
                     pool=pool,
                     machine=our_machine,
                     home=home,
+                    limits=workspace_transfer_limits_from_read_model(authority),
                     executor=executor,
                     dispatch_sem=dispatch_sem,
                     requests=requests,

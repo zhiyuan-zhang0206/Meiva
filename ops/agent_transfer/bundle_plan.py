@@ -4,7 +4,8 @@
 #
 # No filesystem, network, clock, or database access lives here (`purity = "strict"`). Every
 # path check and byte-for-byte manifest comparison fails closed on unknown, extra, missing, or
-# altered entries.
+# altered entries. The ceilings a check enforces arrive as `budget.WorkspaceTransferLimits`, and the
+# refusal vocabulary lives in `errors.py`, so this module owns the wire format and nothing else.
 # meiva:link gateway/agents/docs/agent-transfer.meiva.okf.md
 
 from __future__ import annotations
@@ -15,29 +16,19 @@ from pathlib import PurePosixPath
 
 from pydantic import ValidationError
 
+from ops.agent_transfer.budget import (
+    WorkspaceTransferLimits,
+    check_bundle_stream_size,
+    over_budget_error,
+)
+from ops.agent_transfer.errors import WorkspaceTransferCorruptError
 from ops.rpc_schemas.transfer import WorkspaceBundleManifest, WorkspaceManifestEntry
 
 BUNDLE_MAGIC = b"MEIVA_WS_V1\n"
-MAX_WORKSPACE_TRANSFER_BYTES = 256 * 1024 * 1024
-MAX_WORKSPACE_TRANSFER_FILES = 20_000
-MAX_BUNDLE_STREAM_BYTES = MAX_WORKSPACE_TRANSFER_BYTES + 24 * 1024 * 1024
+# meiva:note
+# The permission bits a symlink's own mode carries in a manifest and a tar member. A symlink's mode is
+# meaningless on both platforms that matter, so it is normalized instead of compared.
 SYMLINK_NORMALIZED_MODE = 0o777
-
-
-class WorkspaceTransferError(ValueError):
-    reason: str = "transfer_error"
-
-
-class WorkspaceTransferConflictError(WorkspaceTransferError):
-    reason: str = "transfer_conflict"
-
-
-class WorkspaceTransferTooLargeError(WorkspaceTransferError):
-    reason: str = "transfer_too_large"
-
-
-class WorkspaceTransferCorruptError(WorkspaceTransferError):
-    reason: str = "transfer_corrupt"
 
 
 # meiva:note
@@ -94,22 +85,17 @@ def validate_manifest_entry(entry: WorkspaceManifestEntry) -> WorkspaceManifestE
 
 
 # meiva:note
-# Enforce entry count and total regular-file byte ceilings before streaming or extracting. Returns
-# `(files_count, total_file_bytes)` for regular files while bounding total entries (including
-# directories and symlinks) by `max_files`.
+# Validate one manifest end to end and enforce both ceilings against `limits`: entries (files,
+# directories and symlinks) and the total regular-file bytes. Both sums finish before the refusal, so
+# the error reports what the workspace holds beside the ceiling that refused it.
 def check_workspace_limits(
     entries: Sequence[WorkspaceManifestEntry],
     *,
-    max_files: int = MAX_WORKSPACE_TRANSFER_FILES,
-    max_bytes: int = MAX_WORKSPACE_TRANSFER_BYTES,
+    limits: WorkspaceTransferLimits,
 ) -> tuple[int, int]:
     seen: set[str] = set()
     files_count = 0
     total_bytes = 0
-    if len(entries) > max_files:
-        raise WorkspaceTransferTooLargeError(
-            f"workspace has {len(entries)} entries, exceeding the {max_files}-entry transfer limit"
-        )
     for entry in entries:
         validate_manifest_entry(entry)
         if entry.relpath in seen:
@@ -120,18 +106,21 @@ def check_workspace_limits(
         if entry.kind == "file":
             files_count += 1
             total_bytes += entry.size
-            if total_bytes > max_bytes:
-                raise WorkspaceTransferTooLargeError(
-                    f"workspace regular files exceed the {max_bytes}-byte transfer limit"
-                )
+    if len(entries) > limits.max_files or total_bytes > limits.max_bytes:
+        raise over_budget_error(limits, entries=len(entries), total_bytes=total_bytes)
     return files_count, total_bytes
 
 
 # meiva:note
 # Frame `(manifest, tar_bytes)` into a self-verifying `MEIVA_WS_V1` byte stream:
 # `BUNDLE_MAGIC + uint32_be(len(manifest_json)) + manifest_json + tar_bytes`.
-def encode_bundle(manifest: WorkspaceBundleManifest, tar_bytes: bytes) -> bytes:
-    files_count, total_bytes = check_workspace_limits(manifest.entries)
+def encode_bundle(
+    manifest: WorkspaceBundleManifest,
+    tar_bytes: bytes,
+    *,
+    limits: WorkspaceTransferLimits,
+) -> bytes:
+    files_count, total_bytes = check_workspace_limits(manifest.entries, limits=limits)
     if manifest.files_count != files_count or manifest.total_file_bytes != total_bytes:
         raise WorkspaceTransferCorruptError("manifest file counts or totals do not match entries")
     actual_sha = hashlib.sha256(tar_bytes).hexdigest()
@@ -139,10 +128,7 @@ def encode_bundle(manifest: WorkspaceBundleManifest, tar_bytes: bytes) -> bytes:
         raise WorkspaceTransferCorruptError("manifest tar digest or length does not match payload")
     manifest_bytes = manifest.model_dump_json().encode("utf-8")
     stream = BUNDLE_MAGIC + len(manifest_bytes).to_bytes(4, "big") + manifest_bytes + tar_bytes
-    if len(stream) > MAX_BUNDLE_STREAM_BYTES:
-        raise WorkspaceTransferTooLargeError(
-            f"encoded workspace bundle ({len(stream)} bytes) exceeds stream limit"
-        )
+    check_bundle_stream_size(len(stream), limits=limits)
     return stream
 
 
@@ -154,11 +140,9 @@ def decode_bundle(
     *,
     expected_agent_id: int,
     expected_transfer_id: str,
+    limits: WorkspaceTransferLimits,
 ) -> tuple[WorkspaceBundleManifest, bytes]:
-    if len(bundle_bytes) > MAX_BUNDLE_STREAM_BYTES:
-        raise WorkspaceTransferTooLargeError(
-            f"workspace bundle ({len(bundle_bytes)} bytes) exceeds stream limit"
-        )
+    check_bundle_stream_size(len(bundle_bytes), limits=limits)
     header_len = len(BUNDLE_MAGIC) + 4
     if len(bundle_bytes) < header_len or not bundle_bytes.startswith(BUNDLE_MAGIC):
         raise WorkspaceTransferCorruptError("workspace bundle is missing the MEIVA_WS_V1 header")
@@ -176,7 +160,7 @@ def decode_bundle(
         raise WorkspaceTransferCorruptError(
             "workspace bundle identity does not match the requested agent or transfer"
         )
-    files_count, total_bytes = check_workspace_limits(manifest.entries)
+    files_count, total_bytes = check_workspace_limits(manifest.entries, limits=limits)
     if manifest.files_count != files_count or manifest.total_file_bytes != total_bytes:
         raise WorkspaceTransferCorruptError("workspace bundle summary counters are inconsistent")
     tar_bytes = bundle_bytes[manifest_end:]

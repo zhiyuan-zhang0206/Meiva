@@ -18,6 +18,8 @@ from base.db import Database
 from base.host.system.hostport import Host
 from base.native_process.loaded_commit import LoadedCommit
 from ops import host_config, inventory
+from ops.agent_transfer import WorkspaceTransferLimits
+from ops.agent_transfer.limits import workspace_transfer_limits_from_read_model
 from ops.cluster import operations as cluster
 from ops.rpc_schemas import (
     AgentSkillViewPayload,
@@ -139,6 +141,7 @@ def dispatch_sync(
                 local_machine=local_machine.name(),
                 home=home,
                 receiver=receiver,
+                limits=workspace_transfer_limits_from_read_model(authority),
             )
         case _:
             return unknown_kind(kind)
@@ -229,6 +232,7 @@ def _transfer_arm(
     local_machine: str,
     home: Path,
     receiver: ReceiverConfig,
+    limits: WorkspaceTransferLimits,
 ) -> tuple[OpStatus, dict[str, object]]:
     from httpx import HTTPStatusError
 
@@ -260,6 +264,7 @@ def _transfer_arm(
                     local_machine=local_machine,
                     home=home,
                     access=receiver.access,
+                    limits=limits,
                 ).model_dump(mode="json")
             case "workspace_transfer_finalize":
                 fin = WorkspaceTransferFinalizePayload.model_validate(payload)

@@ -27,14 +27,14 @@ from ops.agent_transfer.archive_io import (
     abort_target_workspace,
     finalize_workspace,
     pack_workspace,
+    preflight_workspace_budget,
     prepare_target_workspace,
     stage_and_activate_workspace,
 )
-from ops.agent_transfer.bundle_plan import (
-    MAX_BUNDLE_STREAM_BYTES,
+from ops.agent_transfer.budget import WorkspaceTransferLimits, check_bundle_stream_size
+from ops.agent_transfer.errors import (
     WorkspaceTransferConflictError,
     WorkspaceTransferCorruptError,
-    WorkspaceTransferTooLargeError,
 )
 from ops.cluster_status import agent_shell_sessions, kill_agent_shells, kill_shell
 from ops.rpc_schemas.transfer import (
@@ -100,16 +100,22 @@ def _verify_export_fence(
 
 
 # meiva:note
-# Verify the source fence is 'terminated', kill local persistent shells, pack the workspace into a
-# `MEIVA_WS_V1` bundle, and re-verify the fence.
+# Verify the source fence is 'terminated', measure the workspace against the transfer ceilings, kill
+# local persistent shells, pack the workspace into a `MEIVA_WS_V1` bundle, and re-verify the fence.
+#
+# The measurement comes before the kill: a workspace over either ceiling is refused while the
+# agent's shells are still alive and before a byte of it is read, so a refused export leaves the
+# source exactly as it was.
 def export_workspace_bundle(
     pool: ConnectionPool,
     request: WorkspaceExportRequest,
     *,
     local_machine: str,
     home: Path,
+    limits: WorkspaceTransferLimits,
 ) -> bytes:
     session_index = _verify_export_fence(pool, request, local_machine=local_machine)
+    preflight_workspace_budget(paths.workspace_path(home, request.agent_id), limits=limits)
     killed = kill_agent_shells(
         request.agent_id,
         before_session_index=session_index,
@@ -121,6 +127,7 @@ def export_workspace_bundle(
         transfer_id=request.transfer_id,
         source_machine=local_machine,
         killed_shell_sessions=killed,
+        limits=limits,
     )
     _verify_export_fence(pool, request, local_machine=local_machine)
     return stream
@@ -153,11 +160,9 @@ def import_workspace_op(
     local_machine: str,
     home: Path,
     access: GatewayAccess,
+    limits: WorkspaceTransferLimits,
 ) -> WorkspaceTransferImportResult:
-    if payload.bundle_bytes > MAX_BUNDLE_STREAM_BYTES:
-        raise WorkspaceTransferTooLargeError(
-            f"bundle size {payload.bundle_bytes} exceeds stream limit"
-        )
+    check_bundle_stream_size(payload.bundle_bytes, limits=limits)
     url = gateway_api_base(access.gateway_url) + payload.bundle_path
     response = http_get(
         url,
@@ -179,6 +184,7 @@ def import_workspace_op(
         agent_id=payload.agent_id,
         transfer_id=payload.transfer_id,
         bundle_bytes=bundle_bytes,
+        limits=limits,
     )
     return WorkspaceTransferImportResult(
         machine=local_machine,
