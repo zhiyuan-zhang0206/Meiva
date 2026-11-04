@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypeGuard
 
+from base.host.boundary.untyped import object_of
 from base.host.proc import run_bounded
 from base.log import logger
 from base.paths.expand import expand_home
@@ -188,7 +189,7 @@ def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
 
 def _read_cache(target: Path) -> dict[str, object]:
     try:
-        payload = json.loads(target.read_text(encoding="utf-8"))
+        payload = object_of(json.loads, target.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     return payload if _is_object_dict(payload) else {}

@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import json
 import socket
-from typing import Any, TypeGuard
+from collections.abc import Mapping
+
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 # A request line this long is garbage, not a session op. `new` carries a full
 # environment and is the largest legitimate request.
@@ -24,15 +27,15 @@ BAD_REQUEST = 2
 NO_SUCH_SESSION = 3
 
 
-def ok(req_id: object, data: dict[str, Any] | None = None) -> dict[str, Any]:
+def ok(req_id: object, data: Mapping[str, object] | None = None) -> dict[str, object]:
     return {"id": req_id, "ok": True, "code": OK, "data": data, "error": None}
 
 
-def err(req_id: object, code: int, message: str) -> dict[str, Any]:
+def err(req_id: object, code: int, message: str) -> dict[str, object]:
     return {"id": req_id, "ok": False, "code": code, "data": None, "error": message}
 
 
-def encode(message: dict[str, Any]) -> bytes:
+def encode(message: Mapping[str, object]) -> bytes:
     return (json.dumps(message) + "\n").encode("utf-8")
 
 
@@ -53,13 +56,9 @@ def read_line(conn: socket.socket, limit: int = MAX_REQUEST_BYTES) -> bytes | No
             raise ValueError(f"line exceeds {limit} bytes")
 
 
-def _is_json_object(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
-
-
-def decode_object(line: bytes) -> dict[str, Any]:
+def decode_object(line: bytes) -> dict[str, object]:
     """Parse one line into a JSON object (ValueError/TypeError on anything else)."""
-    value = json.loads(line.decode("utf-8"))
-    if not _is_json_object(value):
+    value = object_of(json.loads, line.decode("utf-8"))
+    if not is_object_dict(value):
         raise TypeError("message is not a JSON object")
     return value

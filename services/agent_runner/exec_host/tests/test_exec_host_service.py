@@ -301,7 +301,7 @@ async def test_cancel_mid_run_kills_process_group(tmp_path: Path) -> None:
                 line = await reader.readline()
                 assert line
                 msg = protocol.decode_object(line)
-                if msg.get("type") == "output" and "READY" in msg.get("data", ""):
+                if msg.get("type") == "output" and "READY" in str(msg.get("data", "")):
                     break
 
             bg_pid = int(pid_file.read_text(encoding="utf-8").strip())
@@ -362,7 +362,9 @@ async def test_timeout_kills_process_group(tmp_path: Path, startup_delay: float)
                     line = await reader.readline()
                     assert line
                     msg = protocol.decode_object(line)
-                    if msg.get("type") == "output" and "TIMEOUT_CHILD_READY" in msg.get("data", ""):
+                    if msg.get("type") == "output" and "TIMEOUT_CHILD_READY" in str(
+                        msg.get("data", "")
+                    ):
                         break
             bg_pid = int(pid_file.read_text(encoding="utf-8").strip())
             os.kill(bg_pid, 0)
@@ -417,7 +419,7 @@ async def test_client_disconnect_kills_process_group(tmp_path: Path) -> None:
             line = await reader.readline()
             assert line
             msg = protocol.decode_object(line)
-            if msg.get("type") == "output" and "STARTED" in msg.get("data", ""):
+            if msg.get("type") == "output" and "STARTED" in str(msg.get("data", "")):
                 break
 
         bg_pid = int(pid_file.read_text(encoding="utf-8").strip())

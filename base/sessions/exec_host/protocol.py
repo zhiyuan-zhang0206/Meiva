@@ -13,7 +13,10 @@ from __future__ import annotations
 
 import json
 import socket
-from typing import Any, TypeGuard
+from collections.abc import Mapping
+
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 MAX_REQUEST_BYTES = 1 << 20
 
@@ -22,19 +25,19 @@ ERROR = 1
 BAD_REQUEST = 2
 
 
-def ok(req_id: object, data: dict[str, Any] | None = None) -> dict[str, Any]:
+def ok(req_id: object, data: Mapping[str, object] | None = None) -> dict[str, object]:
     return {"id": req_id, "ok": True, "code": OK, "data": data, "error": None}
 
 
-def err(req_id: object, code: int, message: str) -> dict[str, Any]:
+def err(req_id: object, code: int, message: str) -> dict[str, object]:
     return {"id": req_id, "ok": False, "code": code, "data": None, "error": message}
 
 
-def output_chunk(req_id: object, data: str) -> dict[str, Any]:
+def output_chunk(req_id: object, data: str) -> dict[str, object]:
     return {"id": req_id, "type": "output", "data": data}
 
 
-def encode(message: dict[str, Any]) -> bytes:
+def encode(message: Mapping[str, object]) -> bytes:
     return (json.dumps(message) + "\n").encode("utf-8")
 
 
@@ -51,12 +54,8 @@ def read_line(conn: socket.socket, limit: int = MAX_REQUEST_BYTES) -> bytes | No
             raise ValueError(f"line exceeds {limit} bytes")
 
 
-def _is_json_object(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
-
-
-def decode_object(line: bytes) -> dict[str, Any]:
-    value = json.loads(line.decode("utf-8"))
-    if not _is_json_object(value):
+def decode_object(line: bytes) -> dict[str, object]:
+    value = object_of(json.loads, line.decode("utf-8"))
+    if not is_object_dict(value):
         raise TypeError("message is not a JSON object")
     return value

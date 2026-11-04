@@ -9,13 +9,19 @@
 from __future__ import annotations
 
 import signal
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any
 
 import psutil
 
 from base.clock import Timers
+from base.host.boundary.fields import (
+    int_field,
+    optional_float_field,
+    optional_list_field,
+    str_field,
+)
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.native_process.ownership import OwnedProcess
 from base.native_process.process_control import ProcessControl
 from base.sessions.pty import process_groups
@@ -74,7 +80,7 @@ class Outcome:
     survivors: tuple[Survivor, ...] = ()
     escalated: bool = False
 
-    def to_wire(self) -> dict[str, Any]:
+    def to_wire(self) -> dict[str, object]:
         return {
             "grace_s": self.grace_s,
             "escalated": self.escalated,
@@ -97,38 +103,76 @@ class Outcome:
         }
 
     @classmethod
-    def from_wire(cls, data: dict[str, Any]) -> Outcome:
+    def from_wire(cls, data: Mapping[str, object]) -> Outcome:
         return cls(
-            grace_s=float(data.get("grace_s", 0.0)),
+            grace_s=_grace_of(data),
             escalated=bool(data.get("escalated", False)),
-            closed=tuple(
-                ClosedSession(
-                    item["name"],
-                    identity_from_wire(item["shell"]),
-                    tuple((int(pid), str(name)) for pid, name in item["left"]),
-                )
-                for item in data["closed"]
-            ),
-            survivors=tuple(
-                Survivor(
-                    item["session"],
-                    identity_from_wire(item["process"]),
-                    SurvivorRole(item["role"]),
-                )
-                for item in data["survivors"]
-            ),
+            closed=tuple(_closed_from_wire(item) for item in _wire_list(data, "closed")),
+            survivors=tuple(_survivor_from_wire(item) for item in _wire_list(data, "survivors")),
         )
 
 
-def _identity_wire(identity: OwnedProcess) -> dict[str, Any]:
+def _grace_of(data: Mapping[str, object]) -> float:
+    if "grace_s" not in data:
+        return 0.0
+    grace_s = optional_float_field(data, "grace_s")
+    if grace_s is None:
+        raise TypeError("grace_s is not a number")
+    return grace_s
+
+
+def _identity_wire(identity: OwnedProcess) -> dict[str, object]:
     return {"pid": identity.pid, "birth": identity.birth, "starttime": identity.starttime}
 
 
-def identity_from_wire(item: dict[str, Any]) -> OwnedProcess:
-    starttime = item["starttime"]
-    return OwnedProcess(
-        int(item["pid"]), float(item["birth"]), None if starttime is None else int(starttime)
+def _wire_list(data: Mapping[str, object], key: str) -> list[object]:
+    items = optional_list_field(data, key)
+    if items is None:
+        raise TypeError(f"{key} is missing or not a list")
+    return items
+
+
+def _wire_object(item: object, label: str) -> dict[str, object]:
+    if not is_object_dict(item):
+        raise TypeError(f"{label} is not an object")
+    return item
+
+
+def _left_pair(pair: object) -> tuple[int, str]:
+    if not is_object_list(pair) or len(pair) != 2:
+        raise TypeError("a left entry is not a [pid, name] pair")
+    pid, name = pair
+    if not isinstance(pid, int) or not isinstance(name, str):
+        raise TypeError("a left entry is not a [pid, name] pair")
+    return pid, name
+
+
+def _closed_from_wire(raw: object) -> ClosedSession:
+    item = _wire_object(raw, "a closed session")
+    return ClosedSession(
+        str_field(item, "name"),
+        identity_from_wire(_wire_object(item["shell"], "shell")),
+        tuple(_left_pair(pair) for pair in _wire_list(item, "left")),
     )
+
+
+def _survivor_from_wire(raw: object) -> Survivor:
+    item = _wire_object(raw, "a survivor")
+    return Survivor(
+        str_field(item, "session"),
+        identity_from_wire(_wire_object(item["process"], "process")),
+        SurvivorRole(str_field(item, "role")),
+    )
+
+
+def identity_from_wire(item: Mapping[str, object]) -> OwnedProcess:
+    starttime = item["starttime"]
+    birth = optional_float_field(item, "birth")
+    if birth is None:
+        raise TypeError("birth is missing or not a number")
+    if starttime is not None and not isinstance(starttime, int):
+        raise TypeError("starttime is not an integer")
+    return OwnedProcess(int_field(item, "pid"), birth, starttime)
 
 
 def _known(target: Target) -> tuple[OwnedProcess, ...]:

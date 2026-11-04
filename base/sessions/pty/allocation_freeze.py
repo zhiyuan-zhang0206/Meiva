@@ -27,6 +27,7 @@ from typing import Literal, Never, TypeGuard
 from base.clock import Clock
 from base.clock.ids import new_uuid
 from base.host.atomic_io import AtomicWriter
+from base.host.boundary.untyped import object_of
 from base.native_process.os_platform import file_lock
 
 SCHEMA_VERSION = 1
@@ -111,7 +112,7 @@ def _parse(raw_value: object) -> PtyAllocationFreeze:
 
 def _read_unlocked(path: Path) -> PtyAllocationFreeze:
     try:
-        raw = json.loads(path.read_text())
+        raw = object_of(json.loads, path.read_text())
     except FileNotFoundError:
         return PtyAllocationFreeze(status="inactive")
     except (OSError, ValueError) as exc:

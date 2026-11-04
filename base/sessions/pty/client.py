@@ -16,10 +16,17 @@ import base64
 import math
 import socket
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeGuard
 
+from base.host.boundary.fields import (
+    int_field,
+    optional_float_field,
+    optional_list_field,
+    str_field,
+)
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.sessions.pty import protocol
 from base.sessions.pty.closure import Outcome
 from base.sessions.pty.paths import CAPTURE_MAX_LINES
@@ -104,10 +111,6 @@ class KillVerdict:
     survivors: tuple[int, ...] = ()
 
 
-def _is_json_object(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
-
-
 # meiva:note
 # How many times a connect is tried for a wait of `wait_s` seconds: the first attempt, then one more
 # per fixed retry pause that fits in the wait. A pause is the unit instead of a deadline because
@@ -160,7 +163,18 @@ def request(
     timeout: float = REQUEST_TIMEOUT_S,
     wait: float = 0.0,
     **fields: object,
-) -> dict[str, Any]:
+) -> dict[str, object]:
+    return _exchange(method, fields, socket_path=socket_path, timeout=timeout, wait=wait)
+
+
+def _exchange(
+    method: str,
+    fields: Mapping[str, object],
+    *,
+    socket_path: Path,
+    timeout: float = REQUEST_TIMEOUT_S,
+    wait: float = 0.0,
+) -> dict[str, object]:
     req_id = 1
     conn = _connect(wait, socket_path)
     with conn:
@@ -183,9 +197,81 @@ def request(
             f"pty-sessions answered request {req_id} with id {response.get('id')!r}"
         )
     if not response.get("ok"):
-        raise ServiceError(int(response.get("code") or protocol.ERROR), str(response.get("error")))
+        raise ServiceError(_error_code(response.get("code")), str(response.get("error")))
     data = response.get("data")
-    return data if _is_json_object(data) else {}
+    return data if is_object_dict(data) else {}
+
+
+def _error_code(code: object) -> int:
+    if not code:
+        return protocol.ERROR
+    if isinstance(code, bool) or not isinstance(code, int):
+        raise TypeError(f"error code is {type(code).__name__}, not int")
+    return code
+
+
+def _survivor_pids(data: Mapping[str, object]) -> tuple[int, ...]:
+    if "survivors" not in data:
+        return ()
+    survivors = data["survivors"]
+    if not is_object_list(survivors):
+        raise TypeError(f"survivors is {type(survivors).__name__}, not a list")
+    return tuple(_pid(pid) for pid in survivors)
+
+
+def _pid(value: object) -> int:
+    if not isinstance(value, int):
+        raise TypeError(f"survivor pid is {type(value).__name__}, not int")
+    return value
+
+
+def _float_field(row: Mapping[str, object], key: str) -> float:
+    value = optional_float_field(row, key)
+    if value is None:
+        raise TypeError(f"{key} is missing or not a number")
+    return value
+
+
+# meiva:note
+# The text `row[key]` holds, None when the key is absent or null; any other type raises, so a
+# corrupt row never reads as "no value".
+def _nullable_str(row: Mapping[str, object], key: str) -> str | None:
+    value = row.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TypeError(f"{key} is {type(value).__name__}, not text")
+    return value
+
+
+# meiva:note
+# The integer twin of `_nullable_str` (a bool is not an integer here).
+def _nullable_int(row: Mapping[str, object], key: str) -> int | None:
+    value = row.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{key} is {type(value).__name__}, not int")
+    return value
+
+
+# meiva:note
+# One row of a `list` answer. The service writes every key of `SessionInfo`; the nullable ones
+# (`starttime`, `generation`) are present as null, `initial_command` only when it was asked for.
+def _session_info(row: object) -> SessionInfo:
+    if not is_object_dict(row):
+        raise TypeError("a listed session is not an object")
+    return SessionInfo(
+        name=str_field(row, "name"),
+        pid=int_field(row, "pid"),
+        create_time=_float_field(row, "create_time"),
+        starttime=_nullable_int(row, "starttime"),
+        cmd=str_field(row, "cmd"),
+        cwd=str_field(row, "cwd"),
+        started_at=_float_field(row, "started_at"),
+        generation=_nullable_str(row, "generation"),
+        initial_command=_nullable_str(row, "initial_command"),
+    )
 
 
 def has_session(name: str, *, socket_path: Path) -> bool:
@@ -211,13 +297,16 @@ def list_sessions(
 ) -> list[SessionInfo]:
     """Every live session whose name starts with `prefix`, sorted by name."""
     try:
-        fields: dict[str, Any] = {"prefix": prefix}
+        fields: dict[str, object] = {"prefix": prefix}
         if include_initial_command:
             fields["include_initial_command"] = True
-        rows = request("list", socket_path=socket_path, **fields)["sessions"]
+        answer = _exchange("list", fields, socket_path=socket_path)
     except ServiceDownError:
         return []
-    return [SessionInfo(**row) for row in rows]
+    rows = optional_list_field(answer, "sessions")
+    if rows is None:
+        raise TypeError("sessions is missing or not a list")
+    return [_session_info(row) for row in rows]
 
 
 def live_sessions(prefix: str = "", *, socket_path: Path) -> dict[str, SessionRecord]:
@@ -234,11 +323,11 @@ def create_session(
         ServiceError: the service refused (its message names the reason).
         ServiceUnavailableError: no service answers.
     """
-    fields: dict[str, Any] = {"name": name, "cwd": cwd, "env": env}
+    fields: dict[str, object] = {"name": name, "cwd": cwd, "env": env}
     if cmd:
         fields["cmd"] = cmd
     return bool(
-        request("new", socket_path=config.socket_path, wait=config.connect_wait_s, **fields)[
+        _exchange("new", fields, socket_path=config.socket_path, wait=config.connect_wait_s)[
             "created"
         ]
     )
@@ -272,7 +361,9 @@ def kill(name: str, *, graceful: bool, socket_path: Path) -> KillVerdict:
     except ServiceDownError:
         return KillVerdict("noop", interrupted=False)
     return KillVerdict(
-        str(data["mode"]), bool(data["interrupted"]), tuple(data.get("survivors", ()))
+        str(data["mode"]),
+        bool(data["interrupted"]),
+        _survivor_pids(data),
     )
 
 

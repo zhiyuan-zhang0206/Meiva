@@ -26,6 +26,7 @@ base/host/tests
 base/lm
 base/packages/plugins
 base/packages/tests
+base/sessions
 base/telemetry
 cli
 gateway/tests

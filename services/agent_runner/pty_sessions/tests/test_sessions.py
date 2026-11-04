@@ -420,6 +420,7 @@ def test_initial_command_provenance_is_opt_in_and_keeps_original_allocation(
     cmd = "echo first-allocation"
     assert new(name, unit_home, cmd=cmd)
     default = client.request("list", prefix=name, socket_path=service_socket())["sessions"]
+    assert isinstance(default, list)
     assert "initial_command" not in default[0]
     assert client.list_sessions(name, socket_path=service_socket())[0].initial_command is None
     first = client.list_sessions(name, include_initial_command=True, socket_path=service_socket())[

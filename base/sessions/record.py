@@ -18,13 +18,27 @@ import os
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, TypeGuard
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.native_process.kernel_identity import pid_starttime_ticks
 
 
-def _is_record_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
+# meiva:note
+# `int(value)` for the JSON scalars a record field may hold (a number or a numeric string); any
+# other JSON value is not a whole number and raises TypeError.
+def _int_of(value: object) -> int:
+    if isinstance(value, int | float | str):
+        return int(value)
+    raise TypeError(f"record field is {type(value).__name__}, not a number")
+
+
+# meiva:note
+# The `float` twin of `_int_of`.
+def _float_of(value: object) -> float:
+    if isinstance(value, int | float | str):
+        return float(value)
+    raise TypeError(f"record field is {type(value).__name__}, not a number")
 
 
 @dataclass(frozen=True)
@@ -62,26 +76,28 @@ class SessionRecord:
         if not path.exists():
             return None
         try:
-            data = json.loads(path.read_text())
+            data = object_of(json.loads, path.read_text())
         except (ValueError, OSError):
             return None
-        if not _is_record_dict(data) or "pid" not in data:
+        if not is_object_dict(data) or "pid" not in data:
             return None
         record = data
+        starttime = record.get("starttime")
+        generation = record.get("generation")
+        pgid = record.get("pgid")
+        control_mode = record.get("control_mode")
+        if control_mode is not None and not isinstance(control_mode, str):
+            raise TypeError(f"control_mode is {type(control_mode).__name__}, not text")
         return cls(
-            pid=int(record["pid"]),
-            create_time=float(record.get("create_time", 0.0)),
+            pid=_int_of(record["pid"]),
+            create_time=_float_of(record.get("create_time", 0.0)),
             cmd=str(record.get("cmd", "")),
             cwd=str(record.get("cwd", "")),
-            started_at=float(record.get("started_at", 0.0)),
-            starttime=(None if record.get("starttime") is None else int(record["starttime"])),
-            generation=(
-                record["generation"]
-                if isinstance(record.get("generation"), str) and record["generation"]
-                else None
-            ),
-            control_mode=record.get("control_mode"),
-            pgid=int(record["pgid"]) if isinstance(record.get("pgid"), int) else None,
+            started_at=_float_of(record.get("started_at", 0.0)),
+            starttime=None if starttime is None else _int_of(starttime),
+            generation=generation if isinstance(generation, str) and generation else None,
+            control_mode=control_mode,
+            pgid=pgid if isinstance(pgid, int) else None,
         )
 
     def identifies(
