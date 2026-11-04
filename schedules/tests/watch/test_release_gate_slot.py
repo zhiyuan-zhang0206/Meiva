@@ -116,3 +116,22 @@ def test_the_measured_gaps_open_only_the_windows_that_missed_a_slot() -> None:
     opened = tuple(_decide(gap).card is not None for gap in gaps)
 
     assert opened == (False, False, True, False, True)
+
+
+# meiva:note
+# A reader has to be able to judge one card without waiting for an interval that happens to look
+# suspicious: the card states how many arrivals the lookback should have contained, which is the
+# one number they can check against the workflow's own run list. One of four is a cron that stopped;
+# four of four would be a round that could not read.
+def test_the_card_states_how_many_arrivals_the_lookback_should_have_contained() -> None:
+    facts = replace(
+        _facts(13.5),
+        uncertified_commits=3,
+        scheduled_starts=(NOW - timedelta(hours=13, minutes=30), NOW - timedelta(hours=30)),
+    )
+
+    decision = decide_slot(facts, now=NOW, since=None, stale_after=RELEASE_GATE_SLOT_STALE_AFTER)
+
+    assert decision.card is not None
+    assert "should have started 4 run(s) and started 1" in decision.card.body
+    assert "Confirm that count against the workflow's own run list" in decision.card.body

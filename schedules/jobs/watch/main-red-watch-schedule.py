@@ -37,7 +37,7 @@ from schedules.plans.watch.main_red import (
     NIGHTLY_STALE_AFTER,
     RunFacts,
 )
-from schedules.plans.watch.release_gate_slot import SlotFacts
+from schedules.plans.watch.release_gate_slot import RELEASE_GATE_SLOT_CADENCE, SlotFacts
 
 RunProcess = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -234,15 +234,64 @@ def _last_run_start(workflow: str, run_process: RunProcess) -> datetime | None:
 
 # meiva:note
 # The slot check reads the cron's own runs, not the workflow's newest run: a make-up dispatch is a
-# `workflow_dispatch` run, and counting it would let the repair hide the outage it repaired.
-def _last_schedule_start(workflow: str, run_process: RunProcess) -> datetime | None:
+# `workflow_dispatch` run, and counting it would let the repair hide the outage it repaired. The
+# whole list comes back because the card states how many arrivals a day should have contained --
+# that count is what a reader can check against GitHub, so it has to come from the same read.
+def _schedule_starts(workflow: str, run_process: RunProcess) -> tuple[datetime, ...]:
     import json
 
     listing = json.loads(_api(_runs_path(workflow, 20), run_process))
-    for run in listing.get("workflow_runs", []):
-        if run.get("event") == "schedule":
-            return datetime.fromisoformat(run["created_at"].replace("Z", "+00:00"))
-    return None
+    starts = [
+        datetime.fromisoformat(run["created_at"].replace("Z", "+00:00"))
+        for run in listing.get("workflow_runs", [])
+        if run.get("event") == "schedule" and isinstance(run.get("created_at"), str)
+    ]
+    return tuple(sorted(starts, reverse=True))
+
+
+# meiva:note
+# The slot leg fails on its own. Its two reads -- the cron's own starts and whether the workflow is
+# busy -- used to sit in the argument list of `slot_round`, so one bad answer took the whole round
+# with it: `fire` has no catch above it, and a round that raises costs the heartbeat the supervisor
+# reads. A failure here becomes one named note, and the round still reports the reds it did read.
+#
+# The leg is skipped, not run with `last_schedule_start=None`: that value means "this workflow
+# never started here", and a card built from it would report a stopped cron on the strength of a
+# failed read -- the exact shape of the false alarm this watch already had once.
+def _slot_note(
+    *,
+    state_path: Path,
+    uncertified: int | None,
+    channel_latest: str | None,
+    run_process: RunProcess,
+    report_agent: int,
+) -> str | None:
+    try:
+        starts = _schedule_starts(_RELEASE_GATE, run_process)
+        busy = _workflow_busy(_RELEASE_GATE, run_process)
+    except Exception as exc:
+        return slot_round(
+            state_path=state_path,
+            now=datetime.now(UTC),
+            facts=None,
+            open_card=partial(_open_card, report_agent=report_agent),
+            close_card=_close_card,
+            unreadable=f"{type(exc).__name__}: {exc}",
+        )
+    return slot_round(
+        state_path=state_path,
+        now=datetime.now(UTC),
+        facts=SlotFacts(
+            last_schedule_start=starts[0] if starts else None,
+            busy=busy,
+            uncertified_commits=uncertified,
+            channel_latest=channel_latest,
+            scheduled_starts=starts,
+            cadence=RELEASE_GATE_SLOT_CADENCE,
+        ),
+        open_card=partial(_open_card, report_agent=report_agent),
+        close_card=_close_card,
+    )
 
 
 # meiva:note
@@ -338,17 +387,12 @@ def watch_round(
         ),
     )
     uncertified, channel_latest = _uncertified_commits(run_process)
-    slot_note = slot_round(
+    slot_note = _slot_note(
         state_path=state_path,
-        now=datetime.now(UTC),
-        facts=SlotFacts(
-            last_schedule_start=_last_schedule_start(_RELEASE_GATE, run_process),
-            busy=_workflow_busy(_RELEASE_GATE, run_process),
-            uncertified_commits=uncertified,
-            channel_latest=channel_latest,
-        ),
-        open_card=partial(_open_card, report_agent=report_agent),
-        close_card=_close_card,
+        uncertified=uncertified,
+        channel_latest=channel_latest,
+        run_process=run_process,
+        report_agent=report_agent,
     )
     if slot_note is not None:
         line = f"{line} | {slot_note}"

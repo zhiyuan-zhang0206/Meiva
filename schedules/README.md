@@ -271,7 +271,22 @@ Every schedule row records a target `machine` (defaulting to the gateway machine
   says in the same breath what that does not restore. **Dispatch
   `main-typecheck.yml`; never dispatch `release-gate.yml` from the watch.** A slot
   the gate would have skipped anyway (nothing uncertified) opens no card, and the
-  card closes when a scheduled run appears again.
+  card closes when a scheduled run appears again. The card also states how many
+  scheduled arrivals the last 24 hours should have contained and how many it found
+  (`_arrivals`), because that count is the one number a reader can check against
+  the workflow's own run list: one card is then judgeable on its own, without
+  waiting for an interval that happens to look suspicious.
+- **The slot leg fails alone.** Its two reads -- the cron's own starts and whether
+  the workflow is busy -- run inside `_slot_note`, not in the argument list of
+  `slot_round`, so one bad answer becomes one note on the round line instead of
+  an exception that leaves `fire` (which nothing catches) and takes the round's
+  heartbeat with it. On a failed read the leg is skipped rather than run with
+  `last_schedule_start=None`: that value means "never started", and a card built
+  from it would report a stopped cron on the strength of a failed read.
+  Skipping is a degradation, not silence: `SlotLedger.unreadable_rounds` counts
+  the consecutive rounds it lasted, the round line names it every third round
+  ("nothing is watching the slot while this lasts"), and the first readable round
+  afterwards says how long it was dark.
 - **A silent nightly says what to run.** The liveness note for `ci.yml` ends with
   the dispatch that closes the gap -- `gh workflow run ci.yml --ref main`, the full
   suite, which publishes nothing and takes about ten to fifteen minutes -- because

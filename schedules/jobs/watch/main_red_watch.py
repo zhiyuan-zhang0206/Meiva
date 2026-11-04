@@ -80,6 +80,11 @@ class LivenessStream(NamedTuple):
 class SlotLedger:
     gap_id: str | None = None
     task_id: int | None = None
+    # meiva:note
+    # How many consecutive rounds could not read the slot leg at all. Without it a failing `gh`
+    # looks exactly like a gate that keeps its schedule: the round stays alive, the heartbeat keeps
+    # landing, and the thing that is not running is the judgement itself.
+    unreadable_rounds: int = 0
 
 
 # meiva:note
@@ -104,9 +109,13 @@ def _load_slot(raw: object) -> SlotLedger:
         return SlotLedger()
     gap = raw.get("gap_id")
     task = raw.get("task_id")
+    rounds = raw.get("unreadable_rounds")
     return SlotLedger(
         gap_id=gap if isinstance(gap, str) else None,
         task_id=task if isinstance(task, int) and not isinstance(task, bool) else None,
+        unreadable_rounds=(
+            rounds if isinstance(rounds, int) and not isinstance(rounds, bool) and rounds > 0 else 0
+        ),
     )
 
 
@@ -165,6 +174,7 @@ def save_state(path: Path, state: WatchState) -> None:
         "slot": {
             "gap_id": state.slot.gap_id,
             "task_id": state.slot.task_id,
+            "unreadable_rounds": state.slot.unreadable_rounds,
         },
     }
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -328,17 +338,35 @@ def watch_once(
 # and the next scheduled run closes it. The round dispatches nothing: the make-up run certifies,
 # certifying releases, and a release is the user's decision -- so the card carries the command and
 # stays open until a human runs it or the cron recovers.
+# meiva:note
+# How often an unreadable slot leg repeats itself on the round line. One note per three rounds --
+# ninety minutes at the current cadence -- is often enough that the line never goes quiet while the
+# judgement is not running, and rare enough that it does not become the only thing on the line.
+_UNREADABLE_NOTE_EVERY = 3
+
+
 def slot_round(
     *,
     state_path: Path,
     now: datetime,
-    facts: SlotFacts,
+    facts: SlotFacts | None,
     open_card: Callable[[Card], int],
     close_card: Callable[[int, str], None],
     since: datetime | None = None,
+    unreadable: str | None = None,
 ) -> str | None:
     state = load_state(state_path)
     ledger = state.slot
+    if facts is None:
+        rounds = ledger.unreadable_rounds + 1
+        save_state(state_path, replace_state_slot(state, replace(ledger, unreadable_rounds=rounds)))
+        if rounds % _UNREADABLE_NOTE_EVERY != 0:
+            return None
+        return (
+            f"release-gate slot has not been judged for {rounds} consecutive rounds "
+            f"({unreadable or 'unreadable'}): nothing is watching the slot while this lasts"
+        )
+    recovered = ledger.unreadable_rounds
     decision = decide_slot(
         facts,
         now=now,
@@ -353,8 +381,15 @@ def slot_round(
         task_id = ledger.task_id if ledger.task_id is not None else open_card(decision.card)
         slot = SlotLedger(gap_id=decision.gap_id, task_id=task_id)
     save_state(state_path, replace_state_slot(state, slot))
+    if recovered:
+        back = f"release-gate slot readable again after {recovered} unreadable round(s)"
+        return back if decision.note is None else f"{back} | {decision.note}"
     return decision.note
 
 
+# meiva:note
+# `replace`, not a fresh `WatchState(...)`: the positional form silently dropped whichever maps were
+# added after it was written, and a map that vanishes on every slot round is a memory that looks
+# like it works until the round that needed it.
 def replace_state_slot(state: WatchState, slot: SlotLedger) -> WatchState:
-    return WatchState(state.entries, state.watermarks, state.first_seen, slot)
+    return replace(state, slot=slot)

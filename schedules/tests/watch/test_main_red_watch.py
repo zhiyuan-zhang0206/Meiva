@@ -16,12 +16,14 @@ from schedules.jobs.watch.main_red_liveness import liveness_once
 from schedules.jobs.watch.main_red_watch import (
     LivenessStream,
     STATE_FILE,
+    WatchState,
     load_state,
+    save_state,
     slot_round,
     watch_once,
 )
 from schedules.plans.watch.main_red import FAILURE_TEST, NIGHTLY_STALE_AFTER, Card, RunFacts
-from schedules.plans.watch.release_gate_slot import SlotFacts
+from schedules.plans.watch.release_gate_slot import RELEASE_GATE_SLOT_CADENCE, SlotFacts
 
 # meiva:note
 # The three streams whose silence is reported, as the schedule entry wires them: the helper below
@@ -666,3 +668,61 @@ def test_an_unreadable_range_still_opens_the_card_and_says_so(tmp_path: Path) ->
     assert len(opened) == 1
     assert "unreadable: RuntimeError" in line
     assert "c" * 10 in opened[0].body
+
+
+# meiva:note
+# A slot leg that cannot be read is not a quiet slot. Skipping it keeps the round and its heartbeat
+# alive, which is right -- but three quiet rounds in a row would otherwise be indistinguishable from
+# a gate that keeps its schedule. The count lives in the ledger so the round says so, and the first
+# readable round afterwards says how long it was dark.
+def test_an_unreadable_slot_leg_reports_itself_instead_of_going_quiet(tmp_path: Path) -> None:
+    path = tmp_path / STATE_FILE
+    now = datetime(2026, 11, 2, 12, tzinfo=UTC)
+    quiet = [
+        slot_round(
+            state_path=path,
+            now=now,
+            facts=None,
+            open_card=lambda _card: 1,
+            close_card=lambda _task, _reason: None,
+            unreadable="RuntimeError: 502",
+        )
+        for _ in range(3)
+    ]
+    back = slot_round(
+        state_path=path,
+        now=now,
+        facts=SlotFacts(
+            last_schedule_start=now - timedelta(hours=1),
+            busy=False,
+            uncertified_commits=2,
+            scheduled_starts=(now - timedelta(hours=1),),
+            cadence=RELEASE_GATE_SLOT_CADENCE,
+        ),
+        open_card=lambda _card: 1,
+        close_card=lambda _task, _reason: None,
+    )
+
+    assert quiet[:2] == [None, None]
+    assert quiet[2] is not None and "3 consecutive rounds" in quiet[2]
+    assert back is not None and "readable again after 3 unreadable" in back
+
+
+# meiva:note
+# The ledger that says how long the slot leg has been dark must not cost the watch its memory of
+# the last green. The positional rebuild this replaced dropped every map added after it was
+# written, so a schedule that collected a range correctly could still find it gone next round.
+def test_a_slot_round_keeps_the_memory_of_the_last_green(tmp_path: Path) -> None:
+    path = tmp_path / STATE_FILE
+    save_state(path, WatchState({}, {}, {}, greens={"release-gate.yml": "a" * 40}))
+
+    slot_round(
+        state_path=path,
+        now=datetime(2026, 11, 2, 12, tzinfo=UTC),
+        facts=None,
+        open_card=lambda _card: 1,
+        close_card=lambda _task, _reason: None,
+        unreadable="RuntimeError: 502",
+    )
+
+    assert load_state(path).greens == {"release-gate.yml": "a" * 40}
