@@ -1,0 +1,16 @@
+[uses]
+"__init__.py" = ["cli.py", "contracts.py"]
+"__main__.py" = ["cli.py"]
+"act.py" = ["alerts.py", "contracts.py", "decide.py", "evidence.py"]
+"alerts.py" = ["contracts.py"]
+"cli.py" = ["act.py", "contracts.py", "evidence.py", "report.py"]
+"decide.py" = ["contracts.py"]
+"evidence.py" = ["contracts.py"]
+"tests" = ["cli.py", "contracts.py", "decide.py", "evidence.py"]
+
+[roots]
+"__main__.py" = { kinds = ["argv"], why = "the `__main__` guard reads argv[1:] once and hands it to main" }
+"act.py" = { kinds = ["clock"], why = "the decision ledger stamps every entry with the instant the decision was taken, in the host's local offset" }
+"alerts.py" = { kinds = ["clock"], why = "the blind-judge alert is rate-limited by the wall clock: the state file holds when the last one was delivered" }
+"cli.py" = { kinds = ["argv", "environ", "home"], why = "the composition root: it parses the process command line once, and the argument defaults name the operator's own home (`~`) and can each be overridden by a WORKTREE_GC_* variable, which is what lets one copy run against the live home and another against a fixture" }
+"evidence.py" = { kinds = ["clock"], why = "ages are measured against the current instant: a probe line's freshness, a merge time, a commit time, a hold's expiry" }
