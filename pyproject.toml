@@ -708,6 +708,9 @@ root = "base/config/domains/tests"
 root = "base/config/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/db/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/deploy/git/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -1125,6 +1128,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "base/daemon"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/db"
 reportAny = "error"
 reportExplicitAny = "error"
 

@@ -47,7 +47,7 @@ def status(db: psycopg.Connection, aid: int) -> str:
 
 def force(aid: int) -> int:
     with ConnectionPool[psycopg.Connection](
-        settings.data_plane.db_url, min_size=1, max_size=1, kwargs=PG_KEEPALIVE_KWARGS
+        settings.data_plane.db_url, min_size=1, max_size=1, kwargs={**PG_KEEPALIVE_KWARGS}
     ) as pool:
         _, _, terminate_id, _cutoff = termination.force_terminate_transaction(
             aid, pool, source="user"

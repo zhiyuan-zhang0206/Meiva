@@ -612,7 +612,12 @@ async def settle_running_rows_at_start(pool: AsyncPool, machine: str) -> list[in
                 (machine,),
             )
         ).fetchall()
-    settled = [row[0] for row in rows]
+    settled: list[int] = []
+    for row in rows:
+        agent_id = row[0]
+        if not isinstance(agent_id, int):
+            raise TypeError(f"the settle statement returned a non-integer id: {agent_id!r}")
+        settled.append(agent_id)
     if settled:
         logger.info(
             "hosted start: settled {n} running row(s) {ids}",

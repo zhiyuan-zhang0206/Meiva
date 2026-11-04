@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Any
+from typing import TypedDict
 from urllib.parse import urlsplit
 
 import psycopg
@@ -49,6 +49,23 @@ class NoDatabaseAuthorityError(RuntimeError):
     """
 
 
+# meiva:note
+# The libpq keepalive and connect-timeout parameters every cluster dial carries (`PG_KEEPALIVE_KWARGS`).
+class PgKeepaliveKwargs(TypedDict):
+    keepalives: int
+    keepalives_idle: int
+    keepalives_interval: int
+    keepalives_count: int
+    connect_timeout: int
+
+
+# meiva:note
+# The keepalive parameters plus the statement ceiling a direct connection receives as startup `options`.
+class PgStatementKwargs(PgKeepaliveKwargs):
+    options: str
+
+
+# meiva:note
 # TCP keepalive + connect timeout applied to every cluster Postgres connection —
 # the psycopg/libpq mirror of base/events/live/redis_client.py's `RESILIENCE_KWARGS`. A
 # laptop-grade runner that sleeps or changes networks wakes holding dead TCP
@@ -57,8 +74,9 @@ class NoDatabaseAuthorityError(RuntimeError):
 # then a probe every 10s, 3 misses = dead (~60s), plus a 5s cap on establishing a
 # new connection. These are libpq connection parameters (passed through psycopg's
 # `**kwargs` into the conninfo), so they apply to the connect + every borrowed
-# pool conn. Typed `dict[str, Any]` (like redis's `RESILIENCE_KWARGS`) so
-# `**`-unpacking into psycopg's typed keyword params doesn't trip the type checker.
+# pool conn. Typed as `TypedDict`s (like redis's `RedisResilience`): the keys are fixed, and
+# `**`-unpacking into psycopg's keyword params is checked against them. A pool's `kwargs` takes a plain
+# dict, so a caller hands it `{**PG_KEEPALIVE_KWARGS}`.
 #
 # `connect_timeout` matters most where the connect is the *first* thing a process
 # does: against a peer that black-holes packets (dropped, not ECONNREFUSED) an
@@ -67,7 +85,7 @@ class NoDatabaseAuthorityError(RuntimeError):
 # `connect()` / `connect_url()` / `pool()` / `async_pool()` apply it, bounded or
 # not (a caller may shorten `connect_url`'s connect timeout for a probe).
 # Fail-fast behaviour is pinned by meiva/tests/bootstrap/test_connect_fail_fast.py.
-PG_KEEPALIVE_KWARGS: dict[str, Any] = {
+PG_KEEPALIVE_KWARGS: PgKeepaliveKwargs = {
     "keepalives": 1,
     "keepalives_idle": 30,
     "keepalives_interval": 10,
@@ -79,7 +97,7 @@ PG_KEEPALIVE_KWARGS: dict[str, Any] = {
 # pass to psycopg. `options` is the direct-connection delivery path (Postgres
 # parses it itself); pooled dials additionally run PG_STATEMENT_TIMEOUT_SET_SQL
 # (see connect/pool).
-PG_STATEMENT_TIMEOUT_KWARGS: dict[str, Any] = {
+PG_STATEMENT_TIMEOUT_KWARGS: PgStatementKwargs = {
     **PG_KEEPALIVE_KWARGS,
     "options": PG_STATEMENT_TIMEOUT_OPTIONS,
 }
@@ -91,7 +109,7 @@ PG_STATEMENT_TIMEOUT_KWARGS: dict[str, Any] = {
 DEFAULT_POOL_TIMEOUT_S = 30.0
 
 
-def statement_kwargs(url: str) -> dict[str, Any]:
+def statement_kwargs(url: str) -> PgStatementKwargs:
     """The statement ceiling, after any startup options `url` carries itself: a
     psycopg keyword argument would otherwise replace the URL's `options`."""
     from psycopg.conninfo import conninfo_to_dict
@@ -333,14 +351,14 @@ def connect_url(
     dial: Callable[..., psycopg.Connection] = psycopg.connect,
 ) -> psycopg.Connection:
     _refuse_placeholder(url)
-    transport: dict[str, Any] = {
+    transport: dict[str, object] = {
         **_transport_kwargs(url, unbounded=unbounded),
         "connect_timeout": connect_timeout,
     }
     return dial(url, autocommit=autocommit, prepare_threshold=None, **transport)
 
 
-def _transport_kwargs(url: str, *, unbounded: bool) -> dict[str, Any]:
+def _transport_kwargs(url: str, *, unbounded: bool) -> PgKeepaliveKwargs | PgStatementKwargs:
     """Keepalives always; the statement ceiling unless the dial is unbounded."""
     return PG_KEEPALIVE_KWARGS if unbounded else statement_kwargs(url)
 
@@ -367,7 +385,7 @@ def pool_with_config(
         min_size, max_size, config.db_pool_min_size, config.db_pool_max_size
     )
     sslmode = sslmode_for_url(url, config.db_sslmode)
-    connection_kwargs: dict[str, Any] = {
+    connection_kwargs: dict[str, object] = {
         "prepare_threshold": None,
         **({"sslmode": sslmode} if sslmode else {}),
         **({} if direct else {"application_name": gate.application_name()}),

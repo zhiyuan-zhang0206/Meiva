@@ -8,6 +8,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from pydantic import TypeAdapter
+
 from base.clock import Timers
 from base.clock.ids import new_uuid
 from base.db.protocols import DatabaseLike, SyncConnection, SyncPool
@@ -29,6 +31,18 @@ from services.derived.insights.run_timeline.schemas import RunTimelineNode, RunT
 MAX_AGE_SECONDS = 600.0
 MAX_ENTRIES = 16
 TTL_SECONDS = 5.0
+
+
+# meiva:note
+# The first and last timestamps of a sealed projection's segments (`min(start_ts), max(end_ts)`), and one
+# message fact's index with the time of its LLM request: the rows the statements below answer, validated
+# where they are read.
+_EXTENT_ROW = TypeAdapter(tuple[datetime | None, datetime | None])
+_FACT_ROW = TypeAdapter(tuple[int, datetime])
+
+
+def _fact(row: object) -> tuple[int, datetime] | None:
+    return None if row is None else _FACT_ROW.validate_python(row)
 
 
 @dataclass(frozen=True)
@@ -126,11 +140,13 @@ class TimelineReader:
                     if self._entries.get(agent_id) is hit:
                         self._checked[agent_id] = self.timers.monotonic()
                 return hit
-            extent = conn.execute(
-                "SELECT min(start_ts), max(end_ts) FROM run_timeline_segments"
-                " WHERE agent_id = %s AND version = %s AND session < %s",
-                (agent_id, VERSION, source.boundaries),
-            ).fetchone()
+            extent = _EXTENT_ROW.validate_python(
+                conn.execute(
+                    "SELECT min(start_ts), max(end_ts) FROM run_timeline_segments"
+                    " WHERE agent_id = %s AND version = %s AND session < %s",
+                    (agent_id, VERSION, source.boundaries),
+                ).fetchone()
+            )
         result = self._snapshot(agent_id, source, extent)
         with self._lock:
             self._entries.pop(agent_id, None)
@@ -253,18 +269,22 @@ class TimelineReader:
     def request(self, snapshot: Snapshot, at: int) -> tuple[int, datetime, Segment, HistoryView]:
         with self.pool.connection() as conn:
             args = (snapshot.agent_id, VERSION, snapshot.sealed)
-            following = conn.execute(
-                "SELECT idx, request_ts FROM run_timeline_message_facts WHERE agent_id = %s"
-                " AND version = %s AND session < %s AND request_ts IS NOT NULL AND idx >= %s"
-                " ORDER BY idx LIMIT 1",
-                (*args, at),
-            ).fetchone()
-            previous = conn.execute(
-                "SELECT idx, request_ts FROM run_timeline_message_facts WHERE agent_id = %s"
-                " AND version = %s AND session < %s AND request_ts IS NOT NULL"
-                " ORDER BY idx DESC LIMIT 1",
-                args,
-            ).fetchone()
+            following = _fact(
+                conn.execute(
+                    "SELECT idx, request_ts FROM run_timeline_message_facts WHERE agent_id = %s"
+                    " AND version = %s AND session < %s AND request_ts IS NOT NULL AND idx >= %s"
+                    " ORDER BY idx LIMIT 1",
+                    (*args, at),
+                ).fetchone()
+            )
+            previous = _fact(
+                conn.execute(
+                    "SELECT idx, request_ts FROM run_timeline_message_facts WHERE agent_id = %s"
+                    " AND version = %s AND session < %s AND request_ts IS NOT NULL"
+                    " ORDER BY idx DESC LIMIT 1",
+                    args,
+                ).fetchone()
+            )
         tail = (
             [(f.idx, f.request_ts) for f in snapshot.tail.facts if f.request_ts is not None]
             if snapshot.tail

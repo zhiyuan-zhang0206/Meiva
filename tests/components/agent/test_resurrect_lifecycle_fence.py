@@ -169,7 +169,7 @@ async def test_force_on_unadmitted_row_can_be_resurrected_and_admitted(
 ) -> None:
     agent_id = _agent(db_conn)
     with ConnectionPool[psycopg.Connection](
-        settings.data_plane.db_url, min_size=1, max_size=1, kwargs=PG_KEEPALIVE_KWARGS
+        settings.data_plane.db_url, min_size=1, max_size=1, kwargs={**PG_KEEPALIVE_KWARGS}
     ) as pool:
         _, _, force, _cutoff = await asyncio.to_thread(
             force_terminate_transaction, agent_id, pool, source="user"

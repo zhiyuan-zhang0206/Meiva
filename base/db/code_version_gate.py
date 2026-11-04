@@ -34,10 +34,12 @@ from __future__ import annotations
 import sys
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import NoReturn, Protocol
 
 import psycopg
 
+from base.db.rows import query_one
 from base.host.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
 from base.log import logger
 
@@ -83,18 +85,27 @@ class _Dialer(Protocol):
     def connect(self, *, autocommit: bool = False) -> psycopg.Connection: ...
 
 
+# meiva:note
+# The answer of the statement that raises `deployment_state.min_code_version`.
+@dataclass(frozen=True)
+class _MinimumRow:
+    min_code_version: int
+
+
 def _raise_minimum(db: _Dialer, version: int) -> int:
     with db.connect(autocommit=True) as conn:
-        row = conn.execute(
+        row = query_one(
+            conn,
+            _MinimumRow,
             "UPDATE deployment_state SET min_code_version = GREATEST(min_code_version, %s) "
             "WHERE id = 1 RETURNING min_code_version",
             (version,),
-        ).fetchone()
+        )
     if row is None:
         raise RuntimeError(
             "cannot raise min_code_version: the deployment_state singleton row is missing"
         )
-    minimum = int(row[0])
+    minimum = row.min_code_version
     logger.info(
         "code version gate: cluster minimum is {minimum} (this gateway runs {version})",
         minimum=minimum,

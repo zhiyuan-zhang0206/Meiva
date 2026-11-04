@@ -7,9 +7,10 @@ from contextlib import (
     asynccontextmanager,
     contextmanager,
 )
-from typing import Any, Protocol
+from typing import Protocol
 
 import psycopg
+from psycopg.rows import TupleRow
 
 from base.db.protocols import AsyncConnectionLike, SyncConnection
 
@@ -33,7 +34,7 @@ class _SyncTransactionPool[SyncCT: SyncConnection](Protocol):
 class AsyncConnectionSource(Protocol):
     def connection(
         self, timeout: float | None = None
-    ) -> AbstractAsyncContextManager[psycopg.AsyncConnection[Any]]: ...
+    ) -> AbstractAsyncContextManager[psycopg.AsyncConnection[TupleRow]]: ...
 
 
 # meiva:note
@@ -44,7 +45,7 @@ class AsyncConnectionSource(Protocol):
 class ConnectionSource(Protocol):
     def connection(
         self, timeout: float | None = None
-    ) -> AbstractContextManager[psycopg.Connection[Any]]: ...
+    ) -> AbstractContextManager[psycopg.Connection[TupleRow]]: ...
 
 
 @contextmanager
