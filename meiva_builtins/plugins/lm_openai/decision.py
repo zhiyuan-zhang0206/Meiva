@@ -9,7 +9,7 @@ that name. One request carries every question, so nothing is split or fanned out
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
 from base.lm.provider_api import (
     FALSE,
@@ -50,7 +50,7 @@ class DecisionsBinding:
             raise DecisionResponseError(str(exc), input_tokens=tokens) from exc
 
 
-def _wire_question(name: str, question: Question) -> dict[str, Any]:
+def _wire_question(name: str, question: Question) -> dict[str, object]:
     match question:
         case YesNo():
             return {
@@ -87,7 +87,7 @@ def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
     return isinstance(value, dict)
 
 
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
     return _is_raw_dict(value) and all(isinstance(key, str) for key in value)
 
 
@@ -95,7 +95,7 @@ def _is_object_list(value: object) -> TypeGuard[list[object]]:
     return isinstance(value, list)
 
 
-def _object(value: object, what: str) -> dict[str, Any]:
+def _object(value: object, what: str) -> dict[str, object]:
     if not _is_str_dict(value):
         raise DecisionResponseError(f"Decisions response: {what} is not an object")
     return value
@@ -107,7 +107,7 @@ def _array(value: object, what: str) -> list[object]:
     return value
 
 
-def _input_tokens(body: Mapping[str, Any]) -> int:
+def _input_tokens(body: Mapping[str, object]) -> int:
     usage = body.get("usage")
     tokens = usage.get("input_tokens") if _is_str_dict(usage) else None
     if not isinstance(tokens, int) or isinstance(tokens, bool) or tokens < 0:
@@ -122,7 +122,7 @@ def _number(value: object, what: str) -> float:
 
 
 def _parse_answers(
-    body: Mapping[str, Any], questions: Mapping[str, Question]
+    body: Mapping[str, object], questions: Mapping[str, Question]
 ) -> dict[str, Decision]:
     decisions: dict[str, Decision] = {}
     for item in _array(body.get("answers"), "answers"):
@@ -138,7 +138,7 @@ def _parse_answers(
     return decisions
 
 
-def _parse_answer(name: str, question: Question, answer: Mapping[str, Any]) -> Decision:
+def _parse_answer(name: str, question: Question, answer: Mapping[str, object]) -> Decision:
     expected = {YesNo: "predicate", Choice: "choice", Score: "score"}[type(question)]
     if answer.get("type") != expected:
         raise DecisionResponseError(
