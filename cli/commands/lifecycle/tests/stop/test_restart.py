@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
@@ -31,6 +30,7 @@ from cli.commands.lifecycle.stop.restart import (
 )
 from cli.commands.lifecycle.stop.restart_plan import Finish, Leg, RestartRequest
 from cli.commands.lifecycle.tests.runtime_at import runtime_at
+from cli.commands.lifecycle.tests.stop.stop_support import finished_journal, journal_result
 from cli.commands.lifecycle.tests.stop.stop_support import home as home
 from cli.commands.lifecycle.tests.stop.stop_support import stop_runtime as stop_runtime
 from cli.database import OperatorDatabaseFactory
@@ -129,8 +129,7 @@ def test_the_restart_finishes_the_journal_only_when_it_owns_it(home: Path) -> No
     )
 
     assert conclude(home, Finish(rc=0, error=None, notice=None), owns_journal=False) == 0
-    journal = json.loads((home / "run/lifecycle-op.json").read_text())
-    assert not journal["complete"], "the outer operation still owns the journal"
+    assert not finished_journal(home).complete, "the outer operation still owns the journal"
 
     status_journal.finish(home, 0)
     assert status_journal.begin(home, "restart", pid=os.getpid()), (
@@ -139,9 +138,11 @@ def test_the_restart_finishes_the_journal_only_when_it_owns_it(home: Path) -> No
     assert (
         conclude(home, Finish(rc=1, error="stop leg failed", notice=None), owns_journal=True) == 1
     )
-    journal = json.loads((home / "run/lifecycle-op.json").read_text())
-    assert journal["complete"] and journal["result"]["rc"] == 1
-    assert journal["result"]["error"] == "stop leg failed"
+    journal = finished_journal(home)
+    assert journal.complete
+    result = journal_result(journal)
+    assert result["rc"] == 1
+    assert result["error"] == "stop leg failed"
 
 
 def test_a_leg_refusal_is_said_on_stderr_once_and_returns_its_code(
@@ -166,10 +167,12 @@ def test_a_restart_whose_probes_fail_is_declined_and_stops_nothing(
     assert rc == RESTART_DECLINED_EXIT_CODE
     err = capsys.readouterr().err
     assert "refusing restart: preflight probes failed — host still serving" in err
-    journal = json.loads((home / "run/lifecycle-op.json").read_text())
-    assert journal["complete"] and journal["result"]["rc"] == RESTART_DECLINED_EXIT_CODE
-    assert journal["result"]["error"] == "preflight probes failed"
-    assert [phase["name"] for phase in journal["phases"]] == ["preflight"]
+    journal = finished_journal(home)
+    assert journal.complete
+    result = journal_result(journal)
+    assert result["rc"] == RESTART_DECLINED_EXIT_CODE
+    assert result["error"] == "preflight probes failed"
+    assert [phase.name for phase in journal.phases] == ["preflight"]
 
 
 # meiva:note
@@ -217,16 +220,17 @@ def test_a_failed_start_leg_is_not_ok_and_keeps_the_words_it_printed(
         == 1
     )
 
-    journal = json.loads((home / "run/lifecycle-op.json").read_text())
-    assert [(phase["name"], phase["ok"]) for phase in journal["phases"]] == [
+    journal = finished_journal(home)
+    assert [(phase.name, phase.ok) for phase in journal.phases] == [
         ("preflight", True),
         ("preflight", True),
         ("stop", True),
         ("start", False),
     ], "a leg that returned non-zero never records ok"
-    assert journal["complete"] and journal["result"]["rc"] == 1
-    assert journal["result"]["error"] == "start leg failed with rc=1"
-    assert journal["result"]["start_leg_output"] == [refusal]
+    result = journal_result(journal)
+    assert journal.complete and result["rc"] == 1
+    assert result["error"] == "start leg failed with rc=1"
+    assert result["start_leg_output"] == [refusal]
 
     err = capsys.readouterr().err
     assert refusal in err, "the tee still writes through to the operator"

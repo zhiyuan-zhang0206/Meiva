@@ -3,15 +3,14 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
 
+from base.host.boundary.json_values import is_object_dict
 from cli.commands.lifecycle.root_control.snapshot import SnapshotError, parse_snapshot, root_units
 
 
-def reply(**overrides: Any) -> dict[str, Any]:
-    body: dict[str, Any] = {
+def reply(**overrides: object) -> dict[str, object]:
+    body: dict[str, object] = {
         "root": {"pid": 90, "create_time": 12.5, "starttime": None, "launch_digest": "d" * 64},
         "units": [
             {
@@ -74,7 +73,9 @@ def test_units_keep_the_roots_declaration_order() -> None:
 def test_a_reply_without_health_or_a_launch_digest_is_still_a_snapshot() -> None:
     body = reply()
     del body["health"]
-    del body["root"]["launch_digest"]
+    root = body["root"]
+    assert is_object_dict(root), "the reply carries a root object"
+    del root["launch_digest"]
 
     snapshot = parse_snapshot(body)
 
@@ -98,7 +99,7 @@ def test_a_reply_without_health_or_a_launch_digest_is_still_a_snapshot() -> None
     ],
 )
 def test_a_reply_lacking_a_field_the_commands_read_is_refused(
-    override: dict[str, Any], message: str
+    override: dict[str, object], message: str
 ) -> None:
     with pytest.raises(SnapshotError, match=message):
         parse_snapshot(reply(**override))

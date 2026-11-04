@@ -24,6 +24,8 @@ import pytest
 
 from base.clock import SYSTEM_TIMERS, Deadline
 from base.deploy.lifecycle import home_lifecycle_locks, start_serving
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
 from base.native_process.kernel_identity import pid_starttime_ticks
 from base.sessions.pty import client
@@ -41,6 +43,8 @@ from cli.commands.lifecycle.tests.stop.stop_support import (
     PtyServiceProcess,
     busy_session,
     cluster_chrome,
+    finished_journal,
+    journal_result,
     stop_environment,
     stop_request,
     written_notices,
@@ -198,7 +202,8 @@ def test_a_stop_holds_the_lifecycle_lock_under_the_invocations_pid(
     )
 
     lock = home_lifecycle_locks.lifecycle_lock_path(home)
-    record = json.loads(home_lifecycle_locks.holder_path(lock).read_text())
+    record = object_of(json.loads, home_lifecycle_locks.holder_path(lock).read_text())
+    assert is_object_dict(record), "the lock holder is a JSON object"
     assert record["purpose"] == "cli.do_stop"
     assert record["pid"] == stop_runtime.pid != os.getpid()
     assert record["state"] == "released"
@@ -317,9 +322,10 @@ def test_stop_reports_a_data_plane_failure_without_restarting_anything(
         "to resume." in err
     )
     assert "compensating" not in err
-    journal = json.loads((home / "run/lifecycle-op.json").read_text())
-    assert journal["complete"] and journal["result"]["rc"] == 1
-    assert "compensated" not in journal["result"]
+    journal = finished_journal(home)
+    assert journal.complete
+    assert journal_result(journal)["rc"] == 1
+    assert "compensated" not in journal_result(journal)
 
 
 # meiva:note

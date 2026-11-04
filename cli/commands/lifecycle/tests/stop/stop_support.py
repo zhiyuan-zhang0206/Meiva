@@ -25,13 +25,16 @@ from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Protocol, TextIO
+from typing import Protocol, TextIO
 
 import psutil
 import psycopg
 import pytest
 
 from base.agents.context.clients import DatabaseFactory
+from base.deploy.lifecycle import status_journal
+from base.deploy.lifecycle.status_journal import LifecycleOp
+from base.host.boundary.json_values import is_object_dict
 from base.host.system.tests.fake_commands import real_commands_host
 from base.native_process.kernel_identity import pid_starttime_ticks
 from base.native_process.ownership import OwnedProcess
@@ -188,7 +191,7 @@ def launched_processes(home: Path) -> Generator[Launcher, None, None]:
     ) -> subprocess.Popen[str]:
         if term not in ("default", "exit", "ignore"):
             raise ValueError("invalid fixture SIGTERM behavior")
-        proc = subprocess.Popen(
+        proc: subprocess.Popen[str] = subprocess.Popen(
             [
                 sys.executable,
                 "-u",
@@ -205,7 +208,8 @@ def launched_processes(home: Path) -> Generator[Launcher, None, None]:
             start_new_session=True,
         )
         processes.append(proc)
-        assert proc.stdout is not None and proc.stdout.readline().strip() == "ready"
+        ready = proc.stdout
+        assert ready is not None and ready.readline().strip() == "ready"
         SessionRecord(
             proc.pid,
             psutil.Process(proc.pid).create_time(),
@@ -282,19 +286,42 @@ def closed_session(name: str, left: tuple[tuple[int, str], ...] = ()) -> closure
 
 
 # meiva:note
+# The journal this home wrote, through the reader the operations themselves use. A test that
+# asserts on the journal runs after the operation finished, so an absent journal is a failure.
+def finished_journal(home: Path) -> LifecycleOp:
+    journal = status_journal.read(home)
+    assert journal is not None, "the operation wrote no journal"
+    return journal
+
+
+# meiva:note
+# The `result` object a finished journal records, refused when the run wrote none.
+def journal_result(journal: LifecycleOp) -> dict[str, object]:
+    assert journal.result is not None, "the journal records no result"
+    return journal.result
+
+
+# meiva:note
 # Every closure notice the stops wrote to the database, oldest first.
 #
 # A notice's idempotency claim is written for every notice, delivered to its owner or dropped
 # (a terminated or unknown owner), so the claims are the record of what a stop wrote.
-def written_notices(conn: psycopg.Connection) -> list[dict[str, Any]]:
+def written_notices(conn: psycopg.Connection) -> list[dict[str, object]]:
     with conn.cursor() as cur:
         cur.execute(
             "SELECT response_body FROM api_idempotency WHERE path = 'closure-notice' "
             "ORDER BY completed_at, response_body::text"
         )
-        bodies = [row[0] for row in cur.fetchall()]
+        bodies: list[object] = [row[0] for row in cur.fetchall()]
     conn.commit()
-    return [body if isinstance(body, dict) else json.loads(body) for body in bodies]
+    notices: list[dict[str, object]] = []
+    for body in bodies:
+        loaded: object = (
+            body if is_object_dict(body) else json.loads(body) if isinstance(body, str) else None
+        )
+        assert is_object_dict(loaded), f"a closure notice is {type(loaded).__name__}, not an object"
+        notices.append(loaded)
+    return notices
 
 
 # meiva:note
@@ -376,7 +403,7 @@ class RefusingPtyService:
     def _serve(self) -> None:
         while True:
             try:
-                conn, _ = self._server.accept()
+                conn = self._server.accept()[0]
             except OSError:
                 return
             with conn:

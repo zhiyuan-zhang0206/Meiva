@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 
@@ -8,6 +7,7 @@ import pytest
 
 from base.deploy.lifecycle import status_journal
 from cli.commands.lifecycle.stop.report import finish_stop
+from cli.commands.lifecycle.tests.stop.stop_support import finished_journal, journal_result
 from cli.commands.lifecycle.tests.stop.stop_support import home as home
 
 NOTE = "postgres fast shutdown did not complete within 277s; killed leftover processes: 4242"
@@ -21,9 +21,10 @@ def test_an_escalated_shutdown_is_in_the_report_and_the_journal(
     assert finish_stop(home, owns_journal=True, notes=[NOTE], clients=[]) == 0
 
     assert f"Stop completed with an escalation: {NOTE}" in capsys.readouterr().err
-    journal = json.loads((home / "run/lifecycle-op.json").read_text())
-    assert journal["complete"] and journal["result"]["rc"] == 0
-    assert journal["result"]["escalations"] == [NOTE]
+    journal = finished_journal(home)
+    assert journal.complete
+    assert journal_result(journal)["rc"] == 0
+    assert journal_result(journal)["escalations"] == [NOTE]
 
 
 def test_a_stop_without_an_escalation_says_nothing_extra(
@@ -34,8 +35,7 @@ def test_a_stop_without_an_escalation_says_nothing_extra(
     assert finish_stop(home, owns_journal=True, notes=[], clients=[]) == 0
 
     assert capsys.readouterr().err == ""
-    journal = json.loads((home / "run/lifecycle-op.json").read_text())
-    assert "escalations" not in journal["result"]
+    assert "escalations" not in journal_result(finished_journal(home))
 
 
 def test_pooler_clients_at_the_stop_land_in_the_journal(home: Path) -> None:
@@ -44,6 +44,6 @@ def test_pooler_clients_at_the_stop_land_in_the_journal(home: Path) -> None:
 
     assert finish_stop(home, owns_journal=True, notes=[], clients=[line]) == 0
 
-    journal = json.loads((home / "run/lifecycle-op.json").read_text())
-    assert journal["result"]["pooler_clients"] == [line]
-    assert "escalations" not in journal["result"]
+    result = journal_result(finished_journal(home))
+    assert result["pooler_clients"] == [line]
+    assert "escalations" not in result

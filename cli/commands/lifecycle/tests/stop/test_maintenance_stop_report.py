@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import signal
 import subprocess
@@ -25,7 +24,9 @@ from cli.commands.lifecycle.tests.stop.stop_support import (
     Launcher,
     assert_group_drained,
     closed_session,
+    finished_journal,
     identity_of,
+    journal_result,
     launched_processes,
 )
 from cli.commands.lifecycle.tests.stop.stop_support import home as home
@@ -97,10 +98,12 @@ def test_shell_survivor_names_itself_and_persists_exact_inventory(
         owns_journal=True,
         journal_opened=True,
     )
-    journal = json.loads((home / "run/lifecycle-op.json").read_text())
-    assert journal["complete"] and journal["result"]["rc"] == 1
-    assert journal["result"]["stage"] == "shell-sessions"
-    assert journal["result"]["survivors"] == failure.survivors
+    journal = finished_journal(home)
+    assert journal.complete
+    result = journal_result(journal)
+    assert result["rc"] == 1
+    assert result["stage"] == "shell-sessions"
+    assert result["survivors"] == failure.survivors
     assert f"pid={identity.pid}" in capsys.readouterr().err
 
 

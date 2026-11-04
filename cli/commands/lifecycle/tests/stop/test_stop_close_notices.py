@@ -101,7 +101,8 @@ def test_stop_records_notice_for_verified_closed_busy_session(
     assert notice["session_id"] == 2044
     assert notice["name"] == name
     assert notice["machine"] == stop_runtime.machine.name()
-    assert "operator stop" in notice["reason"]
+    reason = notice["reason"]
+    assert isinstance(reason, str) and "operator stop" in reason
 
 
 def test_the_stop_writes_the_owners_inbound_to_the_database(
@@ -138,8 +139,10 @@ def test_the_stop_writes_the_owners_inbound_to_the_database(
         )
         rows = cur.fetchall()
     assert len(rows) == 1
-    source, content, closed_name = rows[0]
+    row: tuple[object, ...] = rows[0]
+    source, content, closed_name = row
     assert source == "system" and closed_name == name
+    assert isinstance(content, str)
     assert "closed by an operator stop (meiva stop)" in content
 
 
@@ -224,11 +227,15 @@ def test_stop_message_reaches_closed_shell_notice_and_flushes_idle_note_without_
         )
         idle_rows = cur.fetchall()
     assert len(closure_rows) == 1
-    closure_content, closure_msg = closure_rows[0]
+    closure_row: tuple[object, ...] = closure_rows[0]
+    closure_content, closure_msg = closure_row
+    assert isinstance(closure_content, str)
     assert closure_msg == reason and f"Message: {reason}" in closure_content
     assert len(idle_rows) == 1
-    idle_source, idle_content, idle_payload = idle_rows[0]
+    idle_row: tuple[object, ...] = idle_rows[0]
+    idle_source, idle_content, idle_payload = idle_row
     assert idle_source == "system:restart"
+    assert isinstance(idle_content, str)
     assert reason in idle_content
     assert idle_payload == {"note_tag": "lifecycle_restart", "passive": True}
 
