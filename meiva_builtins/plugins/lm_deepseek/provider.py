@@ -1,7 +1,9 @@
 # meiva:link meiva_builtins/plugins/docs/plugins.meiva.okf.md
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from pydantic import SecretStr
 
 if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
@@ -37,11 +39,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
 
     api_key = ctx.keys.require("DEEPSEEK_API_KEY")
 
-    extra_kwargs: dict[str, Any] = {}
-    if ctx.thinking is not None:
-        extra_kwargs["thinking"] = ctx.thinking
-    if ctx.disable_streaming:
-        extra_kwargs["disable_streaming"] = True
+    thinking: dict[str, object] | None = None if ctx.thinking is None else dict(ctx.thinking)
 
     if ctx.spec is None or ctx.spec.max_output_tokens is None:
         raise ValueError(
@@ -51,7 +49,7 @@ def build(ctx: BuildContext) -> BaseChatModel:
         )
     max_tokens = ctx.spec.max_output_tokens
 
-    deepseek_model_kwargs: dict[str, Any] = {}
+    deepseek_model_kwargs: dict[str, object] = {}
     thinking_disabled = ctx.thinking is not None and ctx.thinking.get("type") == "disabled"
     effort = ctx.resolved_effort
     if effort and not thinking_disabled:
@@ -63,17 +61,18 @@ def build(ctx: BuildContext) -> BaseChatModel:
         if wire_effort is not None:
             deepseek_model_kwargs["extra_body"] = {"output_config": {"effort": wire_effort}}
         elif ctx.thinking is None:
-            extra_kwargs["thinking"] = {"type": "disabled"}
+            thinking = {"type": "disabled"}
 
-    model_cls: Any = DeepSeekChatModel
-    return model_cls(
-        model=ctx.model,
-        api_key=api_key,
+    return DeepSeekChatModel(
+        model_name=ctx.model,
+        api_key=SecretStr(api_key),
         base_url=DEEPSEEK_ANTHROPIC_API_BASE,
-        max_tokens=max_tokens,
+        max_tokens_to_sample=max_tokens,
         model_kwargs=deepseek_model_kwargs,
         timeout=ctx.timeout,
-        **extra_kwargs,
+        stop=None,
+        thinking=thinking,
+        disable_streaming=ctx.disable_streaming,
     )
 
 
