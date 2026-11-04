@@ -9,7 +9,7 @@ process resource; the default database factory refuses it before a connection ca
 """
 
 from collections.abc import Mapping
-from typing import Any, Literal, Protocol, overload
+from typing import Literal, Protocol, overload
 
 from pydantic import BaseModel
 
@@ -119,7 +119,7 @@ def bus() -> _EventBus:
 
 
 class _PluginConfigReader(Protocol):
-    def config_for(self, name: str) -> BaseModel: ...
+    def config_for(self, name: str, /) -> BaseModel: ...
 
 
 # meiva:note
@@ -130,8 +130,7 @@ def attached_agent_view() -> tuple[Mapping[str, object], _PluginConfigReader] | 
     lease = None if context is None or context.identity is None else context.identity.lease
     if lease is None:
         return None
-    view: Any = lease.config()
-    return view
+    return lease.config()
 
 
 @overload

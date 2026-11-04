@@ -7,10 +7,11 @@
 
 from __future__ import annotations
 
+from collections.abc import MutableMapping
 from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType, ModuleType
-from typing import Any
+from typing import cast
 
 import pytest
 from pydantic import BaseModel
@@ -163,7 +164,10 @@ def test_an_overlay_replaces_the_configs_with_a_read_only_view() -> None:
     assert isinstance(config, _Config)
     assert config.marker == "agent"
     assert after.sampling is current.sampling
-    view: Any = after.configs
+    # meiva:note
+    # The cast is the lie this test asserts: the overlay hands back a read-only view, so the write
+    # below is the one a mutable mapping would accept.
+    view = cast("MutableMapping[str, BaseModel]", after.configs)
     with pytest.raises(TypeError):
         view["other"] = _Config()
 

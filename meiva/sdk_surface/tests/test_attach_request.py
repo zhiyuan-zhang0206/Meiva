@@ -9,9 +9,9 @@
 from __future__ import annotations
 
 import stat
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, cast
 
 import pytest
 
@@ -37,6 +37,11 @@ from meiva.sdk_surface.pure.media.attach.attach_request import (
 _MEDIA_MODEL = "gpt-5.6-sol"
 _TEXT_ONLY_MODEL = "deepseek-v4-pro"
 _LEASE = ExternalLease(agent_id=9, validate=lambda: 9, config=lambda: None)
+
+# meiva:note
+# The entry point through a permissive view. The arguments the refusal tests pass are exactly the
+# ones its annotation refuses, and the point of each test is that the runtime check refuses them too.
+_permissive: Callable[..., object] = prepare_media
 
 
 def _withdrawn_vision_model(
@@ -102,22 +107,16 @@ def test_a_text_only_model_is_refused_before_the_inputs_are_looked_at(
     model_catalog: ModelCatalog,
 ) -> None:
     with pytest.raises(RuntimeError, match="text-only"):
-        prepare_media(
-            cast(Any, 3), label=None, catalog=model_catalog, model=_TEXT_ONLY_MODEL, in_turn=True
-        )
+        _permissive(3, label=None, catalog=model_catalog, model=_TEXT_ONLY_MODEL, in_turn=True)
 
 
 def test_a_path_that_is_neither_str_nor_path_and_a_label_that_is_not_a_str_are_refused(
     model_catalog: ModelCatalog,
 ) -> None:
     with pytest.raises(TypeError, match="path"):
-        prepare_media(
-            cast(Any, 3), label=None, catalog=model_catalog, model=_MEDIA_MODEL, in_turn=True
-        )
+        _permissive(3, label=None, catalog=model_catalog, model=_MEDIA_MODEL, in_turn=True)
     with pytest.raises(TypeError, match="label"):
-        prepare_media(
-            "a.png", label=cast(Any, 1), catalog=model_catalog, model=_MEDIA_MODEL, in_turn=True
-        )
+        _permissive("a.png", label=1, catalog=model_catalog, model=_MEDIA_MODEL, in_turn=True)
 
 
 @pytest.mark.parametrize(

@@ -63,10 +63,12 @@ from __future__ import annotations
 
 import functools
 import inspect
-from collections.abc import Callable, Generator, Mapping
+from collections.abc import Awaitable, Callable, Generator, Mapping
 from contextlib import contextmanager
 from types import ModuleType
-from typing import Any
+from typing import TypeGuard
+
+from base.host.boundary.untyped import object_of
 
 from . import meiva_module
 from .installation import SLOT, Loading, WrapAdded, WrapLayer, installed, slot
@@ -134,14 +136,14 @@ def _record_activation(target: str, plugin: str, inner_calls: int) -> None:
 # `"files.read"` -> `(meiva.files, "read")`; `"understand"` -> `(meiva, "understand")`. Missing
 # declared attributes are WrapTargetError. Errors raised by a real attribute descriptor
 # propagate unchanged.
-def _locate(target: str, root: ModuleType) -> tuple[Any, str]:
+def _locate(target: str, root: ModuleType) -> tuple[object, str]:
     if not is_public_dotted_path(target):
         raise WrapTargetError(
             f"wrap target {target!r} must be a dotted path of identifiers under `meiva` "
             f"(no leading underscore), e.g. 'files.read' or 'agents.spawn'."
         )
     segments = target.split(".")
-    obj: Any = root
+    obj: object = root
     for seg in segments[:-1]:
         obj = _target_member(obj, seg, target)
     return obj, segments[-1]
@@ -152,7 +154,14 @@ def _target_member(parent: object, attr: str, target: str) -> object:
     missing = object()
     if inspect.getattr_static(parent, attr, missing) is missing:
         raise WrapTargetError(f"meiva.{target} does not resolve: {attr!r} is not declared.")
-    return getattr(parent, attr)
+    return object_of(getattr, parent, attr)
+
+
+# meiva:note
+# The wrap result a coroutine function can await. `layer_is_async` decides the shape of the layer
+# from the callables, not from this call's value, so the value is checked before it is awaited.
+def _awaitable(value: object) -> TypeGuard[Awaitable[object]]:
+    return inspect.isawaitable(value)
 
 
 # meiva:note
@@ -167,8 +176,10 @@ def _install_metadata(
     chained.__qualname__ = face.qualname
     chained.__module__ = face.module
     chained.__doc__ = face.doc
+    metadata: dict[str, object] = chained.__dict__
     for key, value in face.inherited.items():
-        chained.__dict__.setdefault(key, value)
+        if key not in metadata:
+            metadata[key] = value
     if face.signature is not None:
         chained.__signature__ = face.signature  # type: ignore[attr-defined]
 
@@ -206,7 +217,7 @@ def apply_wrap(
     current = strip_recorders(current)
 
     @contextmanager
-    def invocation() -> Generator[Callable[..., Any], None, None]:
+    def invocation() -> Generator[Callable[..., object], None, None]:
         calls = [0]
 
         @functools.wraps(current)
@@ -228,8 +239,13 @@ def apply_wrap(
 
         async def async_chained(*args: object, **kwargs: object) -> object:
             with invocation() as inner:
-                awaitable: Any = wrapper(inner, *args, **kwargs)
-                return await awaitable
+                result = wrapper(inner, *args, **kwargs)
+                if not _awaitable(result):
+                    raise WrapError(
+                        f"wrap layer {target!r} is async but its wrapper returned a "
+                        f"{type(result).__name__}, which cannot be awaited"
+                    )
+                return await result
 
         chained = async_chained
 

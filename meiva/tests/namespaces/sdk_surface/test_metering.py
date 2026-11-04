@@ -18,11 +18,11 @@ import contextlib
 import inspect
 import io
 import os
-from collections.abc import Callable, Generator, Iterator
+from collections.abc import Callable, Coroutine, Generator, Iterator
 from dataclasses import replace
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import cast
+from typing import TypeGuard, cast
 
 import pytest
 
@@ -89,6 +89,13 @@ def _execution_tally() -> Generator[SdkCallTally, None, None]:
         yield tally
     finally:
         process_context.bind_context(previous)
+
+
+# meiva:note
+# A recorder answers `object` (the surface it wraps is arbitrary), and the awaited-call test drives
+# the coroutine its wrapped `async def` returns; the value is narrowed here, not asserted away.
+def _coroutine(value: object) -> TypeGuard[Coroutine[object, object, object]]:
+    return inspect.iscoroutine(value)
 
 
 # meiva:note
@@ -316,7 +323,7 @@ def test_recorder_recognized_by_identity_not_copied_dict(
     rec = metering.make_recorder(lambda: None, "ns.fn", sampling_owner, None)
     assert is_recorder(rec)
 
-    def plugin_wrapper() -> None:
+    def plugin_wrapper() -> object:
         return rec()
 
     # replicate _install_metadata's `chained.__dict__.setdefault(k, v)` copy.
@@ -547,9 +554,9 @@ async def test_awaited_calls_retain_their_entry_identity(
     pin_agent(41, machine=first_machine, clients=clients)
     first_tally = SdkCallTally()
     process_context.bind_context(replace(meiva.context, sdk_calls=first_tally))
-    first = asyncio.create_task(
-        metering.make_recorder(held, "probe.held", sampling_owner, clients)()
-    )
+    pending = metering.make_recorder(held, "probe.held", sampling_owner, clients)()
+    assert _coroutine(pending)
+    first = asyncio.create_task(pending)
     try:
         await asyncio.wait_for(entered.wait(), timeout=5)
         pin_agent(42, machine=second_machine, clients=clients)
@@ -589,7 +596,11 @@ def test_recursive_public_entry_counts_each_invocation(
     emitted_events: EmittedEvents,
 ) -> None:
     def body(depth: int) -> int:
-        return recursive(depth - 1) + 1 if depth else 0
+        if not depth:
+            return 0
+        nested = recursive(depth - 1)
+        assert isinstance(nested, int)
+        return nested + 1
 
     recursive = metering.make_recorder(body, "probe.recursive", sampling_owner, capture)
     with _execution_tally() as tally:

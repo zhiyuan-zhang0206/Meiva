@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from base.host.boundary.untyped import object_of
+
 # meiva:note
 # A recorder marks itself with a reference to itself, so it is recognised by identity: a plugin
 # wrapper built over a recorder inherits the marker through `__dict__`, but there it points at
@@ -33,9 +35,19 @@ def foreign_recorder(fn: object, sampling: object) -> bool:
 # meiva:note
 # `current` with every recorder layer stripped. A recorder always carries `__wrapped__`
 # (`functools.wraps`); a plugin wrap chained over one would keep a stale recorder alive.
+# meiva:note
+# The callable a recorder wraps, or None for anything that is not one.
+def _wrapped(fn: object) -> Callable[..., object] | None:
+    inner = object_of(getattr, fn, "__wrapped__", None)
+    return inner if callable(inner) else None
+
+
 def strip_recorders(current: Callable[..., object]) -> Callable[..., object]:
     while is_recorder(current):
-        current = vars(current)["__wrapped__"]
+        inner = _wrapped(current)
+        if inner is None:
+            break
+        current = inner
     return current
 
 
@@ -44,5 +56,5 @@ def strip_recorders(current: Callable[..., object]) -> Callable[..., object]:
 # target holds no recorder any more (replaced or removed since), which is then left alone.
 def restore_target(current: object) -> object | None:
     if current is not None and is_recorder(current):
-        return vars(current)["__wrapped__"]
+        return _wrapped(current)
     return None

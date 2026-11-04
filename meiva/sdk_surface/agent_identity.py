@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from base.agents.context.identity import AgentIdentity
 from base.api_contracts.agent_contract import Harness
+from base.host.boundary.untyped import object_of
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.process_context import MeivaContext
 from meiva.sdk_surface.pure.caller.harness_plan import harness_name
@@ -25,13 +26,22 @@ from meiva.sdk_surface.pure.caller.identity_plan import (
 from meiva.sdk_surface.pure.caller.usage_plan import actor_id_refusal, lease_refusal
 
 from .installation import installed
-from .validation import is_launched_child as is_launched_child
 
 
 def _bound(context: MeivaContext | None = None) -> AgentIdentity | None:
     """Read an explicit host context or the SDK's process-local entry."""
     context = context if context is not None else process_context.ambient_context()
     return None if context is None else context.identity
+
+
+# meiva:note
+# Whether this process is a script the agent launched rather than the agent's own turn path: the
+# bound identity is a real agent's and this process does not own that agent's loop. A process with
+# no context (a bare `import meiva`) answers False; a launched script asks this at import time, so
+# the read builds its context when the environment carries the agent id.
+def is_launched_child() -> bool:
+    identity = _bound()
+    return bool(identity is not None and identity.agent_id is not None and not identity.owns_loop)
 
 
 # meiva:note
@@ -42,13 +52,13 @@ def _harness_name() -> str:
     if resolved is None:
         return Harness.MEIVA.value
     capture = resolved.sdk_capture
-    registration = None if capture is None else getattr(capture, "_registration", None)
+    registration = None if capture is None else object_of(getattr, capture, "_registration", None)
     return harness_name(
         resolved.harness,
-        capture_handle=None if capture is None else getattr(capture, "handle", None),
+        capture_handle=None if capture is None else object_of(getattr, capture, "handle", None),
         registration_harness=None
         if registration is None
-        else getattr(registration, "harness", None),
+        else object_of(getattr, registration, "harness", None),
     )
 
 

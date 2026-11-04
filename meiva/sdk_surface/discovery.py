@@ -10,9 +10,13 @@ entry re-exports the names tests and framework code reach as `meiva.<name>`.
 
 import ast as _ast
 import inspect
+from collections.abc import Mapping
 from dataclasses import dataclass
 from types import ModuleType, SimpleNamespace
-from typing import Any, ForwardRef
+from typing import ForwardRef
+
+from base.host.boundary.json_values import is_object_list
+from base.host.boundary.untyped import object_of
 
 from .pure.render.const import (
     is_container as is_container,
@@ -58,9 +62,8 @@ def children(
         # contract (dataclass rows render in their declared order).
         return _class_children(container)
     if isinstance(container, SimpleNamespace):
-        return _sorted_children(
-            [(n, v) for n, v in vars(container).items() if not n.startswith("_")]
-        )
+        members: dict[str, object] = vars(container)
+        return _sorted_children([(n, v) for n, v in members.items() if not n.startswith("_")])
     return []
 
 
@@ -94,15 +97,14 @@ def _static_agent_surface(container: object) -> list[str] | None:
     access. Underscore-prefixed names are always dropped, whatever the source,
     so a plugin appending a private helper to `__all_for_meiva__` never leaks into
     the agent's view."""
-    surface = inspect.getattr_static(container, "__all_for_meiva__", None)
+    surface = object_of(inspect.getattr_static, container, "__all_for_meiva__", None)
     if surface is None:
         return None
     if isinstance(surface, property):
-        surface = getattr(container, "__all_for_meiva__", None)
-    items: Any = surface
-    if not isinstance(surface, list):
+        surface = object_of(getattr, container, "__all_for_meiva__", None)
+    if not is_object_list(surface):
         return None
-    return [n for n in items if isinstance(n, str) and not n.startswith("_")]
+    return [n for n in surface if isinstance(n, str) and not n.startswith("_")]
 
 
 class UndeclaredSurfaceError(TypeError):
@@ -176,7 +178,7 @@ def resolve_child(
     renderer emits `## NAME: type` with the PEP 224 docstring (if any) as
     body. Type comes from the source-level annotation when available,
     falling back to the runtime value's class name."""
-    attr = getattr(mod, name, None)
+    attr = object_of(getattr, mod, name, None)
     if attr is None:
         # Names declared via AnnAssign without a value land here — module dict
         # has no entry. Annotation + PEP 224 doc still describe the contract
@@ -267,9 +269,10 @@ def _class_children(cls: type) -> list[tuple[str, object]]:
     first (e.g. dataclass attributes — annotation order is `__init__` order),
     then methods / nested classes. Fields wrap as `Constant` so the renderer
     emits `name: type`; inherited-from-object members don't count."""
+    annotations: dict[str, object] = inspect.get_annotations(cls)
     result: list[tuple[str, object]] = [
         _annotation_field(name, ann)
-        for name, ann in inspect.get_annotations(cls).items()
+        for name, ann in annotations.items()
         if not name.startswith("_")
     ]
     result.extend(_method_children(cls))
@@ -293,7 +296,7 @@ def _annotation_field(name: str, ann: object) -> tuple[str, Constant]:
 
 def _method_children(cls: type) -> list[tuple[str, object]]:
     """Methods / nested classes of a class, in sorted name order."""
-    members = vars(cls)
+    members: Mapping[str, object] = dict(vars(cls))
     return [
         (name, members[name])
         for name in sorted(members)

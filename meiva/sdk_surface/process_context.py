@@ -26,9 +26,8 @@ if parallel branches (fan-out) are introduced, this one-slot model must be re-ev
 
 from __future__ import annotations
 
-from typing import Any
-
 from base.agents.context import MeivaContext as MeivaContext
+from base.host.boundary.untyped import object_of
 from base.native_process.loaded_commit import LoadedCommit
 
 from . import (
@@ -87,12 +86,15 @@ _UPDATE_KEY = UPDATE_KEY
 _IMAGE_KEY = IMAGE_KEY
 
 
-def _slots() -> dict[str, Any]:
+def _slots() -> dict[str, object]:
     return meiva_module().__dict__
 
 
 def _bound() -> MeivaContext | SdkProcessPurpose | None:
-    return _slots().get(CONTEXT_KEY)
+    value = _slots().get(CONTEXT_KEY)
+    if isinstance(value, (MeivaContext, SdkProcessPurpose)):
+        return value
+    return None
 
 
 def bound_context() -> MeivaContext | None:
@@ -119,7 +121,10 @@ def require_bound_context() -> MeivaContext:
 def current_context() -> MeivaContext:
     """What `meiva.context` answers: the bound context, a launched script's own on its first read,
     or `ContextOutsideProcessError`. Read through the live `meiva` module, which owns that rule."""
-    return meiva_module().context
+    context = object_of(getattr, meiva_module(), "context")
+    if not isinstance(context, MeivaContext):
+        raise TypeError(f"meiva.context must be a MeivaContext, got {type(context).__name__}")
+    return context
 
 
 def ambient_context() -> MeivaContext | None:
@@ -140,5 +145,11 @@ def unbind_context() -> MeivaContext | None:
     return value if isinstance(value, MeivaContext) else None
 
 
+# meiva:note
+# The code image `meiva/__init__.py` captured when the package was imported. The slot is written
+# once, by that import, so a value of any other shape means the module was tampered with.
 def loaded_code_image() -> LoadedCommit:
-    return _slots()[IMAGE_KEY]
+    image = _slots().get(IMAGE_KEY)
+    if not isinstance(image, LoadedCommit):
+        raise TypeError(f"meiva.{IMAGE_KEY} must be a LoadedCommit, got {type(image).__name__}")
+    return image

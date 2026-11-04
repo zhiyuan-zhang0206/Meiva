@@ -7,8 +7,9 @@
 
 
 import inspect
+from collections.abc import Callable
 from types import ModuleType, SimpleNamespace
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
 # meiva:note
 # Class attribute set on every type `const()` mints; `is_documented_const` reads it.
@@ -66,8 +67,16 @@ def format_docstring(doc: str, *, indent: str) -> str:
 # `True`.
 #
 # Raises: TypeError: `type(value)` is not subclassable.
+# meiva:note
+# Call a class `type()` minted at run time. The class object itself is a checker dead end — its
+# constructor is modelled as taking no arguments, and the result of calling it is untyped — while
+# through a plain `Callable[..., object]` parameter the call is ordinary and answers `object`.
+def _construct(cls: Callable[..., object], value: object) -> object:
+    return cls(value)
+
+
 def const[T](value: T, doc: str) -> T:
-    base: Any = type(value)
+    base = type(value)
     cls = type(
         f"Documented{base.__name__}",
         (base,),
@@ -77,6 +86,12 @@ def const[T](value: T, doc: str) -> T:
             _DOCUMENTED_MARKER: True,
         },
     )
-    instance: Any = cls(value)
+    # meiva:note
+    # `type()` answers a class only the checker cannot call — its constructor is modelled as taking
+    # no arguments — so the minted class is called through `_construct`'s plain callable parameter
+    # and the instance is narrowed back to `T` by the same `type(value)` the class was built from.
+    instance = _construct(cls, value)
+    if not isinstance(instance, base):
+        raise TypeError(f"const() minted a class that does not construct a {base.__name__}")
     instance.__doc__ = doc
     return instance
