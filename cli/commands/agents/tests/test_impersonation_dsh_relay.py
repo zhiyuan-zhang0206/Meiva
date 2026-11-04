@@ -3,9 +3,11 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 
 import pytest
+
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 
 _SKILL_DIR = (
     Path(__file__).parents[4] / "meiva_builtins/skills/platform/meiva-guide/external-agents"
@@ -60,7 +62,34 @@ if (mode === 'takeover') {
 """
 
 
-def _run_plugin(tmp_path: Path, *args: str) -> dict[str, Any]:
+# meiva:note
+# What the dsh plugin writes to the `out.json` path it is handed: the Node script
+# `meiva_builtins/skills/.../meiva-relay-dsh/meiva-relay.mjs`. Its keys differ per subcommand
+# (`steered` for the relay, `created`/`followed` for the takeover) and the message rows inside are
+# the Claude-Code envelope the plugin forwards, not this repository's shape -- hence `object`
+# rather than a declared TypedDict, which would go stale the next time the plugin changes.
+def _rows(result: dict[str, object], key: str) -> list[dict[str, object]]:
+    value = result[key]
+    assert is_object_list(value), f"{key} is a list"
+    rows: list[dict[str, object]] = []
+    for item in value:
+        assert is_object_dict(item), f"{key} holds an object"
+        rows.append(item)
+    return rows
+
+
+# meiva:note
+# The text of a message row's first content block, the way the plugin's own field of the Claude-Code
+# envelope spells it.
+def _first_text(message: dict[str, object]) -> object:
+    content = message["content"]
+    assert is_object_list(content) and content, "a message row carries a content block"
+    block = content[0]
+    assert is_object_dict(block), "a content block is an object"
+    return block["text"]
+
+
+def _run_plugin(tmp_path: Path, *args: str) -> dict[str, object]:
     harness = tmp_path / "harness.mjs"
     harness.write_text(_PLUGIN_HARNESS, encoding="utf-8")
     out = tmp_path / "out.json"
@@ -70,7 +99,9 @@ def _run_plugin(tmp_path: Path, *args: str) -> dict[str, Any]:
         check=True,
         timeout=60,
     )
-    return json.loads(out.read_text(encoding="utf-8"))
+    written = object_of(json.loads, out.read_text(encoding="utf-8"))
+    assert is_object_dict(written), "the plugin wrote a JSON object"
+    return written
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="the dsh plugin runs on Node.js")
@@ -102,8 +133,8 @@ def test_dsh_plugin_relays_the_session_stub_into_that_session(tmp_path: Path) ->
         "dsh",
     ]
     assert (tmp_path / "token.txt").read_text() == "tok-3"
-    steered: list[dict[str, Any]] = result["steered"]
-    assert [m["content"][0]["text"] for m in steered] == ["Meiva control active.", envelope]
+    steered = _rows(result, "steered")
+    assert [_first_text(message) for message in steered] == ["Meiva control active.", envelope]
     assert all(m["role"] == "user" for m in steered)
     assert [m["source"] for m in steered] == [
         {"kind": "plugin", "plugin": "meiva-relay", "form": "notice", "summary": summary}
@@ -121,9 +152,9 @@ def test_dsh_plugin_takeover_runner_submits_and_consumes_the_launch_message(
     launch = tmp_path / "launch.txt"
     launch.write_text("You will take over Meiva agent 42.", encoding="utf-8")
     result = _run_plugin(tmp_path, "unused", "takeover", str(launch))
-    created: list[dict[str, Any]] = result["created"]
-    followed: list[dict[str, Any]] = result["followed"]
+    created = _rows(result, "created")
+    followed = _rows(result, "followed")
     assert [c["agentOptions"] for c in created] == [{"provider": "p", "model": "m"}]
-    assert [m["content"][0]["text"] for m in followed] == ["You will take over Meiva agent 42."]
+    assert [_first_text(message) for message in followed] == ["You will take over Meiva agent 42."]
     assert followed[0]["source"] == {"kind": "user"}
     assert result["launchGone"]
