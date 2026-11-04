@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from dataclasses import dataclass
 
+from base.host.boundary.options import options
 from base.paths.home import resolve_meiva_home
 from meiva_builtins.plugins.meiva_memory.pool_ops import (
     branch_name,
@@ -16,10 +18,15 @@ from meiva_builtins.plugins.meiva_memory.pool_ops import (
 )
 
 
+@dataclass(frozen=True)
+class _Arguments:
+    message: str
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Per-machine memory steward sync")
     ap.add_argument("-m", "--message", required=True, help="commit message")
-    args = ap.parse_args()
+    args = options(ap.parse_args(), _Arguments)
 
     home = resolve_meiva_home()
     pool = pool_dir(home)

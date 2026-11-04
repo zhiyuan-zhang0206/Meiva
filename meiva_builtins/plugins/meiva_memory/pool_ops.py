@@ -18,11 +18,12 @@ import re
 import subprocess
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
 
 import yaml
 from dotenv import dotenv_values
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.paths import memory_dir
 
 RESERVED = {"MEMORY.md", "AGENTS.md", "index.md", "log.md"}
@@ -97,16 +98,21 @@ def run(
     return r
 
 
-def frontmatter(pool: Path, rel: str) -> dict[str, Any]:
+def frontmatter(pool: Path, rel: str) -> dict[str, object]:
     with (pool / rel).open(encoding="utf-8") as f:
         content = f.read()
     m = re.match(r"^---\n(.*?)\n---\n", content, re.S)
     if not m:
         return {}
     try:
-        return yaml.safe_load(m.group(1)) or {}
+        loaded = object_of(yaml.safe_load, m.group(1))
     except yaml.YAMLError:
         return {}
+    if loaded is None:
+        return {}
+    if not is_object_dict(loaded):
+        raise ValueError(f"{rel}: frontmatter must be a mapping, got {type(loaded).__name__}")
+    return loaded
 
 
 def collect(pool: Path) -> list[str]:
