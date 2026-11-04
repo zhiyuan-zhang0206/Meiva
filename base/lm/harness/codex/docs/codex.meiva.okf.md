@@ -30,7 +30,10 @@ directly: the uniform surface is this adapter, not a shared wire protocol.
    fast instead of silently starting a fresh thread.
 2. **Inject the handoff as the first message.** `Handoff` renders the
    six-section document; a fresh thread submits it as its first turn. A resumed
-   thread is not re-injected.
+   thread is not re-injected. The handoff directs macOS Codex Computer Use to
+   paste non-ASCII text and verify the field value. Native `typeText` dropped
+   the Chinese characters in a mixed-script Chrome input while plain-text
+   paste preserved the full input.
 3. **Map notifications back and persist the identity pair.** `events()` is the
    single outbound stream, and the registry writes `agent_id ↔ thread_id`. When
    `turn/start` returns the authoritative Codex `turn.id`, `CodexSession` binds

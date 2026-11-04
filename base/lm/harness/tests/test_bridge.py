@@ -513,6 +513,24 @@ def test_the_antigravity_wake_document_carries_its_shell_semantics() -> None:
     assert "WaitMsBeforeAsync=10000" in rendered
 
 
+def test_the_codex_wake_document_carries_its_unicode_input_workaround() -> None:
+    bridge = bridge_for(
+        Harness.CODEX,
+        agent_id=6984,
+        machine="macmini",
+        workspace=Path("/agents/6984"),
+        registry=FileSessionRegistry(Path("/registry")),
+        registration_ttl_seconds=3600.0,
+        environ={},
+        root=bridge_root_values(),
+    )
+    assert bridge is not None
+    assert bridge.handoff is not None
+    rendered = bridge.handoff.render()
+    assert "paste(text, {format: 'text'})" in rendered
+    assert "read back the field" in rendered
+
+
 def test_an_antigravity_session_is_built_with_the_skip_flag_it_was_given() -> None:
     session = open_session(
         Harness.ANTIGRAVITY,

@@ -236,12 +236,14 @@ def _record_skill_invoked(skill: Skill) -> None:
 
     capture_owner = None if context is None else context.sdk_capture
     producer = None if context is None else context.clients.event_producer()
+    machine = None if context is None else context.machine
     record_audit_reported(
         database(),
         prepare_event_log(
             event_type="skill_invoked",
             agent_id=agent,
             source="self",
+            machine_reader=None if machine is None else machine.name,
             payload=SkillInvokedPayload(
                 skill=skill["name"],
                 identifier=identifier(skill),

@@ -44,3 +44,8 @@ A refusal, an expired identity or a version conflict raises at the call site; th
 kernel never degrades to "an attachment that writes anyway". `close()` runs the
 same three cleanups in the same order for every identity, and preserves the first
 exception while attaching later ones as notes.
+
+When an external attachment reads a historical checkpoint, it skips root values
+whose exact type is in the retired checkpoint registry. The current state schema
+has no consumer for these values. Supported state, including messages, still
+loads through the normal allowlist.
