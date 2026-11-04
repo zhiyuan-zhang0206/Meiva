@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Harness — the runtime loop an agent runs on
-description: spawn(harness=), the immutability and fork rules the SDK enforces, and harness_availability().
+description: Initial harness selection, restart switching, fork rules and harness availability in the SDK.
 tags:
 - agent-view
 - sdk
@@ -18,9 +18,8 @@ its provider are separate choices. `Harness` values: `meiva` (default),
 ## Choosing one at spawn
 
 `spawn(..., harness=None)`. Omitted, a plain spawn runs the built-in `meiva`
-runtime and a fork keeps whatever harness its source was born on. An unknown
-name is refused before any request is sent — there is no fallback to the
-default. The value is written once, when the agent is born.
+runtime. An unknown name is refused before any request is sent. Spawn sets the
+initial harness.
 
 A harness no launcher can start is refused rather than recorded: `spawn` raises
 `harness_not_launchable` (HTTP 400) and creates no agent,
@@ -36,10 +35,12 @@ An agent's harness can be switched bidirectionally (`meiva` <-> external, or bet
 `meiva.agents.restart(agent_id, message="...", config_overlay={"harness": "..."})`.
 The agent must be in `idling` or `terminated` status, and a mandatory `message` explaining the switch is required.
 
-A fork continues its source's identity, so it inherits the source's harness.
-Naming the source's own value is accepted; naming a different one fails with
-`fork_harness_mismatch` and creates nothing. To move onto another harness, spawn
-a new agent or switch harness via restart after creation.
+`meiva.agents.resurrect(agent_id, prompt)` wakes a terminated agent on its current
+harness.
+
+Forking is supported only on the native `meiva` harness. Forking an agent
+currently on an external harness or requesting an external harness for a fork
+fails with `fork_harness_mismatch`. A fork can switch harness after creation.
 
 ## Checking what this machine can run
 
