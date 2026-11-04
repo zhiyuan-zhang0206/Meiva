@@ -43,13 +43,49 @@ trigger's name.
 `schedules/jobs/loop.py` is the shell. `loop_once(db, schedule, fire, floor, now,
 schedule_id)` computes the slots with `next_fire`, asks the plan, and claims through
 `fire_slot_once` (`schedules/jobs/catchup.py`), returning the sleep, the new floor and what the
-callback returned. `run_loop` is `loop_once` forever and owns the only sleep and the only clock
-read. The weekly loop keeps one extra fact, whether its follow-up slot is armed, and carries it
-in `weekly_once`.
+callback returned. `run_loop` is `loop_once` forever. The weekly loop keeps one extra fact,
+whether its follow-up slot is armed, and carries it in `weekly_once`.
+
+Both end in `run_rounds`, the driver that owns the clock read, the sleep, the round beat and the
+failure handling. A round is a function from the instant it starts and the state the last round
+returned to the state to carry and the pause to take; `run_loop` passes a floor, `run_weekly` a
+`WeeklyState`. There are four resident schedule loops in this repository and only these two go
+through the driver: `schedules/jobs/watch/stall_watch.py:run_watch` and
+`schedules/jobs/watch/qa_keepalive.py:run_keepalive` keep their own, with a narrower policy
+(catch and print, no backoff, no schedule-row write).
 
 The claim is durable and keyed by `(schedule_id, slot)`: it commits before the callback runs,
 so concurrent runners get one winner, and a crash after it loses the slot instead of retrying
 it. The `schedule_id` is explicit everywhere; the entry validates it once.
+
+## When a round fails
+
+Until 2026-11-04 nothing protected a round: one exception in one schedule's round ended that
+schedule's loop, and each of the separate schedules that ran through `run_loop` or `run_weekly`
+needed a person to notice and restart it. `run_rounds` now catches `Exception` around the round
+and keeps going, under a `FailurePolicy` carried by `CronSchedule.failure` (defaults for every
+built-in loop):
+
+| field | default | meaning |
+|---|---|---|
+| `first_delay_s` | 60 s | the pause after the first failed round |
+| `max_delay_s` | 300 s | the ceiling the pause doubles up to |
+| `report_after` | 3 | the failed round in a row that becomes an error |
+
+`failure_backoff_s(failures, policy)` doubles from the first delay once per consecutive failure,
+so a failure that repeats every round costs 60 s, 120 s, 240 s and then five minutes a round.
+Each failed round logs a warning; the round that reaches `report_after` logs an error carrying
+the traceback and writes `schedules.last_error` -- the column `meiva schedules ls` prints --
+once per episode. The round that succeeds logs `recovered after N failed rounds`, clears that
+column and resets the count.
+
+Three details keep this narrower than it sounds. The floor moves only on a round that returns, so
+a failure after the claim costs one extra round rather than a replay: the next round finds the
+slot taken and advances past it, which is the same durable claim as before. A failed round is not
+charged to the round budget, so one slow failure cannot widen every later `alive_by` and blunt
+`schedule_not_progressing`; it still writes a round beat, or the backoff itself would read as a
+late loop. And `except Exception` is deliberate: `KeyboardInterrupt` and the signal exits still
+end the process, because that is how a supervisor stops a resident schedule.
 
 ## Agents
 
@@ -70,3 +106,10 @@ and never falls back to the label.
 Postgres and runs `run_loop` in a child process; `test_agent_directory.py` runs the directory
 shell against a gateway on a loopback port that serves pages and records requests. The
 scripts themselves are run as `__main__` in `test_scripts_entry.py`.
+
+The failure half is driven round by round, for `run_loop` and `run_weekly` alike: a scripted
+clock and a captured `sleep` follow a round that raised into the round after it, so the pauses it
+asked for are the assertion and no test waits. One test reads the heartbeat between rounds, which
+is the other half of the claim -- a loop that kept running without moving its beat would be a
+blind loop rather than a live one. The child-process test adds the third side: `SIGTERM` still
+ends the loop, which is what separates "survives an exception" from "ignores its supervisor".

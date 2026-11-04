@@ -251,6 +251,19 @@ Every schedule row records a target `machine` (defaulting to the gateway machine
   itself; it only has to pass `home=` to `run_loop`. The argument defaults to
   `None` for a stored copy written before it existed — `meiva schedules
   provision` (or the next manager start) refreshes those from these templates.
+- **A round that raises no longer ends the loop.** `run_loop()` and `run_weekly()` both end in
+  `run_rounds()`, which catches `Exception` around each round and retries after a pause that
+  doubles per consecutive failure (`FailurePolicy`: 60 s, 120 s, 240 s, then 300 s a round; a
+  schedule overrides it with `CronSchedule.failure`). Every failed round logs a warning; the
+  third in a row (default `report_after`) logs an error with the traceback and writes
+  `schedules.last_error` — the column `meiva schedules ls` shows — once per episode, and the
+  first round that succeeds logs `recovered after N failed rounds` and clears it. A failure
+  after the claim still costs one extra round, because the slot stays claimed. A failed round is
+  never charged to the round budget, so a slow failure cannot widen `alive_by` and blunt
+  `schedule_not_progressing`. Signals are not caught: stopping a schedule works as before.
+  **Two resident loops keep their own driver and this policy does not reach them**:
+  `jobs/watch/stall_watch.py:150 run_watch` and `jobs/watch/qa_keepalive.py:273 run_keepalive`
+  already catch and print per round — no backoff, no `last_error`.
 - **A cron that stops arriving is its own card, and the card publishes nothing.**
   `release-gate.yml` is the only post-merge run that certifies the whole
   population on a fixed cadence, and this repository's GitHub crons do not keep

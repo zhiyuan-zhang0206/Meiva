@@ -50,7 +50,9 @@ The count comes from the live `/api/events` stream with `with_total=1`: the
 gateway returns no total — which crashed the trigger on `int(None)`, while a
 silent 0 would have skipped the week's deep run.
 
-Both loops run the shared loop (`schedules/jobs/loop.py`): the next slot is searched
+Both loops run the shared driver (`schedules/jobs/loop.py`): `run_weekly` hands one round to
+`run_rounds`, the same one `run_loop` uses, so the weekly schedule takes a round beat, the failure
+backoff and the `schedules.last_error` write the daily loop takes. The next slot is searched
 from the later of the loop's floor and `now - 2 minutes`. Cron expressions are
 strictly greater than their base, so a sleep that lands a fraction of a second past
 the hour would otherwise jump to the next day — the deterministic miss observed on

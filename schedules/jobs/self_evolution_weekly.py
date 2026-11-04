@@ -23,7 +23,7 @@ import httpx
 from base.db import Database
 from base.host.net.auth import delivered_token
 from schedules.jobs.agent_directory import ensure_agent
-from schedules.jobs.loop import CronSchedule, loop_once
+from schedules.jobs.loop import CronSchedule, loop_once, run_rounds
 from schedules.plans.weekly_trigger import (
     FOLLOW_UP_WINDOW_DAYS,
     WEEK_DAYS,
@@ -149,6 +149,13 @@ def weekly_once(
     return WeeklyState(tick.floor, armed), tick.sleep
 
 
+# meiva:note
+# The weekly loop is `run_rounds` with one round of its own: it carries `WeeklyState` between rounds
+# and reads the clock once per round, so a round that raises leaves the floor where it was and the
+# follow-up slot as it was armed. The beat, the backoff and the schedule-row write are the driver's;
+# a second copy of them here is how the two weekly and daily schedules would end up failing
+# differently. `home` and `sleep` are optional for the same reason they are on `run_loop`: the
+# stored copy of this script in the schedules table predates them.
 def run_weekly(
     db: Database,
     schedule: CronSchedule,
@@ -157,15 +164,26 @@ def run_weekly(
     schedule_id: int,
     started_at: datetime,
     clock: Callable[[], datetime],
+    home: Path | None = None,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> NoReturn:
-    state = WeeklyState(floor=started_at, follow_up_armed=False)
-    while True:
-        state, sleep = weekly_once(
+    def advance(now: datetime, state: WeeklyState) -> tuple[WeeklyState, float]:
+        return weekly_once(
             db,
             schedule,
             fire,
             state=state,
-            now=clock(),
+            now=now,
             schedule_id=schedule_id,
         )
-        time.sleep(sleep)
+
+    run_rounds(
+        db,
+        schedule,
+        advance,
+        state=WeeklyState(floor=started_at, follow_up_armed=False),
+        schedule_id=schedule_id,
+        clock=clock,
+        home=home,
+        sleep=sleep,
+    )

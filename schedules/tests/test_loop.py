@@ -5,31 +5,38 @@
 # return. `loop_once` runs the same plan with a chosen `now` against the throwaway Postgres:
 # what is claimed is read back from `schedule_fire_log`, and the fire callback reports its work
 # through its return value, so no test records calls. `run_loop` runs in a child process until
-# it claims a slot.
+# it claims a slot, and a scripted clock plus a captured `sleep` drive it round by round without
+# waiting, which is how a round that raises is followed into the round after it.
 
 from __future__ import annotations
 
 import ast
 import json
+import logging
 import multiprocessing
+import signal
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import psycopg
 import pytest
 
-from base.daemon.schedules.heartbeat import beat_path, read_beat
+from base.daemon.schedules.heartbeat import Beat, beat_path, read_beat
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.schedule_timing import SCHEDULE_FIRST_ROUND_BUDGET_S
 from schedules.jobs.catchup import Fired
 from schedules.jobs.loop import CronSchedule, LoopTick, Trigger, loop_once, run_loop
+from schedules.jobs.self_evolution_weekly import run_weekly
 from schedules.plans.loop_plan import (
+    FailurePolicy,
     Fire,
     LoopTiming,
     Sleep,
     Upcoming,
+    failure_backoff_s,
     plan_step,
     search_base,
 )
@@ -37,6 +44,8 @@ from schedules.tests.support.schedule_support import claimed_slots, insert_sched
 
 _FIVE = datetime(2026, 9, 7, 5, 0, tzinfo=UTC)
 _DAILY = CronSchedule((Trigger("0 5 * * *"),), "UTC")
+_NOON = datetime(2026, 9, 7, 12, 0, tzinfo=UTC)
+_MINUTE = CronSchedule((Trigger("* * * * *", "every-minute"),), "UTC")
 
 
 def _work(slot: datetime, trigger: str | None) -> tuple[datetime, str | None]:
@@ -359,6 +368,11 @@ def test_run_loop_claims_a_due_slot_in_its_own_process(
 
     assert trigger == "every-minute"
     assert claimed_slots(db_conn, schedule_id) == [slot]
+    # meiva:note
+    # The loop now survives a round that raises, so the other half has to stay true: a supervisor
+    # stopping it still stops it. A signal is not an `Exception`; catching one here would leave a
+    # schedule running after its manager asked it to go.
+    assert worker.exitcode == -signal.SIGTERM, "the loop must die on SIGTERM, not swallow it"
 
 
 # meiva:note
@@ -394,10 +408,363 @@ def test_run_loop_writes_the_round_heartbeat_its_manager_reads(
 
 
 # meiva:note
-# Every template hands the loop its home. The default exists only for a stored script that predates
-# the parameter, so a template that forgot it would run without a heartbeat and nothing would say
-# so -- the exact silence this loop change exists to end. The scan reads the repository's own
-# templates: no database, no process.
+# The failure half of the loop. Before it, a round that raised ended the process of whichever
+# schedule it belonged to -- the thirteen templates on `run_loop` and the weekly one on `run_weekly`
+# alike -- and each needed a person to restart it. The tests below drive a loop through a scripted
+# clock and a captured `sleep`, so a failure is followed into the round after it and the pause it
+# asked for is the assertion -- nothing here waits.
+class _StopError(Exception):
+    # meiva:note
+    # Ends a loop that would otherwise never return: the test's own sleep raises it.
+    pass
+
+
+# meiva:note
+# The `observe` seam for a test that only wants the pauses: it reads nothing between rounds.
+def _nothing() -> None:
+    pass
+
+
+# meiva:note
+# A clock that answers each round's two reads with that round's start. The driver reads the clock
+# once for the opening beat and twice per round (start and end), so each instant is used twice with
+# the first used once more at the front. Past the last round it repeats that round's instant: a
+# test that stops at a sleep never reads further.
+def _clock_over(*rounds: datetime) -> Callable[[], datetime]:
+    instants = [rounds[0]] + [instant for start in rounds for instant in (start, start)]
+    remaining = iter(instants)
+    return lambda: next(remaining, rounds[-1])
+
+
+def _last_error(conn: psycopg.Connection, schedule_id: int) -> str | None:
+    with conn.cursor() as cur:
+        cur.execute("SELECT last_error FROM schedules WHERE id = %s", (schedule_id,))
+        row = cur.fetchone()
+    assert row is not None
+    return row[0]
+
+
+def _drive(
+    run: Callable[[Callable[[float], None]], NoReturn],
+    *,
+    rounds: int,
+    observe: Callable[[], None],
+) -> list[float]:
+    # meiva:note
+    # Run a loop for `rounds` rounds and return the pause it asked for after each. `run` is handed
+    # the sleep seam and calls the loop -- `run_loop` or `run_weekly`, both of which end in
+    # `run_rounds` -- so one driver covers both. `observe` is how a test reads the world between
+    # rounds (the schedule row, the heartbeat file), and the raise is the only way out of a
+    # `NoReturn`.
+    pauses: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        pauses.append(seconds)
+        observe()
+        if len(pauses) >= rounds:
+            raise _StopError
+
+    with pytest.raises(_StopError):
+        run(sleep)
+    return pauses
+
+
+def test_the_backoff_doubles_from_the_first_delay_and_stops_at_the_cap() -> None:
+    policy = FailurePolicy()
+    assert [failure_backoff_s(failures, policy) for failures in range(1, 7)] == [
+        60.0,
+        120.0,
+        240.0,
+        300.0,
+        300.0,
+        300.0,
+    ]
+
+
+def test_a_policy_that_could_sleep_too_little_or_never_report_is_refused() -> None:
+    with pytest.raises(ValueError, match="first_delay_s must be positive"):
+        FailurePolicy(first_delay_s=0.0)
+    with pytest.raises(ValueError, match="must not be below first_delay_s"):
+        FailurePolicy(first_delay_s=120.0, max_delay_s=60.0)
+    with pytest.raises(ValueError, match="report_after must be at least 1"):
+        FailurePolicy(report_after=0)
+    with pytest.raises(ValueError, match="failures must be at least 1"):
+        failure_backoff_s(0, FailurePolicy())
+
+
+# meiva:note
+# The one behaviour this whole change exists for: a callback that raised used to end the loop. The
+# round after it finds the slot claimed, advances the floor and carries on -- one extra round, then
+# normal pacing -- and the pause in between is the policy's first delay, not the loop's rest.
+def test_a_round_that_raises_does_not_end_the_loop(
+    db_conn: psycopg.Connection, database: Database, tmp_path: Path
+) -> None:
+    schedule_id = _schedule_row(db_conn)
+    started_at = _NOON + timedelta(seconds=30)
+    calls: list[datetime] = []
+
+    def fire(slot: datetime, trigger: str | None) -> None:
+        calls.append(slot)
+        raise RuntimeError("fire failed")
+
+    pauses = _drive(
+        lambda sleep: run_loop(
+            database,
+            _MINUTE,
+            fire,
+            schedule_id=schedule_id,
+            started_at=started_at,
+            clock=_clock_over(
+                _NOON + timedelta(minutes=1), _NOON + timedelta(minutes=1, seconds=10)
+            ),
+            home=tmp_path,
+            sleep=sleep,
+        ),
+        rounds=2,
+        observe=_nothing,
+    )
+
+    assert pauses == [60.0, 120.0]
+    assert calls == [_NOON + timedelta(minutes=1)], "the claimed slot is not replayed"
+    assert claimed_slots(db_conn, schedule_id) == [_NOON + timedelta(minutes=1)]
+
+
+# meiva:note
+# A failure that happens before the claim -- here an unparsable cron, raised in `next_fire` -- is
+# the one that would repeat every round for as long as the loop ran, so it is the one the doubling
+# delay bounds. Five rounds is past the cap: the last two pauses are equal, and the escalation
+# (one error with a traceback, never one per round) landed on the third.
+def test_a_failure_before_the_claim_backs_off_to_the_cap_and_reports_once(
+    db_conn: psycopg.Connection,
+    database: Database,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING)
+    schedule_id = _schedule_row(db_conn)
+    broken = CronSchedule((Trigger("not a cron expression"),), "UTC")
+
+    pauses = _drive(
+        lambda sleep: run_loop(
+            database,
+            broken,
+            _work,
+            schedule_id=schedule_id,
+            started_at=_NOON,
+            clock=_clock_over(_NOON),
+            home=tmp_path,
+            sleep=sleep,
+        ),
+        rounds=5,
+        observe=_nothing,
+    )
+
+    assert pauses == [60.0, 120.0, 240.0, 300.0, 300.0]
+    escalations = [record for record in caplog.records if record.levelno == logging.ERROR]
+    assert len(escalations) == 1
+    assert "3 rounds in a row" in escalations[0].getMessage()
+    assert escalations[0].exc_info is not None, "the escalation must carry the traceback"
+    assert claimed_slots(db_conn, schedule_id) == [], "nothing was claimed, so nothing is lost"
+
+
+# meiva:note
+# The count is per episode, not per process: after a round succeeds the next failure waits the
+# first delay again (60 s, not 120 s), and says so in the log. Three rounds -- fail, claim-lost
+# recovery, fail -- are enough to see both.
+def test_a_recovered_loop_starts_its_backoff_over(
+    db_conn: psycopg.Connection,
+    database: Database,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING)
+    schedule_id = _schedule_row(db_conn)
+    failing = {_NOON + timedelta(minutes=1), _NOON + timedelta(minutes=2)}
+
+    def fire(slot: datetime, trigger: str | None) -> None:
+        if slot in failing:
+            raise RuntimeError(f"fire failed for {slot.isoformat()} {trigger}")
+
+    pauses = _drive(
+        lambda sleep: run_loop(
+            database,
+            _MINUTE,
+            fire,
+            schedule_id=schedule_id,
+            started_at=_NOON + timedelta(seconds=30),
+            clock=_clock_over(
+                _NOON + timedelta(minutes=1),
+                _NOON + timedelta(minutes=1, seconds=30),
+                _NOON + timedelta(minutes=2),
+            ),
+            home=tmp_path,
+            sleep=sleep,
+        ),
+        rounds=3,
+        observe=_nothing,
+    )
+
+    assert pauses == [60.0, 120.0, 60.0], "a recovered loop restarts at the first delay"
+    recovered = [r.getMessage() for r in caplog.records if "recovered after" in r.getMessage()]
+    assert recovered == [f"schedule {schedule_id} recovered after 1 failed rounds"]
+
+
+# meiva:note
+# The loop must not catch what is not an error to recover from. `KeyboardInterrupt` and the signal
+# exits are how a supervisor stops a resident process, so they travel straight out -- the `sleep`
+# seam would be reached only if the loop had swallowed the interrupt.
+def test_a_control_flow_interrupt_ends_the_loop(
+    db_conn: psycopg.Connection, database: Database, tmp_path: Path
+) -> None:
+    schedule_id = _schedule_row(db_conn)
+
+    def fire(slot: datetime, trigger: str | None) -> None:
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        run_loop(
+            database,
+            _MINUTE,
+            fire,
+            schedule_id=schedule_id,
+            started_at=_NOON + timedelta(seconds=30),
+            clock=_clock_over(_NOON + timedelta(minutes=1)),
+            home=tmp_path,
+            sleep=lambda seconds: pytest.fail("the loop slept instead of honouring the interrupt"),
+        )
+
+
+# meiva:note
+# A loop that survives a failure is quieter than one that died of it, and this is what keeps that
+# from being a net loss: the escalation writes the column `meiva schedules ls` shows, and the round
+# that succeeds clears it. Read from inside the loop's own `sleep`, against a second connection, so
+# the assertion is about what a reader outside the process would have seen.
+def test_an_escalated_failure_lands_in_the_schedule_row_and_recovery_clears_it(
+    db_conn: psycopg.Connection, database: Database, tmp_path: Path
+) -> None:
+    schedule_id = _schedule_row(db_conn)
+    seen: list[str | None] = []
+
+    def fire(slot: datetime, trigger: str | None) -> None:
+        raise RuntimeError("boom-7392")
+
+    pauses = _drive(
+        lambda sleep: run_loop(
+            database,
+            CronSchedule(
+                (Trigger("* * * * *", "every-minute"),),
+                "UTC",
+                failure=FailurePolicy(report_after=1),
+            ),
+            fire,
+            schedule_id=schedule_id,
+            started_at=_NOON + timedelta(seconds=30),
+            clock=_clock_over(
+                _NOON + timedelta(minutes=1), _NOON + timedelta(minutes=1, seconds=10)
+            ),
+            home=tmp_path,
+            sleep=sleep,
+        ),
+        rounds=2,
+        observe=lambda: seen.append(_last_error(db_conn, schedule_id)),
+    )
+
+    assert pauses == [60.0, 120.0]
+    assert seen[0] is not None and "boom-7392" in seen[0]
+    assert "RuntimeError" in seen[0] and "next attempt in 60s" in seen[0]
+    assert seen[1] is None, "recovery clears the error a person would otherwise keep reading"
+
+
+# meiva:note
+# The weekly loop is the second entry point into `run_rounds`, and it was the one loop left with no
+# protection at all when the daily one was fixed -- its own `while True` over `weekly_once`, with no
+# except and not even a heartbeat. The same proof, with a different round: the callback raises, and
+# the loop still takes the round after it.
+_TUESDAY = datetime(2026, 9, 8, tzinfo=UTC)
+
+
+def _beat(home: Path, schedule_id: int) -> Beat:
+    beat = read_beat(home, schedule_id)
+    assert beat is not None, "the loop must leave the heartbeat its manager reads"
+    return beat
+
+
+def test_a_round_that_raises_does_not_end_the_weekly(
+    db_conn: psycopg.Connection, database: Database, tmp_path: Path
+) -> None:
+    schedule_id = _schedule_row(db_conn)
+    weekly = CronSchedule((Trigger("0 0 * * 2", "main"),), "UTC")
+    calls: list[datetime] = []
+
+    def fire(slot: datetime, trigger: str | None) -> bool:
+        calls.append(slot)
+        raise RuntimeError("weekly fire failed")
+
+    pauses = _drive(
+        lambda sleep: run_weekly(
+            database,
+            weekly,
+            fire,
+            schedule_id=schedule_id,
+            started_at=_TUESDAY - timedelta(hours=1),
+            clock=_clock_over(_TUESDAY, _TUESDAY + timedelta(seconds=10)),
+            home=tmp_path,
+            sleep=sleep,
+        ),
+        rounds=2,
+        observe=_nothing,
+    )
+
+    assert pauses == [60.0, 120.0], "back off, then the loop's own rest"
+    assert calls == [_TUESDAY], "the claimed slot is not replayed"
+    assert claimed_slots(db_conn, schedule_id) == [_TUESDAY]
+
+
+# meiva:note
+# "It did not die" is half of it: a loop that kept running but stopped moving its beat would trade
+# a dead process for a blind one, which is the failure this whole change is trying to stop being
+# quiet. Each beat is read between rounds, from the file the manager reads, and has to promise a
+# later instant than the one before it and cover the pause the loop is about to take.
+def test_a_failing_weekly_round_still_moves_the_round_beat(
+    db_conn: psycopg.Connection, database: Database, tmp_path: Path
+) -> None:
+    schedule_id = _schedule_row(db_conn)
+    broken = CronSchedule((Trigger("not a cron expression", "main"),), "UTC")
+    beats: list[Beat] = []
+    moments = (_TUESDAY, _TUESDAY + timedelta(minutes=5), _TUESDAY + timedelta(minutes=20))
+
+    def fire(slot: datetime, trigger: str | None) -> bool:
+        raise AssertionError("an unparsable cron never reaches the callback")
+
+    pauses = _drive(
+        lambda sleep: run_weekly(
+            database,
+            broken,
+            fire,
+            schedule_id=schedule_id,
+            started_at=_TUESDAY - timedelta(hours=1),
+            clock=_clock_over(*moments),
+            home=tmp_path,
+            sleep=sleep,
+        ),
+        rounds=3,
+        observe=lambda: beats.append(_beat(tmp_path, schedule_id)),
+    )
+
+    assert pauses == [60.0, 120.0, 240.0]
+    assert [beat.written_at for beat in beats] == list(moments)
+    assert [beat.alive_by for beat in beats] == sorted(beat.alive_by for beat in beats)
+    assert [beat.alive_by - beat.written_at for beat in beats] == [
+        timedelta(seconds=SCHEDULE_FIRST_ROUND_BUDGET_S + pause) for pause in pauses
+    ], "each beat has to cover the pause the loop is about to take"
+
+
+# meiva:note
+# Every template hands its loop its home: `run_loop` for the cron loops and `run_weekly` for the
+# weekly one, both of which reach `run_rounds` and its beat. The default exists only for a stored
+# script that predates the parameter, so a template that forgot it would run without a heartbeat
+# and nothing would say so -- the exact silence this loop change exists to end. The scan reads the
+# repository's own templates: no database, no process.
 def test_every_schedule_template_passes_its_home_to_the_loop() -> None:
     root = Path(__file__).resolve().parents[2]
     missing: list[str] = []
@@ -407,7 +774,7 @@ def test_every_schedule_template_passes_its_home_to_the_loop() -> None:
         for node in ast.walk(ast.parse(path.read_text())):
             if not isinstance(node, ast.Call):
                 continue
-            if getattr(node.func, "id", "") != "run_loop":
+            if getattr(node.func, "id", "") not in {"run_loop", "run_weekly"}:
                 continue
             if not any(keyword.arg == "home" for keyword in node.keywords):
                 missing.append(f"{path.relative_to(root)}:{node.lineno}")
