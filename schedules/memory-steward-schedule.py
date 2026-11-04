@@ -29,9 +29,11 @@ TRIGGERS = (
         "ke home is what points them at the worktree), then commit + push that branch + open a PR"
         " and squash-merge it once `validate` is green — a pure generated artifact, so the author"
         " may merge it; **never commit on the shared checkout's main: the pool pre-commit refuses"
-        " it**, then merge only review PRs whose `validate` check is green, whose author is not t"
-        "he merger, and write the collector snapshot (each face's HEAD + dirty count) into the PR"
-        " body first",
+        " it**; finally clean up so the registry does not grow one entry per night: `git -C ~/.me"
+        "iva/memory worktree remove --force $W; git -C ~/.meiva/memory worktree prune; rm -rf $(d"
+        "irname $W)`, then merge only review PRs whose `validate` check is green, whose author is"
+        " not the merger, and write the collector snapshot (each face's HEAD + dirty count) into "
+        "the PR body first",
     ),
     Trigger("0 7 * * *", "Daily health check — OKF, size, dedup, stale"),
 )
