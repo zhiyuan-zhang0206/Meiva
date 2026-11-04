@@ -274,3 +274,25 @@ def test_the_gate_step_names_exist_in_the_workflow() -> None:
     names = {step.get("name") for step in workflow["jobs"]["gate"]["steps"]}
 
     assert names >= GATE_CHECK_STEPS, GATE_CHECK_STEPS - names
+
+
+# meiva:note
+# A stale note that stops at "check whether GitHub delayed it" hands the reader a diagnosis and no
+# action. The stream that knows what its own workflow costs supplies the make-up command, and the
+# note ends with it; a stream that never supplied one keeps exactly the note it had before.
+def test_a_stale_note_ends_with_the_make_up_the_stream_supplies() -> None:
+    now = datetime(2026, 11, 2, 12, 0, tzinfo=UTC)
+    supplied = liveness_alert(
+        "nightly-full",
+        now - timedelta(hours=30),
+        now,
+        stale_after=NIGHTLY_STALE_AFTER,
+        make_up="`gh workflow run ci.yml --ref main` (full suite).",
+    )
+    absent = liveness_alert(
+        "nightly", now - timedelta(hours=30), now, stale_after=NIGHTLY_STALE_AFTER
+    )
+
+    assert supplied is not None
+    assert supplied.endswith("Make-up: `gh workflow run ci.yml --ref main` (full suite).")
+    assert absent is not None and "Make-up" not in absent

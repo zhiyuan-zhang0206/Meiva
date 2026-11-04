@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import NamedTuple
@@ -39,8 +39,11 @@ from schedules.plans.watch.release_gate_slot import (
     decide_slot,
 )
 
+Compare = Callable[[str, str], tuple[str, ...]]
+
 __all__ = [
     "STATE_FILE",
+    "Compare",
     "LivenessStream",
     "SlotLedger",
     "WatchState",
@@ -55,12 +58,15 @@ STATE_FILE = "main-red-watch.json"
 
 
 # meiva:note
-# One workflow whose silence has to be reported: the label its note uses, and how long it may stay
-# quiet before that silence means the schedule stopped.
+# One workflow whose silence has to be reported: the label its note uses, how long it may stay
+# quiet before that silence means the schedule stopped, and the command that closes the gap. The
+# command is empty for a stream nobody has measured a dispatch of; the note then reports the
+# silence and names no action rather than inventing one.
 class LivenessStream(NamedTuple):
     label: str
     workflow: str
     stale_after: timedelta
+    make_up: str | None = None
 
 
 # meiva:note
@@ -76,12 +82,17 @@ class SlotLedger:
     task_id: int | None = None
 
 
+# meiva:note
+# `greens` is the newest successful full-suite run read per workflow, which is the base a card's
+# candidate range starts from. It cannot live on an `Entry`: a green run deletes the entry it
+# resolves, so the sha would be dropped at exactly the moment it becomes the one a later red needs.
 @dataclass(frozen=True)
 class WatchState:
     entries: Mapping[str, Entry]
     watermarks: Mapping[str, str]
     first_seen: Mapping[str, str]
     slot: SlotLedger = SlotLedger()
+    greens: Mapping[str, str] = field(default_factory=dict[str, str])
 
 
 # meiva:note
@@ -128,6 +139,7 @@ def load_state(path: Path) -> WatchState:
         dict(raw.get("watermarks", {})),
         dict(raw.get("first_seen", {})),
         slot,
+        dict(raw.get("greens", {})),
     )
 
 
@@ -149,6 +161,7 @@ def save_state(path: Path, state: WatchState) -> None:
         },
         "watermarks": dict(state.watermarks),
         "first_seen": dict(state.first_seen),
+        "greens": dict(state.greens),
         "slot": {
             "gap_id": state.slot.gap_id,
             "task_id": state.slot.task_id,
@@ -170,6 +183,52 @@ def _commit_line(run: RunFacts) -> tuple[str, ...]:
     return (f"{short} {run.head_title}" if run.head_title else short,)
 
 
+# meiva:note
+# The card's heading promises a range -- last green to latest red -- and one commit under it tells
+# a reader the change that broke them is not in the list. So the round asks for the commits between
+# the two whenever the last green is known, and keeps the red run's own line only as the fallback.
+# A range that could not be read is reported as that, in the round's notes; it is never filled in
+# from what the round happens to hold.
+def _candidate_commits(
+    run: RunFacts, compare: Compare | None, base: str | None
+) -> tuple[tuple[str, ...], str | None]:
+    head = run.head_sha
+    if compare is None or not base or not head:
+        return _commit_line(run), None
+    span = f"{base[:10]}..{head[:10]}"
+    try:
+        commits = compare(base, head)
+    except Exception as exc:
+        return _commit_line(run), f"compare {span} unreadable: {type(exc).__name__}: {exc}"
+    if not commits:
+        return _commit_line(run), f"compare {span} named no commit"
+    return commits, None
+
+
+# meiva:note
+# The card one confirmed red opens, together with the note its range collection owes the round.
+# `base` is the newest green the watch has seen for the workflow; naming it on the entry is what
+# turns the card's "Last green" line from a dash into the commit the range starts at.
+def _confirmed_card(
+    entry: Entry, run: RunFacts, compare: Compare | None, base: str | None
+) -> tuple[Card, str | None]:
+    candidates, note = _candidate_commits(run, compare, base)
+    named = replace(entry, last_green_sha=base) if base else entry
+    return (
+        Card(
+            named.fingerprint,
+            card_title(named),
+            card_body(
+                named,
+                latest_url=run.html_url,
+                job_names=run.job_names,
+                candidate_commits=candidates,
+            ),
+        ),
+        note,
+    )
+
+
 def round_line(*, entries: int, confirmed: int, infra: int, notes: tuple[str, ...]) -> str:
     head = f"fingerprints={entries} confirmed={confirmed} infra={infra}"
     return head if not notes else f"{head} | " + " | ".join(notes)
@@ -186,11 +245,13 @@ def watch_once(
     emit: Callable[[Mapping[str, object]], None],
     workflows: tuple[str, ...],
     liveness: tuple[LivenessStream, ...],
+    compare: Compare | None = None,
 ) -> str:
     state = load_state(state_path)
     entries = dict(state.entries)
     watermarks = dict(state.watermarks)
     first_seen = dict(state.first_seen)
+    greens = dict(state.greens)
     for workflow in (*workflows, *(stream.workflow for stream in liveness)):
         first_seen.setdefault(workflow, now.isoformat())
     notes: list[str] = []
@@ -213,18 +274,15 @@ def watch_once(
             newest = run.created_at if newest is None else max(newest, run.created_at)
             plan = apply_run(entries, run)
             entries = dict(plan.entries)
+            if run.conclusion == "success" and run.covers_full_suite and run.head_sha:
+                greens[run.workflow] = run.head_sha
             infra += sum(1 for note in plan.notes if "infra on" in note)
             for entry in plan.confirmed:
-                card = Card(
-                    entry.fingerprint,
-                    card_title(entry),
-                    card_body(
-                        entry,
-                        latest_url=run.html_url,
-                        job_names=run.job_names,
-                        candidate_commits=_commit_line(run),
-                    ),
+                card, candidate_note = _confirmed_card(
+                    entry, run, compare, greens.get(run.workflow)
                 )
+                if candidate_note is not None:
+                    notes.append(candidate_note)
                 task_id = open_card(card)
                 entries[entry.fingerprint] = replace(entries[entry.fingerprint], task_id=task_id)
                 opened += 1
@@ -247,11 +305,12 @@ def watch_once(
             now,
             stale_after=stream.stale_after,
             since=datetime.fromisoformat(first_seen[stream.workflow]),
+            make_up=stream.make_up,
         )
         if alert is not None:
             notes.append(alert)
             stale += 1
-    save_state(state_path, WatchState(entries, watermarks, first_seen))
+    save_state(state_path, WatchState(entries, watermarks, first_seen, greens=greens))
     emit(
         {
             "fingerprints": len(entries),

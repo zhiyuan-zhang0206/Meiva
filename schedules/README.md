@@ -258,15 +258,26 @@ Every schedule row records a target `machine` (defaulting to the gateway machine
   times and ran six, the latest slot starting 1h48m late. The watch reads the
   newest `event=schedule` run of that workflow each round
   (`schedules/plans/watch/release_gate_slot.py`). Past
-  `RELEASE_GATE_SLOT_STALE_AFTER` (two whole slots, twelve hours -- at seven
-  hours the check reports lateness instead: 164 scheduled runs across every
-  scheduled workflow here arrived 45m to 7h50m after their slot, and four of the
-  last five release-gate gaps exceeded seven hours), with nothing of that
-  workflow running and commits uncertified, it opens one card. The round never dispatches: `release-gate.yml` certifies on success,
+  `RELEASE_GATE_SLOT_STALE_AFTER` (nine hours), with nothing of that workflow
+  running and commits uncertified, it opens one card. Nine hours is deliberately
+  not a whole number of slots: across this repository's 164 scheduled runs,
+  arrivals are late by 45m to 7h50m (median 4h34m), so the threshold is a
+  judgement about arrivals, and the five most recent gaps (4h09m, 8h09m, 9h59m,
+  8h49m, 13h21m) put nine hours between the slowest gap that was merely late and
+  the fastest gap that really missed a slot. The round never dispatches: `release-gate.yml` certifies on success,
   so a dispatched run mints a `v*` tag and moves `channel/latest`, and a release
-  is the user's decision -- the card carries the command and says so in its first
-  line. A slot the gate would have skipped anyway (nothing uncertified) opens no
-  card, and the card closes when a scheduled run appears again.
+  is the user's decision. The card therefore names the run that closes the gap it
+  reports -- `main-typecheck.yml`, a type-only pass of a couple of minutes -- and
+  says in the same breath what that does not restore. **Dispatch
+  `main-typecheck.yml`; never dispatch `release-gate.yml` from the watch.** A slot
+  the gate would have skipped anyway (nothing uncertified) opens no card, and the
+  card closes when a scheduled run appears again.
+- **A silent nightly says what to run.** The liveness note for `ci.yml` ends with
+  the dispatch that closes the gap -- `gh workflow run ci.yml --ref main`, the full
+  suite, which publishes nothing and takes about ten to fifteen minutes -- because
+  the stream carries `make_up=` in `schedules/jobs/watch/main-red-watch-schedule.py`.
+  A stream whose dispatch cost nobody has timed carries no `make_up` and reports
+  the silence alone, rather than naming a command with an invented price.
 - **A template change reaches a running cluster at the next `schedule-manager`
   start** (see "How built-ins get created"), or at once through
   `meiva schedules provision`. A resynced **enabled** schedule is relaunched onto the

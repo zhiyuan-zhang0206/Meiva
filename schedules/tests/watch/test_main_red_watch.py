@@ -593,3 +593,76 @@ def test_a_running_release_gate_opens_no_card(tmp_path: Path) -> None:
 
     assert opened == []
     assert note == "release-gate is running; the slot check waits"
+
+
+# meiva:note
+# The card's heading promises the commits from the last green to the latest red, and the round used
+# to be handed the red run's own commit alone under it. A successful full-suite run is what makes
+# that base available -- it deletes the entry it resolves, so the sha is kept beside the watermarks
+# -- and the range is asked for on the round the red is confirmed.
+def test_a_confirmed_red_lists_the_commits_since_the_last_green(tmp_path: Path) -> None:
+    opened: list[Card] = []
+    asked: list[tuple[str, str]] = []
+
+    def compare(base: str, head: str) -> tuple[str, ...]:
+        asked.append((base, head))
+        return ("cafe newest", "babe middle", "f00d oldest")
+
+    def round_once(runs: Sequence[RunFacts]) -> str:
+        return watch_once(
+            state_path=tmp_path / STATE_FILE,
+            now=datetime(2026, 11, 2, 12, tzinfo=UTC),
+            fetch=lambda _workflow: tuple(runs),
+            last_start=lambda _workflow: datetime(2026, 11, 2, 11, tzinfo=UTC),
+            open_card=lambda card: (opened.append(card), 899 + len(opened))[1],
+            close_card=lambda _task, _reason: None,
+            emit=lambda _payload: None,
+            workflows=("release-gate.yml",),
+            liveness=_LIVENESS,
+            compare=compare,
+        )
+
+    round_once([_green("release-gate.yml", "a" * 40, datetime(2026, 11, 1, 6, tzinfo=UTC))])
+    for hour, sha in ((12, "b" * 40), (18, "c" * 40)):
+        round_once([_red("release-gate.yml", sha, datetime(2026, 11, 1, hour, tzinfo=UTC))])
+
+    assert asked == [("a" * 40, "c" * 40)]
+    assert len(opened) == 1
+    assert "cafe newest" in opened[0].body
+    assert f"Last green: `{'a' * 40}`" in opened[0].body
+
+
+# meiva:note
+# A compare is a read and fails like one. The card still has to open -- the red is real whether or
+# not its range could be fetched -- so the round falls back to the red run's own line and says in
+# its notes that the range was unreadable, rather than filling the heading with what it happens to
+# hold and letting a reader believe the list is complete.
+def test_an_unreadable_range_still_opens_the_card_and_says_so(tmp_path: Path) -> None:
+    opened: list[Card] = []
+
+    def compare(base: str, head: str) -> tuple[str, ...]:
+        del base, head
+        raise RuntimeError("compare API answered 502")
+
+    def round_once(runs: Sequence[RunFacts]) -> str:
+        return watch_once(
+            state_path=tmp_path / STATE_FILE,
+            now=datetime(2026, 11, 2, 12, tzinfo=UTC),
+            fetch=lambda _workflow: tuple(runs),
+            last_start=lambda _workflow: datetime(2026, 11, 2, 11, tzinfo=UTC),
+            open_card=lambda card: (opened.append(card), 899 + len(opened))[1],
+            close_card=lambda _task, _reason: None,
+            emit=lambda _payload: None,
+            workflows=("release-gate.yml",),
+            liveness=_LIVENESS,
+            compare=compare,
+        )
+
+    round_once([_green("release-gate.yml", "a" * 40, datetime(2026, 11, 1, 6, tzinfo=UTC))])
+    line = ""
+    for hour, sha in ((12, "b" * 40), (18, "c" * 40)):
+        line = round_once([_red("release-gate.yml", sha, datetime(2026, 11, 1, hour, tzinfo=UTC))])
+
+    assert len(opened) == 1
+    assert "unreadable: RuntimeError" in line
+    assert "c" * 10 in opened[0].body
