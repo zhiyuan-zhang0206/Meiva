@@ -253,3 +253,34 @@ def test_shell_capture_carries_renewal_facts(db_conn: psycopg.Connection) -> Non
         body = client.get(f"/api/agents/{aid}/shell/4").json()
     assert body["renewals"] == 3
     assert body["last_renewed_at"] == renewed.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+@pytest.mark.parametrize("uptime", [None, True, 1.5, "12", [1]])
+def test_shell_capture_refuses_an_uptime_that_is_not_an_integer(
+    db_conn: psycopg.Connection, uptime: object
+) -> None:
+    aid = _insert_agent(db_conn, machine="runner-a")
+    db_conn.commit()
+    reply = completed(
+        {"session_name": f"meiva-agent-{aid}-shell-1-dev", "lines": [], "uptime_seconds": uptime}
+    )
+
+    with (
+        runner_ops(db_conn, "runner-a", {"shell_capture": reply}),
+        gateway_test_client() as client,
+        pytest.raises(TypeError, match="uptime_seconds"),
+    ):
+        client.get(f"/api/agents/{aid}/shell/1")
+
+
+def test_shell_capture_reads_an_absent_uptime_as_zero(db_conn: psycopg.Connection) -> None:
+    aid = _insert_agent(db_conn, machine="runner-a")
+    db_conn.commit()
+    reply = completed({"session_name": f"meiva-agent-{aid}-shell-1-dev", "lines": []})
+
+    with (
+        runner_ops(db_conn, "runner-a", {"shell_capture": reply}),
+        gateway_test_client() as client,
+    ):
+        body = client.get(f"/api/agents/{aid}/shell/1").json()
+    assert body["uptime_seconds"] == 0
