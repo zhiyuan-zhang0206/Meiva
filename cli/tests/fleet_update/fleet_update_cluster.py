@@ -143,6 +143,21 @@ def ssh_on_path(bin_dir: Path, script: Path) -> Path:
     return bin_dir
 
 
+# meiva:note
+# The cluster a fleet-update test drives: it writes the state the fake `ssh` reads before each run
+# (`_state`) and adopts back what the run left (`_adopt`). Its bookkeeping stays untyped for the
+# reason `docs/conventions/testing.md` states — this is the writer half of a program-level double —
+# and the field-level schema, every key with its type and meaning, is declared in the reader,
+# `cli/tests/fleet_update/fake_ssh.py`; a rename changes both.
+#
+# What this class owns is the attribute -> JSON mapping. The groups: the fleet (`hosts`, one
+# `_IDLE` record per alias plus `os` and `head`, and the roster's `names`, `silent`, `hidden`,
+# `laptop`); what a test stages (`fail`, `stop_fails`, `stop_fails_leaves_up`, `recover_fails`,
+# `output`, `incomplete`, `roster_reply`, `roster_lag`, `lease_reply`, `lease_rc`,
+# `silence_reply`, `stored_schedules`, `barriers`); what the run reports (`effects`, `commands`,
+# `run_started_at`, `roster_reads`, `lease_reads`, `silence_open`, `silence_hours`,
+# `silence_comment`, `violations`); and the healthy baseline every host reports (`host_up`,
+# `journal`, `journal_after_stop`, `helper_hash`, `helper_cert_root`).
 # meiva:link cli/tests/fleet_update/docs/fleet-update-harness.meiva.okf.md
 class Cluster:
     def __init__(self, old: str, new: str, *, repo: Path, workdir: Path) -> None:
