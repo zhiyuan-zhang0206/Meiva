@@ -7,10 +7,10 @@ HTTP, retry policy and wire-error translation for explicit contexts.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import replace
-from typing import Any, Literal, assert_never
+from typing import Literal, assert_never
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
@@ -51,6 +51,9 @@ class _NeighborsAnswer(_Answer):
 
 class _AncestorsAnswer(_Answer):
     ancestors: list[dict[str, object]]
+
+
+type _QueryValue = str | int | float | bool | None
 
 
 def _ctx(context: MeivaContext | None) -> MeivaContext:
@@ -100,7 +103,7 @@ def _actor_or(source: str | None) -> str:
 def get(
     path: str,
     *,
-    params: dict[str, Any] | None = None,
+    params: Mapping[str, _QueryValue] | None = None,
     timeout: _transport.TransportTimeout | None = None,
     max_retries: int | None = None,
     context: MeivaContext | None = None,
@@ -257,7 +260,7 @@ def get_last_message(agent_id: int, caller: str) -> str | None:
     return _TextAnswer.model_validate(_transport.json_object(_run(plan, _ctx(None)))).text
 
 
-def get_neighbors(agent_id: int, *, depth: int, limit: int) -> list[dict[str, Any]]:
+def get_neighbors(agent_id: int, *, depth: int, limit: int) -> list[dict[str, object]]:
     """GET /api/agents/{id}/neighbors → list of neighbor dicts.
 
     Each dict has id / label / status / depth / score, strongest first
@@ -269,7 +272,7 @@ def get_neighbors(agent_id: int, *, depth: int, limit: int) -> list[dict[str, An
     return _NeighborsAnswer.model_validate(_transport.json_object(_run(plan, _ctx(None)))).neighbors
 
 
-def get_ancestors(agent_id: int) -> list[dict[str, Any]]:
+def get_ancestors(agent_id: int) -> list[dict[str, object]]:
     """GET /api/agents/{id}/neighbors → the `ancestors` rows: the spawn/fork
     chain above `agent_id`, nearest ancestor first (the gateway walks to the
     top, so the neighbors `depth`/`limit` params do not apply). Same dict
@@ -286,7 +289,9 @@ def get_ancestors(agent_id: int) -> list[dict[str, Any]]:
 _BORN_CHAIN_TIMEOUT_S = 5.0
 
 
-def get_born_chain(agent_id: int, *, context: MeivaContext | None = None) -> list[dict[str, Any]]:
+def get_born_chain(
+    agent_id: int, *, context: MeivaContext | None = None
+) -> list[dict[str, object]]:
     """GET /api/agents/{id}/born-chain → the `ancestors` rows: the immutable
     birth chain above `agent_id`, nearest ancestor first (1 = direct birth
     parent). Each dict carries agent_id / label / status / machine / depth.
@@ -313,7 +318,7 @@ def list_agents(
     query: str = "",
     before_id: int | None = None,
     limit: int = 100,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """Read one bounded directory page; the caller owns cursor traversal."""
     plan = plans.list_agents_request(scope=scope, query=query, before_id=before_id, limit=limit)
     return _transport.json_object(_run(plan, _ctx(None)))
@@ -328,7 +333,7 @@ def patch_label(agent_id: int, label: str, *, source: Literal["user", "self"] = 
     _run(plans.patch_label_request(agent_id, label, source), _ctx(None))
 
 
-def get_agent(agent_id: int) -> dict[str, Any]:
+def get_agent(agent_id: int) -> dict[str, object]:
     """Read an agent directly, independently of directory scope or pagination."""
     return _transport.json_object(_run(Request("GET", f"/api/agents/{agent_id}"), _ctx(None)))
 
@@ -340,7 +345,7 @@ def terminate(
     message: str | None = None,
     force: bool = False,
     kill_all_shell_sessions: bool = False,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """POST /api/agents/{id}/terminate → response dict.
 
     `status` is "enqueued" / "already_terminated"; `open_tasks` carries what
@@ -423,7 +428,7 @@ def register_page(
     title: str | None,
     serve_dir: str | None = None,
     ttl_seconds: int | None = None,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     """POST /api/keyed/v1/agents/{id}/pages → PageRow dict (id/name/port/title/...).
 
     One key per call: transport-level retries share it, so the gateway
@@ -455,11 +460,11 @@ def close_page(agent_id: int, name: str) -> bool:
     return True
 
 
-def list_open_pages(agent_id: int) -> list[dict[str, Any]]:
+def list_open_pages(agent_id: int) -> list[dict[str, object]]:
     """GET /api/agents/{id}/pages → the agent's open PageRow dicts."""
     return _transport.json_rows(_run(Request("GET", f"/api/agents/{agent_id}/pages"), _ctx(None)))
 
 
-def list_machines() -> list[dict[str, Any]]:
+def list_machines() -> list[dict[str, object]]:
     """GET /api/cluster/machines → list of {name, description, live} dicts."""
     return _transport.json_rows(_run(Request("GET", "/api/cluster/machines"), _ctx(None)))

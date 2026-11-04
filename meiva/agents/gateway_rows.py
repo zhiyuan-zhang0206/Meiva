@@ -1,7 +1,7 @@
 # meiva:note
 # Gateway JSON -> SDK types: the one place that turns a reply row into an
 # `AgentRow`, `Machine`, `Neighbor` or `OpenTasksHint`. The gateway client
-# answers `dict[str, Any]`, so every field arrives here as `object`; these
+# answers `dict[str, object]`, so every field arrives here as `object`; these
 # readers decide what a row may contain, and a wrong-typed field raises with
 # its name instead of flowing on as a wrong-typed value.
 # meiva:link meiva/agents/docs/agents.meiva.okf.md
@@ -131,7 +131,7 @@ def machines_from_rows(rows: Sequence[object]) -> list[Machine]:
 
 
 # meiva:note
-# The gateway client hands back `dict[str, Any]` rows, so every field reaches
+# The gateway client hands back `dict[str, object]` rows, so every field reaches
 # this module as `object`. These readers are the one place that decides what a
 # row may contain: a field of the wrong type raises with its name instead of
 # flowing on as a wrong-typed value.
@@ -233,9 +233,7 @@ def row_from_dict(data: Mapping[str, object]) -> AgentRow:
         label=optional_text(data.get("label"), "label"),
         status=AgentStatus(text(data["status"], "status")),
         spawner=text(data["spawner"], "spawner"),
-        fork_source_agent_id=optional_integer(
-            data.get("fork_source_agent_id"), "fork_source_agent_id"
-        ),
+        fork_source_agent_id=optional_integer(data["fork_source_agent_id"], "fork_source_agent_id"),
         machine=text(data["machine"], "machine"),
         spawned_at=timestamp(data["spawned_at"], "spawned_at"),
         last_active_at=timestamp(data["last_active_at"], "last_active_at"),

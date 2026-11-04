@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, TypeGuard
+from typing import Literal, TypeGuard
 
 from base.api_contracts.idempotency import validate_idempotency_key
 
@@ -41,7 +41,7 @@ SEND_TIMEOUT_SECONDS = 120.0
 class Request:
     method: Literal["GET", "POST", "PATCH"]
     path: str
-    body: dict[str, Any] | None = None
+    body: Mapping[str, object] | None = None
     params: dict[str, str | int] | None = None
     timeout_seconds: float | None = None
     idempotency_key: str | None = None
@@ -77,7 +77,7 @@ class SpawnReceipt:
 
 def spawn_request(intent: SpawnIntent, idempotency_key: str) -> Request:
     key = validate_idempotency_key(idempotency_key)
-    body: dict[str, Any] = {"spawner": intent.spawner}
+    body: dict[str, object] = {"spawner": intent.spawner}
     if intent.prompt is not None:
         body["prompt"] = intent.prompt
         body["prompt_source"] = intent.prompt_source
@@ -113,7 +113,7 @@ def message_request(
     completion_notice: bool,
     idempotency_key: str,
 ) -> Request:
-    body: dict[str, Any] = {"content": content, "source": source}
+    body: dict[str, object] = {"content": content, "source": source}
     if completion_notice:
         body["completion_notice"] = True
     return Request(
