@@ -1376,6 +1376,11 @@ reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "meiva/gateway_client"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "meiva/impersonation"
 reportAny = "error"
 reportExplicitAny = "error"

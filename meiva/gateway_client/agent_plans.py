@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
 
 from meiva.gateway_client.plans import Request
 
@@ -42,7 +41,7 @@ def terminate_request(
     force: bool,
     kill_all_shell_sessions: bool,
 ) -> Request:
-    body: dict[str, Any] = {"source": source}
+    body: dict[str, object] = {"source": source}
     if message is not None:
         body["message"] = message
     if force:
@@ -59,7 +58,7 @@ def restart_request(
     message: str,
     config_overlay: Mapping[str, object] | None = None,
 ) -> Request:
-    body: dict[str, Any] = {"source": source, "message": message}
+    body: dict[str, object] = {"source": source, "message": message}
     if config_overlay:
         body["config_overlay"] = dict(config_overlay)
     return Request("POST", f"/api/agents/{agent_id}/restart", body=body)
@@ -74,7 +73,7 @@ def resurrect_request(agent_id: int, prompt: str, resurrected_by: str) -> Reques
 
 
 def register_page_request(agent_id: int, page: PageIntent, idempotency_key: str) -> Request:
-    body: dict[str, Any] = {"name": page.name, "port": page.port, "host": page.host}
+    body: dict[str, object] = {"name": page.name, "port": page.port, "host": page.host}
     if page.title is not None:
         body["title"] = page.title
     if page.serve_dir is not None:
