@@ -68,12 +68,14 @@ import re as re
 import subprocess as subprocess
 from collections.abc import Callable, Generator
 from collections.abc import Iterable as Iterable
+from dataclasses import dataclass
 from pathlib import Path
 
 import psycopg
 
 from base.cluster.machine import MachineNameMissing
 from base.db import connect_url
+from base.db.rows import query_all
 from base.deploy.schema.migration_errors import CodeBehindSchema as CodeBehindSchema
 from base.deploy.schema.migration_errors import (
     MigrationAuthorityMismatch as MigrationAuthorityMismatch,
@@ -258,6 +260,14 @@ def schema_mutation_lock(conn: psycopg.Connection) -> Generator[None]:
             cur.execute("SELECT pg_advisory_unlock(%s)", (MIGRATION_LOCK_KEY,))
 
 
+# meiva:note
+# One gateway-capable unit of the cluster, as `machine_units` records it.
+@dataclass(frozen=True)
+class _GatewayUnitRow:
+    machine_name: str
+    home: str
+
+
 def _gateway_units(conn: psycopg.Connection) -> list[tuple[str, str]]:
     """The `(machine_name, home)` of every unit this DB records as gateway-capable
     — the cluster's own identity, as written by `register_self` at `meiva start`.
@@ -272,11 +282,13 @@ def _gateway_units(conn: psycopg.Connection) -> list[tuple[str, str]]:
         row = cur.fetchone()
         if row is None or row[0] is None:
             return []
-        cur.execute(
-            "SELECT machine_name, home FROM machine_units "
-            "WHERE serve_gateway ORDER BY machine_name, home"
-        )
-        return [(name, home) for name, home in cur.fetchall()]
+    units = query_all(
+        conn,
+        _GatewayUnitRow,
+        "SELECT machine_name, home FROM machine_units "
+        "WHERE serve_gateway ORDER BY machine_name, home",
+    )
+    return [(unit.machine_name, unit.home) for unit in units]
 
 
 def _assert_migration_authority(

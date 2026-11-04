@@ -26,6 +26,7 @@ from base.deploy.sealed_release.sealed_plan import (
     manifest_path,
 )
 from base.host.atomic_io import write_text_atomic
+from base.host.boundary.process import stderr_text, stdout_text
 from base.host.system.hostport import Host
 from base.host.verified_file.plan import stat_changed
 
@@ -128,7 +129,7 @@ def unseal(path: Path, *, host: Host) -> None:
 def _run(host: Host, argv: list[str]) -> None:
     done = host.run(argv, capture_output=True, text=True, timeout=_SEAL_TIMEOUT_S)
     if done.returncode != 0:
-        detail = (done.stderr or done.stdout or "no output").strip().splitlines()[-1:]
+        detail = (stderr_text(done) or stdout_text(done) or "no output").strip().splitlines()[-1:]
         raise SealedTreeError(f"`{' '.join(argv)}` exited {done.returncode}: {detail}")
 
 

@@ -21,6 +21,8 @@ from collections.abc import Generator
 from pathlib import Path
 
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.native_process.os_platform import LockTimeoutError, file_lock
 
 _RESOURCE_LOCK_TIMEOUT_S = 30.0
@@ -41,7 +43,9 @@ def holder_path(path: Path) -> Path:
 
 def _last_holder(path: Path) -> str:
     try:
-        data = json.loads(holder_path(path).read_text())
+        data = object_of(json.loads, holder_path(path).read_text())
+        if not is_object_dict(data):
+            return "unknown"
         return (
             f"pid={data['pid']} purpose={data['purpose']!r} "
             f"since={data['since']} state={data['state']}"

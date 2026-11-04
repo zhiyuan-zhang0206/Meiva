@@ -54,7 +54,8 @@ def test_failed_phase_is_recorded_and_reraised(home: Path) -> None:
     assert op.phases[0].ok is False
     assert op.phases[0].finished_at is not None
     assert op.result is not None and op.result["rc"] == 1
-    assert "boom" in op.result["error"]
+    error = op.result["error"]
+    assert isinstance(error, str) and "boom" in error
 
 
 # meiva:note

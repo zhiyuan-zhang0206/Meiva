@@ -29,20 +29,19 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
 import psutil
 
+from base.host.boundary.fields import optional_object_field
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.log import logger
 from base.paths import run_dir
 
 
 def _is_obj_list(value: object) -> TypeGuard[list[object]]:
     return isinstance(value, list)
-
-
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
 
 
 @dataclass
@@ -86,7 +85,7 @@ class LifecycleOp:
     deadline: float | None
     phases: list[LifecyclePhase] = field(default_factory=list[LifecyclePhase])
     complete: bool = False
-    result: dict[str, Any] | None = None
+    result: dict[str, object] | None = None
     resumed_from: ResumedFrom | None = None
 
 
@@ -222,7 +221,7 @@ def _close_phase(home: Path, entry: LifecyclePhase, *, ok: bool) -> None:
 
 
 def finish(
-    home: Path, rc: int, *, error: str | None = None, extra: dict[str, Any] | None = None
+    home: Path, rc: int, *, error: str | None = None, extra: dict[str, object] | None = None
 ) -> None:
     """Mark the operation complete with its final diagnosis."""
     op = read(home)
@@ -239,7 +238,7 @@ def _parse_phases(raw_phases: object) -> list[LifecyclePhase]:
     if not _is_obj_list(raw_phases):
         return phases
     for raw in raw_phases:
-        if not _is_str_dict(raw):
+        if not is_object_dict(raw):
             continue
         name = raw.get("name")
         if not isinstance(name, str):
@@ -260,7 +259,7 @@ def _parse_phases(raw_phases: object) -> list[LifecyclePhase]:
 
 def _parse_resumed_from(raw_resumed: object) -> ResumedFrom | None:
     """The `resumed_from` record, or None when absent or not fully typed."""
-    if not _is_str_dict(raw_resumed):
+    if not is_object_dict(raw_resumed):
         return None
     prev_pid = raw_resumed.get("pid")
     prev_operation = raw_resumed.get("operation")
@@ -274,21 +273,39 @@ def _parse_resumed_from(raw_resumed: object) -> ResumedFrom | None:
     return None
 
 
+# meiva:note
+# A journal field that must be a JSON number; anything else is a `TypeError`, which `read` treats as an unreadable journal.
+def _number(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise TypeError(f"expected a number, got {type(value).__name__}")
+    return float(value)
+
+
+# meiva:note
+# A journal field that must be a JSON integer; anything else is a `TypeError`, which `read` treats as an unreadable journal.
+def _whole_number(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"expected an integer, got {type(value).__name__}")
+    return value
+
+
 def read(home: Path) -> LifecycleOp | None:
     """The current journal, or None when absent or unreadable."""
     try:
-        raw = json.loads(journal_path(home).read_text())
+        raw = object_of(json.loads, journal_path(home).read_text())
     except (OSError, ValueError):
         return None
-    if not _is_str_dict(raw):
+    if not is_object_dict(raw):
         return None
-    if not isinstance(raw.get("operation"), str):
+    operation = raw.get("operation")
+    if not isinstance(operation, str):
         return None
     phases = _parse_phases(raw.get("phases", []))
     try:
-        pid = int(raw["pid"])
-        started_at = float(raw.get("started_at", 0.0))
-        deadline = None if raw.get("deadline") is None else float(raw["deadline"])
+        pid = _whole_number(raw["pid"])
+        started_at = _number(raw.get("started_at", 0.0))
+        deadline_raw = raw.get("deadline")
+        deadline = None if deadline_raw is None else _number(deadline_raw)
     except (KeyError, TypeError, ValueError):
         # A parseable-but-wrong-shape journal (missing identity fields, bad
         # types) is as unreadable as a corrupt one: readers on the
@@ -296,13 +313,13 @@ def read(home: Path) -> LifecycleOp | None:
         return None
     resumed_from = _parse_resumed_from(raw.get("resumed_from"))
     return LifecycleOp(
-        operation=raw["operation"],
+        operation=operation,
         pid=pid,
         started_at=started_at,
         deadline=deadline,
         phases=phases,
         complete=bool(raw.get("complete", False)),
-        result=raw.get("result"),
+        result=optional_object_field(raw, "result"),
         resumed_from=resumed_from,
     )
 

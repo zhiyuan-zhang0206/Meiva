@@ -53,3 +53,4 @@ services/entrypoints
 services/supervision
 services/upkeep
 services/wake
+base/deploy

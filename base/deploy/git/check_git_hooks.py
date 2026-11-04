@@ -166,6 +166,15 @@ def scan_machine() -> int:
     return 0
 
 
+# meiva:note
+# The options of `main`, as the typed namespace argparse fills in. This script runs under the
+# committer's bare system `python3` and imports nothing from the repository, so it cannot use
+# `base.host.boundary.options.options`; the namespace subclass is the typed seam here.
+class _Arguments(argparse.Namespace):
+    scan_machine: bool
+    strict: bool
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         description="Warn about missing Git hooks or ephemeral interpreter pointers."
@@ -180,7 +189,7 @@ def main(argv: list[str]) -> int:
         action="store_true",
         help="exit 1 when the current repository reports a problem (default: warn only)",
     )
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv, namespace=_Arguments())
     if args.scan_machine:
         return scan_machine()
     problems, main_clone = inspect_checkout(Path.cwd())
