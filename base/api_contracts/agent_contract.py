@@ -29,7 +29,7 @@ from collections.abc import Awaitable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, ClassVar, Literal, Protocol
+from typing import ClassVar, Literal, Protocol
 
 
 class AgentStatus(StrEnum):
@@ -589,7 +589,7 @@ class Event:
     level: Level
     source: str
     target_agent_id: int | None
-    attributes: dict[str, Any] = field(default_factory=dict[str, Any])
+    attributes: dict[str, object] = field(default_factory=dict[str, object])
 
 
 # meiva:note

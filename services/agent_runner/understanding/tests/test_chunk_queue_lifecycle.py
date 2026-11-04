@@ -233,4 +233,6 @@ async def test_a_closing_chunk_past_its_snapshot_describes_what_exists_and_repor
     assert len(await written_nodes(aops_pool)) == 1
     [(name, attrs)] = [(event.event_name, event.attributes) for event in emitted_events]
     assert attrs is not None and name == "understanding_chunk_gap"
-    assert "request 5-9 (not in the snapshot)" in attrs["gaps"]
+    gaps = attrs["gaps"]
+    assert isinstance(gaps, str)
+    assert "request 5-9 (not in the snapshot)" in gaps

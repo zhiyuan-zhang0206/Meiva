@@ -284,7 +284,9 @@ def test_emit_checkpoint_table_sizes_samples_without_vacuuming(
     assert sample.category == "telemetry"
     attributes = sample.attributes
     assert attributes["checkpoints_live"] == 1
-    assert attributes["blobs_bytes"] >= 0
+    blobs_bytes = attributes["blobs_bytes"]
+    assert isinstance(blobs_bytes, int)
+    assert blobs_bytes >= 0
 
 
 def test_emit_skips_missing_tables_fresh_cluster(

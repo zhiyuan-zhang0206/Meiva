@@ -15,6 +15,7 @@ import os
 import subprocess
 import time
 from pathlib import Path
+from typing import TypeGuard
 
 import psutil
 import psycopg
@@ -112,6 +113,12 @@ def _start_with_hung_archive(
 
 
 # meiva:note
+# An emitted attribute read as a list; the assertion below checks what its elements are.
+def _values(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+# meiva:note
 # Linux lane only: the custody receipt this test writes names `NATIVE_TEST_SYSTEM`, and reading it
 # back asks for the native start ticks that only `/proc` provides. On darwin the receipt is refused
 # before the leg under test runs, which reads as a failure of the stop rather than of the host.
@@ -159,7 +166,9 @@ def test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget(
         assert "fast shutdown did not complete" in note and "immediate shutdown" in note
         (event,) = emitted_events.named("postgres_stop_escalated")
         assert event.level == "error" and event.source == "stop"
-        assert set(event.attributes["killed"]) <= hung_pids | {owner.pid}
+        killed = event.attributes["killed"]
+        assert _values(killed), killed
+        assert set(killed) <= hung_pids | {owner.pid}
     finally:
         pg.stop(
             data,

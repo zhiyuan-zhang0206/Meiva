@@ -12,7 +12,7 @@ re-exports `MetricSpec` and `ThresholdStep` as the plugin-author entry point.
 from __future__ import annotations
 
 import re
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -134,11 +134,11 @@ class MetricSpec(BaseModel):
     # `custom` merges into fieldConfig.defaults.custom (stacking/axisLabel/
     # fillOpacity/...). Core panels use these to keep their exact rendered
     # look after migrating from hand-written JSON (2026-08-06, Task #882).
-    options: dict[str, Any] | None = None
-    custom: dict[str, Any] | None = None
+    options: dict[str, object] | None = None
+    custom: dict[str, object] | None = None
     # Overrides merged into fieldConfig.defaults itself (e.g. the stat
     # color mode) — keys not present here keep the generator defaults.
-    field_defaults: dict[str, Any] | None = None
+    field_defaults: dict[str, object] | None = None
     # Explicit grid size (override the 6x4 stat / 12x7 chart default).
     width: int | None = Field(default=None, ge=1, le=24)
     height: int | None = Field(default=None, ge=1, le=40)
@@ -154,7 +154,7 @@ class MetricSpec(BaseModel):
     position: tuple[int, int] | None = None
     # Grafana transformations copied verbatim into the rendered panel (the
     # PR-flow day tables' joinByField + organize).
-    transformations: list[dict[str, Any]] | None = None
+    transformations: list[dict[str, object]] | None = None
     thresholds: list[ThresholdStep] | None = None
     time_basis: TimeBasis | None = None
     output: list[OutputSurface] = ["grafana"]
@@ -227,7 +227,10 @@ def bucket_minutes(template: str) -> int:
     `` / N`` divides all of it; a part that already divides is refused so the
     divisor has one owner.
     """
-    windows = _BUCKET_WINDOW.findall(template)
+    # meiva:note
+    # `re.findall` answers `list[Any]`; the pattern has one capture group, so every item is a
+    # string and the annotation states the claim once instead of casting each use.
+    windows: list[str] = _BUCKET_WINDOW.findall(template)
     if len(windows) != 1:
         raise ValueError(
             "time_basis='per_minute' needs exactly one [Nm] bucket window per query "

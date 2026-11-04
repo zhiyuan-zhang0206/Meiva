@@ -86,7 +86,9 @@ class TestStoppedTooLongSignal:
         )
         assert event.event_name == "machine_stopped_too_long"
         assert event.attributes["machine"] == "forgotten"
-        assert 20 * 60 < event.attributes["stopped_for_s"] <= 21 * 60 + 5
+        stopped_for_s = event.attributes["stopped_for_s"]
+        assert isinstance(stopped_for_s, int)
+        assert 20 * 60 < stopped_for_s <= 21 * 60 + 5
         assert set(event.attributes) == set(payload_keys("machine_stopped_too_long"))
 
     def test_a_recent_stop_is_still_inside_a_normal_restart(
