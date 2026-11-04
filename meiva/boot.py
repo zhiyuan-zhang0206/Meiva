@@ -21,7 +21,7 @@ import random
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, assert_never
+from typing import Protocol, assert_never
 
 from base.agents.context import MeivaContext, deferred_event_bus
 from base.agents.context.clients import (
@@ -42,6 +42,7 @@ from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
+from base.host.boundary.untyped import object_mapping
 from base.host.env.agent_env import AGENT_ID_ENV
 from base.host.exit_codes import hard_exit
 from base.lm.catalog import ModelCatalog
@@ -65,6 +66,21 @@ from meiva.sdk_surface.pure.plans.load_plan import (
 )
 
 
+# meiva:note
+# The one classmethod of redis-py's client class that `_redis` calls. redis-py types `from_url`'s
+# keyword arguments as unknown, so the class is taken as this view, a parameter annotation.
+class _RedisFromUrl(Protocol):
+    def from_url(self, url: str, *, decode_responses: bool, **kwargs: object) -> object: ...
+
+
+def _open_redis(client_class: _RedisFromUrl, url: str, resilience: Mapping[str, object]) -> object:
+    return client_class.from_url(
+        url,
+        decode_responses=True,
+        **{**resilience, "socket_timeout": 10.0},
+    )
+
+
 def _redis(url: str) -> object:
     import redis as redis_lib
 
@@ -74,12 +90,7 @@ def _redis(url: str) -> object:
         raise RuntimeError(
             "MEIVA_REDIS_URL not set — Redis ops should not be called in container mode"
         )
-    client_class: Any = redis_lib.Redis
-    return client_class.from_url(
-        url,
-        decode_responses=True,
-        **{**RESILIENCE_KWARGS, "socket_timeout": 10.0},
-    )
+    return _open_redis(redis_lib.Redis, url, RESILIENCE_KWARGS)
 
 
 # meiva:note
@@ -130,7 +141,7 @@ def database_factory(*, config: ConfigBoot, machine: MachineIdentityReader) -> D
     version = CodeVersion(process_context.loaded_code_image())
     lock = Lock()
 
-    gate: Any = None
+    gate: object = None
 
     def database() -> DatabaseHandle:
         nonlocal gate
@@ -145,11 +156,12 @@ def database_factory(*, config: ConfigBoot, machine: MachineIdentityReader) -> D
                 "MEIVA_DB_URL not set — SQL ops should not be called in container mode"
             )
         with lock:
-            if gate is None:
+            if not isinstance(gate, ProcessDbGate):
                 gate = ProcessDbGate(version=version.get, process="unknown", end_process=hard_exit)
+            process_gate = gate
         return Database(
             db_config_from_boot(config),
-            gate=gate,
+            gate=process_gate,
             direct_url=ClusterDirectUrl(machine.host, home=resolve_meiva_home()),
         )
 
@@ -228,11 +240,14 @@ def derived_clients(config: ConfigBoot, machine: MachineIdentityReader) -> Clien
 
 
 def context_from_description(
-    description: dict[str, Any],
+    description: Mapping[str, object],
     *,
     config: ConfigBoot,
     original_incarnation: RuntimeIncarnation | None = None,
 ) -> MeivaContext:
+    gateway_url = description["gateway_url"]
+    if not isinstance(gateway_url, str):
+        raise TypeError(f"context description gateway_url must be a str: {gateway_url!r}")
     machine = ConfiguredMachineIdentity(config)
     return MeivaContext.from_description(
         description,
@@ -241,7 +256,7 @@ def context_from_description(
             config=config,
             machine=machine,
             database=database_factory(config=config, machine=machine),
-            gateway_url=description["gateway_url"],
+            gateway_url=gateway_url,
         ),
         machine=machine,
         original_incarnation=original_incarnation,
@@ -280,7 +295,7 @@ def launched_context(*, env: Mapping[str, str], config: ConfigBoot) -> MeivaCont
 
 
 def _door_import_complete() -> bool:
-    return bool(meiva_module().__dict__.get("_init_complete", False))
+    return bool(object_mapping(meiva_module().__dict__).get("_init_complete", False))
 
 
 def _identity_facts(context: MeivaContext | None) -> IdentityFacts | None:

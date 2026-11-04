@@ -11,11 +11,15 @@ import os as _os
 import re as _re
 import socket as _socket
 import urllib.request as _urlopen
+from collections.abc import Mapping
 from dataclasses import dataclass
+from http.client import HTTPResponse
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import Protocol, TypeGuard, runtime_checkable
 
 from base.clock import Timers
+from base.host.boundary.fields import int_field, optional_str_field, str_field
+from base.host.boundary.untyped import object_of
 from base.log import logger
 from meiva import boot, gateway_client
 from meiva.sdk_surface import agent_identity, process_context
@@ -57,13 +61,13 @@ class Page:
     url: str
 
 
-def _row_to_page(row: dict[str, Any]) -> Page:
+def _row_to_page(row: Mapping[str, object]) -> Page:
     return Page(
-        id=int(row["id"]),
-        name=row["name"],
-        port=int(row["port"]),
-        title=row.get("title"),
-        url=row["url"],
+        id=int_field(row, "id"),
+        name=str_field(row, "name"),
+        port=int_field(row, "port"),
+        title=optional_str_field(row, "title"),
+        url=str_field(row, "url"),
     )
 
 
@@ -105,7 +109,10 @@ def _coerce_page_port(port: object) -> int:
 def _probe_page_health(host: str, port: int) -> str | None:
     """The body of (host, port)'s /health, or None when nothing answers 200."""
     try:
-        with _urlopen.urlopen(f"http://{host}:{port}/health", timeout=1.0) as resp:
+        answer = object_of(_urlopen.urlopen, f"http://{host}:{port}/health", timeout=1.0)
+        if not isinstance(answer, HTTPResponse):
+            raise TypeError(f"urlopen answered {type(answer).__name__}, not HTTPResponse")
+        with answer as resp:
             if resp.status != 200:
                 return None
             return resp.read().decode(errors="replace")
@@ -184,7 +191,7 @@ class PageHost:
                 port,
             )
             return False
-        return any(int(page["port"]) == port for page in pages)
+        return any(int_field(page, "port") == port for page in pages)
 
     def reject_foreign_port_occupant(self, port: int) -> None:
         """Fail fast when the port is held by a process that is not a page server.
@@ -359,6 +366,14 @@ def page_host() -> PageHost:
     )
 
 
+# meiva:note
+# A failed gateway call's response, seen by the one method `_error_detail` reads: httpx's response
+# and the in-process test client's both answer it.
+@runtime_checkable
+class _JsonBody(Protocol):
+    def json(self) -> object: ...
+
+
 def _error_detail(exc: Exception) -> str | None:
     """The gateway error body's `detail` string, or None when there is none.
 
@@ -366,8 +381,8 @@ def _error_detail(exc: Exception) -> str | None:
     class-based: prod HTTP raises httpx's HTTPStatusError while the in-process
     TestClient raises httpx2's — the JSON wire body is the stable contract.
     """
-    response = getattr(exc, "response", None)
-    if response is None:
+    response = object_of(getattr, exc, "response", None)
+    if not isinstance(response, _JsonBody):
         return None
     try:
         parsed = response.json()
@@ -462,5 +477,5 @@ def __getattr__(name: str) -> object:
     import sys as _sys
 
     if boot.maybe_load_plugins_for_missing(name):
-        return getattr(_sys.modules[__name__], name)
+        return object_of(getattr, _sys.modules[__name__], name)
     raise AttributeError(f"module 'meiva.ui' has no attribute {name!r}")
