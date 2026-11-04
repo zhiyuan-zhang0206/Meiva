@@ -36,6 +36,8 @@ from scripts.data_plane_ops.tests.alert_rules.rule_helpers import (
 from tests.scripts.test_alert_rules_signals import SIGNALS
 
 _EXPECTED_UIDS = {
+    "meiva-ops-alert-pipeline-watchdog",
+    "meiva-ops-alert-pipeline-silent",
     "meiva-ops-warning-error-spike",
     "meiva-ops-llm-rate-limit",
     "meiva-ops-sse-drop-backlog",
@@ -464,3 +466,26 @@ def test_inbound_consumed_unknown_rule_counts_the_event_over_a_day() -> None:
         "metric": "inbound_consumed_unknown",
         "team": "meiva-ops",
     }
+
+
+# meiva:note
+# The dead-man pair is judged as a pair: the watchdog's period (5m, its route's
+# repeat_interval) is the N the silence rule multiplies by three, and the gauge it
+# reads is the one the gateway's ingest refreshes. Pinning only one half lets the
+# other drift into a switch that never fires -- or fires on a quiet night.
+def test_alert_pipeline_watchdog_and_silence_rule_agree_on_the_period() -> None:
+    rules = {rule["uid"]: rule for rule in load_rules()}
+    watchdog = rules["meiva-ops-alert-pipeline-watchdog"]
+    silent = rules["meiva-ops-alert-pipeline-silent"]
+    assert watchdog["labels"]["metric"] == "alert_pipeline_watchdog"
+    assert watchdog["labels"]["notify_im"] == "false"
+    assert watchdog["for"] == "0m"
+    assert rule_query_exprs(watchdog, "prometheus") == ["vector(1)"]
+    assert silent["labels"]["metric"] == "alert_pipeline_silent"
+    exprs = rule_query_exprs(silent, "prometheus")
+    assert any(
+        "meiva_alerts_last_ingest_timestamp_seconds" in expr and "time() -" in expr
+        for expr in exprs
+    ), exprs
+    (threshold,) = threshold_params(silent)
+    assert threshold == [900]

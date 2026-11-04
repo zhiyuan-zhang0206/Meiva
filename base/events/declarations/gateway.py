@@ -172,6 +172,17 @@ class GateAuthProbeFailed(TypedDict):
     latency_ms: int
 
 
+# meiva:note
+# The `alerts` payload — gateway/alerts/router.py:ingest_alerts. One event per accepted webhook
+# POST that wrote an alert row (a new instance or a re-send of a firing one), carrying the epoch
+# seconds of that write. Its only consumer is the OTLP gauge `alerts_last_ingest_timestamp_seconds`:
+# a rule fires when `time() - <gauge> > 900`, so a broken webhook path (a rotated token the gateway
+# no longer accepts, a stopped gateway) becomes visible without waiting for an alert that the
+# broken path would have had to deliver.
+class AlertsLastIngest(TypedDict):
+    last_ingest_timestamp_seconds: float
+
+
 EVENTS: dict[str, EventSpec] = {
     "inspect_metrics_coverage_gap": telemetry_event(
         "inspect_metrics_coverage_gap",
@@ -190,6 +201,17 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "sse_drop": telemetry_event(
         "sse_drop", "SSE event dropped", payload=SseDrop, tier="anomaly", persist=True
+    ),
+    # meiva:note
+    # The alert ingest heartbeat: an unpersisted event whose only consumer is the OTLP
+    # gauge (`alerts_last_ingest_timestamp_seconds`), so the dead-man rule can tell
+    # "the webhook path is silent" from "nothing happened".
+    "alerts": telemetry_event(
+        "alerts",
+        "alert webhook ingest heartbeat — epoch seconds of the last alert the ingest accepted",
+        payload=AlertsLastIngest,
+        tier="noise",
+        site='gateway/alerts/router.py:ingest_alerts telemetry.emit("telemetry", "alerts", ...)',
     ),
     # meiva.ui.serve page-restore
     # gateway endpoint latency metering (Task #1091): 60s aggregates emitted
