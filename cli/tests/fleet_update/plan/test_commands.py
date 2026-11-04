@@ -5,7 +5,11 @@
 # meiva:link cli/docs/fleet-update.meiva.okf.md
 from __future__ import annotations
 
+import os
 import shlex
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
@@ -91,9 +95,186 @@ def test_prestage_warms_dependencies_and_harnesses_from_target_objects_without_m
     command = prestage_command(_NEW)
     assert "meiva-prestage" in command
     assert f'git -C "$S" archive {_NEW} -- pyproject.toml uv.lock .python-version' in command
+    assert f'git -C "$S" diff --quiet HEAD {_NEW} -- uv.lock .python-version' in command
+    assert f"diff --quiet HEAD {_NEW} -- pyproject.toml" not in command
+    assert 'cp -Rc "$S/.venv" "$tmp/.venv"' in command
+    assert "cp -al" not in command
     assert 'UV_PROJECT_ENVIRONMENT="$tmp/.venv"' in command
+    assert 'UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-120}"' in command
+    assert "uv sync -q --frozen --no-install-project --no-build-package meiva) || exit 1" in command
+    assert "pnpm fetch --frozen-lockfile >/dev/null) || exit 1" in command
     assert "converge_local_harness_clis" in command
     assert "git checkout" not in command
+
+
+@dataclass(frozen=True)
+class _PrestageRig:
+    tmp_path: Path
+    user_home: Path
+    home: Path
+    repo: Path
+    bin_dir: Path
+    log_file: Path
+    source_py: Path
+    source_sentinel: Path
+    pyproject_sha: str
+    uv_sha: str
+    pnpm_sha: str
+
+    def run(self, target: str, **extra_env: str) -> subprocess.CompletedProcess[str]:
+        env = {
+            **os.environ,
+            "HOME": str(self.user_home),
+            "MEIVA_HOME": str(self.home),
+            "TMPDIR": str(self.tmp_path),
+            "PATH": f"{self.bin_dir}:{os.environ['PATH']}",
+            **extra_env,
+        }
+        env.pop("UV_HTTP_TIMEOUT", None)
+        return subprocess.run(
+            ["bash", "-c", prestage_command(target)],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+
+def _write_executable(path: Path, body: str) -> None:
+    path.write_text(body, encoding="utf-8")
+    path.chmod(0o755)
+
+
+def _git_in(repo: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "GIT_AUTHOR_NAME": "Test",
+            "GIT_AUTHOR_EMAIL": "t@example.com",
+            "GIT_COMMITTER_NAME": "Test",
+            "GIT_COMMITTER_EMAIL": "t@example.com",
+        },
+    ).stdout.strip()
+
+
+def _build_prestage_rig(tmp_path: Path) -> _PrestageRig:
+    user_home = tmp_path / "user-home"
+    home = user_home / ".meiva"
+    bin_dir, log_file = tmp_path / "bin", tmp_path / "calls.log"
+    repo = home / "source"
+    (repo / ".venv" / "bin").mkdir(parents=True)
+    bin_dir.mkdir()
+    (home / ".env").write_text("", encoding="utf-8")
+    source_py = repo / ".venv" / "bin" / "python"
+    _write_executable(source_py, f'#!/bin/sh\necho "python:$0" >> "{log_file}"\nexit 0\n')
+    source_sentinel = repo / ".venv" / "sentinel.txt"
+    source_sentinel.write_text("immutable\n", encoding="utf-8")
+    _write_executable(
+        bin_dir / "uv",
+        "#!/bin/sh\n"
+        f'echo "uv:timeout=$UV_HTTP_TIMEOUT:pyproject=$([ -f pyproject.toml ] && echo yes || echo no)" >> "{log_file}"\n'
+        'mkdir -p "$UV_PROJECT_ENVIRONMENT/bin"\n'
+        'rm -f "$UV_PROJECT_ENVIRONMENT/bin/python"\n'
+        'printf "#!/bin/sh\\nexit 99\\n" > "$UV_PROJECT_ENVIRONMENT/bin/python"\n'
+        'chmod +x "$UV_PROJECT_ENVIRONMENT/bin/python"\n'
+        'exit "${FAKE_UV_RC:-0}"\n',
+    )
+    _write_executable(
+        bin_dir / "pnpm",
+        f'#!/bin/sh\necho "pnpm:$*" >> "{log_file}"\nexit "${{FAKE_PNPM_RC:-0}}"\n',
+    )
+
+    _git_in(repo, "init", "-q")
+    (repo / "pyproject.toml").write_text("[project]\nname = 'meiva'\n", encoding="utf-8")
+    (repo / "uv.lock").write_text("version = 1\n", encoding="utf-8")
+    (repo / ".python-version").write_text("3.12\n", encoding="utf-8")
+    (repo / "base" / "host" / "env" / "harness").mkdir(parents=True)
+    (repo / "base" / "host" / "env" / "harness" / "convergence.py").write_text(
+        "pass\n", encoding="utf-8"
+    )
+    (repo / "cli").mkdir()
+    (repo / "cli" / "__init__.py").write_text("", encoding="utf-8")
+    (repo / "ui" / "web").mkdir(parents=True)
+    (repo / "ui" / "web" / "package.json").write_text("{}\n", encoding="utf-8")
+    (repo / "ui" / "web" / "pnpm-lock.yaml").write_text(
+        "lockfileVersion: '9.0'\n", encoding="utf-8"
+    )
+    _git_in(repo, "add", ".")
+    _git_in(repo, "commit", "-q", "-m", "base")
+    base_sha = _git_in(repo, "rev-parse", "HEAD")
+
+    (repo / "pyproject.toml").write_text(
+        "[project]\nname = 'meiva'\n[tool.pyright]\n", encoding="utf-8"
+    )
+    _git_in(repo, "add", "pyproject.toml")
+    _git_in(repo, "commit", "-q", "-m", "pyproject only")
+    pyproject_sha = _git_in(repo, "rev-parse", "HEAD")
+
+    (repo / "uv.lock").write_text("version = 2\n", encoding="utf-8")
+    _git_in(repo, "add", "uv.lock")
+    _git_in(repo, "commit", "-q", "-m", "uv lock change")
+    uv_sha = _git_in(repo, "rev-parse", "HEAD")
+
+    (repo / "ui" / "web" / "pnpm-lock.yaml").write_text(
+        "lockfileVersion: '9.1'\n", encoding="utf-8"
+    )
+    _git_in(repo, "add", "ui/web/pnpm-lock.yaml")
+    _git_in(repo, "commit", "-q", "-m", "pnpm lock change")
+    pnpm_sha = _git_in(repo, "rev-parse", "HEAD")
+    _git_in(repo, "checkout", "-q", base_sha)
+    return _PrestageRig(
+        tmp_path=tmp_path,
+        user_home=user_home,
+        home=home,
+        repo=repo,
+        bin_dir=bin_dir,
+        log_file=log_file,
+        source_py=source_py,
+        source_sentinel=source_sentinel,
+        pyproject_sha=pyproject_sha,
+        uv_sha=uv_sha,
+        pnpm_sha=pnpm_sha,
+    )
+
+
+def test_prestage_shell_skips_uv_on_pyproject_only_diff_and_fails_fast_on_sync_error(
+    tmp_path: Path,
+) -> None:
+    rig = _build_prestage_rig(tmp_path)
+
+    # meiva:note
+    # A `pyproject.toml`-only diff skips `uv sync` and keeps using `$S/.venv/bin/python`.
+    res_pyproject = rig.run(rig.pyproject_sha)
+    assert res_pyproject.returncode == 0
+    calls = rig.log_file.read_text(encoding="utf-8").splitlines()
+    assert not any(line.startswith("uv:") for line in calls)
+    assert any(line.startswith("python:") for line in calls)
+
+    # meiva:note
+    # A failed `uv sync` aborts prestage non-zero instead of falling through to a half-built `.venv`.
+    rig.log_file.write_text("", encoding="utf-8")
+    res_uv_fail = rig.run(rig.uv_sha, FAKE_UV_RC="28")
+    assert res_uv_fail.returncode == 1
+    calls = rig.log_file.read_text(encoding="utf-8").splitlines()
+    assert calls == ["uv:timeout=120:pyproject=yes"]
+    assert rig.source_sentinel.read_text(encoding="utf-8") == "immutable\n"
+    assert "exit 0" in rig.source_py.read_text(encoding="utf-8")
+    assert list(tmp_path.glob("meiva-prestage.*")) == []
+
+    # meiva:note
+    # A failed `pnpm fetch` also aborts prestage non-zero before harness convergence runs.
+    (rig.repo / "ui" / "web" / "node_modules").mkdir()
+    rig.log_file.write_text("", encoding="utf-8")
+    res_pnpm_fail = rig.run(rig.pnpm_sha, FAKE_UV_RC="0", FAKE_PNPM_RC="1")
+    assert res_pnpm_fail.returncode == 1
+    calls = rig.log_file.read_text(encoding="utf-8").splitlines()
+    assert "uv:timeout=120:pyproject=yes" in calls
+    assert any(line.startswith("pnpm:fetch") for line in calls)
+    assert not any(line.startswith("python:") for line in calls)
 
 
 def test_the_gateway_programs_are_asked_by_verb() -> None:

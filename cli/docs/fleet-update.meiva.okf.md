@@ -41,10 +41,12 @@ before any SSH. The flags, their modes and the forwarded stop and start choices 
 4. NEW's offline `meiva schedules verify` over the gateway's stored schedule
    table — a red or an unevaluable check refuses `down` before any stop.
 5. Pre-stage NEW across every host in parallel while the cluster is still serving:
-   warm changed `uv` wheels and `pnpm` store entries in a temporary directory and
-   converge external agent harness CLIs (`claude`, `codex`, `agy`, `dsh`) on
-   `agent-runner` hosts so neither `switch` nor `meiva start` spends the outage
-   downloading packages or harness binaries.
+   warm changed Python wheels (`uv.lock` or `.python-version`, seeded from `$S/.venv`
+   via APFS CoW clone on macOS, with `UV_HTTP_TIMEOUT` defaulted to 120s) and `pnpm`
+   store entries (`ui/web/pnpm-lock.yaml`) in a temporary directory — failing fast if
+   either cache warm exits non-zero — and converge external agent harness CLIs
+   (`claude`, `codex`, `agy`, `dsh`) on `agent-runner` hosts so neither `switch` nor
+   `meiva start` spends the outage downloading packages or harness binaries.
 6. Open the window's Grafana silence on the gateway host.
 7. `meiva stop --yes` with the operator's flags across all runners in parallel,
    waiting for every in-flight runner stop to finish before stopping the gateway

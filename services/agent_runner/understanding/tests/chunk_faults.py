@@ -8,9 +8,8 @@ from typing import Any
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from base.agents.history.checkpoint import FullHistory
 from base.agents.history.hierarchy.chunk_generate import ChunkResult
-from base.agents.history.hierarchy.chunks import ChunkCall, LocatedChunk
+from base.agents.history.hierarchy.chunks import ChunkCall, ChunkJob, LocatedChunk, locate_chunk
 from base.agents.history.hierarchy.leaf_groups import UnitGroup
 from base.agents.history.hierarchy.units import divide_units
 from base.agents.messages.timestamp_policy import TimestampPolicy
@@ -53,21 +52,25 @@ def chunk_timestamps() -> TimestampPolicy:
 
 
 # meiva:note
-# The fault rig's recording state and the two boundaries it replaces: the stitched history a job
+# The fault rig's recording state and the two boundaries it replaces: the chunk location a job
 # describes and the model call that divides a chunk. The consumer takes both as constructor
 # arguments, so the rig wires the consumer a test builds instead of rewriting the module, and the
-# tests that need it pass `describe=seams.describe, load_segments=seams.load_segments`.
+# tests that need it pass `describe=seams.describe, locate_job_chunk=seams.locate_job_chunk`.
 @dataclass
 class ChunkSeams:
     timestamps: TimestampPolicy
     state: dict[str, Any]
 
-    def load_segments(
-        self, _db: Database, _agent_id: int, _boundary: str | None
-    ) -> tuple[FullHistory, int | None]:
+    def locate_job_chunk(self, _db: Database, job: ChunkJob) -> LocatedChunk:
         if "segments_error" in self.state:
             raise self.state["segments_error"]
-        return self.state.get("history", inbound_history()), self.state.get("closing_segment")
+        return locate_chunk(
+            self.state.get("history", inbound_history()),
+            start_index=job.start_index,
+            end_index=job.end_index,
+            end_msg_id=job.end_msg_id,
+            closing_segment=self.state.get("closing_segment"),
+        )
 
     def describe(
         self,
@@ -131,5 +134,5 @@ async def run_rounds(
                 **lm_wiring(model_catalog),
                 config=config,
                 describe=seams.describe,
-                load_segments=seams.load_segments,
+                locate_job_chunk=seams.locate_job_chunk,
             ).claim(tg)

@@ -46,12 +46,8 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from base import telemetry
-from base.agents.history.checkpoint import (
-    CheckpointReadError,
-    FullHistory,
-    list_compact_boundary_checkpoint_ids,
-    load_checkpoint_history_full,
-)
+from base.agents.history.checkpoint import CheckpointReadError
+from base.agents.history.checkpoint_segment import BoundaryCheckpointGoneError
 from base.agents.history.hierarchy.chunk_generate import ChunkResult, generate_chunk
 from base.agents.history.hierarchy.chunks import (
     GIVE_UP_AFTER_SECONDS,
@@ -66,7 +62,6 @@ from base.agents.history.hierarchy.chunks import (
     claim_job,
     covered_spans,
     finish_job,
-    locate_chunk,
     message_time,
     release_job,
     slice_chunk,
@@ -99,6 +94,9 @@ from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.log import logger
+from services.agent_runner.understanding.chunk_locator import (
+    locate_job_chunk as locate_job_chunk,
+)
 from services.agent_runner.understanding.group_consumer import (
     run_blocking,
     run_group_checks,
@@ -122,18 +120,6 @@ class Outcome:
 
     status: str
     error: str | None = None
-
-
-def load_segments(
-    db: Database, agent_id: int, boundary_id: str | None
-) -> tuple[FullHistory, int | None]:
-    # meiva:note
-    # The stitched history and, for a closing chunk, the index of its segment.
-    history = load_checkpoint_history_full(db, agent_id)
-    if boundary_id is None:
-        return history, None
-    ascending = list(reversed(list_compact_boundary_checkpoint_ids(db, agent_id)))
-    return history, ascending.index(boundary_id)
 
 
 class ModelCache:
@@ -284,9 +270,7 @@ async def run_job(
     *,
     config: ConfigBoot,
     clock: Clock,
-    load_segments: Callable[
-        [Database, int, str | None], tuple[FullHistory, int | None]
-    ] = load_segments,
+    locate_job_chunk: Callable[[Database, ChunkJob], LocatedChunk] = locate_job_chunk,
     describe: Callable[..., ChunkResult] = describe,
 ) -> Outcome:
     # meiva:note
@@ -302,22 +286,11 @@ async def run_job(
         default_model=config.view.lm.llm_model,
     )
     try:
-        history, closing_segment = await asyncio.to_thread(
-            load_segments, db, job.agent_id, job.boundary_checkpoint_id
-        )
+        located = await asyncio.to_thread(locate_job_chunk, db, job)
     except CheckpointReadError as exc:
         return Outcome("failed", f"checkpoint read failed: {exc}")
-    except ValueError:
+    except BoundaryCheckpointGoneError:
         return Outcome("failed", f"boundary checkpoint {job.boundary_checkpoint_id} is gone")
-    try:
-        located = await asyncio.to_thread(
-            locate_chunk,
-            history,
-            start_index=job.start_index,
-            end_index=job.end_index,
-            end_msg_id=job.end_msg_id,
-            closing_segment=closing_segment,
-        )
     except ChunkNotReadyError as exc:
         return Outcome("wait", str(exc))
     except ChunkDriftError as exc:
@@ -436,9 +409,7 @@ class Consumer:
         clock: Clock,
         poll_seconds: float = POLL_SECONDS,
         max_in_flight: int | None = None,
-        load_segments: Callable[
-            [Database, int, str | None], tuple[FullHistory, int | None]
-        ] = load_segments,
+        locate_job_chunk: Callable[[Database, ChunkJob], LocatedChunk] = locate_job_chunk,
         describe: Callable[..., ChunkResult] = describe,
         settle_chunk_job: Callable[
             [AsyncConnectionPool, ChunkJob, Outcome], Awaitable[None]
@@ -446,7 +417,7 @@ class Consumer:
         run_rebuild: Callable[..., Awaitable[int]] = run_rebuild,
     ) -> None:
         self.pool, self.db, self.tools, self.replay = pool, db, tools, replay
-        self._load_segments = load_segments
+        self._locate_job_chunk = locate_job_chunk
         self._describe = describe
         self._settle_chunk_job = settle_chunk_job
         self._run_rebuild = run_rebuild
@@ -531,7 +502,7 @@ class Consumer:
                     executor,
                     config=self.config,
                     clock=self.clock,
-                    load_segments=self._load_segments,
+                    locate_job_chunk=self._locate_job_chunk,
                     describe=self._describe,
                 )
             except asyncio.CancelledError:
@@ -709,9 +680,7 @@ async def replay_jobs(
     llm_override: str,
     config: ConfigBoot,
     clock: Clock,
-    load_segments: Callable[
-        [Database, int, str | None], tuple[FullHistory, int | None]
-    ] = load_segments,
+    locate_job_chunk: Callable[[Database, ChunkJob], LocatedChunk] = locate_job_chunk,
     describe: Callable[..., ChunkResult] = describe,
     settle_chunk_job: Callable[
         [AsyncConnectionPool, ChunkJob, Outcome], Awaitable[None]
@@ -730,7 +699,7 @@ async def replay_jobs(
         llm_override=llm_override,
         config=config,
         clock=clock,
-        load_segments=load_segments,
+        locate_job_chunk=locate_job_chunk,
         describe=describe,
         settle_chunk_job=settle_chunk_job,
         run_rebuild=run_rebuild,
@@ -750,9 +719,7 @@ async def understanding_loop_forever(
     poll_seconds: float = POLL_SECONDS,
     max_in_flight: int | None = DEFAULT_MAX_IN_FLIGHT,
     startup_delay_seconds: float = 0.0,
-    load_segments: Callable[
-        [Database, int, str | None], tuple[FullHistory, int | None]
-    ] = load_segments,
+    locate_job_chunk: Callable[[Database, ChunkJob], LocatedChunk] = locate_job_chunk,
     describe: Callable[..., ChunkResult] = describe,
     settle_chunk_job: Callable[
         [AsyncConnectionPool, ChunkJob, Outcome], Awaitable[None]
@@ -780,7 +747,7 @@ async def understanding_loop_forever(
         clock=clock,
         poll_seconds=poll_seconds,
         max_in_flight=max_in_flight,
-        load_segments=load_segments,
+        locate_job_chunk=locate_job_chunk,
         describe=describe,
         settle_chunk_job=settle_chunk_job,
         run_rebuild=run_rebuild,

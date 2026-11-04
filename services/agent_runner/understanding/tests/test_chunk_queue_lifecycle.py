@@ -140,7 +140,7 @@ async def test_a_cancelled_job_is_failed_and_reported_not_put_back(
         **lm_wiring(model_catalog),
         config=consumer_config(),
         describe=chunk_seams.describe,
-        load_segments=chunk_seams.load_segments,
+        locate_job_chunk=chunk_seams.locate_job_chunk,
     )
     task = asyncio.create_task(consumer.run_until_idle())
     try:

@@ -55,14 +55,17 @@ def prestage_command(new: str) -> str:
         'tmp=$(mktemp -d "${TMPDIR:-/tmp}/meiva-prestage.XXXXXX")\n'
         "trap 'rm -rf \"$tmp\"' EXIT\n"
         f'git -C "$S" archive {quoted} -- {_PRESTAGE_PATHS} | tar -x -C "$tmp"\n'
-        f'if ! git -C "$S" diff --quiet HEAD {quoted} -- pyproject.toml uv.lock .python-version; then\n'
-        '  (cd "$tmp" && UV_PROJECT_ENVIRONMENT="$tmp/.venv" env -u VIRTUAL_ENV '
-        "uv sync -q --frozen --no-install-project --no-build-package meiva)\n"
+        f'if ! git -C "$S" diff --quiet HEAD {quoted} -- uv.lock .python-version; then\n'
+        '  if [ "$(uname -s)" = Darwin ] && [ -d "$S/.venv" ]; then '
+        'cp -Rc "$S/.venv" "$tmp/.venv" 2>/dev/null || rm -rf "$tmp/.venv"; fi\n'
+        '  (cd "$tmp" && UV_PROJECT_ENVIRONMENT="$tmp/.venv" '
+        'UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-120}" env -u VIRTUAL_ENV '
+        "uv sync -q --frozen --no-install-project --no-build-package meiva) || exit 1\n"
         "fi\n"
         'if [ -d "$S/ui/web/node_modules" ] && [ -f "$tmp/ui/web/pnpm-lock.yaml" ] '
         f'&& ! git -C "$S" diff --quiet HEAD {quoted} -- ui/web/pnpm-lock.yaml '
         "&& command -v pnpm >/dev/null 2>&1; then\n"
-        '  (cd "$tmp/ui/web" && CI=true pnpm fetch --frozen-lockfile >/dev/null)\n'
+        '  (cd "$tmp/ui/web" && CI=true pnpm fetch --frozen-lockfile >/dev/null) || exit 1\n'
         "fi\n"
         'if [ -f "$tmp/base/host/env/harness/convergence.py" ]; then\n'
         '  py="$S/.venv/bin/python"\n'

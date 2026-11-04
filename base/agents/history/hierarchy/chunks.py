@@ -464,12 +464,20 @@ def locate_chunk(
 
         ChunkEmptyError: nothing of the chunk remains past the head.
     """
-    count = len(history.segment_starts)
+    starts, count = history.segment_starts, len(history.segment_starts)
+    chunk = Chunk(start_index, end_index)
     candidates = range(count - 1, -1, -1) if closing_segment is None else (closing_segment,)
     not_ready = False
     for k in candidates:
-        found = _in_segment(
-            history, k, start_index, end_index, end_msg_id, closing=closing_segment is not None
+        seg_end = starts[k + 1] if k + 1 < count else len(history.messages)
+        found = locate_in_segment(
+            history.segment_heads[k],
+            history.messages[starts[k] : seg_end],
+            chunk,
+            end_msg_id,
+            segment=k,
+            segment_start=starts[k],
+            closing=closing_segment is not None,
         )
         if found == "not_ready":
             not_ready = not_ready or k == count - 1
@@ -480,43 +488,37 @@ def locate_chunk(
     raise ChunkDriftError(f"no segment holds message {end_msg_id!r} at index {end_index - 1}")
 
 
-def _in_segment(
-    history: FullHistory,
-    k: int,
-    start_index: int,
-    end_index: int,
+def locate_in_segment(
+    head: SystemMessage | None,
+    body: Sequence[BaseMessage],
+    chunk: Chunk,
     end_msg_id: str,
     *,
+    segment: int,
+    segment_start: int,
     closing: bool,
 ) -> LocatedChunk | Literal["not_ready"] | None:
-    """The chunk inside segment `k`: located, "not_ready" (the live segment is shorter than its
-    end), or None (the end message is not there)."""
-    starts = history.segment_starts
-    head = history.segment_heads[k]
     offset = 1 if head is not None else 0
-    seg_end = starts[k + 1] if k + 1 < len(starts) else len(history.messages)
-    body = history.messages[starts[k] : seg_end]
-    end_body = end_index - offset
+    end_body = chunk.end_index - offset
     missing: tuple[int, int] | None = None
     if closing and end_body > len(body):
-        missing = (len(body) + offset, end_index)
+        missing = (len(body) + offset, chunk.end_index)
         end_body = len(body)
     elif not closing and len(body) < end_body:
         return "not_ready"
     elif end_body < 1 or body[end_body - 1].id != end_msg_id:
         return None
-    start_body = max(start_index - offset, 0)
+    start_body = max(chunk.start_index - offset, 0)
     if end_body <= start_body:
         gap = (
             f"; the snapshot lacks request indices {missing[0]} to {missing[1]}" if missing else ""
         )
-        raise ChunkEmptyError(f"segment {k}: chunk [{start_index}, {end_index}) is empty{gap}")
-    return LocatedChunk(
-        prefix=(*((head,) if head is not None else ()), *body[:end_body]),
-        start_offset=offset + start_body,
-        span=(starts[k] + start_body, starts[k] + end_body - 1),
-        missing=missing,
-    )
+        raise ChunkEmptyError(
+            f"segment {segment}: chunk [{chunk.start_index}, {chunk.end_index}) is empty{gap}"
+        )
+    prefix = (*((head,) if head is not None else ()), *body[:end_body])
+    span = (segment_start + start_body, segment_start + end_body - 1)
+    return LocatedChunk(prefix, offset + start_body, span, missing)
 
 
 def message_time(messages: Sequence[BaseMessage], *, last: bool) -> datetime | None:
