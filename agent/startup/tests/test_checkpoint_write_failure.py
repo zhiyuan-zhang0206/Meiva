@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 import pytest
 from langchain_core.runnables import RunnableConfig
@@ -15,19 +14,20 @@ class _StubSaver(AsyncPostgresSaver):
     def __init__(self, error: BaseException) -> None:
         self._error = error
 
-    async def aput(self, config: RunnableConfig, *_args: Any, **_kwargs: Any) -> Any:
+    async def aput(
+        self, config: RunnableConfig, *_args: object, **_kwargs: object
+    ) -> RunnableConfig:
         raise self._error
 
-    async def aput_writes(self, config: RunnableConfig, *_args: Any, **_kwargs: Any) -> Any:
+    async def aput_writes(self, config: RunnableConfig, *_args: object, **_kwargs: object) -> None:
         raise self._error
 
 
-def _write_failure_events(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        record["extra"]
-        for record in records
-        if record["extra"].get("event") == "checkpoint_write_failed"
-    ]
+# meiva:note
+# The `extra` mapping of every record the loud-failure wrapper logged, read through the fixture's own
+# reader instead of indexing a record dict whose values are `Any`.
+def _write_failure_events(records: LogRecords) -> list[dict[str, object]]:
+    return records.extras(event="checkpoint_write_failed")
 
 
 _CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}

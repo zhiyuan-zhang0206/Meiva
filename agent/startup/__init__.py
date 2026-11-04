@@ -20,20 +20,27 @@ import asyncio
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 from uuid import UUID
 from weakref import WeakValueDictionary
 
 from langchain_core.runnables import RunnableConfig
+from langgraph import constants as graph_constants
 from langgraph.checkpoint.base import ChannelVersions, Checkpoint, CheckpointMetadata
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.checkpoint.serde.types import _DeltaSnapshot
-from langgraph.constants import PUSH
 from psycopg_pool import AsyncConnectionPool
 
 from agent.startup.permission_notice import permission_notice
+from base.host.boundary.untyped import object_mapping, object_of
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+
+# meiva:note
+# LangGraph's `PUSH` channel name, read once: `langgraph.constants` resolves it through a module
+# `__getattr__` typed `Any`, so `object_of` hands back `object` and no unchecked value binds to a name.
+# A write whose key is this channel is a push, which does not advance the step. The site is listed in
+# `[ambient-state.sites]`: the value is a constant fixed by the library, not state this module sets.
+_PUSH: object = object_of(getattr, graph_constants, "PUSH")
 
 
 def wrap_saver_writes_with_loud_failure(
@@ -83,7 +90,7 @@ def wrap_saver_writes_with_loud_failure(
 
     async def _logged_aput_writes(
         config: RunnableConfig,
-        writes: Sequence[tuple[str, Any]],
+        writes: Sequence[tuple[str, object]],
         task_id: str,
         task_path: str = "",
     ) -> None:
@@ -137,7 +144,7 @@ def delta_evidence(checkpoint: Checkpoint, metadata: CheckpointMetadata) -> set[
     counters = metadata.get("counters_since_delta_snapshot")
     if counters:
         evidence.update(counters)
-    for name, value in checkpoint.get("channel_values", {}).items():
+    for name, value in object_mapping(checkpoint.get("channel_values") or {}).items():
         if isinstance(value, _DeltaSnapshot):
             evidence.add(name)
     return evidence
@@ -155,7 +162,7 @@ def _checkpoint_thread_id(config: RunnableConfig) -> str:
     """Return the required LangGraph checkpoint thread id."""
     if "configurable" not in config:
         raise KeyError("checkpoint config is missing configurable")
-    configurable = config["configurable"]
+    configurable = object_mapping(config["configurable"] or {})
     if "thread_id" not in configurable:
         raise KeyError("checkpoint config is missing configurable.thread_id")
     thread_id = configurable["thread_id"]
@@ -319,7 +326,7 @@ def wrap_saver_writes_with_nstep_interval(
 
     async def _throttled_aput_writes(
         config: RunnableConfig,
-        writes: Sequence[tuple[str, Any]],
+        writes: Sequence[tuple[str, object]],
         task_id: str,
         task_path: str = "",
     ) -> None:
@@ -339,7 +346,7 @@ def wrap_saver_writes_with_nstep_interval(
 
             write_step = (
                 state.last_aput_step
-                if any(key == PUSH for key, _value in writes)
+                if any(key == _PUSH for key, _value in writes)
                 else state.last_aput_step + 1
             )
             if write_step % current_interval == 0:
