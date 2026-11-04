@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import TypeGuard
 
 from base.clock import Timers
 from base.sessions.exec_host import protocol
@@ -46,7 +46,7 @@ async def _open_exec_host(
         return None
 
 
-def _spawn_error(message: dict[str, Any]) -> ExecCrashed:
+def _spawn_error(message: dict[str, object]) -> ExecCrashed:
     raw_error = str(message.get("error") or "unknown exec-host error")
     prefix = "exec subprocess could not be spawned: "
     output = raw_error if raw_error.startswith(prefix) else f"{prefix}{raw_error}"
@@ -58,7 +58,7 @@ def _is_str_object_dict(value: object) -> TypeGuard[dict[str, object]]:
 
 
 def _completion_from_response(
-    message: dict[str, Any],
+    message: dict[str, object],
     stream: StreamingTextIO,
     chunk_publisher: ExecOutputChunkPublisher | None,
 ) -> tuple[int | None, bool, bool] | ExecCrashed:
@@ -76,7 +76,9 @@ def _completion_from_response(
     return returncode, bool(raw_data.get("cancelled")), bool(raw_data.get("timed_out"))
 
 
-async def _read_next_frame(reader: asyncio.StreamReader, timeout_s: float) -> dict[str, Any] | None:
+async def _read_next_frame(
+    reader: asyncio.StreamReader, timeout_s: float
+) -> dict[str, object] | None:
     try:
         raw = await asyncio.wait_for(reader.readline(), timeout=timeout_s)
     except TimeoutError:
@@ -185,7 +187,7 @@ async def run_via_exec_host(
         return None
     reader, writer = connection
     req_id = 1
-    request: dict[str, Any] = {
+    request: dict[str, object] = {
         "id": req_id,
         "method": "run",
         "agent_id": agent_id,

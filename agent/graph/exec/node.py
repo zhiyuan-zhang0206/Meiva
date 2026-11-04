@@ -46,13 +46,13 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Awaitable, Sequence
-from dataclasses import fields, replace
+from collections.abc import Awaitable, Mapping, Sequence
+from dataclasses import dataclass, fields, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
-from langchain_core.messages import AIMessage, AnyMessage, ToolCall, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, ToolCall, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command, Overwrite
@@ -74,6 +74,7 @@ from base.agents.messages.kwargs import ExecStatus
 from base.agents.observation import ended_with
 from base.events.live.projection import Cancelled, ExecOutput, ExecStart
 from base.events.live.publisher import AgentEventPublisher
+from base.host.boundary.json_values import is_object_list
 from base.host.env.agent_slices import AgentSlices
 from base.log import logger
 
@@ -188,11 +189,56 @@ async def _exec_with_node_shield(
 
 
 # meiva:note
+# One exec step's state delta, with the channels this module writes as typed fields and the
+# plugin channels carried as opaque values. The graph update is a channel->value mapping whose
+# remainder is written by plugins, so the delta is the boundary: readers take `messages` and
+# `halted` from the fields instead of indexing the bag back to `Any`.
+@dataclass(frozen=True)
+class ExecStepDelta:
+    messages: Sequence[AnyMessage]
+    halted: bool
+    plugin: Mapping[str, object]
+    halt: Mapping[str, bool]
+    attach: AttachState | None
+
+    # meiva:note
+    # The update the node hands the graph: the known channels, then the plugin remainder, then
+    # the interrupt keys. `attach` is absent on a compact halt — the turn writes nothing back.
+    def update(self) -> dict[str, object]:
+        merged: dict[str, object] = {
+            "messages": self.messages,
+            "halted": self.halted,
+            **self.plugin,
+            **self.halt,
+        }
+        if self.attach is not None:
+            merged["attach"] = self.attach
+        return merged
+
+
+# meiva:note
+# A plugin's `messages` state update, narrowed out of the delta bag: the channel is written by
+# plugins, so its value is unknown until this check. A non-list, or an entry that is not a
+# message, is a tampered slot and fails the turn rather than reaching the history.
+def _plugin_messages(value: object) -> list[BaseMessage] | None:
+    if value is None:
+        return None
+    if not is_object_list(value):
+        raise TypeError("a plugin's messages state update must be a list")
+    messages: list[BaseMessage] = []
+    for item in value:
+        if not isinstance(item, BaseMessage):
+            raise TypeError("a plugin's messages state update must hold messages")
+        messages.append(item)
+    return messages
+
+
+# meiva:note
 # Refuse a turn-end declaration the record cannot use, without failing the turn: the marker
 # `invalid` says a declaration was made and rejected (an absent field says none was made),
 # and the rejected text goes out as `turn_end_declaration_rejected`, so a high invalid rate
 # reads as an enum that does not fit what agents want to say, not as noise to be deleted.
-def _refuse_unusable_turn_end(state_update: dict[str, Any], *, agent_id: int) -> None:
+def _refuse_unusable_turn_end(state_update: dict[str, object], *, agent_id: int) -> None:
     if state_update.get("ended_with") is None:
         return
     reason = state_update.get("ended_with_reason")
@@ -223,7 +269,7 @@ async def run_agent_code(
     process: ExecProcess,
 ) -> tuple[
     ExecResult,
-    dict[str, Any],
+    dict[str, object],
     int,
     object,
     list[dict[str, object]] | None,
@@ -399,7 +445,7 @@ async def _exec_single_call(
     exec_msg_idx: int,
     *,
     process: ExecProcess,
-) -> tuple[dict[str, Any], bool]:
+) -> tuple[ExecStepDelta, bool]:
     """Execute one invocation; return its state delta and whether it compacted."""
     assert ctx.event_publisher is not None, (  # noqa: S101
         "exec_node_impl requires ctx.event_publisher"
@@ -425,7 +471,10 @@ async def _exec_single_call(
                 agent_id=agent_id, item_id=f"{exec_msg_idx}.0", content=str(error.content)
             ).model_dump_json()
         )
-        return {"messages": [error], "halted": False}, False
+        return (
+            ExecStepDelta(messages=[error], halted=False, plugin={}, halt={}, attach=None),
+            False,
+        )
 
     # Streaming chunks and the final ExecOutput share the same item_id
     # computed above; the frontend uses it to append chunks to the same
@@ -469,16 +518,17 @@ async def _exec_single_call(
     # after the ToolMessage instead of riding the dict **spread (which would
     # clobber the ToolMessage). Popped + drained unconditionally so a compact
     # turn (REMOVE_ALL'd by claim) leaks nothing to later turns.
-    plugin_messages = plugin_state_update.pop("messages", None)
+    plugin_messages = _plugin_messages(plugin_state_update.pop("messages", None))
 
     # Compact path (SystemHalt): write nothing back — claim REMOVE_ALLs the
     # whole history this turn, so ToolMessage/notes would be wiped anyway.
     compact_halt = not plan.writes_back
+    attach_state: AttachState | None = None
     if compact_halt:
         # Findings annotate the history claim is about to wipe; the rest of the delta (plugin
         # fields) is written back as before, and the findings otherwise ride the spread below
         # into `state.security_findings` for the after_exec hook.
-        plugin_state_update.pop("security_findings", None)
+        _ = plugin_state_update.pop("security_findings", None)
     else:
         # The UI shows exactly what the agent sees in exec output — same blob
         # fed back to the LLM below (ExecOutput shares item_id with the chunk).
@@ -506,13 +556,6 @@ async def _exec_single_call(
         # context notes merge into this exec's delta after the ToolMessage
         # (ordering rationale: _notes.py).
         state_messages_update = merge_exec_notes(state_messages_update, plugin_messages)
-    update: dict[str, Any] = {
-        "messages": state_messages_update,
-        "halted": halted,
-        **plugin_state_update,
-    }
-    if plan.cancelled:
-        update.update(interrupt_halt(plan.cancel_reason))
     if not compact_halt:
         # Attachments registered during this execute_code call are packed into
         # a media HumanMessage appended right after the exec output — the model
@@ -520,7 +563,7 @@ async def _exec_single_call(
         # ruling 2026-08-26). The claim-node drain (_attach_drain.py) remains
         # as the fallback for edge paths that skip this update (compact halt).
         merged_attach = merge_attachments(state.attach, envelope_attachments)
-        update["attach"] = merged_attach
+        attach_state = merged_attach
         attach_msg = build_attach_message(
             merged_attach,
             _attach_model(ctx),
@@ -529,8 +572,17 @@ async def _exec_single_call(
         )
         if attach_msg is not None:
             state_messages_update.append(attach_msg)
-            update["attach"] = AttachState()
-    return update, compact_halt
+            attach_state = AttachState()
+    return (
+        ExecStepDelta(
+            messages=state_messages_update,
+            halted=halted,
+            plugin=plugin_state_update,
+            halt=interrupt_halt(plan.cancel_reason) if plan.cancelled else {},
+            attach=attach_state,
+        ),
+        compact_halt,
+    )
 
 
 def _remaining_exec_calls(
@@ -597,33 +649,34 @@ async def exec_node_impl(
             goto=AFTER_EXEC,
         )
     agent_id = agent_id_from_config(config)
-    delta, compacted = await _exec_single_call(
+    step, compacted = await _exec_single_call(
         state, runtime.context, agent_id, calls[0], len(state.messages), process=process
     )
+    update = step.update()
     if compacted:
-        delta["pending_exec_notes"] = []
-        delta["security_findings"] = Overwrite([])
-        return Command[ExecGoto](update=delta, goto=AFTER_EXEC)
+        update["pending_exec_notes"] = []
+        update["security_findings"] = Overwrite([])
+        return Command[ExecGoto](update=update, goto=AFTER_EXEC)
 
-    results = [message for message in delta["messages"] if isinstance(message, ToolMessage)]
+    results = [message for message in step.messages if isinstance(message, ToolMessage)]
     notes = merge_exec_notes(
         state.pending_exec_notes,
-        [message for message in delta["messages"] if not isinstance(message, ToolMessage)],
+        [message for message in step.messages if not isinstance(message, ToolMessage)],
     )
-    if delta["halted"]:
+    if step.halted:
         results.extend(
             _skipped_call_results(
                 calls[1:], runtime.context, agent_id, len(state.messages) + len(results)
             )
         )
     elif len(calls) > 1:
-        delta["messages"] = replacements + results
-        delta["pending_exec_notes"] = notes
-        return Command[ExecGoto](update=delta, goto=EXEC)
+        update["messages"] = replacements + results
+        update["pending_exec_notes"] = notes
+        return Command[ExecGoto](update=update, goto=EXEC)
 
-    delta["messages"] = replacements + results + notes
-    delta["pending_exec_notes"] = []
-    return Command[ExecGoto](update=delta, goto=AFTER_EXEC)
+    update["messages"] = replacements + results + notes
+    update["pending_exec_notes"] = []
+    return Command[ExecGoto](update=update, goto=AFTER_EXEC)
 
 
 _exec_node_impl = exec_node_impl

@@ -1,8 +1,8 @@
 import asyncio
 import random
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Mapping
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Protocol
 from uuid import UUID
 
 from agent.execution.protocol import ResultPayload
@@ -34,7 +34,7 @@ class ExecProcess(Protocol):
         cancel_event: asyncio.Event,
         chunks: ExecOutputChunkPublisher,
         *,
-        state: dict[str, Any],
+        state: Mapping[str, object],
         config_overlay: dict[str, object],
     ) -> Awaitable[tuple[ExecResult, ResultPayload | None]]: ...
 
@@ -59,7 +59,7 @@ class SubprocessExecProcess:
         cancel_event: asyncio.Event,
         chunks: ExecOutputChunkPublisher,
         *,
-        state: dict[str, Any],
+        state: Mapping[str, object],
         config_overlay: dict[str, object],
     ) -> Awaitable[tuple[ExecResult, ResultPayload | None]]:
         return run_in_subprocess(

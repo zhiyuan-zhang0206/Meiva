@@ -20,8 +20,8 @@ import asyncio
 import contextlib
 import signal
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
 from uuid import UUID
 
 import psutil
@@ -210,7 +210,7 @@ def _close_output(reader: ExecOutputPipe) -> None:
 
 
 def _write_request_failure(
-    path: Path, code: str, context: MeivaContext, timeout: float, state: dict[str, Any] | None
+    path: Path, code: str, context: MeivaContext, timeout: float, state: Mapping[str, object] | None
 ) -> ExecCrashed | None:
     try:
         write_request(
@@ -318,7 +318,7 @@ async def run_in_subprocess(
     exec_dir: Path,
     request_id: UUID,
     result_id: UUID,
-    state: dict[str, Any] | None = None,
+    state: Mapping[str, object] | None = None,
     config_overlay: dict[str, object] | None = None,
     birth_config: dict[str, object] | None = None,
 ) -> tuple[ExecResult, ResultPayload | None]:

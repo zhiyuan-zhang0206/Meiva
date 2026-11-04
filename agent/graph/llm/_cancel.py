@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import Coroutine
-from typing import Any
 
 from langgraph.types import Command
 
@@ -40,7 +39,7 @@ from .goto import LlmGoto
 async def race_stream_vs_cancel(
     ctx: MeivaContext,
     agent_id: int,
-    stream_coro: Coroutine[Any, Any, None],
+    stream_coro: Coroutine[object, object, None],
     handler: RedisStreamHandler,
 ) -> Command[LlmGoto] | None:
     """Race the streaming task against the durable-interrupt cancel event.
