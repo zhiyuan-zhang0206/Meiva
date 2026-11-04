@@ -12,6 +12,59 @@
 # the command exits non-zero. Standard library only: it runs once per command, so startup is the
 # cost.
 # meiva:link cli/tests/fleet_update/docs/fleet-update-harness.meiva.okf.md
+# meiva:note
+# The state this double reads and writes (`FLEET_CLUSTER_STATE`), declared here because the file
+# keeps its bookkeeping untyped on purpose: it is a program-level double — the `ssh` the tests put
+# on PATH, playing a cluster — so its state is the double's own and not a format production reads.
+# `fleet_update_cluster.py` writes the JSON (`_state`) and adopts it back (`_adopt`); this is the
+# schema both sides share, and a field rename changes this note with it.
+#
+# - `old`, `new`: str — the commit each host runs, and the one the window moves it to.
+#   `clean`: str — the clean-tree check a switch must carry.
+# - `hosts`: dict[alias -> host]. The aliases are `gw` (gateway, Linux), `mac` (Darwin) and `lin`
+#   (Linux). A host carries `up`: bool (its daemon runs), `head`: str, `os`: "Linux" | "Darwin",
+#   `dirty`: int, `hook`: "yes" | "no", `active`: "yes" | "no", `stop_message`: "yes" | "no"
+#   (whether its `meiva stop` takes `--message`), and the helper facts a test stages on that one
+#   host: `helper`: "present" | "absent", `facts_rc`: int, `probe_error`: str (replaces the whole
+#   answer), `recorded_hash`, `cert_root`: str, `loaded`, `valid`, `stale`: "yes" | "no",
+#   `drop_fact`: str (the fact line to leave out).
+# - `host_up`: dict[alias -> bool] — the daemon each lifecycle file still shows running; a stop
+#   that failed and left it up differs from `hosts[alias]["up"]` on purpose (#5438 shape).
+# - `journal`: dict[alias -> journal | None] — the last stop journal the host holds:
+#   `{"operation": str, "complete": bool, "result": {"rc": int, "error": str | None}}`.
+#   `journal_after_stop`: dict[alias -> journal | None] — what the host shows instead when
+#   `meiva stop` exits 0 without a completed stop.
+# - `stop_fails`: dict[alias -> int] (the stop's exit code), `stop_fails_leaves_up`: list[alias]
+#   (the stops that take the daemon down), `recover_fails`: list[alias] (a start that fails), and
+#   `fail`: dict["<kind>|<alias>" -> int] for every other effect kind — `fetch`, `prestage`,
+#   `switch`, `start`, `oneshot`, `refresh`, `evidence`, `pre-verify`, `schedules-verify`,
+#   `plugins-verify`, `silence-open`, `silence-close`.
+# - `effects`: list[[kind, alias]] — every effect accepted, in order; `run_started_at`: int — the
+#   index into `effects` where the current window started.
+# - `commands`: list[[alias, command]] — every invocation this double received, for order checks.
+# - `names`: dict[alias -> str] — the machine name the host reports; `silent`, `hidden`:
+#   list[alias] — hosts the roster shows offline, and hosts it leaves out. `laptop`:
+#   `{"row": list[object]} | None` — one extra roster row of five values (online,
+#   identity_mismatch, head_sha, running_sha, serve_agent_runner) under the name `laptop`.
+# - `roster_lag`: int (reads still answered as stale), `roster_reply`: str | None (a raw answer),
+#   `roster_reads`: int (how many the window made).
+# - `leases`: list[dict[str, object]] and `lease_reply`: str | None — the lease table, or a raw
+#   answer; `lease_rc`: int; `lease_reads`: list[int] — the `effects` index each read happened at,
+#   so a test proves the leases were named before anything stopped.
+# - `silence_open`: bool, `silence_hours`: float, `silence_comment`: str, `silence_reply`:
+#   str | None — the Grafana silence the window opened, and the answer a test substitutes.
+# - `programs`: dict["gateway" | "silence" | "leases" -> str] — the source of each program the
+#   window ships over stdin, so the double answers only the shipped text.
+# - `output`: str — a line emitted before every answer; `incomplete`: dict[alias -> str] — the
+#   converge evidence a host reports, verbatim; `stored_schedules`: [int, list[str]] — the
+#   schedules verification answers, and its exit code; `helper_hash`, `helper_cert_root`: str —
+#   the healthy helper every host reports unless it stages its own.
+# - `barriers`: dict[wave -> list[participant]] — the concurrency the test expects of one wave;
+#   `violations`: list[str] — every order the double refused, prefixed by the alias.
+#
+# A program-level double may keep this bookkeeping untyped on the conditions
+# `docs/conventions/testing.md` states; this note is the declaration they require.
+# meiva:link docs/conventions/testing.md
 
 from __future__ import annotations
 
