@@ -39,8 +39,8 @@ def run_converge(ctx: ConvergeCtx, steps: tuple[ConvergeStep, ...], *, prod_inst
         prod_install=prod_install,
     )
     print("\n→ converge host")
-    blocking, advisory = _apply_steps(ctx, steps, decisions)
-    _judge_failures(ctx, blocking, advisory, prod_install=prod_install)
+    blocking, advisory, stopped_at = _apply_steps(ctx, steps, decisions)
+    _judge_failures(ctx, blocking, advisory, stopped_at=stopped_at, prod_install=prod_install)
 
 
 # meiva:note
@@ -51,7 +51,7 @@ def _apply_steps(
     ctx: ConvergeCtx,
     steps: tuple[ConvergeStep, ...],
     decisions: tuple[RunStep | SkipStep, ...],
-) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]], str]:
     blocking: list[tuple[str, str]] = []
     advisory: list[tuple[str, str]] = []
     for step, decision in zip(steps, decisions, strict=True):
@@ -66,11 +66,20 @@ def _apply_steps(
         try:
             step.apply(ctx)
         except Exception as e:
-            (advisory if step.advisory else blocking).append((step.name, str(e)))
-            print(f"  {'!' if step.advisory else '✗'} {step.name}: {e}", file=sys.stderr)
+            match step.on_failure:
+                case "stop":
+                    print(f"  ✗ {step.name}: {e}", file=sys.stderr)
+                    blocking.append((step.name, str(e)))
+                    return blocking, advisory, step.name
+                case "advisory":
+                    advisory.append((step.name, str(e)))
+                    print(f"  ! {step.name}: {e}", file=sys.stderr)
+                case "continue":
+                    blocking.append((step.name, str(e)))
+                    print(f"  ✗ {step.name}: {e}", file=sys.stderr)
             continue
         print(f"  ✓ {step.name}")
-    return blocking, advisory
+    return blocking, advisory, ""
 
 
 # meiva:note
@@ -84,6 +93,7 @@ def _judge_failures(
     blocking: list[tuple[str, str]],
     advisory: list[tuple[str, str]],
     *,
+    stopped_at: str,
     prod_install: bool,
 ) -> None:
     if blocking:
@@ -98,8 +108,15 @@ def _judge_failures(
         clear_incomplete(ctx.meiva_home)
     failed = blocking + advisory
     if failed:
+        tail = (
+            f"; the rest of the table was not attempted after {stopped_at}"
+            if stopped_at
+            else "; every other step applied"
+        )
         print(
-            f"  ! {len(failed)} step(s) failed; every other step applied: "
+            f"  ! {len(failed)} step(s) failed"
+            + tail
+            + ": "
             + ", ".join(name for name, _ in failed),
             file=sys.stderr,
         )

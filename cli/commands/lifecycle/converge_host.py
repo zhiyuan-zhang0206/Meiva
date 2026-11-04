@@ -393,7 +393,11 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ConvergeStep("$MEIVA_HOME ownership preflight", _ensure_ownership_preflight),
     ConvergeStep("meiva on PATH", ensure_meiva_on_path, host_global=True),
     ConvergeStep("~/.local/bin on PATH", ensure_local_bin_on_path, host_global=True),
-    ConvergeStep("$MEIVA_HOME dir skeleton", ensure_meiva_home_dirs),
+    # meiva:note
+    # The one step whose failure stops the table: every later step writes into this home, so a
+    # skeleton that could not be laid out (a `logs` symlink pointing out of it, a read-only
+    # home) would send those writes somewhere else instead of failing.
+    ConvergeStep("$MEIVA_HOME dir skeleton", ensure_meiva_home_dirs, on_failure="stop"),
     # meiva:note
     # External agent CLIs own their global homes: this prod-only host step
     # contributes exactly Meiva's two skills, and only to the clients registered in
@@ -412,7 +416,7 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         # 2026-11-04 this step aborted every converge on the ubuntu node before the OS jobs
         # were registered, and a cold start returns 1 at the converge step, so the host did
         # not come up either (task #6233).
-        advisory=True,
+        on_failure="advisory",
     ),
     # Warning-only health preflight: data-plane reachability (pg/redis, local on
     # gateway / remote on runner) + checkout state (dirty marker). Findings are

@@ -126,7 +126,7 @@ def test_an_advisory_converge_failure_still_prepares_the_host(
     cold = dataclasses.replace(
         cold,
         converge_steps=(
-            ConvergeStep("external harness CLIs", boom, advisory=True),
+            ConvergeStep("external harness CLIs", boom, on_failure="advisory"),
             ConvergeStep("$MEIVA_HOME dir skeleton", ensure_meiva_home_dirs),
         ),
     )

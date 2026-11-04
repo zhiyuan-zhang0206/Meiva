@@ -185,7 +185,7 @@ def test_an_advisory_failure_is_reported_and_the_run_continues(
     with pytest.raises(ConvergeAdvisoryError) as excinfo:
         converge_host.run_converge(
             ctx,
-            (ConvergeStep("external harness CLIs", boom, advisory=True), after),
+            (ConvergeStep("external harness CLIs", boom, on_failure="advisory"), after),
             prod_install=False,
         )
 
@@ -201,17 +201,41 @@ def test_an_advisory_failure_leaves_the_incomplete_marker_clear(ctx: ConvergeCtx
 
     with pytest.raises(ConvergeAdvisoryError):
         converge_host.run_converge(
-            ctx, (ConvergeStep("advisory", boom, advisory=True),), prod_install=True
+            ctx, (ConvergeStep("advisory", boom, on_failure="advisory"),), prod_install=True
         )
     assert read_incomplete(ctx.meiva_home) is None
 
 
-def test_the_external_harness_cli_step_is_advisory() -> None:
+def test_only_the_home_skeleton_stops_the_table() -> None:
     steps = {step.name: step for step in converge_host.CONVERGE_STEPS}
-    assert steps["external harness CLIs"].advisory, (
-        "a harness CLI that cannot be installed must not abort the OS-job registrars"
+    stopping = [name for name, step in steps.items() if step.on_failure == "stop"]
+    assert stopping == ["$MEIVA_HOME dir skeleton"], (
+        "a failing step must not swallow the rest of the table unless it is the container "
+        "those steps write into"
     )
-    assert not steps["health probe cron job"].advisory
+    assert steps["external harness CLIs"].on_failure == "advisory"
+
+
+# meiva:note
+# The one shape that still stops the table: a step later steps write into. Carrying on would
+# send their writes into whatever the broken container resolves to, so the run ends there and
+# the summary says the rest was not attempted -- not that it applied.
+def test_a_stop_step_ends_the_table_and_says_what_was_not_attempted(
+    ctx: ConvergeCtx, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (after,) = _noop_steps("after")
+
+    def boom(_ctx: ConvergeCtx) -> None:
+        raise RuntimeError("the home is a symlink out of itself")
+
+    with pytest.raises(RuntimeError, match="converge failed: skeleton"):
+        converge_host.run_converge(
+            ctx, (ConvergeStep("skeleton", boom, on_failure="stop"), after), prod_install=False
+        )
+
+    captured = capsys.readouterr()
+    assert "the rest of the table was not attempted after skeleton" in captured.err
+    assert "after" not in captured.out
 
 
 def test_a_failed_step_is_recorded_for_the_prod_install_and_a_clean_run_clears_it(
