@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 import psycopg
 from psycopg import sql
@@ -40,6 +41,7 @@ from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.inbox.insert import insert_inbound_message_in_transaction
 from base.agents.messages.inbound_provenance import InboundProvenance
 from base.db import Database
+from base.db.rows import query_all
 from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.ownership import OwnedProcess, shown_name
@@ -164,6 +166,21 @@ def content(notice: ClosureNotice) -> str:
 
 
 # meiva:note
+# The key column of the claim statement's `RETURNING key`.
+@dataclass(frozen=True)
+class _KeyRow:
+    key: str
+
+
+# meiva:note
+# An owner's id and lifecycle status, as the status lookup selects them.
+@dataclass(frozen=True)
+class _OwnerStatusRow:
+    id: int
+    status: str | None
+
+
+# meiva:note
 # Claim every notice's idempotency key in one statement; the keys this attempt owns.
 #
 # The whole batch goes in as one multi-row `ON CONFLICT (key) DO NOTHING RETURNING key`: the
@@ -181,16 +198,17 @@ def claim_all(cur: psycopg.Cursor, batch: Sequence[ClosureNotice]) -> set[str]:
         params.append(claim_key(notice))
         params.append(json.dumps(notice.as_dict(), default=str))
         params.append(OpStatus.COMPLETED)
-    cur.execute(query, params)
-    return {str(row[0]) for row in cur.fetchall()}
+    return {row.key for row in query_all(cur.connection, _KeyRow, query, params)}
 
 
 def _owner_statuses(cur: psycopg.Cursor, batch: Sequence[ClosureNotice]) -> dict[int, str | None]:
-    cur.execute(
+    rows = query_all(
+        cur.connection,
+        _OwnerStatusRow,
         "SELECT id, status FROM agents_meta WHERE id = ANY(%s)",
         (sorted({notice.agent_id for notice in batch}),),
     )
-    return {int(row[0]): row[1] for row in cur.fetchall()}
+    return {row.id: row.status for row in rows}
 
 
 # meiva:note

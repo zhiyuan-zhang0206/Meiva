@@ -14,8 +14,11 @@ import json
 import subprocess
 import sys
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from base.host.boundary.options import options
+from base.host.boundary.untyped import object_of
 from ops.private_files.model import (
     CliArgs,
     GitSource,
@@ -34,7 +37,7 @@ _HASH_CHUNK_SIZE = 1024 * 1024
 
 
 def _load_manifest(path: Path) -> RegistryManifest:
-    raw: object = json.loads(path.expanduser().read_text(encoding="utf-8"))
+    raw = object_of(json.loads, path.expanduser().read_text(encoding="utf-8"))
     return validate_manifest(raw)
 
 
@@ -122,6 +125,16 @@ def verify(root: Path, manifest: Path) -> list[Outcome]:
     return outcomes
 
 
+# meiva:note
+# The parsed command line: the subcommand and the `verify` flags, named as their destinations.
+@dataclass(frozen=True)
+class _Arguments:
+    command: str
+    root: Path | None
+    manifest: Path
+    json_output: bool
+
+
 def _parse_args(argv: Sequence[str] | None) -> CliArgs:
     parser = argparse.ArgumentParser(
         description="Read-only verification for registered private production files."
@@ -143,16 +156,10 @@ def _parse_args(argv: Sequence[str] | None) -> CliArgs:
     verify_parser.add_argument(
         "--json", action="store_true", dest="json_output", help="emit machine-readable output"
     )
-    parsed = parser.parse_args(argv)
+    parsed = options(parser.parse_args(argv), _Arguments)
     if parsed.command != "verify":
         raise AssertionError(f"unknown private-files command: {parsed.command!r}")
-    root = parsed.root if isinstance(parsed.root, Path) else None
-    manifest = parsed.manifest if isinstance(parsed.manifest, Path) else _DEFAULT_MANIFEST
-    return CliArgs(
-        root=root,
-        manifest=manifest,
-        json_output=bool(parsed.json_output),
-    )
+    return CliArgs(root=parsed.root, manifest=parsed.manifest, json_output=parsed.json_output)
 
 
 # meiva:note

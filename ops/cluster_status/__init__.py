@@ -28,6 +28,7 @@ from psycopg_pool import ConnectionPool
 from base.clock import SYSTEM_TIMERS, Clock
 from base.cluster.machine import MachineIdentityReader
 from base.db import Database
+from base.db.rows import count_one
 from base.deploy.git.cluster_drift import checkout_head_sha
 from base.deploy.lifecycle import start_serving
 from base.host.proc import process_alive
@@ -111,13 +112,11 @@ def check_pidfile(pidfile_path: str) -> tuple[bool, int | None]:
 # meiva:note
 # Count this machine's retained agent identities through the snapshot connection.
 def count_local_agents(conn: psycopg.Connection, *, local_machine: str) -> int:
-    row = conn.execute(
-        "SELECT count(*) FROM agents_meta WHERE machine=%s AND status<>'terminated'",
+    return count_one(
+        conn,
+        "SELECT count(*) AS n FROM agents_meta WHERE machine=%s AND status<>'terminated'",
         (local_machine,),
-    ).fetchone()
-    if row is None:
-        raise RuntimeError("local agent count returned no row")
-    return int(row[0])
+    )
 
 
 # meiva:note
