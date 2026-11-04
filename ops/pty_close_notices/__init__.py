@@ -177,7 +177,7 @@ class _KeyRow:
 @dataclass(frozen=True)
 class _OwnerStatusRow:
     id: int
-    status: str | None
+    status: str
 
 
 # meiva:note

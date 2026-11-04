@@ -909,6 +909,39 @@ root = "meiva_builtins/skills/platform/meiva-guide/external-agents/tests"
 root = "meiva_builtins/skills/platform/meiva-self-evolution/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "ops/agent_transfer/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "ops/agents/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "ops/cluster_status/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "ops/env_audit/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "ops/inventory/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "ops/lifecycle/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "ops/private_files/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "ops/pty_close_notices/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "ops/rpc_schemas/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "ops/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "ops/upload_delivery/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "scripts/ci/helper_smoke/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -1213,6 +1246,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "gateway"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "ops"
 reportAny = "error"
 reportExplicitAny = "error"
 
