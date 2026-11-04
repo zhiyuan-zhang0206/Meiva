@@ -183,7 +183,7 @@ class Handoff:
             "",
             "## Using the Meiva Python SDK",
             "The `meiva` Python package is pre-configured in your shell environment and "
-            "attaches to your agent identity automatically on import. Reach the cluster "
+            "attaches to your agent identity on the first call that needs it. Reach the cluster "
             "through these active SDK surfaces:",
             *_bullets([f"`{entry.name}` — {entry.purpose}" for entry in self.entries]),
             "",
@@ -193,6 +193,13 @@ class Handoff:
             "```bash",
             *self._python_example_lines(),
             "```",
+            "",
+            "For background work that uses the SDK, call `meiva.shell.run_background` from "
+            "the live session with an explicit TTL. Meiva launches a managed shell with your "
+            "agent identity. A process orphaned by your native command tool can keep the "
+            "harness handle in its environment while losing the process ancestry required to "
+            "use it. If a task is to switch your own harness, save a handoff, finish the turn, "
+            "and have the switch submitted from outside your session once the agent is idle.",
             "",
             "## Tool & Environment Boundaries",
             *_bullets(list(self.overlaps)),

@@ -56,6 +56,12 @@ def test_render_mentions_identity_and_task(tmp_path: Path) -> None:
     assert text.rstrip().endswith("Read hello.txt and reply with the third word.")
 
 
+def test_render_routes_detached_sdk_work_to_a_managed_shell(tmp_path: Path) -> None:
+    text = handoff(tmp_path).render()
+    assert "`meiva.shell.run_background` from the live session with an explicit TTL" in text
+    assert "process ancestry required" in text
+
+
 def test_size_bytes_matches_the_encoded_render(tmp_path: Path) -> None:
     subject = handoff(tmp_path)
     assert subject.size_bytes() == len(subject.render().encode("utf-8"))

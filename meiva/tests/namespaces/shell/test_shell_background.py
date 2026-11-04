@@ -1,5 +1,7 @@
 # meiva:note
 # `meiva.shell.run_background`: the SDK entry's argument checks and its wiring to the agent's workspace, session and log.  The line a run executes, its log ring and the end-to-end behaviour of a run (notice, close, keep, failures) are the implementation's, tested in `meiva/shell/tests` against a real pty-sessions service with a recording CLI. Here the entry runs with the real `meiva` CLI beside the interpreter.
+import shlex
+import sys
 import time
 from pathlib import Path
 
@@ -30,9 +32,8 @@ def test_run_background_requires_name() -> None:
 
 @pytest.mark.flaky
 def test_run_background_runs_in_the_workspace_and_logs_there(_agent_row: int) -> None:
-    handle = meiva.shell.run_background(
-        "echo facade-ok; pwd", name="test-facade", keep=True, ttl=120
-    )
+    command = shlex.join([sys.executable, str(Path(__file__).with_name("background_sdk_probe.py"))])
+    handle = meiva.shell.run_background(f"{command} && pwd", name="test-facade", keep=True, ttl=120)
     try:
         workspace = workspace_dir(_agent_row, home=meiva_home())
         log_path = Path(handle.output_path)
@@ -42,7 +43,7 @@ def test_run_background_runs_in_the_workspace_and_logs_there(_agent_row: int) ->
         while time.monotonic() < deadline and "[exit 0]" not in log:
             time.sleep(0.1)
             log = log_path.read_text()
-        assert "facade-ok" in log, log
+        assert f"facade-owner: {_agent_row}" in log, log
         assert str(workspace.resolve()) in log or str(workspace) in log, log
         assert log.strip().endswith("[exit 0]"), log
         assert meiva.shell.sessions.list()[handle.session_id] == "test-facade"
