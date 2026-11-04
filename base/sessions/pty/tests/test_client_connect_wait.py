@@ -54,7 +54,7 @@ def test_a_service_that_comes_up_inside_the_wait_answers(short_tmp: Path) -> Non
             with conn:
                 line = protocol.read_line(conn, limit=1 << 20)
                 assert line is not None
-                served.append(protocol.decode_object(line)["method"])
+                served.append(str(protocol.decode_object(line)["method"]))
                 conn.sendall(protocol.encode({"id": 1, "ok": True, "data": {"up": True}}))
 
     thread = threading.Thread(target=serve, daemon=True)

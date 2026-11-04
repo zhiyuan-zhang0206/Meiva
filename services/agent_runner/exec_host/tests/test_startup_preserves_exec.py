@@ -154,7 +154,9 @@ async def _ping(home: Path, process: asyncio.subprocess.Process, log: Path) -> N
                 writer.write(protocol.encode({"id": 1, "method": "ping"}))
                 await writer.drain()
                 reply = protocol.decode_object(await reader.readline())
-                assert reply["ok"] is True and reply["data"]["pid"] == process.pid
+                reply_data = reply["data"]
+                assert isinstance(reply_data, dict)
+                assert reply["ok"] is True and reply_data["pid"] == process.pid
                 return
             finally:
                 writer.close()

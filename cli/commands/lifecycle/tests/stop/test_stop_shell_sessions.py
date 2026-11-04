@@ -543,7 +543,9 @@ def test_a_closure_outcome_with_an_unknown_survivor_role_is_refused(launch: Laun
     wire = closure.Outcome(
         grace_s=0.0, survivors=(closure.Survivor(name, identity_of(survivor), SurvivorRole.JOB),)
     ).to_wire()
-    wire["survivors"][0]["role"] = "helper"
+    survivors = wire["survivors"]
+    assert isinstance(survivors, list)
+    survivors[0]["role"] = "helper"
     with pytest.raises(ValueError, match="'helper' is not a valid SurvivorRole"):
         closure.Outcome.from_wire(wire)
 

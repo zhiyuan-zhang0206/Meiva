@@ -798,6 +798,15 @@ root = "base/packages/plugins/tests"
 root = "base/packages/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/sessions/exec_host/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/sessions/pty/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/sessions/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/telemetry/metrics/core/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -1168,6 +1177,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "base/packages"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "base/sessions"
 reportAny = "error"
 reportExplicitAny = "error"
 

@@ -51,7 +51,7 @@ async def test_run_in_subprocess_routes_through_exec_host_socket_and_streams_out
             raw = await reader.readline()
             req = protocol.decode_object(raw.rstrip(b"\r\n"))
             received_requests.append(req)
-            envelope = read_request(Path(req["request_path"]))
+            envelope = read_request(Path(str(req["request_path"])))
             seen_code.append(envelope.code)
 
             writer.write(protocol.encode(protocol.output_chunk(req["id"], "remote ")))
@@ -61,7 +61,7 @@ async def test_run_in_subprocess_routes_through_exec_host_socket_and_streams_out
             await writer.drain()
 
             write_result(
-                Path(req["result_path"]),
+                Path(str(req["result_path"])),
                 ResultPayload(
                     kind="done",
                     state_update={"custom_slot": "updated-by-remote"},
@@ -148,7 +148,7 @@ async def test_run_in_subprocess_forwards_cancel_over_exec_host_socket(tmp_path:
             received_cancel.append(cancel_msg)
 
             write_result(
-                Path(req["result_path"]),
+                Path(str(req["result_path"])),
                 ResultPayload(
                     kind="cancelled",
                     exc_type="KeyboardInterrupt",

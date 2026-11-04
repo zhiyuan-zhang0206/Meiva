@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Literal, Never, TypeGuard
 
 from base.host.atomic_io import AtomicWriter
+from base.host.boundary.untyped import object_of
 
 SCHEMA_VERSION = 1
 _TOOL_RE = re.compile(r"[a-z][a-z0-9-]*")
@@ -376,7 +377,7 @@ def _parse(key: CodingSessionKey, value: object) -> CodingSessionOwner:
 
 def _read_path(key: CodingSessionKey, path: Path, generation: str | None) -> CodingSessionOwner:
     try:
-        owner = _parse(key, json.loads(path.read_text(encoding="utf-8")))
+        owner = _parse(key, object_of(json.loads, path.read_text(encoding="utf-8")))
     except FileNotFoundError:
         return CodingSessionOwner(
             key=key, status=CodingSessionStatus.INACTIVE, generation=generation
