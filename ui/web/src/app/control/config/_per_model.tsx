@@ -1,5 +1,7 @@
 "use client";
 
+import { NativeSelect } from "@/components/ui/native-select";
+
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
@@ -82,13 +84,12 @@ export function PerModelPanel({
         <label htmlFor="per-model-model" className="text-xs text-muted-foreground">
           {t("model")}
         </label>
-        <select
+        <NativeSelect
           id="per-model-model"
           aria-label={t("model")}
           value={model}
           onChange={(e) => setPicked(e.target.value)}
           disabled={Boolean(models.error) || model === ""}
-          className="text-xs bg-transparent border border-border rounded px-1.5 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-ring cursor-pointer"
         >
           {model === "" && (
             <option value="" disabled>
@@ -104,7 +105,7 @@ export function PerModelPanel({
               ))}
             </optgroup>
           ))}
-        </select>
+        </NativeSelect>
         {resolved.data?.registered === false && (
           <span className="text-[11px] italic text-muted-foreground" data-testid="per-model-unregistered">
             {t("notInRegistry")}

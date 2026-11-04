@@ -37,6 +37,8 @@ describe("Settings navigation", () => {
     expect(screen.queryByText("SCHEDULES_BODY")).toBeNull();
     expect(screen.getByRole("link", { name: "Back to agents" }).getAttribute("href")).toBe("/");
     expect(screen.queryByText(/OKF/i)).toBeNull();
+    const nav = screen.getByRole("navigation", { name: "Settings sections" });
+    expect(within(nav).getAllByRole("button")[0].textContent).toBe("Guide");
   });
 
   it("switches between machine configuration and automations with explicit scope", async () => {

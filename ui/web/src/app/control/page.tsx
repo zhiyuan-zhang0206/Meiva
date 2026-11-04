@@ -22,6 +22,7 @@ import { ControlSection } from "./section";
 import { useSettledAnchorScroll } from "./anchor/anchor-scroll";
 
 const PANELS = [
+  { id: "guide", icon: CircleHelp, group: "guide" },
   { id: "config", icon: Settings2, group: "preferences" },
   { id: "display", icon: Palette, group: "preferences" },
   { id: "plugins", icon: Puzzle, group: "manage" },
@@ -30,7 +31,6 @@ const PANELS = [
   { id: "schedules", icon: CalendarClock, group: "manage" },
   { id: "machines", icon: Monitor, group: "system" },
   { id: "advanced", icon: SlidersHorizontal, group: "system" },
-  { id: "guide", icon: CircleHelp, group: "system" },
   { id: "app", icon: Cpu, group: "system" },
 ] as const;
 type PanelId = typeof PANELS[number]["id"];
@@ -100,9 +100,9 @@ export function ControlShell({ Guide, Config, Display, Plugins, Mcp, Skills, Sch
       <div className={cn("md:flex-row", FLEX, FLEX_COL, FLEX_1, MIN_H_0, OVERFLOW_HIDDEN)}>
         <nav aria-label={t("navigation")} className="shrink-0 border-b border-border bg-muted/15 p-3 md:w-56 md:border-b-0 md:border-r md:overflow-y-auto">
           <div className={cn(FLEX, "gap-1 overflow-x-auto md:block md:space-y-5")}>
-            {(["preferences", "manage", "system"] as const).map((group) => (
+            {(["guide", "preferences", "manage", "system"] as const).map((group) => (
               <div key={group} className={cn(FLEX, "gap-1 md:block md:space-y-1")}>
-                <p className="hidden px-3 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground md:block">{t(group)}</p>
+                {group !== "guide" && <p className="hidden px-3 pb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground md:block">{t(group)}</p>}
                 {panels.filter((panel) => panel.group === group).map(({ id, icon: Icon }) => (
                   <button key={id} type="button" onClick={() => select(id)} aria-current={active === id ? "page" : undefined}
                     className={cn(FLEX, "shrink-0 items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm md:w-full", active === id ? "bg-accent font-medium text-accent-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>

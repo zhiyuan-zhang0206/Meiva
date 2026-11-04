@@ -95,8 +95,8 @@ describe("ConfigPage text inline edit", () => {
   });
 });
 
-describe("ConfigPage restart banner from write result", () => {
-  it("no banner before any write; appears after write with restart targets", async () => {
+describe("ConfigPage restart reminder from write result", () => {
+  it("shows a dismissible reminder only after a saved write needs a restart", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
     transport.putConfig.mockResolvedValue(
       OK_RESULT(["log_level"], ["all"]),
@@ -104,16 +104,35 @@ describe("ConfigPage restart banner from write result", () => {
     wrap(<ConfigEditor mode="advanced" />);
     await waitFor(() => screen.getByTestId("edit-log_level"));
     expect(
-      screen.queryByText(/restart the following processes/),
+      screen.queryByRole("status"),
     ).toBeNull();
+    expect(screen.queryByText("Requires restart")).toBeNull();
     fireEvent.click(screen.getByTestId("edit-log_level"));
     const input = screen.getByTestId("input-log_level");
     fireEvent.change(input, { target: { value: "DEBUG" } });
+    expect(screen.queryByRole("status")).toBeNull();
     fireEvent.keyDown(input, { key: "Enter" });
     const banner = await waitFor(() =>
-      screen.getByText(/restart the following processes/i),
+      screen.getByRole("status"),
     );
     expect(banner.textContent).toMatch(/All processes/);
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss restart reminder" }));
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it.each(["live", "rejected", "failed"])("does not suggest a restart for a %s write", async (outcome) => {
+    transport.getConfig.mockResolvedValue(VIEW);
+    if (outcome === "failed") transport.putConfig.mockRejectedValue(new Error("unavailable"));
+    else transport.putConfig.mockResolvedValue(outcome === "live" ? OK_RESULT(["log_level"]) : {
+      applied: false, results: { log_level: { ok: false, reason: "rejected" } }, restart_required: [],
+    });
+    wrap(<ConfigEditor mode="advanced" />);
+    fireEvent.click(await screen.findByTestId("edit-log_level"));
+    const input = screen.getByTestId("input-log_level");
+    fireEvent.change(input, { target: { value: "DEBUG" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(transport.getConfig.mock.calls.length).toBeGreaterThan(1));
+    expect(screen.queryByRole("status")).toBeNull();
   });
 });
 

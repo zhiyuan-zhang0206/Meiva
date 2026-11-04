@@ -64,8 +64,11 @@ contains only host-scoped fields, with the gateway host selected initially and e
 other online runner listed once. Selecting a machine never changes agent defaults.
 The editor preserves the existing config API, owner routing and hidden overrides.
 Technical identifiers, scope and default values are available in each advanced
-row's details; a required restart stays visible before editing.
+row's details. Restart requirements appear only after a successful field write,
+in a dismissible floating reminder using the write response's restart targets.
+Settings selects share NativeSelect's reserved arrow space and native keyboard behavior.
 
+Guide is a standalone first navigation entry; General remains the default category.
 The navigation retains old config and display deep links. OKF Graph has no Settings
 entry. Schedules shows desired enablement separately from historical process facts:
 `enabled=false,status=running` is Stop unconfirmed, not Stopped. `running` alone

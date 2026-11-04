@@ -5,7 +5,7 @@ import { writeConfigOwners } from "./_owner_writes";
 // meiva:link ui/web/src/app/control/config/docs/configuration.meiva.okf.md
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, RefreshCw } from "lucide-react";
+import { ChevronDown, RefreshCw, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
@@ -155,7 +155,7 @@ export default function ConfigEditor({ mode }: { mode: "general" | "advanced" | 
       ...Object.fromEntries(Object.entries(prev).filter(([k]) => !written.has(k))),
       ...failures,
     }));
-    setRestartTargets(result.restart_required);
+    setRestartTargets(Object.values(result.results).some((field) => field.ok) ? result.restart_required : []);
     setSaveError(result.applied ? null : `Save failed for: ${Object.keys(failures).join(", ")}`);
   }, []);
 
@@ -445,12 +445,13 @@ export default function ConfigEditor({ mode }: { mode: "general" | "advanced" | 
       )}
 
       {restartTargets.length > 0 && (
-        <div className={cn("items-start gap-2 text-xs text-muted-foreground border-t border-border pt-3", FLEX)}>
-          <RefreshCw className="size-3.5 mt-0.5 shrink-0" />
-          <span>
-            {selection ?? "Cluster"}: restart the following processes for changes to take
-            effect: {restartTargets.map((x) => restartLabel(x, t)).join(", ")}
-          </span>
+        <div role="status" className={cn("fixed bottom-6 right-6 z-50 max-w-[min(28rem,calc(100vw-3rem))] items-start gap-3 rounded-xl border border-border bg-popover p-4 text-sm text-popover-foreground shadow-lg", FLEX)}>
+          <RefreshCw aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+          <span>{t("restartAfterSave", { targets: restartTargets.map((target) => restartLabel(target, t)).join(", ") })}</span>
+          <button type="button" aria-label={t("dismissReminder")} onClick={() => setRestartTargets([])}
+            className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground">
+            <X aria-hidden className="size-4" />
+          </button>
         </div>
       )}
     </div>

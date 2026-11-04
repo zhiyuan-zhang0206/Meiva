@@ -34,7 +34,6 @@
   "technicalFilters": "Filter by technical properties",
   "noMatches": "No matching settings.",
   "gatewayMachine": "Gateway machine",
-  "needsRestart": "Requires restart",
   "details": "Technical details",
   "defaultModelHelp": "Used for new agents. Existing agents keep their current model.",
   "usingDefault": "Using the system default",
@@ -67,5 +66,7 @@
       "label": "Search results per request",
       "description": "Maximum number of results returned by a web search."
     }
-  }
+  },
+  "restartAfterSave": "To apply your saved changes, restart: {targets}.",
+  "dismissReminder": "Dismiss restart reminder"
 }

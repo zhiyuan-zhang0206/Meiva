@@ -1,5 +1,7 @@
 "use client";
 
+import { NativeSelect } from "@/components/ui/native-select";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
@@ -72,14 +74,13 @@ export function DefaultModelPanel({ id }: { id: string }) {
         </p>
       ) : (
         <div className={cn("items-center gap-2", FLEX)}>
-          <select
+          <NativeSelect
             id="default-model-select"
             aria-label="Default model"
             data-testid="select-default-model"
             value={value}
             disabled={current.isLoading || models.isLoading || save.isPending}
             onChange={(e) => setPicked(e.target.value)}
-            className="cursor-pointer rounded border border-border bg-transparent px-1.5 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           >
             {value === "" && (
               <option value="" disabled>
@@ -99,7 +100,7 @@ export function DefaultModelPanel({ id }: { id: string }) {
                 ))}
               </optgroup>
             ))}
-          </select>
+          </NativeSelect>
           <Button
             type="button"
             size="sm"

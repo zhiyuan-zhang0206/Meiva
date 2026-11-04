@@ -1,4 +1,4 @@
-exports = ["auto-expand-textarea.tsx", "button.tsx", "context-menu.tsx", "dialog.tsx", "inline-error.tsx", "input.tsx", "resizable.tsx", "scroll-area.tsx", "send-button.tsx", "switch.tsx", "table.tsx", "textarea.tsx"]
+exports = ["auto-expand-textarea.tsx", "button.tsx", "context-menu.tsx", "dialog.tsx", "inline-error.tsx", "input.tsx", "native-select.tsx", "resizable.tsx", "scroll-area.tsx", "send-button.tsx", "switch.tsx", "table.tsx", "textarea.tsx"]
 
 [uses]
 "auto-expand-textarea.test.tsx" = ["auto-expand-textarea.tsx"]

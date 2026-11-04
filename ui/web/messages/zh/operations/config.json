@@ -34,7 +34,6 @@
   "technicalFilters": "按技术属性筛选",
   "noMatches": "没有匹配的设置。",
   "gatewayMachine": "Gateway 所在机器",
-  "needsRestart": "需要重启",
   "details": "技术详情",
   "defaultModelHelp": "用于新建 agent；现有 agent 保留当前模型。",
   "usingDefault": "正在使用系统默认值",
@@ -67,5 +66,7 @@
       "label": "每次搜索的结果数量",
       "description": "一次网页搜索最多返回的结果数。"
     }
-  }
+  },
+  "restartAfterSave": "改动已保存。重启以下进程后生效：{targets}。",
+  "dismissReminder": "关闭重启提醒"
 }

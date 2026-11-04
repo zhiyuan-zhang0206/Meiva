@@ -142,14 +142,14 @@ describe("ConfigPage render", () => {
     expect(inGroups("cluster-pinned")).toHaveLength(1);
   });
 
-  it("per-agent tag follows the wire field; Startup tag follows restart_required", async () => {
+  it("shows per-agent metadata without preemptive restart labels", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
     await renderSettled();
 
     expect(inGroups("per-agent")).toHaveLength(3);
 
-    expect(screen.getByText("Startup: all")).toBeTruthy();
-    expect(screen.getAllByText(/Startup: /).length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText(/Startup: /)).toBeNull();
+    expect(screen.queryByText("Requires restart")).toBeNull();
   });
 
   it("sensitive field masked + lock; writable secret is write-only replaceable", async () => {
@@ -366,7 +366,7 @@ describe("ConfigPage bool toggle (putConfig + write result)", () => {
     expect(put.mock.calls).toEqual([[{ log_level: "INFO" }, undefined], [{ enable_compact: false }, undefined]]);
     expect(await screen.findByText(/Save failed/)).toBeTruthy();
     expect(screen.getByText(/Fleet image changed/)).toBeTruthy();
-    expect(screen.getByText(/restart the following processes/i).textContent).toMatch(/All processes/);
+    expect(screen.getByRole("status").textContent).toMatch(/All processes/);
   });
 
 });

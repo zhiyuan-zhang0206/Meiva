@@ -1,5 +1,7 @@
 "use client";
 
+import { NativeSelect } from "@/components/ui/native-select";
+
 import { Check, Lock, Pencil, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 
@@ -107,12 +109,11 @@ export function MachineSelector({
       <label htmlFor="config-machine" className="text-xs text-muted-foreground">
         {t("machine")}
       </label>
-      <select
+      <NativeSelect
         id="config-machine"
         aria-label={t("machine")}
         value={selection ?? ""}
         onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
-        className="text-xs bg-transparent border border-border rounded px-1.5 py-1 text-foreground hover:text-foreground focus:outline-none focus:ring-1 focus:ring-ring cursor-pointer"
       >
         <option value="">{clusterLabel}</option>
         {agentRunners.map((m) => (
@@ -120,7 +121,7 @@ export function MachineSelector({
             {m.name}
           </option>
         ))}
-      </select>
+      </NativeSelect>
     </div>
   );
 }
@@ -201,7 +202,6 @@ export function ConfigRow({
             {label}
           </span>
           {!field.writable && <span className="text-xs text-muted-foreground">{t("readOnly")}</span>}
-          {field.restart_required && <TagBadge>{t("needsRestart")}</TagBadge>}
           {remoteReadOnly && (
             <span className="text-[11px] text-muted-foreground italic">
               {t("editOnCluster")}
@@ -226,7 +226,6 @@ export function ConfigRow({
           )}
           <TagBadge>{field.scope}</TagBadge>
           {isPerAgent(field) && <TagBadge>{t("perAgent")}</TagBadge>}
-          {field.restart_required && <TagBadge>Startup: {field.restart_required}</TagBadge>}
             <span>Default: {defaultText}</span>
           </div>
           {field.description && <p className="leading-relaxed">{field.description}</p>}
@@ -325,13 +324,12 @@ export function ConfigRow({
           />
         ) : field.field_type === "enum" ? (
           editable ? (
-            <select
+            <NativeSelect
               aria-label={label}
               value={String(field.current_value ?? "")}
               disabled={busy}
               data-testid={`select-${field.name}`}
               onChange={(e) => onSelectEnum(e.target.value)}
-              className="text-xs bg-transparent border border-border rounded px-1.5 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-ring cursor-pointer disabled:opacity-50"
             >
               {(field.current_value == null || field.current_value === "") && (
                 <option value="" disabled>
@@ -343,7 +341,7 @@ export function ConfigRow({
                   {c}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           ) : (
             <span className="text-xs text-muted-foreground px-2">
               {displayValue}
