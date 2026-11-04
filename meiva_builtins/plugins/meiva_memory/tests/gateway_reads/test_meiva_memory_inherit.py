@@ -356,6 +356,20 @@ def test_a_refused_chain_read_degrades_and_is_not_cached(
         assert inherit.inherited_memory_note(ctx) is None
 
 
+@pytest.mark.parametrize(
+    ("field", "value"), [("agent_id", "600301"), ("label", 7), ("machine", ["here"])]
+)
+def test_a_chain_row_of_the_wrong_shape_is_a_contract_break(
+    wire: GatewayWire, machine_identity: MachineIdentityReader, field: str, value: object
+) -> None:
+    row = _row(600301, machine_identity.name())
+    row[field] = value
+    _chain(wire, 1, row)
+
+    with pytest.raises(TypeError, match=field):
+        _ = inherit.inherited_memory_note(_context(wire.context.clients, machine_identity))
+
+
 def test_chain_is_read_at_each_establishment(
     wire: GatewayWire, machine_identity: MachineIdentityReader
 ) -> None:

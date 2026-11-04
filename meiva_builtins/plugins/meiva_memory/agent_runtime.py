@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Collection
-from typing import Any
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
@@ -215,7 +214,7 @@ class _PassiveMemoryRecallHook(Hook):
         runtime: Runtime[MeivaContext],
         _config: RunnableConfig,
         /,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, object] | None:
         agent = runtime.context.require_agent()
         if not agent.memory.passive_memory_recall_enabled:
             return None
@@ -302,7 +301,7 @@ class _MemoryWriteCheckHook(Hook):
         runtime: Runtime[MeivaContext],
         _config: RunnableConfig,
         /,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, object] | None:
         handle = state_handle()
         recorded = handle.view(state)
         if not recorded.shared_notes and not recorded.personal_notes:

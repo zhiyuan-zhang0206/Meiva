@@ -96,7 +96,9 @@ async def test_fires_on_real_inbound_sources(
 
     assert len(wire.stub.received) == 1
     assert result is not None
-    assert "a.md" in result["memory"].injected_paths
+    memory = result["memory"]
+    assert isinstance(memory, MemoryState)
+    assert "a.md" in memory.injected_paths
 
 
 @pytest.mark.parametrize(

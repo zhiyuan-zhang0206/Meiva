@@ -10,9 +10,12 @@ import argparse
 import json
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.options import options
+from base.host.boundary.untyped import object_of
 from base.paths.home import resolve_meiva_home
 from meiva_builtins.plugins.meiva_memory.pool_ops import pool_dir, refresh_index, repo_slug
 
@@ -28,7 +31,7 @@ FACES_FILE = "memory-faces.txt"
 # difference is what turns into UNREADABLE below.
 def _decoded(text: str) -> object:
     try:
-        value: object = json.loads(text or "{}")
+        value = object_of(json.loads, text or "{}")
     except json.JSONDecodeError:
         return None
     return value
@@ -173,6 +176,11 @@ def _write_snapshot(pr: int, slug: str, snapshot: str) -> bool:
     return r.returncode == 0
 
 
+@dataclass(frozen=True)
+class _Arguments:
+    apply: bool
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Merge pool PRs whose pool gate is green (dormant: pass --apply to act)"
@@ -182,8 +190,7 @@ def main() -> int:
         action="store_true",
         help="actually merge; without it the run only reports what it would merge",
     )
-    apply_flag: object = ap.parse_args().apply
-    apply_changes = apply_flag is True
+    apply_changes = options(ap.parse_args(), _Arguments).apply
 
     pool = pool_dir(resolve_meiva_home())
     slug = repo_slug(pool)

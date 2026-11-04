@@ -19,9 +19,9 @@ import os
 import re
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any, TypeGuard
+from typing import ParamSpec, TypeGuard
 
 import yaml
 
@@ -36,8 +36,23 @@ _FM_KEY_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*): (.*)$")
 _MISREAD_STRING_KEYS = ("title", "description", "name", "type", "meiva_machine", "timestamp")
 
 
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
+def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict)
+
+
+_P = ParamSpec("_P")
+
+
+# meiva:note
+# `function(*args, **kwargs)` read as an `object`: `yaml.safe_load` is typed `Any`, and this script
+# also runs standalone inside a pool checkout, so it carries its own copy of the repository's
+# `base.host.boundary.untyped.object_of` instead of importing `base`. It spells the parameters with
+# `ParamSpec` rather than the Python 3.12 type-parameter syntax because the pool's `python3` need not
+# be 3.12 (UP047 is waived for that reason).
+def _object_of(  # noqa: UP047
+    function: Callable[_P, object], /, *args: _P.args, **kwargs: _P.kwargs
+) -> object:
+    return function(*args, **kwargs)
 
 
 def _is_object_list(value: object) -> TypeGuard[list[object]]:
@@ -60,7 +75,7 @@ def _misread_frontmatter_keys(fm_raw: str) -> list[str]:
         if key not in _MISREAD_STRING_KEYS or not raw or raw.startswith(('"', "'", "|", ">")):
             continue
         try:
-            parsed: object = yaml.safe_load(line)
+            parsed = _object_of(yaml.safe_load, line)
         except yaml.YAMLError:
             continue
         value = parsed.get(key) if _is_str_dict(parsed) else None
@@ -69,7 +84,7 @@ def _misread_frontmatter_keys(fm_raw: str) -> list[str]:
     return bad
 
 
-def _check_type_and_agent(fm: dict[str, Any], errors: list[str]) -> None:
+def _check_type_and_agent(fm: dict[str, object], errors: list[str]) -> None:
     if "type" not in fm:
         errors.append("Missing required field 'type'")
     elif not fm["type"] or not isinstance(fm["type"], str) or not fm["type"].strip():
@@ -81,10 +96,10 @@ def _check_type_and_agent(fm: dict[str, Any], errors: list[str]) -> None:
         errors.append("Field 'meiva_agent' must not be null")
 
 
-def _check_tags(fm: dict[str, Any], errors: list[str]) -> None:
+def _check_tags(fm: dict[str, object], errors: list[str]) -> None:
     if "tags" not in fm:
         return
-    tags: object = fm["tags"]
+    tags = fm["tags"]
     if not _is_object_list(tags):
         errors.append("Field 'tags' must be a list")
         return
@@ -102,7 +117,7 @@ def _check_tags(fm: dict[str, Any], errors: list[str]) -> None:
         errors.append(f"{len(type_tags)} type tags ({', '.join(type_tags)}) — exactly one")
 
 
-def _check_timestamp(fm: dict[str, Any], fname: str, errors: list[str]) -> None:
+def _check_timestamp(fm: dict[str, object], fname: str, errors: list[str]) -> None:
     if "timestamp" not in fm:
         return
     ts = fm["timestamp"]
@@ -117,10 +132,10 @@ def _check_timestamp(fm: dict[str, Any], fname: str, errors: list[str]) -> None:
         errors.append(f"Field 'timestamp' does not look like ISO 8601: {ts!r}")
 
 
-def _check_generated(fm: dict[str, Any], errors: list[str]) -> None:
+def _check_generated(fm: dict[str, object], errors: list[str]) -> None:
     if "generated" not in fm:
         return
-    generated: object = fm["generated"]
+    generated = fm["generated"]
     if not _is_str_dict(generated):
         errors.append("Field 'generated' must be a mapping")
         return
@@ -133,7 +148,7 @@ def _check_generated(fm: dict[str, Any], errors: list[str]) -> None:
             errors.append(f"Field 'generated.at' does not look like ISO 8601: {generated_at!r}")
 
 
-def _frontmatter_problem(content: str) -> tuple[dict[str, Any] | None, str | None, str | None]:
+def _frontmatter_problem(content: str) -> tuple[dict[str, object] | None, str | None, str | None]:
     """`(frontmatter, raw frontmatter text, error)` of a note's text; one side is None."""
     if not content.startswith("---\n"):
         return None, None, "Missing YAML frontmatter (must start with ---)"
@@ -141,7 +156,7 @@ def _frontmatter_problem(content: str) -> tuple[dict[str, Any] | None, str | Non
     if len(parts) < 3:
         return None, None, "Unclosed YAML frontmatter"
     try:
-        fm: object = yaml.safe_load(parts[1])
+        fm = _object_of(yaml.safe_load, parts[1])
     except yaml.YAMLError as e:
         return None, None, f"Invalid YAML: {e}"
     if not _is_str_dict(fm):
@@ -201,12 +216,12 @@ def note_char_cap() -> int:
     return int(os.environ.get("MEIVA_MEMORY_NOTE_CAP", "8000"))
 
 
-def _single_note_tag_errors(fname: str, fm: dict[str, Any]) -> list[str]:
+def _single_note_tag_errors(fname: str, fm: dict[str, object]) -> list[str]:
     """Tag-discipline findings that `validate_file` does not report for the note itself."""
     if "tags" not in fm:
         found = _type_tag_errors(fname, [])
     else:
-        raw_tags: object = fm["tags"]
+        raw_tags = fm["tags"]
         tags: list[object] = raw_tags if _is_object_list(raw_tags) else []
         found = [
             e
@@ -221,7 +236,7 @@ def is_note_name(fname: str) -> bool:
     return fname.endswith(".md") and fname not in _RESERVED
 
 
-def note_parts(content: str) -> tuple[dict[str, Any], str] | None:
+def note_parts(content: str) -> tuple[dict[str, object], str] | None:
     """`(frontmatter, body)` of a note's text; None when its frontmatter is missing or invalid."""
     fm, _fm_raw, problem = _frontmatter_problem(content)
     if problem is not None or fm is None:
@@ -260,7 +275,7 @@ MAX_FILES_PER_DIR = 20
 MAX_SUBDIRS_PER_DIR = 20
 
 
-def _notes_with_frontmatter(bundle: Path) -> Iterator[tuple[Path, dict[str, Any]]]:
+def _notes_with_frontmatter(bundle: Path) -> Iterator[tuple[Path, dict[str, object]]]:
     """Every readable, non-reserved, non-hidden note of the bundle with its frontmatter mapping."""
     for fp in bundle.rglob("*.md"):
         if fp.name in _RESERVED or any(
@@ -277,10 +292,10 @@ def _notes_with_frontmatter(bundle: Path) -> Iterator[tuple[Path, dict[str, Any]
         if len(parts) < 3:
             continue
         try:
-            fm = yaml.safe_load(parts[1])
+            fm = _object_of(yaml.safe_load, parts[1])
         except yaml.YAMLError:
             continue
-        if isinstance(fm, dict):
+        if _is_str_dict(fm):
             yield fp, fm
 
 
@@ -316,7 +331,7 @@ def validate_type_tag(bundle: Path) -> list[str]:
     type/<x> tag, and no free-form junk tags (project/role/status/repo/archived)."""
     errors: list[str] = []
     for fp, fm in _notes_with_frontmatter(bundle):
-        raw_tags: object = fm.get("tags")
+        raw_tags = fm.get("tags")
         if isinstance(raw_tags, str):
             tags: list[object] = [raw_tags]
         elif _is_object_list(raw_tags):
@@ -330,9 +345,11 @@ def validate_type_tag(bundle: Path) -> list[str]:
 _CROSS_PROJECT_WORDS = {"meiva", "meiva-internal", "shared-tech", "open-source"}
 
 
-def _misplaced_project_note(rel: str, fm: dict[str, Any], project_words: list[str]) -> str | None:
+def _misplaced_project_note(
+    rel: str, fm: dict[str, object], project_words: list[str]
+) -> str | None:
     """The error for a note tagged with exactly one project word but living outside its tree."""
-    raw_tags: object = fm.get("tags")
+    raw_tags = fm.get("tags")
     if isinstance(raw_tags, str):
         tags: list[object] = [raw_tags]
     elif _is_object_list(raw_tags):
@@ -486,7 +503,7 @@ def _note_frontmatter_title(fp: Path) -> str | None:
     if len(parts) < 3:
         return None
     try:
-        fm: object = yaml.safe_load(parts[1])
+        fm = _object_of(yaml.safe_load, parts[1])
     except yaml.YAMLError:
         return None
     if _is_str_dict(fm) and fm.get("title"):

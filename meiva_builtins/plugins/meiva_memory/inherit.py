@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from langchain_core.messages import HumanMessage
 
 from agent.messages import NoteTag, system_note_message
 from base.agents.context import MeivaContext
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_sequence
 from base.log import logger
 from base.paths import workspace_path
 
@@ -31,14 +32,30 @@ def _ancestor_chain(agent_id: int, ctx: MeivaContext) -> tuple[Ancestor, ...] | 
     from meiva import gateway_client
 
     try:
-        rows: list[dict[str, Any]] = gateway_client.get_born_chain(agent_id, context=ctx)
+        rows = object_sequence(gateway_client.get_born_chain(agent_id, context=ctx))
     except (GatewayUnavailable, httpx.HTTPStatusError) as exc:
         logger.warning("[inherited-memory] born-chain read failed (agent {}): {}", agent_id, exc)
         return None
-    return tuple(
-        Ancestor(agent_id=int(row["agent_id"]), label=row.get("label"), machine=row.get("machine"))
-        for row in rows
-    )
+    return tuple(_ancestor(row) for row in rows)
+
+
+# meiva:note
+# One row of the gateway's born-chain answer. The gateway sends `agent_id` as an integer and `label`
+# / `machine` as a string or null; any other shape is a contract break, so it raises instead of
+# building an ancestor from a value of the wrong type.
+def _ancestor(row: object) -> Ancestor:
+    if not is_object_dict(row):
+        raise TypeError(f"born-chain row must be an object, got {type(row).__name__}")
+    agent_id = row["agent_id"]
+    label = row.get("label")
+    machine = row.get("machine")
+    if not isinstance(agent_id, int) or isinstance(agent_id, bool):
+        raise TypeError(f"born-chain agent_id must be an integer, got {agent_id!r}")
+    if label is not None and not isinstance(label, str):
+        raise TypeError(f"born-chain label must be a string or null, got {label!r}")
+    if machine is not None and not isinstance(machine, str):
+        raise TypeError(f"born-chain machine must be a string or null, got {machine!r}")
+    return Ancestor(agent_id=agent_id, label=label, machine=machine)
 
 
 # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md

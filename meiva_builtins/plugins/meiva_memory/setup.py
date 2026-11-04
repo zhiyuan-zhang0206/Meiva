@@ -28,6 +28,7 @@ import subprocess
 from pathlib import Path
 
 from base.cluster.machine import MachineIdentityReader
+from base.host.boundary.untyped import object_of
 from base.log import logger
 from base.packages.plugins.loading.scaffold import ScaffoldFacts
 
@@ -145,8 +146,9 @@ def _ensure_memory_repo(
     try:
         _initialize_authoring(machine=machine, facts=facts, target=target)
     except subprocess.CalledProcessError as error:
-        stderr = error.stderr.decode() if isinstance(error.stderr, bytes) else (error.stderr or "")
-        raise RuntimeError(_classify_git_init_error(stderr, error.returncode)) from error
+        raise RuntimeError(
+            _classify_git_init_error(_stderr_text(error), error.returncode)
+        ) from error
     print("    memory pool ready")
 
 
@@ -198,9 +200,20 @@ def _ensure_gateway_memory_repo(
     try:
         _initialize_gateway(facts=facts, target=target)
     except subprocess.CalledProcessError as error:
-        stderr = error.stderr.decode() if isinstance(error.stderr, bytes) else (error.stderr or "")
-        raise RuntimeError(_classify_git_init_error(stderr, error.returncode)) from error
+        raise RuntimeError(
+            _classify_git_init_error(_stderr_text(error), error.returncode)
+        ) from error
     print("    gateway memory pool ready")
+
+
+# meiva:note
+# `CalledProcessError.stderr` is typed `Any`: it is bytes when the failed command was run without
+# `text=True`, a string with it, and None when stderr was not captured.
+def _stderr_text(error: subprocess.CalledProcessError) -> str:
+    stderr = object_of(getattr, error, "stderr", None)
+    if isinstance(stderr, bytes):
+        return stderr.decode()
+    return stderr if isinstance(stderr, str) else ""
 
 
 def _classify_git_init_error(stderr: str, returncode: int) -> str:
