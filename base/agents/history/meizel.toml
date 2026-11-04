@@ -9,7 +9,7 @@ exports = ["checkpoint.py", "checkpoint_copy.py", "checkpoint_postgres_walks.py"
 "harness_messages.py" = ["timeline_item.py"]
 "hierarchy" = ["checkpoint.py", "timeline.py"]
 "message_tokens.py" = ["closing_request.py"]
-"tests" = ["checkpoint.py", "checkpoint_postgres_walks.py", "checkpoint_serde.py", "closing_request.py", "compact_boundary.py", "context_breakdown.py", "context_response.py", "delta_read_compat.py", "harness_messages.py", "hierarchy", "message_tokens.py", "timeline.py", "timeline_item.py"]
+"tests" = ["checkpoint.py", "checkpoint_postgres_walks.py", "checkpoint_segment.py", "checkpoint_serde.py", "closing_request.py", "compact_boundary.py", "context_breakdown.py", "context_response.py", "delta_read_compat.py", "harness_messages.py", "hierarchy", "message_tokens.py", "timeline.py", "timeline_item.py"]
 "timeline.py" = ["timeline_item.py"]
 
 [purity]

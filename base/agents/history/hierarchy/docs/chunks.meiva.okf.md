@@ -31,25 +31,9 @@ zeroing it.
 **Compaction closes the segment**: `stamp_compact_boundary` enqueues the remainder from the
 last cut to the segment's end, with the boundary checkpoint id it stamped.
 
-**Manual build per session**: `GET /api/agents/{id}/sessions` and
-`POST /api/agents/{id}/understanding/build` (`gateway/agents/history/understanding.py`;
-`sessions.py`, `build.py`, `chunk_plan.py`). A *session* is one compaction segment (1 = oldest, stable; the unclosed newest has no boundary). `build.plan_jobs` replays the live
-trigger rule over the chosen sessions (`chunk_plan.plan_replay`, threshold
-`chunk_threshold`, as the hook), cuts every chunk down to the runs no level-1 node covers (one job per
-run; a run of framework notes only is dropped) and enqueues ordinary chunk jobs (a closed session's
-name its boundary checkpoint; an ended job of the same stretch is revived, a live one merged into).
-The session in progress is built to the last request sent, which is what closing the live segment
-was. `dry_run` plans and prices only. Estimates are cold-cache (`build.COST_BASIS`). A build
-is recorded in `understanding_builds` (its jobs, its rebuild) and read back by
-`GET .../understanding/builds/{build_id}`.
-
-**Rebuild of the upper levels** (`rebuild.py`, table `understanding_rebuilds`): a build also queues
-one rebuild for its agent (builds merge into the agent's pending row under an advisory lock). The consumer loop claims it only when the agent has no chunk
-job pending or running; while it runs, the agent's chunk jobs are not claimed. It drops every node
-above level 1 and the agent's `understanding_group_state`, then replays the level-1 nodes in
-message order, running the grouping checks after each with that leaf as the horizon
-(`run_group_checks(upto=...)`), as live leaves grow it. An interrupted rebuild
-restarts from the lifted state; chunk jobs finishing while one is pending skip their grouping checks.
+**Manual builds and upper-level rebuilds**: per-session replay planning (`GET /api/agents/{id}/sessions`,
+`POST /api/agents/{id}/understanding/build`) and queued upper-level rebuilds (`understanding_rebuilds`)
+are [[base/agents/history/hierarchy/docs/chunk-builds.meiva.okf.md|Session Builds and Upper-Level Rebuilds]].
 
 ## Queue (`chunks.py`, table `understanding_chunk_jobs`)
 
@@ -62,14 +46,18 @@ share the queue. A `running` row past its lease (claimer died) is failed by the 
 ## Consumer (`services/agent_runner/understanding/chunk_consumer.py`)
 
 A loop of the agent host (`services/agent_runner/agent_host/daemon.py`, given the agent's
-`execute_code` schema), never raising. Every due job runs at
-once, with no cap ([[base/agents/history/hierarchy/docs/concurrency.meiva.okf.md|concurrency]]). Each poll
+`execute_code` schema), never raising. Due jobs run concurrently up to `max_in_flight` per
+consumer (`DEFAULT_MAX_IN_FLIGHT = 2` on the live host loop; unbounded when `None`, see
+[[base/agents/history/hierarchy/docs/concurrency.meiva.okf.md|concurrency]]). Each poll
 samples the queue as `understanding_backlog`. A job, claimed:
 
 1. is described on its own: a chunk never depends on the previous one, and a topic that crosses
    its end is two nodes (the upper levels join them);
-2. locates the chunk in the stitched history (`locate_chunk`): a live chunk by `end_msg_id`
-   at its recorded index; a closing chunk in its boundary checkpoint's segment;
+2. locates the chunk in its single target checkpoint segment (`chunk_locator.locate_job_chunk`,
+   `locate_in_segment`): stitched offsets and older sealed boundary matches come from
+   `compact_segment_shape` metadata on `checkpoints` (lazily stamped once from each boundary's
+   own stored messages), so a live chunk reconstructs `latest` (plus at most one matched older
+   boundary after compaction) and a closing chunk reconstructs only its named boundary checkpoint;
 3. builds the agent's own model (`agent_model_target`, `ModelCache`) and sends `[segment head,
    messages[:end], instruction]` with `execute_code` bound; a tool-call reply is refused and
    retried (`generate._invoke_agent_shaped`);

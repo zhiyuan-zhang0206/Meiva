@@ -425,7 +425,7 @@ async def test_a_done_job_is_followed_by_the_upper_level_checks(
         **lm_wiring(catalog),
         config=config,
         describe=chunk_seams.describe,
-        load_segments=chunk_seams.load_segments,
+        locate_job_chunk=chunk_seams.locate_job_chunk,
     ).run_until_idle()
     async with aops_pool.connection() as conn:
         rows = await (
@@ -480,7 +480,7 @@ async def test_different_agents_run_together_and_one_agents_jobs_in_order(
         **lm_wiring(model_catalog),
         config=consumer_config(),
         describe=chunk_seams.describe,
-        load_segments=chunk_seams.load_segments,
+        locate_job_chunk=chunk_seams.locate_job_chunk,
     ).run_until_idle()
     assert [s for s, *_ in await job_statuses(aops_pool)] == ["done"] * 3
     # meiva:note
@@ -516,7 +516,7 @@ async def test_every_due_job_runs_at_once_each_on_its_own_thread(
         **lm_wiring(model_catalog),
         config=consumer_config(),
         describe=chunk_seams.describe,
-        load_segments=chunk_seams.load_segments,
+        locate_job_chunk=chunk_seams.locate_job_chunk,
     )
     await consumer.run_until_idle()
     jobs = await job_statuses(aops_pool)
@@ -548,7 +548,7 @@ async def test_one_jobs_failure_touches_no_other_job(
         **lm_wiring(model_catalog),
         config=consumer_config(),
         describe=chunk_seams.describe,
-        load_segments=chunk_seams.load_segments,
+        locate_job_chunk=chunk_seams.locate_job_chunk,
     ).run_until_idle()
     status = [(s, e) for s, _, e in await job_statuses(aops_pool)]
     assert [s for s, _ in status] == ["done", "failed", "done"]
@@ -577,7 +577,7 @@ async def test_a_job_that_cannot_be_settled_is_left_to_its_lease_and_others_fini
         **lm_wiring(model_catalog),
         config=consumer_config(),
         describe=chunk_seams.describe,
-        load_segments=chunk_seams.load_segments,
+        locate_job_chunk=chunk_seams.locate_job_chunk,
         settle_chunk_job=settle,
     )
     # meiva:note
@@ -602,7 +602,7 @@ async def test_the_backlog_event_carries_in_flight(
         **lm_wiring(model_catalog),
         config=consumer_config(),
         describe=chunk_seams.describe,
-        load_segments=chunk_seams.load_segments,
+        locate_job_chunk=chunk_seams.locate_job_chunk,
     )
     consumer.in_flight = 1
     await consumer.emit_backlog()
@@ -628,7 +628,7 @@ async def test_the_forever_loop_works_the_queue_and_stops_cleanly_on_cancel(
             config=config,
             poll_seconds=0.05,
             describe=chunk_seams.describe,
-            load_segments=chunk_seams.load_segments,
+            locate_job_chunk=chunk_seams.locate_job_chunk,
         )
     )
     for _ in range(100):
@@ -674,7 +674,7 @@ async def test_max_in_flight_caps_concurrent_claims_and_drains_remaining_jobs(
         config=consumer_config(),
         max_in_flight=2,
         describe=chunk_seams.describe,
-        load_segments=chunk_seams.load_segments,
+        locate_job_chunk=chunk_seams.locate_job_chunk,
     ).run_until_idle()
     assert peak == 2
     assert [s for s, *_ in await job_statuses(aops_pool)] == ["done"] * 4
@@ -720,7 +720,7 @@ async def test_a_replay_describes_one_agents_segments_together_and_skips_the_upp
         **lm_wiring(model_catalog),
         config=config,
         describe=chunk_seams.describe,
-        load_segments=chunk_seams.load_segments,
+        locate_job_chunk=chunk_seams.locate_job_chunk,
     )
     assert [s for s, *_ in await job_statuses(aops_pool)] == ["done", "done", "pending"]
     async with aops_pool.connection() as conn:

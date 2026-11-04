@@ -77,3 +77,89 @@ def test_checkpoint_reads_need_crud_not_schema_ddl(
     assert original.checkpoint["channel_values"]["messages"] == [
         HumanMessage(content="runtime read")
     ]
+
+
+def test_runner_role_lazily_stamps_and_reuses_compact_segment_shape(
+    runner_db: str, database_gate: ProcessDbGate
+) -> None:
+    from dataclasses import replace
+
+    import psycopg
+    from langchain_core.messages import HumanMessage, SystemMessage
+    from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
+
+    from base.agents.history.checkpoint_segment import (
+        SEGMENT_SHAPE_METADATA_KEY,
+        BoundarySegmentShape,
+        open_segment_reader,
+    )
+    from base.db import Database
+    from base.db.config import db_config_from_settings
+
+    grant_runner(runner_db)
+
+    boundary_ckpt = empty_checkpoint()
+    boundary_ckpt["channel_values"] = {
+        "messages": [
+            SystemMessage(content="sys", id="sys-0"),
+            HumanMessage(content="first", id="m0"),
+            HumanMessage(content="legacy without id"),
+        ]
+    }
+    boundary_ckpt["channel_versions"] = {"messages": "1", "__start__": "1"}
+    with PostgresSaver.from_conn_string(runner_db) as saver:
+        saved_boundary = saver.put(
+            config={"configurable": {"thread_id": "74", "checkpoint_ns": ""}},
+            checkpoint=boundary_ckpt,
+            metadata=cast(
+                CheckpointMetadata,
+                {
+                    "source": "loop",
+                    "step": 1,
+                    "parents": {},
+                    "compact_boundary": True,
+                    "trace_id": "a" * 32,
+                },
+            ),
+            new_versions={"messages": "1"},
+        )
+    configurable = saved_boundary.get("configurable") or {}
+    boundary_id = str(configurable["checkpoint_id"])
+
+    runner_database = Database(
+        replace(db_config_from_settings(), db_url=runner_url(runner_db)),
+        gate=database_gate,
+    )
+    with open_segment_reader(runner_database, 74) as reader:
+        shapes = reader.load_boundary_shapes(end_index=2)
+    assert shapes == (
+        BoundarySegmentShape(
+            checkpoint_id=boundary_id,
+            head_count=1,
+            body_len=2,
+            end_id_at_index="m0",
+        ),
+    )
+
+    with psycopg.connect(runner_db) as admin_conn:
+        row = admin_conn.execute(
+            "SELECT metadata FROM checkpoints WHERE thread_id = '74' AND checkpoint_id = %s",
+            (boundary_id,),
+        ).fetchone()
+        assert row is not None
+        metadata = cast(dict[str, object], row[0])
+        assert metadata["compact_boundary"] is True
+        assert metadata["trace_id"] == "a" * 32
+        assert metadata[SEGMENT_SHAPE_METADATA_KEY] == {
+            "v": 1,
+            "head": 1,
+            "body": 2,
+            "ids": ["m0", None],
+        }
+        admin_conn.execute("DELETE FROM checkpoint_blobs WHERE thread_id = '74'")
+        admin_conn.commit()
+
+    with open_segment_reader(runner_database, 74) as reader:
+        assert reader.load_boundary_shapes(end_index=2) == shapes
+        assert reader.load_boundary_shapes(end_index=3)[0].end_id_at_index is None
+        assert reader.load_boundary_shapes(end_index=0)[0].end_id_at_index is None

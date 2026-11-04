@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Consumer Concurrency
-description: How the understanding consumer works several chunk jobs at once — no cap, a TaskGroup, a per-agent order guaranteed by the claim, a one-thread pool per job, rate limiting left to the provider and its retry backoff, the group lease, and the segment-parallel replay.
+description: How the understanding consumer works several chunk jobs at once — bounded by max_in_flight on the live host loop (unbounded on replay), a TaskGroup, a per-agent order guaranteed by the claim, a one-thread pool per job, rate limiting left to the provider and its retry backoff, the group lease, and the segment-parallel replay.
 tags:
 - hierarchy
 - understanding
@@ -13,7 +13,9 @@ tags:
 A cluster has dozens of agents, nearly always one compacting or crossing a chunk, and one chunk call
 takes 1 to 5 minutes, so a consumer that works one job at a time falls behind for good. The loop of
 `services/agent_runner/understanding/chunk_consumer.py` ([[base/agents/history/hierarchy/docs/chunks.meiva.okf.md|Chunk-triggered Understanding]])
-therefore claims every due job and runs it at once; there is no cap setting.
+therefore claims due jobs concurrently up to `max_in_flight` (`DEFAULT_MAX_IN_FLIGHT = 2` on the
+live host loop so post-outage backlogs cannot saturate the runner's CPU or database pool; unbounded
+when `None` in replay and unit tests).
 
 ## Model
 
