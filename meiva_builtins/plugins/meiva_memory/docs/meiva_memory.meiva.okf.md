@@ -12,7 +12,7 @@ tags:
 
 ## What it is
 
-`meiva_memory` provides shared memory pool capability: passive memory recall (`MEIVA_PASSIVE_MEMORY_RECALL`), the `meiva.memory.*` SDK surface, the write check, and the standing memory context notes — the shared pool index, the per-agent index, and the chain-inherited `inheritable` blocks (`inherit.py`, whose decisions are the pure `inherited_blocks.py`). Whether recall runs, and the knobs that shape it, are [[meiva_builtins/plugins/meiva_memory/docs/memory-recall.meiva.okf.md]]'s to state.
+`meiva_memory` provides shared memory pool capability: passive memory recall (`MEIVA_PASSIVE_MEMORY_RECALL`), the `meiva.memory.*` SDK surface, the write check, and the standing memory context notes — the shared pool index, the per-agent index, and the chain-inherited `inheritable` blocks (`inheritance/inherit.py`, whose decisions are the pure `inheritance/inherited_blocks.py`). Whether recall runs, and the knobs that shape it, are [[meiva_builtins/plugins/meiva_memory/docs/memory-recall.meiva.okf.md]]'s to state.
 
 ## Registered hooks
 

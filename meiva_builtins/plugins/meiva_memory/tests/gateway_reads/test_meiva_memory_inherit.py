@@ -19,8 +19,8 @@ from base.packages.plugins.extensions import ExtensionRegistry
 from base.paths import meiva_home
 from base.paths.home import resolve_meiva_home
 from meiva.tests.fixtures.gateway_wire import GatewayStub, GatewayWire
-from meiva_builtins.plugins.meiva_memory import inherit
-from meiva_builtins.plugins.meiva_memory.inherited_blocks import (
+from meiva_builtins.plugins.meiva_memory.inheritance import inherit
+from meiva_builtins.plugins.meiva_memory.inheritance.inherited_blocks import (
     INHERITABLE_CLOSE,
     INHERITABLE_OPEN,
     Ancestor,

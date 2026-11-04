@@ -37,7 +37,7 @@ from base.packages.plugins.extensions import ContextNote, PluginContributions
 from base.paths import memory_dir, workspace_dir
 
 from ._state import MemoryWriteState
-from .inherit import inherited_memory_note
+from .inheritance.inherit import inherited_memory_note
 from .notes import memory_index_note, per_agent_memory_note
 from .write_checks import check_written_notes, render_reminder
 
