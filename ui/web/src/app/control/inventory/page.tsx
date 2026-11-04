@@ -316,7 +316,7 @@ function InventoryRow({
               {enabled}/{present} enabled
             </span>
           </div>
-          {row.description && (
+          {row.kind === "plugin" && row.description && (
             <p className="text-xs text-muted-foreground leading-snug [overflow-wrap:anywhere]">
               {row.description}
             </p>

@@ -22,7 +22,7 @@ import { InlineError } from "@/components/ui/inline-error";
 
 import { errMsg } from "@/lib/contracts/errors";
 import { useStore } from "@/lib/state/store";
-import type { SkillLayer, SkillsView } from "@/lib/contracts/types";
+import type { SkillsView } from "@/lib/contracts/types";
 
 import { useSectionVisible } from "../visibility";
 import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
@@ -30,21 +30,6 @@ import { cn } from "@/lib/format/utils";
 import { useApi } from "@/lib/transport/transport-context";
 
 const SKILLS_QUERY_KEY = ["skills"] as const;
-
-function layerLabel(layer: SkillLayer, t: ReturnType<typeof useTranslations<"skills">>): string {
-  // The key mapping is literal — TS narrows each branch so the key is a
-  // checked member of the skills namespace.
-  switch (layer) {
-    case "core":
-      return t("layerCore");
-    case "plugin":
-      return t("layerPlugin");
-    case "machine":
-      return t("layerMachine");
-    case "untracked":
-      return t("layerUntracked");
-  }
-}
 
 export default function SkillsPage() {
   const client = useApi();
@@ -122,11 +107,8 @@ function SkillsTable({
   return (
     <ul className="divide-y divide-border rounded-xl border border-border">
       {data.skills.map((skill) => (
-        <li key={skill.name} className={cn(FLEX, "items-center justify-between gap-5 px-5 py-4")}>
-          <div className={cn(MIN_W_0, "space-y-1")}>
-            <p className="break-words text-sm font-medium">{skill.name}</p>
-            <p className="text-xs text-muted-foreground">{layerLabel(skill.layer, t)}</p>
-          </div>
+        <li key={skill.name} className={cn(FLEX, "items-center justify-between gap-5 px-5 py-3")}>
+          <p className={cn(MIN_W_0, "break-words text-sm font-medium")}>{skill.name}</p>
           <Switch
             tone="neutral"
             checked={skill.enabled}

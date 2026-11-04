@@ -96,7 +96,7 @@ const AGGREGATE: InventoryAggregate = {
     {
       name: "needs_display",
       kind: "mcp",
-      description: "Headed MCP server",
+      description: "unix:///private/preview/chrome-mcp.sock",
       hosts: {
         [H1]: {
           present: true,
@@ -145,6 +145,8 @@ describe("InventoryPage render", () => {
     expect(screen.getByText("MCP servers")).toBeTruthy();
     expect(screen.getByText("only_h1")).toBeTruthy();
     expect(screen.getByText("needs_display")).toBeTruthy();
+    expect(screen.queryByText("unix:///private/preview/chrome-mcp.sock")).toBeNull();
+    expect(screen.getByText("Code execution plugin")).toBeTruthy();
   });
 
   it("machine columns appear as headers", async () => {
@@ -220,7 +222,7 @@ describe("InventoryPage toggle (putInventory)", () => {
         {
           name: "needs_display",
           kind: "mcp",
-          description: "Headed MCP server",
+          description: "unix:///private/preview/chrome-mcp.sock",
           hosts: {
             [H1]: { present: true, enabled: true, can_enable: false, reason: "requires a display" },
             [H2]: { present: false, enabled: false, can_enable: null, reason: null },
