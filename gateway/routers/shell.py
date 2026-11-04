@@ -108,7 +108,7 @@ async def get_agent_shell(
         session_name=_capture_text(result.get("session_name"), "session_name"),
         lines=_capture_lines(result.get("lines")),
         created_at=created_at,
-        uptime_seconds=int(result.get("uptime_seconds") or 0),
+        uptime_seconds=_capture_uptime(result.get("uptime_seconds", 0)),
         expires_at=expires_at,
         renewals=renewals,
         last_renewed_at=last_renewed_at,
@@ -129,6 +129,18 @@ def _capture_lines(value: object) -> list[str]:
     if not is_object_list(value) or not all(isinstance(line, str) for line in value):
         raise TypeError("shell_capture answered a `lines` that is not a list of strings")
     return [line for line in value if isinstance(line, str)]
+
+
+# meiva:note
+# The `uptime_seconds` field of the capture op's answer. The producing side
+# (`ShellCaptureResult.uptime_seconds: int = 0`, dumped with `model_dump(mode="json")`) always
+# sends the field and always sends an integer, so the caller reads an absent field as the schema
+# default 0 and anything that is not an integer (a bool included) is a broken answer from the other
+# machine.
+def _capture_uptime(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError("shell_capture answered an `uptime_seconds` that is not an integer")
+    return value
 
 
 def _parse_created_at(value: object) -> datetime | None:

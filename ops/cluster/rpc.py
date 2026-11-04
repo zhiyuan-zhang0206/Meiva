@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import logging
 import random
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Self, assert_never
+from typing import Self, assert_never
 
 import httpx
 
@@ -63,7 +63,7 @@ _log = logging.getLogger(__name__)
 # The key a dispatch of `kind` carries when the caller supplied none: the stable business key
 # where the payload has a business id, else a fresh one per dispatch drawn from `rng`.
 def default_idempotency_key(
-    target_machine: str, kind: OpKind, payload: dict[str, Any], rng: random.Random
+    target_machine: str, kind: OpKind, payload: Mapping[str, object], rng: random.Random
 ) -> str:
     return business_idempotency_key(target_machine, kind, payload) or f"{kind}:{new_uuid(rng)}"
 
@@ -99,7 +99,7 @@ class ClusterOpTargetAbsent(ClusterOpUnreachable):
 # is waived.
 # meiva:link ops/docs/ops-module.md
 class ClusterOpFailed(RuntimeError):  # noqa: N818
-    def __init__(self, result: dict[str, Any]) -> None:
+    def __init__(self, result: dict[str, object]) -> None:
         super().__init__(f"cluster op failed: {result}")
         self.result = result
 
@@ -144,12 +144,12 @@ class RpcClient:
         self,
         target_machine: str,
         kind: str,
-        payload: dict[str, Any],
+        payload: Mapping[str, object],
         *,
         timeout_s: float,
         ops_url: str,
         idempotency_key: str | None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         url = f"{ops_url.rstrip('/')}/ops"
         started = self.timers.monotonic()
         access = self.access()
@@ -162,7 +162,7 @@ class RpcClient:
                 resp = await client.post(
                     url,
                     json=OpEnvelope(
-                        kind=kind, payload=payload, idempotency_key=idempotency_key
+                        kind=kind, payload=dict(payload), idempotency_key=idempotency_key
                     ).model_dump(exclude_none=True),
                     headers=headers,
                 )
@@ -227,13 +227,13 @@ class RpcClient:
         self,
         target_machine: str,
         kind: str,
-        payload: dict[str, Any],
+        payload: Mapping[str, object],
         *,
         ops_url: str,
         timeout_s: float | None = None,
         retries: int | None = None,
         idempotency_key: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         if not is_op_kind(kind):
             raise ValueError(f"unknown op kind: {kind!r}")
         budget = dispatch_budget(self.config, timeout_s, retries)
@@ -300,12 +300,12 @@ class RpcClient:
         db: Database,
         target_machine: str,
         kind: str,
-        payload: dict[str, Any],
+        payload: Mapping[str, object],
         *,
         timeout_s: float | None = None,
         retries: int | None = None,
         idempotency_key: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         if not is_op_kind(kind):
             raise ValueError(f"unknown op kind: {kind!r}")
         try:
