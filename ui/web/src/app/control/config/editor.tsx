@@ -316,7 +316,7 @@ export default function ConfigEditor({ mode }: { mode: "general" | "advanced" | 
     data.fields.filter((field) => {
       if ((field.scope === "host") !== (mode === "machines")) return false;
       if (mode === "general" && !COMMON_FIELDS.has(field.env_var)) return false;
-      return `${field.env_var} ${field.description}`.toLowerCase().includes(search.toLowerCase());
+      return `${field.label} ${field.env_var} ${field.description}`.toLowerCase().includes(search.toLowerCase());
     }),
     data.machine_capabilities,
     selection,

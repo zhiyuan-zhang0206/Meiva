@@ -11554,6 +11554,10 @@
             "type": "string",
             "title": "Name"
           },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
           "owner": {
             "anyOf": [
               {
@@ -11660,6 +11664,7 @@
         "type": "object",
         "required": [
           "name",
+          "label",
           "field_type",
           "current_value",
           "default_value",
@@ -16569,6 +16574,10 @@
             "type": "string",
             "title": "Name"
           },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
           "env_var": {
             "type": "string",
             "title": "Env Var"
@@ -16632,6 +16641,7 @@
         "type": "object",
         "required": [
           "name",
+          "label",
           "env_var",
           "description",
           "field_type",

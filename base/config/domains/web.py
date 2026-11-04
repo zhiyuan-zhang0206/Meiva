@@ -9,6 +9,7 @@ from base.config.base import EnvSettings
 
 class WebSettings(EnvSettings):
     web_search_timeout_seconds: float = Field(
+        title="Web search timeout seconds",
         default=10.0,
         alias="MEIVA_WEB_SEARCH_TIMEOUT_SECONDS",
         description="Brave search HTTP timeout (seconds). Typical response < 1s; 10s covers occasional jitter.",
@@ -21,6 +22,7 @@ class WebSettings(EnvSettings):
     )
 
     web_fetch_timeout_seconds: float = Field(
+        title="Web fetch timeout seconds",
         default=30.0,
         alias="MEIVA_WEB_FETCH_TIMEOUT_SECONDS",
         description="Jina Reader fetch HTTP timeout (seconds). Headless browser + JS rendering is slow; 30s covers heavy SPA cold starts.",
@@ -33,6 +35,7 @@ class WebSettings(EnvSettings):
     )
 
     web_max_search_results: int = Field(
+        title="Web max search results",
         default=20,
         alias="MEIVA_WEB_MAX_RESULTS",
         description="Brave search max results per call (free tier caps at 20; higher values are rejected with 422).",
@@ -45,6 +48,7 @@ class WebSettings(EnvSettings):
     )
 
     web_search_provider: Literal["brave", "deepseek"] = Field(
+        title="Web search provider",
         default="brave",
         alias="MEIVA_WEB_SEARCH_PROVIDER",
         description=(
@@ -66,6 +70,7 @@ class WebSettings(EnvSettings):
     )
 
     web_fetch_reader: Literal["jina", "deepseek"] = Field(
+        title="Web fetch reader",
         default="jina",
         alias="MEIVA_WEB_FETCH_READER",
         description=(
@@ -85,6 +90,7 @@ class WebSettings(EnvSettings):
     )
 
     web_deepseek_search_endpoint: str = Field(
+        title="Web deepseek search endpoint",
         default="https://api.deepseek.com/v1/tools/search",
         alias="MEIVA_WEB_DEEPSEEK_SEARCH_ENDPOINT",
         description=(
@@ -101,6 +107,7 @@ class WebSettings(EnvSettings):
     )
 
     web_deepseek_fetch_endpoint: str = Field(
+        title="Web deepseek fetch endpoint",
         default="https://api.deepseek.com/v1/tools/fetch",
         alias="MEIVA_WEB_DEEPSEEK_FETCH_ENDPOINT",
         description=(
@@ -116,6 +123,7 @@ class WebSettings(EnvSettings):
     )
 
     web_deepseek_max_results: int = Field(
+        title="Web deepseek max results",
         default=50,
         alias="MEIVA_WEB_DEEPSEEK_MAX_RESULTS",
         description=(
@@ -133,6 +141,7 @@ class WebSettings(EnvSettings):
     )
 
     web_deepseek_qps: float = Field(
+        title="Web deepseek qps",
         default=5.0,
         gt=0.0,
         alias="MEIVA_WEB_DEEPSEEK_QPS",
@@ -153,6 +162,7 @@ class WebSettings(EnvSettings):
     )
 
     web_brave_search_endpoint: str = Field(
+        title="Web brave search endpoint",
         default="https://api.search.brave.com/res/v1/web/search",
         alias="MEIVA_WEB_BRAVE_SEARCH_ENDPOINT",
         description="Brave Search API endpoint used by `meiva.web.search`. Override to point at a different search endpoint (e.g. a self-hosted relay or a provider mirror) without code changes. A custom endpoint receives the same auth as Brave: `X-Subscription-Token` with BRAVE_API_KEY.",
@@ -165,6 +175,7 @@ class WebSettings(EnvSettings):
     )
 
     web_jina_reader_base: str = Field(
+        title="Web jina reader base",
         default="https://r.jina.ai/",
         alias="MEIVA_WEB_JINA_BASE_URL",
         description="Jina Reader base URL used by `meiva.web.fetch` (the target URL is appended after it). Must end with `/` — it is concatenated with the encoded target URL. Override to point at a different reader endpoint (e.g. a self-hosted mirror) without code changes. A custom endpoint receives the same auth as Jina: `Authorization: Bearer` with JINA_API_KEY.",
@@ -177,6 +188,7 @@ class WebSettings(EnvSettings):
     )
 
     brave_api_key: SecretStr | None = Field(
+        title="Brave API key",
         default=None,
         alias="BRAVE_API_KEY",
         description="Brave Search API key, used by `meiva.web.search`.",
@@ -189,6 +201,7 @@ class WebSettings(EnvSettings):
     )
 
     web_fetch_model: str = Field(
+        title="Web fetch model",
         default="deepseek-flash",
         alias="MEIVA_WEB_FETCH_MODEL",
         description="Model for `meiva.web.fetch` page-content summarization. Separate from `understand_text_model` so the cheap fetch path does not use the agent's main model.",
@@ -201,6 +214,7 @@ class WebSettings(EnvSettings):
     )
 
     web_fetch_reasoning: str = Field(
+        title="Web fetch reasoning",
         default="none",
         alias="MEIVA_WEB_FETCH_REASONING",
         description="Reasoning effort for the `meiva.web.fetch` summarization model. `none` skips reasoning entirely since the summarization prompt is simple.",
@@ -213,6 +227,7 @@ class WebSettings(EnvSettings):
     )
 
     web_fetch_injection_check_enabled: bool = Field(
+        title="Web fetch injection check enabled",
         default=True,
         alias="MEIVA_WEB_FETCH_INJECTION_CHECK_ENABLED",
         description="Check the page text `meiva.web.fetch` reads for instructions aimed at an AI reader, using a decision model, and attach a SECURITY note to the turn when the page looks like prompt injection. The page and its summary are never altered. The check only adds a warning: if the decision model is unavailable the fetch still succeeds. Needs `security_scan_enabled` and the decision model's API key.",
@@ -225,6 +240,7 @@ class WebSettings(EnvSettings):
     )
 
     web_fetch_injection_model: str = Field(
+        title="Web fetch injection model",
         default="jev-1.13.0",
         alias="MEIVA_WEB_FETCH_INJECTION_MODEL",
         description="Decision model (an id from the decision-model catalog, not a chat model) that judges fetched page text for `web_fetch_injection_check_enabled`. An id the catalog does not list makes `meiva.web.fetch` fail instead of silently skipping the check.",
@@ -237,6 +253,7 @@ class WebSettings(EnvSettings):
     )
 
     web_fetch_injection_threshold: float = Field(
+        title="Web fetch injection threshold",
         default=0.4,
         gt=0.0,
         lt=1.0,
@@ -251,6 +268,7 @@ class WebSettings(EnvSettings):
     )
 
     jina_api_key: SecretStr | None = Field(
+        title="Jina API key",
         default=None,
         alias="JINA_API_KEY",
         description="Jina Reader API key (optional), used by `meiva.web.fetch`. Empty = anonymous tier (20 RPM); with key = 500 RPM.",

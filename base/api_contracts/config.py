@@ -37,6 +37,7 @@ class ConfigFieldView(BaseModel):
     """
 
     name: str
+    label: str
     owner: str | None = None  # None is Core; a plugin name owns its config image.
     field_type: str  # "bool" | "string" | "int" | "float" | "enum"
     current_value: object  # bool | str | int | float | None
@@ -109,6 +110,7 @@ class ResolvedFieldView(BaseModel):
     """
 
     name: str  # flat config field name — the same key GET/PUT /api/config uses
+    label: str
     env_var: str
     description: str
     field_type: str  # "bool" | "string" | "int" | "float" | "enum"

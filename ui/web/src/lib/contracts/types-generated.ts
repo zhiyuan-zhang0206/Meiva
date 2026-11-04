@@ -2894,6 +2894,7 @@ export interface components {
         };
         ConfigFieldView: {
             name: string;
+            label: string;
             owner?: string | null;
             field_type: string;
             current_value: unknown;
@@ -3686,6 +3687,7 @@ export interface components {
         };
         ResolvedFieldView: {
             name: string;
+            label: string;
             env_var: string;
             description: string;
             field_type: string;

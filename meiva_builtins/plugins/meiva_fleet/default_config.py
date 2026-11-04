@@ -10,6 +10,7 @@ class FleetConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     task_maintenance_enabled: bool = Field(
+        title="Task maintenance enabled",
         default=True,
         description="Run the task-maintenance daemon on the gateway. On by default; set false to disable task reminders and the escalation pass cluster-wide.",
         json_schema_extra={
@@ -24,6 +25,7 @@ class FleetConfig(BaseModel):
     )
 
     task_maintenance_interval_seconds: float = Field(
+        title="Task maintenance interval seconds",
         default=300.0,
         description="Task-maintenance daemon poll interval (seconds): how often it checks for overdue tasks and reminds owners. A precision lower bound, not the cadence — each task controls its own remind_interval_seconds.",
         json_schema_extra={
@@ -37,6 +39,7 @@ class FleetConfig(BaseModel):
     )
 
     task_reminder_backoff_seconds: float = Field(
+        title="Task reminder backoff seconds",
         default=3600.0,
         description="Floor for the interval (seconds) between repeated reminders for the same overdue window: a task whose remind_interval_seconds exceeds this repeats at its own interval instead.",
         json_schema_extra={
@@ -89,6 +92,7 @@ class FleetConfig(BaseModel):
     )
 
     task_escalate_n: int = Field(
+        title="Task escalate n",
         default=3,
         description=(
             "Cadence periods a task may stay without a state change before the daemon escalates "
@@ -108,6 +112,7 @@ class FleetConfig(BaseModel):
     )
 
     task_reminder_reset_on: tuple[str, ...] = Field(
+        title="Task reminder reset on",
         default=DEFAULT_RESET_ON,
         description=(
             "Which kinds of task update restart a task's reminder window, the counter the "
@@ -131,6 +136,7 @@ class FleetConfig(BaseModel):
     )
 
     task_reminder_pause_max_seconds: int | None = Field(
+        title="Task reminder pause max seconds",
         default=None,
         description=(
             "Longest silence an owner may ask for with update(reminders_paused_until=...). "
@@ -150,6 +156,7 @@ class FleetConfig(BaseModel):
     )
 
     reduce_context_switch: bool = Field(
+        title="Reduce context switch",
         default=True,
         description=(
             "Platform-wide reduce-context-switch default (user ruling 2026-09-20): "

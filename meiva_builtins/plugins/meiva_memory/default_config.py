@@ -9,6 +9,7 @@ class MemoryConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     indexer_enabled: bool = Field(
+        title="Indexer enabled",
         default=True,
         strict=True,
         description="Run the gateway memory indexer, even when memory index injection is disabled.",

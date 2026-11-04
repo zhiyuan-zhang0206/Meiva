@@ -10,6 +10,7 @@ from base.config.base import EnvSettings
 
 class LmSettings(EnvSettings):
     llm_model: str = Field(
+        title="Agent model",
         default="deepseek-flash",
         alias="MEIVA_MODEL",
         description=(
@@ -29,6 +30,7 @@ class LmSettings(EnvSettings):
     )
 
     labeler_model: str = Field(
+        title="Conversation title model",
         default="deepseek-flash",
         alias="MEIVA_LABELER_MODEL",
         description=(
@@ -48,6 +50,7 @@ class LmSettings(EnvSettings):
     )
 
     hierarchy_model: str = Field(
+        title="Timeline summary fallback model",
         default="deepseek-flash",
         alias="MEIVA_HIERARCHY_MODEL",
         description=(
@@ -72,6 +75,7 @@ class LmSettings(EnvSettings):
     )
 
     reply_suggestion_enabled: bool = Field(
+        title="Reply suggestions",
         default=True,
         alias="MEIVA_REPLY_SUGGESTION_ENABLED",
         description=(
@@ -91,6 +95,7 @@ class LmSettings(EnvSettings):
     )
 
     reply_suggestion_model: str = Field(
+        title="Reply suggestion model",
         default="deepseek-flash",
         alias="MEIVA_REPLY_SUGGESTION_MODEL",
         description=(
@@ -108,6 +113,7 @@ class LmSettings(EnvSettings):
     )
 
     reply_suggestion_gate_model: str = Field(
+        title="Reply suggestion decision model",
         default="jev-1.13.0",
         alias="MEIVA_REPLY_SUGGESTION_GATE_MODEL",
         description=(
@@ -125,6 +131,7 @@ class LmSettings(EnvSettings):
     )
 
     reply_suggestion_gate_threshold: float = Field(
+        title="Reply suggestion confidence threshold",
         default=0.5,
         ge=0.0,
         le=1.0,
@@ -143,6 +150,7 @@ class LmSettings(EnvSettings):
     )
 
     reply_suggestion_max_candidates: int = Field(
+        title="Maximum reply suggestions",
         default=3,
         gt=0,
         alias="MEIVA_REPLY_SUGGESTION_MAX_CANDIDATES",
@@ -162,6 +170,7 @@ class LmSettings(EnvSettings):
     )
 
     reply_suggestion_max_input_tokens: int = Field(
+        title="Reply suggestion input budget (tokens)",
         default=1500,
         gt=0,
         alias="MEIVA_REPLY_SUGGESTION_MAX_INPUT_TOKENS",
@@ -182,6 +191,7 @@ class LmSettings(EnvSettings):
     )
 
     llm_invoke_timeout_seconds: float = Field(
+        title="Non-streaming request timeout (seconds)",
         default=60.0,
         alias="MEIVA_LLM_INVOKE_TIMEOUT_SECONDS",
         description=(
@@ -200,6 +210,7 @@ class LmSettings(EnvSettings):
     )
 
     llm_invoke_retry_attempts: int = Field(
+        title="Non-streaming request retries",
         default=1,
         alias="MEIVA_LLM_INVOKE_RETRY_ATTEMPTS",
         description=(
@@ -216,6 +227,7 @@ class LmSettings(EnvSettings):
     )
 
     llm_invoke_retry_delay_seconds: float = Field(
+        title="Non-streaming initial retry delay (seconds)",
         default=2.0,
         alias="MEIVA_LLM_INVOKE_RETRY_DELAY_SECONDS",
         description=(
@@ -232,6 +244,7 @@ class LmSettings(EnvSettings):
     )
 
     llm_invoke_retry_max_delay_seconds: float = Field(
+        title="Non-streaming maximum retry delay (seconds)",
         default=30.0,
         alias="MEIVA_LLM_INVOKE_RETRY_MAX_DELAY_SECONDS",
         description=(
@@ -251,6 +264,7 @@ class LmSettings(EnvSettings):
     )
 
     llm_compact_timeout_seconds: float = Field(
+        title="Compaction summary timeout (seconds)",
         default=120.0,
         alias="MEIVA_LLM_COMPACT_TIMEOUT_SECONDS",
         description=(
@@ -268,6 +282,7 @@ class LmSettings(EnvSettings):
     )
 
     llm_stream_ttft_timeout_seconds: float | None = Field(
+        title="First-token timeout (seconds)",
         default=None,
         alias="MEIVA_LLM_STREAM_TTFT_TIMEOUT_SECONDS",
         description=(
@@ -288,6 +303,7 @@ class LmSettings(EnvSettings):
     )
 
     llm_stream_total_timeout_seconds: float | None = Field(
+        title="Total stream timeout (seconds)",
         default=None,
         alias="MEIVA_LLM_STREAM_TOTAL_TIMEOUT_SECONDS",
         description=(
@@ -308,6 +324,7 @@ class LmSettings(EnvSettings):
     )
 
     llm_stream_inter_chunk_timeout_seconds: float | None = Field(
+        title="Stream idle timeout (seconds)",
         default=None,
         alias="MEIVA_LLM_STREAM_INTER_CHUNK_TIMEOUT_SECONDS",
         description=(
@@ -327,6 +344,7 @@ class LmSettings(EnvSettings):
     )
 
     llm_retry_max_attempts: int | None = Field(
+        title="Maximum model attempts per turn",
         default=None,
         alias="MEIVA_LLM_RETRY_MAX_ATTEMPTS",
         description=(
@@ -343,6 +361,7 @@ class LmSettings(EnvSettings):
     )
 
     llm_retry_max_total_seconds: float = Field(
+        title="Total model retry budget (seconds)",
         default=420.0,
         gt=0,
         alias="MEIVA_LLM_RETRY_MAX_TOTAL_SECONDS",
@@ -361,6 +380,7 @@ class LmSettings(EnvSettings):
     )
 
     llm_retry_initial_interval_seconds: float = Field(
+        title="Initial model retry delay (seconds)",
         default=30.0,
         alias="MEIVA_LLM_RETRY_INITIAL_INTERVAL_SECONDS",
         description="First LLM retry wait (seconds); doubles each attempt (30→60→120→…).",
@@ -373,6 +393,7 @@ class LmSettings(EnvSettings):
     )
 
     llm_retry_max_interval_seconds: float = Field(
+        title="Maximum model retry delay (seconds)",
         default=480.0,
         alias="MEIVA_LLM_RETRY_MAX_INTERVAL_SECONDS",
         description="Cap on the LLM retry backoff interval (seconds).",
@@ -385,6 +406,7 @@ class LmSettings(EnvSettings):
     )
 
     llm_fatal_provider_error_types: str = Field(
+        title="Provider errors that stop retries",
         default="engine_overloaded_error",
         alias="MEIVA_LLM_FATAL_PROVIDER_ERROR_TYPES",
         description=(
@@ -403,6 +425,7 @@ class LmSettings(EnvSettings):
     )
 
     llm_override: str = Field(
+        title="Test model override",
         default="",
         alias="MEIVA_LLM_OVERRIDE",
         description="Test-only fake-chat-model injection, format `module.path:factory_name`. Empty = use the real provider.",
@@ -415,6 +438,7 @@ class LmSettings(EnvSettings):
     )
 
     reasoning_effort: str | None = Field(
+        title="Reasoning effort",
         default=None,
         alias="MEIVA_REASONING_EFFORT",
         description=(
@@ -435,6 +459,7 @@ class LmSettings(EnvSettings):
     )
 
     claude_thinking_budget_tokens: int | None = Field(
+        title="Claude thinking budget (tokens)",
         default=None,
         alias="MEIVA_CLAUDE_THINKING_BUDGET_TOKENS",
         description=(
@@ -456,6 +481,7 @@ class LmSettings(EnvSettings):
     )
 
     understand_text_model: str = Field(
+        title="Text understanding model",
         default="deepseek-flash",
         alias="MEIVA_UNDERSTAND_TEXT_MODEL",
         description=(
@@ -471,6 +497,7 @@ class LmSettings(EnvSettings):
     )
 
     understand_image_model: str = Field(
+        title="Image understanding model",
         default="deepseek-flash",
         alias="MEIVA_UNDERSTAND_IMAGE_MODEL",
         description=(
@@ -487,6 +514,7 @@ class LmSettings(EnvSettings):
     )
 
     understand_pdf_model: str = Field(
+        title="PDF understanding model",
         default="gemini-3.8-flash",
         alias="MEIVA_UNDERSTAND_PDF_MODEL",
         description=(
@@ -502,6 +530,7 @@ class LmSettings(EnvSettings):
     )
 
     understand_audio_model: str = Field(
+        title="Audio understanding model",
         default="gemini-3.8-flash",
         alias="MEIVA_UNDERSTAND_AUDIO_MODEL",
         description=(
@@ -517,6 +546,7 @@ class LmSettings(EnvSettings):
     )
 
     understand_video_model: str = Field(
+        title="Video understanding model",
         default="gemini-3.8-flash",
         alias="MEIVA_UNDERSTAND_VIDEO_MODEL",
         description=(
@@ -532,6 +562,7 @@ class LmSettings(EnvSettings):
     )
 
     understand_media_resolution: str = Field(
+        title="Gemini media resolution",
         default="high",
         alias="MEIVA_UNDERSTAND_MEDIA_RESOLUTION",
         description=(
@@ -548,6 +579,7 @@ class LmSettings(EnvSettings):
     )
 
     understand_media_thinking_level: str = Field(
+        title="Gemini media thinking level",
         default="medium",
         alias="MEIVA_UNDERSTAND_MEDIA_THINKING_LEVEL",
         description=(
@@ -565,6 +597,7 @@ class LmSettings(EnvSettings):
     )
 
     understand_media_base_url: str | None = Field(
+        title="Gemini media endpoint URL",
         default=None,
         alias="MEIVA_UNDERSTAND_MEDIA_BASE_URL",
         description=(
@@ -583,6 +616,7 @@ class LmSettings(EnvSettings):
     )
 
     deepseek_api_key: SecretStr | None = Field(
+        title="DeepSeek API key",
         default=None,
         alias="DEEPSEEK_API_KEY",
         description="DeepSeek API key. Empty = deepseek-* models unavailable.",
@@ -595,6 +629,7 @@ class LmSettings(EnvSettings):
     )
 
     anthropic_api_key: SecretStr | None = Field(
+        title="Anthropic API key",
         default=None,
         alias="ANTHROPIC_API_KEY",
         description="Anthropic API key. Empty = claude-* models unavailable.",
@@ -607,6 +642,7 @@ class LmSettings(EnvSettings):
     )
 
     gemini_api_key: SecretStr | None = Field(
+        title="Gemini API key",
         default=None,
         alias="GEMINI_API_KEY",
         description="Google Gemini API key, used by any gemini-* model: `meiva.understand`'s default pdf/audio/video model and gemini-* agents. Empty = a call on a gemini-* model raises.",
@@ -620,6 +656,7 @@ class LmSettings(EnvSettings):
     )
 
     openai_api_key: SecretStr | None = Field(
+        title="OpenAI API key",
         default=None,
         alias="OPENAI_API_KEY",
         description="OpenAI API key. Empty = gpt-* models unavailable.",
@@ -632,6 +669,7 @@ class LmSettings(EnvSettings):
     )
 
     xiaomi_api_key: SecretStr | None = Field(
+        title="Xiaomi MiMo API key",
         default=None,
         alias="MIMO_API_KEY",
         description="Xiaomi MiMo API key. Empty = mimo-* models unavailable.",
@@ -644,6 +682,7 @@ class LmSettings(EnvSettings):
     )
 
     moonshot_api_key: SecretStr | None = Field(
+        title="Moonshot Kimi API key",
         default=None,
         alias="MOONSHOT_API_KEY",
         description="Moonshot Kimi API key. Empty = kimi-* models unavailable.",
@@ -656,6 +695,7 @@ class LmSettings(EnvSettings):
     )
 
     zhipu_api_key: SecretStr | None = Field(
+        title="Zhipu GLM API key",
         default=None,
         alias="GLM_API_KEY",
         description="Zhipu GLM API key. Empty = glm-* models unavailable.",
@@ -668,6 +708,7 @@ class LmSettings(EnvSettings):
     )
 
     dashscope_api_key: SecretStr | None = Field(
+        title="DashScope API key",
         default=None,
         alias="DASHSCOPE_API_KEY",
         description=(
@@ -683,6 +724,7 @@ class LmSettings(EnvSettings):
     )
 
     dashscope_base_url: str = Field(
+        title="DashScope base URL",
         default="https://dashscope.aliyuncs.com/compatible-mode/v1",
         alias="MEIVA_DASHSCOPE_BASE_URL",
         description=(

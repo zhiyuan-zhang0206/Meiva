@@ -35,6 +35,7 @@ _FILES_RATIONALE = (
 
 class TransferSettings(EnvSettings):
     max_workspace_bytes: int = Field(
+        title="Max workspace bytes",
         default=256 * 1024 * 1024,
         gt=0,
         alias="MEIVA_TRANSFER_MAX_WORKSPACE_BYTES",
@@ -48,6 +49,7 @@ class TransferSettings(EnvSettings):
     )
 
     max_workspace_files: int = Field(
+        title="Max workspace files",
         default=20_000,
         gt=0,
         alias="MEIVA_TRANSFER_MAX_WORKSPACE_FILES",

@@ -9,6 +9,7 @@ from base.config.base import EnvSettings
 
 class AgentCompactionSettings(EnvSettings):
     auto_compact_fraction: float | None = Field(
+        title="Auto compact fraction",
         default=None,
         alias="MEIVA_AUTO_COMPACT_FRACTION",
         description=(
@@ -30,6 +31,7 @@ class AgentCompactionSettings(EnvSettings):
     )
 
     auto_compact_ceiling_tokens: int | None = Field(
+        title="Auto compact ceiling tokens",
         default=None,
         alias="MEIVA_AUTO_COMPACT_CEILING_TOKENS",
         description=(
@@ -54,6 +56,7 @@ class AgentCompactionSettings(EnvSettings):
     )
 
     compact_reminder_fraction: float | None = Field(
+        title="Compact reminder fraction",
         default=None,
         alias="MEIVA_COMPACT_REMINDER_FRACTION",
         description=(
@@ -74,6 +77,7 @@ class AgentCompactionSettings(EnvSettings):
     )
 
     agent_reply_reminder_cadence: Literal["once_per_compaction", "every_time"] = Field(
+        title="Agent reply reminder cadence",
         default="once_per_compaction",
         alias="MEIVA_AGENT_REPLY_REMINDER_CADENCE",
         description=(
@@ -93,6 +97,7 @@ class AgentCompactionSettings(EnvSettings):
     )
 
     sdk_code_reminder_cadence: Literal["once_per_compaction", "every_time"] = Field(
+        title="SDK code reminder cadence",
         default="once_per_compaction",
         alias="MEIVA_SDK_CODE_REMINDER_CADENCE",
         description=(
@@ -112,6 +117,7 @@ class AgentCompactionSettings(EnvSettings):
     )
 
     sdk_nameerror_hint_enabled: bool = Field(
+        title="SDK nameerror hint enabled",
         default=True,
         alias="MEIVA_SDK_NAMEERROR_HINT_ENABLED",
         description=(
@@ -130,6 +136,7 @@ class AgentCompactionSettings(EnvSettings):
     )
 
     history_dump_enabled: bool = Field(
+        title="History dump enabled",
         default=True,
         alias="MEIVA_COMPACT_HISTORY_DUMP",
         description=(
@@ -153,6 +160,7 @@ class AgentCompactionSettings(EnvSettings):
     )
 
     history_dump_keep: int = Field(
+        title="History dump keep",
         default=5,
         alias="MEIVA_COMPACT_HISTORY_DUMP_KEEP",
         description=(

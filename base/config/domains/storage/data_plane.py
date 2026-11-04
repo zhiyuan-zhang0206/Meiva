@@ -174,6 +174,7 @@ def project_service_db_url(
 
 class DataPlaneSettings(EnvSettings):
     db_url: str = Field(
+        title="DB URL",
         alias="MEIVA_DB_URL",
         repr=False,  # carries the write generation's login password as userinfo
         description="The cluster's ONE database access URL, dialed as-is by every "
@@ -192,6 +193,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     redis_url: str = Field(
+        title="Redis URL",
         alias="MEIVA_REDIS_URL",
         repr=False,
         description="Redis connection URL. Carries the runtime ACL user's password "
@@ -205,6 +207,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     redis_bin_dir: str = Field(
+        title="Redis bin dir",
         default="",
         alias="MEIVA_REDIS_BIN_DIR",
         description="Absolute directory containing redis-server and redis-cli for this "
@@ -230,6 +233,7 @@ class DataPlaneSettings(EnvSettings):
         return value
 
     pg_throwaway_base: str = Field(
+        title="Postgres throwaway base",
         default="",
         alias="MEIVA_PG_THROWAWAY_BASE",
         description="Absolute directory that throwaway Postgres clusters (test fixtures, "
@@ -257,6 +261,7 @@ class DataPlaneSettings(EnvSettings):
         return value
 
     pgbouncer_enabled: bool = Field(
+        title="Pgbouncer enabled",
         default=True,
         alias="MEIVA_PGBOUNCER_ENABLED",
         description="Whether this cluster's PgBouncer transaction pooler fronts "
@@ -278,6 +283,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     pooler_max_client_conn: int = Field(
+        title="Pooler max client conn",
         default=2000,
         gt=0,
         alias="MEIVA_POOLER_MAX_CLIENT_CONN",
@@ -304,6 +310,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     data_plane_host: str = Field(
+        title="Data plane host",
         default="",
         alias="MEIVA_DATA_PLANE_HOST",
         description=(
@@ -328,6 +335,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     events_channel: str = Field(
+        title="Events channel",
         default="meiva:events",
         alias="MEIVA_EVENTS_CHANNEL",
         description="Redis pub/sub channel name for cluster events.",
@@ -340,6 +348,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     cluster_secret: str = Field(
+        title="Cluster secret",
         default="",
         alias="MEIVA_CLUSTER_SECRET",
         repr=False,
@@ -368,6 +377,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     redis_admin_password: str = Field(
+        title="Redis admin password",
         default="",
         alias="MEIVA_REDIS_ADMIN_PASSWORD",
         repr=False,
@@ -387,6 +397,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     db_sslmode: str = Field(
+        title="DB sslmode",
         default="",
         alias="MEIVA_DB_SSLMODE",
         description=(
@@ -410,6 +421,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     db_pool_min_size: int = Field(
+        title="DB pool min size",
         default=1,
         alias="MEIVA_DB_POOL_MIN_SIZE",
         description=(
@@ -427,6 +439,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     db_pool_max_size: int = Field(
+        title="DB pool max size",
         default=2,
         alias="MEIVA_DB_POOL_MAX_SIZE",
         description=(
@@ -442,6 +455,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     db_pool_restore_timeout_seconds: float = Field(
+        title="DB pool restore timeout seconds",
         default=5.0,
         alias="MEIVA_DB_POOL_RESTORE_TIMEOUT_SECONDS",
         description=(
@@ -482,6 +496,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     db_pool_restore_client_deadline_seconds: float = Field(
+        title="DB pool restore client deadline seconds",
         default=8.0,
         alias="MEIVA_DB_POOL_RESTORE_CLIENT_DEADLINE_SECONDS",
         description=(
@@ -514,6 +529,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     transport_encryption: str = Field(
+        title="Transport encryption",
         default="",
         alias="MEIVA_TRANSPORT_ENCRYPTION",
         description=(
@@ -532,6 +548,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     trusted_cidrs: str = Field(
+        title="Trusted cidrs",
         default="",
         alias="MEIVA_TRUSTED_CIDRS",
         description=(

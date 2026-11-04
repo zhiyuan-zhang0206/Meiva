@@ -7,6 +7,7 @@ from base.config.base import EnvSettings
 
 class AlertsSettings(EnvSettings):
     grafana_admin_password: SecretStr | None = Field(
+        title="Grafana admin password",
         default=None,
         alias="GRAFANA_ADMIN_PASSWORD",
         description=(
@@ -25,6 +26,7 @@ class AlertsSettings(EnvSettings):
     )
 
     webhook_token: SecretStr | None = Field(
+        title="Webhook token",
         default=None,
         alias="MEIVA_ALERTS_WEBHOOK_TOKEN",
         description=(
@@ -44,6 +46,7 @@ class AlertsSettings(EnvSettings):
     )
 
     im_notify_enabled: bool = Field(
+        title="IM notify enabled",
         default=True,
         alias="MEIVA_ALERTS_IM_NOTIFY_ENABLED",
         description=(
@@ -60,6 +63,7 @@ class AlertsSettings(EnvSettings):
     )
 
     provider_guard_balance_enabled: bool = Field(
+        title="Provider guard balance enabled",
         default=True,
         alias="MEIVA_PROVIDER_GUARD_BALANCE_ENABLED",
         description=(
@@ -77,6 +81,7 @@ class AlertsSettings(EnvSettings):
     )
 
     provider_guard_balance_min_cny: float = Field(
+        title="Provider guard balance min cny",
         default=500.0,
         alias="MEIVA_PROVIDER_GUARD_BALANCE_MIN_CNY",
         description=(
@@ -97,6 +102,7 @@ class AlertsSettings(EnvSettings):
     )
 
     provider_guard_balance_url: str = Field(
+        title="Provider guard balance URL",
         default="https://api.deepseek.com/user/balance",
         alias="MEIVA_PROVIDER_GUARD_BALANCE_URL",
         description=(
@@ -114,6 +120,7 @@ class AlertsSettings(EnvSettings):
     )
 
     provider_guard_balance_timeout_seconds: float = Field(
+        title="Provider guard balance timeout seconds",
         default=20.0,
         alias="MEIVA_PROVIDER_GUARD_BALANCE_TIMEOUT_SECONDS",
         description=(
@@ -131,6 +138,7 @@ class AlertsSettings(EnvSettings):
     )
 
     provider_guard_blocked_agents_enabled: bool = Field(
+        title="Provider guard blocked agents enabled",
         default=True,
         alias="MEIVA_PROVIDER_GUARD_BLOCKED_AGENTS_ENABLED",
         description=(
@@ -151,6 +159,7 @@ class AlertsSettings(EnvSettings):
     )
 
     provider_guard_blocked_agents_min: int = Field(
+        title="Provider guard blocked agents min",
         default=3,
         alias="MEIVA_PROVIDER_GUARD_BLOCKED_AGENTS_MIN",
         description=(
@@ -169,6 +178,7 @@ class AlertsSettings(EnvSettings):
     )
 
     provider_guard_blocked_agents_window_hours: float = Field(
+        title="Provider guard blocked agents window hours",
         default=24.0,
         alias="MEIVA_PROVIDER_GUARD_BLOCKED_AGENTS_WINDOW_HOURS",
         description=(

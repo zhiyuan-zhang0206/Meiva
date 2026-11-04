@@ -196,8 +196,8 @@ describe("ConfigPage machine selector", () => {
       screen.getByLabelText<HTMLSelectElement>("Machine"),
     );
     fireEvent.change(select, { target: { value: AGENT_RUNNER } });
-    await waitFor(() => screen.getByText("HOST LABEL"));
-    expect(screen.queryByText("LOG LEVEL")).toBeNull();
+    await waitFor(() => screen.getByText("Host label"));
+    expect(screen.queryByText("Log level")).toBeNull();
     expect(screen.queryByText(/edit on Cluster view/i)).toBeNull();
   });
 
@@ -282,6 +282,7 @@ describe("Fix 2 — capability reason hidden on non-editable rows", () => {
       fields: [
         {
           name: "cluster_flag",
+          label: "Cluster flag",
           field_type: "bool",
           current_value: false,
           default_value: false,
@@ -346,7 +347,7 @@ describe("ConfigPage per-model resolution view", () => {
     transport.getModels.mockReturnValue(new Promise(() => undefined));
     wrap(<ConfigEditor mode="advanced" />);
 
-    await screen.findByText("LOG LEVEL");
+    await screen.findByText("Log level");
     const select = screen.getByLabelText<HTMLSelectElement>("Model");
     expect(select.value).toBe("");
     expect(select.options[0].textContent).toBe("Loading…");

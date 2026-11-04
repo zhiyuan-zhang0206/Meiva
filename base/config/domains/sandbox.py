@@ -76,6 +76,7 @@ class SandboxSettings(EnvSettings):
         return self
 
     exec_timeout_seconds: float = Field(
+        title="Exec timeout seconds",
         default=300.0,
         alias="MEIVA_EXEC_TIMEOUT_SECONDS",
         description="Hard timeout (seconds) for a single execute_code. On timeout, the envelope hints the agent toward meiva.shell.run_background / meiva.watcher.launch for long-running work. Must be positive and less than exec_node_timeout_seconds (validated at startup and on per-agent overlay).",
@@ -90,6 +91,7 @@ class SandboxSettings(EnvSettings):
     )
 
     exec_node_timeout_seconds: float = Field(
+        title="Exec node timeout seconds",
         default=1200.0,
         alias="MEIVA_EXEC_NODE_TIMEOUT_SECONDS",
         description=(
@@ -106,6 +108,7 @@ class SandboxSettings(EnvSettings):
     )
 
     exec_output_max_chars: int = Field(
+        title="Exec output max chars",
         default=30_000,
         alias="MEIVA_EXEC_OUTPUT_MAX_CHARS",
         description="Hard inline character cap on a single exec's output fed back to the LLM. On overflow, keep the first + last half and archive the retained output in the workspace's bounded 20-file legacy ring. The independent soft line crop can produce a smaller preview first.",
@@ -118,6 +121,7 @@ class SandboxSettings(EnvSettings):
     )
 
     exec_output_crop_after_lines: int = Field(
+        title="Exec output crop after lines",
         default=300,
         ge=0,
         alias="MEIVA_EXEC_OUTPUT_CROP_AFTER_LINES",
@@ -131,6 +135,7 @@ class SandboxSettings(EnvSettings):
     )
 
     exec_output_crop_after_chars: int = Field(
+        title="Exec output crop after chars",
         default=64 * 1024,
         ge=1,
         alias="MEIVA_EXEC_OUTPUT_CROP_AFTER_CHARS",
@@ -144,6 +149,7 @@ class SandboxSettings(EnvSettings):
     )
 
     exec_output_crop_after_bytes: int = Field(
+        title="Exec output crop after bytes",
         default=64 * 1024,
         ge=1,
         alias="MEIVA_EXEC_OUTPUT_CROP_AFTER_BYTES",
@@ -157,6 +163,7 @@ class SandboxSettings(EnvSettings):
     )
 
     exec_output_crop_head_lines: int = Field(
+        title="Exec output crop head lines",
         default=25,
         ge=1,
         alias="MEIVA_EXEC_OUTPUT_CROP_HEAD_LINES",
@@ -170,6 +177,7 @@ class SandboxSettings(EnvSettings):
     )
 
     exec_output_crop_tail_lines: int = Field(
+        title="Exec output crop tail lines",
         default=25,
         ge=1,
         alias="MEIVA_EXEC_OUTPUT_CROP_TAIL_LINES",
@@ -183,6 +191,7 @@ class SandboxSettings(EnvSettings):
     )
 
     exec_output_crop_archive_max_bytes: int = Field(
+        title="Exec output crop archive max bytes",
         default=16 * 1024 * 1024,
         ge=1,
         alias="MEIVA_EXEC_OUTPUT_CROP_ARCHIVE_MAX_BYTES",
@@ -196,6 +205,7 @@ class SandboxSettings(EnvSettings):
     )
 
     exec_output_accumulation_max_chars: int = Field(
+        title="Exec output accumulation max chars",
         default=1_000_000,
         alias="MEIVA_EXEC_OUTPUT_ACCUMULATION_MAX_CHARS",
         description="Character budget the exec output accumulator holds in memory WHILE code runs. Past it the first half + last half are kept and the middle is dropped as it streams, so a runaway print loop cannot pressure the agent process; execution continues and the agent sees the drop marker. Must be >= exec_output_max_chars (validated at startup).",
@@ -208,6 +218,7 @@ class SandboxSettings(EnvSettings):
     )
 
     syntax_fix_ruff_format: bool = Field(
+        title="Syntax fix ruff format",
         default=True,
         alias="MEIVA_SYNTAX_FIX_RUFF_FORMAT",
         description="Run `ruff format` on each code block before exec (after deterministic syntax fixes), keeping in-context code canonical. Toggle for ablation.",
@@ -222,6 +233,7 @@ class SandboxSettings(EnvSettings):
     )
 
     mcp_connect_timeout_seconds: float = Field(
+        title="MCP connect timeout seconds",
         default=60.0,
         alias="MEIVA_MCP_CONNECT_TIMEOUT_SECONDS",
         description="MCP server connect timeout (seconds). npm package downloads / uvx venv setup may be slow; 60s leaves headroom.",

@@ -19,6 +19,7 @@ _SCHEDULE_RESTART_METADATA: dict[str, JsonValue] = {
 
 class GatewaySettings(EnvSettings):
     provision_builtin_schedules: bool = Field(
+        title="Provision builtin schedules",
         default=True,
         alias="MEIVA_PROVISION_BUILTIN_SCHEDULES",
         description=(
@@ -35,6 +36,7 @@ class GatewaySettings(EnvSettings):
     )
 
     gateway_client_max_retries: int = Field(
+        title="Gateway client max retries",
         default=3,
         alias="MEIVA_GATEWAY_MAX_RETRIES",
         description="SDK -> Gateway transient-failure retry count (transport errors + HTTP 429/5xx, idempotent requests only). Gateway cold start is ~0.6s; 3 retries are sufficient.",
@@ -47,6 +49,7 @@ class GatewaySettings(EnvSettings):
     )
 
     gateway_client_retry_delay_seconds: float = Field(
+        title="Gateway client retry delay seconds",
         default=1.0,
         alias="MEIVA_GATEWAY_RETRY_DELAY_SECONDS",
         description="SDK -> Gateway HTTP retry base interval (seconds); each retry doubles it (bounded exponential backoff, 8s cap) plus a per-agent jitter offset.",
@@ -59,6 +62,7 @@ class GatewaySettings(EnvSettings):
     )
 
     gateway_client_http_timeout_seconds: float = Field(
+        title="Gateway client HTTP timeout seconds",
         default=20.0,
         alias="MEIVA_GATEWAY_HTTP_TIMEOUT_SECONDS",
         description="SDK -> Gateway HTTP connect/read timeout (seconds). Wide margin on purpose: spawn is non-idempotent, so a read timeout on a spawn that DID succeed would let the transport retry re-POST it and orphan a second agent.",
@@ -71,6 +75,7 @@ class GatewaySettings(EnvSettings):
     )
 
     sse_disconnect_poll_seconds: float = Field(
+        title="SSE disconnect poll seconds",
         default=1.0,
         alias="MEIVA_SSE_DISCONNECT_POLL_SECONDS",
         description="Gateway SSE client-disconnect detection poll interval (seconds).",
@@ -83,6 +88,7 @@ class GatewaySettings(EnvSettings):
     )
 
     sse_throttle_rate: float = Field(
+        title="SSE throttle rate",
         default=10.0,
         alias="MEIVA_SSE_THROTTLE_RATE",
         description=(
@@ -99,6 +105,7 @@ class GatewaySettings(EnvSettings):
     )
 
     sse_channel_pending_limit: int = Field(
+        title="SSE channel pending limit",
         default=1000,
         ge=1,
         alias="MEIVA_SSE_CHANNEL_PENDING_LIMIT",
@@ -120,6 +127,7 @@ class GatewaySettings(EnvSettings):
     )
 
     notification_outbox_interval_seconds: float = Field(
+        title="Notification outbox interval seconds",
         default=30.0,
         gt=0,
         alias="MEIVA_NOTIFICATION_OUTBOX_INTERVAL_SECONDS",
@@ -138,6 +146,7 @@ class GatewaySettings(EnvSettings):
     )
 
     upload_recovery_claim_seconds: float = Field(
+        title="Upload recovery claim seconds",
         default=300.0,
         gt=0,
         alias="MEIVA_UPLOAD_RECOVERY_CLAIM_SECONDS",
@@ -157,6 +166,7 @@ class GatewaySettings(EnvSettings):
     )
 
     upload_staging_root: str = Field(
+        title="Upload staging root",
         default="",
         alias="MEIVA_UPLOAD_STAGING_ROOT",
         description=(
@@ -174,6 +184,7 @@ class GatewaySettings(EnvSettings):
     )
 
     upload_dir_name: str = Field(
+        title="Upload dir name",
         default="uploads",
         pattern=r"^[A-Za-z0-9_-][A-Za-z0-9._-]*$",
         alias="MEIVA_UPLOAD_DIR_NAME",
@@ -193,6 +204,7 @@ class GatewaySettings(EnvSettings):
     )
 
     notification_outbox_batch: int = Field(
+        title="Notification outbox batch",
         default=100,
         ge=1,
         le=1000,
@@ -210,6 +222,7 @@ class GatewaySettings(EnvSettings):
     )
 
     timeline_compact_history: int = Field(
+        title="Timeline compact history",
         default=1,
         ge=-1,
         alias="MEIVA_TIMELINE_COMPACT_HISTORY",
@@ -228,6 +241,7 @@ class GatewaySettings(EnvSettings):
     )
 
     cluster_rpc_timeout_seconds: float = Field(
+        title="Cluster rpc timeout seconds",
         default=30.0,
         alias="MEIVA_CLUSTER_RPC_TIMEOUT_SECONDS",
         description="Default deadline (seconds) for one gateway -> agent-runner cluster op (ops/cluster/rpc.py dispatch_to_machine). Spawn typically finishes in <5s; lifecycle / config / inventory ops are quick. status_probe passes its own shorter timeout (task #698 G8).",
@@ -240,6 +254,7 @@ class GatewaySettings(EnvSettings):
     )
 
     status_probe_timeout_seconds: float = Field(
+        title="Status probe timeout seconds",
         default=8.0,
         alias="MEIVA_STATUS_PROBE_TIMEOUT_SECONDS",
         description=(
@@ -262,6 +277,7 @@ class GatewaySettings(EnvSettings):
     )
 
     cluster_rpc_max_retries: int = Field(
+        title="Cluster rpc max retries",
         default=3,
         alias="MEIVA_CLUSTER_RPC_MAX_RETRIES",
         description="Extra attempts (after the first) for a gateway -> agent-runner cluster op on transient infrastructure failure (transport error / 5xx), with bounded exponential backoff + jitter (task #961). Non-idempotent ops (spawn / lifecycle) retry under an auto-generated idempotency key, so a lost response replays the first run instead of duplicating it. 0 = fail fast, the pre-#961 single-shot behaviour. The roster's status_probe passes retries=1 inside its separate total deadline.",
@@ -274,6 +290,7 @@ class GatewaySettings(EnvSettings):
     )
 
     schedule_stall_timeout_seconds: float = Field(
+        title="Schedule stall timeout seconds",
         default=1200.0,
         alias="MEIVA_SCHEDULE_STALL_TIMEOUT_SECONDS",
         description="How long a schedule runner may stall in one frame before child cleanup, failure recording (last_error, run row) and hard exit; also the wall-clock bound on a non-.py command. Guards against hung gateway / DB calls. The exit is recorded as terminal process loss; the manager does not relaunch it.",
@@ -281,6 +298,7 @@ class GatewaySettings(EnvSettings):
     )
 
     schedule_recovery_gate_alert_seconds: float = Field(
+        title="Schedule recovery gate alert seconds",
         default=300.0,
         alias="MEIVA_SCHEDULE_RECOVERY_GATE_ALERT_SECONDS",
         description="How long the schedule manager may stay refused by the serving-receipt gate before it reports schedule_recovery_gated. The gate refuses relaunches whenever the published receipt does not name the live root (a helper-reseeded root publishes none); the alert names that condition instead of leaving dead schedules silent.",
@@ -288,6 +306,7 @@ class GatewaySettings(EnvSettings):
     )
 
     schedule_auto_restart_max_per_window: int = Field(
+        title="Schedule auto restart max per window",
         default=5,
         alias="MEIVA_SCHEDULE_AUTO_RESTART_MAX_PER_WINDOW",
         description=(
@@ -302,6 +321,7 @@ class GatewaySettings(EnvSettings):
     )
 
     schedule_auto_restart_window_seconds: float = Field(
+        title="Schedule auto restart window seconds",
         default=1800.0,
         alias="MEIVA_SCHEDULE_AUTO_RESTART_WINDOW_SECONDS",
         description=(
@@ -313,6 +333,7 @@ class GatewaySettings(EnvSettings):
     )
 
     gateway_reload: bool = Field(
+        title="Gateway reload",
         default=False,
         alias="MEIVA_GATEWAY_RELOAD",
         description="Dev-time uvicorn hot-reload switch. Must be false in prod: reload detaches the worker from its session (PPID=1) and zombies hold the port.",
@@ -325,6 +346,7 @@ class GatewaySettings(EnvSettings):
     )
 
     gateway_graceful_shutdown_timeout_seconds: float = Field(
+        title="Gateway graceful shutdown timeout seconds",
         default=30.0,
         gt=0,
         allow_inf_nan=False,
@@ -353,6 +375,7 @@ class GatewaySettings(EnvSettings):
     )
 
     gateway_port: int = Field(
+        title="Gateway port",
         default=8000,
         alias="MEIVA_GATEWAY_PORT",
         description="uvicorn bind port for the gateway. Override where 8000 is taken; must match the port in MEIVA_GATEWAY_URL / MEIVA_GATEWAY_HEALTH_URL.",
@@ -366,6 +389,7 @@ class GatewaySettings(EnvSettings):
     )
 
     gateway_url: str = Field(
+        title="Gateway URL",
         default="",
         alias="MEIVA_GATEWAY_URL",
         description="Gateway base URL on the cluster's private network. Set on "
@@ -381,6 +405,7 @@ class GatewaySettings(EnvSettings):
     )
 
     browser_origins: Annotated[list[str], NoDecode] = Field(
+        title="Browser origins",
         default_factory=list,
         alias="MEIVA_BROWSER_ORIGINS",
         description=(
@@ -411,6 +436,7 @@ class GatewaySettings(EnvSettings):
         return list(parse_browser_origins(value))
 
     cors_allowed_origins: Annotated[list[str], NoDecode] = Field(
+        title="Cors allowed origins",
         default_factory=list,
         alias="MEIVA_GATEWAY_CORS_ALLOWED_ORIGINS",
         description=(
@@ -426,6 +452,7 @@ class GatewaySettings(EnvSettings):
     )
 
     session_cookie_secure: bool | None = Field(
+        title="Session cookie secure",
         default=None,
         alias="MEIVA_GATEWAY_SESSION_COOKIE_SECURE",
         description=(
@@ -441,6 +468,7 @@ class GatewaySettings(EnvSettings):
     )
 
     session_ttl_seconds: int = Field(
+        title="Session TTL seconds",
         default=24 * 3600,
         gt=0,
         alias="MEIVA_GATEWAY_SESSION_TTL_SECONDS",
@@ -454,6 +482,7 @@ class GatewaySettings(EnvSettings):
     )
 
     human_auth: Literal["required", "trusted_network"] = Field(
+        title="Human auth",
         default="trusted_network",
         alias="MEIVA_GATEWAY_HUMAN_AUTH",
         description=(
@@ -477,6 +506,7 @@ class GatewaySettings(EnvSettings):
     )
 
     login_max_failures: int = Field(
+        title="Login max failures",
         default=5,
         gt=0,
         alias="MEIVA_GATEWAY_LOGIN_MAX_FAILURES",
@@ -497,6 +527,7 @@ class GatewaySettings(EnvSettings):
     )
 
     login_lockout_seconds: int = Field(
+        title="Login lockout seconds",
         default=900,
         gt=0,
         alias="MEIVA_GATEWAY_LOGIN_LOCKOUT_SECONDS",
@@ -516,6 +547,7 @@ class GatewaySettings(EnvSettings):
     )
 
     grafana_proxy_enabled: bool = Field(
+        title="Grafana proxy enabled",
         default=False,
         alias="MEIVA_GRAFANA_PROXY_ENABLED",
         description=(
@@ -536,6 +568,7 @@ class GatewaySettings(EnvSettings):
     )
 
     grafana_host: str = Field(
+        title="Grafana host",
         default="127.0.0.1",
         alias="MEIVA_GRAFANA_HOST",
         description=(
@@ -554,6 +587,7 @@ class GatewaySettings(EnvSettings):
     )
 
     mcp_endpoint_enabled: bool = Field(
+        title="MCP endpoint enabled",
         default=False,
         alias="MEIVA_MCP_ENDPOINT_ENABLED",
         description=(
@@ -572,6 +606,7 @@ class GatewaySettings(EnvSettings):
     )
 
     grafana_port: int = Field(
+        title="Grafana port",
         default=3001,
         alias="MEIVA_GRAFANA_PORT",
         description=(

@@ -21,7 +21,6 @@ import {
   displayGroupId,
   displayOrder,
   fieldFilterTags,
-  fieldLabel,
   formatConfigValue,
   isPerAgent,
 } from "../config-groups";
@@ -181,7 +180,7 @@ export function ConfigRow({
   const t = useTranslations("config");
   const isEditing = editingField === field.name;
   const commonKey = simple ? COMMON_KEYS[field.env_var] : undefined;
-  const label = commonKey ? t(`common.${commonKey}.label`) : fieldLabel(field.env_var);
+  const label = commonKey ? t(`common.${commonKey}.label`) : field.label;
   const description = commonKey ? t(`common.${commonKey}.description`) : field.description;
   const displayValue = simple && (field.current_value == null || field.current_value === "")
     ? t("automaticDefault") : displayFieldValue(field);

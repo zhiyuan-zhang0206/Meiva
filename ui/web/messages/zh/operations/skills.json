@@ -5,7 +5,7 @@
   "source": "来源",
   "enabled": "已启用",
   "toggle": "切换 {name}",
-  "intro": "安装在此 gateway 主机加载目录中的技能，按来源层分类。描述你想要的技能，安装 agent 会查找、安装并验证它。",
+  "intro": "管理 Agent 可用的技能。描述你需要的新技能，即可查找并安装。",
   "layerCore": "核心",
   "layerPlugin": "插件",
   "layerMachine": "机器",

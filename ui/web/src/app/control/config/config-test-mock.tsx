@@ -60,7 +60,7 @@ export function wrap(ui: React.ReactElement, qc?: QueryClient) {
 
 export async function renderSettled() {
   const rendered = wrap(<ConfigEditor mode="advanced" />);
-  await screen.findByText("LOG LEVEL");
+  await screen.findByText("Log level");
 
   await screen.findByTestId("per-model-source-auto_compact_fraction");
   return rendered;
@@ -98,6 +98,7 @@ export const VIEW: ConfigView = {
   fields: [
     {
       name: "log_level",
+      label: "Log level",
       field_type: "string",
       current_value: "INFO",
       default_value: "INFO",
@@ -116,6 +117,7 @@ export const VIEW: ConfigView = {
     },
     {
       name: "max_retries",
+      label: "Max retries",
       field_type: "int",
       current_value: 3,
       default_value: 3,
@@ -134,6 +136,7 @@ export const VIEW: ConfigView = {
     },
     {
       name: "enable_compact",
+      label: "Enable compact",
       field_type: "bool",
       current_value: true,
       default_value: false,
@@ -152,6 +155,7 @@ export const VIEW: ConfigView = {
     },
     {
       name: "api_key",
+      label: "Api key",
       field_type: "string",
       current_value: "secret-xyz",
       default_value: "",
@@ -170,6 +174,7 @@ export const VIEW: ConfigView = {
     },
     {
       name: "build_sha",
+      label: "Build sha",
       field_type: "string",
       current_value: "abc123",
       default_value: null,
@@ -188,6 +193,7 @@ export const VIEW: ConfigView = {
     },
     {
       name: "host_label",
+      label: "Host label",
       field_type: "string",
       current_value: "rack-A",
       default_value: "",
@@ -206,6 +212,7 @@ export const VIEW: ConfigView = {
     },
     {
       name: "browser_enabled",
+      label: "Browser enabled",
       field_type: "bool",
       current_value: false,
       default_value: false,
@@ -224,6 +231,7 @@ export const VIEW: ConfigView = {
     },
     {
       name: "nudge_cadence",
+      label: "Nudge cadence",
       field_type: "enum",
       current_value: "once_per_compaction",
       default_value: "once_per_compaction",
@@ -243,6 +251,7 @@ export const VIEW: ConfigView = {
     },
     {
       name: "gateway_port",
+      label: "Gateway port",
       field_type: "int",
       current_value: 8000,
       default_value: 8000,
@@ -290,6 +299,7 @@ export const RESOLVED: ResolvedConfigView = {
   fields: [
     {
       name: "auto_compact_fraction",
+      label: "Auto compact fraction",
       env_var: "MEIVA_AUTO_COMPACT_FRACTION",
       description: "Force-compact ceiling",
       field_type: "float",
@@ -305,6 +315,7 @@ export const RESOLVED: ResolvedConfigView = {
     },
     {
       name: "max_retries",
+      label: "Max retries",
       env_var: "MEIVA_MAX_RETRIES",
       description: "Retry count",
       field_type: "int",
@@ -320,6 +331,7 @@ export const RESOLVED: ResolvedConfigView = {
     },
     {
       name: "llm_retry_max_attempts",
+      label: "Llm retry max attempts",
       env_var: "MEIVA_LLM_RETRY_MAX_ATTEMPTS",
       description: "Retry attempts",
       field_type: "int",

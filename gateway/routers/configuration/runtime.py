@@ -292,6 +292,7 @@ async def get_config(request: Request, machine: str | None = None) -> ConfigView
             fields.append(
                 ConfigFieldView(
                     name=meta.name,
+                    label=meta.label,
                     owner=meta.owner,
                     field_type=meta.field_type,
                     current_value=hf.value,
@@ -318,6 +319,7 @@ async def get_config(request: Request, machine: str | None = None) -> ConfigView
             fields.append(
                 ConfigFieldView(
                     name=meta.name,
+                    label=meta.label,
                     owner=meta.owner,
                     field_type=meta.field_type,
                     current_value=value,
@@ -446,6 +448,7 @@ def get_resolved_config(request: Request, model: str | None = None) -> ResolvedC
         fields.append(
             ResolvedFieldView(
                 name=name,
+                label=meta.label,
                 env_var=meta.env_var,
                 description=meta.description,
                 field_type=meta.field_type,

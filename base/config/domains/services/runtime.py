@@ -15,6 +15,7 @@ __all__ = [
 
 class ServiceRuntimeSettings(EnvSettings):
     browser_enabled: bool = Field(
+        title="Browser enabled",
         default=True,
         alias="MEIVA_BROWSER_ENABLED",
         description="Run the shared headed Chrome on this agent-runner. Auto-skips when the host lacks display/Chrome.",
@@ -29,6 +30,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     chrome_binary: str | None = Field(
+        title="Chrome binary",
         default=None,
         alias="MEIVA_CHROME_BINARY",
         description="Override path to the Chrome binary. None = resolve the platform default.",
@@ -43,6 +45,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     browser_cdp_port: int = Field(
+        title="Browser cdp port",
         default=9222,
         alias="MEIVA_BROWSER_CDP_PORT",
         description="Chrome remote-debugging (CDP) port the shared browser binds and chrome-devtools-mcp attaches to. Per-cluster so co-hosted clusters don't share one Chrome.",
@@ -56,6 +59,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     browser_reach_probe_interval_s: int = Field(
+        title="Browser reach probe interval s",
         default=300,
         alias="MEIVA_BROWSER_REACH_PROBE_INTERVAL_S",
         description="Interval for the browser-reach canary (seconds): each sample fetches the gateway health URL from a temporary hidden about:blank target in the shared browser context. 300s limits routine probe traffic; root diagnostics enforces a minimum interval of 60s.",
@@ -70,6 +74,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     browser_reach_timeout_s: float = Field(
+        title="Browser reach timeout s",
         default=6.0,
         alias="MEIVA_BROWSER_REACH_TIMEOUT_S",
         description="Wall-clock budget for one browser-reach canary (seconds): bounds CDP target setup plus the in-page fetch. The 2026-09-18 hang left fetches pending for 9s+, so a smaller budget separates a quick network reject from a hang without stalling the watchdog round; the host-path control read uses the same budget.",
@@ -84,6 +89,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     permissions_helper_enabled: bool = Field(
+        title="Permissions helper enabled",
         default=True,
         alias="MEIVA_PERMISSIONS_HELPER_ENABLED",
         description="Run the signed macOS permissions helper on this agent-runner. Auto-skips when the host isn't a capable macOS box.",
@@ -101,6 +107,7 @@ class ServiceRuntimeSettings(EnvSettings):
     # every long-lived macOS process spawn to it. Operators enable this only
     # after the helper nursery protocol is deployed and healthy on the host.
     permissions_helper_spawn: bool = Field(
+        title="Permissions helper spawn",
         default=False,
         alias="MEIVA_PERMISSIONS_HELPER_SPAWN",
         description="Spawn macOS service, agent, and pty-sessions service processes directly through the permissions helper so they inherit its stable TCC identity.",
@@ -115,6 +122,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     permissions_helper_port: int = Field(
+        title="Permissions helper port",
         default=9223,
         alias="MEIVA_PERMISSIONS_HELPER_PORT",
         description="Port key for the macOS permissions helper's Unix socket. Per-cluster so co-hosted clusters get distinct sockets.",
@@ -128,6 +136,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     permissions_helper_artifact_dir: Path | None = Field(
+        title="Permissions helper artifact dir",
         default=None,
         alias="MEIVA_PERMISSIONS_HELPER_ARTIFACT_DIR",
         description="Explicit isolated directory for a reviewed signed helper artifact; never replaces the installed helper bundle.",
@@ -142,6 +151,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     project_root: Path | None = Field(
+        title="Project root",
         default=None,
         alias="MEIVA_PROJECT_ROOT",
         description="Repo root directory — used as cwd when healthcheck restarts a service. None = derive from `__file__`.",
@@ -156,6 +166,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     memory_root: Path = Field(
+        title="Memory root",
         default_factory=lambda: unit_home() / "memory",
         alias="MEIVA_MEMORY_ROOT",
         description="Root directory of the meiva.memory pool's markdown files; the memory indexer watches this path.",
@@ -169,6 +180,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     memory_search_backend: str = Field(
+        title="Memory search backend",
         default="numpy",
         alias="MEIVA_MEMORY_SEARCH_BACKEND",
         description=(
@@ -191,6 +203,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     memory_search_max_concurrency: int = Field(
+        title="Memory search max concurrency",
         default=20,
         alias="MEIVA_MEMORY_SEARCH_MAX_CONCURRENCY",
         description=(
@@ -211,6 +224,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     memory_search_deadline_seconds: float = Field(
+        title="Memory search deadline seconds",
         default=15.0,
         alias="MEIVA_MEMORY_SEARCH_DEADLINE_SECONDS",
         description=(
@@ -234,6 +248,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     memory_search_acquire_timeout_seconds: float = Field(
+        title="Memory search acquire timeout seconds",
         default=1.0,
         alias="MEIVA_MEMORY_SEARCH_ACQUIRE_TIMEOUT_SECONDS",
         description=(
@@ -257,6 +272,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     memory_rerank_model: str = Field(
+        title="Memory rerank model",
         default="jev-1.13.0",
         alias="MEIVA_MEMORY_RERANK_MODEL",
         description=(
@@ -278,6 +294,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     memory_rerank_candidates: int = Field(
+        title="Memory rerank candidates",
         # 30 rather than 50: in the 2026-10-11 benchmark, passive recall precision at the 0.80
         # threshold was the same at 30 candidates (P(>=1) about 0.77), search nDCG@5 was 0.746
         # against 0.755, and cost about 60%. Measured with every request in flight, ranking 30
@@ -307,6 +324,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     memory_dedup_candidates: int = Field(
+        title="Memory dedup candidates",
         default=5,
         ge=1,
         le=100,
@@ -329,6 +347,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     memory_search_max_batch_rows: int = Field(
+        title="Memory search max batch rows",
         default=65536,
         gt=0,
         alias="MEIVA_MEMORY_SEARCH_MAX_BATCH_ROWS",
@@ -350,6 +369,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     embedding_backend: str = Field(
+        title="Embedding backend",
         default="gemini",
         alias="MEIVA_EMBEDDING_BACKEND",
         description=(
@@ -369,6 +389,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     embeddinggemma_endpoint: str | None = Field(
+        title="Embeddinggemma endpoint",
         default=None,
         alias="MEIVA_EMBEDDINGGEMMA_ENDPOINT",
         description="Raw-input embedding HTTP endpoint ending in /v1/embeddings; no automatic task prefixes on the server.",
@@ -381,6 +402,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     embeddinggemma_model: str | None = Field(
+        title="Embeddinggemma model",
         default=None,
         alias="MEIVA_EMBEDDINGGEMMA_MODEL",
         description="Pinned model locator understood by the embedding server; separate from semantic revision identity.",
@@ -393,6 +415,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     embeddinggemma_revision: str | None = Field(
+        title="Embeddinggemma revision",
         default=None,
         alias="MEIVA_EMBEDDINGGEMMA_REVISION",
         description="Operator-verified lowercase 40-hex checkpoint commit or 64-hex artifact SHA256. Must match the actual served weights and change for any artifact/quantization change.",
@@ -405,6 +428,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     embeddinggemma_api_key: SecretStr | None = Field(
+        title="Embeddinggemma API key",
         default=None,
         alias="MEIVA_EMBEDDINGGEMMA_API_KEY",
         description="Optional bearer token for the embedding server.",
@@ -417,6 +441,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     memory_embed_timeout_seconds: float = Field(
+        title="Memory embed timeout seconds",
         default=60.0,
         alias="MEIVA_EMBED_TIMEOUT_SECONDS",
         description=(
@@ -433,6 +458,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     memory_search_port: int = Field(
+        title="Memory search port",
         default=19531,
         alias="MEIVA_MEMORY_SEARCH_PORT",
         description="Memory search service HTTP port.",
@@ -445,6 +471,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     memory_search_uri: str = Field(
+        title="Memory search URI",
         default="http://127.0.0.1:19531",
         alias="MEIVA_MEMORY_SEARCH_URI",
         description="Memory search service base URI — indexer daemon / gateway dial it when the numpy backend is selected.",
@@ -457,6 +484,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     memory_search_data_dir: Path = Field(
+        title="Memory search data dir",
         default_factory=lambda: unit_home() / "memory-search",
         alias="MEIVA_MEMORY_SEARCH_DATA_DIR",
         description="Memory search on-disk data directory (vectors.npz).",
@@ -470,6 +498,7 @@ class ServiceRuntimeSettings(EnvSettings):
     )
 
     memory_search_pidfile: Path = Field(
+        title="Memory search pidfile",
         default_factory=lambda: unit_home() / "run" / "memory_search.pid",
         alias="MEIVA_MEMORY_SEARCH_PIDFILE",
         description="Memory search daemon pidfile path.",

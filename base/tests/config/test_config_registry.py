@@ -338,3 +338,12 @@ def test_cluster_secret_validator_rejects_unsafe_chars() -> None:
     for bad in ("has space", "new\nline", "hash#tag", "tab\tchar", "semi;colon"):
         with pytest.raises(ValueError):
             config.DataPlaneSettings._validate_cluster_secret(bad)
+
+
+def test_panel_fields_declare_display_titles() -> None:
+    from base.config import FIELD_INFOS
+
+    missing = [
+        name for name, info in FIELD_INFOS.items() if not info.title or not info.title.strip()
+    ]
+    assert not missing, f"Config fields need display titles: {missing}"

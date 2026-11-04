@@ -5,7 +5,7 @@
   "source": "Source",
   "enabled": "Enabled",
   "toggle": "Toggle {name}",
-  "intro": "Skills installed on this gateway host's load dir, by source layer. Describe one you want and an installer agent finds, installs, and verifies it.",
+  "intro": "Manage the skills available to your agents. Describe a new skill to find and install it.",
   "layerCore": "Core",
   "layerPlugin": "Plugin",
   "layerMachine": "Machine",

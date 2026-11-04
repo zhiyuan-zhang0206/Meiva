@@ -319,6 +319,7 @@ export interface ConversationSnapshotResponse {
 export interface ConfigFieldView {
   readonly owner?: string | null; // None is Core; a plugin name owns its image.
   readonly name: string;
+  readonly label: string;
   readonly field_type: "bool" | "string" | "int" | "float" | "enum";
   readonly current_value: boolean | string | number | null;
   readonly default_value: boolean | string | number | null;
