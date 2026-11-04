@@ -6,10 +6,9 @@ A mitigation, not a boundary: a clean result means "no known pattern
 matched", not "safe".
 """
 
-from typing import Any, TypeGuard
-
 from base.agents.messages import injection_scan
 from base.agents.messages.security_finding import SecurityFindingEntry as SecurityFindingEntry
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.log import logger
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.pure.media import finding_plan
@@ -27,10 +26,6 @@ __all_for_meiva__ = [
 
 # The graph-state channel a finding is appended to (`BaseAgentState.security_findings`).
 _FINDINGS_CHANNEL = "security_findings"
-
-
-def _is_state_dict(val: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(val, dict)
 
 
 # meiva:note
@@ -65,11 +60,17 @@ def deliver(delivery: FindingDelivery, findings: Findings) -> None:
     if not plan.append:
         return
     update = process_context.get_state_update()
-    if not _is_state_dict(update):
+    if not is_object_dict(update):
         raise TypeError(
             f"meiva.state_update must stay a dict, got {type(update).__name__} (security finding)"
         )
-    update[_FINDINGS_CHANNEL] = [*update.get(_FINDINGS_CHANNEL, []), *plan.append]
+    carried = update.get(_FINDINGS_CHANNEL, [])
+    if not is_object_list(carried):
+        raise TypeError(
+            f"meiva.state_update[{_FINDINGS_CHANNEL!r}] must stay a list, "
+            f"got {type(carried).__name__} (security finding)"
+        )
+    update[_FINDINGS_CHANNEL] = [*carried, *plan.append]
 
 
 # meiva:note

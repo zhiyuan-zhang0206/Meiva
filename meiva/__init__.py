@@ -34,6 +34,7 @@ from base.agents.context import MeivaContext
 from base.agents.context.clients import LazyConnection as _LazyConnection
 from base.cluster.machine import MachineIdentityReader as _MachineIdentityReader
 from base.config import ConfigBoot
+from base.host.boundary.untyped import object_mapping, object_of
 from base.packages.plugins.loading import StateGate
 
 from .sdk_surface import process_context
@@ -85,6 +86,25 @@ gateway API access. Unavailable when no execution context is established.
 """
 
 
+# meiva:note
+# What `meiva.context` answers: the bound context, binding a launched process's own on first read.
+def _bound_context() -> MeivaContext:
+    if process_context.bound_context() is None and not process_context.is_host_process():
+        # meiva:note
+        # A launched script whose environment carries the agent id builds and binds its own
+        # context on first read (`import meiva` already did, for the normal launch order).
+        from .boot import bind_launched_context
+
+        launched = bind_launched_context()
+        if launched is not None:
+            return launched
+        from .self.harness import ensure_identity
+
+        if ensure_identity() is not None:
+            return process_context.require_bound_context()
+    return process_context.require_bound_context()
+
+
 class _SdkModule(_ModuleType):
     """The `meiva` module, whose three framework slots delegate to `process_context`."""
 
@@ -106,19 +126,7 @@ class _SdkModule(_ModuleType):
 
     @property
     def context(self) -> MeivaContext:
-        if process_context.bound_context() is None and not process_context.is_host_process():
-            # A launched script whose environment carries the agent id builds and binds its own
-            # context on first read (`import meiva` already did, for the normal launch order).
-            from .boot import bind_launched_context
-
-            launched = bind_launched_context()
-            if launched is not None:
-                return launched
-            from .self.harness import ensure_identity
-
-            if ensure_identity() is not None:
-                return process_context.require_bound_context()
-        return process_context.require_bound_context()
+        return _bound_context()
 
     @context.setter
     def context(self, value: MeivaContext) -> None:
@@ -238,13 +246,13 @@ def __getattr__(name: str) -> Any:
         ensure_identity()
         raise process_context.outside_process("context")
     if name == "DB":
-        return _sys.modules[__name__].context.sql
+        return _bound_context().sql
     if name == "REDIS":
-        return _sys.modules[__name__].context.redis
+        return _bound_context().redis
     if name in ("DB_URL", "REDIS_URL", "GATEWAY_URL"):
         from .sdk_surface import settings as _settings
 
-        return getattr(_settings, name)
+        return object_of(getattr, _settings, name)
     if not name.startswith("_") and _init_complete:
         from .self.harness import ensure_identity
 
@@ -254,7 +262,7 @@ def __getattr__(name: str) -> Any:
         maybe_load_plugins_for_missing(name)
         mod = _sys.modules[__name__]
         if name in mod.__dict__:
-            return mod.__dict__[name]
+            return object_mapping(mod.__dict__)[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
