@@ -6,14 +6,16 @@ from __future__ import annotations
 import dataclasses
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 from base.clock import Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
+from base.host.boundary.options import options
+from base.host.boundary.untyped import object_of
 from cli.commands.data_plane import walg as walg_cmd
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
@@ -57,16 +59,38 @@ def plane(data_plane_config: DataPlaneConfig, sandbox: Sandbox) -> DataPlaneConf
     return dataclasses.replace(data_plane_config, walg_config_file=sandbox.config_file)
 
 
+# meiva:note
+# The attributes the `backup walg` verbs read off the parsed namespace. `options` refuses a missing
+# or wrongly typed attribute, so a parser change that renames one fails here instead of reading
+# `Any`.
+@dataclass(frozen=True)
+class _ParsedVerb:
+    func: Callable[..., int]
+
+
+@dataclass(frozen=True)
+class _ParsedRestore:
+    func: Callable[..., int]
+    dir: str
+    backup: str
+    time: str | None
+    lsn: str | None
+    user: str
+
+
 def test_the_parser_reaches_every_verb() -> None:
     parser = build_parser()
 
-    check = parser.parse_args(["backup", "walg", "check"])
-    run = parser.parse_args(["backup", "walg", "run"])
-    status = parser.parse_args(["backup", "walg", "status"])
-    restore = parser.parse_args(
-        ["backup", "walg", "restore", "--dir", "/srv/restored", "--user", "meiva"]
+    check = options(parser.parse_args(["backup", "walg", "check"]), _ParsedVerb)
+    run = options(parser.parse_args(["backup", "walg", "run"]), _ParsedVerb)
+    status = options(parser.parse_args(["backup", "walg", "status"]), _ParsedVerb)
+    restore = options(
+        parser.parse_args(
+            ["backup", "walg", "restore", "--dir", "/srv/restored", "--user", "meiva"]
+        ),
+        _ParsedRestore,
     )
-    drill = parser.parse_args(["backup", "walg", "drill"])
+    drill = options(parser.parse_args(["backup", "walg", "drill"]), _ParsedVerb)
 
     assert drill.func.__name__ == "_h_backup_walg_drill"
 
@@ -78,7 +102,10 @@ def test_the_parser_reaches_every_verb() -> None:
         None,
         "meiva",
     )
-    named = parser.parse_args(["backup", "walg", "restore", "--dir", "/d", "--user", "zyonzhang"])
+    named = options(
+        parser.parse_args(["backup", "walg", "restore", "--dir", "/d", "--user", "zyonzhang"]),
+        _ParsedRestore,
+    )
     assert named.user == "zyonzhang"
     assert check.func.__name__ == "_h_backup_walg_check"
     assert run.func.__name__ == "_h_backup_walg_run"
@@ -128,7 +155,7 @@ def _at_the_door(
     args.database_factory = database_factory
     if installed is not None:
         args.installed = installed
-    return int(args.func(args))
+    return int(options(args, _ParsedVerb).func(args))
 
 
 def test_run_prints_timestamped_lines_and_returns_the_ticks_exit_code(
@@ -422,9 +449,9 @@ def test_restore_recovers_to_the_target_and_keeps_the_data_directory(
         archive_current_segment(conn, sandbox)
         conn.execute("INSERT INTO t VALUES ('B1')")
         archive_current_segment(conn, sandbox)
-        target_row = conn.execute("SELECT pg_current_wal_insert_lsn()").fetchone()
-        assert target_row is not None
-        target = str(target_row[0])
+        row = object_of(conn.execute("SELECT pg_current_wal_insert_lsn()").fetchone)
+        assert isinstance(row, tuple) and row, "the query answers one row"
+        target = str(object_of(row.__getitem__, 0))
         conn.execute("INSERT INTO t VALUES ('B2')")
         archive_current_segment(conn, sandbox)
         conn.close()
@@ -457,10 +484,10 @@ def test_restore_recovers_to_the_target_and_keeps_the_data_directory(
 
 
 @pytest.mark.parametrize(
-    ("kwargs", "message"),
+    ("time_arg", "lsn", "message"),
     [
-        ({"time": None, "lsn": "not-an-lsn"}, "is not an LSN"),
-        ({"time": "2026-10-01", "lsn": "0/1"}, "not both"),
+        (None, "not-an-lsn", "is not an LSN"),
+        ("2026-10-01", "0/1", "not both"),
     ],
 )
 def test_restore_rejects_a_bad_target_before_fetching(
@@ -468,7 +495,8 @@ def test_restore_rejects_a_bad_target_before_fetching(
     plane: DataPlaneConfig,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
-    kwargs: dict[str, Any],
+    time_arg: str | None,
+    lsn: str,
     message: str,
 ) -> None:
     code = walg_cmd.cmd_walg_restore(
@@ -479,7 +507,8 @@ def test_restore_rejects_a_bad_target_before_fetching(
         clock=_clock(),
         home=sandbox.home,
         environ=sandbox.environ,
-        **kwargs,
+        time=time_arg,
+        lsn=lsn,
         installed=always_pinned,
         system=_SYSTEM,
         machine=_MACHINE,
