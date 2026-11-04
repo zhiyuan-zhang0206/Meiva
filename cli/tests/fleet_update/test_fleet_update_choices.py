@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from cli.fleet_update.choices import parse
-from cli.tests.fleet_update.fleet_update_cluster import Cluster
+from cli.tests.fleet_update.fleet_update_cluster import Cluster, write_executable
 
 _STOP_CHOICES = [
     "--close-shell-sessions",
@@ -327,9 +327,10 @@ def test_a_read_carries_no_operation_identity(
 def test_the_service_roster_runs_on_the_interpreter_the_entry_named(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    stand_in = tmp_path / "stand-in-python"
-    stand_in.write_text("#!/bin/sh\necho 'stand-in interpreter ran' >&2\nexit 3\n")
-    stand_in.chmod(0o755)
+    stand_in = write_executable(
+        tmp_path / "stand-in-python",
+        "#!/bin/sh\necho 'stand-in interpreter ran' >&2\nexit 3\n",
+    )
     with pytest.raises(SystemExit) as refusal:
         _ = parse(
             ["run", *_STOP_CHOICES, "--stop-infra", "--gateway", "gw", "--log-dir", "logs"],

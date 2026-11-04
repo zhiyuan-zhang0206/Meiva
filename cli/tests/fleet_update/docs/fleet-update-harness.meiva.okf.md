@@ -40,6 +40,8 @@ accepts (`--roster-timeout 1`, `--lease-confirm-seconds 1`).
 
 The fake `ssh` refuses production's forbidden order at the offending command — a gateway stop or start while a runner is up, a runner start before the gateway, a prestage after its stop in the same run, a switch before its stop, a macOS start that is not the one-shot LaunchAgent — and its pre-verify simulation accepts only the gateway, only against NEW, with the table read before the worktree check and the check before any stop of the run; each refusal is recorded as a violation the test reads back and fails on.
 
+Because `host_commands.HOME` resolves `$HOME/.meiva/source` directly on target machines rather than reading `MEIVA_HOME`, `conftest.py` isolates `os.environ["HOME"]` to a fresh `tmp_path / "isolated-user-home"` directory for every test in `cli/tests/fleet_update/`, restoring it on teardown. `run_host_shell`, `assert_isolated_home`, `Cluster.process_env` and `local_ssh.py` also refuse to execute when `HOME` (or `FLEET_LOCAL_HOME`) resolves to the operator's `pwd.getpwuid(os.getuid()).pw_dir` home, and `write_executable` refuses to write stub binaries through symlinks.
+
 `hosts`, `names`, `silent`, `hidden`, `roster_lag`, `stored_schedules`, `silence_reply`, `leases`, `lease_reply` and `fail` are per-test knobs. `lease_reads` records how many effects the cluster had already accepted at each lease read, so a test can prove the leases are named before anything stops; a read is never an effect, so `--dry-run` stays effect-free.
 
 Parent: [[cli/docs/cli.meiva.okf.md]].

@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import plistlib
+import pwd
 import shlex
 import subprocess
 import sys
@@ -19,11 +20,19 @@ import pytest
 from base.native_process.root_control import instance_lock
 from base.paths import repo_root
 from cli.fleet_update import fleet_verify, oneshot
-from cli.fleet_update.plan.host_commands import PROBE
+from cli.fleet_update.plan.host_commands import HOME, PROBE
 from cli.fleet_update.plan.operation import OperationIdentity
 from cli.fleet_update.session import Pacing, Session
 from cli.fleet_update.timers import ProcessTimers
-from cli.tests.fleet_update.fleet_update_cluster import git, ssh_on_path
+from cli.tests.fleet_update.fleet_update_cluster import (
+    Cluster,
+    assert_isolated_home,
+    git,
+    operator_home,
+    run_host_shell,
+    ssh_on_path,
+    write_executable,
+)
 
 _STAMP = "20261024T120000"
 
@@ -88,7 +97,10 @@ _JOURNAL_WITH_BACKSLASHES = json.dumps(
 def _host_home(tmp_path: Path, journal: str | None) -> Path:
     source = tmp_path / ".meiva" / "source"
     (source / ".venv" / "bin").mkdir(parents=True)
-    (source / ".venv" / "bin" / "python").symlink_to(sys.executable)
+    write_executable(
+        source / ".venv" / "bin" / "python",
+        f'#!/bin/sh\nexec "{sys.executable}" "$@"\n',
+    )
     git(source, "init", "-q", "--initial-branch=main")
     git(source, "commit", "-q", "--allow-empty", "-m", "base")
     (source / ".git" / "info" / "exclude").write_text(".venv/\n")
@@ -100,11 +112,9 @@ def _host_home(tmp_path: Path, journal: str | None) -> Path:
 
 
 def _probed(shell: str, home: Path) -> dict[str, str]:
-    result = subprocess.run(
+    result = run_host_shell(
         [shell, "-c", PROBE],
         env={**os.environ, "HOME": str(home)},
-        capture_output=True,
-        text=True,
         check=True,
     )
     return {
@@ -168,12 +178,12 @@ def test_the_machine_name_is_asked_through_the_hosts_real_shell(shell: str, tmp_
     (source / "base" / "config.py").write_text("class ConfigBoot: pass\n")
     python = source / ".venv" / "bin" / "python"
     python.parent.mkdir(parents=True)
-    python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
-    python.chmod(0o755)
+    write_executable(python, f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
 
     local_ssh = ssh_on_path(tmp_path / "bin", Path(__file__).with_name("local_ssh.py"))
     env = {
         "PATH": f"{local_ssh}{os.pathsep}{os.environ['PATH']}",
+        "HOME": str(tmp_path),
         "FLEET_LOCAL_SHELL": shell,
         "FLEET_LOCAL_HOME": str(tmp_path),
     }
@@ -199,3 +209,86 @@ def test_the_machine_name_is_asked_through_the_hosts_real_shell(shell: str, tmp_
         session.log.close()
 
     assert names == {"mac": "mac-mini"}
+
+
+def test_fleet_update_tests_isolate_home_from_the_operator_passwd_home_by_default() -> None:
+    passwd_home = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
+    env_home = Path(os.environ["HOME"]).resolve()
+
+    assert passwd_home == operator_home()
+    assert env_home == Path.home().resolve()
+    assert env_home != passwd_home
+    assert env_home.is_dir()
+    assert not Path(os.environ["HOME"]).is_symlink()
+    assert not (env_home / ".meiva").exists()
+
+
+def test_host_commands_home_with_default_process_env_fails_fast_outside_operator_home() -> None:
+    # meiva:note
+    # Calling `subprocess.run` without an explicit `env` inherits the `conftest.py` isolated
+    # `HOME`, so `cd "$HOME/.meiva/source" || exit 1` exits 1 immediately instead of entering the
+    # operator's real `~/.meiva/source`.
+    proc = subprocess.run(
+        ["bash", "-c", f"{HOME}; pwd"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 1
+    assert proc.stdout == ""
+
+
+def test_host_shell_and_local_ssh_guards_refuse_the_operator_home_before_spawning_a_shell(
+    tmp_path: Path,
+) -> None:
+    real_home = operator_home()
+    sentinel = tmp_path / "ran"
+
+    with pytest.raises(AssertionError, match="empty HOME"):
+        assert_isolated_home("")
+    with pytest.raises(AssertionError, match="empty HOME"):
+        assert_isolated_home(None)
+    with pytest.raises(AssertionError, match="operator HOME"):
+        assert_isolated_home(real_home)
+    with pytest.raises(AssertionError, match="operator HOME"):
+        run_host_shell(
+            ["bash", "-c", f'echo touched > "{sentinel}"'],
+            env={**os.environ, "HOME": str(real_home)},
+        )
+    assert not sentinel.exists()
+
+    workdir = tmp_path / "cluster"
+    workdir.mkdir()
+    cluster = Cluster("0" * 40, "1" * 40, repo=tmp_path, workdir=workdir)
+    cluster.environ["HOME"] = str(real_home)
+    with pytest.raises(AssertionError, match="operator HOME"):
+        cluster.process_env()
+
+    local_ssh = ssh_on_path(tmp_path / "bin", Path(__file__).with_name("local_ssh.py"))
+    proc = subprocess.run(
+        [str(local_ssh / "ssh"), "mac", f'echo touched > "{sentinel}"'],
+        env={
+            **os.environ,
+            "FLEET_LOCAL_SHELL": "/bin/sh",
+            "FLEET_LOCAL_HOME": str(real_home),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode != 0
+    assert "operator HOME" in proc.stderr
+    assert not sentinel.exists()
+
+
+def test_write_executable_refuses_to_write_through_a_symlink(tmp_path: Path) -> None:
+    target = tmp_path / "real-interpreter"
+    target.write_text("untouched\n", encoding="utf-8")
+    link = tmp_path / "python"
+    link.symlink_to(target)
+
+    with pytest.raises(AssertionError, match="symlink"):
+        write_executable(link, "#!/bin/sh\nexit 0\n")
+
+    assert link.is_symlink()
+    assert target.read_text(encoding="utf-8") == "untouched\n"

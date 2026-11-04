@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from base.paths import repo_root
+from cli.tests.fleet_update.fleet_update_cluster import assert_isolated_home
 
 _ROSTER = {
     "name": "runner-a",
@@ -89,6 +90,7 @@ def run_program(tmp_path: Path, gateway: Gateway, *args: str) -> subprocess.Comp
         "MEIVA_CONFIG_FETCH": "skip",
         "PYTHONDONTWRITEBYTECODE": "1",
     }
+    assert_isolated_home(env["HOME"])
     return subprocess.run(
         [sys.executable, "-m", "cli.commands.management.fleet_gateway", *args],
         cwd=repo_root(),

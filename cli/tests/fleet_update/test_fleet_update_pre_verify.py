@@ -24,6 +24,11 @@ import pytest
 from base.paths import repo_root
 from cli.fleet_update.plan.gateway_commands import pre_verify_script
 from cli.fleet_update.programs import CHECK_ROWS_SCRIPT, VERIFY_SCRIPTS, program_text
+from cli.tests.fleet_update.fleet_update_cluster import (
+    assert_isolated_home,
+    run_host_shell,
+    write_executable,
+)
 
 _OLD_ROWS = [(1, "digest", "import os\n"), (2, "empty", "")]
 
@@ -82,11 +87,13 @@ def _read_rows(checkout: Path, out: Path) -> subprocess.CompletedProcess[str]:
     # Execute the read step's source under the OLD checkout's import path.
     env = {
         "PATH": os.environ["PATH"],
+        "HOME": str(checkout),
         "PYTHONPATH": str(checkout),
         "PYTHONDONTWRITEBYTECODE": "1",
         "MEIVA_HOME": str(checkout),
         "MEIVA_CONFIG_FETCH": "skip",
     }
+    assert_isolated_home(env["HOME"])
     return subprocess.run(
         [
             sys.executable,
@@ -318,6 +325,7 @@ def test_the_real_cli_checks_a_rows_file_offline_under_a_throwaway_home(tmp_path
         "MEIVA_HOME": str(home),
         "MEIVA_CONFIG_FETCH": "skip",
     }
+    assert_isolated_home(env["HOME"])
     proc = subprocess.run(
         [
             sys.executable,
@@ -381,7 +389,10 @@ def host(tmp_path: Path) -> tuple[Path, str]:
     new = _git(source, "rev-parse", "HEAD")
     _git(source, "reset", "-q", "--hard", "HEAD~1")
     (source / ".venv" / "bin").mkdir(parents=True)
-    (source / ".venv" / "bin" / "python").symlink_to(sys.executable)
+    write_executable(
+        source / ".venv" / "bin" / "python",
+        f'#!/bin/sh\nexec "{sys.executable}" "$@"\n',
+    )
     _git(source, "config", "status.showUntrackedFiles", "no")
     return tmp_path, new
 
@@ -400,14 +411,7 @@ def _run_script(
     tmp = home / "tmp"
     tmp.mkdir(exist_ok=True)
     env = {**os.environ, "HOME": str(home), "TMPDIR": str(tmp), "REAL_HOME": str(home / ".meiva")}
-    return subprocess.run(
-        ["bash", "-c", _render(new)],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
-    )
+    return run_host_shell(["bash", "-c", _render(new)], env=env, timeout=120)
 
 
 def test_the_script_checks_the_table_through_new_and_cleans_up(host: tuple[Path, str]) -> None:
@@ -554,6 +558,7 @@ def test_the_read_step_reads_the_rows_through_a_gateway_from_the_hosts_own_confi
     out = tmp_path / "rows.json"
     env = {
         "PATH": os.environ["PATH"],
+        "HOME": str(tmp_path),
         "PYTHONPATH": str(repo_root()),
         "PYTHONDONTWRITEBYTECODE": "1",
         "MEIVA_HOME": str(home),
@@ -561,6 +566,7 @@ def test_the_read_step_reads_the_rows_through_a_gateway_from_the_hosts_own_confi
         "MEIVA_GATEWAY_URL": f"http://127.0.0.1:{server.server_address[1]}",
         "MEIVA_API_TOKEN": "pre-verify-test-value",
     }
+    assert_isolated_home(env["HOME"])
     try:
         proc = subprocess.run(
             [
