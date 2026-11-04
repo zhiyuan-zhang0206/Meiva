@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol
 
 import base.paths
 import meiva
 import meiva.files as _meiva_files
 from base.agents.to_user.models import DOCUMENT_FILENAME
+from base.host.boundary.untyped import object_of
 from base.log import logger
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.agent_identity import require_agent_id
@@ -18,8 +20,15 @@ def _absolute(path: str | Path) -> Path:
     target = Path(coerce_str(path, "path", allow_types=(os.PathLike,))).expanduser()
     if target.is_absolute():
         return target
-    cwd = getattr(meiva, "cwd", None)
-    return cwd.get() / target if cwd is not None else _meiva_files.resolve(target)
+    # meiva:note
+    # `meiva.cwd` exists only while the meiva_code plugin is enabled, so it is looked up by name and
+    # used when it answers with a path; without it the file namespace resolves the path.
+    current = object_of(getattr, object_of(getattr, meiva, "cwd", None), "get", None)
+    if callable(current):
+        base_dir = current()
+        if isinstance(base_dir, Path):
+            return base_dir / target
+    return _meiva_files.resolve(target)
 
 
 # meiva:link meiva_builtins/plugins/meiva_to_user/docs/panel-write-check.meiva.okf.md
@@ -33,12 +42,12 @@ def panel_path(path: str | Path, *, agent_id: int, home: Path) -> Path | None:
 
 
 class _StateHandle(Protocol):
-    def update(self, delta: dict[str, Any]) -> object: ...
+    def update(self, delta: Mapping[str, object]) -> object: ...
 
 
 def _state_handle() -> _StateHandle:
-    materialize = getattr(meiva.state, "materialize", None)
-    if materialize is not None:
+    materialize = object_of(getattr, object_of(getattr, meiva, "state"), "materialize", None)
+    if callable(materialize):
         materialize()
     from .agent_runtime import state_handle
 
