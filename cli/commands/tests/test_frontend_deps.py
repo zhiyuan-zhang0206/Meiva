@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -220,5 +221,62 @@ def test_skips_when_installed_versions_match_lockfile(
     installed = repo / "ui" / "web" / "node_modules" / "@scope" / "dep"
     installed.mkdir(parents=True)
     (installed / "package.json").write_text('{"version": "1.0.0"}')
+    fake_pnpm_install.ensure(repo)
+    assert fake_pnpm_install.installs() == []
+
+
+def test_reinstalls_when_pnpm_workspace_yaml_changed(
+    tmp_path: Path, fake_pnpm_install: FakePnpm
+) -> None:
+    repo = _make_repo(tmp_path / "repo")
+    workspace = repo / "ui" / "web" / "pnpm-workspace.yaml"
+    workspace.write_text("nodeLinker: hoisted\n")
+    fake_pnpm_install.ensure(repo)
+    fake_pnpm_install.forget()
+    fake_pnpm_install.ensure(repo)
+    assert fake_pnpm_install.installs() == []
+
+    workspace.write_text("nodeLinker: hoisted\nenableGlobalVirtualStore: false\n")
+    fake_pnpm_install.ensure(repo)
+    assert fake_pnpm_install.installs() == [(repo / "ui" / "web").resolve()]
+    fake_pnpm_install.forget()
+    fake_pnpm_install.ensure(repo)
+    assert fake_pnpm_install.installs() == []
+
+
+def test_skips_across_commits_and_source_edits_when_lock_and_workspace_unchanged(
+    tmp_path: Path, fake_pnpm_install: FakePnpm
+) -> None:
+    repo = _make_repo(tmp_path / "repo")
+    fe = repo / "ui" / "web"
+    (fe / "pnpm-workspace.yaml").write_text(
+        "nodeLinker: hoisted\nenableGlobalVirtualStore: false\n"
+    )
+    (fe / "src").mkdir()
+    (fe / "src" / "page.tsx").write_text("export const V = 1;\n")
+    (repo / "README.md").write_text("v1\n")
+    for args in (
+        ("init",),
+        ("config", "user.email", "test@example.com"),
+        ("config", "user.name", "Test"),
+        ("config", "commit.gpgsign", "false"),
+        ("add", "."),
+        ("commit", "-m", "initial"),
+    ):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+
+    fake_pnpm_install.ensure(repo)
+    assert fake_pnpm_install.installs() == [fe.resolve()]
+    fake_pnpm_install.forget()
+
+    (repo / "README.md").write_text("v2\n")
+    (fe / "src" / "page.tsx").write_text("export const V = 2;\n")
+    subprocess.run(["git", "-C", str(repo), "add", "README.md", "ui/web/src/page.tsx"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-m", "move head"],
+        check=True,
+        capture_output=True,
+    )
+
     fake_pnpm_install.ensure(repo)
     assert fake_pnpm_install.installs() == []

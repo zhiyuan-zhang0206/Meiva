@@ -169,15 +169,26 @@ def _node_modules_drift(fe: Path, node_modules: Path) -> str | None:
     return None
 
 
+def _frontend_deps_stamp_hash(fe: Path) -> str:
+    digest = hashlib.sha256(b"pnpm-lock.yaml\0")
+    digest.update((fe / "pnpm-lock.yaml").read_bytes())
+    workspace = fe / "pnpm-workspace.yaml"
+    if workspace.is_file():
+        digest.update(b"\0pnpm-workspace.yaml\0")
+        digest.update(workspace.read_bytes())
+    return digest.hexdigest()
+
+
 # meiva:note
 # `install_argv` is the install command (`pnpm install --frozen-lockfile`) and `environ`
 # the environment it inherits, with the Node search path injected; both come from the caller.
 #
-# Installs frontend deps when node_modules is missing OR when pnpm-lock.yaml changed since the
-# last install — `pnpm run build` without the exact locked deps dies immediately and the session
-# exits. `node_modules/.meiva-lock-hash` stamps the sha256 of the `pnpm-lock.yaml` last installed
-# from (written after `pnpm install --frozen-lockfile`). When the stamp matches, `_node_modules_drift`
-# verifies `.modules.yaml`, rejects foreign markers, and checks direct dependency versions against
+# Installs frontend deps when node_modules is missing OR when pnpm-lock.yaml / pnpm-workspace.yaml
+# changed since the last install — `pnpm run build` without the exact locked deps or matching
+# workspace state either fails immediately or triggers an unfrozen `verifyDepsBeforeRun` reinstall.
+# `node_modules/.meiva-lock-hash` stamps `_frontend_deps_stamp_hash(fe)` after a successful
+# `pnpm install --frozen-lockfile`. When the stamp matches, `_node_modules_drift` verifies
+# `.modules.yaml`, rejects foreign markers, and checks direct dependency versions against
 # `pnpm-lock.yaml` (cf. docs/postmortems/0007).
 def ensure_frontend_deps(
     repo: Path, *, environ: Mapping[str, str], install_argv: tuple[str, ...]
@@ -185,14 +196,19 @@ def ensure_frontend_deps(
     fe = repo / "ui" / "web"
     node_modules = fe / "node_modules"
     stamp = node_modules / ".meiva-lock-hash"
-    want = hashlib.sha256((fe / "pnpm-lock.yaml").read_bytes()).hexdigest()
+    want = _frontend_deps_stamp_hash(fe)
     if node_modules.is_dir() and stamp.is_file() and stamp.read_text().strip() == want:
         drift = _node_modules_drift(fe, node_modules)
         if drift is None:
             return
         print(f"  · frontend deps drifted ({drift}), running pnpm install --frozen-lockfile")
     else:
-        reason = "missing" if not node_modules.is_dir() else "pnpm-lock.yaml changed"
+        if not node_modules.is_dir():
+            reason = "missing"
+        elif not stamp.is_file():
+            reason = "install stamp missing"
+        else:
+            reason = "pnpm-lock.yaml or pnpm-workspace.yaml changed"
         print(f"  · frontend deps {reason}, running pnpm install --frozen-lockfile")
     # meiva:note
     # A start runs without a terminal (launchd, ssh, a service session). When the lockfile changed,

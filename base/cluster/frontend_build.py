@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import stat
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -17,7 +18,8 @@ from typing import Literal, assert_never
 
 from base.host.boundary.options import attribute, options
 from base.host.net.browser_origins import parse_browser_origins, split_browser_origins
-from base.host.runtime_interpreter import source_digest
+from base.host.proc import run_bounded
+from base.host.verified_file.plan import stat_changed
 
 _KEY_FILE = "meiva-build-key"
 BuildAction = Literal["reuse", "build"]
@@ -46,17 +48,75 @@ def plan_frontend_build(
     )
 
 
+def _frontend_source_names(frontend_dir: Path) -> list[bytes]:
+    result = run_bounded(
+        [
+            "git",
+            "-C",
+            str(frontend_dir),
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+        ],
+        timeout=30.0,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        stderr = (result.stderr or b"").decode("utf-8", errors="replace").strip()
+        raise RuntimeError(f"git ls-files failed for {frontend_dir}: {stderr}")
+    return sorted(set((result.stdout or b"").split(b"\0")) - {b""})
+
+
+def _source_entry_record(path: Path, encoded: bytes) -> bytes:
+    try:
+        before = path.lstat()
+    except FileNotFoundError:
+        return b"D\0" + encoded + b"\0"
+    mode = before.st_mode
+    if stat.S_ISLNK(mode):
+        content = str(path.readlink()).encode("utf-8")
+    elif stat.S_ISREG(mode):
+        content = path.read_bytes()
+    else:
+        raise RuntimeError(f"unsupported frontend source member: {path}")
+    after = path.lstat()
+    if stat_changed(before, after):
+        raise RuntimeError(f"frontend source changed while reading: {path}")
+    return (
+        b"F\0" + encoded + b"\0" + f"{mode:o}\0".encode("ascii") + hashlib.sha256(content).digest()
+    )
+
+
+# meiva:note
+# Hash every tracked or untracked-non-ignored path, mode and content under
+# `frontend_dir` without binding the repository's `HEAD`, so commits outside
+# `frontend_dir` keep the same digest while mid-read edits or checkouts fail closed.
+# meiva:link base/cluster/docs/frontend-build.meiva.okf.md
+def frontend_source_digest(frontend_dir: Path) -> str:
+    if not frontend_dir.is_dir():
+        raise FileNotFoundError(frontend_dir)
+    names = _frontend_source_names(frontend_dir)
+    digest = hashlib.sha256(b"meiva-frontend-source-v1\0")
+    for encoded in names:
+        digest.update(_source_entry_record(frontend_dir / encoded.decode("utf-8"), encoded))
+    if _frontend_source_names(frontend_dir) != names:
+        raise RuntimeError(f"frontend source file list changed while reading: {frontend_dir}")
+    return digest.hexdigest()
+
+
 def build_key(
     frontend_dir: Path, *, gateway_port: int, browser_origins: tuple[str, ...]
 ) -> str | None:
     # meiva:note
     # None means "cannot prove the build is current", and the caller treats that as
-    # "build". The source digest covers HEAD and every tracked or
-    # untracked-but-not-ignored file under the frontend, so a checkout move or an
-    # edited component both change the key.
+    # "build". The source digest covers every tracked or untracked-but-not-ignored
+    # file under `frontend_dir` without binding the monorepo's `HEAD`, so backend-only
+    # commits reuse `.next` while any frontend edit or dependency change rebuilds.
     try:
-        source = source_digest(frontend_dir)
-    except (OSError, RuntimeError, subprocess.SubprocessError):
+        source = frontend_source_digest(frontend_dir)
+    except (OSError, RuntimeError, UnicodeDecodeError, subprocess.SubprocessError):
         return None
     node = _node_version()
     if node is None:
@@ -81,14 +141,12 @@ def key_from_parts(
 
 def _node_version() -> str | None:
     try:
-        result = subprocess.run(
-            ["node", "--version"], capture_output=True, text=True, check=False, timeout=30
-        )
+        result = run_bounded(["node", "--version"], timeout=30.0, capture_output=True, text=True)
     except (OSError, subprocess.SubprocessError):
         return None
     if result.returncode != 0:
         return None
-    return result.stdout.strip()
+    return result.stdout.strip() or None
 
 
 def key_path(frontend_dir: Path) -> Path:

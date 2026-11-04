@@ -4,6 +4,16 @@
 nodeLinker: hoisted
 packageImportMethod: clone-or-copy
 
+# Keep CI (`ensure_frontend_deps` sets CI=true) and non-CI (`pnpm run build` /
+# `pnpm run start` inside the frontend service session) on the same workspace
+# state, and disable pnpm 11's default `verifyDepsBeforeRun: install` so
+# `pnpm run` / `pnpm exec` never spawn an unfrozen `pnpm install` (which took
+# ~3s before `next build`, dirtied `node_modules` timestamps, and broke
+# scratch-worktree lint hooks that symlink `node_modules`). `ensure_frontend_deps`,
+# `setup-worktree.sh`, and CI own locked installs explicitly.
+enableGlobalVirtualStore: false
+verifyDepsBeforeRun: false
+
 # eslint-plugin-jsx-a11y has not yet published an ESLint 10 peer range.
 strictPeerDependencies: false
 
