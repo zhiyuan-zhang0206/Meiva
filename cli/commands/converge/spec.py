@@ -7,9 +7,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from base.agents.context.clients import DatabaseFactory
 from base.clock import Clock, Timers
@@ -97,3 +98,35 @@ class ConvergeStep:
     # Empty means shared host/cluster preparation. Otherwise one selected
     # consumer is required; role membership alone does not select a service.
     services: frozenset[str] = frozenset()
+    # meiva:note
+    # What a failure in this step means for the steps after it and for the host.
+    #
+    # "continue" (the default): report it, carry on. Converge steps are host preparation --
+    # each resolves the paths it writes from the context, creates its own parents, and raises
+    # its own error when a capability it needs is missing, so nothing reads another step's
+    # result. Continuing is what keeps one broken preparation from leaving every later repair
+    # unapplied (2026-11-04, #6233). The host is not considered converged: the run exits
+    # non-zero and the incomplete marker names this step.
+    #
+    # "stop": the one shape where carrying on is unsafe -- the step is a container later steps
+    # write into, so its failure means their writes could land somewhere else. The rest of the
+    # table is not attempted and the summary says so.
+    #
+    # "advisory": report it, carry on, and the host is still startable (a cold start catches
+    # `ConvergeAdvisoryError` and brings the services up). Reserve it for preparation only an
+    # optional consumer needs, such as an external CLI.
+    on_failure: Literal["continue", "stop", "advisory"] = "continue"
+
+
+# meiva:note
+# Advisory steps failed while every blocking step in the table applied.
+#
+# Carries the failing step names so a caller that must keep going (a cold start, where the
+# host still has to come up) can tell this apart from a converge that stopped early.
+class ConvergeAdvisoryError(RuntimeError):
+    def __init__(self, failures: Sequence[tuple[str, str]]) -> None:
+        self.failures = tuple(failures)
+        super().__init__(
+            "converge finished with advisory failures (everything else applied): "
+            + "; ".join(f"{name}: {reason}" for name, reason in self.failures)
+        )

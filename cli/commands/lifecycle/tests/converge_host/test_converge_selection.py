@@ -9,7 +9,12 @@ import pytest
 from base.config import ConfigBoot
 from cli.commands.converge.incomplete import read_incomplete, record_incomplete
 from cli.commands.converge.plans.step_selection import RunStep, SkipStep, StepScope, plan_steps
-from cli.commands.converge.spec import ALL_ROLES, ConvergeCtx, ConvergeStep
+from cli.commands.converge.spec import (
+    ALL_ROLES,
+    ConvergeAdvisoryError,
+    ConvergeCtx,
+    ConvergeStep,
+)
 from cli.commands.lifecycle import converge_host
 from cli.database.runtime import CommandRuntime
 
@@ -143,7 +148,11 @@ def test_the_loop_runs_the_steps_that_were_decided_in_order_and_reports_each(
     ]
 
 
-def test_the_first_failing_step_stops_the_loop_and_reraises(
+# meiva:note
+# The inversion the recovery path depends on: one failing step must not swallow the steps
+# after it. Before 2026-11-04 a failure raised immediately, so a single broken step left every
+# later repair unapplied and the operator saw only the first error (#6233).
+def test_a_failing_step_is_reported_and_the_loop_still_runs_the_rest(
     ctx: ConvergeCtx, capsys: pytest.CaptureFixture[str]
 ) -> None:
     (after,) = _noop_steps("after")
@@ -151,12 +160,82 @@ def test_the_first_failing_step_stops_the_loop_and_reraises(
     def boom(_ctx: ConvergeCtx) -> None:
         raise RuntimeError("nope")
 
-    with pytest.raises(RuntimeError, match="nope"):
+    with pytest.raises(RuntimeError, match="converge failed: boom: nope"):
         converge_host.run_converge(ctx, (ConvergeStep("boom", boom), after), prod_install=False)
 
     captured = capsys.readouterr()
-    assert "✗ boom: nope" in captured.err
-    assert "after" not in captured.out, "no step runs after the first failure"
+    assert "  ✗ boom: nope" in captured.err
+    assert "  ✓ after" in captured.out, "the step after a failure still runs"
+    assert "1 step(s) failed; every other step applied: boom" in captured.err
+
+
+# meiva:note
+# An advisory step is host preparation only an optional consumer needs. Its failure is
+# reported, the rest of the table still applies, and the run still ends non-zero so the
+# standalone `meiva converge` does not look green -- but the marker stays clear, because
+# nothing a later step depends on was left unapplied.
+def test_an_advisory_failure_is_reported_and_the_run_continues(
+    ctx: ConvergeCtx, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (after,) = _noop_steps("after")
+
+    def boom(_ctx: ConvergeCtx) -> None:
+        raise RuntimeError("the npm prefix is root-owned")
+
+    with pytest.raises(ConvergeAdvisoryError) as excinfo:
+        converge_host.run_converge(
+            ctx,
+            (ConvergeStep("external harness CLIs", boom, on_failure="advisory"), after),
+            prod_install=False,
+        )
+
+    captured = capsys.readouterr()
+    assert "  ! external harness CLIs: the npm prefix is root-owned" in captured.err
+    assert "  ✓ after" in captured.out, "an advisory failure does not stop the loop"
+    assert [name for name, _ in excinfo.value.failures] == ["external harness CLIs"]
+
+
+def test_an_advisory_failure_leaves_the_incomplete_marker_clear(ctx: ConvergeCtx) -> None:
+    def boom(_ctx: ConvergeCtx) -> None:
+        raise RuntimeError("the npm prefix is root-owned")
+
+    with pytest.raises(ConvergeAdvisoryError):
+        converge_host.run_converge(
+            ctx, (ConvergeStep("advisory", boom, on_failure="advisory"),), prod_install=True
+        )
+    assert read_incomplete(ctx.meiva_home) is None
+
+
+def test_only_the_home_skeleton_stops_the_table() -> None:
+    steps = {step.name: step for step in converge_host.CONVERGE_STEPS}
+    stopping = [name for name, step in steps.items() if step.on_failure == "stop"]
+    assert stopping == ["$MEIVA_HOME dir skeleton"], (
+        "a failing step must not swallow the rest of the table unless it is the container "
+        "those steps write into"
+    )
+    assert steps["external harness CLIs"].on_failure == "advisory"
+
+
+# meiva:note
+# The one shape that still stops the table: a step later steps write into. Carrying on would
+# send their writes into whatever the broken container resolves to, so the run ends there and
+# the summary says the rest was not attempted -- not that it applied.
+def test_a_stop_step_ends_the_table_and_says_what_was_not_attempted(
+    ctx: ConvergeCtx, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (after,) = _noop_steps("after")
+
+    def boom(_ctx: ConvergeCtx) -> None:
+        raise RuntimeError("the home is a symlink out of itself")
+
+    with pytest.raises(RuntimeError, match="converge failed: skeleton"):
+        converge_host.run_converge(
+            ctx, (ConvergeStep("skeleton", boom, on_failure="stop"), after), prod_install=False
+        )
+
+    captured = capsys.readouterr()
+    assert "the rest of the table was not attempted after skeleton" in captured.err
+    assert "after" not in captured.out
 
 
 def test_a_failed_step_is_recorded_for_the_prod_install_and_a_clean_run_clears_it(

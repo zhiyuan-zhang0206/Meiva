@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
-from datetime import datetime
 from pathlib import Path
 from typing import assert_never
 
@@ -39,12 +38,6 @@ from cli.commands.converge.frontend_env import ensure_no_frontend_env_overrides
 from cli.commands.converge.harness_clis import ensure_external_harness_clis
 from cli.commands.converge.health_preflight import (
     ensure_health_preflight as _ensure_health_preflight,
-)
-from cli.commands.converge.incomplete import (
-    clear_incomplete,
-)
-from cli.commands.converge.incomplete import (
-    record_incomplete as record_incomplete_marker,
 )
 from cli.commands.converge.os_jobs import (
     ensure_cluster_autostart,
@@ -78,8 +71,13 @@ from cli.commands.converge.plans.split_host_checks import (
     probes_cross_machine_transfer,
     requires_github_pr,
 )
-from cli.commands.converge.plans.step_selection import RunStep, SkipStep, StepScope, plan_steps
 from cli.commands.converge.redis_bridge import retire_launchd_redis_bridge
+from cli.commands.converge.runner import (
+    record_incomplete as record_incomplete,
+)
+from cli.commands.converge.runner import (
+    run_converge,
+)
 from cli.commands.converge.spec import ConvergeCtx, ConvergeStep
 from cli.commands.converge.steps import (
     ensure_local_bin_on_path,
@@ -395,7 +393,11 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
     ConvergeStep("$MEIVA_HOME ownership preflight", _ensure_ownership_preflight),
     ConvergeStep("meiva on PATH", ensure_meiva_on_path, host_global=True),
     ConvergeStep("~/.local/bin on PATH", ensure_local_bin_on_path, host_global=True),
-    ConvergeStep("$MEIVA_HOME dir skeleton", ensure_meiva_home_dirs),
+    # meiva:note
+    # The one step whose failure stops the table: every later step writes into this home, so a
+    # skeleton that could not be laid out (a `logs` symlink pointing out of it, a read-only
+    # home) would send those writes somewhere else instead of failing.
+    ConvergeStep("$MEIVA_HOME dir skeleton", ensure_meiva_home_dirs, on_failure="stop"),
     # meiva:note
     # External agent CLIs own their global homes: this prod-only host step
     # contributes exactly Meiva's two skills, and only to the clients registered in
@@ -408,6 +410,13 @@ CONVERGE_STEPS: tuple[ConvergeStep, ...] = (
         roles=frozenset({"agent-runner"}),
         requires_unit_config=True,
         host_global=True,
+        # meiva:note
+        # Advisory: a CLI whose pinned version cannot be installed (a root-owned npm prefix, a
+        # registry outage) degrades an optional harness. It must not stop the run -- on
+        # 2026-11-04 this step aborted every converge on the ubuntu node before the OS jobs
+        # were registered, and a cold start returns 1 at the converge step, so the host did
+        # not come up either (task #6233).
+        on_failure="advisory",
     ),
     # Warning-only health preflight: data-plane reachability (pg/redis, local on
     # gateway / remote on runner) + checkout state (dirty marker). Findings are
@@ -633,71 +642,6 @@ def converge_host(
     # whenever MEIVA_HOME is unset, so additionally require a checkout that is not a
     # dev worktree (`.worktrees/...` or `.claude/worktrees/...`).
     run_converge(ctx, steps, prod_install=is_prod_install(repo=repo, home=command.home))
-
-
-# meiva:note
-# Print and run what `plan_steps` decides for `steps`, stopping at the first failure.
-#
-# A failed step is announced, recorded as the home's incomplete marker (prod install only)
-# and re-raised; a fully successful converge on the prod install clears the marker.
-def run_converge(ctx: ConvergeCtx, steps: tuple[ConvergeStep, ...], *, prod_install: bool) -> None:
-    decisions = plan_steps(
-        tuple(
-            StepScope(
-                step.name, step.roles, step.requires_unit_config, step.host_global, step.services
-            )
-            for step in steps
-        ),
-        roles=ctx.roles,
-        services=ctx.services,
-        prod_install=prod_install,
-    )
-    print("\n→ converge host")
-    failed_step = ""
-    try:
-        for step, decision in zip(steps, decisions, strict=True):
-            match decision:
-                case SkipStep(reason=reason):
-                    print(f"  · {step.name}: skipped ({reason})")
-                    continue
-                case RunStep():
-                    pass
-                case _:
-                    assert_never(decision)
-            try:
-                step.apply(ctx)
-            except Exception as e:
-                failed_step = step.name
-                print(f"  ✗ {step.name}: {e}", file=sys.stderr)
-                raise
-            print(f"  ✓ {step.name}")
-    except Exception as exc:
-        # meiva:note
-        # The host's services may still come up (meiva start continues past the
-        # converge), so the marker is the only durable trace of an unapplied step.
-        # meiva:link cli/commands/converge/docs/converge-incomplete.meiva.okf.md
-        record_incomplete(
-            ctx.meiva_home,
-            step=failed_step,
-            error=str(exc),
-            prod_install=prod_install,
-            now=ctx.clock.now(),
-        )
-        raise
-    if prod_install:
-        clear_incomplete(ctx.meiva_home)
-
-
-# meiva:note
-# Only the host's prod install owns the marker: a dev cluster's converge must
-# never clear or set the prod home's record.
-# meiva:link cli/commands/converge/docs/converge-incomplete.meiva.okf.md
-def record_incomplete(
-    meiva_home: Path, *, step: str, error: str, prod_install: bool, now: datetime
-) -> None:
-    if not prod_install:
-        return
-    record_incomplete_marker(meiva_home, step=step, error=error, now=now)
 
 
 def selected_service_names(

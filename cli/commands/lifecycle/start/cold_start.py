@@ -20,7 +20,7 @@ from base.deploy import start_trace
 from base.paths import skills_dir
 from base.telemetry import EventPipeline
 from cli.commands import _repo
-from cli.commands.converge.spec import ConvergeStep
+from cli.commands.converge.spec import ConvergeAdvisoryError, ConvergeStep
 from cli.commands.data_plane import bringup, completion
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.extensions import materialize
@@ -108,6 +108,13 @@ def _run_step(
                     command=command,
                     steps=cold.converge_steps,
                 )
+            except ConvergeAdvisoryError as e:
+                # meiva:note
+                # Advisory steps are host preparation an optional consumer needs; the host
+                # itself is fully prepared, so the start continues. The exit code of the
+                # standalone `meiva converge` still reports it.
+                print(f"  ! converge finished with warnings: {e}", file=sys.stderr)
+                return 0
             except Exception as e:
                 print(f"  ✗ converge failed: {e}", file=sys.stderr)
                 return 1
