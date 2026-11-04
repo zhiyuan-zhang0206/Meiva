@@ -1,13 +1,16 @@
 import json
+import logging
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.history.harness_messages import aappend_harness_timeline_items
 from base.agents.history.timeline_item import TimelineItem
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.db.transaction import async_write_transaction
+from services.agent_runner.agent_host import health_routes
 from services.agent_runner.agent_host.health_routes import prepare_harness_switch_route
 
 # meiva:note
@@ -127,6 +130,7 @@ async def test_pool_fallback_records_the_switch_note(
 
 async def test_no_pool_skips_the_write_and_still_answers_ok(
     aops_pool: AsyncConnectionPool[Any],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     agent_id = 9213
     await _setup_agent(aops_pool, agent_id)
@@ -142,10 +146,16 @@ async def test_no_pool_skips_the_write_and_still_answers_ok(
 
     host = _host(_control_pool=None, _pool=None)
 
-    status_code, body, _content_type = await _route(host)(_payload(agent_id))
+    with caplog.at_level(logging.WARNING, logger=health_routes.__name__):
+        status_code, body, _content_type = await _route(host)(_payload(agent_id))
 
     assert status_code == 200
     assert b'"ok":true' in body
     assert await _harness_rows(aops_pool, agent_id) == [
         ("claude_code", "system_marker", "known row")
     ]
+    # meiva:note
+    # The guard skips the write before attempting one, so this path stays quiet. A warning
+    # here means the branch reached the writer with no pool and survived only because the
+    # write is wrapped in try/except — which is not the silent skip this case claims.
+    assert [record for record in caplog.records if record.name == health_routes.__name__] == []
