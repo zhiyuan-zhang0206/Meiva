@@ -1,4 +1,4 @@
-exports = ["observability_inputs.py", "scripted_http.py"]
+exports = ["observability_inputs.py", "postgres_receiver.py", "scripted_http.py"]
 
 [uses]
 "test_settings_values.py" = ["import_probe_child.py"]

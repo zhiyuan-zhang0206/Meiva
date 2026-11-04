@@ -15,17 +15,16 @@ from __future__ import annotations
 
 import contextlib
 import getpass
-import json
 import os
 import shutil
 import subprocess
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
 
 import psycopg
 import pytest
+from psycopg.rows import TupleRow
 from redis.exceptions import RedisError
 
 from base import cluster
@@ -41,6 +40,8 @@ from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.host.db_authority import delivery, ledger, model
 from base.host.db_authority.api import API_TOKEN_ENV, ensure_telemetry_token
 from base.host.env.registry import process_environment
@@ -49,6 +50,7 @@ from base.host.system.tests.fake_commands import fake_host, real_commands_host
 from base.native_process.child_env import daemon_process_env
 from base.paths import meiva_home
 from base.paths.tests.homes import point_home
+from cli import start_identity
 from cli.commands.data_plane import bringup, completion
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane import pgbouncer as pooler
@@ -67,6 +69,12 @@ from cli.commands.data_plane.tests.native_cluster import (
     shutdown_redis,
 )
 from cli.commands.lifecycle.start.migrations import cmd_migrations_apply
+from cli.commands.observability.tests.postgres_receiver import (
+    RECEIVER,
+    PostgresReceiver,
+    dial_as_receiver,
+    scrape_like_the_receiver,
+)
 from cli.commands.tests.test_single_box_static import REPO_ROOT, configure_single_box_home
 from cli.database import (
     OperatorDatabaseFactory,
@@ -112,7 +120,7 @@ class Born:
         name, password = self.login(cls)
         return url_with_userinfo(self.endpoint(), name, password)
 
-    def admin(self) -> psycopg.Connection[Any]:
+    def admin(self) -> psycopg.Connection[TupleRow]:
         return psycopg.connect(
             host=str(ci.pg_socket_dir(self.home)),
             port=self.pg_port,
@@ -312,12 +320,27 @@ _AUTH_REFUSED = (
 )
 
 
-def assert_refused(**kwargs: Any) -> str:
+def _refused(connect: Callable[[], object]) -> str:
     with pytest.raises(psycopg.OperationalError) as excinfo:
-        psycopg.connect(connect_timeout=5, **kwargs).close()
+        connect()
     message = str(excinfo.value)
     assert any(marker in message for marker in _AUTH_REFUSED), message
     return message
+
+
+def assert_refused(*, host: str, port: int, user: str, password: str, dbname: str) -> str:
+    return _refused(
+        lambda: psycopg.connect(
+            connect_timeout=5, host=host, port=port, user=user, password=password, dbname=dbname
+        ).close()
+    )
+
+
+# meiva:note
+# A whole DSN — a published endpoint — must be refused for the same reasons: the endpoint a bundle
+# advertises carries no login, so dialling it fails authentication before any query.
+def assert_conninfo_refused(conninfo: str) -> str:
+    return _refused(lambda: psycopg.connect(conninfo, connect_timeout=5).close())
 
 
 def test_fresh_birth_mints_generation_zero_behind_nologin_owner(
@@ -345,7 +368,8 @@ def test_fresh_birth_mints_generation_zero_behind_nologin_owner(
     assert operator_database.db_url() == born.dsn("gateway")
     assert born.process_env["MEIVA_DB_URL"] == born.dsn("gateway")
     assert born.process_env[delivery.GENERATION_ENV] == "0"
-    assert json.loads((born.home / "start-intent.json").read_text())["phase"] == "provisioned"
+    intent = start_identity.read_intent(born.home)
+    assert intent is not None and intent["phase"] == "provisioned"
 
 
 def test_birth_refuses_unauthenticated_and_owner_logins(born_readonly: Born) -> None:
@@ -524,9 +548,7 @@ def test_ordinary_start_refuses_a_home_without_a_ledger_before_any_effect(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    intent = json.loads((configured.home / "start-intent.json").read_text())
-    intent["phase"] = "provisioned"
-    (configured.home / "start-intent.json").write_text(json.dumps(intent))
+    start_identity.mark_phase(configured.home, "provisioned")
     assert (
         bringup.ensure_gateway_data_plane(
             configured.plane,
@@ -642,7 +664,7 @@ _ROLES = frozenset({"gateway", "agent-runner"})
 
 def _collector_postgres_receiver(
     born: Born, *, operator_database: OperatorDatabaseFactory, command_runtime: CommandRuntime
-) -> dict[str, Any]:
+) -> PostgresReceiver:
     """The rendered collector config's PostgreSQL receiver; the whole rendered
     text carries no credential of the data plane."""
     import yaml
@@ -650,10 +672,13 @@ def _collector_postgres_receiver(
     from cli.commands.observability import otel_collector as oc
     from cli.commands.observability.inputs import collector_settings_from_boot
 
+    plane = born.plane
     config = command_runtime.config
     config.set_field("telemetry_otlp_enabled", True)
-    for name in ("db_url", "redis_url", "redis_admin_password", "cluster_secret"):
-        config.set_field(name, getattr(born.plane, name))
+    config.set_field("db_url", plane.db_url)
+    config.set_field("redis_url", plane.redis_url)
+    config.set_field("redis_admin_password", plane.redis_admin_password)
+    config.set_field("cluster_secret", plane.cluster_secret)
     command_runtime.machine.set(name="test-machine")
     rendered = oc.generate_config(
         REPO_ROOT,
@@ -671,54 +696,11 @@ def _collector_postgres_receiver(
     }
     leaked = [name for name, value in credentials.items() if value in rendered]
     assert leaked == [], f"collector config carries credentials: {leaked}"
-    return yaml.safe_load(rendered)["receivers"]["postgresql"]
-
-
-def _dial_as_receiver(receiver: dict[str, Any], database: str) -> psycopg.Connection[Any]:
-    """Dial exactly as otelcol-contrib's postgresql receiver builds its lib/pq
-    DSN: `host:port` endpoint, `/` prefixed for the unix transport."""
-    host, _, port = receiver["endpoint"].rpartition(":")
-    if receiver["transport"] == "unix":
-        host = "/" + host.lstrip("/")
-    return psycopg.connect(
-        host=host,
-        port=port,
-        user=receiver["username"],
-        password=receiver["password"],
-        dbname=database,
-        sslmode="disable",
-        connect_timeout=5,
-        autocommit=True,
-    )
-
-
-def _scrape_like_the_receiver(receiver: dict[str, Any]) -> None:
-    """The receiver's cluster-wide queries (on `postgres`) and per-database ones."""
-    with _dial_as_receiver(receiver, "postgres") as conn:
-        # Other sessions' activity/replication rows need the stats role.
-        assert conn.execute("SELECT pg_has_role('pg_read_all_stats', 'USAGE')").fetchone() == (
-            True,
-        )
-        sizes = conn.execute(
-            "SELECT datname, pg_database_size(datname) FROM pg_catalog.pg_database"
-            " WHERE datistemplate = false"
-        ).fetchall()
-        assert {name for name, _size in sizes} >= {"postgres", "meiva"}
-        conn.execute("SELECT datname, count(*) FROM pg_stat_activity GROUP BY datname")
-        conn.execute(
-            "SELECT coalesce(pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn), -1)"
-            " FROM pg_stat_replication"
-        )
-        conn.execute("SELECT coalesce(last_archived_time, CURRENT_TIMESTAMP) FROM pg_stat_archiver")
-        conn.execute("SHOW max_connections")
-    for database in receiver["databases"]:
-        with _dial_as_receiver(receiver, database) as conn:
-            tables = conn.execute(
-                "SELECT relname, pg_relation_size(relid) FROM pg_stat_user_tables"
-            ).fetchall()
-            assert "agents" in {name for name, _size in tables}
-            conn.execute("SELECT * FROM pg_statio_user_tables")
-            conn.execute("SELECT pg_relation_size(indexrelid) FROM pg_stat_user_indexes")
+    parsed = object_of(yaml.safe_load, rendered)
+    assert is_object_dict(parsed), "the collector template renders a YAML mapping"
+    receivers = parsed["receivers"]
+    assert is_object_dict(receivers), "the rendered config carries a receivers mapping"
+    return RECEIVER.validate_python(receivers["postgresql"])
 
 
 def test_collector_postgres_receiver_keeps_no_credential(
@@ -737,8 +719,8 @@ def test_collector_postgres_receiver_keeps_no_credential(
     assert receiver["username"] == authority.MONITOR_ROLE
     assert receiver["transport"] == "unix"
     assert receiver["databases"] == ["meiva"]
-    _scrape_like_the_receiver(receiver)
-    with _dial_as_receiver(receiver, "meiva") as conn:
+    scrape_like_the_receiver(receiver)
+    with dial_as_receiver(receiver, "meiva") as conn:
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("SELECT id FROM agents LIMIT 1")
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
@@ -763,7 +745,7 @@ def test_collector_postgres_receiver_keeps_no_credential(
         )
         == receiver
     )
-    _scrape_like_the_receiver(receiver)
+    scrape_like_the_receiver(receiver)
 
 
 def test_direct_exemption_dials_postgres_as_the_delivered_login(
