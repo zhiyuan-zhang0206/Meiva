@@ -22,13 +22,13 @@ checkpointing themselves are never on this path.
 
 from __future__ import annotations
 
-from typing import Any
-
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 
 from agent.state import BaseAgentState
 from base.agents.context import MeivaContext
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_mapping
 from base.log import logger
 
 
@@ -50,9 +50,15 @@ async def attach_trace_checkpoint_ref(
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     try:
         state = await graph.aget_state(config)
-        cfg = state.config.get("configurable") or {}
-        checkpoint_id: Any = cfg.get("checkpoint_id")
-        if checkpoint_id is None:
+        # meiva:note
+        # The configured state carries `Any` values; read the one key this linker uses as `object`
+        # and narrow it here, so an id of another type is refused at the read instead of being
+        # stamped into the span and the checkpoint row.
+        configurable = object_mapping(state.config).get("configurable")
+        if not is_object_dict(configurable):
+            return
+        checkpoint_id = configurable.get("checkpoint_id")
+        if not isinstance(checkpoint_id, str):
             return
     except Exception:
         # A fresh thread yields an empty snapshot (handled above); a raise is a checkpoint
