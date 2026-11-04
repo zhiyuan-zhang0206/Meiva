@@ -8,6 +8,7 @@ from __future__ import annotations
 from cli.commands.observability.tests.converge_otel_collector.collector_harness import (
     HYBRID,
     CollectorUnit,
+    mapping_at,
 )
 from cli.commands.observability.tests.converge_otel_collector.collector_harness import (
     collector_unit as collector_unit,
@@ -21,7 +22,7 @@ def test_session_filelog_receivers_are_disjoint_and_bound_discovery(
     config = collector_unit.render(HYBRID)
     logs = f"{collector_unit.home}/logs"
 
-    assert config["receivers"]["filelog/sessions"] == {
+    assert mapping_at(config, "receivers", "filelog/sessions") == {
         "include": [f"{logs}/meiva-agent-*-shell-*.out.log"],
         "start_at": "end",
         "include_file_name": True,
@@ -31,7 +32,7 @@ def test_session_filelog_receivers_are_disjoint_and_bound_discovery(
         "polls_to_archive": 50,
         "max_concurrent_files": 200,
     }
-    assert config["receivers"]["filelog/services"] == {
+    assert mapping_at(config, "receivers", "filelog/services") == {
         "include": [f"{logs}/*.out.log"],
         "exclude": [f"{logs}/meiva-agent-*.out.log", f"{logs}/meiva-otel-collector.out.log"],
         "start_at": "end",

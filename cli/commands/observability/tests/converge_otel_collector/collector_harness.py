@@ -15,8 +15,9 @@ import re
 import urllib.request
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from http.client import HTTPResponse
 from pathlib import Path
-from typing import Any, NoReturn, cast
+from typing import NoReturn
 
 import pytest
 import yaml
@@ -24,6 +25,8 @@ import yaml
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.deploy.release.collector import plan as collector_plan
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from base.host.db_authority.api import ensure_telemetry_token, telemetry_token_path
 from base.host.net.ports import SYSTEM_URL_OPENER, StreamingUrlOpener
 from base.paths import otel_collector_dir
@@ -46,9 +49,14 @@ __all__ = [
     "RUNNER",
     "STATION",
     "CollectorUnit",
+    "ConfigMapping",
     "MirrorOpener",
     "collector_unit",
+    "config_of",
+    "mapping_at",
     "never_dialed",
+    "sequence_at",
+    "value_at",
 ]
 
 
@@ -66,6 +74,57 @@ GATEWAY_INGRESS = "http://10.0.0.10:4318"
 # survives on purpose: the network-interface exclusion regexp's end-anchor, written `$$` in the
 # template.
 _UNFILLED_PLACEHOLDER = re.compile(r"\$[A-Z_]{2,}")
+
+
+# meiva:note
+# A rendered collector config: the template's leaves are strings, numbers, lists and mappings, so a
+# section reads as a mapping of `object` values and a test says where it reads and what shape it
+# expects — `mapping_at`, `sequence_at`, `value_at` for a leaf — rather than holding an unchecked one.
+type ConfigMapping = dict[str, object]
+
+
+# meiva:note
+# The rendered text parsed as YAML, in the one place that accepts what `yaml.safe_load` answers. A
+# test that reads the config from the text — and reads the text itself, for a credential that must
+# not appear — comes through here instead of binding `Any`.
+def config_of(text: str) -> ConfigMapping:
+    parsed = object_of(yaml.safe_load, text)
+    assert is_object_dict(parsed), "the collector template renders a YAML mapping"
+    return parsed
+
+
+# meiva:note
+# The leaf at `path` inside a rendered config. Every step is checked: a string step must name a key
+# of a mapping, an integer step must be in range of a sequence. A test that reads through this fails
+# with the path it expected when the template stops producing that shape.
+def value_at(value: object, *path: str | int) -> object:
+    found = value
+    for step in path:
+        if isinstance(step, int):
+            assert is_object_list(found), f"{step!r}: no sequence at {path!r}"
+            assert -len(found) <= step < len(found), f"{step!r}: out of range at {path!r}"
+            found = found[step]
+        else:
+            assert is_object_dict(found), f"{step!r}: no mapping at {path!r}"
+            assert step in found, f"{step!r}: no such key at {path!r}"
+            found = found[step]
+    return found
+
+
+# meiva:note
+# The mapping at `path`: `value_at` plus the shape the reader needs.
+def mapping_at(value: object, *path: str | int) -> ConfigMapping:
+    found = value_at(value, *path)
+    assert is_object_dict(found), f"no mapping at {path!r}"
+    return found
+
+
+# meiva:note
+# The sequence twin of `mapping_at`.
+def sequence_at(value: object, *path: str | int) -> list[object]:
+    found = value_at(value, *path)
+    assert is_object_list(found), f"no sequence at {path!r}"
+    return found
 
 
 # meiva:note
@@ -87,7 +146,7 @@ class MirrorOpener:
 
     def __call__(
         self, target: str | urllib.request.Request, timeout: float
-    ) -> AbstractContextManager[Any]:
+    ) -> AbstractContextManager[HTTPResponse]:
         assert isinstance(target, str)
         return SYSTEM_URL_OPENER(f"{self.mirror_url}/{target.rsplit('/', 1)[1]}", timeout)
 
@@ -141,8 +200,8 @@ class CollectorUnit:
         observability: ObservabilityConfig | None = None,
         data_plane: DataPlaneInputs | None = None,
         database_factory: DatabaseFactory = never_dialed,
-    ) -> dict[str, Any]:
-        parsed: Any = yaml.safe_load(
+    ) -> ConfigMapping:
+        return config_of(
             self.text(
                 roles,
                 host=host,
@@ -151,8 +210,6 @@ class CollectorUnit:
                 database_factory=database_factory,
             )
         )
-        assert isinstance(parsed, dict)
-        return cast("dict[str, Any]", parsed)
 
     # meiva:note
     # Run one install pass over this home. The unit's opener fetches a missing binary: tests that

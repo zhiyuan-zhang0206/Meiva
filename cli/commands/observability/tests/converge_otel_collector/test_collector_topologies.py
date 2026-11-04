@@ -7,9 +7,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
-
 import pytest
 
 from base.cluster.machines import unit_dial_url
@@ -21,11 +18,16 @@ from cli.commands.observability.tests.converge_otel_collector.collector_harness 
     RUNNER,
     STATION,
     CollectorUnit,
+    ConfigMapping,
+    mapping_at,
+    sequence_at,
+    value_at,
 )
 from cli.commands.observability.tests.converge_otel_collector.collector_harness import (
     collector_unit as collector_unit,
 )
 from cli.commands.observability.tests.observability_inputs import TELEMETRY_TOKEN, observability
+from cli.database import OperatorDatabaseFactory
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 
@@ -38,8 +40,8 @@ def _bearer(unit: CollectorUnit) -> str:
     return bearer
 
 
-def _http(config: dict[str, Any]) -> dict[str, Any]:
-    return config["receivers"]["otlp"]["protocols"]["http"]
+def _http(config: ConfigMapping) -> ConfigMapping:
+    return mapping_at(config, "receivers", "otlp", "protocols", "http")
 
 
 def test_a_pure_runner_relays_every_signal_to_the_gateway_ingress_with_the_cluster_bearer(
@@ -49,12 +51,12 @@ def test_a_pure_runner_relays_every_signal_to_the_gateway_ingress_with_the_clust
         RUNNER, observability=observability(gateway_otlp_endpoint=GATEWAY_INGRESS)
     )
 
-    assert set(config["receivers"]) >= {"otlp", "host_metrics", "prometheus/otelcol"}
-    assert "otlp/remote" not in config["receivers"]
-    assert set(config["exporters"]) == {*RELAY_EXPORTERS, "file/traces"}
+    assert set(mapping_at(config, "receivers")) >= {"otlp", "host_metrics", "prometheus/otelcol"}
+    assert "otlp/remote" not in mapping_at(config, "receivers")
+    assert set(mapping_at(config, "exporters")) == {*RELAY_EXPORTERS, "file/traces"}
     bearer = _bearer(collector_unit)
     for exporter_id in RELAY_EXPORTERS:
-        exporter = config["exporters"][exporter_id]
+        exporter = mapping_at(config, "exporters", exporter_id)
         assert exporter["endpoint"] == GATEWAY_INGRESS
         assert exporter["headers"] == {"Authorization": f"Bearer {bearer}"}
     rendered = str(config)
@@ -76,23 +78,25 @@ def test_a_gateway_or_station_accepts_remote_relays_only_on_its_reachable_addres
     config = collector_unit.render(roles)
 
     assert _http(config) == {"endpoint": "127.0.0.1:4318"}
-    assert config["receivers"]["otlp/remote"]["protocols"]["http"] == {
+    assert mapping_at(config, "receivers", "otlp/remote", "protocols", "http") == {
         "endpoint": "10.0.0.10:4318",
         "auth": {"authenticator": "bearertokenauth/cluster"},
     }
-    assert config["extensions"]["bearertokenauth/cluster"] == {"token": _bearer(collector_unit)}
-    assert "bearertokenauth/cluster" in config["service"]["extensions"]
-    pipelines = config["service"]["pipelines"]
-    assert pipelines["traces/remote"]["exporters"] == ["otlphttp/tempo"]
-    assert pipelines["traces"]["exporters"] == ["otlphttp/tempo", "file/traces"]
-    assert "otlp/remote" in pipelines["logs"]["receivers"]
-    assert "otlp/remote" in pipelines["metrics"]["receivers"]
+    assert mapping_at(config, "extensions", "bearertokenauth/cluster") == {
+        "token": _bearer(collector_unit)
+    }
+    assert "bearertokenauth/cluster" in sequence_at(config, "service", "extensions")
+    pipelines = mapping_at(config, "service", "pipelines")
+    assert sequence_at(pipelines, "traces/remote", "exporters") == ["otlphttp/tempo"]
+    assert sequence_at(pipelines, "traces", "exporters") == ["otlphttp/tempo", "file/traces"]
+    assert "otlp/remote" in sequence_at(pipelines, "logs", "receivers")
+    assert "otlp/remote" in sequence_at(pipelines, "metrics", "receivers")
     for exporter_id, endpoint in (
         ("otlphttp/tempo", "http://127.0.0.1:14318"),
         ("otlphttp/loki", "http://127.0.0.1:3100/otlp"),
         ("otlphttp/prometheus", "http://127.0.0.1:9090/api/v1/otlp"),
     ):
-        assert config["exporters"][exporter_id]["endpoint"] == endpoint
+        assert value_at(config, "exporters", exporter_id, "endpoint") == endpoint
 
 
 def test_the_stations_remote_receiver_binds_the_port_its_unit_url_advertises(
@@ -100,7 +104,9 @@ def test_the_stations_remote_receiver_binds_the_port_its_unit_url_advertises(
 ) -> None:
     config = collector_unit.render(STATION, observability=observability(telemetry_otlp_port=4321))
 
-    assert config["receivers"]["otlp/remote"]["protocols"]["http"]["endpoint"] == "10.0.0.10:4321"
+    assert value_at(config, "receivers", "otlp/remote", "protocols", "http", "endpoint") == (
+        "10.0.0.10:4321"
+    )
     assert (
         unit_dial_url(
             STATION,
@@ -123,9 +129,11 @@ def test_the_local_listener_follows_this_units_port_while_relay_targets_follow_b
     runner = collector_unit.render(RUNNER, observability=local)
 
     assert _http(gateway) == {"endpoint": "127.0.0.1:4319"}
-    assert gateway["receivers"]["otlp/remote"]["protocols"]["http"]["endpoint"] == "10.0.0.10:4319"
+    assert value_at(gateway, "receivers", "otlp/remote", "protocols", "http", "endpoint") == (
+        "10.0.0.10:4319"
+    )
     for exporter_id in RELAY_EXPORTERS:
-        assert runner["exporters"][exporter_id]["endpoint"] == GATEWAY_INGRESS
+        assert value_at(runner, "exporters", exporter_id, "endpoint") == GATEWAY_INGRESS
 
 
 def test_an_ipv6_address_is_bracketed_in_the_receiver_bind_and_in_the_relay_endpoint(
@@ -138,10 +146,13 @@ def test_an_ipv6_address_is_bracketed_in_the_receiver_bind_and_in_the_relay_endp
         observability=observability(gateway_otlp_endpoint="http://[fd7a:115c:a1e0::10]:4318"),
     )
 
-    remote = gateway["receivers"]["otlp/remote"]["protocols"]["http"]["endpoint"]
+    remote = value_at(gateway, "receivers", "otlp/remote", "protocols", "http", "endpoint")
     assert remote == "[fd7a:115c:a1e0::10]:4318"
     for exporter_id in RELAY_EXPORTERS:
-        assert runner["exporters"][exporter_id]["endpoint"] == "http://[fd7a:115c:a1e0::10]:4318"
+        assert (
+            value_at(runner, "exporters", exporter_id, "endpoint")
+            == "http://[fd7a:115c:a1e0::10]:4318"
+        )
 
 
 @pytest.mark.parametrize(
@@ -163,14 +174,15 @@ def test_nothing_remote_can_dial_a_unit_without_a_token_or_a_routable_host(
 
     config = collector_unit.render(roles, host=host)
 
-    assert "otlp/remote" not in config["receivers"]
-    assert "bearertokenauth/cluster" not in config["extensions"]
+    assert "otlp/remote" not in mapping_at(config, "receivers")
+    assert "bearertokenauth/cluster" not in mapping_at(config, "extensions")
     assert _http(config)["endpoint"] == "127.0.0.1:4318"
-    assert all(
-        exporter["endpoint"].startswith("http://127.0.0.1:")
-        for name, exporter in config["exporters"].items()
-        if name.startswith("otlphttp/")
-    )
+    exporters = mapping_at(config, "exporters")
+    for name in exporters:
+        if name.startswith("otlphttp/"):
+            endpoint = value_at(exporters, name, "endpoint")
+            assert isinstance(endpoint, str)
+            assert endpoint.startswith("http://127.0.0.1:")
 
 
 # meiva:note
@@ -213,7 +225,7 @@ def test_a_split_topology_fails_closed_when_its_ingress_identity_is_incomplete(
         collector_unit.retract_token()
 
     with pytest.raises(RuntimeError, match=message):
-        collector_unit.render(
+        _ = collector_unit.render(
             roles,
             host=host,
             observability=observability(gateway_otlp_endpoint=gateway_ingress),
@@ -227,7 +239,7 @@ def test_a_split_topology_fails_closed_when_its_ingress_identity_is_incomplete(
 def test_a_unit_that_consumes_a_remote_observatory_relays_every_signal_to_its_single_ingress(
     db_url: str,
     collector_unit: CollectorUnit,
-    operator_database: Callable[[], Any],
+    operator_database: OperatorDatabaseFactory,
     roles: frozenset[str] | None,
 ) -> None:
     config = collector_unit.render(
@@ -238,18 +250,18 @@ def test_a_unit_that_consumes_a_remote_observatory_relays_every_signal_to_its_si
 
     bearer = _bearer(collector_unit)
     for exporter_id in RELAY_EXPORTERS:
-        exporter = config["exporters"][exporter_id]
+        exporter = mapping_at(config, "exporters", exporter_id)
         assert exporter["endpoint"] == "http://10.0.0.46:4318"
         assert exporter["headers"] == {"Authorization": f"Bearer {bearer}"}
     rendered = str(config)
     for loopback_backend in ("127.0.0.1:3100", "127.0.0.1:9090", "127.0.0.1:14318"):
         assert loopback_backend not in rendered
-    assert "file/traces" in config["exporters"]
+    assert "file/traces" in mapping_at(config, "exporters")
     assert _http(config) == {"endpoint": "127.0.0.1:4318"}
 
 
 def test_a_remote_observatory_without_a_telemetry_token_cannot_authenticate_its_relay(
-    db_url: str, collector_unit: CollectorUnit, operator_database: Callable[[], Any]
+    db_url: str, collector_unit: CollectorUnit, operator_database: OperatorDatabaseFactory
 ) -> None:
     collector_unit.retract_token()
 

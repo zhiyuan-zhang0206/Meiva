@@ -11,10 +11,8 @@ from __future__ import annotations
 
 import dataclasses
 from pathlib import Path
-from typing import Any
 
 import pytest
-import yaml
 
 from base.cluster.authority import MONITOR_ROLE
 from base.cluster.dataplane.pg_admin import pg_socket_path
@@ -34,6 +32,11 @@ from cli.commands.observability.tests.converge_otel_collector.collector_harness 
     RUNNER,
     STATION,
     CollectorUnit,
+    ConfigMapping,
+    config_of,
+    mapping_at,
+    sequence_at,
+    value_at,
 )
 from cli.commands.observability.tests.converge_otel_collector.collector_harness import (
     collector_unit as collector_unit,
@@ -51,12 +54,12 @@ POSTGRES_PORT = 5433
 DELIVERED_LOGIN = "postgresql://meiva_g3_gateway:generation-login-password@127.0.0.1:1/meiva"
 
 
-def _rotation(config: dict[str, Any]) -> dict[str, Any]:
-    return config["exporters"]["file/traces"]["rotation"]
+def _rotation(config: ConfigMapping) -> ConfigMapping:
+    return mapping_at(config, "exporters", "file/traces", "rotation")
 
 
-def _infra_receivers(config: dict[str, Any]) -> list[str]:
-    return config["service"]["pipelines"]["metrics/infra"]["receivers"]
+def _infra_receivers(config: ConfigMapping) -> list[object]:
+    return sequence_at(config, "service", "pipelines", "metrics/infra", "receivers")
 
 
 def test_the_collector_settings_are_read_from_the_domains_of_one_owner(
@@ -139,9 +142,9 @@ def test_changed_settings_reach_the_config_on_the_next_converge_but_a_hand_edit_
     config = otel_collector_config(collector_unit.home)
 
     collector_unit.ensure(None, observability=observability(trace_retention_days=3))
-    assert _rotation(yaml.safe_load(config.read_text(encoding="utf-8")))["max_days"] == 3
+    assert _rotation(config_of(config.read_text(encoding="utf-8")))["max_days"] == 3
     collector_unit.ensure(None, observability=observability(trace_retention_days=9))
-    assert _rotation(yaml.safe_load(config.read_text(encoding="utf-8")))["max_days"] == 9
+    assert _rotation(config_of(config.read_text(encoding="utf-8")))["max_days"] == 9
 
     config.write_text("user: edit\n", encoding="utf-8")
     collector_unit.ensure(None, observability=observability(trace_retention_days=12))
@@ -251,7 +254,7 @@ def test_the_station_gateway_home_renders_its_collector_from_the_converge_contex
     assert binary.read_bytes() == b"bin"
     config = otel_collector_config(collector_unit.home)
     assert config.stat().st_mode & 0o777 == 0o600
-    assert _rotation(yaml.safe_load(config.read_text(encoding="utf-8")))["max_days"] == 5
+    assert _rotation(config_of(config.read_text(encoding="utf-8")))["max_days"] == 5
     assert "collector skipped" not in capsys.readouterr().err
 
 
@@ -289,8 +292,8 @@ def test_the_observability_values_are_baked_into_the_fan_out_and_the_retention(
     )
 
     endpoints = {
-        name: body["endpoint"]
-        for name, body in config["exporters"].items()
+        name: value_at(body, "endpoint")
+        for name, body in mapping_at(config, "exporters").items()
         if name.startswith("otlphttp/")
     }
     assert endpoints == {
@@ -299,7 +302,9 @@ def test_the_observability_values_are_baked_into_the_fan_out_and_the_retention(
         "otlphttp/prometheus": "http://10.0.0.2:9090/api/v1/otlp",
     }
     assert _rotation(config)["max_days"] == 7
-    assert config["exporters"]["file/traces"]["path"] == f"{collector_unit.home}/traces/spans.jsonl"
+    assert value_at(config, "exporters", "file/traces", "path") == (
+        f"{collector_unit.home}/traces/spans.jsonl"
+    )
 
 
 def test_the_trace_mirror_rotates_by_size_with_bounded_backups(
@@ -324,30 +329,31 @@ def test_every_hop_drops_the_newest_batch_after_a_bounded_retry_and_queues_in_me
     config = collector_unit.render(
         roles, observability=observability(gateway_otlp_endpoint=GATEWAY_INGRESS)
     )
-    exporters = config["exporters"]
+    exporters = mapping_at(config, "exporters")
 
     for exporter_id, queue_size in (
         ("otlphttp/tempo", 5000),
         ("otlphttp/loki", 5000),
         ("otlphttp/prometheus", 1000),
     ):
-        assert exporters[exporter_id]["timeout"] == "5s"
-        assert exporters[exporter_id]["sending_queue"] == {
+        exporter = mapping_at(exporters, exporter_id)
+        assert exporter["timeout"] == "5s"
+        assert exporter["sending_queue"] == {
             "enabled": True,
             "queue_size": queue_size,
             "block_on_overflow": False,
             "wait_for_result": False,
         }
-        assert exporters[exporter_id]["retry_on_failure"] == {
+        assert exporter["retry_on_failure"] == {
             "enabled": True,
             "initial_interval": "5s",
             "max_interval": "30s",
             "max_elapsed_time": "15m",
         }
-    assert "file_storage" not in config["extensions"]
-    assert "file_storage" not in config["service"]["extensions"]
-    assert "file_storage/logoffsets" in config["extensions"]
-    assert config["service"]["pipelines"]["traces"]["exporters"] == [
+    assert "file_storage" not in mapping_at(config, "extensions")
+    assert "file_storage" not in sequence_at(config, "service", "extensions")
+    assert "file_storage/logoffsets" in mapping_at(config, "extensions")
+    assert sequence_at(config, "service", "pipelines", "traces", "exporters") == [
         "otlphttp/tempo",
         "file/traces",
     ]
@@ -357,11 +363,11 @@ def test_a_gateway_scrapes_its_own_data_plane_without_the_write_generations_logi
     collector_unit: CollectorUnit,
 ) -> None:
     text = collector_unit.text(HYBRID, data_plane=data_plane(db_url=DELIVERED_LOGIN))
-    config = yaml.safe_load(text)
+    config = config_of(text)
 
     assert "generation-login-password" not in text
     assert "meiva_g3_gateway" not in text
-    receivers = config["receivers"]
+    receivers = mapping_at(config, "receivers")
     socket_dir = pg_socket_path(collector_unit.home).as_posix()
     assert receivers["postgresql"] == {
         "endpoint": f"{socket_dir.lstrip('/')}:{POSTGRES_PORT}",
@@ -372,8 +378,8 @@ def test_a_gateway_scrapes_its_own_data_plane_without_the_write_generations_logi
         "collection_interval": "60s",
         "tls": {"insecure": True},
     }
-    assert receivers["redis"]["endpoint"] == "127.0.0.1:6380"
-    assert receivers["redis"]["password"] == data_plane().redis_admin_password
+    assert value_at(receivers, "redis", "endpoint") == "127.0.0.1:6380"
+    assert value_at(receivers, "redis", "password") == data_plane().redis_admin_password
     assert _infra_receivers(config) == ["host_metrics", "prometheus/otelcol", "postgresql", "redis"]
 
 
@@ -384,8 +390,8 @@ def test_disabling_otlp_export_keeps_the_redis_receiver_but_drops_the_postgres_o
         HYBRID, observability=observability(telemetry_otlp_enabled=False)
     )
 
-    assert "postgresql" not in config["receivers"]
-    assert "redis" in config["receivers"]
+    assert "postgresql" not in mapping_at(config, "receivers")
+    assert "redis" in mapping_at(config, "receivers")
     assert _infra_receivers(config) == ["host_metrics", "prometheus/otelcol", "redis"]
 
 
@@ -401,11 +407,11 @@ def test_a_remote_managed_plane_is_scraped_for_redis_only_and_leaks_no_provider_
             is_remote=True,
         ),
     )
-    config = yaml.safe_load(text)
+    config = config_of(text)
 
     assert "provider-password" not in text
-    assert "postgresql" not in config["receivers"]
-    assert config["receivers"]["redis"]["endpoint"] == "10.0.0.2:6380"
+    assert "postgresql" not in mapping_at(config, "receivers")
+    assert value_at(config, "receivers", "redis", "endpoint") == "10.0.0.2:6380"
     assert _infra_receivers(config) == ["host_metrics", "prometheus/otelcol", "redis"]
 
 
@@ -415,10 +421,10 @@ def test_a_gateway_without_a_registry_record_in_its_home_cannot_render_the_postg
     bare = dataclasses.replace(collector_unit, home=tmp_path / ".meiva-bare")
 
     with pytest.raises(RuntimeError, match="no registry record"):
-        bare.render(HYBRID)
+        _ = bare.render(HYBRID)
 
     write_cluster_record(bare.home)
-    assert "postgresql" in bare.render(HYBRID)["receivers"]
+    assert "postgresql" in mapping_at(bare.render(HYBRID), "receivers")
 
 
 @pytest.mark.parametrize(
@@ -436,21 +442,21 @@ def test_a_unit_that_does_not_own_the_data_plane_scrapes_only_its_host(
         roles, observability=observability(gateway_otlp_endpoint=GATEWAY_INGRESS)
     )
 
-    assert "postgresql" not in config["receivers"]
-    assert "redis" not in config["receivers"]
-    assert "host_metrics" in config["receivers"]
+    assert "postgresql" not in mapping_at(config, "receivers")
+    assert "redis" not in mapping_at(config, "receivers")
+    assert "host_metrics" in mapping_at(config, "receivers")
     assert _infra_receivers(config) == ["host_metrics", "prometheus/otelcol"]
 
 
 def test_the_host_identity_processors_sit_on_the_infra_pipeline_only(
     collector_unit: CollectorUnit,
 ) -> None:
-    pipelines = collector_unit.render(GATEWAY)["service"]["pipelines"]
+    pipelines = mapping_at(collector_unit.render(GATEWAY), "service", "pipelines")
 
-    assert pipelines["metrics"]["receivers"] == ["otlp", "otlp/remote"]
-    assert "transform/host_label" not in pipelines["metrics"]["processors"]
-    assert "transform/host_label" in pipelines["metrics/infra"]["processors"]
-    assert "resource_detection/host" in pipelines["metrics/infra"]["processors"]
+    assert sequence_at(pipelines, "metrics", "receivers") == ["otlp", "otlp/remote"]
+    assert "transform/host_label" not in sequence_at(pipelines, "metrics", "processors")
+    assert "transform/host_label" in sequence_at(pipelines, "metrics/infra", "processors")
+    assert "resource_detection/host" in sequence_at(pipelines, "metrics/infra", "processors")
 
 
 def test_infra_datapoints_keep_the_physical_host_and_gain_the_roster_machine_name(
@@ -458,7 +464,9 @@ def test_infra_datapoints_keep_the_physical_host_and_gain_the_roster_machine_nam
 ) -> None:
     config = collector_unit.render(GATEWAY)
 
-    statements = config["processors"]["transform/host_label"]["metric_statements"][0]["statements"]
+    statements = sequence_at(
+        config, "processors", "transform/host_label", "metric_statements", 0, "statements"
+    )
     assert 'set(attributes["host"], resource.attributes["host.name"])' in statements
     assert 'set(attributes["machine_name"], "test-machine")' in statements
 
@@ -474,9 +482,9 @@ def test_the_collector_binds_and_scrapes_its_own_metrics_port(
         ),
     )
 
-    reader = config["service"]["telemetry"]["metrics"]["readers"][0]["pull"]["exporter"]
+    reader = mapping_at(config, "service", "telemetry", "metrics", "readers", 0, "pull", "exporter")
     assert reader["prometheus"] == {"host": "localhost", "port": port}
-    assert config["receivers"]["prometheus/otelcol"]["config"]["scrape_configs"] == [
+    assert sequence_at(config, "receivers", "prometheus/otelcol", "config", "scrape_configs") == [
         {
             "job_name": "meiva-otel-collector",
             "scrape_interval": "30s",
@@ -488,7 +496,7 @@ def test_the_collector_binds_and_scrapes_its_own_metrics_port(
 def test_the_collectors_internal_logs_are_warn_level(collector_unit: CollectorUnit) -> None:
     config = collector_unit.render(GATEWAY)
 
-    assert config["service"]["telemetry"]["logs"]["level"] == "warn"
+    assert value_at(config, "service", "telemetry", "logs", "level") == "warn"
 
 
 def test_logs_promote_event_labels_and_label_tailed_files_before_the_final_batch(
@@ -496,7 +504,7 @@ def test_logs_promote_event_labels_and_label_tailed_files_before_the_final_batch
 ) -> None:
     config = collector_unit.render(HYBRID)
 
-    promote = config["processors"]["transform/promote_event_labels"]
+    promote = mapping_at(config, "processors", "transform/promote_event_labels")
     assert promote["error_mode"] == "ignore"
     assert promote["log_statements"] == [
         {
@@ -507,7 +515,7 @@ def test_logs_promote_event_labels_and_label_tailed_files_before_the_final_batch
             ],
         }
     ]
-    assert config["processors"]["transform/filelog_service"]["log_statements"] == [
+    assert sequence_at(config, "processors", "transform/filelog_service", "log_statements") == [
         {
             "context": "log",
             "conditions": ['attributes["log.file.name"] != nil'],
@@ -519,13 +527,18 @@ def test_logs_promote_event_labels_and_label_tailed_files_before_the_final_batch
             ],
         }
     ]
-    assert config["extensions"]["file_storage/logoffsets"] == {
+    assert mapping_at(config, "extensions", "file_storage/logoffsets") == {
         "directory": f"{collector_unit.home}/otel-collector/log-offsets",
         "create_directory": True,
     }
-    logs = config["service"]["pipelines"]["logs"]
-    assert logs["receivers"] == ["otlp", "otlp/remote", "filelog/sessions", "filelog/services"]
-    assert logs["processors"] == [
+    logs = mapping_at(config, "service", "pipelines", "logs")
+    assert sequence_at(logs, "receivers") == [
+        "otlp",
+        "otlp/remote",
+        "filelog/sessions",
+        "filelog/services",
+    ]
+    assert sequence_at(logs, "processors") == [
         "memory_limiter",
         "filter/cluster_allow",
         "transform/promote_event_labels",
@@ -542,14 +555,17 @@ def test_local_otlp_pipelines_drop_resources_that_name_another_cluster(
     expected = [
         'resource.attributes["cluster"] != nil and resource.attributes["cluster"] != ".meiva"'
     ]
-    assert config["processors"]["filter/cluster_allow"] == {
+    assert mapping_at(config, "processors", "filter/cluster_allow") == {
         "error_mode": "ignore",
         "traces": {"span": expected},
         "metrics": {"metric": expected},
         "logs": {"log_record": expected},
     }
-    pipelines = config["service"]["pipelines"]
+    pipelines = mapping_at(config, "service", "pipelines")
     for name in ("logs", "metrics", "traces"):
-        assert pipelines[name]["processors"][:2] == ["memory_limiter", "filter/cluster_allow"]
-    assert "filter/cluster_allow" not in pipelines["metrics/infra"]["processors"]
-    assert "filter/cluster_allow" not in pipelines["traces/remote"]["processors"]
+        assert sequence_at(pipelines, name, "processors")[:2] == [
+            "memory_limiter",
+            "filter/cluster_allow",
+        ]
+    assert "filter/cluster_allow" not in sequence_at(pipelines, "metrics/infra", "processors")
+    assert "filter/cluster_allow" not in sequence_at(pipelines, "traces/remote", "processors")
