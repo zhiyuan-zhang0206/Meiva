@@ -34,6 +34,8 @@ from meiva_builtins.plugins.meiva_syntax_fix.tests.hook_support import (
     UNAVAILABLE,
     agent_slices,
     execute_code_state,
+    fixed_ai,
+    update_messages,
 )
 
 
@@ -110,10 +112,12 @@ async def test_syntax_repair_is_per_call_and_preserves_content(
     update = await syntax_fix_before_exec(state, runtime_for(syntax_fix_ruff_format=False), {})
 
     assert update is not None
-    fixed = update["messages"][0]
+    fixed = fixed_ai(update)
     assert [call["id"] for call in fixed.tool_calls] == ["call-0", "call-1"]
     assert [call["args"]["code"] for call in fixed.tool_calls] == ["print(1,1)", "print(2,2)"]
-    assert [block["input"]["code"] for block in fixed.content] == ["print(1,1)", "print(2,2)"]
+    assert isinstance(fixed.content, list)
+    blocks = [block for block in fixed.content if isinstance(block, dict)]
+    assert [block["input"]["code"] for block in blocks] == ["print(1,1)", "print(2,2)"]
     assert ai.model_dump() == original
 
 
@@ -149,7 +153,7 @@ async def test_unfixable_single_call_error_result_carries_creation_time(
 
     assert update is not None
     assert update["goto"] == "after_exec"
-    _, error = update["messages"]
+    _, error = update_messages(update)
     assert isinstance(error, ToolMessage)
     kwargs = read_meiva_kwargs(error)
     assert kwargs.get("meiva_msg_type") == "exec_output"
@@ -200,7 +204,7 @@ async def test_syntax_fix_preserves_recovered_calls(
     state = AgentState(messages=[_ai_with_two_content_tool_uses()])
     update = await syntax_fix_before_exec(state, runtime_for(), _config())
     assert update is not None
-    fixed = update["messages"][0]
+    fixed = fixed_ai(update)
     assert [call["id"] for call in fixed.tool_calls] == ["call_00", "call_01"]
     assert [call["args"]["code"].strip() for call in fixed.tool_calls] == [
         'print("skills")',

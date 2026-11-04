@@ -773,6 +773,9 @@ root = "gateway/tests"
 root = "meiva/mcps/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_syntax_fix/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/plugins/meiva_to_user/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -1199,6 +1202,11 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/plugins/meiva_self_evolution"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_syntax_fix"
 reportAny = "error"
 reportExplicitAny = "error"
 

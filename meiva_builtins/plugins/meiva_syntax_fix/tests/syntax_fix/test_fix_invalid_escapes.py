@@ -36,8 +36,10 @@ from meiva_builtins.plugins.meiva_syntax_fix.tests.hook_support import (
     REPAIRS_IN_A_FENCE,
     REPAIRS_UNTERMINATED_STRING,
     UNAVAILABLE,
+    fixed_ai,
     make_runtime,
     manual_clock,
+    update_messages,
 )
 from meiva_builtins.plugins.meiva_syntax_fix.tests.test_syntax_fix import is_broken
 
@@ -164,7 +166,7 @@ class TestSyntaxFixBeforeExec:
         )
         assert result is not None
         assert "messages" in result
-        fixed = result["messages"][0]
+        fixed = fixed_ai(result)
         code = fixed.tool_calls[0]["args"]["code"]
         assert "print(1, 2)" in code
 
@@ -181,7 +183,7 @@ class TestSyntaxFixBeforeExec:
             state, make_runtime(syntax_fix_ruff_format=True), self._config()
         )
         assert result is not None
-        assert result["messages"][0].tool_calls[0]["args"]["code"].strip() == "x = 1"
+        assert fixed_ai(result).tool_calls[0]["args"]["code"].strip() == "x = 1"
 
     async def test_ruff_format_skipped_when_disabled(self):
         state = AgentState(
@@ -202,7 +204,7 @@ class TestSyntaxFixBeforeExec:
             state, make_runtime(syntax_fix_ruff_format=False), self._config()
         )
         assert result is not None
-        code = result["messages"][0].tool_calls[0]["args"]["code"]
+        code = fixed_ai(result).tool_calls[0]["args"]["code"]
         assert "x = 1" not in code
         assert "x=1" in code
 
@@ -223,7 +225,7 @@ class TestSyntaxFixBeforeExec:
         )
         result = await syntax_fix_before_exec(state, make_runtime(), self._config())
         assert result is not None
-        code = result["messages"][0].tool_calls[0]["args"]["code"]
+        code = fixed_ai(result).tool_calls[0]["args"]["code"]
         assert "import json" in code
 
     async def test_syntax_error_injects_tool_message(self):
@@ -247,8 +249,8 @@ class TestSyntaxFixBeforeExec:
         assert result is not None
         assert result.get("goto") == "after_exec"
         assert "halted" in result
-        assert len(result["messages"]) == 2
-        tool_msg = result["messages"][1]
+        assert len(update_messages(result)) == 2
+        tool_msg = update_messages(result)[1]
         assert "SyntaxError" in tool_msg.content
 
     @staticmethod
@@ -271,8 +273,8 @@ class TestSyntaxFixBeforeExec:
         )
         assert result is not None
         assert "goto" not in result
-        assert len(result["messages"]) == 1
-        assert result["messages"][0].tool_calls[0]["args"]["code"] == REPAIRED
+        assert len(update_messages(result)) == 1
+        assert fixed_ai(result).tool_calls[0]["args"]["code"] == REPAIRED
 
     async def test_llm_repair_unavailable_falls_back(self):
         broken = "if True print('x')"
@@ -281,8 +283,8 @@ class TestSyntaxFixBeforeExec:
         )
         assert result is not None
         assert result.get("goto") == "after_exec"
-        assert len(result["messages"]) == 2
-        assert "SyntaxError" in result["messages"][1].content
+        assert len(update_messages(result)) == 2
+        assert "SyntaxError" in update_messages(result)[1].content
 
     async def test_valid_code_no_change_returns_none(self):
         state = AgentState(
