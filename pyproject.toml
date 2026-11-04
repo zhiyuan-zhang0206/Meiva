@@ -642,6 +642,12 @@ root = "agent/execution/tests"
 root = "agent/extensions/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "agent/graph/exec/tests"
+
+[[tool.pyright.executionEnvironments]]
+root = "agent/graph/llm/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "agent/messages/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -1117,6 +1123,16 @@ reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
 root = "agent/startup"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "agent/graph/exec"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "agent/graph/llm"
 reportAny = "error"
 reportExplicitAny = "error"
 

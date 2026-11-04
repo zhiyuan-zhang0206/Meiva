@@ -1,7 +1,7 @@
 import asyncio
 import os
 import sys
-from collections.abc import Awaitable, Sequence
+from collections.abc import Awaitable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -34,7 +34,7 @@ class ProcessCall:
     context: MeivaContext
     cancel_event: asyncio.Event
     chunks: ExecOutputChunkPublisher
-    state: dict[str, Any]
+    state: Mapping[str, object]
     config_overlay: dict[str, object]
 
 
@@ -56,7 +56,7 @@ class ScriptedExecProcess:
         cancel_event: asyncio.Event,
         chunks: ExecOutputChunkPublisher,
         *,
-        state: dict[str, Any],
+        state: Mapping[str, object],
         config_overlay: dict[str, object],
     ) -> Awaitable[Outcome]:
         call = ProcessCall(code, context, cancel_event, chunks, state, config_overlay)

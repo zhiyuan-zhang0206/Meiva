@@ -21,7 +21,9 @@ blocks immediately after") and would also trip the dangling-tool_use repair hook
 
 from __future__ import annotations
 
-from langchain_core.messages import AnyMessage
+from collections.abc import Sequence
+
+from langchain_core.messages import AnyMessage, BaseMessage
 from langgraph.graph.message import add_messages
 
 
@@ -32,7 +34,7 @@ from langgraph.graph.message import add_messages
 # meiva:link agent/graph/exec/docs/exec-notes.meiva.okf.md
 def merge_exec_notes(
     state_messages_update: list[AnyMessage],
-    plugin_messages: list[AnyMessage] | None,
+    plugin_messages: Sequence[BaseMessage] | None,
 ) -> list[AnyMessage]:
     if plugin_messages is not None:
         state_messages_update = add_messages(state_messages_update, plugin_messages)  # pyright: ignore[reportArgumentType, reportAssignmentType]

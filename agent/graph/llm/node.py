@@ -4,7 +4,7 @@ import asyncio
 import random
 import time
 from datetime import datetime
-from typing import Literal, NoReturn
+from typing import Literal, NoReturn, TypeGuard, get_args
 
 from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_core.runnables import RunnableConfig
@@ -33,6 +33,8 @@ from base.agents.messages.kwargs import read_meiva_kwargs
 from base.agents.observation.ended_with import BUDGET
 from base.events.live.projection import TokenUsage
 from base.events.live.publisher import AgentEventPublisher
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_mapping, object_of
 from base.lm.catalog import ModelCatalog
 from base.log import logger
 
@@ -185,8 +187,17 @@ def _note_failed_attempt(
 # that stopped the model loop themselves. A cancelled attempt returns halted too, but commits
 # no message — its partial generation was discarded — so it is not a turn-end decision and
 # keeps the plain record.
-def _model_halted(update: dict[str, object] | None) -> bool:
-    return bool(update) and update.get("halted") is True and "messages" in update
+def _model_halted(update: object) -> bool:
+    if not is_object_dict(update):
+        return False
+    return update.get("halted") is True and "messages" in update
+
+
+# meiva:note
+# A compact update names its `goto` as a plain value; prove it is one of the llm node's routing
+# values (`LlmGoto` itself is the owner of that list) before the graph routes on it.
+def _is_llm_goto(value: object) -> TypeGuard[LlmGoto]:
+    return isinstance(value, str) and value in get_args(LlmGoto)
 
 
 # meiva:note
@@ -246,8 +257,11 @@ async def llm_attempt(
                 outcome="succeeded",
                 now=runtime.context.require_clock().now().timestamp(),
             )
-            update = result.update
-            if update is not None and _model_halted(update):
+            # meiva:note
+            # `Command.update` is typed `Any` by langgraph; read it as `object` and narrow once,
+            # so the halt predicate and the two channel writes below stay checked.
+            update = object_of(getattr, result, "update")
+            if is_object_dict(update) and _model_halted(update):
                 # meiva:note
                 # The model stopped on its own, so this attempt's record belongs to the turn
                 # boundary: only claim knows whether the turn ends here, and only the agent
@@ -261,7 +275,7 @@ async def llm_attempt(
                     duration_seconds=time.monotonic() - turn_start,
                     ok=True,
                 )
-            if state.circuit.open and update is not None and "messages" in update:
+            if state.circuit.open and is_object_dict(update) and "messages" in update:
                 update["circuit"] = CircuitState()
                 logger.info(
                     "heartbeat circuit breaker CLOSED — LLM call accepted again",
@@ -287,7 +301,13 @@ async def _llm_node_impl(
 
     compacted = await auto_compact_for_llm(state, runtime, config)
     if compacted is not None:
-        goto = compacted.pop("goto")
+        goto = object_mapping(compacted).get("goto")
+        if not _is_llm_goto(goto):
+            raise TypeError(f"a compact update must name one of {get_args(LlmGoto)}, not {goto!r}")
+        # meiva:note
+        # The routing value rides the command, not the state update: drop it from the delta
+        # before the graph applies the rest of the compact hook's channels.
+        del compacted["goto"]
         return Command[LlmGoto](update=compacted, goto=goto)
 
     handler = RedisStreamHandler(
