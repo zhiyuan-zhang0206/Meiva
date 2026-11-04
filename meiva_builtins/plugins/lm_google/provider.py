@@ -3,13 +3,15 @@
 # meiva:link meiva_builtins/plugins/docs/plugins.meiva.okf.md
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from google.genai.types import MediaResolution
     from langchain_core.language_models.chat_models import BaseChatModel
+    from langchain_google_genai import ChatGoogleGenerativeAI
 
 from loguru import logger
+from pydantic import SecretStr
 
 from base.lm.compat.stop import StopSpec
 from base.lm.effort import validate_effort
@@ -80,14 +82,12 @@ def _media_resolution(setting: str | None) -> MediaResolution | None:
 
 
 def build(ctx: BuildContext) -> BaseChatModel:
+    return build_gemini(ctx, api_key=ctx.keys.require("GEMINI_API_KEY"))
+
+
+def build_gemini(ctx: BuildContext, *, api_key: str) -> ChatGoogleGenerativeAI:
     from langchain_google_genai import ChatGoogleGenerativeAI
 
-    return ChatGoogleGenerativeAI(
-        **chat_model_kwargs(ctx, api_key=ctx.keys.require("GEMINI_API_KEY"))
-    )
-
-
-def chat_model_kwargs(ctx: BuildContext, *, api_key: str) -> dict[str, Any]:
     thinking_disabled = ctx.thinking is not None and ctx.thinking.get("type") == "disabled"
     thinking_level = _thinking_level(ctx, thinking_disabled=thinking_disabled)
     if ctx.media_thinking_level is not None:
@@ -96,21 +96,21 @@ def chat_model_kwargs(ctx: BuildContext, *, api_key: str) -> dict[str, Any]:
         include_thoughts = None
     else:
         include_thoughts = not thinking_disabled
-    media_resolution_value = _media_resolution(ctx.media_resolution)
-    kwargs: dict[str, Any] = {
-        "model": ctx.model,
-        "google_api_key": api_key,
-        "include_thoughts": include_thoughts,
-        "thinking_level": thinking_level,
-        "disable_streaming": ctx.disable_streaming,
-        "timeout": ctx.timeout,
-        "temperature": None,
-    }
-    if media_resolution_value is not None:
-        kwargs["media_resolution"] = media_resolution_value
-    if ctx.base_url is not None:
-        kwargs["base_url"] = ctx.base_url
-    return kwargs
+    # meiva:note
+    # `media_resolution` and `base_url` are passed as `None` when unset because that is the field
+    # default, which keeps the call free of a `**kwargs` bag whose `Any` values would turn every
+    # constructor argument into an untyped one.
+    return ChatGoogleGenerativeAI(
+        model=ctx.model,
+        google_api_key=SecretStr(api_key),
+        include_thoughts=include_thoughts,
+        thinking_level=thinking_level,
+        disable_streaming=ctx.disable_streaming,
+        timeout=ctx.timeout,
+        temperature=None,
+        media_resolution=_media_resolution(ctx.media_resolution),
+        base_url=ctx.base_url,
+    )
 
 
 PROVIDER = ProviderContribution(

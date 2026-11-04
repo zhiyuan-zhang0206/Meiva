@@ -11,10 +11,12 @@ import threading
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
 
 import pytest
 from google.genai import types
+
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 
 __all__ = ["GeminiServer", "gemini_server"]
 
@@ -22,14 +24,14 @@ __all__ = ["GeminiServer", "gemini_server"]
 @dataclass(frozen=True)
 class Received:
     path: str
-    body: dict[str, Any]
+    body: dict[str, object]
 
 
 @dataclass
 class GeminiServer:
     url: str = ""
     status: int = 200
-    reply: dict[str, Any] = field(default_factory=dict)
+    reply: dict[str, object] = field(default_factory=dict)
     received: list[Received] = field(default_factory=list)
 
     def answer(self, response: types.GenerateContentResponse) -> None:
@@ -51,7 +53,9 @@ def gemini_server() -> Iterator[GeminiServer]:
 
         def do_POST(self) -> None:
             length = int(self.headers["Content-Length"])
-            server_state.received.append(Received(self.path, json.loads(self.rfile.read(length))))
+            body = object_of(json.loads, self.rfile.read(length))
+            assert is_object_dict(body)
+            server_state.received.append(Received(self.path, body))
             data = json.dumps(server_state.reply).encode()
             self.send_response(server_state.status)
             self.send_header("Content-Type", "application/json")
