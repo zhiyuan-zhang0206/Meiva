@@ -1160,6 +1160,11 @@ reportAny = "error"
 reportExplicitAny = "error"
 
 [[tool.pyright.executionEnvironments]]
+root = "meiva_builtins/plugins/meiva_self_evolution"
+reportAny = "error"
+reportExplicitAny = "error"
+
+[[tool.pyright.executionEnvironments]]
 root = "meiva_builtins/plugins/meiva_to_user"
 reportAny = "error"
 reportExplicitAny = "error"
