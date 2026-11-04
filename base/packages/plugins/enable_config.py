@@ -3,11 +3,12 @@
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeGuard
 
 from pydantic import BaseModel, ValidationError
 
 from base import paths
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.packages.plugins import load_report
 from base.packages.skills import names as skill_naming
 
@@ -149,7 +150,7 @@ def parse_description(source_path: Path) -> str:
 # Core API
 
 
-def _validate_schema(data: dict[str, Any]) -> PluginsConfig:
+def _validate_schema(data: dict[str, object]) -> PluginsConfig:
     try:
         return PluginsConfig.model_validate(data)
     except ValidationError as e:
@@ -162,28 +163,24 @@ def _default_config(known_plugins: set[str]) -> PluginsConfig:
     )
 
 
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
-
-
 @dataclass(frozen=True)
 class PluginEnableStore:
     # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
 
     path: Path
 
-    def read(self) -> dict[str, Any] | None:
+    def read(self) -> dict[str, object] | None:
         # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
         p = self.path
         if not p.exists():
             return None
         raw = p.read_text()
-        data = json.loads(raw if raw.strip() else "{}")
-        if not _is_str_dict(data):
+        data = object_of(json.loads, raw if raw.strip() else "{}")
+        if not is_object_dict(data):
             raise PluginsConfigError(f"{p}: expected a JSON object, got {type(data).__name__}")
         return data
 
-    def write(self, raw: dict[str, Any]) -> None:
+    def write(self, raw: dict[str, object]) -> None:
         # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
         self.path.write_text(json.dumps(raw, indent=2))
 
@@ -261,7 +258,7 @@ def local_config_path(*, home: Path) -> Path:
     return home / "plugins_config.json"
 
 
-def write_local(raw: dict[str, Any], *, home: Path) -> None:
+def write_local(raw: dict[str, object], *, home: Path) -> None:
     # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
     PluginEnableStore(local_config_path(home=home)).write(raw)
 

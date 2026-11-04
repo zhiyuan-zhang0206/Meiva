@@ -53,9 +53,10 @@ import tarfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 import psycopg
+from psycopg.rows import class_row
 from psycopg_pool import ConnectionPool
 
 from base.packages.extensions.install_registry import IGNORED_NAMES, TrustTier
@@ -104,7 +105,7 @@ class Extension:
     default_enabled: bool
     source_ref: str | None = None
     version: str | None = None
-    manifest: dict[str, Any] | None = None
+    manifest: dict[str, object] | None = None
     installed_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -234,12 +235,21 @@ def put_blob(
     return digest
 
 
+# meiva:note
+# The one column `get_blob` reads: psycopg hands a `bytea` back as `bytes`, or as a `memoryview` on some
+# adapters, so the archive is rebuilt as `bytes` either way.
+@dataclass(frozen=True)
+class _BlobRow:
+    archive: bytes | memoryview
+
+
 def get_blob(conn: psycopg.Connection, content_hash: str) -> bytes | None:
     """The archive stored under `content_hash`, or None."""
-    row = conn.execute(
-        "SELECT archive FROM extension_blobs WHERE content_hash = %s", (content_hash,)
-    ).fetchone()
-    return None if row is None else bytes(row[0])
+    with conn.cursor(row_factory=class_row(_BlobRow)) as cur:
+        row = cur.execute(
+            "SELECT archive FROM extension_blobs WHERE content_hash = %s", (content_hash,)
+        ).fetchone()
+    return None if row is None else bytes(row.archive)
 
 
 def upsert(
@@ -252,7 +262,7 @@ def upsert(
     trust: TrustTier = "unreviewed",
     source_ref: str | None = None,
     version: str | None = None,
-    manifest: dict[str, Any] | None = None,
+    manifest: dict[str, object] | None = None,
     default_enabled: bool | None = None,
 ) -> None:
     """Write or update one extension row.
@@ -317,26 +327,10 @@ _SELECT = (
 )
 
 
-def _row_to_extension(row: tuple[Any, ...]) -> Extension:
-    return Extension(
-        name=row[0],
-        kind=row[1],
-        source=row[2],
-        content_hash=row[3],
-        trust=row[4],
-        default_enabled=row[5],
-        source_ref=row[6],
-        version=row[7],
-        manifest=row[8],
-        installed_at=row[9],
-        updated_at=row[10],
-    )
-
-
 def get(conn: psycopg.Connection, name: str) -> Extension | None:
     """One row by name, or None."""
-    row = conn.execute(f"{_SELECT} WHERE name = %s", (name,)).fetchone()
-    return None if row is None else _row_to_extension(row)
+    with conn.cursor(row_factory=class_row(Extension)) as cur:
+        return cur.execute(f"{_SELECT} WHERE name = %s", (name,)).fetchone()
 
 
 def list_enabled(conn: psycopg.Connection, *, kind: ExtensionKind | None = None) -> list[Extension]:
@@ -347,13 +341,12 @@ def list_enabled(conn: psycopg.Connection, *, kind: ExtensionKind | None = None)
     per-agent overlay from S3. Ordered by name so a converge log and a status
     table read the same way twice.
     """
-    if kind is None:
-        rows = conn.execute(f"{_SELECT} WHERE default_enabled ORDER BY name").fetchall()
-    else:
-        rows = conn.execute(
+    with conn.cursor(row_factory=class_row(Extension)) as cur:
+        if kind is None:
+            return cur.execute(f"{_SELECT} WHERE default_enabled ORDER BY name").fetchall()
+        return cur.execute(
             f"{_SELECT} WHERE default_enabled AND kind = %s ORDER BY name", (kind,)
         ).fetchall()
-    return [_row_to_extension(r) for r in rows]
 
 
 def set_default_enabled(conn: psycopg.Connection, name: str, *, enabled: bool) -> bool:
@@ -379,7 +372,7 @@ def register_tree(
     trust: TrustTier = "unreviewed",
     source_ref: str | None = None,
     version: str | None = None,
-    manifest: dict[str, Any] | None = None,
+    manifest: dict[str, object] | None = None,
     default_enabled: bool | None = None,
 ) -> str:
     """Pack `root`, store the blob and upsert the row — one transaction.

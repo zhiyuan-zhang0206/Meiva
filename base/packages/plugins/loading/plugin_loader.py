@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
+from base.host.boundary.untyped import object_of
 from base.packages.plugins import load_report
 
 
@@ -114,10 +115,10 @@ def load_plugin_module(
     # tests) is a different module and must not inherit the previous one's
     # globals — bind fresh.
     existing = sys.modules.get(spec.name)
-    recorded = getattr(existing, "__file__", None)
+    recorded = object_of(getattr, existing, "__file__", None)
     if (
         existing is not None
-        and recorded is not None
+        and isinstance(recorded, str)
         and os.path.realpath(recorded) == os.path.realpath(plugin_py)
     ):
         loaded = existing

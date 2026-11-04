@@ -18,8 +18,9 @@ from __future__ import annotations
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeGuard
 
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from base.host.git.host_version_plan import Version, parse_version
 from base.packages.plugins.manifest import (
     CLAUSE_SPLIT_RE,
@@ -130,10 +131,6 @@ def _strictest_upper(bounds: list[_Bounds]) -> _Bounds | None:
     return best
 
 
-def _is_object_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
-
-
 def pyproject_dependency_specs(pkg_dir: Path) -> dict[str, str]:
     """Direct `[project].dependencies` of the pyproject in `pkg_dir`, as
     `{name: specifier_string}` ("" = no specifier, i.e. any version).
@@ -147,14 +144,14 @@ def pyproject_dependency_specs(pkg_dir: Path) -> dict[str, str]:
     if not pyproject.is_file():
         raise ManifestError(f"no pyproject.toml in {pkg_dir}")
     try:
-        data: dict[str, Any] = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        data = object_of(tomllib.loads, pyproject.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as e:
         raise ManifestError(f"cannot parse {pyproject}: {e}") from e
-    project: dict[str, Any] | None = data.get("project")
-    if project is None:
+    project = data.get("project") if is_object_dict(data) else None
+    if not is_object_dict(project):
         raise ManifestError(f"{pyproject}: [project] section missing or not a table")
     deps = project.get("dependencies", [])
-    if not _is_object_list(deps):
+    if not is_object_list(deps):
         raise ManifestError(f"{pyproject}: [project].dependencies is not a list")
     specs: dict[str, str] = {}
     for raw_entry in deps:

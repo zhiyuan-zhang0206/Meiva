@@ -46,6 +46,7 @@ state class.
 
 from __future__ import annotations
 
+import inspect
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -168,6 +169,31 @@ def _log_hook_timings(hook_name: HookName, timings: list[tuple[str, float]]) -> 
     )
 
 
+def _erased(function: Callable[..., object]) -> Callable[..., object]:
+    return function
+
+
+async def _awaited(pending: Awaitable[object]) -> object:
+    return await pending
+
+
+# meiva:note
+# `await hook(state, runtime, config)` with the kernel's values, answered as the raw `object` the hook
+# returned (a state update, or None). `GraphHook`'s parameters are `Never` (a plugin's hook is written
+# against the kernel's types, which live above `base/packages`), so a call with real values is checked
+# against nothing here: this is the one place that makes it, and the kernel is the one caller. A hook
+# that does not answer an awaitable is a plugin bug.
+async def call_graph_hook(
+    hook: GraphHook, state: object, runtime: object, config: object
+) -> object:
+    pending = _erased(hook)(state, runtime, config)
+    if not inspect.isawaitable(pending):
+        raise TypeError(
+            f"graph hook {hook.name!r} returned {type(pending).__name__}, not an awaitable"
+        )
+    return await _awaited(pending)
+
+
 def make_hook_runner(
     hook_name: HookName,
     default_next: NodeName | Callable[[_state.AgentState], NodeName],
@@ -237,10 +263,10 @@ def make_hook_runner(
         timings: list[tuple[str, float]] = []
         for plugin, hook in hooks:
             started = time.monotonic()
-            returned: object = await hook(state, runtime, config)
+            returned = await call_graph_hook(hook, state, runtime, config)
             timings.append((hook.name, time.monotonic() - started))
             # meiva:note
-            # The hook protocol answers `Any` (base/packages/plugins), so the update is narrowed
+            # The hook protocol answers an open value (base/packages/plugins), so the update is narrowed
             # here rather than trusted: a hook that returns a non-dict is a plugin bug, and this is
             # the boundary that turns it into one named failure instead of a downstream attribute
             # error inside the merge.

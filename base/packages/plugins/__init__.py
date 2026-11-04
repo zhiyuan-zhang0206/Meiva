@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Protocol, TypeGuard, overload
+from typing import Protocol, overload
 
 from pydantic import BaseModel, ValidationError
 from pydantic.fields import FieldInfo
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.packages.plugins.plugin_errors import InvalidConfigData, SchemaDriftError
 
 __all__ = [
@@ -25,19 +27,15 @@ class _AgentConfigSlices(Protocol):
     def plugin_configs(self) -> dict[str, BaseModel]: ...
 
 
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
-
-
 def config_from_image[C: BaseModel](cls: type[C], content: str, config_path: Path) -> C:
     try:
-        disk_data = json.loads(content)
+        disk_data = object_of(json.loads, content)
     except json.JSONDecodeError as e:
         raise InvalidConfigData(
             f"plugin config disk image JSON parse failed ({config_path}): {e}"
         ) from e
 
-    if not _is_str_dict(disk_data):
+    if not is_object_dict(disk_data):
         raise InvalidConfigData(
             "plugin config disk image top-level must be a JSON object, got "
             f"{type(disk_data).__name__} ({config_path})"
@@ -83,13 +81,13 @@ def process_plugin_config(plugin: str, configs: Mapping[str, BaseModel]) -> Base
     return configs[plugin]
 
 
-def _schema_extra(info: FieldInfo) -> dict[str, Any]:
+def _schema_extra(info: FieldInfo) -> dict[str, object]:
     extra = info.json_schema_extra
-    return extra if _is_str_dict(extra) else {}
+    return extra if is_object_dict(extra) else {}
 
 
 def _field_is_sensitive(extra: object) -> bool:
-    if not _is_str_dict(extra):
+    if not is_object_dict(extra):
         return False
     return extra.get("sensitive") is True
 

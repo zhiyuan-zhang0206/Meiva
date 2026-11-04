@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 
 from pydantic import BaseModel
 
+from base.host.boundary.untyped import object_of
 from base.packages.plugins import load_report
 from base.packages.plugins.config_face import CONFIG_FACE
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
@@ -31,8 +32,10 @@ FACE_KEYS: dict[str, tuple[str, ...]] = {
 }
 
 
-def _declared(plugin: str, face: str, contribute: Callable[[], object]) -> PluginContributions:
-    contributions = contribute()
+def _declared(plugin: str, face: str, contribute: object) -> PluginContributions:
+    if not callable(contribute):
+        raise TypeError(f"{plugin}.{face}: contribute is not callable")
+    contributions = object_of(contribute)
     if not isinstance(contributions, PluginContributions):
         raise TypeError(
             f"{plugin}.{face}.contribute() returned {type(contributions).__name__}, "
@@ -52,7 +55,7 @@ def declarations(
             load_manifest(plugin_dir)
             for face in faces:
                 module = sys.modules.get(f"{pkg_of(plugin_dir)}.{name}.{face}")
-                contribute = getattr(module, "contribute", None)
+                contribute = object_of(getattr, module, "contribute", None)
                 if contribute is None:
                     continue
                 declared = _declared(name, face, contribute)
@@ -71,7 +74,7 @@ def loaded_state_classes() -> frozenset[type[BaseModel]]:
         parts = dotted.split(".")
         if parts[-1] != FACE_MODULE or ".".join(parts[:-2]) not in _PLUGIN_PACKAGES:
             continue
-        contribute = getattr(module, "contribute", None)
+        contribute = object_of(getattr, module, "contribute", None)
         if contribute is None:
             continue
         try:

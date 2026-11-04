@@ -6,9 +6,10 @@ import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeGuard
 
 from base import paths
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from base.host.git import host_version as host_version_module
 from base.host.git.host_version_plan import Version, parse_version
 from base.packages.plugins.surface.notification_contributions import (
@@ -148,16 +149,8 @@ class PluginManifest:
     requires_commit: str | None = None
 
 
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
-
-
-def _is_any_list(value: object) -> TypeGuard[list[Any]]:
-    return isinstance(value, list)
-
-
 def _str_list(value: object, what: str, errors: list[str]) -> list[str] | None:
-    if not _is_any_list(value):
+    if not is_object_list(value):
         errors.append(f"{what}: expected a list of non-empty strings")
         return None
     items = [v for v in value if isinstance(v, str) and v]
@@ -167,7 +160,7 @@ def _str_list(value: object, what: str, errors: list[str]) -> list[str] | None:
     return items
 
 
-def _validate_identity(data: dict[str, Any], errors: list[str]) -> tuple[str, str, str | None]:
+def _validate_identity(data: dict[str, object], errors: list[str]) -> tuple[str, str, str | None]:
     known = {
         "apiVersion",
         "name",
@@ -210,11 +203,26 @@ def _validate_identity(data: dict[str, Any], errors: list[str]) -> tuple[str, st
     )
 
 
-def _validate_engines(data: dict[str, Any], errors: list[str]) -> dict[str, str]:
-    engines: dict[str, Any] | None = data.get("engines")
+# meiva:note
+# The object under `key` of `container`, named `label` in the report: None when it is absent, and None
+# with an error when it is present but not an object (the validators below then skip it).
+def _section(
+    container: dict[str, object], key: str, label: str, errors: list[str]
+) -> dict[str, object] | None:
+    value = container.get(key)
+    if value is None:
+        return None
+    if not is_object_dict(value):
+        errors.append(f"{label} must be an object")
+        return None
+    return value
+
+
+def _validate_engines(data: dict[str, object], errors: list[str]) -> dict[str, str]:
+    engines = _section(data, "engines", "engines", errors)
     parsed: dict[str, str] = {}
     if engines is None:
-        if data.get("requires_commit") is None:
+        if data.get("engines") is None and data.get("requires_commit") is None:
             errors.append(
                 "engines (or requires_commit) is required; engines must be an "
                 'object, e.g. {"meiva": ">=0.1.38"}'
@@ -239,7 +247,7 @@ def _validate_engines(data: dict[str, Any], errors: list[str]) -> dict[str, str]
 _COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
 
 
-def _validate_requires_commit(data: dict[str, Any], errors: list[str]) -> str | None:
+def _validate_requires_commit(data: dict[str, object], errors: list[str]) -> str | None:
     raw = data.get("requires_commit")
     if raw is None:
         return None
@@ -250,7 +258,7 @@ def _validate_requires_commit(data: dict[str, Any], errors: list[str]) -> str | 
 
 
 def _config_contribution(value: object, errors: list[str]) -> dict[str, object] | None:
-    if not _is_str_dict(value):
+    if not is_object_dict(value):
         errors.append("contributions.config must be an object {schema?, perAgentFields?}")
         return None
     cfg: dict[str, object] = {}
@@ -272,7 +280,7 @@ _FACE_RE = re.compile(r"^[A-Za-z0-9._~-]+\.py$")
 
 
 def _schedules_contribution(value: object, errors: list[str]) -> dict[str, object] | None:
-    if not _is_str_dict(value):
+    if not is_object_dict(value):
         errors.append("contributions.schedules must be an object {face}")
         return None
     unknown = set(value) - {"face"}
@@ -297,8 +305,8 @@ def _check_hook_points(hooks: list[str], errors: list[str]) -> None:
             )
 
 
-def _validate_contributions(data: dict[str, Any], errors: list[str]) -> dict[str, object]:
-    contributions: dict[str, Any] | None = data.get("contributions")
+def _validate_contributions(data: dict[str, object], errors: list[str]) -> dict[str, object]:
+    contributions = _section(data, "contributions", "contributions", errors)
     parsed: dict[str, object] = {}
     if contributions is None:
         return parsed
@@ -331,8 +339,8 @@ def _validate_contributions(data: dict[str, Any], errors: list[str]) -> dict[str
     return parsed
 
 
-def _validate_plugins(dependencies: dict[str, Any], errors: list[str]) -> dict[str, str]:
-    plugins: dict[str, Any] | None = dependencies.get("plugins")
+def _validate_plugins(dependencies: dict[str, object], errors: list[str]) -> dict[str, str]:
+    plugins = _section(dependencies, "plugins", "dependencies.plugins", errors)
     parsed: dict[str, str] = {}
     if plugins is None:
         return parsed
@@ -352,10 +360,13 @@ def _validate_plugins(dependencies: dict[str, Any], errors: list[str]) -> dict[s
     return parsed
 
 
-def _validate_python_packages(dependencies: dict[str, Any], errors: list[str]) -> dict[str, str]:
-    packages: list[Any] | None = dependencies.get("pythonPackages")
+def _validate_python_packages(dependencies: dict[str, object], errors: list[str]) -> dict[str, str]:
+    packages = dependencies.get("pythonPackages")
     parsed: dict[str, str] = {}
     if packages is None:
+        return parsed
+    if not is_object_list(packages):
+        errors.append("dependencies.pythonPackages must be a list")
         return parsed
     for raw_entry in packages:
         if not isinstance(raw_entry, str) or not raw_entry.strip():
@@ -400,8 +411,10 @@ def _validate_python_packages(dependencies: dict[str, Any], errors: list[str]) -
     return parsed
 
 
-def _validate_host_capabilities(dependencies: dict[str, Any], errors: list[str]) -> dict[str, str]:
-    host_caps: dict[str, Any] | None = dependencies.get("hostCapabilities")
+def _validate_host_capabilities(
+    dependencies: dict[str, object], errors: list[str]
+) -> dict[str, str]:
+    host_caps = _section(dependencies, "hostCapabilities", "dependencies.hostCapabilities", errors)
     parsed: dict[str, str] = {}
     if host_caps is None:
         return parsed
@@ -412,7 +425,7 @@ def _validate_host_capabilities(dependencies: dict[str, Any], errors: list[str])
                 f"dependencies.hostCapabilities: unknown capability {ckey!r} "
                 f"(one of {', '.join(sorted(HOST_CAPABILITIES))})"
             )
-        elif cval not in allowed:
+        elif not isinstance(cval, str) or cval not in allowed:
             errors.append(
                 f"dependencies.hostCapabilities.{ckey}: {cval!r} is not one of {'/'.join(allowed)}"
             )
@@ -421,8 +434,8 @@ def _validate_host_capabilities(dependencies: dict[str, Any], errors: list[str])
     return parsed
 
 
-def _validate_dependencies(data: dict[str, Any], errors: list[str]) -> Dependencies:
-    dependencies: dict[str, Any] | None = data.get("dependencies")
+def _validate_dependencies(data: dict[str, object], errors: list[str]) -> Dependencies:
+    dependencies = _section(data, "dependencies", "dependencies", errors)
     if dependencies is None:
         return Dependencies(plugins={}, python_packages={}, host_capabilities={})
     for dkey in dependencies:
@@ -435,8 +448,8 @@ def _validate_dependencies(data: dict[str, Any], errors: list[str]) -> Dependenc
     )
 
 
-def _validate_lifecycle(data: dict[str, Any], errors: list[str]) -> Lifecycle:
-    lifecycle: dict[str, Any] | None = data.get("lifecycle")
+def _validate_lifecycle(data: dict[str, object], errors: list[str]) -> Lifecycle:
+    lifecycle = _section(data, "lifecycle", "lifecycle", errors)
     if lifecycle is None:
         return Lifecycle(entry=None, activation="immediate", dispose="effect-registry")
     for lkey in lifecycle:
@@ -455,12 +468,12 @@ def _validate_lifecycle(data: dict[str, Any], errors: list[str]) -> Lifecycle:
         errors.append(f"lifecycle.dispose: {dispose!r} unsupported — 'effect-registry' or 'none'")
     return Lifecycle(
         entry=entry if isinstance(entry, str) else None,
-        activation=activation,
-        dispose=dispose,
+        activation=activation if isinstance(activation, str) else "immediate",
+        dispose=dispose if isinstance(dispose, str) else "effect-registry",
     )
 
 
-def validate(data: dict[str, Any]) -> PluginManifest:
+def validate(data: dict[str, object]) -> PluginManifest:
     errors: list[str] = []
     name, version, description = _validate_identity(data, errors)
     parsed_engines = _validate_engines(data, errors)
@@ -499,10 +512,10 @@ def load_manifest(pkg_dir: Path) -> PluginManifest:
     except OSError as e:
         raise ManifestError(f"cannot read {path}: {e}") from e
     try:
-        data = json.loads(raw)
+        data = object_of(json.loads, raw)
     except json.JSONDecodeError as e:
         raise ManifestError(f"{path} is not valid JSON: {e}") from e
-    if not _is_str_dict(data):
+    if not is_object_dict(data):
         raise ManifestError(f"{path}: manifest must be a JSON object; got {type(data).__name__}")
     return validate(data)
 

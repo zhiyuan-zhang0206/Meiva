@@ -103,6 +103,18 @@ def skill_view(prompt: Prompt, *, home: Path, environ: Mapping[str, str]) -> Ski
     return view
 
 
+# meiva:note
+# The `description` of the configured MCP server `server`: None when it gave none, and a `TypeError` naming
+# the server when it gave a non-string (the same reading as `meiva.mcps`).
+def _description(server: str, spec: Mapping[str, object]) -> str | None:
+    description = spec.get("description")
+    if description is None:
+        return None
+    if not isinstance(description, str):
+        raise TypeError(f"{server}: description must be a string, got {type(description).__name__}")
+    return description
+
+
 def read_mcp_servers(disabled: Sequence[str], *, home: Path) -> tuple[McpServer, ...]:
     if disabled_by_sdk_config("mcps", disabled):
         return ()
@@ -110,7 +122,7 @@ def read_mcp_servers(disabled: Sequence[str], *, home: Path) -> tuple[McpServer,
 
     configured = load_mcp_config(home=home)
     return tuple(
-        McpServer(name, configured[name].get("description")) for name in sorted(configured)
+        McpServer(name, _description(name, configured[name])) for name in sorted(configured)
     )
 
 

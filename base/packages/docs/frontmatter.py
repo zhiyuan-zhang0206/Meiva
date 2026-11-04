@@ -25,6 +25,8 @@ from typing import TypeGuard
 
 import yaml
 
+from base.host.boundary.untyped import object_of
+
 
 def _is_str_object_dict(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict)
@@ -88,7 +90,7 @@ def parse_frontmatter(content: str) -> tuple[dict[str, str], str]:
     fm_text, body = split
 
     try:
-        parsed: object = yaml.safe_load(fm_text)
+        parsed = object_of(yaml.safe_load, fm_text)
     except yaml.YAMLError as e:
         raise FrontmatterError(f"invalid YAML in frontmatter: {e}") from e
 
@@ -126,7 +128,7 @@ def parse_frontmatter_typed(content: str) -> tuple[dict[str, object], str] | Non
         return None
     fm_text, body = split
     try:
-        parsed: object = yaml.safe_load(fm_text)
+        parsed = object_of(yaml.safe_load, fm_text)
     except yaml.YAMLError:
         return None
     if not _is_str_object_dict(parsed):

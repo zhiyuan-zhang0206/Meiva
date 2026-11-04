@@ -4,11 +4,12 @@ from collections.abc import Callable, Collection, Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeGuard
 
 from pydantic import BaseModel, ValidationError
 from pydantic.fields import FieldInfo
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.packages.plugin_config_contracts import ConfigImage, PluginConfigChangedError
 from base.packages.plugins import (
     all_plugin_configs,
@@ -101,20 +102,16 @@ def _instantiate_from_disk(owner: ConfigImage) -> BaseModel:
     return with_cluster_policy(owner.name, config_from_image(owner.cls, owner.read(), owner.path))
 
 
-def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
-    return isinstance(value, dict)
-
-
 def _reconcile_config_image[C: BaseModel](
     cls: type[C], content: str | None, config_path: Path
 ) -> tuple[C, set[str], set[str]]:
     if content is None:
         return cls(), set(cls.model_fields), set()
     try:
-        data = json.loads(content)
+        data = object_of(json.loads, content)
     except json.JSONDecodeError as exc:
         raise InvalidConfigData(f"plugin disk image JSON malformed ({config_path}): {exc}") from exc
-    if not _is_str_dict(data):
+    if not is_object_dict(data):
         raise InvalidConfigData(f"plugin config disk image must be a JSON object ({config_path})")
     disk_keys = set(data)
     cls_keys = set(cls.model_fields)
@@ -152,9 +149,9 @@ def merge_disk_image_schema(owner: ConfigImage) -> tuple[set[str], set[str]]:
     return added, removed
 
 
-def _schema_extra(info: FieldInfo) -> dict[str, Any]:
+def _schema_extra(info: FieldInfo) -> dict[str, object]:
     extra = info.json_schema_extra
-    return extra if _is_str_dict(extra) else {}
+    return extra if is_object_dict(extra) else {}
 
 
 def _per_agent_fields_for(cls: type[BaseModel]) -> set[str]:
@@ -354,7 +351,7 @@ def validate_config_overlay_shape(
                     by_domain.setdefault(domain_of(f), {})[f] = v
                 models = domain_model_classes()
                 for dom, upd in by_domain.items():
-                    cls = models[dom]
+                    cls: type[BaseModel] = models[dom]
                     sub = cls()
                     cls.model_validate({**sub.model_dump(), **upd})
             else:

@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
+from base.host.boundary.untyped import object_of
 from base.lm.catalog import CatalogBuilder, ModelCatalog
 from base.lm.pricing.archive import load_archive
 from base.packages.plugins.extensions import PluginContributions
@@ -70,14 +71,14 @@ def _declaration(
         return declaration_of(module)
     if hasattr(module, "contribute"):
         raise ValueError(f"provider {name!r} declares both configure() and contribute()")
-    configure = module.configure
+    configure = object_of(getattr, module, "configure")
     if not callable(configure):
         raise TypeError(f"provider {name!r} configure must be callable")
     cls = declared_config_class(name, plugin_dir)
     if cls is None:
         raise ValueError(f"configured provider {name!r} requires a default_config.py schema")
     config = read_plugin_config(name, cls, disk_image_path(name, home=home))
-    contributions = configure(config)
+    contributions = object_of(configure, config)
     if not isinstance(contributions, PluginContributions):
         raise TypeError(f"provider {name!r} configure() did not return PluginContributions")
     return contributions

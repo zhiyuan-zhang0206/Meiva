@@ -25,6 +25,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from base.host.boundary.untyped import object_of
 from base.packages.plugins import config_from_image, load_report
 from base.packages.plugins.extensions import PluginContributions
 
@@ -75,10 +76,12 @@ def _read(name: str, face_py: Path) -> PluginContributions:
         sys.modules[dotted] = module
         try:
             spec.loader.exec_module(module)
-            contribute = getattr(module, "contribute", None)
+            contribute = object_of(getattr, module, "contribute", None)
             if contribute is None:
                 raise AttributeError(f"{face_py} has no contribute()")
-            contributions = contribute()
+            if not callable(contribute):
+                raise TypeError(f"{face_py} contribute is not callable")
+            contributions = object_of(contribute)
         finally:
             if held is None:
                 sys.modules.pop(dotted, None)

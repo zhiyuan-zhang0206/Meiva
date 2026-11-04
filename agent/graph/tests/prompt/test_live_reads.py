@@ -88,6 +88,16 @@ def test_configured_servers_are_read_with_their_descriptions() -> None:
 
 
 # meiva:note
+# A server's `description` that is not a string stops the read and names the server, as `meiva.mcps` does.
+def test_a_server_description_that_is_not_a_string_names_the_server() -> None:
+    config = {"mcpServers": {"alpha": {"command": "alpha-server", "description": 7}}}
+    (meiva_home() / "mcp.json").write_text(json.dumps(config), encoding="utf-8")
+
+    with pytest.raises(TypeError, match="alpha: description must be a string, got int"):
+        read_mcp_servers((), home=meiva_home())
+
+
+# meiva:note
 # The skill and MCP readers look under the home they are handed, not the process's own.
 def test_the_readers_look_under_the_home_they_are_handed(tmp_path: Path) -> None:
     other = tmp_path / "other-home"

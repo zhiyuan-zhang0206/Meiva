@@ -23,6 +23,7 @@ Reads use the process's constructed Settings domains. An unavailable domain
 fails explicitly; a read never constructs a second Settings image.
 """
 
+from base.host.boundary.untyped import object_of
 from base.host.env.config_lite_table import FIELD_DOMAINS, SENSITIVE_FIELDS
 from base.packages.plugins.plugin_errors import (
     FlagDomainUnavailable as FlagDomainUnavailable,
@@ -55,7 +56,7 @@ def read_declared_flag(key: str, flags: tuple[str, ...]) -> object:
 
     if not settings.has_domain(domain):
         raise FlagDomainUnavailable(f"declared core flag {key!r} is unavailable in this profile")
-    return getattr(getattr(settings, domain), field)
+    return object_of(getattr, object_of(getattr, settings, domain), field)
 
 
 # meiva:note

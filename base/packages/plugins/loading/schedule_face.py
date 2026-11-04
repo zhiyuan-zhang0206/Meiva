@@ -14,6 +14,7 @@ from typing import TypeGuard
 
 from pydantic import BaseModel
 
+from base.host.boundary.untyped import object_of
 from base.packages.plugins import config_face, enable_config, load_report
 from base.packages.plugins.manifest import load_manifest
 from base.packages.plugins.surface.schedules import ScheduleSpec, StatCardSpec
@@ -54,7 +55,7 @@ def declared_schedules(plugin: str, plugin_dir: Path, *, home: Path) -> tuple[Sc
 
     cfg = resolve_plugin_config_for_face(plugin, plugin_dir, home=home)
     module = _load_face_module(f"plugins.{plugin}._schedules_face", face_py)
-    contribute = getattr(module, "contribute", None)
+    contribute = object_of(getattr, module, "contribute", None)
     if contribute is None or not callable(contribute):
         raise AttributeError(f"{face_py} has no contribute()")
 
@@ -115,7 +116,7 @@ def declared_ui_stats(plugin: str, plugin_dir: Path, *, home: Path) -> tuple[Sta
 
     cfg = resolve_plugin_config_for_face(plugin, plugin_dir, home=home)
     module = _load_face_module(f"plugins.{plugin}._ui_stats_face", face_py)
-    contribute = getattr(module, "contribute", None)
+    contribute = object_of(getattr, module, "contribute", None)
     if contribute is None or not callable(contribute):
         raise AttributeError(f"{face_py} has no contribute()")
 
