@@ -25,6 +25,8 @@ from base.host.boundary.fields import (
     optional_float_field,
     optional_list_field,
     str_field,
+    typed_optional_int_field,
+    typed_optional_str_field,
 )
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.sessions.pty import protocol
@@ -233,29 +235,6 @@ def _float_field(row: Mapping[str, object], key: str) -> float:
 
 
 # meiva:note
-# The text `row[key]` holds, None when the key is absent or null; any other type raises, so a
-# corrupt row never reads as "no value".
-def _nullable_str(row: Mapping[str, object], key: str) -> str | None:
-    value = row.get(key)
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise TypeError(f"{key} is {type(value).__name__}, not text")
-    return value
-
-
-# meiva:note
-# The integer twin of `_nullable_str` (a bool is not an integer here).
-def _nullable_int(row: Mapping[str, object], key: str) -> int | None:
-    value = row.get(key)
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError(f"{key} is {type(value).__name__}, not int")
-    return value
-
-
-# meiva:note
 # One row of a `list` answer. The service writes every key of `SessionInfo`; the nullable ones
 # (`starttime`, `generation`) are present as null, `initial_command` only when it was asked for.
 def _session_info(row: object) -> SessionInfo:
@@ -265,12 +244,12 @@ def _session_info(row: object) -> SessionInfo:
         name=str_field(row, "name"),
         pid=int_field(row, "pid"),
         create_time=_float_field(row, "create_time"),
-        starttime=_nullable_int(row, "starttime"),
+        starttime=typed_optional_int_field(row, "starttime"),
         cmd=str_field(row, "cmd"),
         cwd=str_field(row, "cwd"),
         started_at=_float_field(row, "started_at"),
-        generation=_nullable_str(row, "generation"),
-        initial_command=_nullable_str(row, "initial_command"),
+        generation=typed_optional_str_field(row, "generation"),
+        initial_command=typed_optional_str_field(row, "initial_command"),
     )
 
 
