@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, NotRequired, TypedDict
+from typing import NotRequired, TypedDict
 
 from base.events.vocabulary import EventSpec, telemetry_event
 
@@ -13,7 +13,7 @@ class SdkCall(TypedDict):
     fn: str
     duration: float
     sample_rate: int
-    detail: NotRequired[dict[str, Any]]
+    detail: NotRequired[dict[str, object]]
 
 
 class PluginActivation(TypedDict):

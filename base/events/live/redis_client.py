@@ -11,9 +11,10 @@ not `aclose()` it.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import socket
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any, TypeGuard
+from typing import TypedDict, TypeGuard
 
 import redis as _redis_sync
 import redis.asyncio as aredis
@@ -29,6 +30,7 @@ from base.events.live.redis_resilience import (
     keepalive_options,
     should_warn_publish_failure,
 )
+from base.host.boundary.untyped import object_of
 from base.host.net.predicates import is_ipv4_literal
 from base.log import logger
 
@@ -40,12 +42,24 @@ from base.log import logger
 # Values live in base/events/live/redis_resilience.py — the single source both this
 # module and redis_listener import (audit 2026-08-08 P2).
 
+
 # socket_timeout must be None EXPLICITLY: since redis-py 5 the constructor
 # default is 5s (DEFAULT_SOCKET_TIMEOUT), and a blanket 5s read timeout
 # periodically cuts pubsub.listen()'s long blocking read (the hosted
 # agent-host dispatcher reconnect-looped every 5s of idle — 2026-08-30 soak
 # startup). Keepalive + health_check detect dead links without that side effect.
-RESILIENCE_KWARGS: dict[str, Any] = {
+# meiva:note
+# The keyword arguments redis-py's `from_url` / `Redis` take for connection resilience, by name, so
+# a splat of them is checked against what this module meant to pass.
+class RedisResilience(TypedDict):
+    socket_timeout: float | None
+    socket_keepalive: bool
+    socket_keepalive_options: dict[int, int]
+    socket_connect_timeout: float
+    health_check_interval: float
+
+
+RESILIENCE_KWARGS: RedisResilience = {
     "socket_timeout": None,
     "socket_keepalive": True,
     "socket_keepalive_options": keepalive_options(),
@@ -124,8 +138,8 @@ class TransportAwareAsyncConnection(aredis.Connection):
         # once the writer itself was closed, and `transport.is_closing()` is
         # True exactly when connection_lost fired (or close() was called) —
         # either way the socket can no longer carry writes.
-        transport = getattr(self._writer, "transport", None)
-        return not (transport is not None and transport.is_closing())
+        transport = object_of(getattr, self._writer, "transport", None)
+        return not (isinstance(transport, asyncio.BaseTransport) and transport.is_closing())
 
 
 # meiva:note
@@ -200,6 +214,21 @@ def retry_auth_failures_sync[T](operation: Callable[[], T], *, auth_retry: AuthR
             waited_s += delay_s
 
 
+# meiva:note
+# redis-py's `execute_command` is typed with unknown parameters, so the retry wrapper reaches the base
+# class's method by name and calls it through `object`: `_base_execute` returns the unbound method of
+# `owner`, which the wrapper then calls with `self` and its own arguments unchanged.
+def _base_execute(owner: type) -> Callable[..., object]:
+    execute = object_of(getattr, owner, "execute_command")
+    if not callable(execute):
+        raise TypeError(f"{owner.__name__}.execute_command is not callable")
+    return execute
+
+
+async def _awaited(pending: Awaitable[object]) -> object:
+    return await pending
+
+
 class AuthRetryAsyncRedis(aredis.Redis):
     """Redis client whose ordinary async commands survive ACL re-affirmation."""
 
@@ -209,8 +238,10 @@ class AuthRetryAsyncRedis(aredis.Redis):
         self, *args: object, auth_retry: bool = True, **options: object
     ) -> object:
         async def _execute() -> object:
-            cls_any: Any = aredis.Redis
-            return await cls_any.execute_command(self, *args, **options)
+            pending = _base_execute(aredis.Redis)(self, *args, **options)
+            if not inspect.isawaitable(pending):
+                raise TypeError("redis-py async execute_command did not answer an awaitable")
+            return await _awaited(pending)
 
         return (
             await retry_auth_failures_async(_execute, auth_retry=self._auth_retry)
@@ -226,8 +257,7 @@ class AuthRetrySyncRedis(_redis_sync.Redis):
 
     def execute_command(self, *args: object, auth_retry: bool = True, **options: object) -> object:
         def _execute() -> object:
-            cls_any: Any = _redis_sync.Redis
-            return cls_any.execute_command(self, *args, **options)
+            return _base_execute(_redis_sync.Redis)(self, *args, **options)
 
         return (
             retry_auth_failures_sync(_execute, auth_retry=self._auth_retry)
@@ -248,13 +278,14 @@ def open_async_redis(
     client because they own a socket per subscription, while ordinary commands
     still receive the same ACL-transition retry policy.
     """
-    raw_client: Any = AuthRetryAsyncRedis.from_url(  # pyright: ignore[reportUnknownMemberType] — redis-py types from_url's **kwargs as Unknown; the call is fully typed.
+    client = AuthRetryAsyncRedis.from_url(  # pyright: ignore[reportUnknownMemberType] — redis-py types from_url's **kwargs as Unknown; the call is fully typed.
         redis_url,
         decode_responses=decode_responses,
         connection_class=TransportAwareAsyncConnection,
         **RESILIENCE_KWARGS,
     )
-    client: AuthRetryAsyncRedis = raw_client
+    if not isinstance(client, AuthRetryAsyncRedis):
+        raise TypeError(f"from_url answered {type(client).__name__}, not AuthRetryAsyncRedis")
     client._auth_retry = auth_retry
     return client
 
@@ -400,12 +431,13 @@ def open_sync_redis(
     auth_retry: AuthRetry,
 ) -> AuthRetrySyncRedis:
     """A new synchronous client on `redis_url` with the cluster's resilience settings."""
-    raw_client: Any = AuthRetrySyncRedis.from_url(  # pyright: ignore[reportUnknownMemberType] — redis-py types from_url's **kwargs as Unknown; the call is fully typed.
+    client = AuthRetrySyncRedis.from_url(  # pyright: ignore[reportUnknownMemberType] — redis-py types from_url's **kwargs as Unknown; the call is fully typed.
         redis_url,
         decode_responses=decode_responses,
         connection_class=PinnedIPv4Connection,
         **RESILIENCE_KWARGS,
     )
-    client: AuthRetrySyncRedis = raw_client
+    if not isinstance(client, AuthRetrySyncRedis):
+        raise TypeError(f"from_url answered {type(client).__name__}, not AuthRetrySyncRedis")
     client._auth_retry = auth_retry
     return client

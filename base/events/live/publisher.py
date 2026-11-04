@@ -35,12 +35,15 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Awaitable
 from contextlib import suppress
 
 import redis.asyncio as aredis
 from redis.exceptions import AuthenticationError, NoPermissionError
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
+
+from base.host.boundary.json_values import is_object_list
 
 from ...log import logger
 from .redis_client import retry_auth_failures_async
@@ -54,6 +57,13 @@ _DEFAULT_PUBLISH_TIMEOUT_S = 2.0
 _DEFAULT_DRAIN_TIMEOUT_S = 2.0
 _WARN_INTERVAL_S = 5.0  # rate-limit dropped-event warnings under sustained loss
 _BATCH_SIZE = 64  # events drained per pipeline round-trip (see _run)
+
+
+# meiva:note
+# What redis-py's `execute` coroutine answers, read as `object`: its stub types the replies `Any`, and a
+# parameter typed `Awaitable[object]` takes the coroutine without naming the `Any`.
+async def _awaited(pending: Awaitable[object]) -> object:
+    return await pending
 
 
 class AgentEventPublisher:
@@ -193,7 +203,10 @@ class AgentEventPublisher:
             for payload in batch:
                 # redis-py types publish()'s **kwargs as Unknown; the call itself is fully typed.
                 pipe.publish(self._events_channel, payload)  # pyright: ignore[reportUnknownMemberType]
-            results = await pipe.execute(raise_on_error=False)
+            executed = await _awaited(pipe.execute(raise_on_error=False))
+            if not is_object_list(executed):
+                raise TypeError("redis-py pipeline.execute did not answer a list")
+            results: list[object] = executed
             for result in results:
                 if isinstance(result, BaseException) and not isinstance(result, _PUBLISH_ERRORS):
                     raise result

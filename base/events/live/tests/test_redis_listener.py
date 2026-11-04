@@ -21,6 +21,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import pytest
 import redis.asyncio as aredis
+from redis.asyncio.client import PubSub
 from redis.exceptions import NoPermissionError
 
 from base.clock import SYSTEM_TIMERS
@@ -715,7 +716,7 @@ class TestDeadTransportSurvival:
         try:
             await listener.ensure_listening()
             pubsub = listener._pubsub
-            assert pubsub is not None
+            assert isinstance(pubsub, PubSub)
             conn = pubsub.connection
             assert conn is not None
             writer = conn._writer

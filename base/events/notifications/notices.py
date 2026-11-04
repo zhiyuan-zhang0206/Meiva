@@ -2,14 +2,26 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 
 import psycopg
+from psycopg.rows import class_row
 
 from base.events.notifications.publish import deliver_in_transaction
 
 _SELECT_NOTICE = (
     "SELECT require_response, title, content, question FROM agent_notices WHERE id = %s"
 )
+
+
+# meiva:note
+# The columns of `_SELECT_NOTICE`, by name; `question` is whatever JSON the agent attached.
+@dataclass(frozen=True)
+class _NoticeRow:
+    require_response: bool
+    title: str
+    content: str | None
+    question: object
 
 
 def question_fingerprint(question: object) -> str:
@@ -54,19 +66,19 @@ def notice_href(notice_id: int) -> str:
 def stage_notice_notification(
     conn: psycopg.Connection, *, agent_id: int, notice_id: int
 ) -> int | None:
-    row = conn.execute(_SELECT_NOTICE, (notice_id,)).fetchone()
+    with conn.cursor(row_factory=class_row(_NoticeRow)) as cur:
+        row = cur.execute(_SELECT_NOTICE, (notice_id,)).fetchone()
     if row is None:
         return None
-    require_response, title, content, question = row
-    if not require_response:
+    if not row.require_response:
         return None
     staged = deliver_in_transaction(
         conn,
         category_id="core.needs_input",
-        subject=title,
-        body=content,
+        subject=row.title,
+        body=row.content,
         href=notice_href(notice_id),
-        dedupe_key=notice_dedupe_key(notice_id, question),
+        dedupe_key=notice_dedupe_key(notice_id, row.question),
         agent_id=agent_id,
     )
     return None if staged is None else staged.id

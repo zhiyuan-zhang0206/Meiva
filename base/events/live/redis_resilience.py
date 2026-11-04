@@ -90,7 +90,7 @@ def compute_auth_retry_delay(
     if remaining_s <= 0:
         return 0.0
     exponential_cap = min(
-        policy.initial_delay_s * (2 ** (failure_count - 1)),
+        policy.initial_delay_s * (2.0 ** (failure_count - 1)),
         policy.delay_cap_s,
         remaining_s,
     )

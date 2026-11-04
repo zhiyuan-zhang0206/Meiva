@@ -19,10 +19,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, LiteralString
+from typing import LiteralString
 
 import psycopg
-from psycopg.rows import dict_row
+from psycopg.rows import TupleRow, class_row
 
 __all__ = ["Episode", "ResolveReason", "SignalSeverity", "open_or_touch", "resolve"]
 
@@ -111,32 +111,54 @@ RETURNING *
 
 
 # meiva:note
-# Rows are read through a mapping cursor this module owns, not through whatever factory the
+# The columns of `signal_state`, by name; `severity` is still the stored text here and `_episode` makes it a
+# `SignalSeverity`.
+@dataclass(frozen=True)
+class _EpisodeRow:
+    id: int
+    source: str
+    subject: str
+    condition: str
+    severity: str
+    opened_at: datetime
+    last_seen: datetime
+    count: int
+    first_event_id: int | None
+    last_event_id: int | None
+    resolved_at: datetime | None
+    resolve_reason: str | None
+    evidence_ref: str | None
+    acked_by: int | None
+    acked_at: datetime | None
+
+
+# meiva:note
+# Rows are read through a row factory this module owns, not through whatever factory the
 # caller configured: a database surface must not change shape with its caller's connection.
-def _episode(row: Mapping[str, Any]) -> Episode:
+def _episode(row: _EpisodeRow) -> Episode:
     return Episode(
-        id=row["id"],
-        source=row["source"],
-        subject=row["subject"],
-        condition=row["condition"],
-        severity=SignalSeverity(row["severity"]),
-        opened_at=row["opened_at"],
-        last_seen=row["last_seen"],
-        count=row["count"],
-        first_event_id=row["first_event_id"],
-        last_event_id=row["last_event_id"],
-        resolved_at=row["resolved_at"],
-        resolve_reason=row["resolve_reason"],
-        evidence_ref=row["evidence_ref"],
-        acked_by=row["acked_by"],
-        acked_at=row["acked_at"],
+        id=row.id,
+        source=row.source,
+        subject=row.subject,
+        condition=row.condition,
+        severity=SignalSeverity(row.severity),
+        opened_at=row.opened_at,
+        last_seen=row.last_seen,
+        count=row.count,
+        first_event_id=row.first_event_id,
+        last_event_id=row.last_event_id,
+        resolved_at=row.resolved_at,
+        resolve_reason=row.resolve_reason,
+        evidence_ref=row.evidence_ref,
+        acked_by=row.acked_by,
+        acked_at=row.acked_at,
     )
 
 
 def _one(
-    conn: psycopg.Connection[Any], statement: LiteralString, params: Mapping[str, Any]
+    conn: psycopg.Connection[TupleRow], statement: LiteralString, params: Mapping[str, object]
 ) -> Episode | None:
-    with conn.cursor(row_factory=dict_row) as cursor:
+    with conn.cursor(row_factory=class_row(_EpisodeRow)) as cursor:
         cursor.execute(statement, params)
         row = cursor.fetchone()
     return None if row is None else _episode(row)
@@ -147,7 +169,7 @@ def _one(
 # may touch a signal for a reading it did not record as an event -- but when it passes one, that
 # event becomes the newest evidence and the first one is kept as the episode's origin.
 def open_or_touch(
-    conn: psycopg.Connection[Any],
+    conn: psycopg.Connection[TupleRow],
     *,
     source: str,
     subject: str,
@@ -155,7 +177,7 @@ def open_or_touch(
     severity: SignalSeverity,
     event_id: int | None = None,
 ) -> Episode:
-    params: dict[str, Any] = {
+    params: dict[str, object] = {
         "source": source,
         "subject": subject,
         "condition": condition,
@@ -172,7 +194,7 @@ def open_or_touch(
 # The one write a resolver makes: the condition is gone. `None` means there was nothing open to
 # close -- a re-derived verdict arriving after someone else closed it, which is a no-op.
 def resolve(
-    conn: psycopg.Connection[Any],
+    conn: psycopg.Connection[TupleRow],
     *,
     source: str,
     subject: str,
@@ -180,7 +202,7 @@ def resolve(
     reason: ResolveReason | str,
     evidence_ref: str | None = None,
 ) -> Episode | None:
-    params: dict[str, Any] = {
+    params: dict[str, object] = {
         "source": source,
         "subject": subject,
         "condition": condition,

@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 
 from redis.asyncio.client import PubSub as _RedisPubSub
 
@@ -67,7 +67,7 @@ async def test_the_wait_deadline_is_read_from_the_timers_it_is_handed() -> None:
 async def test_a_lost_connection_backs_off_on_the_timers_it_is_handed() -> None:
     timers = ManualTimers()
 
-    def _refuse(*args: object, **kwargs: object) -> object:
+    def _refuse(*args: object, **kwargs: object) -> NoReturn:
         raise OSError("no route to the cluster redis")
 
     listener = RedisInboundListener(

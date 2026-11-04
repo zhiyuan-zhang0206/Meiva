@@ -25,6 +25,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TypeGuard
 
+from base.host.boundary.untyped import object_of
+
 __all__ = [
     "Alarm",
     "acknowledge",
@@ -208,7 +210,7 @@ def _is_object(value: object) -> TypeGuard[dict[str, object]]:
 
 def _parsed(raw: str) -> dict[str, object] | None:
     try:
-        decoded: object = json.loads(raw)
+        decoded = object_of(json.loads, raw)
     except ValueError:
         return None
     return decoded if _is_object(decoded) else None

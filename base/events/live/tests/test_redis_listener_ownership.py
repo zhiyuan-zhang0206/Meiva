@@ -29,7 +29,7 @@ class PubSub:
         self.parent: asyncio.Task[object] | None = None
         self.message: dict[str, str] | None = None
 
-    async def subscribe(self, channel: str) -> None:
+    async def subscribe(self, *channels: str) -> None:
         self.task = asyncio.current_task()
         self.subscribed.set()
         if self.hold_subscribe:
@@ -48,7 +48,9 @@ class PubSub:
     async def ping(self) -> None:
         return
 
-    async def get_message(self, **kwargs: object) -> dict[str, str] | None:
+    async def get_message(
+        self, ignore_subscribe_messages: bool = False, timeout: float | None = 0.0
+    ) -> dict[str, str] | None:
         self.task = asyncio.current_task()
         self.reading.set()
         try:
@@ -332,7 +334,7 @@ async def test_completed_active_open_stays_owned_until_caller_claims_error(
     error = LateError("active result stays with caller")
 
     class ReceiptPubSub(PubSub):
-        async def subscribe(self, channel: str) -> None:
+        async def subscribe(self, *channels: str) -> None:
             task = asyncio.current_task()
             assert task is not None
 
@@ -340,7 +342,7 @@ async def test_completed_active_open_stays_owned_until_caller_claims_error(
                 retained.append(completed in listener._operations)
 
             task.add_done_callback(receipt)
-            await super().subscribe(channel)
+            await super().subscribe(*channels)
 
     pubsub = ReceiptPubSub()
     pubsub.error = error
