@@ -110,6 +110,41 @@ def test_a_step_that_fails_stops_the_preparation_where_it_is(
     assert not (outside / ".metadata_never_index").exists()
 
 
+# meiva:note
+# An advisory converge step is preparation an optional consumer needs, so its failure must
+# not end the preparation: the host has to come up and its later phases still run (a cold
+# start returns 1 at the converge step, which would leave the node down -- #6233).
+def test_an_advisory_converge_failure_still_prepares_the_host(
+    start_run: StartRun, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run = start_run
+    cold, spans = _cold(run)
+
+    def boom(_ctx: object) -> None:
+        raise RuntimeError("the npm prefix is root-owned")
+
+    cold = dataclasses.replace(
+        cold,
+        converge_steps=(
+            ConvergeStep("external harness CLIs", boom, advisory=True),
+            ConvergeStep("$MEIVA_HOME dir skeleton", ensure_meiva_home_dirs),
+        ),
+    )
+    seen = len(spans)
+
+    rc = prepare_cold_start(
+        cold, run.roster(RUNNER, only=("pty-sessions",)), retained_children=run.children
+    )
+
+    assert rc == 0
+    phases = _phases_after(spans, seen)
+    assert phases[0] == "converge host"
+    assert "migrations" in phases, "an advisory failure does not end the preparation"
+    captured = capsys.readouterr()
+    assert "converge finished with warnings" in captured.err
+    assert "npm prefix is root-owned" in captured.err
+
+
 _SKILL = """---
 name: {name}
 description: a test skill, use when exercising what a cold start does with extensions

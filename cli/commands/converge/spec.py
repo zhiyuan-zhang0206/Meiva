@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -97,3 +97,24 @@ class ConvergeStep:
     # Empty means shared host/cluster preparation. Otherwise one selected
     # consumer is required; role membership alone does not select a service.
     services: frozenset[str] = frozenset()
+    # meiva:note
+    # A step whose failure is reported and summarized but does not stop the run: the host is
+    # fully usable without it, and the steps after it do not depend on it. Reserve this for
+    # host preparation that only a later, optional consumer needs -- aborting there leaves
+    # every later step unapplied, which is how a mis-pinned external CLI once kept a host's
+    # OS jobs (crontab) from being registered at all (2026-11-04, #6233).
+    advisory: bool = False
+
+
+# meiva:note
+# Advisory steps failed while every blocking step in the table applied.
+#
+# Carries the failing step names so a caller that must keep going (a cold start, where the
+# host still has to come up) can tell this apart from a converge that stopped early.
+class ConvergeAdvisoryError(RuntimeError):
+    def __init__(self, failures: Sequence[tuple[str, str]]) -> None:
+        self.failures = tuple(failures)
+        super().__init__(
+            "converge finished with advisory failures (everything else applied): "
+            + "; ".join(f"{name}: {reason}" for name, reason in self.failures)
+        )

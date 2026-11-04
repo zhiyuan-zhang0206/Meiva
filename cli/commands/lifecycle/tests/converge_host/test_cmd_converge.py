@@ -132,20 +132,21 @@ def test_a_second_converge_changes_nothing_in_the_users_shell(converge: _Converg
 
 
 # meiva:note
-# A step that cannot apply stops the converge where it is and leaves the marker `meiva status`
-# reports, because `meiva start` goes on to bring the services up past it; only a converge that
-# completes clears the marker.
-def test_a_failing_step_stops_converge_and_leaves_the_marker_until_one_completes(
+# A step that cannot apply still leaves the marker `meiva status` reports, and the rest of the
+# table runs anyway: one broken step must not decide whether the host's other repairs happen
+# (2026-11-04, #6233). Only a converge without a blocking failure clears the marker.
+def test_a_failing_step_leaves_the_marker_and_the_rest_of_the_table_still_runs(
     converge: _Converge, capsys: pytest.CaptureFixture[str]
 ) -> None:
     converge.command.config.set_field("require_github_pr", True)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="converge failed: github PR capability"):
         converge.run()
 
     captured = capsys.readouterr()
     assert "  ✗ github PR capability" in captured.err
-    assert "macOS firewall allow list" not in captured.out, "the steps after it never ran"
+    assert "  ✓ macOS firewall allow list" in captured.out, "the steps after it still ran"
+    assert "step(s) failed; every other step applied: github PR capability" in captured.err
     recorded = read_incomplete(converge.home)
     assert recorded is not None and recorded.step == "github PR capability"
     assert (converge.home / "logs").is_dir(), "the steps before it were applied"

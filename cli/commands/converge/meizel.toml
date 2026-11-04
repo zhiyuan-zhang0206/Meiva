@@ -1,7 +1,8 @@
-exports = ["brew_pin.py", "firewall.py", "firewall_command.py", "frontend_env.py", "harness_clis.py", "health_preflight.py", "incomplete.py", "os_jobs.py", "ownership_preflight.py", "plans", "redis_bridge.py", "rendered_file.py", "spec.py", "steps.py", "telemetry_token.py", "tests", "walg.py"]
+exports = ["brew_pin.py", "firewall.py", "firewall_command.py", "frontend_env.py", "harness_clis.py", "health_preflight.py", "incomplete.py", "os_jobs.py", "ownership_preflight.py", "plans", "redis_bridge.py", "rendered_file.py", "runner.py", "spec.py", "steps.py", "telemetry_token.py", "tests", "walg.py"]
 
 [uses]
 "brew_pin.py" = ["spec.py"]
+"runner.py" = ["incomplete.py", "plans", "spec.py"]
 "firewall.py" = ["plans", "spec.py"]
 "firewall_command.py" = ["firewall.py", "plans"]
 "frontend_env.py" = ["spec.py"]
