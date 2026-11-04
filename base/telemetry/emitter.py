@@ -137,8 +137,9 @@ def init_telemetry(
         process_state["pipeline"] = pipeline
     process_state["process"] = process
     process_state["agent_id"] = agent_id
+    process_state["home"] = home
     if machine_reader is not None or process_state["machine"] is None:
-        process_state["machine"] = resolve_machine(machine_reader)
+        process_state["machine"] = resolve_machine(machine_reader, home=home)
     # meiva:note
     # The cluster label is materialized once, here, from the home the boot hands in: every
     # later event row reads the slot, so a process cannot emit rows that answer for another
@@ -271,9 +272,9 @@ def prepare_event(
         span_id=span_id,
         agent_id=agent_id if agent_id is not None else ambient_agent_id(),
         machine=(
-            resolve_machine(machine_reader)
+            resolve_machine(machine_reader, home=process_state["home"])
             if machine_reader is not None
-            else process_state["machine"] or resolve_machine()
+            else process_state["machine"] or resolve_machine(home=process_state["home"])
         ),
         cluster=process_state["cluster"] or UNKNOWN_CLUSTER,
         process=process_state["process"],

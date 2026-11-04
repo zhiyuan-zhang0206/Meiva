@@ -1,0 +1,10 @@
+exports = ["__init__.py", "tests"]
+
+[uses]
+"__init__.py" = ["aliases.py", "identity.py"]
+"identity.py" = ["aliases.py"]
+"tests" = ["__init__.py", "aliases.py", "identity.py"]
+
+[purity]
+"aliases.py" = "strict"
+"identity.py" = "strict"

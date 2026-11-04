@@ -2,7 +2,8 @@ exports = ["alerts", "audit_events.py", "converge_report.py", "delivery", "emitt
 
 [uses]
 "__init__.py" = ["delivery", "emitter.py", "pipeline_build.py"]
-"audit_events.py" = ["__init__.py"]
+"audit_events.py" = ["__init__.py", "delivery"]
+"delivery" = ["machine"]
 "converge_report.py" = ["emitter.py"]
 "emitter.py" = ["delivery", "observability.py"]
 "event_store.py" = ["delivery", "emitter.py"]

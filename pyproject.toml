@@ -813,6 +813,9 @@ root = "base/sessions/pty/tests"
 root = "base/sessions/tests"
 
 [[tool.pyright.executionEnvironments]]
+root = "base/telemetry/machine/tests"
+
+[[tool.pyright.executionEnvironments]]
 root = "base/telemetry/metrics/core/tests"
 
 [[tool.pyright.executionEnvironments]]

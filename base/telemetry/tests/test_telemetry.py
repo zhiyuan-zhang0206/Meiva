@@ -172,13 +172,19 @@ def test_no_span_means_null_trace() -> None:
 # ── machine / process dimensions ──────────────────────────────────────────────
 
 
-def test_machine_falls_back_to_hostname_on_explicit_missing_reader() -> None:
+# meiva:note
+# An unreadable identity is `unknown`, never the hostname: a hostname is a different identity
+# form, and writing it into `machine` made one machine count as two in every reader that
+# grouped by the column (task #6089). The hostname still reaches the data, in the diagnostic
+# value `machine_hostname`.
+def test_machine_falls_back_to_unknown_on_explicit_missing_reader() -> None:
     from base.cluster.machine import MachineNameMissing
 
     def missing() -> str:
         raise MachineNameMissing("unit is not configured")
 
-    assert telemetry.resolve_machine(missing) == socket.gethostname()
+    assert telemetry.resolve_machine(missing) == "unknown"
+    assert telemetry.machine_hostname() == socket.gethostname()
 
 
 def test_event_machine_reader_does_not_rebind_process_or_other_context(
@@ -512,3 +518,28 @@ def test_explicit_capture_precedes_closed_projection_admission() -> None:
     emitter.emit_prepared(prepared, capture=capture, producer=lambda: pipe)
     assert captured == [prepared]
     assert pipe.dropped == 1
+
+
+def test_an_unreadable_identity_is_unknown_not_a_hostname() -> None:
+    from base.cluster.machine import MachineNameMissing
+
+    def reader() -> str:
+        raise MachineNameMissing("unset")
+
+    assert telemetry.resolve_machine(reader) == "unknown"
+
+
+def test_the_home_file_answers_when_the_environment_did_not(tmp_path: Path) -> None:
+    from base.cluster.machine import MachineNameMissing
+
+    (tmp_path / ".env").write_text("MEIVA_MACHINE_NAME=company-air\n", encoding="utf-8")
+
+    def reader() -> str:
+        raise MachineNameMissing("unset")
+
+    assert telemetry.resolve_machine(reader, home=tmp_path) == "company-air"
+
+
+def test_a_reader_that_answers_wins_over_the_home_file(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text("MEIVA_MACHINE_NAME=company-air\n", encoding="utf-8")
+    assert telemetry.resolve_machine(lambda: "macmini", home=tmp_path) == "macmini"

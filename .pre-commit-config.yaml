@@ -73,6 +73,13 @@ repos:
         always_run: true
         pass_filenames: false
 
+      - id: lint-audit-machine-read
+        name: lint audit machine reads (one read path for the machine dimension)
+        entry: .venv/bin/python scripts/lint/audit_machine_direct_read.py
+        language: system
+        files: ^(base/|cli/|gateway/|agent/|services/|schedules/|db/|scripts/lint/audit_machine_direct_read\.py)
+        pass_filenames: false
+
       - id: lint-python-lock
         name: lint Python lock (canonical PyPI sources)
         entry: .venv/bin/python scripts/lint/locks/python_lock.py

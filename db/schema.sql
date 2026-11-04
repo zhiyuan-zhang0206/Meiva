@@ -2281,6 +2281,7 @@ CREATE TABLE audit_events (
     span_id         TEXT,
     agent_id        BIGINT,
     machine         TEXT NOT NULL,
+    machine_hostname TEXT,
     process         TEXT NOT NULL,
     event_name      TEXT NOT NULL,
     level           TEXT NOT NULL CHECK (level IN ('debug', 'info', 'warning', 'error', 'critical')),
@@ -2289,6 +2290,29 @@ CREATE TABLE audit_events (
     attributes      JSONB NOT NULL DEFAULT '{}'::jsonb,
     imported_from   TEXT
 );
+
+-- meiva:note
+-- The single read path for the machine dimension (task #6089): readers select this view
+-- instead of the column, so exactly one place knows the historical hostnames. A row keeps the
+-- `machine` value it was written with; `machine_canonical` adds the mapped name and
+-- `machine_mapped` says whether the mapping recognized it.
+CREATE VIEW audit_events_canonical AS
+SELECT
+    a.*,
+    CASE a.machine
+        WHEN 'Zyons-Mac-mini.local' THEN 'macmini'
+        WHEN 'zhangzhiyuandeMac-mini.local' THEN 'company-mini'
+        WHEN 'Zhiyuans-MacBook-Air-606.local' THEN 'macbook-air'
+        WHEN 'zhiyuanzhangs-MacBook-Air.local' THEN 'company-air'
+        ELSE a.machine
+    END AS machine_canonical,
+    COALESCE(a.machine IN (
+        'Zyons-Mac-mini.local',
+        'zhangzhiyuandeMac-mini.local',
+        'Zhiyuans-MacBook-Air-606.local',
+        'zhiyuanzhangs-MacBook-Air.local'
+    ), false) AS machine_mapped
+FROM audit_events a;
 
 CREATE INDEX audit_events_ts ON audit_events (ts);
 CREATE INDEX audit_events_agent_ts ON audit_events (agent_id, ts);
