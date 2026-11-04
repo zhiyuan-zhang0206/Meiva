@@ -119,9 +119,9 @@ def prepare_event_log(
 
 
 _INSERT_AUDIT_EVENT = (
-    "INSERT INTO audit_events (event_uid, ts, trace_id, span_id, agent_id, machine, process, "
-    "event_name, level, source, target_agent_id, attributes) "
-    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+    "INSERT INTO audit_events (event_uid, ts, trace_id, span_id, agent_id, machine, "
+    "machine_hostname, process, event_name, level, source, target_agent_id, attributes) "
+    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
     "ON CONFLICT (event_uid) DO NOTHING"
 )
 
@@ -146,6 +146,8 @@ def audit_event_uid(event: telemetry.Event, *, stream_id: int | None = None) -> 
 
 def _audit_row(event: telemetry.Event) -> tuple[object, ...]:
     """The INSERT parameters of one audit event; ValueError unless it is registered audit."""
+    from base.telemetry.delivery.state import machine_hostname
+
     spec = EVENTS.get(event.event_name)
     if (
         event.category != "audit"
@@ -163,6 +165,7 @@ def _audit_row(event: telemetry.Event) -> tuple[object, ...]:
         event.span_id,
         event.agent_id,
         event.machine,
+        machine_hostname(),
         event.process,
         event.event_name,
         event.level,

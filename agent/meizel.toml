@@ -21,5 +21,3 @@ exports = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py"
 "__init__.py" = "strict"
 "nodes.py" = "strict"
 "state_channels.py" = "strict"
-
-[debt.ambient-read]

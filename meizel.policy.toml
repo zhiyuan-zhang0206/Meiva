@@ -310,6 +310,7 @@ config-readers = [
 # Files that ARE a sink facade: the module-level state in them is the facade's own write-only
 # machinery. The exemption covers state only; a thread or task a facade starts is still reported.
 [ambient-state.sink-facades]
+"base/telemetry/delivery/state.py" = "the per-process event binding (pipeline, process, agent, machine, cluster, home, hostname): written once at the boot seam, read by every emit; no decision reads it to choose behaviour"
 "base/deploy/start_trace.py" = "the start-phase meter: spans are written at the call sites and read only by the one report printed at exit"
 "agent/graph/node_log/_lifecycle.py" = "snapshot cursor and node-exit aggregate buffered for the log/event stream; written by node exits, read only by the flush that emits them"
 "base/log/process.py" = "the concrete loguru startup and sink facade: its idempotency guard is read only by process logging initialization"

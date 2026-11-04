@@ -472,6 +472,11 @@ def entries(lease_id: str, conn: SyncConnection) -> list[Entry]:
     return log
 
 
+# meiva:note
+# This read is on the lint's allowlist (`scripts/lint/audit_machine_direct_read.py`) because a
+# replay must reproduce the payload that was recorded, not today's reading of it: rewriting
+# `machine` here would make the history say something the event never said. Every other reader
+# goes through `audit_events_canonical`.
 def _audit_bodies(conn: SyncConnection, uids: list[int]) -> dict[int, _AuditBody]:
     with conn.cursor(row_factory=class_row(_AuditBody)) as cur:
         bodies = cur.execute(

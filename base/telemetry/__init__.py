@@ -10,6 +10,7 @@ from base.telemetry.delivery.reporting import (
 from base.telemetry.delivery.serialization import event_line, event_line_digest, event_payload
 from base.telemetry.delivery.state import (
     ambient_agent_id,
+    machine_hostname,
     process_name,
     process_state,
     resolve_machine,
@@ -53,6 +54,7 @@ __all__ = [
     "failure_isolated",
     "flush",
     "init_telemetry",
+    "machine_hostname",
     "prepare_event",
     "process_name",
     "process_state",

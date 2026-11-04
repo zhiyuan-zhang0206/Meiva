@@ -9,7 +9,7 @@
 "write_record.py" = "strict"
 
 [debt.ambient-read]
+"__init__.py#argv sys.argv" = { count = 1, owner = "#5816", until = "waits for `_process_metadata` to take the process label from its caller: when psutil fails it falls back to the name in sys.argv[0]" }
 "__init__.py#clock datetime.datetime.now" = { count = 2, owner = "#5816", until = "waits for nothing that can arrive: the write record's `ts` and the tamper record's instant are the moment this process wrote or checked the file — the audit trail's whole value is that the writer stamped it, and a caller-supplied clock would be that same clock read one frame earlier" }
 "__init__.py#pid os.getpid" = { count = 1, owner = "#5816", until = "waits for nothing that can arrive: the record's `pid` names the writer, which is what makes a crashed or raced write traceable; every caller of `record_env_write` would have to read its own pid to hand in the same number" }
 "__init__.py#pid psutil.Process()" = { count = 1, owner = "#5816", until = "waits for nothing that can arrive: `_process_metadata` names the process writing this `.env` audit record — its name and its executable — and that process is the one asking; a caller-supplied name would let an agent record that somebody else touched the file" }
-"__init__.py#argv sys.argv" = { count = 1, owner = "#5816", until = "waits for `_process_metadata` to take the process label from its caller: when psutil fails it falls back to the name in sys.argv[0]" }
