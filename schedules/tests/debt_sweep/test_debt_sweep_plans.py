@@ -110,7 +110,7 @@ def test_the_worker_prompt_names_the_ledger_the_scan_artifact_and_one_pr() -> No
     assert "today's debt-clearing pass" in prompt
     assert "(2026-09-22)" in prompt
     assert "origin/main" in prompt
-    assert "meiva.skills.sweeper" in prompt
+    assert "Follow the reconciliation procedure" in prompt
     assert LEDGER_PATH == "future/tech-debt/ledger.md"
     assert f"`{LEDGER_PATH}`" in prompt
     assert f"`{_ARTIFACT}`" in prompt
@@ -143,7 +143,9 @@ def test_the_p0_lead_hears_the_end_of_a_long_failure() -> None:
     assert message.startswith("Daily debt sweep failed:\n")
     assert "-tail\n" in message
     assert "head-" not in message
-    assert message.endswith("then run the debt-clearing pass manually with the sweeper skills.")
+    assert message.endswith(
+        "then run the debt-clearing pass using the repository technical-debt guide."
+    )
     assert "saved mechanical-scan report" in message
 
 

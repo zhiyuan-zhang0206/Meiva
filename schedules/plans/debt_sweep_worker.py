@@ -35,7 +35,7 @@ def worker_prompt(day: str, artifact: Path, scan: ScanReport) -> str:
     return f"""You are today's debt-clearing pass for the Meiva repository ({day}).
 
 Start a fresh worktree from origin/main and follow the normal PR workflow; never push main.
-Use the `meiva.skills.sweeper` engine with `docs/conventions/engineering/tech-debt.md` as project input.
+Follow the reconciliation procedure in `docs/conventions/engineering/tech-debt.md`.
 Reconcile the single ledger at `{LEDGER_PATH}`.
 
 The mechanical scan artifact is `{artifact}`.
@@ -65,7 +65,7 @@ def failure_message(detail: str) -> str:
         "Daily debt sweep failed:\n"
         f"{detail[-_FAILURE_TAIL:]}\n"
         "Check the schedule log and the saved mechanical-scan report, then run the "
-        "debt-clearing pass manually with the sweeper skills."
+        "debt-clearing pass using the repository technical-debt guide."
     )
 
 

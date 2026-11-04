@@ -41,7 +41,6 @@ not be advertised by a fixed cross-machine allowlist.
 | skill-creator | Guide package/modification routing | Skill authoring tasks. |
 | meiva-corp | Explicit organization task | Do not assign every cluster a corporate hierarchy. |
 | meiva-self-evolution | Explicit improvement task or assigned service | Do not start a standing mining job from ordinary work. |
-| sweeper | Explicit maintenance task | Do not launch a general debt sweep from every bug fix. |
 
 Before hiding these independent entry skills from the wildcard directory, verify
 that each routing entry links to it and that a held-out task discovers it. The

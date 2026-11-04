@@ -70,5 +70,4 @@ return old_checkout()
 - Ousterhout, *A Philosophy of Software Design* (2018) — §1.4 (incremental complexity accumulation)
 - Feathers, *Working Effectively with Legacy Code* (2004) — characterization tests, seams, the definition of legacy code
 - Fowler, Martin — feature flags (strangler fig pattern), technical-debt quadrant
-- Meiva sweeper skill — debt-tracking engine (living registry, weekly sweep)
 - wondelai/skills, `remove-technical-debt` — debt classification and structured repayment workflow

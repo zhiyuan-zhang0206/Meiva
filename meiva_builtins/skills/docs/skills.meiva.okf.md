@@ -65,7 +65,6 @@ tech debt.
 |------|------|------|
 | meiva-self-evolution | Weekly collect real runs into trace dataset, mine skill/plugin regressions and produce fix reports | [[meiva_builtins/skills/platform/meiva-self-evolution/docs/meiva-self-evolution.meiva.okf.md]] |
 | skill-creator | Create / improve / review skill | [[meiva_builtins/skills/platform/skill-creator/docs/skill-creator.meiva.okf.md]] |
-| sweeper | Tech debt sweep engine (reconcile repo debt tracker, land PR) | [[meiva_builtins/skills/practice/sweeper/docs/sweeper.meiva.okf.md]] |
 
 ## Web & media
 Fetching content from the web and media — driving AI web apps, per-source
