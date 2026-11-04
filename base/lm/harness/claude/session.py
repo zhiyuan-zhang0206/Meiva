@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
-from typing import Any, Protocol, assert_never
+from typing import Protocol, assert_never
 
 import claude_agent_sdk
 
@@ -75,7 +75,7 @@ class ClaudeClientProtocol(SdkClient, Protocol):
 
 class ClaudeSdkProtocol(Protocol):
     @property
-    def ClaudeAgentOptions(self) -> Callable[..., Any]:  # noqa: N802
+    def ClaudeAgentOptions(self) -> Callable[..., object]:  # noqa: N802
         # meiva:note
         # Property name matches the `ClaudeAgentOptions` class exported by `claude_agent_sdk`.
         ...

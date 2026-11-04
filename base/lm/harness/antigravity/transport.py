@@ -6,10 +6,11 @@ import json
 import signal
 from collections import deque
 from collections.abc import AsyncIterator, Callable, Iterable, Mapping
-from typing import Any
 
 import psutil
 
+from base.host.boundary.json_values import is_object_dict
+from base.host.boundary.untyped import object_of
 from base.lm.harness.antigravity.config import AntigravityConfig
 from base.lm.harness.cancel import (
     CancelReport,
@@ -26,7 +27,6 @@ from base.lm.harness.process import ChildProbe, PsutilChildProbe, WaitClock, sna
 READER_LIMIT_BYTES = 8 * 1024 * 1024
 CANCEL_POLL_SECONDS = 0.02
 STDERR_TAIL_LINES = 40
-STREAM_END = object()
 
 
 class TransportClosedError(RuntimeError):
@@ -91,7 +91,7 @@ class AgyTransport:
         self._probe: ChildProbe = probe or PsutilChildProbe()
         self._process: asyncio.subprocess.Process | None = None
         self._returncode: int | None = None
-        self._queue: asyncio.Queue[Any] = asyncio.Queue()
+        self._queue: asyncio.Queue[dict[str, object] | None] = asyncio.Queue()
         self._tasks = asyncio.TaskGroup()
         self._tasks_entered = False
         self._pumps: list[asyncio.Task[None]] = []
@@ -224,12 +224,12 @@ class AgyTransport:
         if process is not None:
             self._returncode = process.returncode
         self._process = None
-        await self._queue.put(STREAM_END)
+        await self._queue.put(None)
 
-    async def events(self) -> AsyncIterator[dict[str, Any]]:
+    async def events(self) -> AsyncIterator[dict[str, object]]:
         while True:
             item = await self._queue.get()
-            if item is STREAM_END:
+            if item is None:
                 return
             yield item
 
@@ -258,22 +258,19 @@ class AgyTransport:
                 if not text:
                     continue
                 try:
-                    payload: dict[str, Any] | list[Any] | str | int | float | bool | None = (
-                        json.loads(text)
-                    )
+                    event = object_of(json.loads, text)
                 except json.JSONDecodeError:
                     self._stderr.append(f"unparsed stdout: {text[:200]}")
                     continue
-                if not isinstance(payload, dict):
+                if not is_object_dict(event):
                     continue
-                event: dict[str, Any] = payload
                 if event.get("event") == "init":
                     session_id = event.get("conversation_id")
                     if isinstance(session_id, str):
                         self._conversation_id = session_id
                 await self._queue.put(event)
         finally:
-            await self._queue.put(STREAM_END)
+            await self._queue.put(None)
 
     async def _pump_stderr(self, stream: asyncio.StreamReader) -> None:
         while True:

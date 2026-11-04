@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
 
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
 from base.host.env.harness_binaries import resolve_user_home
 from base.lm.harness.events import (
     AssistantText,
@@ -15,8 +17,6 @@ from base.lm.harness.events import (
     ToolUse,
     Usage,
 )
-
-type JsonPayload = str | int | float | bool | dict[str, Any] | list[JsonPayload] | None
 
 
 # meiva:note
@@ -56,7 +56,7 @@ class ResultFields:
         return self.status.lower()
 
 
-def map_init(payload: dict[str, Any]) -> SessionStarted:
+def map_init(payload: Mapping[str, object]) -> SessionStarted:
     init = _mapping(payload.get("init"))
     return SessionStarted(
         session_id=_text(payload.get("conversation_id")) or "",
@@ -68,7 +68,7 @@ def map_init(payload: dict[str, Any]) -> SessionStarted:
 
 # meiva:note
 # Translate one `step_update`; text accumulation stays with the session.
-def map_step_update(update: dict[str, Any], *, turn_id: str) -> tuple[BridgeEvent, ...]:
+def map_step_update(update: Mapping[str, object], *, turn_id: str) -> tuple[BridgeEvent, ...]:
     step_type = _text(update.get("step_type"))
     if step_type == "agent_response":
         return _map_agent_response_step(update, turn_id=turn_id)
@@ -77,7 +77,9 @@ def map_step_update(update: dict[str, Any], *, turn_id: str) -> tuple[BridgeEven
     return ()
 
 
-def _map_agent_response_step(update: dict[str, Any], *, turn_id: str) -> tuple[BridgeEvent, ...]:
+def _map_agent_response_step(
+    update: Mapping[str, object], *, turn_id: str
+) -> tuple[BridgeEvent, ...]:
     state = _text(update.get("state"))
     delta = _text(update.get("text_delta"))
     step_index = _int(update.get("step_index"))
@@ -96,7 +98,7 @@ def _map_agent_response_step(update: dict[str, Any], *, turn_id: str) -> tuple[B
     return tuple(events)
 
 
-def _map_tool_step(update: dict[str, Any], *, turn_id: str) -> tuple[BridgeEvent, ...]:
+def _map_tool_step(update: Mapping[str, object], *, turn_id: str) -> tuple[BridgeEvent, ...]:
     state = _text(update.get("state"))
     step_index = _int(update.get("step_index"))
     conversation_id = _text(update.get("conversation_id"))
@@ -139,7 +141,9 @@ def _map_tool_step(update: dict[str, Any], *, turn_id: str) -> tuple[BridgeEvent
     return ()
 
 
-def assistant_text(update: dict[str, Any], *, turn_id: str, text: str) -> AssistantText | None:
+def assistant_text(
+    update: Mapping[str, object], *, turn_id: str, text: str
+) -> AssistantText | None:
     if _text(update.get("step_type")) != "agent_response" or _text(update.get("state")) != "DONE":
         return None
     return AssistantText(turn_id=turn_id, text=text)
@@ -151,7 +155,7 @@ def assistant_text(update: dict[str, Any], *, turn_id: str, text: str) -> Assist
 # beside it. Stated so the next reader does not add the cache count twice; see
 # `Usage` in `base/lm/harness/events.py`.
 # meiva:link base/lm/harness/docs/harness.meiva.okf.md
-def parse_usage(payload: JsonPayload) -> Usage:
+def parse_usage(payload: object) -> Usage:
     usage = _mapping(payload)
     raw_in = _int(usage.get("input_tokens"))
     raw_out = _int(usage.get("output_tokens"))
@@ -176,10 +180,10 @@ def parse_usage(payload: JsonPayload) -> Usage:
     )
 
 
-def parse_result(payload: dict[str, Any]) -> ResultFields:
-    raw_denied: JsonPayload = payload.get("denied_actions")
-    denied_items = raw_denied if isinstance(raw_denied, list) else []
-    denied = tuple(_denial_label(entry) for entry in denied_items if isinstance(entry, dict))
+def parse_result(payload: Mapping[str, object]) -> ResultFields:
+    raw_denied = payload.get("denied_actions")
+    denied_items = raw_denied if is_object_list(raw_denied) else []
+    denied = tuple(_denial_label(entry) for entry in denied_items if is_object_dict(entry))
     duration = payload.get("duration_seconds")
     return ResultFields(
         session_id=_text(payload.get("conversation_id")),
@@ -193,21 +197,21 @@ def parse_result(payload: dict[str, Any]) -> ResultFields:
     )
 
 
-def _denial_label(entry: JsonPayload) -> str:
+def _denial_label(entry: object) -> str:
     item = _mapping(entry)
     action = _text(item.get("action")) or "unknown"
     display = _text(item.get("display_name")) or ""
     return f"{action}:{display}".rstrip(":")
 
 
-def _tool_failed(info: dict[str, Any]) -> bool:
+def _tool_failed(info: Mapping[str, object]) -> bool:
     # meiva:note
     # `agy` does not mark a failing shell command: a non-zero exit arrives as
     # plain output text. Only a tool-level error field is trustworthy here.
     return bool(info.get("error") or info.get("Error"))
 
 
-def _tool_content(info: dict[str, Any]) -> str:
+def _tool_content(info: Mapping[str, object]) -> str:
     for key in ("output", "Output", "combinedOutput", "combined_output"):
         value = info.get(key)
         if isinstance(value, str):
@@ -217,7 +221,7 @@ def _tool_content(info: dict[str, Any]) -> str:
     return ""
 
 
-def _read_transcript_rows(conversation_id: str) -> list[dict[str, Any]]:
+def _read_transcript_rows(conversation_id: str) -> list[dict[str, object]]:
     log_dir = (
         resolve_user_home()
         / ".gemini"
@@ -232,12 +236,12 @@ def _read_transcript_rows(conversation_id: str) -> list[dict[str, Any]]:
         if not path.is_file():
             continue
         try:
-            rows: list[dict[str, Any]] = []
+            rows: list[dict[str, object]] = []
             for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
                 if not line.strip():
                     continue
-                parsed: JsonPayload = json.loads(line)
-                if isinstance(parsed, dict):
+                parsed = object_of(json.loads, line)
+                if is_object_dict(parsed):
                     rows.append(parsed)
             return rows
         except (OSError, json.JSONDecodeError):
@@ -245,14 +249,14 @@ def _read_transcript_rows(conversation_id: str) -> list[dict[str, Any]]:
     return []
 
 
-def _transcript_tool_args(conversation_id: str, step_index: int, name: str) -> dict[str, Any]:
+def _transcript_tool_args(conversation_id: str, step_index: int, name: str) -> dict[str, object]:
     rows = _read_transcript_rows(conversation_id)
     for row in reversed(rows):
         idx = _int(row.get("step_index"))
         if step_index > 0 and idx > step_index:
             continue
-        raw_calls: JsonPayload = row.get("tool_calls")
-        calls = raw_calls if isinstance(raw_calls, list) else []
+        raw_calls = row.get("tool_calls")
+        calls = raw_calls if is_object_list(raw_calls) else []
         for raw_tc in calls:
             tc = _mapping(raw_tc)
             if _text(tc.get("name")) == name:
@@ -286,8 +290,8 @@ def _transcript_thinking(conversation_id: str, step_index: int, *, before_tool: 
     return None
 
 
-def _mapping(value: JsonPayload) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
+def _mapping(value: object) -> dict[str, object]:
+    return value if is_object_dict(value) else {}
 
 
 def _text(value: object) -> str | None:

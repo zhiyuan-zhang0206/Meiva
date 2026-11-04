@@ -6,12 +6,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any
 
 from base.lm.harness.acp import AcpError
 from base.lm.harness.acp.permission import PermissionRequest
 
-type JsonObject = dict[str, Any]
+type JsonObject = dict[str, object]
 
 PROTOCOL_VERSION = 1
 MODEL_CONFIG_ID = "model"
@@ -66,7 +65,9 @@ def config_option_requests(
 ) -> tuple[JsonObject, ...]:
     if session_id is None or model is None:
         return ()
-    requests = [{"sessionId": session_id, "configId": MODEL_CONFIG_ID, "value": model}]
+    requests: list[JsonObject] = [
+        {"sessionId": session_id, "configId": MODEL_CONFIG_ID, "value": model}
+    ]
     if reasoning_effort is not None:
         requests.append(
             {

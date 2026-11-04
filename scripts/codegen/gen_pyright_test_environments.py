@@ -83,6 +83,7 @@ TESTS_OWING_ANY: tuple[str, ...] = (
     "agent/execution/tests",
     "agent/messages/tests",
     "base/agents",
+    "base/lm",
     "base/telemetry",
     "cli",
     "gateway/tests",

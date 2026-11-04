@@ -22,12 +22,29 @@ message native.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Any
+from collections.abc import Mapping, Sequence
 
 from langchain_core.messages import UsageMetadata
 
 from base.lm.content import ContentBlock, content_blocks
+
+
+# meiva:note
+# The text of one openai `summary_text` part, or "" when the part carries none.
+def _text_of(part: dict[str, object]) -> str:
+    text = part.get("text")
+    return text if isinstance(text, str) else ""
+
+
+# meiva:note
+# A provider's token count as an int: nothing (None, 0, empty) counts as zero, a number or numeric
+# text is converted (non-numeric text raises `ValueError`), any other type is refused naming `key`.
+def _token_count(value: object, key: str) -> int:
+    if not value:
+        return 0
+    if isinstance(value, int | float | str):
+        return int(value)
+    raise TypeError(f"token count {key!r} must be a number, got {type(value).__name__}")
 
 
 def _canonical_block(block: ContentBlock) -> ContentBlock:
@@ -42,9 +59,7 @@ def _canonical_block(block: ContentBlock) -> ContentBlock:
     """
     if block.get("type") != "reasoning":
         return block
-    text = "".join(
-        part.get("text", "") for part in (block.get("summary") or []) if isinstance(part, dict)
-    )
+    text = "".join(_text_of(part) for part in (block.get("summary") or []))
     out: ContentBlock = {"type": "thinking", "thinking": text}
     if "index" in block:
         out["index"] = block["index"]
@@ -79,13 +94,12 @@ def extract_reasoning_tokens(
     total_reasoning_chars: int = 0,
 ) -> int:
     if usage_metadata:
-        raw_details: Any = usage_metadata.get("output_token_details") or {}
-        details: dict[str, int] = raw_details
+        details: Mapping[str, object] = usage_metadata.get("output_token_details") or {}
         from_details = sum(
-            int(value or 0)
+            _token_count(value, key)
             for key, value in details.items()
             if key == "reasoning" or key.endswith("_reasoning")
-        ) or details.get("reasoning_tokens")
+        ) or _token_count(details.get("reasoning_tokens"), "reasoning_tokens")
         if from_details:
             return int(from_details)
 
@@ -111,6 +125,5 @@ def count_thinking_chars(content: str | Sequence[object]) -> int:
             total += len(block.get("thinking") or "")
         elif btype == "reasoning":
             for part in block.get("summary") or []:
-                if isinstance(part, dict):
-                    total += len(part.get("text") or "")
+                total += len(_text_of(part))
     return total

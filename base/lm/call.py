@@ -15,10 +15,12 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Sequence
-from typing import Any, TypeGuard
+from typing import Protocol
 
-from langchain_core.messages import BaseMessage
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, BaseMessage
 
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.host.env.agent_slices import ModelOverrides
 from base.host.net import resilience
 from base.host.net.resilience import extract_retry_after, jittered
@@ -27,43 +29,64 @@ from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.effort import ReasoningEffort
 
 
-def _is_object_list(value: object) -> TypeGuard[list[object]]:
-    return isinstance(value, list)
+# meiva:note
+# What the retry tail needs of a chat model or a tool-bound runnable: invoke it on a message
+# list, get the model's reply.
+class ChatInvoker(Protocol):
+    def invoke(self, messages: list[BaseMessage], /) -> AIMessage: ...
 
 
-def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
-    return isinstance(value, dict)
+# meiva:note
+# A response that carries a `content` (a chat model reply, or anything shaped like one).
+class _HasContent(Protocol):
+    @property
+    def content(self) -> object: ...
+
+
+# meiva:note
+# The chat-model builder `answer_text` calls: `factory.build_chat_model`, or a stand-in with the
+# same keywords.
+class ChatModelBuilder(Protocol):
+    def __call__(
+        self,
+        model: str,
+        *,
+        reasoning_effort: str | None = None,
+        timeout: float | None = None,
+        catalog: ModelCatalog,
+        keys: ProviderKeys,
+        llm_override: str,
+        overrides: ModelOverrides,
+    ) -> BaseChatModel: ...
 
 
 # meiva:note
 # One provider call and how long it took, in milliseconds. The duration is the plain use of the
 # interval clock: nothing here waits or decides on it, and the retry loop around it holds the
 # waiting.
-def _invoke_timed(runnable: object, messages: list[Any]) -> tuple[Any, float]:
-    invoker: Any = runnable
+def _invoke_timed(runnable: ChatInvoker, messages: list[BaseMessage]) -> tuple[AIMessage, float]:
     started = time.monotonic()
-    response = invoker.invoke(messages)
+    response = runnable.invoke(messages)
     return response, (time.monotonic() - started) * 1_000
 
 
-def extract_text(response: object) -> str:
+def extract_text(response: _HasContent) -> str:
     """Flatten a model response's content to plain text.
 
     str passthrough, or join the `text` blocks of a content-list response;
     anything else (a non-text content shape) is stringified.
     """
-    # langchain's content-block dicts are dict[Unknown, Unknown]; the cast
-    # states the shape we handle and the runtime isinstance guards below are
-    # the real checks (a content list may also carry bare str elements).
-    raw_response: Any = response
-    content: object = raw_response.content
+    # meiva:note
+    # A content list may also carry bare str elements; the isinstance guards below
+    # are the checks of the shape we handle.
+    content = response.content
     if isinstance(content, str):
         return content
-    if _is_object_list(content):
+    if is_object_list(content):
         blocks: Sequence[object] = content
         texts: list[str] = []
         for block in blocks:
-            if _is_str_dict(block) and block.get("type") == "text":
+            if is_object_dict(block) and block.get("type") == "text":
                 text = block.get("text")
                 if isinstance(text, str) and text:
                     texts.append(text)
@@ -72,8 +95,8 @@ def extract_text(response: object) -> str:
 
 
 def invoke_response(
-    runnable: object,
-    messages: list[Any],
+    runnable: ChatInvoker,
+    messages: list[BaseMessage],
     *,
     desc: str,
     error_type: type[Exception],
@@ -132,7 +155,7 @@ def invoke_response(
 
     retry_attempts = max(0, retry_attempts)  # a negative budget must not empty the loop
     retry_max_delay_seconds = max(retry_delay_seconds, retry_max_delay_seconds)
-    response: Any | None = None
+    response: AIMessage | None = None
     latency_ms: float | None = None
     for attempt in range(retry_attempts + 1):
         try:
@@ -149,7 +172,10 @@ def invoke_response(
                 raise
             retryable = is_retryable_provider_error(provider_error)
             if attempt < retry_attempts and retryable:
-                delay = min(retry_delay_seconds * (2**attempt), retry_max_delay_seconds)
+                # meiva:note
+                # `1 << attempt` is 2**attempt: the stubs type `int ** int` as Any, which the Any
+                # rules refuse, so the doubling is written as a shift.
+                delay = min(retry_delay_seconds * (1 << attempt), retry_max_delay_seconds)
                 retry_after = extract_retry_after(e)
                 if retry_after is not None:
                     delay = max(delay, retry_after)
@@ -185,8 +211,8 @@ def invoke_response(
 
 
 def invoke_text(
-    llm: object,
-    content: list[Any],
+    llm: ChatInvoker,
+    content: Sequence[str | dict[str, object]],
     *,
     desc: str,
     error_type: type[Exception],
@@ -212,7 +238,7 @@ def invoke_text(
 
     response = invoke_response(
         llm,
-        [HumanMessage(content=content)],
+        [HumanMessage(content=list(content))],
         desc=desc,
         error_type=error_type,
         retry_attempts=retry_attempts,
@@ -251,7 +277,7 @@ def answer_text(
     keys: ProviderKeys,
     llm_override: str,
     overrides: ModelOverrides,
-    build_chat_model: Callable[..., Any],
+    build_chat_model: ChatModelBuilder,
     sleep: Callable[[float], None] = resilience.retry_sleep,
 ) -> str:
     """Build `model` at `effort` and answer `prompt` against `material`.

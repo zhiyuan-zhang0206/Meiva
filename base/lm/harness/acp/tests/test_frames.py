@@ -6,6 +6,7 @@ from base.lm.harness.acp.errors import AcpRpcError
 from base.lm.harness.acp.frames import (
     Blank,
     Frame,
+    JsonObject,
     NonJson,
     NotAnObject,
     decode_line,
@@ -31,6 +32,7 @@ from base.lm.harness.acp.permission import (
     parse_permission_request,
     permission_response,
 )
+from base.lm.harness.acp.tests.support import object_at
 
 
 def test_a_request_frame_carries_its_id_method_and_a_copy_of_the_params() -> None:
@@ -53,7 +55,7 @@ def test_a_notification_frame_has_no_id() -> None:
 
 
 def test_an_encoded_frame_is_one_utf8_line_that_decodes_back_to_the_frame() -> None:
-    frame = {"jsonrpc": "2.0", "id": 1, "result": {"text": "naïve — ok"}}
+    frame: JsonObject = {"jsonrpc": "2.0", "id": 1, "result": {"text": "naïve — ok"}}
 
     line = encode_frame(frame)
 
@@ -149,8 +151,8 @@ def test_a_permission_request_is_asked_and_every_other_client_method_is_refused(
     refused = answer_server_request(ServerRequest(5, "fs/read_text_file", {}))
     assert isinstance(refused, Refusal)
     assert refused.frame["id"] == 5
-    error = refused.frame["error"]
-    assert error["code"] == -32601 and "fs/read_text_file" in error["message"]
+    error = object_at(refused.frame["error"])
+    assert error["code"] == -32601 and "fs/read_text_file" in str(error["message"])
     assert isinstance(
         answer_server_request(ServerRequest(6, "session/request_permission", [1])), Refusal
     )

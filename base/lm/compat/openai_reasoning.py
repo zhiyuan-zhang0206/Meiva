@@ -32,13 +32,29 @@ which the server requires echoed back).
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
 
 from langchain_core.messages import AIMessageChunk
 from langchain_core.outputs import ChatGenerationChunk
 from langchain_openai import ChatOpenAI
 
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.lm.content import ContentBlock, message_content
+
+
+# meiva:note
+# The first choice's `delta` of an openai-style stream chunk (the chunk itself, or wrapped
+# under a `chunk` key), or an empty dict when the chunk carries no choice.
+def _delta_of(chunk: Mapping[str, object]) -> dict[str, object]:
+    choices = chunk.get("choices")
+    if not choices:
+        wrapped = chunk.get("chunk")
+        choices = wrapped.get("choices") if is_object_dict(wrapped) else None
+    if not is_object_list(choices) or not choices:
+        return {}
+    first = choices[0]
+    delta = first.get("delta") if is_object_dict(first) else None
+    return delta if is_object_dict(delta) else {}
 
 
 class ReasoningContentChatModel(ChatOpenAI):
@@ -46,9 +62,9 @@ class ReasoningContentChatModel(ChatOpenAI):
 
     def _convert_chunk_to_generation_chunk(
         self,
-        chunk: dict[str, Any],
+        chunk: dict[str, object],
         default_chunk_class: type,
-        base_generation_info: dict[str, Any] | None,
+        base_generation_info: dict[str, object] | None,
     ) -> ChatGenerationChunk | None:
         # langchain's ChatOpenAI base method is loosely typed (partially unknown).
         gen = super()._convert_chunk_to_generation_chunk(  # pyright: ignore[reportUnknownMemberType]
@@ -56,9 +72,7 @@ class ReasoningContentChatModel(ChatOpenAI):
         )
         if gen is None or not isinstance(gen.message, AIMessageChunk):
             return gen
-        choices = chunk.get("choices") or chunk.get("chunk", {}).get("choices", [])
-        delta: dict[str, Any] = (choices[0].get("delta") or {}) if choices else {}
-        reasoning = delta.get("reasoning_content")
+        reasoning = _delta_of(chunk).get("reasoning_content")
         msg = gen.message
         # base content is the text fragment (str) or "" for reasoning/tool-only
         # chunks. Re-emit uniformly as list-of-blocks so accumulation merges by
@@ -68,13 +82,11 @@ class ReasoningContentChatModel(ChatOpenAI):
         text = content if isinstance(content, str) else ""
         # typed as the content union (not list[dict]) so the assignment below is
         # not rejected by list invariance against AIMessageChunk.content.
-        blocks: list[str | ContentBlock] = []
-        if reasoning:
-            blocks.append({"type": "thinking", "thinking": reasoning, "index": 0})
+        blocks: list[str | dict[str, object]] = []
+        if isinstance(reasoning, str) and reasoning:
+            thinking: ContentBlock = {"type": "thinking", "thinking": reasoning, "index": 0}
+            blocks.append(dict(thinking))
         if text:
             blocks.append({"type": "text", "text": text, "index": 1})
-        # ContentBlock is invariant against langchain's list[str | dict] content
-        # slot; the blocks above are shape-checked, the cast only re-widens.
-        raw_blocks: Any = blocks
-        msg.content = raw_blocks
+        msg.content = blocks
         return gen

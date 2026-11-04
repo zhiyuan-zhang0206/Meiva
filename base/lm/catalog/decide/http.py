@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
 
+from base.host.boundary.untyped import object_of
 from base.lm.catalog.decide.types import (
     DecisionBuildContext,
     not_json_failure,
@@ -23,8 +23,11 @@ async def post_json(
     # The lightweight provider contract loads on the exec-child boot path.
     import httpx
 
-    raw_transport: Any = ctx.transport
-    transport: httpx.AsyncBaseTransport | None = raw_transport
+    transport = ctx.transport
+    if transport is not None and not isinstance(transport, httpx.AsyncBaseTransport):
+        raise TypeError(
+            f"a decision transport must be an httpx.AsyncBaseTransport, got {type(transport)!r}"
+        )
     try:
         async with httpx.AsyncClient(transport=transport, timeout=ctx.timeout) as client:
             response = await client.post(
@@ -42,7 +45,7 @@ async def post_json(
         text=response.text,
     )
     try:
-        body: object = response.json()
+        body = object_of(response.json)
     except ValueError as exc:
         raise not_json_failure(ctx.model, url) from exc
     return require_json_object(ctx.model, url, body)

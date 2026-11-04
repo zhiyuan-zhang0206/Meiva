@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from base.host.boundary.json_values import is_object_dict
 from base.lm.harness.acp.errors import AcpRpcError
-from base.lm.harness.acp.frames import JSONRPC, Json, JsonObject, RequestId
+from base.lm.harness.acp.frames import JSONRPC, JsonObject, RequestId
 from base.lm.harness.acp.permission import PermissionRequest, parse_permission_request
 
 METHOD_NOT_FOUND = -32601
@@ -23,7 +24,7 @@ class AcpNotification:
 class ServerRequest:
     request_id: RequestId
     method: str
-    params: Json
+    params: object
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,20 +36,23 @@ class Reply:
 
 def classify(frame: JsonObject) -> ServerRequest | AcpNotification | Reply | None:
     if "id" in frame and "method" in frame:
-        return ServerRequest(frame["id"], str(frame["method"]), frame.get("params"))
+        server_id = frame["id"]
+        if not (server_id is None or isinstance(server_id, int | float | str)):
+            return None
+        return ServerRequest(server_id, str(frame["method"]), frame.get("params"))
     if "method" in frame:
-        params: Json = frame.get("params")
+        params = frame.get("params")
         return AcpNotification(
-            method=str(frame["method"]), params=params if isinstance(params, dict) else {}
+            method=str(frame["method"]), params=params if is_object_dict(params) else {}
         )
     request_id = frame.get("id")
     if not isinstance(request_id, int):
         return None
-    error: Json = frame.get("error")
-    if isinstance(error, dict):
+    error = frame.get("error")
+    if is_object_dict(error):
         return Reply(request_id, None, error)
-    result: Json = frame.get("result")
-    return Reply(request_id, result if isinstance(result, dict) else {}, None)
+    result = frame.get("result")
+    return Reply(request_id, result if is_object_dict(result) else {}, None)
 
 
 # meiva:note
@@ -56,9 +60,10 @@ def classify(frame: JsonObject) -> ServerRequest | AcpNotification | Reply | Non
 # agent sent none), or the JSON-RPC error it refused with, named after the method it answered.
 def reply_outcome(reply: Reply, method: str) -> JsonObject | AcpRpcError:
     if reply.error is not None:
+        code = reply.error.get("code", -1)
         return AcpRpcError(
             method,
-            int(reply.error.get("code", -1)),
+            int(code) if isinstance(code, int | float | str) else -1,
             str(reply.error.get("message", "")),
             reply.error.get("data"),
         )
@@ -81,7 +86,7 @@ class AskPermission:
 
 
 def answer_server_request(request: ServerRequest) -> Refusal | AskPermission:
-    if request.method == "session/request_permission" and isinstance(request.params, dict):
+    if request.method == "session/request_permission" and is_object_dict(request.params):
         return AskPermission(parse_permission_request(request.params), request.request_id)
     return Refusal(
         {

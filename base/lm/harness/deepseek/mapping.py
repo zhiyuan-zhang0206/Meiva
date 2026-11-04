@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
 
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.lm.harness.events import (
     AssistantText,
     BridgeEvent,
@@ -12,10 +12,7 @@ from base.lm.harness.events import (
     ToolUse,
 )
 
-type JsonValue = (
-    str | int | float | bool | dict[str, Any] | list[JsonValue] | Mapping[str, Any] | None
-)
-type UpdateMap = Mapping[str, Any]
+type UpdateMap = Mapping[str, object]
 
 # meiva:note
 # ACP carries committed semantic blocks, not provider deltas: one
@@ -85,12 +82,12 @@ _SUBTYPES = {
 
 
 def _tool_use(update: UpdateMap, *, turn_id: str) -> ToolUse:
-    raw_input: JsonValue = update.get("rawInput")
+    raw_input = update.get("rawInput")
     return ToolUse(
         turn_id=turn_id,
         tool_use_id=str(update.get("toolCallId", "")),
         name=str(update.get("title") or update.get("kind") or "tool"),
-        tool_input=dict(raw_input) if isinstance(raw_input, dict) else {},
+        tool_input=dict(raw_input) if is_object_dict(raw_input) else {},
     )
 
 
@@ -108,23 +105,23 @@ def _tool_result(update: UpdateMap, *, turn_id: str) -> list[BridgeEvent]:
     ]
 
 
-def _content_text(blocks: JsonValue) -> str:
-    if not isinstance(blocks, list):
+def _content_text(blocks: object) -> str:
+    if not is_object_list(blocks):
         return ""
     parts: list[str] = []
     for block in blocks:
-        if not isinstance(block, dict):
+        if not is_object_dict(block):
             continue
-        inner: JsonValue = block.get("content")
-        if isinstance(inner, dict):
+        inner = block.get("content")
+        if is_object_dict(inner):
             text = _text_of(inner)
             if text:
                 parts.append(text)
     return "\n".join(parts)
 
 
-def _text_of(block: JsonValue) -> str:
-    if not isinstance(block, dict):
+def _text_of(block: object) -> str:
+    if not is_object_dict(block):
         return ""
     if block.get("type") != "text":
         return ""

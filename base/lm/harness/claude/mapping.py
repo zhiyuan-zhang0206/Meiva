@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
+from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.lm.harness.events import (
     AssistantText,
     BridgeEvent,
@@ -16,8 +16,6 @@ from base.lm.harness.events import (
     UnsolicitedOutput,
     Usage,
 )
-
-type _Json = str | int | float | bool | dict[str, Any] | list[_Json] | None
 
 # meiva:note
 # Dispatch is by class name rather than `isinstance`: the SDK is injected, and a
@@ -162,7 +160,7 @@ def _user(message: object, turn_id: str | None) -> list[BridgeEvent]:
 
 
 def _rate_limit(message: object, turn_id: str | None) -> list[BridgeEvent]:
-    info = getattr(message, "rate_limit_info", None)
+    info: object = getattr(message, "rate_limit_info", None)
     if info is None:
         return []
     return [
@@ -208,7 +206,7 @@ def task_update_status(message: object) -> str | None:
     return _text(_as_dict(getattr(message, "patch", None)).get("status"))
 
 
-def _origin_kind(raw: _Json) -> str | None:
+def _origin_kind(raw: object) -> str | None:
     kind = _as_dict(raw).get("kind")
     return kind if isinstance(kind, str) else None
 
@@ -231,7 +229,7 @@ _HANDLERS = {
 # 24020-token prompt. Reporting the remainder alone understates the prompt and
 # trips the pricing invariant that cached tokens cannot exceed input.
 # meiva:link base/lm/harness/docs/harness.meiva.okf.md
-def _usage(raw: _Json) -> Usage:
+def _usage(raw: object) -> Usage:
     data = _as_dict(raw)
     cache_read = _int_or_zero(data.get("cache_read_input_tokens"))
     cache_creation = _int_or_zero(data.get("cache_creation_input_tokens"))
@@ -243,22 +241,22 @@ def _usage(raw: _Json) -> Usage:
     )
 
 
-def _denials(raw: _Json) -> tuple[str, ...]:
+def _denials(raw: object) -> tuple[str, ...]:
     names: list[str] = []
     for item in _as_list(raw):
-        if isinstance(item, dict):
-            data = _as_dict(item)
+        if is_object_dict(item):
+            data = item
             names.append(str(data.get("tool_name") or data.get("name") or data))
         else:
             names.append(str(item))
     return tuple(names)
 
 
-def _messages(raw: _Json) -> tuple[str, ...]:
+def _messages(raw: object) -> tuple[str, ...]:
     return tuple(str(item) for item in _as_list(raw) if str(item).strip())
 
 
-def _render(content: _Json) -> str:
+def _render(content: object) -> str:
     if content is None:
         return ""
     if isinstance(content, str):
@@ -267,8 +265,8 @@ def _render(content: _Json) -> str:
     if blocks:
         parts: list[str] = []
         for block in blocks:
-            if isinstance(block, dict):
-                data = _as_dict(block)
+            if is_object_dict(block):
+                data = block
                 text = data.get("text")
                 parts.append(text if isinstance(text, str) else str(data.get("type", "")))
             else:
@@ -283,20 +281,20 @@ def _clip(text: str) -> str:
     return text[:TOOL_RESULT_PREVIEW_CHARS] + "..."
 
 
-def _dict(value: _Json) -> dict[str, Any]:
-    if isinstance(value, dict):
+def _dict(value: object) -> dict[str, object]:
+    if is_object_dict(value):
         return value
     if value is None:
         return {}
     return {"value": value}
 
 
-def _as_dict(value: _Json) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
+def _as_dict(value: object) -> dict[str, object]:
+    return value if is_object_dict(value) else {}
 
 
-def _as_list(value: _Json) -> list[_Json]:
-    return value if isinstance(value, list) else []
+def _as_list(value: object) -> list[object]:
+    return value if is_object_list(value) else []
 
 
 def _text(value: object) -> str | None:

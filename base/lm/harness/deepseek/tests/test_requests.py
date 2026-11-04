@@ -17,7 +17,7 @@ from base.lm.harness.deepseek.requests import (
 
 
 def request_with(
-    options: tuple[str, ...], *, tool_call: dict[str, str] | None = None
+    options: tuple[str, ...], *, tool_call: dict[str, object] | None = None
 ) -> PermissionRequest:
     return PermissionRequest(
         session_id="session-1",

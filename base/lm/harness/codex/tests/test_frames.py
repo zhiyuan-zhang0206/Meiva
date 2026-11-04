@@ -5,6 +5,7 @@ import json
 from base.lm.harness.codex.frames import (
     INTERNAL_ERROR,
     METHOD_NOT_FOUND,
+    JsonObject,
     JsonRpcError,
     Notification,
     Reply,
@@ -60,7 +61,7 @@ def test_a_frame_with_a_method_alone_is_a_notification() -> None:
 
 
 def test_an_integer_id_alone_is_a_reply_and_keeps_its_whole_frame() -> None:
-    frame = {"jsonrpc": "2.0", "id": 9, "result": {"thread": {"id": "thread-1"}}}
+    frame: JsonObject = {"jsonrpc": "2.0", "id": 9, "result": {"thread": {"id": "thread-1"}}}
     assert classify(json.dumps(frame).encode()) == Reply(9, frame)
 
 

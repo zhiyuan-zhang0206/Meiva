@@ -7,6 +7,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from base.host.boundary.json_values import is_object_dict
 from base.lm.harness.acp import AcpNotification
 from base.lm.harness.deepseek.mapping import assistant_text, parse_prompt_result
 from base.lm.harness.deepseek.usage import UsageSnapshot
@@ -61,8 +62,8 @@ def route_notification(
     params = notification.params
     if params.get("sessionId") != session_id:
         return IgnoredNotification()
-    raw_update: UpdateMap | None = params.get("update")
-    if not isinstance(raw_update, dict):
+    raw_update = params.get("update")
+    if not is_object_dict(raw_update):
         return IgnoredNotification()
     if raw_update.get("sessionUpdate") == USAGE_UPDATE:
         used, size = raw_update.get("used"), raw_update.get("size")

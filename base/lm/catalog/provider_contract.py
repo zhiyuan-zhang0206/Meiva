@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
+from typing import TYPE_CHECKING, Literal, NotRequired, TypedDict
 
 if TYPE_CHECKING:
     # Annotation-only reference (`ProviderBinding.build`): the registration
@@ -127,7 +127,7 @@ class ProviderBinding:
     # Absent means the core attachment defaults; older plugins and consumers
     # degrade without a provider-specific override.
     attach: AttachPolicy | None = None
-    served_speed: Callable[[Mapping[str, Any]], InferenceSpeed] | None = None
+    served_speed: Callable[[Mapping[str, object]], InferenceSpeed] | None = None
     """Parse the actual service receipt of a Fast call; missing or unsupported
     receipts fail before accounting. Providers without Fast IDs need none."""
 

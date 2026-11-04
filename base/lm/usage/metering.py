@@ -10,8 +10,7 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Callable
-from typing import Any
+from typing import Protocol
 from uuid import UUID
 
 from langchain_core.callbacks import BaseCallbackHandler, BaseCallbackManager, Callbacks
@@ -29,7 +28,21 @@ __all__ = ["DIRECT_USAGE_KIND", "LlmUsageMeter", "install_usage_meter", "unmeter
 
 DIRECT_USAGE_KIND = "direct"
 
-UsageEmitter = Callable[..., Any]
+
+# meiva:note
+# What the meter calls for each metered message: `log_usage_from_message`, or a stand-in with
+# the same shape. The result is not read.
+class UsageEmitter(Protocol):
+    def __call__(
+        self,
+        message: AIMessage,
+        model: str,
+        /,
+        *,
+        catalog: ModelCatalog,
+        usage_kind: str,
+        options: UsageOptions,
+    ) -> object: ...
 
 
 class LlmUsageMeter(BaseCallbackHandler):
@@ -52,7 +65,7 @@ class LlmUsageMeter(BaseCallbackHandler):
 
     def on_chat_model_start(
         self,
-        serialized: dict[str, Any],  # noqa: ARG002
+        serialized: dict[str, object],  # noqa: ARG002
         messages: list[list[BaseMessage]],  # noqa: ARG002
         *,
         run_id: UUID,

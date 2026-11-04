@@ -4,7 +4,9 @@ import asyncio
 import sys
 from pathlib import Path
 
-from base.lm.harness.acp import PermissionRequest
+from base.host.boundary.json_values import is_object_dict
+from base.lm.harness.acp import AcpNotification, PermissionRequest
+from base.lm.harness.acp.frames import JsonObject
 from base.lm.harness.acp.transport import AcpConnection
 
 FAKE_AGENT = Path(__file__).with_name("fake_agent.py")
@@ -39,8 +41,10 @@ async def connect(
     return connection, seen
 
 
-async def collect(connection: AcpConnection, *, count: int, timeout: float = 2.0) -> list[object]:
-    received: list[object] = []
+async def collect(
+    connection: AcpConnection, *, count: int, timeout: float = 2.0
+) -> list[AcpNotification]:
+    received: list[AcpNotification] = []
 
     async def reader() -> None:
         async for notification in connection.notifications():
@@ -50,3 +54,16 @@ async def collect(connection: AcpConnection, *, count: int, timeout: float = 2.0
 
     await asyncio.wait_for(reader(), timeout=timeout)
     return received
+
+
+def object_at(value: object) -> JsonObject:
+    assert is_object_dict(value)
+    return value
+
+
+def update_of(notification: AcpNotification) -> JsonObject:
+    return object_at(notification.params["update"])
+
+
+def chunk_text(notification: AcpNotification) -> object:
+    return object_at(update_of(notification)["content"])["text"]

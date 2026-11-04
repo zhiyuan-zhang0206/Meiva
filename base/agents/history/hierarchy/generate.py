@@ -30,7 +30,7 @@ type ToolSpec = dict[str, object] | type | Callable[..., object] | BaseTool
 
 
 class InvocableLlm(Protocol):
-    def invoke(self, messages: list[BaseMessage], /) -> object: ...
+    def invoke(self, messages: list[BaseMessage], /) -> AIMessage: ...
 
 
 class ToolBindableLlm(Protocol):

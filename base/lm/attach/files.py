@@ -9,6 +9,7 @@ from __future__ import annotations
 import stat
 from pathlib import Path
 
+from base.host.boundary.untyped import object_of
 from base.lm.attach.constants import ATTACH_MAX_FILES_PER_TURN
 from base.lm.attach.packing import (
     AttachEntry,
@@ -41,8 +42,12 @@ def pack_attachments(
         while True:
             request = plan.send(_observe(request))
     except StopIteration as finished:
-        pack: AttachmentPack | None = finished.value
-        return pack
+        pack = object_of(getattr, finished, "value")
+        if pack is None or isinstance(pack, AttachmentPack):
+            return pack
+        raise TypeError(
+            f"the attachment plan returned {type(pack)!r}, not an AttachmentPack"
+        ) from finished
 
 
 def _observe(request: PackRequest) -> Observation:

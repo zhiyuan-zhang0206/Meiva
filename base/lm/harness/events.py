@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,7 +57,7 @@ class ToolUse:
     turn_id: str
     tool_use_id: str
     name: str
-    tool_input: dict[str, Any]
+    tool_input: dict[str, object]
 
 
 @dataclass(frozen=True, slots=True)
