@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     # Annotation-only (`build` return): keeps the chat-model stack off the
@@ -49,7 +49,8 @@ def build(ctx: BuildContext) -> BaseChatModel:
     # `reasoning_effort` payload field, a declared ChatOpenAI constructor
     # field (GLM's enum is low/high/max, default max — `low` and `high` are
     # the cheaper tiers; checked 2026-08-23 for GLM-5.3).
-    glm_kwargs: dict[str, Any] = {}
+    extra_body: dict[str, dict[str, str]] | None = None
+    reasoning_effort: str | None = None
     if ctx.thinking is not None and ctx.thinking.get("type") == "disabled":
         if ctx.spec is not None and ctx.spec.thinking_always_on:
             # glm-5.3 / glm-5.3-flash / glm-5.3-flashx always think — the
@@ -61,9 +62,9 @@ def build(ctx: BuildContext) -> BaseChatModel:
                 f"{ctx.model} cannot disable thinking; thinking={{'type': 'disabled'}} ignored"
             )
         else:
-            glm_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+            extra_body = {"thinking": {"type": "disabled"}}
     elif ctx.resolved_effort:
-        glm_kwargs["reasoning_effort"] = validate_effort(
+        reasoning_effort = validate_effort(
             ctx.resolved_effort,
             ctx.effort_levels if ctx.effort_levels is not None else _GLM_EFFORT_LEVELS,
             target="glm",
@@ -75,7 +76,8 @@ def build(ctx: BuildContext) -> BaseChatModel:
         stream_usage=True,
         disable_streaming=ctx.disable_streaming,
         timeout=ctx.timeout,
-        **glm_kwargs,
+        extra_body=extra_body,
+        reasoning_effort=reasoning_effort,
     )
 
 
