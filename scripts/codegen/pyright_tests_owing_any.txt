@@ -35,6 +35,7 @@ base/telemetry
 cli
 gateway/tests
 meiva/mcps/tests
+meiva/shell
 meiva_builtins/plugins/meiva_code
 meiva_builtins/plugins/meiva_fleet
 meiva_builtins/plugins/meiva_memory
