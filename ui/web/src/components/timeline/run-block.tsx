@@ -311,15 +311,11 @@ export const TurnBlock = memo(function TurnBlock({
       : t("working")
     : hasWork && summary.workedMs > 0
       ? t("workedFor", { duration: formatDuration(summary.workedMs) })
-      : null;
+      : t("workActivity");
 
-  const actionSummary = formatTurnSummary(summary, (key, values) =>
+  const actionSummary = expanded ? formatTurnSummary(summary, (key, values) =>
     t(key as Parameters<typeof t>[0], values),
-  );
-
-  const headerParts: string[] = [];
-  if (workedLabel) headerParts.push(workedLabel);
-  if (actionSummary) headerParts.push(actionSummary);
+  ) : "";
 
   const hasSdkCalls = summary.sdkCalls.length > 0;
 
@@ -408,8 +404,11 @@ export const TurnBlock = memo(function TurnBlock({
         <span className={cn("gap-0.5", FLEX, FLEX_COL, MIN_W_0, expanded && FLEX_1)}>
           <span className={cn("items-center gap-1.5 text-[13px] leading-snug", FLEX, MIN_W_0)}>
             <Layers className="size-3.5 shrink-0 opacity-70" />
-            <span className="truncate whitespace-nowrap tabular-nums">{headerParts.join(" · ") || ""}</span>
+            <span className="truncate whitespace-nowrap tabular-nums">{workedLabel}</span>
           </span>
+          {actionSummary && (
+            <span className="pl-5 text-xs leading-snug">{actionSummary}</span>
+          )}
           {sdkChips}
         </span>
       </button>
@@ -460,7 +459,7 @@ export const PendingLiveActivityWindow = memo(function PendingLiveActivityWindow
           FLEX,
         )}
       >
-        <ChevronRight className="size-3.5 shrink-0 opacity-60 mt-0.5 rotate-90" />
+        <ChevronRight className="size-3.5 shrink-0 opacity-60 mt-0.5" />
         <span className={cn("items-center gap-1.5 text-[13px] leading-snug", FLEX, MIN_W_0)}>
           <Layers className="size-3.5 shrink-0 opacity-70" />
           <span className="truncate whitespace-nowrap tabular-nums">{t("working")}</span>

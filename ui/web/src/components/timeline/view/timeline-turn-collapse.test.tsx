@@ -1,15 +1,43 @@
 import { fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render, revealCollapsedCards } from "./timeline-test-mock";
+import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render, revealCollapsedCards, setUserSettings } from "./timeline-test-mock";
 
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
 import { TimelineView } from "..";
 
 afterEach(cleanupTimelineTest);
-describe("turn-collapse (settled turns collapsed by default, live trailing turn expanded)", () => {
+describe("work block expansion", () => {
   const runToggle = () => screen.getByTestId("turn-toggle");
+
+  it("starts live work collapsed and reveals its summary and details on click", () => {
+    render(
+      <TimelineView
+        turnActive
+        items={[
+          makeItem({ item_id: "1.0", kind: "inbound_chat", source: "agent:7", payload: "incoming update" }),
+          makeItem({ item_id: "1.1", kind: "agent_reasoning", payload: "live thought", reasoning_ms: 5_000 }),
+        ]}
+      />,
+    );
+
+    const toggle = runToggle();
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle.textContent).toBe("Working for 5s");
+    expect(screen.queryByText("incoming update")).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("Working for 5s")).toBeTruthy();
+    expect(screen.getByText("1 turn · 1 agent message")).toBeTruthy();
+    expect(screen.getByText("incoming update")).toBeTruthy();
+
+    fireEvent.click(toggle);
+    setUserSettings({ "display.expand_working_block": true });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle.textContent).toBe("Working for 5s");
+  });
 
   it("drops a pinned turn expansion when the timeline thread changes", () => {
     const threadAItems = [
@@ -53,6 +81,7 @@ describe("turn-collapse (settled turns collapsed by default, live trailing turn 
   });
 
   it("drops a pinned inner-card collapse on a live turn when the timeline thread changes", () => {
+    setUserSettings({ "display.expand_working_block": true });
     const { rerender } = render(
       <TimelineView
         turnActive
@@ -96,7 +125,7 @@ describe("turn-collapse (settled turns collapsed by default, live trailing turn 
       />,
     );
     const runHeader = runToggle();
-    expect(runHeader.textContent).toContain("1 turn");
+    expect(runHeader.textContent).not.toContain("1 turn");
     expect(runHeader.getAttribute("aria-expanded")).toBe("false");
     expect(runHeader.getAttribute("title")).toBeNull();
     revealCollapsedCards();
@@ -120,12 +149,14 @@ describe("turn-collapse (settled turns collapsed by default, live trailing turn 
       />,
     );
     const runHeader = runToggle();
-    expect(runHeader.textContent).toContain("1 agent message");
+    expect(runHeader.textContent).not.toContain("1 agent message");
     fireEvent.click(runHeader);
+    expect(runHeader.textContent).toContain("1 agent message");
     expect(screen.getByText("Agent 7")).toBeTruthy();
   });
 
   it("streaming items join the same work block — first chunk lands in a wrapper immediately", () => {
+    setUserSettings({ "display.expand_working_block": true });
     render(
       <TimelineView
         turnActive
@@ -142,6 +173,7 @@ describe("turn-collapse (settled turns collapsed by default, live trailing turn 
   });
 
   it("streaming items are always groupable — no peeling, all in one work block", () => {
+    setUserSettings({ "display.expand_working_block": true });
     render(
       <TimelineView
         turnActive
@@ -173,6 +205,7 @@ describe("turn-collapse (settled turns collapsed by default, live trailing turn 
   });
 
   it("turnActive → live trailing turn expands ALL child blocks, while finished turns expand only agent_chat", () => {
+    setUserSettings({ "display.expand_working_block": true });
     render(
       <TimelineView
         turnActive
@@ -234,8 +267,8 @@ describe("turn-collapse (settled turns collapsed by default, live trailing turn 
     );
     const wrapper = container.querySelector('[data-item-id="3.0"]');
     expect(wrapper).toBeTruthy();
-    expect(wrapper?.textContent).toContain("1 turn");
     revealCollapsedCards();
+    expect(wrapper?.textContent).toContain("1 turn");
     expect(wrapper?.querySelector('[data-expanded="true"]')).toBeTruthy();
     expect(screen.getByTestId("python-code").textContent).toBe("x=1");
   });
@@ -267,6 +300,7 @@ describe("turn-collapse (settled turns collapsed by default, live trailing turn 
   });
 
   it("clicking the active turn header toggles expansion", () => {
+    setUserSettings({ "display.expand_working_block": true });
     render(
       <TimelineView
         turnActive
@@ -290,6 +324,7 @@ describe("turn-collapse (settled turns collapsed by default, live trailing turn 
   });
 
   it("collapse pinned mid-stream survives the turn going idle, then a click expands", () => {
+    setUserSettings({ "display.expand_working_block": true });
     const items = [
       makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "think" }),
       makeItem({ item_id: "1.1", kind: "agent_code", payload: "x=1" }),
@@ -309,6 +344,7 @@ describe("turn-collapse (settled turns collapsed by default, live trailing turn 
   });
 
   it("within an active expanded turn, all sub-items are visible (not just last)", () => {
+    setUserSettings({ "display.expand_working_block": true });
     render(
       <TimelineView
         turnActive
@@ -327,6 +363,7 @@ describe("turn-collapse (settled turns collapsed by default, live trailing turn 
   });
 
   it("preserves the mounted TurnBlock DOM instance and manual override across front trimming and older-page prepends", () => {
+    setUserSettings({ "display.expand_working_block": true });
     const { container, rerender } = render(
       <TimelineView
         turnActive

@@ -191,6 +191,7 @@ describe("continuous compact history", () => {
     expect(turns[0].getAttribute("data-turn-member-ranks")).toContain("1:s1.prev.0.0");
     expect(turns[0].getAttribute("data-turn-member-ranks")).toContain("0:3.1");
     expect(turns[0].textContent).toContain("Worked for 10s");
+    fireEvent.click(screen.getByTestId("turn-toggle"));
     expect(turns[0].textContent).toContain("2 compact summaries");
   });
   it("keeps the oldest segment visible when it has no summary", () => {

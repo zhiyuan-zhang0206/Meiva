@@ -1,6 +1,6 @@
 import { fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render, revealCollapsedCards } from "./timeline-test-mock";
+import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render, revealCollapsedCards, setUserSettings } from "./timeline-test-mock";
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
 import { TimelineView } from "..";
@@ -70,6 +70,7 @@ describe("ItemView: agent_code + agent_reasoning", () => {
   });
 
   it("agent_code streamingCode=true on last item → PythonCode streaming=1", () => {
+    setUserSettings({ "display.expand_working_block": true });
     render(
       <TimelineView
         turnActive
@@ -139,6 +140,7 @@ describe("toggle chip: summary on expanded items", () => {
     expect(screen.getByText("ponder")).toBeTruthy();
   });
   it("streaming thinking chip shows live 'Thinking for'", () => {
+    setUserSettings({ "display.expand_working_block": true });
     render(
       <TimelineView
         turnActive
@@ -248,6 +250,7 @@ describe("toggle chip: summary on expanded items", () => {
     expect(screen.queryByText(/Ran in/)).toBeNull();
   });
   it("streaming code_output chip shows live 'Running for' when execStartedAt is set", () => {
+    setUserSettings({ "display.expand_working_block": true });
     render(
       <TimelineView
         turnActive

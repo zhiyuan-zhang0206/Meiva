@@ -77,6 +77,17 @@ describe("DisplaySettingsPage", () => {
     expect(screen.getByText("Timeline max width")).toBeTruthy();
   });
 
+  it("saves the Working block expansion preference from the Timeline settings", async () => {
+    renderPage();
+    const toggle = await screen.findByRole("switch", { name: "Expand Working block by default" });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(transport.putSetting).toHaveBeenCalledWith("display.expand_working_block", true),
+    );
+  });
+
   it("persists the clock format under display.clock_format", async () => {
     transport.getSettings
       .mockResolvedValueOnce({ settings: [] })

@@ -1,6 +1,6 @@
 import { act, fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render, revealCollapsedCards } from "./timeline-test-mock";
+import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render, revealCollapsedCards, setUserSettings } from "./timeline-test-mock";
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
 import { TimelineView } from "..";
@@ -10,6 +10,7 @@ afterEach(cleanupTimelineTest);
 describe("detail-block duration display", () => {
   const runToggle = () => screen.getByTestId("turn-toggle");
   it("streaming code block inside the active last turn shows a live 'Writing code for'", () => {
+    setUserSettings({ "display.expand_working_block": true });
     render(
       <TimelineView
         turnActive
@@ -29,6 +30,7 @@ describe("detail-block duration display", () => {
     expect(screen.getByText(/Writing code for/)).toBeTruthy();
   });
   it("active last turn header shows the unified 'Working for' header and bounded scrollport", () => {
+    setUserSettings({ "display.expand_working_block": true });
     const { container } = render(
       <TimelineView
         turnActive
@@ -43,6 +45,7 @@ describe("detail-block duration display", () => {
     expect(runToggle().textContent).toContain("1 turn");
   });
   it("folds llmWaiting keepalive into the active turn as Thinking without spawning an extra block", () => {
+    setUserSettings({ "display.expand_working_block": true });
     const now = Date.now();
     const { container } = render(
       <TimelineView
@@ -93,10 +96,11 @@ describe("detail-block duration display", () => {
       />,
     );
     const header = runToggle();
-    expect(header.textContent).toContain("Worked for 5s");
-    expect(header.textContent).toContain("1 turn");
+    expect(header.textContent).toBe("Worked for 5s");
+    fireEvent.click(header);
+    expect(screen.getByText("1 turn")).toBeTruthy();
   });
-  it("system-note-only turn shows '1 system note', not a blank header and no 'Worked for'", () => {
+  it("system-note-only turn has an Activity label and reveals its note count on expansion", () => {
     render(
       <TimelineView
         items={[
@@ -107,8 +111,9 @@ describe("detail-block duration display", () => {
       />,
     );
     const header = runToggle();
-    expect(header.textContent).toContain("1 system note");
-    expect(header.textContent).not.toContain("Worked for");
+    expect(header.textContent).toBe("Activity");
+    fireEvent.click(header);
+    expect(screen.getByText("1 system note")).toBeTruthy();
   });
   it("live timer excludes the idle gap the turn spans, so it does not drop at turn end", () => {
     const now = Date.now();
@@ -137,6 +142,7 @@ describe("detail-block duration display", () => {
     expect(runToggle().textContent).toContain("Worked for 17s");
   });
   it("live timer adds the streaming block's elapsed to the committed total", () => {
+    setUserSettings({ "display.expand_working_block": true });
     const now = Date.now();
     render(
       <TimelineView
@@ -195,6 +201,7 @@ describe("detail-block duration display", () => {
     expect(pending.textContent).toContain("Working…");
   });
   it("scrolling up inside the Live Activity Window reveals ScrollToBottomButton and clicking re-attaches", () => {
+    setUserSettings({ "display.expand_working_block": true });
     render(
       <TimelineView
         turnActive
@@ -224,6 +231,7 @@ describe("detail-block duration display", () => {
     expect(screen.queryByTestId("scroll-to-bottom")).toBeNull();
   });
   it("active last turn stays expanded across streaming commits; collapses when a reply lands below", () => {
+    setUserSettings({ "display.expand_working_block": true });
     const base = [
       makeItem({ item_id: "1.0", kind: "agent_chat", payload: "hi" }),
       makeItem({ item_id: "2.0", kind: "agent_reasoning", payload: "hmm" }),
@@ -333,6 +341,7 @@ describe("TimelineView bounded expanded work block", () => {
     expect(viewport.scrollTop).toBe(450);
   });
   it("chains upward and downward wheel events to the outer message list once the expanded TurnBlock hits its scroll boundary", () => {
+    setUserSettings({ "display.expand_working_block": true });
     const items = [
       makeItem({ item_id: "0.5", kind: "inbound_chat", source: "user", payload: "Prompt" }),
       makeItem({ item_id: "1.0", kind: "agent_reasoning", payload: "thinking" }),

@@ -46,6 +46,7 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
   "display.clock_format": "24h",
 
   "display.timeline_width_px": 800,
+  "display.expand_working_block": false,
 
   "display.inspector_open": false,
 

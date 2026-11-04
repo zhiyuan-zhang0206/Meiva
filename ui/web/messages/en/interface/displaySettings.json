@@ -18,6 +18,8 @@
   "relative": "Relative (e.g. 3m ago)",
   "absolute": "Absolute (e.g. 7/12 15:45)",
   "timeline": "Timeline",
+  "expandWorkingBlock": "Expand Working block by default",
+  "expandWorkingBlockDesc": "Automatically expand the current work block while an agent is working.",
   "timelineMaxWidth": "Timeline max width",
   "timelineMaxWidthDesc": "Max width of the conversation column in pixels ({min}px–{max}px). The column fills its pane up to this ceiling and centers with side gutters when wider. Default {def}px.",
   "notifications": "Notifications",

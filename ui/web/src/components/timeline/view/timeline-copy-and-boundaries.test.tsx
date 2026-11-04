@@ -382,6 +382,7 @@ describe("formatItemTime: clock format without zone name", () => {
 
 describe("turnActive transition expansion", () => {
   it("rerender from turnActive=true to false collapses the trailing detail turn while keeping primary items visible", () => {
+    setUserSettings({ "display.expand_working_block": true });
     const items = [
       makeItem({ item_id: "1", kind: "agent_chat", payload: "first" }),
       makeItem({ item_id: "2", kind: "agent_code", payload: "last_code()" }),
@@ -397,6 +398,7 @@ describe("turnActive transition expansion", () => {
 
 describe("ItemView memo comparator: streaming prop flip is visible", () => {
   it("streamingCode false → true rerender, last agent_code data-streaming should update to 1", () => {
+    setUserSettings({ "display.expand_working_block": true });
     const items = [makeItem({ kind: "agent_code", payload: "x" })];
     const { rerender } = render(<TimelineView turnActive items={items} streamingCode={false} />);
     expect(screen.getByTestId("python-code").getAttribute("data-streaming")).toBe("0");
@@ -404,6 +406,7 @@ describe("ItemView memo comparator: streaming prop flip is visible", () => {
     expect(screen.getByTestId("python-code").getAttribute("data-streaming")).toBe("1");
   });
   it("streamingCode true → false rerender, last agent_code data-streaming should update to 0", () => {
+    setUserSettings({ "display.expand_working_block": true });
     const items = [makeItem({ kind: "agent_code", payload: "x" })];
     const { rerender } = render(<TimelineView turnActive items={items} streamingCode />);
     expect(screen.getByTestId("python-code").getAttribute("data-streaming")).toBe("1");

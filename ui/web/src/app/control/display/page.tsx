@@ -19,6 +19,7 @@ import {
   Clock,
   EyeOff,
   Languages,
+  Layers,
   MessageSquareText,
   MoveHorizontal,
   Palette,
@@ -193,7 +194,14 @@ export default function DisplaySettingsPage() {
         />
       </SettingsSection>
 
-      <SettingsSection id="display-timeline" title="Timeline">
+      <SettingsSection id="display-timeline" title={t("timeline")}>
+        <ToggleRow
+          icon={Layers}
+          label={t("expandWorkingBlock")}
+          description={t("expandWorkingBlockDesc")}
+          value={settings["display.expand_working_block"] === true}
+          onChange={(v) => setSetting("display.expand_working_block", v)}
+        />
         <SliderRow
           icon={MoveHorizontal}
           label="Timeline max width"
