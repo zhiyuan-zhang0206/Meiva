@@ -3,21 +3,24 @@ exports = ["child_env.py", "code_version.py", "evidence.py", "exec_domain.py", "
 [uses]
 "code_version.py" = ["loaded_commit.py"]
 "exec_domain.py" = ["os_platform.py", "process_control.py"]
+"exec_kill_notice.py" = ["untyped.py"]
 "kernel_identity.py" = ["os_platform.py"]
-"ownership.py" = ["birth_key.py", "kernel_identity.py", "os_platform.py", "pidfd.py"]
-"pidfd.py" = ["os_platform.py"]
-"root_control" = ["os_platform.py", "ownership.py"]
-"tests" = ["birth_key.py", "child_env.py", "code_version.py", "evidence.py", "kernel_identity.py", "loaded_commit.py", "os_platform.py", "ownership.py", "pidfd.py", "process_control.py", "runtime_incarnation.py", "turn_identity.py"]
+"loaded_commit.py" = ["untyped.py"]
+"os_platform.py" = ["untyped.py"]
+"ownership.py" = ["kernel_identity.py", "os_platform.py", "pidfd.py"]
+"pidfd.py" = ["os_platform.py", "untyped.py"]
+"root_control" = ["os_platform.py", "ownership.py", "untyped.py"]
+"tests" = ["child_env.py", "code_version.py", "evidence.py", "kernel_identity.py", "loaded_commit.py", "os_platform.py", "ownership.py", "pidfd.py", "process_control.py", "runtime_incarnation.py", "turn_identity.py"]
 "turn_identity.py" = ["stop_timing.py"]
 
 [roots]
 "child_env.py" = { kinds = ["environ"], why = "centralized process-protocol seam: copies the complete live env, consumes one-shot markers, and adopts a child's committed handoff; Settings cannot model dynamic per-process state" }
 
 [purity]
-"birth_key.py" = "strict"
 "evidence.py" = "strict"
 "runtime_incarnation.py" = "strict"
 "stop_timing.py" = "strict"
+"untyped.py" = "strict"
 
 # meiva:note
 # `os_platform.py#clock _monotonic()` is a duration source, not a wall-clock moment: it only compares

@@ -1,13 +1,23 @@
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import TypedDict
 
 import pytest
+from pydantic import TypeAdapter
 
-from base.native_process.birth_key import process_birth_key
+from base.native_process.ownership import process_birth_key
+
+
+class _Observed(TypedDict):
+    pydantic: bool
+    kernel: bool
+    legacy_exports: list[str]
+
+
+_OBSERVED = TypeAdapter(_Observed)
 
 
 @pytest.mark.parametrize("platform", ["linux", "darwin"])
@@ -51,7 +61,7 @@ def test_native_imports_keep_kernel_observation_local(case: str, tmp_path: Path)
         timeout=30,
         check=True,
     )
-    observed = json.loads(result.stdout)
+    observed = _OBSERVED.validate_json(result.stdout)
     assert not observed["pydantic"]
     assert observed["kernel"] == (case == "ownership")
     assert observed["legacy_exports"] == []

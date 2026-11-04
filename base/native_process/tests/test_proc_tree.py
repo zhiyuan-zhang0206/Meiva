@@ -3,14 +3,16 @@ from __future__ import annotations
 import os
 import subprocess
 import time
-from typing import Any
 
 import psutil
 import pytest
+from pydantic import TypeAdapter
 
 from base.native_process import ownership as proc_tree
 from base.native_process.os_platform import is_linux
 from base.native_process.ownership import OwnedProcess, stable_create_time
+
+_NODES = TypeAdapter(list[dict[str, object]])
 
 
 # meiva:note
@@ -215,8 +217,7 @@ def test_process_metadata_records_the_script_of_a_node_ancestor() -> None:
         nodes=[caller_facts, node_facts, shell_facts],
     )
     assert metadata["pid"] == 30 and "script" not in metadata
-    ancestors: Any = metadata["ancestors"]
-    recorded_node, recorded_shell = ancestors
+    recorded_node, recorded_shell = _NODES.validate_python(metadata["ancestors"])
     assert recorded_node["name"] == "node" and recorded_node["script"] == "/opt/homebrew/bin/dsh"
     assert "script" not in recorded_shell
 
@@ -240,7 +241,7 @@ def test_process_metadata_roots_the_tree_at_the_pid_it_is_given() -> None:
     child = subprocess.Popen(["sleep", "60"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         metadata = proc_tree.process_metadata(pid=child.pid, codex_home=None)
-        ancestors: Any = metadata["ancestors"]
+        ancestors = _NODES.validate_python(metadata["ancestors"])
 
         assert metadata["pid"] == child.pid
         assert ancestors

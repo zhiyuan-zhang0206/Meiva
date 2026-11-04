@@ -20,6 +20,8 @@ from collections.abc import Mapping
 from enum import StrEnum
 from typing import NotRequired, TypedDict, TypeGuard
 
+from base.native_process.untyped import is_object_dict, object_of
+
 # One message is one line; the cap bounds how much a peer can make us buffer.
 MAX_MESSAGE_BYTES = 64 * 1024
 
@@ -130,10 +132,6 @@ def parse_request(raw: bytes) -> RequestPayload:
     return request
 
 
-def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
-    return isinstance(value, dict)
-
-
 def _is_object_list(value: object) -> TypeGuard[list[object]]:
     return isinstance(value, list)
 
@@ -141,7 +139,7 @@ def _is_object_list(value: object) -> TypeGuard[list[object]]:
 def _resource_request(name_raw: object, payload: object) -> RequestPayload:
     if not isinstance(name_raw, str) or not name_raw:
         raise ProtocolError("resource requires a non-empty 'name'")
-    if not _is_object_dict(payload):
+    if not is_object_dict(payload):
         raise ProtocolError("resource requires an object 'payload'")
     return {"verb": Verb.RESOURCE, "name": name_raw, "payload": payload}
 
@@ -173,7 +171,7 @@ def _parse_caller(raw: object, verb: str) -> CallerPayload | None:
         return None
     if verb not in STATE_VERBS:
         raise ProtocolError(f"verb {verb!r} takes no 'caller'")
-    if not _is_object_dict(raw):
+    if not is_object_dict(raw):
         raise ProtocolError("'caller' must be an object")
     values = raw
     unknown = set(values) - _CALLER_FIELDS
@@ -255,13 +253,13 @@ def parse_status_response(raw: bytes) -> ResponsePayload:
     if not response["ok"]:
         return response
     body = response.get("result")
-    if not _is_object_dict(body):
+    if not is_object_dict(body):
         raise ProtocolError("root status omitted its unit roster")
     rows = body.get("units")
     if not _is_object_list(rows):
         raise ProtocolError("root status omitted its unit roster")
     for item in rows:
-        if not _is_object_dict(item):
+        if not is_object_dict(item):
             raise ProtocolError("root status contains an invalid unit")
         unit_id = item.get("id")
         if not isinstance(unit_id, str) or not unit_id:
@@ -293,9 +291,9 @@ def _decode_object(raw: bytes) -> dict[str, object]:
     except UnicodeDecodeError as exc:
         raise ProtocolError(f"message is not UTF-8: {exc}") from exc
     try:
-        value = json.loads(decoded)
+        value = object_of(json.loads, decoded)
     except json.JSONDecodeError as exc:
         raise ProtocolError(f"message is not valid JSON: {exc}") from exc
-    if not _is_object_dict(value):
+    if not is_object_dict(value):
         raise ProtocolError("message must be a JSON object")
     return value

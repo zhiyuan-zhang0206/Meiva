@@ -4,10 +4,10 @@ import json
 import socket
 import threading
 import uuid
-from collections.abc import Generator, Mapping
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 
 import psutil
 
@@ -36,8 +36,61 @@ _UNIX_PATH_BYTES = 108
 
 
 # meiva:note
+# A loaded source identity as the answer carries it.
+class RuntimeFacts(TypedDict):
+    kind: str
+    code_root: str
+    interpreter: str
+    prefix: str
+    cwd: str
+    source_digest: str
+
+
+# meiva:note
+# The birth row of a `status` answer: the process, the home, the launch digest and the loaded runtime.
+class RootFacts(TypedDict):
+    pid: int
+    create_time: float
+    starttime: int | None
+    home: str
+    launch_digest: str
+    runtime: RuntimeFacts
+    running: bool
+
+
+# meiva:note
+# The process fields of a marked birth.
+class ProcessFacts(TypedDict):
+    pid: int
+    create_time: float
+    starttime: int | None
+
+
+# meiva:note
+# The marked birth a receipt carries.
+class BirthFacts(TypedDict):
+    home: str
+    process: ProcessFacts
+    launch_digest: str
+    runtime: RuntimeFacts
+
+
+# meiva:note
+# What the fake root answers to `status`.
+class StatusAnswer(TypedDict):
+    root: RootFacts
+    units: list[object]
+
+
+# meiva:note
+# An answer whose birth row is left out.
+class RootlessAnswer(TypedDict):
+    units: list[object]
+
+
+# meiva:note
 # A loaded source identity has the shape `observe_root` validates: absolute paths and a digest.
-def _runtime(home: Path) -> dict[str, Any]:
+def _runtime(home: Path) -> RuntimeFacts:
     return {
         "kind": "source",
         "code_root": str(home / "runtime" / "code"),
@@ -51,10 +104,14 @@ def _runtime(home: Path) -> dict[str, Any]:
 # meiva:note
 # The marked birth a `status` answer carries, in the receipt's `birth` shape: the receipt and the
 # answer are the same fields by construction, not by a copy that can drift.
-def birth_from_response(root: Mapping[str, Any]) -> dict[str, Any]:
+def birth_from_response(root: RootFacts) -> BirthFacts:
     return {
         "home": root["home"],
-        "process": {field: root[field] for field in ("pid", "create_time", "starttime")},
+        "process": {
+            "pid": root["pid"],
+            "create_time": root["create_time"],
+            "starttime": root["starttime"],
+        },
         "launch_digest": root["launch_digest"],
         "runtime": root["runtime"],
     }
@@ -67,7 +124,7 @@ def receipt_path(home: Path) -> Path:
 # meiva:note
 # Publish `birth` as this home's serving marker through a staged rename, and return the generation
 # the marker carries.
-def write_receipt(home: Path, birth: Mapping[str, Any], *, generation: str | None = None) -> str:
+def write_receipt(home: Path, birth: BirthFacts, *, generation: str | None = None) -> str:
     published = generation or str(uuid.uuid4())
     state = {
         "schema_version": 2,
@@ -93,7 +150,7 @@ def clear_receipt(home: Path) -> None:
 # the socket on every read.
 @contextmanager
 def publish_with(
-    gate: Path, *, home: Path, answer: Mapping[str, Any], poll_s: float = 0.05
+    gate: Path, *, home: Path, answer: StatusAnswer, poll_s: float = 0.05
 ) -> Generator[None]:
     birth = birth_from_response(answer["root"])
     stop = threading.Event()
@@ -123,7 +180,7 @@ def publish_with(
         clear_receipt(home)
 
 
-def _answer(connection: socket.socket, answer: dict[str, Any]) -> None:
+def _answer(connection: socket.socket, answer: StatusAnswer | RootlessAnswer) -> None:
     with connection:
         raw = b""
         while not raw.endswith(b"\n"):
@@ -182,11 +239,9 @@ def _drop_stale_socket(socket_path: Path) -> None:
 # meiva:note
 # The answer this fake root serves for `home`, built without binding anything: `serve` publishes it
 # on the socket, and a case that needs only a receipt writes that receipt from here.
-def answer_for(
-    *, home: Path, report_pid: int | None = None, running: bool = True, omit_root: bool = False
-) -> dict[str, Any]:
+def answer_for(*, home: Path, report_pid: int | None = None, running: bool = True) -> StatusAnswer:
     owner = OwnedProcess.capture(psutil.Process())
-    root: dict[str, Any] = {
+    root: RootFacts = {
         "pid": owner.pid if report_pid is None else report_pid,
         "create_time": owner.birth,
         "starttime": owner.starttime,
@@ -195,24 +250,35 @@ def answer_for(
         "runtime": _runtime(home),
         "running": running,
     }
-    return {"units": []} if omit_root else {"root": root, "units": []}
+    return {"root": root, "units": []}
 
 
 # meiva:note
 # Answer `status` on `home`'s control socket with this process's own native birth, so the kernel's
 # peer check passes for a server that runs inside the test's process; each departure reproduces
 # one refusal `observe_root` makes. `report_pid` names another process (the kernel-reported peer
-# is the only authenticating fact), `running=False` says the root is not running, and `omit_root`
-# leaves the birth row out of an otherwise valid answer.
+# is the only authenticating fact), and `running=False` says the root is not running.
 @contextmanager
 def serve(
-    *,
-    home: Path,
-    report_pid: int | None = None,
-    running: bool = True,
-    omit_root: bool = False,
-) -> Generator[dict[str, Any]]:
-    answer = answer_for(home=home, report_pid=report_pid, running=running, omit_root=omit_root)
+    *, home: Path, report_pid: int | None = None, running: bool = True
+) -> Generator[StatusAnswer]:
+    answer = answer_for(home=home, report_pid=report_pid, running=running)
+    with _serving(home, answer):
+        yield answer
+
+
+# meiva:note
+# `serve` for an answer whose birth row is left out: the one refusal `observe_root` makes about a
+# well-formed answer that names no root.
+@contextmanager
+def serve_without_root(*, home: Path) -> Generator[RootlessAnswer]:
+    answer: RootlessAnswer = {"units": []}
+    with _serving(home, answer):
+        yield answer
+
+
+@contextmanager
+def _serving(home: Path, answer: StatusAnswer | RootlessAnswer) -> Generator[None]:
     socket_path = root_run_dir(home) / "meiva-root.sock"
     socket_path.parent.mkdir(parents=True, exist_ok=True)
     _refuse_long_socket_path(socket_path)
@@ -226,7 +292,7 @@ def serve(
     def accept() -> None:
         while not stop.is_set():
             try:
-                connection, _ = listener.accept()
+                connection = listener.accept()[0]
             except TimeoutError:
                 continue
             _answer(connection, answer)
@@ -234,7 +300,7 @@ def serve(
     thread = threading.Thread(target=accept, name="status-root")
     thread.start()
     try:
-        yield answer
+        yield
     finally:
         stop.set()
         thread.join(timeout=_JOIN_TIMEOUT_S)

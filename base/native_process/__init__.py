@@ -18,4 +18,4 @@
 #
 # Linux birth identity is PID plus kernel start ticks in an explicit boot scope.
 # Wall-derived timestamps remain diagnostic. Serialized receipts retain all fields;
-# only independent observations compare through `birth_key.process_birth_key`.
+# only independent observations compare through `ownership.process_birth_key`.

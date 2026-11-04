@@ -35,7 +35,7 @@ def _darwin_boot_session_uuid() -> str:
     buffer = ctypes.create_string_buffer(size.value)
     if libc.sysctlbyname(name, buffer, ctypes.byref(size), None, 0) != 0:
         raise OSError(ctypes.get_errno(), f"sysctl {name.decode()} failed")
-    return buffer.value.decode()
+    return ctypes.string_at(buffer).decode()
 
 
 def native_boot_id() -> str | None:

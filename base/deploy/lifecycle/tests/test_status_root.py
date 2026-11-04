@@ -21,6 +21,7 @@ from base.native_process.root_control.client import RootClientError
 from base.native_process.root_control.tests.status_root import (
     birth_from_response,
     serve,
+    serve_without_root,
     write_receipt,
 )
 
@@ -98,7 +99,7 @@ def test_an_answer_naming_another_process_is_refused(home: Path) -> None:
 # meiva:note
 # An otherwise valid answer that leaves the birth row out cannot name the root either.
 def test_an_answer_without_the_birth_row_is_refused(home: Path) -> None:
-    with serve(home=home, omit_root=True):
+    with serve_without_root(home=home):
         with pytest.raises(RootClientError):
             start_serving.observe_root(home)
         assert start_serving.is_serving(home) is False

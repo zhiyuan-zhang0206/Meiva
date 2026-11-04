@@ -12,6 +12,7 @@ import os
 from functools import cache
 
 from base.native_process.os_platform import is_linux
+from base.native_process.untyped import object_of
 
 
 def require_pidfd_support(*, platform: str, has_symbols: bool) -> None:
@@ -39,7 +40,9 @@ def pidfd_libc() -> ctypes.CDLL:
     return libc
 
 
-def check_pidfd_result(result: int, errno_code: int, *, call: str) -> int:
+def check_pidfd_result(result: object, errno_code: int, *, call: str) -> int:
+    if not isinstance(result, int):
+        raise TypeError(f"{call} answered {type(result).__name__}, not an integer")
     if result < 0:
         raise OSError(errno_code, f"{call}: {os.strerror(errno_code)}")
     return result
@@ -47,11 +50,11 @@ def check_pidfd_result(result: int, errno_code: int, *, call: str) -> int:
 
 def open_process(pid: int) -> int:
     """Return a non-inheritable descriptor; the caller owns its close."""
-    descriptor = pidfd_libc().pidfd_open(pid, 0)
+    descriptor = object_of(pidfd_libc().pidfd_open, pid, 0)
     return check_pidfd_result(descriptor, ctypes.get_errno(), call=f"pidfd_open({pid})")
 
 
 def send_signal(descriptor: int, signum: int) -> None:
     """Signal the retained task, preserving native errno for the custody owner."""
-    result = pidfd_libc().pidfd_send_signal(descriptor, signum, None, 0)
+    result = object_of(pidfd_libc().pidfd_send_signal, descriptor, signum, None, 0)
     check_pidfd_result(result, ctypes.get_errno(), call=f"pidfd_send_signal({descriptor})")
