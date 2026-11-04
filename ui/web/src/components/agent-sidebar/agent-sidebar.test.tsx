@@ -89,12 +89,16 @@ describe("DesktopSidebar collapse/expand", () => {
 
   it("header + opens the real create form, and its Spawn button calls onSpawn", async () => {
     wrap(<AgentSidebar {...handlers} />);
+    expect(transport.getSystemStatus).toHaveBeenCalled();
+    expect(transport.refreshHarnessAvailability).not.toHaveBeenCalled();
     // meiva:note
     // Two steps on purpose: the + only reveals the form (machine / model /
     // effort / harness), and the form's own Spawn button is what spawns.
     // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
     fireEvent.click(screen.getByTestId("sidebar-create"));
-    fireEvent.click(await screen.findByRole("button", { name: "Spawn" }));
+    const spawn = screen.getByRole<HTMLButtonElement>("button", { name: "Spawn" });
+    await waitFor(() => expect(spawn.disabled).toBe(false));
+    fireEvent.click(spawn);
     await waitFor(() => expect(handlers.onSpawn).toHaveBeenCalled());
   });
 
@@ -145,7 +149,9 @@ describe("MobileSidebar open/close", () => {
     wrap(<AgentSidebar {...handlers} />);
     expect(screen.getByTestId("sidebar-settings")).toBeTruthy();
     fireEvent.click(screen.getByTestId("sidebar-create"));
-    fireEvent.click(await screen.findByRole("button", { name: "Spawn" }));
+    const spawn = screen.getByRole<HTMLButtonElement>("button", { name: "Spawn" });
+    await waitFor(() => expect(spawn.disabled).toBe(false));
+    fireEvent.click(spawn);
     await waitFor(() => expect(handlers.onSpawn).toHaveBeenCalled());
   });
 });
@@ -160,8 +166,7 @@ describe("SidebarBody empty / tree / spawning placeholder", () => {
     wrap(<AgentSidebar {...handlers} />);
     expect(screen.getByText("No agents yet.")).toBeTruthy();
     // meiva:note
-    // Nothing mounts before the click: the CTA is the only create control in
-    // the body, and it opens the same form as the header's +.
+    // The CTA opens the same form as the header's +.
     // meiva:link ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md
     expect(screen.queryByRole("button", { name: "Spawn" })).toBeNull();
     fireEvent.click(screen.getByTestId("sidebar-create-cta"));

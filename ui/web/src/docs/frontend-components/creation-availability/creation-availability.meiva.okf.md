@@ -11,10 +11,12 @@ tags:
 Creation lives behind the sidebar header's `+`. The form lists agents only on
 online, non-paused agent-runner machines with `agent_host_online=true`; the host
 verdict keeps its pidfile meaning, and a false or absent verdict leaves that row
-disabled with its reason. While cluster status is loading on cold cache, the
-form presents a compact checking status; if the cold status query fails without
-cached data, it shows an `InlineError` with Retry instead of reporting no runners.
-Background status refetch errors retain cached data quietly.
+disabled with its reason. The sidebar starts reading the shared system status
+cache before the click. The form renders immediately, using cached choices
+while status refreshes. On a cold cache, pending columns stay quiet and Spawn
+stays disabled until it has the data needed to submit. If the cold status
+query fails, it shows an `InlineError` with Retry. Background status refetch
+errors retain cached data quietly.
 
 Creation is one table, read left to right: **Machine, Harness, Model, Effort**.
 The machine comes first: harness availability belongs to a machine.
@@ -83,8 +85,7 @@ says so instead of offering a choice the backend would refuse with
 `fork_harness_mismatch`.
 
 Opening the picker reads the last snapshot from
-`GET /api/cluster/machines/{name}/harnesses`; it never starts a probe. The sidebar
-has no page-load warm-up. `Refresh` explicitly calls
+`GET /api/cluster/machines/{name}/harnesses`; it never starts a harness probe. `Refresh` explicitly calls
 `POST /api/cluster/machines/{name}/harnesses/refresh` across all ready runner
 machines at once, with a shared pending state and repeat clicks disabled. Each
 machine's successful result updates its query cache independently; a failure

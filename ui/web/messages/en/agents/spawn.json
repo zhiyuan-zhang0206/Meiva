@@ -14,7 +14,6 @@
   "hostUnavailable": "Agent host unavailable",
   "hostUnknown": "Agent host status unknown",
   "machineOffline": "machine offline",
-  "loadingStatus": "Checking available runners…",
   "statusUnavailable": "Couldn’t load cluster status",
   "noReadyRunner": "No agent runner with an available host",
   "priceBreakdown": "Input / cache read / output, USD per 1M tokens",

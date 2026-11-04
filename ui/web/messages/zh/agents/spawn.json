@@ -14,7 +14,6 @@
   "hostUnavailable": "Agent host 不可用",
   "hostUnknown": "Agent host 状态未知",
   "machineOffline": "机器离线",
-  "loadingStatus": "正在检查可用机器…",
   "statusUnavailable": "无法加载集群状态",
   "noReadyRunner": "没有 host 可用的 agent runner",
   "priceBreakdown": "输入 / 缓存读取 / 输出，美元 / 百万 token",

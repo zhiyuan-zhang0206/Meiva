@@ -54,6 +54,7 @@ export interface SpawnPickerProps {
   harnessRows: HarnessAvailability[];
   harness: Harness;
   onHarness: (harness: Harness) => void;
+  modelsPending: boolean;
   modelIds: string[];
   models: ModelsResponse["models"] | undefined;
   model: string | undefined;
@@ -76,6 +77,7 @@ export function SpawnTable({
   harness,
   onHarness,
   modelIds,
+  modelsPending,
   models,
   model,
   onModel,
@@ -192,7 +194,7 @@ export function SpawnTable({
             </li>
           );
         })}
-        {modelIds.length === 0 && (
+        {modelIds.length === 0 && !modelsPending && (
           <li className="px-2 py-1 text-muted-foreground">{t("modelsUnavailable")}</li>
         )}
       </ul>
@@ -319,6 +321,7 @@ export function SpawnStack({
   harness,
   onHarness,
   modelIds,
+  modelsPending,
   models,
   model,
   onModel,
@@ -411,7 +414,7 @@ export function SpawnStack({
       <StackSection
         id="model"
         label={modelLabel}
-        value={model === undefined ? t("modelsUnavailable") : formatModelLabel(model)}
+        value={model === undefined ? (modelsPending ? "—" : t("modelsUnavailable")) : formatModelLabel(model)}
         expanded={open === "model"}
         onToggle={() => toggle("model")}
       >
@@ -435,7 +438,7 @@ export function SpawnStack({
               </li>
             );
           })}
-          {modelIds.length === 0 && (
+          {modelIds.length === 0 && !modelsPending && (
             <li className="px-3 py-2 text-muted-foreground">{t("modelsUnavailable")}</li>
           )}
         </ul>
