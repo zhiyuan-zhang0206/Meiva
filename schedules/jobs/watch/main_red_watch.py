@@ -92,7 +92,7 @@ class WatchState:
     watermarks: Mapping[str, str]
     first_seen: Mapping[str, str]
     slot: SlotLedger = SlotLedger()
-    greens: Mapping[str, str] = field(default_factory=dict)
+    greens: Mapping[str, str] = field(default_factory=dict[str, str])
 
 
 # meiva:note
