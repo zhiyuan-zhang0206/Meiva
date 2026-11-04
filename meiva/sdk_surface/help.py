@@ -490,7 +490,10 @@ def _format_child(name: str, child: object, render: _Render = _DEFAULT_RENDER) -
         # The class formatter is the one that reads the render parameters
         # (compact classes; the recursion into nested members).
         if not inspect.isclass(child):
-            return f"# {name}: {type(child).__name__}"
+            raise TypeError(
+                f"{name} was classified as a class but is a {type(child).__name__}; "
+                "the surface changed between classification and rendering"
+            )
         return _format_class_stub(name, child, render)
     if formatter is _format_function_stub or formatter is _format_submodule_ref:
         # meiva:note

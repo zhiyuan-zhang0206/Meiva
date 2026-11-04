@@ -379,6 +379,28 @@ def test_uninstall_restores_from_the_install_record_without_a_namespace_walk(
     assert target.demo is demo
 
 
+# meiva:note
+# A member the surface enumerated but the namespace no longer carries (`MEIVA_SDK_DISABLE` deletes
+# the global) is skipped, as before — absence is the normal disabled-surface state. A member that
+# is still there and stopped being callable is not absence: something replaced a routine, so
+# `install` refuses instead of leaving that entry unmetered without a word.
+def test_install_skips_a_routine_the_namespace_no_longer_carries(
+    sampling_owner: call_policy.SamplingPolicyOwner,
+) -> None:
+    target = SimpleNamespace()
+    surface = metering.MeterSurface(routines=((target, "demo", "demo"),), funnel_module=None)
+    assert metering.install(sampling_owner, clients=None, surface=surface) == ()
+
+
+def test_install_refuses_a_routine_that_stopped_being_callable(
+    sampling_owner: call_policy.SamplingPolicyOwner,
+) -> None:
+    target = SimpleNamespace(demo="not callable")
+    surface = metering.MeterSurface(routines=((target, "demo", "demo"),), funnel_module=None)
+    with pytest.raises(TypeError, match="no longer callable"):
+        metering.install(sampling_owner, clients=None, surface=surface)
+
+
 def test_install_meters_the_funnel_module_it_is_given(
     sampling_owner: call_policy.SamplingPolicyOwner,
 ) -> None:
