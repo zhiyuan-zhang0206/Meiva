@@ -8,8 +8,9 @@ surface module carries only the description (task #3633).
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
@@ -19,7 +20,7 @@ from agent.graph.hooks.compact import auto_compact_will_fire
 from agent.graph.tool_calls import first_tool_call_code
 from agent.hooks import Hook
 from agent.messages import NoteTag, system_note_message, tail_has_agent_inbound
-from agent.state import AgentState
+from agent.state import AgentState, PluginStateHandle
 from base.agents.context import MeivaContext
 from base.lm.content import message_content
 from base.log import logger
@@ -46,11 +47,23 @@ from ._state import (
 )
 from .hint_selection import assumed_persistence_name, rearmed_reminded, select_hints
 
-# Channel keys for this plugin's state fields (prefixed by the framework from the
-# declared state class). A hook node reads/writes these directly on `state`
-# because the in-turn handle (state_handle.read/update) is not wired up here.
-_REMINDED_FIELD = "meiva_sdk_reminder__reminded"
-_BOOKMARK_FIELD = "meiva_sdk_reminder__last_seen_compact"
+
+# meiva:note
+# The typed handle over this plugin's state, built per use. A hook node reads its fields from the
+# graph `state` through `view` and returns them keyed by their channels through `delta`, because the
+# in-turn handle (`read` / `update`) is not wired up here.
+def _state_handle() -> PluginStateHandle[MeivaSdkReminderState]:
+    return PluginStateHandle(MeivaSdkReminderState, "meiva_sdk_reminder")
+
+
+# meiva:note
+# What one `execute_code` call's hook pass adds: the hint notes to append after the output and the
+# plugin's state fields keyed by their graph channels. Kept apart so the caller merges notes into
+# the `messages` channel and fields into the update without reading either back out of a dict.
+@dataclass(frozen=True)
+class _CallUpdate:
+    notes: Sequence[AnyMessage]
+    fields: Mapping[str, object]
 
 
 def _earlier_codes(previous_messages: list[AnyMessage]) -> list[str]:
@@ -64,8 +77,9 @@ def _earlier_codes(previous_messages: list[AnyMessage]) -> list[str]:
 
 
 def _rearmed(state: AgentState) -> tuple[set[str], int]:
+    snapshot = _state_handle().view(state)
     reminded, bookmark = rearmed_reminded(
-        getattr(state, _REMINDED_FIELD), getattr(state, _BOOKMARK_FIELD), state.compact.version
+        snapshot.reminded, snapshot.last_seen_compact, state.compact.version
     )
     return set(reminded), bookmark
 
@@ -91,7 +105,7 @@ class _SdkReminderAfterExecHook(Hook):
 
     async def __call__(
         self, state: AgentState, runtime: Runtime[MeivaContext], config: RunnableConfig, /
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, object] | None:
         """Match each result by ID, retaining the per-compaction hint cadence."""
         ai_index = next(
             (
@@ -111,7 +125,7 @@ class _SdkReminderAfterExecHook(Hook):
             if isinstance(msg, ToolMessage)
         }
         prior = state.messages[:ai_index]
-        update: dict[str, Any] = {}
+        update: dict[str, object] = {}
         notes: list[AnyMessage] = []
         for call in ai.tool_calls:
             output = outputs.get(call["id"] or "")
@@ -120,9 +134,9 @@ class _SdkReminderAfterExecHook(Hook):
             single = ai.model_copy(update={"tool_calls": [call]})
             view = state.model_copy(update={**update, "messages": [*prior, single, output]})
             delta = await self._for_call(view, runtime, config)
-            if delta:
-                notes.extend(delta.pop("messages", []))
-                update.update(delta)
+            if delta is not None:
+                notes.extend(delta.notes)
+                update.update(delta.fields)
             prior = [*prior, single, output]
         if notes:
             update["messages"] = notes
@@ -134,7 +148,7 @@ class _SdkReminderAfterExecHook(Hook):
         runtime: Runtime[MeivaContext],
         _config: RunnableConfig,
         /,
-    ) -> dict[str, Any] | None:
+    ) -> _CallUpdate | None:
         if len(state.messages) < 2:
             return None
         ai_msg = state.messages[-2]
@@ -177,10 +191,10 @@ class _SdkReminderAfterExecHook(Hook):
             # bookmark advance.
             return None
 
-        update: dict[str, Any] = {
-            _REMINDED_FIELD: reminded | selection.newly_seen,
-            _BOOKMARK_FIELD: new_bookmark,
-        }
+        fields = _state_handle().delta(
+            {"reminded": reminded | selection.newly_seen, "last_seen_compact": new_bookmark}
+        )
+        notes: list[AnyMessage] = []
         if selection.hinted or selection.nameerror_hint is not None:
             hint_lines = [hint_for(cat) for cat in selection.hinted]
             if selection.nameerror_hint is not None:
@@ -193,15 +207,15 @@ class _SdkReminderAfterExecHook(Hook):
             # same surface the agent_reply / compact-reminder notes use. The
             # exec-output message keeps carrying only the agent's real output.
             now = runtime.context.require_clock().now()
-            update["messages"] = [
+            notes.append(
                 system_note_message(
                     content=hints,
                     tag=NoteTag.SDK_HINT,
                     picked_up_at=now,
                     created_at=now,
                 )
-            ]
-        return update
+            )
+        return _CallUpdate(notes=notes, fields=fields)
 
 
 # meiva:note
@@ -237,7 +251,7 @@ class _SdkReminderAgentReplyHook(Hook):
         runtime: Runtime[MeivaContext],
         _config: RunnableConfig,
         /,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, object] | None:
         if not tail_has_agent_inbound(state.messages):
             return None
 
@@ -274,8 +288,9 @@ class _SdkReminderAgentReplyHook(Hook):
                 reminded.add(AGENT_REPLY_CATEGORY)
                 return {
                     "messages": [_agent_reply_note(runtime.context.require_clock().now())],
-                    _REMINDED_FIELD: reminded,
-                    _BOOKMARK_FIELD: new_bookmark,
+                    **_state_handle().delta(
+                        {"reminded": reminded, "last_seen_compact": new_bookmark}
+                    ),
                 }
 
 
