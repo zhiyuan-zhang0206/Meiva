@@ -233,6 +233,13 @@ class HarnessCliUpdateRound(TypedDict):
     outcomes: NotRequired[list[dict[str, object]]]
 
 
+class PluginCollectorCycle(TypedDict):
+    collector: str
+    outcome: Literal["ok", "failed"]
+    reason: str
+    cycle: int
+
+
 EVENTS: dict[str, EventSpec] = {
     "harness_cli_update_round": telemetry_event(
         "harness_cli_update_round",
@@ -401,5 +408,12 @@ EVENTS: dict[str, EventSpec] = {
         "one sample of the understanding chunk queue per consumer round: pending, running and the oldest pending age",
         payload=UnderstandingBacklog,
         site="services/agent_runner/understanding/chunk_consumer.py:Consumer.emit_backlog",
+    ),
+    "plugin_collector_cycle": telemetry_event(
+        "plugin_collector_cycle",
+        "one interval collector finished a refresh cycle, in both outcomes — the only record that says the loop ran at all; three intervals without one is a collector that is alive but producing nothing",
+        payload=PluginCollectorCycle,
+        tier="observation",
+        site="meiva_builtins/plugins/meiva_usage/runner.py:_emit_cycle",
     ),
 }

@@ -192,9 +192,41 @@ def _load_collector_config(
     return collector
 
 
-def run_from_schedule(
+# meiva:note
+# One event per refresh cycle, in both outcomes. The loop's exception handler is the only place a
+# failed cycle is visible, and until this existed "alive but producing nothing" was
+# indistinguishable from healthy (schedule 50, 2026-11-04: three hours of swallowed failures).
+# Telemetry must never break the loop: a process with no pipeline, or an event the registry
+# refuses, is reported to the log and the next cycle still runs.
+def _emit_cycle(collector_id: str, outcome: str, reason: str, *, cycle: int) -> None:
+    from base.telemetry.emitter import emit, pipeline_bound
+
+    if not pipeline_bound():
+        return
+    try:
+        emit(
+            "telemetry",
+            "plugin_collector_cycle",
+            attributes={
+                "collector": collector_id,
+                "outcome": outcome,
+                "reason": reason,
+                "cycle": cycle,
+            },
+        )
+    except Exception as exc:
+        _log.warning("collector {} cycle event not emitted: {}", collector_id, exc)
+
+
+# meiva:note
+# The loop, with its two effects handed in as required parameters. The public entry point below
+# supplies the real ones; a test supplies its own, which is why they carry no defaults — a default
+# reaching the real implementation is a seam no caller sees (diff-hints callable-default).
+def run_collector_cycles(
     borrowed: ScheduleInputs | None,
     *,
+    refresh: Callable[..., object],
+    sleep: Callable[[float], None],
     collector_id: str,
     stop_after_cycles: int | None = None,
     environ: Mapping[str, str] | None = None,
@@ -224,7 +256,7 @@ def run_from_schedule(
 
         now = datetime.now(tz=UTC)
         try:
-            refresh_collector_once(
+            refresh(
                 collector,
                 db=db,
                 user_home=effective_home,
@@ -239,10 +271,23 @@ def run_from_schedule(
             )
         except Exception as exc:
             _log.warning("collector {} refresh cycle failed: {}", collector_id, exc)
+            _emit_cycle(collector_id, "failed", type(exc).__name__, cycle=cycles)
+        else:
+            _emit_cycle(collector_id, "ok", "", cycle=cycles)
 
         cycles += 1
         if stop_after_cycles is not None and cycles >= stop_after_cycles:
             return
 
         interval_s = float(collector.interval_minutes * 60)
-        time.sleep(interval_s)
+        sleep(interval_s)
+
+
+def run_from_schedule(borrowed: ScheduleInputs | None, *, collector_id: str) -> None:
+    # meiva:note
+    # The entry a generated schedule script calls. It supplies the loop's two effects; a test that
+    # needs to control them calls `run_collector_cycles` with its own, which is why they are
+    # required parameters there instead of defaults here (diff-hints callable-default).
+    run_collector_cycles(
+        borrowed, refresh=refresh_collector_once, sleep=time.sleep, collector_id=collector_id
+    )
