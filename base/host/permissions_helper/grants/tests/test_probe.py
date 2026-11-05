@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -105,7 +106,9 @@ def _codes(value: int) -> dict[str, int]:
 
 def test_the_probe_reads_every_catalog_service_through_one_child(tmp_path: Path) -> None:
     helper = FakeHelper(codes=_codes(0))
-    result = probe.probe(helper, workdir=tmp_path, run_id="r1", env={}, timers=RecordedWaits())
+    result = probe.probe(
+        helper, python=sys.executable, workdir=tmp_path, run_id="r1", env={}, timers=RecordedWaits()
+    )
     assert len(helper.spawned) == 1
     assert result.helper_reachable
     assert all(grant is Grant.GRANTED for grant in result.grants.values())
@@ -114,13 +117,17 @@ def test_the_probe_reads_every_catalog_service_through_one_child(tmp_path: Path)
 
 def test_preflight_words_map_onto_the_grant_vocabulary(tmp_path: Path) -> None:
     helper = FakeHelper(codes=_codes(2))
-    result = probe.probe(helper, workdir=tmp_path, run_id="r2", env={}, timers=RecordedWaits())
+    result = probe.probe(
+        helper, python=sys.executable, workdir=tmp_path, run_id="r2", env={}, timers=RecordedWaits()
+    )
     assert all(grant is Grant.NOT_DETERMINED for grant in result.grants.values())
 
 
 def test_a_grant_the_record_holds_and_the_helper_has_not_read_is_stale(tmp_path: Path) -> None:
     helper = FakeHelper(codes=_codes(0), screen=False, ax=True)
-    result = probe.probe(helper, workdir=tmp_path, run_id="r3", env={}, timers=RecordedWaits())
+    result = probe.probe(
+        helper, python=sys.executable, workdir=tmp_path, run_id="r3", env={}, timers=RecordedWaits()
+    )
     assert result.grant_for(SCREEN_ITEM) is Grant.STALE
     assert result.grant_for(ACCESSIBILITY_ITEM) is Grant.GRANTED
     assert result.grant_for(AUTOMATION_ITEMS[0]) is Grant.UNKNOWN
@@ -128,14 +135,18 @@ def test_a_grant_the_record_holds_and_the_helper_has_not_read_is_stale(tmp_path:
 
 def test_a_record_without_a_decision_stays_not_determined(tmp_path: Path) -> None:
     helper = FakeHelper(codes=_codes(2), screen=False, ax=False)
-    result = probe.probe(helper, workdir=tmp_path, run_id="r8", env={}, timers=RecordedWaits())
+    result = probe.probe(
+        helper, python=sys.executable, workdir=tmp_path, run_id="r8", env={}, timers=RecordedWaits()
+    )
     assert result.grant_for(SCREEN_ITEM) is Grant.NOT_DETERMINED
     assert result.grant_for(ACCESSIBILITY_ITEM) is Grant.NOT_DETERMINED
 
 
 def test_a_helper_without_the_request_method_says_so(tmp_path: Path) -> None:
     helper = FakeHelper(codes=_codes(0), request_capable=False)
-    result = probe.probe(helper, workdir=tmp_path, run_id="r7", env={}, timers=RecordedWaits())
+    result = probe.probe(
+        helper, python=sys.executable, workdir=tmp_path, run_id="r7", env={}, timers=RecordedWaits()
+    )
     assert not result.supports_request
 
 
@@ -149,7 +160,12 @@ def test_the_request_reports_what_the_helper_holds_afterwards() -> None:
 
 def test_a_helper_that_does_not_answer_is_unavailable_not_denied(tmp_path: Path) -> None:
     result = probe.probe(
-        DeadHelper(), workdir=tmp_path, run_id="r4", env={}, timers=RecordedWaits()
+        DeadHelper(),
+        workdir=tmp_path,
+        run_id="r4",
+        env={},
+        timers=RecordedWaits(),
+        python=sys.executable,
     )
     assert not result.helper_reachable
     assert result.grants == {}
@@ -164,6 +180,7 @@ def test_an_old_helper_build_is_a_setup_error_the_caller_must_fix(tmp_path: Path
     with pytest.raises(probe.PermissionsProbeError) as caught:
         probe.probe(
             OldHelper(codes=_codes(0)),
+            python=sys.executable,
             workdir=tmp_path,
             run_id="r5",
             env={},
@@ -203,6 +220,7 @@ def test_a_preflight_that_finds_no_result_spends_its_poll_on_the_given_timers(
     with pytest.raises(probe.PermissionsProbeError):
         probe.run_preflight(
             Silent(codes=_codes(0)),
+            python=sys.executable,
             workdir=tmp_path,
             run_id="r9",
             env={},
@@ -222,6 +240,7 @@ def test_a_probe_child_that_never_writes_times_out(tmp_path: Path) -> None:
     with pytest.raises(probe.PermissionsProbeError):
         probe.run_preflight(
             Silent(codes=_codes(0)),
+            python=sys.executable,
             workdir=tmp_path,
             run_id="r6",
             env={},

@@ -13,7 +13,7 @@ helper, so there is nothing to check), the child environment, a scratch
 directory, the account home and the record path, carried together as
 `GateHost`. It reads nothing of the process: each root that runs the gate
 (`meiva permissions`, the converge step, the gateway endpoint) describes its host
-with `gate_host(home, user_home, environ, helper, timers)` from the facts it holds,
+with `gate_host(home, user_home, environ, helper, timers, python)` from the facts it holds,
 and hands the passes a clock (the instant they stamp) and a run id (the name of the
 probe children's files). Its `timers` are the waits: the monotonic reading each
 deadline is set from and the sleep between polls of a child's result file, so a test

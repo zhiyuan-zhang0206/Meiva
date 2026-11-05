@@ -40,6 +40,7 @@ def run(args: argparse.Namespace) -> int:
         return 0
     runtime = runtime_of(args)
     host = onboarding.gate_host(
+        python=runtime.host.platform.executable,
         home=runtime.home,
         user_home=runtime.session.user_home,
         environ=runtime.host_after_config().environ,

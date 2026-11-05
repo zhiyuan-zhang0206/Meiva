@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -177,6 +178,7 @@ def test_the_gate_service_describes_its_host_from_the_gateway_process(
     assert (
         seat.env
         == gate_host(
+            python=sys.executable,
             home=home,
             user_home=seat.home,
             environ={"PATH": "/the/gateways/launch/path"},
@@ -187,7 +189,12 @@ def test_the_gate_service_describes_its_host_from_the_gateway_process(
     assert (
         seat.env
         != gate_host(
-            home=home, user_home=seat.home, environ={}, helper=None, timers=app.state.clock
+            python=sys.executable,
+            home=home,
+            user_home=seat.home,
+            environ={},
+            helper=None,
+            timers=app.state.clock,
         ).env
     )
     assert isinstance(seat.client, PermissionsHelperClient)

@@ -32,6 +32,7 @@ class GateHost:
     home: Path
     record_path: Path
     timers: Timers
+    python: str
 
 
 # meiva:note
@@ -45,6 +46,7 @@ def gate_host(
     environ: Mapping[str, str],
     helper: HelperFactory | None,
     timers: Timers,
+    python: str,
 ) -> GateHost:
     from base.sessions import env_forwarding
 
@@ -55,6 +57,7 @@ def gate_host(
         home=user_home,
         record_path=gate.record_path(home),
         timers=timers,
+        python=python,
     )
 
 
@@ -67,7 +70,12 @@ def check(*, host: GateHost, now: datetime, run_id: str) -> GateReport:
     record = gate.read_record(host.record_path)
     deferred = bool(record.deferred) if record is not None else False
     result = probe.probe(
-        host.client, workdir=host.workdir, run_id=run_id, env=host.env, timers=host.timers
+        host.client,
+        workdir=host.workdir,
+        run_id=run_id,
+        env=host.env,
+        timers=host.timers,
+        python=host.python,
     )
     report = gate.evaluate(result, deferred=deferred, now=now)
     gate.remember(report, deferred=deferred, path=host.record_path)
@@ -123,6 +131,7 @@ def _ask_items(
             workdir=seat.workdir,
             run_id=run_id,
             env=seat.env,
+            python=seat.python,
             home=seat.home,
             timeout_s=timeout_s,
             timers=seat.timers,
