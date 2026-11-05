@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 
-from base.host.boundary.untyped import object_of
 from meiva import boot
 from meiva.sdk_surface import process_context, sdk_disable
 
@@ -10,26 +9,44 @@ __all_for_meiva__ = ["attach"]
 
 HANDLE_ENV = "MEIVA_HARNESS_HANDLE"
 
-_REGISTRATION_NAMES = frozenset({"HarnessRegistration", "RegistrationError", "handle_digest"})
-_STORE_NAMES = frozenset({"FileRegistrationStore", "registration_store"})
-_ATTACHMENT_NAMES = frozenset({"HarnessAttachment", "open_attachment", "resolve_registration"})
-
 
 def __getattr__(name: str) -> object:
     """Serve the kernel's names on first use, so `import meiva` stays light."""
-    if name in _REGISTRATION_NAMES:
-        from . import registration
+    match name:
+        case "HarnessRegistration":
+            from .registration import HarnessRegistration
 
-        return object_of(getattr, registration, name)
-    if name in _STORE_NAMES:
-        from . import store
+            return HarnessRegistration
+        case "RegistrationError":
+            from .registration import RegistrationError
 
-        return object_of(getattr, store, name)
-    if name in _ATTACHMENT_NAMES:
-        from . import attachment
+            return RegistrationError
+        case "handle_digest":
+            from .registration import handle_digest
 
-        return object_of(getattr, attachment, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+            return handle_digest
+        case "FileRegistrationStore":
+            from .store import FileRegistrationStore
+
+            return FileRegistrationStore
+        case "registration_store":
+            from .store import registration_store
+
+            return registration_store
+        case "HarnessAttachment":
+            from .attachment import HarnessAttachment
+
+            return HarnessAttachment
+        case "open_attachment":
+            from .attachment import open_attachment
+
+            return open_attachment
+        case "resolve_registration":
+            from .attachment import resolve_registration
+
+            return resolve_registration
+        case _:
+            raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def ensure_identity() -> object:
