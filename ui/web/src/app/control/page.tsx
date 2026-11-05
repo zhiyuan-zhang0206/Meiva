@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarClock, CircleHelp, Cpu, MessageSquare, Monitor, Palette, Plug, Puzzle, Settings2, SlidersHorizontal, Sparkles } from "lucide-react";
+import { CalendarClock, CircleHelp, Cpu, MessageSquare, Plug, Puzzle, Settings2, SlidersHorizontal, Sparkles } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -24,12 +24,10 @@ import { useSettledAnchorScroll } from "./anchor/anchor-scroll";
 const PANELS = [
   { id: "guide", icon: CircleHelp, group: "guide" },
   { id: "config", icon: Settings2, group: "preferences" },
-  { id: "display", icon: Palette, group: "preferences" },
   { id: "plugins", icon: Puzzle, group: "manage" },
   { id: "mcp", icon: Plug, group: "manage" },
   { id: "skills", icon: Sparkles, group: "manage" },
   { id: "schedules", icon: CalendarClock, group: "manage" },
-  { id: "machines", icon: Monitor, group: "system" },
   { id: "advanced", icon: SlidersHorizontal, group: "system" },
   { id: "app", icon: Cpu, group: "system" },
 ] as const;
@@ -38,9 +36,9 @@ type PanelId = typeof PANELS[number]["id"];
 function panelFor(anchor: string): PanelId {
   const match = PANELS.find((panel) => panel.id === anchor);
   if (match) return match.id;
-  if (anchor === "config-default-model") return "config";
+  if (anchor === "config-default-model" || ["config-communication", "config-model-preferences", "display-notifications", "display-composer", "display-language", "display-theme"].includes(anchor)) return "config";
   if (anchor.startsWith("config-")) return "advanced";
-  if (anchor.startsWith("display-")) return "display";
+  if (anchor === "machines" || anchor === "display" || anchor.startsWith("display-") || anchor.startsWith("advanced-")) return "advanced";
   return "config";
 }
 
@@ -67,6 +65,8 @@ export function ControlShell({ Guide, Config, Display, Plugins, Mcp, Skills, Sch
   const appBridge = useAppBridge();
   const [anchor, setAnchor] = useState(() => browser.navigation.location()?.hash.slice(1) ?? "config");
   const active = panelFor(anchor);
+  const advancedView = anchor === "machines" || anchor === "advanced-resources" ? "resources"
+    : anchor === "display" || anchor.startsWith("display-") || anchor === "advanced-display" ? "display" : "agent";
   const panels = PANELS.filter((panel) => panel.id !== "app" || appBridge);
   useSettledAnchorScroll(CONTROL_SCROLL_ID, anchor);
 
@@ -76,17 +76,14 @@ export function ControlShell({ Guide, Config, Display, Plugins, Mcp, Skills, Sch
     return () => window.removeEventListener("hashchange", sync);
   }, [browser]);
 
-  const select = (id: PanelId) => {
+  const select = (id: PanelId | "advanced-resources" | "advanced-display") => {
     setAnchor(id);
     browser.navigation.replace(`#${id}`, browser.navigation.state());
     document.getElementById(CONTROL_SCROLL_ID)?.scrollTo({ top: 0 });
   };
-  const label = (id: PanelId) => id === "config" ? t("general") : id === "machines" ? t("machines")
-    : id === "advanced" ? t("advanced") : ts(id);
+  const label = (id: PanelId) => id === "config" ? t("general") : id === "advanced" ? t("advanced") : ts(id);
   const description = active === "config" ? t("generalDescription")
-    : active === "machines" ? t("machinesDescription")
     : active === "advanced" ? t("advancedDescription")
-    : active === "display" ? t("displayDescription")
     : active === "schedules" ? t("schedulesDescription") : undefined;
 
   return (
@@ -116,10 +113,25 @@ export function ControlShell({ Guide, Config, Display, Plugins, Mcp, Skills, Sch
         <div id={CONTROL_SCROLL_ID} className={cn("overflow-y-auto overflow-x-hidden", FLEX_1)}>
           <div className={cn("mx-auto max-w-4xl px-5 py-8 md:px-10", MIN_W_0)}>
             <ControlSection key={active} id={active} label={label(active)} description={description}>
-              {active === "config" && <Config mode="general" />}
-              {active === "advanced" && <Config mode="advanced" />}
-              {active === "machines" && <Config mode="machines" />}
-              {active === "display" && <Display />}
+              {active === "config" && <div className="space-y-8"><Config mode="general" /><Display mode="general" /></div>}
+              {active === "advanced" && <div className="space-y-6">
+                <nav aria-label={t("advancedSections")} className={cn(FLEX, "flex-wrap gap-1 border-b border-border pb-3")}>
+                  {([
+                    ["agent", "advanced", "agentSettings"],
+                    ["resources", "advanced-resources", "resourcesServices"],
+                    ["display", "advanced-display", "interfaceDetails"],
+                  ] as const).map(([view, target, key]) => <button key={view} type="button"
+                    aria-current={advancedView === view ? "page" : undefined} aria-controls={`advanced-panel-${view}`} id={`advanced-tab-${view}`}
+                    onClick={() => select(target)} className={cn("rounded-md px-3 py-2 text-sm", advancedView === view ? "bg-accent font-medium" : "text-muted-foreground hover:bg-muted")}>
+                    {t(key)}
+                  </button>)}
+                </nav>
+                <div role="region" id={`advanced-panel-${advancedView}`} aria-labelledby={`advanced-tab-${advancedView}`}>
+                  {advancedView === "agent" && <Config key="agent" mode="advanced" />}
+                  {advancedView === "resources" && <Config key="resources" mode="machines" />}
+                  {advancedView === "display" && <Display mode="advanced" />}
+                </div>
+              </div>}
               {active === "plugins" && <><Plugins /><PluginNavList location="settings" /></>}
               {active === "mcp" && <Mcp />}
               {active === "skills" && <Skills />}

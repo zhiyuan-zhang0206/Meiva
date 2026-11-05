@@ -71,8 +71,12 @@
   "preferences": "Preferences",
   "manage": "Manage",
   "system": "System",
-  "generalDescription": "Defaults for how your agents work.",
+  "generalDescription": "How your agents work with you, and your everyday preferences.",
   "machinesDescription": "Device capabilities and local services. Changes apply to one machine.",
-  "advancedDescription": "Detailed configuration for models, execution, and infrastructure.",
-  "moreSettings": "Looking for more? Open advanced settings"
+  "advancedDescription": "Fine-tune agent behavior, system resources, and interface details.",
+  "moreSettings": "Looking for more? Open advanced settings",
+  "advancedSections": "Advanced sections",
+  "agentSettings": "Agent settings",
+  "resourcesServices": "Resources & services",
+  "interfaceDetails": "Interface details"
 }

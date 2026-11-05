@@ -7,10 +7,12 @@ tags: [frontend, performance, control, insights]
 
 # Settings and Insights first paint
 
-Settings mounts only the selected category. Its default General panel contains the
-model selector and curated fields; advanced configuration, inventories and schedules
-load when selected. Legacy config sub-anchors select Advanced and display anchors
-select Display. The header and navigation render immediately. Section bodies and
+Settings mounts only the selected category. General starts with communication
+style and model preferences, followed by everyday notification, writing and
+appearance settings. Advanced has independent Agent settings, Resources & services,
+and Interface details areas. Machine selection belongs only to resources. Legacy
+machine and display-detail anchors select the corresponding Advanced area; everyday
+preference anchors select General. The header and navigation render immediately. Section bodies and
 field groups still use the idle mount queue, so Advanced does not mount its entire
 field catalog in one frame. Insights retains its vertical anchor layout.
 

@@ -8,7 +8,7 @@ import { ControlShell } from "./page";
 
 function Guide() { return <div>GUIDE_BODY</div>; }
 function Config({ mode }: { mode: "general" | "advanced" | "machines" }) { return <div>{mode}_CONFIG</div>; }
-function Display() { return <div>DISPLAY_BODY</div>; }
+function Display({ mode }: { mode?: "general" | "advanced" | "all" }) { return <div>{mode}_DISPLAY</div>; }
 function Plugins() { return <div>PLUGINS_BODY</div>; }
 function Mcp() { return <div>MCP_BODY</div>; }
 function Skills() { return <div>SKILLS_BODY</div>; }
@@ -35,19 +35,23 @@ describe("Settings navigation", () => {
     expect(screen.getByRole("heading", { name: "Settings" })).toBeTruthy();
     expect(await screen.findByText("general_CONFIG")).toBeTruthy();
     expect(screen.queryByText("SCHEDULES_BODY")).toBeNull();
+    expect(screen.getByText("general_DISPLAY")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Back to agents" }).getAttribute("href")).toBe("/");
     expect(screen.queryByText(/OKF/i)).toBeNull();
     const nav = screen.getByRole("navigation", { name: "Settings sections" });
     expect(within(nav).getAllByRole("button")[0].textContent).toBe("Guide");
   });
 
-  it("switches between machine configuration and automations with explicit scope", async () => {
+  it("places machine resources inside Advanced and keeps automations separate", async () => {
     const { browser } = renderSettings();
     const nav = screen.getByRole("navigation", { name: "Settings sections" });
-    fireEvent.click(within(nav).getByRole("button", { name: "Machines" }));
+    expect(within(nav).queryByRole("button", { name: "Machines" })).toBeNull();
+    expect(within(nav).queryByRole("button", { name: "Display" })).toBeNull();
+    fireEvent.click(within(nav).getByRole("button", { name: "Advanced" }));
+    fireEvent.click(screen.getByRole("button", { name: "Resources & services" }));
     expect(await screen.findByText("machines_CONFIG")).toBeTruthy();
     expect(screen.queryByText("general_CONFIG")).toBeNull();
-    expect(browser.navigation.location()?.hash).toBe("#machines");
+    expect(browser.navigation.location()?.hash).toBe("#advanced-resources");
     fireEvent.click(within(nav).getByRole("button", { name: "Schedules" }));
     expect(await screen.findByText("SCHEDULES_BODY")).toBeTruthy();
     expect(within(nav).getByRole("button", { name: "Schedules" }).getAttribute("aria-current")).toBe("page");
@@ -60,10 +64,19 @@ describe("Settings navigation", () => {
     expect(screen.queryByText("general_CONFIG")).toBeNull();
   });
 
+
+  it("preserves the old machine link inside Advanced", async () => {
+    window.location.hash = "#machines";
+    renderSettings();
+    expect(await screen.findByText("machines_CONFIG")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Advanced" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("button", { name: "Resources & services" }).getAttribute("aria-current")).toBe("page");
+  });
+
   it("responds to hash navigation after mounting", async () => {
     const { browser } = renderSettings();
     browser.navigation.replace("#display-timeline", null);
     fireEvent(window, new Event("hashchange"));
-    await waitFor(() => expect(screen.getByText("DISPLAY_BODY")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("advanced_DISPLAY")).toBeTruthy());
   });
 });

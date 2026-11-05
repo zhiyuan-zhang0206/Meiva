@@ -45,8 +45,7 @@ import { cn } from "@/lib/format/utils";
 import { useApi } from "@/lib/transport/transport-context";
 
 const COMMON_FIELDS = new Set([
-  "MEIVA_REASONING_EFFORT", "MEIVA_EXEC_TIMEOUT_SECONDS", "MEIVA_AUTO_COMPACT_FRACTION",
-  "MEIVA_TIMEZONE", "MEIVA_WEB_SEARCH_PROVIDER", "MEIVA_WEB_MAX_RESULTS",
+  "MEIVA_AGENT_COMMUNICATION_STYLE", "MEIVA_REASONING_EFFORT",
 ]);
 
 const configQueryKey = (machine: MachineSelection) => ["config", machine] as const;
@@ -118,12 +117,12 @@ export default function ConfigEditor({ mode }: { mode: "general" | "advanced" | 
   const machines = useQuery({
     queryKey: MACHINES_QUERY_KEY,
     queryFn: () => client.getMachines(),
-    enabled: visible,
+    enabled: visible && mode === "machines",
   });
   const status = useQuery({
     queryKey: SYSTEM_STATUS_QUERY_KEY,
     queryFn: () => client.getSystemStatus(),
-    enabled: visible,
+    enabled: visible && mode === "machines",
   });
   const gatewayName = status.data?.cluster.current_machine ?? null;
 
@@ -211,6 +210,7 @@ export default function ConfigEditor({ mode }: { mode: "general" | "advanced" | 
       let parsed: unknown = value;
       if (field.field_type === "int") parsed = parseInt(value, 10);
       else if (field.field_type === "float") parsed = parseFloat(value);
+      else if (field.name === "agent_communication_style" && value === "") parsed = null;
       const result = await writeConfigOwners(
         applyDelta(current.raw_overrides, name, parsed), current.fields,
         (patch) => client.putConfig(patch, machine ?? undefined),
@@ -324,9 +324,9 @@ export default function ConfigEditor({ mode }: { mode: "general" | "advanced" | 
   );
   const generalFields = allGroups.flatMap((group) => group.fields);
   const groupSections = mode === "general" ? [
-    { id: "config-behavior", label: t("agentDefaults"), fields: generalFields.filter((field) => !field.env_var.startsWith("MEIVA_WEB_")) },
-    { id: "config-search", label: t("webSearch"), fields: generalFields.filter((field) => field.env_var.startsWith("MEIVA_WEB_")) },
-  ].filter((group) => group.fields.length > 0) : allGroups;
+    { id: "config-communication", label: t("workingTogether"), fields: generalFields.filter((field) => field.name === "agent_communication_style") },
+    { id: "config-model-preferences", label: t("modelsHeading"), fields: generalFields.filter((field) => field.name !== "agent_communication_style") },
+  ] : allGroups;
   const shownCount = groupSections.reduce((n, g) => n + g.fields.length, 0);
 
   return (
@@ -336,11 +336,6 @@ export default function ConfigEditor({ mode }: { mode: "general" | "advanced" | 
           <MachineSelector selection={selection} agentRunners={onlineAgentRunners}
             gatewayName={gatewayName} onChange={onSelectMachine} />
           <p className="text-xs text-muted-foreground">{t("machineScope")}</p>
-        </div>
-      )}
-      {mode === "general" && (
-        <div className="rounded-lg border border-border p-5">
-          <DefaultModelPanel id={DEFAULT_MODEL_GROUP_ID} />
         </div>
       )}
       {mode !== "general" && (
@@ -392,7 +387,12 @@ export default function ConfigEditor({ mode }: { mode: "general" | "advanced" | 
                 />
               </button>}
             </h3>
-            {!collapsed ? (
+            {mode === "general" && id === "config-model-preferences" && (
+              <div className="rounded-md border border-border p-4 mb-3">
+                <DefaultModelPanel id={DEFAULT_MODEL_GROUP_ID} />
+              </div>
+            )}
+            {!collapsed && fields.length > 0 ? (
               <DeferredMount>
                 <div id={fieldsId} className="border border-border rounded-md divide-y divide-border">
                   {fields.map((field) => (

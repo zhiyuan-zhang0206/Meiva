@@ -17,13 +17,13 @@ beforeEach(() => {
   window.innerWidth = 1024;
 });
 
-function renderPage() {
+function renderPage(mode: "general" | "advanced" | "all" = "all") {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   const view = renderWithBrowser(
     <QueryClientProvider client={qc}>
-      <DisplaySettingsPage />
+      <DisplaySettingsPage mode={mode} />
     </QueryClientProvider>,
   );
   return { ...view, queryClient: qc };
@@ -53,6 +53,24 @@ async function replySuggestionsToggle(): Promise<HTMLButtonElement> {
 }
 
 describe("DisplaySettingsPage", () => {
+  it("puts everyday preferences in General and leaves clock details in Advanced", async () => {
+    renderPage("general");
+    expect(await screen.findByRole("switch", { name: "Awaiting-reply notification" })).toBeTruthy();
+    expect(screen.getByLabelText("English")).toBeTruthy();
+    expect(screen.queryByText("Clock format")).toBeNull();
+    expect(screen.queryByText("Show weekday in timestamps")).toBeNull();
+    expect(screen.queryByText("Single realtime connection")).toBeNull();
+    expect(transport.getModels).not.toHaveBeenCalled();
+  });
+
+  it("keeps the advanced clock editor connected to the existing preference", async () => {
+    renderPage("advanced");
+    fireEvent.click(await screen.findByLabelText("12-hour"));
+    await waitFor(() => expect(transport.putSetting).toHaveBeenCalledWith("display.clock_format", "12h"));
+    expect(screen.queryByText("Awaiting-reply notification")).toBeNull();
+    expect(screen.queryByLabelText("English")).toBeNull();
+  });
+
   it("renders the default when a stored value has the wrong type", async () => {
     // meiva:note
     // The settings table crosses the wire as JSON and `mergeUserSettings` copies a row over

@@ -68,5 +68,14 @@
     }
   },
   "restartAfterSave": "改动已保存。重启以下进程后生效：{targets}。",
-  "dismissReminder": "关闭重启提醒"
+  "dismissReminder": "关闭重启提醒",
+  "workingTogether": "协作方式",
+  "modelsHeading": "模型",
+  "communication": {
+    "oriented": "过程中持续交流",
+    "concise": "仅汇报关键进展",
+    "silent": "完成后汇报",
+    "off": "基础沟通规则",
+    "help": "选择 Agent 在工作过程中汇报进展的频率。"
+  }
 }

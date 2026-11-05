@@ -71,8 +71,12 @@
   "preferences": "偏好设置",
   "manage": "管理",
   "system": "系统",
-  "generalDescription": "设置 agent 的默认工作方式。",
+  "generalDescription": "调整 Agent 与你的协作方式，以及日常使用偏好。",
   "machinesDescription": "设备能力与本地服务，更改仅影响所选机器。",
-  "advancedDescription": "模型、执行与基础设施的详细配置。",
-  "moreSettings": "需要更多选项？打开高级设置"
+  "advancedDescription": "微调 Agent 行为、系统资源和界面细节。",
+  "moreSettings": "需要更多选项？打开高级设置",
+  "advancedSections": "高级设置分类",
+  "agentSettings": "Agent 设置",
+  "resourcesServices": "资源与服务",
+  "interfaceDetails": "界面细节"
 }

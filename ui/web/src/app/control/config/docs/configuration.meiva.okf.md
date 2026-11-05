@@ -57,11 +57,16 @@ The panel preserves their existing overrides rather than choosing new values.
 
 ## Settings presentation
 
-Settings mounts one selected category at a time. General shows the default model
-and a small curated set of agent defaults. Advanced contains non-host configuration,
-search, optional technical filters and the effective per-model values. Machines
-contains only host-scoped fields, with the gateway host selected initially and each
-other online runner listed once. Selecting a machine never changes agent defaults.
+Settings mounts one selected category at a time. General leads with communication
+style, then the default model and reasoning effort; everyday notifications, writing,
+language and available themes follow. The explicit communication-style choices retain
+their registered values; Model default removes the override with null.
+Advanced groups Agent settings, Resources & services, and Interface details.
+Only Resources & services selects a machine and edits host-scoped fields, with the
+gateway selected initially and each other online runner listed once. Selecting a
+machine never changes agent defaults. Execution timeouts, compaction thresholds and
+clock formatting belong to Advanced. Legacy machine and display links route to the
+corresponding Advanced area; General appearance and notification anchors stay in General.
 The editor preserves the existing config API, owner routing and hidden overrides.
 Every row uses its backend-authored label and optional concise help text.
 Rows omit technical identifiers, scope badges and the technical-details disclosure.

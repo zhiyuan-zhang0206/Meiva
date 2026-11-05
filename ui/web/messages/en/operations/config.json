@@ -68,5 +68,14 @@
     }
   },
   "restartAfterSave": "To apply your saved changes, restart: {targets}.",
-  "dismissReminder": "Dismiss restart reminder"
+  "dismissReminder": "Dismiss restart reminder",
+  "workingTogether": "Working together",
+  "modelsHeading": "Models",
+  "communication": {
+    "oriented": "Keep me involved",
+    "concise": "Milestone updates",
+    "silent": "Report when finished",
+    "off": "Standard guidance",
+    "help": "How often agents update you while they work."
+  }
 }
