@@ -119,6 +119,7 @@ def _candidate_payload(
     model reports it instead of recovering it from ``os.environ``.
     """
     candidate: dict[str, object] = {}
+    source_values = dict[str, object](source)
     for name in model.model_fields:
         if name in updates:
             candidate[name] = updates[name]
@@ -130,7 +131,7 @@ def _candidate_payload(
             if alias in aliases:
                 candidate[name] = aliases[alias]
                 continue
-            candidate[name] = getattr(source, name)
+            candidate[name] = source_values[name]
             continue
         if default is not PydanticUndefined:
             candidate[name] = default
