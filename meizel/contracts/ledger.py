@@ -25,6 +25,7 @@ from meizel.contracts.debt import (
     total,
     unowned,
     unreviewed,
+    waits_for_nothing,
     without_until,
 )
 from meizel.contracts.manifest import Manifest
@@ -175,18 +176,44 @@ _OWNER_EXPLANATION = (
 # sentence begins with neither: the two answer different questions, and a phrasing that answers
 # neither is one a reader skims as if it answered one of them.
 _SHAPE_EXPLANATION = (
-    "`until` has two shapes because it answers one of two different questions.\\n"
-    "\\n"
-    '  until = "waits for <the condition that ends it>: <why it cannot happen yet>"\\n'
-    "      Something will arrive, and the next reader can check whether it has.\\n"
-    "\\n"
-    '  until = "permanently: <the design boundary it is tied to>"\\n'
-    "      Nothing will arrive, and the next reader can try to falsify that.\\n"
-    "\\n"
-    "A sentence that begins with neither reads as a reason without saying which of the two it is, and a\\n"
-    "reader who cannot tell whether to wait or to argue stops looking. Rewrite it into one of the two.\\n"
+    "`until` has two shapes because it answers one of two different questions.\n"
+    "\n"
+    '  until = "waits for <the condition that ends it>: <why it cannot happen yet>"\n'
+    "      Something will arrive, and the next reader can check whether it has.\n"
+    "\n"
+    '  until = "permanently: <the design boundary it is tied to>"\n'
+    "      Nothing will arrive, and the next reader can try to falsify that.\n"
+    "\n"
+    "A sentence that begins with neither reads as a reason without saying which of the two it is, and a\n"
+    "reader who cannot tell whether to wait or to argue stops looking. Rewrite it into one of the two.\n"
     "`unreviewed:` is the marker `debt record` writes and is not a third shape."
 )
+
+# meiva:note
+# Why a waiting sentence may not say nothing will arrive, printed once per run on the first entry that
+# does: the head answers one of two questions, and the other answer's sentence written in this shape is
+# how an entry that will never be paid comes to read like one that is about to be.
+_CONTRADICTION_EXPLANATION = (
+    "The head of an `until` -- everything before the colon -- answers one of the two questions\n"
+    "above, and the two answers are not interchangeable: `waits for <condition>` says something\n"
+    "will arrive and names it, so a head saying nothing can arrive has answered `permanently:` in\n"
+    "the waiting shape's words.\n"
+    "\n"
+    "Write the boundary as `permanently: <the design boundary it is tied to>`, or name the\n"
+    "condition the entry is really waiting for. The argument for why no condition can arrive\n"
+    "belongs after the colon, where the next reader can try to falsify it."
+)
+
+# meiva:note
+# The explanation each fault gets, printed once per run on the first entry that carries it: the order is
+# the order a reader meets them, and a fault that is not here is one the entry's own message covers.
+_EXPLANATIONS: Mapping[str, str] = {
+    "until": _UNTIL_EXPLANATION,
+    "owner": _OWNER_EXPLANATION,
+    "shape": _SHAPE_EXPLANATION,
+    "contradiction": _CONTRADICTION_EXPLANATION,
+}
+
 
 # meiva:note
 # The footer the first bare entry of a run carries: that these are errors, and that an entry
@@ -211,6 +238,8 @@ def _missing(entry: DebtEntry) -> tuple[str, ...]:
         faults.append("until")
     elif not has_shape(entry.until):
         faults.append("shape")
+    elif waits_for_nothing(entry.until):
+        faults.append("contradiction")
     return tuple(faults)
 
 
@@ -227,6 +256,12 @@ def _block(text: str) -> str:
 # One sentence per entry, saying which of the two fields is missing. A reader who meets twenty of
 # them reads twenty facts about twenty entries rather than one fact about the field repeated.
 def _bare_message(code: Code, key: str, missing: tuple[str, ...]) -> str:
+    if missing == ("contradiction",):
+        return (
+            f"{code} {key!r} waits for nothing: `until` begins `waits for ` and then says nothing "
+            "can arrive, so the entry states the boundary the other shape names -- write it "
+            "`permanently: <the design boundary it is tied to>`."
+        )
     if missing == ("shape",):
         return (
             f"{code} {key!r} states an exit condition in no shape this tool reads: `until` must "
@@ -266,22 +301,26 @@ def bare_entries(manifests: Mapping[str, Manifest]) -> list[Diagnostic]:
                     rows.append((diagnostic, missing))
     rows.sort(key=lambda row: (row[0].path, row[0].line, row[0].code, row[0].message))
     found: list[Diagnostic] = []
-    until_shown = owner_shown = shape_shown = False
+    shown: set[str] = set()
     for index, (diagnostic, missing) in enumerate(rows):
-        hints: list[str] = []
-        if "until" in missing and not until_shown:
-            hints.append(_block(_UNTIL_EXPLANATION))
-            until_shown = True
-        if "owner" in missing and not owner_shown:
-            hints.append(_block(_OWNER_EXPLANATION))
-            owner_shown = True
-        if "shape" in missing and not shape_shown:
-            hints.append(_block(_SHAPE_EXPLANATION))
-            shape_shown = True
+        hints = _explanations(missing, shown)
         if index == 0:
             hints.append(_block(_BARE_FOOTER))
         found.append(replace(diagnostic, hints=tuple(hints)))
     return found
+
+
+# meiva:note
+# The explanations this entry is the first to need: `shown` carries the faults already explained in this
+# run, so twenty entries with one fault read as one explanation and twenty sentences rather than twenty
+# copies of a paragraph.
+def _explanations(missing: tuple[str, ...], shown: set[str]) -> list[str]:
+    hints: list[str] = []
+    for fault, text in _EXPLANATIONS.items():
+        if fault in missing and fault not in shown:
+            hints.append(_block(text))
+            shown.add(fault)
+    return hints
 
 
 def reconcile(

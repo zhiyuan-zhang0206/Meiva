@@ -102,6 +102,30 @@ def test_an_until_in_no_shape_is_an_error_that_names_both(
     assert run(root, "check") == 1
 
 
+def test_an_until_that_waits_for_nothing_asks_for_permanently(make_repo: RepoFactory) -> None:
+    entries = {
+        KEY: '{ count = 1, owner = "synthetic", until = "waits for nothing that can arrive: a fixture" }'
+    }
+    root = make_repo({**USE, "pkg/meizel.toml": manifest(**entries)})
+    [only] = bare(root)
+    assert "waits for nothing" in only.message
+    assert "`permanently: <the design boundary it is tied to>`" in only.message
+    assert "answers one of the two questions" in only.render()
+    assert run(root, "check") == 1
+
+
+def test_an_until_may_argue_with_nothing_after_its_colon(make_repo: RepoFactory) -> None:
+    entries = {
+        KEY: (
+            '{ count = 1, owner = "synthetic", until = "waits for an injectable account: nothing in '
+            'the account database names a caller that could hand one in" }'
+        )
+    }
+    root = make_repo({**USE, "pkg/meizel.toml": manifest(**entries)})
+    assert bare(root) == []
+    assert run(root, "check") == 0
+
+
 def test_a_manifest_that_keeps_its_metadata_is_the_only_clean_one(make_repo: RepoFactory) -> None:
     root = make_repo({**USE, "pkg/meizel.toml": manifest(**{KEY: COMPLETE})})
     assert bare(root) == []

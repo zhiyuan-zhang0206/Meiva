@@ -23,5 +23,5 @@ exports = ["archive.py", "check.py", "config.py", "probe.py", "restore.py", "sta
 "tick.py" = { kinds = ["clock"], why = "Daily WAL-G tick entrypoint stamps step records with current UTC time" }
 
 [debt.ambient-read]
-"check.py#environ tempfile.TemporaryDirectory()" = { count = 1, owner = "#5816", until = "waits for nothing that can arrive: `_storage_round_trip` writes the small object it uploads and the copy it downloads back into a scratch directory of its own; the paths its caller holds are the Wal-G binary `path` and `home`, its configuration home, so neither is a place to leave the probe's two files" }
-"check.py#random tempfile.TemporaryDirectory()" = { count = 1, owner = "#5816", until = "waits for nothing that can arrive: the directory's name is minted by the OS inside the `meiva-walg-check-` prefix so two checks in one process cannot collide; the round trip reports what it proved, never where" }
+"check.py#environ tempfile.TemporaryDirectory()" = { count = 1, owner = "#5816", until = "permanently: `_storage_round_trip` writes the small object it uploads and the copy it downloads back into a scratch directory of its own; the paths its caller holds are the Wal-G binary `path` and `home`, its configuration home, so neither is a place to leave the probe's two files" }
+"check.py#random tempfile.TemporaryDirectory()" = { count = 1, owner = "#5816", until = "permanently: the directory's name is minted by the OS inside the `meiva-walg-check-` prefix so two checks in one process cannot collide; the round trip reports what it proved, never where" }
