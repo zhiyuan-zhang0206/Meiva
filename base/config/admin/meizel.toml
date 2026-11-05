@@ -8,6 +8,3 @@ exports = ["candidate.py", "editing.py", "metadata.py"]
 "__init__.py" = "strict"
 "editing.py" = "strict"
 "metadata.py" = "strict"
-
-[debt.restricted-python]
-"candidate.py#dynamic attribute name" = { count = 1, owner = "#6082", until = "waits for the follow-up that repays field-name reflection: the names are a fixed set of fields or flags written in the source, so they can be read by explicit access" }

@@ -91,6 +91,7 @@ def plugin_metadata(*, home: Path) -> list[ConfigFieldMeta]:
         if not names:
             continue
         config = read_config_image(owner.cls, owner.path)
+        values = dict[str, object](config)
         for name in names:
             info = owner.cls.model_fields[name]
             extra = schema_extra(info)
@@ -99,7 +100,7 @@ def plugin_metadata(*, home: Path) -> list[ConfigFieldMeta]:
                 ConfigFieldMeta(
                     name=name,
                     field_type=kind,
-                    current_value=object_of(getattr, config, name),
+                    current_value=values[name],
                     default_value=(
                         None if info.is_required() else info.get_default(call_default_factory=True)
                     ),
