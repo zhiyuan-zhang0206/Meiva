@@ -10,7 +10,7 @@ import psutil
 import pytest
 
 from base.clock.tests.fakes import system_clock
-from base.lm.harness.antigravity.tests.support import config, start
+from base.lm.harness.antigravity.tests.support import config, say, start
 from base.lm.harness.antigravity.transport import AgyTransport
 from base.lm.harness.events import TurnCompleted
 
@@ -46,6 +46,20 @@ async def test_interrupt_reaps_the_tool_children_the_cli_leaves_behind(tmp_path:
         if child is not None:
             with contextlib.suppress(ProcessLookupError):
                 os.kill(child, signal.SIGKILL)
+        await harness.stop()
+
+
+async def test_the_session_serves_the_next_turn_after_interrupt(tmp_path: Path) -> None:
+    harness = await start(tmp_path, turns=[{"hang": True}, say("after")])
+    try:
+        first = harness.session.submit("hang")
+        await harness.wait_until(lambda: harness.messages() == ["hang"])
+        await harness.session.interrupt()
+        assert (await first.outcome()).interrupted
+        second = await harness.session.submit("now work").outcome()
+        assert second.text == "after"
+        assert not second.is_error
+    finally:
         await harness.stop()
 
 

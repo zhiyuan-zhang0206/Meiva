@@ -180,7 +180,6 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         try:
             transport = await self._ensure_transport()
             self._baseline = snapshot(self._probe, transport.pid)
-            self._start_deadline(ticket)
             self._sent_turn = ticket.turn_id
             await transport.send(ticket.text)
         except (TransportClosedError, OSError, RuntimeError) as exc:

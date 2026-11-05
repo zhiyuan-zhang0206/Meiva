@@ -42,7 +42,7 @@ def test_the_values_are_the_boundary_the_cli_runs_under(tmp_path: Path) -> None:
     assert values["cwd"] == str(tmp_path)
     assert values["tools"] == ["Read", "Bash"]
     assert values["permission_mode"] == "plan"
-    assert values["max_turns"] is None
+    assert "max_turns" not in values
     assert "setting_sources" not in values
     assert "strict_mcp_config" not in values
     assert values["include_partial_messages"] is True

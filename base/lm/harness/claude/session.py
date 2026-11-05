@@ -229,7 +229,6 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         ticket.started_at = self._monotonic()
         self._turn_steps_count = 0
         self._baseline = snapshot(self._probe, self._cli_pid)
-        self._start_deadline(ticket)
         try:
             await client.query(ticket.text)
         except Exception as exc:
@@ -299,7 +298,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         for event in plan.stream:
             self._emit(event)
         if plan.report is not None:
-            self._hold_dispatch(self.config.injected_turn_timeout_seconds)
+            self._hold_dispatch(self.config.injected_dispatch_wait_seconds)
             self._unsolicited(plan.report)
 
     def _track_task_started(self, message: object) -> None:

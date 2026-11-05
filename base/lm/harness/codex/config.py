@@ -33,7 +33,6 @@ class CodexConfig:
     extra_args: tuple[str, ...] = ()
     api_key_mode: bool = False
     startup_timeout_seconds: float = 120.0
-    turn_timeout_seconds: float | None = None
     cancel_settle_seconds: float = 5.0
     max_pending_turns: int = 32
     max_buffered_events: int = 256

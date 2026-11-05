@@ -87,7 +87,6 @@ caller opts into it.
 | `binary` / `extra_args` | `codex` / `()` | the CLI on `PATH`; tests substitute a peer |
 | `api_key_mode` | `False` | off means the child gets no credential variables; on is the explicit choice of per-token billing |
 | `startup_timeout_seconds` | 120 | `initialize`/`thread/*` are local round trips; a wedged server is a fault |
-| `turn_timeout_seconds` | `None` | optional wall-clock limit for a turn; when configured, expiry interrupts it |
 | `cancel_settle_seconds` | 5 | reaping is milliseconds; 5s tolerates load without hiding a leak |
 | `max_pending_turns` | 32 | overflow returns the message to its durable owner instead of growing memory |
 | `max_buffered_events` | 256 | text deltas are droppable past this; control events are bounded by tool-call count |
@@ -109,7 +108,7 @@ The seven adapter invariants are pinned by tests in `tests/`:
 | 2 | same key → same ticket; completed key replays | `test_inbound_queue.py::test_same_key_returns_the_same_ticket`, `::test_completed_key_replays_the_recorded_outcome` |
 | 3 | a full queue refuses rather than buffers | `test_inbound_queue.py::test_queue_overflow_is_refused` |
 | 4 | interrupt asserts the tool children are reaped | `test_cancel.py::test_interrupt_asserts_the_tool_children_are_reaped` |
-| 5 | a turn timeout interrupts | `test_cancel.py::test_turn_timeout_interrupts_the_turn` |
+| 5 | a turn can finish after two quiet days | `test_cancel.py::test_default_turn_can_finish_after_two_quiet_days` |
 | 6 | usage accumulates per turn | `test_inbound_queue.py::test_usage_accumulates_across_turns` |
 | 7 | the handoff is injected once, never on resume | `test_session.py::test_resume_uses_the_registry_and_skips_the_handoff` |
 

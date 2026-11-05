@@ -30,8 +30,8 @@ answers while the CLI session sits idle.
 A **big turn** is one continuous stretch of foreground work from a wake until
 the executor hands control back or reaches a terminal outcome. The native graph
 executes the individual nodes. An external harness owns its loop, so the graph
-waits in one node for the same boundary. Big turns have no default wall-clock
-deadline. An explicitly configured deadline can interrupt one. Operations such
+waits in one node for the same boundary. Meiva provides no configurable limit
+on the duration or model-call count of an external big turn. Operations such
 as process startup, transport writes, and shutdown retain their own bounds.
 
 A **small turn** is one model call, its input, and the work it requests. Native

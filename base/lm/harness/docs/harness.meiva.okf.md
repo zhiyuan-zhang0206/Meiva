@@ -27,8 +27,7 @@ invariants the host relies on:
 3. a full queue refuses; it never buffers beyond its bound;
 4. `interrupt()` asserts that tool child processes were reaped — an unobservable
    process tree is reported as unknown, not as success;
-5. turns have no default elapsed-time limit, including while the provider is
-   quiet. A configured turn timeout interrupts; it never silently drops the turn.
+5. turns can run for as long as the provider needs, including while it is quiet.
    Setup, transport, cancellation and shutdown keep their own bounds;
 6. usage and cost accumulate per turn, and `Usage.input_tokens` is the whole
    prompt — cache reads and cache writes included, with those two fields as
@@ -52,7 +51,7 @@ and open questions are recorded in
 
 | Module | Owns |
 |---|---|
-| `base_session.py` | `BaseHarnessSession`, `TurnTicket`, `SessionBinding`, `InboundQueueFullError`, `SessionClosedError`, and `EVENT_STREAM_END`: the shared session state machine (inbound queue, turn promotion, idempotency dedupe, bounded event queue with delta dropping, turn timeout watchdog, background `TaskGroup` management, `SessionRegistry` persistence, injected `Clock`) |
+| `base_session.py` | `BaseHarnessSession`, `TurnTicket`, `SessionBinding`, `InboundQueueFullError`, `SessionClosedError`, and `EVENT_STREAM_END`: the shared session state machine (inbound queue, turn promotion, idempotency dedupe, bounded event queue with delta dropping, background `TaskGroup` management, `SessionRegistry` persistence, injected `Clock`) |
 | `cancel.py` | `CancelReport`, `ProcessObservation`, `describe`, `Sweep`, and the pure functions that cut a report from them |
 | `events.py` | `BridgeEvent` and its members, plus the droppable (text delta) versus control split |
 | `turn.py` | `SessionTotals`, `TurnOutcome`, `add_cost` |

@@ -8,7 +8,7 @@ from base.lm.harness import ClusterFact, EntryPoint, FileSessionRegistry, Handof
 from base.lm.harness.claude import DEFAULT_MODEL
 from base.lm.harness.claude.session import SessionClosedError
 from base.lm.harness.claude.tests import fake_sdk as fake
-from base.lm.harness.claude.tests.fake_sdk import Block, Emit, Say
+from base.lm.harness.claude.tests.fake_sdk import Emit, Say
 from base.lm.harness.claude.tests.support import start
 from base.lm.harness.events import (
     HandoffInjected,
@@ -17,7 +17,6 @@ from base.lm.harness.events import (
     SessionClosed,
     SessionStarted,
     TurnCompleted,
-    TurnFaulted,
 )
 
 
@@ -93,19 +92,6 @@ async def test_rate_limit_signal_reaches_the_stream(tmp_path: Path) -> None:
         assert signal.utilization == 0.96
         assert signal.resets_at == 1795000000
         assert signal.rate_limit_type == "seven_day"
-    finally:
-        await harness.stop()
-
-
-async def test_turn_deadline_interrupts_a_wedged_turn(tmp_path: Path) -> None:
-    harness = await start(tmp_path, scripts=[[Block()]], turn_timeout_seconds=0.05)
-    try:
-        ticket = harness.session.submit("wedge")
-        faulted = await harness.wait_for(
-            lambda event: isinstance(event, TurnFaulted) and "interrupting" in event.error
-        )
-        assert faulted.turn_id == ticket.turn_id
-        assert harness.client.interrupts == 1
     finally:
         await harness.stop()
 

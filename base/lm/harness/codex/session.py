@@ -249,7 +249,6 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
     async def _begin(self, ticket: TurnTicket) -> None:
         ticket.started_at = self._monotonic()
         self._baseline = snapshot(self._probe, self._transport.pid)
-        self._start_deadline(ticket)
         # meiva:note
         # `turn/started` can beat this response, and the items that follow name the
         # turn by id: the flag is what lets that notification bind the name first, so

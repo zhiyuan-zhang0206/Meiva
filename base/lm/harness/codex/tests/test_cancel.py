@@ -9,7 +9,7 @@ from base.clock.tests.fakes import clock_over
 from base.clock.tests.manual_timers import ManualTimers
 from base.lm.harness.codex.tests.fake_app_server import CODEX_PID
 from base.lm.harness.codex.tests.support import start
-from base.lm.harness.events import SessionFaulted, TurnCompleted
+from base.lm.harness.events import TurnCompleted
 
 TOOL_MARKER = "sleep 40"
 
@@ -80,23 +80,6 @@ async def test_default_turn_can_finish_after_two_quiet_days(tmp_path: Path) -> N
         assert not ticket.settled
         harness.server.complete()
         assert not (await asyncio.wait_for(ticket.outcome(), timeout=2)).is_error
-    finally:
-        await harness.stop()
-
-
-async def test_turn_timeout_interrupts_the_turn(tmp_path: Path) -> None:
-    harness = await start(tmp_path, turn_timeout_seconds=0.05)
-    try:
-        ticket = harness.session.submit("hang forever")
-        await harness.turn_started()
-        fault = await harness.wait_for(
-            lambda event: isinstance(event, SessionFaulted) and "exceeded" in event.error
-        )
-        assert fault.turn_id == ticket.turn_id
-        assert "turn/interrupt" in harness.server.methods()
-        harness.server.complete(status="interrupted")
-        completed = await harness.wait_for(lambda event: isinstance(event, TurnCompleted))
-        assert completed.interrupted is True
     finally:
         await harness.stop()
 
