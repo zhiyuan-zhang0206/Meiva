@@ -41,6 +41,12 @@ SIGNALS: dict[str, Signal] = {
     "meiva-ops-schedule-process-lost": Signal(
         "schedule_process_lost", "meiva-ops", "0m", "warning"
     ),
+    # meiva:note
+    # The interval collectors' own beat. Silence means the loop stopped (a failed cycle still
+    # emits, with outcome=failed), so this rule reads absence, not failure (2026-11-06).
+    "meiva-ops-plugin-collector-silent": Signal(
+        "plugin_collector_cycle", "meiva-ops", "5m", "warning"
+    ),
     "meiva-ops-schedule-stalled": Signal("schedule_stalled", "meiva-ops-slow", "0m", "warning"),
     "meiva-ops-schedule-convergence-abandoned": Signal(
         "schedule_convergence_abandoned", "meiva-ops-slow", "0m", "warning"

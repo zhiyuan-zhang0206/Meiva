@@ -1025,7 +1025,7 @@ groups:
                 uid: loki
               editorMode: code
               expr: >-
-                absent_over_time({service_name="unknown_service"} | json | cluster=".meiva" | event_name="plugin_collector_cycle" [35m])
+                absent_over_time({service_name="unknown_service", event_name="plugin_collector_cycle"} | json | cluster=".meiva" | category="telemetry" [35m])
               instant: true
               queryType: instant
             relativeTimeRange:
