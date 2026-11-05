@@ -38,7 +38,7 @@ exports = ["__main__.py", "allowances.py", "budgets", "checkout.py", "contracts"
 "roles.py" = "strict"
 
 [debt.impure-call]
-"allowances.py#meizel.checkout.GitRepo" = { count = 1, owner = "#5921", until = "waits for the policy text or a reader as a value: allowances.load(root) has 17 call sites and none of them holds a GitRepo, so building one here repeats the same git call wherever it moved to" }
+"allowances.py#meizel.checkout.GitRepo" = { count = 1, owner = "#5921", until = "waits for the policy text or a reader as a value: three rules read the policy at import from their own `__file__` (state/no_os_environ.py, state/turn_scoped_config.py, language/no_script_sibling_imports.py), where no caller exists to hand it in, so building the GitRepo here repeats the same read wherever the load moved to — the port that would carry the policy text into the rules is tracked in #6026" }
 "lint_common.py#Path.is_dir" = { count = 1, owner = "#5921", until = "waits for a caller that already holds which targets exist: a lint's scan dirs and its explicit targets reach the tooling as strings — the SourceTree port that would carry them is tracked in #6026" }
 "lint_common.py#Path.is_file" = { count = 1, owner = "#5921", until = "waits for a caller that already holds which of its targets are files: the admitted set is a list of names, not a stat per name — the SourceTree port that would carry it is tracked in #6026" }
 "lint_common.py#Path.read_bytes" = { count = 1, owner = "#5921", until = "waits for the judged text as a value: rule modules hand the tooling a path, never the content they want judged — the SourceTree port that would carry it is tracked in #6026" }
@@ -48,5 +48,5 @@ exports = ["__main__.py", "allowances.py", "budgets", "checkout.py", "contracts"
 "lint_common.py#os.path.lexists" = { count = 1, owner = "#5921", until = "waits for the caller to hold what pre-commit named: --only paths arrive as strings and a tracked symlink whose target is gone is still one of them — the SourceTree port that would carry the set is tracked in #6026" }
 
 [debt.impure-edge]
-"allowances.py#meizel/checkout.py" = { count = 1, owner = "#5921", until = "waits for the policy text as a value: the same reader as the GitRepo entry above, so the edge goes when the caller hands the policy in" }
+"allowances.py#meizel/checkout.py" = { count = 1, owner = "#5921", until = "waits for the policy text as a value: the same reader as the GitRepo entry above, so the edge goes when the caller hands the policy in — the same port, tracked in #6026" }
 "lint_common.py#meizel/checkout.py" = { count = 1, owner = "#5921", until = "waits for the tracked-file set as a value: the shell asks git once per run and hands the names down; every caller is a non-root module — tracked with the SourceTree port in #6026" }
