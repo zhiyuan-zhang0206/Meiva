@@ -21,11 +21,12 @@ from __future__ import annotations
 import asyncio
 import functools
 import json
+import os
 import threading
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -151,6 +152,11 @@ async def _serve(
     pool = boot.open_db_pool(database=lambda: database, authority=authority)
     executor = boot.op_thread_pool(authority=authority)
     home = resolve_meiva_home() if unit_home is None else unit_home.resolve()
+    # meiva:note
+    # The daemon resolves provider keys from the process environment, which in a deployed runner is
+    # the unit's own; the caller's `fake_host()` stands in for process and command effects, so give it
+    # this process's environment rather than an empty one.
+    host = replace(host, environ=os.environ)
     sem = asyncio.Semaphore(authority.service_field_value("ops_concurrency"))
     receiver = _receiver_of(machine.name(), home, gateway_access)
     route = functools.partial(

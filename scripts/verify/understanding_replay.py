@@ -224,7 +224,7 @@ async def _consume(
             [execute_code],
             agent_id,
             catalog=catalog,
-            keys=process_provider_keys(catalog),
+            keys=process_provider_keys(catalog, environ=config.process_environment()),
             llm_override=config.view.lm.llm_override,
             config=config,
             clock=clock,
@@ -275,7 +275,11 @@ async def _regroup(
         leaves = await run_rebuild(
             pool,
             db,
-            ModelCache(catalog, process_provider_keys(catalog), config.view.lm.llm_override),
+            ModelCache(
+                catalog,
+                process_provider_keys(catalog, environ=config.process_environment()),
+                config.view.lm.llm_override,
+            ),
             agent_id,
             config=config,
             clock=clock,

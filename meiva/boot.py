@@ -127,8 +127,10 @@ def _gateway(url: str, *, config: ConfigBoot) -> GatewayHandle:
 # child, a script, a command-line inventory). It closes at interpreter exit: finite cleanup, not a
 # guarantee of a nonzero exit or of delivery after a hard exit. `uninstall` unregisters the close of
 # the installation that retains the owner, so a removed surface leaves no callback behind.
-def process_sampling_owner(rng: random.Random) -> SamplingPolicyOwner:
-    owner = call_policy.process_sampling_owner(rng)
+def process_sampling_owner(
+    rng: random.Random, *, environ: Mapping[str, str]
+) -> SamplingPolicyOwner:
+    owner = call_policy.process_sampling_owner(rng, environ=environ)
     atexit.register(owner.close)
     return owner
 
@@ -499,7 +501,8 @@ def _load_inputs(
         clock = Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
     catalog = build_model_catalog(home=home)
     sampling = process_sampling_owner(
-        context.rng if context is not None and context.rng is not None else _new_rng()
+        context.rng if context is not None and context.rng is not None else _new_rng(),
+        environ=config.process_environment(),
     )
     return LoadInputs(
         surface=surface,
@@ -512,7 +515,7 @@ def _load_inputs(
         clock=clock,
         home=home,
         catalog=catalog,
-        provider_keys=process_provider_keys(catalog),
+        provider_keys=process_provider_keys(catalog, environ=config.process_environment()),
         context=context,
         validate_state=validate_state,
     )

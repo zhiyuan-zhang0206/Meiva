@@ -84,7 +84,7 @@ def test_full_reload_does_not_register_a_service_owners_cleanup(unit_home: Path)
 def test_the_boot_wrapper_keeps_the_generator_its_root_gave_it(unit_home: Path) -> None:
     rng = seeded_rng(4)
 
-    owner = process_sampling_owner(rng)
+    owner = process_sampling_owner(rng, environ={})
     try:
         assert owner.rng is rng
     finally:

@@ -131,7 +131,7 @@ def _h_plugins_inspect(args: argparse.Namespace) -> int:
     from cli.database.runtime import runtime_of
 
     runtime = runtime_of(args)
-    sampling = process_sampling_owner(runtime.rng)
+    sampling = process_sampling_owner(runtime.rng, environ=runtime.config.process_environment())
     with sampling.execution():
         return cmd_plugins_inspect(
             options(args, _InspectOptions).name,
@@ -145,7 +145,9 @@ def _h_plugins_verify(args: argparse.Namespace) -> int:
     from cli.database.runtime import runtime_of
 
     runtime = runtime_of(args)
-    return cmd_plugins_verify(rng=runtime.rng, home=runtime.home)
+    return cmd_plugins_verify(
+        rng=runtime.rng, home=runtime.home, environ=runtime.config.process_environment()
+    )
 
 
 def _h_plugins_upgrade(args: argparse.Namespace) -> int:

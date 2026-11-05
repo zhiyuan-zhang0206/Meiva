@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -49,7 +50,7 @@ _NEW_HIERARCHY = (
 
 
 def _check(script: str) -> str | None:
-    return _verify.check_script(script)
+    return _verify.check_script(script, python=sys.executable)
 
 
 def test_an_old_signature_call_is_red_where_the_import_alone_was_green() -> None:
@@ -119,7 +120,11 @@ def test_check_file_prints_the_call_signature_verdict(
     stale.write_text(_OLD_HIERARCHY, encoding="utf-8")
     assert (
         _verify.cmd_schedules_verify(
-            source=CheckFile(str(stale)), notify=True, now=_NOW, producer=operator_pipeline
+            python=sys.executable,
+            source=CheckFile(str(stale)),
+            notify=True,
+            now=_NOW,
+            producer=operator_pipeline,
         )
         == 1
     )
@@ -137,7 +142,11 @@ def test_the_sweep_checks_agent_written_rows_like_built_in_ones(
     )
     assert (
         _verify.cmd_schedules_verify(
-            source=RowsFromFile(str(rows)), notify=False, now=_NOW, producer=operator_pipeline
+            python=sys.executable,
+            source=RowsFromFile(str(rows)),
+            notify=False,
+            now=_NOW,
+            producer=operator_pipeline,
         )
         == 1
     )
@@ -261,7 +270,11 @@ def test_check_file_prints_the_undefined_name_verdict(
     stale.write_text("from base.config import settings\nroot = base.__file__\n", encoding="utf-8")
     assert (
         _verify.cmd_schedules_verify(
-            source=CheckFile(str(stale)), notify=True, now=_NOW, producer=operator_pipeline
+            python=sys.executable,
+            source=CheckFile(str(stale)),
+            notify=True,
+            now=_NOW,
+            producer=operator_pipeline,
         )
         == 1
     )
@@ -348,3 +361,9 @@ def test_the_strict_module_decides_what_counts_as_repository_code(tmp_path: Path
         "an unknowable source is never guessed ours; answering True invents a signature check for a "
         "callee nobody could read, and the author cannot act on the result"
     )
+
+
+def test_an_unavailable_declared_interpreter_is_a_tool_error(tmp_path: Path) -> None:
+    missing = _verify.check_script("value = 1\n", python=str(tmp_path / "missing-python"))
+    assert missing is not None
+    assert missing.startswith("tool-error:FileNotFoundError:")

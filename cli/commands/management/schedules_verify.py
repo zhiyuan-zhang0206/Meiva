@@ -102,10 +102,10 @@ SweepSource = CheckFile | RowsFromFile | RowsFromGateway | GatewayUnresolved
 # clean, else the RED detail. Runs the check child (`schedule_verify_child`) with this CLI's
 # interpreter from the repo root: every sanctioned `meiva` invocation is the checkout's own venv --
 # the same `.venv/bin/python` the ScheduleManager launches the runner with.
-def check_script(script: str) -> str | None:
+def check_script(script: str, *, python: str) -> str | None:
     try:
         proc = subprocess.run(
-            [sys.executable, "-m", "cli.commands.management.schedule_verify_child"],
+            [python, "-m", "cli.commands.management.schedule_verify_child"],
             check=False,
             input=script,
             cwd=str(repo_root()),
@@ -212,7 +212,7 @@ def _read_rows(source: RowsFromFile | RowsFromGateway) -> tuple[StoredSchedule, 
 # meiva:note
 # Run the dry-import and call-signature sweep over every in-store script and print its lines.
 def _sweep(
-    source: RowsFromFile | RowsFromGateway | GatewayUnresolved, *, stamp: str
+    source: RowsFromFile | RowsFromGateway | GatewayUnresolved, *, stamp: str, python: str
 ) -> SweepOutcome:
     if isinstance(source, GatewayUnresolved):
         outcome = unreadable(stamp, source.error_type, source.message)
@@ -226,7 +226,8 @@ def _sweep(
             outcome = unreadable(stamp, type(exc).__name__, str(exc))
         else:
             results = tuple(
-                (row, check_script(row.script) if needs_check(row.script) else None) for row in rows
+                (row, check_script(row.script, python=python) if needs_check(row.script) else None)
+                for row in rows
             )
             outcome = summarize(stamp, results)
     for line in outcome.lines:
@@ -236,13 +237,13 @@ def _sweep(
 
 # meiva:note
 # `--check-file PATH` — dry-import one script file (no gateway, no signal).
-def _verify_file(path: str) -> int:
+def _verify_file(path: str, *, python: str) -> int:
     try:
         source = Path(path).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         print(f"cannot read script file: {exc}", file=sys.stderr)
         return 2
-    missing = check_script(source)
+    missing = check_script(source, python=python)
     print("CHECK-OK" if missing is None else f"CHECK-RED missing={missing}")
     return 0 if missing is None else 1
 
@@ -253,15 +254,16 @@ def cmd_schedules_verify(
     notify: bool,
     now: datetime,
     producer: Callable[[], EventPipeline],
+    python: str,
 ) -> int:
     match source:
         case CheckFile(path):
-            return _verify_file(path)
+            return _verify_file(path, python=python)
         case RowsFromFile():
             notify = False
-            outcome = _sweep(source, stamp=now.isoformat(timespec="seconds"))
+            outcome = _sweep(source, stamp=now.isoformat(timespec="seconds"), python=python)
         case RowsFromGateway() | GatewayUnresolved():
-            outcome = _sweep(source, stamp=now.isoformat(timespec="seconds"))
+            outcome = _sweep(source, stamp=now.isoformat(timespec="seconds"), python=python)
         case _:
             assert_never(source)
     if notify and outcome.owes_signal:
@@ -327,4 +329,5 @@ def h_schedules_verify(args: argparse.Namespace) -> int:
         notify=not opts.no_notify,
         now=stamped_instant(runtime),
         producer=producer_of(args),
+        python=runtime.host.platform.executable,
     )

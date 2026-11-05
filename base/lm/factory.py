@@ -71,6 +71,7 @@ entering state guards that metadata is not empty.
 from __future__ import annotations
 
 import importlib
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -160,11 +161,9 @@ def provider_key_of_model(model: str, *, catalog: ModelCatalog) -> str | None:
 # gateway reads at each use so a key edited in the cluster `.env` is served without a restart; a
 # split runner's keys arrive in its environment through the bootstrap before its first build. The
 # `.env` is read only when some declared key is absent from the environment.
-def process_provider_keys(catalog: ModelCatalog) -> ProviderKeys:
+def process_provider_keys(catalog: ModelCatalog, *, environ: Mapping[str, str]) -> ProviderKeys:
     from base.host.env.dotenv_file import process_env_file, read_env_aliases
-    from base.host.env.registry import process_environment
 
-    environ = process_environment()
     absent = [name for name in catalog.key_envs if not environ.get(name)]
     env_file = read_env_aliases(process_env_file()) if absent else {}
     return ProviderKeys.read(catalog.key_envs, environ=environ, env_file=env_file)

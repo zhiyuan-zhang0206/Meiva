@@ -2,6 +2,7 @@
 # Real process shutdown after installing, transferring or failing to replace an SDK surface.
 import atexit
 import json
+import os
 import sys
 from enum import StrEnum
 from pathlib import Path
@@ -49,9 +50,9 @@ match mode:
         atexit.register(owner.close)
         owner.refresh()
     case Mode.SERVICE_RELOAD:
-        owner = call_policy.process_sampling_owner(seeded_rng())
+        owner = call_policy.process_sampling_owner(seeded_rng(), environ=os.environ)
     case Mode.INSTALL | Mode.RELOAD | Mode.RELOAD_EXPLICIT | Mode.FAILED_RELOAD:
-        owner = process_sampling_owner(seeded_rng())
+        owner = process_sampling_owner(seeded_rng(), environ=os.environ)
     case _:
         assert_never(mode)
 owners.append(owner)

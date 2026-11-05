@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from psycopg_pool import ConnectionPool
 
@@ -40,12 +40,13 @@ async def launch_agent_op(
     catalog: ModelCatalog,
     authority: ConfigAuthority,
     local_machine: str,
+    environ: Mapping[str, str],
 ) -> SpawnedAgent:
     harness = await asyncio.to_thread(
         validate_launch_row, db_pool, body, local_machine=local_machine
     )
     if harness is Harness.MEIVA or uses_harness_model_selection(body.birth_config):
-        keys = await asyncio.to_thread(process_provider_keys, catalog)
+        keys = await asyncio.to_thread(process_provider_keys, catalog, environ=environ)
         validate_model_launch(
             catalog=catalog,
             keys=keys,

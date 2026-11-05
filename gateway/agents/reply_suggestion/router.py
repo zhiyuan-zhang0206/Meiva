@@ -51,7 +51,11 @@ async def post_reply_suggestion(
     suggestion_state = state_as(request, ReplySuggestionAppState)
     catalog = request_catalog(request)
     keys = (
-        await asyncio.to_thread(process_provider_keys, catalog)
+        await asyncio.to_thread(
+            process_provider_keys,
+            catalog,
+            environ=suggestion_state.gateway_process.config.process_environment(),
+        )
         if isinstance(catalog, ModelCatalog)
         else None
     )

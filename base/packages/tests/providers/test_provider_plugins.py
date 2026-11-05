@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import shutil
 from collections.abc import Callable
 from dataclasses import replace
@@ -21,9 +20,7 @@ from base.lm.compat import stop
 from base.lm.factory import (
     build_chat_model,
     model_supports_vision,
-    process_provider_keys,
     provider_key_of_model,
-    validate_model_launch,
 )
 from base.lm.pricing.archive import load_archive
 from base.lm.provider_api import PriceRates, ProviderBinding, ProviderContribution
@@ -478,28 +475,6 @@ def test_bound_build_preserves_fallback_identity_and_effort(
     assert contexts[0].media_resolution == "high"
     assert contexts[0].media_thinking_level == "low"
     assert contexts[0].base_url == "https://example.com/v1"
-
-
-def test_plugin_model_validation_and_key_check(
-    unit_home: Path, provider_plugin: Callable[..., None]
-) -> None:
-    provider_plugin()
-    catalog = build_model_catalog(home=unit_home)
-    assert "TESTP_API_KEY" in catalog.key_envs
-    assert "TESTP_API_KEY" not in os.environ
-    (unit_home / ".env").write_text("")
-    with pytest.raises(ValueError, match="TESTP_API_KEY"):
-        validate_model_launch(
-            model="testp-1", catalog=catalog, llm_override="", keys=process_provider_keys(catalog)
-        )
-
-    (unit_home / ".env").write_text("TESTP_API_KEY=sk-test\n")
-    assert (
-        validate_model_launch(
-            model="testp-1", catalog=catalog, llm_override="", keys=process_provider_keys(catalog)
-        )
-        == "testp-1"
-    )
 
 
 def test_vision_flag_drives_image_gate(provider_plugin: Callable[..., None]) -> None:

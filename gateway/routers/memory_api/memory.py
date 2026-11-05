@@ -203,7 +203,11 @@ async def _search_and_rank(
         purpose=body.purpose,
         model=inputs.rerank_model,
         catalog=catalog,
-        keys=await asyncio.to_thread(process_provider_keys, catalog),
+        keys=await asyncio.to_thread(
+            process_provider_keys,
+            catalog,
+            environ=gateway_state(request).gateway_process.config.process_environment(),
+        ),
         k=body.k,
         limit=plan.limit,
         exclude=plan.exclude,

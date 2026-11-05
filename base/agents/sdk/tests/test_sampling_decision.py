@@ -102,12 +102,18 @@ def test_generators_with_different_seeds_make_different_decisions() -> None:
     )
 
 
-def test_the_process_owner_keeps_the_generator_its_root_gave_it(unit_home: Path) -> None:
+def test_the_process_owner_keeps_the_generator_its_root_gave_it(
+    unit_home: Path,
+) -> None:
     rng = seeded_rng(4)
 
-    owner = process_sampling_owner(rng)
+    environ = {"MEIVA_SDK_CALL_SAMPLING_ENABLED": "true", "MEIVA_SDK_CALL_SAMPLE_EVERY": "7"}
+    owner = process_sampling_owner(rng, environ=environ)
     try:
         assert owner.rng is rng
+        assert owner.source.env is environ
+        assert owner.value.sampling_enabled is True
+        assert owner.value.sample_every == 7
     finally:
         owner.close()
 

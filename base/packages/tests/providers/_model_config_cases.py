@@ -35,7 +35,7 @@ def validate_model_from_config_wins_over_default(
         config={"llm_model": "deepseek-flash"},
         catalog=model_catalog,
         llm_override="",
-        keys=process_provider_keys(model_catalog),
+        keys=process_provider_keys(model_catalog, environ=os.environ),
     )
     assert result == "deepseek-flash"
 
@@ -48,7 +48,7 @@ def validate_fallback_to_cluster_default_when_config_omits_model(
         config={"some_other_key": "value"},
         catalog=model_catalog,
         llm_override="",
-        keys=process_provider_keys(model_catalog),
+        keys=process_provider_keys(model_catalog, environ=os.environ),
     )
     assert result == "deepseek-flash"
 
@@ -61,7 +61,7 @@ def validate_fallback_to_cluster_default_when_config_is_none(
         config=None,
         catalog=model_catalog,
         llm_override="",
-        keys=process_provider_keys(model_catalog),
+        keys=process_provider_keys(model_catalog, environ=os.environ),
     )
     assert result == "deepseek-flash"
 
@@ -73,7 +73,7 @@ def validate_no_model_configured_raises(model_catalog: ModelCatalog) -> None:
             config=None,
             catalog=model_catalog,
             llm_override="",
-            keys=process_provider_keys(model_catalog),
+            keys=process_provider_keys(model_catalog, environ=os.environ),
         )
 
 
@@ -86,7 +86,7 @@ def validate_no_model_configured_empty_config(
             config={},
             catalog=model_catalog,
             llm_override="",
-            keys=process_provider_keys(model_catalog),
+            keys=process_provider_keys(model_catalog, environ=os.environ),
         )
 
 
@@ -96,7 +96,7 @@ def validate_unknown_model_raises(model_catalog: ModelCatalog) -> None:
             model="not-a-real-model",
             catalog=model_catalog,
             llm_override="",
-            keys=process_provider_keys(model_catalog),
+            keys=process_provider_keys(model_catalog, environ=os.environ),
         )
 
 
@@ -105,7 +105,7 @@ def validate_known_model_succeeds(model_catalog: ModelCatalog) -> None:
         model="deepseek-flash",
         catalog=model_catalog,
         llm_override="",
-        keys=process_provider_keys(model_catalog),
+        keys=process_provider_keys(model_catalog, environ=os.environ),
     )
     assert result == "deepseek-flash"
 
@@ -119,7 +119,7 @@ def validate_all_supported_models_pass_name_check(
             model=m,
             catalog=model_catalog,
             llm_override="",
-            keys=process_provider_keys(model_catalog),
+            keys=process_provider_keys(model_catalog, environ=os.environ),
         )
         assert result == m
 
@@ -133,7 +133,7 @@ def validate_superseded_model_stays_spawn_valid(
             config={"llm_model": "kimi-k3"},
             catalog=model_catalog,
             llm_override="",
-            keys=process_provider_keys(model_catalog),
+            keys=process_provider_keys(model_catalog, environ=os.environ),
         )
         == "kimi-k3"
     )
@@ -149,7 +149,7 @@ def validate_superseded_model_stays_spawn_valid(
         config={"llm_model": "glm-5.2"},
         catalog=model_catalog,
         llm_override="",
-        keys=process_provider_keys(model_catalog),
+        keys=process_provider_keys(model_catalog, environ=os.environ),
     )
     assert result == "glm-5.2"
 
@@ -177,7 +177,7 @@ def validate_missing_claude_key_raises(model_catalog: ModelCatalog) -> None:
             model="claude-sonnet-5",
             catalog=model_catalog,
             llm_override="",
-            keys=process_provider_keys(model_catalog),
+            keys=process_provider_keys(model_catalog, environ=os.environ),
         )
 
 
@@ -187,7 +187,7 @@ def validate_missing_deepseek_key_raises(model_catalog: ModelCatalog) -> None:
             model="deepseek-flash",
             catalog=model_catalog,
             llm_override="",
-            keys=process_provider_keys(model_catalog),
+            keys=process_provider_keys(model_catalog, environ=os.environ),
         )
 
 
@@ -197,7 +197,7 @@ def validate_missing_gemini_key_raises(model_catalog: ModelCatalog) -> None:
             model="gemini-3.5-flash",
             catalog=model_catalog,
             llm_override="",
-            keys=process_provider_keys(model_catalog),
+            keys=process_provider_keys(model_catalog, environ=os.environ),
         )
 
 
@@ -207,7 +207,7 @@ def validate_missing_openai_key_raises(model_catalog: ModelCatalog) -> None:
             model="gpt-5.6-sol",
             catalog=model_catalog,
             llm_override="",
-            keys=process_provider_keys(model_catalog),
+            keys=process_provider_keys(model_catalog, environ=os.environ),
         )
 
 
@@ -217,7 +217,7 @@ def validate_missing_mimo_key_raises(model_catalog: ModelCatalog) -> None:
             model="mimo-v2.6-pro",
             catalog=model_catalog,
             llm_override="",
-            keys=process_provider_keys(model_catalog),
+            keys=process_provider_keys(model_catalog, environ=os.environ),
         )
 
 
@@ -228,7 +228,7 @@ def validate_missing_kimi_key_raises(model_catalog: ModelCatalog) -> None:
                 model=model,
                 catalog=model_catalog,
                 llm_override="",
-                keys=process_provider_keys(model_catalog),
+                keys=process_provider_keys(model_catalog, environ=os.environ),
             )
 
 
@@ -238,7 +238,7 @@ def validate_missing_glm_key_raises(model_catalog: ModelCatalog) -> None:
             model="glm-5.2",
             catalog=model_catalog,
             llm_override="",
-            keys=process_provider_keys(model_catalog),
+            keys=process_provider_keys(model_catalog, environ=os.environ),
         )
 
 
@@ -248,7 +248,7 @@ def validate_missing_qwen_key_raises(model_catalog: ModelCatalog) -> None:
             model="qwen3.8-max",
             catalog=model_catalog,
             llm_override="",
-            keys=process_provider_keys(model_catalog),
+            keys=process_provider_keys(model_catalog, environ=os.environ),
         )
 
 
@@ -257,7 +257,7 @@ def validate_key_present_succeeds(model_catalog: ModelCatalog) -> None:
         model="claude-sonnet-5",
         catalog=model_catalog,
         llm_override="",
-        keys=process_provider_keys(model_catalog),
+        keys=process_provider_keys(model_catalog, environ=os.environ),
     )
     assert result == "claude-sonnet-5"
 
@@ -271,7 +271,7 @@ def validate_config_model_with_missing_key_raises(
             config={"llm_model": "claude-sonnet-5"},
             catalog=model_catalog,
             llm_override="",
-            keys=process_provider_keys(model_catalog),
+            keys=process_provider_keys(model_catalog, environ=os.environ),
         )
 
 
@@ -283,7 +283,7 @@ def validate_config_model_with_key_present_succeeds(
         config={"llm_model": "claude-sonnet-5"},
         catalog=model_catalog,
         llm_override="",
-        keys=process_provider_keys(model_catalog),
+        keys=process_provider_keys(model_catalog, environ=os.environ),
     )
     assert result == "claude-sonnet-5"
 
@@ -296,7 +296,7 @@ def validate_config_with_non_string_model_ignores(
         config={"llm_model": 42},
         catalog=model_catalog,
         llm_override="",
-        keys=process_provider_keys(model_catalog),
+        keys=process_provider_keys(model_catalog, environ=os.environ),
     )
     assert result == "deepseek-flash"
 
@@ -307,7 +307,7 @@ def validate_override_skips_api_key_check(model_catalog: ModelCatalog) -> None:
         model="claude-sonnet-5",
         catalog=model_catalog,
         llm_override=llm_override,
-        keys=process_provider_keys(model_catalog),
+        keys=process_provider_keys(model_catalog, environ=os.environ),
     )
     assert result == "claude-sonnet-5"
 
@@ -322,7 +322,7 @@ def validate_supported_explicit_effort_passes_unchanged(
             config=config,
             catalog=model_catalog,
             llm_override="",
-            keys=process_provider_keys(model_catalog),
+            keys=process_provider_keys(model_catalog, environ=os.environ),
         )
         == model
     )
@@ -339,7 +339,7 @@ def validate_invalid_explicit_effort_rejected_even_with_override(
             config={"reasoning_effort": effort},
             catalog=model_catalog,
             llm_override=llm_override,
-            keys=process_provider_keys(model_catalog),
+            keys=process_provider_keys(model_catalog, environ=os.environ),
         )
 
 
@@ -350,7 +350,7 @@ def validate_restored_model_validates_to_itself(
         model="gemini-3.8-flash",
         catalog=model_catalog,
         llm_override="",
-        keys=process_provider_keys(model_catalog),
+        keys=process_provider_keys(model_catalog, environ=os.environ),
     )
     assert result == "gemini-3.8-flash"
 

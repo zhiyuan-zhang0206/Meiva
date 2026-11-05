@@ -126,9 +126,9 @@ def load_installation(
     load_extensions(
         home=home,
         catalog=catalog,
-        provider_keys=process_provider_keys(catalog),
+        provider_keys=process_provider_keys(catalog, environ=config.process_environment()),
         authority=authority,
-        sampling=process_sampling_owner(rng),
+        sampling=process_sampling_owner(rng, environ=config.process_environment()),
         clients=clients,
         clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
         disabled_entries=disabled_entries,

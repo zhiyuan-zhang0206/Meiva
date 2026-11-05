@@ -7,7 +7,7 @@ import math
 import random
 import threading
 import time
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Mapping
 from types import TracebackType
 
 from base.agents.sdk import (
@@ -228,18 +228,17 @@ class SamplingPolicyOwner:
 
 
 # meiva:note
-# The sampling owner of a process whose root has no configuration boot of its own (a bare SDK
-# process, an exec child, a CLI verb): the composition root reads the process environment and
-# the home's `.env` location here, once, as values. The environment is the live process
-# environment, so a flag or token delivered after install is seen at the next refresh. Until the
-# first refresh the owner serves the policy the environment already carries.
-def process_sampling_owner(rng: random.Random) -> SamplingPolicyOwner:
+# The sampling owner of a process whose root has no configuration boot of its own
+# (a bare SDK process, an exec child, a CLI verb). The root supplies its environment
+# mapping; keep it live so a flag or token delivered after install is visible at
+# the next refresh. Until then the owner serves the supplied initial policy.
+def process_sampling_owner(
+    rng: random.Random, *, environ: Mapping[str, str]
+) -> SamplingPolicyOwner:
     from base.host.env.dotenv_file import process_env_file
-    from base.host.env.registry import process_environment
 
-    env = process_environment()
     return SamplingPolicyOwner(
-        initial=policy_from_aliases(env),
-        source=SamplingSource(env=env, env_path=process_env_file()),
+        initial=policy_from_aliases(environ),
+        source=SamplingSource(env=environ, env_path=process_env_file()),
         rng=rng,
     )

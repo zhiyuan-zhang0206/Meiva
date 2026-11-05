@@ -5,6 +5,7 @@ import random
 import sys
 import textwrap
 import traceback
+from collections.abc import Mapping
 from pathlib import Path
 
 from agent.extensions.catalog import (
@@ -22,10 +23,10 @@ from base.packages.plugins.enable_config import RETIRED_BUILTIN_PLUGINS, Danglin
 
 
 # meiva:note
-# The sampling owner of one CLI verb: it is the process root, so it builds the owner from the process
-# environment and closes it at interpreter exit.
-def _verb_sampling(rng: random.Random) -> SamplingPolicyOwner:
-    sampling = process_sampling_owner(rng)
+# The sampling owner of one CLI verb: the invocation supplies its live environment,
+# and the owner closes at interpreter exit.
+def _verb_sampling(rng: random.Random, *, environ: Mapping[str, str]) -> SamplingPolicyOwner:
+    sampling = process_sampling_owner(rng, environ=environ)
     atexit.register(sampling.close)
     return sampling
 
@@ -196,7 +197,7 @@ def _where(exc: BaseException) -> str:
 
 
 # meiva:link cli/commands/extensions/docs/plugin-inspection.meiva.okf.md
-def cmd_plugins_verify(*, rng: random.Random, home: Path) -> int:
+def cmd_plugins_verify(*, rng: random.Random, home: Path, environ: Mapping[str, str]) -> int:
     from agent.state import plugin_state_schema
     from meiva.sdk_surface.extensions import load_extensions
 
@@ -204,7 +205,7 @@ def cmd_plugins_verify(*, rng: random.Random, home: Path) -> int:
     try:
         loaded = load_extensions(
             report=lambda name, exc: failures.append((name, exc)),
-            sampling=_verb_sampling(rng),
+            sampling=_verb_sampling(rng, environ=environ),
             validate_state=plugin_state_schema,
             home=home,
         )

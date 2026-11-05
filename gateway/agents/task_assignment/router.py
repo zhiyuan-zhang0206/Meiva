@@ -200,7 +200,11 @@ async def post_task_assignment(
         )
         try:
             catalog = require_model_catalog(request)
-            keys = await asyncio.to_thread(process_provider_keys, catalog)
+            keys = await asyncio.to_thread(
+                process_provider_keys,
+                catalog,
+                environ=gateway_state(request).gateway_process.config.process_environment(),
+            )
             await asyncio.to_thread(
                 creation.spawn_preflight_blocking,
                 db,

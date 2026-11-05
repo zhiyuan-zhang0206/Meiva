@@ -1,6 +1,7 @@
 # meiva:note
 # Force cancellation follows commit; failed launch validation preserves birth state.
 
+import os
 from pathlib import Path
 from uuid import uuid4
 
@@ -123,6 +124,7 @@ async def test_launch_agent_op_hosted_validation_failure_preserves_its_row(
             catalog=model_catalog,
             authority=config_authority,
             local_machine=machine_identity.name(),
+            environ=os.environ,
         )
     assert (
         db_conn.execute(
