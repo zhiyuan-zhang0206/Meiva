@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import cast
 from uuid import uuid4
 
@@ -60,6 +61,7 @@ async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
             catalog=build_model_catalog(home=meiva_home()),
             authority=config_authority,
             local_machine=machine_identity.name(),
+            environ=os.environ,
         )
         await lifecycle.launch_agent_op(
             database,
@@ -69,6 +71,7 @@ async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
             catalog=build_model_catalog(home=meiva_home()),
             authority=config_authority,
             local_machine=machine_identity.name(),
+            environ=os.environ,
         )
         stale = body.model_copy(update={"launch_attempt_id": uuid4()})
         with pytest.raises(ValueError, match="stale or misplaced"):
@@ -80,6 +83,7 @@ async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
                 catalog=build_model_catalog(home=meiva_home()),
                 authority=config_authority,
                 local_machine=machine_identity.name(),
+                environ=os.environ,
             )
         db_conn.execute("UPDATE agents_meta SET machine='later-placement' WHERE id=%s", (agent_id,))
         db_conn.commit()
@@ -92,6 +96,7 @@ async def test_new_launch_attempt_is_repeatable_without_prompt_insertion(
                 catalog=build_model_catalog(home=meiva_home()),
                 authority=config_authority,
                 local_machine=machine_identity.name(),
+                environ=os.environ,
             )
         for _ in range(2):
             wake = cast(dict[str, object] | None, received.get_message(timeout=2))

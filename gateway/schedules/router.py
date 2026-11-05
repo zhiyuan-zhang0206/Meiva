@@ -640,6 +640,7 @@ async def guarded_draft_schedule(
         rpc=gateway_rpc(request),
         creation_identity=body.model_dump(mode="json"),
         ensure_harnesses=gateway_ensure_harnesses(request),
+        environ=gateway_state(request).gateway_process.config.process_environment(),
     )
     return ScheduleDraftResponse(agent_id=spawned.id)
 

@@ -9,6 +9,3 @@ exports = ["call_policy.py", "capture.py", "tally.py", "telemetry.py", "tests"]
 "__init__.py" = "strict"
 "capture.py" = "strict"
 "tally.py" = "strict"
-
-[debt.ambient-read]
-"call_policy.py#environ base.host.env.registry.process_environment" = { count = 1, owner = "#5816", until = "waits for its four production callers to hand the sampling facts: process_sampling_owner(rng) has no environment parameter and reads the declared MEIVA_SDK_CALL_* keys itself, so the fix is a required argument at meiva/boot.py, cli extensions plugins, agent_host configuration and plugins_inspect" }

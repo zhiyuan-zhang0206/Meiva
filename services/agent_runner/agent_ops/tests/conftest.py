@@ -1,5 +1,6 @@
 """Invocation-owned op executors for daemon contracts."""
 
+import os
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -81,7 +82,10 @@ def ops(
             database=ops_database,
             image=ops_image,
             machine=machine_identity,
-            host=fake_host(),
+            # meiva:note
+            # A deployed ops daemon builds its `Host` from the unit config, so the process
+            # environment it resolves provider keys from is this one.
+            host=fake_host(environ=os.environ),
             home=unit_home,
             receiver=ReceiverConfig(
                 unit=UnitIdentity(machine=machine_identity.name(), home=str(unit_home.resolve())),

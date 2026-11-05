@@ -3,7 +3,7 @@ exports = ["config.py", "fleet_gateway.py", "fleet_leases.py", "schedules.py", "
 [uses]
 "schedule_verify_checks.py" = []
 "schedule_verify_child.py" = ["schedule_verify_checks.py"]
-"schedules_verify.py" = ["child_verdict.py", "schedule_verify_child.py", "sweep_outcome.py"]
+"schedules_verify.py" = ["child_verdict.py", "sweep_outcome.py"]
 "schedules_verify_read_rows.py" = ["schedules_verify.py"]
 "tests" = ["child_verdict.py", "config.py", "schedule_verify_checks.py", "schedules.py", "schedules_verify.py", "sweep_outcome.py"]
 
@@ -29,4 +29,3 @@ exports = ["config.py", "fleet_gateway.py", "fleet_leases.py", "schedules.py", "
 [debt.ambient-read]
 "config.py#environ getpass.getuser" = { count = 1, owner = "#5816", until = "waits for `_edit_local_config` to take the operator's user name from its caller: it asks getpass for it" }
 "config.py#pid getpass.getuser" = { count = 1, owner = "#5816", until = "waits for `_edit_local_config` to take the operator's user name from its caller: it asks getpass for it" }
-"schedules_verify.py#pid sys.executable" = { count = 1, owner = "#5816", until = "waits for `check_script` to take the interpreter path from its caller: it reads `sys.executable` itself" }

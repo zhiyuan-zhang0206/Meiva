@@ -1,6 +1,7 @@
 # meiva:note
 # Load normally, then corrupt only the fallback file before the process reads its provider keys.
 
+import os
 import sys
 from pathlib import Path
 
@@ -14,7 +15,7 @@ def main(home: Path, keys_all_live: bool) -> None:
     assert meiva_home() == home
     (home / ".env").write_bytes(b"DEEPSEEK_API_KEY=\xff\n")
     try:
-        keys = process_provider_keys(catalog)
+        keys = process_provider_keys(catalog, environ=os.environ)
     except UnicodeDecodeError:
         assert not keys_all_live, "live keys must bypass the malformed fallback"
     else:

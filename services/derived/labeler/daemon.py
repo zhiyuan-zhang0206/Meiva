@@ -281,7 +281,7 @@ async def run(
             liveness,
             labeler_config(process_config),
             catalog=catalog,
-            keys=process_provider_keys(catalog),
+            keys=process_provider_keys(catalog, environ=process_config.process_environment()),
             llm_override=process_config.view.lm.llm_override,
             overrides=labeler_model_overrides(
                 profile=process_config.view.profile, lm=process_config.view.lm

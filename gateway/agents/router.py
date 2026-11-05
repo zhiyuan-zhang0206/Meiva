@@ -202,6 +202,7 @@ async def post_guarded_agents(
             clock=gateway_clock(request),
             rpc=gateway_rpc(request),
             ensure_harnesses=gateway_ensure_harnesses(request),
+            environ=gateway_state(request).gateway_process.config.process_environment(),
         )
     except CreationConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

@@ -1,4 +1,5 @@
 import atexit
+import os
 
 from base.agents.sdk.call_policy import SamplingPolicyOwner
 from base.clock.tests.seeded_rng import seeded_rng
@@ -18,7 +19,7 @@ def report_owner() -> None:
 
 
 atexit.register(report_owner)
-owners.append(process_sampling_owner(seeded_rng()))
+owners.append(process_sampling_owner(seeded_rng(), environ=os.environ))
 install.install(
     ExtensionRegistry(()),
     config_images=DiskPluginConfigImages(resolve_meiva_home()),

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -65,7 +66,9 @@ def _verify_failed(events: EmittedEvents) -> dict[str, object]:
 def _sweep(
     source: _verify.SweepSource, producer: Callable[[], EventPipeline], *, notify: bool = True
 ) -> int:
-    return _verify.cmd_schedules_verify(source=source, notify=notify, now=_NOW, producer=producer)
+    return _verify.cmd_schedules_verify(
+        python=sys.executable, source=source, notify=notify, now=_NOW, producer=producer
+    )
 
 
 def test_a_gateway_of_clean_scripts_prints_the_result_line_and_reports_nothing(

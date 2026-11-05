@@ -214,6 +214,7 @@ async def dispatch(
                     catalog=catalog,
                     authority=authority,
                     local_machine=local_machine.name(),
+                    environ=host.environ,
                 )
 
                 return OpStatus.COMPLETED, spawned.model_dump(mode="json", exclude_none=True)

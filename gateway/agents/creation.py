@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
@@ -128,6 +128,7 @@ async def create_and_launch_agent(
     rpc: RpcClient,
     creation_identity: dict[str, object] | None = None,
     ensure_harnesses: EnsureHarnesses | None = None,
+    environ: Mapping[str, str],
 ) -> SpawnedAgent:
     """Gateway-side spawn (Task #1236 follow-up): preflight -> create the agent
     ROW in-process -> forward a launch-only op to the target runner.
@@ -168,7 +169,7 @@ async def create_and_launch_agent(
     probed_models, probed_default_model, harness_defaults = await _resolve_external_spawn_probe(
         db, target, body, ensure_harnesses
     )
-    keys = await asyncio.to_thread(process_provider_keys, catalog)
+    keys = await asyncio.to_thread(process_provider_keys, catalog, environ=environ)
     tail_skills, model_receipt = await asyncio.to_thread(
         spawn_preflight_blocking,
         db,

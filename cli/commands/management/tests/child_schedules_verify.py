@@ -28,6 +28,7 @@ def _check_rows(rows_file: str) -> None:
     try:
         sys.exit(
             cmd_schedules_verify(
+                python=sys.executable,
                 source=RowsFromFile(rows_file),
                 notify=False,
                 now=datetime.now(UTC),
