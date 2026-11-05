@@ -7,7 +7,7 @@ from agent.graph.prompt.conversation import harness_user_reply_section, user_rep
 from agent.graph.prompt.live import LiveSdk, SectionInputs
 from agent.graph.prompt.skill_selection import SkillView
 from agent.graph.prompt.system_prompt import build_system_prompt
-from base.agents.messages.reply_intent import USER_REPLY_PREFIX
+from base.agents.messages.reply_intent import DISPLAY_TO_USER, HIDE_FROM_USER
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
@@ -72,8 +72,8 @@ def test_reply_routing_and_handoff_policy_survive_every_style(style: str) -> Non
     )
 
     assert prompt.count("Reply in ordinary assistant text in this conversation") == 1
-    assert "Text alongside a tool call also reaches the user" in prompt
-    assert "no separate SDK call is needed" in prompt
+    assert "tool call follows the same visibility rule as a standalone reply" in prompt
+    assert "No separate SDK call is needed" in prompt
     assert "when resuming unfinished human requests from a handoff" in prompt
     assert "further investigation should address a concrete remaining question" in prompt
     assert "rather than inventing additional ones" in prompt
@@ -147,17 +147,11 @@ def test_milestone_policy_preserves_results_and_questions(
     assert "emit alongside each action" not in prompt
 
 
-def test_background_wake_reply_prefix_guidance_in_native_and_harness_sections() -> None:
+def test_explicit_visibility_guidance_in_native_and_harness_sections() -> None:
     inputs = _inputs(_slices())
     for section in (user_reply_section(inputs), harness_user_reply_section(inputs)):
-        assert "## Output visibility by wake source" in section
-        assert section.index("## Output visibility by wake source") < section.index(
-            "On a new question or request from the human"
-        )
-        assert f"`{USER_REPLY_PREFIX}`" in section
-        assert "woken solely by non-human inputs" in section
-        assert "collapsed work log" in section
-        assert "End the turn with no assistant text" not in section
-        assert f"omit `{USER_REPLY_PREFIX}` on human-triggered runs" in section
-        milestone_tail = section.split("## Meaningful progress", maxsplit=1)[1]
-        assert f"`{USER_REPLY_PREFIX}`" in milestone_tail
+        assert "## Output visibility" in section
+        assert DISPLAY_TO_USER in section
+        assert HIDE_FROM_USER in section
+        assert "the user can expand and read them" in section
+        assert "human and background wakes alike" in section

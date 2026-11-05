@@ -24,17 +24,21 @@ for it: it accepts the wrapped form and the legacy `[system] …` opening of a
 summary stored before the note carried tags, so the context breakdown keeps
 bucketing old history correctly.
 
-## Background-wake user-reply header
+## Assistant text visibility
 
-`USER_REPLY_HEADER` (`"Meiva agent to user:"`), `USER_REPLY_PREFIX`
-(`"Meiva agent to user: "`), and `NON_HUMAN_WAKE_REMINDER` in
-`base/agents/messages/reply_intent.py` disambiguate proactive user-facing replies
-from internal work-log text on runs woken without human input
-(`meiva_non_human_wake=True`). When `claim` transitions an agent into a
-`non_human_wake=True` LLM/harness turn, it appends one silent `NoteTag.NON_HUMAN_WAKE`
-system note carrying `NON_HUMAN_WAKE_REMINDER` as a recency anchor beside the waking
-inbound batch. Both `scripts/codegen/dump_frontend_constants.py` and
-`base/agents/history/timeline.py` read from `reply_intent.py`, keeping live SSE
-stream folding (`ui/web/src/lib/fold/timeline.ts`), committed `TimelineItem`
-projection (`user_facing`), and `agents_meta.last_message_text` normalization
-aligned on one constant owner.
+New assistant text blocks use an exact first-line marker, followed by a newline
+and a non-blank body. `MEIVA_DISPLAY_TO_USER` puts the body in the main
+conversation for direct answers and meaningful user-facing updates.
+`MEIVA_HIDE_FROM_USER` puts the body in Details, which the user can expand and
+read. Missing or malformed markers preserve the raw text in Details and trigger
+a `reply_visibility` system note for the model. The native driver puts tool
+response corrections after the tool results, and retries a malformed terminal
+reply once. The external harness driver sends the correction as a separate turn
+with a distinct idempotency key and at most one retry.
+
+`meiva_explicit_visibility` marks new checkpoint output. The corresponding SSE
+field is `explicit_visibility`. Historical output without the marker retains
+its wake-based projection. A fresh background wake includes a silent reminder
+with the current protocol; wake source no longer decides new text visibility.
+The frontend generates the marker constants from
+`base/agents/messages/reply_intent.py`.

@@ -242,7 +242,7 @@ describe("groupIntoTurns", () => {
     expect(kinds(groups)).toEqual(["turn(2@0)"]);
   });
 
-  it("promotes the timeline's last non-empty agent_chat even when user_facing is false, and refolds it once a newer agent_chat arrives", () => {
+  it("keeps non-user-facing agent chat in the work block even when it is the latest output", () => {
     const trailingInternal = [
       item("inbound_chat", "user", "1.0", { payload: "deploy" }),
       item("inbound_chat", "agent:10", "2.0", { payload: "done" }),
@@ -253,9 +253,7 @@ describe("groupIntoTurns", () => {
     ];
     expect(kinds(groupIntoTurns(trailingInternal, { collapseTurns: true, liveIndex: null }))).toEqual([
       "single(inbound_chat@0)",
-      "turn(3@1)",
-      "single(agent_chat@4)",
-      "turn(1@5)",
+      "turn(5@1)",
     ]);
 
     const superseded = [
@@ -264,25 +262,23 @@ describe("groupIntoTurns", () => {
     ];
     expect(kinds(groupIntoTurns(superseded, { collapseTurns: true, liveIndex: null }))).toEqual([
       "single(inbound_chat@0)",
-      "turn(5@1)",
-      "single(agent_chat@6)",
+      "turn(6@1)",
     ]);
   });
 
-  it("does not prematurely promote a streaming non-human-wake agent_chat while typing the Meiva agent to user: header", () => {
+  it("keeps a partially streamed display header in the work block", () => {
     const partialHeader = [
       item("agent_chat", null, "1.0", { user_facing: false, payload: "Earlier note" }),
       item("agent_reasoning", null, "2.0", { payload: "thinking" }),
       item("agent_chat", null, "2.1", {
         user_facing: false,
-        payload: "Meiva agent ",
-        rawChatPayload: "Meiva agent ",
-        nonHumanWake: true,
+        payload: "MEIVA_DISPLAY",
+        rawChatPayload: "MEIVA_DISPLAY",
+        explicitVisibility: true,
       }),
     ];
     expect(kinds(groupIntoTurns(partialHeader, { collapseTurns: true, liveIndex: 2 }))).toEqual([
-      "single(agent_chat@0)",
-      "turn(2@1)",
+      "turn(3@0)",
     ]);
   });
 });

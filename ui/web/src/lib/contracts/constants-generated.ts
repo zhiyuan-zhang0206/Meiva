@@ -9,12 +9,15 @@ export const SSE_EVENT_WINDOW_MS = 40;
 export const USER_REPLY_HEADER = "Meiva agent to user:";
 // meiva:link base/agents/messages/reply_intent.py
 export const USER_REPLY_PREFIX = "Meiva agent to user: ";
+export const DISPLAY_TO_USER = "MEIVA_DISPLAY_TO_USER";
+export const HIDE_FROM_USER = "MEIVA_HIDE_FROM_USER";
 
 // meiva:link base/agents/messages/kwargs.py
 export const NOTE_TAGS = [
   "impersonation",
   "sdk_hint",
   "agent_reply",
+  "reply_visibility",
   "non_human_wake",
   "task",
   "compact_reminder",

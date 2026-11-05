@@ -57,7 +57,7 @@
 // re-exports the helpers for its historical importers, so nothing here may
 // import ../timeline (cycle).
 
-import { USER_REPLY_HEADER } from "../contracts/constants-generated";
+import { DISPLAY_TO_USER, HIDE_FROM_USER, USER_REPLY_HEADER } from "../contracts/constants-generated";
 import type { BackendTimelineItem, SystemEvent } from "../contracts/types";
 import { parseItemId, sortByItemId } from "./item-id";
 
@@ -91,7 +91,20 @@ function stripUserReplyPrefix(text: string): {
 function resolveStreamingChat(
   rawText: string,
   nonHumanWake: boolean,
+  explicitVisibility: boolean,
 ): { readonly payload: string; readonly user_facing: boolean } {
+  if (explicitVisibility) {
+    const lineEnd = rawText.indexOf("\n");
+    if (lineEnd >= 0) {
+      const firstLine = rawText.slice(0, lineEnd);
+      const header = firstLine.endsWith("\r") ? firstLine.slice(0, -1) : firstLine;
+      const body = rawText.slice(lineEnd + 1);
+      if ((header === DISPLAY_TO_USER || header === HIDE_FROM_USER) && body.trim()) {
+        return { payload: body, user_facing: header === DISPLAY_TO_USER };
+      }
+    }
+    return { payload: rawText, user_facing: false };
+  }
   const { matched, body } = stripUserReplyPrefix(rawText);
   if (nonHumanWake) {
     if (matched && body.trim().length > 0) {
@@ -148,21 +161,23 @@ function appendDeltaById(
   kind: "agent_chat" | "agent_code" | "agent_reasoning" | "code_output",
   delta: string,
   nowMs = 1,
-  eventNonHumanWake?: boolean,
+  chatEvent?: Extract<SystemEvent, { role: "chat_delta" }>,
 ): BackendTimelineItem[] {
   const idx = items.findIndex((it) => it.item_id === itemId);
   if (idx >= 0) {
     const prev = items[idx];
     if (kind === "agent_chat") {
       const raw = (prev.rawChatPayload ?? prev.payload) + delta;
-      const nonHumanWake = Boolean(prev.nonHumanWake ?? eventNonHumanWake);
-      const resolved = resolveStreamingChat(raw, nonHumanWake);
+      const nonHumanWake = Boolean(prev.nonHumanWake ?? chatEvent?.non_human_wake);
+      const explicitVisibility = Boolean(prev.explicitVisibility ?? chatEvent?.explicit_visibility);
+      const resolved = resolveStreamingChat(raw, nonHumanWake, explicitVisibility);
       const updated: BackendTimelineItem = {
         ...prev,
         payload: resolved.payload,
         user_facing: resolved.user_facing,
         rawChatPayload: raw,
         nonHumanWake,
+        explicitVisibility,
       };
       return [...items.slice(0, idx), updated, ...items.slice(idx + 1)];
     }
@@ -175,13 +190,15 @@ function appendDeltaById(
   const chatState =
     kind === "agent_chat"
       ? (() => {
-          const nonHumanWake = Boolean(eventNonHumanWake);
-          const resolved = resolveStreamingChat(delta, nonHumanWake);
+          const nonHumanWake = Boolean(chatEvent?.non_human_wake);
+          const explicitVisibility = Boolean(chatEvent?.explicit_visibility);
+          const resolved = resolveStreamingChat(delta, nonHumanWake, explicitVisibility);
           return {
             payload: resolved.payload,
             user_facing: resolved.user_facing,
             rawChatPayload: delta,
             nonHumanWake,
+            explicitVisibility,
           };
         })()
       : null;
@@ -201,6 +218,7 @@ function appendDeltaById(
           user_facing: chatState.user_facing,
           rawChatPayload: chatState.rawChatPayload,
           nonHumanWake: chatState.nonHumanWake,
+          explicitVisibility: chatState.explicitVisibility,
         }
       : {}),
     // Start the live "Thinking for Xs" clock the moment the first reasoning
@@ -231,6 +249,7 @@ function createStartItem(
   kind: "agent_chat" | "agent_code" | "agent_reasoning",
   nowMs = 1,
   nonHumanWake = false,
+  explicitVisibility = false,
 ): BackendTimelineItem[] {
   if (items.some((it) => it.item_id === itemId)) return items;
   return insertItemById(items, {
@@ -242,7 +261,12 @@ function createStartItem(
     inbound_id: null,
     show_timestamp: true,
     ...(kind === "agent_chat"
-      ? { user_facing: !nonHumanWake, rawChatPayload: "", nonHumanWake }
+      ? {
+          user_facing: !nonHumanWake && !explicitVisibility,
+          rawChatPayload: "",
+          nonHumanWake,
+          explicitVisibility,
+        }
       : {}),
     // reasoning_start: anchor the live "Thinking for Xs" clock now.
     ...(kind === "agent_reasoning" ? { reasoningStartedAt: nowMs } : {}),
@@ -340,13 +364,17 @@ export function applySystemEvent(
       // later phases.
       return freezeReasoningClocks(
         clearCodeClocks(
-          createStartItem(items, ev.item_id, "agent_chat", nowMs, Boolean(ev.non_human_wake)),
+          createStartItem(
+            items, ev.item_id, "agent_chat", nowMs, ev.non_human_wake, ev.explicit_visibility,
+          ),
           nowMs,
         ),
         nowMs,
       );
     case "chat_delta":
-      return appendDeltaById(items, ev.item_id, "agent_chat", ev.content, nowMs, ev.non_human_wake);
+      return appendDeltaById(
+        items, ev.item_id, "agent_chat", ev.content, nowMs, ev,
+      );
     case "code_start":
       // Code content begins → reasoning phase is over (same as chat_start),
       // and any previous code block's clock (multi-code turn) is stale.

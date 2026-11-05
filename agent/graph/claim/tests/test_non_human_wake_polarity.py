@@ -257,7 +257,7 @@ async def test_settle_claimed_batch_appends_recency_reminder_only_on_fresh_non_h
     peer_msgs = cast(list[BaseMessage], peer_update["messages"])
     assert len(peer_msgs) == 2
     assert read_meiva_kwargs(peer_msgs[-1]).get("meiva_note_tag") == "non_human_wake"
-    assert "Meiva agent to user: " in str(peer_msgs[-1].content)
+    assert "MEIVA_DISPLAY_TO_USER" in str(peer_msgs[-1].content)
 
     mid_run_cmd = await settle_claimed_batch(
         runtime.context,
@@ -328,7 +328,7 @@ async def test_external_harness_non_human_wake_includes_recency_reminder_and_kee
     assert update.get("non_human_wake") is True
     pending = cast(dict[str, str], update["harness_pending_input"])
     assert pending["key"] == "inbound-601"
-    assert "Meiva agent to user: " in pending["prompt"]
+    assert "MEIVA_DISPLAY_TO_USER" in pending["prompt"]
 
 
 async def test_harness_projector_propagates_non_human_wake() -> None:

@@ -176,7 +176,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     model = ScriptedModel(
         AIMessage(content="the retained summary is still above the ceiling " * 30),
         generation=AIMessageChunk(
-            content="resumed ordinary work",
+            content="MEIVA_DISPLAY_TO_USER\nresumed ordinary work",
             response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
             usage_metadata={"input_tokens": 500, "output_tokens": 5, "total_tokens": 505},
         ),
@@ -232,7 +232,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     generated = await llm_node(state, runtime, config, rng=_rng())
     assert generated.goto == "after_exec"
     state = _apply(state, generated)
-    assert state.messages[-1].content == "resumed ordinary work"
+    assert state.messages[-1].content == "MEIVA_DISPLAY_TO_USER\nresumed ordinary work"
     assert state.compact.version == 1
     # meiva:note
     # A committed ordinary result re-arms the threshold.

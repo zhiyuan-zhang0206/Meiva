@@ -1,6 +1,6 @@
 # meiva:note
-# Core reply routing, wake-polarity visibility, language, and milestone progress rules in `user_reply_section` remain active across every `COMMUNICATION_STYLE_SECTIONS` setting (`off`, `oriented`, `concise`, `silent`). Whenever the first turn on a human request calls `execute_code`, it must include a brief substantive opening reply before the first tool call; intermediate turns call `execute_code` with no assistant text unless a milestone is reached. `COMMUNICATION_STYLE_SECTIONS` keys match the non-`off` `agent_communication_style` Literal members so an unknown style raises at render time.
-from base.agents.messages.reply_intent import USER_REPLY_PREFIX
+# Core reply routing, explicit visibility, language, and milestone progress rules in `user_reply_section` remain active across every `COMMUNICATION_STYLE_SECTIONS` setting (`off`, `oriented`, `concise`, `silent`). Whenever the first turn on a human request calls `execute_code`, it must include a brief substantive opening reply before the first tool call; intermediate turns call `execute_code` with no assistant text unless a milestone is reached. `COMMUNICATION_STYLE_SECTIONS` keys match the non-`off` `agent_communication_style` Literal members so an unknown style raises at render time.
+from base.agents.messages.reply_intent import REPLY_VISIBILITY_RULE
 
 from .live import SectionInputs
 
@@ -15,24 +15,16 @@ def _build_user_reply_section(
     return (
         "# Responding to human requests\n\n"
         "Reply in ordinary assistant text in this conversation. Text alongside a "
-        "tool call also reaches the user; no separate SDK call is needed to send "
-        f"it. {feedback_sentence}\n\n"
-        "## Output visibility by wake source\n\n"
-        "How assistant text reaches the human depends on what woke the current run:\n"
-        "- **Human-triggered runs** (a human message or resumed human handoff): "
-        "ordinary assistant text appears directly in the main user conversation; "
-        f"omit `{USER_REPLY_PREFIX}` on human-triggered runs.\n"
-        "- **Runs woken solely by non-human inputs** (peer agents, external agents, "
-        "watchers, background shells, schedules, heartbeats or system notes): "
-        "ordinary assistant text without an explicit user-reply header folds into "
-        "the collapsed work log (`Details`) rather than appearing in the main user "
-        "conversation or push notifications. Peer messages, watcher events, "
-        "scheduled wakes and system notes do not require courtesy replies or "
-        "automatic closing summaries. Follow their delivery and acknowledgment "
-        "protocols separately (for example, reply to a peer agent via "
-        "`meiva.agents.send_message`, never via assistant text). Begin the "
-        f"message with `{USER_REPLY_PREFIX}` when proactively speaking to the "
-        "human in this conversation.\n\n"
+        "tool call follows the same visibility rule as a standalone reply. No separate SDK call is needed. "
+        f"{feedback_sentence}\n\n"
+        "## Output visibility\n\n"
+        f"{REPLY_VISIBILITY_RULE} Apply this rule on human and background wakes alike. "
+        "Text without a valid prefix is folded into Details. A system note may ask you "
+        "to correct it. Tool calls, tool results and reasoning do not need a prefix.\n\n"
+        "Peer messages, watcher events, scheduled wakes and system notes do not require "
+        "courtesy replies or automatic closing summaries. Follow their acknowledgment "
+        "protocols separately (for example, reply to a peer via "
+        "`meiva.agents.send_message`).\n\n"
         "On a new question or request from the human, respond promptly in the same "
         f"conversation. If you can answer directly, give the answer {without_tool_phrase}; "
         "no separate acknowledgment is needed. Whenever your first "
@@ -73,9 +65,8 @@ def _build_user_reply_section(
         "material change of direction, a blocker requiring action, or a handoff. "
         "An update must add information that changes what the user knows, "
         "decides or can do. Completing an internal step or ending a turn is not "
-        "itself a milestone. When reporting a milestone, blocker or final "
-        f"deliverable to the user on a non-human wake, begin that message with `{USER_REPLY_PREFIX}` "
-        "so it surfaces outside the collapsed work log.\n\n"
+        "itself a milestone. Use the display prefix for a milestone, blocker or "
+        "final deliverable that the user needs to see.\n\n"
         "An explicitly selected live-pairing style may add more frequent "
         "substantive updates, but every message must remain self-contained and "
         "useful to the user. Do not assume continuous attention to the session.\n\n"

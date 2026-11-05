@@ -13,6 +13,7 @@ from agent.graph.hooks.compact import compact_reminder
 from agent.graph.hooks.skill_recall import SkillRecallHook
 from agent.hooks import Hook
 from agent.hooks.repair import repair_dangling_tool_pairing
+from agent.hooks.reply_visibility import deliver_reply_visibility_correction
 from agent.hooks.security import deliver_security_findings
 from base.packages.plugins.extensions import ExtensionRegistry, GraphHook, HookPoint
 
@@ -27,7 +28,7 @@ def framework_hooks() -> dict[HookPoint, tuple[Hook, ...]]:
             newly_installed_skills,
         ),
         "before_exec": (),
-        "after_exec": (deliver_security_findings,),
+        "after_exec": (deliver_security_findings, deliver_reply_visibility_correction),
     }
 
 

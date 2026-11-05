@@ -21,6 +21,7 @@ def test_note_tag_value_set() -> None:
         "sdk_hint",
         "agent_reply",
         "non_human_wake",
+        "reply_visibility",
         "task",
         "impersonation",
         "compact_reminder",

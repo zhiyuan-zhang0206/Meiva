@@ -6,7 +6,7 @@ from datetime import datetime
 
 from agent.graph.claim.harness_tool_format import format_tool_use
 from base.agents.history.timeline_item import TimelineItem
-from base.agents.messages.reply_intent import resolve_agent_reply
+from base.agents.messages.reply_intent import parse_reply_visibility, resolve_agent_reply
 from base.agents.sdk.telemetry import SdkCall
 from base.clock import Clock
 from base.lm.harness import (
@@ -38,11 +38,14 @@ class HarnessTurnProjector:
         base_idx: int,
         clock: Clock,
         non_human_wake: bool = False,
+        explicit_visibility: bool = False,
     ) -> None:
         self._checkpoint = checkpoint
         self._next_idx = self._base_idx = self._committed_count = base_idx
         self._clock = clock
         self._non_human_wake = non_human_wake
+        self._explicit_visibility = explicit_visibility
+        self.invalid_reply_visibility = False
         self._activity_started = clock.now()
         self._text_started = self._activity_started
         self._reasoning_ended: datetime | None = None
@@ -117,6 +120,7 @@ class HarnessTurnProjector:
                 for turn in turns:
                     if turn.text and not turn.replayed:
                         self._new_chat(turn.text, now)
+                        self._check_visibility(turn.text)
             if error is not None:
                 self._new_item("system_marker", f"error:Harness execution stopped: {error}", now)
             await self._flush()
@@ -130,7 +134,7 @@ class HarnessTurnProjector:
         if self._text_item is not None and self._text_item.kind != kind:
             self._close_text(now)
         started = self._text_item is None
-        if started and not event.text.strip():
+        if started and not event.text:
             return
         self._text = (event.text or self._text) if complete else self._text + event.text
         current = self._text_item
@@ -158,8 +162,10 @@ class HarnessTurnProjector:
                 self._text_item, self._text, reasoning_ms=_elapsed(self._text_started, now)
             )
             self._reasoning_ended = now
-        elif self._text_item is not None and self._text_item.activity_pending and seal_chat:
-            self._revise(self._text_item, self._text_item.payload, activity_pending=False)
+        elif self._text_item is not None and seal_chat:
+            self._check_visibility(self._text)
+            if self._text_item.activity_pending:
+                self._revise(self._text_item, self._text_item.payload, activity_pending=False)
         self._text_item = None
         self._text = ""
 
@@ -193,8 +199,16 @@ class HarnessTurnProjector:
         )
         self._activity_started = now
 
+    def _check_visibility(self, text: str) -> None:
+        if self._explicit_visibility and text.strip() and parse_reply_visibility(text) is None:
+            self.invalid_reply_visibility = True
+
     def _reply(self, text: str) -> tuple[str, bool]:
-        return resolve_agent_reply(text, non_human_wake=self._non_human_wake)
+        return resolve_agent_reply(
+            text,
+            non_human_wake=self._non_human_wake,
+            explicit_visibility=self._explicit_visibility,
+        )
 
     def _new_chat(self, text: str, now: datetime, *, pending: bool = False) -> TimelineItem:
         payload, user_facing = self._reply(text)

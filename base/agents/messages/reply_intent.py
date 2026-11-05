@@ -9,15 +9,29 @@ from __future__ import annotations
 USER_REPLY_HEADER = "Meiva agent to user:"
 USER_REPLY_PREFIX = "Meiva agent to user: "
 
-# meiva:note
-# Appended once in `claim` when an agent enters a `non_human_wake=True` run so long
-# multi-step sessions retain a recency signal beside the inbound wake envelope without
-# repeating on mid-run tool loops or mid-run secondary arrivals.
-# meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
-NON_HUMAN_WAKE_REMINDER = (
-    "Non-human wake: unprefixed assistant text folds into the collapsed work log. "
-    f"Begin user-intended text with `{USER_REPLY_PREFIX}`."
+DISPLAY_TO_USER = "MEIVA_DISPLAY_TO_USER"
+HIDE_FROM_USER = "MEIVA_HIDE_FROM_USER"
+REPLY_VISIBILITY_RULE = (
+    f"Start each non-empty assistant text block with either {DISPLAY_TO_USER} or "
+    f"{HIDE_FROM_USER} on its own first line, then write the body on the next line. "
+    f"Use {DISPLAY_TO_USER} for answers, deliverables, decisions and meaningful milestones "
+    f"the user needs to see in the main conversation. Use {HIDE_FROM_USER} for working notes. "
+    "Those notes are folded into Details and the user can expand and read them."
 )
+NON_HUMAN_WAKE_REMINDER = f"Non-human wake. {REPLY_VISIBILITY_RULE}"
+REPLY_VISIBILITY_CORRECTION = (
+    "Your previous output contained text with a missing or invalid visibility prefix. "
+    "That text was folded into Details. "
+    f"{REPLY_VISIBILITY_RULE} If it was a user-facing reply, resend it with the display prefix."
+)
+
+
+def parse_reply_visibility(text: str) -> tuple[str, bool] | None:
+    header, separator, body = text.partition("\n")
+    header = header.removesuffix("\r")
+    if not separator or header not in (DISPLAY_TO_USER, HIDE_FROM_USER) or not body.strip():
+        return None
+    return body, header == DISPLAY_TO_USER
 
 
 # meiva:note
@@ -46,7 +60,11 @@ def strip_user_reply_prefix(text: str) -> tuple[bool, str]:
 # Header-only output with nothing non-blank after stripping stays `(text, False)` inside
 # `Details` rather than promoting an empty primary bubble, keeping `item_id` alignment intact.
 # meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
-def resolve_agent_reply(text: str, *, non_human_wake: bool) -> tuple[str, bool]:
+def resolve_agent_reply(
+    text: str, *, non_human_wake: bool, explicit_visibility: bool = False
+) -> tuple[str, bool]:
+    if explicit_visibility:
+        return parse_reply_visibility(text) or (text, False)
     matched, body = strip_user_reply_prefix(text)
     if matched:
         if body.strip():
@@ -57,6 +75,9 @@ def resolve_agent_reply(text: str, *, non_human_wake: bool) -> tuple[str, bool]:
 
 # meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
 def normalize_last_message_text(text: str) -> str:
+    explicit = parse_reply_visibility(text)
+    if explicit is not None:
+        return explicit[0]
     matched, body = strip_user_reply_prefix(text)
     if not matched:
         return text

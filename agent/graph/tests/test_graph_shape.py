@@ -75,7 +75,7 @@ class FakeEngine:
         self.submitted.append(text)
         return HarnessTurn(
             turn_id="t1",
-            text="the harness answered",
+            text="MEIVA_DISPLAY_TO_USER\nthe harness answered",
             usage=Usage(input_tokens=1, output_tokens=1),
             cost_usd=0.0,
             subtype="success",
@@ -151,7 +151,8 @@ async def test_an_external_harness_never_enters_the_native_turn_nodes() -> None:
 
     assert "harness_turn" in seen, "the harness node is the turn"
     assert not NATIVE_NODES.intersection(seen), f"native turn nodes ran: {seen}"
-    assert engine.submitted == ["do it"], "the message reached the harness once"
+    [prompt] = engine.submitted
+    assert prompt.endswith("\n\ndo it")
 
 
 # meiva:note

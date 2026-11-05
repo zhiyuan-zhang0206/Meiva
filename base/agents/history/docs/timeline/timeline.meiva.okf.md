@@ -34,7 +34,12 @@ Code items come from the normalized tool_calls view — one provider-agnostic ru
 
 ## User-facing polarity (`user_facing`)
 
-Every `TimelineItem` carries `user_facing: bool = True`. For `agent_chat` items, `ai_message_items` resolves `(payload, user_facing)` via `base.agents.messages.reply_intent.resolve_agent_reply(raw_text, non_human_wake=bool(kwargs.get("meiva_non_human_wake")))`: human-triggered runs (and legacy `AIMessage`s without `meiva_non_human_wake`) default to `user_facing=True` while defensively stripping any redundant `Meiva agent to user:` header; non-human wakes default to `user_facing=False` unless the block opens with `Meiva agent to user:` followed by non-blank content, in which case the header is stripped and `user_facing=True`. A header-only block with empty stripped body demotes to `(raw_text, False)` rather than omitting the item so `item_id` block alignment with streamed `chat_start` and subsequent `agent_code` items stays intact. Downstream surfaces (`runs.classifyItem`, `im_bridge.is_dialog_item`, reply-suggestion excerpt/trigger) gate user-visible reply behavior on `user_facing`.
+Every `TimelineItem` carries `user_facing`. For new `agent_chat` items,
+`ai_message_items` uses `meiva_explicit_visibility` to select the first-line
+visibility protocol in `base.agents.messages.reply_intent`. The projection
+strips valid markers, preserves malformed text in Details, and keeps block
+indices stable. Older checkpoints without that flag use their wake-based
+projection. Reply suggestions use only user-facing chat.
 
 ## Reasoning timing
 

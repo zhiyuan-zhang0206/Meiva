@@ -525,52 +525,21 @@ describe("ItemView: monochrome secondary headers and turn child defaults", () =>
     expect(screen.queryByText("internal background note")).toBeNull();
   });
 
-  it("surfaces the timeline's last non-empty agent_chat on the main canvas as fallback and refolds it when a newer agent_chat arrives", () => {
-    const { container, rerender } = render(
+  it("keeps the latest internal assistant text folded and lets the user expand it", () => {
+    render(
       <TimelineView
         items={[
           makeItem({
             item_id: "1.0",
-            kind: "agent_reasoning",
-            payload: "background reasoning",
-          }),
-          makeItem({
-            item_id: "1.1",
             kind: "agent_chat",
             user_facing: false,
-            payload: "Fallback visible closing text",
+            payload: "Internal closing text",
           }),
         ]}
       />,
     );
-    expect(container.querySelectorAll('[data-testid="agent-message-prose"]')).toHaveLength(1);
-    expect(screen.getByText("Fallback visible closing text")).toBeTruthy();
-
-    rerender(
-      <TimelineView
-        items={[
-          makeItem({
-            item_id: "1.0",
-            kind: "agent_reasoning",
-            payload: "background reasoning",
-          }),
-          makeItem({
-            item_id: "1.1",
-            kind: "agent_chat",
-            user_facing: false,
-            payload: "Fallback visible closing text",
-          }),
-          makeItem({
-            item_id: "2.0",
-            kind: "agent_chat",
-            user_facing: false,
-            payload: "Newer closing text",
-          }),
-        ]}
-      />,
-    );
-    expect(container.querySelectorAll('[data-testid="agent-message-prose"]')).toHaveLength(1);
-    expect(screen.queryByText("Fallback visible closing text")).toBeNull();
-    expect(screen.getByText("Newer closing text")).toBeTruthy();
+    expect(screen.queryByText("Internal closing text")).toBeNull();
+    fireEvent.click(screen.getByTestId("turn-toggle"));
+    expect(screen.getByText("Internal closing text")).toBeTruthy();
   });
 });
