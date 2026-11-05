@@ -16,7 +16,8 @@ tags:
 Table name `agent_tasks`; `base.agents.tasks.model.Task` owns the field order.
 `TASK_COLUMNS` is derived from `dataclasses.fields(Task)`. The Fleet SDK imports
 that constant and `task_from_row` directly from `base.agents.tasks.model`.
-`task_from_row(row)` renders the established cluster-zone timestamps and unpacks
+`task_from_row(row, clock=...)` renders timestamps with the SDK or gateway owner's
+clock rather than consulting process-wide Settings, and unpacks
 the fields in that order into `Task(*row)`.
 
 ## Parent-Child Task Tree

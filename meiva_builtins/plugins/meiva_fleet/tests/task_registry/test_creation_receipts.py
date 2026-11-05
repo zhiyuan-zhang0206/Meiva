@@ -4,6 +4,7 @@ import json
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Barrier
 from typing import Any
@@ -18,6 +19,8 @@ import meiva
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
+from base.clock import Clock
+from base.clock.tests.fakes import clock_at
 from base.config.tests.configuration import data_plane_environment
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -37,6 +40,13 @@ from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
     seed_agent,
 )
+
+
+# meiva:note
+# The clock a context carries into this test: pinned, so the row renderer stamps the
+# same instant whichever thread builds the context.
+def _pinned_clock() -> Clock:
+    return clock_at(datetime(2026, 11, 6, tzinfo=UTC))
 
 
 def _facts(db: psycopg.Connection) -> tuple[object, ...]:
@@ -61,7 +71,10 @@ def test_concurrent_creation_returns_same_original_task(
         clients = ClientSet(database=lambda: Database.from_settings(gate=database_gate))
         try:
             context = MeivaContext(
-                identity=AgentIdentity(actor, True), clients=clients, bus=pinned_bus
+                identity=AgentIdentity(actor, True),
+                clients=clients,
+                bus=pinned_bus,
+                clock_factory=_pinned_clock,
             )
             barrier.wait()
             return task_registry.create_in_context(

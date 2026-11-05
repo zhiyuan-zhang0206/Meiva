@@ -7,6 +7,7 @@ import pytest
 from gateway.agents.task_assignment import router as assignments
 from gateway.agents.task_assignment.schemas import TaskAssignmentIn
 from gateway.http.auth.request_principal import AuthPrincipal, principal_key
+from gateway.http.config import GatewayAppState, app_state_as
 from gateway.tests.auth.gateway_config import (
     GatewayTestClient,
     gateway_test_client,
@@ -109,6 +110,7 @@ def _winner_commits_while_preflight_waits(
                 "local-test",
                 catalog=assignments.require_catalog(app.state.catalog),
                 authority=app.state.config_authority,
+                clock=app_state_as(app, GatewayAppState).clock,
             )
             if registry_changes is not None:
                 held.holder.execute(registry_changes)

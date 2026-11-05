@@ -62,6 +62,7 @@ def commit_assignment(
     *,
     catalog: ModelCatalog,
     authority: ConfigAuthority,
+    clock: Clock,
 ) -> tuple[TaskAssignmentResult, list[telemetry.Event]]:
 
     with write_transaction(pool) as conn, conn.cursor() as cur:
@@ -86,6 +87,7 @@ def commit_assignment(
                 body.task.title,
                 body.task.description,
                 parent=body.task.parent,
+                clock=clock,
                 owner=birth.agent_id,
                 actor=body.actor_agent_id,
                 priority=body.task.priority.value,
@@ -224,6 +226,7 @@ async def post_task_assignment(
                 target,
                 catalog=catalog,
                 authority=gateway_state(request).config_authority,
+                clock=gateway_clock(request),
             )
             if events:
                 await asyncio.to_thread(

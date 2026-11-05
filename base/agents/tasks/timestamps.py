@@ -18,10 +18,12 @@ _TS_FIELDS = frozenset({"created_at", "updated_at", "last_reminded_at", "reminde
 # meiva:note
 # `row`, selected in `col_names` order, with the timestamp columns rendered as bare cluster-zone
 # strings; other columns pass through.
-def render_task_timestamps(row: tuple[object, ...], col_names: str) -> tuple[object, ...]:
+def render_task_timestamps(
+    row: tuple[object, ...], col_names: str, *, clock: Clock
+) -> tuple[object, ...]:
     out: list[object] = list(row)
     for i, name in enumerate(col_names.split(", ")):
         value = out[i]
         if isinstance(value, datetime) and name in _TS_FIELDS:
-            out[i] = Clock.from_settings().format_timestamp(value)
+            out[i] = clock.format_timestamp(value)
     return tuple(out)

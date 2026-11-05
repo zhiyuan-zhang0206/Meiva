@@ -8,6 +8,7 @@ from base.agents.tasks.model import TASK_COLUMNS, Task, task_from_row
 from base.agents.tasks.owner_notifications import owner_change_notifications
 from base.agents.tasks.priority import resolve_create_args
 from base.agents.tasks.rules import is_closed, open_title_holder
+from base.clock import Clock
 from base.telemetry import Event
 
 
@@ -59,6 +60,8 @@ def insert_task(
     remind_interval_seconds: int,
     priority: str,
     actor: int,
+    *,
+    clock: Clock,
 ) -> tuple[Task, Event]:
     """INSERT a task row + record its create audit fact inside the caller's transaction.
 
@@ -103,7 +106,7 @@ def insert_task(
     row = cur.fetchone()
     if row is None:
         raise RuntimeError("expected exactly one row: task insert")
-    task = task_from_row(row)
+    task = task_from_row(row, clock=clock)
     from base.telemetry.audit_events import prepare_event_log, record_audit  # deferred (task #3816)
 
     event = record_audit(
@@ -156,10 +159,13 @@ def create_task_in_transaction(
     actor: int,
     priority: str,
     remind_interval_seconds: int | None,
+    clock: Clock,
 ) -> tuple[Task, Event, list[Event]]:
     """Write parent-validated task, audit and notifications without committing."""
     interval, priority = resolve_create_args(remind_interval_seconds, priority)
     ensure_parent_exists(cur, parent)
-    task, event = insert_task(cur, title, description, parent, owner, interval, priority, actor)
+    task, event = insert_task(
+        cur, title, description, parent, owner, interval, priority, actor, clock=clock
+    )
     notes = queue_creation_notifications(cur, task, owner, actor, description)
     return task, event, notes

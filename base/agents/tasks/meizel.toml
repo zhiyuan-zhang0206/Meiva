@@ -6,13 +6,10 @@ exports = ["creation.py", "delivery.py", "model.py", "notes.py", "owner_notifica
 "model.py" = ["priority.py", "status.py", "timestamps.py"]
 "reparent.py" = ["rules.py"]
 "rules.py" = ["status.py"]
-"tests" = ["reminder_window.py", "rules.py"]
+"tests" = ["model.py", "reminder_window.py", "rules.py", "timestamps.py"]
 
 [purity]
 "__init__.py" = "strict"
 "priority.py" = "strict"
 "reminder_window.py" = "strict"
 "status.py" = "strict"
-
-[debt.ambient-read]
-"timestamps.py#settings base.clock.Clock.from_settings" = { count = 1, owner = "#5816", until = "waits for the Task row to carry its clock: render_task_timestamps() is reached from Task(...) construction in model.py, which holds no configuration, so the fix is a clock field on the model rather than another parameter here" }

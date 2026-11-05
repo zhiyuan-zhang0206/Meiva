@@ -7,7 +7,9 @@ description: Caller-owned task and agent-birth transactions with unchanged publi
 # Creation transaction primitives
 
 `base.agents.tasks.creation.create_task_in_transaction` accepts an existing
-cursor. It resolves the canonical priority/reminder policy, locks and validates
+cursor and the caller's clock. Timestamp rendering follows that owner's timezone
+and weekday policy; the Task data model carries no clock or configuration field.
+It resolves the canonical priority/reminder policy, locks and validates
 the parent, inserts the task and creation audit, and queues the established owner
 notification policy in that transaction. It returns a `Task` and prepared audit
 events. It never opens another connection, commits, wakes an agent or publishes
