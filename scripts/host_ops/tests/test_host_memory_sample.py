@@ -144,6 +144,8 @@ def test_missing_kernel_files_degrade_to_empty_values(tmp_path: Path) -> None:
         pressure=tmp_path / "absent",
         cgroup_root=tmp_path / "absent-root",
         limit=3,
+        meminfo=tmp_path / "no-meminfo",
+        machine_root=tmp_path / "no-cgroup",
     )
 
     assert payload["pressure"] == {}
@@ -151,6 +153,7 @@ def test_missing_kernel_files_degrade_to_empty_values(tmp_path: Path) -> None:
     assert payload["units"] == []
     assert payload["slice"]["current"] is None
     assert payload["machine"]["charged"] is None
+    assert payload["machine"]["unreclaimable"] is None
     assert payload["machine"]["total"] is None
     assert payload["capped"] == []
 
