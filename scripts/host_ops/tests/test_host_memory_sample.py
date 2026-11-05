@@ -56,6 +56,7 @@ def test_sample_reports_machine_memory_and_capped_units(tmp_path: Path) -> None:
     _write(root / "app.slice" / "run-a.scope" / "memory.current", "400\n")
     _write(root / "app.slice" / "run-a.scope" / "memory.max", "1024\n")
     _write(root / "app.slice" / "run-a.scope" / "memory.peak", "900\n")
+    _write(root / "app.slice" / "run-a.scope" / "memory.events", "max 3\noom_kill 1\n")
     _write(root / "free.scope" / "memory.current", "10\n")
     _write(root / "free.scope" / "memory.max", "max\n")
     _write(
@@ -78,6 +79,7 @@ def test_sample_reports_machine_memory_and_capped_units(tmp_path: Path) -> None:
 
     assert payload["machine"] == {
         "charged": 555,
+        "unreclaimable": 300 + 9 - 40,
         "anon": 300,
         "file": 200,
         "slab": 45,
@@ -92,6 +94,33 @@ def test_sample_reports_machine_memory_and_capped_units(tmp_path: Path) -> None:
     assert [unit["path"] for unit in payload["capped"]] == ["app.slice/run-a.scope"]
     assert payload["capped"][0]["max"] == 1024
     assert payload["capped"][0]["peak"] == 900
+    assert payload["capped"][0]["max_events"] == 3
+    assert payload["capped"][0]["oom_kill"] == 1
+
+
+def test_unreclaimable_does_not_double_count_the_slab_inside_kernel() -> None:
+    stats = {
+        "anon": 300,
+        "file": 200,
+        "slab": 45,
+        "slab_reclaimable": 40,
+        "slab_unreclaimable": 5,
+        "kernel": 9,
+    }
+
+    # meiva:note
+    # kernel already contains every slab, so the reclaimable part is subtracted once; a reader who
+    # adds slab_unreclaimable on top gets a different, larger number, and this assertion is what
+    # makes that difference visible instead of plausible.
+    naive_double_count = stats["anon"] + stats["kernel"] + stats["slab_unreclaimable"]
+
+    assert sampler.unreclaimable(stats) == 300 + 9 - 40
+    assert sampler.unreclaimable(stats) != naive_double_count
+
+
+def test_unreclaimable_is_unknown_without_the_columns_it_needs() -> None:
+    assert sampler.unreclaimable({"anon": 300}) is None
+    assert sampler.unreclaimable({}) is None
 
 
 def test_machine_totals_sum_top_level_groups_when_the_root_has_no_counter(tmp_path: Path) -> None:

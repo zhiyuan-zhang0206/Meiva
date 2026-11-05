@@ -43,6 +43,8 @@ class CappedUnit(TypedDict):
     current: int | None
     max: int
     peak: int | None
+    max_events: int | None
+    oom_kill: int | None
 
 
 class MachineUsage(TypedDict):
@@ -52,13 +54,16 @@ class MachineUsage(TypedDict):
     # included, so it compares with a unit's own memory.current; but three quarters of it can be
     # dropped on demand, so a parent limit derived from `charged` alone would be set from memory
     # the kernel would happily reclaim. `anon`, `file`, `slab_reclaimable`, `slab_unreclaimable`
-    # and `kernel` come from memory.stat and separate the two. A parent budget is RAM minus the
-    # peak of what cannot be reclaimed -- `anon + kernel - slab_reclaimable`; `kernel` already
-    # contains every slab, so adding `slab_unreclaimable` to it counts that memory twice.
+    # and `kernel` come from memory.stat and separate the two. `unreclaimable` is the figure a
+    # parent budget is written against, computed here rather than by every reader, because the raw
+    # columns are nested and adding them up is the mistake the next reader will make: `kernel`
+    # already contains every slab, so `anon + slab_unreclaimable + kernel` counts unreclaimable
+    # slab twice and reads as roughly double.
     # total/available/swap come from /proc/meminfo and answer a third question -- what a new
     # workload could take without swapping -- so they are reported, not mixed in.
 
     charged: int | None
+    unreclaimable: int | None
     anon: int | None
     file: int | None
     slab: int | None
@@ -230,11 +235,26 @@ def machine_totals(machine_root: Path) -> tuple[int | None, dict[str, int]]:
     return charged, stats
 
 
+# meiva:note
+# One named figure so no caller assembles the formula itself. `kernel` already contains every
+# slab, so the unreclaimable part is anon plus kernel minus the slab the kernel can drop; adding
+# slab_unreclaimable on top double counts it. A stat file that never reported any of the three
+# yields None, which says "not measured" rather than a zero that would read as "nothing".
+def unreclaimable(stats: dict[str, int]) -> int | None:
+    anon = stats.get("anon")
+    kernel = stats.get("kernel")
+    reclaimable = stats.get("slab_reclaimable")
+    if anon is None or kernel is None or reclaimable is None:
+        return None
+    return anon + kernel - reclaimable
+
+
 def machine_usage(*, meminfo: Path, machine_root: Path) -> MachineUsage:
     values = read_meminfo(meminfo)
     charged, stats = machine_totals(machine_root)
     return MachineUsage(
         charged=charged,
+        unreclaimable=unreclaimable(stats),
         anon=stats.get("anon"),
         file=stats.get("file"),
         slab=stats.get("slab"),
@@ -253,6 +273,9 @@ def capped_units(root: Path) -> list[CappedUnit]:
     # The slice's own limits are read through `slice`; this walk answers the other half -- which
     # of its units carry a budget right now, and what each has been charged. Peak comes free from
     # the kernel, so a limit set today can be compared with what the unit reached before it.
+    # The unit's own `max`/`oom_kill` counters are sampled for the same reason: a transient scope
+    # takes its counters with it when it exits, so "was this budget ever hit" is only answerable
+    # while the scope is alive and only if it was recorded then.
     found: list[CappedUnit] = []
     for limit_file in root.rglob("memory.max"):
         unit_dir = limit_file.parent
@@ -261,12 +284,15 @@ def capped_units(root: Path) -> list[CappedUnit]:
         limit = read_limit(limit_file)
         if limit is None:
             continue
+        events = read_events(unit_dir / "memory.events")
         found.append(
             CappedUnit(
                 path=unit_dir.relative_to(root).as_posix(),
                 current=read_int(unit_dir / "memory.current"),
                 max=limit,
                 peak=read_int(unit_dir / "memory.peak"),
+                max_events=events.get("max"),
+                oom_kill=events.get("oom_kill"),
             )
         )
     found.sort(key=lambda item: item["path"])
