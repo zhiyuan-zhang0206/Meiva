@@ -66,7 +66,7 @@ describe("classifyMarker", () => {
 
 describe("isSilentMarker", () => {
   it("silences the non-human-wake reminder and nothing else in the vocabulary", () => {
-    expect(NOTE_TAGS.filter((tag) => isSilentMarker(tag, "body"))).toEqual(["non_human_wake"]);
+    expect(NOTE_TAGS.filter((tag) => isSilentMarker(tag, "body"))).toEqual(["reply_visibility", "non_human_wake"]);
   });
 
   it("judges a source outside the vocabulary by its payload", () => {

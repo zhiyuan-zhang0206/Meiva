@@ -3,10 +3,17 @@ from __future__ import annotations
 import asyncio
 import random
 import time
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Literal, NoReturn, TypeGuard, get_args
 
-from langchain_core.messages import AIMessage, AIMessageChunk
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    AnyMessage,
+    BaseMessage,
+    SystemMessage,
+)
 from langchain_core.runnables import RunnableConfig
 from langgraph.errors import GraphBubbleUp
 from langgraph.runtime import Runtime
@@ -26,16 +33,19 @@ from agent.graph.node_log import StallConfig, node_lifecycle
 from agent.graph.tool_calls import code_from_args
 from agent.hooks.understanding_chunks import due_chunk_update
 from agent.llm.usage import log_llm_usage
-from agent.nodes import AFTER_EXEC, BEFORE_EXEC
+from agent.messages.reply_visibility import has_invalid_reply_visibility, reply_visibility_note
+from agent.nodes import AFTER_EXEC, BEFORE_EXEC, BEFORE_LLM
 from agent.state_channels import CircuitState
 from base.agents.context import MeivaContext, agent_id_from_config
-from base.agents.messages.kwargs import read_meiva_kwargs
+from base.agents.messages.kwargs import NoteTag, read_meiva_kwargs
+from base.agents.messages.reply_intent import REPLY_VISIBILITY_RULE
 from base.agents.observation.ended_with import BUDGET
 from base.events.live.projection import TokenUsage
 from base.events.live.publisher import AgentEventPublisher
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_mapping, object_of
 from base.lm.catalog import ModelCatalog
+from base.lm.content import message_content
 from base.log import logger
 
 from ._backoff import WAIT_JITTER_SPAN_S, Attempt, RetryPolicy, assess_failure, budget_spent
@@ -82,6 +92,7 @@ def _finalize_turn_observability(
 ) -> None:
     kw = read_meiva_kwargs(final_msg)
     kw["meiva_created_at"] = now.isoformat()
+    kw["meiva_explicit_visibility"] = True
     if handler.non_human_wake:
         kw["meiva_non_human_wake"] = True
     reasoning_ms_by_block = handler.reasoning_ms_by_block
@@ -285,6 +296,36 @@ async def llm_attempt(
             return result
 
 
+def _is_reply_correction(messages: Sequence[BaseMessage]) -> bool:
+    for message in reversed(messages):
+        if isinstance(message, AIMessage):
+            return False
+        kwargs = read_meiva_kwargs(message)
+        if kwargs.get("meiva_note_tag") == NoteTag.REPLY_VISIBILITY:
+            return True
+        if kwargs.get("meiva_inbound_id") is not None:
+            return False
+    return False
+
+
+def _messages_with_current_visibility_rule(messages: Sequence[AnyMessage]) -> list[AnyMessage]:
+    messages = list(messages)
+    if messages and isinstance(head := messages[0], SystemMessage):
+        content = message_content(head)
+        if isinstance(content, str) and "## Output visibility by wake source" in content:
+            start = content.index("## Output visibility by wake source")
+            end = content.find("\n\nOn a new question", start)
+            if end >= 0:
+                updated = (
+                    content[:start]
+                    + REPLY_VISIBILITY_RULE
+                    + content[end:]
+                    + "\n\nThe visibility rule above supersedes any earlier reply-prefix instructions."
+                )
+                messages[0] = head.model_copy(update={"content": updated})
+    return messages
+
+
 async def _llm_node_impl(
     state: _state.AgentState,
     runtime: Runtime[MeivaContext],
@@ -316,16 +357,19 @@ async def _llm_node_impl(
         msg_idx=len(state.messages),
         turn_progress=ctx.turn_progress,
         non_human_wake=state.non_human_wake,
+        explicit_visibility=True,
     )
 
     chunks: list[AIMessageChunk] = []
+
+    messages = _messages_with_current_visibility_rule(state.messages)
 
     cancelled_cmd = await race_stream_vs_cancel(
         ctx,
         agent_id,
         stream_llm(
             llm,
-            list(state.messages),
+            messages,
             chunks=chunks,
             handler=handler,
             agent=ctx.require_agent(),
@@ -370,6 +414,13 @@ async def _llm_node_impl(
     )
 
     if not final_msg.tool_calls:
+        if has_invalid_reply_visibility(final_msg):
+            note = reply_visibility_note(ctx.require_clock().now())
+            already_correcting = _is_reply_correction(state.messages)
+            return Command[LlmGoto](
+                update={"messages": [final_msg, note], "halted": already_correcting, **cut_update},
+                goto=AFTER_EXEC if already_correcting else BEFORE_LLM,
+            )
         logger.info("[halt] {body}", event="halt", body="no tool_call (idle)", agent_id=agent_id)
         return Command[LlmGoto](
             update={"messages": [final_msg], "halted": True, **cut_update},

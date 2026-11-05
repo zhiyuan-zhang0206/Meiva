@@ -71,7 +71,7 @@ async def _next_host_continues(
     assert [n.status for n in cluster.inbound(agent_id, "system_note")] == ["done"]
     assert cluster.row(agent_id)[0] == "idling"
     messages = await second.messages(agent_id)
-    assert str(messages[-1].content) == "resumed"
+    assert str(messages[-1].content) == "MEIVA_DISPLAY_TO_USER\nresumed"
     await second.close()
     return script.histories[-1]
 
@@ -212,7 +212,7 @@ async def test_the_host_wakes_the_resumed_turn_without_waiting_for_a_scan(
     assert [r.status for r in cluster.inbound(agent_id, "restart")] == ["done"]
     assert [n.status for n in cluster.inbound(agent_id, "system_note")] == ["done"]
     messages = await host.messages(agent_id)
-    assert str(messages[-1].content) == "resumed"
+    assert str(messages[-1].content) == "MEIVA_DISPLAY_TO_USER\nresumed"
     assert not any("half a sentence" in str(m.content) for m in messages)
     assert sum("while your turn was unfinished" in str(m.content) for m in script.histories[1]) == 1
     await host.close()

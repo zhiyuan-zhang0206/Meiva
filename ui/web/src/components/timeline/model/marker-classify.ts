@@ -32,7 +32,7 @@ export const MEMORY_SOURCES: ReadonlySet<NoteTag> = new Set<NoteTag>([
 // Notes the agent reads but the conversation timeline never shows: a recency anchor
 // beside the waking inbound is guidance for the model, not an event for the reader.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/markers.meiva.okf.md
-const SILENT_NOTE_TAGS: ReadonlySet<NoteTag> = new Set<NoteTag>(["non_human_wake"]);
+const SILENT_NOTE_TAGS: ReadonlySet<NoteTag> = new Set<NoteTag>(["non_human_wake", "reply_visibility"]);
 
 export type MarkerClass =
   | { readonly kind: "lifecycle"; readonly tag: LifecycleTag }

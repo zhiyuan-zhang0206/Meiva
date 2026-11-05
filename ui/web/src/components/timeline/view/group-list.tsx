@@ -294,7 +294,6 @@ export function TimelineGroupList({
     source: "buffer" | "canonical",
     rank: number,
     forceExpand?: boolean,
-    topLevelSingle?: boolean,
   ) => {
     const renderKey = source === "buffer"
       ? `buffer:${compactBuffer?.epoch}:${rank}:${item.item_id}`
@@ -318,10 +317,7 @@ export function TimelineGroupList({
       );
     }
 
-    const promotedPrimary = Boolean(
-      topLevelSingle && item.kind === "agent_chat" && item.user_facing === false,
-    );
-    const isPrimary = classifyItem(item) === "primary" || promotedPrimary;
+    const isPrimary = classifyItem(item) === "primary";
     const defaultExpanded = isPrimary || forceExpand ? true : config.fixedDefault;
     const expanded = overrides.has(item.item_id) ? !defaultExpanded : defaultExpanded;
     const copyable = expanded && !item.partial;
@@ -335,7 +331,6 @@ export function TimelineGroupList({
         streaming={streaming}
         expanded={expanded}
         copyable={copyable}
-        promotedPrimary={promotedPrimary}
         onToggle={toggleExpanded}
       />
     );
@@ -364,7 +359,7 @@ export function TimelineGroupList({
           const renderedGroup = (() => {
             if (group.kind === "single") {
               const { item, index, source, rank } = group.member;
-              return renderRow(item, index, source, rank, undefined, true);
+              return renderRow(item, index, source, rank);
             }
 
             const first = group.members[0];

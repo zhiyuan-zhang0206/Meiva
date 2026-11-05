@@ -33,6 +33,7 @@ from agent.graph.interrupt import (
 from agent.graph.llm_errors import FatalLLMStreamError
 from agent.graph.node_log import StallConfig, node_lifecycle
 from agent.hooks import call_graph_hook
+from agent.messages.reply_visibility import reply_visibility_note
 from agent.nodes import CLAIM, HARNESS_TURN
 from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.history.harness_messages import (
@@ -43,6 +44,7 @@ from base.agents.history.timeline import build_timeline_items
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.inbound import InterruptScope
 from base.agents.messages.kwargs import read_meiva_kwargs
+from base.agents.messages.reply_intent import REPLY_VISIBILITY_RULE
 from base.db.transaction import async_write_transaction
 from base.events.live.projection import Cancelled, InboundCommitted, LLMDone, TimelineSnapshot
 from base.events.live.publisher import AgentEventPublisher
@@ -57,10 +59,11 @@ from base.lm.harness import (
     HarnessTurnFaultedError,
 )
 from base.lm.harness.engine import ForegroundSteering, HarnessTurn, TurnEngine
+from base.lm.system_note import wrap_system_note
 from base.lm.usage import UsageFields, log_usage_fields
 from base.log import logger
 
-HarnessGoto = Literal["claim"]
+HarnessGoto = Literal["claim", "harness_turn"]
 
 # meiva:note
 # This tick keeps host custody alive while a harness owns the invocation. Provider
@@ -186,6 +189,8 @@ def _resolve_turn_prompt_and_key(
     if pre_messages:
         pre_text = render_messages(pre_messages)
         text = f"{pre_text}\n\n{text}".strip() if text else pre_text
+    if text and REPLY_VISIBILITY_RULE not in text:
+        text = f"{wrap_system_note(REPLY_VISIBILITY_RULE)}\n\n{text}"
     key = str(pending_input.get("key") or "") or f"inbound-turn-{agent_id}"
     return text, key
 
@@ -221,6 +226,7 @@ async def _run_harness_turn(
         base_idx=base_idx,
         clock=ctx.require_clock(),
         non_human_wake=state.non_human_wake,
+        explicit_visibility=True,
     )
     input_accepted = asyncio.Event()
 
@@ -268,6 +274,21 @@ async def _run_harness_turn(
     else:
         event_publisher.emit(LLMDone(agent_id=agent_id).model_dump_json())
         await persist_last_active(ctx, agent_id, turn.text)
+        if projector.invalid_reply_visibility:
+            note = reply_visibility_note(ctx.require_clock().now())
+            await append_turn_timeline(ctx, agent_id, [note])
+            if not (state.harness_pending_input or {}).get("visibility_correction"):
+                return Command[HarnessGoto](
+                    update={
+                        **extra_updates,
+                        "harness_pending_input": {
+                            "prompt": render_message(note),
+                            "key": f"{key}:visibility-correction",
+                            "visibility_correction": True,
+                        },
+                    },
+                    goto=HARNESS_TURN,
+                )
     return Command[HarnessGoto](
         update={**extra_updates, "halted": True, "harness_pending_input": None}, goto=CLAIM
     )

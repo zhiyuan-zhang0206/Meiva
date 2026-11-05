@@ -1,7 +1,8 @@
-exports = ["guard.py"]
+exports = ["guard.py", "reply_visibility.py"]
 
 [uses]
 "__init__.py" = ["tail.py"]
+"reply_visibility.py" = ["__init__.py"]
 "tests" = ["__init__.py", "guard.py"]
 
 [purity]

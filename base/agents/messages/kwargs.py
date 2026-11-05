@@ -36,6 +36,7 @@ class NoteTag(StrEnum):
     IMPERSONATION = "impersonation"
     SDK_HINT = "sdk_hint"
     AGENT_REPLY = "agent_reply"
+    REPLY_VISIBILITY = "reply_visibility"
     NON_HUMAN_WAKE = "non_human_wake"
     TASK = "task"
     COMPACT_REMINDER = "compact_reminder"
@@ -109,6 +110,7 @@ class MeivaMessageKwargs(TypedDict, total=False):
     sdk_calls: list[dict[str, object]] | None
     meiva_reasoning_ms_by_block: dict[str, int]
     meiva_code_ms_by_block: dict[str, int]
+    meiva_explicit_visibility: bool
     meiva_non_human_wake: bool
     meiva_usage: MeivaUsage
 

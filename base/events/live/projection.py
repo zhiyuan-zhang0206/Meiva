@@ -74,6 +74,7 @@ class ChatStart(_Base):
     role: Literal["chat_start"] = "chat_start"
     item_id: str
     non_human_wake: bool = False
+    explicit_visibility: bool = False
 
 
 class ChatDelta(_Base):
@@ -90,6 +91,7 @@ class ChatDelta(_Base):
     item_id: str
     content: str
     non_human_wake: bool = False
+    explicit_visibility: bool = False
 
 
 class CompactRequest(_Base):

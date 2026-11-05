@@ -7,7 +7,7 @@ import random
 import time
 
 import pytest
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AnyMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 
 from agent.graph.llm._backoff import Attempt
@@ -76,7 +76,7 @@ async def test_turn_end_ok_true_record_no_exception(
 ) -> None:
     """Normal path ok=True: uses logger.info without exc_info, record["exception"] is None,
     payload must not bloat with traceback/exception_* fields."""
-    model = ScriptedModel(scripts=[[end_turn_chunk()]])
+    model = ScriptedModel(scripts=[[end_turn_chunk("MEIVA_DISPLAY_TO_USER\nok")]])
 
     result = await llm_node(
         _STATE,
@@ -85,7 +85,10 @@ async def test_turn_end_ok_true_record_no_exception(
         rng=_rng(),
     )
 
-    assert result.update is not None and result.update["messages"][0].content == "ok"
+    assert (
+        result.update is not None
+        and result.update["messages"][0].content == "MEIVA_DISPLAY_TO_USER\nok"
+    )
     assert loguru_records.events("turn_end") == [], "a halting attempt holds its record"
     assert result.update["turn_end_held_seconds"] is not None
     assert "meiva_non_human_wake" not in result.update["messages"][0].additional_kwargs
@@ -132,3 +135,30 @@ async def test_llm_node_stamps_meiva_non_human_wake_only_when_state_non_human_wa
     assert result.update is not None
     ai_msg = result.update["messages"][0]
     assert ai_msg.additional_kwargs.get("meiva_non_human_wake") is True
+
+
+@pytest.mark.parametrize(
+    ("retry_text", "note_count"),
+    [("MEIVA_DISPLAY_TO_USER\nHere is the answer.", 0), ("Still unmarked.", 1)],
+)
+async def test_invalid_final_reply_gets_one_immediate_correction(
+    model_catalog: ModelCatalog, database_gate: ProcessDbGate, retry_text: str, note_count: int
+) -> None:
+    model = ScriptedModel(scripts=[[end_turn_chunk("Unmarked.")], [end_turn_chunk(retry_text)]])
+    runtime = llm_runtime(model, model_catalog=model_catalog, database_gate=database_gate)
+    result = await llm_node(_STATE, runtime, _config_with_thread(), rng=_rng())
+    assert result.goto == "before_llm"
+    assert result.update is not None
+    messages: list[AnyMessage] = result.update["messages"]
+    reply, note = messages
+    assert reply.content == "Unmarked."
+    assert note.additional_kwargs["meiva_note_tag"] == "reply_visibility"
+    assert "folded into Details" in note.text
+
+    state = AgentState(messages=[*_STATE.messages, reply, note], halted=False)
+    result = await llm_node(state, runtime, _config_with_thread(), rng=_rng())
+    assert result.goto == "after_exec"
+    assert result.update is not None
+    assert result.update["halted"] is True
+    corrected: list[AnyMessage] = result.update["messages"]
+    assert len(corrected) == 1 + note_count

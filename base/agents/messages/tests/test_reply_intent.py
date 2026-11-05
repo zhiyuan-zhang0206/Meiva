@@ -3,6 +3,8 @@ from __future__ import annotations
 import pytest
 
 from base.agents.messages.reply_intent import (
+    DISPLAY_TO_USER,
+    HIDE_FROM_USER,
     NON_HUMAN_WAKE_REMINDER,
     USER_REPLY_HEADER,
     USER_REPLY_PREFIX,
@@ -16,7 +18,8 @@ def test_header_constants_match_contract() -> None:
     assert USER_REPLY_HEADER == "Meiva agent to user:"
     assert USER_REPLY_PREFIX == "Meiva agent to user: "
     assert USER_REPLY_PREFIX.startswith(USER_REPLY_HEADER)
-    assert f"`{USER_REPLY_PREFIX}`" in NON_HUMAN_WAKE_REMINDER
+    assert DISPLAY_TO_USER in NON_HUMAN_WAKE_REMINDER
+    assert HIDE_FROM_USER in NON_HUMAN_WAKE_REMINDER
     assert "no assistant text" not in NON_HUMAN_WAKE_REMINDER
     assert "\n" not in NON_HUMAN_WAKE_REMINDER
 
@@ -93,3 +96,24 @@ def test_normalize_last_message_text_strips_prefix_and_drops_header_only() -> No
     assert normalize_last_message_text("Plain text") == "Plain text"
     assert normalize_last_message_text("Meiva agent to user: Shipped.") == "Shipped."
     assert normalize_last_message_text("Meiva agent to user:   \n ") == ""
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("MEIVA_DISPLAY_TO_USER\nShipped.", ("Shipped.", True)),
+        ("MEIVA_HIDE_FROM_USER\r\nWork log.", ("Work log.", False)),
+        ("MEIVA_DISPLAY_TO_USER", ("MEIVA_DISPLAY_TO_USER", False)),
+        ("MEIVA_DISPLAY_TO_USER\n   ", ("MEIVA_DISPLAY_TO_USER\n   ", False)),
+        ("**MEIVA_DISPLAY_TO_USER**\nShipped.", ("**MEIVA_DISPLAY_TO_USER**\nShipped.", False)),
+        ("Missing header.", ("Missing header.", False)),
+    ],
+)
+@pytest.mark.parametrize("non_human_wake", [False, True])
+def test_explicit_visibility_routes_by_exact_first_line(
+    text: str, expected: tuple[str, bool], non_human_wake: bool
+) -> None:
+    assert (
+        resolve_agent_reply(text, non_human_wake=non_human_wake, explicit_visibility=True)
+        == expected
+    )

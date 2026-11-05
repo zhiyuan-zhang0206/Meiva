@@ -84,7 +84,7 @@ async def _assert_next_host_resumes(
     assert sum(_RESUMED in str(m.content) for m in script.histories[1]) == 1
     after = await second.messages(agent_id)
     assert [m.content for m in after[: len(before)]] == [m.content for m in before]
-    assert str(after[-1].content) == "resumed"
+    assert str(after[-1].content) == "MEIVA_DISPLAY_TO_USER\nresumed"
     assert [n.status for n in cluster.inbound(agent_id, "system_note")] == ["done"]
     assert cluster.row(agent_id)[0] == "idling"
     await second.close()

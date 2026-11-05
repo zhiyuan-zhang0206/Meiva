@@ -289,7 +289,7 @@ async def test_stream_normal_completion_no_cancelled_event(
 
     async def _fast_complete() -> AsyncIterator[AIMessageChunk]:
         yield AIMessageChunk(
-            content="hi",
+            content="MEIVA_DISPLAY_TO_USER\nhi",
             response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
             usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
         )

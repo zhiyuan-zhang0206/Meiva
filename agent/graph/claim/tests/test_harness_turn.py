@@ -79,7 +79,7 @@ class FakeEngine:
     # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
     def __init__(
         self,
-        reply: str = "the answer",
+        reply: str = "MEIVA_DISPLAY_TO_USER\nthe answer",
         usage: Usage | None = None,
         prelude: tuple[HarnessTurn, ...] = (),
         events: tuple[BridgeEvent, ...] = (),
@@ -212,14 +212,16 @@ def test_a_notes_only_window_uses_its_length() -> None:
 
 
 async def test_a_turn_submits_the_pending_messages_and_commits_the_reply() -> None:
-    engine = FakeEngine(reply="done")
+    engine = FakeEngine(reply="MEIVA_DISPLAY_TO_USER\ndone")
     state = AgentState(harness_pending_input={"prompt": "do it", "key": "inbound-7"})
 
     command = await harness_turn_node(state, runtime(engine), config())
 
     assert command.goto == "claim"
     assert command.update is not None
-    assert engine.submitted == [("do it", "inbound-7")]
+    [(prompt, key)] = engine.submitted
+    assert prompt.endswith("\n\ndo it")
+    assert key == "inbound-7"
     assert command.update["harness_pending_input"] is None
     assert command.update["halted"] is True
 
@@ -260,7 +262,7 @@ async def test_an_unpriceable_usage_keeps_the_reply_and_reports_the_gap(
     loguru_records: LogRecords,
 ) -> None:
     engine = FakeEngine(
-        reply="done",
+        reply="MEIVA_DISPLAY_TO_USER\ndone",
         usage=Usage(input_tokens=8, output_tokens=3, cache_read_input_tokens=99),
     )
     state = AgentState(harness_pending_input={"prompt": "do it", "key": "inbound-7"})
@@ -279,14 +281,14 @@ async def test_an_unpriceable_usage_keeps_the_reply_and_reports_the_gap(
 async def test_the_handoff_turn_lands_as_its_own_message(loguru_records: LogRecords) -> None:
     opening = HarnessTurn(
         turn_id="t0",
-        text="acknowledged",
+        text="MEIVA_HIDE_FROM_USER\nacknowledged",
         usage=Usage(input_tokens=900, output_tokens=6),
         cost_usd=0.02,
         subtype="success",
         is_error=False,
         interrupted=False,
     )
-    engine = FakeEngine(reply="done", prelude=(opening,))
+    engine = FakeEngine(reply="MEIVA_DISPLAY_TO_USER\ndone", prelude=(opening,))
     state = AgentState(harness_pending_input={"prompt": "do it", "key": "inbound-7"})
 
     command = await harness_turn_node(state, runtime(engine), config())
@@ -415,7 +417,7 @@ async def test_a_completed_turn_stamps_the_reply_as_the_last_message(
         database_gate=database_gate,
         machine=machine_identity,
     )
-    engine = FakeEngine(reply="the answer")
+    engine = FakeEngine(reply="MEIVA_DISPLAY_TO_USER\nthe answer")
 
     await harness_turn_node(
         AgentState(harness_pending_input={"prompt": "do it", "key": "inbound-7"}),
@@ -508,14 +510,14 @@ async def test_the_handoff_prelude_is_not_the_last_message(
     )
     ack = HarnessTurn(
         turn_id="t0",
-        text="acknowledged",
+        text="MEIVA_HIDE_FROM_USER\nacknowledged",
         usage=Usage(input_tokens=900, output_tokens=6),
         cost_usd=0.02,
         subtype="success",
         is_error=False,
         interrupted=False,
     )
-    engine = FakeEngine(prelude=(ack,), reply="the answer")
+    engine = FakeEngine(prelude=(ack,), reply="MEIVA_DISPLAY_TO_USER\nthe answer")
 
     await harness_turn_node(
         AgentState(harness_pending_input={"prompt": "do it", "key": "inbound-7"}),
@@ -533,9 +535,9 @@ async def test_intra_turn_events_project_to_live_sse_and_committed_messages(
 ) -> None:
 
     engine = FakeEngine(
-        reply="all done",
+        reply="MEIVA_DISPLAY_TO_USER\nall done",
         events=(
-            TextDelta(turn_id="t1", text="Checking "),
+            TextDelta(turn_id="t1", text="MEIVA_HIDE_FROM_USER\nChecking "),
             TextDelta(turn_id="t1", text="files..."),
             ToolUse(
                 turn_id="t1",
@@ -549,7 +551,7 @@ async def test_intra_turn_events_project_to_live_sse_and_committed_messages(
                 content="README.md\n",
                 is_error=False,
             ),
-            TextDelta(turn_id="t1", text="all done"),
+            TextDelta(turn_id="t1", text="MEIVA_DISPLAY_TO_USER\nall done"),
         ),
     )
     state = AgentState(harness_pending_input={"prompt": "list files", "key": "inbound-7"})
@@ -577,14 +579,14 @@ async def test_consecutive_assistant_text_blocks_project_to_distinct_ai_messages
 ) -> None:
 
     engine = FakeEngine(
-        reply="Second message",
+        reply="MEIVA_DISPLAY_TO_USER\nSecond message",
         events=(
-            TextDelta(turn_id="t1", text="First "),
+            TextDelta(turn_id="t1", text="MEIVA_HIDE_FROM_USER\nFirst "),
             TextDelta(turn_id="t1", text="message"),
-            AssistantText(turn_id="t1", text="First message"),
-            TextDelta(turn_id="t1", text="Second "),
+            AssistantText(turn_id="t1", text="MEIVA_HIDE_FROM_USER\nFirst message"),
+            TextDelta(turn_id="t1", text="MEIVA_DISPLAY_TO_USER\nSecond "),
             TextDelta(turn_id="t1", text="message"),
-            AssistantText(turn_id="t1", text="Second message"),
+            AssistantText(turn_id="t1", text="MEIVA_DISPLAY_TO_USER\nSecond message"),
         ),
     )
     state = AgentState(harness_pending_input={"prompt": "two steps", "key": "inbound-7"})
@@ -671,7 +673,7 @@ async def test_harness_turn_projects_reasoning_and_step_timing(live_events: Live
                 content="ok\n",
             ),
             ReasoningText(turn_id="t1", text="Synthesizing reply"),
-            AssistantText(turn_id="t1", text="Final answer"),
+            AssistantText(turn_id="t1", text="MEIVA_DISPLAY_TO_USER\nFinal answer"),
         ),
     )
     state = AgentState(harness_pending_input={"prompt": "run it", "key": "inbound-9"})
@@ -719,7 +721,9 @@ async def test_terminate_interrupt_preserves_projected_tool_call_messages() -> N
     state = AgentState(harness_pending_input={"prompt": "[Heartbeat]: check in", "key": "window-4"})
 
     command = await harness_turn_node(state, runtime(engine), config(6986))
-    assert engine.submitted == [("[Heartbeat]: check in", "window-4")]
+    [(prompt, key)] = engine.submitted
+    assert prompt.endswith("\n\n[Heartbeat]: check in")
+    assert key == "window-4"
     assert command.update is not None
     assert command.update == {"halted": True, "harness_pending_input": None}
 

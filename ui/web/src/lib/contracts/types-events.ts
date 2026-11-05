@@ -26,6 +26,7 @@ export type BackendTimelineItem = Omit<
   readonly execElapsedMs?: number;
   readonly rawChatPayload?: string;
   readonly nonHumanWake?: boolean;
+  readonly explicitVisibility?: boolean;
 };
 
 export interface TimelineResponse {
@@ -50,12 +51,14 @@ export interface ChatStartEvent extends BaseEvent {
   readonly role: "chat_start";
   readonly item_id: string;
   readonly non_human_wake?: boolean;
+  readonly explicit_visibility?: boolean;
 }
 export interface ChatDeltaEvent extends BaseEvent {
   readonly role: "chat_delta";
   readonly item_id: string;
   readonly content: string;
   readonly non_human_wake?: boolean;
+  readonly explicit_visibility?: boolean;
 }
 export interface CompactRequestEvent extends BaseEvent {
   readonly role: "compact_request";

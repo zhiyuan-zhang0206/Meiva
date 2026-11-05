@@ -23,7 +23,12 @@ if __name__ == "__main__":
 
 
 from base.agents.messages.kwargs import NoteTag
-from base.agents.messages.reply_intent import USER_REPLY_HEADER, USER_REPLY_PREFIX
+from base.agents.messages.reply_intent import (
+    DISPLAY_TO_USER,
+    HIDE_FROM_USER,
+    USER_REPLY_HEADER,
+    USER_REPLY_PREFIX,
+)
 from base.events.live.projection import EVENT_COALESCE_MS
 
 _OUT = Path("ui/web/src/lib/contracts/constants-generated.ts")
@@ -39,6 +44,8 @@ export const SSE_EVENT_WINDOW_MS = {coalesce_ms};
 export const USER_REPLY_HEADER = {user_reply_header};
 // meiva:link base/agents/messages/reply_intent.py
 export const USER_REPLY_PREFIX = {user_reply_prefix};
+export const DISPLAY_TO_USER = {display_to_user};
+export const HIDE_FROM_USER = {hide_from_user};
 
 // meiva:link base/agents/messages/kwargs.py
 export const NOTE_TAGS = [
@@ -54,6 +61,8 @@ def main(out_dir: str | None = None) -> None:
             coalesce_ms=EVENT_COALESCE_MS,
             user_reply_header=json.dumps(USER_REPLY_HEADER),
             user_reply_prefix=json.dumps(USER_REPLY_PREFIX),
+            display_to_user=json.dumps(DISPLAY_TO_USER),
+            hide_from_user=json.dumps(HIDE_FROM_USER),
             note_tags="\n".join(f"  {json.dumps(tag.value)}," for tag in NoteTag),
         )
     )

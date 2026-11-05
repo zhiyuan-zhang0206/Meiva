@@ -126,6 +126,24 @@ describe("applySystemEvent (clocks, compaction, and terminal states)", () => {
     expect(items[0]).toMatchObject({ kind: "agent_chat", payload: "hi user", user_facing: true });
   });
 
+  it.each([
+    ["MEIVA_DISPLAY_TO_USER\n", "Hello.", true],
+    ["MEIVA_HIDE_FROM_USER\n", "Hello.", false],
+    ["MEIVA_DISPLAY_TO_USER\uFF1A\n", "MEIVA_DISPLAY_TO_USER\uFF1A\nHello.", false],
+    ["", "Hello.", false],
+  ])("routes explicit visibility from streamed header %j", (header, payload, userFacing) => {
+    const info = { item_id: "5.0", agent_id: 1, explicit_visibility: true };
+    let items = applySystemEvent([], { ...info, role: "chat_start" });
+    expect(items[0].user_facing).toBe(false);
+
+    if (header) {
+      items = applySystemEvent(items, { ...info, role: "chat_delta", content: header });
+      expect(items[0].user_facing).toBe(false);
+    }
+    items = applySystemEvent(items, { ...info, role: "chat_delta", content: "Hello." });
+    expect(items[0]).toMatchObject({ payload, user_facing: userFacing });
+  });
+
   it("human-wake stream strips redundant Meiva agent to user: header without flickering user_facing", () => {
     let items: BackendTimelineItem[] = [];
     items = applySystemEvent(items, {

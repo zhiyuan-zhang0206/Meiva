@@ -131,9 +131,11 @@ Capabilities rather than standing as its own section.
   communication with the user. Execution updates default to milestones meaningful
   to the user; routine operations stay in tool feedback or working notes.
   Automated wakes and peer messages do not require courtesy replies or closing summaries;
-  on runs woken solely by non-human inputs, unprefixed assistant text folds into the
-  collapsed work log while `Meiva agent to user: ` explicitly routes a proactive
-  message to the main user conversation.
+  every assistant text block declares its visibility on the first line.
+  `MEIVA_DISPLAY_TO_USER` routes meaningful user-facing text to the main
+  conversation. `MEIVA_HIDE_FROM_USER` routes working notes to Details,
+  which the user can expand. Invalid or missing markers also fold into Details
+  and trigger a correction note.
 - **Core communication style** — `agent/graph/prompt/system_prompt.py:communication_style_section`,
   selected by `settings.agent.agent_communication_style` (env
   `MEIVA_AGENT_COMMUNICATION_STYLE`, default `off`): how much the agent narrates
