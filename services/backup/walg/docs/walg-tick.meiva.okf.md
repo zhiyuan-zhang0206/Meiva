@@ -22,10 +22,12 @@ verified or pruned either hides a broken chain or fills the bucket. It is one co
   `backup-list`), `backup-push` with `WALG_DELTA_MAX_STEPS=6` (WAL-G itself makes a
   full backup when the chain is six deep and retries a failed one the next day; a
   backup that is not in the list afterwards is a failure), chain verification,
-  retention. The first failing step ends the run and is recorded under its name. When
-  due, the weekly recovery drill ([[walg-restore.meiva.okf.md|restore and drill]]) runs
-  between preflight and backup, so that it restores yesterday's backup; its failure is
-  recorded in `drill` and never ends the run.
+  retention. The first failing step ends the run and is recorded under its name. Between
+  preflight and the backup, two things happen first: whatever a killed drill left in the
+  throwaway roots is deleted (the tick holds the same `run.lock` a drill takes, so it
+  cannot be a live drill's copy), and, when due, the weekly recovery drill
+  ([[walg-restore.meiva.okf.md|restore and drill]]) runs -- so that it restores
+  yesterday's backup. The drill's failure is recorded in `drill` and never ends the run.
 - **Chain verification** (`verify.py`): `wal-verify integrity timeline --json`, only the
   JSON status is read, because WAL-G exits 0 while reporting a gap. `FAILURE` in either
   check fails the run; `WARNING` (segments still uploading) does not; an unknown status

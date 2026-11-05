@@ -52,13 +52,18 @@ one code path with two callers.
   refused **before anything is written**: `DrillRefusedError` carries "needs X / holds Y / short
   by Z", the tick logs `drill: REFUSED`, the record keeps `last_refused_at` /
   `last_refused_reason` (kept across later successes), and the probe's `DRILL_FAILED` fires on
-  it. A refusal is not a failure of the backup and not a silent skip.
+  it. A refusal is not a failure of the backup and not a silent skip. A drill that passes
+  reports the same four numbers it decided on — `space: need … (data … x 1.2 + wal …), keep …,
+  have … -> ok` — because a gate that only speaks when it refuses is indistinguishable, from the
+  log, from a drill that has no gate.
 - **The copy is removed, and leftovers too**: `finally: shutil.rmtree(scratch)` covers success,
   failure and an exception. It does **not** cover SIGTERM/SIGKILL or a reboot — `finally` never
-  runs — so each drill first sweeps every `meiva-walg-drill-*` directory under the chosen base
-  (the run lock admits one drill at a time) and reports `scratch: removed … leftovers`; the
-  removal itself is reported as `scratch: removed <name>`. Evidence on 2026-10-30: the drill
-  that finished ok freed 44 GiB (`/var/tmp/meiva-walg-drill-*` gone, 13 → 56 GiB free).
+  runs — so the drill first sweeps every `meiva-walg-drill-*` directory under the throwaway
+  roots, before its space gate reads the disk, and reports `scratch: removed … leftovers`. The
+  daily tick sweeps the same roots too, so a copy left by a killed *manual* drill is freed the
+  next day, not when the drill next comes due; both callers hold the run lock, which is the
+  proof that no live drill owns what they delete. Evidence on 2026-10-30: the drill that
+  finished ok freed 44 GiB (`/var/tmp/meiva-walg-drill-*` gone, 13 → 56 GiB free).
 - **The type census**: `verify_restored_database` also accounts for every class the newest
   conversations name, and a green run carries its denominators — see
   [the drill's type census](walg-drill-type-census.meiva.okf.md).

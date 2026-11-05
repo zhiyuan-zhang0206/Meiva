@@ -129,6 +129,21 @@ def _confirm_log() -> str:
     return "\n".join([*lines, "INFO: Objects deleted successfully: count=21"]) + "\n"
 
 
+# meiva:note
+# The throwaway root is this test's own directory. Without it the tick's scratch sweep would read
+# this machine's /dev/shm and /var/tmp -- and delete what it found there.
+def _throwaway(sandbox: Sandbox) -> ThrowawayConfig:
+    root = sandbox.home.parent / "scratch"
+    root.mkdir(parents=True, exist_ok=True)
+    return ThrowawayConfig(
+        None,
+        default_root=root,
+        home=sandbox.home,
+        environ=os.environ,
+        timers=SYSTEM_TIMERS,
+    )
+
+
 def _run(sandbox: Sandbox, platform: tick.Platform | None = None) -> tuple[int, list[str]]:
     lines: list[str] = []
     code = tick.run_tick_on(
@@ -136,9 +151,7 @@ def _run(sandbox: Sandbox, platform: tick.Platform | None = None) -> tuple[int, 
         platform=_platform() if platform is None else platform,
         path=sandbox.path,
         database_for_url=_database_factory(),
-        throwaway=ThrowawayConfig(
-            None, home=sandbox.home, environ=os.environ, timers=SYSTEM_TIMERS
-        ),
+        throwaway=_throwaway(sandbox),
         home=sandbox.home,
         environ=sandbox.environ,
     )
@@ -177,6 +190,26 @@ def test_a_run_goes_preflight_backup_verify_retention_in_that_order(sandbox: San
     assert lines[1] == f"backup: {FULL_4} (full, {stored} bytes stored)"
     assert lines[2] == "verify: integrity WARNING, timeline OK"
     assert lines[-1] == f"ok: {FULL_4}; chain integrity WARNING, timeline OK; retention deleted 21"
+
+
+# meiva:note
+# The whole point of sweeping on every tick: a manual drill killed the day after a good one leaves
+# 48 GiB behind and is not due again for six days. The tick's own space gate would then read a disk
+# that is short for a reason nobody can act on.
+def test_a_killed_drills_scratch_copy_is_removed_on_the_next_tick(sandbox: Sandbox) -> None:
+    throwaway = _throwaway(sandbox)
+    assert throwaway.default_root is not None
+    leftover = throwaway.default_root / "meiva-walg-drill-from-a-killed-manual-run"
+    (leftover / "data").mkdir(parents=True)
+    _ = (leftover / "data" / "PG_VERSION").write_text("17")
+
+    code, lines = _run(sandbox)
+
+    assert code == 0
+    assert not leftover.exists()
+    assert (
+        f"scratch: removed 1 leftover drill directory (0 MiB) on {throwaway.default_root}" in lines
+    )
 
 
 def test_backup_push_gets_the_chain_limit_and_the_owner_only_socket(sandbox: Sandbox) -> None:
