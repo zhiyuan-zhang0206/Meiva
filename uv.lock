@@ -1979,7 +1979,6 @@ dependencies = [
     { name = "uvicorn", extra = ["standard"] },
     { name = "websockets" },
     { name = "yt-dlp" },
-    { name = "zstandard" },
 ]
 
 [package.dev-dependencies]
@@ -2038,7 +2037,6 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.40" },
     { name = "websockets", specifier = ">=15.0.1" },
     { name = "yt-dlp", specifier = ">=2026.3.17" },
-    { name = "zstandard", specifier = ">=0.23" },
 ]
 
 [package.metadata.requires-dev]

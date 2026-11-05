@@ -65,9 +65,6 @@ dependencies = [
     # 0.x minor bump is a mapping change to review, not something to pick up
     # silently.
     "claude-agent-sdk>=0.2.168,<0.3",
-    # DeepSeek harness per-turn usage log decompression
-    # (base/lm/harness/deepseek/usage_files.py).
-    "zstandard>=0.23",
     # --- Common runtime libraries ---
     # Imported directly by first-party code (Pillow, requests, mdit,
     # cryptography, websockets, oss2, trafilatura, feedparser) and
@@ -773,9 +770,6 @@ root = "base/lm/compat/tests"
 root = "base/lm/decision/tests"
 
 [[tool.pyright.executionEnvironments]]
-root = "base/lm/harness/acp/tests"
-
-[[tool.pyright.executionEnvironments]]
 root = "base/lm/harness/antigravity/tests"
 
 [[tool.pyright.executionEnvironments]]
@@ -783,9 +777,6 @@ root = "base/lm/harness/claude/tests"
 
 [[tool.pyright.executionEnvironments]]
 root = "base/lm/harness/codex/tests"
-
-[[tool.pyright.executionEnvironments]]
-root = "base/lm/harness/deepseek/tests"
 
 [[tool.pyright.executionEnvironments]]
 root = "base/lm/harness/tests"

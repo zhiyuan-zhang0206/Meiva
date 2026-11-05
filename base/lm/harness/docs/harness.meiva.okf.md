@@ -12,8 +12,8 @@ tags:
 # Provider harness
 
 `base/lm/harness/` is what every external agent runtime shares with the host.
-An adapter (Claude Agent SDK, DeepSeek Harness over ACP, Codex app-server, Antigravity CLI) owns the
-transport and the message mapping; this package owns everything whose meaning
+An adapter (Claude Agent SDK, Codex app-server, Antigravity CLI) owns the transport
+and the message mapping; this package owns everything whose meaning
 does not change when the provider does, so a second adapter adds a directory
 instead of a second vocabulary.
 
@@ -33,16 +33,16 @@ invariants the host relies on:
    subsets — whatever shape the provider reports them in;
 7. the handoff is injected once, when the session is created, and never again on
    resume; when a bound session id is supplied (`resume` is non-`None` or loaded from
-   the registry), a failed `session/resume` or `thread/resume` fails fast instead of
-   silently falling back to a fresh session (`session/new` / `thread/start`);
+   the registry), a failed resume fails fast instead of silently
+   falling back to a fresh session;
 8. a faulted or closed session stops being usable: the bridge retires it instead of
    submitting to it again;
 9. `close()` returns only after the session's process tree is gone, or raises when the
    adapter's settle window still observes residue. An unobservable tree remains
    explicitly unknown; it is not proof that every descendant exited.
 
-Adapters: [[../claude/docs/claude.meiva.okf.md]],
-[[../deepseek/docs/deepseek.meiva.okf.md]]. Contract, provider differences
+Adapters: [[../claude/docs/claude.meiva.okf.md]], [[../codex/docs/codex.meiva.okf.md]],
+[[../antigravity/docs/antigravity.meiva.okf.md]]. Contract, provider differences
 and open questions are recorded in
 [external harness adapters](../../../../docs/decisions/agents/graph/2026-10-19-external-harness.md).
 

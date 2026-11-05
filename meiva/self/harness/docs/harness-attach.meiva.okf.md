@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Harness attach
-description: '`meiva/self/harness/` — the seam that lets a provider harness process (Claude Code, Codex, Antigravity, dsh) act as a Meiva agent: a registration row, a hashed handle delivered through the environment, and the attach step that binds the borrowed identity.'
+description: '`meiva/self/harness/` — the seam that lets a provider harness process (Claude Code, Codex, Antigravity) act as a Meiva agent: a registration row, a hashed handle delivered through the environment, and the attach step that binds the borrowed identity.'
 tags:
 - meiva
 - harness
