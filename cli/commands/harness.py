@@ -23,7 +23,7 @@ def cmd_harness_exec(
     agent_id: int | None,
     session_id: str | None,
     opener: AttachmentOpener | None = None,
-    stdin: TextIO | None = None,
+    stdin: TextIO,
 ) -> int:
     try:
         return _exec(
@@ -32,7 +32,7 @@ def cmd_harness_exec(
             agent_id=agent_id,
             session_id=session_id,
             opener=opener,
-            stdin=sys.stdin if stdin is None else stdin,
+            stdin=stdin,
         )
     except (RuntimeError, ValueError, OSError) as exc:
         print(f"harness: {exc}", file=sys.stderr)

@@ -11,6 +11,8 @@ import datetime
 import sys
 from pathlib import Path
 
+import pytest
+
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(_REPO_ROOT))
 
@@ -29,16 +31,20 @@ def _line(stamp: str, requesting_pid: int, responsible_pid: int | None = 400) ->
     )
 
 
-def test_parse_window_indexes_by_requesting_pid() -> None:
+@pytest.mark.parametrize("hours", [-7, 0, 8])
+def test_parse_window_indexes_by_requesting_pid(hours: int) -> None:
+    zone = datetime.timezone(datetime.timedelta(hours=hours))
     good = _line("2026-09-14 15:30:01.123", 5001)
     no_responsible = _line("2026-09-14 15:30:01.900", 5002, responsible_pid=None)
     garbage = "not a log line requesting={TCCDProcess: identifier=x, pid=5003}"
     no_requesting = "2026-09-14 15:30:02.000 0x1 Default tccd: something else entirely"
-    window = smoke.f12_parse_window("\n".join([good, no_responsible, garbage, no_requesting]))
+    window = smoke.f12_parse_window(
+        "\n".join([good, no_responsible, garbage, no_requesting]), zone=zone
+    )
     assert set(window) == {5001, 5002}
     ts, line = window[5001][0]
     assert line == good
-    expected = datetime.datetime(2026, 9, 14, 15, 30, 1, 123000).astimezone().timestamp()
+    expected = datetime.datetime(2026, 9, 14, 15, 30, 1, 123000, tzinfo=zone).timestamp()
     assert abs(ts - expected) < 0.001
     assert window[5002][0][1] == no_responsible
 

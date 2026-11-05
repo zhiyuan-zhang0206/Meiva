@@ -16,7 +16,9 @@ import re
 import stat
 from collections.abc import Callable
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -63,13 +65,17 @@ def _printed_key(printed: str) -> str:
     return match.group(1)
 
 
+@pytest.mark.parametrize("zone", [None, "America/New_York"])
 def test_it_seals_the_active_generation_for_one_unit_under_the_key_it_prints(
     tmp_path: Path,
     gateway_home: Path,
     command_runtime: CommandRuntime,
     capsys: pytest.CaptureFixture[str],
+    zone: str | None,
 ) -> None:
     command = _operator(command_runtime, gateway_home, serves_gateway=True)
+    if zone is not None:
+        command.config.set_field("timezone", zone)
     out = tmp_path / "mini.bundle"
 
     assert _issue(command, out) == 0
@@ -81,6 +87,11 @@ def test_it_seals_the_active_generation_for_one_unit_under_the_key_it_prints(
     bundle = open_bundle(
         out.read_bytes(), _printed_key(printed), now=command.clock.now().timestamp()
     )
+    expected_zone = ZoneInfo("America/Los_Angeles" if zone is None else zone)
+    expires = datetime.fromtimestamp(bundle.expires_at, tz=expected_zone).isoformat(
+        timespec="seconds"
+    )
+    assert expires in printed
     capability = bundle.capability
     assert capability.unit == UnitIdentity(machine=MACHINE, home="/home/u/.meiva")
     assert capability.endpoint == f"postgresql://meiva@{_REACHABLE}:6433/meiva"

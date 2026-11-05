@@ -41,6 +41,3 @@ exports = ["hints.py"]
 "stats.py" = ["model.py", "names.py", "scope.py", "signatures.py", "walk.py"]
 "tests" = ["acks.py", "catalog.py", "diff.py", "engine.py", "hints.py", "model.py", "promotion.py", "removed.py", "render.py", "scope.py", "stats.py"]
 "walk.py" = ["model.py"]
-
-[debt.ambient-read]
-"hints.py#environ shutil.which()" = { count = 1, owner = "#5816", until = "waits for `_gh` to take the program path, or the search path, from its caller: it asks PATH for the program itself" }
