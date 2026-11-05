@@ -14,6 +14,7 @@ from meiva_builtins.plugins.meiva_memory.pool_ops import (
     regenerate_indexes,
     repo_slug,
     run,
+    stage,
     stage_and_commit,
 )
 
@@ -44,6 +45,7 @@ def main() -> int:
         )
         return 2
 
+    stage(pool)
     regenerate_indexes(pool)
     stage_and_commit(args.message, pool)
     run(["git", "-C", str(pool), "push", "origin", "HEAD"])

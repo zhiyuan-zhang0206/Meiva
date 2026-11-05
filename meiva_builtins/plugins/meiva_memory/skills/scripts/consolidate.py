@@ -11,6 +11,7 @@ from meiva_builtins.plugins.meiva_memory.pool_ops import (
     refresh_index,
     regenerate_indexes,
     run,
+    stage,
     stage_and_commit,
 )
 
@@ -28,6 +29,7 @@ def main() -> int:
     pool = pool_dir(resolve_meiva_home())
     print(f"memory pool: {pool}")
 
+    stage(pool)
     regenerate_indexes(pool)
     committed = stage_and_commit(args.message, pool)
     run(["git", "-C", str(pool), "push"])
