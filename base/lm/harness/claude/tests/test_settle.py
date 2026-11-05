@@ -33,6 +33,7 @@ REPORTED = ResultFields(
     api_error_status=None,
     errors=(),
     origin_kind="human",
+    interrupted=False,
 )
 
 
@@ -40,10 +41,8 @@ def fields(**overrides: object) -> ResultFields:
     return replace(REPORTED, **overrides)
 
 
-def running(
-    parts: tuple[str, ...] = ("one", "two"), *, steps: int = 1, interrupted: bool = False
-) -> RunningTurn:
-    return RunningTurn(turn_id="turn-7", parts=parts, interrupt_requested=interrupted, steps=steps)
+def running(parts: tuple[str, ...] = ("one", "two"), *, steps: int = 1) -> RunningTurn:
+    return RunningTurn(turn_id="turn-7", parts=parts, steps=steps)
 
 
 def test_the_settled_text_is_what_the_turn_streamed() -> None:
@@ -110,8 +109,8 @@ def test_a_result_that_names_a_session_replaces_the_one_the_init_reported() -> N
 
 def test_the_settled_turn_keeps_the_fields_the_result_reported() -> None:
     settlement = settle_result(
-        fields(is_error=True, subtype="error_during_execution", stop_reason=None),
-        turn=running(interrupted=True),
+        fields(is_error=True, subtype="error_during_execution", stop_reason=None, interrupted=True),
+        turn=running(),
         session_id=None,
         totals=SessionTotals(),
     )

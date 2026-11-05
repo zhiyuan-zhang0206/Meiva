@@ -23,6 +23,11 @@ or a blocked graph invocation.
 - **Ownership**: claim locks metadata before inbound rows and validates the
   admitted generation, owner and lease. A stale or missing owner cannot claim
   another incarnation's work.
+- **Foreground steering reservation**: a chat reserved by an external harness
+  stays pending with a pickup timestamp. Ordinary claim excludes that row.
+  Provider acknowledgement commits the chat timeline item and consumes the
+  reservation together. A definite rejection clears the timestamp. Recovery
+  retires an unresolved reservation with a timeline note reporting uncertainty.
 - **Checkpoint reconciliation**: startup, compaction and co-batch deferral use
   the same owner lock. Interrupted claimed chats are consumed, never requeued;
   successful completion is distinguished from unknown execution. Reconciliation

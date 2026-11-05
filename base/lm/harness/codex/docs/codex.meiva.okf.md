@@ -47,7 +47,7 @@ directly: the uniform surface is this adapter, not a shared wire protocol.
 | `session.py` | `CodexSession`, the shell: start / resume / close, ordered inbound queue, one event stream, approvals, interrupt, totals |
 | `transport.py` | `StdioAppServer`, the shell of the child's pipes: spawn, write a line, read a line, correlate a reply |
 | `frames.py` | the JSON-RPC wire: frames, the compact one-line encoding, what an inbound line is (`classify`), the reply-to-result rule, the two errors |
-| `requests.py` | what the session sends (`initialize`, `thread/*`, `turn/start`, `turn/interrupt`) and the frame it answers a server request with |
+| `requests.py` | what the session sends (`initialize`, `thread/*`, `turn/start`, `turn/steer`, `turn/interrupt`) and the frame it answers a server request with |
 | `turns.py` | what a message means and what a settled turn is: `inbound`, `item`, `binding`, `error_report`, `unclaimed_text`, `TurnRecord`, `settle` |
 | `mapping.py` | pure `ThreadItem` → event translation and usage extraction |
 | `config.py` | `CodexConfig` and the command line |
@@ -92,25 +92,35 @@ caller opts into it.
 | `max_buffered_events` | 256 | text deltas are droppable past this; control events are bounded by tool-call count |
 | `dedupe_window` | 256 | a redelivery inside the window replays the recorded outcome |
 
+## Foreground input
+
+Ordinary submissions wait for the previous `turn/completed` before sending
+`turn/start`. Foreground input uses the stable `turn/steer` RPC with
+`expectedTurnId` set to the bound Codex turn and `clientUserMessageId` set to
+the Meiva inbound key. Codex rejects the request if that turn is no longer active.
+
+A successful RPC admits input to Codex's pending queue. The bridge acknowledges
+execution receipt after a matching `item/completed` notification names the same
+thread, turn and `userMessage.clientId`. That notification follows insertion
+into Codex's conversation history. A transport or internal failure, an invalid
+response, or completion before the receipt leaves delivery uncertain.
+`clientUserMessageId` correlates the notification. It carries no replay
+guarantee.
+
 ## Invariants
 
-Invariant 1 is how the queue is kept out of Codex's steering path: the session
-calls `turn/start` **only after `turn/completed`**, so a turn is never started
-against a busy thread. That matters because `turn/start` on a busy thread steers
-the running turn instead of starting a new one — a message submitted mid-turn
-would land inside a tool result, which is exactly what invariant 1 forbids.
-
-The seven adapter invariants are pinned by tests in `tests/`:
+Adapter invariants are pinned by tests in `tests/`:
 
 | # | Invariant | Test |
 |---|---|---|
-| 1 | inbound only at a turn boundary | `test_inbound_queue.py::test_messages_wait_for_the_turn_boundary` |
+| 1 | ordinary submissions start only at a turn boundary | `test_inbound_queue.py::test_messages_wait_for_the_turn_boundary` |
 | 2 | same key → same ticket; completed key replays | `test_inbound_queue.py::test_same_key_returns_the_same_ticket`, `::test_completed_key_replays_the_recorded_outcome` |
 | 3 | a full queue refuses rather than buffers | `test_inbound_queue.py::test_queue_overflow_is_refused` |
 | 4 | interrupt asserts the tool children are reaped | `test_cancel.py::test_interrupt_asserts_the_tool_children_are_reaped` |
 | 5 | a turn can finish after two quiet days | `test_cancel.py::test_default_turn_can_finish_after_two_quiet_days` |
 | 6 | usage accumulates per turn | `test_inbound_queue.py::test_usage_accumulates_across_turns` |
 | 7 | the handoff is injected once, never on resume | `test_session.py::test_resume_uses_the_registry_and_skips_the_handoff` |
+| 8 | steering waits for a correlated execution receipt | `test_inbound_queue.py::test_steer_waits_for_matching_completed_user_item` |
 
 ## Version pinning
 

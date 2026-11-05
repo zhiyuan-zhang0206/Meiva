@@ -61,6 +61,7 @@ class ItemStep:
     phase: str
     text: str | None = None
     final: bool = False
+    user_message_key: str | None = None
 
 
 # meiva:note
@@ -85,9 +86,8 @@ class ErrorReport:
 
 # meiva:note
 # Everything one turn of this session has produced so far: the usage it reported step by step,
-# the reply parts it streamed and the ones that were its final answer, the denials it collected,
-# and whether an interrupt was asked for. The session holds one of these per running turn and
-# settles the turn from it, so an incoming message changes a value instead of three maps.
+# its streamed and final reply parts, and the denials it collected. The session holds one
+# of these per running turn, so an incoming message changes a value instead of three maps.
 @dataclass(frozen=True, slots=True)
 class TurnRecord:
     usage: Usage = field(default_factory=Usage)
@@ -95,7 +95,6 @@ class TurnRecord:
     parts: tuple[str, ...] = ()
     finals: tuple[str, ...] = ()
     denials: tuple[str, ...] = ()
-    interrupt_requested: bool = False
 
     # meiva:note
     # A token report of nothing says nothing: `thread/tokenUsage/updated` also arrives for a turn
@@ -114,9 +113,6 @@ class TurnRecord:
 
     def with_denial(self, denial: str) -> TurnRecord:
         return replace(self, denials=(*self.denials, denial))
-
-    def interrupted(self) -> TurnRecord:
-        return replace(self, interrupt_requested=True)
 
     # meiva:note
     # The reply a settled turn carries: its final answers when it named any, else everything it
@@ -162,6 +158,11 @@ def item(kind: NotificationKind, params: RequestParams) -> ItemStep:
         phase="completed" if completed else "started",
         text=text,
         final=text is not None and assistant_text(payload, final_only=True) is not None,
+        user_message_key=(
+            as_text(payload.get("clientId"))
+            if completed and payload.get("type") == "userMessage"
+            else None
+        ),
     )
 
 
@@ -206,10 +207,9 @@ def unclaimed_text(turn: RequestParams) -> str:
 
 
 # meiva:note
-# The turn boundary: the status the server reports settles the outcome, the interrupt flag adds the
-# one the server never sees, and the usage the turn streamed is what it spent. `steps` counts the
-# reports it sent, so a provider that reports once and a provider that reports per tool call both
-# name their own number of steps.
+# The server status settles the outcome, and the streamed usage is what the turn spent.
+# `steps` counts the reports it sent, so providers that report once or per tool call
+# both name their own number of steps.
 def settle(
     *,
     turn_id: str,
@@ -223,7 +223,7 @@ def settle(
     steps = record.steps
     num_turns = max(len(steps), 1)
     text = record.text
-    interrupted = record.interrupt_requested or fields.status == "interrupted"
+    interrupted = fields.status == "interrupted"
     is_error = fields.status in {"failed", "interrupted"} or fields.error_message is not None
     outcome = TurnOutcome(
         turn_id=turn_id,

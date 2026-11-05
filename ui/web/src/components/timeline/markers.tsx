@@ -108,5 +108,8 @@ export function EphemeralSystemMarker({
     const content = payload.slice("error:".length);
     return <EphemeralMarker label={t("errorPrefix", { content })} isError />;
   }
+  if (payload.startsWith("status:")) {
+    return <EphemeralMarker label={payload.slice("status:".length)} />;
+  }
   return <UnknownMarkerChip source={source} payload={payload} />;
 }

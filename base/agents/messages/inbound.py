@@ -27,6 +27,12 @@ class InterruptReason(StrEnum):
     RESTART = "restart"
 
 
+class InterruptScope(StrEnum):
+    ALL = "all"
+    FOREGROUND = "foreground"
+    LIFECYCLE = "lifecycle"
+
+
 class InboundKind(StrEnum):
     """Legal values for inbound_messages.kind — in sync with the CHECK constraint in db/schema.sql.
 

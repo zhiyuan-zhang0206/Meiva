@@ -79,7 +79,10 @@ and the CLI reports its end on its own:
   turn's `ResultMessage`; writing it earlier is folded into the pending tool
   result, where the model treats it as injected content.
 - **Cancellation is asserted.** `interrupt()` reports whether the tool's child
-  processes were reaped, and `settled=None` when the CLI pid is unobservable.
+  processes were reaped, and `settled=None` when the CLI pid is unobservable. A
+  result attributed to the foreground confirms cancellation when its
+  `terminal_reason` is `aborted_streaming` or `aborted_tools`. Older CLIs can
+  omit this field, in which case the bridge uses the ordinary result verdict.
 - **The child environment is an allowlist.** `auth.build_env` names every key the
   session may carry (`registry.session_child_env_keys`) and blanks every other key
   the host process holds, because the SDK spawns the CLI with

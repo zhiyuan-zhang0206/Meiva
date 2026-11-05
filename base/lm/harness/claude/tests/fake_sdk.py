@@ -116,6 +116,7 @@ class ResultMessage:
     origin: dict[str, Any] | None = None
     errors: list[str] | None = None
     api_error_status: int | None = None
+    terminal_reason: str | None = None
 
 
 @dataclass
@@ -175,6 +176,8 @@ class FakeClaudeSDKClient:
         self.connected = False
         self.disconnected = False
         self.on_interrupt: Any = None
+        self.interrupt_ack_gate: asyncio.Event | None = None
+        self.interrupt_acknowledged = asyncio.Event()
         self._queue: asyncio.Queue[Any] = asyncio.Queue()
         self._turn: asyncio.Task[None] | None = None
         self._blocker = asyncio.Event()
@@ -266,7 +269,14 @@ class FakeClaudeSDKClient:
         await self._cancel_turn()
         if self.on_interrupt is not None:
             self.on_interrupt()
-        self._finish(result=ResultMessage(subtype="error_during_execution", is_error=True))
+        self._finish(
+            result=ResultMessage(
+                subtype="error_during_execution", is_error=True, terminal_reason="aborted_tools"
+            )
+        )
+        if self.interrupt_ack_gate is not None:
+            await self.interrupt_ack_gate.wait()
+        self.interrupt_acknowledged.set()
 
     async def _cancel_turn(self) -> None:
         turn, self._turn = self._turn, None

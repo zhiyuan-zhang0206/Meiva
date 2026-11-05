@@ -10,6 +10,7 @@ from base.api_contracts.agent_contract import Harness
 from base.lm.harness.base_session import SessionClock
 from base.lm.harness.engine import (
     CompletedTurnEvent,
+    ForegroundSteering,
     HarnessSession,
     HarnessTurn,
     SubmittedTurn,
@@ -18,6 +19,7 @@ from base.lm.harness.engine import (
 from base.lm.harness.events import (
     AssistantText,
     BridgeEvent,
+    ForegroundAccepted,
     ReasoningDelta,
     ReasoningText,
     SessionClosed,
@@ -126,6 +128,7 @@ class HarnessBridge:
         self._registration_ttl = timedelta(seconds=registration_ttl_seconds)
         self._created_at: str | None = None
         self._session: HarnessSession | None = None
+        self._foreground: asyncio.Future[tuple[HarnessSession, str] | None] | None = None
         self._handoff_delivered = False
         self._model: str | None = None
         self._digest: str | None = None
@@ -182,12 +185,43 @@ class HarnessBridge:
         self._handoff_delivered = bool(getattr(session, "resumed", False))
         return session
 
+    @property
+    def steering_available(self) -> bool:
+        session = self._session
+        return isinstance(session, ForegroundSteering) and session.steering_available
+
+    async def steer(self, text: str, *, key: str) -> bool:
+        session = self._session
+        if not isinstance(session, ForegroundSteering):
+            return False
+        return await session.steer(text, key=key)
+
     async def run_turn(
         self,
         text: str,
         *,
         key: str,
         on_event: TurnEventSink | None = None,
+    ) -> HarnessTurn:
+        if self._foreground is not None:
+            raise HarnessSetupError("a harness turn is already running")
+        foreground: asyncio.Future[tuple[HarnessSession, str] | None] = (
+            asyncio.get_running_loop().create_future()
+        )
+        self._foreground = foreground
+        try:
+            return await self._run_turn(text, key, on_event, foreground)
+        finally:
+            if not foreground.done():
+                foreground.set_result(None)
+            self._foreground = None
+
+    async def _run_turn(
+        self,
+        text: str,
+        key: str,
+        on_event: TurnEventSink | None,
+        foreground: asyncio.Future[tuple[HarnessSession, str] | None],
     ) -> HarnessTurn:
         try:
             session = await self.ensure()
@@ -209,9 +243,15 @@ class HarnessBridge:
                 raise HarnessSetupError(f"{self.harness.value} refused the turn: {exc}") from exc
             if ticket.deduplicated and ticket.settled:
                 return replace(_completed(await ticket.outcome(), ""), replayed=True)
-            return await self._wait_with_registration(session, str(ticket.turn_id), on_event)
-        except (HarnessTurnFaultedError, HarnessClosedError, HarnessSetupError):
-            await self._retire(session, reason="turn faulted")
+            turn_id = str(ticket.turn_id)
+            foreground.set_result((session, turn_id))
+            return await self._wait_with_registration(session, turn_id, on_event)
+        except HarnessTurnFaultedError as exc:
+            if exc.outcome is None:
+                await self._retire(session, reason="unsettled turn fault")
+            raise
+        except (HarnessClosedError, HarnessSetupError):
+            await self._retire(session, reason="session unavailable")
             raise
 
     # meiva:note
@@ -240,13 +280,14 @@ class HarnessBridge:
         return outcome
 
     async def interrupt(self) -> object:
-        session = self._session
-        if session is None:
-            raise HarnessClosedError("no harness session is running")
-        try:
-            return await session.interrupt()
-        finally:
-            await self._retire(session, reason="interrupted")
+        foreground = self._foreground
+        if foreground is None:
+            return None
+        target = await asyncio.shield(foreground)
+        if target is None or self._foreground is not foreground:
+            return None
+        session, turn_id = target
+        return await session.interrupt(turn_id=turn_id)
 
     async def close(self, *, reason: str = "closed") -> None:
         if self._close_error is not None:
@@ -341,7 +382,7 @@ class HarnessBridge:
         async for event in session.events():
             done = await self._consume_event(event, turn_id, streamed, on_event=on_event)
             if done is not None:
-                if done.is_error:
+                if done.is_error and not done.interrupted:
                     raise HarnessTurnFaultedError(
                         fault_message(self.harness.value, done), outcome=done
                     )
@@ -387,7 +428,16 @@ class HarnessBridge:
         if on_event is None:
             return False
         if not isinstance(
-            event, (AssistantText, ReasoningDelta, ReasoningText, TextDelta, ToolUse, ToolResult)
+            event,
+            (
+                ForegroundAccepted,
+                AssistantText,
+                ReasoningDelta,
+                ReasoningText,
+                TextDelta,
+                ToolUse,
+                ToolResult,
+            ),
         ):
             return False
         if event.turn_id != turn_id:

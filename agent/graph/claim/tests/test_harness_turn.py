@@ -59,6 +59,7 @@ from base.lm.harness.engine import TurnEventSink
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.turn_identity import HostedServiceResources
+from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
 
@@ -142,6 +143,7 @@ def runtime(
             event_publisher=publisher or MagicMock(),
             agent=AgentSlices.resolve(default_reader=defaults()),
             catalog=build_model_catalog(home=meiva_home()),
+            commands=CommandCatalog.system(skills=list, home=meiva_home()),
             clock_factory=Clock.from_settings,
             environ=ENVIRON,
         )

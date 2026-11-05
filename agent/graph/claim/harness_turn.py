@@ -11,7 +11,14 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent import state as _state
+from agent.graph.claim._dispatch import prepare_chat_inbound
 from agent.graph.claim.harness_activity import HarnessTurnProjector
+from agent.graph.claim.harness_input import commit_harness_input, retire_unconfirmed_harness_input
+from agent.graph.claim.harness_steer import (
+    finish_harness_steer,
+    recover_harness_steer,
+    reserve_harness_steer,
+)
 from agent.graph.claim.harness_tool_format import is_object_sequence
 from agent.graph.claim.lost_turn import report_lost_turn
 from agent.graph.claim.timeline import append_turn_timeline
@@ -19,6 +26,7 @@ from agent.graph.claim.turn_stamp import persist_last_active
 from agent.graph.hooks.framework import harness_pre_turn_hooks
 from agent.graph.interrupt import (
     ModelInterruptedError,
+    interrupt_halt,
     interruptible_model,
     subscribe_interrupt,
 )
@@ -31,16 +39,24 @@ from base.agents.history.harness_messages import (
     aget_next_harness_message_seq,
     aupsert_harness_timeline_item,
 )
+from base.agents.history.timeline import build_timeline_items
 from base.agents.history.timeline_item import TimelineItem
+from base.agents.messages.inbound import InterruptScope
 from base.agents.messages.kwargs import read_meiva_kwargs
 from base.db.transaction import async_write_transaction
-from base.events.live.projection import Cancelled, LLMDone, TimelineSnapshot
+from base.events.live.projection import Cancelled, InboundCommitted, LLMDone, TimelineSnapshot
 from base.events.live.publisher import AgentEventPublisher
 from base.host.boundary.json_values import is_object_dict
 from base.lm.catalog import ModelCatalog
 from base.lm.content import message_content
-from base.lm.harness import HarnessClosedError, HarnessSetupError, HarnessTurnFaultedError
-from base.lm.harness.engine import HarnessTurn, TurnEngine
+from base.lm.harness import (
+    BridgeEvent,
+    ForegroundAccepted,
+    HarnessClosedError,
+    HarnessSetupError,
+    HarnessTurnFaultedError,
+)
+from base.lm.harness.engine import ForegroundSteering, HarnessTurn, TurnEngine
 from base.lm.usage import UsageFields, log_usage_fields
 from base.log import logger
 
@@ -174,17 +190,6 @@ def _resolve_turn_prompt_and_key(
     return text, key
 
 
-async def _handle_turn_interrupted(
-    ctx: MeivaContext,
-    agent_id: int,
-    bridge: TurnEngine,
-    projector: HarnessTurnProjector,
-) -> None:
-    await projector.finish(interrupted=True)
-    _announce_cancel(ctx, agent_id)
-    await interrupt_engine(agent_id, bridge)
-
-
 async def _run_harness_turn(
     state: _state.AgentState,
     ctx: MeivaContext,
@@ -217,20 +222,32 @@ async def _run_harness_turn(
         clock=ctx.require_clock(),
         non_human_wake=state.non_human_wake,
     )
-    try:
-        async with subscribe_interrupt(
-            ctx.ops_pool, agent_id, resources=ctx.hosted_resources
-        ) as cancel_event:
-            action = bridge.run_turn(text, key=key, on_event=projector.on_event)
-            turn = await interruptible_model(
-                _ticking(ctx.turn_progress.mark, agent_id, action, projector), cancel_event
+    input_accepted = asyncio.Event()
+
+    async def retire_unconfirmed() -> None:
+        if not input_accepted.is_set():
+            items = await projector.append_inbound(
+                lambda: retire_unconfirmed_harness_input(ctx, agent_id, state.harness_pending_input)
             )
-    except ModelInterruptedError:
-        await _handle_turn_interrupted(ctx, agent_id, bridge, projector)
+            _publish_inbound(ctx, agent_id, items)
+
+    try:
+        turn = await _await_foreground(
+            ctx, agent_id, bridge, projector, text, key, state.harness_pending_input, input_accepted
+        )
+    except ModelInterruptedError as exc:
+        await retire_unconfirmed()
+        items = await projector.append_inbound(
+            lambda: recover_harness_steer(ctx, agent_id, publish=False)
+        )
+        _publish_inbound(ctx, agent_id, items)
+        await projector.finish(interrupted=True)
         return Command[HarnessGoto](
-            update={**extra_updates, "halted": True, "harness_pending_input": None}, goto=CLAIM
+            update={**extra_updates, **interrupt_halt(exc.reason), "harness_pending_input": None},
+            goto=CLAIM,
         )
     except (HarnessTurnFaultedError, HarnessClosedError, HarnessSetupError) as exc:
+        await retire_unconfirmed()
         outcome = exc.outcome if isinstance(exc, HarnessTurnFaultedError) else None
         if outcome is not None:
             log_turn_usage(ctx, agent_id, bridge.model, outcome)
@@ -254,6 +271,191 @@ async def _run_harness_turn(
     return Command[HarnessGoto](
         update={**extra_updates, "halted": True, "harness_pending_input": None}, goto=CLAIM
     )
+
+
+async def _await_foreground(
+    ctx: MeivaContext,
+    agent_id: int,
+    bridge: TurnEngine,
+    projector: HarnessTurnProjector,
+    text: str,
+    key: str,
+    pending_input: Mapping[str, object] | None,
+    input_accepted: asyncio.Event,
+) -> HarnessTurn:
+    resources = ctx.hosted_resources
+    async with (
+        subscribe_interrupt(
+            ctx.ops_pool, agent_id, resources=resources, scope=InterruptScope.LIFECYCLE
+        ) as lifecycle,
+        subscribe_interrupt(
+            ctx.ops_pool, agent_id, resources=resources, scope=InterruptScope.FOREGROUND
+        ) as cancel,
+    ):
+        stopping = asyncio.Event()
+
+        async def accept_input() -> None:
+            if input_accepted.is_set():
+                return
+            items = await projector.append_inbound(
+                lambda: commit_harness_input(ctx, agent_id, pending_input)
+            )
+            _publish_inbound(ctx, agent_id, items)
+            input_accepted.set()
+
+        async def observe(event: BridgeEvent) -> None:
+            if isinstance(event, ForegroundAccepted):
+                await accept_input()
+                return
+            await accept_input()
+            await projector.on_event(event)
+
+        async def request_cancel() -> None:
+            await cancel.wait()
+            stopping.set()
+            await projector.record_control("Cancellation requested.")
+            if error := await interrupt_engine(agent_id, bridge):
+                await projector.record_control(f"Cancellation unconfirmed: {error}", error=True)
+
+        async def execute() -> HarnessTurn:
+            try:
+                turn = await bridge.run_turn(text, key=key, on_event=observe)
+            except HarnessTurnFaultedError as exc:
+                if exc.outcome is not None:
+                    await accept_input()
+                raise
+            await accept_input()
+            return turn
+
+        async def run() -> HarnessTurn:
+            return await _with_foreground_controls(
+                execute, request_cancel, stopping, input_accepted, ctx, agent_id, bridge, projector
+            )
+
+        return await interruptible_model(
+            _ticking(ctx.turn_progress.mark, agent_id, run(), projector), lifecycle
+        )
+
+
+# meiva:note
+# A foreground cancel sends a control request while the event reader remains
+# alive. Only its observed terminal outcome can end the foreground. Stop
+# admitting steering at handback, and settle any receipt already in flight.
+# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+async def _with_foreground_controls(
+    execute: Callable[[], Awaitable[HarnessTurn]],
+    request_cancel: Callable[[], Awaitable[None]],
+    stopping: asyncio.Event,
+    input_accepted: asyncio.Event,
+    ctx: MeivaContext,
+    agent_id: int,
+    bridge: TurnEngine,
+    projector: HarnessTurnProjector,
+) -> HarnessTurn:
+    async def request() -> None:
+        await request_cancel()
+
+    outcome: HarnessTurn | BaseException
+    async with asyncio.TaskGroup() as tasks:
+        cancel_task = tasks.create_task(request(), name=f"harness-cancel-{agent_id}")
+        if ctx.ops_pool is not None and isinstance(bridge, ForegroundSteering):
+            tasks.create_task(
+                _steer_while_active(ctx, agent_id, bridge, projector, stopping, input_accepted),
+                name=f"harness-steer-{agent_id}",
+            )
+        try:
+            outcome = await execute()
+        except BaseException as error:
+            outcome = error
+        finally:
+            stopping.set()
+            cancel_task.cancel()
+        if isinstance(outcome, asyncio.CancelledError):
+            raise outcome
+    if isinstance(outcome, BaseException):
+        raise outcome
+    return outcome
+
+
+async def _steer_while_active(
+    ctx: MeivaContext,
+    agent_id: int,
+    engine: ForegroundSteering,
+    projector: HarnessTurnProjector,
+    stopping: asyncio.Event,
+    input_accepted: asyncio.Event,
+) -> None:
+    while not stopping.is_set():
+        if input_accepted.is_set() and engine.steering_available:
+            inbound = await reserve_harness_steer(ctx, agent_id)
+            if inbound is not None:
+                try:
+                    messages = prepare_chat_inbound(ctx, inbound)
+                    prompt = render_messages(messages)
+                except Exception:
+                    await finish_harness_steer(ctx, agent_id, inbound.id, accepted_items=None)
+                    raise
+                if not await _send_steer(
+                    ctx, agent_id, engine, projector, stopping, inbound.id, prompt, messages
+                ):
+                    return
+                continue
+        with suppress(TimeoutError):
+            await asyncio.wait_for(stopping.wait(), timeout=1.0)
+
+
+async def _send_steer(
+    ctx: MeivaContext,
+    agent_id: int,
+    engine: ForegroundSteering,
+    projector: HarnessTurnProjector,
+    stopping: asyncio.Event,
+    inbound_id: int,
+    prompt: str,
+    messages: list[BaseMessage],
+) -> bool:
+    try:
+        accepted = not stopping.is_set() and await engine.steer(prompt, key=f"inbound-{inbound_id}")
+    except Exception as exc:
+        logger.warning(
+            "could not confirm harness steer delivery",
+            event="harness_steer_unconfirmed",
+            agent_id=agent_id,
+            inbound_id=inbound_id,
+            error=str(exc),
+        )
+        items = await projector.append_inbound(
+            lambda: recover_harness_steer(ctx, agent_id, publish=False)
+        )
+        _publish_inbound(ctx, agent_id, items)
+        return False
+
+    if not accepted:
+        await finish_harness_steer(ctx, agent_id, inbound_id, accepted_items=None)
+        return False
+    timeline, _ = build_timeline_items(messages, inputs=ctx.timestamp_policy())
+    items = await projector.append_inbound(
+        lambda: finish_harness_steer(ctx, agent_id, inbound_id, accepted_items=timeline)
+    )
+    _publish_inbound(ctx, agent_id, items)
+    return True
+
+
+def _publish_inbound(ctx: MeivaContext, agent_id: int, items: list[TimelineItem]) -> None:
+    publisher = ctx.event_publisher
+    if publisher is None or not items:
+        return
+    count = int(items[-1].item_id.split(".")[0]) + 1
+    publisher.emit(
+        TimelineSnapshot(
+            agent_id=agent_id, items=[item.model_dump() for item in items], msg_count=count
+        ).model_dump_json()
+    )
+    for item in items:
+        if item.kind == "inbound_chat" and item.inbound_id is not None:
+            publisher.emit(
+                InboundCommitted(agent_id=agent_id, inbound_id=item.inbound_id).model_dump_json()
+            )
 
 
 async def _checkpoint_activity(
@@ -330,11 +532,10 @@ def _announce_cancel(ctx: MeivaContext, agent_id: int) -> None:
 # meiva:note
 # An interrupt that cannot be delivered is reported, never raised: the durable cancel
 # row is still pending and claim dispatches it on the next pass, while a raise here
-# would turn the user's stop into a failed turn. The adapter's `settled` is the one
-# honest answer to "did the child processes actually stop", so it is logged as it came
-# back — `None` included, which means the CLI tree was not observable rather than reaped.
+# would turn the user's stop into a failed turn. Process observations are diagnostics.
+# The foreground ends only when the executor reports a terminal outcome.
 # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
-async def interrupt_engine(agent_id: int, bridge: TurnEngine) -> None:
+async def interrupt_engine(agent_id: int, bridge: TurnEngine) -> str | None:
     try:
         report = await bridge.interrupt()
     except Exception as exc:
@@ -344,16 +545,17 @@ async def interrupt_engine(agent_id: int, bridge: TurnEngine) -> None:
             event="harness_interrupt_failed",
             body=f"interrupting agent {agent_id}'s harness turn raised: {exc!r}",
         )
-        return
+        return str(exc) or type(exc).__name__
     logger.info(
         "[{label}] {body}",
         label="harness",
         event="harness_interrupt",
-        body=f"interrupted agent {agent_id}'s harness turn",
+        body=f"requested interruption for agent {agent_id}'s harness turn",
         agent_id=agent_id,
         settled=getattr(report, "settled", None),
         turn_id=getattr(report, "turn_id", None),
     )
+    return None
 
 
 # meiva:note

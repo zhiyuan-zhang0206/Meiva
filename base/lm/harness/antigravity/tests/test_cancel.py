@@ -137,6 +137,20 @@ async def test_interrupt_without_an_active_turn_keeps_the_process(tmp_path: Path
         await harness.stop()
 
 
+async def test_foreground_interrupt_leaves_the_process_running(tmp_path: Path) -> None:
+    harness = await start(tmp_path, turns=[{"hang": True}])
+    try:
+        ticket = harness.session.submit("run")
+        await harness.wait_until(lambda: harness.messages() == ["run"])
+        pid = harness.session.cli_pid
+        with pytest.raises(NotImplementedError, match="foreground-only"):
+            await harness.session.interrupt(turn_id=ticket.turn_id)
+        assert harness.session.cli_pid == pid
+        assert not ticket.settled
+    finally:
+        await harness.stop()
+
+
 async def test_a_transport_that_never_started_cannot_pass(tmp_path: Path) -> None:
     transport = AgyTransport(config(tmp_path), clock=system_clock())
     report = await transport.interrupt(turn_id="turn-x")

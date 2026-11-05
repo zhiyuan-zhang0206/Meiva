@@ -14,13 +14,11 @@ from base.lm.harness.session import SessionTotals, TurnOutcome
 
 
 # meiva:note
-# What the running turn collected before its result arrived: the text it streamed, whether an
-# interrupt was asked for, and how many model steps the CLI reported.
+# What the running turn collected before its result arrived: streamed text and model steps.
 @dataclass(frozen=True, slots=True)
 class RunningTurn:
     turn_id: str
     parts: tuple[str, ...]
-    interrupt_requested: bool
     steps: int
 
 
@@ -63,7 +61,7 @@ def settle_result(
         text=text,
         subtype=fields.subtype,
         is_error=fields.is_error,
-        interrupted=turn.interrupt_requested,
+        interrupted=fields.interrupted,
         stop_reason=fields.stop_reason,
         usage=fields.usage,
         cost_usd=fields.cost_usd,
@@ -75,7 +73,7 @@ def settle_result(
         text=text,
         subtype=fields.subtype,
         is_error=fields.is_error,
-        interrupted=turn.interrupt_requested,
+        interrupted=fields.interrupted,
         stop_reason=fields.stop_reason,
         num_turns=max(fields.num_turns, turn.steps, 1),
         duration_ms=fields.duration_ms,

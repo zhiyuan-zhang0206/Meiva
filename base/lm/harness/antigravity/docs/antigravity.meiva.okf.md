@@ -33,9 +33,10 @@ and `result`. There are no request ids and no methods, so **a cancel cannot be a
 request**: the adapter sends `SIGINT`, and the CLI answers with a final `result`
 (`status: ERROR`, `error: interrupted`) and exits 1. `interrupt()` therefore
 retires the process; the next turn respawns it with `--conversation`, which keeps
-the transcript while the process is replaced.
+the transcript while the process is replaced. Hosted foreground Cancel leaves
+the CLI running and reports that the provider lacks a foreground-only control.
 
-If Antigravity ever ships ACP into the CLI, only `transport.py` changes.
+The CLI also offers an `agy acp` mode. This adapter uses headless stream JSON.
 
 ## Three harness differences, absorbed here
 

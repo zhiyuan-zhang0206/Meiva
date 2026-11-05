@@ -122,22 +122,17 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
     def cli_pid(self) -> int | None:
         return self._transport.pid if self._transport is not None else None
 
-    async def interrupt(self) -> CancelReport:
-        ticket = self._active
+    async def interrupt(self, *, turn_id: str | None = None) -> CancelReport:
+        if turn_id is not None:
+            raise NotImplementedError("Antigravity does not support foreground-only cancellation")
+        ticket = await self._interrupt_target(turn_id)
         transport = self._transport
-        if ticket is not None:
-            ticket.interrupt_requested = True
         if transport is None:
-            return unobserved_cancel(turn_id=ticket.turn_id if ticket is not None else None)
+            return unobserved_cancel(turn_id=turn_id)
         if ticket is None:
-            # meiva:note
-            # Nothing is running: keep the healthy process instead of killing
-            # it.
-            return unobserved_cancel(turn_id=None, cli_pid=transport.pid, cli_alive=transport.alive)
-        # meiva:note
-        # Retire before signalling: the reader may see EOF while the report is
-        # still being assembled, and an expected exit must not look like a
-        # crash.
+            return unobserved_cancel(
+                turn_id=turn_id, cli_pid=transport.pid, cli_alive=transport.alive
+            )
         self._retired = transport
         return await transport.interrupt(turn_id=ticket.turn_id, baseline=self._baseline)
 
@@ -182,6 +177,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             self._baseline = snapshot(self._probe, transport.pid)
             self._sent_turn = ticket.turn_id
             await transport.send(ticket.text)
+            ticket.interrupt_ready.set()
         except (TransportClosedError, OSError, RuntimeError) as exc:
             self._sent_turn = None
             self._fail_turn(ticket, exc)
@@ -207,34 +203,10 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         if retired:
             self._retired = None
         await transport.close()
-        if retired or self._closed:
-            return
-        ticket = self._active
-        if ticket is not None and ticket.interrupt_requested:
-            # meiva:note
-            # The interrupt killed the process before its `result` arrived.
-            self._complete(
-                ticket,
-                TurnOutcome(
-                    turn_id=ticket.turn_id,
-                    text="".join(ticket.parts).strip(),
-                    subtype="interrupted",
-                    is_error=True,
-                    interrupted=True,
-                    stop_reason="interrupted",
-                    usage=Usage(),
-                    cost_usd=None,
-                    permission_denials=(),
-                ),
-            )
+        if self._closed or (retired and self._sent_turn is None):
             return
         error = "agy stream ended"
-        if ticket is None:
-            # meiva:note
-            # The process ended with nothing waiting on it: that is the session's
-            # failure, and it names no turn (#5664).
-            # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
-            self._emit(SessionFailed(error=error))
+        self._emit(SessionFailed(error=error))
         self._fail_active(SessionClosedError(error))
 
     def _handle(self, payload: dict[str, object]) -> None:
@@ -323,7 +295,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             text=text,
             subtype=fields.subtype,
             is_error=fields.is_error,
-            interrupted=ticket.interrupt_requested or fields.interrupted,
+            interrupted=fields.interrupted,
             stop_reason=fields.status,
             usage=fields.usage,
             cost_usd=None,
@@ -341,7 +313,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
                 text=text,
                 subtype=fields.subtype,
                 is_error=fields.is_error,
-                interrupted=ticket.interrupt_requested or fields.interrupted,
+                interrupted=fields.interrupted,
                 stop_reason=fields.status,
                 num_turns=num_turns,
                 duration_ms=fields.duration_ms,

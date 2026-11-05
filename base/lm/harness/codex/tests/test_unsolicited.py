@@ -3,14 +3,22 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
+
 from base.lm.harness.base_session import TurnTicket
+from base.lm.harness.codex.frames import INVALID_REQUEST, JsonRpcError
 from base.lm.harness.codex.tests.support import start
 from base.lm.harness.events import (
+    AssistantText,
+    ForegroundAccepted,
     SessionFailed,
     TextDelta,
+    ToolUse,
+    TurnCompleted,
     TurnFaulted,
     UnsolicitedOutput,
 )
+from base.lm.harness.session import SessionClosedError
 
 
 # meiva:note
@@ -211,20 +219,17 @@ async def test_a_notification_from_another_thread_is_ignored(tmp_path: Path) -> 
 
 
 # meiva:note
-# `turn/started` can reach the session before `turn/start`'s answer. Binding the name
-# there is what keeps the items in that window attributable: without it they would be
-# dropped as foreign, and a caller would lose the opening of its own reply.
+# `turn/started` can supply the interrupt target while early activity waits for
+# the authoritative response. The receipt leads even when completion arrived first.
 # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
 async def test_turn_started_binds_the_name_before_the_response(tmp_path: Path) -> None:
-    harness = await start(tmp_path)
+    harness = await start(tmp_path, max_buffered_events=4)
     try:
         harness.server.turn_start_gate = asyncio.get_running_loop().create_future()
         harness.server.turn_start_id = "codex-turn-early"
         turn = harness.session.submit("hello")
-        for _ in range(500):
-            if harness.server.methods().count("turn/start"):
-                break
-            await asyncio.sleep(0.002)
+        await asyncio.sleep(0)
+        assert harness.server.params_for("turn/start")
 
         harness.server.emit(
             "turn/started",
@@ -244,14 +249,104 @@ async def test_turn_started_binds_the_name_before_the_response(tmp_path: Path) -
                 "delta": "early ",
             },
         )
+        for _ in range(5):
+            harness.server.delta("extra ", turn_id="codex-turn-early")
+        harness.server.command_started(turn_id="codex-turn-early")
+        harness.server.usage(input_tokens=7, output_tokens=2, turn_id="codex-turn-early")
         await asyncio.sleep(0.01)
-        assert [event.text for event in harness.of(TextDelta)] == ["early "]
+        assert harness.of(TextDelta) == []
+        assert harness.of(ToolUse) == []
+        assert harness.of(ForegroundAccepted) == []
+        assert harness.session.dropped_deltas == 2
 
-        harness.server.turn_start_gate.set_result(None)
-        await harness.turn_started(1)
         harness.server.message("done", turn_id="codex-turn-early")
         harness.server.complete(turn_id="codex-turn-early")
+        assert not turn.settled
+        harness.server.turn_start_gate.set_result(None)
+        outcome = await asyncio.wait_for(turn.outcome(), 2)
+        assert outcome.text == "done"
+        assert outcome.usage.input_tokens == 7
+        assert [
+            type(event)
+            for event in harness.events
+            if isinstance(event, ForegroundAccepted | TextDelta | ToolUse | TurnCompleted)
+        ] == [ForegroundAccepted, TextDelta, TextDelta, TextDelta, ToolUse, TurnCompleted]
+        assert harness.of(TextDelta)[0].text == "early "
+        assert harness.of(ForegroundAccepted)[0].turn_id == turn.turn_id
+    finally:
+        await harness.stop()
 
-        assert (await asyncio.wait_for(turn.outcome(), 2)).text == "done"
+
+async def test_rejected_start_never_accepts_a_provisionally_bound_turn(tmp_path: Path) -> None:
+    harness = await start(tmp_path)
+    try:
+        gate: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        harness.server.turn_start_gate = gate
+        turn = harness.session.submit("hello")
+        await asyncio.sleep(0)
+        assert harness.server.params_for("turn/start")
+        harness.server.emit(
+            "turn/started",
+            {
+                "threadId": harness.server.thread_id,
+                "turn": {"id": "replayed-turn", "status": "inProgress", "items": []},
+            },
+        )
+        harness.server.command_started(turn_id="replayed-turn")
+        harness.server.message("foreign", turn_id="replayed-turn")
+        harness.server.complete(turn_id="replayed-turn")
+        gate.set_exception(JsonRpcError(INVALID_REQUEST, "start rejected"))
+        with pytest.raises(SessionClosedError, match="start rejected"):
+            _ = await asyncio.wait_for(turn.outcome(), 2)
+        assert harness.of(ForegroundAccepted) == []
+        assert harness.of(ToolUse) == []
+        assert harness.of(AssistantText) == []
+        assert harness.of(TurnCompleted) == []
+    finally:
+        await harness.stop()
+
+
+async def test_early_activity_follows_the_authoritative_turn_id(tmp_path: Path) -> None:
+    harness = await start(tmp_path)
+    try:
+        gate: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        harness.server.turn_start_gate = gate
+        harness.server.turn_start_id = "actual-turn"
+        turn = harness.session.submit("hello")
+        await asyncio.sleep(0)
+        harness.server.emit(
+            "turn/started",
+            {
+                "threadId": harness.server.thread_id,
+                "turn": {"id": "replayed-turn", "status": "inProgress", "items": []},
+            },
+        )
+        harness.server.command_started(turn_id="replayed-turn")
+        harness.server.delta("foreign", turn_id="replayed-turn")
+        harness.server.usage(input_tokens=99, output_tokens=99, turn_id="replayed-turn")
+        harness.server.emit(
+            "error",
+            {
+                "threadId": harness.server.thread_id,
+                "turnId": "replayed-turn",
+                "willRetry": False,
+                "error": {"message": "foreign failure"},
+            },
+        )
+        harness.server.complete(turn_id="replayed-turn")
+        harness.server.command_started(turn_id="actual-turn", item_id="actual-command")
+        harness.server.delta("mine", turn_id="actual-turn")
+        harness.server.usage(input_tokens=7, output_tokens=2, turn_id="actual-turn")
+        gate.set_result(None)
+        await harness.turn_started()
+        harness.server.message("done")
+        harness.server.complete()
+        outcome = await asyncio.wait_for(turn.outcome(), 2)
+        assert outcome.text == "done"
+        assert outcome.usage.input_tokens == 7
+        assert harness.of(TurnFaulted) == []
+        assert [event.tool_use_id for event in harness.of(ToolUse)] == ["actual-command"]
+        assert [event.text for event in harness.of(TextDelta)] == ["mine"]
+        assert len(harness.of(ForegroundAccepted)) == 1
     finally:
         await harness.stop()

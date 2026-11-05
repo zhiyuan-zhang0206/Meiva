@@ -25,8 +25,10 @@ invariants the host relies on:
 2. a repeated submission key returns the same ticket, and a completed key
    replays its recorded outcome instead of re-running;
 3. a full queue refuses; it never buffers beyond its bound;
-4. `interrupt()` asserts that tool child processes were reaped — an unobservable
-   process tree is reported as unknown, not as success;
+4. a hosted `interrupt()` targets the current submitted ticket and preserves the
+   session. A matching provider terminal result confirms cancellation. Process
+   observations report cleanup separately. Providers without a foreground-only
+   control leave the turn running and report that cancellation is unavailable;
 5. turns can run for as long as the provider needs, including while it is quiet.
    Setup, transport, cancellation and shutdown keep their own bounds;
 6. usage and cost accumulate per turn, and `Usage.input_tokens` is the whole

@@ -45,11 +45,12 @@ waits for it, the big turn remains active. When foreground work hands control
 back, a later background completion can wake the agent through a new inbound
 and start another big turn.
 
+See [[agent/graph/docs/harness-foreground.meiva.okf.md|foreground input and cancellation]] for the execution contract.
+
 ## External timeline
 
 The provider session owns execution state and continuation. The Meiva claim
-node consumes inbound rows and commits their timeline entries before handing
-the prompt to the harness. Native Meiva keeps its timeline in LangGraph
+node stages inbound timeline entries and commits them on provider acceptance. Native Meiva keeps its timeline in LangGraph
 checkpoints. The external activity projector writes to
 `agent_harness_messages` as events arrive.
 

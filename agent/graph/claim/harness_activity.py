@@ -74,6 +74,25 @@ class HarnessTurnProjector:
                 case _:
                     raise TypeError(f"unexpected harness activity: {type(event).__name__}")
 
+    async def record_control(self, text: str, *, error: bool = False) -> None:
+        async with self._lock:
+            prefix = "error:" if error else "status:"
+            self._new_item("system_marker", f"{prefix}{text}", self._clock.now())
+            await self._flush()
+
+    async def append_inbound(
+        self, commit: Callable[[], Awaitable[list[TimelineItem]]]
+    ) -> list[TimelineItem]:
+        async with self._lock:
+            await self._flush()
+            items = await commit()
+            for item in items:
+                if item.item_id != f"{self._next_idx}.0":
+                    raise RuntimeError(f"unexpected harness inbound position {item.item_id}")
+                self._next_idx += 1
+            self._committed_count = self._next_idx
+            return items
+
     async def flush_text(self) -> None:
         while True:
             await self._dirty.wait()

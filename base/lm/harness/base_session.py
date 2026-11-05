@@ -63,6 +63,7 @@ class TurnTicket:
         # meiva:link base/lm/harness/docs/harness.meiva.okf.md
         self.provider_turn_id: str | None = None
         self.interrupt_requested = False
+        self.interrupt_ready = asyncio.Event()
         self.parts: list[str] = []
         self.thoughts: list[str] = []
         self.denials: list[str] = []
@@ -76,6 +77,7 @@ class TurnTicket:
         return self._future.done()
 
     def settle(self, outcome: TurnOutcome) -> None:
+        self.interrupt_ready.set()
         if not self._future.done():
             self._future.set_result(outcome)
 
@@ -83,6 +85,7 @@ class TurnTicket:
         self.settle(outcome)
 
     def fail(self, exc: BaseException) -> None:
+        self.interrupt_ready.set()
         if self._future.done():
             return
         self._future.set_exception(exc)
@@ -152,8 +155,23 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
     async def close(self, *, reason: str = "closed") -> None:
         raise NotImplementedError
 
-    async def interrupt(self) -> object:
+    async def interrupt(self, *, turn_id: str | None = None) -> object:
         raise NotImplementedError
+
+    # meiva:note
+    # Startup and completion can both race a cancel. Wait on the captured ticket
+    # for the adapter to finish addressing the prompt, then recheck ownership.
+    async def _interrupt_target(self, turn_id: str | None) -> TurnTicket | None:
+        ticket = self._active
+        if turn_id is not None and (ticket is None or ticket.turn_id != turn_id):
+            ticket = next((queued for queued in self._pending if queued.turn_id == turn_id), None)
+        if ticket is None:
+            return None
+        await ticket.interrupt_ready.wait()
+        if self._active is not ticket or ticket.interrupt_requested:
+            return None
+        ticket.interrupt_requested = True
+        return ticket
 
     async def _begin(self, ticket: TurnTicket) -> None:
         raise NotImplementedError

@@ -143,7 +143,7 @@ class FakeSession:
 
         return stream()
 
-    async def interrupt(self) -> object:
+    async def interrupt(self, *, turn_id: str | None = None) -> object:
         return object()
 
     async def close(self, *, reason: str = "closed") -> None:
@@ -755,13 +755,17 @@ async def test_session_model_and_error_detail_surface_through_bridge() -> None:
                 self._queue.append(completion(turn_id, "ok"))
             return FakeTicket(turn_id)
 
-    bridge = make_bridge(ModelOnStartSession())
+    session = ModelOnStartSession()
+    bridge = make_bridge(session)
     await bridge.run_turn("one", key="k1")
     assert bridge.model == "gpt-6.1-sol"
     with pytest.raises(HarnessTurnFaultedError, match="failed \\(failed\\): usage limit reached"):
         await bridge.run_turn("two", key="k2")
     with pytest.raises(HarnessTurnFaultedError, match="failed \\(API 400\\): API Error: 400"):
         await bridge.run_turn("three", key="k3")
+
+    assert session.started == 1
+    assert not session.closed
 
 
 def registration(
