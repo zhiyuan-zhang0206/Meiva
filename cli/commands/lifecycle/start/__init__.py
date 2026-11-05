@@ -336,7 +336,7 @@ def _report_running_tree(
             host=start.command.machine.host(), port=start.config.gateway_port
         ):
             print(line)
-        print_login_link(sessions, config=start.config, at_terminal=sys.stdout.isatty())
+        print_login_link(sessions, config=start.config, out=sys.stdout)
     _report_browser_session(start)
 
 

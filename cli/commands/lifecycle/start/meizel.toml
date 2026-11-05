@@ -18,4 +18,3 @@ exports = ["admission.py", "cold_start.py", "cold_start_plan.py", "gateway_hint.
 "stand_down_gate.py" = "strict"
 
 [debt.ambient-read]
-"__init__.py#pid sys.stdout.isatty" = { count = 1, owner = "#5816", until = "waits for `print_login_link` to take the output stream instead of asking the process for it: `_report_running_tree` passes `sys.stdout.isatty()` because a false answer makes `plan_login_link` skip minting the one-time UI login link for an output nobody is watching, and the stream is the value a test would hand in to name an output that is not a terminal" }

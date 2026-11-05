@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import dataclasses
+import io
 import json
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -25,6 +26,14 @@ from cli.database.runtime import CommandRuntime
 
 _SECRET = "human-secret-for-link-tests"  # noqa: S105 — test fixture
 _TICKET = "ticket.human-0123.abcDEF_-xyz"
+
+
+# meiva:note
+# The stream the cases hand `print_login_link`: a `StringIO` that is a terminal, so a case reads the
+# lines back from the output it named instead of intercepting this process's stdout.
+class _Terminal(io.StringIO):
+    def isatty(self) -> bool:
+        return True
 
 
 # meiva:note
@@ -83,39 +92,36 @@ def _config(command: CommandRuntime, gateway_url: str, *, secret: str = _SECRET)
 
 
 def test_prints_the_ticket_in_the_fragment_and_never_the_secret(
-    command_runtime: CommandRuntime, capsys: pytest.CaptureFixture[str]
+    command_runtime: CommandRuntime,
 ) -> None:
     with _gateway() as gateway:
         config = _config(command_runtime, gateway.url)
+        out = _Terminal()
 
-        print_login_link({"gateway", "gate"}, config=config, at_terminal=True)
+        print_login_link({"gateway", "gate"}, config=config, out=out)
 
-    out = capsys.readouterr().out
-    assert f"http://localhost:3000/#ticket={_TICKET}" in out
-    assert _SECRET not in out
+    printed = out.getvalue()
+    assert f"http://localhost:3000/#ticket={_TICKET}" in printed
+    assert _SECRET not in printed
     assert gateway.calls == [("/api/auth/login-ticket", f"Bearer {_SECRET}")]
 
 
-def test_a_ticket_is_made_safe_for_a_url_fragment(
-    command_runtime: CommandRuntime, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_a_ticket_is_made_safe_for_a_url_fragment(command_runtime: CommandRuntime) -> None:
     with _gateway(body={"ticket": "a b/c?d#e"}) as gateway:
-        print_login_link({"gate"}, config=_config(command_runtime, gateway.url), at_terminal=True)
+        out = _Terminal()
+        print_login_link({"gate"}, config=_config(command_runtime, gateway.url), out=out)
 
-    assert "/#ticket=a%20b%2Fc%3Fd%23e" in capsys.readouterr().out
+    assert "/#ticket=a%20b%2Fc%3Fd%23e" in out.getvalue()
 
 
-def test_skips_when_output_is_not_a_terminal(
-    command_runtime: CommandRuntime, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_skips_when_output_is_not_a_terminal(command_runtime: CommandRuntime) -> None:
     with _gateway() as gateway:
-        print_login_link(
-            {"gateway", "gate"}, config=_config(command_runtime, gateway.url), at_terminal=False
-        )
+        out = io.StringIO()
+        print_login_link({"gateway", "gate"}, config=_config(command_runtime, gateway.url), out=out)
 
-    out = capsys.readouterr().out
+    printed = out.getvalue()
     assert gateway.calls == []
-    assert "#ticket=" not in out and "skipped" in out
+    assert "#ticket=" not in printed and "skipped" in printed
 
 
 def test_mints_nothing_without_a_ui_or_the_human_secret(
@@ -123,16 +129,17 @@ def test_mints_nothing_without_a_ui_or_the_human_secret(
 ) -> None:
     with _gateway() as gateway:
         config = _config(command_runtime, gateway.url)
-        print_login_link({"gateway"}, config=config, at_terminal=True)
+        out = _Terminal()
+        print_login_link({"gateway"}, config=config, out=out)
         print_login_link(
             {"gateway", "gate"},
             config=_config(command_runtime, gateway.url, secret=""),
-            at_terminal=True,
+            out=out,
         )
 
     assert gateway.calls == []
-    captured = capsys.readouterr()
-    assert captured.out == "" and captured.err == ""
+    assert out.getvalue() == ""
+    assert capsys.readouterr().err == ""
 
 
 @pytest.mark.parametrize(
@@ -150,13 +157,12 @@ def test_a_gateway_failure_is_reported_and_does_not_raise(
     body: dict[str, object],
 ) -> None:
     with _gateway(status=status, body=body) as gateway:
-        print_login_link(
-            {"gateway", "gate"}, config=_config(command_runtime, gateway.url), at_terminal=True
-        )
+        out = _Terminal()
+        print_login_link({"gateway", "gate"}, config=_config(command_runtime, gateway.url), out=out)
 
     captured = capsys.readouterr()
     assert "could not mint a one-time UI login link" in captured.err
-    assert "#ticket=" not in captured.out
+    assert "#ticket=" not in out.getvalue() and "#ticket=" not in captured.out
 
 
 def test_an_unreachable_gateway_is_reported_and_does_not_raise(
@@ -166,8 +172,9 @@ def test_an_unreachable_gateway_is_reported_and_does_not_raise(
         unreachable = gateway.url
     config = _config(command_runtime, unreachable)
 
-    print_login_link({"gateway", "gate"}, config=config, at_terminal=True)
+    out = _Terminal()
+    print_login_link({"gateway", "gate"}, config=config, out=out)
 
     captured = capsys.readouterr()
     assert "could not mint a one-time UI login link" in captured.err
-    assert "#ticket=" not in captured.out
+    assert "#ticket=" not in out.getvalue() and "#ticket=" not in captured.out

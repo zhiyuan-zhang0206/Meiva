@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Collection
-from typing import assert_never
+from typing import TextIO, assert_never
 from urllib.parse import quote
 
 from cli.boundary.json_body import response_object
@@ -56,7 +56,10 @@ def _issue_ticket(config: StartConfig) -> str:
 #
 # Inapplicable cases (no UI launched, no human secret, output not a terminal) print nothing
 # or one line; a gateway failure is reported on stderr and never fails the start.
-def print_login_link(sessions: Collection[str], *, config: StartConfig, at_terminal: bool) -> None:
+#
+# The stream is the caller's: it is written to, and whether it is a terminal is asked of it, so a
+# test names an output instead of describing this process's own.
+def print_login_link(sessions: Collection[str], *, config: StartConfig, out: TextIO) -> None:
     import httpx
 
     step = plan_login_link(
@@ -66,14 +69,14 @@ def print_login_link(sessions: Collection[str], *, config: StartConfig, at_termi
             entry_url=config.entry_url,
             app_port=config.app_port,
             has_human_secret=bool(config.data_plane.cluster_secret),
-            at_terminal=at_terminal,
+            at_terminal=out.isatty(),
         )
     )
     match step:
         case NoLink():
             return
         case SkipLink(line=line):
-            print(line)
+            print(line, file=out)
         case MintLink(base=base):
             try:
                 ticket = _issue_ticket(config)
@@ -81,6 +84,6 @@ def print_login_link(sessions: Collection[str], *, config: StartConfig, at_termi
                 print(mint_failure_line(str(exc)), file=sys.stderr)
                 return
             for line in link_lines(base, quote(ticket, safe=".-_")):
-                print(line)
+                print(line, file=out)
         case _:
             assert_never(step)
