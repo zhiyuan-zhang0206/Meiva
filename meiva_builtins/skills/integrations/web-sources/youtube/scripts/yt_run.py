@@ -32,11 +32,11 @@
 
 from __future__ import annotations
 
-import datetime as _dt
 import json
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import assert_never
@@ -79,11 +79,15 @@ from yt_wire import (
 # local transcription subprocess and the raw-mirror dir `<home>/state/mirrors/youtube`
 # — shared derived state doubling as the sync watermark. The per-content subdir is the stable
 # video id, so a re-run reuses it (dedup).
+#
+# `now` is the instant a fetched post is stamped with: the caller names how time is read, so a
+# test pins the stamp instead of comparing against a clock the test also cannot freeze.
 @dataclass(frozen=True)
 class YoutubeConfig:
     ytdlp: str
     transcribe: tuple[str, ...]
     root: Path
+    now: Callable[[], str]
 
 
 # meiva:note
@@ -123,10 +127,6 @@ class SyncResult:
     new_items: tuple[S1Item, ...]
     enumerated: tuple[FeedItem, ...]
     skipped_ids: tuple[str, ...]
-
-
-def _now_iso() -> str:
-    return _dt.datetime.now(tz=_dt.UTC).isoformat().replace("+00:00", "Z")
 
 
 # meiva:note
@@ -230,7 +230,7 @@ def _fetch_with_version(
         if transcript is None and options.whisper_fallback:
             whispered = whisper_transcript(config, video_id)
             transcript = Transcript(whispered, "whisper") if whispered else None
-    post = build_post(video_id, meta, transcript, fetched_at=_now_iso(), version=version)
+    post = build_post(video_id, meta, transcript, fetched_at=config.now(), version=version)
 
     if options.with_video:
         outdir = config.root / video_id

@@ -41,6 +41,10 @@ _CHANNEL = "UCdemodemodemodemodemo22"
 _UPLOADS = "UUdemodemodemodemodemo22"
 _PLAYLIST = "PLf2m23nhTg1P5BsOHUOXyQz5RhfUSSVUi"
 _A, _B, _C, _D = "aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc", "ddddddddddd"
+# meiva:note
+# The instant every fetched post in these cases is stamped with: the config hands it in, so a case
+# asserts the stamp instead of comparing against a clock the case cannot freeze.
+_STAMP = "2026-11-06T00:00:00Z"
 _VIDEO = "dRsjO-88nBs"
 
 _VIDEO_META: dict[str, Any] = {
@@ -202,7 +206,12 @@ class FakeYtdlp:
         transcribe = self.directory / "transcribe.py"
         transcribe.write_text(_STAND_IN_TRANSCRIBE.format(python=sys.executable))
         transcribe.chmod(0o755)
-        return run.YoutubeConfig(ytdlp=str(ytdlp), transcribe=(str(transcribe),), root=root)
+        return run.YoutubeConfig(
+            ytdlp=str(ytdlp),
+            transcribe=(str(transcribe),),
+            root=root,
+            now=lambda: _STAMP,
+        )
 
     def calls(self) -> list[list[str]]:
         return self._logged("calls.log")
@@ -595,6 +604,7 @@ def test_fetch_writes_the_mirror(ytdlp: FakeYtdlp, tmp_path: Path) -> None:
     assert post["fetched_via"] == "youtube-feed (yt-dlp 2099.01.01)"
     assert post["channel"]["handle"] == "@handle"
     assert post["published_at"] == "2025-07-31T18:22:30Z"
+    assert post["fetched_at"] == _STAMP
     assert list(post) == _POST_KEYS
 
 
