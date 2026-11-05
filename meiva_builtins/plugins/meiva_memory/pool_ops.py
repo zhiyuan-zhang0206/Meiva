@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -270,6 +271,57 @@ def rebuild_root_memory_index(pool: Path) -> None:
     print("root:", len(root_files), "dirs:", len(tops), "| chars:", len(new))
     with memory_path.open("w", encoding="utf-8") as f:
         f.write(new)
+    verify_root_counts(pool, memory_path)
+
+
+_ROOT_DIR_LINE_RE = re.compile(r"^- \[([^\]]+)/\]\(([^)]*)/index\.md\) \u2014 (\d+) notes$")
+
+
+def _root_dir_counts(content: str) -> dict[str, int]:
+    heading = re.search(r"^## Pointers[ \t]*$", content, re.M)
+    section = content[heading.end() :] if heading else content
+    counts: dict[str, int] = {}
+    for line in section.splitlines():
+        found = _ROOT_DIR_LINE_RE.match(line)
+        if found:
+            counts[found.group(1)] = int(found.group(3))
+    return counts
+
+
+def _count_mismatches(written: Mapping[str, int], expected: Mapping[str, int]) -> list[str]:
+    out: list[str] = []
+    for name in sorted(set(written) | set(expected)):
+        have, want = written.get(name), expected.get(name)
+        if have is None:
+            out.append(f"{name}/: no count line, expected {want} notes")
+        elif want is None:
+            out.append(f"{name}/: a count line for a directory that holds no notes ({have})")
+        elif have != want:
+            out.append(f"{name}/: says {have} notes, expected {want}")
+    return out
+
+
+# meiva:note
+# The root counts are this function's own derived output, so it proves them itself: read the file
+# back, recount from a fresh enumeration, and fail loudly when the two disagree (405, 2026-11-06).
+# The alternative -- checking them in the pool's PR gate -- was rejected: between a note-adding
+# merge and the next daily rebuild they trail by design, so gating them reds every PR that adds a
+# note. What this covers is the producer that cannot be trusted about its own artifact: a
+# generator that stopped running, or one that computed a smaller number and wrote it down.
+def verify_root_counts(pool: Path, memory_path: Path) -> None:
+    files = collect(pool)
+    expected = {
+        top: sum(1 for note in files if note.startswith(top + "/"))
+        for top in {note.split("/")[0] for note in files if "/" in note}
+    }
+    written = _root_dir_counts(memory_path.read_text(encoding="utf-8"))
+    mismatches = _count_mismatches(written, expected)
+    if not mismatches:
+        return
+    print("\u2717 MEMORY.md root counts disagree with the notes this run counted:", file=sys.stderr)
+    for line in mismatches:
+        print(f"  {line}", file=sys.stderr)
+    raise SystemExit(1)
 
 
 # meiva:note
