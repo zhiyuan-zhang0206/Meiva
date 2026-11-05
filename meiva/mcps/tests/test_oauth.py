@@ -115,18 +115,7 @@ async def test_callback_server_redirect_uri() -> None:
 # ─── issuer normalization shim ────────────────────────────────────────────
 
 
-def test_normalize_issuer_strips_trailing_slash() -> None:
-    assert oauth_mod.normalize_issuer("https://accounts.google.com/") == (
-        "https://accounts.google.com"
-    )
-    assert oauth_mod.normalize_issuer("https://accounts.google.com") == (
-        "https://accounts.google.com"
-    )
-
-
 def test_normalized_validate_issuer_accepts_google_trailing_slash() -> None:
-    """Google's two metadata docs disagree on the trailing slash; the shim
-    treats them as the same issuer (RFC 3986 §6.2.1)."""
     from mcp.shared.auth import OAuthMetadata
     from pydantic import AnyHttpUrl
 
@@ -136,6 +125,47 @@ def test_normalized_validate_issuer_accepts_google_trailing_slash() -> None:
         token_endpoint=AnyHttpUrl("https://oauth2.googleapis.com/token"),
     )
     oauth_mod.normalized_validate_issuer(md, "https://accounts.google.com")  # no raise
+
+
+@pytest.mark.parametrize(
+    ("advertised", "expected"),
+    [
+        ("https://issuer.test/tenant/", "https://issuer.test/tenant"),
+        ("https://issuer.test/tenant", "https://issuer.test/tenant/"),
+        ("https://issuer.test/tenant///", "https://issuer.test/tenant"),
+        ("https://issuer.test///", "https://issuer.test"),
+        ("https://issuer.test/tenant-b", "https://issuer.test/tenant-a"),
+    ],
+)
+def test_issuer_paths_and_multiple_slashes_are_not_normalized(
+    advertised: str, expected: str
+) -> None:
+    from mcp.client.auth.exceptions import OAuthFlowError
+    from mcp.shared.auth import OAuthMetadata
+    from pydantic import AnyHttpUrl
+
+    metadata = OAuthMetadata(
+        issuer=AnyHttpUrl(advertised),
+        authorization_endpoint=AnyHttpUrl("https://issuer.test/auth"),
+        token_endpoint=AnyHttpUrl("https://issuer.test/token"),
+    )
+
+    with pytest.raises(OAuthFlowError, match="issuer mismatch"):
+        oauth_mod.normalized_validate_issuer(metadata, expected)
+
+
+@pytest.mark.parametrize("issuer", ["https://issuer.test/tenant", "https://issuer.test/tenant/"])
+def test_identical_path_issuers_are_accepted(issuer: str) -> None:
+    from mcp.shared.auth import OAuthMetadata
+    from pydantic import AnyHttpUrl
+
+    metadata = OAuthMetadata(
+        issuer=AnyHttpUrl(issuer),
+        authorization_endpoint=AnyHttpUrl("https://issuer.test/auth"),
+        token_endpoint=AnyHttpUrl("https://issuer.test/token"),
+    )
+
+    oauth_mod.normalized_validate_issuer(metadata, issuer)
 
 
 def test_normalized_validate_issuer_still_rejects_mismatch() -> None:

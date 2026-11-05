@@ -35,6 +35,7 @@ import httpx2
 from loguru import logger
 from mcp.client.auth import AuthorizationCodeResult
 from mcp.client.auth.oauth2 import OAuthContext
+from mcp.client.auth.utils import issuers_match
 from mcp.shared.auth import OAuthClientInformationFull, OAuthMetadata, OAuthToken
 from pydantic import AnyUrl
 
@@ -209,30 +210,11 @@ async def _open_browser(auth_url: str) -> None:
         logger.warning("[mcp-oauth] could not open a browser; authorize at: " + auth_url)
 
 
-def normalize_issuer(url: str) -> str:
-    """Strip a trailing slash for issuer comparison (RFC 3986 §6.2.1).
-
-    Google's protected-resource metadata advertises the authorization server
-    as `https://accounts.google.com` while its AS metadata declares issuer
-    `https://accounts.google.com/` — the SDK's strict string compare
-    (validate_metadata_issuer) rejects that as a mismatch. Normalizing both
-    sides is the spec-sanctioned comparison and fixes Google without relaxing
-    anything for other issuers.
-    """
-    return url.rstrip("/")
-
-
+# meiva:note
+# Google's protected-resource path reaches the SDK's strict issuer validator instead of its
+# root-origin tolerance. Keep the two bound copies patched, but use the SDK's own issuers_match:
+# only an origin with and without one trailing slash may differ; path issuers stay exact.
 def _install_issuer_normalization() -> None:
-    """Monkeypatch the SDK's issuer comparison with a normalization shim.
-
-    The SDK compares `str(metadata.issuer) != expected_issuer` verbatim
-    (mcp.client.auth.utils.validate_metadata_issuer), which Google trips over
-    (trailing-slash difference between its two metadata documents). We patch
-    the function the SDK's oauth flow actually calls (it binds the import at
-    module load), replacing the strict compare with a normalized one. Idempotent:
-    patching twice is a no-op. Tracked upstream: modelcontextprotocol/python-sdk
-    (2026-08-05, Google issuer trailing slash).
-    """
     import mcp.client.auth.oauth2 as _oauth2
     import mcp.client.auth.utils as _utils
 
@@ -243,7 +225,7 @@ def _install_issuer_normalization() -> None:
 def normalized_validate_issuer(oauth_metadata: OAuthMetadata, expected_issuer: str) -> None:
     from mcp.client.auth.exceptions import OAuthFlowError
 
-    if normalize_issuer(str(oauth_metadata.issuer)) != normalize_issuer(expected_issuer):
+    if not issuers_match(str(oauth_metadata.issuer), expected_issuer):
         raise OAuthFlowError(
             f"Authorization server metadata issuer mismatch: "
             f"{oauth_metadata.issuer} != {expected_issuer}"
