@@ -1,4 +1,5 @@
 from contextlib import nullcontext
+from datetime import UTC, datetime
 
 import psycopg
 import pytest
@@ -9,6 +10,7 @@ from base.agents.model.birth_config import set_cluster_default_model
 from base.agents.tasks.creation import create_task_in_transaction
 from base.agents.tasks.model import Task
 from base.api_contracts.agent_contract import InvalidModelConfig
+from base.clock.tests.fakes import clock_at
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -96,6 +98,7 @@ def test_caller_owns_birth_task_audit_and_inbound_commit(
                 "Combined task",
                 "Assignment",
                 parent=parent,
+                clock=clock_at(datetime(2026, 11, 6, tzinfo=UTC)),
                 owner=birth.agent_id,
                 actor=actor.agent_id,
                 priority="P2",
@@ -147,6 +150,7 @@ def test_task_validation_failure_rolls_back_birth_and_prompt(
                 "Rejected task",
                 "",
                 parent=parent,
+                clock=clock_at(datetime(2026, 11, 6, tzinfo=UTC)),
                 owner=birth.agent_id,
                 actor=birth.agent_id,
                 priority="P2",

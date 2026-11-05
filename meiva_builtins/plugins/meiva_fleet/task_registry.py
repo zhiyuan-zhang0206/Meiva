@@ -218,6 +218,7 @@ def commit_creation(
             title,
             description,
             parent=parent,
+            clock=context.require_clock(),
             owner=task_owner,
             actor=actor,
             priority=priority,
@@ -734,7 +735,7 @@ def get(task_id: int) -> Task:
         row = cur.fetchone()
     if row is None:
         raise ValueError(f"task {task_id} does not exist")
-    return task_from_row(row)
+    return task_from_row(row, clock=meiva.context.require_clock())
 
 
 def list(
@@ -762,4 +763,5 @@ def list(
     query, params = build_list_query(parent, owner, status, recursive=recursive)
     with meiva.context.sql.cursor() as cur:
         cur.execute(query, params)
-        return [task_from_row(r) for r in cur.fetchall()]
+        clock = meiva.context.require_clock()
+        return [task_from_row(r, clock=clock) for r in cur.fetchall()]

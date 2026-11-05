@@ -10,6 +10,7 @@ from pydantic import TypeAdapter
 from base.agents.tasks.priority import DEFAULT_PRIORITY, validate_priority
 from base.agents.tasks.status import TaskStatus
 from base.agents.tasks.timestamps import render_task_timestamps
+from base.clock import Clock
 
 
 # meiva:note
@@ -47,8 +48,8 @@ _TASK_COLUMN_NAMES = tuple(TASK_COLUMNS.split(", "))
 _TASK = TypeAdapter(Task)
 
 
-def task_from_row(row: tuple[object, ...]) -> Task:
-    values = render_task_timestamps(row, TASK_COLUMNS)
+def task_from_row(row: tuple[object, ...], *, clock: Clock) -> Task:
+    values = render_task_timestamps(row, TASK_COLUMNS, clock=clock)
     return _TASK.validate_python(dict(zip(_TASK_COLUMN_NAMES, values, strict=True)))
 
 
