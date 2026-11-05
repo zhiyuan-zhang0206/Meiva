@@ -25,9 +25,17 @@ class SamplingPolicy(BaseModel):
     sample_every: int = Field(default=10, ge=1)
 
 
+# meiva:note
+# `env` is the live process environment: whole-value reprs of it land in logs.
+# loguru renders a failing line's variables on every `logger.opt(exception=True)`
+# call unless the sink passes `diagnose=False`; a bare SDK process uses loguru's
+# default stderr sink, which keeps `diagnose=True`. Any frame holding this object
+# then printed the entire environment - including `MEIVA_DB_URL` and the delivered
+# token - into the agent's shell log on 2026-11-05 02:20 during a gateway outage.
+# The value stays usable (the mapping is still the field); only its repr is gone.
 @dataclass(frozen=True)
 class SamplingSource:
-    env: Mapping[str, str]
+    env: Mapping[str, str] = field(repr=False)
     env_path: Path
     tuning: BootstrapFetch = field(
         default_factory=lambda: BootstrapFetch(timeout_s=2.0, attempts=1)
