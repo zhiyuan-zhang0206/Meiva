@@ -15,7 +15,7 @@ Plugin faces return frozen PluginContributions values. Merging preserves tuple d
 
 ## Runtime face admission
 
-The load gate compares manifest and provided contributions in both directions for the loaded faces. A failed declaration, manifest or state validation excludes that plugin and reports the failure without excluding other plugins. Declaring state without a supplied state gate is a caller error.
+The load gate compares manifest and provided contributions in both directions, and for each plugin only on the faces that loaded in this process. A face the caller asked for but never imported contributes no keys, so a surface-only child never judges a plugin's runtime declaration. A failed declaration, manifest or state validation excludes that plugin and reports the failure without excluding other plugins. Declaring state without a supplied state gate is a caller error.
 
 Child surface-only loads must stay off the agent runtime and LM stack; heavyweight state validation is injected only by callers that run agent code. `loaded_state_classes` reads only the runtime faces already present in this process for serializer allowlisting. A broken face reports a sink failure and contributes no classes rather than crashing serialization. No discovery or import is needed on the per-payload read.
 

@@ -303,7 +303,9 @@ def build_catalog(*, sampling: SamplingPolicyOwner, home: Path) -> Catalog:
     config = load_extensions(
         sampling=sampling, validate_state=plugin_state_schema, home=home
     ).config
-    declared = {name: contributions for name, _dir, contributions in declarations(home=home)}
+    declared = {
+        declaration.name: declaration.contributions for declaration in declarations(home=home)
+    }
     data_records = _data_records(home=home)
     discovered = enable_config.installed_plugin_dirs(home=home)
     repo_plugins = _repo_plugins_dir()
