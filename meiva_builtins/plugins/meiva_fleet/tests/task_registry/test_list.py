@@ -3,11 +3,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import closing
 from uuid import uuid4
 
 import psycopg
+import pytest
 
-from meiva.tests.fixtures.pin_agent import pin_agent
+from base.agents.context.clients import ClientSet
+from base.db import Database
+from meiva.tests.fixtures.pin_agent import pin_agent, snapshot_clients_over
 from meiva_builtins.plugins.meiva_fleet import task_registry
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
     root_task_id as root_task_id,
@@ -19,11 +24,17 @@ def _create(title: str, parent: int) -> int:
     return task_registry.create(title, "work", parent=parent, operation_key=str(uuid4())).id
 
 
+@pytest.fixture
+def task_list_clients(database: Database) -> Iterator[ClientSet]:
+    with closing(snapshot_clients_over(lambda: database)) as clients:
+        yield clients
+
+
 def test_list_filters_by_owner_status_parent_and_subtree(
-    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int, task_list_clients: ClientSet
 ) -> None:
     owner = seed_agent(db_conn)
-    pin_agent(owner)
+    pin_agent(owner, clients=task_list_clients)
     top = _create("top", root_task_id)
     child = _create("child", top)
     grandchild = _create("grandchild", child)
