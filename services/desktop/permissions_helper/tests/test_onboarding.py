@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import subprocess
+import sys
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -137,6 +138,7 @@ def host(tmp_path: Path, *, client: FakeHelper | DeadHelper | None = None) -> on
     for subpath in FOLDER_PATHS.values():
         (tmp_path / subpath).mkdir(parents=True, exist_ok=True)
     return onboarding.GateHost(
+        python=sys.executable,
         client=client if client is not None else FakeHelper(_codes(0)),
         env={},
         workdir=tmp_path / "scratch",
@@ -183,6 +185,7 @@ def test_a_pass_waits_on_the_timers_of_the_host_it_is_given(tmp_path: Path) -> N
 
 def test_a_non_darwin_host_has_nothing_to_check(tmp_path: Path) -> None:
     seat = onboarding.GateHost(
+        python=sys.executable,
         client=None,
         env={},
         workdir=tmp_path / "scratch",
@@ -348,6 +351,7 @@ def test_a_host_is_described_from_the_facts_the_root_hands_in(tmp_path: Path) ->
     helper = FakeHelper(_codes(0))
 
     seat = onboarding.gate_host(
+        python=sys.executable,
         home=home,
         user_home=user_home,
         environ={"PATH": "/marker/bin"},
@@ -366,6 +370,7 @@ def test_a_platform_without_a_helper_is_a_host_with_no_client_and_nothing_to_che
     tmp_path: Path,
 ) -> None:
     seat = onboarding.gate_host(
+        python=sys.executable,
         home=tmp_path / "meiva-home",
         user_home=tmp_path / "account",
         environ={},

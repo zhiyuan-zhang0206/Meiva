@@ -3,14 +3,10 @@ exports = ["catalog.py", "checklist.py", "gate.py", "probe.py", "triggers.py"]
 [uses]
 "checklist.py" = ["catalog.py", "gate.py"]
 "gate.py" = ["catalog.py", "probe.py"]
-"probe.py" = ["catalog.py", "children"]
-"triggers.py" = ["catalog.py", "children", "probe.py"]
+"probe.py" = ["catalog.py"]
+"triggers.py" = ["catalog.py", "probe.py"]
 "tests" = ["catalog.py", "checklist.py", "gate.py", "probe.py"]
 
 [purity]
 "__init__.py" = "strict"
 "catalog.py" = "strict"
-
-[debt.ambient-read]
-"probe.py#pid sys.executable" = { count = 1, owner = "#5816", until = "waits for `run_preflight` to take the interpreter path from its caller: it reads `sys.executable` itself" }
-"triggers.py#pid sys.executable" = { count = 2, owner = "#5816", until = "waits for `child_argv` to take the interpreter path from its caller: it reads `sys.executable` itself" }

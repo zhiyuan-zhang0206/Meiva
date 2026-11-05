@@ -342,6 +342,7 @@ def ensure_permissions_onboarding(ctx: ConvergeCtx) -> None:
     from services.desktop.permissions_helper import onboarding
 
     host = onboarding.gate_host(
+        python=ctx.host.platform.executable,
         home=ctx.meiva_home,
         user_home=ctx.session.user_home,
         environ=ctx.read_config().process_environment(),

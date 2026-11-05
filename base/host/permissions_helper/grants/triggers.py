@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 from base.host.permissions_helper.grants.catalog import (
@@ -46,17 +45,17 @@ def classify_apple_event(text: str) -> str:
     return f"unresolved ({text})"
 
 
-def child_argv(item_id: str, *, home: Path, result_path: Path) -> list[str] | None:
+def child_argv(item_id: str, *, home: Path, result_path: Path, python: str) -> list[str] | None:
     if item_id in FOLDER_PATHS:
         return [
-            sys.executable,
+            python,
             str(FOLDER_CHILD),
             str(home / FOLDER_PATHS[item_id]),
             str(result_path),
         ]
     if item_id in APPLE_EVENT_SCRIPTS:
         return [
-            sys.executable,
+            python,
             str(APPLE_EVENT_CHILD),
             APPLE_EVENT_SCRIPTS[item_id],
             str(result_path),
@@ -71,13 +70,14 @@ def request_item(
     workdir: Path,
     run_id: str,
     env: dict[str, str],
+    python: str,
     home: Path,
     timeout_s: float,
     timers: Waits,
 ) -> str:
     result_path = workdir / f"{item.id}-{run_id}.result"
     result_path.unlink(missing_ok=True)
-    argv = child_argv(item.id, home=home, result_path=result_path)
+    argv = child_argv(item.id, home=home, result_path=result_path, python=python)
     if argv is None:
         return "unresolved (no trigger method)"
     classify = classify_touch if item.id in FOLDER_PATHS else classify_apple_event

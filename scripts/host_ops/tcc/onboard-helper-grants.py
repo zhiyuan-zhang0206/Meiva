@@ -214,6 +214,7 @@ def preflight_matrix(client: PermissionsHelperClient, workdir: Path, run_id: str
         workdir=workdir,
         run_id=run_id,
         env=child_env(),
+        python=sys.executable,
         services=tuple(PREFLIGHT_SERVICES),
         timers=SYSTEM_TIMERS,
     )
@@ -411,6 +412,7 @@ def _folder_grants(
                     next(key for key, sub in triggers.FOLDER_PATHS.items() if sub == folder),
                     home=home,
                     result_path=result_path,
+                    python=sys.executable,
                 )
                 or [],
                 result_path,
@@ -449,6 +451,7 @@ def _apple_event_grants(
                     ),
                     home=home,
                     result_path=result_path,
+                    python=sys.executable,
                 )
                 or [],
                 result_path,

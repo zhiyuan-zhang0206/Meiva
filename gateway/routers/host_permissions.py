@@ -25,6 +25,7 @@ def gate_service(request: Request) -> GateService:
     clock = gateway_clock(request)
     return GateService(
         host=gate_host(
+            python=process.host.platform.executable,
             home=process.home,
             user_home=config.user_home,
             environ=process.host.environ,

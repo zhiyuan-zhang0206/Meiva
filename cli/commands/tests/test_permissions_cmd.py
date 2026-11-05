@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -106,6 +107,7 @@ class FakeHelper:
 def _host(tmp_path: Path, **overrides: Grant) -> tuple[GateHost, FakeHelper]:
     helper = FakeHelper(**overrides)
     seat = GateHost(
+        python=sys.executable,
         client=helper,
         env={},
         workdir=tmp_path / "scratch",
@@ -226,6 +228,7 @@ def test_the_verb_describes_the_host_from_the_invocation_runtime(
     [(env, cwd)] = helper.children
     assert cwd == str(home / "permissions-onboarding")
     forwarded = onboarding.gate_host(
+        python=sys.executable,
         home=home,
         user_home=runtime.session.user_home,
         environ=runtime.host_after_config().environ,
@@ -233,6 +236,7 @@ def test_the_verb_describes_the_host_from_the_invocation_runtime(
         timers=runtime.timers,
     ).env
     from_the_hosts_launch = onboarding.gate_host(
+        python=sys.executable,
         home=home,
         user_home=runtime.session.user_home,
         environ=runtime.host.environ,

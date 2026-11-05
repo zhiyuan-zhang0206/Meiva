@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -359,6 +360,7 @@ def test_the_onboarding_step_acts_on_the_context_home_and_clock(
     assert (workdir / "preflight-converge-20261017T080000000000-probe.results.json").exists()
     assert helper.folders == [str(mac.session.user_home / FOLDER_PATHS["desktop-folder"])]
     forwarded = onboarding.gate_host(
+        python=sys.executable,
         home=unit_home,
         user_home=mac.session.user_home,
         environ=mac.read_config().process_environment(),
@@ -366,6 +368,7 @@ def test_the_onboarding_step_acts_on_the_context_home_and_clock(
         timers=mac.timers,
     ).env
     from_the_hosts_launch = onboarding.gate_host(
+        python=sys.executable,
         home=unit_home,
         user_home=mac.session.user_home,
         environ=mac.host.environ,

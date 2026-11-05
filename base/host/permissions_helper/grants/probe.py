@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -163,6 +162,7 @@ def run_preflight(
     workdir: Path,
     run_id: str,
     env: dict[str, str],
+    python: str,
     services: tuple[str, ...],
     timers: Waits,
     wait_s: float = PROBE_WAIT_S,
@@ -173,7 +173,7 @@ def run_preflight(
     spawn_child(
         client,
         name=f"tcc-preflight-{run_id}",
-        argv=[sys.executable, str(PREFLIGHT_CHILD), json.dumps(list(services)), str(result_path)],
+        argv=[python, str(PREFLIGHT_CHILD), json.dumps(list(services)), str(result_path)],
         env=env,
         workdir=workdir,
         tag=f"preflight-{run_id}",
@@ -196,6 +196,7 @@ def probe(
     workdir: Path,
     run_id: str,
     env: dict[str, str],
+    python: str,
     timers: Waits,
     services: tuple[str, ...] | None = None,
     wait_s: float = PROBE_WAIT_S,
@@ -220,6 +221,7 @@ def probe(
         workdir=workdir,
         run_id=run_id,
         env=env,
+        python=python,
         services=services or PREFLIGHT_SERVICES,
         timers=timers,
         wait_s=wait_s,
