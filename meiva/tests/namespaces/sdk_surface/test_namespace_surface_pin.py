@@ -94,7 +94,17 @@ _TOP_LEVEL = [
 
 @pytest.mark.parametrize("namespace", sorted(_SURFACE))
 def test_the_agent_visible_names_of_a_core_namespace_are_pinned(namespace: str) -> None:
-    module = security if namespace == "security" else getattr(meiva, namespace)
+    module = {
+        "agents": meiva.agents,
+        "self": meiva.self,
+        "ui": meiva.ui,
+        "watcher": meiva.watcher,
+        "web": meiva.web,
+        "skills": meiva.skills,
+        "files": meiva.files,
+        "shell": meiva.shell,
+        "security": security,
+    }[namespace]
     assert agent_visible_names(module) == _SURFACE[namespace]
 
 

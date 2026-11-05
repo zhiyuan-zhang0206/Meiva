@@ -65,16 +65,20 @@ def _infra_receivers(config: ConfigMapping) -> list[object]:
 def test_the_collector_settings_are_read_from_the_domains_of_one_owner(
     command_runtime: CommandRuntime,
 ) -> None:
+    _ = command_runtime.config.ensure_eager()
     view = command_runtime.config.view
 
     values = collector_settings_from_boot(command_runtime.config)
 
-    for group, domain in (
-        (values.observability, view.observability),
-        (values.data_plane, view.data_plane),
+    for group, expected in (
+        (values.observability, dict(view.observability)),
+        (
+            values.data_plane,
+            {**dict(view.data_plane), "is_remote": view.data_plane.is_remote},
+        ),
     ):
         assert dataclasses.asdict(group) == {
-            field.name: getattr(domain, field.name) for field in dataclasses.fields(group)
+            field.name: expected[field.name] for field in dataclasses.fields(group)
         }
     limits = view.observability
     assert values.download == collector_plan.DownloadLimits(

@@ -7,10 +7,12 @@ from base.cluster.machine import MachineIdentityReader
 # The model id a built chat model serves, whichever provider client it is: the clients name it
 # `model` or `model_name`.
 def served_model(llm: object) -> str:
-    for attribute in ("model", "model_name"):
-        value = getattr(llm, attribute, None)
-        if isinstance(value, str):
-            return value
+    value = getattr(llm, "model", None)
+    if isinstance(value, str):
+        return value
+    value = getattr(llm, "model_name", None)
+    if isinstance(value, str):
+        return value
     raise AssertionError(f"{type(llm).__name__} names no model")
 
 

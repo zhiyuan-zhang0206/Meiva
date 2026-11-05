@@ -46,9 +46,7 @@ def test_the_mapping_reads_every_field_from_its_own_setting(
 
     config = data_plane_config_from_boot(boot)
 
-    assert {
-        field.name: getattr(config, field.name) for field in dataclasses.fields(config)
-    } == expected
+    assert dataclasses.asdict(config) == expected
 
 
 def test_is_remote_is_derived_from_the_urls_and_follows_a_replaced_url(

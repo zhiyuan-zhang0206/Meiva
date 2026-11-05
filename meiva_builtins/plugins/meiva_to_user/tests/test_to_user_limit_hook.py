@@ -15,7 +15,7 @@ from base.agents.context.identity import AgentIdentity
 from base.agents.to_user.models import DOCUMENT_FILENAME
 from base.clock import Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
-from base.config import settings
+from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.log.tests.log_records import LogRecords
 from base.packages.plugins.extensions import ExtensionRegistry
@@ -36,10 +36,6 @@ _NOW = datetime(2026, 3, 4, 5, 6, 7, tzinfo=UTC)
 def _clock() -> Clock:
     timers = ManualTimers(wall_start=_NOW)
     return Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
-
-
-def _default_reader(domain: str, field: str) -> Any:
-    return getattr(getattr(settings, domain), field)
 
 
 def _state(
@@ -65,7 +61,7 @@ def _state(
 def _runtime(pins: dict[str, Any] | None = None) -> Runtime[MeivaContext]:
     context = MeivaContext(
         identity=AgentIdentity(agent_id=_AGENT, owns_loop=True),
-        agent=AgentSlices.resolve(pins=pins, default_reader=_default_reader),
+        agent=AgentSlices.resolve(pins=pins, default_reader=defaults()),
         clock_factory=_clock,
         meiva_home=resolve_meiva_home(),
     )

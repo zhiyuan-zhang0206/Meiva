@@ -55,36 +55,34 @@ def test_converged_namespaces_load_real_task_instructions(
     assert isinstance(root_body, str)
     assert "meiva agents send" in root_body
 
-    expected = {
-        ("meiva_guide", "agents"): "external_agent:claude_code",
-        ("meiva_guide", "deploy"): "meiva init",
-        ("meiva_guide", "operations"): "Alert review",
-        ("meiva_guide", "modification_layers"): "L4",
-        ("meiva_guide", "packages", "install"): "Find candidates",
-        ("meiva_guide", "plugins", "develop"): "plugin.py",
-        ("meiva_guide", "schedules"): "resumable",
-        ("meiva_guide", "external_agents"): "Mode B",
-        ("meiva_guide", "pages"): "user input",
-        ("meiva_workflow", "capability_timescale"): "Gather evidence",
-    }
-    for segments, instruction in expected.items():
-        skill = meiva.skills
-        for segment in segments:
-            skill = getattr(skill, segment)
+    guide = meiva.skills.meiva_guide
+    expected = (
+        (guide.agents, "external_agent:claude_code"),
+        (guide.deploy, "meiva init"),
+        (guide.operations, "Alert review"),
+        (guide.modification_layers, "L4"),
+        (guide.packages.install, "Find candidates"),
+        (guide.plugins.develop, "plugin.py"),
+        (guide.schedules, "resumable"),
+        (guide.external_agents, "Mode B"),
+        (guide.pages, "user input"),
+        (meiva.skills.meiva_workflow.capability_timescale, "Gather evidence"),
+    )
+    for skill, instruction in expected:
         body = skill.__doc__
         assert isinstance(body, str)
         assert instruction in body
 
-    for old in (
-        "meiva_package_installer",
-        "meiva_schedule_writer",
-        "meiva_use_other_agents",
-        "meiva_ui",
-        "meiva_watcher",
-        "meiva_ultra_speed",
+    for read in (
+        lambda: meiva.skills.meiva_package_installer,
+        lambda: meiva.skills.meiva_schedule_writer,
+        lambda: meiva.skills.meiva_use_other_agents,
+        lambda: meiva.skills.meiva_ui,
+        lambda: meiva.skills.meiva_watcher,
+        lambda: meiva.skills.meiva_ultra_speed,
     ):
         with pytest.raises(AttributeError):
-            getattr(meiva.skills, old)
+            read()
 
 
 def _assert_portable_reading_links(target: Path) -> None:

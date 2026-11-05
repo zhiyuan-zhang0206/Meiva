@@ -48,9 +48,8 @@ def load_activity_plugin() -> Iterator[None]:
 
 
 def test_plugin_registers_self_members(load_activity_plugin: None):
-    for name in ("set_label",):
-        assert callable(getattr(meiva.self, name))
-        assert name in meiva.self.__all_for_meiva__
+    assert callable(meiva.self.set_label)
+    assert "set_label" in meiva.self.__all_for_meiva__
 
 
 def test_member_torn_down_on_uninstall(load_activity_plugin: None):
@@ -363,8 +362,12 @@ def test_set_label_hands_the_agents_own_label_to_the_gateway(
 
 
 def test_plugin_registers_ui_notice_members(load_activity_plugin: None):
-    for name in ("notify", "edit_notice", "dismiss_notice"):
-        assert callable(getattr(meiva.ui, name))
+    for name, member in (
+        ("notify", meiva.ui.notify),
+        ("edit_notice", meiva.ui.edit_notice),
+        ("dismiss_notice", meiva.ui.dismiss_notice),
+    ):
+        assert callable(member)
         assert name in meiva.ui.__all_for_meiva__
 
 

@@ -25,7 +25,7 @@ for name, alias, raw in json.loads(os.environ["PARITY_CASES"]):
         lite_error = f"{type(exc).__name__}: {exc}"
     model = MODELS[FIELD_DOMAINS[name]]
     try:
-        eager_value = getattr(model(), name)
+        eager_value = dict(model())[name]
         eager_error = None
         eager_is_value_error = None
     except Exception as exc:

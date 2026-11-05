@@ -35,9 +35,9 @@ def _free_port() -> int:
 def test_the_slice_carries_the_live_value_of_every_field() -> None:
     boot = ConfigBoot()
     config = daemon.memory_search_config(config=boot)
-    for field in dataclasses.fields(config):
-        flat = getattr(boot.view.services, _FLAT_NAME.get(field.name, field.name))
-        assert getattr(config, field.name) == flat, field.name
+    for name, value in dataclasses.asdict(config).items():
+        flat = boot.get_field(_FLAT_NAME.get(name, name))
+        assert value == flat, name
 
 
 async def test_storage_boot_serves_the_provider_width_over_a_real_socket(tmp_path: Path) -> None:

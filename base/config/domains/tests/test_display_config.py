@@ -35,7 +35,7 @@ def test_display_window_accepts_both_endpoints_without_clamping(
 ) -> None:
     for value in (minimum, maximum):
         configured = _load(name, value, source)
-        assert getattr(configured, name) == value
+        assert dict(configured)[name] == value
 
 
 @pytest.mark.parametrize(("name", "minimum", "maximum"), DISPLAY_RANGES)

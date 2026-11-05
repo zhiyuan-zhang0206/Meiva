@@ -26,6 +26,7 @@ from base.agents.context.identity import AgentIdentity
 from base.clock import Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
 from base.config import settings
+from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.log.tests.log_records import LogRecords
 from base.packages.plugins.extensions import ExtensionRegistry
@@ -48,10 +49,6 @@ _NOW = datetime(2026, 3, 4, 5, 6, 7, tzinfo=UTC)
 def _clock() -> Clock:
     timers = ManualTimers(wall_start=_NOW)
     return Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
-
-
-def _default_reader(domain: str, field: str) -> Any:
-    return getattr(getattr(settings, domain), field)
 
 
 @pytest.fixture
@@ -145,7 +142,7 @@ def runtime(search: _MemoryGateway, model_catalog: Any) -> Iterator[Runtime[Meiv
     )
     context = MeivaContext(
         identity=AgentIdentity(agent_id=17, owns_loop=True),
-        agent=AgentSlices.resolve(default_reader=_default_reader),
+        agent=AgentSlices.resolve(default_reader=defaults()),
         catalog=model_catalog,
         clients=clients,
         clock_factory=_clock,
@@ -283,7 +280,7 @@ async def test_the_threshold_is_configurable(
         context=replace(
             runtime.context,
             agent=AgentSlices.resolve(
-                {"memory_write_dedup_threshold": 0.5}, default_reader=_default_reader
+                {"memory_write_dedup_threshold": 0.5}, default_reader=defaults()
             ),
         ),
     )
@@ -399,7 +396,7 @@ async def test_a_deadline_overrun_is_logged_and_adds_nothing(
         context=replace(
             runtime.context,
             agent=AgentSlices.resolve(
-                {"memory_write_check_deadline_seconds": 0.05}, default_reader=_default_reader
+                {"memory_write_check_deadline_seconds": 0.05}, default_reader=defaults()
             ),
         ),
     )
@@ -472,7 +469,8 @@ async def test_records_union_across_calls_and_reset_in_a_real_graph(
 
     final = state_cls.model_validate(await graph.compile().ainvoke(state_cls(messages=[])))
 
-    assert getattr(final, _SHARED) == set() and getattr(final, _PERSONAL) == set()
+    values = dict(final)
+    assert values[_SHARED] == set() and values[_PERSONAL] == set()
     [reminder] = final.messages
     assert str(pool / "a.md") in str(reminder.content) and str(pool / "b.md") in str(
         reminder.content

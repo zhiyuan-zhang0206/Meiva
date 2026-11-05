@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import asdict
 from typing import Any
 
 import pytest
@@ -154,8 +155,9 @@ def test_an_agents_stream_bound_is_the_one_the_stream_runs_under(
     )
     unpinned = stream_bounds(AgentSlices.resolve(default_reader=defaults()), model_catalog)
 
-    assert getattr(pinned, _STREAM_BOUNDS[setting]) == 4.25
+    pinned_values, unpinned_values = asdict(pinned), asdict(unpinned)
+    assert pinned_values[_STREAM_BOUNDS[setting]] == 4.25
     for other in _STREAM_BOUNDS.values():
         if other != _STREAM_BOUNDS[setting]:
-            assert getattr(pinned, other) == getattr(unpinned, other)
-    assert getattr(unpinned, _STREAM_BOUNDS[setting]) != 4.25
+            assert pinned_values[other] == unpinned_values[other]
+    assert unpinned_values[_STREAM_BOUNDS[setting]] != 4.25

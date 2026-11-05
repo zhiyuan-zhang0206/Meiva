@@ -1,4 +1,1 @@
 exports = ["test_display_config.py", "test_upload_dir_config.py"]
-
-[debt.restricted-python]
-"test_display_config.py#dynamic attribute name" = { count = 1, owner = "#6082", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

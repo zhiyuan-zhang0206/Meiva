@@ -5,6 +5,3 @@ exports = ["fake_process_control.py", "host_pipe.py"]
 "test_identity_boundaries.py" = ["_identity_import_child.py"]
 "test_os_platform.py" = ["_os_platform_child.py"]
 "test_process_control.py" = ["fake_process_control.py"]
-
-[debt.restricted-python]
-"_identity_import_child.py#dynamic attribute name" = { count = 1, owner = "#6082", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

@@ -17,6 +17,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
 from base.config import ConfigBoot, settings
+from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_config_images import PluginConfigOwner, config_image_path
@@ -143,7 +144,7 @@ def test_bind_auto_writes_default_when_missing(
         "test_plugin",
         AgentSlices.resolve(
             plugin_configs=isolated_registry,
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+            default_reader=defaults(),
         ),
         FixtureConfig,
     )
@@ -171,7 +172,7 @@ def test_bind_reads_existing_image(isolated_registry: dict[str, BaseModel], unit
         "test_plugin",
         AgentSlices.resolve(
             plugin_configs=isolated_registry,
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+            default_reader=defaults(),
         ),
         FixtureConfig,
     )
@@ -255,7 +256,7 @@ def test_merge_then_bind_resolves_removed_field_drift(
         "test_plugin",
         AgentSlices.resolve(
             plugin_configs=isolated_registry,
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+            default_reader=defaults(),
         ),
         FixtureConfig,
     )
@@ -615,7 +616,7 @@ def test_apply_config_overlay_mutates_plugin_config(
             "overlay_test",
             AgentSlices.resolve(
                 plugin_configs=isolated_registry,
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+                default_reader=defaults(),
             ),
             FixtureConfig,
         ).marker
@@ -629,7 +630,7 @@ def test_apply_config_overlay_mutates_plugin_config(
             "overlay_test",
             AgentSlices.resolve(
                 plugin_configs=isolated_registry,
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+                default_reader=defaults(),
             ),
             FixtureConfig,
         ).marker
@@ -686,7 +687,6 @@ def test_apply_config_overlay_plugin_scope_only_mutates_plugin_configs(
     isolated_registry: dict[str, BaseModel], unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """scope='plugin' applies only plugin half; framework Settings untouched."""
-    from base.config import settings
 
     _setup_overlayable_plugin(isolated_registry)
     original_model = settings.lm.llm_model
@@ -703,7 +703,7 @@ def test_apply_config_overlay_plugin_scope_only_mutates_plugin_configs(
             "overlay_test",
             AgentSlices.resolve(
                 plugin_configs=isolated_registry,
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+                default_reader=defaults(),
             ),
             FixtureConfig,
         ).marker

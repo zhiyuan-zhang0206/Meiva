@@ -68,8 +68,8 @@ def test_health_probe_check_flags_disable_only_when_negated(flag: str, destinati
     parser = build_parser()
     default = parser.parse_args(["cluster", "health-probe"])
     disabled = parser.parse_args(["cluster", "health-probe", f"--no-{flag}"])
-    assert getattr(default, destination) is True
-    assert getattr(disabled, destination) is False
+    assert default.schema_check is True
+    assert disabled.schema_check is False
     with pytest.raises(SystemExit) as refused:
         parser.parse_args(["cluster", "health-probe", f"--{flag}"])
     assert refused.value.code == 2

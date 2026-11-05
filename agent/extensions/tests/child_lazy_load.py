@@ -18,10 +18,6 @@ from typing import Any
 from base.paths import meiva_home
 
 
-def sdk_namespace(module: object, name: str) -> Any:
-    return getattr(module, name)
-
-
 def _as_exec_entry() -> None:
     import importlib.machinery
 
@@ -76,7 +72,7 @@ def loads_at_import(counter: Path) -> dict[str, Any]:
 
     return {
         "installed_after_import": _installed(),
-        "pong": sdk_namespace(meiva, "lazytasks").ping(),
+        "pong": meiva.lazytasks.ping(),
         "executions": _executions(counter),
     }
 
@@ -88,7 +84,7 @@ def loads_on_first_miss(counter: Path) -> dict[str, Any]:
     after_import = _installed()
     return {
         "installed_after_import": after_import,
-        "pong": sdk_namespace(meiva, "lazytasks").ping(),
+        "pong": meiva.lazytasks.ping(),
         "installed": _installed(),
         "executions": _executions(counter),
     }
@@ -98,8 +94,8 @@ def latched_after_first_load(counter: Path) -> dict[str, Any]:
     _as_exec_entry()
     import meiva
 
-    _ = sdk_namespace(meiva, "lazytasks")
-    second = _attribute_error(lambda: sdk_namespace(meiva, "still_unknown"))
+    _ = meiva.lazytasks
+    second = _attribute_error(lambda: meiva.still_unknown)
     return {"second_miss": second, "executions": _executions(counter)}
 
 
@@ -107,7 +103,7 @@ def unknown_name(counter: Path) -> dict[str, Any]:
     import meiva
 
     return {
-        "error": _attribute_error(lambda: sdk_namespace(meiva, "nope_xyz")),
+        "error": _attribute_error(lambda: meiva.nope_xyz),
         "installed": _installed(),
         "executions": _executions(counter),
     }
@@ -135,7 +131,7 @@ def agent_process(counter: Path) -> dict[str, Any]:
         MeivaContext(identity=AgentIdentity(agent_id=7, owns_loop=True), environ=os.environ)
     )
     return {
-        "error": _attribute_error(lambda: sdk_namespace(meiva, "nope_xyz")),
+        "error": _attribute_error(lambda: meiva.nope_xyz),
         "executions": _executions(counter),
     }
 
@@ -177,8 +173,8 @@ def unreadable_config_on_lookup(counter: Path) -> dict[str, Any]:
     return {
         **_repeated_failure(
             [
-                lambda: sdk_namespace(meiva, "missing_after_failure"),
-                lambda: sdk_namespace(meiva, "missing_after_failure"),
+                lambda: meiva.missing_after_failure,
+                lambda: meiva.missing_after_failure,
             ]
         ),
         "executions": _executions(counter),
@@ -213,17 +209,17 @@ def member_on_framework_namespace(counter: Path) -> dict[str, Any]:
     _as_exec_entry()
     import meiva
 
-    member = "lazylog"
-    return {"pong": getattr(meiva.self, member)(), "executions": _executions(counter)}
+    member = meiva.self.lazylog
+    assert callable(member)
+    return {"pong": member(), "executions": _executions(counter)}
 
 
 def missing_member(counter: Path) -> dict[str, Any]:
     import meiva
 
-    self_member, ui_member = "lazylog", "lazynotify"
     return {
-        "self": _attribute_error(lambda: getattr(meiva.self, self_member)),
-        "ui": _attribute_error(lambda: getattr(meiva.ui, ui_member)),
+        "self": _attribute_error(lambda: meiva.self.lazylog),
+        "ui": _attribute_error(lambda: meiva.ui.lazynotify),
         "executions": _executions(counter),
     }
 

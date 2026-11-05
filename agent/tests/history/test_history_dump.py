@@ -52,9 +52,9 @@ from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import settings
 from base.config.domains.agent.settings import AgentCompactionSettings
 from base.config.service_read import ConfigAuthority
+from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -195,7 +195,7 @@ def _runtime_with_llm(
                     "auto_compact_fraction": 1e-6,
                     "compact_reminder_fraction": 1e-6,
                 },
-                default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+                default_reader=defaults(),
             ),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
@@ -235,7 +235,7 @@ def _make_runtime(
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(
             {"history_dump_enabled": enabled, "history_dump_keep": 5},
-            default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+            default_reader=defaults(),
         ),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),

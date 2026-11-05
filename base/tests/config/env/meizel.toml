@@ -3,6 +3,3 @@
 "test_dotenv_boot_launcher_context.py" = ["test_dotenv_boot.py"]
 "test_file_lock_bounded.py" = ["_file_lock_holder.py"]
 "test_registry.py" = ["_env_import_child.py"]
-
-[debt.restricted-python]
-"test_agent_slices.py#dynamic attribute name" = { count = 9, owner = "#6082", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

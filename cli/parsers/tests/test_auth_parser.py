@@ -11,8 +11,9 @@ from cli.parsers import command_options, parse_args
 @pytest.mark.parametrize(("flag", "other"), [("--prompt", "stdin"), ("--stdin", "prompt")])
 def test_one_named_source_is_accepted_and_the_other_is_off(flag: str, other: str) -> None:
     args = parse_args(["auth", "set-password", flag])
-    assert getattr(args, flag.removeprefix("--")) is True
-    assert getattr(args, other) is False
+    sources = {"prompt": args.prompt, "stdin": args.stdin}
+    assert sources[flag.removeprefix("--")] is True
+    assert sources[other] is False
 
 
 def test_no_source_is_an_error_that_lists_both_options(

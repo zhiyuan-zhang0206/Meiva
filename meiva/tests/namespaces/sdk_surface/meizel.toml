@@ -6,6 +6,3 @@
 "test_log_agent_attribution.py" = ["child_gateway_boot.py"]
 "test_process_clients.py" = ["child_gateway_credentials.py"]
 "test_sampling_atexit.py" = ["child_sampling_atexit.py", "child_sampling_atexit_uninstalled.py"]
-
-[debt.restricted-python]
-"test_namespace_surface_pin.py#dynamic attribute name" = { count = 1, owner = "#6082", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

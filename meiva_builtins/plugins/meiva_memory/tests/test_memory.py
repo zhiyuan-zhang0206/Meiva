@@ -96,7 +96,7 @@ def test_path_docs_carry_the_note_format(name: str) -> None:
     from meiva.tests.fixtures.pin_agent import pin_agent
 
     pin_agent(17)
-    doc = getattr(meiva.memory, name).__doc__
+    doc = {"PATH": meiva.memory.PATH, "PERSONAL_PATH": meiva.memory.PERSONAL_PATH}[name].__doc__
     for required in ("type: Memory", "meiva_agent:", "meiva_machine:", "timestamp:", "title:"):
         assert required in doc
     assert "description:" in doc and "tags: [type/<kind>]" in doc

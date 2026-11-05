@@ -8,6 +8,3 @@ exports = ["slices.py"]
 "test_computer_loop_liveness.py" = ["loop_watchdog_child.py", "slices.py"]
 "test_computer_mcp_daemon.py" = ["slices.py"]
 "test_computer_mcp_wrapper.py" = ["slices.py"]
-
-[debt.restricted-python]
-"test_computer_config.py#dynamic attribute name" = { count = 1, owner = "#6082", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }
