@@ -20,4 +20,4 @@ exports = ["synthetic.py"]
 "test_rule.py" = ["synthetic.py"]
 
 [debt.restricted-python]
-"test_graphs.py#dynamic attribute name" = { count = 1, owner = "#6082", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }
+"test_graphs.py#dynamic attribute name" = { count = 1, owner = "#6082", until = "permanently: the test collects every public callable the model declares and requires the shell to implement it, so naming them as a list would let a method added to the model go unimplemented — the gap this check exists to catch. Reopens if the check stops reflecting over the class: a hand-kept list of methods, or a protocol the type checker enforces instead, makes this entry repayable" }
