@@ -35,6 +35,11 @@ An agent's harness can be switched bidirectionally (`meiva` <-> external, or bet
 `meiva.agents.restart(agent_id, message="...", config_overlay={"harness": "..."})`.
 The agent must be in `idling` or `terminated` status, and a mandatory `message` explaining the switch is required.
 
+For a switch requested during the target agent's own turn, save a handoff and
+submit the restart from outside the target session after it becomes idle.
+The transition cleans up agent-owned shell sessions, so a shell belonging to
+the target is unsuitable for tracking its own restart result.
+
 `meiva.agents.resurrect(agent_id, prompt)` wakes a terminated agent on its current
 harness.
 

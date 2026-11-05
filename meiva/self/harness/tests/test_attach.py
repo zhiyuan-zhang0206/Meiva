@@ -129,7 +129,7 @@ def test_another_machines_registration_is_refused() -> None:
 
 
 def test_a_process_outside_the_controller_tree_is_refused() -> None:
-    with pytest.raises(RegistrationError, match="does not descend"):
+    with pytest.raises(RegistrationError, match=r"does not descend.*meiva\.shell\.run_background"):
         admit(row(controller_pid=1234))
 
 

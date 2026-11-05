@@ -1,0 +1,2 @@
+[uses]
+"test_shell_background.py" = ["background_sdk_probe.py"]

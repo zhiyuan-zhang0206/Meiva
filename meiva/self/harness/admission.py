@@ -56,7 +56,8 @@ def require_live_registration(
     if not descends(registration.controller_pid, lineage):
         raise RegistrationError(
             "this process does not descend from the controller that started the "
-            f"harness session (pid {registration.controller_pid})"
+            f"harness session (pid {registration.controller_pid}). Launch SDK work that must "
+            "continue in the background with meiva.shell.run_background from the live session"
         )
     return registration
 
