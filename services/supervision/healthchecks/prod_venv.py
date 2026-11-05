@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import re
 import subprocess
-import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -63,22 +62,29 @@ def _probe_within(
     legs_left: int,
     run: CommandRunner,
     clock: Clock,
+    cwd: Path,
 ) -> _LegFailure | None:
     share = (deadline - clock.monotonic()) / legs_left
     if share <= 0:
         return _LegFailure(f"{label}: the observation deadline was already spent", unmeasured=True)
-    return _probe(label, argv, env, share, run=run)
+    return _probe(label, argv, env, share, run=run, cwd=cwd)
 
 
 def _probe(
-    label: str, argv: list[str], env: dict[str, str], timeout_s: float, *, run: CommandRunner
+    label: str,
+    argv: list[str],
+    env: dict[str, str],
+    timeout_s: float,
+    *,
+    run: CommandRunner,
+    cwd: Path,
 ) -> _LegFailure | None:
     """Return a bounded diagnostic for failed execution, including spawn failure."""
     try:
         result = run(
             argv,
             timeout=timeout_s,
-            cwd=tempfile.gettempdir(),
+            cwd=cwd,
             env=env,
             capture_output=True,
             text=True,
@@ -139,6 +145,7 @@ def observe_venv(
     deadline_s: float,
     run: CommandRunner,
     clock: Clock,
+    probe_cwd: Path,
 ) -> VenvObservation:
     interpreter = editable_install.venv_python(source_root)
     if interpreter is None:
@@ -159,6 +166,7 @@ def observe_venv(
             legs_left=2,
             run=run,
             clock=clock,
+            cwd=probe_cwd,
         )
         if failure is not None:
             (unmeasured if failure.unmeasured else violations).append(failure.detail)
@@ -173,6 +181,7 @@ def observe_venv(
         legs_left=1,
         run=run,
         clock=clock,
+        cwd=probe_cwd,
     )
     if failure is not None:
         (unmeasured if failure.unmeasured else violations).append(failure.detail)

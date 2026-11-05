@@ -57,6 +57,7 @@ def test_a_venv_leg_inside_the_observation_deadline_is_not_a_failure(tmp_path: P
         clock=system_clock(),
         deadline_s=20.0,
         source_root=tmp_path,
+        probe_cwd=tmp_path,
     )
 
     assert probe.alive
@@ -78,6 +79,7 @@ def test_a_venv_leg_that_outlives_the_deadline_is_inconclusive_not_down(tmp_path
         clock=Clock(ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=timers),
         deadline_s=2000.0,
         source_root=tmp_path,
+        probe_cwd=tmp_path,
     )
 
     assert probe.verdict is ProbeVerdict.INCONCLUSIVE
@@ -106,6 +108,7 @@ def test_a_venv_leg_the_host_could_not_start_is_no_verdict(tmp_path: Path) -> No
         clock=system_clock(),
         deadline_s=20.0,
         source_root=tmp_path,
+        probe_cwd=tmp_path,
     )
 
     assert probe.verdict is ProbeVerdict.INCONCLUSIVE

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import tempfile
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -51,6 +52,7 @@ def checks_for(
     root: OwnedProcess = ROOT,
     launchd: LaunchdFacts = LAUNCHD,
     run: CommandRunner | None = None,
+    probe_cwd: Path | None = None,
     **inputs: Any,
 ) -> list[Diagnostic]:
     return probes.build_diagnostics(
@@ -58,6 +60,10 @@ def checks_for(
         launchd=launchd,
         run=runner_from(refuse_launchctl) if run is None else run,
         root=root,
+        # meiva:note
+        # A roster test observes the probe, not the directory it runs in: the OS temp directory is
+        # what a deployed root hands in.
+        probe_cwd=Path(tempfile.gettempdir()) if probe_cwd is None else probe_cwd,
         **inputs,
     )
 
