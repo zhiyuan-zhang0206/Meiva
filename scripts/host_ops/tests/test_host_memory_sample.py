@@ -50,6 +50,66 @@ def test_sample_ranks_units_and_treats_max_as_unbounded(tmp_path: Path) -> None:
     assert payload["ts"].endswith("+00:00")
 
 
+def test_sample_reports_machine_memory_and_capped_units(tmp_path: Path) -> None:
+    root = tmp_path / "user.slice"
+    _write(root / "memory.current", "1000\n")
+    _write(root / "app.slice" / "run-a.scope" / "memory.current", "400\n")
+    _write(root / "app.slice" / "run-a.scope" / "memory.max", "1024\n")
+    _write(root / "app.slice" / "run-a.scope" / "memory.peak", "900\n")
+    _write(root / "free.scope" / "memory.current", "10\n")
+    _write(root / "free.scope" / "memory.max", "max\n")
+    _write(
+        tmp_path / "meminfo",
+        "MemTotal: 1000 kB\nMemAvailable: 400 kB\nSwapTotal: 200 kB\nSwapFree: 50 kB\n",
+    )
+    _write(tmp_path / "machine" / "memory.current", "555\n")
+    _write(
+        tmp_path / "machine" / "memory.stat",
+        "anon 300\nfile 200\nslab 45\nslab_reclaimable 40\nslab_unreclaimable 5\nkernel 9\n",
+    )
+
+    payload = sampler.sample(
+        pressure=tmp_path / "absent",
+        cgroup_root=root,
+        limit=3,
+        meminfo=tmp_path / "meminfo",
+        machine_root=tmp_path / "machine",
+    )
+
+    assert payload["machine"] == {
+        "charged": 555,
+        "anon": 300,
+        "file": 200,
+        "slab": 45,
+        "slab_reclaimable": 40,
+        "slab_unreclaimable": 5,
+        "kernel": 9,
+        "total": 1024 * 1000,
+        "available": 1024 * 400,
+        "swap_total": 1024 * 200,
+        "swap_free": 1024 * 50,
+    }
+    assert [unit["path"] for unit in payload["capped"]] == ["app.slice/run-a.scope"]
+    assert payload["capped"][0]["max"] == 1024
+    assert payload["capped"][0]["peak"] == 900
+
+
+def test_machine_totals_sum_top_level_groups_when_the_root_has_no_counter(tmp_path: Path) -> None:
+    machine = tmp_path / "cgroup"
+    _write(machine / "user.slice" / "memory.current", "700\n")
+    _write(machine / "user.slice" / "memory.stat", "anon 400\nfile 300\n")
+    _write(machine / "system.slice" / "memory.current", "300\n")
+    _write(machine / "system.slice" / "memory.stat", "anon 100\nfile 200\n")
+    _write(machine / "init.scope" / "memory.current", "5\n")
+    _write(machine / "cpu.pressure", "some avg10=0.00\n")
+
+    charged, stats = sampler.machine_totals(machine)
+
+    assert charged == 1005
+    assert stats["anon"] == 500
+    assert stats["file"] == 500
+
+
 def test_missing_kernel_files_degrade_to_empty_values(tmp_path: Path) -> None:
     payload = sampler.sample(
         pressure=tmp_path / "absent",
@@ -61,6 +121,9 @@ def test_missing_kernel_files_degrade_to_empty_values(tmp_path: Path) -> None:
     assert payload["events"] == {}
     assert payload["units"] == []
     assert payload["slice"]["current"] is None
+    assert payload["machine"]["charged"] is None
+    assert payload["machine"]["total"] is None
+    assert payload["capped"] == []
 
 
 def test_append_line_rotates_at_the_size_cap(tmp_path: Path) -> None:
