@@ -141,6 +141,11 @@ EVENTS: dict[str, EventSpec] = {
         "and claim dispatches it again on the next pass",
         tier="anomaly",
     ),
+    "harness_steer_unconfirmed": telemetry_event(
+        "harness_steer_unconfirmed",
+        "an external harness did not confirm a steer; the inbound stays pending",
+        tier="anomaly",
+    ),
     "harness_close_settled": telemetry_event(
         "harness_close_settled",
         "an external harness session closed and none of its observed processes survived",
@@ -180,6 +185,11 @@ EVENTS: dict[str, EventSpec] = {
         "harness_usage_log_failed",
         "an external harness turn finished but its usage could not be priced; the reply stands "
         "and the accounting row for that turn is missing",
+        tier="anomaly",
+    ),
+    "harness_registration_renewal_failed": telemetry_event(
+        "harness_registration_renewal_failed",
+        "an external harness session could not renew its registration",
         tier="anomaly",
     ),
     "harness_registration_unreadable": telemetry_event(
