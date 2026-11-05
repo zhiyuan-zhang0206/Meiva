@@ -256,18 +256,24 @@ class ScheduleProcessLost(TypedDict):
 
 
 # meiva:note
-# `schedule_stalled` fires once after an enabled, non-completed schedule has had no live session
+# `schedule_stalled` fires once after an enabled, non-completed schedule has had nothing running it
 # for more than two hours; a live observation rearms a later outage.
 #
+# ``evidence`` names the shape the manager saw: ``session_absent`` when no session exists at all,
+# ``runner_gone`` when the session is still there as a shell whose runner died inside it -- and
+# then ``runner_detail`` carries the process-table reading that proved it.
+#
 # ``silent_seconds`` measures the silence from the observable fact -- the last round the schedule
-# itself finished -- so a manager that noticed the lost session hours late still reports how long
-# the work has been stopped. ``session_missing_seconds`` is how long the manager has known the
-# session was gone; without a beat it is also the silence, and ``beat_written_at`` is absent.
+# itself finished -- so a manager that noticed hours late still reports how long the work has been
+# stopped. ``session_missing_seconds`` is how long the manager has known; without a beat it is also
+# the silence, and ``beat_written_at`` is absent.
 class ScheduleStalled(TypedDict):
     schedule_id: int
     status: str
     silent_seconds: float
     session_missing_seconds: float
+    evidence: str
+    runner_detail: NotRequired[str]
     beat_written_at: NotRequired[str]
 
 
@@ -623,7 +629,7 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "schedule_process_lost": telemetry_event(
         "schedule_process_lost",
-        "a schedule's session disappeared and the manager recorded the schedule as an error — the detection itself, emitted once per loss at the moment it is seen; if nothing restarts the schedule, `schedule_stalled` follows two hours later as the second stage of the same outage",
+        "a schedule's session disappeared, or its session is a shell whose runner process is gone, and the manager recorded the schedule as an error — the detection itself, emitted once per loss at the moment it is seen; if nothing restarts the schedule, `schedule_stalled` follows two hours later as the second stage of the same outage",
         payload=ScheduleProcessLost,
         tier="anomaly",
         site="services/wake/schedule_manager/manager.py:_mark_lost emit_process_lost",
@@ -638,7 +644,7 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "schedule_stalled": telemetry_event(
         "schedule_stalled",
-        "enabled non-completed schedule has had no live session for more than two hours",
+        "enabled non-completed schedule has had nothing running it for more than two hours — no session, or a session whose runner process is gone",
         payload=ScheduleStalled,
         tier="anomaly",
         site=("services/wake/schedule_manager/round_progress.py:report_stalled telemetry.emit"),

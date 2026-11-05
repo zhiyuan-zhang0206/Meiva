@@ -174,10 +174,20 @@ def reclaim_verdict(
 #
 # The ``; exit $?`` tail is meant to end the shell with the runner, and it does not reliably do
 # that: the session is an interactive login shell, and a runner killed with SIGKILL leaves it
-# running (measured 2026-11-04 on company-mini: the shell outlived its runner, the session stayed
-# in ``list_sessions``, and ``_live_ids`` kept counting that schedule alive -- so ``not_live_since``
-# was never written and no absence alert could fire). A session's existence therefore says nothing
-# about whether the runner is producing; the round heartbeat is the only signal for that (#6164).
+# running (measured 2026-11-04 on company-mini: the shell outlived its runner and the session
+# stayed in ``list_sessions``). A session name therefore answers "a shell exists" and nothing
+# more, so what holds each question has to be named one question at a time (#6164):
+#
+# - "the runner process is gone" is read from the runner's own record
+#   (base/daemon/schedules/claim.py), and the manager no longer lets a session stand in for it;
+# - "the runner is alive and has stopped iterating" is still only visible through the round
+#   heartbeat, and only for the schedules that write one;
+# - "the runner died before it could record itself" -- every session started before that record
+#   existed -- is unknown: said once by the manager, and never acted on as a death.
+#
+# While one sentence claimed both "a session exists" and "the schedule is alive", a detection that
+# existed and one that did not read the same, and the second was believed because the first was
+# true.
 def launch_command(repo_root: str, schedule_id: int, revision: int) -> str:
     return (
         f"cd {shlex.quote(repo_root)} && "

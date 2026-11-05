@@ -5261,7 +5261,7 @@ groups:
 
       # ── meiva-ops-schedule-stalled: replaces the schedule manager's stall detection ending in a log WARNING only (no rule read the event) ──
       - uid: meiva-ops-schedule-stalled
-        title: "Schedule has had no live session for 2h"
+        title: "Schedule has had nothing running it for 2h"
         condition: D
         for: 0m
         keepFiringFor: *recovery-window
@@ -5274,12 +5274,13 @@ groups:
           metric: schedule_stalled
           team: meiva-ops
         annotations:
-          summary: "schedule {{ $labels.attributes_schedule_id }} has had no live session for 2h+"
+          summary: "schedule {{ $labels.attributes_schedule_id }} has had nothing running it for 2h+"
           description: >-
-            The schedule manager found an enabled, non-completed schedule with no live session for more than
-            two hours (schedule_stalled, emitted once per outage). Triage with `meiva schedules list` and the
-            schedule's session log; a breaker-tripped error schedule is included on purpose, its silence is
-            the failure. Resolves 24 hours after the event.
+            The schedule manager found an enabled, non-completed schedule with nothing running it for more than
+            two hours (schedule_stalled, emitted once per outage). `attributes_evidence` says which shape: no
+            session at all, or a session that is still a shell whose runner process is gone. Triage with
+            `meiva schedules list` and the schedule's session log; a breaker-tripped error schedule is included
+            on purpose, its silence is the failure. Resolves 24 hours after the event.
         data:
           - refId: A
             datasourceUid: loki

@@ -22,6 +22,7 @@ from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
+from base.daemon.schedules.claim import clear_claim, write_claim
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -83,6 +84,10 @@ def run(schedule_id: int, revision: int | None = None, *, config: ConfigBoot | N
     version = CodeVersion(image)
     gate = ProcessDbGate(process=process_name(), version=version.get, end_process=hard_exit)
     home = meiva_home()
+    # meiva:note
+    # The one record that answers "is the process that owns this schedule still running": a
+    # session is a login shell and outlives its runner (base/daemon/schedules/claim.py).
+    _ = write_claim(home, schedule_id, pid=os.getpid())
 
     def database() -> Database:
         return Database(
@@ -140,6 +145,10 @@ def run(schedule_id: int, revision: int | None = None, *, config: ConfigBoot | N
             if primary is None:
                 raise
             primary.add_note(f"schedule clients cleanup failed: {cleanup!r}")
+        # meiva:note
+        # Cleared last: until this line the process is still the runner of this schedule, and a
+        # record left behind is what tells a reader the process did not exit on its own.
+        clear_claim(home, schedule_id)
 
 
 def main(argv: Sequence[str]) -> None:
