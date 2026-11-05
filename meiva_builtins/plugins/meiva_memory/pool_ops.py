@@ -115,17 +115,56 @@ def frontmatter(pool: Path, rel: str) -> dict[str, object]:
     return loaded
 
 
+# meiva:note
+# The pool's notes: the `.md` paths of its git index minus `RESERVED`, in sorted order. Outside a
+# git checkout (or when `pool` is not the checkout's root) the filesystem is walked instead.
+#
+# Why the index and not the working tree (2026-11-06): the pool validator enumerates
+# `git ls-files` -- deliberately, so an untracked draft cannot block anybody's commit -- and this
+# generator enumerated the working tree. One derived number, two sources, two opposite failures.
+# An untracked draft inflated N here and wrote a pointer line to a file that never reached HEAD
+# (silent). Once the validator started checking N, the same draft also turned every commit red
+# (loud). Reading the index here removes both: a draft is invisible to the two sides alike, and a
+# `git add`-ed but uncommitted note is visible to both, so "stage before generating" stops being a
+# procedure one has to remember and becomes a property. A scheduled run over a fully tracked home
+# checkout sees no change at all.
 def collect(pool: Path) -> list[str]:
-    root = pool
+    tracked = _tracked_notes(pool)
+    return tracked if tracked is not None else _walk_notes(pool)
+
+
+def _tracked_notes(pool: Path) -> list[str] | None:
+    prefix = subprocess.run(  # noqa: S603
+        ["git", "-C", str(pool), "rev-parse", "--show-prefix"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if prefix.returncode != 0 or prefix.stdout.strip():
+        # meiva:note
+        # Not a checkout, or a subdirectory of one: `ls-files` would then print paths from the
+        # enclosing repository's root, which are not this pool's to count.
+        return None
+    listed = subprocess.run(  # noqa: S603
+        ["git", "-C", str(pool), "ls-files", "-z", "--", "*.md"],
+        capture_output=True,
+        check=False,
+    )
+    if listed.returncode != 0:
+        return None
+    names = [n for n in listed.stdout.decode("utf-8", "replace").split("\0") if n]
+    return sorted(n for n in names if Path(n).name not in RESERVED and (pool / n).is_file())
+
+
+def _walk_notes(pool: Path) -> list[str]:
     files: list[str] = []
-    for dirpath, _dirnames, filenames in os.walk(root):
+    for dirpath, _dirnames, filenames in os.walk(pool):
         if ".git" in dirpath or ".githooks" in dirpath:
             continue
         for fn in filenames:
             if not fn.endswith(".md") or fn in RESERVED:
                 continue
-            rel = str((Path(dirpath) / fn).relative_to(root))
-            files.append(rel)
+            files.append(str((Path(dirpath) / fn).relative_to(pool)))
     return sorted(files)
 
 
@@ -153,22 +192,18 @@ def write_directory_index(pool: Path, dir_rel: str, all_files: list[str]) -> str
     root = pool
     dpath = root / dir_rel if dir_rel else root
     prefix = dir_rel + "/" if dir_rel else ""
-    entries = sorted(p.name for p in dpath.iterdir())
     # meiva:note
-    # A subdirectory appears only when it holds at least one note anywhere below it. A working
-    # tree carries directories git cannot store -- `__pycache__` left by importing this module,
-    # an editor scratch dir -- and listing one as "0 notes" made a single pool produce different
-    # indexes on different machines; the git-tree generator derives its subdirectories from the
-    # files, so that was the only place the two disagreed. The count on the line uses the same
-    # prefix rule.
-    dirs = [
-        e
-        for e in entries
-        if (dpath / e).is_dir()
-        and not e.startswith(".")
-        and any(f.startswith(prefix + e + "/") for f in all_files)
-    ]
-    mds = [e for e in entries if e.endswith(".md") and e not in RESERVED]
+    # Both lists come from `all_files` -- the same notes `collect` enumerated -- and never from
+    # `iterdir()` (2026-11-06). A directory listing is the working tree, and the working tree is
+    # not what a reader of the committed index gets: an untracked draft there produced a pointer
+    # line to a file that never reached the commit, and nothing reported it. Deriving the notes
+    # and the subdirectories from the enumerated set keeps one source; a working tree carries
+    # directories git cannot store (`__pycache__`, an editor scratch dir) and listing one as
+    # "0 notes" made a single pool produce different indexes on different machines.
+    below = [f[len(prefix) :] for f in all_files if f.startswith(prefix)]
+    sdirs = {rest.split("/", 1)[0] for rest in below if "/" in rest}
+    dirs = sorted(sdirs)
+    mds = [rest for rest in below if "/" not in rest]
 
     title = "(root)" if not dir_rel else dir_rel + "/"
     lines = [f"# {title}", "", "## Subdirectories", ""]
@@ -243,15 +278,24 @@ def rebuild_root_memory_index(pool: Path) -> None:
 # one line per root note, one per top-level directory; the rest of the file is kept).
 #
 # Agents write notes with `meiva.files` and nothing maintains these indexes as they do, so the
-# consolidation scripts rebuild them before staging: the pool validator's pointer checks
-# (every note pointed at once, titles matching, no missing targets) pass on what gets committed.
+# consolidation scripts rebuild them: the pool validator's pointer checks (every note pointed at
+# once, titles matching, no missing targets) pass on what gets committed.
+#
+# Call `stage` first (2026-11-06): the rebuild enumerates the git index, so a note that is only in
+# the working tree is not part of the pool yet and would be left out of the very commit it is
+# about to enter. `stage_and_commit` stages again after the rebuild, which is what carries the
+# rewritten indexes into the commit.
 def regenerate_indexes(pool: Path) -> None:
     generate_directory_indexes(pool)
     rebuild_root_memory_index(pool)
 
 
-def stage_and_commit(message: str, pool: Path) -> bool:
+def stage(pool: Path) -> None:
     run(["git", "-C", str(pool), "add", "-A"])
+
+
+def stage_and_commit(message: str, pool: Path) -> bool:
+    stage(pool)
     status = run(["git", "-C", str(pool), "status", "--porcelain"], check=False)
     if not status.stdout.strip():
         print("  (nothing to commit)")
