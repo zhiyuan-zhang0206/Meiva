@@ -8,27 +8,32 @@ from __future__ import annotations
 import datetime
 import json
 import os
+from collections.abc import Mapping
 from pathlib import Path
+
+from base.host.boundary.untyped import object_of
 
 from . import evidence
 from .alerts import blind_alert
-from .contracts import ProbeUnavailableError, Settings
+from .contracts import ProbeUnavailableError, Settings, TreeRow
 from .decide import cooloff_block, on_never_list
 from .evidence import probe_rows
+from .values import int_of, object_dict, text_of
 
 
-def record(settings: Settings, entry):
+def record(settings: Settings, entry: Mapping[str, object]) -> None:
     # meiva:note
     # One line per decision that reached a tree, appended in the order the decisions happened —
     # the ledger is evidence, so it is never batched or reordered.
-    entry = dict(entry)
-    entry.setdefault("ts", datetime.datetime.now().astimezone().isoformat(timespec="seconds"))
+    line = dict(entry)
+    line.setdefault("ts", datetime.datetime.now().astimezone().isoformat(timespec="seconds"))
     with settings.ledger.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        handle.write(json.dumps(line, ensure_ascii=False) + "\n")
 
 
-def judge_root(settings: Settings, root):
-
+def judge_root(
+    settings: Settings, root: str | Path
+) -> tuple[list[TreeRow], bool, dict[str, object]]:
     # meiva:note
     # `(rows, prefiltered)` — the trees of one root and whether a snapshot judge saw them.
     #
@@ -86,7 +91,9 @@ def judge_root(settings: Settings, root):
     return evidence.git_trees(root), False, {}
 
 
-def atomic_ok(settings: Settings, row, merge_cooloff_min, commit_cooloff_min):
+def atomic_ok(
+    settings: Settings, row: TreeRow, merge_cooloff_min: float, commit_cooloff_min: float
+) -> tuple[bool, str, str]:
     # meiva:note
     # The moment-of-deletion predicate: re-read the facts that can change between the probe's
     # snapshot and `git worktree remove`, and refuse unless every condition the verdict rested on
@@ -108,7 +115,7 @@ def atomic_ok(settings: Settings, row, merge_cooloff_min, commit_cooloff_min):
     return True, "ok", "ok"
 
 
-def first_blocking_fact(settings: Settings, row):
+def first_blocking_fact(settings: Settings, row: TreeRow) -> tuple[str, str] | None:
     # meiva:note
     # The first tree-scoped fact that forbids deletion, in the order a reader would check it, or
     # None when the tree is eligible. Every code it returns is counted per run, which is what
@@ -122,7 +129,7 @@ def first_blocking_fact(settings: Settings, row):
     return pr_block(settings, row)
 
 
-def local_block(row):
+def local_block(row: TreeRow) -> tuple[str, str] | None:
     # meiva:note
     # The evidence this machine holds without asking anyone: the directory, the working tree, a
     # half-finished operation, the head, a live process, and the branch the tree is on.
@@ -160,7 +167,7 @@ def local_block(row):
     return None
 
 
-def head_of(path):
+def head_of(path: str) -> str:
     # meiva:note
     # The tree's own HEAD, or an empty string when git cannot say — an unreadable head blocks the
     # tree at the comparison below rather than passing it.
@@ -168,7 +175,7 @@ def head_of(path):
     return out if rc == 0 else ""
 
 
-def live_users(path):
+def live_users(path: str) -> int:
     # meiva:note
     # How many processes name this tree on their command line, excluding this tool's own: a
     # running process is a tree someone is using right now, whatever its age says.
@@ -176,7 +183,7 @@ def live_users(path):
     return len([line for line in procs.splitlines() if path in line and "worktree_gc" not in line])
 
 
-def pr_block(settings: Settings, row):
+def pr_block(settings: Settings, row: TreeRow) -> tuple[str, str] | None:
     # meiva:note
     # Merged *at this head* — the sha, not the branch name: a branch reused for the next task, or
     # moved by a post-merge push, must not hand this tree a MERGED. This is the one question that
@@ -186,7 +193,7 @@ def pr_block(settings: Settings, row):
             "gh",
             "pr",
             "view",
-            row["branch"],
+            row.get("branch") or "",
             "--json",
             "number,state,headRefOid,mergedAt",
             "-q",
@@ -205,12 +212,26 @@ def pr_block(settings: Settings, row):
     return None
 
 
-def reclaim(settings: Settings, root: str, row, dry_run, merge_cooloff_min, commit_cooloff_min):
+def reclaim(
+    settings: Settings,
+    root: str,
+    row: TreeRow,
+    *,
+    dry_run: bool,
+    merge_cooloff_min: float,
+    commit_cooloff_min: float,
+) -> dict[str, object]:
     # meiva:note
     # Reclaim one tree, or explain why not. Returns the ledger entry; the caller records it, so a
     # decision is written even when it is "skipped".
     path = row["path"]
-    entry = ledger_entry(root, row, dry_run, merge_cooloff_min, commit_cooloff_min)
+    entry = ledger_entry(
+        root,
+        row,
+        dry_run=dry_run,
+        merge_cooloff_min=merge_cooloff_min,
+        commit_cooloff_min=commit_cooloff_min,
+    )
     if on_never_list(Path(path).name, evidence.never_patterns(settings)):
         return {**entry, "result": "skipped-never-list"}
     holder = evidence.held(settings, Path(path).name)
@@ -223,10 +244,11 @@ def reclaim(settings: Settings, root: str, row, dry_run, merge_cooloff_min, comm
         }
     ok, code, line = atomic_ok(settings, row, merge_cooloff_min, commit_cooloff_min)
     entry["verify"] = line
-    if row.get("resolved_pr") and not entry["pr"]:
+    resolved = row.get("resolved_pr")
+    if resolved and not entry["pr"]:
         # meiva:note
         # The gate resolved the PR for this tip; keep the number, not just the verdict.
-        entry["pr"] = [row["resolved_pr"]]
+        entry["pr"] = [resolved]
     entry["blocked_by"] = None if ok else code
     if not ok:
         # meiva:note
@@ -237,7 +259,14 @@ def reclaim(settings: Settings, root: str, row, dry_run, merge_cooloff_min, comm
     return remove_tree(root, path, row, entry)
 
 
-def ledger_entry(root, row, dry_run, merge_cooloff_min, commit_cooloff_min):
+def ledger_entry(
+    root: str,
+    row: TreeRow,
+    *,
+    dry_run: bool,
+    merge_cooloff_min: float,
+    commit_cooloff_min: float,
+) -> dict[str, object]:
     # meiva:note
     # The facts a decision was made on, written before the decision is taken: a ledger that only
     # records outcomes cannot answer "what did the judge see that night".
@@ -256,7 +285,7 @@ def ledger_entry(root, row, dry_run, merge_cooloff_min, commit_cooloff_min):
     }
 
 
-def remove_tree(root, path, row, entry):
+def remove_tree(root: str, path: str, row: TreeRow, entry: dict[str, object]) -> dict[str, object]:
     # meiva:note
     # `worktree remove` first; `prune` only picks up after it, never as a substitute. Branch refs
     # are kept in every root (405, 2026-11-03): `worktree remove` deletes no ref, a ref costs a few
@@ -273,27 +302,25 @@ def remove_tree(root, path, row, entry):
     return entry
 
 
-def ledger_report(settings: Settings, hours):
+def ledger_report(settings: Settings, hours: float) -> int:
     # meiva:note
     # Aggregate the per-run tallies over the last `hours` — the line the daily report quotes.
     #
     # Without it, "the cool-off works" is a claim nobody can check: every round records what
     # each candidate was blocked by, so this is one groupby over the ledger.
-    tally, rounds, candidates = {}, 0, 0
+    tally: dict[str, int] = {}
+    rounds, candidates = 0, 0
     with settings.ledger.open(encoding="utf-8") as handle:
         for line in handle:
-            try:
-                entry = json.loads(line)
-            except ValueError:
-                continue
-            stamp = evidence.minutes_since_iso(entry.get("ts"))
+            entry = object_dict(object_of(json.loads, line))
+            stamp = evidence.minutes_since_iso(text_of(entry.get("ts")))
             if stamp is None or stamp > hours * 60:
                 continue
             if entry.get("result") in ("run-summary", "skip-no-candidates"):
                 rounds += 1
-                candidates += int(entry.get("candidates") or 0)
-                for key, count in (entry.get("tally") or {}).items():
-                    tally[key] = tally.get(key, 0) + int(count)
+                candidates += int_of(entry.get("candidates"))
+                for key, count in object_dict(entry.get("tally")).items():
+                    tally[key] = tally.get(key, 0) + int_of(count)
     outcome = ", ".join(f"{key}={count}" for key, count in sorted(tally.items())) or "nothing"
     print(f"last {hours:g}h: {rounds} open rounds, {candidates} candidates; outcome: {outcome}")
     return 0

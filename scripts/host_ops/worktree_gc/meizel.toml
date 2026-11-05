@@ -1,12 +1,12 @@
 [uses]
 "__init__.py" = ["cli.py", "contracts.py"]
 "__main__.py" = ["cli.py"]
-"act.py" = ["alerts.py", "contracts.py", "decide.py", "evidence.py"]
-"alerts.py" = ["contracts.py"]
-"cli.py" = ["act.py", "contracts.py", "evidence.py", "report.py"]
-"decide.py" = ["contracts.py"]
-"evidence.py" = ["contracts.py"]
-"tests" = ["cli.py", "contracts.py", "decide.py", "evidence.py"]
+"act.py" = ["alerts.py", "contracts.py", "decide.py", "evidence.py", "values.py"]
+"alerts.py" = ["contracts.py", "values.py"]
+"cli.py" = ["act.py", "contracts.py", "evidence.py", "report.py", "values.py"]
+"evidence.py" = ["contracts.py", "values.py"]
+"report.py" = ["contracts.py", "values.py"]
+"tests" = ["cli.py", "contracts.py", "decide.py", "evidence.py", "values.py"]
 
 [roots]
 "__main__.py" = { kinds = ["argv"], why = "the `__main__` guard reads argv[1:] once and hands it to main" }

@@ -6,13 +6,18 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import time
 import urllib.request
 from contextlib import suppress
 from pathlib import Path
 
+from base.host.boundary.json_values import is_object_dict, is_object_list
+from base.host.boundary.untyped import object_of
+
 from .contracts import Settings
+from .values import float_of, object_dict, text_of
 
 # meiva:note
 # One alert per blind episode per window, never one per round: the condition is not the alert,
@@ -36,30 +41,46 @@ def home_env(settings: Settings, key: str) -> str:
     return ""
 
 
-def gateway_credentials(settings: Settings):
+def agent_host_env(settings: Settings) -> dict[str, object]:
+    # meiva:note
+    # The `agent-host` unit's environment block, read as `object` values and narrowed one lookup
+    # at a time: `manifests.json` is written by another component, so its shape is a claim to
+    # check, not a type to trust.
+    try:
+        with settings.manifests.open(encoding="utf-8") as handle:
+            data = object_of(json.load, handle)
+    except (OSError, ValueError):
+        return {}
+    if not is_object_dict(data):
+        return {}
+    units = data.get("units")
+    if not is_object_list(units):
+        return {}
+    for unit in units:
+        if is_object_dict(unit) and unit.get("id") == "agent-host":
+            env = unit.get("env")
+            return dict(env) if is_object_dict(env) else {}
+    return {}
+
+
+def gateway_credentials(settings: Settings) -> tuple[str, str | None]:
     # meiva:note
     # The token and the address a schedule process can report through: a schedule has no agent
     # identity, so `meiva.agents.send_message` cannot be the channel that reports a blind judge,
     # while this one needs nothing but a file on disk. Address order: the run's own (`--gateway`,
     # then `WORKTREE_GC_GATEWAY`), the agent-host unit's `MEIVA_GATEWAY_URL`, then the home's
     # `.env`. An empty address means "cannot alert", never a guessed one.
-    try:
-        with settings.manifests.open(encoding="utf-8") as handle:
-            data = json.load(handle)
-    except (OSError, ValueError):
-        data = {}
-    env = {}
-    for unit in data.get("units", []):
-        if unit.get("id") == "agent-host":
-            env = unit.get("env", {}) or {}
-            break
+    env = agent_host_env(settings)
     address = (
-        settings.gateway or env.get("MEIVA_GATEWAY_URL") or home_env(settings, "MEIVA_GATEWAY_URL")
+        settings.gateway
+        or text_of(env.get("MEIVA_GATEWAY_URL"))
+        or home_env(settings, "MEIVA_GATEWAY_URL")
     )
-    return env.get("MEIVA_API_TOKEN") or env.get("AVA_API_TOKEN") or "", address
+    token = text_of(env.get("MEIVA_API_TOKEN")) or text_of(env.get("AVA_API_TOKEN"))
+    return token, address or None
 
 
-def post_alert(settings: Settings, content: str):
+def post_alert(settings: Settings, content: str) -> tuple[bool, str]:
     # meiva:note
     # Returns `(delivered, detail)` and never raises: the caller prints the detail, so a failed
     # alert is visible in the round's output instead of being the round's exception.
@@ -76,13 +97,16 @@ def post_alert(settings: Settings, content: str):
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=20) as response:  # noqa: S310
-            return response.status < 300, f"http {response.status}"
+        handle = object_of(urllib.request.urlopen, request, timeout=20)
+        if not isinstance(handle, http.client.HTTPResponse):
+            return False, f"unexpected handle {type(handle).__name__}"
+        with handle:
+            return handle.status < 300, f"http {handle.status}"
     except OSError as exc:
         return False, f"{type(exc).__name__}: {str(exc)[:120]}"
 
 
-def blind_alert(settings: Settings, root: str, expected: int, detail: str) -> str:
+def blind_alert(settings: Settings, root: str | Path, expected: int, detail: str) -> str:
     # meiva:note
     # Say once per window that the snapshot judge is blind — silence is the bug.
     #
@@ -93,10 +117,10 @@ def blind_alert(settings: Settings, root: str, expected: int, detail: str) -> st
     now = time.time()
     try:
         with settings.blind_state.open(encoding="utf-8") as handle:
-            state = json.load(handle)
+            state = object_dict(object_of(json.load, handle))
     except (OSError, ValueError):
         state = {}
-    last = float(state.get("alerted_at") or 0)
+    last = float_of(state.get("alerted_at"))
     if now - last < BLIND_ALERT_HOURS * 3600:
         return f"already alerted {(now - last) / 3600.0:.1f}h ago"
     ok, delivery = post_alert(
@@ -107,7 +131,12 @@ def blind_alert(settings: Settings, root: str, expected: int, detail: str) -> st
         f"{(f'{(now - last) / 3600.0:.1f} h ago') if last else 'none'}.",
     )
     if ok:
-        state = {"alerted_at": now, "root": root, "expected": expected, "detail": detail}
+        state = {
+            "alerted_at": now,
+            "root": str(root),
+            "expected": expected,
+            "detail": detail,
+        }
         with suppress(OSError), settings.blind_state.open("w", encoding="utf-8") as handle:
             json.dump(state, handle, ensure_ascii=False)
     return "alert {} ({})".format("sent" if ok else "FAILED", delivery)

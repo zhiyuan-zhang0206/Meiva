@@ -8,11 +8,16 @@ from __future__ import annotations
 
 import json
 import subprocess
+from pathlib import Path
 
+import pytest
+
+from base.host.boundary.untyped import object_of
 from scripts.host_ops.worktree_gc.cli import main
+from scripts.host_ops.worktree_gc.values import object_dict
 
 
-def git(cwd, *args) -> str:
+def git(cwd: Path, *args: str) -> str:
     # meiva:note
     # The suite's only doorway to git: a fixed argv against the throwaway repository it just made.
     return subprocess.run(  # noqa: S603
@@ -20,7 +25,7 @@ def git(cwd, *args) -> str:
     ).stdout.strip()
 
 
-def make_repo(tmp_path):
+def make_repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir()
     git(repo, "init", "-b", "main")
@@ -32,7 +37,7 @@ def make_repo(tmp_path):
     return repo
 
 
-def base_args(tmp_path, repo, *extra):
+def base_args(tmp_path: Path, repo: Path, *extra: str) -> list[str]:
     return [
         "--repo",
         str(repo),
@@ -58,40 +63,50 @@ def base_args(tmp_path, repo, *extra):
     ]
 
 
-def ledger_rows(tmp_path):
+def ledger_rows(tmp_path: Path) -> list[dict[str, object]]:
     text = (tmp_path / "ledger.jsonl").read_text(encoding="utf-8")
-    return [json.loads(line) for line in text.splitlines() if line.strip()]
+    return [object_dict(object_of(json.loads, line)) for line in text.splitlines() if line.strip()]
 
 
-def test_gate_closed_round_records_a_comfortable_volume(tmp_path, capsys) -> None:
+def outcomes(tmp_path: Path) -> list[object]:
+    return [row.get("result") for row in ledger_rows(tmp_path)]
+
+
+def test_gate_closed_round_records_a_comfortable_volume(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     repo = make_repo(tmp_path)
     assert main(base_args(tmp_path, repo, "--trigger-avail-gib", "0")) == 0
     out = capsys.readouterr().out
     assert "gate(avail<0G" in out and "-> closed" in out
     assert "judge: {" in out
-    assert [row["result"] for row in ledger_rows(tmp_path)] == ["skip-disk-comfortable"]
+    assert outcomes(tmp_path) == ["skip-disk-comfortable"]
 
 
-def test_never_list_entry_skips_the_tree_without_touching_it(tmp_path, capsys) -> None:
+def test_never_list_entry_skips_the_tree_without_touching_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     repo = make_repo(tmp_path)
     worktree = tmp_path / "one"
     git(repo, "worktree", "add", "-b", "feature", str(worktree))
     (tmp_path / "never.txt").write_text("one\n", encoding="utf-8")
-    main(base_args(tmp_path, repo, "--trigger-avail-gib", "99999"))
+    assert main(base_args(tmp_path, repo, "--trigger-avail-gib", "99999")) == 0
     out = capsys.readouterr().out
     assert "skipped-never-list" in out
     assert worktree.is_dir()
-    assert {row["result"] for row in ledger_rows(tmp_path)} >= {"skipped-never-list"}
+    assert "skipped-never-list" in outcomes(tmp_path)
 
 
-def test_detached_head_is_never_a_candidate(tmp_path, capsys) -> None:
+def test_detached_head_is_never_a_candidate(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     # meiva:note
     # A detached HEAD has no branch whose PR could prove the work is merged, so the gate refuses
     # it before asking `gh` anything.
     repo = make_repo(tmp_path)
     worktree = tmp_path / "detached"
     git(repo, "worktree", "add", "--detach", str(worktree))
-    main(base_args(tmp_path, repo, "--trigger-avail-gib", "99999"))
+    assert main(base_args(tmp_path, repo, "--trigger-avail-gib", "99999")) == 0
     out = capsys.readouterr().out
     assert "no-branch" in out
     assert worktree.is_dir()

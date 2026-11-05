@@ -22,14 +22,19 @@ from scripts.host_ops.worktree_gc.decide import cooloff_block, on_never_list
     ],
 )
 def test_cooloff_names_the_clock_that_is_still_running(
-    merged_at, merged_age_min, commit_age_min, expected
+    merged_at: str | None,
+    merged_age_min: float | None,
+    commit_age_min: float | None,
+    expected: str | None,
 ) -> None:
     blocked = cooloff_block(merged_at, merged_age_min, commit_age_min, 30.0, 60.0)
     assert (blocked[0] if blocked else None) == expected
 
 
 def test_cooloff_reports_the_reading_it_used() -> None:
-    code, detail = cooloff_block("2026-11-05T00:00:00Z", 12.0, 600.0, 30.0, 60.0)
+    blocked = cooloff_block("2026-11-05T00:00:00Z", 12.0, 600.0, 30.0, 60.0)
+    assert blocked is not None
+    code, detail = blocked
     assert code == "merge-cooloff"
     assert "12 min" in detail
 

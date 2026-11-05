@@ -7,9 +7,16 @@
 from __future__ import annotations
 
 import fnmatch
+from collections.abc import Sequence
 
 
-def cooloff_block(merged_at, merged_age_min, commit_age_min, merge_cooloff_min, commit_cooloff_min):
+def cooloff_block(
+    merged_at: str | None,
+    merged_age_min: float | None,
+    commit_age_min: float | None,
+    merge_cooloff_min: float,
+    commit_cooloff_min: float,
+) -> tuple[str, str] | None:
     # meiva:note
     # (code, detail) while a clock still protects this tree, or None to let it go.
     #
@@ -31,7 +38,7 @@ def cooloff_block(merged_at, merged_age_min, commit_age_min, merge_cooloff_min, 
     return None
 
 
-def on_never_list(name, patterns):
+def on_never_list(name: str, patterns: Sequence[str]) -> bool:
     # meiva:note
     # A never-list entry is a human's declaration that a tree is off-limits. Matching is
     # case-insensitive on the directory name only — never on a path — so one entry cannot

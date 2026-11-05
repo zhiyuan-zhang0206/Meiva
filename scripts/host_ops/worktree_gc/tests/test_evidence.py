@@ -8,6 +8,7 @@ from __future__ import annotations
 import datetime
 import json
 import os
+from pathlib import Path
 
 import pytest
 
@@ -16,7 +17,7 @@ from scripts.host_ops.worktree_gc.evidence import probe_rows
 from scripts.host_ops.worktree_gc.tests.support import settings
 
 
-def write_ledger(tmp_path, rows) -> None:
+def write_ledger(tmp_path: Path, rows: list[dict[str, object]]) -> None:
     path = tmp_path / "probe-ledger.jsonl"
     path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
 
@@ -26,7 +27,7 @@ def stamp(minutes_ago: float) -> str:
     return moment.isoformat(timespec="seconds")
 
 
-def test_fresh_line_is_the_judge(tmp_path) -> None:
+def test_fresh_line_is_the_judge(tmp_path: Path) -> None:
     write_ledger(
         tmp_path,
         [{"ts": stamp(1), "probe_sha": "abc1234", "trees": [{"path": "/w/one", "verdict": "ok"}]}],
@@ -36,18 +37,18 @@ def test_fresh_line_is_the_judge(tmp_path) -> None:
     assert line["probe_sha"] == "abc1234"
 
 
-def test_stale_line_reads_as_no_judge(tmp_path) -> None:
+def test_stale_line_reads_as_no_judge(tmp_path: Path) -> None:
     write_ledger(tmp_path, [{"ts": stamp(120), "trees": [{"path": "/w/one"}]}])
     with pytest.raises(ProbeUnavailableError, match="old"):
         probe_rows(settings(tmp_path))
 
 
-def test_missing_ledger_reads_as_no_judge(tmp_path) -> None:
+def test_missing_ledger_reads_as_no_judge(tmp_path: Path) -> None:
     with pytest.raises(ProbeUnavailableError, match="no probe ledger"):
         probe_rows(settings(tmp_path))
 
 
-def test_line_without_its_own_stamp_is_aged_by_the_file(tmp_path) -> None:
+def test_line_without_its_own_stamp_is_aged_by_the_file(tmp_path: Path) -> None:
     # meiva:note
     # The fallback is the ledger file's mtime, so a judge that writes no timestamp is still aged
     # rather than trusted forever; two hours of silence is still stale.
@@ -59,7 +60,7 @@ def test_line_without_its_own_stamp_is_aged_by_the_file(tmp_path) -> None:
         probe_rows(settings(tmp_path))
 
 
-def test_line_that_is_not_json_reads_as_no_judge(tmp_path) -> None:
+def test_line_that_is_not_json_reads_as_no_judge(tmp_path: Path) -> None:
     (tmp_path / "probe-ledger.jsonl").write_text("not json\n", encoding="utf-8")
     with pytest.raises(ProbeUnavailableError, match="not JSON"):
         probe_rows(settings(tmp_path))

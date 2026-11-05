@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NotRequired, Required, TypedDict
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,56 @@ class Settings:
     home_env: Path
     owner: int
     gateway: str
+
+
+class TreeRow(TypedDict, total=False):
+    # meiva:note
+    # One worktree, as the judge saw it. The two producers — the snapshot probe's ledger and this
+    # tool's own `git worktree list` — write the same shape; a field a given producer does not
+    # supply is simply absent, so every read below is a `.get`.
+    path: Required[str]
+    branch: NotRequired[str | None]
+    head: NotRequired[str]
+    size_gib: NotRequired[float | None]
+    verdict: NotRequired[str]
+    # meiva:note
+    # The probe's own PR list, and the two fields the deletion gate resolves for itself when the
+    # snapshot carries no verdict to rest on.
+    pr: NotRequired[list[dict[str, object]]]
+    resolved_pr: NotRequired[int]
+    merged_at: NotRequired[str | None]
+
+
+class SurfaceEntry(TypedDict, total=False):
+    # meiva:note
+    # One directory under `<root>/.worktrees` that no registration of this root accounts for.
+    tree: str
+    path: str
+    size_gib: float | None
+    gitdir: str
+
+
+class SurfaceReport(TypedDict):
+    # meiva:note
+    # Both directions of the surface check: registrations without a directory, and directories no
+    # registration knows about, split by why they are not ours to touch.
+    root: str
+    registered: int
+    missing_dirs: list[str]
+    ghosts: list[SurfaceEntry]
+    foreign: list[SurfaceEntry]
+    not_a_tree: list[SurfaceEntry]
+
+
+class StashReport(TypedDict, total=False):
+    # meiva:note
+    # The repo-scoped stash inventory: reported, never a veto.
+    root: str
+    count: int | None
+    oldest_days: float | None
+    debt: bool
+    entries: list[dict[str, object]]
+    error: str
 
 
 class ProbeUnavailableError(RuntimeError):
