@@ -542,12 +542,14 @@ def _update_harness_transition_meta_blocking(
             if target_harness == "meiva":
                 normalize_overlay_llm_model(overlay_without_harness, models=catalog.models)
             conn.execute(
-                "UPDATE agents_meta SET harness = %s, config_overlay = COALESCE(config_overlay, '{}'::jsonb) || %s::jsonb WHERE id = %s",
+                "UPDATE agents_meta SET harness = %s, harness_configured_at = clock_timestamp(), "
+                "config_overlay = COALESCE(config_overlay, '{}'::jsonb) || %s::jsonb WHERE id = %s",
                 (target_harness, json.dumps(overlay_without_harness), agent_id),
             )
         else:
             conn.execute(
-                "UPDATE agents_meta SET harness = %s WHERE id = %s",
+                "UPDATE agents_meta SET harness = %s, harness_configured_at = clock_timestamp() "
+                "WHERE id = %s",
                 (target_harness, agent_id),
             )
         if target_harness != "meiva":

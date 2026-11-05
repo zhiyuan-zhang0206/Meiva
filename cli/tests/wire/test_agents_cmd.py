@@ -166,6 +166,16 @@ def test_agents_restart_posts_config_overlay(
     assert "enqueued" in capsys.readouterr().out
 
 
+def test_agents_restart_prints_the_gateway_rejection(
+    wire: PublicGateway, capsys: pytest.CaptureFixture[str]
+) -> None:
+    wire.respond("post", {"detail": "model is not supported by this harness"}, status=400)
+    assert wire.run("agents", "restart", "9", "-m", "switch models") == 1
+    assert (
+        "restart refused (400): model is not supported by this harness" in capsys.readouterr().err
+    )
+
+
 def test_agents_restart_rejects_non_object_config_json(
     wire: PublicGateway, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -359,6 +359,17 @@ def cmd_agents_restart(
         timeout=_TIMEOUT_S,
         headers=gateway_auth_headers(access),
     )
+    if resp.is_client_error:
+        try:
+            detail = response_object(resp).get("detail")
+        except ValueError:
+            detail = None
+        print(
+            f"agent {agent_id} restart refused ({resp.status_code}): "
+            f"{detail or resp.reason_phrase}",
+            file=sys.stderr,
+        )
+        return 1
     resp.raise_for_status()
     print(f"  ✓ agent {agent_id} restart: {response_object(resp).get('status')}")
     return 0

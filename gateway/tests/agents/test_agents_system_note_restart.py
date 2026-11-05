@@ -488,7 +488,8 @@ class TestRestart:
 
             with db_conn.cursor() as cur:
                 cur.execute(
-                    "SELECT harness, birth_config, config_overlay FROM agents_meta WHERE id = %s",
+                    "SELECT harness, birth_config, config_overlay, harness_configured_at "
+                    "FROM agents_meta WHERE id = %s",
                     (agent_id,),
                 )
                 row = cur.fetchone()
@@ -498,6 +499,7 @@ class TestRestart:
                 assert row[2].get("llm_model") == "gpt-6.1-sol"
                 assert row[2].get("reasoning_effort") == "medium"
                 assert "harness" not in row[2]
+                assert row[3] is not None
 
             item = TimelineItem(
                 item_id="1.0",
