@@ -13,12 +13,13 @@ class DaemonSettings(
     EnvSettings,
 ):
     host_max_concurrent_turns: int = Field(
-        title="Host max concurrent turns",
+        title="Maximum concurrent agent turns per host",
         default=0,
         ge=0,
         alias="MEIVA_HOST_MAX_CONCURRENT_TURNS",
         description="Hosted agent-runner: optional limit on active agent continuations. Zero (default) disables this admission limit; positive values queue excess agents until a running agent idles or exits. A continuation includes model/tool waits and may span many steps. Database client pools and provider concurrency have separate budgets; this setting does not resize them. Set a positive limit when host memory or execution capacity requires one.",
         json_schema_extra={
+            "help_text": "Set 0 to allow unlimited concurrent turns.",
             "capability": "agent-runner",
             "restart_required": "all",
             "writable": True,
@@ -28,7 +29,7 @@ class DaemonSettings(
     )
 
     host_admission_wait_alert_seconds: float = Field(
-        title="Host admission wait alert seconds",
+        title="Agent turn queue alert threshold (seconds)",
         default=2400.0,
         gt=0,
         alias="MEIVA_HOST_ADMISSION_WAIT_ALERT_SECONDS",
@@ -43,7 +44,7 @@ class DaemonSettings(
     )
 
     host_db_pool_max_size: int = Field(
-        title="Host DB pool max size",
+        title="Agent host workload database connection limit",
         default=64,
         gt=0,
         alias="MEIVA_HOST_DB_POOL_MAX_SIZE",
@@ -58,7 +59,7 @@ class DaemonSettings(
     )
 
     host_control_pool_max_size: int = Field(
-        title="Host control pool max size",
+        title="Agent host control database connection limit",
         default=8,
         gt=0,
         alias="MEIVA_HOST_CONTROL_POOL_MAX_SIZE",
@@ -73,7 +74,7 @@ class DaemonSettings(
     )
 
     host_agent_cache_size: int = Field(
-        title="Host agent cache size",
+        title="Agent runtimes kept warm per host",
         default=32,
         alias="MEIVA_HOST_AGENT_CACHE_SIZE",
         description="Hosted agent-runner: how many agents' prepared runtimes (chat model + this agent's startup housekeeping already done for them) the host keeps warm, evicted least-recently-used. A cold entry costs one model build plus this agent's startup housekeeping on its next wake; an unbounded cache would let a fleet-wide wake burst hold one per local agent forever.",
@@ -87,7 +88,7 @@ class DaemonSettings(
     )
 
     host_agent_idle_ttl_seconds: float = Field(
-        title="Host agent idle TTL seconds",
+        title="Idle agent runtime retention (seconds)",
         default=900.0,
         alias="MEIVA_HOST_AGENT_IDLE_TTL_SECONDS",
         description="Hosted agent-runner: how long a prepared agent runtime survives with no turn before the host drops it. The size cap alone would keep a long-silent agent warm forever on a lightly loaded runner; this is the other half, so a runner that goes quiet returns to holding nothing.",
@@ -101,7 +102,7 @@ class DaemonSettings(
     )
 
     host_turn_no_progress_timeout_seconds: float = Field(
-        title="Host turn no progress timeout seconds",
+        title="Agent turn stall timeout (seconds)",
         default=2400.0,
         alias="MEIVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS",
         description="Hosted agent-runner: a graph invocation whose per-agent turn clock has shown no activity (a LangGraph node enter, a completed LLM step) for this long is treated as turn-level fake-alive and aborted: the invocation is cancelled with the bounded unwind, the row settles to idling, one Error event is emitted, and the next wake resumes from the checkpoint. The default covers exec_node_timeout (1200s) plus the LLM retry budget plus margin, matching MEIVA_WEDGED_AGENT_INBOUND_AGE_SECONDS. A days-long turn that keeps stepping is never aborted — only no-progress counts.",
@@ -115,7 +116,7 @@ class DaemonSettings(
     )
 
     host_turn_progress_scan_interval_seconds: float = Field(
-        title="Host turn progress scan interval seconds",
+        title="Agent turn progress check interval (seconds)",
         default=30.0,
         alias="MEIVA_HOST_TURN_PROGRESS_SCAN_INTERVAL_SECONDS",
         description="Hosted agent-runner: how often the no-progress stall guard polls the per-agent turn clock while a graph.ainvoke is running. Poll cadence only — it changes detection latency, never the abort threshold (MEIVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS).",
@@ -129,7 +130,7 @@ class DaemonSettings(
     )
 
     held_settle_budget_s: float = Field(
-        title="Held settle budget s",
+        title="Takeover checkpoint settlement timeout (seconds)",
         default=5.0,
         gt=0,
         alias="MEIVA_HOST_HELD_SETTLE_BUDGET_S",
@@ -144,7 +145,7 @@ class DaemonSettings(
     )
 
     harness_registration_ttl_seconds: float = Field(
-        title="Harness registration TTL seconds",
+        title="External harness registration lifetime (seconds)",
         default=3600.0,
         gt=0,
         alias="MEIVA_HARNESS_REGISTRATION_TTL_SECONDS",
@@ -159,7 +160,7 @@ class DaemonSettings(
     )
 
     harness_skip_permissions: bool = Field(
-        title="Harness skip permissions",
+        title="Skip external harness approval prompts",
         default=True,
         alias="MEIVA_HARNESS_SKIP_PERMISSIONS",
         description="Hosted agent-runner: pass the external CLI its skip-approvals flag. Default true because a hosted turn has nobody at the terminal to answer an approval prompt, so a prompt is a hang rather than a decision; an operator who wants the CLI's own flow sets it false, per agent through config_overlay.",
@@ -175,7 +176,7 @@ class DaemonSettings(
     )
 
     page_server_poll_interval_seconds: float = Field(
-        title="Page server poll interval seconds",
+        title="Published page check interval (seconds)",
         default=2.0,
         alias="MEIVA_PAGE_SERVER_POLL_INTERVAL_SECONDS",
         description="Page server supervisor daemon poll interval (seconds): how often it reconciles open agent_pages rows against live page sessions.",
@@ -189,7 +190,7 @@ class DaemonSettings(
     )
 
     page_server_db_failure_exit_seconds: float = Field(
-        title="Page server DB failure exit seconds",
+        title="Page server database failure timeout (seconds)",
         default=300.0,
         alias="MEIVA_PAGE_SERVER_DB_FAILURE_EXIT_SECONDS",
         description=(
@@ -212,7 +213,7 @@ class DaemonSettings(
     )
 
     page_default_ttl_seconds: float = Field(
-        title="Page default TTL seconds",
+        title="Published page default lifetime (seconds)",
         default=86400.0,
         alias="MEIVA_PAGE_DEFAULT_TTL_SECONDS",
         description="Default lifetime in seconds for agent-published pages when the SDK does not specify ttl. The gateway applies this policy when it registers the page.",
@@ -226,7 +227,7 @@ class DaemonSettings(
     )
 
     chrome_page_default_ttl_seconds: float = Field(
-        title="Chrome page default TTL seconds",
+        title="Browser page default lifetime (seconds)",
         default=86400.0,
         gt=0,
         alias="MEIVA_CHROME_PAGE_DEFAULT_TTL_SECONDS",
@@ -241,7 +242,7 @@ class DaemonSettings(
     )
 
     notice_ttl_limit_seconds: float = Field(
-        title="Notice TTL limit seconds",
+        title="Notice maximum lifetime (seconds)",
         default=86400.0,
         alias="MEIVA_NOTICE_TTL_LIMIT_SECONDS",
         description="Maximum lifetime in seconds for agent notices. Notices without an explicit expire_at use now + limit; notices requesting a longer lifetime are clamped to this limit.",
@@ -255,7 +256,7 @@ class DaemonSettings(
     )
 
     ttl_reaper_poll_interval_seconds: float = Field(
-        title="TTL reaper poll interval seconds",
+        title="Expired resource cleanup interval (seconds)",
         default=60.0,
         alias="MEIVA_TTL_REAPER_POLL_INTERVAL_SECONDS",
         description="TTL reaper service poll interval in seconds for expired pages, browser sessions, notices, impersonation leases and explicitly time-limited persistent shell sessions.",
@@ -269,7 +270,7 @@ class DaemonSettings(
     )
 
     schedule_fire_log_retention_days: int = Field(
-        title="Schedule fire log retention days",
+        title="Schedule claim retention (days)",
         default=30,
         alias="MEIVA_SCHEDULE_FIRE_LOG_RETENTION_DAYS",
         description="Days of schedule_fire_log claims kept by the TTL reaper's retention prune. schedule_fire_log is the at-most-once claim ledger of schedule slots; the prune deletes every row whose slot is older than this window.",
@@ -283,7 +284,7 @@ class DaemonSettings(
     )
 
     schedule_fire_log_cleanup_interval_seconds: float = Field(
-        title="Schedule fire log cleanup interval seconds",
+        title="Schedule claim cleanup interval (seconds)",
         default=86400.0,
         alias="MEIVA_SCHEDULE_FIRE_LOG_CLEANUP_INTERVAL_SECONDS",
         description="How often the TTL reaper runs the schedule_fire_log retention prune (the clock is kept in maintenance_state, so a restart does not reset it). One bounded DELETE per pass; the default keeps a single daily pass.",
@@ -297,7 +298,7 @@ class DaemonSettings(
     )
 
     health_restart_lease_grace_s: float = Field(
-        title="Health restart lease grace s",
+        title="Restart delay for active impersonation (seconds)",
         default=30.0,
         ge=0,
         alias="MEIVA_HEALTH_RESTART_LEASE_GRACE_S",
@@ -312,7 +313,7 @@ class DaemonSettings(
     )
 
     health_probe_agent_min: int = Field(
-        title="Health probe agent min",
+        title="Minimum active agents for health check",
         default=1,
         alias="MEIVA_HEALTH_PROBE_AGENT_MIN",
         description="Minimum running/idling agents the health-probe requires for a healthy verdict. A dev/QA cluster (any non-default home) has this seeded to 0 in its `.env` at birth: with no resident agents by design, the check would otherwise fail forever and --auto-rollback would cycle the checkout (2026-08-10 preview and 2026-09-12 dev-worktree incidents). An explicit value — including the prod default 1 — stands as written.",
@@ -325,7 +326,7 @@ class DaemonSettings(
     )
 
     heartbeat_enabled: bool = Field(
-        title="Heartbeat enabled",
+        title="Enable idle agent check-ins",
         default=True,
         alias="MEIVA_HEARTBEAT_ENABLED",
         description="Run the heartbeat daemon on the gateway. On by default; set false to disable idle-agent check-ins cluster-wide.",
@@ -339,7 +340,7 @@ class DaemonSettings(
     )
 
     heartbeat_interval_seconds: float = Field(
-        title="Heartbeat interval seconds",
+        title="Idle agent check interval (seconds)",
         default=300.0,
         alias="MEIVA_HEARTBEAT_INTERVAL_SECONDS",
         description="Heartbeat daemon poll interval (seconds): how often it scans idle agents and sends a check-in to those that haven't paused. Longer = less disturbance, slower stall detection.",
@@ -352,7 +353,7 @@ class DaemonSettings(
     )
 
     heartbeat_idle_threshold_seconds: float = Field(
-        title="Heartbeat idle threshold seconds",
+        title="Idle time before agent check-in (seconds)",
         default=300.0,
         alias="MEIVA_HEARTBEAT_IDLE_THRESHOLD_SECONDS",
         description="Minimum idle time (seconds) since an agent's last completed turn before the heartbeat checks in on it. Measured from last activity, not status change, so an ops restart never resets the timer.",
@@ -365,7 +366,7 @@ class DaemonSettings(
     )
 
     heartbeat_backoff_consecutive_noop_nudges: int = Field(
-        title="Heartbeat backoff consecutive noop nudges",
+        title="Unanswered check-ins before slowing reminders",
         default=3,
         alias="MEIVA_HEARTBEAT_BACKOFF_CONSECUTIVE_NOOP_NUDGES",
         description="Platform-side nudge backoff (B7): consecutive heartbeat nudges that produce no real inbound and no agent pause raise the agent's backoff level, stretching the reminder interval by 2^level (cap 24h). Real inbound or a pause resets it.",
@@ -378,7 +379,7 @@ class DaemonSettings(
     )
 
     heartbeat_backoff_max_interval_seconds: float = Field(
-        title="Heartbeat backoff max interval seconds",
+        title="Maximum check-in interval (seconds)",
         default=86400.0,
         alias="MEIVA_HEARTBEAT_BACKOFF_MAX_INTERVAL_SECONDS",
         description="Ceiling (seconds) on the backoff-stretched heartbeat reminder interval: an agent that keeps receiving check-ins without doing work has its reminder floor stretched to heartbeat_interval_seconds * 2^level, and this is where that floor stops growing. Why a day: a check-in is a backed-off agent's only route back to work, so the ceiling is what decides how long a genuinely wedged agent can stay silent — a day keeps it reachable without giving up on it, while the steady-state nudge rate stays near zero (at the default 5-minute interval the stretch is already 21 hours at level 8).",
@@ -391,7 +392,7 @@ class DaemonSettings(
     )
 
     wedged_agent_inbound_age_seconds: float = Field(
-        title="Wedged agent inbound age seconds",
+        title="Pending message age for stalled agent detection (seconds)",
         default=2400.0,
         alias="MEIVA_WEDGED_AGENT_INBOUND_AGE_SECONDS",
         description="Minimum age (seconds) of an unconsumed pending inbound before a running agent is considered wedged. Default 2400s (40 min) — exec_node_timeout_seconds (1200s) + LLM retry budget plus margin. Raise for agents doing long-running work; lower for tighter detection.",
@@ -405,7 +406,7 @@ class DaemonSettings(
     )
 
     events_maintenance_interval_seconds: float = Field(
-        title="Events maintenance interval seconds",
+        title="Event maintenance interval (seconds)",
         default=3600.0,
         alias="MEIVA_EVENTS_MAINTENANCE_INTERVAL_SECONDS",
         description="Events-maintenance daemon poll interval (seconds): how often it recovers observations, replays the mirror and re-aggregates the last closed days. Hourly keeps the durable ledger fresh and recovers a downtime gap within the hour.",
@@ -418,7 +419,7 @@ class DaemonSettings(
     )
 
     events_maintenance_pass_deadline_s: float = Field(
-        title="Events maintenance pass deadline s",
+        title="Event maintenance timeout (seconds)",
         default=1500.0,
         alias="MEIVA_EVENTS_MAINTENANCE_PASS_DEADLINE_S",
         description="Hard deadline in seconds for one hourly events-maintenance pass. Exceeding this bound wedges the loop for watchdog respawn.",
@@ -431,7 +432,7 @@ class DaemonSettings(
     )
 
     events_escalation_mode: Literal["off", "shadow"] = Field(
-        title="Events escalation mode",
+        title="Alert escalation mode",
         default="shadow",
         alias="MEIVA_EVENTS_ESCALATION_MODE",
         description="What the alert escalation pass does with an open critical/error episode older than the age floor: `shadow` decides and records what a person would have been told, without sending; `off` skips the pass. Delivery is a later slice, so there is no `live` value to select yet.",
@@ -444,7 +445,7 @@ class DaemonSettings(
     )
 
     events_escalation_interval_seconds: float = Field(
-        title="Events escalation interval seconds",
+        title="Alert escalation check interval (seconds)",
         default=60.0,
         alias="MEIVA_EVENTS_ESCALATION_INTERVAL_SECONDS",
         description="Escalation pass interval (seconds). One minute keeps the decision within the responsiveness a P1 needs without polling faster than a person can act.",
@@ -457,7 +458,7 @@ class DaemonSettings(
     )
 
     events_escalation_min_age_seconds: float = Field(
-        title="Events escalation min age seconds",
+        title="Alert age before escalation (seconds)",
         default=600.0,
         alias="MEIVA_EVENTS_ESCALATION_MIN_AGE_SECONDS",
         description="How long an open critical/error episode must persist (seconds) before it counts as unanswered. Ten minutes leaves room for the on-duty agent the alert wakes first; the value is the user's attention budget, not a technical bound.",
@@ -470,7 +471,7 @@ class DaemonSettings(
     )
 
     events_escalation_cooldown_seconds: float = Field(
-        title="Events escalation cooldown seconds",
+        title="Alert escalation cooldown (seconds)",
         default=1800.0,
         alias="MEIVA_EVENTS_ESCALATION_COOLDOWN_SECONDS",
         description="Minimum gap (seconds) between two escalation decisions for the same episode. Stored on the ledger row, so a restart cannot reset the wait.",
@@ -483,7 +484,7 @@ class DaemonSettings(
     )
 
     events_maintenance_resolution_deadline_s: float = Field(
-        title="Events maintenance resolution deadline s",
+        title="Event resolution timeout (seconds)",
         default=600.0,
         alias="MEIVA_EVENTS_MAINTENANCE_RESOLUTION_DEADLINE_S",
         description="Hard deadline in seconds for one events-maintenance class-resolution pass; exceeding it wedges the loop for watchdog respawn.",
@@ -496,12 +497,13 @@ class DaemonSettings(
     )
 
     events_resolution_burst_threshold: int = Field(
-        title="Events resolution burst threshold",
+        title="Event count to reopen a dismissed class",
         default=5,
         ge=0,
         alias="MEIVA_EVENTS_RESOLUTION_BURST_THRESHOLD",
         description="A dismissed Loki event class reopens when its trailing ten-minute count is greater than this threshold. 0 reopens on the first matching event; the default 5 leaves normal low-volume recurrence dismissed.",
         json_schema_extra={
+            "help_text": "Set 0 to reopen a dismissed class on its first matching event.",
             "capability": "gateway",
             "restart_required": "all",
             "writable": True,
@@ -511,7 +513,7 @@ class DaemonSettings(
     )
 
     events_resolution_interval_seconds: int = Field(
-        title="Events resolution interval seconds",
+        title="Event resolution check interval (seconds)",
         default=300,
         ge=1,
         alias="MEIVA_EVENTS_RESOLUTION_INTERVAL_SECONDS",
@@ -526,7 +528,7 @@ class DaemonSettings(
     )
 
     events_auto_dismiss_enabled: bool = Field(
-        title="Events auto dismiss enabled",
+        title="Automatically dismiss stable event classes",
         default=False,
         alias="MEIVA_EVENTS_AUTO_DISMISS_ENABLED",
         description="Enable the daily stable-class auto-dismiss scan. Off by default: the normal resolution flow is an explicit authenticated API call by the ops agent or operator.",
@@ -540,7 +542,7 @@ class DaemonSettings(
     )
 
     events_auto_dismiss_days: int = Field(
-        title="Events auto dismiss days",
+        title="Stable event class age before dismissal (days)",
         default=7,
         ge=1,
         alias="MEIVA_EVENTS_AUTO_DISMISS_DAYS",
@@ -555,7 +557,7 @@ class DaemonSettings(
     )
 
     computer_use_lease_s: float = Field(
-        title="Computer use lease s",
+        title="Computer screen ownership timeout (seconds)",
         default=30.0,
         alias="MEIVA_COMPUTER_LEASE_S",
         description="Computer-use screen-ownership lease: a holder that sends no action for this long loses the screen (Phase 2, task #1101).",
@@ -570,7 +572,7 @@ class DaemonSettings(
     )
 
     computer_use_queue_timeout_s: float = Field(
-        title="Computer use queue timeout s",
+        title="Computer action queue timeout (seconds)",
         default=30.0,
         alias="MEIVA_COMPUTER_QUEUE_TIMEOUT_S",
         description="How long a computer-use action waits in the FIFO queue before failing with 'screen busy' (Phase 2, task #1101).",
@@ -585,7 +587,7 @@ class DaemonSettings(
     )
 
     computer_use_session_idle_s: float = Field(
-        title="Computer use session idle s",
+        title="Computer session idle timeout (seconds)",
         default=600.0,
         alias="MEIVA_COMPUTER_SESSION_IDLE_S",
         description="Computer-use task-session idle threshold: a task_id with no action for this long emits computer_session_end (Phase 2, task #1101).",
@@ -600,7 +602,7 @@ class DaemonSettings(
     )
 
     computer_use_loop_stall_s: float = Field(
-        title="Computer use loop stall s",
+        title="Computer service stall timeout (seconds)",
         default=180.0,
         alias="MEIVA_COMPUTER_LOOP_STALL_S",
         description="Computer-use daemon loop-liveness window (seconds): a run loop that has not ticked for this long dumps all thread stacks and exits for a supervisor restart (2026-10-04: a wedged loop left the unit unstoppable for ~15 minutes).",
@@ -615,7 +617,7 @@ class DaemonSettings(
     )
 
     computer_use_shutdown_drain_s: float = Field(
-        title="Computer use shutdown drain s",
+        title="Computer service shutdown drain timeout (seconds)",
         default=5.0,
         alias="MEIVA_COMPUTER_SHUTDOWN_DRAIN_S",
         description="Computer-use daemon shutdown drain window (seconds): on stop, the daemon cancels its client handlers and waits at most this long for the listener to finish, then dumps all thread stacks and exits for a supervisor restart (2026-10-04: an unbounded drain left the process half-down — listener closed, stop signal consumed). Keep it below the supervisor's stop window (10s) so the drain reports first.",

@@ -2895,6 +2895,7 @@ export interface components {
         ConfigFieldView: {
             name: string;
             label: string;
+            help_text?: string | null;
             owner?: string | null;
             field_type: string;
             current_value: unknown;

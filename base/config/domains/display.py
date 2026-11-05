@@ -26,7 +26,7 @@ class DisplaySettings(EnvSettings):
     """User-facing listing/window defaults (see the module docstring)."""
 
     messages_default_limit: int = Field(
-        title="Messages default limit",
+        title="Default message history page size",
         default=100,
         ge=1,
         le=10000,
@@ -46,7 +46,7 @@ class DisplaySettings(EnvSettings):
         },
     )
     timeline_default_limit: int = Field(
-        title="Timeline default limit",
+        title="Default timeline page size",
         default=50,
         ge=1,
         le=1000,
@@ -67,7 +67,7 @@ class DisplaySettings(EnvSettings):
     )
 
     run_timeline_message_text_max: int = Field(
-        title="Run timeline message text max",
+        title="Run timeline message text limit (characters)",
         default=20000,
         ge=1000,
         le=200000,
@@ -89,7 +89,7 @@ class DisplaySettings(EnvSettings):
     )
 
     notices_open_default_limit: int = Field(
-        title="Notices open default limit",
+        title="Default open notices limit",
         default=200,
         ge=1,
         le=500,
@@ -109,7 +109,7 @@ class DisplaySettings(EnvSettings):
         },
     )
     notices_resolved_default_page: int = Field(
-        title="Notices resolved default page",
+        title="Default resolved notices page size",
         default=30,
         ge=1,
         le=100,
@@ -129,7 +129,7 @@ class DisplaySettings(EnvSettings):
     )
 
     shell_capture_default_lines: int = Field(
-        title="Shell capture default lines",
+        title="Default shell output tail (lines)",
         default=200,
         ge=50,
         le=2000,
@@ -151,7 +151,7 @@ class DisplaySettings(EnvSettings):
     )
 
     timeline_history_page_base: int = Field(
-        title="Timeline history page base",
+        title="Initial timeline history page size",
         default=50,
         ge=1,
         le=1000,
@@ -171,7 +171,7 @@ class DisplaySettings(EnvSettings):
     )
 
     timeline_retained_items_max: int = Field(
-        title="Timeline retained items max",
+        title="Maximum timeline items retained in view",
         default=250,
         ge=200,
         le=500,
@@ -193,7 +193,7 @@ class DisplaySettings(EnvSettings):
     )
 
     timeline_window_activation_rows: int = Field(
-        title="Timeline window activation rows",
+        title="Timeline row count for windowed rendering",
         default=100,
         ge=2,
         le=5000,
@@ -212,7 +212,7 @@ class DisplaySettings(EnvSettings):
     )
 
     timeline_window_turn_rows: int = Field(
-        title="Timeline window turn rows",
+        title="Turn row count for windowed rendering",
         default=100,
         ge=1,
         le=5000,
@@ -231,7 +231,7 @@ class DisplaySettings(EnvSettings):
     )
 
     timeline_window_measure_rows: int = Field(
-        title="Timeline window measure rows",
+        title="Timeline row count for height measurement",
         default=75,
         ge=1,
         le=4999,
@@ -250,7 +250,7 @@ class DisplaySettings(EnvSettings):
     )
 
     events_default_limit: int = Field(
-        title="Events default limit",
+        title="Default event history page size",
         default=100,
         alias="MEIVA_EVENTS_DEFAULT_LIMIT",
         description=(
@@ -269,7 +269,7 @@ class DisplaySettings(EnvSettings):
     )
 
     alerts_default_limit: int = Field(
-        title="Alerts default limit",
+        title="Default alerts page size",
         default=100,
         alias="MEIVA_ALERTS_DEFAULT_LIMIT",
         description=(
@@ -287,7 +287,7 @@ class DisplaySettings(EnvSettings):
         },
     )
     schedules_runs_default_limit: int = Field(
-        title="Schedules runs default limit",
+        title="Default schedule run history page size",
         default=50,
         alias="MEIVA_SCHEDULES_RUNS_DEFAULT_LIMIT",
         description=(
@@ -304,7 +304,7 @@ class DisplaySettings(EnvSettings):
         },
     )
     config_audit_default_last: int = Field(
-        title="Config audit default last",
+        title="Default configuration audit history size",
         default=20,
         alias="MEIVA_CONFIG_AUDIT_DEFAULT_LAST",
         description=(
@@ -321,7 +321,7 @@ class DisplaySettings(EnvSettings):
     )
 
     cluster_events_default_limit: int = Field(
-        title="Cluster events default limit",
+        title="Default cluster events page size",
         default=200,
         alias="MEIVA_CLUSTER_EVENTS_DEFAULT_LIMIT",
         description=(
@@ -337,7 +337,7 @@ class DisplaySettings(EnvSettings):
         },
     )
     metrics_default_window_days: int = Field(
-        title="Metrics default window days",
+        title="Default metrics window (days)",
         default=1,
         alias="MEIVA_METRICS_DEFAULT_WINDOW_DAYS",
         description=(
@@ -354,7 +354,7 @@ class DisplaySettings(EnvSettings):
     )
 
     neighbors_default_depth: int = Field(
-        title="Neighbors default depth",
+        title="Default agent relationship depth",
         default=1,
         alias="MEIVA_NEIGHBORS_DEFAULT_DEPTH",
         description=(
@@ -371,7 +371,7 @@ class DisplaySettings(EnvSettings):
         },
     )
     neighbors_default_limit: int = Field(
-        title="Neighbors default limit",
+        title="Default agent relationship limit",
         default=20,
         alias="MEIVA_NEIGHBORS_DEFAULT_LIMIT",
         description=(
@@ -389,7 +389,7 @@ class DisplaySettings(EnvSettings):
     )
 
     fleet_graph_decay_lambda: float = Field(
-        title="Fleet graph decay lambda",
+        title="Fleet graph daily message weight decay",
         default=0.5,
         alias="MEIVA_FLEET_GRAPH_DECAY_LAMBDA",
         description=(
@@ -407,7 +407,7 @@ class DisplaySettings(EnvSettings):
         },
     )
     plugin_stats_max_detail_chars: int = Field(
-        title="Plugin stats max detail chars",
+        title="Plugin statistic detail limit (characters)",
         default=500,
         gt=0,
         alias="MEIVA_PLUGIN_STATS_MAX_DETAIL_CHARS",

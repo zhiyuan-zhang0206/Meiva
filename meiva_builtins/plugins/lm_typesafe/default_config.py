@@ -65,13 +65,13 @@ class LocalDecisionConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     local_endpoint: str = Field(
-        title="Local endpoint",
+        title="Local decision service endpoint",
         default="",
         strict=True,
         json_schema_extra={"scope": "cluster-pinned", "restart_required": "all"},
     )
     local_models: dict[str, LocalDecisionModel] = Field(
-        title="Local models",
+        title="Local decision model registrations",
         default_factory=dict,
         json_schema_extra={"scope": "cluster-pinned", "restart_required": "all"},
     )

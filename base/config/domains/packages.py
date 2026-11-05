@@ -36,7 +36,7 @@ _HOST_FIELD: JsonDict = {
 
 class PackagesSettings(EnvSettings):
     refresh_enabled: bool = Field(
-        title="Refresh enabled",
+        title="Enable automatic package refresh",
         default=True,
         alias="MEIVA_PACKAGES_REFRESH_ENABLED",
         description="Master switch for the content-refresh channel (core skills fast lane): the converge step registers the 15-min OS job only when on, and a job run no-ops when off. Manual `meiva packages refresh` always works.",
@@ -44,7 +44,7 @@ class PackagesSettings(EnvSettings):
     )
 
     refresh_default_mode: UpdateModeSetting = Field(
-        title="Refresh default mode",
+        title="Default package update policy",
         default="auto",
         alias="MEIVA_PACKAGES_REFRESH_DEFAULT_MODE",
         description="Update policy a channel-backed package resolves to at first sight when its registry row carries no explicit mode: auto (check + apply), notify (check, record, never apply), off.",
@@ -52,7 +52,7 @@ class PackagesSettings(EnvSettings):
     )
 
     refresh_default_interval_seconds: int = Field(
-        title="Refresh default interval seconds",
+        title="Default package refresh interval (seconds)",
         default=86400,
         gt=0,
         alias="MEIVA_PACKAGES_REFRESH_DEFAULT_INTERVAL_SECONDS",
@@ -61,7 +61,7 @@ class PackagesSettings(EnvSettings):
     )
 
     refresh_tick_seconds: int = Field(
-        title="Refresh tick seconds",
+        title="Package refresh scheduler interval (seconds)",
         default=900,
         gt=0,
         alias="MEIVA_PACKAGES_REFRESH_TICK_SECONDS",
@@ -70,7 +70,7 @@ class PackagesSettings(EnvSettings):
     )
 
     refresh_budget_seconds: float = Field(
-        title="Refresh budget seconds",
+        title="Package refresh time budget (seconds)",
         default=120.0,
         gt=0,
         alias="MEIVA_PACKAGES_REFRESH_BUDGET_SECONDS",
@@ -79,7 +79,7 @@ class PackagesSettings(EnvSettings):
     )
 
     refresh_max_applies: int = Field(
-        title="Refresh max applies",
+        title="Maximum package updates per refresh",
         default=10,
         gt=0,
         alias="MEIVA_PACKAGES_REFRESH_MAX_APPLIES",
@@ -88,7 +88,7 @@ class PackagesSettings(EnvSettings):
     )
 
     refresh_network_timeout_seconds: float = Field(
-        title="Refresh network timeout seconds",
+        title="Package refresh network timeout (seconds)",
         default=30.0,
         gt=0,
         alias="MEIVA_PACKAGES_REFRESH_NETWORK_TIMEOUT_SECONDS",

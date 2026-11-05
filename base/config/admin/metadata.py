@@ -95,6 +95,7 @@ class ConfigFieldMeta:
     # frontend renders as a fixed-option select; None for every other type.
     choices: _ConfigChoices = None
     owner: str | None = None
+    help_text: str | None = None
 
 
 def get_config_metadata(*, authority: ConfigMetadataAuthority) -> list[ConfigFieldMeta]:
@@ -135,6 +136,7 @@ def get_config_metadata(*, authority: ConfigMetadataAuthority) -> list[ConfigFie
             ConfigFieldMeta(
                 name=name,
                 label=field_info.title,
+                help_text=extra.get("help_text"),
                 field_type=type_name,
                 current_value=current,
                 default_value=default,

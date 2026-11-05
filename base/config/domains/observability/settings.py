@@ -24,7 +24,7 @@ _OTLP_INGRESS_PORT_DEFAULT = 4318
 
 class ObservabilitySettings(EnvSettings):
     sdk_call_sampling_enabled: bool = Field(
-        title="SDK call sampling enabled",
+        title="Sample SDK call events",
         default=False,
         alias="MEIVA_SDK_CALL_SAMPLING_ENABLED",
         description="Sample SDK-call events instead of recording every call. Background refresh every five seconds; execution tallies always remain complete.",
@@ -36,7 +36,7 @@ class ObservabilitySettings(EnvSettings):
         },
     )
     sdk_call_sample_every: int = Field(
-        title="SDK call sample every",
+        title="SDK call sampling interval",
         default=10,
         ge=1,
         alias="MEIVA_SDK_CALL_SAMPLE_EVERY",
@@ -50,7 +50,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     trace_enabled: bool = Field(
-        title="Trace enabled",
+        title="Enable trace export",
         default=True,
         alias="MEIVA_TRACE_ENABLED",
         description="Export OTel spans to the local OTel Collector sidecar (which fans out to Tempo and writes the JSONL mirror under $MEIVA_HOME/traces/ via its file exporter). Disable to skip span export entirely — with the sidecar architecture recording IS the export, so the mirror stops too (one kill switch for the whole OTLP surface).",
@@ -63,7 +63,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     trace_retention_days: int = Field(
-        title="Trace retention days",
+        title="Trace retention (days)",
         default=3,
         alias="MEIVA_TRACE_RETENTION_DAYS",
         description="Delete local trace-mirror files older than this many days (pruned on each agent start; the collector file exporter also rotates by max_days from the same setting, baked into its config at converge). A window not replayed in time is gone.",
@@ -100,7 +100,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     log_retention_days: int = Field(
-        title="Log retention days",
+        title="Log retention (days)",
         default=14,
         ge=1,
         alias="MEIVA_LOG_RETENTION_DAYS",
@@ -118,7 +118,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     trace_strip_content: bool = Field(
-        title="Trace strip content",
+        title="Remove model content from traces",
         default=True,
         alias="MEIVA_TRACE_STRIP_CONTENT",
         description="Strip LLM content attributes (gen_ai.task.input/output, traceloop.entity.input/output, messages, system_instructions, ...) from recorded spans. Metadata-only spans: names, langgraph paths, checkpoint refs, agent_id, durations, status, trace_id. Content stays out of the mirror; it is fetched on demand from checkpoints by trace id.",
@@ -131,11 +131,12 @@ class ObservabilitySettings(EnvSettings):
     )
 
     trace_max_dir_mb: int = Field(
-        title="Trace max dir mb",
+        title="Trace directory size limit (MiB)",
         default=2048,
         alias="MEIVA_TRACE_MAX_DIR_MB",
         description="Hard cap on the local trace-mirror directory size (MB). When exceeded on an agent start, oldest mirror files are deleted until the directory fits. Bounds disk even when retention_days is wide or the collector rotation is misconfigured.",
         json_schema_extra={
+            "help_text": "Set 0 to disable the directory size cap.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -144,7 +145,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     trace_disk_watermark: float = Field(
-        title="Trace disk watermark",
+        title="Disk usage threshold for pausing traces",
         default=0.9,
         alias="MEIVA_TRACE_DISK_WATERMARK",
         description="Data-disk usage fraction (0..1) at which trace recording auto-degrades: the agent skips enabling span recording (and logs a warning event) so the mirror can never fill the disk. 1.0 or above disables the guard.",
@@ -157,7 +158,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     telemetry_otlp_enabled: bool = Field(
-        title="Telemetry OTLP enabled",
+        title="Export events through OTLP",
         default=True,
         alias="MEIVA_TELEMETRY_OTLP_ENABLED",
         description=(
@@ -182,7 +183,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     telemetry_otlp_child_defer: bool = Field(
-        title="Telemetry OTLP child defer",
+        title="Defer execution process telemetry export",
         default=True,
         alias="MEIVA_TELEMETRY_OTLP_CHILD_DEFER",
         description=(
@@ -206,7 +207,7 @@ class ObservabilitySettings(EnvSettings):
         },
     )
     telemetry_otlp_child_defer_max_age_s: float = Field(
-        title="Telemetry OTLP child defer max age s",
+        title="Deferred telemetry maximum age (seconds)",
         default=60.0,
         alias="MEIVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S",
         description=(
@@ -225,7 +226,7 @@ class ObservabilitySettings(EnvSettings):
         },
     )
     telemetry_otlp_endpoint: str = Field(
-        title="Telemetry OTLP endpoint",
+        title="Local OTLP collector endpoint",
         default=f"http://127.0.0.1:{_OTLP_INGRESS_PORT_DEFAULT}",
         alias="MEIVA_TELEMETRY_OTLP_ENDPOINT",
         description=(
@@ -251,7 +252,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     telemetry_otlp_port: int = Field(
-        title="Telemetry OTLP port",
+        title="Local OTLP collector port",
         default=_OTLP_INGRESS_PORT_DEFAULT,
         alias="MEIVA_TELEMETRY_OTLP_PORT",
         ge=1,
@@ -302,7 +303,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     telemetry_tempo_endpoint: str = Field(
-        title="Telemetry tempo endpoint",
+        title="Tempo trace ingestion endpoint",
         default="http://127.0.0.1:14318",
         alias="MEIVA_TELEMETRY_TEMPO_ENDPOINT",
         description=(
@@ -322,7 +323,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     telemetry_tempo_query_url: str = Field(
-        title="Telemetry tempo query URL",
+        title="Tempo query URL",
         default="http://127.0.0.1:3200",
         alias="MEIVA_TELEMETRY_TEMPO_QUERY_URL",
         description=(
@@ -340,7 +341,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     telemetry_loki_url: str = Field(
-        title="Telemetry loki URL",
+        title="Loki event history URL",
         default="http://127.0.0.1:3100",
         alias="MEIVA_TELEMETRY_LOKI_URL",
         description="Loki base URL (single-binary HTTP port) for the LGTM event-history read path — the replacement for PG `events` reads (task #1197).",
@@ -353,7 +354,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     telemetry_prometheus_url: str = Field(
-        title="Telemetry prometheus URL",
+        title="Prometheus metrics URL",
         default="http://127.0.0.1:9090",
         alias="MEIVA_TELEMETRY_PROMETHEUS_URL",
         description="Prometheus base URL (HTTP API port) for the LGTM telemetry-aggregate read path — the replacement for PG `events` llm_usage reads (task #1197).",
@@ -366,7 +367,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     telemetry_grafana_url: str = Field(
-        title="Telemetry grafana URL",
+        title="Grafana dashboard URL",
         default="http://127.0.0.1:3003",
         alias="MEIVA_TELEMETRY_GRAFANA_URL",
         description="Grafana base URL (HTTP port) for the LGTM dashboard and health-read path — the lgtm healthcheck's /api/health readiness probe and the Grafana-evaluated ops alerts read from the same instance (task #1789).",
@@ -379,7 +380,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     lgtm_listen_host: str = Field(
-        title="Lgtm listen host",
+        title="Loki and Prometheus listen address",
         default="127.0.0.1",
         alias="MEIVA_LGTM_LISTEN_HOST",
         description=(
@@ -399,7 +400,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     lgtm_grafana_listen_host: str = Field(
-        title="Lgtm grafana listen host",
+        title="Grafana listen address",
         default="0.0.0.0",  # noqa: S104 — a config default value, not a bind
         alias="MEIVA_LGTM_GRAFANA_LISTEN_HOST",
         description=(
@@ -419,7 +420,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     lgtm_loki_port: int = Field(
-        title="Lgtm loki port",
+        title="Loki HTTP port",
         default=3100,
         ge=1,
         le=65535,
@@ -435,7 +436,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     lgtm_loki_grpc_port: int = Field(
-        title="Lgtm loki grpc port",
+        title="Loki internal gRPC port",
         default=9095,
         ge=1,
         le=65535,
@@ -451,7 +452,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     lgtm_prometheus_port: int = Field(
-        title="Lgtm prometheus port",
+        title="Prometheus HTTP port",
         default=9090,
         ge=1,
         le=65535,
@@ -467,7 +468,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     lgtm_grafana_port: int = Field(
-        title="Lgtm grafana port",
+        title="Grafana HTTP port",
         default=3003,
         ge=1,
         le=65535,
@@ -483,7 +484,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     lgtm_storage_dir: str = Field(
-        title="Lgtm storage dir",
+        title="Observability data directory",
         default="",
         alias="MEIVA_LGTM_STORAGE_DIR",
         description=(
@@ -506,7 +507,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     observability_url: str = Field(
-        title="Observability URL",
+        title="Observability station URL",
         default="",
         alias="MEIVA_OBSERVABILITY_URL",
         description=(
@@ -523,6 +524,7 @@ class ObservabilitySettings(EnvSettings):
             "loopback 127.0.0.1 when the station is local."
         ),
         json_schema_extra={
+            "help_text": "Leave empty to use local observability services; omit the port and trailing slash.",
             "restart_required": "all",
             "writable": True,
             "sensitive": False,
@@ -532,7 +534,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     observability_otlp_port: int = Field(
-        title="Observability OTLP port",
+        title="Observability station OTLP port",
         default=_OTLP_INGRESS_PORT_DEFAULT,
         ge=1,
         le=65535,
@@ -553,7 +555,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     otel_collector_metrics_port: int = Field(
-        title="Otel collector metrics port",
+        title="OpenTelemetry collector metrics port",
         default=8888,
         alias="MEIVA_OTELCOL_METRICS_PORT",
         description=(
@@ -572,7 +574,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     otel_collector_download_budget_s: float = Field(
-        title="Otel collector download budget s",
+        title="OpenTelemetry collector download budget (seconds)",
         default=900.0,
         gt=0,
         alias="MEIVA_OTELCOL_DOWNLOAD_BUDGET_S",
@@ -595,7 +597,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     otel_collector_download_socket_timeout_s: float = Field(
-        title="Otel collector download socket timeout s",
+        title="OpenTelemetry collector download socket timeout (seconds)",
         default=30.0,
         gt=0,
         alias="MEIVA_OTELCOL_DOWNLOAD_SOCKET_TIMEOUT_S",
@@ -616,7 +618,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     otel_collector_download_attempts: int = Field(
-        title="Otel collector download attempts",
+        title="OpenTelemetry collector download attempts",
         default=3,
         ge=1,
         alias="MEIVA_OTELCOL_DOWNLOAD_ATTEMPTS",
@@ -635,7 +637,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     otel_collector_download_retry_backoff_s: float = Field(
-        title="Otel collector download retry backoff s",
+        title="OpenTelemetry collector download retry delay (seconds)",
         default=5.0,
         ge=0,
         alias="MEIVA_OTELCOL_DOWNLOAD_RETRY_BACKOFF_S",
@@ -655,7 +657,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     otel_collector_download_progress_interval_s: float = Field(
-        title="Otel collector download progress interval s",
+        title="OpenTelemetry collector download progress interval (seconds)",
         default=15.0,
         gt=0,
         alias="MEIVA_OTELCOL_DOWNLOAD_PROGRESS_INTERVAL_S",
@@ -674,7 +676,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     lgtm_native_download_budget_s: float = Field(
-        title="Lgtm native download budget s",
+        title="Observability backend download budget (seconds)",
         default=900.0,
         gt=0,
         alias="MEIVA_LGTM_NATIVE_DOWNLOAD_BUDGET_S",
@@ -698,7 +700,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     lgtm_native_download_socket_timeout_s: float = Field(
-        title="Lgtm native download socket timeout s",
+        title="Observability backend download socket timeout (seconds)",
         default=30.0,
         gt=0,
         alias="MEIVA_LGTM_NATIVE_DOWNLOAD_SOCKET_TIMEOUT_S",
@@ -719,7 +721,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     lgtm_native_download_attempts: int = Field(
-        title="Lgtm native download attempts",
+        title="Observability backend download attempts",
         default=3,
         ge=1,
         alias="MEIVA_LGTM_NATIVE_DOWNLOAD_ATTEMPTS",
@@ -738,7 +740,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     lgtm_native_download_retry_backoff_s: float = Field(
-        title="Lgtm native download retry backoff s",
+        title="Observability backend download retry delay (seconds)",
         default=5.0,
         ge=0,
         alias="MEIVA_LGTM_NATIVE_DOWNLOAD_RETRY_BACKOFF_S",
@@ -758,7 +760,7 @@ class ObservabilitySettings(EnvSettings):
     )
 
     lgtm_native_download_progress_interval_s: float = Field(
-        title="Lgtm native download progress interval s",
+        title="Observability backend download progress interval (seconds)",
         default=15.0,
         gt=0,
         alias="MEIVA_LGTM_NATIVE_DOWNLOAD_PROGRESS_INTERVAL_S",

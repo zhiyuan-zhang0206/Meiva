@@ -58,27 +58,29 @@ def health_port_field(
 class ServiceHealthPortFields:
     """The per-unit daemon /healthz port overrides."""
 
-    labeler_health_port: int | None = health_port_field("labeler", title="Labeler health port")
+    labeler_health_port: int | None = health_port_field(
+        "labeler", title="Conversation labeler health port"
+    )
     im_bridge_health_port: int | None = health_port_field(
-        "im_bridge", title="IM bridge health port"
+        "im_bridge", title="Messaging bridge health port"
     )
     heartbeat_health_port: int | None = health_port_field(
-        "heartbeat", title="Heartbeat health port"
+        "heartbeat", title="Heartbeat service health port"
     )
     delivery_watchdog_health_port: int | None = health_port_field(
-        "delivery_watchdog", title="Delivery watchdog health port"
+        "delivery_watchdog", title="Message watchdog health port"
     )
     task_maintenance_health_port: int | None = health_port_field(
-        "task_maintenance", title="Task maintenance health port"
+        "task_maintenance", title="Task maintenance service health port"
     )
     events_maintenance_health_port: int | None = health_port_field(
-        "events_maintenance", title="Events maintenance health port"
+        "events_maintenance", title="Event maintenance service health port"
     )
     pg_backup_health_port: int | None = health_port_field(
-        "pg_backup", title="Postgres backup health port"
+        "pg_backup", title="Postgres backup service health port"
     )
     ttl_reaper_health_port: int | None = health_port_field(
-        "ttl_reaper", title="TTL reaper health port"
+        "ttl_reaper", title="Expired resource cleanup service health port"
     )
     schedule_manager_health_port: int | None = health_port_field(
         "schedule_manager", capability="common", title="Schedule manager health port"
@@ -89,7 +91,7 @@ class ServiceHealthPortFields:
     # The ops daemon is the agent-runner's inbound port the gateway dials to run
     # cluster ops; the runner registers the resulting URL itself.
     ops_health_port: int | None = health_port_field(
-        "ops", capability="agent-runner", title="Ops health port"
+        "ops", capability="agent-runner", title="Operations service health port"
     )
     # `writable`: the one official repair surface for a hosted-runner port that
     # collides on a mirrored localhost namespace (`.env` hand-edits were the only

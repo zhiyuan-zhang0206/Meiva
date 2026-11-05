@@ -22,7 +22,6 @@ import {
   displayOrder,
   fieldFilterTags,
   formatConfigValue,
-  isPerAgent,
 } from "../config-groups";
 
 export type MachineSelection = string | null;
@@ -125,23 +124,6 @@ export function MachineSelector({
   );
 }
 
-const COMMON_KEYS: Record<string, "reasoning" | "timeout" | "compaction" | "timezone" | "searchProvider" | "searchResults"> = {
-  MEIVA_REASONING_EFFORT: "reasoning",
-  MEIVA_EXEC_TIMEOUT_SECONDS: "timeout",
-  MEIVA_AUTO_COMPACT_FRACTION: "compaction",
-  MEIVA_TIMEZONE: "timezone",
-  MEIVA_WEB_SEARCH_PROVIDER: "searchProvider",
-  MEIVA_WEB_MAX_RESULTS: "searchResults",
-};
-
-function TagBadge({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="rounded border border-border px-1 text-[11px] text-muted-foreground">
-      {children}
-    </span>
-  );
-}
-
 export function ConfigRow({
   field,
   simple,
@@ -179,12 +161,9 @@ export function ConfigRow({
 }) {
   const t = useTranslations("config");
   const isEditing = editingField === field.name;
-  const commonKey = simple ? COMMON_KEYS[field.env_var] : undefined;
-  const label = commonKey ? t(`common.${commonKey}.label`) : field.label;
-  const description = commonKey ? t(`common.${commonKey}.description`) : field.description;
+  const label = field.label;
   const displayValue = simple && (field.current_value == null || field.current_value === "")
     ? t("automaticDefault") : displayFieldValue(field);
-  const defaultText = formatConfigValue(field.default_value);
   const capabilityBlocked = field.field_type === "bool" && field.can_enable === false;
   const toggleDisabled = busy || capabilityBlocked;
 
@@ -197,7 +176,7 @@ export function ConfigRow({
     >
       <div className={cn("space-y-0.5", FLEX_1, MIN_W_0)}>
         <div className={cn("items-center gap-2 flex-wrap", FLEX)}>
-          <span className="font-medium break-all" title={field.env_var}>
+          <span className="font-medium break-words">
             {label}
           </span>
           {!field.writable && <span className="text-xs text-muted-foreground">{t("readOnly")}</span>}
@@ -212,26 +191,9 @@ export function ConfigRow({
             </span>
           )}
         </div>
-        {!simple && <details className="pt-1 text-xs text-muted-foreground">
-          <summary className="cursor-pointer">{t("details")}</summary>
-          <div className={cn(FLEX, "flex-wrap items-center gap-2 py-2")}>
-            <code>{field.env_var}</code>
-          {field.writable ? (
-            <TagBadge>{t("runtime")}</TagBadge>
-          ) : (
-            <span className="rounded border border-border bg-muted px-1 text-[11px] font-medium">
-              {t("cliOnly")}
-            </span>
-          )}
-          <TagBadge>{field.scope}</TagBadge>
-          {isPerAgent(field) && <TagBadge>{t("perAgent")}</TagBadge>}
-            <span>Default: {defaultText}</span>
-          </div>
-          {field.description && <p className="leading-relaxed">{field.description}</p>}
-        </details>}
-        {simple && description && (
+        {field.help_text && (
           <p className="text-xs text-muted-foreground leading-snug">
-            {description}
+            {field.help_text}
           </p>
         )}
         {editable && capabilityBlocked && field.reason && (
@@ -258,7 +220,7 @@ export function ConfigRow({
                 autoCapitalize="none"
                 spellCheck={false}
                 value={editValue}
-                aria-label={t("replace", { env: field.env_var })}
+                aria-label={t("replace", { env: label })}
                 placeholder={t("newValue")}
                 onChange={(e) => onEditValueChange(e.target.value)}
                 onKeyDown={onEditKeyDown}
@@ -305,7 +267,7 @@ export function ConfigRow({
                   title={t("editSetting", { name: label })}
                   disabled={busy}
                   className="h-7 px-1"
-                  aria-label={`Replace ${field.env_var}`}
+                  aria-label={`Replace ${label}`}
                   data-testid={`edit-${field.name}`}
                 >
                   <Pencil className="size-3" />
@@ -318,7 +280,7 @@ export function ConfigRow({
             checked={!!field.current_value}
             disabled={!editable || toggleDisabled}
             data-testid={`toggle-${field.name}`}
-            aria-label={field.env_var}
+            aria-label={label}
             onCheckedChange={(v) => onToggle(v)}
           />
         ) : field.field_type === "enum" ? (

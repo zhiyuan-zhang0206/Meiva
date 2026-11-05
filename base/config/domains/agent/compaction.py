@@ -9,7 +9,7 @@ from base.config.base import EnvSettings
 
 class AgentCompactionSettings(EnvSettings):
     auto_compact_fraction: float | None = Field(
-        title="Auto compact fraction",
+        title="Automatic compaction threshold (context fraction)",
         default=None,
         alias="MEIVA_AUTO_COMPACT_FRACTION",
         description=(
@@ -21,6 +21,7 @@ class AgentCompactionSettings(EnvSettings):
             "auto_compact_ceiling_tokens. Range (0, 1]."
         ),
         json_schema_extra={
+            "help_text": "Use a fraction above 0 and at most 1; leave unset for the model default.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -31,7 +32,7 @@ class AgentCompactionSettings(EnvSettings):
     )
 
     auto_compact_ceiling_tokens: int | None = Field(
-        title="Auto compact ceiling tokens",
+        title="Automatic compaction ceiling (tokens)",
         default=None,
         alias="MEIVA_AUTO_COMPACT_CEILING_TOKENS",
         description=(
@@ -46,6 +47,7 @@ class AgentCompactionSettings(EnvSettings):
             "it keeps its proportional lead."
         ),
         json_schema_extra={
+            "help_text": "Set 0 to remove the token cap, or leave unset for the model default.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -56,7 +58,7 @@ class AgentCompactionSettings(EnvSettings):
     )
 
     compact_reminder_fraction: float | None = Field(
-        title="Compact reminder fraction",
+        title="Compaction reminder threshold (context fraction)",
         default=None,
         alias="MEIVA_COMPACT_REMINDER_FRACTION",
         description=(
@@ -67,6 +69,7 @@ class AgentCompactionSettings(EnvSettings):
             "below auto_compact_fraction; set it >= to disable the reminder."
         ),
         json_schema_extra={
+            "help_text": "Leave unset for the model default; a value at or above the automatic threshold disables the reminder.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -77,7 +80,7 @@ class AgentCompactionSettings(EnvSettings):
     )
 
     agent_reply_reminder_cadence: Literal["once_per_compaction", "every_time"] = Field(
-        title="Agent reply reminder cadence",
+        title="Agent reply reminder frequency",
         default="once_per_compaction",
         alias="MEIVA_AGENT_REPLY_REMINDER_CADENCE",
         description=(
@@ -97,7 +100,7 @@ class AgentCompactionSettings(EnvSettings):
     )
 
     sdk_code_reminder_cadence: Literal["once_per_compaction", "every_time"] = Field(
-        title="SDK code reminder cadence",
+        title="SDK alternative reminder frequency",
         default="once_per_compaction",
         alias="MEIVA_SDK_CODE_REMINDER_CADENCE",
         description=(
@@ -117,7 +120,7 @@ class AgentCompactionSettings(EnvSettings):
     )
 
     sdk_nameerror_hint_enabled: bool = Field(
-        title="SDK nameerror hint enabled",
+        title="Show hint for missing names from earlier code cells",
         default=True,
         alias="MEIVA_SDK_NAMEERROR_HINT_ENABLED",
         description=(
@@ -136,7 +139,7 @@ class AgentCompactionSettings(EnvSettings):
     )
 
     history_dump_enabled: bool = Field(
-        title="History dump enabled",
+        title="Save conversation history before compaction",
         default=True,
         alias="MEIVA_COMPACT_HISTORY_DUMP",
         description=(
@@ -160,7 +163,7 @@ class AgentCompactionSettings(EnvSettings):
     )
 
     history_dump_keep: int = Field(
-        title="History dump keep",
+        title="Conversation history dumps to retain",
         default=5,
         alias="MEIVA_COMPACT_HISTORY_DUMP_KEEP",
         description=(

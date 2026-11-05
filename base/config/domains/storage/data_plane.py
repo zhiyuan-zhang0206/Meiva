@@ -174,7 +174,7 @@ def project_service_db_url(
 
 class DataPlaneSettings(EnvSettings):
     db_url: str = Field(
-        title="DB URL",
+        title="Database connection URL",
         alias="MEIVA_DB_URL",
         repr=False,  # carries the write generation's login password as userinfo
         description="The cluster's ONE database access URL, dialed as-is by every "
@@ -207,7 +207,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     redis_bin_dir: str = Field(
-        title="Redis bin dir",
+        title="Redis executable directory",
         default="",
         alias="MEIVA_REDIS_BIN_DIR",
         description="Absolute directory containing redis-server and redis-cli for this "
@@ -233,7 +233,7 @@ class DataPlaneSettings(EnvSettings):
         return value
 
     pg_throwaway_base: str = Field(
-        title="Postgres throwaway base",
+        title="Temporary Postgres cluster directory",
         default="",
         alias="MEIVA_PG_THROWAWAY_BASE",
         description="Absolute directory that throwaway Postgres clusters (test fixtures, "
@@ -261,7 +261,7 @@ class DataPlaneSettings(EnvSettings):
         return value
 
     pgbouncer_enabled: bool = Field(
-        title="Pgbouncer enabled",
+        title="Enable PgBouncer connection pooling",
         default=True,
         alias="MEIVA_PGBOUNCER_ENABLED",
         description="Whether this cluster's PgBouncer transaction pooler fronts "
@@ -283,7 +283,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     pooler_max_client_conn: int = Field(
-        title="Pooler max client conn",
+        title="PgBouncer client connection limit",
         default=2000,
         gt=0,
         alias="MEIVA_POOLER_MAX_CLIENT_CONN",
@@ -310,7 +310,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     data_plane_host: str = Field(
-        title="Data plane host",
+        title="Data plane host address",
         default="",
         alias="MEIVA_DATA_PLANE_HOST",
         description=(
@@ -326,6 +326,7 @@ class DataPlaneSettings(EnvSettings):
             "(`cli.start_identity`)."
         ),
         json_schema_extra={
+            "help_text": "Leave empty to use the loopback address when generating data plane URLs.",
             "restart_required": "all",
             "writable": True,
             "sensitive": False,
@@ -335,7 +336,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     events_channel: str = Field(
-        title="Events channel",
+        title="Redis event channel",
         default="meiva:events",
         alias="MEIVA_EVENTS_CHANNEL",
         description="Redis pub/sub channel name for cluster events.",
@@ -377,7 +378,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     redis_admin_password: str = Field(
-        title="Redis admin password",
+        title="Redis administrator password",
         default="",
         alias="MEIVA_REDIS_ADMIN_PASSWORD",
         repr=False,
@@ -397,7 +398,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     db_sslmode: str = Field(
-        title="DB sslmode",
+        title="Database TLS mode",
         default="",
         alias="MEIVA_DB_SSLMODE",
         description=(
@@ -413,6 +414,7 @@ class DataPlaneSettings(EnvSettings):
             "not already carry an sslmode query parameter."
         ),
         json_schema_extra={
+            "help_text": "Leave empty to use the database URL or libpq default; a mode in the URL takes precedence.",
             "restart_required": "all",
             "writable": True,
             "sensitive": False,
@@ -421,7 +423,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     db_pool_min_size: int = Field(
-        title="DB pool min size",
+        title="Minimum database pool connections",
         default=1,
         alias="MEIVA_DB_POOL_MIN_SIZE",
         description=(
@@ -439,7 +441,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     db_pool_max_size: int = Field(
-        title="DB pool max size",
+        title="Maximum database pool connections",
         default=2,
         alias="MEIVA_DB_POOL_MAX_SIZE",
         description=(
@@ -455,7 +457,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     db_pool_restore_timeout_seconds: float = Field(
-        title="DB pool restore timeout seconds",
+        title="Database session restore timeout (seconds)",
         default=5.0,
         alias="MEIVA_DB_POOL_RESTORE_TIMEOUT_SECONDS",
         description=(
@@ -496,7 +498,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     db_pool_restore_client_deadline_seconds: float = Field(
-        title="DB pool restore client deadline seconds",
+        title="Database session restore client timeout (seconds)",
         default=8.0,
         alias="MEIVA_DB_POOL_RESTORE_CLIENT_DEADLINE_SECONDS",
         description=(
@@ -529,7 +531,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     transport_encryption: str = Field(
-        title="Transport encryption",
+        title="Cluster transport encryption mode",
         default="",
         alias="MEIVA_TRANSPORT_ENCRYPTION",
         description=(
@@ -548,7 +550,7 @@ class DataPlaneSettings(EnvSettings):
     )
 
     trusted_cidrs: str = Field(
-        title="Trusted cidrs",
+        title="Trusted data plane network ranges (CIDR)",
         default="",
         alias="MEIVA_TRUSTED_CIDRS",
         description=(
@@ -559,6 +561,7 @@ class DataPlaneSettings(EnvSettings):
             "plane binds the gateway's own reachable address, not all interfaces."
         ),
         json_schema_extra={
+            "help_text": "Leave empty to allow only loopback access; separate network ranges with commas.",
             "restart_required": "all",
             "writable": True,
             "sensitive": False,

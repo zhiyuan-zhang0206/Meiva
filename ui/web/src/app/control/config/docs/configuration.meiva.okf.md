@@ -63,8 +63,9 @@ search, optional technical filters and the effective per-model values. Machines
 contains only host-scoped fields, with the gateway host selected initially and each
 other online runner listed once. Selecting a machine never changes agent defaults.
 The editor preserves the existing config API, owner routing and hidden overrides.
-Technical identifiers, scope and default values are available in each advanced
-row's details. Restart requirements appear only after a successful field write,
+Every row uses its backend-authored label and optional concise help text.
+Rows omit technical identifiers, scope badges and the technical-details disclosure.
+Environment identifiers remain searchable. Restart requirements appear only after a successful field write,
 in a dismissible floating reminder using the write response's restart targets.
 Settings selects share NativeSelect's reserved arrow space and native keyboard behavior.
 

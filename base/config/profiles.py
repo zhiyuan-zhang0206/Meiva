@@ -127,6 +127,7 @@ class DomainModelLike(Protocol):
 
 
 class SchemaExtra(TypedDict, total=False):
+    help_text: str
     scope: str
     remote_writable: bool
     writable: bool

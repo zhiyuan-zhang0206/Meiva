@@ -9,7 +9,7 @@ from base.config.base import EnvSettings
 
 class WalgSettings(EnvSettings):
     walg_config_file: Path | None = Field(
-        title="Walg config file",
+        title="WAL-G configuration file",
         default=None,
         alias="MEIVA_WALG_CONFIG_FILE",
         description=(

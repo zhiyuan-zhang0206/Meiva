@@ -11,7 +11,7 @@ from base.config.base import EnvSettings
 
 class AgentMemorySettings(EnvSettings):
     memory_index_inject_enabled: bool = Field(
-        title="Memory index inject enabled",
+        title="Include shared memory index in context",
         default=True,
         alias="MEIVA_MEMORY_INDEX_INJECT",
         description=(
@@ -28,7 +28,7 @@ class AgentMemorySettings(EnvSettings):
     )
 
     memory_per_agent_inject_enabled: bool = Field(
-        title="Memory per agent inject enabled",
+        title="Include personal memory index in context",
         default=True,
         alias="MEIVA_MEMORY_PER_AGENT_INJECT",
         description=(
@@ -47,7 +47,7 @@ class AgentMemorySettings(EnvSettings):
     )
 
     memory_per_agent_index_max_lines: int = Field(
-        title="Memory per agent index max lines",
+        title="Personal memory index suggested limit (lines)",
         default=200,
         alias="MEIVA_MEMORY_PER_AGENT_INDEX_MAX_LINES",
         description=(
@@ -59,6 +59,7 @@ class AgentMemorySettings(EnvSettings):
             "entry files are uncapped — they cost context only when read)."
         ),
         json_schema_extra={
+            "help_text": "Set 0 to disable the length reminder; the index is never truncated.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -67,7 +68,7 @@ class AgentMemorySettings(EnvSettings):
     )
 
     memory_inherit_depth: int = Field(
-        title="Memory inherit depth",
+        title="Memory inheritance depth (ancestors)",
         default=1,
         ge=0,
         le=10,
@@ -82,6 +83,7 @@ class AgentMemorySettings(EnvSettings):
             "higher value only invites an accidental whole-family pull."
         ),
         json_schema_extra={
+            "help_text": "Set 0 to disable inheritance; 1 includes the direct parent.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -92,7 +94,7 @@ class AgentMemorySettings(EnvSettings):
     )
 
     memory_inherit_max_block_chars: int = Field(
-        title="Memory inherit max block chars",
+        title="Inherited memory block limit (characters)",
         default=4000,
         ge=0,
         alias="MEIVA_MEMORY_INHERIT_MAX_BLOCK_CHARS",
@@ -104,6 +106,7 @@ class AgentMemorySettings(EnvSettings):
             "context. 0 disables the per-block cap."
         ),
         json_schema_extra={
+            "help_text": "Set 0 to remove the limit for each inherited block.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -112,7 +115,7 @@ class AgentMemorySettings(EnvSettings):
     )
 
     memory_inherit_max_total_chars: int = Field(
-        title="Memory inherit max total chars",
+        title="Total inherited memory limit (characters)",
         default=16000,
         ge=0,
         alias="MEIVA_MEMORY_INHERIT_MAX_TOTAL_CHARS",
@@ -124,6 +127,7 @@ class AgentMemorySettings(EnvSettings):
             "total cap."
         ),
         json_schema_extra={
+            "help_text": "Set 0 to remove the total inherited memory limit.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -132,7 +136,7 @@ class AgentMemorySettings(EnvSettings):
     )
 
     passive_memory_recall_enabled: bool = Field(
-        title="Passive memory recall enabled",
+        title="Recall relevant memories before a turn",
         default=True,
         alias="MEIVA_PASSIVE_MEMORY_RECALL",
         description=(
@@ -153,7 +157,7 @@ class AgentMemorySettings(EnvSettings):
     )
 
     memory_recall_inject_threshold: float = Field(
-        title="Memory recall inject threshold",
+        title="Minimum relevance for recalled memories",
         # meiva:note
         # Two calibrations, both for jev-1.13.0 with the rerank question and state templates of
         # services/derived/memory_indexer/rerank.py (scores are only comparable under that exact
@@ -185,7 +189,7 @@ class AgentMemorySettings(EnvSettings):
     )
 
     memory_recall_inject_max: int = Field(
-        title="Memory recall inject max",
+        title="Maximum recalled memories per turn",
         default=3,
         ge=0,
         le=100,
@@ -209,7 +213,7 @@ class AgentMemorySettings(EnvSettings):
     )
 
     memory_recall_deadline_seconds: float = Field(
-        title="Memory recall deadline seconds",
+        title="Memory recall timeout (seconds)",
         default=5.0,
         alias="MEIVA_MEMORY_RECALL_DEADLINE_SECONDS",
         description=(
@@ -234,7 +238,7 @@ class AgentMemorySettings(EnvSettings):
     )
 
     memory_write_check_deadline_seconds: float = Field(
-        title="Memory write check deadline seconds",
+        title="Memory write check timeout (seconds)",
         default=5.0,
         alias="MEIVA_MEMORY_WRITE_CHECK_DEADLINE_SECONDS",
         description=(
@@ -255,7 +259,7 @@ class AgentMemorySettings(EnvSettings):
     )
 
     memory_write_dedup_threshold: float = Field(
-        title="Memory write dedup threshold",
+        title="Memory duplicate detection threshold",
         # meiva:note
         # Measured on two 200-write samples, not benchmark-calibrated: with the same-rule
         # question in services/derived/memory_indexer/rerank.py, 0.80 reminded on 8% and 10.5%

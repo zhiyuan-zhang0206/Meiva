@@ -78,11 +78,11 @@ describe("ConfigPage render", () => {
     expect(screen.queryByText("Display & general")).toBeNull();
     expect(screen.queryByText("Connection")).toBeNull();
 
-    expect(screen.getByTitle("MEIVA_LOG_LEVEL")).toBeTruthy();
+    expect(screen.getByText("Log level")).toBeTruthy();
 
     expect(inGroups("Max retries")).toHaveLength(1);
     expect(screen.queryByText("log_level")).toBeNull();
-    expect(screen.getByText("MEIVA_LOG_LEVEL")).toBeTruthy();
+    expect(screen.queryByText("MEIVA_LOG_LEVEL")).toBeNull();
   });
 
   it("HIDDEN_ENV_VARS: transport micro-tuning is dropped from the panel", async () => {
@@ -130,26 +130,19 @@ describe("ConfigPage render", () => {
     ).toBeTruthy();
   });
 
-  it("scope badge is shown per row (raw scope)", async () => {
-    transport.getConfig.mockResolvedValue(VIEW);
+  it("uses authored help without repeating technical metadata", async () => {
+    transport.getConfig.mockResolvedValue({
+      ...VIEW,
+      fields: VIEW.fields.map((field) => field.name === "max_retries"
+        ? { ...field, help_text: "Set 0 to disable retries." } : field),
+    });
     await renderSettled();
 
-    expect(inGroups("cluster-default")).toHaveLength(3);
-
-    expect(inGroups("host")).toHaveLength(0);
-
-    expect(inGroups("agent")).toHaveLength(1);
-
-    expect(inGroups("cluster-pinned")).toHaveLength(1);
-  });
-
-  it("shows per-agent metadata without preemptive restart labels", async () => {
-    transport.getConfig.mockResolvedValue(VIEW);
-    await renderSettled();
-
-    expect(inGroups("per-agent")).toHaveLength(3);
-
-    expect(screen.queryByText(/Startup: /)).toBeNull();
+    expect(screen.getByText("Set 0 to disable retries.")).toBeTruthy();
+    expect(inGroups("cluster-default")).toHaveLength(0);
+    expect(inGroups("per-agent")).toHaveLength(0);
+    expect(screen.queryByText("Technical details")).toBeNull();
+    expect(screen.queryByText("Logging verbosity")).toBeNull();
     expect(screen.queryByText("Requires restart")).toBeNull();
   });
 
@@ -165,7 +158,7 @@ describe("ConfigPage render", () => {
     fireEvent.click(screen.getByTestId("edit-api_key"));
     const input = screen.getByTestId<HTMLInputElement>("input-api_key");
     expect(input.getAttribute("type")).toBe("password");
-    expect(screen.getByLabelText("Replace MEIVA_API_KEY")).toBe(input);
+    expect(screen.getByLabelText("Replace Api key")).toBe(input);
     expect(input.value).toBe("");
 
     fireEvent.change(input, { target: { value: "sk-NEW" } });
@@ -186,13 +179,12 @@ describe("ConfigPage render", () => {
     expect(putSpy).not.toHaveBeenCalled();
   });
 
-  it("read-only field tagged CLI-only + no edit button", async () => {
+  it("read-only field explains editability without technical badges", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
     wrap(<ConfigEditor mode="machines" />);
     await screen.findByText("Build sha");
-    expect(screen.getAllByText("CLI-only").length).toBeGreaterThan(0);
     expect(screen.queryByTestId("edit-build_sha")).toBeNull();
-    expect(within(screen.getByTitle("MEIVA_BUILD_SHA").closest("[id^='config-field-']")!).getByText(/read-only/i)).toBeTruthy();
+    expect(within(screen.getByText("Build sha").closest("[id^='config-field-']")!).getByText(/read-only/i)).toBeTruthy();
   });
 
   it("distinguishes editable values from runtime fields read-only on this machine", async () => {
@@ -211,10 +203,10 @@ describe("ConfigPage render", () => {
     fireEvent.change(screen.getByLabelText("Machine"), {
       target: { value: AGENT_RUNNER },
     });
-    const hostLabel = await screen.findByTitle("MEIVA_HOST_LABEL");
+    const hostLabel = await screen.findByText("Host label");
     await waitFor(() => expect(screen.queryByTestId("edit-host_label")).toBeNull());
     const hostRow = hostLabel.closest<HTMLElement>("[id^='config-field-']")!;
-    expect(within(hostRow).getByText("Runtime")).toBeTruthy();
+    expect(within(hostRow).queryByText("Runtime")).toBeNull();
     expect(within(hostRow).getByText(/read-only/i)).toBeTruthy();
   });
 

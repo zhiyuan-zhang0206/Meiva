@@ -100,6 +100,7 @@ def plugin_metadata(*, home: Path) -> list[ConfigFieldMeta]:
                 ConfigFieldMeta(
                     name=name,
                     label=info.title or name,
+                    help_text=extra.get("help_text"),
                     field_type=kind,
                     current_value=values[name],
                     default_value=(

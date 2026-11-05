@@ -293,6 +293,7 @@ async def get_config(request: Request, machine: str | None = None) -> ConfigView
                 ConfigFieldView(
                     name=meta.name,
                     label=meta.label,
+                    help_text=meta.help_text,
                     owner=meta.owner,
                     field_type=meta.field_type,
                     current_value=hf.value,
@@ -320,6 +321,7 @@ async def get_config(request: Request, machine: str | None = None) -> ConfigView
                 ConfigFieldView(
                     name=meta.name,
                     label=meta.label,
+                    help_text=meta.help_text,
                     owner=meta.owner,
                     field_type=meta.field_type,
                     current_value=value,

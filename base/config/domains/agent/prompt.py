@@ -32,7 +32,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     sdk_disable: Annotated[list[str], NoDecode] = Field(
-        title="SDK disable",
+        title="Disabled SDK paths",
         default_factory=list,
         alias="MEIVA_SDK_DISABLE",
         description=(
@@ -53,7 +53,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     sdk_expand_in_system_prompt: Annotated[list[str], NoDecode] = Field(
-        title="SDK expand in system prompt",
+        title="SDK paths expanded in system prompt",
         default_factory=lambda: ["shell", "files", "agents", "tasks"],
         alias="MEIVA_SDK_EXPAND",
         description=(
@@ -80,7 +80,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     skills_to_inject_into_system_prompt: Annotated[list[str], NoDecode] = Field(
-        title="Skills to inject into system prompt",
+        title="Skills included in the system prompt index",
         default_factory=lambda: ["*"],
         alias="MEIVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT",
         description=(
@@ -105,7 +105,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     skills_to_expand_at_start: Annotated[list[str], NoDecode] = Field(
-        title="Skills to expand at start",
+        title="Skills loaded in full at startup",
         default_factory=list,
         alias="MEIVA_SKILLS_TO_EXPAND_AT_START",
         description=(
@@ -129,7 +129,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     system_prompt_extra: Annotated[list[str], NoDecode] = Field(
-        title="System prompt extra",
+        title="Additional system prompt sections",
         default_factory=list,
         alias="MEIVA_SYSTEM_PROMPT_EXTRA",
         description=(
@@ -148,7 +148,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     workspace_in_system_prompt: bool = Field(
-        title="Workspace in system prompt",
+        title="Include workspace location in system prompt",
         default=True,
         alias="MEIVA_WORKSPACE_IN_SYSTEM_PROMPT",
         description=(
@@ -166,7 +166,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     to_user_soft_limit_words: int = Field(
-        title="To user soft limit words",
+        title="User panel suggested length (words)",
         default=1500,
         gt=0,
         alias="MEIVA_TO_USER_SOFT_LIMIT_WORDS",
@@ -189,7 +189,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     to_user_limit_reminder_cadence: Literal["once_per_compaction", "every_time"] = Field(
-        title="To user limit reminder cadence",
+        title="User panel length reminder frequency",
         default="once_per_compaction",
         alias="MEIVA_TO_USER_LIMIT_REMINDER_CADENCE",
         description=(
@@ -210,7 +210,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     commands_enabled: bool = Field(
-        title="Commands enabled",
+        title="Enable slash commands",
         default=True,
         alias="MEIVA_COMMANDS_ENABLED",
         description=(
@@ -227,7 +227,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     prompt_sdk_overview_enabled: bool = Field(
-        title="Prompt SDK overview enabled",
+        title="Include SDK overview in system prompt",
         default=True,
         alias="MEIVA_SYSTEM_PROMPT_SDK_OVERVIEW",
         description=(
@@ -243,7 +243,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     prompt_knowledge_cutoff_enabled: bool = Field(
-        title="Prompt knowledge cutoff enabled",
+        title="Include knowledge cutoff in system prompt",
         default=True,
         alias="MEIVA_PROMPT_KNOWLEDGE_CUTOFF",
         description=(
@@ -260,7 +260,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     prompt_prefer_sdk_enabled: bool | None = Field(
-        title="Prompt prefer SDK enabled",
+        title="Include SDK preference guidance",
         default=None,
         alias="MEIVA_SYSTEM_PROMPT_PREFER_SDK",
         description=(
@@ -277,7 +277,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     prompt_keep_it_simple_enabled: bool | None = Field(
-        title="Prompt keep it simple enabled",
+        title="Include simplicity guidance",
         default=None,
         alias="MEIVA_SYSTEM_PROMPT_KEEP_IT_SIMPLE",
         description=(
@@ -317,7 +317,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     prompt_memory_behavior_enabled: bool | None = Field(
-        title="Prompt memory behavior enabled",
+        title="Include memory guidance",
         default=None,
         alias="MEIVA_SYSTEM_PROMPT_MEMORY",
         description=(
@@ -335,7 +335,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     prompt_output_conciseness_enabled: bool | None = Field(
-        title="Prompt output conciseness enabled",
+        title="Include concise output guidance",
         default=None,
         alias="MEIVA_SYSTEM_PROMPT_CONCISENESS",
         description=(
@@ -352,7 +352,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     prompt_ui_delivery_enabled: bool | None = Field(
-        title="Prompt UI delivery enabled",
+        title="Include user interface delivery guidance",
         default=None,
         alias="MEIVA_SYSTEM_PROMPT_UI_DELIVERY",
         description=(
@@ -370,7 +370,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     prompt_user_tone_enabled: bool | None = Field(
-        title="Prompt user tone enabled",
+        title="Include user communication guidance",
         default=None,
         alias="MEIVA_SYSTEM_PROMPT_USER_TONE",
         description=(
@@ -388,7 +388,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     prompt_outcome_reporting_enabled: bool | None = Field(
-        title="Prompt outcome reporting enabled",
+        title="Include honest reporting guidance",
         default=None,
         alias="MEIVA_SYSTEM_PROMPT_REPORTING",
         description=(
@@ -405,7 +405,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     prompt_action_caution_enabled: bool | None = Field(
-        title="Prompt action caution enabled",
+        title="Include guidance for consequential actions",
         default=None,
         alias="MEIVA_SYSTEM_PROMPT_CAUTION",
         description=(
@@ -423,7 +423,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     prompt_align_before_action_enabled: bool | None = Field(
-        title="Prompt align before action enabled",
+        title="Include guidance on aligning before action",
         default=None,
         alias="MEIVA_SYSTEM_PROMPT_ALIGN",
         description=(
@@ -441,7 +441,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     prompt_delegation_check_enabled: bool | None = Field(
-        title="Prompt delegation check enabled",
+        title="Include delegation guidance",
         default=None,
         alias="MEIVA_SYSTEM_PROMPT_DELEGATION_CHECK",
         description=(
@@ -463,7 +463,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     prompt_cross_machine_delegation_enabled: bool | None = Field(
-        title="Prompt cross machine delegation enabled",
+        title="Include cross-machine delegation guidance",
         default=None,
         alias="MEIVA_SYSTEM_PROMPT_CROSS_MACHINE_DELEGATION",
         description=(
@@ -481,7 +481,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     prompt_file_driven_work_enabled: bool | None = Field(
-        title="Prompt file driven work enabled",
+        title="Include file-driven workflow guidance",
         default=None,
         alias="MEIVA_SYSTEM_PROMPT_FILE_DRIVEN_WORK",
         description=(
@@ -499,7 +499,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     prompt_temporal_awareness_enabled: bool | None = Field(
-        title="Prompt temporal awareness enabled",
+        title="Include guidance on time-sensitive facts",
         default=None,
         alias="MEIVA_SYSTEM_PROMPT_TEMPORAL",
         description=(
@@ -517,7 +517,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     prompt_invest_future_enabled: bool | None = Field(
-        title="Prompt invest future enabled",
+        title="Include guidance on improving future work",
         default=None,
         alias="MEIVA_SYSTEM_PROMPT_INVEST_FUTURE",
         description=(
@@ -535,7 +535,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     prompt_codeact_enabled: bool = Field(
-        title="Prompt codeact enabled",
+        title="Include batched execution guidance",
         default=True,
         alias="MEIVA_SYSTEM_PROMPT_CODEACT",
         description=(
@@ -556,7 +556,7 @@ class AgentPromptSettings(EnvSettings):
     )
 
     prompt_sequential_tool_calls_enabled: bool = Field(
-        title="Prompt sequential tool calls enabled",
+        title="Explain sequential tool calls",
         default=False,
         alias="MEIVA_SYSTEM_PROMPT_SEQUENTIAL_TOOL_CALLS",
         description=(

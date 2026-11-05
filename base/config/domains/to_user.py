@@ -18,7 +18,7 @@ _TO_USER_FIELD: JsonDict = {
 
 class ToUserSettings(EnvSettings):
     max_document_bytes: int = Field(
-        title="Max document bytes",
+        title="Panel document size limit (bytes)",
         default=1024 * 1024,
         gt=0,
         alias="MEIVA_TO_USER_MAX_DOCUMENT_BYTES",
@@ -34,7 +34,7 @@ class ToUserSettings(EnvSettings):
     )
 
     max_references: int = Field(
-        title="Max references",
+        title="Maximum references per panel document",
         default=1024,
         gt=0,
         alias="MEIVA_TO_USER_MAX_REFERENCES",
@@ -48,7 +48,7 @@ class ToUserSettings(EnvSettings):
     )
 
     max_chain_depth: int = Field(
-        title="Max chain depth",
+        title="Maximum nested document reference depth",
         default=16,
         gt=0,
         alias="MEIVA_TO_USER_MAX_CHAIN_DEPTH",
@@ -62,7 +62,7 @@ class ToUserSettings(EnvSettings):
     )
 
     max_resource_bytes: int = Field(
-        title="Max resource bytes",
+        title="Referenced file size limit (bytes)",
         default=64 * 1024 * 1024,
         gt=0,
         alias="MEIVA_TO_USER_MAX_RESOURCE_BYTES",

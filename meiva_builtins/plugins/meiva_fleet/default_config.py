@@ -10,7 +10,7 @@ class FleetConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     task_maintenance_enabled: bool = Field(
-        title="Task maintenance enabled",
+        title="Enable task maintenance",
         default=True,
         description="Run the task-maintenance daemon on the gateway. On by default; set false to disable task reminders and the escalation pass cluster-wide.",
         json_schema_extra={
@@ -25,7 +25,7 @@ class FleetConfig(BaseModel):
     )
 
     task_maintenance_interval_seconds: float = Field(
-        title="Task maintenance interval seconds",
+        title="Task maintenance check interval (seconds)",
         default=300.0,
         description="Task-maintenance daemon poll interval (seconds): how often it checks for overdue tasks and reminds owners. A precision lower bound, not the cadence — each task controls its own remind_interval_seconds.",
         json_schema_extra={
@@ -39,7 +39,7 @@ class FleetConfig(BaseModel):
     )
 
     task_reminder_backoff_seconds: float = Field(
-        title="Task reminder backoff seconds",
+        title="Minimum task reminder interval (seconds)",
         default=3600.0,
         description="Floor for the interval (seconds) between repeated reminders for the same overdue window: a task whose remind_interval_seconds exceeds this repeats at its own interval instead.",
         json_schema_extra={
@@ -92,7 +92,7 @@ class FleetConfig(BaseModel):
     )
 
     task_escalate_n: int = Field(
-        title="Task escalate n",
+        title="Unanswered task reminders before escalation",
         default=3,
         description=(
             "Cadence periods a task may stay without a state change before the daemon escalates "
@@ -112,7 +112,7 @@ class FleetConfig(BaseModel):
     )
 
     task_reminder_reset_on: tuple[str, ...] = Field(
-        title="Task reminder reset on",
+        title="Task updates that reset reminders",
         default=DEFAULT_RESET_ON,
         description=(
             "Which kinds of task update restart a task's reminder window, the counter the "
@@ -136,7 +136,7 @@ class FleetConfig(BaseModel):
     )
 
     task_reminder_pause_max_seconds: int | None = Field(
-        title="Task reminder pause max seconds",
+        title="Maximum task reminder pause (seconds)",
         default=None,
         description=(
             "Longest silence an owner may ask for with update(reminders_paused_until=...). "
@@ -146,6 +146,7 @@ class FleetConfig(BaseModel):
             "the only thing standing between a frozen task and the human queue."
         ),
         json_schema_extra={
+            "help_text": "Leave unset to disallow pausing task reminders.",
             "env_var": "MEIVA_TASK_REMINDER_PAUSE_MAX_SECONDS",
             "restart_required": "",
             "writable": True,
@@ -156,7 +157,7 @@ class FleetConfig(BaseModel):
     )
 
     reduce_context_switch: bool = Field(
-        title="Reduce context switch",
+        title="Reduce interruptions to the user",
         default=True,
         description=(
             "Platform-wide reduce-context-switch default (user ruling 2026-09-20): "

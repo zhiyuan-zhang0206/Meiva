@@ -320,6 +320,7 @@ export interface ConfigFieldView {
   readonly owner?: string | null; // None is Core; a plugin name owns its image.
   readonly name: string;
   readonly label: string;
+  readonly help_text?: string | null;
   readonly field_type: "bool" | "string" | "int" | "float" | "enum";
   readonly current_value: boolean | string | number | null;
   readonly default_value: boolean | string | number | null;
@@ -330,8 +331,6 @@ export interface ConfigFieldView {
   readonly capability: "gateway" | "agent-runner" | "common";
   readonly scope: "cluster-pinned" | "cluster-default" | "host" | "agent";
   readonly restart_required: "agent" | "ops" | "gateway" | "all" | "";
-  // Whether a spawn/restart config overlay may override this field per agent —
-  // drives the panel's "per-agent" tag and filter.
   readonly per_agent: boolean;
   readonly writable: boolean;
   readonly sensitive: boolean;

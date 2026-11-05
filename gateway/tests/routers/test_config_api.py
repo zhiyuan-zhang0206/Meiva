@@ -99,7 +99,7 @@ def test_get_config_serializes_plugin_factory_defaults(unit_home: Path) -> None:
     fields = {field["name"]: field for field in response.json()["fields"]}
     registration = fields["local_models"]
     assert registration["owner"] == "lm_typesafe"
-    assert registration["label"] == "Local models"
+    assert registration["label"] == "Local decision model registrations"
     assert registration["default_value"] == {}
     assert registration["current_value"] == {}
     assert registration["scope"] == "cluster-pinned"
@@ -133,6 +133,11 @@ def test_config_fields_expose_scope() -> None:
     fields = {f["name"]: f for f in resp.json()["fields"]}
     assert fields["llm_model"]["label"] == "Agent model"
     assert fields["llm_model"]["description"]
+    assert (
+        fields["agent_host_memory_max_mb"]["help_text"]
+        == "Set 0 to disable the agent host memory limit."
+    )
+    assert fields["llm_model"]["help_text"] is None
     assert fields["db_url"]["scope"] == "cluster-pinned"
     assert fields["llm_model"]["scope"] == "cluster-default"
     assert fields["machine_name"]["scope"] == "host"

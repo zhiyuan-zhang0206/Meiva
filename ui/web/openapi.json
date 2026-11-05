@@ -11558,6 +11558,17 @@
             "type": "string",
             "title": "Label"
           },
+          "help_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Help Text"
+          },
           "owner": {
             "anyOf": [
               {

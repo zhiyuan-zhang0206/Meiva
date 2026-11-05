@@ -10,7 +10,7 @@ from base.config.base import EnvSettings
 
 class AgentEvalSettings(EnvSettings):
     eval_isolation: bool = Field(
-        title="Eval isolation",
+        title="Isolate evaluation agents",
         default=False,
         alias="MEIVA_EVAL_ISOLATION",
         description=(
@@ -28,7 +28,7 @@ class AgentEvalSettings(EnvSettings):
     )
 
     eval_network_allowlist: Annotated[list[str], NoDecode] = Field(
-        title="Eval network allowlist",
+        title="Network capabilities allowed during evaluation",
         default_factory=list,
         alias="MEIVA_EVAL_NETWORK_ALLOWLIST",
         description=(
@@ -46,7 +46,7 @@ class AgentEvalSettings(EnvSettings):
     )
 
     security_scan_enabled: bool = Field(
-        title="Security scan enabled",
+        title="Scan inbound messages for prompt injection",
         default=True,
         alias="MEIVA_SECURITY_SCAN_ENABLED",
         description=(

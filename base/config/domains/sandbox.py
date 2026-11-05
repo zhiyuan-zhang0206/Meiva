@@ -76,11 +76,12 @@ class SandboxSettings(EnvSettings):
         return self
 
     exec_timeout_seconds: float = Field(
-        title="Exec timeout seconds",
+        title="Execution timeout (seconds)",
         default=300.0,
         alias="MEIVA_EXEC_TIMEOUT_SECONDS",
         description="Hard timeout (seconds) for a single execute_code. On timeout, the envelope hints the agent toward meiva.shell.run_background / meiva.watcher.launch for long-running work. Must be positive and less than exec_node_timeout_seconds (validated at startup and on per-agent overlay).",
         json_schema_extra={
+            "help_text": "Must be positive and shorter than the execution node timeout.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -91,7 +92,7 @@ class SandboxSettings(EnvSettings):
     )
 
     exec_node_timeout_seconds: float = Field(
-        title="Exec node timeout seconds",
+        title="Execution node timeout (seconds)",
         default=1200.0,
         alias="MEIVA_EXEC_NODE_TIMEOUT_SECONDS",
         description=(
@@ -108,7 +109,7 @@ class SandboxSettings(EnvSettings):
     )
 
     exec_output_max_chars: int = Field(
-        title="Exec output max chars",
+        title="Execution output limit (characters)",
         default=30_000,
         alias="MEIVA_EXEC_OUTPUT_MAX_CHARS",
         description="Hard inline character cap on a single exec's output fed back to the LLM. On overflow, keep the first + last half and archive the retained output in the workspace's bounded 20-file legacy ring. The independent soft line crop can produce a smaller preview first.",
@@ -121,12 +122,13 @@ class SandboxSettings(EnvSettings):
     )
 
     exec_output_crop_after_lines: int = Field(
-        title="Exec output crop after lines",
+        title="Crop execution output after (lines)",
         default=300,
         ge=0,
         alias="MEIVA_EXEC_OUTPUT_CROP_AFTER_LINES",
         description="Soft preview line trigger: crop outputs with more than this many splitlines() lines. Part of a three-way OR - outputs longer than exec_output_crop_after_chars characters or exec_output_crop_after_bytes UTF-8 bytes also preview. Zero disables soft cropping entirely. Crop only when the marker-inclusive preview is shorter and the full output can be archived; existing hard caps still apply.",
         json_schema_extra={
+            "help_text": "Set 0 to disable soft output cropping.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -135,12 +137,13 @@ class SandboxSettings(EnvSettings):
     )
 
     exec_output_crop_after_chars: int = Field(
-        title="Exec output crop after chars",
+        title="Crop execution output after (characters)",
         default=64 * 1024,
         ge=1,
         alias="MEIVA_EXEC_OUTPUT_CROP_AFTER_CHARS",
         description="Soft preview character trigger: crop outputs longer than this many characters even when their line count is under the line trigger (long lines). Must be >= exec_output_max_chars so a preview never triggers below the hard inline limit. Zero is not allowed; set exec_output_crop_after_lines=0 to disable soft cropping entirely.",
         json_schema_extra={
+            "help_text": "Must be at least the execution output character limit; disable cropping with the line threshold instead.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -149,12 +152,13 @@ class SandboxSettings(EnvSettings):
     )
 
     exec_output_crop_after_bytes: int = Field(
-        title="Exec output crop after bytes",
+        title="Crop execution output after (UTF-8 bytes)",
         default=64 * 1024,
         ge=1,
         alias="MEIVA_EXEC_OUTPUT_CROP_AFTER_BYTES",
         description="Soft preview UTF-8 byte trigger: crop outputs whose encoded size exceeds this even when both their character count and line count are under their triggers (multibyte text). Must be >= exec_output_max_chars. Zero is not allowed; set exec_output_crop_after_lines=0 to disable soft cropping entirely.",
         json_schema_extra={
+            "help_text": "Must be at least the execution output character limit; disable cropping with the line threshold instead.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -163,7 +167,7 @@ class SandboxSettings(EnvSettings):
     )
 
     exec_output_crop_head_lines: int = Field(
-        title="Exec output crop head lines",
+        title="Leading lines in execution output preview",
         default=25,
         ge=1,
         alias="MEIVA_EXEC_OUTPUT_CROP_HEAD_LINES",
@@ -177,7 +181,7 @@ class SandboxSettings(EnvSettings):
     )
 
     exec_output_crop_tail_lines: int = Field(
-        title="Exec output crop tail lines",
+        title="Trailing lines in execution output preview",
         default=25,
         ge=1,
         alias="MEIVA_EXEC_OUTPUT_CROP_TAIL_LINES",
@@ -191,7 +195,7 @@ class SandboxSettings(EnvSettings):
     )
 
     exec_output_crop_archive_max_bytes: int = Field(
-        title="Exec output crop archive max bytes",
+        title="Archived execution output budget (bytes)",
         default=16 * 1024 * 1024,
         ge=1,
         alias="MEIVA_EXEC_OUTPUT_CROP_ARCHIVE_MAX_BYTES",
@@ -205,11 +209,12 @@ class SandboxSettings(EnvSettings):
     )
 
     exec_output_accumulation_max_chars: int = Field(
-        title="Exec output accumulation max chars",
+        title="Execution output memory budget (characters)",
         default=1_000_000,
         alias="MEIVA_EXEC_OUTPUT_ACCUMULATION_MAX_CHARS",
         description="Character budget the exec output accumulator holds in memory WHILE code runs. Past it the first half + last half are kept and the middle is dropped as it streams, so a runaway print loop cannot pressure the agent process; execution continues and the agent sees the drop marker. Must be >= exec_output_max_chars (validated at startup).",
         json_schema_extra={
+            "help_text": "Must be at least the execution output character limit.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -218,7 +223,7 @@ class SandboxSettings(EnvSettings):
     )
 
     syntax_fix_ruff_format: bool = Field(
-        title="Syntax fix ruff format",
+        title="Format code with Ruff before execution",
         default=True,
         alias="MEIVA_SYNTAX_FIX_RUFF_FORMAT",
         description="Run `ruff format` on each code block before exec (after deterministic syntax fixes), keeping in-context code canonical. Toggle for ablation.",
@@ -233,7 +238,7 @@ class SandboxSettings(EnvSettings):
     )
 
     mcp_connect_timeout_seconds: float = Field(
-        title="MCP connect timeout seconds",
+        title="MCP server connection timeout (seconds)",
         default=60.0,
         alias="MEIVA_MCP_CONNECT_TIMEOUT_SECONDS",
         description="MCP server connect timeout (seconds). npm package downloads / uvx venv setup may be slow; 60s leaves headroom.",

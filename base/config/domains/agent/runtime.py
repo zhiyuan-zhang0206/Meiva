@@ -11,7 +11,7 @@ from base.config.domains.agent.completion_policy import CompletionNoticePolicy
 class AgentRuntimeSettings(EnvSettings):
     completion_notice_policy: Literal[CompletionNoticePolicy.ALL, CompletionNoticePolicy.HOURLY] = (
         Field(
-            title="Completion notice policy",
+            title="Agent completion notification policy",
             default=CompletionNoticePolicy.ALL,
             alias="MEIVA_COMPLETION_NOTICE_POLICY",
             description="Per-agent completion notification policy: all delivers one notice per completion, and hourly aggregates every completion in a durable hourly digest.",
@@ -27,7 +27,7 @@ class AgentRuntimeSettings(EnvSettings):
     )
 
     agent_host_memory_max_mb: int = Field(
-        title="Agent host memory max mb",
+        title="Agent host memory limit (MiB)",
         default=0,
         alias="MEIVA_AGENT_HOST_MEMORY_MAX_MB",
         description=(
@@ -41,6 +41,7 @@ class AgentRuntimeSettings(EnvSettings):
         ),
         ge=0,
         json_schema_extra={
+            "help_text": "Set 0 to disable the agent host memory limit.",
             "capability": "agent-runner",
             "restart_required": "all",
             "writable": True,
@@ -51,7 +52,7 @@ class AgentRuntimeSettings(EnvSettings):
     )
 
     agent_host_memory_swap_max_mb: int = Field(
-        title="Agent host memory swap max mb",
+        title="Agent host swap allowance (MiB)",
         default=0,
         alias="MEIVA_AGENT_HOST_MEMORY_SWAP_MAX_MB",
         description=(
@@ -62,6 +63,7 @@ class AgentRuntimeSettings(EnvSettings):
         ),
         ge=0,
         json_schema_extra={
+            "help_text": "Set 0 to disallow swap for the agent host process tree when its memory limit is enabled.",
             "capability": "agent-runner",
             "restart_required": "all",
             "writable": True,
@@ -72,7 +74,7 @@ class AgentRuntimeSettings(EnvSettings):
     )
 
     exec_host_memory_max_mb: int = Field(
-        title="Exec host memory max mb",
+        title="Execution host memory limit (MiB)",
         default=0,
         alias="MEIVA_EXEC_HOST_MEMORY_MAX_MB",
         description=(
@@ -89,6 +91,7 @@ class AgentRuntimeSettings(EnvSettings):
         ),
         ge=0,
         json_schema_extra={
+            "help_text": "Set 0 to disable the execution host memory limit.",
             "capability": "agent-runner",
             "restart_required": "all",
             "writable": True,
@@ -99,7 +102,7 @@ class AgentRuntimeSettings(EnvSettings):
     )
 
     rewrite_retire_after_failures: int = Field(
-        title="Rewrite retire after failures",
+        title="Launch failures before retiring a rewritten unit",
         default=3,
         alias="MEIVA_REWRITE_RETIRE_AFTER_FAILURES",
         description=(
@@ -126,7 +129,7 @@ class AgentRuntimeSettings(EnvSettings):
     )
 
     exec_host_memory_swap_max_mb: int = Field(
-        title="Exec host memory swap max mb",
+        title="Execution host swap allowance (MiB)",
         default=0,
         alias="MEIVA_EXEC_HOST_MEMORY_SWAP_MAX_MB",
         description=(
@@ -139,6 +142,7 @@ class AgentRuntimeSettings(EnvSettings):
         ),
         ge=0,
         json_schema_extra={
+            "help_text": "Set 0 to disallow swap for the execution host process tree when its memory limit is enabled.",
             "capability": "agent-runner",
             "restart_required": "all",
             "writable": True,
@@ -149,7 +153,7 @@ class AgentRuntimeSettings(EnvSettings):
     )
 
     exec_memory_guard_floor_mb: int = Field(
-        title="Exec memory guard floor mb",
+        title="Minimum execution memory eligible for pressure cleanup (MiB)",
         default=1024,
         alias="MEIVA_EXEC_MEMORY_GUARD_FLOOR_MB",
         description=(
@@ -174,7 +178,7 @@ class AgentRuntimeSettings(EnvSettings):
     )
 
     exec_oom_score_adj: int = Field(
-        title="Exec oom score adj",
+        title="Execution process out-of-memory priority",
         default=800,
         alias="MEIVA_EXEC_OOM_SCORE_ADJ",
         description=(
@@ -188,6 +192,7 @@ class AgentRuntimeSettings(EnvSettings):
         ge=0,
         le=1000,
         json_schema_extra={
+            "help_text": "Set 0 to retain the inherited priority; 1000 makes the process a first-choice victim.",
             "capability": "agent-runner",
             "restart_required": "agent",
             "writable": True,
@@ -198,7 +203,7 @@ class AgentRuntimeSettings(EnvSettings):
     )
 
     checkpoint_interval: int = Field(
-        title="Checkpoint interval",
+        title="Checkpoint interval (super-steps)",
         default=4,
         alias="MEIVA_CHECKPOINT_INTERVAL",
         description="Persist a LangGraph checkpoint every Nth super-step (4 by default; 1 restores every-step persistence). Crash recovery replays up to N-1 super-steps. Per-agent override, restart required.",
@@ -214,7 +219,7 @@ class AgentRuntimeSettings(EnvSettings):
     )
 
     db_notify_wait_timeout_seconds: float = Field(
-        title="DB notify wait timeout seconds",
+        title="Agent work scan interval (seconds)",
         default=30.0,
         alias="MEIVA_DB_NOTIFY_WAIT_TIMEOUT_SECONDS",
         description="Agent-host inbound subscription read timeout and durable pending-work scan interval (seconds). A lost Redis wake is recovered by the next database scan.",
@@ -227,11 +232,12 @@ class AgentRuntimeSettings(EnvSettings):
     )
 
     node_stall_dump_seconds: float = Field(
-        title="Node stall dump seconds",
+        title="Stalled node stack dump threshold (seconds)",
         default=0.0,
         alias="MEIVA_NODE_STALL_DUMP_SECONDS",
         description="If > 0, dump every thread's stack to stderr when a graph node stays in one node longer than this many seconds (one-shot per node). 0 disables. A hang diagnostic; off in prod, on in the e2e harness.",
         json_schema_extra={
+            "help_text": "Set 0 to disable stalled-node stack dumps.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -240,7 +246,7 @@ class AgentRuntimeSettings(EnvSettings):
     )
 
     db_pool_acquire_timeout_seconds: float = Field(
-        title="DB pool acquire timeout seconds",
+        title="Database connection wait timeout (seconds)",
         default=30.0,
         alias="MEIVA_DB_POOL_ACQUIRE_TIMEOUT_SECONDS",
         description="Max seconds an agent waits to borrow a Postgres connection before raising. Keep it generous: a mid-turn raise exits the agent process, which is not auto-resurrected.",
@@ -253,7 +259,7 @@ class AgentRuntimeSettings(EnvSettings):
     )
 
     db_pool_slow_acquire_warn_seconds: float = Field(
-        title="DB pool slow acquire warn seconds",
+        title="Slow database connection warning threshold (seconds)",
         default=10.0,
         alias="MEIVA_DB_POOL_SLOW_ACQUIRE_WARN_SECONDS",
         description="A successful connection borrow at least this slow is reported as a `db_pool_acquire_slow` event (WARNING). A healthy borrow takes milliseconds, so seconds mean the host is stalled or Postgres is reconnecting; 3s fired on every host-stall check spike (2026-10-03 triage #8: 39 of 41 lines had check_ms == elapsed, a normal reset check being ~30ms). Stays below db_pool_acquire_timeout_seconds so a slow-but-served borrow is visible before it becomes a hard timeout.",
@@ -266,7 +272,7 @@ class AgentRuntimeSettings(EnvSettings):
     )
 
     impersonation_ack_window_seconds: int = Field(
-        title="Impersonation ack window seconds",
+        title="Impersonation delivery acknowledgement timeout (seconds)",
         default=180,
         alias="MEIVA_IMPERSONATION_ACK_WINDOW_SECONDS",
         description="Seconds to ACK each impersonation delivery attempt. Snapshotted when a lease is requested; config edits apply to new leases, including after relay restart.",
@@ -281,7 +287,7 @@ class AgentRuntimeSettings(EnvSettings):
     )
 
     impersonation_max_delivery_attempts: int = Field(
-        title="Impersonation max delivery attempts",
+        title="Maximum impersonation delivery attempts",
         default=2,
         alias="MEIVA_IMPERSONATION_MAX_DELIVERY_ATTEMPTS",
         description="Maximum total delivery attempts per impersonation message, including the initial submission. Exhaustion pauses automatic delivery of that message; the lease and late ACK remain valid. Snapshotted at request; config edits apply to new leases.",
@@ -296,7 +302,7 @@ class AgentRuntimeSettings(EnvSettings):
     )
 
     heartbeat_pause_max_seconds: float = Field(
-        title="Heartbeat pause max seconds",
+        title="Maximum heartbeat pause (seconds)",
         default=86400.0,
         alias="MEIVA_HEARTBEAT_PAUSE_MAX_SECONDS",
         description="Maximum seconds one meiva.self.pause_heartbeat(duration) call may pause the idle heartbeat. Cluster default; an agent can override it per-agent via its config overlay (e.g. meiva.self.restart(config_overlay=...)).",
@@ -312,7 +318,7 @@ class AgentRuntimeSettings(EnvSettings):
     )
 
     understanding_enabled: bool = Field(
-        title="Understanding enabled",
+        title="Generate understanding summaries",
         default=False,
         alias="MEIVA_UNDERSTANDING_ENABLED",
         description="Master switch for chunk-triggered understanding. On: the llm node and the compact paths enqueue context chunks into `understanding_chunk_jobs`, and the agent host's consumer loop describes them into depth-1 `understanding_nodes` rows. Off ships the mechanism dark: nothing is enqueued and the loop idles.",
@@ -325,7 +331,7 @@ class AgentRuntimeSettings(EnvSettings):
     )
 
     understanding_chunk_ratio: float = Field(
-        title="Understanding chunk ratio",
+        title="Understanding chunk size (fraction of context threshold)",
         default=0.5,
         alias="MEIVA_UNDERSTANDING_CHUNK_RATIO",
         description="Understanding chunk size as a fraction of the agent model's soft compaction threshold (its compact-reminder tokens, with the agent's own overrides): a chunk is enqueued when a request's provider-reported input tokens exceed those at the previous cut of the same compaction segment by at least ratio x that threshold. A segment's closing remainder is enqueued at compaction regardless of size. A small ratio speeds up verification.",
@@ -340,11 +346,12 @@ class AgentRuntimeSettings(EnvSettings):
     )
 
     understanding_group_model: str = Field(
-        title="Understanding group model",
+        title="Understanding group summary model",
         default="",
         alias="MEIVA_UNDERSTANDING_GROUP_MODEL",
         description="Model for the upper-level understanding groupings (level 2 and above). Empty = the agent's own model (`agent_model_target`). Unlike the leaf chunks, a grouping request has no agent prefix, so it is not tied to the agent's model for cache parity.",
         json_schema_extra={
+            "help_text": "Leave empty to use the agent's own model.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -353,11 +360,12 @@ class AgentRuntimeSettings(EnvSettings):
     )
 
     understanding_group_reasoning: str = Field(
-        title="Understanding group reasoning",
+        title="Understanding group reasoning effort",
         default="",
         alias="MEIVA_UNDERSTANDING_GROUP_REASONING",
         description="Reasoning strength of the understanding grouping calls above level 1 (`group.py`; the level-1 groups are written by the chunk calls, on the agent's own model). Empty (default) = the model's own default tier, untouched. `off` = thinking disabled where the provider allows it; any other value is passed as the reasoning effort of providers that take one (deepseek `high` / `max`). Set only to override the vendor default.",
         json_schema_extra={
+            "help_text": "Leave empty for the model default; use off to disable thinking where supported.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -366,7 +374,7 @@ class AgentRuntimeSettings(EnvSettings):
     )
 
     understanding_group_check_open: int = Field(
-        title="Understanding group check open",
+        title="New ungrouped nodes before a grouping check",
         default=60,
         alias="MEIVA_UNDERSTANDING_GROUP_CHECK_OPEN",
         description="Upper-level grouping cadence: a level (level 1 and above) is offered to one grouping call each time its open nodes, those without a parent, number this many more than at its previous check, so the call can close several groups at once (any group size; the newest node stays open). Lower = more frequent, smaller calls.",
@@ -380,12 +388,13 @@ class AgentRuntimeSettings(EnvSettings):
     )
 
     understanding_group_check_decay: int = Field(
-        title="Understanding group check decay",
+        title="Grouping check threshold decay by level",
         default=3,
         alias="MEIVA_UNDERSTANDING_GROUP_CHECK_DECAY",
         description="How much the grouping cadence tightens per level: level k (1 = grouping the leaves) is checked each time its open nodes number max(6, `MEIVA_UNDERSTANDING_GROUP_CHECK_OPEN` / decay^(k-1)) more than at its previous check (60, 20, 7, 6, ... by default), and its `must_close` brake is three times that. A higher level fills far more slowly, so with one threshold for all levels the top trails the history by days. 1 = the same threshold at every level.",
         ge=1,
         json_schema_extra={
+            "help_text": "Set 1 to use the same grouping threshold at every level.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -394,7 +403,7 @@ class AgentRuntimeSettings(EnvSettings):
     )
 
     understanding_group_corrections: int = Field(
-        title="Understanding group corrections",
+        title="Maximum understanding grouping correction rounds",
         default=2,
         alias="MEIVA_UNDERSTANDING_GROUP_CORRECTIONS",
         description="Correction rounds of one grouping reply: a chunk call whose groups carry invalid first/last unit numbers or do not cover the whole catalog without gaps, or an upper-level check whose ids are invalid or not consecutive, is sent back in the same conversation for the model to fix. Past this many corrections a chunk job fails (and is retried) or an upper-level check fails (its raw calls stay recorded; the level is checked again after `MEIVA_UNDERSTANDING_GROUP_CHECK_OPEN` more open nodes).",

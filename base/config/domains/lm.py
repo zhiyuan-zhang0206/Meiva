@@ -219,6 +219,7 @@ class LmSettings(EnvSettings):
             "read-only/idempotent, so a bounded retry is safe; 0 disables."
         ),
         json_schema_extra={
+            "help_text": "Set 0 to disable retries for non-streaming requests.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -293,6 +294,7 @@ class LmSettings(EnvSettings):
             "slow providers; per-agent overridable."
         ),
         json_schema_extra={
+            "help_text": "Leave unset to use the model's default.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -314,6 +316,7 @@ class LmSettings(EnvSettings):
             "3600). Per-agent overridable."
         ),
         json_schema_extra={
+            "help_text": "Leave unset to use the model's default.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -334,6 +337,7 @@ class LmSettings(EnvSettings):
             "it on false positives."
         ),
         json_schema_extra={
+            "help_text": "Leave unset to use the model's default.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -353,6 +357,7 @@ class LmSettings(EnvSettings):
             "DeepSeek's intermittent tool-call drift)."
         ),
         json_schema_extra={
+            "help_text": "Includes the first attempt; leave unset to use the model's default.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -415,6 +420,7 @@ class LmSettings(EnvSettings):
             "error-type fast-fail."
         ),
         json_schema_extra={
+            "help_text": "Separate error types with commas; leave empty to disable this check.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -449,6 +455,7 @@ class LmSettings(EnvSettings):
             "before execution. Per-agent overridable."
         ),
         json_schema_extra={
+            "help_text": "Leave empty to use the model or harness default.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -471,6 +478,7 @@ class LmSettings(EnvSettings):
             "reasoning_effort."
         ),
         json_schema_extra={
+            "help_text": "Leave unset for the model default; 0 disables thinking on supported models, while positive values must be at least 1024 and below the output token limit.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
@@ -608,6 +616,7 @@ class LmSettings(EnvSettings):
             "(GEMINI_API_KEY). Other providers ignore it."
         ),
         json_schema_extra={
+            "help_text": "Leave unset to use the default Gemini endpoint.",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,
