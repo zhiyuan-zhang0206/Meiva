@@ -6,6 +6,7 @@ import pytest
 import meiva
 import meiva.skills as skills_mod
 from base.agents.context.clients import ClientSet
+from base.cluster.machine import MachineFacts
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig
@@ -108,6 +109,23 @@ def test_files_read_skill_md_records_consumption(
 
     meiva.files.read(meiva.skills.alpha.path + "/SKILL.md", start=1, end=1)
     assert audited_agent.invoked() == [("alpha", "loaded")]
+
+
+@pytest.mark.usefixtures("sdk_model_owner")
+def test_skill_help_uses_the_attached_machine_for_its_audit_event(
+    fake_skills_dir: Path, audited_agent: AuditedAgent, db_conn: psycopg.Connection
+) -> None:
+    write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
+    machine = MachineFacts.of(name="attached-runner", role="agent-runner")
+    pin_agent(audited_agent.id, machine=machine)
+
+    meiva.help(meiva.skills.alpha)
+
+    row = db_conn.execute(
+        "SELECT machine FROM audit_events WHERE agent_id = %s AND event_name = 'skill_invoked'",
+        (audited_agent.id,),
+    ).fetchone()
+    assert row == ("attached-runner",)
 
 
 def test_a_relative_skill_path_is_refused_not_anchored_at_the_working_directory(

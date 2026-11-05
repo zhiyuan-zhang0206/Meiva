@@ -189,6 +189,30 @@ def _envelope_type_name(payload: object) -> tuple[str, str] | None:
     return None
 
 
+_RETIRED_MODULE_BYTES = tuple({entry.module.encode() for entry in RETIRED_CHECKPOINT_MSGPACK_TYPES})
+
+
+# meiva:note
+# Attachment can discard a retired root value without also discarding a live
+# container that happens to hold an old type or name somewhere inside it.
+# meiva:link base/agents/context/external_attachment/docs/external-attachment.meiva.okf.md
+def is_retired_checkpoint_value(blob: bytes) -> bool:
+    if not any(module in blob for module in _RETIRED_MODULE_BYTES):
+        return False
+
+    def retired_envelope(code: int, data: bytes) -> bool:
+        if code not in _ENVELOPE_EXT_CODES:
+            return False
+        payload = object_of(ormsgpack.unpackb, data, ext_hook=ormsgpack.Ext, option=_DECODE_OPTIONS)
+        name = _envelope_type_name(payload)
+        return name is not None and retired_type(name) is not None
+
+    try:
+        return ormsgpack.unpackb(blob, ext_hook=retired_envelope, option=_DECODE_OPTIONS) is True
+    except ormsgpack.MsgpackDecodeError:
+        return False
+
+
 CheckpointTypeStatus = Literal["allowed", "retired", "unknown"]
 
 

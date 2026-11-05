@@ -118,11 +118,19 @@ def open_session(
 
 
 # meiva:note
-# The wake document is per adapter only where the adapter's world differs: Antigravity's
-# CLI starts a fresh shell per `run_command` and kills a `&` child when the turn ends, and
-# a harness agent that does not know that writes commands that look right and do not
-# survive. Every other adapter takes the shared document unchanged.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
+# Codex Computer Use dropped the Chinese portion of a mixed-script string in Chrome.
+# The wake document gives fresh Codex sessions the verified plain-text input path.
+# meiva:link base/lm/harness/codex/docs/codex.meiva.okf.md
+_CODEX_COMPUTER_USE = HarnessContribution(
+    harnesses=frozenset({Harness.CODEX}),
+    overlaps=(
+        "When inserting non-ASCII text with Codex Computer Use on macOS, use "
+        "`paste(text, {format: 'text'})` and read back the field to verify the exact text. "
+        "Native `typeText` can drop characters from mixed-script input.",
+    ),
+)
+
+
 def handoff_for(
     harness: Harness,
     *,
@@ -152,7 +160,7 @@ def handoff_for(
             label=label,
             cluster=tuple(cluster),
         )
-    return base.with_contributions(contributions, harness=harness)
+    return base.with_contributions((_CODEX_COMPUTER_USE, *contributions), harness=harness)
 
 
 _handoff_for = handoff_for

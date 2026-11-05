@@ -80,6 +80,7 @@ def prepare_event_log(
     source: str,
     target_agent_id: int | None = None,
     payload: Mapping[str, object] | None = None,
+    machine_reader: Callable[[], str] | None = None,
 ) -> telemetry.Event:
     """Construct one audit event (category=audit) without recording or emitting it.
 
@@ -115,6 +116,7 @@ def prepare_event_log(
         source=source,
         target_agent_id=target_agent_id,
         attributes=caller_payload(source, payload),
+        machine_reader=machine_reader,
     )
 
 

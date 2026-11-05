@@ -24,6 +24,7 @@ from base.agents.context.external_attachment.state_schema import (
     BaseAgentState,
     plugin_state_schema,
 )
+from base.agents.history.checkpoint_serde import is_retired_checkpoint_value
 from base.agents.history.delta_read_compat import reconstruct_delta_messages
 from base.db import Database
 from base.host.boundary.json_values import is_object_dict, is_object_list
@@ -44,9 +45,23 @@ def _as_dict_row_conn(value: object) -> TypeGuard[Connection[DictRow]]:
     return isinstance(value, Connection)
 
 
+# meiva:note
+# A retired lifecycle channel can still be present in an old checkpoint or its pending
+# writes. Attachment projects onto the current state schema, which has no consumer for
+# those values. Drop exact retired root envelopes before the upstream decoder sees them.
+# Other values still go through the regular allowlist.
+# meiva:link meiva/impersonation/docs/attachment.meiva.okf.md
+class _AttachmentCheckpointSerializer(JsonPlusSerializer):
+    def loads_typed(self, data: tuple[str, bytes]) -> object:
+        encoding, blob = data
+        if encoding == "msgpack" and is_retired_checkpoint_value(blob):
+            return None
+        return object_of(super().loads_typed, data)
+
+
 # meiva:link meiva/impersonation/docs/attachment.meiva.okf.md
 def serializer() -> JsonPlusSerializer:
-    return JsonPlusSerializer(
+    return _AttachmentCheckpointSerializer(
         allowed_msgpack_modules=agent_state.checkpoint_msgpack_allowlist(
             extensions_registry.loaded_state_classes()
         )

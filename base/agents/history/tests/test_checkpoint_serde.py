@@ -17,6 +17,7 @@ from base.agents.history.checkpoint_serde import (
     RETIRED_CHECKPOINT_MSGPACK_TYPES,
     STATIC_CHECKPOINT_MSGPACK_TYPES,
     checkpoint_type_status,
+    is_retired_checkpoint_value,
     observed_checkpoint_types,
     retired_type,
 )
@@ -71,6 +72,15 @@ def test_the_writer_names_a_message_class_the_reader_already_loads() -> None:
 
     assert named == {("langchain_core.messages.human", "HumanMessage")}
     assert {checkpoint_type_status(key) for key in named} == {"allowed"}
+
+
+def test_only_a_retired_root_envelope_is_skippable() -> None:
+    for entry in RETIRED_CHECKPOINT_MSGPACK_TYPES:
+        envelope = _envelope(entry.module, entry.name)
+        assert is_retired_checkpoint_value(ormsgpack.packb(envelope))
+        assert not is_retired_checkpoint_value(ormsgpack.packb({"nested": envelope}))
+        assert not is_retired_checkpoint_value(ormsgpack.packb(f"{entry.module}.{entry.name}"))
+        assert not is_retired_checkpoint_value(ormsgpack.packb(_envelope(entry.module, "Unknown")))
 
 
 def test_a_type_is_loadable_retired_or_unaccounted_for() -> None:

@@ -11,8 +11,10 @@ from __future__ import annotations
 import base64
 from typing import Any
 
+import ormsgpack
 import pytest
 from langchain_core.messages import HumanMessage, RemoveMessage
+from langgraph.checkpoint.serde.jsonplus import EXT_PYDANTIC_V2
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
 import meiva
@@ -84,6 +86,22 @@ def test_external_attachment_appends_messages_without_replacing_native_history(
     with impersonation.attach(attached_runtime.lease_id):
         assert handle.read().messages == [native_message, appended_message]
     assert len(attached_runtime.journal()) == 1
+
+
+def test_external_snapshot_skips_retired_work_and_preserves_messages(
+    attached_runtime: Takeover, caplog: pytest.LogCaptureFixture
+) -> None:
+    message = HumanMessage(content="Native history", id="native")
+    retired = ormsgpack.Ext(
+        EXT_PYDANTIC_V2,
+        ormsgpack.packb(
+            ("base.agents.incarnation.native_work_models", "NativeWorkTarget", {"agent_id": 235})
+        ),
+    )
+    attached_runtime.write_checkpoint(native_work=retired, messages=[message])
+
+    assert native_messages(attached_runtime) == [message]
+    assert "Blocked deserialization" not in caplog.text
 
 
 def test_external_attachment_refuses_to_journal_a_full_history_reset(
