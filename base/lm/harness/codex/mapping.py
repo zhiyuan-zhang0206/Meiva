@@ -35,11 +35,8 @@ def _as_int(value: object) -> int | None:
 
 # meiva:note
 # Codex speaks ThreadItem, not the bridge's own vocabulary: a `commandExecution`
-# item is one tool use whose result arrives as the same item completed, and a
-# `fileChange` item is an apply-patch. Everything else (reasoning, plan, images,
-# sub-agent activity) is surface the bridge does not model, so it maps to nothing
-# rather than to a synthetic event. Tool results are the one payload that can be
-# megabytes, so the event carries a preview.
+# item is one tool use whose result arrives as the same item completed. A tool
+# result can be megabytes, so the event carries a preview.
 # meiva:link base/lm/harness/codex/docs/codex.meiva.okf.md
 TOOL_RESULT_PREVIEW_CHARS = 2000
 
@@ -73,6 +70,8 @@ def item_event(params: RequestParams, *, phase: str, turn_id: str) -> list[Bridg
         return _mcp_call(item, phase, turn_id)
     if kind == "dynamicToolCall":
         return _dynamic_tool(item, phase, turn_id)
+    if kind == "collabAgentToolCall":
+        return _collab_call(item, phase, turn_id)
     if kind == "webSearch":
         return _web_search(item, phase, turn_id)
     return []
@@ -243,6 +242,34 @@ def _dynamic_tool(item: RequestParams, phase: str, turn_id: str) -> list[BridgeE
             tool_use_id=identifier,
             is_error=item.get("success") is not True,
             content=_clip(json.dumps(item.get("contentItems") or [], ensure_ascii=False)),
+        )
+    ]
+
+
+def _collab_call(item: RequestParams, phase: str, turn_id: str) -> list[BridgeEvent]:
+    identifier = _as_text(item.get("id"))
+    name = _as_text(item.get("tool"))
+    if not identifier or not name:
+        return []
+    if phase == "started":
+        tool_input = {
+            key: value
+            for key in ("receiverThreadIds", "prompt", "model", "reasoningEffort")
+            if (value := item.get(key)) is not None
+        }
+        return [ToolUse(turn_id=turn_id, tool_use_id=identifier, name=name, tool_input=tool_input)]
+    status = _as_text(item.get("status"))
+    summary = {
+        "status": status,
+        "receiverThreadIds": item.get("receiverThreadIds"),
+        "agentsStates": item.get("agentsStates"),
+    }
+    return [
+        ToolResult(
+            turn_id=turn_id,
+            tool_use_id=identifier,
+            is_error=status != "completed",
+            content=_clip(json.dumps(summary, ensure_ascii=False)),
         )
     ]
 

@@ -10,8 +10,7 @@ tags:
 
 # Harness turn
 
-`agent/graph/claim/harness_turn.py`, `base/lm/harness/bridge.py` is how an agent born on `claude_code` or `codex` runs a
-turn. The claim node keeps owning the durable inbound queue, the lifecycle
+`agent/graph/claim/harness_turn.py`, `base/lm/harness/bridge.py` run an external harness for Meiva. The claim node keeps owning the durable inbound queue, the lifecycle
 commands and the turn boundary; when the batch would hand work to the built-in
 loop, it routes to `harness_turn` instead:
 
@@ -26,37 +25,48 @@ own verdicts: a compaction parks its destination in `ContextReset.resume` and
 a compacted external-harness agent resumes into `before_llm`, where the native model
 answers while the CLI session sits idle.
 
-`before_llm`, `llm`, `before_exec`, `exec` and `after_exec` never run on such an
-agent. That is not a convention: the harness turn is the whole loop — model call,
-tool calls, transcript — and those nodes exist to drive the pieces of a loop the
-external CLI already owns. `tests/test_harness_routing.py` runs a compiled graph
-and asserts the set of nodes that executed.
+## Turn boundaries
 
-The choice of a whole-turn node and the rejected single-LLM-call alternative are
-recorded in [the harness decision](../../../docs/decisions/agents/graph/2026-10-19-external-harness.md#the-decision).
+A **big turn** is one continuous stretch of foreground work from a wake until
+the executor hands control back or reaches a terminal outcome. The native graph
+executes the individual nodes. An external harness owns its loop, so the graph
+waits in one node for the same boundary. Big turns have no default wall-clock
+deadline. An explicitly configured deadline can interrupt one. Operations such
+as process startup, transport writes, and shutdown retain their own bounds.
 
-## Storage contract and external timeline (Plan B)
+A **small turn** is one model call, its input, and the work it requests. Native
+Meiva owns those boundaries. External adapters may report a call or a per-call
+usage receipt, depending on the protocol. Text, reasoning, and tool events
+provide independently visible activity even when a model-call boundary is
+unobservable.
 
-For an external harness (`harness != "meiva"`), the external CLI's on-disk session
-file (`FileSessionRegistry`) is the **Execution Source of Truth**: the CLI owns its
-context window, compaction, and continuation.
+A background command has its own lifecycle. If foreground work continues or
+waits for it, the big turn remains active. When foreground work hands control
+back, a later background completion can wake the agent through a new inbound
+and start another big turn.
 
-Under Plan B:
-- External harnesses write UI timeline items strictly to the dedicated Postgres table
-  `agent_harness_messages` (with monotonic `seq` per agent) and **never** read or write
-  LangGraph `state.messages`.
-- LangGraph checkpoints remain 100% the execution and UI store for native `meiva` agents,
-  eliminating cross-harness schema corruption and serialization bugs.
-- `harness_cursor` has been completely retired from `BaseAgentState`.
-- `claim` drains the inbound queue, maps incoming messages to `TimelineItem`s, writes
-  them to `agent_harness_messages`, and passes the pending text to `harness_turn` via
-  `state.harness_pending_input`.
-- `harness_turn` executes the bridge turn, streams `BridgeEvent`s, atomically appends
-  committed timeline items to `agent_harness_messages`, and clears `harness_pending_input`.
-  When an adapter delivers an asynchronous `ToolResult` after a completed intermediate
-  `AssistantText` step, `HarnessTurnProjector` flushes that completed response step
-  before settling the tool result so live deltas, reasoning durations, and subsequent
-  tool or text steps remain isolated.
+## External timeline
+
+The provider session owns execution state and continuation. The Meiva claim
+node consumes inbound rows and commits their timeline entries before handing
+the prompt to the harness. Native Meiva keeps its timeline in LangGraph
+checkpoints. The external activity projector writes to
+`agent_harness_messages` as events arrive.
+
+The first text or reasoning fragment, complete blocks, and tool start and
+result checkpoints are written while the big turn is active. Additional
+fragments are coalesced within a short checkpoint interval. Each item has a
+stable flat `<seq>.0` ID and a monotonic revision. A tool result revises its
+pending output in place, even if other tools or text appear in the meantime.
+The hosted runtime incarnation fences writes. After each commit the same
+checkpoint is published to the live timeline, and reloads read it from storage.
+The IM bridge accepts completed chat blocks. Incomplete text remains visible
+in the work history and is excluded from outbound message delivery.
+
+Cancellation and failure preserve committed work. Terminal handling flushes
+pending text, marks tools whose result is unavailable, and records a failure
+reason when the harness faults. A host custody tick keeps the invocation
+owned while the provider is quiet. It produces no timeline activity.
 
 ## The bridge
 
@@ -73,15 +83,12 @@ in `FileSessionRegistry`.
   (or `window-{cursor + len(pending)}` when the batch carries only notes such as a
   heartbeat check-in), and streams `BridgeEvent`s via `on_event`. Completed keys within
   the same session replay the ticket outcome without emitting a second completion event.
-- When a turn is interrupted by a system/terminate signal (`InterruptReason.SYSTEM`), any tool
-  calls and reasoning already projected during the turn are committed to `agent_harness_messages`
-  before `claim` settles the termination inbound.
 - A session that faults or closes mid-turn retires itself and raises a fatal stream
   abort; the next inbound opens a fresh resumed session from the registry. Only a
   failure that names this turn ends it, and a session failure ends it as a closed
   session rather than as this turn's verdict
   ([[base/lm/harness/docs/attribution.meiva.okf.md|attribution]]).
-- Work a harness reports after its turn (a background command) becomes a
+- A non-empty notice a harness reports after its turn becomes a
   `system:harness` inbound (`base/agents/inbox/harness_notice.py`), so
   the agent wakes on it through this same path.
 - Retirement is asynchronous (`HarnessSessions.retire`), and the next turn awaits
@@ -102,7 +109,7 @@ continuation. The shared deadlines and shutdown fallback are owned by
 
 ## Cost and usage
 
-Each non-replayed completed turn logs the same `llm_usage` row the built-in loop logs, with
+Each non-replayed terminal result with observed usage logs the same `llm_usage` row the built-in loop logs, with
 `usage_kind="agent"` and `source` set to the harness name, so the two runtimes
 stay comparable in one place. A turn whose provider reported no tokens logs
 nothing.

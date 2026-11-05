@@ -48,6 +48,17 @@ Each image's caption is the text block immediately before it (modern interleaved
 
 Tagged framework HumanMessages take explicit branches; anything left — pre-tag history, retired marker types like the old LLM-cancel — renders as a system_marker with source=None, which the frontend flags as the red UnknownMarkerChip. Fail-loud is deliberate: a red chip on rare historical rows beats a silent mis-render; an untagged system note is the same case.
 
+## External harness activity checkpoints
+
+External harness activity keeps a flat `<seq>.0` item ID and a non-negative
+`activity_revision`. The history writer appends a new item at the next sequence
+and updates the same row as its revision advances, under the agent metadata row
+lock. A repeat of an identical revision is idempotent. A stale runtime owner,
+legacy row, or conflicting revision cannot replace the stored activity. Native
+and historical items carry no activity revision. `activity_pending` marks a text
+checkpoint that can still change. The IM bridge and reply-suggestion excerpt
+consume only complete text blocks.
+
 ## Window unit and readers
 
 display.timeline_default_limit (MEIVA_TIMELINE_DEFAULT_LIMIT, default 50) counts timeline ITEMS and is read per call through timeline_default_limit() — both the gateway and the agent import this module, so consumers must not capture the value at import. tail_window returns the newest limit items plus has_more; limit <= 0 or a list no longer than the limit returns everything with has_more=False.

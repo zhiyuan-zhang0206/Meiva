@@ -946,8 +946,8 @@ CREATE TRIGGER agents_meta_born_spawner_append_only
     EXECUTE FUNCTION reject_agents_meta_born_spawner_update();
 
 -- ─────────────── agent_harness_messages ───────────────
--- Dedicated append-only UI display table for external harnesses (claude_code,
--- codex, antigravity). Native meiva continues using LangGraph checkpoints
+-- Dedicated UI display table for external harnesses. Live activity items can
+-- advance in place by revision. Native meiva continues using LangGraph checkpoints
 -- as both execution truth and UI store; external harnesses write rendered TimelineItems
 -- here so LangGraph checkpoints remain decoupled from external harness execution.
 CREATE TABLE agent_harness_messages (
@@ -964,7 +964,7 @@ CREATE TABLE agent_harness_messages (
 CREATE INDEX idx_agent_harness_messages_agent_seq ON agent_harness_messages (agent_id, seq DESC);
 
 COMMENT ON TABLE agent_harness_messages IS
-    'Append-only timeline item store for agents running on external harnesses (claude_code, codex, antigravity, kimi_code).';
+    'Timeline item store for external harnesses, with in-place revisions for live activity.';
 COMMENT ON COLUMN agent_harness_messages.agent_id IS
     'Owning agent id.';
 COMMENT ON COLUMN agent_harness_messages.seq IS
@@ -981,6 +981,7 @@ COMMENT ON COLUMN agent_harness_messages.created_at IS
 DO $$ BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_runner') THEN
         GRANT SELECT, INSERT ON agent_harness_messages TO meiva_runner;
+        GRANT UPDATE (item) ON agent_harness_messages TO meiva_runner;
         GRANT USAGE, SELECT ON SEQUENCE agent_harness_messages_id_seq TO meiva_runner;
     END IF;
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'meiva_gateway') THEN

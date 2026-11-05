@@ -5,12 +5,14 @@ import os
 import random
 from collections.abc import Callable
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 
 from base.api_contracts.agent_contract import Harness
-from base.clock.tests.fakes import system_clock
+from base.clock.tests.fakes import clock_over, system_clock
+from base.clock.tests.manual_timers import ManualTimers
 from base.lm.harness import Handoff, HarnessBridge, HarnessClosedError, HarnessTurnFaultedError
 from base.lm.harness.base_session import SessionBinding
 from base.lm.harness.claude import BridgeConfig
@@ -27,7 +29,7 @@ from base.lm.harness.codex import CodexConfig
 from base.lm.harness.codex.frames import JsonObject, RequestParams
 from base.lm.harness.codex.session import CodexSession
 from base.lm.harness.codex.tests.fake_app_server import FakeAppServer
-from base.lm.harness.registration import SecureRandom
+from base.lm.harness.registration import RegistrationStore, SecureRandom
 from base.lm.harness.registry import FileSessionRegistry
 
 
@@ -116,6 +118,53 @@ async def test_codex_cancel_during_first_turn_closes_transport(tmp_path: Path) -
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
         await bridge.close()
+
+
+async def test_a_quiet_turn_keeps_its_attachment_after_the_original_expiry(tmp_path: Path) -> None:
+    store = RegistrationStore(tmp_path / "registrations")
+    timers = ManualTimers()
+    clock = clock_over(timers)
+    server = FakeAppServer(pid=None)
+    session = CodexSession(
+        CodexConfig(cwd=tmp_path),
+        environ={},
+        transport=server,
+        binding=SessionBinding(),
+        clock=clock,
+    )
+    bridge = HarnessBridge(
+        Harness.CODEX,
+        7,
+        lambda _: session,
+        registrations=store,
+        registration_ttl_seconds=3600,
+        clock=clock,
+        handle_rng=SecureRandom(random.SystemRandom()),
+        controller_pid=os.getpid(),
+    )
+
+    turn = asyncio.create_task(bridge.run_turn("wait quietly", key="inbound-1"))
+    try:
+        await until(lambda: bool(server.turn_ids))
+        first = store.read(7)
+        assert first is not None
+        expiry = datetime.fromisoformat(first.expires_at)
+        await until(lambda: timers.now() > expiry)
+
+        assert not turn.done()
+        assert store.sweep(now=timers.now()) == []
+        renewed = store.read(7)
+        assert renewed is not None
+        assert renewed.created_at == first.created_at
+        assert renewed.handle_sha256 == first.handle_sha256
+        assert renewed.external_session_id == first.external_session_id == session.session_id
+        server.complete()
+        assert not (await asyncio.wait_for(turn, timeout=2)).is_error
+    finally:
+        _ = turn.cancel()
+        _ = await asyncio.gather(turn, return_exceptions=True)
+        await bridge.close()
+    assert store.read(7) is None
 
 
 async def test_failed_first_turn_retires_the_session(tmp_path: Path) -> None:

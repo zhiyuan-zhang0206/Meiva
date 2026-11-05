@@ -7,6 +7,8 @@ from typing import Protocol
 from base.lm.harness.events import BridgeEvent, Usage
 from base.lm.harness.handoff import Handoff
 
+TurnEventSink = Callable[[BridgeEvent], Awaitable[None] | None]
+
 
 # meiva:note
 # What one harness turn produced, in the terms the graph already accounts for: the
@@ -131,7 +133,7 @@ class TurnEngine(Protocol):
         text: str,
         *,
         key: str,
-        on_event: Callable[[BridgeEvent], None] | None = None,
+        on_event: TurnEventSink | None = None,
     ) -> Awaitable[HarnessTurn]: ...
     def interrupt(self) -> Awaitable[object]: ...
     def close(self, *, reason: str = "closed") -> Awaitable[None]: ...

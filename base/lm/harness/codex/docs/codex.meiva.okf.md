@@ -87,7 +87,7 @@ caller opts into it.
 | `binary` / `extra_args` | `codex` / `()` | the CLI on `PATH`; tests substitute a peer |
 | `api_key_mode` | `False` | off means the child gets no credential variables; on is the explicit choice of per-token billing |
 | `startup_timeout_seconds` | 120 | `initialize`/`thread/*` are local round trips; a wedged server is a fault |
-| `turn_timeout_seconds` | 900 | a wedged turn becomes an interrupt, never a silent hang |
+| `turn_timeout_seconds` | `None` | optional wall-clock limit for a turn; when configured, expiry interrupts it |
 | `cancel_settle_seconds` | 5 | reaping is milliseconds; 5s tolerates load without hiding a leak |
 | `max_pending_turns` | 32 | overflow returns the message to its durable owner instead of growing memory |
 | `max_buffered_events` | 256 | text deltas are droppable past this; control events are bounded by tool-call count |

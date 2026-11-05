@@ -11,23 +11,22 @@ from psycopg_pool import AsyncConnectionPool
 from agent.db import ClaimedInbound
 from agent.graph.claim._dispatch import BatchState, resolve_non_human_wake
 from agent.graph.claim._routing import Routing
-from agent.graph.claim.harness_turn import HarnessTurnProjector
+from agent.graph.claim.harness_activity import HarnessTurnProjector
 from agent.graph.claim.node import claim_node_impl, settle_claimed_batch
 from agent.graph.claim.tests.claim_support import make_runtime, thread_config
 from agent.graph.claim.turn_stamp import persist_last_active
 from agent.messages import NoteTag, system_note_message
 from agent.state import AgentState
+from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.kwargs import read_meiva_kwargs
-from base.agents.observation.turn_progress import TurnProgress
 from base.agents.tests.units import spawn_agent
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
-from base.events.live.tests.live_capture import LiveEvents
 from base.lm.catalog import ModelCatalog
-from base.lm.harness import AssistantText, HarnessTurn, TextDelta, ToolUse, Usage
+from base.lm.harness import AssistantText, TextDelta, ToolUse
 
 START = datetime(2026, 10, 25, 1, 2, 3, tzinfo=UTC)
 
@@ -332,69 +331,29 @@ async def test_external_harness_non_human_wake_includes_recency_reminder_and_kee
     assert "Meiva agent to user: " in pending["prompt"]
 
 
-def _run_background_harness_turn(live_events: LiveEvents) -> list[object]:
+async def test_harness_projector_propagates_non_human_wake() -> None:
     moments = iter(START + timedelta(seconds=n) for n in range(6))
     clock = Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS, now=moments.__next__)
+    items: dict[str, TimelineItem] = {}
+
+    async def checkpoint(item: TimelineItem, msg_count: int) -> None:
+        items[item.item_id] = item
+
     projector = HarnessTurnProjector(
-        event_publisher=live_events.publisher,
-        agent_id=7,
-        base_idx=2,
-        turn_progress=TurnProgress(),
-        clock=clock,
-        non_human_wake=True,
+        checkpoint=checkpoint, base_idx=2, clock=clock, non_human_wake=True
     )
-    projector.on_event(TextDelta(turn_id="t1", text="Checking worker..."))
-    projector.on_event(AssistantText(turn_id="t1", text="Checking worker..."))
-    projector.on_event(
+    await projector.on_event(TextDelta(turn_id="t1", text="Checking worker..."))
+    assert items["2.0"].user_facing is False
+    await projector.on_event(AssistantText(turn_id="t1", text="Checking worker..."))
+    await projector.on_event(
         ToolUse(turn_id="t1", tool_use_id="c1", name="Bash", tool_input={"command": "ls"})
     )
-    projector.on_event(AssistantText(turn_id="t1", text="Meiva agent to user: All green."))
-    return list(
-        projector.finish(
-            (
-                HarnessTurn(
-                    turn_id="t1",
-                    text="Meiva agent to user: All green.",
-                    usage=Usage(),
-                    cost_usd=None,
-                    subtype="success",
-                    is_error=False,
-                    interrupted=False,
-                ),
-            )
-        )
-    )
+    await projector.on_event(AssistantText(turn_id="t1", text="Meiva agent to user: All green."))
+    await projector.finish()
 
-
-async def test_harness_projector_propagates_non_human_wake_on_sse_and_messages(
-    live_events: LiveEvents,
-) -> None:
-    from langchain_core.messages import AIMessage
-
-    messages = _run_background_harness_turn(live_events)
-    events = await live_events.events()
-
-    chat_events = [e for e in events if e["role"] in ("chat_start", "chat_delta")]
-    assert len(chat_events) >= 2
-    assert {e["non_human_wake"] for e in chat_events} == {True}
-
-    ai_msgs = [m for m in messages if isinstance(m, AIMessage)]
-    assert len(ai_msgs) == 2
-    assert [m.additional_kwargs.get("meiva_non_human_wake") for m in ai_msgs] == [True, True]
-
-
-async def test_harness_projector_resolves_mid_turn_snapshot_polarity(
-    live_events: LiveEvents,
-) -> None:
-    _run_background_harness_turn(live_events)
-    events = await live_events.events()
-
-    snapshots = [e for e in events if e["role"] == "timeline_snapshot"]
-    assert len(snapshots) == 1
-    chat_snap_items = [it for it in snapshots[0]["items"] if it["kind"] == "agent_chat"]
-    assert len(chat_snap_items) == 1
-    assert chat_snap_items[0]["payload"] == "Checking worker..."
-    assert chat_snap_items[0]["user_facing"] is False
+    assert [
+        (item.payload, item.user_facing) for item in items.values() if item.kind == "agent_chat"
+    ] == [("Checking worker...", False), ("All green.", True)]
 
 
 async def test_persist_last_active_strips_prefix_and_skips_empty_header(

@@ -99,7 +99,7 @@ nothing in the protocol can tell the two apart.
 
 | Field | Default | Reason |
 |---|---|---|
-| `turn_timeout_seconds` | 900 | a turn that outlives it is interrupted, never silently dropped |
+| `turn_timeout_seconds` | `None` | optional wall-clock limit for a turn; when configured, expiry interrupts it |
 | `cancel_settle_seconds` | 5 | how long an interrupt waits for the CLI and its children before escalating to SIGTERM/SIGKILL and reporting residue |
 | `max_pending_turns` | 32 | the queue refuses instead of buffering without bound |
 | `max_buffered_events` | 256 | text deltas are droppable under lag; control events never are |

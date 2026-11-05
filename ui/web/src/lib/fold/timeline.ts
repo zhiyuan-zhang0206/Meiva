@@ -574,9 +574,22 @@ export function mergeSnapshotWithStreaming(
   msg_count: number,
   streamingIds: ReadonlySet<string> = new Set(),
 ): BackendTimelineItem[] {
-  const snapshotIds = new Set(snapshot.map((it) => it.item_id));
+  // meiva:note
+  // A delayed HTTP read can carry an older revision than one delivered by SSE.
+  // meiva:link ui/web/src/docs/frontend-state/timeline-cache.meiva.okf.md
+  const committedById = new Map(snapshot.map((it) => [it.item_id, it]));
   const clientExtras = prev.filter((it) => {
-    if (snapshotIds.has(it.item_id)) return false;
+    const committed = committedById.get(it.item_id);
+    if (committed !== undefined) {
+      if (
+        it.activity_revision != null &&
+        committed.activity_revision != null &&
+        it.activity_revision > committed.activity_revision
+      ) {
+        committedById.set(it.item_id, it);
+      }
+      return false;
+    }
     const isUncommittedStreamItem =
       Boolean(it.partial) ||
       (it.reasoningStartedAt != null && it.reasoning_ms == null) ||
@@ -591,7 +604,7 @@ export function mergeSnapshotWithStreaming(
   });
   // Sort by item_id's msg_idx.block_idx — ephemeral markers go through the
   // parseItemId null path and land at the end, preserving event ordering.
-  const merged = sortByItemId([...snapshot, ...clientExtras]);
+  const merged = sortByItemId([...committedById.values(), ...clientExtras]);
   // Shallow compare: if merged and prev have the same length and matching
   // references at each position, return prev so Zustand setState sees the
   // same reference and short-circuits, skipping a React re-render.

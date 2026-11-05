@@ -77,11 +77,12 @@ and resets the next older page to its base size. The compact transition buffer k
 release; trimming resumes afterward. A reader parked mid-history retains every
 loaded row, so deliberate deep-history reading can still grow memory and DOM.
 
-Timeline snapshots merge with provisional streaming items. The current
-wire format does not provide a shared checkpoint revision between REST and live
-snapshots; request cancellation alone does not establish commit ordering. An
-explicit cross-layer identity contract is required before claiming arbitrary
-same-agent snapshot race safety.
+Timeline snapshots merge with provisional streaming items. Durable external
+harness activities carry a per-item `activity_revision`. The highest revision
+of a shared item ID wins across SSE and REST, so an older response that arrives
+late cannot overwrite newer progress. This ordering is local to each activity
+item. Native timeline snapshots still merge by checkpoint coordinates without
+a shared REST/SSE checkpoint revision.
 
 ## Relationship to Other Nodes
 

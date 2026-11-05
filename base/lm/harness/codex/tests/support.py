@@ -7,7 +7,7 @@ from typing import Any
 
 from base.clock.tests.fakes import system_clock
 from base.host.boundary.json_values import is_object_list
-from base.lm.harness.base_session import SessionBinding
+from base.lm.harness.base_session import SessionBinding, SessionClock
 from base.lm.harness.codex import CodexConfig
 from base.lm.harness.codex.frames import as_object, as_text
 from base.lm.harness.codex.session import CodexSession
@@ -112,6 +112,7 @@ async def start(
     registry: FileSessionRegistry | None = None,
     unsolicited: UnsolicitedSink | None = None,
     observe_pid: bool = True,
+    clock: SessionClock | None = None,
     **config_overrides: Any,
 ) -> Harness:
     fake = server if server is not None else FakeAppServer(pid=CODEX_PID if observe_pid else None)
@@ -125,7 +126,7 @@ async def start(
         binding=SessionBinding(agent_id, registry, unsolicited),
         transport=fake,
         probe=scripted_probe,
-        clock=system_clock(),
+        clock=clock if clock is not None else system_clock(),
     )
     await session.start(resume=resume, handoff=handoff_doc)
     return Harness(session, fake, scripted_probe)

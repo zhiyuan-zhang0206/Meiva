@@ -79,7 +79,7 @@ def is_dialog_item(it: TimelineItem) -> bool:
         return False
     if kind == "inbound_chat":
         return it.get("source") == _USER_SOURCE
-    return it.get("user_facing") is not False
+    return it.get("user_facing") is not False and it.get("activity_pending") is not True
 
 
 # meiva:note

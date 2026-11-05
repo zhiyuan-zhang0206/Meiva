@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -7,7 +8,13 @@ from datetime import timedelta
 
 from base.api_contracts.agent_contract import Harness
 from base.lm.harness.base_session import SessionClock
-from base.lm.harness.engine import CompletedTurnEvent, HarnessSession, HarnessTurn, SubmittedTurn
+from base.lm.harness.engine import (
+    CompletedTurnEvent,
+    HarnessSession,
+    HarnessTurn,
+    SubmittedTurn,
+    TurnEventSink,
+)
 from base.lm.harness.events import (
     AssistantText,
     BridgeEvent,
@@ -34,10 +41,13 @@ from base.lm.harness.registration import (
     handle_digest,
 )
 from base.lm.harness.registry import SessionRecord, SessionRegistry
+from base.log import logger
 
 
 class HarnessTurnFaultedError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, outcome: HarnessTurn | None = None) -> None:
+        super().__init__(message)
+        self.outcome = outcome
 
 
 class HarnessClosedError(RuntimeError):
@@ -177,7 +187,7 @@ class HarnessBridge:
         text: str,
         *,
         key: str,
-        on_event: Callable[[BridgeEvent], None] | None = None,
+        on_event: TurnEventSink | None = None,
     ) -> HarnessTurn:
         try:
             session = await self.ensure()
@@ -199,10 +209,35 @@ class HarnessBridge:
                 raise HarnessSetupError(f"{self.harness.value} refused the turn: {exc}") from exc
             if ticket.deduplicated and ticket.settled:
                 return replace(_completed(await ticket.outcome(), ""), replayed=True)
-            return await self._await_turn(session, str(ticket.turn_id), on_event=on_event)
+            return await self._wait_with_registration(session, str(ticket.turn_id), on_event)
         except (HarnessTurnFaultedError, HarnessClosedError, HarnessSetupError):
             await self._retire(session, reason="turn faulted")
             raise
+
+    # meiva:note
+    # The renewal has the turn's lifetime. Preserve the original turn exception so
+    # callers can distinguish cancellation, an adapter fault, and a session closure.
+    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+    async def _wait_with_registration(
+        self, session: HarnessSession, turn_id: str, on_event: TurnEventSink | None
+    ) -> HarnessTurn:
+        if self._registrations is None:
+            return await self._await_turn(session, turn_id, on_event=on_event)
+
+        outcome: HarnessTurn | BaseException
+        async with asyncio.TaskGroup() as tasks:
+            renewal = tasks.create_task(
+                self._renew_registration(session), name=f"harness-registration-{self._agent_id}"
+            )
+            try:
+                outcome = await self._await_turn(session, turn_id, on_event=on_event)
+            except BaseException as error:
+                outcome = error
+            finally:
+                _ = renewal.cancel()
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
 
     async def interrupt(self) -> object:
         session = self._session
@@ -249,18 +284,34 @@ class HarnessBridge:
         self._exit_code = session.exit_code
 
     # meiva:note
-    # Every row carries an expiry, and the bridge rewrites it at the start of each turn:
-    # `descends_from(controller_pid)` is only as good as the kernel's pid allocation, so
-    # a row that never expired would be a bearer capability that a reused pid could
-    # eventually inherit. Renewal is what keeps a live agent's row valid — the TTL is
-    # sized above the adapter's own turn timeout — and it is also what makes a crashed
-    # host's row lapse without anyone sweeping it.
+    # Every row expires so a reused controller pid cannot inherit a crashed host's
+    # bearer capability. A running turn renews its registration independently of provider
+    # output. The identity check prevents an interrupt or close from resurrecting a row.
+    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+    async def _renew_registration(self, session: HarnessSession) -> None:
+        interval = self._registration_ttl.total_seconds() / 3
+        while self._session is session:
+            await self._clock.asleep(interval)
+            if self._session is not session:
+                return
+            try:
+                self._register(session.session_id or "")
+            except OSError as exc:
+                logger.warning(
+                    "could not renew harness registration for agent {agent_id}: {error}",
+                    event="harness_registration_renewal_failed",
+                    agent_id=self._agent_id,
+                    error=exc,
+                )
+
+    # meiva:note
+    # A renewal preserves the handle, controller and creation time for this session.
     # meiva:link base/lm/harness/docs/harness.meiva.okf.md
     def _register(self, external_session_id: str) -> None:
         if self._registrations is None or self._digest is None:
             return
         now = self._clock.now()
-        self._created_at = self._created_at or now.isoformat(timespec="seconds")
+        self._created_at = self._created_at or now.isoformat()
         self._registrations.write(
             HarnessRegistration(
                 agent_id=self._agent_id,
@@ -270,7 +321,7 @@ class HarnessBridge:
                 controller_pid=self._controller_pid,
                 handle_sha256=self._digest,
                 created_at=self._created_at,
-                expires_at=(now + self._registration_ttl).isoformat(timespec="seconds"),
+                expires_at=(now + self._registration_ttl).isoformat(),
                 status=ATTACHED,
             )
         )
@@ -284,24 +335,26 @@ class HarnessBridge:
         session: HarnessSession,
         turn_id: str,
         *,
-        on_event: Callable[[BridgeEvent], None] | None = None,
+        on_event: TurnEventSink | None = None,
     ) -> HarnessTurn:
         streamed: dict[str, list[str]] = {}
         async for event in session.events():
-            done = self._consume_event(event, turn_id, streamed, on_event=on_event)
+            done = await self._consume_event(event, turn_id, streamed, on_event=on_event)
             if done is not None:
                 if done.is_error:
-                    raise HarnessTurnFaultedError(fault_message(self.harness.value, done))
+                    raise HarnessTurnFaultedError(
+                        fault_message(self.harness.value, done), outcome=done
+                    )
                 return done
         raise HarnessClosedError(f"harness event stream ended before turn {turn_id} completed")
 
-    def _consume_event(
+    async def _consume_event(
         self,
         event: BridgeEvent,
         turn_id: str,
         streamed: dict[str, list[str]],
         *,
-        on_event: Callable[[BridgeEvent], None] | None = None,
+        on_event: TurnEventSink | None = None,
     ) -> HarnessTurn | None:
         if isinstance(event, SessionStarted):
             if event.model:
@@ -314,16 +367,16 @@ class HarnessBridge:
             return None
         if isinstance(event, AssistantText):
             streamed.setdefault(event.turn_id, []).append(event.text)
-        if self._forward(event, turn_id, on_event):
+        if await self._forward(event, turn_id, on_event):
             return None
         _raise_if_faulted(event, turn_id)
         return None
 
-    def _forward(
+    async def _forward(
         self,
         event: BridgeEvent,
         turn_id: str,
-        on_event: Callable[[BridgeEvent], None] | None,
+        on_event: TurnEventSink | None,
     ) -> bool:
         # meiva:note
         # Streaming payload reaches the caller as it arrives, but only when the caller
@@ -339,7 +392,8 @@ class HarnessBridge:
             return False
         if event.turn_id != turn_id:
             return False
-        on_event(event)
+        if (pending := on_event(event)) is not None:
+            await pending
         return True
 
 

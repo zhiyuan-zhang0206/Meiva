@@ -447,6 +447,26 @@ describe("processSseEvent role dispatch (table-driven)", () => {
     expect(s.streamingCode).toBe(true);
     expect(s.tokenUsage).toBe(500);
   });
+
+  it("updates durable activity in place and keeps it through a stale read and cancel", () => {
+    const timeline = useTimelineStore.getState();
+    const pending = item({ item_id: "1.0", kind: "code_output", payload: "Running", activity_revision: 0 });
+    const result = { ...pending, payload: "Completed", activity_revision: 1 };
+    const progress = item({ item_id: "2.0", payload: "I found the cause", activity_revision: 0 });
+    timeline.processSseEvent({
+      role: "inbound_arrived", agent_id: 42, inbound_id: 1, kind: "chat", source: "user", content: "Investigate",
+    });
+    timeline.processSseEvent({ role: "timeline_snapshot", agent_id: 42, msg_count: 2, items: [pending] });
+    expect(useTimelineStore.getState().items).toEqual([pending]);
+    timeline.processSseEvent({ role: "timeline_snapshot", agent_id: 42, msg_count: 3, items: [result, progress] });
+    expect(useTimelineStore.getState().items).toEqual([result, progress]);
+    expect(useTimelineStore.getState().turnActive).toBe(true);
+    timeline.reloadSnapshot([pending], 2, false);
+    expect(useTimelineStore.getState().items).toEqual([result, progress]);
+    timeline.processSseEvent({ role: "cancelled", agent_id: 42 });
+    expect(useTimelineStore.getState().items).toEqual([result, progress]);
+    expect(useTimelineStore.getState().turnActive).toBe(false);
+  });
 });
 
 // -- 2. processConnectionEvent ──────────────────────────────────────────────

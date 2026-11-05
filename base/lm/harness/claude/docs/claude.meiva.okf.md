@@ -55,8 +55,8 @@ exports come from `base.lm.harness.claude.session`, so the door itself stays `st
 | `model` | `claude-sonnet-5-5` | full id from the bundled CLI's model table; an alias would let an upgrade change the model |
 | `tools` | `None` | retain the complete native CLI tool set; an explicit tuple restricts it |
 | `permission_mode` | `bypassPermissions` | headless session with no approval layer: the CLI must not park on a prompt nobody can answer. The workspace is the boundary. |
-| `max_turns` | `None` | retain native completion behavior without an artificial 24-step cutoff; the bridge deadline still bounds stalled turns |
-| `turn_timeout_seconds` | 900 | a wedged CLI surfaces as a bridge fault instead of a hung agent |
+| `max_turns` | `None` | retain native completion behavior without an artificial 24-step cutoff |
+| `turn_timeout_seconds` | `None` | optional wall-clock limit for a turn; when configured, expiry interrupts it |
 | `cancel_settle_seconds` | 5 | observed reaping is ~40ms; 5s tolerates load without hiding a leak |
 | `max_pending_turns` | 32 | overflow returns the message to its durable owner instead of growing memory |
 | `max_buffered_events` | 256 | text deltas are droppable past this; control events are bounded by tool-call count |

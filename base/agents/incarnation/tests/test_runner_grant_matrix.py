@@ -76,6 +76,19 @@ def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one gr
         )
         # agents_meta status/liveness (SELECT + UPDATE; INSERT stays with spawn)
         conn.execute("UPDATE agents_meta SET status = 'idling' WHERE id = %s", (agent_id,))
+        conn.execute(
+            "INSERT INTO agent_harness_messages (agent_id, seq, harness, item) "
+            "VALUES (%s, 0, 'codex', '{}')",
+            (agent_id,),
+        )
+        conn.execute(
+            "UPDATE agent_harness_messages SET item = '{\"activity_revision\": 1}' WHERE agent_id = %s",
+            (agent_id,),
+        )
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            conn.execute(
+                "UPDATE agent_harness_messages SET seq = 1 WHERE agent_id = %s", (agent_id,)
+            )
         # agents is gateway-written only: labels go through the gateway API
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("UPDATE agents SET label = 'me' WHERE id = %s", (agent_id,))

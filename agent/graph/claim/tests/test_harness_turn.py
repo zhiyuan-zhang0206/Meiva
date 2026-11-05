@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncGenerator, Callable, Sequence
+from collections.abc import AsyncGenerator, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
@@ -13,9 +13,9 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
+from agent.graph.claim.harness_activity import HarnessTurnProjector
+from agent.graph.claim.harness_tool_format import format_tool_use
 from agent.graph.claim.harness_turn import (
-    HarnessTurnProjector,
-    format_tool_use,
     harness_turn_node,
     interrupt_engine,
     log_turn_usage,
@@ -28,6 +28,8 @@ from agent.graph.llm_errors import FatalLLMStreamError
 from agent.messages import NoteTag
 from agent.state import AgentState
 from base.agents.context import HostedTurnResources, MeivaContext
+from base.agents.history.harness_messages import aload_harness_timeline_items
+from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.kwargs import read_meiva_kwargs
 from base.agents.tests.units import spawn_agent
 from base.api_contracts.agent_contract import Harness
@@ -36,6 +38,8 @@ from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import defaults
 from base.db.code_version_gate import ProcessDbGate
+from base.events.live.publisher import AgentEventPublisher
+from base.events.live.tests.live_capture import LiveEvents
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.harness import (
@@ -51,6 +55,7 @@ from base.lm.harness import (
     ToolUse,
     Usage,
 )
+from base.lm.harness.engine import TurnEventSink
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.turn_identity import HostedServiceResources
@@ -58,6 +63,11 @@ from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
 
 ENVIRON = dict(os.environ)
+
+
+async def deliver(sink: TurnEventSink, event: BridgeEvent) -> None:
+    if (pending := sink(event)) is not None:
+        await pending
 
 
 class FakeEngine:
@@ -89,12 +99,12 @@ class FakeEngine:
         text: str,
         *,
         key: str,
-        on_event: Callable[[BridgeEvent], None] | None = None,
+        on_event: TurnEventSink | None = None,
     ) -> HarnessTurn:
         self.submitted.append((text, key))
         if on_event is not None:
             for event in self._events:
-                on_event(event)
+                await deliver(on_event, event)
         return HarnessTurn(
             turn_id="t1",
             text=self._reply,
@@ -119,7 +129,7 @@ def runtime(
     *,
     ops_pool: AsyncConnectionPool | None = None,
     hosted_resources: HostedTurnResources | None = None,
-    publisher: MagicMock | None = None,
+    publisher: AgentEventPublisher | None = None,
 ) -> Runtime[MeivaContext]:
     return Runtime(
         context=MeivaContext(
@@ -295,7 +305,7 @@ async def test_a_faulted_session_settles_the_turn_as_a_fatal_stream_abort(
             text: str,
             *,
             key: str,
-            on_event: Callable[[BridgeEvent], None] | None = None,
+            on_event: TurnEventSink | None = None,
         ) -> HarnessTurn:
             raise HarnessTurnFaultedError("cli died")
 
@@ -320,7 +330,7 @@ async def test_a_session_that_cannot_start_settles_the_turn_as_a_fatal_stream_ab
             text: str,
             *,
             key: str,
-            on_event: Callable[[BridgeEvent], None] | None = None,
+            on_event: TurnEventSink | None = None,
         ) -> HarnessTurn:
             raise HarnessSetupError("claude_code session could not start: no sdk")
 
@@ -414,6 +424,69 @@ async def test_a_completed_turn_stamps_the_reply_as_the_last_message(
     assert _last_message_text(db_conn, agent_id) == "the answer"
 
 
+async def test_tool_activity_is_visible_before_completion_and_survives_abort(
+    redis_url: str,
+    aops_pool: AsyncConnectionPool,
+    hosted_resources: HostedTurnResources,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    agent_id = spawn_agent(
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+
+    async def load() -> list[TimelineItem]:
+        async with aops_pool.connection() as conn:
+            return await aload_harness_timeline_items(conn, agent_id)
+
+    class FaultingEngine(FakeEngine):
+        async def run_turn(
+            self, text: str, *, key: str, on_event: TurnEventSink | None = None
+        ) -> HarnessTurn:
+            assert on_event is not None
+            await deliver(
+                on_event,
+                ToolUse(
+                    turn_id="t1", tool_use_id="call", name="Bash", tool_input={"command": "ls"}
+                ),
+            )
+            start = await load()
+            assert [(item.kind, item.payload) for item in start] == [
+                ("agent_code", "ls"),
+                ("code_output", "Tool running"),
+            ]
+            await deliver(
+                on_event,
+                ToolResult(turn_id="t1", tool_use_id="call", content="README", is_error=False),
+            )
+            result = await load()
+            assert result[1].item_id == start[1].item_id
+            assert result[1].activity_revision == 2
+            assert result[1].payload == "README"
+            raise HarnessTurnFaultedError("provider disconnected")
+
+    state = AgentState(harness_pending_input={"prompt": "list files", "key": "inbound-7"})
+    with pytest.raises(FatalLLMStreamError, match="provider disconnected"):
+        await harness_turn_node(
+            state,
+            runtime(FaultingEngine(), ops_pool=aops_pool, hosted_resources=hosted_resources),
+            config(agent_id),
+        )
+
+    result = await load()
+    assert [item.payload for item in result] == [
+        "ls",
+        "README",
+        "error:Harness execution stopped: provider disconnected",
+    ]
+
+
 async def test_the_handoff_prelude_is_not_the_last_message(
     redis_url: str,
     db_conn: psycopg.Connection,
@@ -453,8 +526,9 @@ async def test_the_handoff_prelude_is_not_the_last_message(
     )
 
 
-async def test_intra_turn_events_project_to_live_sse_and_committed_messages() -> None:
-    import json
+async def test_intra_turn_events_project_to_live_sse_and_committed_messages(
+    live_events: LiveEvents,
+) -> None:
 
     engine = FakeEngine(
         reply="all done",
@@ -476,37 +550,29 @@ async def test_intra_turn_events_project_to_live_sse_and_committed_messages() ->
             TextDelta(turn_id="t1", text="all done"),
         ),
     )
-    emitted: list[str] = []
-
-    def record_emit(raw: str) -> None:
-        emitted.append(str(json.loads(raw)["role"]))
-
-    publisher = MagicMock()
-    publisher.emit.side_effect = record_emit
-    rt = runtime(engine, publisher=publisher)
     state = AgentState(harness_pending_input={"prompt": "list files", "key": "inbound-7"})
-
-    command = await harness_turn_node(state, rt, config())
-
-    assert command.update is not None
+    command = await harness_turn_node(
+        state, runtime(engine, publisher=live_events.publisher), config()
+    )
     assert command.update == {"halted": True, "harness_pending_input": None}
-
-    assert emitted == [
-        "chat_start",
-        "chat_delta",
-        "code_start",
-        "code_delta",
-        "timeline_snapshot",
-        "exec_start",
-        "exec_output",
-        "chat_start",
-        "chat_delta",
-        "llm_done",
+    events = await live_events.events()
+    assert events[-1]["role"] == "llm_done"
+    assert [
+        (event["items"][0]["item_id"], event["items"][0]["payload"]) for event in events[:-1]
+    ] == [
+        ("0.0", "Checking "),
+        ("0.0", "Checking files..."),
+        ("1.0", "ls -la"),
+        ("2.0", "Tool running"),
+        ("2.0", "README.md\n"),
+        ("3.0", "all done"),
+        ("3.0", "all done"),
     ]
 
 
-async def test_consecutive_assistant_text_blocks_project_to_distinct_ai_messages() -> None:
-    import json
+async def test_consecutive_assistant_text_blocks_project_to_distinct_ai_messages(
+    live_events: LiveEvents,
+) -> None:
 
     engine = FakeEngine(
         reply="Second message",
@@ -519,27 +585,18 @@ async def test_consecutive_assistant_text_blocks_project_to_distinct_ai_messages
             AssistantText(turn_id="t1", text="Second message"),
         ),
     )
-    emitted: list[tuple[str, str | None]] = []
-
-    def record_emit(raw: str) -> None:
-        payload = json.loads(raw)
-        emitted.append((str(payload["role"]), payload.get("item_id")))
-
-    publisher = MagicMock()
-    publisher.emit.side_effect = record_emit
-    rt = runtime(engine, publisher=publisher)
     state = AgentState(harness_pending_input={"prompt": "two steps", "key": "inbound-7"})
-
-    command = await harness_turn_node(state, rt, config(6985))
-
-    assert command.update is not None
+    command = await harness_turn_node(
+        state, runtime(engine, publisher=live_events.publisher), config(6985)
+    )
     assert command.update == {"halted": True, "harness_pending_input": None}
-    assert emitted == [
-        ("chat_start", "0.0"),
-        ("chat_delta", "0.0"),
-        ("chat_start", "1.0"),
-        ("chat_delta", "1.0"),
-        ("llm_done", None),
+    events = await live_events.events()
+    items = [event["items"][0] for event in events if event["role"] == "timeline_snapshot"]
+    assert [(item["item_id"], item["payload"]) for item in items] == [
+        ("0.0", "First "),
+        ("0.0", "First message"),
+        ("1.0", "Second "),
+        ("1.0", "Second message"),
     ]
 
 
@@ -592,8 +649,7 @@ async def test_multi_step_turn_logs_each_step_usage_and_calls(
     assert all("unpriced" not in row["extra"] for row in rows)
 
 
-async def test_harness_turn_projects_reasoning_and_step_timing() -> None:
-    import json
+async def test_harness_turn_projects_reasoning_and_step_timing(live_events: LiveEvents) -> None:
 
     engine = FakeEngine(
         events=(
@@ -616,25 +672,19 @@ async def test_harness_turn_projects_reasoning_and_step_timing() -> None:
             AssistantText(turn_id="t1", text="Final answer"),
         ),
     )
-    emitted: list[tuple[str, str | None]] = []
-
-    def record_emit(raw: str) -> None:
-        payload = json.loads(raw)
-        emitted.append((str(payload["role"]), payload.get("item_id")))
-
-    publisher = MagicMock()
-    publisher.emit.side_effect = record_emit
-    rt = runtime(engine, publisher=publisher)
     state = AgentState(harness_pending_input={"prompt": "run it", "key": "inbound-9"})
-
-    command = await harness_turn_node(state, rt, config(6985))
-    assert command.update is not None
+    command = await harness_turn_node(
+        state, runtime(engine, publisher=live_events.publisher), config(6985)
+    )
     assert command.update == {"halted": True, "harness_pending_input": None}
-    assert ("reasoning_start", "0.0") in emitted
-    assert ("reasoning_delta", "0.0") in emitted
-    assert ("code_start", "0.1") in emitted
-    assert ("reasoning_start", "2.0") in emitted
-    assert ("chat_start", "2.1") in emitted
+    events = await live_events.events()
+    latest = {item["item_id"]: item for event in events for item in event.get("items", [])}
+    assert latest["0.0"]["payload"] == "Planning tool call"
+    assert latest["0.0"]["reasoning_ms"] >= 0
+    assert latest["1.0"]["kind"] == "agent_code"
+    assert latest["2.0"]["exec_ms"] >= 0
+    assert latest["3.0"]["payload"] == "Synthesizing reply"
+    assert latest["4.0"]["payload"] == "Final answer"
 
 
 async def test_terminate_interrupt_preserves_projected_tool_call_messages() -> None:
@@ -647,18 +697,19 @@ async def test_terminate_interrupt_preserves_projected_tool_call_messages() -> N
             text: str,
             *,
             key: str,
-            on_event: Callable[[BridgeEvent], None] | None = None,
+            on_event: TurnEventSink | None = None,
         ) -> HarnessTurn:
             self.submitted.append((text, key))
             assert on_event is not None
-            on_event(ReasoningText(turn_id="t1", text="Role complete, terminating."))
-            on_event(
+            await deliver(on_event, ReasoningText(turn_id="t1", text="Role complete, terminating."))
+            await deliver(
+                on_event,
                 ToolUse(
                     turn_id="t1",
                     tool_use_id="call-term",
                     name="Bash",
                     tool_input={"command": "python3 -c 'import meiva; meiva.self.terminate()'"},
-                )
+                ),
             )
             raise ModelInterruptedError(InterruptReason.SYSTEM)
 
@@ -704,23 +755,16 @@ def test_pending_inbound_ids_reads_only_the_recorded_claim() -> None:
     assert pending_inbound_ids(None) == []
 
 
-# meiva:note
-# Only a turn that produced nothing is recorded as a loss: one that already streamed text showed the
-# reader something, and a second "this failed" note beside a half reply would be noise.
-async def test_the_projector_reports_whether_the_turn_produced_text() -> None:
-    projector = HarnessTurnProjector(
-        event_publisher=MagicMock(),
-        agent_id=7,
-        base_idx=0,
-        turn_progress=MagicMock(),
-        clock=MagicMock(),
-    )
+async def test_the_projector_reports_whether_the_turn_produced_activity() -> None:
+    async def checkpoint(item: TimelineItem, msg_count: int) -> None:
+        pass
 
-    assert projector.produced_text() is False
-
-    projector.on_event(AssistantText(turn_id="t1", text="hello"))
-
-    assert projector.produced_text() is True
+    clock = MagicMock()
+    clock.now.return_value = datetime(2026, 11, 6, tzinfo=UTC)
+    projector = HarnessTurnProjector(checkpoint=checkpoint, base_idx=0, clock=clock)
+    assert projector.has_activity is False
+    await projector.on_event(AssistantText(turn_id="t1", text="hello"))
+    assert projector.has_activity is True
 
 
 # meiva:note

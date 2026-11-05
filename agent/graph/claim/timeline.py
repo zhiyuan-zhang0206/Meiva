@@ -1,6 +1,5 @@
 # meiva:note
-# Committed messages become harness timeline rows: the one write path shared by the turn's own
-# settlement, an interrupted turn's partial reply, and a turn that died before it said anything.
+# A turn that fails before its first activity leaves a system note in harness history.
 # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
 
 from __future__ import annotations

@@ -19625,6 +19625,29 @@
             "type": "string",
             "title": "Item Id"
           },
+          "activity_revision": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activity Revision"
+          },
+          "activity_pending": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activity Pending"
+          },
           "kind": {
             "type": "string",
             "enum": [

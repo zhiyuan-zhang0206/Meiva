@@ -24,7 +24,7 @@ class BridgeConfig:
     permission_mode: str = "bypassPermissions"
     max_turns: int | None = None
     auth: AuthConfig = field(default_factory=AuthConfig)
-    turn_timeout_seconds: float = 900.0
+    turn_timeout_seconds: float | None = None
     cancel_settle_seconds: float = 5.0
     max_pending_turns: int = 32
     max_buffered_events: int = 256

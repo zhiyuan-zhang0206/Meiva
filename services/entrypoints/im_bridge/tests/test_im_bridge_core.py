@@ -551,6 +551,7 @@ def test_dialog_filter_keeps_only_user_and_agent_text() -> None:
         {"kind": "inbound_chat", "source": "agent:1818", "payload": "peer msg"},
         {"kind": "inbound_chat", "source": "watcher:3", "payload": "wake"},
         {"kind": "agent_chat", "payload": "answer"},
+        {"kind": "agent_chat", "payload": "still streaming", "activity_pending": True},
         {"kind": "agent_chat", "payload": "explicitly user facing", "user_facing": True},
         {"kind": "agent_chat", "payload": "internal background log", "user_facing": False},
         {"kind": "agent_code", "payload": "code"},

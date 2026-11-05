@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import suppress
-from datetime import datetime
-from typing import Any, Literal, TypeGuard
+from typing import Any, Literal
 
-from langchain_core.messages import AIMessage, BaseMessage, ToolCall, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 
 from agent import state as _state
+from agent.graph.claim.harness_activity import HarnessTurnProjector
+from agent.graph.claim.harness_tool_format import is_object_sequence
 from agent.graph.claim.lost_turn import report_lost_turn
 from agent.graph.claim.timeline import append_turn_timeline
 from agent.graph.claim.turn_stamp import persist_last_active
@@ -25,49 +25,21 @@ from agent.graph.interrupt import (
 from agent.graph.llm_errors import FatalLLMStreamError
 from agent.graph.node_log import StallConfig, node_lifecycle
 from agent.hooks import call_graph_hook
-from agent.messages import exec_output_message
 from agent.nodes import CLAIM, HARNESS_TURN
 from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.history.harness_messages import (
     aget_next_harness_message_seq,
+    aupsert_harness_timeline_item,
 )
 from base.agents.history.timeline_item import TimelineItem
-from base.agents.messages.inbound import InterruptReason
-from base.agents.messages.kwargs import ExecStatus, read_meiva_kwargs
-from base.agents.messages.reply_intent import resolve_agent_reply
-from base.agents.observation.turn_progress import TurnProgress
-from base.agents.sdk.telemetry import SdkCall
-from base.clock import Clock
-from base.events.live.coalescer import DeltaCoalescer
-from base.events.live.projection import (
-    Cancelled,
-    ChatDelta,
-    ChatStart,
-    CodeDelta,
-    CodeStart,
-    ExecOutput,
-    ExecStart,
-    LLMDone,
-    ReasoningDelta,
-    ReasoningStart,
-    TimelineSnapshot,
-)
+from base.agents.messages.kwargs import read_meiva_kwargs
+from base.db.transaction import async_write_transaction
+from base.events.live.projection import Cancelled, LLMDone, TimelineSnapshot
 from base.events.live.publisher import AgentEventPublisher
 from base.host.boundary.json_values import is_object_dict
 from base.lm.catalog import ModelCatalog
 from base.lm.content import message_content
-from base.lm.harness import (
-    AssistantText,
-    BridgeEvent,
-    HarnessClosedError,
-    HarnessSetupError,
-    HarnessTurnFaultedError,
-    ReasoningText,
-    TextDelta,
-    ToolResult,
-    ToolUse,
-)
-from base.lm.harness import ReasoningDelta as BridgeReasoningDelta
+from base.lm.harness import HarnessClosedError, HarnessSetupError, HarnessTurnFaultedError
 from base.lm.harness.engine import HarnessTurn, TurnEngine
 from base.lm.usage import UsageFields, log_usage_fields
 from base.log import logger
@@ -75,12 +47,8 @@ from base.log import logger
 HarnessGoto = Literal["claim"]
 
 # meiva:note
-# A harness turn is one long await with no LangGraph step inside it, and the host's
-# stall guard reads this process's turn clock rather than the harness's. The node
-# therefore marks progress itself while it waits. One minute is a cadence, not a
-# threshold: the guard aborts at `MEIVA_HOST_TURN_NO_PROGRESS_TIMEOUT_SECONDS` (40
-# minutes), and the adapter's own `turn_timeout_seconds` (15) interrupts a turn
-# first, so a tick this slow can only ever keep a live turn alive.
+# This tick keeps host custody alive while a harness owns the invocation. Provider
+# activity is recorded separately by the timeline projector.
 # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
 PROGRESS_TICK_SECONDS = 60.0
 
@@ -135,378 +103,6 @@ def turn_key(messages: Sequence[BaseMessage], *, cursor: int = 0) -> str:
     return f"window-{cursor + len(messages)}"
 
 
-def _first_str(mapping: Mapping[str, Any], *keys: str) -> str | None:
-    return next((val for k in keys if isinstance(val := mapping.get(k), str) and val), None)
-
-
-def _format_write_tool_use(tool_input: Mapping[str, Any]) -> str:
-    path = _first_str(tool_input, "file_path", "Path", "TargetFile")
-    content = _first_str(tool_input, "content", "Content", "CodeContent")
-    return f"# {path}\n{content.rstrip()}" if path and content is not None else ""
-
-
-def _format_edit_tool_use(tool_input: Mapping[str, Any]) -> str:
-    path = _first_str(tool_input, "file_path", "Path", "TargetFile")
-    old = _first_str(tool_input, "old_string", "Target", "TargetContent")
-    new = _first_str(tool_input, "new_string", "Replacement", "ReplacementContent")
-    if path and old is not None and isinstance(new, str):
-        return f"# {path}\n--- old\n{old.rstrip()}\n+++ new\n{new.rstrip()}"
-    return ""
-
-
-def format_tool_use(name: str, tool_input: Mapping[str, Any]) -> str:
-    if (
-        name in {"Bash", "command", "run_command"}
-        and (cmd := _first_str(tool_input, "command", "CommandLine"))
-        and cmd.strip()
-    ):
-        return cmd
-    if name == "patch" and (rendered := _format_patch_tool_use(tool_input)):
-        return rendered
-    if name in {"Write", "write_file", "write_to_file"} and (
-        r := _format_write_tool_use(tool_input)
-    ):
-        return r
-    if name in {"Edit", "edit_file", "replace_file_content"} and (
-        r := _format_edit_tool_use(tool_input)
-    ):
-        return r
-    return json.dumps(dict(tool_input), ensure_ascii=False, indent=2) if tool_input else name
-
-
-def _is_object_mapping(value: object) -> TypeGuard[Mapping[object, object]]:
-    return isinstance(value, Mapping)
-
-
-def _is_object_sequence(value: object) -> TypeGuard[Sequence[object]]:
-    return isinstance(value, Sequence) and not isinstance(value, str | bytes)
-
-
-def _format_patch_change(raw_entry: object) -> str | None:
-    if not _is_object_mapping(raw_entry):
-        return None
-    entry: dict[str, Any] = {str(k): v for k, v in raw_entry.items()}
-    if not (path := _first_str(entry, "path")):
-        return None
-    header = f"# {kind}: {path}" if (kind := _first_str(entry, "kind")) else f"# {path}"
-    diff = entry.get("diff")
-    return f"{header}\n{diff.rstrip()}" if isinstance(diff, str) and diff.strip() else header
-
-
-def _format_patch_tool_use(tool_input: Mapping[str, Any]) -> str:
-    changes = tool_input.get("changes")
-    if _is_object_sequence(changes) and changes:
-        blocks = [r for raw in changes if (r := _format_patch_change(raw)) is not None]
-        if blocks:
-            return "\n\n".join(blocks)
-    raw_paths = tool_input.get("paths")
-    if _is_object_sequence(raw_paths) and raw_paths and all(isinstance(x, str) for x in raw_paths):
-        return "\n".join(x for x in raw_paths if isinstance(x, str))
-    return ""
-
-
-# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
-class HarnessTurnProjector:
-    def __init__(
-        self,
-        *,
-        event_publisher: AgentEventPublisher,
-        agent_id: int,
-        base_idx: int,
-        turn_progress: TurnProgress,
-        clock: Clock,
-        non_human_wake: bool = False,
-    ) -> None:
-        self._publisher = event_publisher
-        self._agent_id = agent_id
-        self._msg_idx = base_idx
-        self._turn_progress = turn_progress
-        self._clock = clock
-        self._non_human_wake = non_human_wake
-        self._step_started_at = self._clock.now()
-        self._reasoning_coalescer = DeltaCoalescer(self._emit_reasoning_delta)
-        self._coalescer = DeltaCoalescer(self._emit_chat_delta)
-        self._reasoning_started = False
-        self._streamed_reasoning = False
-        self._reasoning_started_at: datetime | None = None
-        self._reasoning_ended_at: datetime | None = None
-        self._reasoning_buf: list[str] = []
-        self._chat_started = False
-        self._streamed_text = False
-        self._text_completed = False
-        self._any_text_event = False
-        self._text_buf: list[str] = []
-        self._messages: list[BaseMessage] = []
-        self._tool_slots: dict[str, tuple[int, str, datetime]] = {}
-
-    def _emit_reasoning_delta(self, item_id: str, content: str) -> None:
-        ev = ReasoningDelta(agent_id=self._agent_id, item_id=item_id, content=content)
-        self._publisher.emit(ev.model_dump_json())
-
-    def _emit_chat_delta(self, item_id: str, content: str) -> None:
-        ev = ChatDelta(
-            agent_id=self._agent_id,
-            item_id=item_id,
-            content=content,
-            non_human_wake=self._non_human_wake,
-        )
-        self._publisher.emit(ev.model_dump_json())
-
-    def produced_text(self) -> bool:
-        return self._any_text_event or bool(self._messages)
-
-    def on_event(self, event: BridgeEvent) -> None:
-        self._turn_progress.mark(self._agent_id)
-        if isinstance(event, (BridgeReasoningDelta, ReasoningText)):
-            self._on_reasoning_event(event)
-        elif isinstance(event, (TextDelta, AssistantText)):
-            self._on_text_event(event)
-        elif isinstance(event, ToolUse):
-            self._on_tool_use(event)
-        elif isinstance(event, ToolResult):
-            self._on_tool_result(event)
-
-    def _on_reasoning_event(self, event: BridgeReasoningDelta | ReasoningText) -> None:
-        if self._text_completed and self._text_buf:
-            self._flush_completed_text()
-        if isinstance(event, BridgeReasoningDelta):
-            self._streamed_reasoning = True
-            self._append_reasoning(event.text)
-            return
-        if not self._streamed_reasoning:
-            self._append_reasoning(event.text)
-        self._streamed_reasoning = False
-        self._reasoning_ended_at = self._clock.now()
-
-    def _on_text_event(self, event: TextDelta | AssistantText) -> None:
-        if self._text_completed and self._text_buf:
-            self._flush_completed_text()
-        if self._reasoning_started and self._reasoning_ended_at is None:
-            self._reasoning_ended_at = self._clock.now()
-        self._any_text_event = True
-        if isinstance(event, TextDelta):
-            self._streamed_text = True
-            self._append_text(event.text)
-            return
-        if not self._streamed_text:
-            self._append_text(event.text)
-        self._streamed_text = False
-        self._text_completed = True
-
-    def _reset_step_buffers(self, now: datetime) -> None:
-        self._step_started_at = now
-        self._reasoning_buf.clear()
-        self._text_buf.clear()
-        self._reasoning_started_at = self._reasoning_ended_at = None
-        self._reasoning_started = self._streamed_reasoning = False
-        self._chat_started = self._streamed_text = self._text_completed = False
-
-    def _build_ai_content_and_kwargs(
-        self,
-        step_text: str,
-        now: datetime,
-        *,
-        include_code_ms_at: int | None = None,
-    ) -> tuple[str | list[str | dict[str, Any]], dict[str, Any], int | None, int | None]:
-        self._reasoning_coalescer.flush()
-        self._coalescer.flush()
-        reasoning_text = "".join(self._reasoning_buf).strip()
-        kwargs: dict[str, Any] = {"meiva_created_at": now.isoformat()}
-        if self._non_human_wake:
-            kwargs["meiva_non_human_wake"] = True
-        reasoning_ms: int | None = None
-        if reasoning_text:
-            r_start = self._reasoning_started_at or self._step_started_at
-            r_end = self._reasoning_ended_at or now
-            reasoning_ms = max(int((r_end - r_start).total_seconds() * 1000), 0)
-            kwargs["meiva_reasoning_ms_by_block"] = {"0": reasoning_ms}
-            blocks: list[str | dict[str, Any]] = [
-                {"type": "thinking", "thinking": reasoning_text, "index": 0}
-            ]
-            if step_text:
-                blocks.append({"type": "text", "text": step_text, "index": 1})
-            content: str | list[str | dict[str, Any]] = blocks
-        else:
-            content = step_text
-        code_ms: int | None = None
-        if include_code_ms_at is not None:
-            c_start = self._reasoning_ended_at or self._step_started_at
-            if (computed := max(int((now - c_start).total_seconds() * 1000), 0)) > 0:
-                code_ms = computed
-                kwargs["meiva_code_ms_by_block"] = {str(include_code_ms_at): code_ms}
-        return content, kwargs, reasoning_ms, code_ms
-
-    def _flush_completed_text(self) -> None:
-        now = self._clock.now()
-        step_text = "".join(self._text_buf).strip()
-        if step_text or "".join(self._reasoning_buf).strip():
-            content, kwargs, _, _ = self._build_ai_content_and_kwargs(step_text, now)
-            self._messages.append(AIMessage(content=content, additional_kwargs=kwargs))
-            self._msg_idx += 1
-        self._reset_step_buffers(now)
-
-    def _append_reasoning(self, text: str) -> None:
-        if not text:
-            return
-        item_id = f"{self._msg_idx}.0"
-        if not self._reasoning_started:
-            self._reasoning_started_at = self._step_started_at
-            self._publisher.emit(
-                ReasoningStart(agent_id=self._agent_id, item_id=item_id).model_dump_json()
-            )
-            self._reasoning_started = True
-        self._reasoning_buf.append(text)
-        self._reasoning_coalescer.append(item_id, text)
-
-    def _append_text(self, text: str) -> None:
-        if not text:
-            return
-        item_id = f"{self._msg_idx}.{1 if self._reasoning_started else 0}"
-        if not self._chat_started:
-            self._reasoning_coalescer.flush()
-            ev = ChatStart(
-                agent_id=self._agent_id, item_id=item_id, non_human_wake=self._non_human_wake
-            )
-            self._publisher.emit(ev.model_dump_json())
-            self._chat_started = True
-        self._text_buf.append(text)
-        self._coalescer.append(item_id, text)
-
-    def _on_tool_use(self, event: ToolUse) -> None:
-        now = self._clock.now()
-        reasoning_text = "".join(self._reasoning_buf).strip()
-        step_text = "".join(self._text_buf).strip()
-        code_block_idx = (1 if reasoning_text else 0) + (1 if step_text else 0)
-        content, kwargs, reasoning_ms, code_ms = self._build_ai_content_and_kwargs(
-            step_text, now, include_code_ms_at=code_block_idx
-        )
-        code_item_id = f"{self._msg_idx}.{code_block_idx}"
-        exec_item_id = f"{self._msg_idx + 1}.0"
-        code_text = format_tool_use(event.name, event.tool_input)
-        tool_id = event.tool_use_id or f"call-{self._msg_idx}"
-        tool_source = event.name if event.name != "execute_code" else None
-        emit = self._publisher.emit
-        iso_now = now.isoformat()
-        emit(CodeStart(agent_id=self._agent_id, item_id=code_item_id).model_dump_json())
-        code_ev = CodeDelta(agent_id=self._agent_id, item_id=code_item_id, content=code_text)
-        emit(code_ev.model_dump_json())
-        snapshot_items: list[dict[str, Any]] = []
-        if reasoning_text:
-            snapshot_items.append(
-                TimelineItem(
-                    item_id=f"{self._msg_idx}.0",
-                    kind="agent_reasoning",
-                    payload=reasoning_text,
-                    created_at=iso_now,
-                    reasoning_ms=reasoning_ms,
-                ).model_dump()
-            )
-        if step_text:
-            chat_payload, user_facing = resolve_agent_reply(
-                step_text, non_human_wake=self._non_human_wake
-            )
-            snapshot_items.append(
-                TimelineItem(
-                    item_id=f"{self._msg_idx}.{1 if reasoning_text else 0}",
-                    kind="agent_chat",
-                    payload=chat_payload,
-                    created_at=iso_now,
-                    user_facing=user_facing,
-                ).model_dump()
-            )
-        snapshot_items.append(
-            TimelineItem(
-                item_id=code_item_id,
-                kind="agent_code",
-                source=tool_source,
-                payload=code_text,
-                created_at=iso_now,
-                code_elapsed_ms=code_ms,
-                sdk_calls=[SdkCall(method=event.name, count=1)],
-            ).model_dump()
-        )
-        snap = TimelineSnapshot(
-            agent_id=self._agent_id, items=snapshot_items, msg_count=self._msg_idx + 1
-        )
-        emit(snap.model_dump_json())
-        emit(ExecStart(agent_id=self._agent_id, item_id=exec_item_id).model_dump_json())
-        call = ToolCall(name=event.name, args={"code": code_text}, id=tool_id, type="tool_call")
-        self._messages.append(
-            AIMessage(content=content, tool_calls=[call], additional_kwargs=kwargs)
-        )
-        slot_idx = len(self._messages)
-        self._messages.append(
-            exec_output_message(
-                content="",
-                tool_call_id=tool_id,
-                status=ExecStatus.COMPLETED,
-                body_start=0,
-                created_at=now,
-                started_at=now,
-                exec_ms=0,
-                sdk_calls=[{"method": event.name, "count": 1}],
-            )
-        )
-        self._tool_slots[event.tool_use_id] = (slot_idx, exec_item_id, now)
-        self._msg_idx += 2
-        self._reset_step_buffers(now)
-
-    def _on_tool_result(self, event: ToolResult) -> None:
-        if (slot := self._tool_slots.get(event.tool_use_id)) is None:
-            return
-        if self._text_completed and (self._text_buf or self._reasoning_buf):
-            self._flush_completed_text()
-        slot_idx, exec_item_id, started_at = slot
-        now = self._clock.now()
-        self._step_started_at = now
-        exec_ms = max(int((now - started_at).total_seconds() * 1000), 0)
-        prev = self._messages[slot_idx]
-        tool_id = prev.tool_call_id if isinstance(prev, ToolMessage) else event.tool_use_id
-        self._publisher.emit(
-            ExecOutput(
-                agent_id=self._agent_id, item_id=exec_item_id, content=event.content
-            ).model_dump_json()
-        )
-        self._messages[slot_idx] = exec_output_message(
-            content=event.content,
-            tool_call_id=tool_id,
-            status=ExecStatus.FAILED if event.is_error else ExecStatus.COMPLETED,
-            body_start=0,
-            created_at=now,
-            started_at=started_at,
-            exec_ms=exec_ms,
-            sdk_calls=read_meiva_kwargs(prev).get("sdk_calls"),
-        )
-
-    def settle_interrupt(
-        self,
-        reason: InterruptReason,
-    ) -> list[BaseMessage]:
-        self._reasoning_coalescer.flush()
-        self._coalescer.flush()
-        if reason is InterruptReason.SYSTEM and self._messages:
-            self._publisher.emit(LLMDone(agent_id=self._agent_id).model_dump_json())
-            return list(self._messages)
-        return []
-
-    def finish(self, turns: Sequence[HarnessTurn]) -> list[BaseMessage]:
-        self._reasoning_coalescer.flush()
-        self._coalescer.flush()
-        self._publisher.emit(LLMDone(agent_id=self._agent_id).model_dump_json())
-        reasoning_text = "".join(self._reasoning_buf).strip()
-        if not self._messages and not reasoning_text:
-            kw = {"meiva_non_human_wake": True} if self._non_human_wake else {}
-            return [AIMessage(content=t.text, additional_kwargs=dict(kw)) for t in turns]
-        final_text = "".join(self._text_buf).strip()
-        if not final_text and not self._any_text_event:
-            final_text = turns[-1].text
-        if final_text or reasoning_text:
-            now = self._clock.now()
-            content, kwargs, _, _ = self._build_ai_content_and_kwargs(final_text, now)
-            self._messages.append(AIMessage(content=content, additional_kwargs=kwargs))
-        return list(self._messages)
-
-
 async def _run_pre_turn_hooks(
     state: _state.AgentState,
     runtime: Runtime[MeivaContext],
@@ -522,7 +118,7 @@ async def _run_pre_turn_hooks(
         if not is_object_dict(result) or not result:
             continue
         for key, value in result.items():
-            if key == "messages" and _is_object_sequence(value):
+            if key == "messages" and is_object_sequence(value):
                 pre_messages.extend(m for m in value if isinstance(m, BaseMessage))
             elif key != "goto":
                 hook_updates[key] = value
@@ -530,13 +126,8 @@ async def _run_pre_turn_hooks(
 
 
 # meiva:note
-# One graph step, one wait: entering `node_lifecycle` publishes the incremental
-# `TimelineSnapshot` so newly claimed inbound messages echo immediately in the UI,
-# while `HarnessTurnProjector` streams intra-turn text deltas and tool calls/results
-# into both live SSE events and committed `state.messages`. A session that faults or
-# closes under the turn is raised as a fatal stream abort: the turn cannot finish, so
-# it settles as a failure rather than leaving half a reply, and the next inbound may
-# start a fresh session.
+# The graph waits for one big turn. Observable activities are committed by the
+# projector while the harness works, independently of the terminal outcome.
 # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
 async def harness_turn_node(
     state: _state.AgentState,
@@ -588,10 +179,8 @@ async def _handle_turn_interrupted(
     agent_id: int,
     bridge: TurnEngine,
     projector: HarnessTurnProjector,
-    reason: InterruptReason,
 ) -> None:
-    partial = projector.settle_interrupt(reason)
-    await append_turn_timeline(ctx, agent_id, partial)
+    await projector.finish(interrupted=True)
     _announce_cancel(ctx, agent_id)
     await interrupt_engine(agent_id, bridge)
 
@@ -618,11 +207,13 @@ async def _run_harness_turn(
     if ctx.ops_pool is not None:
         async with ctx.ops_pool.connection() as pool_conn:
             base_idx = await aget_next_harness_message_seq(pool_conn, agent_id)
+
+    async def checkpoint(item: TimelineItem, msg_count: int) -> None:
+        await _checkpoint_activity(ctx, agent_id, event_publisher, item, msg_count)
+
     projector = HarnessTurnProjector(
-        event_publisher=event_publisher,
-        agent_id=agent_id,
+        checkpoint=checkpoint,
         base_idx=base_idx,
-        turn_progress=ctx.turn_progress,
         clock=ctx.require_clock(),
         non_human_wake=state.non_human_wake,
     )
@@ -632,15 +223,20 @@ async def _run_harness_turn(
         ) as cancel_event:
             action = bridge.run_turn(text, key=key, on_event=projector.on_event)
             turn = await interruptible_model(
-                _ticking(ctx.turn_progress.mark, agent_id, action), cancel_event
+                _ticking(ctx.turn_progress.mark, agent_id, action, projector), cancel_event
             )
-    except ModelInterruptedError as interrupted:
-        await _handle_turn_interrupted(ctx, agent_id, bridge, projector, interrupted.reason)
+    except ModelInterruptedError:
+        await _handle_turn_interrupted(ctx, agent_id, bridge, projector)
         return Command[HarnessGoto](
             update={**extra_updates, "halted": True, "harness_pending_input": None}, goto=CLAIM
         )
     except (HarnessTurnFaultedError, HarnessClosedError, HarnessSetupError) as exc:
-        if not projector.produced_text():
+        outcome = exc.outcome if isinstance(exc, HarnessTurnFaultedError) else None
+        if outcome is not None:
+            log_turn_usage(ctx, agent_id, bridge.model, outcome)
+        if projector.has_activity:
+            await projector.finish(error=str(exc))
+        else:
             await report_lost_turn(
                 ctx, agent_id, state.harness_pending_input, key, exc, append=append_turn_timeline
             )
@@ -649,11 +245,37 @@ async def _run_harness_turn(
     turns = (*turn.prelude, turn)
     for completed in turns:
         log_turn_usage(ctx, agent_id, bridge.model, completed)
-    committed = projector.finish(turns)
-    await append_turn_timeline(ctx, agent_id, committed)
-    await persist_last_active(ctx, agent_id, turns[-1].text)
+    await projector.finish(turns, interrupted=turn.interrupted)
+    if turn.interrupted:
+        _announce_cancel(ctx, agent_id)
+    else:
+        event_publisher.emit(LLMDone(agent_id=agent_id).model_dump_json())
+        await persist_last_active(ctx, agent_id, turn.text)
     return Command[HarnessGoto](
         update={**extra_updates, "halted": True, "harness_pending_input": None}, goto=CLAIM
+    )
+
+
+async def _checkpoint_activity(
+    ctx: MeivaContext,
+    agent_id: int,
+    publisher: AgentEventPublisher,
+    item: TimelineItem,
+    msg_count: int,
+) -> None:
+    if ctx.ops_pool is not None:
+        async with async_write_transaction(ctx.ops_pool) as conn:
+            saved = await aupsert_harness_timeline_item(
+                conn, agent_id, ctx.harness, item, incarnation=ctx.original_incarnation
+            )
+            if saved is None:
+                raise RuntimeError(
+                    f"Harness activity checkpoint rejected for agent {agent_id}: {item.item_id}"
+                )
+    publisher.emit(
+        TimelineSnapshot(
+            agent_id=agent_id, items=[item.model_dump()], msg_count=msg_count
+        ).model_dump_json()
     )
 
 
@@ -665,7 +287,10 @@ async def _run_harness_turn(
 # for the same reason.
 # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
 async def _ticking(
-    mark: Callable[[int], None], agent_id: int, turn: Awaitable[HarnessTurn]
+    mark: Callable[[int], None],
+    agent_id: int,
+    turn: Awaitable[HarnessTurn],
+    projector: HarnessTurnProjector,
 ) -> HarnessTurn:
     async def settle() -> HarnessTurn | BaseException:
         try:
@@ -680,20 +305,22 @@ async def _ticking(
 
     async with asyncio.TaskGroup() as tasks:
         ticker = tasks.create_task(tick(), name=f"harness-progress-{agent_id}")
+        checkpoints = tasks.create_task(projector.flush_text(), name=f"harness-timeline-{agent_id}")
         outcome = await settle()
         ticker.cancel()
+        checkpoints.cancel()
         with suppress(asyncio.CancelledError):
             await ticker
+        with suppress(asyncio.CancelledError):
+            await checkpoints
     if isinstance(outcome, BaseException):
         raise outcome
     return outcome
 
 
 # meiva:note
-# A cancelled turn tells the live view to drop the partial bubble, exactly as an
-# interrupted model stream does: the harness turn produced no committed reply, so
-# there is nothing else to show. The durable cancel stays a pending inbound row that
-# the next claim pass dispatches.
+# Tell the live view the turn ended. Its committed activities remain visible and
+# the durable cancel stays pending for the next claim pass.
 # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
 def _announce_cancel(ctx: MeivaContext, agent_id: int) -> None:
     assert ctx.event_publisher is not None, "a cancelled harness turn requires ctx.event_publisher"  # noqa: S101

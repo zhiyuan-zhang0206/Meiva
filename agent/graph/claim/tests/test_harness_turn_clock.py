@@ -1,61 +1,42 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import subprocess
 import sys
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from langchain_core.messages import AIMessage, ToolMessage
-
-from agent.graph.claim.harness_turn import HarnessTurnProjector
-from base.agents.messages.inbound import InterruptReason
-from base.agents.observation.turn_progress import TurnProgress
+from agent.graph.claim.harness_activity import HarnessTurnProjector
+from base.agents.history.timeline_item import TimelineItem
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
-from base.clock.configuration import clock_config_from_boot
 from base.clock.tests.manual_timers import ManualTimers
-from base.config import ConfigBoot
-from base.events.live.tests.live_capture import LiveEvents, idle_publisher
 from base.lm.harness import (
     AssistantText,
-    HarnessTurn,
     ReasoningDelta,
     ReasoningText,
     TextDelta,
     ToolResult,
     ToolUse,
-    Usage,
 )
 
 START = datetime(2026, 10, 25, 1, 2, 3, tzinfo=UTC)
 
 
-def _turn(text: str) -> HarnessTurn:
-    return HarnessTurn(
-        turn_id="turn",
-        text=text,
-        usage=Usage(),
-        cost_usd=None,
-        subtype="success",
-        is_error=False,
-        interrupted=False,
-    )
+def _projector(clock: Clock) -> tuple[HarnessTurnProjector, dict[str, TimelineItem]]:
+    items: dict[str, TimelineItem] = {}
+
+    async def checkpoint(item: TimelineItem, msg_count: int) -> None:
+        items[item.item_id] = item
+
+    return HarnessTurnProjector(checkpoint=checkpoint, base_idx=2, clock=clock), items
 
 
-def _projector(clock: Clock) -> HarnessTurnProjector:
-    return HarnessTurnProjector(
-        event_publisher=idle_publisher(),
-        agent_id=7,
-        base_idx=2,
-        turn_progress=TurnProgress(),
-        clock=clock,
-    )
-
-
-def _tool() -> ToolUse:
+def _tool(tool_use_id: str = "call") -> ToolUse:
     return ToolUse(
-        turn_id="turn", tool_use_id="call", name="Bash", tool_input={"command": "echo ok"}
+        turn_id="turn", tool_use_id=tool_use_id, name="Bash", tool_input={"command": "echo ok"}
     )
 
 
@@ -66,140 +47,82 @@ def _result(tool_use_id: str = "call") -> ToolResult:
 async def test_each_projection_step_uses_the_clock_time_source() -> None:
     timers = ManualTimers(wall_start=START)
     clock = Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
-    projector = _projector(clock)
-    projector.on_event(ReasoningDelta(turn_id="turn", text="planning"))
+    projector, items = _projector(clock)
+    await projector.on_event(ReasoningDelta(turn_id="turn", text="planning"))
     timers.advance(1)
-    projector.on_event(ReasoningText(turn_id="turn", text="planning"))
+    await projector.on_event(ReasoningText(turn_id="turn", text="planning"))
     timers.advance(2)
-    projector.on_event(_tool())
+    await projector.on_event(_tool())
     timers.advance(4)
-    projector.on_event(_result())
+    await projector.on_event(_result())
     timers.advance(1)
-    projector.on_event(ReasoningText(turn_id="turn", text="replying"))
+    await projector.on_event(ReasoningText(turn_id="turn", text="replying"))
     timers.advance(2)
-    projector.on_event(AssistantText(turn_id="turn", text="done"))
-    timers.advance(1)
-    messages = projector.finish((_turn("done"),))
+    await projector.on_event(AssistantText(turn_id="turn", text="done"))
+    await projector.finish()
 
-    assert len(messages) == 3
-    assert messages[0].additional_kwargs["meiva_reasoning_ms_by_block"] == {"0": 1000}
-    assert messages[0].additional_kwargs["meiva_code_ms_by_block"] == {"1": 2000}
-    assert (
-        messages[0].additional_kwargs["meiva_created_at"]
-        == (START + timedelta(seconds=3)).isoformat()
-    )
-    assert messages[1].additional_kwargs["meiva_exec_ms"] == 4000
-    assert (
-        messages[1].additional_kwargs["meiva_exec_started_at"]
-        == (START + timedelta(seconds=3)).isoformat()
-    )
-    assert (
-        messages[1].additional_kwargs["meiva_created_at"]
-        == (START + timedelta(seconds=7)).isoformat()
-    )
-    assert messages[2].additional_kwargs["meiva_reasoning_ms_by_block"] == {"0": 1000}
-    assert messages[2].additional_kwargs["meiva_created_at"] == timers.now().isoformat()
-
-
-async def test_flush_and_reasoning_end_take_separate_instants() -> None:
-    moments = iter(START + timedelta(seconds=n) for n in range(4))
-    clock = Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS, now=moments.__next__)
-    projector = _projector(clock)
-    projector.on_event(AssistantText(turn_id="turn", text="first"))
-    projector.on_event(ReasoningText(turn_id="turn", text="second"))
-    messages = projector.finish((_turn("done"),))
-
-    assert messages[0].content == "first"
-    assert (
-        messages[0].additional_kwargs["meiva_created_at"]
-        == (START + timedelta(seconds=1)).isoformat()
-    )
-    assert messages[1].additional_kwargs["meiva_reasoning_ms_by_block"] == {"0": 1000}
-    assert (
-        messages[1].additional_kwargs["meiva_created_at"]
-        == (START + timedelta(seconds=3)).isoformat()
-    )
-
-
-async def test_unknown_tool_result_and_unstamped_fallback_need_no_later_instant() -> None:
-    moments = iter((START,))
-    projector = _projector(
-        Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS, now=moments.__next__)
-    )
-    projector.on_event(_result("unknown"))
-    projector.on_event(AssistantText(turn_id="turn", text="answer"))
-    messages = projector.finish((_turn("answer"),))
-
-    assert len(messages) == 1
-    assert messages[0].content == "answer"
-    assert "meiva_created_at" not in messages[0].additional_kwargs
-
-
-async def test_interrupt_keeps_tool_messages_without_a_finish_instant() -> None:
-    moments = iter((START, START + timedelta(seconds=1)))
-    projector = _projector(
-        Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS, now=moments.__next__)
-    )
-    projector.on_event(_tool())
-    items = projector.settle_interrupt(InterruptReason.SYSTEM)
-
-    assert len(items) == 2
-    assert isinstance(items[1], ToolMessage)
-    assert items[1].tool_call_id == "call"
+    reasoning, code, result, followup, reply = items.values()
+    assert reasoning.reasoning_ms == 1000
+    assert code.code_elapsed_ms == 2000
+    assert code.created_at == (START + timedelta(seconds=3)).isoformat()
+    assert result.exec_ms == 4000
+    assert result.created_at == (START + timedelta(seconds=7)).isoformat()
+    assert followup.reasoning_ms == 1000
+    assert reply.created_at == timers.now().isoformat()
 
 
 async def test_backward_time_still_clamps_execution_duration() -> None:
     moments = iter((START, START + timedelta(seconds=3), START + timedelta(seconds=2)))
-    projector = _projector(
+    projector, items = _projector(
         Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS, now=moments.__next__)
     )
-    projector.on_event(_tool())
-    projector.on_event(_result())
-    messages = projector.finish((_turn(""),))
-
-    assert len(messages) == 2
-    assert messages[1].additional_kwargs["meiva_exec_ms"] == 0
+    await projector.on_event(_tool())
+    await projector.on_event(_result())
+    assert items["3.0"].exec_ms == 0
 
 
-async def test_real_clock_projects_to_the_actual_publisher(live_events: LiveEvents) -> None:
-    owner = ConfigBoot()
-    owner.read_process_environment()
-    clock = Clock(clock_config_from_boot(owner), timers=SYSTEM_TIMERS)
-    projector = HarnessTurnProjector(
-        event_publisher=live_events.publisher,
-        agent_id=7,
-        base_idx=2,
-        turn_progress=TurnProgress(),
-        clock=clock,
-    )
-    projector.on_event(_tool())
-    projector.on_event(_result())
-    messages = projector.finish((_turn("done"),))
-    events = await live_events.events()
+async def test_parallel_results_keep_their_slots_and_unknown_results_do_not_add_items() -> None:
+    timers = ManualTimers(wall_start=START)
+    clock = Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
+    projector, items = _projector(clock)
+    await projector.on_event(_tool("first"))
+    await projector.on_event(_tool("second"))
+    await projector.on_event(_result("unknown"))
+    await projector.on_event(AssistantText(turn_id="turn", text="Waiting on a tool."))
+    timers.advance(5)
+    await projector.on_event(_result("second"))
+    await projector.finish()
 
-    assert [event["role"] for event in events] == [
-        "code_start",
-        "code_delta",
-        "timeline_snapshot",
-        "exec_start",
-        "exec_output",
-        "llm_done",
+    assert [(item.kind, item.payload) for item in items.values()] == [
+        ("agent_code", "echo ok"),
+        ("code_output", "Tool result unavailable"),
+        ("agent_code", "echo ok"),
+        ("code_output", "ok"),
+        ("agent_chat", "Waiting on a tool."),
     ]
-    assert events[4]["content"] == messages[1].content == "ok"
-    first = messages[0]
-    assert isinstance(first, AIMessage)
-    snapshot = events[2]["items"]
-    assert [item["created_at"] for item in snapshot] == [
-        first.additional_kwargs["meiva_created_at"]
-    ]
-    assert snapshot[0]["payload"] == first.tool_calls[0]["args"]["code"]
-    assert (
-        messages[1].additional_kwargs["meiva_exec_started_at"]
-        == first.additional_kwargs["meiva_created_at"]
-    )
-    for message in messages:
-        moment = datetime.fromisoformat(message.additional_kwargs["meiva_created_at"])
-        assert moment.utcoffset() == timedelta(0)
+    assert items["3.0"].exec_ms is None
+    assert items["5.0"].exec_ms == 5000
+
+
+async def test_silent_provider_does_not_hold_the_trailing_delta() -> None:
+    timers = ManualTimers(wall_start=START)
+    clock = Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
+    updated = asyncio.Event()
+
+    async def checkpoint(item: TimelineItem, msg_count: int) -> None:
+        if item.payload == "partial response":
+            updated.set()
+
+    projector = HarnessTurnProjector(checkpoint=checkpoint, base_idx=2, clock=clock)
+    writer = asyncio.create_task(projector.flush_text())
+    try:
+        await projector.on_event(TextDelta(turn_id="turn", text="partial"))
+        await projector.on_event(TextDelta(turn_id="turn", text=" response"))
+        await asyncio.wait_for(updated.wait(), timeout=2)
+    finally:
+        writer.cancel()
+        with suppress(asyncio.CancelledError):
+            await writer
 
 
 # meiva:note
@@ -227,97 +150,3 @@ def test_existing_clock_ignores_unused_rendering_config_until_the_next_capture(
     result = json.loads(completed.stdout.splitlines()[-1])
 
     assert result == {"projected": True, "next_capture_refused": True, "initial_bad_refused": True}
-
-
-async def test_async_tool_result_after_completed_text_flushes_step_before_settling_result(
-    live_events: LiveEvents,
-) -> None:
-    timers = ManualTimers(wall_start=START)
-    clock = Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
-    projector = HarnessTurnProjector(
-        event_publisher=live_events.publisher,
-        agent_id=7,
-        base_idx=9,
-        turn_progress=TurnProgress(),
-        clock=clock,
-        non_human_wake=True,
-    )
-    projector.on_event(
-        ToolUse(
-            turn_id="turn",
-            tool_use_id="call_1",
-            name="run_command",
-            tool_input={"CommandLine": "python3 -c 'import meiva; meiva.self.pause_heartbeat()'"},
-        )
-    )
-    timers.advance(6)
-    projector.on_event(ReasoningText(turn_id="turn", text="Pausing heartbeat while idle."))
-    projector.on_event(TextDelta(turn_id="turn", text="Waiting for task completion."))
-    projector.on_event(AssistantText(turn_id="turn", text="Waiting for task completion."))
-    timers.advance(11)
-    projector.on_event(
-        ToolResult(
-            turn_id="turn",
-            tool_use_id="call_1",
-            content="Heartbeat paused.\n",
-            is_error=False,
-        )
-    )
-    timers.advance(2)
-    projector.on_event(ReasoningText(turn_id="turn", text="Task finished."))
-    projector.on_event(AssistantText(turn_id="turn", text="Heartbeat successfully paused."))
-    timers.advance(1)
-    messages = projector.finish((_turn("Heartbeat successfully paused."),))
-    events = await live_events.events()
-
-    roles_and_ids = [(ev["role"], ev.get("item_id")) for ev in events]
-    assert roles_and_ids.index(("chat_delta", "11.1")) < roles_and_ids.index(
-        ("exec_output", "10.0")
-    )
-    assert ("reasoning_start", "12.0") in roles_and_ids
-    assert ("chat_start", "12.1") in roles_and_ids
-
-    assert len(messages) == 4
-    assert isinstance(messages[0], AIMessage) and messages[0].tool_calls[0]["id"] == "call_1"
-    assert isinstance(messages[1], ToolMessage) and messages[1].content == "Heartbeat paused.\n"
-    assert messages[1].additional_kwargs["meiva_exec_ms"] == 17000
-    assert messages[2].additional_kwargs["meiva_reasoning_ms_by_block"] == {"0": 6000}
-    assert (
-        messages[2].additional_kwargs["meiva_created_at"]
-        == (START + timedelta(seconds=17)).isoformat()
-    )
-    assert messages[3].additional_kwargs["meiva_reasoning_ms_by_block"] == {"0": 2000}
-    assert (
-        messages[3].additional_kwargs["meiva_created_at"]
-        == (START + timedelta(seconds=20)).isoformat()
-    )
-
-
-async def test_async_tool_result_followed_by_next_tool_use_does_not_merge_prior_text() -> None:
-    timers = ManualTimers(wall_start=START)
-    clock = Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
-    projector = _projector(clock)
-    projector.on_event(
-        ToolUse(
-            turn_id="turn", tool_use_id="call_1", name="Bash", tool_input={"command": "sleep 6"}
-        )
-    )
-    timers.advance(5)
-    projector.on_event(AssistantText(turn_id="turn", text="Waiting on background command."))
-    timers.advance(3)
-    projector.on_event(_result("call_1"))
-    timers.advance(1)
-    projector.on_event(
-        ToolUse(turn_id="turn", tool_use_id="call_2", name="Bash", tool_input={"command": "echo 2"})
-    )
-    timers.advance(1)
-    projector.on_event(_result("call_2"))
-    messages = projector.finish((_turn(""),))
-
-    assert len(messages) == 5
-    assert isinstance(messages[2], AIMessage)
-    assert messages[2].content == "Waiting on background command."
-    assert messages[2].tool_calls == []
-    assert isinstance(messages[3], AIMessage)
-    assert messages[3].content == ""
-    assert messages[3].tool_calls[0]["id"] == "call_2"

@@ -34,7 +34,7 @@ from base.lm.harness.session import (
 # meiva:note
 # Shared turn-engine state machine for every external harness session adapter:
 # ordered inbound turn promotion, key-based idempotency replay, bounded outbound
-# delta dropping, per-turn timeout watchdogs, background task-group lifecycle,
+# delta dropping, opt-in turn timeout watchdogs, background task-group lifecycle,
 # and `SessionRegistry` binding/resumption.
 # meiva:link base/lm/harness/docs/harness.meiva.okf.md
 
@@ -361,14 +361,18 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         self._registry.save(self._record)
 
     def _start_deadline(self, ticket: TurnTicket) -> None:
+        timeout = self.config.turn_timeout_seconds
+        if timeout is None:
+            return
+
         async def expire() -> None:
-            await self._clock.asleep(self.config.turn_timeout_seconds)
+            await self._clock.asleep(timeout)
             if self._active is not ticket:
                 return
             self._emit(
                 TurnFaulted(
                     turn_id=ticket.turn_id,
-                    error=f"turn exceeded {self.config.turn_timeout_seconds:.0f}s; interrupting",
+                    error=f"turn exceeded {timeout:.0f}s; interrupting",
                 )
             )
             try:

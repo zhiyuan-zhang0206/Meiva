@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -13,6 +14,8 @@ from base.lm.harness.events import (
     HandoffInjected,
     SessionBound,
     SessionStarted,
+    ToolResult,
+    ToolUse,
     TurnCompleted,
 )
 from base.lm.harness.registry import FileSessionRegistry, SessionRecord
@@ -98,6 +101,60 @@ async def test_completion_text_prefers_the_final_answer(tmp_path: Path) -> None:
         harness.server.complete()
         outcome = await asyncio.wait_for(ticket.outcome(), 2)
         assert outcome.text == "The file defines one function."
+    finally:
+        await harness.stop()
+
+
+@pytest.mark.parametrize("status", ["completed", "failed", "interrupted"])
+async def test_collaboration_tool_reports_both_items_during_the_turn(
+    tmp_path: Path, status: str
+) -> None:
+    harness = await start(tmp_path)
+    try:
+        ticket = harness.session.submit("Delegate the work")
+        await harness.turn_started()
+        item: dict[str, object] = {
+            "type": "collabAgentToolCall",
+            "id": "collab-1",
+            "tool": "spawnAgent",
+            "senderThreadId": "thread-1",
+            "receiverThreadIds": [],
+            "prompt": "Read the tests",
+            "agentsStates": {},
+            "status": "inProgress",
+        }
+        scope = {"threadId": "thread-1", "turnId": harness.server.current_turn}
+        harness.server.emit("item/started", {**scope, "item": item})
+        started = await harness.wait_for(lambda event: isinstance(event, ToolUse))
+        assert started == ToolUse(
+            turn_id=ticket.turn_id,
+            tool_use_id="collab-1",
+            name="spawnAgent",
+            tool_input={"receiverThreadIds": [], "prompt": "Read the tests"},
+        )
+
+        completed_item = {
+            **item,
+            "status": status,
+            "receiverThreadIds": ["child-thread"],
+            "agentsStates": {"child-thread": {"status": "running"}},
+        }
+        harness.server.emit("item/completed", {**scope, "item": completed_item})
+        result = await harness.wait_for(lambda event: isinstance(event, ToolResult))
+        assert result.turn_id == ticket.turn_id
+        assert result.tool_use_id == "collab-1"
+        assert result.is_error == (status != "completed")
+        assert json.loads(result.content) == {
+            "status": status,
+            "receiverThreadIds": ["child-thread"],
+            "agentsStates": {"child-thread": {"status": "running"}},
+        }
+        assert harness.of(TurnCompleted) == []
+
+        harness.server.complete()
+        await asyncio.wait_for(ticket.outcome(), 2)
+        await harness.wait_for(lambda event: isinstance(event, TurnCompleted))
+        assert len(harness.of(TurnCompleted)) == 1
     finally:
         await harness.stop()
 

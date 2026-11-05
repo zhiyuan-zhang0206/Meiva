@@ -22,9 +22,8 @@ class NotificationKind(StrEnum):
 
 
 # meiva:note
-# Every notification the bridge reads, by the method that carries it, and nothing for the rest:
-# reasoning, plan, image, sub-agent, queue and rate-limit events map to no kind because the runtime
-# does not model them.
+# Classify the notification envelope here. The payload of `item/started` or
+# `item/completed` determines which bridge event the item produces.
 # meiva:link base/lm/harness/codex/docs/codex.meiva.okf.md
 _KINDS = {
     "item/agentMessage/delta": NotificationKind.TEXT_DELTA,

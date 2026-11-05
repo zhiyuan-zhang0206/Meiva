@@ -27,7 +27,9 @@ invariants the host relies on:
 3. a full queue refuses; it never buffers beyond its bound;
 4. `interrupt()` asserts that tool child processes were reaped — an unobservable
    process tree is reported as unknown, not as success;
-5. a turn timeout interrupts; it never silently drops the turn;
+5. turns have no default elapsed-time limit, including while the provider is
+   quiet. A configured turn timeout interrupts; it never silently drops the turn.
+   Setup, transport, cancellation and shutdown keep their own bounds;
 6. usage and cost accumulate per turn, and `Usage.input_tokens` is the whole
    prompt — cache reads and cache writes included, with those two fields as
    subsets — whatever shape the provider reports them in;
