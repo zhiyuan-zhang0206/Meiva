@@ -29,7 +29,7 @@ import subprocess
 import tarfile
 import tempfile
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -96,8 +96,36 @@ class RefreshReport:
 class _Delta:
     """Registry write-back staged during the pass, applied in ONE mutate at the end."""
 
-    update: dict[str, object] = field(default_factory=dict[str, object])
-    package: dict[str, object] = field(default_factory=dict[str, object])
+    last_check_at: str | None = None
+    last_result: str | None = None
+    failures: int | None = None
+    channel: install_registry.ChannelKind | None = None
+    mode: install_registry.UpdateMode | None = None
+    interval_seconds: int | None = None
+    applied_rev: str | None = None
+    last_apply_at: str | None = None
+    content_hash: str | None = None
+
+    def apply(self, row: install_registry.InstalledPackage) -> None:
+        if self.last_check_at is not None:
+            row.update.last_check_at = self.last_check_at
+        if self.last_result is not None:
+            row.update.last_result = self.last_result
+        if self.failures is not None:
+            row.update.failures = self.failures
+        if self.channel is not None:
+            row.update.channel = self.channel
+        if self.mode is not None:
+            row.update.mode = self.mode
+        if self.interval_seconds is not None:
+            row.update.interval_seconds = self.interval_seconds
+        if self.applied_rev is not None:
+            row.update.applied_rev = self.applied_rev
+        if self.last_apply_at is not None:
+            row.update.last_apply_at = self.last_apply_at
+            row.content_hash = self.content_hash
+            row.installed_hash = self.content_hash
+            row.updated_at = self.last_apply_at
 
 
 class Pass:
@@ -157,14 +185,14 @@ class Pass:
     def _record(self, pkg: install_registry.InstalledPackage, result: str) -> None:
         """Stage the standard per-package write-back for one pass outcome."""
         delta = self.deltas.setdefault(pkg.name, _Delta())
-        delta.update["last_check_at"] = self.now.isoformat(timespec="seconds")
-        delta.update["last_result"] = result
+        delta.last_check_at = self.now.isoformat(timespec="seconds")
+        delta.last_result = result
         self._keep_resolved(pkg, delta)
         ok = result in {"up_to_date", "applied"} or result.startswith("available")
         if ok:
-            delta.update["failures"] = 0
+            delta.failures = 0
         else:
-            delta.update["failures"] = pkg.update.failures + 1
+            delta.failures = pkg.update.failures + 1
         policy = install_registry.resolved_policy(pkg, defaults_reader=self._defaults)
         self.items.append(
             ItemOutcome(
@@ -181,11 +209,11 @@ class Pass:
         """Freeze the resolved policy into the row at first sight (§5.2)."""
         policy = install_registry.resolved_policy(pkg, defaults_reader=self._defaults)
         if pkg.update.channel is None and policy.channel is not None:
-            delta.update["channel"] = policy.channel
+            delta.channel = policy.channel
         if pkg.update.mode is None:
-            delta.update["mode"] = policy.mode
+            delta.mode = policy.mode
         if pkg.update.interval_seconds is None and policy.interval_seconds is not None:
-            delta.update["interval_seconds"] = policy.interval_seconds
+            delta.interval_seconds = policy.interval_seconds
 
     # -- engine --------------------------------------------------------------
 
@@ -480,7 +508,7 @@ class Pass:
             rc, out = self._git_local("diff", "--name-only", applied, head, "--", src_rel)
             if rc == 0 and not out.strip():
                 delta = self.deltas.setdefault(pkg.name, _Delta())
-                delta.update["applied_rev"] = head
+                delta.applied_rev = head
                 self._record(pkg, "up_to_date")
                 return
         if self.check_only or policy.mode == "notify":
@@ -493,13 +521,11 @@ class Pass:
         result, new_hash = self._apply_staged(pkg, staged, head)
         if result in ("applied", "up_to_date"):
             delta = self.deltas.setdefault(pkg.name, _Delta())
-            delta.update["applied_rev"] = head
+            delta.applied_rev = head
             if result == "applied":
                 stamp = self.now.isoformat(timespec="seconds")
-                delta.update["last_apply_at"] = stamp
-                delta.package["content_hash"] = new_hash
-                delta.package["installed_hash"] = new_hash
-                delta.package["updated_at"] = stamp
+                delta.last_apply_at = stamp
+                delta.content_hash = new_hash
         self._record(pkg, result)
 
     def _git_local(self, *args: str) -> tuple[int, str]:
@@ -615,13 +641,11 @@ class Pass:
         if result not in ("applied", "up_to_date"):
             return
         delta = self.deltas.setdefault(pkg.name, _Delta())
-        delta.update["applied_rev"] = sha
+        delta.applied_rev = sha
         if result == "applied":
             stamp = self.now.isoformat(timespec="seconds")
-            delta.update["last_apply_at"] = stamp
-            delta.package["content_hash"] = new_hash
-            delta.package["installed_hash"] = new_hash
-            delta.package["updated_at"] = stamp
+            delta.last_apply_at = stamp
+            delta.content_hash = new_hash
 
     def _git_candidate(self, pkg: install_registry.InstalledPackage) -> str | None:
         """The remote sha worth acquiring, or None after recording why this package stops here."""
@@ -713,10 +737,7 @@ class Pass:
                 )
                 if row is None:
                     continue
-                for field_name, value in delta.update.items():
-                    setattr(row.update, field_name, value)
-                for field_name, value in delta.package.items():
-                    setattr(row, field_name, value)
+                delta.apply(row)
 
 
 # Operator-facing error tails: the last line of a stream, capped — the full
