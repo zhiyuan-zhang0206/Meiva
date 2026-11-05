@@ -9,6 +9,3 @@ exports = ["memory_pressure.py", "reading.py", "sample.py"]
 "__init__.py" = "strict"
 "reading.py" = "strict"
 "sample.py" = { mode = "none", why = "the shell that takes one live machine reading: it asks psutil for the CPU, memory and primary-disk figures and runs `pmset -g batt` on a macOS host, stamping the reading with the instant its caller names; the model, the battery parse and how the figures become the displayed sample are decided in reading.py" }
-
-[debt.ambient-read]
-"memory_pressure.py#environ ctypes.util.find_library" = { count = 2, owner = "#5816", until = "waits for `_DarwinMemory.pressure` and `_DarwinMemory.footprint` to take the loaded system library from their caller: each asks the library search path (LD_LIBRARY_PATH, PATH) for libc or libproc itself" }
