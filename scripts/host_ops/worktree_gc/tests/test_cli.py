@@ -97,16 +97,52 @@ def test_never_list_entry_skips_the_tree_without_touching_it(
     assert "skipped-never-list" in outcomes(tmp_path)
 
 
-def test_detached_head_is_never_a_candidate(
+def test_detached_head_outside_main_is_not_a_candidate(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     # meiva:note
-    # A detached HEAD has no branch whose PR could prove the work is merged, so the gate refuses
-    # it before asking `gh` anything.
+    # A detached HEAD carrying a commit that main does not have has no PR to prove it is merged,
+    # so the gate refuses it before asking `gh` anything.
     repo = make_repo(tmp_path)
     worktree = tmp_path / "detached"
     git(repo, "worktree", "add", "--detach", str(worktree))
     assert main(base_args(tmp_path, repo, "--trigger-avail-gib", "99999")) == 0
     out = capsys.readouterr().out
     assert "no-branch" in out
+    assert worktree.is_dir()
+
+
+def test_detached_head_already_in_main_is_a_candidate(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # meiva:note
+    # The same shape as above, one fact different: the head is an ancestor of `origin/main`, so
+    # the tree holds nothing main lacks and there is no merge left to prove. The round must reach
+    # the cool-off gates instead of stopping at "no-branch" -- which is what the old rule did to
+    # two real trees on 2026-11-05.
+    repo = make_repo(tmp_path)
+    origin = tmp_path / "origin.git"
+    git(tmp_path, "clone", "--bare", str(repo), str(origin))
+    git(repo, "remote", "add", "origin", str(origin))
+    git(repo, "fetch", "origin")
+    worktree = tmp_path / "detached-in-main"
+    git(repo, "worktree", "add", "--detach", str(worktree))
+
+    assert (
+        main(
+            base_args(
+                tmp_path,
+                repo,
+                "--trigger-avail-gib",
+                "99999",
+                "--dry-run",
+                "--commit-cooloff-min",
+                "0",
+            )
+        )
+        == 0
+    )
+    out = capsys.readouterr().out
+    assert "no-branch" not in out
+    assert "would-reclaim" in out
     assert worktree.is_dir()
