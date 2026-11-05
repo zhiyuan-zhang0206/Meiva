@@ -39,9 +39,9 @@ class MemorySource(Protocol):
 
 
 # meiva:note
-# These probes need Darwin's system ABI, not a library selected through the
-# launching process's search path. dyld resolves these absolute install names
-# from the shared cache even when they have no standalone file on disk.
+# Name Darwin's system libc/libproc install names directly, avoiding
+# ctypes.util.find_library discovery. dyld still owns the final resolution,
+# including shared-cache lookup when there is no standalone file on disk.
 class _DarwinMemory:
     def pressure(self) -> PressureLevel:
         libc = ctypes.CDLL("/usr/lib/libc.dylib", use_errno=True)

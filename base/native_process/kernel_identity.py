@@ -26,8 +26,8 @@ def pid_starttime_ticks(pid: int) -> int | None:
 def _darwin_boot_session_uuid() -> str:
     # meiva:note
     # The `kern.bootsessionuuid` sysctl, read in-process (a microsecond call, not a spawn).
-    # Its provider is Darwin's system libc install name, which dyld resolves from
-    # the shared cache; the caller's library search path must not select it.
+    # Name Darwin's libc install name directly, avoiding find_library discovery;
+    # dyld still owns the final resolution, including shared-cache lookup.
     name = b"kern.bootsessionuuid"
     libc = ctypes.CDLL("/usr/lib/libc.dylib", use_errno=True)
     size = ctypes.c_size_t(0)
