@@ -225,7 +225,7 @@ def _emit_cycle(collector_id: str, outcome: str, reason: str, *, cycle: int) -> 
 def run_collector_cycles(
     borrowed: ScheduleInputs | None,
     *,
-    refresh: Callable[..., None],
+    refresh: Callable[..., object],
     sleep: Callable[[float], None],
     collector_id: str,
     stop_after_cycles: int | None = None,
