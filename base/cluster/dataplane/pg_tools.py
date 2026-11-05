@@ -218,7 +218,7 @@ def _throwaway_locks(config: ThrowawayConfig) -> list[Path]:
     return sorted(
         lock
         for root in _throwaway_base.throwaway_roots(
-            config.override, default_root=config.default_root
+            config.override, environ=config.environ, default_root=config.default_root
         )
         for lock in root.glob(f"{THROWAWAY_PREFIX}*/{OWNER_LOCK_NAME}")
     )
@@ -267,7 +267,7 @@ def resolved_throwaway_dir(instance_dir: Path, *, config: ThrowawayConfig) -> Pa
     roots = {
         root.resolve()
         for root in _throwaway_base.throwaway_roots(
-            config.override, default_root=config.default_root
+            config.override, environ=config.environ, default_root=config.default_root
         )
     }
     if resolved.parent not in roots or resolved.name != instance_dir.name:
@@ -436,10 +436,10 @@ def _live_throwaway_ports(config: ThrowawayConfig) -> set[int]:
     return ports
 
 
-def _port_lock_root(config: ThrowawayConfig | None = None) -> Path:
-    if config is not None and config.default_root is not None:
+def _port_lock_root(config: ThrowawayConfig) -> Path:
+    if config.default_root is not None:
         return config.default_root
-    return _throwaway_base.default_base()
+    return _throwaway_base.default_base(config.environ)
 
 
 def allocate_port(
@@ -615,7 +615,9 @@ def throwaway_postgres(
                 prefix=THROWAWAY_PREFIX,
                 dir=base
                 or _throwaway_base.select_throwaway_base(
-                    override=config.override, default_root=config.default_root
+                    override=config.override,
+                    environ=config.environ,
+                    default_root=config.default_root,
                 ),
             )
         )

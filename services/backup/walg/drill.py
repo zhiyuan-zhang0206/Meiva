@@ -278,7 +278,11 @@ def _restore_and_verify(
     """Restore `backup` to the newest archived segment and verify it; returns the summary."""
     required = required_bytes(backup, facts, factor=space_factor)
     try:
-        base = select_throwaway_base(required + host_floor_bytes, override=throwaway.override)
+        base = select_throwaway_base(
+            required + host_floor_bytes,
+            override=throwaway.override,
+            environ=throwaway.environ,
+        )
     except InsufficientThrowawaySpaceError as exc:
         raise DrillRefusedError(f"drill refused, nothing written: {exc}") from exc
     available = free_bytes(base)
