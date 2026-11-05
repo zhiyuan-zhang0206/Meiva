@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 import ctypes
-import ctypes.util
 import errno
 import struct
 from typing import Literal, Protocol
@@ -39,9 +38,13 @@ class MemorySource(Protocol):
     def footprint(self, pid: int) -> int: ...
 
 
+# meiva:note
+# Name Darwin's system libc/libproc install names directly, avoiding
+# ctypes.util.find_library discovery. dyld still owns the final resolution,
+# including shared-cache lookup when there is no standalone file on disk.
 class _DarwinMemory:
     def pressure(self) -> PressureLevel:
-        libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+        libc = ctypes.CDLL("/usr/lib/libc.dylib", use_errno=True)
         value = ctypes.c_int(0)
         size = ctypes.c_size_t(ctypes.sizeof(value))
         name = b"kern.memorystatus_vm_pressure_level"
@@ -50,7 +53,7 @@ class _DarwinMemory:
         return _DARWIN_LEVELS[value.value]
 
     def footprint(self, pid: int) -> int:
-        libproc = ctypes.CDLL(ctypes.util.find_library("proc"), use_errno=True)
+        libproc = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
         buffer = ctypes.create_string_buffer(_RUSAGE_BUFFER_BYTES)
         if libproc.proc_pid_rusage(pid, _RUSAGE_INFO_V2, buffer) != 0:
             if ctypes.get_errno() == errno.ESRCH:

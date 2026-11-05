@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ctypes
-import ctypes.util
 from pathlib import Path
 from uuid import UUID
 
@@ -27,8 +26,10 @@ def pid_starttime_ticks(pid: int) -> int | None:
 def _darwin_boot_session_uuid() -> str:
     # meiva:note
     # The `kern.bootsessionuuid` sysctl, read in-process (a microsecond call, not a spawn).
+    # Name Darwin's libc install name directly, avoiding find_library discovery;
+    # dyld still owns the final resolution, including shared-cache lookup.
     name = b"kern.bootsessionuuid"
-    libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+    libc = ctypes.CDLL("/usr/lib/libc.dylib", use_errno=True)
     size = ctypes.c_size_t(0)
     if libc.sysctlbyname(name, None, ctypes.byref(size), None, 0) != 0:
         raise OSError(ctypes.get_errno(), f"sysctl {name.decode()} failed")
