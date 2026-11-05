@@ -22,7 +22,7 @@ A **schedule** is a resident process supervised by a host-local `schedule-manage
 - **Liveness identity**: the session name `meiva-schedule-<id>` is the schedule's stable identity—it encodes no cluster/machine name (path-only cluster identity, #629/#633); the PTY session namespace itself is host-local + per-home (the service socket `$MEIVA_HOME/run/pty-sessions.sock`), and home already isolates sessions adequately
 - **Service restart**: re-identifies live sessions and retains the persisted one-attempt latch and stall clock. Missing started sessions become errors, without script replay.
 - **Terminal execution**: a disappeared session with `status=completed` remains completed. Otherwise the manager records an error requiring explicit start/restart. Neither case relaunches automatically.
-- **Alerts on prolonged silence**: an enabled schedule with no live session for more than two hours emits one WARNING plus one `schedule_stalled` telemetry event. `status='error'` remains eligible without being relaunched. The first sessionless observation (`not_live_since`) and the alert (`stall_alerted_at`) are columns of the row, so one outage alerts once across restarts. Seeing the session live again clears both and rearms a later outage; completed and disabled schedules are excluded.
+- **Alerts on prolonged silence**: an enabled schedule with nothing running it for more than two hours emits one WARNING plus one `schedule_stalled` telemetry event, whose `evidence` says which shape it saw (no session, or a shell whose runner is gone). The first observation (`not_live_since`) and the alert (`stall_alerted_at`) are columns of the row, so one outage alerts once across restarts. Seeing the schedule live again clears both and rearms a later outage; completed and disabled schedules are excluded.
 
 ### ScheduleRunner (`services/wake/schedule_manager/engine.py`)
 - The in-session entrypoint `.venv/bin/python -m services.wake.schedule_manager.runner <id>`; its script execution, stall guard, hard-exit cleanup and exit semantics are in [[schedule-runner.meiva.okf.md]].
@@ -40,11 +40,10 @@ The built-in cron slot mechanism — at-most-once claims per `(schedule_id, slot
 
 ## Liveness
 
-A sessionless schedule alerts once after two hours (`schedule_stalled`). A resident
-schedule -- a `while True` loop, so `schedule_fire_log` never gains a row -- writes
-`state/schedules/<id>.heartbeat.json` each round naming when it expects to be back;
-a passed deadline raises `schedule_not_progressing` once per episode. Schedules without
-a heartbeat are unaffected.
+A session is a shell; the runner inside it can be gone ([[gateway/schedules/docs/schedule-liveness.meiva.okf.md|Schedule liveness]]).
+Three records answer three questions: the session name (is a shell there), the runner's own
+record under `run/schedules/` (is that process still alive), and a resident schedule's
+heartbeat (has it iterated since).
 
 ## One launch attempt per revision
 

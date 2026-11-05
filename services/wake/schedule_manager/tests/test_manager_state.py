@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import logging
+import os
+import subprocess
+import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -12,12 +15,14 @@ from psycopg_pool import ConnectionPool
 
 from base.cluster import session_name
 from base.config import settings
+from base.daemon.schedules.claim import write_claim
 from base.daemon.schedules.heartbeat import beat_path, write_beat
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.tests.serving_root import observe
 from base.sessions.protocol import SessionBackend
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
+from services.wake.schedule_manager import manager as manager_module
 from services.wake.schedule_manager import round_progress
 from services.wake.schedule_manager.tests.manager_support import NOW, POLICY, schedule_manager
 
@@ -207,7 +212,7 @@ def test_missing_error_schedule_alerts_after_two_hours_and_rearms_after_recovery
         7200.1 <= cast(float, attrs["session_missing_seconds"]) < 7260 for _name, attrs in emitted
     )
     assert all("beat_written_at" not in attrs for _name, attrs in emitted)
-    assert caplog.text.count(f"schedule {sid} has had no live session") == 2
+    assert caplog.text.count(f"schedule {sid} has been seen with nothing running") == 2
 
 
 def test_the_stall_alert_clock_and_flag_survive_a_restart(
@@ -618,3 +623,87 @@ def test_a_fresh_round_rearms_the_alert(
     _write_beat(unit_home, sid, offset_s=-900)
     mgr.reconcile(now=NOW)
     assert emitted_events.names() == ["schedule_not_progressing", "schedule_not_progressing"]
+
+
+def _claim_a_runner_that_then_dies(home: Path, sid: int) -> None:
+    # meiva:note
+    # The production shape: a runner records itself, then is killed while its session's login
+    # shell stays. The reader must prove the death from the process table, not from the session.
+    proc = subprocess.Popen(["/bin/sleep", "60"])
+    assert write_claim(home, sid, pid=proc.pid) is not None
+    proc.kill()
+    deadline = time.monotonic() + 10
+    while proc.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+
+def test_a_live_session_whose_runner_is_gone_is_a_lost_process(
+    unit_home: Path,
+    pool: ConnectionPool[psycopg.Connection],
+    fake_session: tuple[_FakeBackend, list[int]],
+    emitted_events: EmittedEvents,
+    db_conn: psycopg.Connection,
+) -> None:
+    backend, _launched = fake_session
+    sid = _insert(db_conn, "runner-gone")
+    _set_status(db_conn, sid, "running")
+    _hold_live(backend, sid)
+    _claim_a_runner_that_then_dies(unit_home, sid)
+
+    schedule_manager(pool, backend).reconcile(now=NOW)
+
+    assert emitted_events.names() == ["schedule_process_lost"]
+    assert _status(db_conn, sid) == "error"
+    row = db_conn.execute("SELECT not_live_since FROM schedules WHERE id = %s", (sid,)).fetchone()
+    assert row is not None and row[0] is not None
+
+
+def test_a_session_with_no_runner_record_is_unknown_and_acted_on_by_nothing(
+    unit_home: Path,
+    pool: ConnectionPool[psycopg.Connection],
+    fake_session: tuple[_FakeBackend, list[int]],
+    emitted_events: EmittedEvents,
+    caplog: pytest.LogCaptureFixture,
+    db_conn: psycopg.Connection,
+) -> None:
+    backend, _launched = fake_session
+    sid = _insert(db_conn, "runner-unrecorded")
+    _set_status(db_conn, sid, "running")
+    _hold_live(backend, sid)
+
+    manager = schedule_manager(pool, backend)
+    with caplog.at_level(logging.WARNING, logger=manager_module.__name__):
+        manager.reconcile(now=NOW)
+        manager.reconcile(now=NOW)
+
+    # meiva:note
+    # Unprovable is not dead: a session started before runners recorded themselves keeps today's
+    # answer, and saying so once is the whole of the manager's response.
+    assert emitted_events.names() == []
+    assert _status(db_conn, sid) == "running"
+    assert caplog.text.count("no provable runner") == 1
+    assert f"schedules [{sid}]" in caplog.text
+
+
+def test_a_session_whose_runner_is_alive_is_not_reported_as_unknown(
+    unit_home: Path,
+    pool: ConnectionPool[psycopg.Connection],
+    fake_session: tuple[_FakeBackend, list[int]],
+    emitted_events: EmittedEvents,
+    caplog: pytest.LogCaptureFixture,
+    db_conn: psycopg.Connection,
+) -> None:
+    backend, _launched = fake_session
+    sid = _insert(db_conn, "runner-alive")
+    _set_status(db_conn, sid, "running")
+    _hold_live(backend, sid)
+    # meiva:note
+    # The test process stands in for the runner: it is alive, and the record describes it.
+    assert write_claim(unit_home, sid, pid=os.getpid()) is not None
+
+    with caplog.at_level(logging.WARNING, logger=manager_module.__name__):
+        schedule_manager(pool, backend).reconcile(now=NOW)
+
+    assert emitted_events.names() == []
+    assert "no provable runner" not in caplog.text
+    assert _status(db_conn, sid) == "running"

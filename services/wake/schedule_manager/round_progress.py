@@ -6,9 +6,11 @@
 # schedule keeps its session while it wedges inside a round, and its own heartbeat says when it
 # expected to be back.
 #
-# `report_stalled` answers "the session is gone, how long has the work been stopped": a manager
-# can notice a lost session hours late, so the reported silence is measured from the last round
-# the schedule actually finished, not from the moment the manager noticed.
+# `report_stalled` answers "nothing is running this schedule any more, and how long has it been
+# like that": the session can be gone, and it can also still be there as a shell whose runner
+# died inside it (base/daemon/schedules/claim.py). The manager is told which of the two it saw,
+# because they need different words; a manager can notice hours late, so the reported silence is
+# measured from the last round the schedule actually finished, not from the moment it noticed.
 #
 # The clock comes from Postgres rather than this process: the manager runs under the strict
 # profile and may not read a clock itself, and the database is the same wall clock the file
@@ -18,6 +20,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +28,7 @@ from pathlib import Path
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
+from base.daemon.schedules.claim import RunnerLiveness, read_runner_liveness
 from base.daemon.schedules.heartbeat import (
     Beat,
     is_overdue,
@@ -36,11 +40,79 @@ from base.db.rows import query_all, query_one
 from base.db.transaction import write_transaction
 from base.deploy.schedule_timing import SCHEDULE_PROGRESS_SKEW_S, SCHEDULE_STALL_ALERT_AFTER_S
 
-__all__ = ["report_late_rounds", "report_stalled"]
+__all__ = [
+    "Liveness",
+    "alive_sessions",
+    "note_unproven",
+    "read_liveness",
+    "report_late_rounds",
+    "report_stalled",
+]
 
 STALL_ALERT_AFTER_S = SCHEDULE_STALL_ALERT_AFTER_S
 
 _log = logging.getLogger(__name__)
+
+
+# meiva:note
+# What the manager knows about the processes behind its live sessions: the ones it can prove
+# alive, the ones it proved gone (each with the sentence that proved it), and the ones it cannot
+# decide. Every verdict comes from the runner's own record, never from the session name.
+@dataclass(frozen=True)
+class Liveness:
+    alive: frozenset[int]
+    dead_evidence: Mapping[int, str]
+    # meiva:note
+    # The enabled schedules whose session is live and whose runner cannot be proved either way.
+    # Only these are worth saying out loud; a completed schedule's lingering shell is expected.
+    unproven: frozenset[int]
+    unproven_detail: str
+
+
+def read_liveness(home: Path, sessions: set[int], status_by_id: Mapping[int, str]) -> Liveness:
+    readings = {sid: read_runner_liveness(home, sid) for sid in sessions}
+    alive = {
+        sid for sid, reading in readings.items() if reading.liveness is not RunnerLiveness.DEAD
+    }
+    unproven = frozenset(
+        sid
+        for sid, reading in readings.items()
+        if reading.liveness is RunnerLiveness.UNKNOWN and status_by_id.get(sid) == "running"
+    )
+    return Liveness(
+        alive=frozenset(alive),
+        dead_evidence={sid: readings[sid].detail for sid in sessions - alive},
+        unproven=unproven,
+        unproven_detail="" if not unproven else readings[min(unproven)].detail,
+    )
+
+
+# meiva:note
+# The same reading for a caller that only needs the answer "may this session be counted alive":
+# every schedule whose runner is not proved gone, including the unprovable ones.
+def alive_sessions(home: Path, sessions: set[int]) -> set[int]:
+    return {
+        sid
+        for sid in sessions
+        if read_runner_liveness(home, sid).liveness is not RunnerLiveness.DEAD
+    }
+
+
+# meiva:note
+# Said once per set, not once per tick: the manager speaks up when a live session stops being
+# explainable and again when that changes. Silence afterwards does not mean the reading improved --
+# the last line stays the record of it, and no schedule is acted on for it.
+def note_unproven(previous: frozenset[int], liveness: Liveness) -> frozenset[int]:
+    if liveness.unproven == previous:
+        return previous
+    if liveness.unproven:
+        _log.warning(
+            "schedules %s: a live session but no provable runner (%s); reported as unknown, "
+            "never as lost",
+            sorted(liveness.unproven),
+            liveness.unproven_detail,
+        )
+    return liveness.unproven
 
 
 def report_late_rounds(
@@ -48,7 +120,7 @@ def report_late_rounds(
     *,
     home: Path,
     status_by_id: Mapping[int, str],
-    live_ids: set[int],
+    live_ids: AbstractSet[int],
 ) -> None:
     beats = {sid: read_beat(home, sid) for sid in status_by_id if sid in live_ids}
     if not any(beat is not None for beat in beats.values()):
@@ -118,21 +190,27 @@ def report_stalled(
     machine: str,
     home: Path,
     status_by_id: Mapping[int, str],
-    live_ids: set[int],
+    live_ids: AbstractSet[int],
+    dead_evidence: Mapping[int, str] | None = None,
 ) -> None:
     eligible = {sid for sid, status in status_by_id.items() if status != "completed"}
-    missing = sorted(eligible - live_ids)
+    # meiva:note
+    # ``dead_evidence`` names the schedules that still hold a session whose runner is proved
+    # gone, with the sentence that proved it. A schedule in neither mapping has no session at
+    # all -- the two shapes are one outage each, not one outage with two names.
+    evidence: Mapping[int, str] = {} if dead_evidence is None else dead_evidence
+    stopped = sorted(eligible - live_ids)
     with write_transaction(pool) as conn:
         conn.execute(
             "UPDATE schedules SET not_live_since = NULL, stall_alerted_at = NULL "
             "WHERE machine = %s AND NOT (id = ANY(%s)) "
             "AND (not_live_since IS NOT NULL OR stall_alerted_at IS NOT NULL)",
-            (machine, missing),
+            (machine, stopped),
         )
         conn.execute(
             "UPDATE schedules SET not_live_since = statement_timestamp() "
             "WHERE machine = %s AND id = ANY(%s) AND not_live_since IS NULL",
-            (machine, missing),
+            (machine, stopped),
         )
         alerts = query_all(
             conn,
@@ -141,13 +219,14 @@ def report_stalled(
             "WHERE machine = %s AND id = ANY(%s) AND stall_alerted_at IS NULL "
             "AND not_live_since < statement_timestamp() - make_interval(secs => %s) "
             "RETURNING id, not_live_since, statement_timestamp() AS observed_at",
-            (machine, missing, STALL_ALERT_AFTER_S),
+            (machine, stopped, STALL_ALERT_AFTER_S),
         )
     for alert in alerts:
-        _emit_stall(home, status_by_id[alert.id], alert)
+        detail = evidence.get(alert.id)
+        _emit_stall(home, status_by_id[alert.id], alert, detail)
 
 
-def _emit_stall(home: Path, status: str, alert: _StallRow) -> None:
+def _emit_stall(home: Path, status: str, alert: _StallRow, runner_detail: str | None) -> None:
     beat = read_beat(home, alert.id)
     session_missing_s = _seconds_between(alert.not_live_since, alert.observed_at)
     silent_s = (
@@ -158,22 +237,27 @@ def _emit_stall(home: Path, status: str, alert: _StallRow) -> None:
         "status": status,
         "silent_seconds": silent_s,
         "session_missing_seconds": session_missing_s,
+        "evidence": "session_absent" if runner_detail is None else "runner_gone",
     }
+    if runner_detail is not None:
+        attributes["runner_detail"] = runner_detail
     if beat is None:
         _log.warning(
-            "schedule %s has had no live session for %.1fs (status=%s, no round beat)",
+            "schedule %s has been seen with nothing running for %.1fs (status=%s, %s, no beat)",
             alert.id,
             session_missing_s,
             status,
+            "no session" if runner_detail is None else runner_detail,
         )
     else:
         written_at = beat.written_at.isoformat(timespec="seconds")
         attributes["beat_written_at"] = written_at
         _log.warning(
-            "schedule %s has had no live session for %.1fs and no round since %s "
+            "schedule %s has been seen with nothing running for %.1fs (%s), no round since %s "
             "(%.1fs, status=%s)",
             alert.id,
             session_missing_s,
+            "no session" if runner_detail is None else runner_detail,
             written_at,
             silent_s,
             status,

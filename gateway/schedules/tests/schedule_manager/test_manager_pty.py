@@ -1,14 +1,14 @@
-"""ScheduleManager x real pty-sessions service integration.
-
-A real pty-sessions service + real DB + real backend + the real
-`services.wake.schedule_manager.runner` entrypoint: `_launch` creates a session in the service,
-`_live_ids` / `capture_blocking` see it, `_reap` tears it down, and a failed
-revision is never launched again after manager restart.
-
-The schedule commands are deliberately trivial (`sleep 30` for the live
-paths, `false` for the crash paths) — the runner's real script execution and
-status semantics are covered by test_schedule_runner.py.
-"""
+# meiva:note
+# ScheduleManager against a real pty-sessions service.
+#
+# A real pty-sessions service, real DB, real backend and the real
+# `services.wake.schedule_manager.runner` entrypoint: `_launch` creates a session in the service,
+# `_session_ids` / `capture_blocking` see it, `_reap` tears it down, and a failed revision is never
+# launched again after manager restart.
+#
+# The schedule commands are deliberately trivial (`sleep 30` for the live paths, `false` for the
+# crash paths) — the runner's real script execution and status semantics are covered by
+# test_schedule_runner.py.
 
 import shlex
 import time
@@ -150,8 +150,9 @@ def test_pty_launch_live_capture(
     pool: ConnectionPool,
     _pty_home: str,
 ) -> None:
-    """_launch through the real PTY backend: the session is live in the service,
-    _live_ids sees it, capture returns the runner's output."""
+    # meiva:note
+    # `_launch` through the real PTY backend: the session is live in the service, `_session_ids`
+    # sees it, and capture returns the runner's output.
     # A real .py script (command must name the script file — a bare command
     # with no extension made the runner execute the script body as .py and
     # crash instantly; round 4 CI, 2893). The print marks real execution so
@@ -172,7 +173,7 @@ def test_pty_launch_live_capture(
     assert name in [info.name for info in client.list_sessions(socket_path=service_socket())], (
         "service does not list it"
     )
-    assert sid in mgr._live_ids(NOW)
+    assert sid in mgr._session_ids(NOW)
     # Poll for the runner's output instead of one immediate capture: under a
     # slow CI login shell the launch-to-output window is variable, and a
     # single probe can land before the command is delivered or after the

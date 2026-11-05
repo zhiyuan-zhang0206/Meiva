@@ -13,7 +13,9 @@ environment and `ManagerPolicy` as required constructor inputs; its daemon reads
 them once (`get_shell_backend(home=...)`, its repository root, `forward_env_dict()` and
 the gateway configuration) and never reads settings or the environment again. The
 clock is a value: the loop passes a monotonic reading as `now` to `reconcile` and
-`sync_one`. What the manager decides from it is a pure function in a strict
+`sync_one`. Liveness follows the same shape as a round beat: a file under the manager's
+home (`base.daemon.schedules.claim`) rather than a constructor input, so a test writes a
+record for a process it starts and kills instead of faking the process table. What the manager decides from it is a pure function in a strict
 module: `convergence` (which action converges a schedule, what a surviving
 session means for a launch, whether a replaced host may be reclaimed),
 `blocked_streak` (when a failing convergence is given up and when its failure is

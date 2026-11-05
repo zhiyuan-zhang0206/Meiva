@@ -29,6 +29,7 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.cluster import session_name
+from base.daemon.schedules.claim import RunnerLiveness, read_runner_liveness
 from base.daemon.schedules.heartbeat import clear_beat
 from base.db.transaction import write_transaction
 from base.deploy.lifecycle import start_serving
@@ -60,7 +61,13 @@ from services.wake.schedule_manager.launch_events import (
 )
 from services.wake.schedule_manager.manager_policy import ManagerPolicy
 from services.wake.schedule_manager.recovery_gate import GateState, observe_gate, refuse
-from services.wake.schedule_manager.round_progress import report_late_rounds, report_stalled
+from services.wake.schedule_manager.round_progress import (
+    alive_sessions,
+    note_unproven,
+    read_liveness,
+    report_late_rounds,
+    report_stalled,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -113,15 +120,21 @@ class ScheduleManager:
         # meiva:note
         # How this manager sees the running root: `observe_root` unless the caller names another.
         self._observe = observe
-        # Enabled sessions whose stale same-name survivor resisted a reap. A
-        # live session normally means adopt, but these need another official
-        # reap before their replacement may launch. In memory: a restarted
-        # service meets the same survivor again (a session of another generation
-        # is reaped by `_live_ids` itself).
+        # meiva:note
+        # Enabled sessions whose stale same-name survivor resisted a reap. A live session
+        # normally means adopt, but these need another official reap before their replacement
+        # may launch. In memory: a restarted service meets the same survivor again (a session of
+        # another generation is reaped by `_session_ids` itself).
         self._reap_retries: set[int] = set()
-        # A D-state survivor can resist each five-second reconcile forever; log
-        # the first failure and periodic summaries rather than flooding ERROR.
+        # meiva:note
+        # A D-state survivor can resist each five-second reconcile forever; log the first
+        # failure and periodic summaries rather than flooding ERROR.
         self._reap_failure_logs: dict[int, ReapLog] = {}
+        # meiva:note
+        # The schedules whose live session has no provable runner, as last reported. The line is
+        # edge-triggered on this set rather than timed, so a stable unknown is said once per
+        # manager generation and a change is never missed.
+        self._unproven_runners: frozenset[int] = frozenset()
         # meiva:note
         # The current streak of failed convergence attempts of each schedule.
         self._blocked: dict[int, Streak] = {}
@@ -174,10 +187,15 @@ class ScheduleManager:
 
     def _sync_owned_revision(self, schedule_id: int, now: float) -> bool:
         wanted = revisions.desired(self._pool, schedule_id, machine=self._machine_name)
+        # meiva:note
+        # A session is the shell; the runner is a command inside it and can be gone while the
+        # shell stays (base/daemon/schedules/claim.py). Only a proved death counts as not live --
+        # an unprovable one keeps today's answer, because "not live" here authorizes a relaunch.
         live = (
             wanted is not None
             and wanted.enabled
-            and schedule_id in self._live_ids(now, owned_id=schedule_id)
+            and schedule_id in self._session_ids(now, owned_id=schedule_id)
+            and read_runner_liveness(self._home, schedule_id).liveness is not RunnerLiveness.DEAD
         )
         observed = revisions.launched_revision(self._home, schedule_id) if live else None
         action = plan_sync(wanted, live=live, observed=observed)
@@ -259,35 +277,49 @@ class ScheduleManager:
         if self._host_generation is None:
             self._note_host_generation_unknown(now)
             return
+        # meiva:note
         # A given-up schedule is not retried: only a new revision lifts that.
         self._reap_retries.difference_update(self._abandoned)
         retrying = self._reap_retries.copy()
-        # Read liveness before status: on a clean exit the runner commits
+        # meiva:note
+        # Read the sessions before the status: on a clean exit the runner commits
         # status='completed' before its process exits (and the session dies), so a
-        # session seen dead here is guaranteed to already carry its terminal status.
-        live = self._live_ids(now)  # {id}
+        # session seen gone here is guaranteed to already carry its terminal status.
+        sessions = self._session_ids(now)  # {id}
         enabled_rows = self._load_enabled()
         enabled = set(enabled_rows)
-        known = live | enabled
+        known = sessions | enabled
         self._forget_unknown(known)
+        # meiva:note
+        # A session says a shell exists; only the runner's own record says the process does
+        # (base/daemon/schedules/claim.py). A proved death is reported as a stall from its first
+        # observation; an unprovable one is said once and otherwise left alone.
+        liveness = read_liveness(self._home, sessions, enabled_rows)
+        alive = set(liveness.alive)
+        self._unproven_runners = note_unproven(self._unproven_runners, liveness)
         report_stalled(
             self._pool,
             machine=self._machine_name,
             home=self._home,
             status_by_id=enabled_rows,
-            live_ids=live,
+            live_ids=alive,
+            dead_evidence=liveness.dead_evidence,
         )
-        report_late_rounds(self._pool, home=self._home, status_by_id=enabled_rows, live_ids=live)
+        # meiva:note
+        # Late rounds belong to the schedules whose death is not proved: a proved one is the same
+        # outage `schedule_stalled` reports, and one outage keeps one event per stage.
+        report_late_rounds(self._pool, home=self._home, status_by_id=enabled_rows, live_ids=alive)
         # A launch can find a same-name session after liveness initially said it
         # was absent. If the official reap refused it, this set makes the next
         # reconcile retry rather than adopting the stale survivor forever.
-        retrying.intersection_update(live)
+        retrying.intersection_update(sessions)
         for sid in retrying:
             if self._retry_reap(sid, now):
-                live.remove(sid)
+                sessions.remove(sid)
+                alive.discard(sid)
 
         # Kill sessions we no longer want (disabled / deleted).
-        orphans = live - enabled
+        orphans = sessions - enabled
         for sid in orphans:
             if sid not in retrying:
                 self._sync_revision(sid, now)
@@ -295,12 +327,13 @@ class ScheduleManager:
         for sid in sorted(enabled):
             wanted = revisions.desired(self._pool, sid, machine=self._machine_name)
             if wanted is not None and (
-                wanted.revision != wanted.applied or (sid in live and wanted.status == "error")
+                wanted.revision != wanted.applied or (sid in alive and wanted.status == "error")
             ):
                 self._sync_revision(sid, now)
-        live = self._live_ids(now)
+        sessions = self._session_ids(now)
         enabled_rows = self._load_enabled()
-        self._launch_missing(enabled_rows, sorted(set(enabled_rows) - live), now)
+        alive = alive_sessions(self._home, sessions)
+        self._launch_missing(enabled_rows, sorted(set(enabled_rows) - alive), now)
         self._observe_recovery_gate(now)
 
     def _observe_recovery_gate(self, now: float) -> None:
@@ -402,13 +435,20 @@ class ScheduleManager:
         )
         return True
 
-    def _live_ids(self, now: float, *, owned_id: int | None = None) -> set[int]:
+    # meiva:note
+    # The schedules whose session exists in the current host generation. Not liveness: the shell
+    # outlives the runner, so a caller that needs "the process is still there" also reads the
+    # runner's own record (_runner_readings).
+    def _session_ids(self, now: float, *, owned_id: int | None = None) -> set[int]:
         from base.sessions.pty.allocation_freeze import current_generation
 
         live: set[int] = set()
         backend = self._backend
         generation = current_generation(home=self._home)
-        prefix = session_name("schedule-")  # meiva-schedule-
+        # meiva:note
+        # Every schedule session is named `meiva-schedule-<id>`; the prefix is what the backend
+        # lists, and the tail is the schedule id.
+        prefix = session_name("schedule-")
         names = backend.list_sessions(prefix=prefix)
         _log.debug(
             "schedule session scan backend=%s settings_home=%s record_dir=%s names=%s",
@@ -425,10 +465,10 @@ class ScheduleManager:
                 if observed_generation == generation:
                     live.add(schedule_id)
                     continue
-                # An enabled schedule is current desired state, but a matching
-                # name from the preceding flip is not its current exact
-                # session. Reap the old record; an admitted revision stays
-                # consumed, while an explicit new revision may launch.
+                # meiva:note
+                # An enabled schedule is current desired state, but a matching name from the
+                # preceding flip is not its current exact session. Reap the old record; an
+                # admitted revision stays consumed, while an explicit new revision may launch.
                 if owned_id is not None and owned_id != schedule_id:
                     live.add(schedule_id)
                     continue
@@ -447,9 +487,10 @@ class ScheduleManager:
                     expected_generation=observed_generation,
                 ):
                     self._reap_retries.add(schedule_id)
-                    # Do not launch a second runner while the old exact session
-                    # is still live. The centralized reaper retries with
-                    # rate-limited failure accounting on the next tick.
+                    # meiva:note
+                    # Do not launch a second runner while the old exact session is still live.
+                    # The centralized reaper retries with rate-limited failure accounting on the
+                    # next tick.
                     live.add(schedule_id)
         return live
 

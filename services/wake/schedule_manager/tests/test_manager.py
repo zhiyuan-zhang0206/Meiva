@@ -278,7 +278,7 @@ def test_live_superseded_generation_is_reaped_before_schedule_reconcile(
     backend.generations[name] = "previous-generation"
     _set_allocation_generation(unit_home, "current-generation")
 
-    assert schedule_manager(pool, backend)._live_ids(NOW) == set()
+    assert schedule_manager(pool, backend)._session_ids(NOW) == set()
     assert backend.killed == [name]
 
 
