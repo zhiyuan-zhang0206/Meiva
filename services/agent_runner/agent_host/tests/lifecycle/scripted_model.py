@@ -17,6 +17,8 @@ from langchain_core.messages import AIMessageChunk, BaseMessage
 from langchain_core.messages.ai import UsageMetadata
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 
+from base.agents.messages.reply_intent import DISPLAY_TO_USER
+
 OVERRIDE = f"{__name__}:build"
 
 _USAGE: UsageMetadata = {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
@@ -74,7 +76,9 @@ class ScriptedChatModel(BaseChatModel):
         script.histories.append(list(messages))
         script.entered.set()
         if step.partial is not None:
-            yield ChatGenerationChunk(message=AIMessageChunk(content=step.partial))
+            yield ChatGenerationChunk(
+                message=AIMessageChunk(content=f"{DISPLAY_TO_USER}\n{step.partial}")
+            )
         if step.holds:
             await script.release.wait()
         if step.code is not None:
@@ -96,7 +100,9 @@ class ScriptedChatModel(BaseChatModel):
             return
         yield ChatGenerationChunk(
             message=AIMessageChunk(
-                content=step.text,
+                content=step.text
+                if step.partial is not None
+                else f"{DISPLAY_TO_USER}\n{step.text}",
                 response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
                 usage_metadata=_USAGE,
             )
