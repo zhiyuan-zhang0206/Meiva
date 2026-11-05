@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import datetime as _dt
 import sys
 from pathlib import Path
 
@@ -30,14 +31,24 @@ from yt_post import to_s1 as project_to_s1
 
 
 # meiva:note
+# The stamp a fetched post is mirrored with: UTC, second precision, `Z` suffix. The entry owns it
+# because a post's instant is read where the post is written, and an agent's code cell that calls
+# `feed.sync()` has no clock to hand down.
+def _now_iso() -> str:
+    return _dt.datetime.now(tz=_dt.UTC).isoformat().replace("+00:00", "Z")
+
+
+# meiva:note
 # The configuration of this process: the mirror dir under this process's home, the `yt-dlp` on
-# PATH, and this interpreter running the local transcription subprocess.
+# PATH, this interpreter running the local transcription subprocess, and the clock a fetched post
+# is stamped with.
 def _process_config() -> yt_run.YoutubeConfig:
     script = Path(__file__).resolve().with_name("transcribe.py")
     return yt_run.YoutubeConfig(
         ytdlp="yt-dlp",
         transcribe=(sys.executable, str(script)),
         root=resolve_meiva_home() / "state" / "mirrors" / "youtube",
+        now=_now_iso,
     )
 
 
