@@ -87,6 +87,7 @@ def db_rows_blocking(pool: ConnectionPool, agent_id: int) -> InspectDbRows:
             "       harness, "
             "       (SELECT amo.model FROM agent_metric_observations amo "
             "        WHERE amo.agent_id = agents_meta.id AND amo.model IS NOT NULL "
+            "        AND amo.occurred_at >= COALESCE(agents_meta.harness_configured_at, '-infinity') "
             "        ORDER BY amo.occurred_at DESC LIMIT 1) AS observed_model, "
             "       heartbeat_backoff_level, "
             "       (SELECT COALESCE(lease.activated_at, lease.created_at) "

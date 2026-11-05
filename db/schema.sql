@@ -151,6 +151,7 @@ CREATE TABLE agents_meta (
     last_launch_failure_at TIMESTAMPTZ,
     harness_exit_code INTEGER,  -- exit status of the external harness CLI child for this agent's most recent session: NULL = still running or never recorded (the built-in meiva loop has no child and records nothing), 0 = the child exited normally, non-zero = it exited abnormally. Written by the host's session retirement after the child was reaped (task #5616)
     harness_exit_at TIMESTAMPTZ,  -- when harness_exit_code was written: the moment the session was retired, after the child was reaped; NULL whenever harness_exit_code is NULL
+    harness_configured_at TIMESTAMPTZ,  -- when a harness transition last wrote the runtime configuration
     CONSTRAINT agents_meta_launch_failure_pair_check
         CHECK ((last_launch_failure_reason IS NULL) = (last_launch_failure_at IS NULL)),
     -- fork fields exist in pairs or not at all (constraint explicitly named to align with the ALTER in 0002 migration)

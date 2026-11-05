@@ -40,6 +40,10 @@ submit the restart from outside the target session after it becomes idle.
 The transition cleans up agent-owned shell sessions, so a shell belonging to
 the target is unsuitable for tracking its own restart result.
 
+After a transition, the Inspector shows the configured model until the new
+runtime reports model usage. Earlier usage stays available for history and
+billing.
+
 `meiva.agents.resurrect(agent_id, prompt)` wakes a terminated agent on its current
 harness.
 

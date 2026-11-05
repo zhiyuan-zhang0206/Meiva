@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import psycopg
 import pytest
@@ -46,6 +46,31 @@ def test_inspector_populates_observed_model_for_external_harness(
     db_conn.commit()
     with database.pool(max_size=1) as pool:
         assert db_rows_blocking(pool, aid).config_overlay["llm_model"] == "gpt-5.4"
+
+
+def test_inspector_ignores_usage_from_before_the_harness_transition(
+    db_conn: psycopg.Connection, database: Database
+) -> None:
+    aid = _agent(db_conn, liveness_state="online", harness="claude_code")
+    switched_at = datetime.now(UTC)
+    db_conn.execute(
+        "UPDATE agents_meta SET harness_configured_at = %s, "
+        'config_overlay = \'{"llm_model": "sonnet"}\' WHERE id = %s',
+        (switched_at, aid),
+    )
+    write_observations(
+        [MetricObservation(1, aid, switched_at - timedelta(seconds=1), "usage", model="gpt-5.4")],
+        db=db_conn,
+    )
+    db_conn.commit()
+    with database.pool(max_size=1) as pool:
+        assert db_rows_blocking(pool, aid).config_overlay["llm_model"] == "sonnet"
+        write_observations(
+            [MetricObservation(2, aid, switched_at, "usage", model="claude-sonnet-5-5")],
+            db=db_conn,
+        )
+        db_conn.commit()
+        assert db_rows_blocking(pool, aid).config_overlay["llm_model"] == "claude-sonnet-5-5"
 
 
 # meiva:note
