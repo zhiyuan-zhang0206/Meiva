@@ -51,6 +51,7 @@ def test_exec_runs_the_file_inside_one_attachment(
         agent_id=41,
         session_id="session-1",
         opener=opener(attachment, calls),
+        stdin=io.StringIO(),
     )
     assert code == 0
     assert marker.read_text(encoding="utf-8") == "ran"
@@ -101,6 +102,7 @@ def test_a_missing_file_exits_one_with_a_message(capsys: pytest.CaptureFixture[s
         agent_id=None,
         session_id=None,
         opener=lambda *_args, **_kwargs: RecordingAttachment(),
+        stdin=io.StringIO(),
     )
     assert code == 1
     assert "harness:" in capsys.readouterr().err

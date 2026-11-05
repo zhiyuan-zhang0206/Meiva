@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -301,7 +301,9 @@ def cmd_db_authority_issue_unit(
     except (AuthorityRefusedError, ValueError, RuntimeError, OSError) as exc:
         print(failure_line("issue-unit", str(exc)), file=sys.stderr)
         return 1
-    expires = datetime.fromtimestamp(issued.expires_at).astimezone().isoformat(timespec="seconds")
+    expires = datetime.fromtimestamp(issued.expires_at, tz=command.zone or UTC).isoformat(
+        timespec="seconds"
+    )
     report = IssuedReport(
         unit=unit.describe(),
         generation=issued.generation,

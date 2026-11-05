@@ -16,6 +16,7 @@ class _ExecOptions:
 
 def _h_harness_exec(args: argparse.Namespace) -> int:
     from cli.commands.harness import cmd_harness_exec
+    from cli.database.runtime import runtime_of
 
     opts = options(args, _ExecOptions)
     return cmd_harness_exec(
@@ -23,6 +24,7 @@ def _h_harness_exec(args: argparse.Namespace) -> int:
         handle=opts.handle,
         agent_id=opts.agent_id,
         session_id=opts.session_id,
+        stdin=runtime_of(args).terminal.stdin,
     )
 
 

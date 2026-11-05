@@ -127,7 +127,7 @@ def f12_point(
     return {"smoke_ts": smoke_ts, "rows": rows, "chains": [_f12_chain_line(pid) for pid in pids]}
 
 
-def f12_parse_window(log_text: str) -> dict[int, list[tuple[float, str]]]:
+def f12_parse_window(log_text: str, *, zone: datetime.tzinfo) -> dict[int, list[tuple[float, str]]]:
     """Index AUTHREQ_ATTRIBUTION lines by requesting pid: pid -> [(ts, line)]."""
     lines: dict[int, list[tuple[float, str]]] = {}
     for line in log_text.splitlines():
@@ -137,7 +137,7 @@ def f12_parse_window(log_text: str) -> dict[int, list[tuple[float, str]]]:
             continue
         ts = (
             datetime.datetime.strptime(stamp.group("stamp"), "%Y-%m-%d %H:%M:%S.%f")
-            .astimezone()
+            .replace(tzinfo=zone)
             .timestamp()
         )
         lines.setdefault(int(requesting.group("requesting_pid")), []).append((ts, line))
@@ -334,6 +334,8 @@ def _f12_join_tccd(
         [
             "/usr/bin/log",
             "show",
+            "--timezone",
+            "UTC",
             "--last",
             f"{span}m",
             "--style",
@@ -344,5 +346,5 @@ def _f12_join_tccd(
         timeout=120.0,
     ).stdout
     save(evidence, name, log_text)
-    samples["tccd"] = f12_join(samples, f12_parse_window(log_text))
+    samples["tccd"] = f12_join(samples, f12_parse_window(log_text, zone=datetime.UTC))
     samples["summary"] = f12_attribution_summary(samples)

@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import assert_never
@@ -250,7 +249,7 @@ def _touches_rsc_boundary(change: ChangeSet) -> bool:
 _FRONTEND_RUNS = (
     Run(
         "next-build",
-        (shutil.which("pnpm") or "pnpm", "run", "build"),
+        ("pnpm", "run", "build"),
         "exit code; the production build refuses a client boundary in a server component",
         cwd="ui/web",
     ),
@@ -273,7 +272,7 @@ _APP_TEST_RUNS = (
     Run(
         "vitest-app",
         (
-            shutil.which("npx") or "npx",
+            "npx",
             "vitest",
             "run",
             "--config",

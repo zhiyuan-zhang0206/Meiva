@@ -20,6 +20,3 @@ exports = ["agents", "auth.py", "cluster", "converge", "data_plane", "duration.p
 "__init__.py" = "strict"
 "duration.py" = "strict"
 "probe_report.py" = "strict"
-
-[debt.ambient-read]
-"harness.py#pid sys.stdin" = { count = 1, owner = "#5816", until = "waits for `cmd_harness_exec` to require its `stdin` stream: it falls back to `sys.stdin` when `stdin` is None" }

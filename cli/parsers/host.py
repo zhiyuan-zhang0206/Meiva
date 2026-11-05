@@ -193,7 +193,7 @@ def h_stop(
         command=runtime,
         database_factory=database_factory_of(args),
         producer=producer_of(args),
-        stdin=sys.stdin,
+        stdin=runtime.terminal.stdin,
     )
     try:
         return cmd_stop(request, environment, retained_children)

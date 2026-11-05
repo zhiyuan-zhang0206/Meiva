@@ -9,6 +9,3 @@ exports = ["diff_checks.py", "diff_checks_pytest.py", "tests"]
 
 [roots]
 "diff_checks.py" = { kinds = ["environ", "pid", "argv", "random"], why = "receipt entry point composes what each judged child inherits: it reads the launcher's environment once in main() and hands every child the CI contract (that environment minus MEIVA_*), because a child that inherits the operator's shell reports the shell's state as if it were the change's (#5907); it also reads its own interpreter once in main() and hands that one value to every child command it builds that does not name a first-party entry -- the checks, the tools beside it, pytest; the selector names `scripts.ci.test_selector` and keeps its own read here, because that read is the fact edge declaring `hooks -> ci`; the __main__ guard reads argv[1:] once and hands it to main; it also names its report directory and its file listing at random under the temporary directory" }
-
-[debt.ambient-read]
-"diff_checks_plan.py#environ shutil.which()" = { count = 2, owner = "#5816", until = "waits for the module's top level to take the program path, or the search path, from its caller: it asks PATH for the program itself" }

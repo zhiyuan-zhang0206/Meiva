@@ -21,7 +21,6 @@ import ast
 import collections
 import json
 import re
-import shutil
 import subprocess
 import sys
 import tomllib
@@ -523,8 +522,6 @@ def _github_slug() -> str:
 # error, a timeout -- answers nothing: a read that only adds information must not fail a push, and an
 # unreadable answer is not a finding about the branch.
 def _gh(*args: str) -> str:
-    if shutil.which(_GH) is None:
-        return ""
     try:
         done = subprocess.run(  # noqa: S603
             [_GH, *args], capture_output=True, text=True, check=False, timeout=_GH_TIMEOUT_S
