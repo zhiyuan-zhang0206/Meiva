@@ -1,4 +1,4 @@
-exports = ["acp", "antigravity", "base_session.py", "bridge.py", "claude", "codex", "deepseek", "engine.py", "handoff.py", "process.py", "registration.py", "registry.py", "tests", "wiring.py"]
+exports = ["antigravity", "base_session.py", "bridge.py", "claude", "codex", "engine.py", "handoff.py", "process.py", "registration.py", "registry.py", "tests", "wiring.py"]
 
 [uses]
 "__init__.py" = ["bridge.py", "engine.py", "events.py", "handoff.py", "registration.py", "registry.py"]
@@ -7,7 +7,6 @@ exports = ["acp", "antigravity", "base_session.py", "bridge.py", "claude", "code
 "bridge.py" = ["base_session.py", "engine.py", "events.py", "faults.py", "handoff.py", "registration.py", "registry.py"]
 "claude" = ["__init__.py", "base_session.py", "cancel.py", "events.py", "handoff.py", "process.py", "registry.py", "session"]
 "codex" = ["base_session.py", "cancel.py", "events.py", "handoff.py", "process.py", "registry.py", "session"]
-"deepseek" = ["__init__.py", "acp", "base_session.py", "cancel.py", "events.py", "handoff.py", "process.py", "registry.py", "session"]
 "cancel.py" = []
 "engine.py" = ["events.py", "handoff.py"]
 "events.py" = []

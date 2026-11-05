@@ -9,8 +9,7 @@ import pytest
 from base.api_contracts.agent_contract import Harness
 from base.clock.tests.fakes import system_clock
 from base.lm.harness import HarnessTurn, RegistrationStore
-from base.lm.harness.acp.tests.eof_process import eof_peer
-from base.lm.harness.acp.transport import AcpConnection
+from base.lm.harness.antigravity import AgyTransport, AntigravityConfig
 from base.log.tests.log_records import LogRecords
 from services.agent_runner.agent_host.runtime import AgentRuntime, HarnessSessions
 
@@ -218,11 +217,10 @@ async def test_the_builtin_meiva_loop_never_records_a_zero(tmp_path: Path) -> No
 # exits 3 — through the production transport, then through the real `_close`, and
 # asserts the recorded value is that status rather than NULL (task #5616).
 class TransportBackedEngine:
-    def __init__(self, connection: AcpConnection) -> None:
-        self.harness = Harness.CODEX
+    def __init__(self, transport: AgyTransport) -> None:
+        self.harness = Harness.ANTIGRAVITY
         self.model = None
-        self._connection = connection
-        self.closed = False
+        self._transport = transport
 
     async def run_turn(self, text: str, *, key: str, on_event: object = None) -> HarnessTurn:
         raise AssertionError("this engine is never asked for a turn")
@@ -231,44 +229,44 @@ class TransportBackedEngine:
         raise AssertionError("this engine is never interrupted")
 
     async def close(self, *, reason: str = "closed") -> None:
-        await self._connection.close(reason=reason)
-        self.closed = True
+        await self._transport.close()
 
     @property
     def exit_code(self) -> int | None:
-        return self._connection.returncode
+        return self._transport.returncode
 
 
-async def test_a_real_child_exit_status_reaches_the_recorder(tmp_path: Path) -> None:
+@pytest.mark.parametrize("stdout_eof_before_exit", [False, True])
+async def test_a_real_child_exit_status_reaches_the_recorder(
+    tmp_path: Path, stdout_eof_before_exit: bool
+) -> None:
     stub = tmp_path / "stub-cli"
-    stub.write_text("#!/bin/sh\nexit 3\n")
+    _ = stub.write_text(
+        "#!/bin/sh\ntrap 'exit 3' INT\nexec 1>&-\nread -r line\n"
+        if stdout_eof_before_exit
+        else "#!/bin/sh\nexit 3\n"
+    )
     stub.chmod(0o755)
-    connection = AcpConnection([str(stub)], cwd=str(tmp_path), environ={})
-    await connection.start()
+    config = AntigravityConfig(cwd=tmp_path, executable=(str(stub),))
+    transport = AgyTransport(config, clock=system_clock())
     recorder = ExitRecorder()
     owner = HarnessSessions(RegistrationStore(tmp_path), record_exit=recorder, clock=system_clock())
     await owner.start()
     try:
-        owner.retire(44, runtime(TransportBackedEngine(connection)))
+        await transport.start(resume=None)
+        async with asyncio.timeout(3):
+            if stdout_eof_before_exit:
+                assert [event async for event in transport.events()] == []
+                assert transport.alive
+            else:
+                while transport.alive:
+                    await asyncio.sleep(0.005)
+        owner.retire(44, runtime(TransportBackedEngine(transport)))
         await owner.join(44)
         assert recorder.writes == [(44, 3)]
     finally:
         await owner.aclose()
-
-
-async def test_stdout_eof_does_not_finish_retirement_before_the_child_exits(tmp_path: Path) -> None:
-    async with eof_peer(tmp_path, gate_exit=False) as peer:
-        recorder = ExitRecorder()
-        owner = HarnessSessions(
-            RegistrationStore(tmp_path), record_exit=recorder, clock=system_clock()
-        )
-        await owner.start()
-        try:
-            owner.retire(44, runtime(TransportBackedEngine(peer.connection)))
-            await owner.join(44)
-            assert recorder.writes == [(44, 3)]
-        finally:
-            await owner.aclose()
+        await transport.close()
 
 
 async def test_a_running_session_records_nothing(tmp_path: Path) -> None:
