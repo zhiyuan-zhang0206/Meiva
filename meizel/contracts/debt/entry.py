@@ -19,6 +19,7 @@ __all__ = [
     "has_shape",
     "is_table",
     "read_entry",
+    "waits_for_nothing",
 ]
 
 # meiva:note
@@ -44,6 +45,17 @@ _FIELDS = ("count", "owner", "until")
 # unreviewed rather than inventing a reason; the summary counts those apart.
 def has_shape(until: str) -> bool:
     return until.startswith((*SHAPES, UNREVIEWED))
+
+
+# meiva:note
+# Whether a sentence picks the waiting shape and then says nothing will arrive. `waits for nothing
+# ...` names no condition that could arrive, so it is the other shape's answer written in this one's
+# words, and a reader cannot tell which of the two answers the entry gives. Only the head before the
+# colon is read, because the head is where a wait names what it waits for; the explanation after it
+# may argue with anything, "nothing" included.
+def waits_for_nothing(until: str) -> bool:
+    head = until.split(":", 1)[0]
+    return head.startswith(SHAPES[0]) and "nothing" in head.lower()
 
 
 # meiva:note

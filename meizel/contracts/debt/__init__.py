@@ -30,6 +30,7 @@ from meizel.contracts.debt.entry import (
     has_shape,
     is_table,
     read_entry,
+    waits_for_nothing,
 )
 from meizel.contracts.debt.states import unowned, unreviewed, without_until
 from meizel.graph.model import Code
@@ -63,6 +64,7 @@ __all__ = [
     "total",
     "unowned",
     "unreviewed",
+    "waits_for_nothing",
     "without_until",
 ]
 
