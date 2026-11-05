@@ -64,9 +64,16 @@ has a tree that contains it — on a line that cannot block.
 
 Only **tree-scoped** facts block: the directory is gone, the working tree is
 dirty, a rebase/merge/cherry-pick is half-finished, HEAD moved off the snapshot,
-a process names the tree, the tree holds the default branch, its HEAD is
-detached, the PR is no longer merged at this tip, or one of the two cool-offs is
-still running.
+a process names the tree, the tree holds the default branch, its PR is no longer
+merged at this tip, or one of the two cool-offs is still running.
+
+A detached HEAD is a question, not a verdict. It has no branch whose PR could
+prove the work is merged, so the answer comes from the commits instead: a head
+that is an ancestor of `origin/main` holds nothing main lacks, and the tree is
+eligible on the same terms as a merged branch. Only a head main does not have —
+or one that cannot be compared, because `origin/main` is missing — stays
+blocked. A stale `origin/main` can hide a merge and so keep a tree; it can never
+invent one, so this rule's only possible mistake is the safe one.
 
 A hold another agent keeps is consulted and never rewritten: it is not this
 tool's state, and the bookkeeping that expires it stays where it belongs.

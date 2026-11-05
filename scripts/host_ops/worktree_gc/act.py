@@ -126,7 +126,34 @@ def first_blocking_fact(settings: Settings, row: TreeRow) -> tuple[str, str] | N
     local = local_block(row)
     if local:
         return local
+    if not row.get("branch"):
+        return detached_block(settings, row)
     return pr_block(settings, row)
+
+
+def detached_block(settings: Settings, row: TreeRow) -> tuple[str, str] | None:
+    # meiva:note
+    # A tree without a branch has no PR that could prove its work is merged, but "no PR" was never
+    # the question -- the question is whether anything in this tree is missing from main. A head
+    # that is already an ancestor of `origin/main` answers it here, without a network round trip:
+    # the tree holds no commit main lacks, and the dirty check above already covered the files git
+    # does not track. A stale `origin/main` can only hide a merge, never invent one, so the mistake
+    # this rule can still make is to keep a tree, not to delete one that held work.
+    #
+    # 2026-11-05: `/private/tmp/verify-main` (whose lesson the old veto came from) and two trees
+    # after it were held for a month by a rule that read "detached" as "unknowable".
+    head = row.get("head") or ""
+    if not head:
+        return "no-branch", "detached HEAD and the head is unreadable"
+    _, _, rc = evidence.sh(
+        ["git", "-C", str(settings.repo), "merge-base", "--is-ancestor", head, "origin/main"],
+        timeout=60,
+    )
+    if rc == 0:
+        return None
+    if rc == 1:
+        return "no-branch", f"detached HEAD {head[:9]} is not in origin/main"
+    return "no-branch", f"detached HEAD {head[:9]}: origin/main cannot be compared (rc={rc})"
 
 
 def local_block(row: TreeRow) -> tuple[str, str] | None:
@@ -153,12 +180,6 @@ def local_block(row: TreeRow) -> tuple[str, str] | None:
     if live:
         return "live", f"live={live} now"
     branch = row.get("branch")
-    if not branch:
-        # meiva:note
-        # Detached HEAD: there is no branch whose PR could prove the work in this tree is merged,
-        # so the one thing this gate exists to prove is unknowable. `/private/tmp/verify-main`
-        # looked "clean and old" and passed until this line existed.
-        return "no-branch", "detached HEAD: no PR to prove the work is merged"
     if branch in ("main", "master"):
         # meiva:note
         # A tree holding the default branch has no "its own PR" to be merged: asking the API about
