@@ -14,10 +14,13 @@ the mechanical publish steps.
 
 ## IM ingress channels (20+)
 
-Today: Telegram + Feishu are the live channels (the WeChat iLink adapter exists but is production-disabled since 2026-08-06). IM **ingress is live**: the IM Bridge takes user commands via the IM surface (`/list` `/switch` `/status` `/spawn` `/commands` `/help` `/notice`) — ingress is *not* web-only.
+Today: Weixin is the only shipped native IM adapter, and remains production-disabled
+since 2026-08-06. Telegram and Feishu were retired by the 2026-11-06 user decision.
+The shared bridge command framework remains available for an explicitly enabled
+Weixin account; web notices and conversations remain independent surfaces.
 
 At open-source time: native ingress for the IM apps users actually live in —
-Slack, Discord, Telegram, WhatsApp, Signal, WeChat/Weixin, Feishu/Lark, and the
+Slack, Discord, WhatsApp, Signal, WeChat/Weixin, and the
 long tail — is table stakes for adoption. Competitors (OpenClaw ~20, Hermes
 22-23) treat channel count as a headline feature precisely because it is a direct
 driver of "I can use this where I already am" → GitHub stars. Each channel is a

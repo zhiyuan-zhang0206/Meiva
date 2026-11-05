@@ -318,7 +318,7 @@ def test_first_error_follows_construction_order(tmp_path: Path) -> None:
         eager_home,
         [
             "MEIVA_EXEC_TIMEOUT_SECONDS=abc",  # sandbox domain, constructs early
-            "MEIVA_TELEGRAM_POLL_TIMEOUT_SECONDS=abc",  # telegram domain, later
+            "MEIVA_IM_BRIDGE_TIMELINE_WINDOW=abc",
         ],
     )
     non_lite_eager = _spawn(
@@ -333,7 +333,7 @@ def test_first_error_follows_construction_order(tmp_path: Path) -> None:
     for proc in (non_lite_eager, non_lite_lite):
         assert proc.returncode != 0
         assert "MEIVA_EXEC_TIMEOUT_SECONDS" in proc.stderr
-        assert "MEIVA_TELEGRAM_POLL_TIMEOUT_SECONDS" not in proc.stderr
+        assert "MEIVA_IM_BRIDGE_TIMELINE_WINDOW" not in proc.stderr
 
 
 def test_concurrent_first_touch_upgrades_once(_isolated_boot_home: Path) -> None:

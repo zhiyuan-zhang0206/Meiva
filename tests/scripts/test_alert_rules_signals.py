@@ -68,9 +68,6 @@ SIGNALS: dict[str, Signal] = {
         "impersonation_terminal_notice_failed", "meiva-ops", "0m", "warning"
     ),
     "meiva-ops-im-push-failed": Signal("im_push_failed", "meiva-ops", "0s", "warning"),
-    "meiva-ops-im-feishu-owner-seed-failed": Signal(
-        "im_feishu_owner_seed_failed", "meiva-ops", "0s", "warning"
-    ),
     "meiva-ops-im-push-stall": Signal("im_push_health", "meiva-ops", "2m", "warning"),
     "meiva-ops-delivery-stalled": Signal("delivery_stalled", "meiva-ops", "1m", "warning"),
     "meiva-ops-delivery-stranded-wake": Signal(

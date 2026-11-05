@@ -84,7 +84,7 @@ permanent noes. Detail: [`open-source-prerequisites.md`](open-source-prerequisit
 
 | Item | Why it matters at open-source time |
 |---|---|
-| 20+ IM ingress channels (Slack/Discord/Telegram/WhatsApp/WeChat/...) | Users live in their favorite IM app; native ingress is table stakes for adoption + GitHub stars. **In progress**: `im_bridge` v1 ships Telegram / WeChat (iLink) / Feishu as gateway services; the adapter pattern makes every additional IM a new adapter. Detail: [`im-frontends.md`](im-frontends.md) — issue #971. |
+| 20+ IM ingress channels (Slack/Discord/WhatsApp/WeChat/...) | Users live in their favorite IM app; native ingress is table stakes for adoption + GitHub stars. **In progress**: `im_bridge` v1 ships Weixin (iLink) as gateway services; the adapter pattern makes every additional IM a new adapter. Detail: [`im-frontends.md`](im-frontends.md) — issue #971. |
 | Provider fallback chain (DeepSeek -> Kimi/Qwen/Anthropic) | A public project cannot hard-fail when one provider is down; fallback becomes a real requirement, not a model-babysit. |
 
 ## Low priority / opportunistic

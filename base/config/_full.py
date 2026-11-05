@@ -24,8 +24,6 @@ import base.config.config_registry as _config_registry
 from base.config.base import EnvSettings
 from base.config.config_registry import DOMAIN_ATTRS, DOMAIN_MODELS, schema_extra
 from base.config.domains.agent.settings import AgentSettings
-from base.config.domains.channels.feishu import FeishuSettings
-from base.config.domains.channels.telegram import TelegramSettings
 from base.config.domains.daemon.settings import DaemonSettings
 from base.config.domains.display import DisplaySettings
 from base.config.domains.gateway import GatewaySettings
@@ -93,8 +91,6 @@ class Settings(BaseModel):
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     display: DisplaySettings = Field(default_factory=DisplaySettings)
     packages: PackagesSettings = Field(default_factory=PackagesSettings)
-    feishu: FeishuSettings = Field(default_factory=FeishuSettings)
-    telegram: TelegramSettings = Field(default_factory=TelegramSettings)
     walg: WalgSettings = Field(default_factory=WalgSettings)
     general: GeneralSettings = Field(default_factory=GeneralSettings)
 
@@ -239,7 +235,6 @@ def facade_exports() -> dict[str, object]:
         "AlertsSettings": AlertsSettings,
         "DaemonSettings": DaemonSettings,
         "DataPlaneSettings": DataPlaneSettings,
-        "FeishuSettings": FeishuSettings,
         "GatewaySettings": GatewaySettings,
         "GeneralSettings": GeneralSettings,
         "LmSettings": LmSettings,
@@ -247,7 +242,6 @@ def facade_exports() -> dict[str, object]:
         "PackagesSettings": PackagesSettings,
         "SandboxSettings": SandboxSettings,
         "ServiceSettings": ServiceSettings,
-        "TelegramSettings": TelegramSettings,
         "WalgSettings": WalgSettings,
         "WebSettings": WebSettings,
         "ToUserSettings": ToUserSettings,

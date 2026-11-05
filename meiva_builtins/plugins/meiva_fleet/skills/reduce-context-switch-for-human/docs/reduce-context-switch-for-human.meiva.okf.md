@@ -39,4 +39,4 @@ Out-of-band pushes are only allowed for truly urgent matters: irreversible risk 
 
 - [[meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md|Notify]] — queue channel itself (`meiva.ui.notify`)
 - [[meiva_builtins/plugins/meiva_fleet/skills/meiva-fleet/docs/meiva-fleet.meiva.okf.md|meiva-fleet skill]] — fleet general outline of the same communication dichotomy
-- [[meiva_builtins/skills/docs/skills.meiva.okf.md|Skills index]] — push channel skills like telegram
+- [[meiva_builtins/skills/docs/skills.meiva.okf.md|Skills index]] — available communication skills

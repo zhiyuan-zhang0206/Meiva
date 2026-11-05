@@ -3,17 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import random
 from collections.abc import Mapping
-from contextlib import suppress
 from dataclasses import dataclass
-from pathlib import Path
 from typing import NotRequired, Protocol, TypedDict
 
-from psycopg.errors import ConnectionDoesNotExist, ConnectionFailure
-from psycopg_pool import ConnectionPool, PoolTimeout
+from psycopg_pool import ConnectionPool
 from pydantic import TypeAdapter
 
 from base.api_contracts.idempotency import keyed_headers
@@ -22,24 +18,13 @@ from base.clock import Clock
 from base.clock.ids import new_uuid
 from base.db.rows import query_all
 from base.db.transaction import write_transaction
-from base.events.notifications.catalog import core_catalog
-from base.events.notifications.policy import enabled_for
-from base.events.notifications.store import read_overrides_sync
 from services.entrypoints.im_bridge import copy
 from services.entrypoints.im_bridge.config import ImBridgeConfig
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
-from services.entrypoints.im_bridge.notice_poll_store import NoticePollStore
 from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
-from services.entrypoints.im_bridge.outbound.types import (
-    OutboundIntent,
-    OutboundSource,
-    OutboundSourceKind,
-)
 from services.entrypoints.im_bridge.types import (
-    NETWORK_ERRORS,
     IMAdapter,
     NoticeBridgeOwner,
-    SendNotStartedError,
 )
 
 _log = logging.getLogger("services.entrypoints.im_bridge.notice_bridge")
@@ -48,14 +33,6 @@ _CB_REPLY = "notice:reply:"
 _CB_READ = "notice:read:"
 _CB_DISMISS = "notice:dismiss:"
 _CB_LIST = "notice:list"
-
-_PRIORITY_RANK = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
-
-# meiva:note
-# Response-required notices use `core.needs_input` on every transport. Historical
-# FYI rows are filtered independently of that category and create no outbound intent.
-# meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-_NEEDS_INPUT = core_catalog()["core.needs_input"]
 
 
 # Direct-DB reads (R3 door ④, decision 2): the notice bridge reads
@@ -102,9 +79,6 @@ class _NoticeRow:
 # meiva:note
 # The notice push filter: the lowest priority to push and the one agent to push for, each None
 # when unset.
-class NoticeFilters(TypedDict):
-    min_priority: str | None
-    agent: int | None
 
 
 # meiva:note
@@ -118,7 +92,6 @@ class ReplyMode(TypedDict):
 
 
 _NOTICES = TypeAdapter(list[Notice])
-_FILTERS = TypeAdapter(NoticeFilters)
 _OBJECT = TypeAdapter(dict[str, object])
 
 
@@ -137,21 +110,6 @@ def _row_to_notice(r: _NoticeRow) -> Notice:
     }
 
 
-def _parse_filter_tokens(rest: list[str]) -> NoticeFilters:
-    """`{"min_priority", "agent"}` from the tokens after `/notice filter`."""
-    filters: NoticeFilters = {"min_priority": None, "agent": None}
-    i = 0
-    while i < len(rest):
-        tok = rest[i]
-        if tok.upper() in _PRIORITY_RANK or tok.lower() == "off":
-            filters["min_priority"] = None if tok.lower() == "off" else tok.upper()
-        elif tok.lower() == "agent" and i + 1 < len(rest):
-            filters["agent"] = int(rest[i + 1])
-            i += 1
-        i += 1
-    return filters
-
-
 class NoticeBridgeCore(Protocol):
     adapters: dict[str, IMAdapter]
     outbound_store: IMOutboxStore
@@ -160,7 +118,8 @@ class NoticeBridgeCore(Protocol):
 
 
 class NoticeBridge(NoticeBridgeOwner):
-    """Push fleet notices to the owner chat; own reply mode + filters."""
+    # meiva:note
+    # Manual notice lookup and account-bound reply windows for connected IM conversations.
 
     def __init__(
         self,
@@ -168,34 +127,20 @@ class NoticeBridge(NoticeBridgeOwner):
         config: ImBridgeConfig,
         *,
         db_pool: ConnectionPool | None = None,
-        state_dir: Path,
         clock: Clock,
         rng: random.Random,
     ) -> None:
         self._config = config
         self.core: NoticeBridgeCore = core
         self.db_pool: ConnectionPool | None = db_pool
-        self._state_dir = state_dir
         self._clock = clock
         self._rng = rng
-        self.poll_store = NoticePollStore(self.core.outbound_store)
         self._reply_modes: dict[str, ReplyMode] = {}  # chat_id -> mode
-        self._filters: NoticeFilters = {"min_priority": None, "agent": None}
-        self._load_state()
 
     def _now(self) -> float:
         return self._clock.now().timestamp()
 
     # -- persistence -------------------------------------------------------
-
-    def _load_state(self) -> None:
-        d = self._state_dir
-        d.mkdir(parents=True, exist_ok=True)
-        with suppress(FileNotFoundError):
-            self._filters = _FILTERS.validate_json((d / "notice_filters.json").read_text())
-
-    def _save(self, name: str, value: NoticeFilters) -> None:
-        (self._state_dir / name).write_text(json.dumps(value))
 
     # -- gateway -----------------------------------------------------------
 
@@ -218,110 +163,11 @@ class NoticeBridge(NoticeBridgeOwner):
 
     # -- polling -----------------------------------------------------------
 
-    def initialize_poll(self) -> None:
-        """Establish native cutover before daemon readiness and first poll."""
-        self.poll_store.initialize_notice_poll()
-
-    async def poll_once(self) -> None:
-        """Accept normal notice decisions; the shared worker owns provider calls."""
-        if self.db_pool is None:
-            return
-        try:
-            await asyncio.to_thread(self.initialize_poll)
-            notices = await asyncio.to_thread(self._unaccepted_notices)
-            switches = await asyncio.to_thread(read_overrides_sync, self.db_pool)
-        except (ConnectionDoesNotExist, ConnectionFailure, PoolTimeout) as exc:
-            _log.warning("notice acceptance read held class=%s", type(exc).__name__)
-            return
-        for notice in notices:
-            if not await self._accept_normal_notice(notice, switches=switches):
-                self._warn_push_held(notice)
-                break
-
-    async def _accept_normal_notice(self, notice: Notice, *, switches: dict[str, bool]) -> bool:
-        # meiva:note
-        # One place decides whether a notice reaches Telegram, and it says why: this
-        # bridge's `/notice filter` scope, historical FYI rows and the user's category
-        # switch. Acceptance still advances the poll cursor either way; only the push
-        # is withheld.
-        # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-        reason = self._filter_reason(notice, switches=switches)
-        filtered = reason is not None
-        snapshot: dict[str, object] = {
-            "id": notice["id"],
-            "agent_id": notice["agent_id"],
-            "title": notice["title"],
-            "content": notice.get("content"),
-            "priority": notice["priority"],
-            "require_response": notice["require_response"],
-            "agent_label": notice.get("agent_label"),
-        }
-        snapshot["filters"] = dict(self._filters)
-        snapshot["switches"] = dict(switches)
-        snapshot["filtered_reason"] = reason
-        intent = None
-        if not filtered:
-            adapter = self.core.adapters.get("telegram")
-            if adapter is None:
-                return False
-            text, buttons = self._render_notice(notice)
-            try:
-                recipient, prepared = await adapter.prepare_notice_owner(text, tuple(buttons))
-            except (*NETWORK_ERRORS, SendNotStartedError, NotImplementedError) as exc:
-                _log.warning(
-                    "notice target unavailable notice=%s class=%s", notice["id"], type(exc).__name__
-                )
-                return False
-            intent = OutboundIntent(
-                channel="telegram",
-                chat_id=recipient,
-                agent_id=int(notice["agent_id"]),
-                source=OutboundSource(
-                    kind=OutboundSourceKind.NOTICE, identity=str(notice["id"]), block_idx=0
-                ),
-                prepared=prepared,
-            )
-        try:
-            await asyncio.to_thread(
-                self.poll_store.accept_notice,
-                int(notice["id"]),
-                snapshot,
-                intent,
-                filtered=filtered,
-                filtered_reason=reason,
-            )
-        except (ConnectionDoesNotExist, ConnectionFailure, PoolTimeout) as exc:
-            _log.warning(
-                "notice acceptance held notice=%s class=%s", notice["id"], type(exc).__name__
-            )
-            return False
-        return True
-
     # meiva:note
     # Historical FYI rows receive a filtered receipt without creating an outbound
     # intent. The TTL bounds this compatibility scan; active queues contain only
     # notices that require a response.
     # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-    def _unaccepted_notices(self, limit: int | None = None) -> list[Notice]:
-        from base.agents.inbox.rows import NOTICE_FYI_TTL_DAYS
-
-        if limit is None:
-            limit = self._config.notices_open_default_limit
-        if self.db_pool is None:
-            raise RuntimeError("notice bridge requires a database pool")
-        with self.db_pool.connection() as conn:
-            rows = query_all(
-                conn,
-                _NoticeRow,
-                _SELECT_NOTICE + "JOIN im_bridge_notice_poll_state s ON s.singleton "
-                "LEFT JOIN im_bridge_notice_acceptances a ON a.notice_id=n.id "
-                "WHERE n.id > s.legacy_floor AND a.notice_id IS NULL "
-                "AND n.resolved_at IS NULL AND (n.require_response OR "
-                "n.created_at > now() - make_interval(days => %s)) "
-                "ORDER BY n.id ASC LIMIT %s",
-                (NOTICE_FYI_TTL_DAYS, limit),
-            )
-        return [_row_to_notice(r) for r in rows]
 
     def _open_notices(self, limit: int | None = None) -> list[Notice]:
         if limit is None:
@@ -340,18 +186,8 @@ class NoticeBridge(NoticeBridgeOwner):
         return [_row_to_notice(r) for r in rows]
 
     # meiva:note
-    # Historical FYI rows are never pushed, even when the needs-input category is
-    # disabled. Their distinct receipt reason preserves the transport audit.
+    # Render notices for an explicit queue read or existing account-bound callback.
     # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-    def _filter_reason(self, n: Notice, *, switches: dict[str, bool]) -> str | None:
-        if not n["require_response"]:
-            return "fyi"
-        if not enabled_for(_NEEDS_INPUT, switches):
-            return "needs_input_off"
-        agent = self._filters.get("agent")
-        if agent is not None and n["agent_id"] != int(agent):
-            return "agent"
-        return None
 
     @staticmethod
     def _render_notice(n: Notice, prefix: str | None = None) -> tuple[str, list[tuple[str, str]]]:
@@ -374,34 +210,9 @@ class NoticeBridge(NoticeBridgeOwner):
         buttons.append(("📋 Queue", _CB_LIST))  # emoji-ok: queue-view button
         return "\n\n".join(lines), buttons
 
-    async def _push(self, n: Notice, *, prefix: str | None = None) -> bool:
-        """Deliver one notice; return True when it was sent."""
-        adapter = self.core.adapters.get("telegram")
-        if adapter is None:
-            return False
-        text, buttons = self._render_notice(n, prefix)
-        try:
-            await adapter.send_to_owner(text, buttons=buttons)
-            return True
-        except Exception:
-            _log.warning("notice push failed (notice %s)", n["id"], exc_info=True)
-            return False
-
     #: Cooldown for the "push held" warning — one line per stall, not one per
     #: 3s poll round.
     _push_held_warned_at = 0.0
-
-    def _warn_push_held(self, n: Notice) -> None:
-        """Log that the cursor is held on notice ``n`` — throttled, because
-        an absent telegram adapter would otherwise log every poll round."""
-        now = self._clock.monotonic()
-        if now - self._push_held_warned_at < 300:
-            return
-        self._push_held_warned_at = now
-        _log.warning(
-            "notice %s acceptance held or response lost; retained receipt governs the next poll",
-            n["id"],
-        )
 
     # -- callbacks ---------------------------------------------------------
 
@@ -466,12 +277,18 @@ class NoticeBridge(NoticeBridgeOwner):
             return "Queue lookup failed, try again later"
         if not notices:
             return "🎉 No notices queued"  # emoji-ok: Telegram queue-empty hint
-        for i, n in enumerate(notices, start=1):
-            await self._push(
-                n,
-                prefix=f"📋 Queue {i}/{len(notices)}",  # emoji-ok: Telegram queue label
-            )  # emoji-ok: Telegram queue label
-        return f"📋 Queue: {len(notices)} notices open, listed below"  # emoji-ok: Telegram queue summary
+        rendered = [
+            self._render_notice(n, prefix=f"Queue {i}/{len(notices)}")[0]
+            for i, n in enumerate(notices, start=1)
+        ]
+        return f"Queue: {len(notices)} notices open\n\n" + "\n\n".join(rendered)
+
+    def cmd_notice(self, args: str) -> str:
+        return (
+            f"Unsupported notice command {args!r}; use /notice list"
+            if args
+            else "Use /notice list to read open notices in this conversation"
+        )
 
     def reply_context_held(self, chat_id: str, text: str, account_id: str) -> bool:
         mode = self._reply_modes.get(str(chat_id))
@@ -574,28 +391,3 @@ class NoticeBridge(NoticeBridgeOwner):
         return None
 
     # -- /notice command ---------------------------------------------------
-
-    def cmd_notice(self, args: str) -> str:
-        """/notice [filter ...] — show status or update the push filter."""
-        parts = args.strip().split()
-        if not parts or parts[0] != "filter":
-            f = self._filters
-            bits = [
-                f"min_priority={f.get('min_priority') or 'off'}",
-                f"agent={f.get('agent') or 'all'}",
-            ]
-            return (
-                "Notice push: "
-                + " ".join(bits)
-                + "  (usage: /notice filter <P0|P1|P2|off> [agent <id>])"
-            )
-        rest = parts[1:]
-        if not rest:
-            f = self._filters
-            return (
-                "Current filter: " + " ".join(f"{k}={v}" for k, v in f.items() if v is not None)
-                or "none (all pushed)"
-            )
-        self._filters = _parse_filter_tokens(rest)
-        self._save("notice_filters.json", self._filters)
-        return "Filter updated: " + json.dumps(self._filters)

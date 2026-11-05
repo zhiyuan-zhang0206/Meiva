@@ -221,7 +221,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `brew_pin` | the brew-pin assertion could not judge this host: brew list (--pinned) raised or exited non-zero, so the installed and pinned sets are unknown, not empty | anomaly | — | — | events | — |
 | `launchd_retirement` | launchctl print still lists a job after its bootout; the retired job keeps running the code it was loaded with while its plist is already gone | anomaly | — | — | events | — |
 | `im_push_failed` | an IM bridge outbound send failed after its single retry (failures = the adapter's consecutive-failure count) | anomaly | channel, failures | — | events | — |
-| `im_feishu_owner_seed_failed` | the feishu owner chat could not be restored at bridge boot; feishu notifications are blind until the user messages the bot | anomaly | reason, chats | — | events | — |
 | `im_push_health` | one per-channel IM bridge push-health sample: age of the last delivered push and pending deliveries, consumed by the leg-staleness alert rule | observation | channel, last_ok_age_s, pending | — | events | — |
 | `node_enter` | LangGraph node entered — sink-filtered out of the event stream (PR #1758); log files only | noise | — | — | file | — |
 | `node_exit` | LangGraph node exited | noise | count, nodes | — | events | — |

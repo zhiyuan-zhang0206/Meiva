@@ -96,17 +96,18 @@ def test_current_field_values_decodes_nodecode_comma_list(authority: ConfigAutho
 def test_current_field_values_decodes_nodecode_comma_list_without_warning(
     authority: ConfigAuthority, loguru_records: LogRecords
 ):
-    """P1 regression: a NoDecode comma-list value is a SUPPORTED .env spelling,
-    not a decode failure. Decoding through the owning model must not emit the
-    "cannot be decoded" warning — it fired on every panel read / agent spawn
-    for MEIVA_IM_DISABLED_ADAPTERS='weixin,feishu' — and a list[float] field must
-    come back floats, not a wrong-typed string split."""
+    # meiva:note
+    # P1 regression: a NoDecode comma-list value is a SUPPORTED .env spelling,
+    #     not a decode failure. Decoding through the owning model must not emit the
+    #     "cannot be decoded" warning — it fired on every panel read / agent spawn
+    #     for MEIVA_IM_DISABLED_ADAPTERS='weixin,retired-channel' — and a list[float] field must
+    #     come back floats, not a wrong-typed string split.
 
     rec = _Logged(loguru_records)
     _write(
         authority,
         {
-            "im_disabled_adapters": ["weixin", "feishu"],
+            "im_disabled_adapters": ["weixin", "retired-channel"],
             "im_send_retry_delays": [0.5, 1.0],
         },
         set(),
@@ -114,7 +115,7 @@ def test_current_field_values_decodes_nodecode_comma_list_without_warning(
 
     values = authority.current_field_values()
 
-    assert values["im_disabled_adapters"] == ["weixin", "feishu"]
+    assert values["im_disabled_adapters"] == ["weixin", "retired-channel"]
     assert values["im_send_retry_delays"] == [0.5, 1.0]
     delays = values["im_send_retry_delays"]
     assert is_object_list(delays)
@@ -129,11 +130,11 @@ def test_current_field_values_decodes_json_array_spelling(
     through the panel path too — both spellings, not just the comma list."""
 
     rec = _Logged(loguru_records)
-    _write(authority, {"im_disabled_adapters": '["weixin", "feishu"]'}, set())
+    _write(authority, {"im_disabled_adapters": '["weixin", "retired-channel"]'}, set())
 
     values = authority.current_field_values()
 
-    assert values["im_disabled_adapters"] == ["weixin", "feishu"]
+    assert values["im_disabled_adapters"] == ["weixin", "retired-channel"]
     assert rec.warnings == []
 
 
@@ -305,11 +306,11 @@ def test_current_field_values_isolates_bad_env_from_good_file_value(
     the boot value instead."""
 
     rec = _Logged(loguru_records)
-    _write(authority, {"im_disabled_adapters": ["weixin", "feishu"]}, set())
+    _write(authority, {"im_disabled_adapters": ["weixin", "retired-channel"]}, set())
 
     values = authority.current_field_values()
 
-    assert values["im_disabled_adapters"] == ["weixin", "feishu"]
+    assert values["im_disabled_adapters"] == ["weixin", "retired-channel"]
     assert rec.warnings == []
 
 

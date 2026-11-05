@@ -104,7 +104,7 @@ _NETWORK_PROXY_ROWS = tuple(EnvField(key) for key in sorted(NETWORK_PROXY_KEYS))
 #
 # The single reader for `NETWORK_PROXY_KEYS`: `child_env` forwards whichever of
 # the keys it finds, and a consumer that has to *decide* whether to leave a
-# library's own proxy discovery alone (the Feishu ws handshake, issue #2089)
+# library's own proxy discovery alone
 # asks this instead of re-listing the keys.
 def network_proxy_configured(environ: Mapping[str, str]) -> bool:
     return any(environ.get(key) for key in NETWORK_PROXY_KEYS)

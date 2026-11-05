@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import dataclasses
 import json
 import logging
 import os
@@ -30,14 +29,13 @@ from base.host.env import port_lease
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
 from services.entrypoints.im_bridge import daemon
-from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter
 from services.entrypoints.im_bridge.adapters.run_plan import (
     ADAPTER_NAMES,
     exit_code,
     plan_adapters,
 )
-from services.entrypoints.im_bridge.adapters.telegram import TelegramAdapter
 from services.entrypoints.im_bridge.adapters.weixin import WeixinAdapter
+from services.entrypoints.im_bridge.config import ImBridgeConfig
 from services.entrypoints.im_bridge.tests.slices import im_bridge_config, system_rng
 from services.entrypoints.im_bridge.tests.support import DurableAdapter, owned_tasks
 from services.entrypoints.im_bridge.tests.test_im_bridge_core import (
@@ -48,7 +46,7 @@ from services.entrypoints.im_bridge.tests.test_im_bridge_core import make_core a
 from services.entrypoints.im_bridge.types import IMAdapter
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
-_TIMINGS = daemon.DaemonTimings(liveness_beat_s=0.02, notice_poll_s=0.05, outbound_round_s=0.05)
+_TIMINGS = daemon.DaemonTimings(liveness_beat_s=0.02, outbound_round_s=0.05)
 
 
 # meiva:note
@@ -158,18 +156,24 @@ async def test_a_child_fault_fails_the_daemon_and_every_resource_is_cleaned_up(
     db_conn: psycopg.Connection,
     tmp_path: Path,
 ) -> None:
+    served_config.set_field("im_push_health_interval_seconds", 0.02)
+    served_config.set_field("im_push_health_channels", ["weixin"])
     port = int(str(served_config.get_field("im_bridge_health_port")))
     task = _run(served_config, database, tmp_path)
     try:
         await _until(lambda: _get(port) is not None, "the health endpoint")
         db_conn.commit()
-        db_conn.execute("ALTER TABLE agent_notices RENAME TO agent_notices_hidden_by_test")
+        db_conn.execute(
+            "ALTER TABLE im_bridge_outbound_intents RENAME TO im_bridge_outbound_intents_hidden_by_test"
+        )
         db_conn.commit()
         with pytest.raises(ExceptionGroup) as caught:
             await asyncio.wait_for(task, timeout=15)
     finally:
         db_conn.rollback()
-        db_conn.execute("ALTER TABLE agent_notices_hidden_by_test RENAME TO agent_notices")
+        db_conn.execute(
+            "ALTER TABLE im_bridge_outbound_intents_hidden_by_test RENAME TO im_bridge_outbound_intents"
+        )
         db_conn.commit()
         if not task.done():
             task.cancel()
@@ -244,9 +248,10 @@ async def test_cleanup_attempts_every_resource_and_reports_an_unknown_adapter_fa
 
 
 def test_the_plan_loads_the_enabled_adapters_in_order() -> None:
-    plan = plan_adapters(frozenset({"weixin", "feishu"}))
-    assert plan.load == ("telegram",)
-    assert plan.disabled == ("weixin", "feishu")
+    assert ADAPTER_NAMES == ("weixin",)
+    plan = plan_adapters(frozenset({"weixin"}))
+    assert plan.load == ()
+    assert plan.disabled == ("weixin",)
     assert plan_adapters(frozenset()).load == ADAPTER_NAMES
     assert plan_adapters(frozenset({"retired-channel"})).load == ADAPTER_NAMES
 
@@ -273,32 +278,22 @@ def test_load_adapters_builds_only_the_enabled_ones(
     process_config: ConfigBoot, make_core: CoreFactory, state_dir: Path
 ) -> None:
     core = make_core(FakeGateway())
-    inputs = daemon.adapter_inputs(
-        process_config, state_dir=state_dir, clock=system_clock(), rng=system_rng()
-    )
-    loaded = daemon.load_adapters(core, plan_adapters(frozenset({"weixin", "feishu"})), inputs)
-    assert [type(adapter) for adapter in loaded] == [TelegramAdapter]
-    assert core.adapters["telegram"] is loaded[0]
+    inputs = daemon.adapter_inputs(state_dir=state_dir, clock=system_clock(), rng=system_rng())
+    loaded = daemon.load_adapters(core, plan_adapters(frozenset({"weixin"})), inputs)
+    assert loaded == []
 
 
 def test_load_adapters_hands_each_adapter_its_slice(
     process_config: ConfigBoot, make_core: CoreFactory, state_dir: Path
 ) -> None:
     core = make_core(FakeGateway())
-    inputs = dataclasses.replace(
-        daemon.adapter_inputs(
-            process_config,
-            state_dir=state_dir,
-            clock=system_clock(),
-            rng=system_rng(),
-        ),
-        proxy_configured=True,
+    inputs = daemon.adapter_inputs(
+        state_dir=state_dir,
+        clock=system_clock(),
+        rng=system_rng(),
     )
-    telegram, weixin, feishu = daemon.load_adapters(core, plan_adapters(frozenset()), inputs)
-    assert isinstance(telegram, TelegramAdapter) and telegram._config == inputs.telegram
+    [weixin] = daemon.load_adapters(core, plan_adapters(frozenset()), inputs)
     assert isinstance(weixin, WeixinAdapter) and weixin._state_dir == state_dir
-    assert isinstance(feishu, FeishuAdapter) and feishu._config == inputs.feishu
-    assert feishu._proxy_configured is True and feishu._state_dir == state_dir
 
 
 def test_invalid_adapter_configuration_is_not_skipped(
@@ -309,26 +304,31 @@ def test_invalid_adapter_configuration_is_not_skipped(
         json.dumps({"account_id": "a", "bot_token": "t", "base_url": "http://plain.example"})
     )
     core = make_core(FakeGateway())
-    inputs = daemon.adapter_inputs(
-        process_config, state_dir=state_dir, clock=system_clock(), rng=system_rng()
-    )
+    inputs = daemon.adapter_inputs(state_dir=state_dir, clock=system_clock(), rng=system_rng())
     with pytest.raises(ValueError, match="qualified HTTPS namespace"):
-        daemon.load_adapters(core, plan_adapters(frozenset({"telegram", "feishu"})), inputs)
+        daemon.load_adapters(core, plan_adapters(frozenset({"telegram"})), inputs)
 
 
-@pytest.mark.parametrize("build", ["im_bridge_config", "telegram_config", "feishu_config"])
-def test_a_built_slice_carries_the_live_value_of_every_field(
-    build: str, process_config: ConfigBoot
-) -> None:
+def test_im_bridge_config_carries_the_live_values(process_config: ConfigBoot) -> None:
     process_config.set_field("im_disabled_adapters", ["weixin"])
     process_config.set_field("im_send_retry_delays", [0.5, 1.5])
-    process_config.set_field("telegram_owner_id", 4242)
-    process_config.set_field("feishu_app_id", "cli_x")
-    config = getattr(daemon, build)(process_config)
-    for field in dataclasses.fields(config):
-        flat: Any = process_config.get_field(field.name)
-        expected = tuple(cast(list[Any], flat)) if isinstance(flat, list) else flat
-        assert getattr(config, field.name) == expected
+    view = process_config.view
+    expected = ImBridgeConfig(
+        im_disabled_adapters=tuple(view.services.im_disabled_adapters),
+        im_send_retry_delays=tuple(view.services.im_send_retry_delays),
+        im_push_retry_backoff_seconds=view.services.im_push_retry_backoff_seconds,
+        im_push_retry_jitter_seconds=view.services.im_push_retry_jitter_seconds,
+        im_sse_read_timeout_seconds=view.services.im_sse_read_timeout_seconds,
+        im_bridge_timeline_window=view.services.im_bridge_timeline_window,
+        im_bridge_replay_messages=view.services.im_bridge_replay_messages,
+        im_bridge_notice_reply_window_seconds=view.services.im_bridge_notice_reply_window_seconds,
+        im_bridge_notice_open_limit=view.services.im_bridge_notice_open_limit,
+        im_push_health_channels=tuple(
+            channel for channel in view.services.im_push_health_channels if channel == "weixin"
+        ),
+        im_push_health_interval_seconds=view.services.im_push_health_interval_seconds,
+    )
+    assert daemon.im_bridge_config(process_config) == expected
 
 
 def test_the_gateway_client_gets_the_gateway_url_and_bearer_from_the_root() -> None:

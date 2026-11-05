@@ -240,31 +240,10 @@ Batches so far: the IM bridge daemon, then the events-maintenance and labeler da
 
 ### IM bridge
 
-The IM bridge daemon: three slices, 21 fields read across eight modules, all in one
-process (the gateway-side `services.entrypoints.im_bridge.daemon`), none read by another package.
-
-- `ImBridgeConfig` (retry delays, push backoff, SSE timeout, timeline and replay windows,
-  notice limits, disabled adapters), `TelegramCredentialsConfig` and
-  `FeishuCredentialsConfig` (credentials and poll timing, plus the replay window the
-  Feishu cursor needs) live in `services/entrypoints/im_bridge/config.py`. Field names are the flat
-  registry names. Secrets sit in their own slices, so the Telegram token is not in the
-  bridge core's type.
-- `services/entrypoints/im_bridge/daemon.py` is the composition root and the only module there that
-  reads `settings`. Its `im_bridge_config()`, `telegram_config()`, `feishu_config()` and
-  `gateway_client()` build the objects; `run()` hands `IMBridgeCore(config, gateway)` its
-  slice and its gateway client, and `_load_adapters` hands each adapter the slice it
-  names (Weixin takes none). The gateway URL and the cluster secret reach `GatewayClient`
-  as arguments from the root; the secret is not part of any slice.
-- The adapter fallbacks that swallowed a missing `settings.feishu` domain are gone: a
-  slice is always complete.
-- Tests build slices with `services/entrypoints/im_bridge/tests/slices.py` (the daemon's builders plus
-  `dataclasses.replace`) instead of patching `settings`; `test_im_bridge_daemon.py` pins
-  that each slice field equals the live flat field of the same name and that `run()` and
-  `_load_adapters` hand the slices down.
-- The gateway profile still lists the `telegram` and `feishu` domains, because the root
-  reads them. `telegram-send-file` keeps reading the bot token from the environment: exec
-  is fully trusted and shares the runner's OS user, so moving the token out of the skill
-  isolates nothing.
+The gateway-side IM daemon builds `ImBridgeConfig` from its `ConfigBoot` and
+passes it to the shared core. The retained Weixin adapter receives its state
+directory, clock and random generator. Telegram and Feishu native integrations
+are retired by the [2026-11-06 decision](../../../docs/history/2026-11-06/im-channel-retirement.md).
 
 ### Events maintenance and labeler
 

@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any, cast
 
 import psycopg
-import pytest
 from psycopg_pool import ConnectionPool
 
 from base.clock.tests.fakes import system_clock
@@ -91,7 +90,7 @@ class FakeAdapter:
         self, text: str, buttons: tuple[tuple[str, str], ...]
     ) -> tuple[str, PreparedOutboundSend]:
         return "owner", PreparedOutboundSend(
-            adapter_kind=OutboundAdapterKind.TELEGRAM,
+            adapter_kind=OutboundAdapterKind.WEIXIN,
             account_id="test-account",
             chunks=(OutboundChunk(text=text),),
             markdown=False,
@@ -150,7 +149,6 @@ def _bridge(
     )
     adapter = FakeAdapter()
     core.adapters["telegram"] = adapter  # type: ignore[assignment]
-    core.notice_bridge.initialize_poll()
     return core.notice_bridge, adapter
 
 
@@ -176,98 +174,12 @@ def _seed_notice(
     return int(nid)
 
 
-async def test_poll_pushes_new_notices_and_accepts_each(
-    pool: ConnectionPool, state_dir: Path, db_conn: psycopg.Connection
-) -> None:
-    async with owned_tasks() as _owned_tasks:
-        agent = create_agent(db_conn)
-        bridge, adapter = _bridge(pool, state_dir, FakeGateway(), tasks=_owned_tasks)
-        first = [_seed_notice(db_conn, agent, "A"), _seed_notice(db_conn, agent, "B")]
-
-        await bridge.poll_once()
-        for _ in range(2):
-            await _deliver(bridge)
-        assert len(adapter.sent) == 2  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-        assert "A" in adapter.sent[0][0]  # pyright: ignore[reportUnknownMemberType]
-        assert _accepted_ids(pool) == first
-        bridge._filters = {"min_priority": "P1", "agent": None}
-        second = [
-            _seed_notice(db_conn, agent, "low", prio="P3"),
-            _seed_notice(db_conn, agent, "decide"),
-        ]
-        await bridge.poll_once()
-        for _ in range(2):
-            await _deliver(bridge)
-        assert len(adapter.sent) == 4
-        assert _accepted_ids(pool) == [*first, *second]
-
-
 # meiva:note
 # The user's category switch decides a notification everywhere. A decision notice the
 # user switched off must not reach Telegram either — the bridge is a transport, not a
 # second policy — while acceptance still advances the poll cursor so the notice is not
 # re-examined on every round.
 # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-async def test_switched_off_decisions_are_accepted_but_not_pushed(
-    pool: ConnectionPool, state_dir: Path, db_conn: psycopg.Connection
-) -> None:
-    async with owned_tasks() as _owned_tasks:
-        with pool.connection() as conn:
-            conn.execute(
-                "INSERT INTO user_settings (key, value) VALUES (%s, %s) "
-                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
-                ("notifications.categories", '{"core.needs_input": false}'),
-            )
-        bridge, adapter = _bridge(pool, state_dir, FakeGateway(), tasks=_owned_tasks)
-        notice = _seed_notice(db_conn, create_agent(db_conn), "decide")
-
-        await bridge.poll_once()
-        await _deliver(bridge)
-
-        assert adapter.sent == []
-        assert _accepted_ids(pool) == [notice]
-        with pool.connection() as conn:
-            decision = conn.execute(
-                "SELECT decision FROM im_bridge_notice_acceptances WHERE notice_id = %s",
-                (notice,),
-            ).fetchone()
-        assert decision == ("filtered",)
-
-
-async def test_historical_fyi_is_filtered_even_with_needs_input_disabled(
-    pool: ConnectionPool, state_dir: Path, db_conn: psycopg.Connection
-) -> None:
-    async with owned_tasks() as _owned_tasks:
-        with pool.connection() as conn:
-            conn.execute(
-                "INSERT INTO user_settings (key, value) VALUES (%s, %s) "
-                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
-                ("notifications.categories", '{"core.needs_input": false}'),
-            )
-        bridge, adapter = _bridge(pool, state_dir, FakeGateway(), tasks=_owned_tasks)
-        notice = _seed_notice(db_conn, create_agent(db_conn), "just an fyi", require_response=False)
-
-        await bridge.poll_once()
-        await _deliver(bridge)
-
-        assert adapter.sent == []
-        assert _accepted_ids(pool) == [notice]
-
-
-async def test_filter_agent_restricts_pushes(
-    pool: ConnectionPool, state_dir: Path, db_conn: psycopg.Connection
-) -> None:
-    async with owned_tasks() as _owned_tasks:
-        bridge, adapter = _bridge(pool, state_dir, FakeGateway(), tasks=_owned_tasks)
-        wanted, other = create_agent(db_conn), create_agent(db_conn)
-        _seed_notice(db_conn, wanted, "from wanted")
-        _seed_notice(db_conn, other, "from other")
-        bridge._filters = {"min_priority": None, "agent": wanted}
-
-        await bridge.poll_once()
-        await _deliver(bridge)
-        assert len(adapter.sent) == 1
-        assert "from wanted" in adapter.sent[0][0]
 
 
 async def test_reply_mode_window_resolves_notice(pool: ConnectionPool, state_dir: Path) -> None:
@@ -324,23 +236,6 @@ async def test_reply_mode_cancel_and_expiry(pool: ConnectionPool, state_dir: Pat
         out = await bridge.handle_inbound("1", "hi")
         assert out is None
         assert gateway.resolved == []
-
-
-async def test_historical_fyi_callback_still_arms_reply_mode(
-    pool: ConnectionPool, state_dir: Path, db_conn: psycopg.Connection
-) -> None:
-    async with owned_tasks() as _owned_tasks:
-        gateway = FakeGateway()
-        bridge, _ = _bridge(pool, state_dir, gateway, tasks=_owned_tasks)
-
-        _seed_notice(db_conn, create_agent(db_conn), "FYI done", require_response=False)
-        await bridge.poll_once()
-
-        hint = await bridge.handle_callback("12345", "notice:reply:1:1")
-        assert hint is not None and "Reply mode" in hint
-        out = await bridge.handle_inbound("12345", "\u6536\u5230\uff0c\u8c22\u8c22")
-        assert out is not None
-        assert gateway.resolved == [(1, 1, "answer", "\u6536\u5230\uff0c\u8c22\u8c22")]
 
 
 async def test_reply_mode_drops_on_resolve_failure(pool: ConnectionPool, state_dir: Path) -> None:
@@ -402,11 +297,12 @@ async def test_read_dismiss_callbacks(pool: ConnectionPool, state_dir: Path) -> 
         assert gateway.resolved == [(8, 43, "dismiss", None)]
 
 
-async def test_list_queue_pushes_each_open_notice(
+async def test_list_queue_returns_each_open_notice_without_cross_channel_send(
     pool: ConnectionPool, state_dir: Path, db_conn: psycopg.Connection
 ) -> None:
-    """The queue view pushes every open notice (both kinds) with processing
-    buttons and returns a summary (Task #941)."""
+    # meiva:note
+    # The queue view pushes every open notice (both kinds) with processing
+    # buttons and returns a summary (Task #941).
     async with owned_tasks() as _owned_tasks:
         agent = create_agent(db_conn)
         _seed_notice(db_conn, agent, "A")
@@ -415,16 +311,9 @@ async def test_list_queue_pushes_each_open_notice(
 
         hint = await bridge.list_queue()
         assert hint is not None and "2 notices open" in hint
-        assert len(adapter.sent) == 2
-        assert "Queue 1/2" in adapter.sent[0][0]
-        # each row carries an action button
-        b0 = adapter.sent[0][2]
-        b1 = adapter.sent[1][2]
-        assert b0 is not None and b0[0][0] == "✏️ Reply"  # emoji-ok: button label
-        assert b1 is not None and b1[0][0] == "✏️ Reply"  # emoji-ok: button label
-        assert b1 is not None and b1[1][1].startswith("notice:dismiss:")
-        # queue button
-        assert b0 is not None and b0[-1][1] == "notice:list"
+        assert adapter.sent == []
+        assert "Queue 1/2" in hint and "Queue 2/2" in hint
+        assert "A" in hint and "B" in hint
 
 
 async def test_list_queue_empty(pool: ConnectionPool, state_dir: Path) -> None:
@@ -446,30 +335,8 @@ async def test_list_queue_callback(
 
         hint = await bridge.handle_callback("1", "notice:list")
         assert hint is not None
-        assert len(adapter.sent) == 1
-
-
-async def test_cmd_notice_filter_updates_and_persists(
-    pool: ConnectionPool, state_dir: Path
-) -> None:
-    async with owned_tasks() as _owned_tasks:
-        gateway = FakeGateway()
-        bridge, _ = _bridge(pool, state_dir, gateway, tasks=_owned_tasks)
-
-        out = bridge.cmd_notice("filter P1 agent 5")
-        assert '"min_priority": "P1"' in out
-        assert '"agent": 5' in out
-        assert (state_dir / "notice_filters.json").exists()
-        # restart: filter survives
-        bridge2 = NoticeBridge(
-            _bridge(pool, state_dir, gateway, tasks=_owned_tasks)[0].core,
-            im_bridge_config(),
-            state_dir=state_dir,
-            clock=system_clock(),
-            rng=system_rng(),
-        )
-        assert bridge2._filters["min_priority"] == "P1"
-        assert bridge2._filters["agent"] == 5
+        assert adapter.sent == []
+        assert "A" in hint
 
 
 # ── direct-DB reads (R3 door ④, decision 2) ───────────────────────────────
@@ -491,48 +358,7 @@ def _direct_bridge(
     )
     adapter = FakeAdapter()
     core.adapters["telegram"] = adapter  # type: ignore[assignment]
-    core.notice_bridge.poll_store.initialize_notice_poll()
     return core.notice_bridge, adapter
-
-
-def test_poll_reads_directly_from_db(
-    redis_url: str,
-    pool: ConnectionPool,
-    state_dir: Path,
-    db_conn: psycopg.Connection,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentityReader,
-) -> None:
-    from base.agents.tests.units import spawn_agent
-
-    agent_id = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
-    bridge, adapter = _direct_bridge(pool, state_dir)
-    nid = _seed_notice(
-        db_conn, agent_id, "direct db notice", require_response=True
-    )  # after the cutover is fixed
-    asyncio.run(bridge.poll_once())
-    asyncio.run(_deliver(bridge))
-    assert len(adapter.sent) == 1
-    assert "direct db notice" in adapter.sent[0][0]
-    assert _accepted_ids(pool) == [nid]
-
-    # Resolved notices stop being returned.
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agent_notices SET resolved_at = now(), resolution = 'dismissed' WHERE id = %s",
-            (nid,),
-        )
-    db_conn.commit()
-    asyncio.run(bridge.poll_once())
-    assert len(adapter.sent) == 1, "no re-delivery of resolved notices"
 
 
 def test_list_queue_reads_directly_from_db(
@@ -558,7 +384,8 @@ def test_list_queue_reads_directly_from_db(
     bridge, adapter = _direct_bridge(pool, state_dir)
     hint = asyncio.run(bridge.list_queue())
     assert hint is not None and "1 notices open" in hint
-    assert any("queue item" in s[0] for s in adapter.sent)
+    assert "queue item" in hint
+    assert adapter.sent == []
 
 
 def test_list_queue_limit_follows_config(
@@ -587,107 +414,5 @@ def test_list_queue_limit_follows_config(
     bridge, adapter = _direct_bridge(pool, state_dir, im_bridge_notice_open_limit=2)
     hint = asyncio.run(bridge.list_queue())
     assert hint is not None and "2 notices open" in hint
-    assert len(adapter.sent) == 2
-
-
-def test_unaccepted_notices_caps_at_display_default(
-    redis_url: str,
-    pool: ConnectionPool,
-    state_dir: Path,
-    db_conn: psycopg.Connection,
-    *,
-    model_catalog: ModelCatalog,
-    config_authority: ConfigAuthority,
-    database_gate: ProcessDbGate,
-    machine_identity: MachineIdentityReader,
-) -> None:
-    """One source for the live-read cap: the DB-direct twin resolves the same
-    display.notices_open_default_limit the gateway endpoint applies (task
-    #3696)."""
-    from base.agents.tests.units import spawn_agent
-
-    agent_id = spawn_agent(
-        catalog=model_catalog,
-        authority=config_authority,
-        database_gate=database_gate,
-        machine=machine_identity,
-    )
-    bridge, _adapter = _direct_bridge(pool, state_dir, notices_open_default_limit=2)
-    for i in range(3):
-        _seed_notice(
-            db_conn, agent_id, f"live item {i}", require_response=True
-        )  # after the cutover is fixed
-    rows = bridge._unaccepted_notices()
-    assert len(rows) == 2
-
-
-class _FlakyAdapter(FakeAdapter):
-    """Fails the first send_to_owner call, succeeds after."""
-
-    def __init__(self, fail_first: int = 1) -> None:
-        super().__init__()
-        self._failures_left = fail_first
-        self.failure = RuntimeError("telegram API down")
-
-    async def send_to_owner(
-        self,
-        text: str,
-        *,
-        markdown: bool = False,
-        buttons: list[tuple[str, str]] | None = None,
-    ) -> None:
-        if self._failures_left > 0:
-            self._failures_left -= 1
-            raise self.failure
-        await super().send_to_owner(text, markdown=markdown, buttons=buttons)
-
-
-async def test_poll_accepts_before_uncertain_send_and_never_retries(
-    pool: ConnectionPool, state_dir: Path, db_conn: psycopg.Connection
-) -> None:
-    async with owned_tasks() as _owned_tasks:
-        bridge, _ = _bridge(pool, state_dir, FakeGateway(), tasks=_owned_tasks)
-        agent = create_agent(db_conn)
-        notices = [_seed_notice(db_conn, agent, title) for title in ("A", "B", "C")]
-        flaky = _FlakyAdapter(fail_first=1)
-        bridge.core.adapters["telegram"] = flaky  # type: ignore[assignment]
-        await bridge.poll_once()
-        assert _accepted_ids(pool) == notices, "accepted means durable intent, not provider success"
-        assert flaky.sent == []
-        with pytest.raises(RuntimeError) as caught:
-            await _deliver(bridge)
-        assert caught.value is flaky.failure, "unknown send errors reach the service owner"
-        with pool.connection() as conn:
-            assert [
-                r[0]
-                for r in conn.execute("SELECT status FROM im_bridge_outbound_intents ORDER BY id")
-            ] == ["uncertain", "queued", "queued"]
-        for _ in range(2):
-            await _deliver(bridge)
-        assert len(flaky.sent) == 2
-        await bridge.poll_once()
-        await _deliver(bridge)
-        assert len(flaky.sent) == 2, "ambiguous first send is retained, never poll-replayed"
-        with pool.connection() as conn:
-            assert [
-                r[0]
-                for r in conn.execute("SELECT status FROM im_bridge_outbound_intents ORDER BY id")
-            ] == ["uncertain", "sent", "sent"]
-
-
-async def test_poll_holds_acceptance_when_adapter_absent(
-    pool: ConnectionPool, state_dir: Path, db_conn: psycopg.Connection
-) -> None:
-    """Regression (audit round 2, P1): with no telegram adapter registered,
-    every notice used to be consumed every 3s — all notices silently dropped.
-    Acceptance must hold instead."""
-    async with owned_tasks() as _owned_tasks:
-        bridge, _ = _bridge(pool, state_dir, FakeGateway(), tasks=_owned_tasks)
-        _seed_notice(db_conn, create_agent(db_conn), "A")
-        bridge.core.adapters.pop("telegram")
-
-        await bridge.poll_once()
-        assert _accepted_ids(pool) == []
-        # still held on the second round (and no exception)
-        await bridge.poll_once()
-        assert _accepted_ids(pool) == []
+    assert adapter.sent == []
+    assert hint.count("Queue ") == 2

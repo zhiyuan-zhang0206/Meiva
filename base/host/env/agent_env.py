@@ -57,7 +57,7 @@ _SESSION_DELIVERY_KEYS = frozenset(
 # A pty session's environment is the pty-sessions service's own environment plus the caller's
 # overlay, so every secret the service inherits reaches every shell child - a schedule script, an
 # agent shell, a watcher. Measured 2026-10-30 on the gateway home: a schedule script saw 107
-# MEIVA_* keys including the cluster secret, the Cloudflare token, the Feishu app secret and the
+# MEIVA_* keys including the cluster secret, the Cloudflare token, retired channel secrets and the
 # redis passwords, none of which any schedule job reads.
 #
 # Rule: a credential is read from the file that holds it, never carried in a child's environment.

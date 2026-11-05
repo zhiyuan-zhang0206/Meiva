@@ -40,17 +40,17 @@ async def test_emit_once_reports_age_and_pending_per_leg(loguru_records: LogReco
     store = _fake_store(
         {
             "telegram": (3, now - timedelta(seconds=125.0)),
-            "feishu": (0, now - timedelta(seconds=90.0)),
+            "weixin": (0, now - timedelta(seconds=90.0)),
         }
     )
-    config = im_bridge_config(im_push_health_channels=("telegram", "feishu"))
+    config = im_bridge_config(im_push_health_channels=("telegram", "weixin"))
 
     await emit_push_health_once(store, config, now=now)
 
     events = loguru_records.events("im_push_health")
     assert [(e["extra"]["channel"], e["extra"]["pending"]) for e in events] == [
         ("telegram", 3),
-        ("feishu", 0),
+        ("weixin", 0),
     ]
     assert [e["extra"]["last_ok_age_s"] for e in events] == [125.0, 90.0]
 
@@ -71,7 +71,7 @@ async def test_loop_samples_once_per_interval(
 ) -> None:
     store = IMOutboxStore(pool, rng=system_rng())
     config = im_bridge_config(
-        im_push_health_channels=("feishu",), im_push_health_interval_seconds=0.02
+        im_push_health_channels=("weixin",), im_push_health_interval_seconds=0.02
     )
     sampling = asyncio.create_task(push_health_loop(store, config, clock=system_clock()))
     try:
@@ -85,7 +85,7 @@ async def test_loop_samples_once_per_interval(
             await sampling
     events = loguru_records.events("im_push_health")
     assert len(events) >= 3
-    assert {event["extra"]["channel"] for event in events} == {"feishu"}
+    assert {event["extra"]["channel"] for event in events} == {"weixin"}
 
 
 def test_snapshot_counts_waiting_and_last_sent(pool: ConnectionPool) -> None:

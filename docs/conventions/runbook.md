@@ -363,8 +363,8 @@ each run it stays failed; Grafana rules do the rest: `meiva-ops-health-probe-war
 (`for: 3m`) and `meiva-ops-health-probe-error` (`for: 10m`) per check, and
 `meiva-ops-health-probe-silent` when no `health_probe_ran` reached Loki for 15 minutes
 (the probe stopped, or the event path did). A deploy window is silenced by the fleet
-update's silence, except disk pressure; `gateway_liveness` and the dead-man rule also
-reach Telegram directly, because the webhook cannot report a down gateway.
+update's silence, except disk pressure; all Grafana notifications now use the gateway webhook. The host sentinel submits
+through the existing agent message path and records failures locally.
 
 The OS job and CLI probe only observe. They do not invoke rollback,
 maintain release-policy failure counters, or promote pending code to known-good.
@@ -813,9 +813,8 @@ whether a restart is required — see
 | `JINA_API_KEY` | jina.ai -> API keys |
 | `WANDB_API_KEY` | wandb.ai -> Settings -> API keys |
 | `MEIVA_CF_API_TOKEN` | Cloudflare dashboard -> My Profile -> API Tokens |
-| `MEIVA_TELEGRAM_BOT_TOKEN` | Telegram `@BotFather` -> `/revoke` then `/token` |
 
-Not automated: each is a manual console visit, and several (Telegram) have no
+Not automated: each is a manual console visit, and several have no
 programmatic rotation API at all.
 
 ## Code version gate

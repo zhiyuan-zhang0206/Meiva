@@ -137,9 +137,7 @@ def test_build_registry_rejects_bad_capability() -> None:
     from base.config import config_registry
 
     with pytest.raises(RuntimeError, match="capability='gatway'"):
-        config_registry.validate_domain_models(
-            (("telegram", "Telegram", "TelegramSettings", "gatway"),)
-        )
+        config_registry.validate_domain_models((("alerts", "Alerts", "AlertsSettings", "gatway"),))
 
 
 def test_identity_fields_are_read_only() -> None:

@@ -51,14 +51,10 @@ class AlertWebhookInputs:
 
 # meiva:note
 # The credentials the rendered Grafana tree carries: the admin password when one is set and the
-# Telegram bot that gets the direct contact point (an empty token or owner 0 means no bot). The
-# password and the token never reach a repr, so a log line or a traceback that formats the value
-# never prints them.
+# webhook token. Neither credential reaches a repr.
 @dataclass(frozen=True)
 class GrafanaCredentials:
     admin_password: str | None = field(repr=False)
-    telegram_bot_token: str = field(repr=False)
-    telegram_owner_id: int
     webhook_token: str = field(default="", repr=False)
 
 

@@ -284,7 +284,7 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 | uid | Event | `for` | Severity | Replaces |
 |-----|-------|-------|----------|----------|
 | `meiva-ops-health-probe-warning` / `-error` | `health_probe_failing` per `attributes_check` | 3m / 10m | warning / error | the probe's time-graded owner alert |
-| `meiva-ops-health-probe-silent` | absent `health_probe_ran` for 15m | 0m | error | nothing: a stopped probe was silent (routes to Telegram too) |
+| `meiva-ops-health-probe-silent` | absent `health_probe_ran` for 15m | 0m | error | nothing: a stopped probe was silent  |
 | `meiva-ops-service-start-unready` | `service_start_unready` | 0m | warning | start-readiness alert rows |
 | `meiva-ops-boot-retries-exhausted` | `boot_retries_exhausted` | 0m | error | nothing: the boot job's endless retry never reported a permanent failure |
 | `meiva-ops-schedule-verify-failed` | `schedule_verify_failed` | 0m | error | the verify sweep's direct post |
@@ -297,12 +297,11 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 | `meiva-ops-impersonation-seal-stuck` / `-capture-failed` | `impersonation_event_log_incomplete` | 0s | warning | the impersonation event-log rows |
 | `meiva-ops-impersonation-notice-failed` | `impersonation_terminal_notice_failed` per lease | 0s | warning | the ended-lease notice's durable retry ledger (a failed single submission is now reported, not retried) |
 | `meiva-ops-im-push-failed` | `im_push_failed` (weixin, 2+ failures) | 0s | warning | the push watchdog's cross-channel alert and cooldown |
-| `meiva-ops-im-feishu-owner-seed-failed` | `im_feishu_owner_seed_failed` | 0s | warning | a direct owner message |
 | `meiva-ops-im-push-stall` | `im_push_health` per leg (`attributes_channel`; pending > 0, last delivery age > 900s) | 2m | warning | nothing: an outbound IM leg could stall with no alert (10-08: Telegram leg silent 54 min, 2 pushes stranded) |
 | `meiva-ops-delivery-stalled` | `delivery_stalled` per agent | 1m | warning | the deploy-window hold and settle grace |
 | `meiva-ops-delivery-stranded-wake` | `delivery_stranded_wake` per agent (inbound id in the summary) | 0s | warning | nothing: an automatic wake that revives an owner a user had just killed had no notification path (2026-10-25 review of #7066) |
 | `meiva-ops-db-pool-acquire-slow` | `db_pool_acquire_slow` per machine | 2m | warning | the per-host cooldown marker |
-| `meiva-ops-root-unit-restart-failed` / `-breaker-open` | `root_unit_failure_state` per `attributes_kind`, per machine and unit | 0m | error / critical | the root unit episode store and its posts; the breaker rule also routes to Telegram (a database outage takes the webhook's own ingest path down with it) |
+| `meiva-ops-root-unit-restart-failed` / `-breaker-open` | `root_unit_failure_state` per `attributes_kind`, per machine and unit | 0m | error / critical | the root unit episode store and its posts |
 | `meiva-ops-root-unit-not-revivable` | `root_unit_not_revivable` >1 in 2m | 0m | error | `terminal_escalate_rounds` |
 | `meiva-ops-root-unit-stop-escalated` | `root_unit_stop_escalated` >0 in 10m | 0m | error | nothing: a stop that outlived its window gave up silently and left a half-dead unit (2026-10-18) |
 | `meiva-ops-root-unit-unowned-alive` | `root_unit_unowned_alive` per machine and unit | 0m | error | nothing: a unit could read "state stopped / probe alive" for a day with every rule green (2026-10-20) |
@@ -312,7 +311,7 @@ and trailing window carry the debounce. A condition that stops resolves itself w
 | `meiva-ops-root-diagnostic-browser-reach` | `root_diagnostic` verdict `down` / `unavailable` / `port-taken`, >2 samples in 16m | 0m | warning | the per-probe consecutive-failure thresholds; its cadence (300s) is why one debounce covers both classes over ~10-15 minutes |
 | `meiva-ops-root-diagnostic-task-telemetry` | `root_diagnostic` verdict `down`, >1 hourly sample in 6h | 0m | warning | nothing: the daemon delivered over 100 reminder digests a day while a storage filter dropped every task_reminder_digest / task_escalation row (2026-10-03 → 10-25). Only `down` counts — an unreadable database is the recovery probe's finding, not this one |
 | `meiva-ops-alert-pipeline-watchdog` | Prometheus `vector(1)` — always firing, carries `notify_im: "false"` | 0s | warning | synthetic heartbeat: it exists only so R28 has something whose absence means something. Its route repeats every 5m and does not fall through, so it costs one webhook POST per period and no IM |
-| `meiva-ops-alert-pipeline-silent` | `time() - meiva_alerts_last_ingest_timestamp_seconds` > 900 (three watchdog periods) | 5m | error | nothing: a rotated webhook token or a misrouted contact point silences **every** rule at once, and no rule rode a path that could report it (2026-11-04). Routes straight to Telegram |
+| `meiva-ops-alert-pipeline-silent` | `time() - meiva_alerts_last_ingest_timestamp_seconds` > 900 (three watchdog periods) | 5m | error | nothing: a rotated webhook token or a misrouted contact point silences **every** rule at once, and no rule rode a path that could report it (2026-11-04). Routes to the gateway webhook |
 
 Unhealthy-for-3-minutes and unhealthy-for-10-minutes are two coexisting rules per condition
 (Grafana's file provisioning has no inhibition rules), so a long outage holds a warning and an
@@ -336,7 +335,7 @@ the silence looks exactly like a quiet night. Two rules close that hole and noth
 - `meiva-ops-alert-pipeline-silent` reads the gauge the ingest refreshes
   (`alerts_last_ingest_timestamp_seconds`, emitted by `gateway/alerts/router.py:ingest_alerts` on every
   accepted POST) and fires when it is older than 900 s — three missed periods — for 5 minutes. It routes
-  **straight to Telegram**, because the path it reports on is the one every other alert would have used.
+  to the gateway webhook. The outside-Grafana sentinel uses the existing agent message path.
 
 The judgment is on the *age of the last accepted ingest*, not on how many alerts fired: a quiet night
 cannot trip it and a broken token cannot hide behind one. The period (5 m) and the threshold (3 × 5 m)
@@ -356,11 +355,9 @@ Rules evaluate in Grafana and POST firing/resolved webhooks to the gateway's `PO
 (contact point and policy in `contact.yml`). The policy is the one place merging and repetition
 are decided: instances of one rule are one group (`group_by: [alertname]`, 30s wait, 5m
 interval, 4h repeat), critical skips the wait, and every other alert has an explicit route to the
-webhook. `attributes_check="gateway_liveness"` alerts, the probe's dead-man rule and an open unit
-circuit breaker (`metric="root_unit_restart_attempts_exhausted"`) also go straight to Telegram
-through Grafana's native notifier (bot token and owner chat id rendered by converge from the
-telegram settings), because the webhook cannot report a down gateway — and its ingest writes the
-alert row to Postgres, so it cannot report a stalled database either (2026-10-18).
+webhook. The direct Telegram contact point is retired; every rule uses the gateway webhook.
+The host sentinel retains a separate observation loop and agent-queue submission,
+but no external Bot API delivery path remains.
 
 The ingest stores each alert instance in `alerts` (deduped by fingerprint x starts_at, Alertmanager
 webhook shape) and fans firing notifications out through the im_bridge daemon (the only sanctioned

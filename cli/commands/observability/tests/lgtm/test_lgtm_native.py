@@ -180,9 +180,7 @@ def test_only_the_selected_backend_is_downloaded_and_its_siblings_are_left_alone
             lgtm_unit,
             repo,
             services=frozenset({"prometheus"}),
-            settings=lgtm_settings(
-                credentials=GrafanaCredentials("never-rendered", "bot-token", 7)
-            ),
+            settings=lgtm_settings(credentials=GrafanaCredentials("never-rendered")),
             database=operator_database,
         )
 
@@ -190,7 +188,6 @@ def test_only_the_selected_backend_is_downloaded_and_its_siblings_are_left_alone
     assert (lgtm_unit.native / "bin/prometheus").is_file()
     assert not (lgtm_unit.native / "bin/loki").exists()
     assert not (lgtm_unit.native / "grafana/admin_password").exists()
-    assert not (lgtm_unit.native / "grafana/telegram.env").exists()
 
 
 def test_a_selection_naming_no_backend_or_a_foreign_service_is_refused(
@@ -217,7 +214,7 @@ def test_a_platform_without_pinned_binaries_is_refused_before_anything_is_writte
     assert not lgtm_unit.home.exists()
 
 
-def test_a_grafana_password_and_a_telegram_bot_are_written_owner_only_with_grafana(
+def test_a_grafana_password_is_written_owner_only_with_grafana(
     db_url: str, lgtm_unit: LgtmUnit, operator_database: DatabaseFactory
 ) -> None:
     lgtm_unit.mark_current("darwin", "arm64")
@@ -226,33 +223,13 @@ def test_a_grafana_password_and_a_telegram_bot_are_written_owner_only_with_grafa
     ensure(
         lgtm_unit,
         REPO_ROOT,
-        settings=lgtm_settings(
-            credentials=GrafanaCredentials("fake-key-for-test", "fake-bot-token-for-test", 42)
-        ),
+        settings=lgtm_settings(credentials=GrafanaCredentials("fake-key-for-test")),
         database=operator_database,
     )
 
     credential = lgtm_unit.native / "grafana/admin_password"
     assert credential.read_text(encoding="utf-8") == "fake-key-for-test\n"
     assert credential.stat().st_mode & 0o777 == 0o600
-    env_file = lgtm_unit.native / "grafana/telegram.env"
-    assert "TELEGRAM_CHAT_ID=42" in env_file.read_text(encoding="utf-8")
-    assert env_file.stat().st_mode & 0o777 == 0o600
-
-
-def test_a_later_pass_without_a_bot_removes_its_credential_file(
-    db_url: str, lgtm_unit: LgtmUnit, operator_database: DatabaseFactory
-) -> None:
-    lgtm_unit.mark_current("darwin", "arm64")
-    install_loki_stub(lgtm_unit)
-    with_bot = lgtm_settings(credentials=GrafanaCredentials(None, "fake-bot-token-for-test", 42))
-    ensure(lgtm_unit, REPO_ROOT, settings=with_bot, database=operator_database)
-    assert (lgtm_unit.native / "grafana/telegram.env").exists()
-
-    ensure(lgtm_unit, REPO_ROOT, database=operator_database)
-
-    assert not (lgtm_unit.native / "grafana/telegram.env").exists()
-    assert not (lgtm_unit.native / "grafana/admin_password").exists()
 
 
 def test_a_loki_config_the_pinned_parser_rejects_blocks_preparation(
@@ -583,3 +560,15 @@ def test_an_unset_storage_root_is_this_homes_own_data_directory(tmp_path: Path) 
 def test_another_users_home_in_the_storage_root_is_refused(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="names another user's home"):
         lgtm_native.storage_root("~someone/lgtm", home=tmp_path, user_home=tmp_path)
+
+
+def test_converge_removes_retired_generated_bot_credentials(
+    db_url: str, lgtm_unit: LgtmUnit, operator_database: DatabaseFactory
+) -> None:
+    lgtm_unit.mark_current("darwin", "arm64")
+    install_loki_stub(lgtm_unit)
+    retired = lgtm_unit.native / "grafana/telegram.env"
+    retired.parent.mkdir(parents=True, exist_ok=True)
+    retired.write_text("retired-test-value\n")
+    ensure(lgtm_unit, REPO_ROOT, database=operator_database)
+    assert not retired.exists()

@@ -9,7 +9,6 @@ if TYPE_CHECKING:
         DaemonSettings,
         DataPlaneSettings,
         DisplaySettings,
-        FeishuSettings,
         GatewaySettings,
         GeneralSettings,
         LmSettings,
@@ -17,7 +16,6 @@ if TYPE_CHECKING:
         PackagesSettings,
         SandboxSettings,
         ServiceSettings,
-        TelegramSettings,
         ToUserSettings,
         TransferSettings,
         WalgSettings,
@@ -50,7 +48,5 @@ class SettingsDomains:
     observability: ObservabilitySettings
     display: DisplaySettings
     packages: PackagesSettings
-    feishu: FeishuSettings
-    telegram: TelegramSettings
     walg: WalgSettings
     general: GeneralSettings

@@ -62,7 +62,7 @@ class RecordingAdapter(IMAdapter):
 
     async def prepare_timeline(self, text: str) -> PreparedOutboundSend:
         return PreparedOutboundSend(
-            adapter_kind=OutboundAdapterKind.TELEGRAM,
+            adapter_kind=OutboundAdapterKind.WEIXIN,
             account_id=self.account,
             chunks=(OutboundChunk(text=text),),
             markdown=False,
@@ -109,7 +109,7 @@ def candidate(
             kind=OutboundSourceKind.MESSAGE, identity=f"persisted-{index}", block_idx=0
         ),
         prepared=PreparedOutboundSend(
-            adapter_kind=OutboundAdapterKind.TELEGRAM,
+            adapter_kind=OutboundAdapterKind.WEIXIN,
             account_id=account,
             chunks=(OutboundChunk(text=text),),
             markdown=False,

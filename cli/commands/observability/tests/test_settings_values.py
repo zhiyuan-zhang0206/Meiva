@@ -49,8 +49,6 @@ def test_importing_the_readers_does_not_build_the_eager_configuration(tmp_path: 
 def test_the_native_lgtm_settings_are_read_from_one_owner(command_runtime: CommandRuntime) -> None:
     config = command_runtime.config
     config.set_field("grafana_admin_password", SecretStr(PASSWORD))
-    config.set_field("telegram_bot_token", BOT_TOKEN)
-    config.set_field("telegram_owner_id", 42)
     config.set_field("gateway_url", "https://gateway.example")
     config.set_field("gateway_port", 8123)
     config.set_field("lgtm_native_download_attempts", 7)
@@ -60,7 +58,7 @@ def test_the_native_lgtm_settings_are_read_from_one_owner(command_runtime: Comma
     assert settings.observability == observability_config_from_boot(config)
     assert settings.webhook.gateway_url == "https://gateway.example"
     assert settings.webhook.gateway_port == 8123
-    assert settings.credentials == GrafanaCredentials(PASSWORD, BOT_TOKEN, 42)
+    assert settings.credentials == GrafanaCredentials(PASSWORD)
     assert settings.download.attempts == 7
 
 
@@ -77,7 +75,7 @@ def test_the_grafana_password_is_read_out_of_its_secret_wrapper_at_the_boundary(
 
 
 def test_no_secret_of_the_settings_reaches_a_repr() -> None:
-    credentials = GrafanaCredentials(PASSWORD, BOT_TOKEN, 42)
+    credentials = GrafanaCredentials(PASSWORD)
     plane = DataPlaneInputs(
         db_url=f"postgresql://{LOGIN}@127.0.0.1:5433/meiva",
         redis_url=f"redis://{LOGIN}@127.0.0.1:6380/0",

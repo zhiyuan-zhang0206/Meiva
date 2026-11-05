@@ -91,18 +91,3 @@ class TimelineAcceptance(NamedTuple):
     watermark: PushWatermark | None
     blocked: bool = False
     selected_agent_id: int | None = None
-
-
-class NoticePollDecision(StrEnum):
-    QUEUED = "queued"
-    FILTERED = "filtered"
-
-
-class NoticePollImportReason(StrEnum):
-    NO_HISTORY = "no_history"
-    LEGACY_HISTORY_UNKNOWN = "legacy_history_unknown"
-
-
-class NoticePollReceipt(NamedTuple):
-    decision: NoticePollDecision
-    intent_ids: tuple[int, ...]

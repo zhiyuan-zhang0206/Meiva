@@ -74,8 +74,6 @@ def test_gateway_profile_excludes_agent_domains() -> None:
         assert "has_domain" in str(exc.value)
     for domain in (
         "lm",
-        "telegram",
-        "feishu",
         "data_plane",
         "services",
         "daemon",
@@ -103,7 +101,7 @@ def test_agent_profile_domains() -> None:
         "daemon",
     ):
         assert s.has_domain(domain), domain
-    for domain in ("alerts", "telegram", "feishu"):
+    for domain in "alerts":
         assert not s.has_domain(domain), domain
         with pytest.raises(AttributeError):
             getattr(s, domain)
@@ -148,7 +146,7 @@ def test_runner_profile_domains() -> None:
         "observability",
     ):
         assert s.has_domain(domain), domain
-    for domain in ("agent", "web", "alerts", "telegram", "feishu"):
+    for domain in ("agent", "web", "alerts"):
         assert not s.has_domain(domain), domain
         with pytest.raises(AttributeError):
             getattr(s, domain)
@@ -237,13 +235,11 @@ def test_memory_backend_switch_fields_require_gateway_restart() -> None:
 
 
 def test_gateway_consumed_fields_declare_gateway_restart() -> None:
-    from base.config.domains.channels.feishu import FeishuSettings
-    from base.config.domains.channels.telegram import TelegramSettings
     from base.config.domains.lm import LmSettings
     from base.config.domains.services.settings import ServiceSettings
     from base.config.profiles import PROCESS_PROFILES
 
-    for domain in ("services", "telegram", "feishu", "lm"):
+    for domain in ("services", "lm"):
         assert domain in PROCESS_PROFILES["gateway"]
 
     by_model = {
@@ -253,18 +249,6 @@ def test_gateway_consumed_fields_declare_gateway_restart() -> None:
             "im_disabled_adapters",
             "im_send_retry_delays",
             "im_sse_read_timeout_seconds",
-        ),
-        TelegramSettings: (
-            "telegram_bot_token",
-            "telegram_owner_id",
-            "telegram_poll_timeout_seconds",
-            "telegram_reconnect_base_delay_seconds",
-            "telegram_reconnect_max_delay_seconds",
-        ),
-        FeishuSettings: (
-            "feishu_app_id",
-            "feishu_app_secret",
-            "feishu_rest_timeout_seconds",
         ),
         LmSettings: (
             "labeler_model",

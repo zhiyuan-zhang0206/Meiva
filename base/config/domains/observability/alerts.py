@@ -48,7 +48,7 @@ class AlertsSettings(EnvSettings):
         alias="MEIVA_ALERTS_IM_NOTIFY_ENABLED",
         description=(
             "Send firing/resolved alert notifications to the user's connected "
-            "IM channels (Telegram / WeChat / Feishu via the im_bridge daemon). "
+            "IM channels (Weixin via the im_bridge daemon). "
             "Disable to keep the alerts store + UI only."
         ),
         json_schema_extra={

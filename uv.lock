@@ -1583,22 +1583,6 @@ wheels = [
 ]
 
 [[package]]
-name = "lark-oapi"
-version = "1.7.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "httpx" },
-    { name = "pycryptodome" },
-    { name = "requests" },
-    { name = "requests-toolbelt" },
-    { name = "websockets" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/8f/5f/a0cc291039501fae117602074006508c17d6c9c83f1daa61b8d029004662/lark_oapi-1.7.3.tar.gz", hash = "sha256:e532e57fa295a1cc10e3432191f80638a082a190dc678cb2eddb6de301ff3573", size = 2346519, upload-time = "2026-08-19T09:27:42.208Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/7c/65/91961331ba56308101cb932d446bd1b80e7d23234e498cefc6384ca04018/lark_oapi-1.7.3-py3-none-any.whl", hash = "sha256:c91f00087b7977dc9059ab492e8fe435e1a873863dca1d4e660d2be5b801e4cd", size = 7708570, upload-time = "2026-08-19T09:27:33.078Z" },
-]
-
-[[package]]
 name = "libcst"
 version = "1.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1972,7 +1956,6 @@ dependencies = [
     { name = "langgraph" },
     { name = "langgraph-checkpoint" },
     { name = "langgraph-checkpoint-postgres" },
-    { name = "lark-oapi" },
     { name = "loguru" },
     { name = "markdown-it-py" },
     { name = "mcp" },
@@ -2032,7 +2015,6 @@ requires-dist = [
     { name = "langgraph", specifier = ">=0.3" },
     { name = "langgraph-checkpoint", specifier = ">=4.3" },
     { name = "langgraph-checkpoint-postgres", specifier = ">=3.1.3,<3.2" },
-    { name = "lark-oapi", specifier = ">=1.7.1" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "markdown-it-py", specifier = ">=4.0" },
     { name = "mcp", specifier = ">=2.0.0,<3" },

@@ -1,26 +1,26 @@
-"""Route service stop signals through cleanup, then leave without thread joins.
-
-Normal stop requests SIGTERM, which becomes KeyboardInterrupt, matching the
-daemon's existing asyncio.run()/finally cleanup. Normal stop waits for actual
-completion and reports an incomplete stop on timeout; only an explicit force
-request interrupts the remaining resources.
-
-Launchers exec into the daemon before direct SIGTERM delivery. SIGINT keeps
-Python's existing handler.
-
-Where present, the repeated-SIGTERM guard stays at each daemon's call site.
-The daemons with an explicit drain cancel and await remaining loop tasks so
-``run()``'s cleanup can finish, then call ``base.host.exit_codes.hard_exit``, which
-leaves without joining threads (see its docstring for why the runner is not closed).
-
-The in-flight work varies: agent-host recorders, delivery recovery, Feishu
-calls, heartbeat grading, page reconciliation, memory search loading, indexer
-embedding, event maintenance, and watchdog checks all use threads. Labeler can
-use the default executor for DNS even though it declares no long executor job;
-backup's child-process dump has no long executor job. Their ``run()`` cleanup
-handles owned resources before exit; unfinished reconciliation is re-derived on
-restart and indexer failures stay dirty on disk.
-"""
+# meiva:note
+# Route service stop signals through cleanup, then leave without thread joins.
+#
+# Normal stop requests SIGTERM, which becomes KeyboardInterrupt, matching the
+# daemon's existing asyncio.run()/finally cleanup. Normal stop waits for actual
+# completion and reports an incomplete stop on timeout; only an explicit force
+# request interrupts the remaining resources.
+#
+# Launchers exec into the daemon before direct SIGTERM delivery. SIGINT keeps
+# Python's existing handler.
+#
+# Where present, the repeated-SIGTERM guard stays at each daemon's call site.
+# The daemons with an explicit drain cancel and await remaining loop tasks so
+# ``run()``'s cleanup can finish, then call ``base.host.exit_codes.hard_exit``, which
+# leaves without joining threads (see its docstring for why the runner is not closed).
+#
+# The in-flight work varies: agent-host recorders, delivery recovery, adapter
+# calls, heartbeat grading, page reconciliation, memory search loading, indexer
+# embedding, event maintenance, and watchdog checks all use threads. Labeler can
+# use the default executor for DNS even though it declares no long executor job;
+# backup's child-process dump has no long executor job. Their ``run()`` cleanup
+# handles owned resources before exit; unfinished reconciliation is re-derived on
+# restart and indexer failures stay dirty on disk.
 
 from __future__ import annotations
 

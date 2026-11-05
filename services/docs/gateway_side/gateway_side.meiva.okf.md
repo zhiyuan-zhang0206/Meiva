@@ -18,7 +18,7 @@ Source of truth = services in `build_services()` of `services/supervision/roster
 | Service | Responsibility | File |
 |---------|----------------|------|
 | heartbeat | Idle agent heartbeat wake-up | [[heartbeat.meiva.okf.md]] |
-| im-bridge | **Product frontend** — every IM channel adapter (Telegram / WeChat / Feishu), dialog push + commands | [[im_bridge.meiva.okf.md]] |
+| im-bridge | **Product frontend** — every IM channel adapter (Weixin), dialog push + commands | [[im_bridge.meiva.okf.md]] |
 | delivery-watchdog | Stall alerting + stranded-owner wake fallback + stale-inbound dead-letter sweeps | [[delivery_watchdog.meiva.okf.md]] |
 | ttl-reaper | Wall-clock deadline enforcement: expired pages / persistent shells / browser sessions / notices / impersonation leases, lifecycle-pointer scans, fire-log prune | [[ttl_reaper.meiva.okf.md]] |
 | schedule-manager | Keeps one resident session alive per enabled schedule (reconcile + crash backoff/breaker, API sync requests) | [[schedule_manager.meiva.okf.md]] |

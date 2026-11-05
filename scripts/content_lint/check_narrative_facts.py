@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
-"""check_narrative_facts.py — narrative-facts verifier (audit round-2 E12/P1-2).
-
-check_doc_references.py validates that docs point at things that exist
-(links, CLI flags). It cannot see that a doc's *prose* describes the code
-that is actually there. This script adds three narrative-fact checks, each
-extracted from the code and asserted against the doc that owns the fact:
-
-  A. skill catalog  — every slug-like skill name in docs/skills/skills.meiva.okf.md
-     functional-group rows must resolve under meiva_builtins/skills/ or
-     meiva_builtins/plugins/ (catches a removed skill still listed — the
-     2026-08-03 telegram residual class).
-  B. IM command set — every `/command` route in services/entrypoints/im_bridge/core.py
-     must appear in the "Command set" line of
-     services/docs/gateway_side/im_bridge/im_bridge.meiva.okf.md (catches the 8/2-8/6 drift
-     class: /spawn /commands /notice shipped, doc listed four commands).
-  C. IM channels    — every adapter in services/entrypoints/im_bridge/adapters/ must be
-     mentioned in im_bridge.meiva.okf.md (channel aliases: weixin/wechat,
-     feishu/lark). Catches "three channels" narrative after convergence.
-
-Facts are declared once in code; the docs are views and this script is the
-freshness check. Run from the repo root; wired into pre-commit.
-"""
+# meiva:note
+# check_narrative_facts.py — narrative-facts verifier (audit round-2 E12/P1-2).
+#
+# check_doc_references.py validates that docs point at things that exist
+# (links, CLI flags). It cannot see that a doc's *prose* describes the code
+# that is actually there. This script adds three narrative-fact checks, each
+# extracted from the code and asserted against the doc that owns the fact:
+#
+#   A. skill catalog  — every slug-like skill name in docs/skills/skills.meiva.okf.md
+#      functional-group rows must resolve under meiva_builtins/skills/ or
+#      meiva_builtins/plugins/ (catches a removed skill still listed — the
+#      2026-08-03 telegram residual class).
+#   B. IM command set — every `/command` route in services/entrypoints/im_bridge/core.py
+#      must appear in the "Command set" line of
+#      services/docs/gateway_side/im_bridge/im_bridge.meiva.okf.md (catches the 8/2-8/6 drift
+#      class: /spawn /commands /notice shipped, doc listed four commands).
+#   C. IM channels    — every adapter in services/entrypoints/im_bridge/adapters/ must be
+#      mentioned in im_bridge.meiva.okf.md (channel aliases: weixin/wechat).
+#      Catches stale channel-count narrative after convergence.
+#
+# Facts are declared once in code; the docs are views and this script is the
+# freshness check. Run from the repo root; wired into pre-commit.
 
 from __future__ import annotations
 
@@ -32,7 +32,6 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 SLUG = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 CHANNEL_ALIASES = {
     "weixin": ("weixin", "wechat"),
-    "feishu": ("feishu", "lark"),
 }
 
 

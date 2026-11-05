@@ -33,7 +33,7 @@
     "config-security": "安全与密钥",
     "config-general": "显示与常规",
     "config-observability": "可观测性",
-    "config-web": "Web 与 Telegram",
+    "config-web": "Web",
     "config-services": "服务",
     "config-health": "健康检查",
     "display": "显示",

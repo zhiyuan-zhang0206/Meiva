@@ -123,15 +123,13 @@ def _alert_webhook_inputs(boot: ConfigBoot) -> AlertWebhookInputs:
 
 # meiva:note
 # The Grafana admin password (when configured, read out of its secret wrapper here and nowhere
-# else) and the Telegram bot of this home.
+# else) and its alert webhook token.
 def _grafana_credentials(boot: ConfigBoot) -> GrafanaCredentials:
     view = boot.view
     password = view.alerts.grafana_admin_password
     webhook = view.alerts.webhook_token
     return GrafanaCredentials(
         admin_password=None if password is None else password.get_secret_value(),
-        telegram_bot_token=view.telegram.telegram_bot_token,
-        telegram_owner_id=view.telegram.telegram_owner_id,
         webhook_token="" if webhook is None else webhook.get_secret_value(),
     )
 
