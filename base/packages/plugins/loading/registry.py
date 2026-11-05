@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -32,6 +33,22 @@ FACE_KEYS: dict[str, tuple[str, ...]] = {
 }
 
 
+# meiva:note
+# One plugin as this process loaded it: what it declared, and which faces produced that. `faces` is the
+# gate's scope; a face the caller asked for but this process never imported (a child loads surfaces
+# only) contributes nothing, so the gate judges a plugin only on the faces whose declaration it sees.
+@dataclass(frozen=True)
+class PluginDeclaration:
+    name: str
+    plugin_dir: Path
+    contributions: PluginContributions
+    faces: tuple[str, ...]
+
+    @property
+    def keys(self) -> tuple[str, ...]:
+        return tuple(key for face in self.faces for key in FACE_KEYS.get(face, ()))
+
+
 def _declared(plugin: str, face: str, contribute: object) -> PluginContributions:
     if not callable(contribute):
         raise TypeError(f"{plugin}.{face}: contribute is not callable")
@@ -45,12 +62,17 @@ def _declared(plugin: str, face: str, contribute: object) -> PluginContributions
 
 
 # meiva:link base/packages/plugins/docs/runtime-contributions.meiva.okf.md
+# meiva:note
+# Declare each enabled plugin from the faces of `faces` this process has already imported. A face is
+# listed only when its module is present and its `contribute()` ran, so the answer is what this process
+# can actually see, not what the caller asked for.
 def declarations(
     faces: Sequence[str] = ALL_FACES, report: load_report.Reporter | None = None, *, home: Path
-) -> list[tuple[str, Path, PluginContributions]]:
-    found: list[tuple[str, Path, PluginContributions]] = []
+) -> list[PluginDeclaration]:
+    found: list[PluginDeclaration] = []
     for name, plugin_dir in enabled_plugin_dirs(report, home=home):
         merged: PluginContributions | None = None
+        loaded: list[str] = []
         try:
             load_manifest(plugin_dir)
             for face in faces:
@@ -60,11 +82,12 @@ def declarations(
                     continue
                 declared = _declared(name, face, contribute)
                 merged = declared if merged is None else merged.merged(declared)
+                loaded.append(face)
         except Exception as exc:
             load_report.reporter(report)(name, exc)
             continue
         if merged is not None:
-            found.append((name, plugin_dir, merged))
+            found.append(PluginDeclaration(name, plugin_dir, merged, tuple(loaded)))
     return found
 
 
@@ -89,6 +112,10 @@ def loaded_state_classes() -> frozenset[type[BaseModel]]:
 
 
 # meiva:link base/packages/plugins/docs/runtime-contributions.meiva.okf.md
+# meiva:note
+# Admit the enabled plugins whose manifest agrees with the faces this process loaded. Each plugin is
+# judged against its own faces alone (`PluginDeclaration.keys`), so asking for every face does not make
+# a process gate a face it never imported.
 def build_registry(
     faces: Sequence[str] = ALL_FACES,
     report: load_report.Reporter | None = None,
@@ -96,9 +123,13 @@ def build_registry(
     validate_state: StateGate | None = None,
     home: Path,
 ) -> ExtensionRegistry:
-    keys = tuple(key for face in faces for key in FACE_KEYS.get(face, ()))
     admitted: list[tuple[str, PluginContributions]] = []
-    for name, plugin_dir, contributions in declarations(faces, report, home=home):
+    for declaration in declarations(faces, report, home=home):
+        name, plugin_dir, contributions = (
+            declaration.name,
+            declaration.plugin_dir,
+            declaration.contributions,
+        )
         if contributions.state and validate_state is None:
             raise RuntimeError(
                 f"plugin {name!r} declares state classes but this load supplied no state gate "
@@ -107,7 +138,7 @@ def build_registry(
         try:
             if contributions.state and validate_state is not None:
                 validate_state(ExtensionRegistry(((name, contributions),)))
-            check_manifest(name, plugin_dir, contributions, keys)
+            check_manifest(name, plugin_dir, contributions, declaration.keys)
         except Exception as exc:
             load_report.reporter(report)(name, exc)
             continue

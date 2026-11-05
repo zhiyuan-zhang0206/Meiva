@@ -448,7 +448,7 @@ def test_a_plugin_whose_manifest_and_contribute_disagree_on_hooks_is_excluded(
     assert name == "gate_bad"
     assert isinstance(exc, ContributionMismatch)
     assert problem in str(exc)
-    assert "gate_bad" in {declared for declared, _dir, _c in declarations(home=unit_home)}
+    assert "gate_bad" in {declaration.name for declaration in declarations(home=unit_home)}
 
 
 @pytest.mark.parametrize(
