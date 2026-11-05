@@ -87,3 +87,22 @@ def test_stop_collects_refresh_boundary_failure(tmp_path: Path) -> None:
         owner.stop()
     assert caught.value is original
     assert worker.error is original and not worker.thread.is_alive()
+
+
+# meiva:note
+# A source's repr reaches logs: loguru renders a failing line's variables, and the
+# owner's repr carries this object. The environment must not be part of it - on
+# 2026-11-05 a gateway outage logged `SamplingSource(env=environ({...}))`, i.e. the
+# whole process environment including `MEIVA_DB_URL`, into an agent's shell log.
+def test_source_repr_omits_environment_values(tmp_path: Path) -> None:
+    source = SamplingSource(
+        env={"MEIVA_DB_URL": "postgresql://user:canary-password@host:5432/db"},
+        env_path=tmp_path / ".env",
+    )
+
+    rendered = repr(source)
+
+    assert "canary-password" not in rendered
+    assert "MEIVA_DB_URL" not in rendered
+    assert "env_path" in rendered
+    assert source.env["MEIVA_DB_URL"].endswith("/db")
