@@ -128,7 +128,7 @@ class TestScopeDerivationRules:
         }
         assert not (NETWORK_PROXY_KEYS & set(child_env(direct)))
         # meiva:note
-        # The family's single reader (the Feishu ws handshake asks it): any
+        # The family's single reader (adapter handshakes can ask it): any
         # non-empty proxy key, either spelling.
         assert network_proxy_configured(proxied) is True
         assert network_proxy_configured(direct) is False

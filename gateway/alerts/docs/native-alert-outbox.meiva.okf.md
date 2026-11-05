@@ -34,9 +34,7 @@ rejected. A 404 from a daemon that lacks the route is a hold, never fallback to 
 Errors log safe classification, not URLs, credentials or context tokens.
 
 `AlertOutboundBridge` resolves all loaded adapters' current owner/account/rendering
-without sending. Telegram uses configured owner plus authenticated bot ID,
-Weixin the QR-login user plus existing account namespace, Feishu the last known
-p2p open ID plus configured app ID. At least one owner must qualify. A receipt
+without sending. Weixin the QR-login user plus existing account namespace. At least one owner must qualify. A receipt
 freezes the available recipient subset and explicit unavailable channel/account
 (where known)/reason decisions. Unavailable channels carry no fabricated intent.
 One transaction commits that receipt and every available shared outbound intent.

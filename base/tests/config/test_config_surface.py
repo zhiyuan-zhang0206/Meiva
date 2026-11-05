@@ -124,15 +124,16 @@ def _disabled_adapters_from_env(value: str | None = None) -> list[str]:
 
 
 def test_disabled_adapters_accept_comma_separated_env() -> None:
-    """The natural .env spelling — "weixin,feishu" — parses into the list."""
-    assert _disabled_adapters_from_env("weixin,feishu") == ["weixin", "feishu"]
+    # meiva:note
+    # The natural .env spelling — "weixin,retired-channel" — parses into the list.
+    assert _disabled_adapters_from_env("weixin,retired-channel") == ["weixin", "retired-channel"]
 
 
 def test_disabled_adapters_accept_json_array_env() -> None:
     """The JSON-array spelling works too."""
-    assert _disabled_adapters_from_env('["weixin", "feishu"]') == [
+    assert _disabled_adapters_from_env('["weixin", "retired-channel"]') == [
         "weixin",
-        "feishu",
+        "retired-channel",
     ]
 
 

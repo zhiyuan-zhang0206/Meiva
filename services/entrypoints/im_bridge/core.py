@@ -125,7 +125,7 @@ class IMBridgeCore(
         self.cursor_store = CursorStore(db_pool)
         self.outbound_store = IMOutboxStore(db_pool, rng=rng)
         self._notice_bridge: notice_bridge.NoticeBridge = notice_bridge.NoticeBridge(
-            self, config, db_pool=db_pool, state_dir=state_dir, clock=clock, rng=rng
+            self, config, db_pool=db_pool, clock=clock, rng=rng
         )
         self.adapters: dict[str, IMAdapter] = {}
         self.outbound_worker = IMOutboxWorker(

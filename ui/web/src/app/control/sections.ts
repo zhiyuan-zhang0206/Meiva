@@ -80,7 +80,7 @@ export const CONTROL_SECTIONS: ControlSectionDef[] = [
       { id: "config-security", label: "Security & secrets", labelKey: "config-security" },
       { id: "config-general", label: "Display & general", labelKey: "config-general" },
       { id: "config-observability", label: "Observability", labelKey: "config-observability" },
-      { id: "config-web", label: "Web & Telegram", labelKey: "config-web" },
+      { id: "config-web", label: "Web", labelKey: "config-web" },
       { id: "config-services", label: "Services", labelKey: "config-services" },
       { id: "config-health", label: "Health probes", labelKey: "config-health" },
     ],

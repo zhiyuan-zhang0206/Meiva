@@ -42,7 +42,6 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.host.db_authority.admission import admission_inputs
-from base.host.env.registry import network_proxy_configured
 from base.host.exit_codes import hard_exit
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.native_process.code_version import CodeVersion
@@ -53,9 +52,7 @@ from base.telemetry.process_logging import init_gateway_process
 from services.entrypoints.im_bridge.adapters.run_plan import AdapterPlan, exit_code, plan_adapters
 from services.entrypoints.im_bridge.alert_outbound import AlertOutboundBridge
 from services.entrypoints.im_bridge.config import (
-    FeishuCredentialsConfig,
     ImBridgeConfig,
-    TelegramCredentialsConfig,
     state_dir_of,
 )
 from services.entrypoints.im_bridge.core import IMBridgeCore
@@ -82,7 +79,6 @@ _LIVENESS_TIMEOUT_S = 120.0
 @dataclass(frozen=True)
 class DaemonTimings:
     liveness_beat_s: float = 30.0
-    notice_poll_s: float = 3.0
     outbound_round_s: float = 3.0
 
 
@@ -142,34 +138,12 @@ def im_bridge_config(config: ConfigBoot) -> ImBridgeConfig:
         im_bridge_replay_messages=view.services.im_bridge_replay_messages,
         im_bridge_notice_reply_window_seconds=view.services.im_bridge_notice_reply_window_seconds,
         im_bridge_notice_open_limit=view.services.im_bridge_notice_open_limit,
-        im_push_health_channels=tuple(view.services.im_push_health_channels),
-        im_push_health_interval_seconds=view.services.im_push_health_interval_seconds,
-        notices_open_default_limit=view.display.notices_open_default_limit,
-    )
-
-
-def telegram_config(config: ConfigBoot) -> TelegramCredentialsConfig:
-    view = config.view
-    return TelegramCredentialsConfig(
-        telegram_bot_token=view.telegram.telegram_bot_token,
-        telegram_owner_id=view.telegram.telegram_owner_id,
-        telegram_poll_timeout_seconds=view.telegram.telegram_poll_timeout_seconds,
-        telegram_reconnect_base_delay_seconds=view.telegram.telegram_reconnect_base_delay_seconds,
-        telegram_reconnect_max_delay_seconds=view.telegram.telegram_reconnect_max_delay_seconds,
-    )
-
-
-def feishu_config(config: ConfigBoot) -> FeishuCredentialsConfig:
-    view = config.view
-    return FeishuCredentialsConfig(
-        feishu_app_id=view.feishu.feishu_app_id,
-        feishu_app_secret=view.feishu.feishu_app_secret,
-        feishu_rest_timeout_seconds=view.feishu.feishu_rest_timeout_seconds,
-        feishu_poll_interval_seconds=view.feishu.feishu_poll_interval_seconds,
-        feishu_poll_chat_id=view.feishu.feishu_poll_chat_id,
-        delivery_watchdog_stale_claimed_threshold_seconds=(
-            view.daemon.delivery_watchdog_stale_claimed_threshold_seconds
+        im_push_health_channels=tuple(
+            channel
+            for channel in view.services.im_push_health_channels
+            if channel in plan_adapters(frozenset()).load
         ),
+        im_push_health_interval_seconds=view.services.im_push_health_interval_seconds,
     )
 
 
@@ -187,32 +161,23 @@ def gateway_client(
 
 # meiva:note
 # What the adapters are built from: the configuration slices of the adapters that take one, the
-# bridge's state directory, whether the machine names an outbound proxy for the Feishu websocket
-# handshake, and the process's clock, random generator and id source that the adapters which
+# bridge's state directory, and the process's clock and random generator that the adapters which
 # stamp times, draw jitter or mint ids use.
 @dataclass(frozen=True)
 class AdapterInputs:
-    telegram: TelegramCredentialsConfig
-    feishu: FeishuCredentialsConfig
     state_dir: Path
-    proxy_configured: bool
     clock: Clock
     rng: random.Random
 
 
 def adapter_inputs(
-    config: ConfigBoot,
     *,
     state_dir: Path,
     clock: Clock,
     rng: random.Random,
 ) -> AdapterInputs:
-    environment = config.process_environment()
     return AdapterInputs(
-        telegram=telegram_config(config),
-        feishu=feishu_config(config),
         state_dir=state_dir,
-        proxy_configured=network_proxy_configured(environment),
         clock=clock,
         rng=rng,
     )
@@ -221,10 +186,6 @@ def adapter_inputs(
 # meiva:note
 # One static import per channel: a disabled adapter's module is never imported.
 def _build_adapter(name: str, core: IMBridgeCore, inputs: AdapterInputs) -> IMAdapter:
-    if name == "telegram":
-        from services.entrypoints.im_bridge.adapters import telegram
-
-        return telegram.ADAPTER_CLASS(core, inputs.telegram, state_dir=inputs.state_dir)
     if name == "weixin":
         from services.entrypoints.im_bridge.adapters import weixin
 
@@ -233,17 +194,6 @@ def _build_adapter(name: str, core: IMBridgeCore, inputs: AdapterInputs) -> IMAd
             state_dir=inputs.state_dir,
             clock=inputs.clock,
             rng=inputs.rng,
-        )
-    if name == "feishu":
-        from services.entrypoints.im_bridge.adapters import feishu
-
-        return feishu.ADAPTER_CLASS(
-            core,
-            inputs.feishu,
-            state_dir=inputs.state_dir,
-            proxy_configured=inputs.proxy_configured,
-            cursor_store=core.cursor_store,
-            clock=inputs.clock,
         )
     raise ValueError(f"unknown im_bridge adapter {name!r}")
 
@@ -273,15 +223,6 @@ async def liveness_loop(liveness: Liveness, *, interval_s: float) -> None:
 
     while True:
         liveness.beat()
-        await asyncio.sleep(interval_s)
-
-
-async def notice_loop(core: IMBridgeCore, *, interval_s: float) -> None:
-    """Poll the gateway for new fleet notices and push them to the owner
-    chat (Task #884). Cursor + filter persist across restarts."""
-
-    while True:
-        await core.notice_bridge.poll_once()
         await asyncio.sleep(interval_s)
 
 
@@ -433,7 +374,6 @@ async def _start(
     )
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     endpoint = _endpoint(process_config, runtime=runtime)
-    await asyncio.to_thread(core.notice_bridge.initialize_poll)
     unit, generation = admission_inputs(home)
     owned.health = await start_health_server(
         "im_bridge",
@@ -451,13 +391,12 @@ async def _start(
     adapters = owned.adapters = load_adapters(
         core,
         plan_adapters(frozenset(config.im_disabled_adapters)),
-        adapter_inputs(process_config, state_dir=state_dir, clock=clock, rng=rng),
+        adapter_inputs(state_dir=state_dir, clock=clock, rng=rng),
     )
     if not adapters:
         _log.warning("im_bridge: no adapters loaded — nothing to serve")
     await core.restore_subscriptions()
     loops.create_task(liveness_loop(liveness, interval_s=timings.liveness_beat_s))
-    loops.create_task(notice_loop(core, interval_s=timings.notice_poll_s))
     loops.create_task(push_health_loop(core.outbound_store, config, clock=clock))
     await asyncio.gather(*(a.start(loops) for a in adapters))
     if adapters:

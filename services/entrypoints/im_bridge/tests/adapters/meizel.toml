@@ -2,9 +2,6 @@ exports = ["test_weixin_adapter.py", "test_weixin_chat_identity.py", "weixin_nat
 
 [uses]
 "conftest.py" = ["weixin_native.py"]
-"feishu_adapter" = ["test_feishu_adapter.py"]
-"test_feishu_owner_seed.py" = ["test_feishu_adapter.py"]
-"test_prepared_timeline.py" = ["test_telegram_adapter.py"]
 "test_weixin_adapter.py" = ["weixin_native.py"]
 "test_weixin_chat_identity.py" = ["test_weixin_adapter.py"]
 "test_weixin_ingress_account_fencing.py" = ["test_weixin_ingress_recovery.py", "weixin_native.py"]

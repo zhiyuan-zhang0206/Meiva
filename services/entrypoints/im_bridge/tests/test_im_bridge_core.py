@@ -653,7 +653,8 @@ class FakeTypingAdapter(DurableAdapter):
 
 
 class FakePlainAdapter(FakeTypingAdapter):
-    """WeChat/Feishu: same transport contract, no buttons, no typing."""
+    # meiva:note
+    # WeChat: same transport contract, no buttons, no typing.
 
     channel = "weixin"
     can_buttons = False

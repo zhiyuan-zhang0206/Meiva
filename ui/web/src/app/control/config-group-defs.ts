@@ -167,8 +167,6 @@ export const GROUP_ENV_VARS: Record<string, string[]> = {
     "MEIVA_WEB_JINA_BASE_URL",
     "JINA_API_KEY",
     "MEIVA_WEB_DEEPSEEK_FETCH_ENDPOINT",
-    "MEIVA_TELEGRAM_BOT_TOKEN",
-    "MEIVA_TELEGRAM_OWNER_ID",
   ],
   "config-services": [
     "MEIVA_BROWSER_ENABLED",

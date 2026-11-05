@@ -29,7 +29,6 @@ const BACKEND_GROUP_FALLBACK: Partial<Record<string, string>> = {
   "Data plane": "config-dataplane",
   Services: "config-services",
   Observability: "config-observability",
-  Telegram: "config-web",
   General: "config-general",
   // meiva:note
   // Display windows/limits (backend domain "Display", task #3696) — the

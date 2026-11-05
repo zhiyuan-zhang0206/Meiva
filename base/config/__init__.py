@@ -225,9 +225,6 @@ if TYPE_CHECKING:
         DataPlaneSettings as DataPlaneSettings,
     )
     from base.config._full import (
-        FeishuSettings as FeishuSettings,
-    )
-    from base.config._full import (
         GatewaySettings as GatewaySettings,
     )
     from base.config._full import (
@@ -250,9 +247,6 @@ if TYPE_CHECKING:
     )
     from base.config._full import (
         Settings as Settings,
-    )
-    from base.config._full import (
-        TelegramSettings as TelegramSettings,
     )
     from base.config._full import (
         ToUserSettings as ToUserSettings,

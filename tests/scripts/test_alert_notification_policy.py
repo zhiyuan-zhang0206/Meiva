@@ -79,33 +79,19 @@ def test_critical_alerts_skip_the_batching_wait() -> None:
 
 
 # meiva:note
-# A down gateway, a silent probe and an open breaker all bypass the webhook: its
-# ingest stores the alert row in Postgres before the IM fan-out, so an alert about a
-# stalled database cannot land. On 2026-10-18 four machines sat in an open breaker
-# for 36 minutes and nothing was delivered (task #5312). The alert pipeline's own
-# dead-man pair (#6229-adjacent, 2026-11-04) rides the same reasoning one level up:
-# the watchdog speaks only to the webhook, and the rule that reports a silent
-# pipeline speaks straight to Telegram.
-def test_alerts_the_webhook_cannot_deliver_also_reach_telegram_directly() -> None:
-    contacts = {c["name"]: c for c in _document()["contactPoints"]}
-    (receiver,) = contacts["meiva-alerts-telegram"]["receivers"]
-    assert receiver["type"] == "telegram"
-    assert receiver["settings"] == {
-        "bottoken": "$__env{MEIVA_ALERTS_TELEGRAM_BOT_TOKEN}",
-        "chatid": "$__env{MEIVA_ALERTS_TELEGRAM_CHAT_ID}",
-    }
-    for key, matcher in (
-        ("attributes_check:gateway_liveness", ["attributes_check", "=", "gateway_liveness"]),
-        ("metric:health_probe_silent", ["metric", "=", "health_probe_silent"]),
-        (
-            "metric:root_unit_restart_attempts_exhausted",
-            ["metric", "=", "root_unit_restart_attempts_exhausted"],
-        ),
-        ("metric:alert_pipeline_silent", ["metric", "=", "alert_pipeline_silent"]),
+# Retirement retains webhook routes and prevents duplicate catch-all delivery.
+def test_retired_receivers_are_removed_and_all_routes_use_the_webhook() -> None:
+    document = _document()
+    assert [c["name"] for c in document["contactPoints"]] == ["meiva-alerts-webhook"]
+    assert document["deleteContactPoints"] == [{"orgId": 1, "uid": "meiva-alerts-telegram"}]
+    assert {route["receiver"] for route in _policy()["routes"]} == {"meiva-alerts-webhook"}
+    for key in (
+        "attributes_check:gateway_liveness",
+        "metric:health_probe_silent",
+        "metric:root_unit_restart_attempts_exhausted",
+        "metric:alert_pipeline_silent",
     ):
-        route = _routes()[key]
-        assert route["object_matchers"] == [matcher]
-        assert route["continue"] is True
+        assert _routes()[key]["continue"] is False
 
 
 # meiva:note
@@ -121,5 +107,5 @@ def test_the_watchdog_repeats_at_the_period_the_silent_rule_judges_on() -> None:
     assert watchdog["continue"] is False
     assert watchdog["repeat_interval"] == watchdog["group_interval"] == "5m"
     assert watchdog["group_wait"] == "0s"
-    assert silent["receiver"] == "meiva-alerts-telegram"
-    assert silent["continue"] is True
+    assert silent["receiver"] == "meiva-alerts-webhook"
+    assert silent["continue"] is False

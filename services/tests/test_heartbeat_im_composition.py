@@ -29,12 +29,12 @@ from services.entrypoints.im_bridge import daemon as im_bridge_daemon
 from services.wake.heartbeat import daemon as heartbeat_daemon
 
 
-def _config(db_url: str, *, service: str, port: int) -> ConfigBoot:
-    config = ConfigBoot()
-    config.read_process_environment()
+def _config(config: ConfigBoot, db_url: str, *, service: str, port: int) -> ConfigBoot:
     config.view.data_plane.db_url = db_url
+    config.set_field("cluster_secret", "composition-test-secret")
     config.set_field(f"{service}_health_port", port)
-    config.view.services.im_disabled_adapters = ["telegram", "weixin", "feishu"]
+    config.view.services.im_disabled_adapters = ["telegram", "feishu", "weixin"]
+    config.view.services.im_push_health_channels = ["telegram", "feishu"]
     return config
 
 
@@ -118,11 +118,12 @@ async def test_entry_retains_one_gate_serves_health_and_cleans_up_when_stopped(
     service: str,
     db_url: str,
     database_gate: ProcessDbGate,
+    process_config: ConfigBoot,
     machine_identity: MachineIdentityReader,
     tmp_path: Path,
 ) -> None:
     port = _free_port()
-    config = _config(db_url, service=service, port=port)
+    config = _config(process_config, db_url, service=service, port=port)
     image = LoadedCommit(tmp_path, f"captured-{service}")
     runtime = tmp_path / "run"
 
@@ -151,6 +152,8 @@ async def test_entry_retains_one_gate_serves_health_and_cleans_up_when_stopped(
             status, payload = await _healthz(port)
             break
         except OSError:
+            if task.done():
+                await task
             assert time.monotonic() < deadline, "the health server never came up"
             await asyncio.sleep(0.05)
 

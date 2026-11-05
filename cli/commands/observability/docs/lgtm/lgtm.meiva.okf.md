@@ -21,7 +21,7 @@ and how a download waits and reports (`plans/lgtm/download_retry.py`,
 `plans/lgtm/download_report.py`). Configuration is read once, at the converge step, by
 `inputs.py` from the step's `ConfigBoot` into frozen values (`LgtmSettings`,
 `ObservabilityConfig`); nothing below the step reads `settings`, the environment or the clock
-for a decision, and the secrets in those values (Grafana password, Telegram token) are read out
+for a decision, and the secrets in those values (Grafana password, alert webhook token) are read out
 of their wrapper there and never reach a repr. A URL is split once by `url_split.split_url`
 into the `UrlParts` value the plans decide on. The shell tests run the real pass against a
 release mirror on port 0.

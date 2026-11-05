@@ -113,15 +113,15 @@ def test_set_list_field_writes_bare_env_and_round_trips(captured_put: ConfigGate
         )
     )
     captured_put.persist = True
-    result = captured_put.run("set", "MEIVA_IM_DISABLED_ADAPTERS=weixin,feishu")
+    result = captured_put.run("set", "MEIVA_IM_DISABLED_ADAPTERS=weixin,retired-channel")
 
     assert result.returncode == 0, result.stderr
     assert (captured_put.home / ".env").read_text() == (
-        f"MEIVA_GATEWAY_URL={captured_put.url}\nMEIVA_IM_DISABLED_ADAPTERS=weixin,feishu\n"
+        f"MEIVA_GATEWAY_URL={captured_put.url}\nMEIVA_IM_DISABLED_ADAPTERS=weixin,retired-channel\n"
     )
     written = unit_env_aliases()["MEIVA_IM_DISABLED_ADAPTERS"]
     parsed = ServiceSettings.model_validate({"MEIVA_IM_DISABLED_ADAPTERS": written})
-    assert parsed.im_disabled_adapters == ["weixin", "feishu"]
+    assert parsed.im_disabled_adapters == ["weixin", "retired-channel"]
 
 
 def test_set_sends_only_the_delta(captured_put: ConfigGateway) -> None:
@@ -581,7 +581,7 @@ def test_config_audit_local_reads_newest_first_and_filters(
         site="first",
         changes=[{"alias": "MEIVA_MODEL", "old": "a", "new": "b"}],
     )
-    record_env_write(env_path, {"MEIVA_FEISHU_APP_ID"}, set(), site="second")
+    record_env_write(env_path, {"MEIVA_IM_BRIDGE_TIMELINE_WINDOW"}, set(), site="second")
     machine_identity.set(name="audit-fixture")
 
     process = _process(local_env_home)
@@ -600,7 +600,7 @@ def test_config_audit_local_reads_newest_first_and_filters(
     assert (
         cfg.cmd_config_audit(
             last=10,
-            key="MEIVA_FEISHU_APP_ID",
+            key="MEIVA_IM_BRIDGE_TIMELINE_WINDOW",
             machine=None,
             identity=machine_identity,
             process=process,

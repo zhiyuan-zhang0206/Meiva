@@ -1,80 +1,17 @@
 ---
 type: doc
-title: "Normal Notice Outbound Acceptance"
-description: "Notice-specific source receipts reuse the IM intent table and whole-send worker."
-tags:
-- im-bridge
-- idempotency
+title: "IM notice lookup after channel retirement"
+description: "Manual notice lookup and retained historical native-poll receipts after Telegram retirement."
 ---
 
-# Normal notice outbound acceptance
+# IM notice lookup
 
-`NoticeBridge.poll_once` reads unaccepted rows from the existing database,
-applying its agent filter and notification category switch. Historical FYI rows
-receive a filtered receipt with reason `fyi` and no outbound intent; their TTL
-bounds this compatibility scan. Only response-required notices can be pushed. It accepts normal
-poll decisions through `NoticePollStore`; it does not call the provider.
-`IMOutboxStore` owns the shared intent insertion primitive and `IMOutboxWorker`
-owns the same queued/sending/sent/uncertain/failed lifecycle as timeline output.
-There is no second dispatch queue or worker.
+The native Telegram automatic notice poller is retired. `/notice list` reads
+open response-required notices and returns their rendered text in the requesting
+conversation. Shared UI notices, account-bound reply windows and resolution
+handlers remain available. Existing poll cutover, acceptance receipts and queued
+outbound records remain in Postgres for history; the retained adapter set cannot
+dispatch the retired Telegram or Feishu accounts.
 
-A global `agent_notices.id` identifies one normal-poll operation. Acceptance
-freezes the existing Telegram owner recipient, authenticated non-secret bot
-account, rendered chunks, markup fallback and notice buttons. An immutable
-notice source receipt, its shared outbound intent and diagnostic progress commit
-in one transaction. A filtered receipt freezes the filter decision and inserts
-no intent. An absent adapter/owner or account failure holds acceptance without
-inventing delivery or a filtered result. Existing accepted sources are never
-retargeted after the owner changes. Queued account mismatches retain their
-original target under the shared worker's policy.
-
-`im_bridge_notice_acceptances` has no foreign-key pin or expiry. The provider
-worker never treats a poll retry as permission to resend an ambiguous operation.
-A provider acknowledgement lost, successful prefix followed by an error, or
-abandoned sending attempt remains unconfirmed; subsequent recipient messages may
-proceed. Acceptance is not proof of delivery.
-
-## Cutover and late commits
-
-`im_bridge_notice_poll_state` owns one immutable legacy floor and a strict
-import reason. The first initialization with existing committed history records
-`legacy_history_unknown` and fixes the floor at the committed maximum. That
-old range is retained for manual inspection through explicit `/notice`;
-it is never automatically replayed. Empty history records `no_history` at floor
-zero during daemon startup before readiness, so a fresh install can accept its
-first later notice even before the initial periodic poll. Later initializations
-keep the stored row. Initialization does not fabricate receipts for old rows.
-
-After cutover, eligibility is `id > legacy_floor` plus an anti-join against
-normal-poll receipts. The maximum accepted ID is only a diagnostic, never
-eligibility. A low ID reserved after cutover can commit
-after a higher notice was accepted and still be found. IDs do not establish
-transaction commit order. Old in-flight IDs below the initial cutover floor
-remain part of the unknown legacy boundary; this is not a promise to recover
-all historical gaps.
-
-## Generation compatibility and remaining producers
-
-The legacy daemon sends directly and only writes JSON cursor state, which the
-new generation never reads. It cannot read or obey these database source receipts. The new schema cannot fence an
-old provider call: **mixed legacy and new IM generations
-are not safe for either normal notices or the timeline Outbox cutover**.
-Before enabling the new generation, the authorized operator must stop all old
-IM daemons and drain their already-started provider calls, then enable the new
-generation with the matching schema. Do not re-enable a legacy sending binary
-as a rollback. This contribution performs no deployment.
-
-Workers use short atomic claims and original-attempt completion CAS, without a
-cross-process chat gate. Existing stored manifest JSON keys and adapter kinds
-remain readable after internal vocabulary renaming.
-
-Explicit `/notice` listing and its replay callbacks retain their deliberate
-immediate-send behavior in this slice. Ops `/send` fan-out, alert-transition
-identity, chunk acknowledgement/recovery and retention/reconciliation remain
-open under #4477. No new UI or client Outbox is introduced.
-
-Notice queues contain only response-required questions. Reply arms the configured
-reply window; plain-text answers in that window resolve the question, and `/cancel`
-exits reply mode. Dismiss explicitly closes without answering. Legacy mark-read
-callbacks cannot resolve a notice. Priority and agent filters remain persisted
-under the bridge state directory. Ordinary results stay in conversation.
+The decision is recorded in
+[IM channel retirement](../../../../docs/history/2026-11-06/im-channel-retirement.md).

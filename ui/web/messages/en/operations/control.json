@@ -33,7 +33,7 @@
     "config-security": "Security & secrets",
     "config-general": "Display & general",
     "config-observability": "Observability",
-    "config-web": "Web & Telegram",
+    "config-web": "Web",
     "config-services": "Services",
     "config-health": "Health probes",
     "display": "Display",

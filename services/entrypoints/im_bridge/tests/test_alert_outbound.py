@@ -97,13 +97,13 @@ async def test_first_accept_freezes_subset_unavailable_and_response_loss_recover
     pool: ConnectionPool,
 ):
     [group] = ingest(pool, [item("a"), item("b")])
-    ready, missing = AlertAdapter(), AlertAdapter("feishu")
+    ready, missing = AlertAdapter(), AlertAdapter("weixin")
     missing.owner = None
     first = await bridge(pool, ready, missing).accept(group)
     assert len(first.intent_ids) == 1
     assert [decision.decision for decision in first.decisions] == [
-        AlertOwnerDecision.OWNER_UNAVAILABLE,
         AlertOwnerDecision.AVAILABLE,
+        AlertOwnerDecision.OWNER_UNAVAILABLE,
     ]
     missing.owner, ready.owner, ready.account = "later-owner", "changed-owner", "changed-bot"
     recovered = await bridge(pool, missing, ready).accept(group)

@@ -1,13 +1,11 @@
-"""Durable im-bridge cursors in Postgres (`im_bridge_cursors`).
-
-Two positions that used to live in process memory, so a restart lost them: the
-push acceptance watermark and Feishu's inbound poll cursor. IMOutboxStore
-owns live push acceptance and chat selection in the same cursor row; this
-compatibility owner reads positions and seeds legacy fixtures. The daemon owns
-the pool. Feishu's independent inbound poll contract remains unchanged.
-
-Methods are synchronous (psycopg pool): async callers run them in a thread.
-"""
+# meiva:note
+# Durable im-bridge cursors in Postgres (`im_bridge_cursors`).
+#
+# IMOutboxStore owns live push acceptance and chat selection in the same cursor
+# row; this compatibility owner reads positions and seeds legacy fixtures.
+# The daemon owns the pool.
+#
+# Methods are synchronous (psycopg pool): async callers run them in a thread.
 
 from __future__ import annotations
 
@@ -44,13 +42,6 @@ class _PushRow:
     push_created_at: str | None
 
 
-@dataclass(frozen=True)
-class _PollRow:
-    chat_id: str
-    poll_message_id: str | None
-    poll_create_ms: int
-
-
 class CursorStore:
     def __init__(self, db_pool: ConnectionSource | None = None) -> None:
         self._pool = db_pool
@@ -84,30 +75,6 @@ class CursorStore:
             "push_agent_id = EXCLUDED.push_agent_id, push_item_id = EXCLUDED.push_item_id, "
             "push_created_at = EXCLUDED.push_created_at, updated_at = now()",
             (channel, chat_id, agent_id, watermark.item_id, watermark.created_at),
-        )
-
-    def load_poll(self, channel: str) -> dict[str, tuple[str, int]]:
-        """{conversation id: (newest handled message id or '', its create time in ms)}."""
-
-        if self._pool is None:
-            return {}
-        with self._pool.connection() as conn:
-            rows = query_all(
-                conn,
-                _PollRow,
-                "SELECT chat_id, poll_message_id, poll_create_ms FROM im_bridge_cursors "
-                "WHERE channel = %s AND poll_create_ms IS NOT NULL",
-                (channel,),
-            )
-        return {row.chat_id: (row.poll_message_id or "", row.poll_create_ms) for row in rows}
-
-    def save_poll(self, channel: str, chat_id: str, message_id: str, create_ms: int) -> None:
-        self._upsert(
-            "INSERT INTO im_bridge_cursors (channel, chat_id, poll_message_id, poll_create_ms) "
-            "VALUES (%s, %s, %s, %s) ON CONFLICT (channel, chat_id) DO UPDATE SET "
-            "poll_message_id = EXCLUDED.poll_message_id, poll_create_ms = EXCLUDED.poll_create_ms, "
-            "updated_at = now()",
-            (channel, chat_id, message_id or None, create_ms),
         )
 
     def _upsert(self, statement: LiteralString, params: tuple[str | int | None, ...]) -> None:

@@ -45,4 +45,4 @@ When the user messages you directly, they have responded to you — judge whethe
 
 Push only for a true emergency: irreversible risk in motion, the whole effort blocked on the user, or the user explicitly asked to be woken for this. Everything else queues.
 
-A push is out-of-band delivery to wherever the human actually is; find the channel yourself (e.g. a push skill like telegram). This skill sets when, not how.
+A push is out-of-band delivery to wherever the human actually is; find the channel yourself through an available, authorized channel. This skill sets when, not how.

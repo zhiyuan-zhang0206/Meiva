@@ -173,3 +173,6 @@ deleteRules:
     uid: ava-ops-turn-duration-p95
   - orgId: 1
     uid: ava-ops-warning-error-spike
+
+  - orgId: 1
+    uid: meiva-ops-im-feishu-owner-seed-failed

@@ -306,7 +306,6 @@ def gateway_config_from_boot(
             gateway_url=gateway_url,
         )
     )
-    display = view.display
     lm = view.lm
     daemon = view.daemon
     alerts_token = view.alerts.webhook_token
@@ -336,20 +335,20 @@ def gateway_config_from_boot(
         upload_dir_name=gateway.upload_dir_name,
         human_auth=gateway.human_auth,
         display=DisplayDefaults(
-            shell_capture_default_lines=display.shell_capture_default_lines,
-            config_audit_default_last=display.config_audit_default_last,
-            fleet_graph_decay_lambda=display.fleet_graph_decay_lambda,
-            cluster_events_default_limit=display.cluster_events_default_limit,
-            neighbors_default_depth=display.neighbors_default_depth,
-            neighbors_default_limit=display.neighbors_default_limit,
-            messages_default_limit=display.messages_default_limit,
-            notices_open_default_limit=display.notices_open_default_limit,
-            notices_resolved_default_page=display.notices_resolved_default_page,
-            schedules_runs_default_limit=display.schedules_runs_default_limit,
-            alerts_default_limit=display.alerts_default_limit,
-            metrics_default_window_days=display.metrics_default_window_days,
-            events_default_limit=display.events_default_limit,
-            timeline_default_limit=display.timeline_default_limit,
+            shell_capture_default_lines=view.display.shell_capture_default_lines,
+            config_audit_default_last=view.display.config_audit_default_last,
+            fleet_graph_decay_lambda=view.display.fleet_graph_decay_lambda,
+            cluster_events_default_limit=view.display.cluster_events_default_limit,
+            neighbors_default_depth=view.display.neighbors_default_depth,
+            neighbors_default_limit=view.display.neighbors_default_limit,
+            messages_default_limit=view.display.messages_default_limit,
+            notices_open_default_limit=view.display.notices_open_default_limit,
+            notices_resolved_default_page=view.display.notices_resolved_default_page,
+            schedules_runs_default_limit=view.display.schedules_runs_default_limit,
+            alerts_default_limit=view.display.alerts_default_limit,
+            metrics_default_window_days=view.display.metrics_default_window_days,
+            events_default_limit=view.display.events_default_limit,
+            timeline_default_limit=view.display.timeline_default_limit,
         ),
         models=ModelDefaults(
             llm_model=lm.llm_model,

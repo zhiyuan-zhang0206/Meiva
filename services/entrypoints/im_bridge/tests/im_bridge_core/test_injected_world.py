@@ -15,11 +15,6 @@ from starlette.routing import Route
 from base.clock.ids import new_uuid
 from base.host.net.tests.local_http import serve_asgi
 from services.entrypoints.im_bridge import push_watchdog
-from services.entrypoints.im_bridge.adapters.feishu_poll_cursor import (
-    FeishuListedMessage,
-    anchor,
-    pending_after,
-)
 from services.entrypoints.im_bridge.adapters.weixin import post_headers, wechat_uin
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
 from services.entrypoints.im_bridge.ingress.store import WeixinIngressStore
@@ -30,11 +25,8 @@ from services.entrypoints.im_bridge.tests.slices import im_bridge_config, seeded
 from services.entrypoints.im_bridge.tests.test_timeline_outbox import candidate
 from services.entrypoints.im_bridge.types import InboundMessage
 
-
 # meiva:note
 # A listed message that carries only the members the cursor functions read; named like a class.
-def _Item(message_id: str, create_time: int) -> FeishuListedMessage:  # noqa: N802
-    return FeishuListedMessage(message_id=message_id, create_time=str(create_time))
 
 
 def test_a_minted_id_is_a_version_four_uuid_that_follows_its_generator() -> None:
@@ -112,23 +104,6 @@ def test_a_new_ingress_binding_takes_its_epoch_from_the_injected_generator(
     )
 
     assert binding.epoch == new_uuid(seeded_rng(31))
-
-
-def test_feishu_anchor_of_an_empty_window_is_the_callers_now() -> None:
-    assert anchor([], now_ms=1_700_000_000_000) == (None, 1_700_000_000_000)
-    newest = _Item("om_2", 1_699_999_000_000)
-    assert anchor([_Item("om_1", 1), newest], now_ms=5) == ("om_2", 1_699_999_000_000)
-
-
-def test_feishu_replay_window_is_measured_from_the_callers_now() -> None:
-    old, fresh = _Item("om_1", 1_000_000), _Item("om_2", 1_990_000)
-
-    pending, stale = pending_after(
-        [old, fresh], None, None, replay=True, replay_window_s=60.0, now_ms=2_000_000
-    )
-
-    assert pending == [fresh]
-    assert stale == [old]
 
 
 class _RecoveredAdapter:

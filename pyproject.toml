@@ -70,7 +70,7 @@ dependencies = [
     "zstandard>=0.23",
     # --- Common runtime libraries ---
     # Imported directly by first-party code (Pillow, requests, mdit,
-    # cryptography, lark, websockets, oss2, trafilatura, feedparser) and
+    # cryptography, websockets, oss2, trafilatura, feedparser) and
     # invoked by built-in skills (yt-dlp).
     # Heavy ML/numerical libraries are excluded outright: torch / tensorflow / jax /
     # transformers / opencv / numba / dask.
@@ -79,7 +79,6 @@ dependencies = [
     "mdit-py-plugins>=0.6",  # GFM footnote references in shared documents
     "markdown-it-py>=4.0",  # Markdown document reference parsing
     "cryptography>=42.0.0",  # crypto primitives
-    "lark-oapi>=1.7.1",
     "websockets>=15.0.1",
     "oss2>=2.19.1",
     "trafilatura>=2.1.0",  # main-content extraction (web-sources skill)

@@ -114,9 +114,9 @@ def test_domain_validation_keeps_cross_field_invariants(tmp_path: Path) -> None:
 def test_valid_file_values_do_not_read_later_ambient_values(tmp_path: Path) -> None:
     path = tmp_path / ".env"
     authority = _authority(path)
-    path.write_text("MEIVA_IM_DISABLED_ADAPTERS=weixin,feishu\n")
+    path.write_text("MEIVA_IM_DISABLED_ADAPTERS=weixin,retired-channel\n")
 
-    assert authority.current_field_values()["im_disabled_adapters"] == ["weixin", "feishu"]
+    assert authority.current_field_values()["im_disabled_adapters"] == ["weixin", "retired-channel"]
 
 
 def test_agent_owner_file_uses_explicit_runner_projection(tmp_path: Path) -> None:

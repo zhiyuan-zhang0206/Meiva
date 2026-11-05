@@ -264,7 +264,7 @@ def test_send_route_502_when_no_channel_delivered() -> None:
     class _Core:
         async def notify_user(self, text: str) -> dict[str, str]:
             del text
-            return {"telegram": "error: RuntimeError", "feishu": "skipped"}
+            return {"telegram": "error: RuntimeError", "weixin": "skipped"}
 
     async def build() -> Any:
         return await daemon.handle_send(_Core())  # type: ignore[attr-defined]
@@ -273,7 +273,7 @@ def test_send_route_502_when_no_channel_delivered() -> None:
     status, body, ctype = asyncio_run(handler(b'{"text": "alert line"}'))
     assert status == 502
     assert ctype == "application/json"
-    assert json.loads(body) == {"results": {"telegram": "error: RuntimeError", "feishu": "skipped"}}
+    assert json.loads(body) == {"results": {"telegram": "error: RuntimeError", "weixin": "skipped"}}
 
 
 def test_send_route_502_when_no_adapter_loaded() -> None:
@@ -302,7 +302,7 @@ def test_send_route_200_when_at_least_one_channel_delivered() -> None:
     class _Core:
         async def notify_user(self, text: str) -> dict[str, str]:
             del text
-            return {"telegram": "ok", "feishu": "error: RuntimeError"}
+            return {"telegram": "ok", "weixin": "error: RuntimeError"}
 
     async def build() -> Any:
         return await daemon.handle_send(_Core())  # type: ignore[attr-defined]
@@ -310,7 +310,7 @@ def test_send_route_200_when_at_least_one_channel_delivered() -> None:
     handler = asyncio_run(build())
     status, body, _ = asyncio_run(handler(b'{"text": "alert line"}'))
     assert status == 200
-    assert json.loads(body) == {"results": {"telegram": "ok", "feishu": "error: RuntimeError"}}
+    assert json.loads(body) == {"results": {"telegram": "ok", "weixin": "error: RuntimeError"}}
 
 
 def asyncio_run(awaitable: Any) -> Any:

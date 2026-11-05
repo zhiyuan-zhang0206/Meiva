@@ -131,10 +131,8 @@ client adopts a cursor instead of replaying history; every later advance uses th
 row it actually read. The console renders the per-category switches that decide those
 deliveries (Display settings → Notifications, the `notifications.categories` map) and no
 delivery feed of its own: its inbox is the notice queue, so the `notification` role
-never enters a timeline. The Telegram bridge still reads `agent_notices` directly for
-what to push — it moves onto these rows next — but it applies the same per-category
-switches before pushing, so a decision notice the user switched off does not reach
-Telegram either. Historical FYI rows receive filtered receipts and are never
-pushed; ordinary information stays in conversation. No transport
+never enters a timeline. Native Telegram notice forwarding is retired. The web notice queue and its
+per-category controls remain active; IM notice queries are explicit reads.
+No transport
 re-derives its own trigger from agent state. A transport may render less (an importance
 floor, a master switch), never more.

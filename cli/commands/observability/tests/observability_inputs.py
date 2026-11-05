@@ -102,15 +102,13 @@ def data_plane(**changes: Any) -> DataPlaneInputs:
 
 # meiva:note
 # Native LGTM settings: default observability values, a gateway on 8000 with no base URL, no Grafana
-# password and no Telegram bot, and fast downloads.
+# password, and fast downloads.
 def lgtm_settings(**changes: Any) -> LgtmSettings:
     return replace(
         LgtmSettings(
             observability=observability(),
             webhook=AlertWebhookInputs(gateway_url="", gateway_port=8000),
-            credentials=GrafanaCredentials(
-                admin_password=None, telegram_bot_token="", telegram_owner_id=0
-            ),
+            credentials=GrafanaCredentials(admin_password=None),
             download=FAST_DOWNLOADS,
         ),
         **changes,

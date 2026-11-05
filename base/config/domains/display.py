@@ -94,7 +94,7 @@ class DisplaySettings(EnvSettings):
             "Default cap on one open-notices read (GET /api/notices/open, /api/notices/live, "
             "and the unified feed's open/awaiting slices) when the caller passes no limit. "
             "200 covers a large fleet backlog in one request while bounding the poll payload "
-            "the IM bridge fans out to Telegram and the CLI's fleet-wide listing; the "
+            "the IM bridge fans out to connected channels and the CLI's fleet-wide listing; the "
             "protective ceiling (500) stays a constant."
         ),
         json_schema_extra={

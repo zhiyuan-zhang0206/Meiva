@@ -106,7 +106,7 @@ def overlay_unknown_and_out_of_profile_keys_fail_fast() -> None:
     except KeyError:
         unknown = "KeyError"
     try:
-        c.set_field("telegram_bot_token", "x")
+        c.set_field("im_notify_enabled", True)
     except AttributeError as exc:
         excluded = "AttributeError" if "profile" in str(exc) else str(exc)
     emit("BADKEYS", unknown, excluded, c.boot_state()["upgrades"])

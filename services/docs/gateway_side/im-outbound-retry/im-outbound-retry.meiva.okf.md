@@ -16,12 +16,10 @@ call without retrying the complete text. A ConnectError on chunk two does not
 justify repeating chunk one. HTTP 5xx, read/write timeouts, unknown SDK errors
 and partial delivery are not safe-retry evidence.
 
-Telegram and Weixin sanitize pre-send ConnectError, ConnectTimeout and
+Weixin sanitize pre-send ConnectError, ConnectTimeout and
 PoolTimeout into this marker on the first chunk only. If an earlier chunk was
 acknowledged, the public send converts that marker into an ordinary incomplete
-send error. This also applies to the Telegram markup fallback: a confirmed
-markup rejection may fall back to plain text, but cannot restart an accepted
-prefix. Feishu makes no whole-send retry promise for unknown SDK errors.
+send error.
 
 Weixin creates a fresh client_id per new send/chunk and keeps that ID within
 its confirmed stale-session rejection retry. A failed send no longer leaves a
@@ -36,21 +34,14 @@ channels. Channels without an owner chat are skipped.
 
 ## Provider evidence and remaining boundary
 
-The [official Telegram Bot API sendMessage parameters](https://core.telegram.org/bots/api#sendmessage)
-return a Message after success but expose no client dedup key for this method
-(checked 2026-10-07). This Bot API is distinct from Telegram's MTProto
-messages.sendMessage random_id. We cannot infer safe Bot API replay from the
-MTProto contract. No new iLink or Feishu duplicate-elimination guarantee is
-claimed by this change; provider-specific identity and retention need their own
-verified contract before enabling ambiguous retries.
+
 
 ## Timeline server Outbox
 
 Timeline dialog uses `IMOutboxStore`, not the command watchdog send path.
 `IMBridgeCore._push_snapshot` treats SSE as a wakeup and fetches the committed
 Gateway timeline. Periodic committed-tail pulls cover pre-commit SSE with no later event. `_accept_timeline` freezes adapter kind,
-account, recipient, rendered chunks and Telegram's confirmed-rejection plain
-fallback. The manifest stores no bot token, app secret or Weixin context token.
+account, recipient and rendered chunks. The manifest stores no bot token, app secret or Weixin context token.
 Authentication and ephemeral transport context remain adapter-owned.
 
 Acceptance locks the recipient's `im_bridge_cursors` row and inserts
@@ -64,10 +55,7 @@ silently repaired or replayed.
 `im_bridge_outbound_replays` stores the immutable `/switch` invocation argument,
 target and original accepted intent IDs, including an empty batch. A repeated
 platform event recovers this batch even after more timeline items appear or the
-old target disappears; changed arguments/targets conflict. Telegram callbacks
-use the click ID, not the shared bot message ID. An internal call without a
-stable event ID gets one UUID per logical call and makes no cross-restart
-identity promise. Batch IDs are retained snapshots without queue-pinning FKs.
+old target disappears; changed arguments/targets conflict.
 
 The cursor's `push_agent_id` also owns initialized chat selection; the JSON
 switch file is a derived cache. Recipient mutexes order canonical reads and
@@ -81,9 +69,8 @@ empty legacy position remains held (`push_initialized=false`); explicit empty
 switch acceptance initializes the target so its first later output can send.
 An absent legacy JSON choice clears rather than reviving a former selection.
 
-Account identity comes from existing non-secret owners: Feishu app ID, Weixin
-login account ID plus endpoint, and Telegram bot User ID returned by cached
-[`getMe`](https://core.telegram.org/bots/api#getme). Identity failure holds
+Account identity comes from existing non-secret owners: Weixin
+login account ID plus endpoint. Identity failure holds
 acceptance. Initial NULL account binding preserves a matching old position;
 regular pushes cannot rebind a different account. Only explicit switch
 acceptance can rebind. Queued intents for unavailable accounts keep their exact

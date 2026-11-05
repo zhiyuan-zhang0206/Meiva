@@ -180,7 +180,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     im_bridge_enabled: bool = Field(
         default=True,
         alias="MEIVA_IM_BRIDGE_ENABLED",
-        description="Whether the im_bridge service is part of this cluster's service roster. A cluster with no IM adapters configured (all Telegram/Weixin/Feishu credentials absent) can disable the service: its daemon exits immediately with zero adapters, and the watchdog's healthcheck then fails it every round (2026-08-10 preview noise).",
+        description="Whether the im_bridge service is part of this cluster's service roster. A cluster with no IM adapters configured (Weixin account absent) can disable the service: the daemon retains health and background tasks even when no adapter is enabled.",
         json_schema_extra={
             "restart_required": "all",
             "writable": True,
@@ -205,7 +205,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     im_disabled_adapters: Annotated[list[str], NoDecode] = Field(
         default=[],
         alias="MEIVA_IM_DISABLED_ADAPTERS",
-        description="Comma-separated IM adapter names to skip at daemon load (code stays; e.g. 'weixin' — WeChat iLink production-disabled since 2026-08-06; Feishu re-enabled 2026-09).",
+        description="Comma-separated IM adapter names to skip at daemon load (code stays; e.g. 'weixin' — WeChat iLink production-disabled since 2026-08-06).",
         json_schema_extra={
             "restart_required": "gateway",
             "writable": True,
@@ -351,7 +351,7 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     )
 
     im_push_health_channels: Annotated[list[str], NoDecode] = Field(
-        default=["telegram", "feishu"],
+        default=["weixin"],
         alias="MEIVA_IM_PUSH_HEALTH_CHANNELS",
         description=(
             "IM channels that get a periodic push-health sample for the leg-level "
@@ -416,12 +416,13 @@ class ServiceSettings(ServiceHealthPortFields, ServiceRuntimeSettings):
     @field_validator("im_disabled_adapters", "im_push_health_channels", mode="before")
     @classmethod
     def _parse_str_list(cls, v: object) -> object:
-        """String-list env values arrive as raw strings (NoDecode):
-        MEIVA_IM_DISABLED_ADAPTERS and MEIVA_IM_PUSH_HEALTH_CHANNELS. Accept a JSON
-        array ("[\"weixin\", \"feishu\"]"), a comma-separated list
-        ("weixin,feishu"), or an empty value -> [] (Task #855; P0 fix: without
-        this validator any env value raised ValidationError and the settings
-        load crashed every runner)."""
+        # meiva:note
+        # String-list env values arrive as raw strings (NoDecode):
+        #         MEIVA_IM_DISABLED_ADAPTERS and MEIVA_IM_PUSH_HEALTH_CHANNELS. Accept a JSON
+        #         array ("["weixin", "retired-channel"]"), a comma-separated list
+        #         ("weixin,retired-channel"), or an empty value -> [] (Task #855; P0 fix: without
+        #         this validator any env value raised ValidationError and the settings
+        #         load crashed every runner).
         if isinstance(v, str):
             s = v.strip()
             if not s:

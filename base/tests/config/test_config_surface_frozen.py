@@ -27,7 +27,6 @@ _FROZEN_ALIASES = {
     "labeler_model": "MEIVA_LABELER_MODEL",
     "deepseek_api_key": "DEEPSEEK_API_KEY",
     "exec_timeout_seconds": "MEIVA_EXEC_TIMEOUT_SECONDS",
-    "telegram_bot_token": "MEIVA_TELEGRAM_BOT_TOKEN",
     "skills_to_inject_into_system_prompt": "MEIVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT",
     "gateway_port": "MEIVA_GATEWAY_PORT",
 }

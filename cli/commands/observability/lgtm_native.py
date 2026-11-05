@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import shlex
 import shutil
 import sys
 import tarfile
@@ -500,24 +499,6 @@ def render_grafana_admin_password(native_dir: Path, password: str | None) -> Non
     write_if_changed(native_dir / "grafana/admin_password", password + "\n", mode=0o600)
 
 
-# meiva:note
-# Render the direct Telegram contact point's bot token and chat id when this home has a bot.
-#
-# The gateway's own alert path (webhook, ingest, im_bridge) cannot report that the gateway is
-# down; Grafana's Telegram notifier does not depend on it. Without a bot the file is removed and
-# `run.sh` falls back to inert placeholders.
-def render_grafana_telegram_env(native_dir: Path, *, token: str, owner: int) -> None:
-    env_file = native_dir / "grafana/telegram.env"
-    if not token or not owner:
-        env_file.unlink(missing_ok=True)
-        return
-    content = (
-        f"export MEIVA_ALERTS_TELEGRAM_BOT_TOKEN={shlex.quote(token)}\n"
-        f"export MEIVA_ALERTS_TELEGRAM_CHAT_ID={owner}\n"
-    )
-    write_if_changed(env_file, content, mode=0o600)
-
-
 def _installed_markers(native_dir: Path, names: tuple[str, ...]) -> dict[str, InstalledMarkers]:
     def read(path: Path) -> str | None:
         return path.read_text(encoding="utf-8").strip() if path.exists() else None
@@ -595,11 +576,7 @@ def ensure_lgtm_native(
     )
     if "grafana" in services:
         render_grafana_admin_password(native_dir, settings.credentials.admin_password)
-        render_grafana_telegram_env(
-            native_dir,
-            token=settings.credentials.telegram_bot_token,
-            owner=settings.credentials.telegram_owner_id,
-        )
+        (native_dir / "grafana/telegram.env").unlink(missing_ok=True)
     if "loki" in services:
         verify_loki(meiva_home, host=host)
 

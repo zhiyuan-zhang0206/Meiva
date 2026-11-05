@@ -86,8 +86,6 @@ DOMAIN_MODELS: tuple[tuple[str, str, str | type[object] | _DomainModelLike, str]
     ("observability", "Observability", "ObservabilitySettings", "common"),
     ("display", "Display", "DisplaySettings", "common"),
     ("packages", "Packages", "PackagesSettings", "agent-runner"),
-    ("feishu", "Feishu", "FeishuSettings", "gateway"),
-    ("telegram", "Telegram", "TelegramSettings", "gateway"),
     ("walg", "WAL-G backup", "WalgSettings", "gateway"),
     ("general", "General", "GeneralSettings", "common"),
 )
@@ -99,8 +97,6 @@ DOMAIN_ATTRS = frozenset(attr for attr, _label, _model, _cap in DOMAIN_MODELS)
 # The sub-model class behind each `DOMAIN_MODELS` name.
 def _model_classes() -> dict[str, type[BaseModel]]:
     from base.config.domains.agent.settings import AgentSettings
-    from base.config.domains.channels.feishu import FeishuSettings
-    from base.config.domains.channels.telegram import TelegramSettings
     from base.config.domains.daemon.settings import DaemonSettings
     from base.config.domains.display import DisplaySettings
     from base.config.domains.gateway import GatewaySettings
@@ -132,8 +128,6 @@ def _model_classes() -> dict[str, type[BaseModel]]:
         "ObservabilitySettings": ObservabilitySettings,
         "DisplaySettings": DisplaySettings,
         "PackagesSettings": PackagesSettings,
-        "FeishuSettings": FeishuSettings,
-        "TelegramSettings": TelegramSettings,
         "WalgSettings": WalgSettings,
         "GeneralSettings": GeneralSettings,
     }

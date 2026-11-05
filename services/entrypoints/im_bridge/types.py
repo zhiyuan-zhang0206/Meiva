@@ -79,8 +79,10 @@ def raise_http_failure(status: int, message: str) -> NoReturn:
 
 
 class OutboundAdapterKind(StrEnum):
-    TELEGRAM = "telegram-v1"
-    FEISHU = "feishu-v1"
+    # meiva:note
+    # Read retained requests and alert receipts without reactivating retired adapters.
+    RETIRED_TELEGRAM_V1 = "telegram-v1"
+    RETIRED_FEISHU_V1 = "feishu-v1"
     WEIXIN = "weixin-v1"
 
 
@@ -106,9 +108,10 @@ class PreparedOutboundSend(BaseModel):
 
 @dataclass
 class Reply:
-    """One outbound message. ``buttons`` are tap targets the adapter may
-    render (Telegram inline keyboard); ``markdown`` marks agent content that
-    may carry markdown (adapters render it, others ignore)."""
+    # meiva:note
+    # One outbound message. ``buttons`` are tap targets the adapter may
+    # render; ``markdown`` marks agent content that
+    # may carry markdown (adapters render it, others ignore).
 
     text: str
     buttons: list[tuple[str, str]] | None = None  # (label, command)
@@ -170,7 +173,7 @@ class CommandInfo(TypedDict):
 class InboundMessage:
     """One normalized message from a platform adapter."""
 
-    channel: str  # "telegram" | "weixin" | "feishu"
+    channel: str
     chat_id: str  # platform-scoped conversation id
     text: str
     message_id: str | None = None
@@ -190,12 +193,6 @@ class ChatState:
 
 
 class NoticeBridgeOwner:
-    def initialize_poll(self) -> None:
-        raise NotImplementedError
-
-    async def poll_once(self) -> None:
-        raise NotImplementedError
-
     async def handle_inbound(self, chat_id: str, text: str) -> str | None:
         raise NotImplementedError
 
@@ -225,11 +222,6 @@ class NoticeBridgeOwner:
 
     def reply_target(self, chat_id: str, text: str, *, account_id: str) -> tuple[int, int] | None:
         raise NotImplementedError
-
-
-class PollCursorStore(Protocol):
-    def load_poll(self, channel: str) -> dict[str, tuple[str, int]]: ...
-    def save_poll(self, channel: str, chat_id: str, message_id: str, create_ms: int) -> None: ...
 
 
 class BridgeCore(Protocol):
@@ -276,7 +268,6 @@ class IMAdapter(ABC):
         """Disconnect and clean up."""
 
     can_buttons: bool = False
-    """True when the platform renders inline buttons (Telegram)."""
 
     can_type: bool = False
     """True when the platform has a native \"typing\" indicator."""
@@ -326,21 +317,22 @@ class IMAdapter(ABC):
         markdown: bool = False,
         buttons: list[tuple[str, str]] | None = None,
     ) -> None:
-        """Send ``text`` to the user's private chat on this channel.
-
-        The outbound-notification entry point (``IMBridgeCore.notify_user``):
-        each adapter resolves its own owner chat (Telegram owner id, WeChat
-        account user, Feishu's last p2p sender). Adapters that cannot resolve
-        one raise NotImplementedError — ``notify_user`` catches and skips
-        them, so a channel without a known chat never breaks the fan-out.
-        """
+        # meiva:note
+        # Send ``text`` to the user's private chat on this channel.
+        #
+        #         The outbound-notification entry point (``IMBridgeCore.notify_user``):
+        #         each adapter resolves its own owner chat (IM owner id, WeChat
+        #         account user). Adapters that cannot resolve
+        #         one raise NotImplementedError — ``notify_user`` catches and skips
+        #         them, so a channel without a known chat never breaks the fan-out.
+        #
 
         raise NotImplementedError(f"{type(self).__name__} cannot resolve an owner chat")
 
     async def typing(self, chat_id: str) -> None:
-        """Show the platform's native \"typing\" indicator (Telegram's
-        bouncing dots) for a moment. Core refreshes it until the agent
-        replies; the base implementation refuses — check ``can_type`` first."""
+        # meiva:note
+        # Show the platform's native "typing" indicator for a moment. Core refreshes it until the agent
+        # replies; the base implementation refuses — check ``can_type`` first.
 
         raise NotImplementedError(f"{type(self).__name__} cannot show typing")
 

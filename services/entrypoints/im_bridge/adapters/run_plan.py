@@ -14,7 +14,7 @@ __all__ = ["ADAPTER_NAMES", "AdapterPlan", "exit_code", "plan_adapters"]
 
 # meiva:note
 # The adapters the bridge ships, in load order.
-ADAPTER_NAMES = ("telegram", "weixin", "feishu")
+ADAPTER_NAMES = ("weixin",)
 
 
 # meiva:note

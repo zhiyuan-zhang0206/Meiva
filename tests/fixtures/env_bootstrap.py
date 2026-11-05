@@ -49,7 +49,7 @@ import tests._test_env_file
 # differently where a launcher's environment reached it.
 #
 # A credential is a whole name element, never a substring: `MEIVA_API_TOKEN`,
-# `MEIVA_FEISHU_APP_SECRET`, `MEIVA_DB_CAPABILITY_KEY` are credentials;
+# `MEIVA_TELEGRAM_BOT_TOKEN`, `MEIVA_DB_CAPABILITY_KEY` are credentials;
 # `MEIVA_REPLY_SUGGESTION_MAX_INPUT_TOKENS` is a budget and
 # `MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE` is a path TO a credential — a rule that called
 # those two credentials would teach the reader to ignore this one. `MEIVA_PROCESS_PROFILE`
@@ -190,15 +190,15 @@ os.environ["MEIVA_CONFIG_FETCH"] = "skip"
 # meiva:link tests/docs/test-fixtures/history-dump-isolation.meiva.okf.md
 os.environ["MEIVA_COMPACT_HISTORY_DUMP"] = "false"
 
-# ── Process-profile marker: the suite is profile-less, like CI ──
+# meiva:note
+# The suite is profile-less, like CI.
 #
 # `Settings()` reads MEIVA_PROCESS_PROFILE at construction to build only the
 # domains that process kind consumes. The pytest process has no process kind,
 # but a local run launched from a fleet agent / runner process INHERITS the
 # launcher's marker (MEIVA_PROCESS_PROFILE=agent), so `settings` builds only the
-# agent domains and gateway-domain reads fail — `settings.feishu` /
-# `settings.telegram` in the im_bridge adapter tests raise "does not construct
-# the 'feishu' config domain" — while CI (no marker, every domain constructed)
+# agent domains and gateway-domain reads fail — `settings.telegram` in the
+# im_bridge adapter tests raises "does not construct the telegram config domain" — while CI (no marker, every domain constructed)
 # stays green. Pop the marker here, before the first Settings() construction,
 # so local runs match CI (2026-08-06, PR #1650 verification).
 os.environ.pop("MEIVA_PROCESS_PROFILE", None)
@@ -219,12 +219,8 @@ os.environ.pop("MEIVA_PROCESS_PROFILE", None)
 # monkeypatch (`meiva/tests/namespaces/sdk_surface/test_process_clients.py`).
 os.environ.pop("MEIVA_API_TOKEN", None)
 # meiva:note
-# The same delivery, four more ways: the Cloudflare provisioning token, the Feishu app
-# secret the IM bridge signs with, the relay token an impersonation session opens with (the
-# lease exports it into the session's environment), and the alerts webhook token. Nothing in
-# the suite needs any of them: `settings.feishu` reads an absent secret as "channel
-# unavailable" and the ingest endpoint reads an absent webhook token as "loopback callers
-# only", which is what CI reads.
+# Host credentials, including a retired channel's secret, are still scrubbed: removal of a
+# config field does not erase variables inherited from an older installation.
 os.environ.pop("MEIVA_CF_API_TOKEN", None)
 os.environ.pop("MEIVA_FEISHU_APP_SECRET", None)
 os.environ.pop("MEIVA_IMPERSONATION_RELAY_TOKEN", None)

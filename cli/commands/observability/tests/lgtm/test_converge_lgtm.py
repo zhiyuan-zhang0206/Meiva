@@ -339,30 +339,6 @@ def test_an_unconfigured_grafana_password_leaves_no_credential_file(lgtm_unit: L
 
 # meiva:note
 # The bot token is a fixture value, never a credential.
-def test_the_telegram_contact_env_exists_only_while_the_home_has_a_bot(
-    lgtm_unit: LgtmUnit,
-) -> None:
-    lgtm_unit.render()
-    env_file = lgtm_unit.native / "grafana/telegram.env"
-
-    lgtm_native.render_grafana_telegram_env(
-        lgtm_unit.native,
-        token="fake-bot-token-for-test",  # noqa: S106
-        owner=42,
-    )
-
-    assert env_file.read_text(encoding="utf-8") == (
-        "export MEIVA_ALERTS_TELEGRAM_BOT_TOKEN=fake-bot-token-for-test\n"
-        "export MEIVA_ALERTS_TELEGRAM_CHAT_ID=42\n"
-    )
-    assert env_file.stat().st_mode & 0o777 == 0o600
-    run_script = (lgtm_unit.native / "grafana/run.sh").read_text(encoding="utf-8")
-    assert f'. "{env_file}"' in run_script
-
-    lgtm_native.render_grafana_telegram_env(lgtm_unit.native, token="", owner=0)
-
-    assert not env_file.exists()
-    assert 'MEIVA_ALERTS_TELEGRAM_BOT_TOKEN:-unconfigured}"' in run_script
 
 
 @pytest.mark.parametrize(

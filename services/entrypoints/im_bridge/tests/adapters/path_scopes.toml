@@ -1,13 +1,8 @@
 # Fixture modules (tests/path_scoped/) that govern this directory's tests: "." is the
 # directory itself, otherwise the test files named here (tests/fixtures/path_scopes.py).
 "meiva.tests.fixtures.sdk" = [
-    "test_feishu_adapter.py",
-    "test_feishu_durable_cursor.py",
-    "test_feishu_owner_seed.py",
-    "test_im_bridge_telegram.py",
     "test_prepared_timeline.py",
     "test_segment_retry_safety.py",
-    "test_telegram_adapter.py",
     "test_weixin_adapter.py",
     "test_weixin_chat_identity.py",
     "test_weixin_ingress_account_fencing.py",
