@@ -17,3 +17,11 @@ while execution owns its environment. The optional GitHub read already handles
 
 No root declarations or rule allowances change in this batch. The SDK
 interpreter fact remains the separate prerequisite tracked by task #6128.
+
+## Review update
+
+The UTC fallback proposed above was withdrawn during review. Capability reports
+use the timezone from the invocation's configuration view, including the existing
+`America/Los_Angeles` field default when no override was supplied. Debt repayment
+does not replace that established configuration default with a new one. F12's UTC
+choice is different: the log producer is explicitly requested to emit UTC.

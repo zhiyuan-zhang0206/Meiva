@@ -16,7 +16,7 @@ import re
 import stat
 from collections.abc import Callable
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -87,7 +87,7 @@ def test_it_seals_the_active_generation_for_one_unit_under_the_key_it_prints(
     bundle = open_bundle(
         out.read_bytes(), _printed_key(printed), now=command.clock.now().timestamp()
     )
-    expected_zone = UTC if zone is None else ZoneInfo(zone)
+    expected_zone = ZoneInfo("America/Los_Angeles" if zone is None else zone)
     expires = datetime.fromtimestamp(bundle.expires_at, tz=expected_zone).isoformat(
         timespec="seconds"
     )

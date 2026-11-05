@@ -12,8 +12,9 @@
 from __future__ import annotations
 
 import sys
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import httpx
 from pydantic import BaseModel, JsonValue, TypeAdapter
@@ -301,9 +302,9 @@ def cmd_db_authority_issue_unit(
     except (AuthorityRefusedError, ValueError, RuntimeError, OSError) as exc:
         print(failure_line("issue-unit", str(exc)), file=sys.stderr)
         return 1
-    expires = datetime.fromtimestamp(issued.expires_at, tz=command.zone or UTC).isoformat(
-        timespec="seconds"
-    )
+    expires = datetime.fromtimestamp(
+        issued.expires_at, tz=ZoneInfo(command.config.view.general.timezone)
+    ).isoformat(timespec="seconds")
     report = IssuedReport(
         unit=unit.describe(),
         generation=issued.generation,
