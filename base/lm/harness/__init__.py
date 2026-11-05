@@ -11,6 +11,7 @@ from base.lm.harness.engine import HarnessSession, HarnessTurn, TurnEngine
 from base.lm.harness.events import (
     AssistantText,
     BridgeEvent,
+    ForegroundAccepted,
     HandoffInjected,
     RateLimitObserved,
     ReasoningDelta,
@@ -46,6 +47,7 @@ __all__ = [
     "ClusterFact",
     "EntryPoint",
     "FileSessionRegistry",
+    "ForegroundAccepted",
     "Handoff",
     "HandoffInjected",
     "HarnessBridge",

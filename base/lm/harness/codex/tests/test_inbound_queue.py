@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from base.lm.harness.codex.frames import INTERNAL_ERROR, INVALID_REQUEST, JsonObject, JsonRpcError
 from base.lm.harness.codex.session import InboundQueueFullError
 from base.lm.harness.codex.tests.support import start, turn_text
 
@@ -42,6 +43,79 @@ async def test_same_key_returns_the_same_ticket(tmp_path: Path) -> None:
         harness.server.message("ok")
         harness.server.complete()
         await asyncio.wait_for(first.outcome(), 2)
+        assert len(harness.server.params_for("turn/start")) == 1
+    finally:
+        await harness.stop()
+
+
+async def test_steer_waits_for_matching_completed_user_item(tmp_path: Path) -> None:
+    harness = await start(tmp_path)
+    try:
+        first = harness.session.submit("one")
+        await harness.turn_started()
+        assert harness.session.steering_available
+        steer = asyncio.create_task(harness.session.steer("change direction", key="inbound-42"))
+        await asyncio.sleep(0)
+        assert harness.server.params_for("turn/steer") == [
+            {
+                "threadId": harness.server.thread_id,
+                "expectedTurnId": harness.server.current_turn,
+                "clientUserMessageId": "inbound-42",
+                "input": [{"type": "text", "text": "change direction"}],
+            }
+        ]
+        params: JsonObject = {
+            "threadId": harness.server.thread_id,
+            "turnId": harness.server.current_turn,
+            "item": {"type": "userMessage", "id": "user-2", "clientId": "inbound-42"},
+        }
+        harness.server.emit("item/started", params)
+        harness.server.emit("item/completed", {**params, "turnId": "different-turn"})
+        harness.server.emit(
+            "item/completed",
+            {**params, "item": {"type": "userMessage", "id": "user-3", "clientId": "other"}},
+        )
+        await asyncio.sleep(0)
+        assert not steer.done()
+        harness.server.emit("item/completed", params)
+        assert await asyncio.wait_for(steer, 2)
+        assert harness.session.active_turn_id == first.turn_id
+        assert harness.session.pending_turns == ()
+        assert len(harness.server.params_for("turn/start")) == 1
+    finally:
+        await harness.stop()
+
+
+async def test_steer_rejection_and_internal_error_have_distinct_outcomes(tmp_path: Path) -> None:
+    harness = await start(tmp_path)
+    try:
+        assert not harness.session.steering_available
+        assert not await harness.session.steer("idle", key="inbound-42")
+        assert not harness.server.params_for("turn/steer")
+        _ = harness.session.submit("one")
+        await harness.turn_started()
+        harness.server.steer_error = JsonRpcError(INVALID_REQUEST, "no active turn to steer")
+        assert not await harness.session.steer("rejected", key="inbound-43")
+        harness.server.steer_error = JsonRpcError(INTERNAL_ERROR, "internal failure")
+        with pytest.raises(JsonRpcError, match="internal failure"):
+            _ = await harness.session.steer("ambiguous", key="inbound-44")
+    finally:
+        await harness.stop()
+
+
+async def test_steer_without_receipt_at_turn_completion_is_ambiguous(tmp_path: Path) -> None:
+    harness = await start(tmp_path)
+    try:
+        _ = harness.session.submit("one")
+        await harness.turn_started()
+        steer = asyncio.create_task(harness.session.steer("queued", key="inbound-42"))
+        await asyncio.sleep(0)
+        assert harness.server.params_for("turn/steer")
+        harness.server.complete()
+        assert not harness.session.steering_available
+        with pytest.raises(RuntimeError, match="turn ended before the steer receipt arrived"):
+            _ = await asyncio.wait_for(steer, 2)
+        assert harness.session.pending_turns == ()
         assert len(harness.server.params_for("turn/start")) == 1
     finally:
         await harness.stop()

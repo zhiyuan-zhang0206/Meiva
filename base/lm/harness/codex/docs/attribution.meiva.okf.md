@@ -1,7 +1,7 @@
 ---
 type: doc
 title: Who an app-server notification belongs to
-description: '`base/lm/harness/codex/` — attribution: the turn id the adapter binds from `turn/started` or `turn/start`, why a name it never bound has no owner, and what a completion or error this session did not run becomes.'
+description: '`base/lm/harness/codex/` — attribution: the authoritative turn id from `turn/start`, how early notifications are buffered, and where foreign completions and errors go.'
 tags:
 - base
 - library
@@ -13,16 +13,21 @@ tags:
 
 The app server runs work this session did not start — a queued message, a review,
 a compaction, and, across `thread/resume`, the tail of a turn an earlier session
-ran. Every turn-scoped notification therefore goes through the shared
-`_claim(turnId)` and never through "there is a turn in flight, so it is ours":
-the adapter binds the provider's name once (`turn/started` when it beats the
-`turn/start` response, the response otherwise) and a name it never bound has no
-owner. `threadId` is checked too: one connection serves one thread, and a
-notification naming another one is not this session's work.
+ran. The response to `turn/start` names the authoritative turn. An early
+`turn/started` can supply an interrupt target. Early activity waits for the
+response and is then dispatched after `ForegroundAccepted`. Only activity
+naming the authoritative turn contributes to the running foreground. Each
+connection serves one thread.
+
+During launch, notifications without a turn ID or the matching thread ID
+cannot be attributed. The early buffer applies `max_buffered_events` to text
+and reasoning deltas while retaining control notifications. A rejected launch
+discards the buffer.
 
 | Notification | Becomes |
 |---|---|
-| `turn/started` while this session is starting a turn | the name bound to that ticket; at any other moment, nothing |
+| `turn/started` while this session is starting a turn | provisional interrupt target |
+| `turn/start` response naming a turn | authoritative turn binding and `ForegroundAccepted` |
 | `turn/completed` naming our turn | `TurnCompleted` |
 | `turn/completed` naming any other turn | `UnsolicitedOutput(source="turn/completed")` carrying that turn's reply |
 | `error` with `willRetry=false` naming our turn | `TurnFaulted` |

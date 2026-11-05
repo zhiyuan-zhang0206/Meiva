@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal, NamedTuple
 
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel, Field, TypeAdapter
 
 from base.agents.impersonation.status import ImpersonationMetadata
 from base.agents.messages.inbound_images import (
@@ -49,6 +49,8 @@ class TimelineItem(BaseModel):
     """
 
     item_id: str
+    activity_revision: int | None = Field(default=None, ge=0, strict=True)
+    activity_pending: bool | None = None
     kind: Literal[
         "inbound_chat",
         "inbound_compact_summary",

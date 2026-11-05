@@ -4135,6 +4135,8 @@ export interface components {
         };
         TimelineItem: {
             item_id: string;
+            activity_revision?: number | null;
+            activity_pending?: boolean | null;
             kind: "inbound_chat" | "inbound_compact_summary" | "inbound_compact_request" | "attach" | "agent_chat" | "agent_code" | "agent_reasoning" | "code_output" | "system_prompt" | "system_marker";
             source?: string | null;
             payload: string;

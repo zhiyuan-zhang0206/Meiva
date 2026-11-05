@@ -38,7 +38,6 @@ def option_values(
         cwd=str(config.cwd),
         tools=None if config.tools is None else list(config.tools),
         permission_mode=config.permission_mode,
-        max_turns=config.max_turns,
         include_partial_messages=True,
         env=build_env(environ, config.auth, host=environ),
         resume=resume,

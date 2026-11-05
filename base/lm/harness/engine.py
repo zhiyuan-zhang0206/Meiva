@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from base.lm.harness.events import BridgeEvent, Usage
 from base.lm.harness.handoff import Handoff
+
+TurnEventSink = Callable[[BridgeEvent], Awaitable[None] | None]
 
 
 # meiva:note
@@ -72,6 +74,14 @@ class CompletedTurnEvent(Protocol):
     def steps(self) -> tuple[Usage, ...]: ...
 
 
+@runtime_checkable
+class ForegroundSteering(Protocol):
+    @property
+    def steering_available(self) -> bool: ...
+
+    def steer(self, text: str, *, key: str) -> Awaitable[bool]: ...
+
+
 class SubmittedTurn(Protocol):
     @property
     def turn_id(self) -> str: ...
@@ -98,7 +108,7 @@ class HarnessSession(Protocol):
     ) -> Awaitable[None]: ...
     def submit(self, text: str, *, key: str | None = None) -> SubmittedTurn: ...
     def events(self) -> AsyncIterator[BridgeEvent]: ...
-    def interrupt(self) -> Awaitable[object]: ...
+    def interrupt(self, *, turn_id: str | None = None) -> Awaitable[object]: ...
     def close(self, *, reason: str = "closed") -> Awaitable[None]: ...
 
     @property
@@ -131,7 +141,7 @@ class TurnEngine(Protocol):
         text: str,
         *,
         key: str,
-        on_event: Callable[[BridgeEvent], None] | None = None,
+        on_event: TurnEventSink | None = None,
     ) -> Awaitable[HarnessTurn]: ...
     def interrupt(self) -> Awaitable[object]: ...
     def close(self, *, reason: str = "closed") -> Awaitable[None]: ...

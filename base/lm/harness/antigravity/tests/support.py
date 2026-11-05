@@ -108,7 +108,6 @@ def config(tmp_path: Path, **overrides: Any) -> AntigravityConfig:
     values: dict[str, Any] = {
         "cwd": tmp_path,
         "executable": (sys.executable, str(FAKE_CLI)),
-        "turn_timeout_seconds": 30.0,
         "cancel_settle_seconds": 2.0,
     }
     values.update(overrides)

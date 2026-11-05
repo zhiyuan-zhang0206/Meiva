@@ -188,9 +188,9 @@ def test_a_turn_that_named_no_final_answer_keeps_everything_it_streamed() -> Non
     assert record.text == "one\ntwo"
 
 
-def test_declining_and_interrupting_are_recorded_on_the_turn() -> None:
-    record = TurnRecord().with_denial("command: rm -rf build").interrupted()
-    assert (record.denials, record.interrupt_requested) == (("command: rm -rf build",), True)
+def test_denials_are_recorded_on_the_turn() -> None:
+    record = TurnRecord().with_denial("command: rm -rf build")
+    assert record.denials == ("command: rm -rf build",)
 
 
 def test_a_completed_turn_settles_its_outcome_event_and_totals() -> None:
@@ -256,15 +256,15 @@ def test_a_failed_turn_settles_as_an_error_naming_the_servers_reason() -> None:
     assert settlement.outcome.usage == Usage()
 
 
-def test_an_interrupt_the_server_never_reports_still_settles_as_interrupted() -> None:
+def test_only_the_server_status_marks_a_turn_interrupted() -> None:
     settlement = settle(
         turn_id="turn-3",
         session_id="thread-1",
-        turn={"status": "completed"},
-        record=TurnRecord().interrupted(),
+        turn={"status": "interrupted"},
+        record=TurnRecord(),
         totals=SessionTotals(),
     )
-    assert (settlement.outcome.interrupted, settlement.outcome.is_error) == (True, False)
+    assert (settlement.outcome.interrupted, settlement.outcome.is_error) == (True, True)
 
 
 def test_a_step_per_report_names_the_number_of_steps() -> None:

@@ -33,37 +33,25 @@ class InboundRow(NamedTuple):
 NOTICE_FYI_TTL_DAYS = 30
 
 
+# meiva:note
+# Pending chats stay in the composer strip. A claimed chat for the native
+# harness moves to the conversation at claim. External chats remain visible
+# here during pickup and leave when provider acceptance is committed or delivery
+# uncertainty is recorded.
+#
+# An active takeover's trail or relay read counts as display delivery only
+# while the lease is live. The strip also needs the payload for attachments.
+# meiva:link base/agents/inbox/docs/inbox.meiva.okf.md
 def list_pending_inbounds(db: psycopg.Connection, agent_id: int) -> list[InboundRow]:
-    """List chat inbounds still queued for an agent, oldest first.
-
-    Only `status='pending'` (the claim node has not picked these up yet)
-    and `kind='chat'` (user-visible dialogue, not control signals). Once a
-    message is claimed it enters the agent's in-memory messages and shows
-    up in the timeline snapshot, so it is intentionally excluded here — the
-    web UI renders these as a compact "pending" strip above the composer,
-    distinct from the timeline.
-
-    Rows the active takeover pipeline has already absorbed are also
-    excluded: while an unexpired `active` lease exists, a pending chat that
-    the session trail has transcribed (an `agent_impersonation_entries`
-    row — what the timeline renders) or that the relay has read
-    (`agent_impersonation_messages`) is display-side delivered, and must
-    not appear in both the timeline and the strip (#3683). The row itself
-    stays `status='pending'` — this is a read-surface view, not a state
-    change; once the lease ends, unacknowledged rows are visible here
-    again (delivery evidence counts only while the lease is alive).
-
-    `payload` rides along (unlike the other InboundRow readers) because the
-    strip renders multimodal messages: the endpoint extracts their image
-    reference urls from the content blocks so the browser can show
-    thumbnails before the message is claimed.
-    """
     with db.cursor() as cur:
         cur.execute(
             "SELECT ib.id, ib.content, ib.kind, ib.source, ib.status, ib.created_at, "
             "       ib.claimed_at, ib.payload "
             "FROM inbound_messages ib "
-            "WHERE ib.agent_id = %s AND ib.status = 'pending' AND ib.kind = 'chat' "
+            "WHERE ib.agent_id = %s AND ib.kind = 'chat' "
+            "AND (ib.status = 'pending' OR (ib.status = 'claimed' AND EXISTS ("
+            "  SELECT 1 FROM agents_meta am WHERE am.id = ib.agent_id AND am.harness <> 'meiva'"
+            "))) "
             "AND NOT EXISTS ("
             "  SELECT 1 FROM agent_impersonations lease "
             "  WHERE lease.agent_id = ib.agent_id "

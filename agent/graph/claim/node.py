@@ -83,6 +83,7 @@ from ._dispatch import by_who as by_who
 from ._dispatch import handle_heartbeat as handle_heartbeat
 from ._present import publish_end_timeline_snapshot, publish_inbound_committed
 from ._routing import ClaimGoto, resolve_routing, route_target
+from .harness_steer import recover_harness_steer
 from .harness_turn import render_messages, turn_key
 from .turn_end import settle_turn_end
 
@@ -132,6 +133,8 @@ async def claim_node_impl(
 
     # ── First SELECT: try uncontended claim before pub/sub wait ──
     try:
+        if ctx.harness is not Harness.MEIVA:
+            _ = await recover_harness_steer(ctx, agent_id)
         batch = await claim_inbound_batch(
             ctx.ops_pool, agent_id, incarnation=ctx.original_incarnation
         )
@@ -176,24 +179,12 @@ async def _settle_external_harness_batch(
     agent_id: int,
     st: BatchState,
     *,
+    claimed_chat_ids: list[int],
     enters_harness_turn: bool,
     update: dict[str, object],
 ) -> None:
     update.pop("messages", None)
-    if st.new_msgs and ctx.ops_pool is not None:
-        items, _ = build_timeline_items(st.new_msgs, inputs=ctx.timestamp_policy())
-        async with async_write_transaction(ctx.ops_pool) as pool_conn:
-            persisted = await aappend_harness_timeline_items(
-                pool_conn, agent_id, ctx.harness.value, items
-            )
-            total_count = await aload_harness_message_count(pool_conn, agent_id)
-        if ctx.event_publisher is not None:
-            snap = TimelineSnapshot(
-                agent_id=agent_id,
-                items=[it.model_dump() for it in persisted],
-                msg_count=total_count,
-            )
-            ctx.event_publisher.emit(snap.model_dump_json())
+    items, _ = build_timeline_items(st.new_msgs, inputs=ctx.timestamp_policy())
     if enters_harness_turn:
         pending = [m for m in st.new_msgs if not isinstance(m, (AIMessage, ToolMessage))]
         text = render_messages(pending)
@@ -207,7 +198,22 @@ async def _settle_external_harness_batch(
             "prompt": text,
             "key": key,
             "inbound_ids": inbound_ids,
+            "claimed_chat_ids": claimed_chat_ids,
+            "timeline_items": [item.model_dump(mode="json") for item in items],
         }
+    elif items and ctx.ops_pool is not None:
+        async with async_write_transaction(ctx.ops_pool) as pool_conn:
+            persisted = await aappend_harness_timeline_items(
+                pool_conn, agent_id, ctx.harness.value, items
+            )
+            total_count = await aload_harness_message_count(pool_conn, agent_id)
+        if ctx.event_publisher is not None:
+            snap = TimelineSnapshot(
+                agent_id=agent_id,
+                items=[it.model_dump() for it in persisted],
+                msg_count=total_count,
+            )
+            ctx.event_publisher.emit(snap.model_dump_json())
 
 
 # meiva:note
@@ -225,7 +231,8 @@ async def settle_claimed_batch(
     routing = await resolve_routing(ctx, agent_id, batch)
     st = BatchState()
     await dispatch_batch(ctx, state, agent_id, batch, routing, st)
-    await publish_inbound_committed(ctx, agent_id, st.committed_chat_ids)
+    if ctx.harness is Harness.MEIVA:
+        await publish_inbound_committed(ctx, agent_id, st.committed_chat_ids)
     outcome = await decide(ctx, state, agent_id, st, routing)
     if outcome.publish_end_snapshot and ctx.harness is Harness.MEIVA:
         publish_end_timeline_snapshot(ctx, state, agent_id, st.new_msgs)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -272,6 +279,11 @@ async def settle_claimed_batch(
             ctx,
             agent_id,
             st,
+            claimed_chat_ids=[
+                item.id
+                for item in batch
+                if item.kind == "chat" and item.id in st.committed_chat_ids
+            ],
             enters_harness_turn=outcome.command.goto in (BEFORE_LLM, "harness_turn"),  # pyright: ignore[reportUnknownMemberType]
             update=update,
         )

@@ -31,6 +31,12 @@ describe("marker data-testid hooks (Task #1018)", () => {
     expect(screen.queryByTestId("marker-unrecognized")).toBeNull();
   });
 
+  it("shows a foreground cancellation request as a status", () => {
+    render(<EphemeralSystemMarker source={null} payload="status:Cancellation requested." />);
+    expect(screen.getByText("Cancellation requested.")).toBeTruthy();
+    expect(screen.queryByTestId("marker-error")).toBeNull();
+  });
+
   it("filtered payloads (compact_done / compact_request / cancelled) render neither", () => {
     for (const payload of ["compact_done", "cancelled", "compact_request:x"]) {
       const { unmount } = render(<EphemeralSystemMarker source={null} payload={payload} />);

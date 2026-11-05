@@ -32,7 +32,7 @@ class _StatementRecorder:
 
 
 def _columns(statement: str, privilege: str) -> set[str]:
-    match = re.search(rf"GRANT {privilege} \((.*?)\) ON agent_impersonations", statement, re.S)
+    match = re.search(rf"GRANT {privilege} \(([^)]*)\) ON agent_impersonations", statement, re.S)
     assert match is not None, f"no GRANT {privilege} list on agent_impersonations in: {statement}"
     return {column.strip() for column in match.group(1).split(",") if column.strip()}
 
@@ -51,7 +51,7 @@ def test_runtime_grants_match_the_bootstrap_grants_in_the_schema() -> None:
     bootstrap: dict[str, set[str]] = {"INSERT": set(), "UPDATE": set()}
     for privilege in bootstrap:
         match = re.search(
-            rf"GRANT {privilege} \((.*?)\) ON agent_impersonations TO meiva_runner", schema, re.S
+            rf"GRANT {privilege} \(([^)]*)\) ON agent_impersonations TO meiva_runner", schema, re.S
         )
         assert match is not None, f"db/schema.sql has no bootstrap GRANT {privilege} list"
         bootstrap[privilege] = {c.strip() for c in match.group(1).split(",") if c.strip()}

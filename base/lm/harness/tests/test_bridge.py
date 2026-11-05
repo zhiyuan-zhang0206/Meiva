@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import json
 import os
 import random
 from collections.abc import AsyncIterator, Sequence
@@ -144,7 +143,7 @@ class FakeSession:
 
         return stream()
 
-    async def interrupt(self) -> object:
+    async def interrupt(self, *, turn_id: str | None = None) -> object:
         return object()
 
     async def close(self, *, reason: str = "closed") -> None:
@@ -680,15 +679,15 @@ def test_the_registration_carries_the_injected_clock_pid_and_handle_generator(
 def test_a_registration_expires_within_the_configured_ttl(tmp_path: Path) -> None:
     store = RegistrationStore(tmp_path / "registrations")
     bridge = make_bridge(FakeSession(), registrations=store)
-
+    before = datetime.now(UTC)
     asyncio.run(bridge.run_turn("hello", key="inbound-1"))
+    after = datetime.now(UTC)
 
-    written = json.loads((tmp_path / "registrations" / "6984.json").read_text(encoding="utf-8"))
-    assert written["expires_at"], "a row without an expiry is a capability with no end"
-    created = datetime.fromisoformat(written["created_at"])
-    expires = datetime.fromisoformat(written["expires_at"])
-    assert expires - created == timedelta(seconds=3600)
-    assert expires > datetime.now(UTC), "a live controller's row is valid, not expired"
+    written = store.read(6984)
+    assert written is not None
+    expires = datetime.fromisoformat(written.expires_at)
+    ttl = timedelta(seconds=3600)
+    assert before + ttl <= expires <= after + ttl
 
 
 def test_every_turn_renews_the_row_without_restamping_its_creation(tmp_path: Path) -> None:
@@ -756,13 +755,17 @@ async def test_session_model_and_error_detail_surface_through_bridge() -> None:
                 self._queue.append(completion(turn_id, "ok"))
             return FakeTicket(turn_id)
 
-    bridge = make_bridge(ModelOnStartSession())
+    session = ModelOnStartSession()
+    bridge = make_bridge(session)
     await bridge.run_turn("one", key="k1")
     assert bridge.model == "gpt-6.1-sol"
     with pytest.raises(HarnessTurnFaultedError, match="failed \\(failed\\): usage limit reached"):
         await bridge.run_turn("two", key="k2")
     with pytest.raises(HarnessTurnFaultedError, match="failed \\(API 400\\): API Error: 400"):
         await bridge.run_turn("three", key="k3")
+
+    assert session.started == 1
+    assert not session.closed
 
 
 def registration(

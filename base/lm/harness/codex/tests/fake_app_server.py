@@ -49,6 +49,7 @@ class FakeAppServer:
         self.requests: list[tuple[str, RequestParams]] = []
         self.notifications: list[tuple[str, RequestParams | None]] = []
         self.turn_ids: list[str] = []
+        self.steer_error: JsonRpcError | None = None
         self.on_interrupt: Callable[[], None] | None = None
         # meiva:note
         # A gate a test can hold shut to keep `turn/start` unanswered, so it can push a
@@ -104,6 +105,10 @@ class FakeAppServer:
             turn_id = self.turn_start_id or f"codex-turn-{len(self.turn_ids) + 1}"
             self.turn_ids.append(turn_id)
             return {"turn": {"id": turn_id, "status": "inProgress"}}
+        if method == "turn/steer":
+            if self.steer_error is not None:
+                raise self.steer_error
+            return {"turnId": params.get("expectedTurnId")}
         if method == "turn/interrupt":
             if self.on_interrupt is not None:
                 self.on_interrupt()

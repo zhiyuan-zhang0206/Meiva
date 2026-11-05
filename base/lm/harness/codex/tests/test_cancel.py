@@ -5,9 +5,11 @@ from pathlib import Path
 
 import pytest
 
+from base.clock.tests.fakes import clock_over
+from base.clock.tests.manual_timers import ManualTimers
 from base.lm.harness.codex.tests.fake_app_server import CODEX_PID
 from base.lm.harness.codex.tests.support import start
-from base.lm.harness.events import SessionFaulted, TurnCompleted
+from base.lm.harness.events import TurnCompleted
 
 TOOL_MARKER = "sleep 40"
 
@@ -66,19 +68,18 @@ async def test_unobservable_app_server_is_not_a_pass(tmp_path: Path) -> None:
         await harness.stop()
 
 
-async def test_turn_timeout_interrupts_the_turn(tmp_path: Path) -> None:
-    harness = await start(tmp_path, turn_timeout_seconds=0.05)
+async def test_default_turn_can_finish_after_two_quiet_days(tmp_path: Path) -> None:
+    timers = ManualTimers()
+    harness = await start(tmp_path, clock=clock_over(timers))
     try:
-        ticket = harness.session.submit("hang forever")
+        ticket = harness.session.submit("wait for the provider")
         await harness.turn_started()
-        fault = await harness.wait_for(
-            lambda event: isinstance(event, SessionFaulted) and "exceeded" in event.error
-        )
-        assert fault.turn_id == ticket.turn_id
-        assert "turn/interrupt" in harness.server.methods()
-        harness.server.complete(status="interrupted")
-        completed = await harness.wait_for(lambda event: isinstance(event, TurnCompleted))
-        assert completed.interrupted is True
+        timers.advance(2 * 24 * 3600)
+        await asyncio.sleep(0)
+        assert "turn/interrupt" not in harness.server.methods()
+        assert not ticket.settled
+        harness.server.complete()
+        assert not (await asyncio.wait_for(ticket.outcome(), timeout=2)).is_error
     finally:
         await harness.stop()
 

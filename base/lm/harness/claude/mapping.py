@@ -52,6 +52,7 @@ class ResultFields:
     # name it. `_claim` is what decides which of those can be our turn's boundary.
     # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
     origin_kind: str | None
+    interrupted: bool
 
 
 def map_message(message: object, *, turn_id: str | None) -> list[BridgeEvent]:
@@ -76,6 +77,8 @@ def parse_result(message: object) -> ResultFields:
         api_error_status=_int_or_none(getattr(message, "api_error_status", None)),
         errors=_messages(getattr(message, "errors", None)),
         origin_kind=_origin_kind(getattr(message, "origin", None)),
+        interrupted=getattr(message, "terminal_reason", None)
+        in ("aborted_streaming", "aborted_tools"),
     )
 
 

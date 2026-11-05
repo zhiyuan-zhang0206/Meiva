@@ -37,6 +37,9 @@ class ExcerptItem(Protocol):
     @property
     def user_facing(self) -> bool: ...
 
+    @property
+    def activity_pending(self) -> bool | None: ...
+
 
 @dataclass(frozen=True)
 class ConversationExcerpt:
@@ -74,7 +77,10 @@ def _last_turn_agent_text(items: Sequence[ExcerptItem]) -> list[ExcerptItem]:
     return [
         item
         for item in items[last_inbound + 1 :]
-        if item.kind == "agent_chat" and item.user_facing and item.payload.strip()
+        if item.kind == "agent_chat"
+        and item.user_facing
+        and not item.activity_pending
+        and item.payload.strip()
     ]
 
 

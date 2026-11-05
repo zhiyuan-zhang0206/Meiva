@@ -85,6 +85,18 @@ def interrupt_request(thread_id: str, turn_id: str) -> tuple[str, JsonObject]:
     return ("turn/interrupt", {"threadId": thread_id, "turnId": turn_id})
 
 
+def steer_request(thread_id: str, turn_id: str, text: str, *, key: str) -> tuple[str, JsonObject]:
+    return (
+        "turn/steer",
+        {
+            "threadId": thread_id,
+            "expectedTurnId": turn_id,
+            "clientUserMessageId": key,
+            "input": [{"type": "text", "text": text}],
+        },
+    )
+
+
 # meiva:note
 # The frame one server request is answered with, and the denial to record when it is one this
 # bridge refuses: a request the bridge declines is an action the turn did not take, and the agent

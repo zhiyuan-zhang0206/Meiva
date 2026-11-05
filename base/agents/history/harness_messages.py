@@ -1,5 +1,5 @@
 # meiva:note
-# Database operations for the append-only agent_harness_messages table used as
+# Database operations for the agent_harness_messages table used as
 # the UI display store for external harnesses (claude_code, codex, antigravity).
 # Native meiva continues using LangGraph checkpoints as both its
 # execution truth and UI store.
@@ -9,11 +9,13 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
+from uuid import UUID
 
 from psycopg import AsyncConnection, Connection
 
 from base.agents.history.timeline_item import TimelineItem
-from base.db.rows import aquery_all, query_all
+from base.db.rows import aquery_all, aquery_one, query_all
+from base.native_process.runtime_incarnation import RuntimeIncarnation, StaleIncarnationError
 
 
 # meiva:note
@@ -21,6 +23,12 @@ from base.db.rows import aquery_all, query_all
 @dataclass(frozen=True)
 class _ItemRow:
     item: object
+
+
+_INSERT_HARNESS_TIMELINE_ITEM = """
+INSERT INTO agent_harness_messages (agent_id, seq, harness, item, inbound_id, created_at)
+VALUES (%s, %s, %s, %s::jsonb, %s, COALESCE(%s::timestamptz, clock_timestamp()))
+"""
 
 
 def _int_from_row(row: tuple[object, ...] | None) -> int:
@@ -135,10 +143,7 @@ def append_harness_timeline_items(
             persisted.append(updated)
             item_json = json.dumps(updated.model_dump(mode="json"))
             cur.execute(
-                """
-                INSERT INTO agent_harness_messages (agent_id, seq, harness, item, inbound_id, created_at)
-                VALUES (%s, %s, %s, %s::jsonb, %s, COALESCE(%s::timestamptz, clock_timestamp()))
-                """,
+                _INSERT_HARNESS_TIMELINE_ITEM,
                 (
                     agent_id,
                     seq,
@@ -178,10 +183,7 @@ async def aappend_harness_timeline_items(
             persisted.append(updated)
             item_json = json.dumps(updated.model_dump(mode="json"))
             await cur.execute(
-                """
-                INSERT INTO agent_harness_messages (agent_id, seq, harness, item, inbound_id, created_at)
-                VALUES (%s, %s, %s, %s::jsonb, %s, COALESCE(%s::timestamptz, clock_timestamp()))
-                """,
+                _INSERT_HARNESS_TIMELINE_ITEM,
                 (
                     agent_id,
                     seq,
@@ -192,3 +194,111 @@ async def aappend_harness_timeline_items(
                 ),
             )
         return persisted
+
+
+@dataclass(frozen=True)
+class _HarnessTimelineOwner:
+    status: str
+    runtime_generation: UUID | None
+    runtime_owner: UUID | None
+
+
+@dataclass(frozen=True)
+class _HarnessTimelineRow:
+    harness: str
+    item: str
+
+
+# meiva:note
+# Insert the next flat activity or advance the revision of an existing one. None denotes
+# a sequence, identity, or revision conflict; an obsolete runtime raises before reading
+# or writing timeline items.
+# meiva:link base/agents/history/docs/timeline/timeline.meiva.okf.md
+async def aupsert_harness_timeline_item(
+    conn: AsyncConnection,
+    agent_id: int,
+    harness: str,
+    item: TimelineItem,
+    *,
+    incarnation: RuntimeIncarnation | None = None,
+) -> TimelineItem | None:
+    seq = _activity_seq(item.item_id)
+    revision = item.activity_revision
+    if revision is None:
+        raise ValueError("harness activity requires a revision")
+    async with conn.transaction():
+        if not await _lock_activity_owner(conn, agent_id, incarnation):
+            return None
+        row = await aquery_one(
+            conn,
+            _HarnessTimelineRow,
+            "SELECT harness, item::text FROM agent_harness_messages WHERE agent_id = %s AND seq = %s",
+            (agent_id, seq),
+        )
+        if row is None:
+            return await _insert_harness_activity(conn, agent_id, seq, harness, item)
+        if row.harness != harness:
+            return None
+        previous = TimelineItem.model_validate_json(row.item)
+        if not _can_advance_activity(previous, item, revision):
+            return item if previous == item else None
+        await conn.execute(
+            "UPDATE agent_harness_messages SET item = %s::jsonb WHERE agent_id = %s AND seq = %s",
+            (item.model_dump_json(), agent_id, seq),
+        )
+        return item
+
+
+def _activity_seq(item_id: str) -> int:
+    message, separator, block = item_id.partition(".")
+    if not separator or block != "0" or not message.isascii() or not message.isdecimal():
+        raise ValueError("harness activity requires a flat timeline item id")
+    if len(message) > 10:
+        raise ValueError("harness activity requires a canonical timeline sequence")
+    seq = int(message)
+    if message != str(seq) or seq > 2_147_483_647:
+        raise ValueError("harness activity requires a canonical timeline sequence")
+    return seq
+
+
+async def _lock_activity_owner(
+    conn: AsyncConnection, agent_id: int, incarnation: RuntimeIncarnation | None
+) -> bool:
+    if incarnation is not None:
+        incarnation.require_agent(agent_id)
+    owner = await aquery_one(
+        conn,
+        _HarnessTimelineOwner,
+        "SELECT status, runtime_generation, runtime_owner FROM agents_meta WHERE id = %s FOR UPDATE",
+        (agent_id,),
+    )
+    if incarnation is not None and (
+        owner is None
+        or owner.status == "terminated"
+        or (owner.runtime_generation, owner.runtime_owner)
+        != (incarnation.generation, incarnation.owner)
+    ):
+        raise StaleIncarnationError(f"stale harness activity write for agent {agent_id}")
+    return owner is not None
+
+
+def _can_advance_activity(previous: TimelineItem, item: TimelineItem, revision: int) -> bool:
+    return (
+        previous.activity_revision is not None
+        and previous.activity_revision < revision
+        and previous.item_id == item.item_id
+        and previous.kind == item.kind
+        and previous.inbound_id == item.inbound_id
+    )
+
+
+async def _insert_harness_activity(
+    conn: AsyncConnection, agent_id: int, seq: int, harness: str, item: TimelineItem
+) -> TimelineItem | None:
+    if seq != await aget_next_harness_message_seq(conn, agent_id):
+        return None
+    await conn.execute(
+        _INSERT_HARNESS_TIMELINE_ITEM,
+        (agent_id, seq, harness, item.model_dump_json(), item.inbound_id, item.created_at),
+    )
+    return item

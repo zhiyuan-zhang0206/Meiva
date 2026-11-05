@@ -14,7 +14,7 @@ from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 from agent.ownership.inbound import lock_inbound_owner
 from base.agents.impersonation.wake import publish_inbound_wake
-from base.agents.messages.inbound import InterruptReason
+from base.agents.messages.inbound import InterruptReason, InterruptScope
 from base.api_contracts.agent_contract import AgentStatus
 from base.db import Database
 from base.db.rows import IdRow, aquery_one
@@ -389,6 +389,7 @@ async def claim_inbound_batch(
             "WHERE id IN ("
             "  SELECT id FROM inbound_messages "
             "  WHERE status = 'pending' AND agent_id = %s "
+            "  AND (kind <> 'chat' OR claimed_at IS NULL) "
             "  AND (NOT %s OR kind NOT IN ('restart','terminate')) "
             "  ORDER BY created_at ASC, id ASC "
             "  FOR UPDATE SKIP LOCKED"
@@ -531,7 +532,7 @@ class PendingInterrupt:
 
 
 async def pending_interrupt_reason(
-    pool: AsyncConnectionSource, agent_id: int
+    pool: AsyncConnectionSource, agent_id: int, *, scope: InterruptScope = InterruptScope.ALL
 ) -> InterruptReason | None:
     async with (
         pool.connection() as conn,
@@ -542,8 +543,14 @@ async def pending_interrupt_reason(
             "AND i.source <> 'self' AND i.status='pending' AND (i.kind IN ('cancel','terminate') "
             "OR (i.kind='restart' "
             "AND i.created_at <= clock_timestamp() - make_interval(secs => %s))) "
+            "AND (%s OR i.kind <> 'cancel') AND (%s OR i.kind = 'cancel') "
             "ORDER BY i.id LIMIT 1",
-            (agent_id, RESTART_INTERRUPT_GRACE_S),
+            (
+                agent_id,
+                RESTART_INTERRUPT_GRACE_S,
+                scope is not InterruptScope.LIFECYCLE,
+                scope is not InterruptScope.FOREGROUND,
+            ),
         )
         row = await cur.fetchone()
     return None if row is None else row.reason

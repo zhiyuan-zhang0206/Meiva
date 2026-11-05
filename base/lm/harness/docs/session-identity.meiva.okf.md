@@ -25,8 +25,10 @@ this machine belongs to one agent. Three facts gate it — the row says `attache
 `expires_at` has not passed, and the calling process descends from
 `controller_pid` — and the expiry is the one the bridge cannot forget, because the
 others degrade silently: a pid gets reused, and a row that never expires would be a
-bearer capability nobody can revoke. The bridge rewrites the row at the start of
-every turn, so the deadline only runs out when the writing host is gone.
+bearer capability nobody can revoke. The bridge refreshes the row when a turn
+starts and every third of its TTL while the turn is running, including while the
+provider is quiet. A retired session removes the row; an abandoned row expires
+after its last renewal.
 
 `SessionRecord.harness` makes the registry self-describing. A record written
 before the field existed reads as `meiva` — the only harness that predates it —

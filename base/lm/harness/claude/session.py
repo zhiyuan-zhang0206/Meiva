@@ -177,17 +177,17 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
     def cli_pid(self) -> int | None:
         return self._cli_pid
 
-    async def interrupt(self) -> CancelReport:
+    async def interrupt(self, *, turn_id: str | None = None) -> CancelReport:
+        ticket = await self._interrupt_target(turn_id)
+        if ticket is None:
+            return unobserved_cancel(turn_id=turn_id)
         client = self._require_client()
-        ticket = self._active
-        if ticket is not None:
-            ticket.interrupt_requested = True
         pid = self._cli_pid
-        turn_id = ticket.turn_id if ticket is not None else None
+        turn_id = ticket.turn_id
         observed = snapshot(self._probe, pid)
         spawned = spawned_since(observed, self._baseline)
         started = self._monotonic()
-        await client.interrupt()
+        await self._interrupt_control(client, ticket)
         interrupt_ms = (self._monotonic() - started) * 1000.0
         if pid is None:
             return unobserved_cancel(turn_id=turn_id, interrupt_ms=interrupt_ms)
@@ -212,6 +212,25 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
             ),
         )
 
+    # meiva:note
+    # The result may reach the bridge before the SDK sees its control reply.
+    # Let the session finish that exchange so the SDK can clear its request
+    # bookkeeping even when the foreground no longer needs to await the ACK.
+    async def _interrupt_control(self, client: ClaudeClientProtocol, ticket: TurnTicket) -> None:
+        errors: list[Exception] = []
+
+        async def send() -> None:
+            try:
+                if self._active is ticket:
+                    await client.interrupt()
+            except Exception as exc:
+                ticket.interrupt_requested = False
+                errors.append(exc)
+
+        await asyncio.shield(self._spawn(send()))
+        if errors:
+            raise errors[0]
+
     def _build_options(self, resume: str | None) -> object:
         options = self._sdk.ClaudeAgentOptions
         return options(
@@ -229,9 +248,9 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         ticket.started_at = self._monotonic()
         self._turn_steps_count = 0
         self._baseline = snapshot(self._probe, self._cli_pid)
-        self._start_deadline(ticket)
         try:
             await client.query(ticket.text)
+            ticket.interrupt_ready.set()
         except Exception as exc:
             self._fail_turn(ticket, exc)
 
@@ -245,6 +264,10 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         except Exception as exc:
             self._emit(SessionFailed(error=f"session stream failed: {exc}"))
             self._fail_active(exc)
+        else:
+            error = SessionClosedError("Claude event stream ended")
+            self._emit(SessionFailed(error=str(error)))
+            self._fail_active(error)
 
     # meiva:note
     # One dispatch table, keyed by the provider's own class name: a result is a turn
@@ -299,7 +322,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         for event in plan.stream:
             self._emit(event)
         if plan.report is not None:
-            self._hold_dispatch(self.config.injected_turn_timeout_seconds)
+            self._hold_dispatch(self.config.injected_dispatch_wait_seconds)
             self._unsolicited(plan.report)
 
     def _track_task_started(self, message: object) -> None:
@@ -320,7 +343,6 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
             turn=RunningTurn(
                 turn_id=ticket.turn_id,
                 parts=tuple(ticket.parts),
-                interrupt_requested=ticket.interrupt_requested,
                 steps=self._turn_steps_count,
             ),
             session_id=self._session_id,

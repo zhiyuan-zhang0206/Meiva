@@ -8,6 +8,7 @@ import pytest
 
 from base.api_contracts.agent_contract import Harness
 from base.clock.tests.fakes import system_clock
+from base.lm.harness import HarnessClosedError, HarnessTurnFaultedError
 from base.lm.harness.base_session import SessionBinding
 from base.lm.harness.codex import CodexConfig
 from base.lm.harness.codex.auth import SECRET_ENV_NAMES, build_env
@@ -121,7 +122,8 @@ async def test_bridge_recaptures_environment_and_registration_when_resuming(tmp_
         assert str(binary.parent) in first["environment"]["PATH"].split(":")
         assert "OPENAI_API_KEY" not in first["environment"]
         assert bridge.exit_code is None
-        await bridge.interrupt()
+        with pytest.raises((HarnessClosedError, HarnessTurnFaultedError)):
+            await bridge.run_turn("unsupported by local peer", key="retire-peer")
         assert bridge.exit_code is not None
         environment["SESSION_VALUE"] = "resumed-session"
         resumed = await bridge.ensure()

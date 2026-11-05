@@ -22,11 +22,9 @@ class BridgeConfig:
     cli_path: str | None = None
     tools: tuple[str, ...] | None = None
     permission_mode: str = "bypassPermissions"
-    max_turns: int | None = None
     auth: AuthConfig = field(default_factory=AuthConfig)
-    turn_timeout_seconds: float = 900.0
     cancel_settle_seconds: float = 5.0
     max_pending_turns: int = 32
     max_buffered_events: int = 256
     dedupe_window: int = 256
-    injected_turn_timeout_seconds: float = 30.0
+    injected_dispatch_wait_seconds: float = 30.0

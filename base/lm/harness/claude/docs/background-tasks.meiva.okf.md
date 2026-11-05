@@ -33,7 +33,7 @@ mean different things.
   `origin.kind == "human"`, and a CLI too old to report an origin at all, still
   claim the running turn.
 - Dispatch is held for the CLI's own turn so its text cannot be collected into
-  ours; `injected_turn_timeout_seconds` bounds the wait. The first unclaimed
+  ours; `injected_dispatch_wait_seconds` bounds the wait. The first unclaimed
   `ResultMessage` releases it.
 
 ## Stopping them

@@ -6,12 +6,11 @@ import os
 import sys
 from pathlib import Path
 
-from agent.graph.claim.harness_turn import HarnessTurnProjector
-from base.agents.observation.turn_progress import TurnProgress
+from agent.graph.claim.harness_activity import HarnessTurnProjector
+from base.agents.history.timeline_item import TimelineItem
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.config import ConfigBoot
-from base.events.live.tests.live_capture import idle_publisher
 from base.lm.harness import ReasoningText, ToolResult, ToolUse
 
 
@@ -19,19 +18,19 @@ async def main() -> None:
     owner = ConfigBoot()
     owner.boot()
     clock = Clock(clock_config_from_boot(owner), timers=SYSTEM_TIMERS)
-    projector = HarnessTurnProjector(
-        event_publisher=idle_publisher(),
-        agent_id=7,
-        base_idx=0,
-        turn_progress=TurnProgress(),
-        clock=clock,
-    )
+
+    async def checkpoint(item: TimelineItem, msg_count: int) -> None:
+        pass
+
+    projector = HarnessTurnProjector(checkpoint=checkpoint, base_idx=0, clock=clock)
     os.environ["MEIVA_MESSAGE_TIMESTAMP_WEEKDAY"] = "not-a-bool"
-    projector.on_event(ReasoningText(turn_id="turn", text="planning"))
-    projector.on_event(
+    await projector.on_event(ReasoningText(turn_id="turn", text="planning"))
+    await projector.on_event(
         ToolUse(turn_id="turn", tool_use_id="call", name="Bash", tool_input={"command": "true"})
     )
-    projector.on_event(ToolResult(turn_id="turn", tool_use_id="call", content="ok", is_error=False))
+    await projector.on_event(
+        ToolResult(turn_id="turn", tool_use_id="call", content="ok", is_error=False)
+    )
     result = {"projected": True, "next_capture_refused": False, "initial_bad_refused": False}
     try:
         clock_config_from_boot(owner)

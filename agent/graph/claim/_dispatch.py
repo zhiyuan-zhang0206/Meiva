@@ -84,16 +84,26 @@ class BatchState:
         Claim runs between turns, with no tool_use awaiting its result, so a
         note behind the message cannot split a tool_use -> tool_result pair.
         """
-        self.new_msgs.append(message)
-        if finding is not None:
-            self.new_msgs.append(
-                security_note_message(
-                    source=finding.source,
-                    triggers=finding.triggers,
-                    picked_up_at=now,
-                    created_at=now,
-                )
-            )
+        self.new_msgs.extend(_scanned_messages(message, finding, now=now))
+
+
+def _scanned_messages(
+    message: BaseMessage,
+    finding: SecurityFindingEntry | None,
+    *,
+    now: datetime,
+) -> list[BaseMessage]:
+    if finding is None:
+        return [message]
+    return [
+        message,
+        security_note_message(
+            source=finding.source,
+            triggers=finding.triggers,
+            picked_up_at=now,
+            created_at=now,
+        ),
+    ]
 
 
 def _ts_prefix(ctx: MeivaContext) -> str:
@@ -106,14 +116,12 @@ def _ts_prefix(ctx: MeivaContext) -> str:
     )
 
 
-async def _handle_chat(
-    ctx: MeivaContext,
-    item: ClaimedInbound,
-    st: BatchState,
-) -> None:
-    """CHAT inbound: wrap as HumanMessage, append to state, mark committed."""
+# meiva:note
+# Ordinary claim and foreground steering share the chat envelope and security note.
+# meiva:link agent/messages/docs/message-format.meiva.okf.md
+def prepare_chat_inbound(ctx: MeivaContext, item: ClaimedInbound) -> list[BaseMessage]:
     now = ctx.require_clock().now()
-    st.append_scanned(
+    return _scanned_messages(
         *build_chat_inbound(
             item,
             picked_up_at=now,
@@ -126,6 +134,15 @@ async def _handle_chat(
         ),
         now=now,
     )
+
+
+async def _handle_chat(
+    ctx: MeivaContext,
+    item: ClaimedInbound,
+    st: BatchState,
+) -> None:
+    """CHAT inbound: wrap as HumanMessage, append to state, mark committed."""
+    st.new_msgs.extend(prepare_chat_inbound(ctx, item))
     st.committed_chat_ids.append(item.id)
 
 
@@ -323,7 +340,8 @@ async def _handle_cancel(
 ) -> None:
     """CANCEL: pause agent — stop in-flight work, idle. No lifecycle marker."""
     assert ctx.event_publisher is not None, "_handle_cancel requires ctx.event_publisher"  # noqa: S101
-    ctx.event_publisher.emit(Cancelled(agent_id=agent_id).model_dump_json())
+    if ctx.harness is Harness.MEIVA:
+        ctx.event_publisher.emit(Cancelled(agent_id=agent_id).model_dump_json())
     st.cancelled = True
 
 

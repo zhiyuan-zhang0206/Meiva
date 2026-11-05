@@ -33,9 +33,10 @@ and `result`. There are no request ids and no methods, so **a cancel cannot be a
 request**: the adapter sends `SIGINT`, and the CLI answers with a final `result`
 (`status: ERROR`, `error: interrupted`) and exits 1. `interrupt()` therefore
 retires the process; the next turn respawns it with `--conversation`, which keeps
-the transcript while the process is replaced.
+the transcript while the process is replaced. Hosted foreground Cancel leaves
+the CLI running and reports that the provider lacks a foreground-only control.
 
-If Antigravity ever ships ACP into the CLI, only `transport.py` changes.
+The CLI also offers an `agy acp` mode. This adapter uses headless stream JSON.
 
 ## Three harness differences, absorbed here
 
@@ -90,7 +91,7 @@ nothing in the protocol can tell the two apart.
 | Module | Owns |
 |---|---|
 | `transport.py` | `AgyTransport`: spawn, NDJSON framing, SIGINT with process assertions, stderr tail |
-| `session.py` | `AgySession`: ordered inbound queue, one event stream, deadlines, totals, respawn after interrupt |
+| `session.py` | `AgySession`: ordered inbound queue, one event stream, totals, respawn after interrupt |
 | `mapping.py` | pure `init` / `step_update` / `result` → event translation |
 | `handoff_rules.py` | `build_handoff()` and the two shell-semantics rules |
 | `config.py` | `AntigravityConfig` and the argv it builds |
@@ -99,7 +100,6 @@ nothing in the protocol can tell the two apart.
 
 | Field | Default | Reason |
 |---|---|---|
-| `turn_timeout_seconds` | 900 | a turn that outlives it is interrupted, never silently dropped |
 | `cancel_settle_seconds` | 5 | how long an interrupt waits for the CLI and its children before escalating to SIGTERM/SIGKILL and reporting residue |
 | `max_pending_turns` | 32 | the queue refuses instead of buffering without bound |
 | `max_buffered_events` | 256 | text deltas are droppable under lag; control events never are |

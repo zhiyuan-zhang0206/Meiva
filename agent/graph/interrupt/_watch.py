@@ -42,6 +42,7 @@ from contextlib import asynccontextmanager
 
 from agent.db import pending_interrupt_reason
 from agent.graph.node_log import awaiter_chain_lines
+from base.agents.messages.inbound import InterruptScope
 from base.db.transaction import AsyncConnectionSource
 from base.log import logger
 from base.native_process.stop_timing import INTERRUPT_POLL_S
@@ -75,9 +76,12 @@ async def watch_for_interrupt(
     stop: asyncio.Event,
     *,
     poll_s: float,
+    scope: InterruptScope = InterruptScope.ALL,
 ) -> None:
     while not stop.is_set():
-        step = watch_step(await pending_interrupt_reason(pool, agent_id), stopped=stop.is_set())
+        step = watch_step(
+            await pending_interrupt_reason(pool, agent_id, scope=scope), stopped=stop.is_set()
+        )
         if isinstance(step, Fire):
             event.set(step.reason)
             return
@@ -107,10 +111,12 @@ class _OwnedWatch:
         self.late = False
         self.retained_at = 0.0
 
-    async def run(self, pool: AsyncConnectionSource, poll_s: float) -> None:
+    async def run(self, pool: AsyncConnectionSource, poll_s: float, scope: InterruptScope) -> None:
         cancelled = False
         try:
-            await watch_for_interrupt(pool, self.event, self.agent_id, self.stop, poll_s=poll_s)
+            await watch_for_interrupt(
+                pool, self.event, self.agent_id, self.stop, poll_s=poll_s, scope=scope
+            )
         except asyncio.CancelledError:
             cancelled = True
             raise
@@ -125,7 +131,10 @@ class _OwnedWatch:
                 logger.opt(exception=error).warning(
                     "interrupt watcher failed during invocation (agent_id={})", self.agent_id
                 )
-                if action is FailureAction.WARN_AND_INTERRUPT:
+                if (
+                    action is FailureAction.WARN_AND_INTERRUPT
+                    and scope is not InterruptScope.FOREGROUND
+                ):
                     self.event.set()
         finally:
             if self.late:
@@ -195,6 +204,7 @@ async def subscribe_interrupt(
     resources: HostedTurnResources | None,
     poll_s: float = INTERRUPT_POLL_S,
     exit_timeout_s: float = WATCHER_EXIT_TIMEOUT_S,
+    scope: InterruptScope = InterruptScope.ALL,
 ) -> AsyncGenerator[InterruptEvent]:
     event = InterruptEvent()
     if pool is None:
@@ -204,7 +214,9 @@ async def subscribe_interrupt(
         raise RuntimeError("a database interrupt watcher requires its explicit service resources")
     service = resources.require_service()
     owned = _OwnedWatch(resources, agent_id, event, asyncio.Event(), exit_timeout_s)
-    watcher = service.watch(owned.run(pool, poll_s), name=f"interrupt-watcher-{agent_id}")
+    watcher = service.watch(
+        owned.run(pool, poll_s, scope), name=f"interrupt-watcher-{scope}-{agent_id}"
+    )
     primary: BaseException | None = None
     try:
         yield event

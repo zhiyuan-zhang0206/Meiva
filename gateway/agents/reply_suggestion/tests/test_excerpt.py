@@ -45,6 +45,11 @@ def test_human_sources_match_the_timeline_model(source: str | None, human: bool)
     assert is_human_source(source) is human
 
 
+def test_incomplete_harness_text_is_not_a_reply_excerpt() -> None:
+    draft = item("agent_chat", "Checking the", 2).model_copy(update={"activity_pending": True})
+    assert build_excerpt([draft], 1500) is None
+
+
 def test_keeps_the_latest_user_message_and_the_last_turns_agent_text() -> None:
     items = [
         item("inbound_chat", "old question", 1, "user"),

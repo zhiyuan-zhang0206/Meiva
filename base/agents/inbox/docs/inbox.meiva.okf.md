@@ -29,6 +29,8 @@ the database layer imports none of them.
 - `compact.py` — `insert_compact_request_inbound`, the native compact envelope.
 - `rows.py` — `InboundRow`, `list_pending_inbounds` and
   `NOTICE_FYI_TTL_DAYS`, the open-feed lifetime of FYI notices.
+  The composer strip keeps a claimed external-harness chat visible until
+  provider acceptance moves it into the timeline and consumes its inbox row.
 
 ## Key dependencies
 

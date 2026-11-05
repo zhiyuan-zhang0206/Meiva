@@ -55,13 +55,11 @@ exports come from `base.lm.harness.claude.session`, so the door itself stays `st
 | `model` | `claude-sonnet-5-5` | full id from the bundled CLI's model table; an alias would let an upgrade change the model |
 | `tools` | `None` | retain the complete native CLI tool set; an explicit tuple restricts it |
 | `permission_mode` | `bypassPermissions` | headless session with no approval layer: the CLI must not park on a prompt nobody can answer. The workspace is the boundary. |
-| `max_turns` | `None` | retain native completion behavior without an artificial 24-step cutoff; the bridge deadline still bounds stalled turns |
-| `turn_timeout_seconds` | 900 | a wedged CLI surfaces as a bridge fault instead of a hung agent |
 | `cancel_settle_seconds` | 5 | observed reaping is ~40ms; 5s tolerates load without hiding a leak |
 | `max_pending_turns` | 32 | overflow returns the message to its durable owner instead of growing memory |
 | `max_buffered_events` | 256 | text deltas are droppable past this; control events are bounded by tool-call count |
 | `dedupe_window` | 256 | a redelivery inside the window replays the outcome instead of re-running the turn |
-| `injected_turn_timeout_seconds` | 30 | the CLI answers a background-task notification in a turn of its own; dispatch is held until that turn reports, and this bound turns a CLI that never reports into one wait instead of a wedged agent. Observed notification turns are two to three seconds, so 30 is an order above them and still bounds a user's wait |
+| `injected_dispatch_wait_seconds` | 30 | the CLI answers a background-task notification in a turn of its own; dispatch is held until that turn reports, and this bound turns a CLI that never reports into one wait instead of a wedged agent. Observed notification turns are two to three seconds, so 30 is an order above them and still bounds a user's wait |
 
 Native user, project and local settings remain enabled, including CLAUDE.md,
 skills, hooks, plugins and configured MCP servers. The adapter does not set
@@ -81,7 +79,10 @@ and the CLI reports its end on its own:
   turn's `ResultMessage`; writing it earlier is folded into the pending tool
   result, where the model treats it as injected content.
 - **Cancellation is asserted.** `interrupt()` reports whether the tool's child
-  processes were reaped, and `settled=None` when the CLI pid is unobservable.
+  processes were reaped, and `settled=None` when the CLI pid is unobservable. A
+  result attributed to the foreground confirms cancellation when its
+  `terminal_reason` is `aborted_streaming` or `aborted_tools`. Older CLIs can
+  omit this field, in which case the bridge uses the ordinary result verdict.
 - **The child environment is an allowlist.** `auth.build_env` names every key the
   session may carry (`registry.session_child_env_keys`) and blanks every other key
   the host process holds, because the SDK spawns the CLI with

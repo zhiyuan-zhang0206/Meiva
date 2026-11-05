@@ -138,7 +138,7 @@ class DaemonSettings(
         default=3600.0,
         gt=0,
         alias="MEIVA_HARNESS_REGISTRATION_TTL_SECONDS",
-        description="Hosted agent-runner: how long a provider harness registration stays usable after the bridge last renewed it. The bridge rewrites the row at the start of every turn, so the expiry only elapses when the writing host is gone, which is what closes the hole a reused controller pid would otherwise keep open. Covers the adapter's own 900s turn timeout with margin; keep it above that or a live turn outlives its own identity.",
+        description="Hosted agent-runner: how long a provider harness registration stays usable after its last renewal. The bridge refreshes it throughout a running turn, including periods without provider output. An abandoned registration expires so a reused controller pid cannot inherit its attachment.",
         json_schema_extra={
             "capability": "agent-runner",
             "restart_required": "all",

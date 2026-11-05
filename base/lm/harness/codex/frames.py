@@ -24,6 +24,9 @@ JSONRPC = "2.0"
 METHOD_NOT_FOUND = -32601
 INTERNAL_ERROR = -32603
 
+INVALID_REQUEST = -32600
+INVALID_PARAMS = -32602
+
 RequestHandler = Callable[[str, JsonObject], JsonObject | Awaitable[JsonObject]]
 NotificationHandler = Callable[[str, JsonObject], None]
 ClosedHandler = Callable[[str], None]

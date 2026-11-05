@@ -34,7 +34,7 @@ from base.lm.harness.session import (
 # meiva:note
 # Shared turn-engine state machine for every external harness session adapter:
 # ordered inbound turn promotion, key-based idempotency replay, bounded outbound
-# delta dropping, per-turn timeout watchdogs, background task-group lifecycle,
+# delta dropping, background task-group lifecycle,
 # and `SessionRegistry` binding/resumption.
 # meiva:link base/lm/harness/docs/harness.meiva.okf.md
 
@@ -63,6 +63,7 @@ class TurnTicket:
         # meiva:link base/lm/harness/docs/harness.meiva.okf.md
         self.provider_turn_id: str | None = None
         self.interrupt_requested = False
+        self.interrupt_ready = asyncio.Event()
         self.parts: list[str] = []
         self.thoughts: list[str] = []
         self.denials: list[str] = []
@@ -76,6 +77,7 @@ class TurnTicket:
         return self._future.done()
 
     def settle(self, outcome: TurnOutcome) -> None:
+        self.interrupt_ready.set()
         if not self._future.done():
             self._future.set_result(outcome)
 
@@ -83,6 +85,7 @@ class TurnTicket:
         self.settle(outcome)
 
     def fail(self, exc: BaseException) -> None:
+        self.interrupt_ready.set()
         if self._future.done():
             return
         self._future.set_exception(exc)
@@ -128,7 +131,6 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         self._completed: OrderedDict[str, TurnOutcome] = OrderedDict()
         self._active: TurnTicket | None = None
         self._reader: asyncio.Task[None] | None = None
-        self._deadlines: dict[str, asyncio.Task[None]] = {}
         self._tasks = asyncio.TaskGroup()
         self._children: set[asyncio.Task[None]] = set()
         self._tasks_entered = False
@@ -153,8 +155,23 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
     async def close(self, *, reason: str = "closed") -> None:
         raise NotImplementedError
 
-    async def interrupt(self) -> object:
+    async def interrupt(self, *, turn_id: str | None = None) -> object:
         raise NotImplementedError
+
+    # meiva:note
+    # Startup and completion can both race a cancel. Wait on the captured ticket
+    # for the adapter to finish addressing the prompt, then recheck ownership.
+    async def _interrupt_target(self, turn_id: str | None) -> TurnTicket | None:
+        ticket = self._active
+        if turn_id is not None and (ticket is None or ticket.turn_id != turn_id):
+            ticket = next((queued for queued in self._pending if queued.turn_id == turn_id), None)
+        if ticket is None:
+            return None
+        await ticket.interrupt_ready.wait()
+        if self._active is not ticket or ticket.interrupt_requested:
+            return None
+        ticket.interrupt_requested = True
+        return ticket
 
     async def _begin(self, ticket: TurnTicket) -> None:
         raise NotImplementedError
@@ -360,31 +377,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         self._record = replace(self._record, updated_at=self._now_iso())
         self._registry.save(self._record)
 
-    def _start_deadline(self, ticket: TurnTicket) -> None:
-        async def expire() -> None:
-            await self._clock.asleep(self.config.turn_timeout_seconds)
-            if self._active is not ticket:
-                return
-            self._emit(
-                TurnFaulted(
-                    turn_id=ticket.turn_id,
-                    error=f"turn exceeded {self.config.turn_timeout_seconds:.0f}s; interrupting",
-                )
-            )
-            try:
-                await self.interrupt()
-            except Exception as exc:
-                self._emit(TurnFaulted(turn_id=ticket.turn_id, error=f"interrupt failed: {exc}"))
-
-        self._deadlines[ticket.turn_id] = self._spawn(expire())
-
-    def _cancel_deadline(self, ticket: TurnTicket) -> None:
-        task = self._deadlines.pop(ticket.turn_id, None)
-        if task is not None:
-            task.cancel()
-
     def _complete(self, ticket: TurnTicket, outcome: TurnOutcome) -> None:
-        self._cancel_deadline(ticket)
         if self._active is ticket:
             self._active = None
         if ticket.key is not None:
@@ -447,7 +440,6 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
             self._unconsumed_events += 1
 
     def _fail_turn(self, ticket: TurnTicket, exc: BaseException) -> None:
-        self._cancel_deadline(ticket)
         self._emit(TurnFaulted(turn_id=ticket.turn_id, error=f"turn failed: {exc}"))
         ticket.fail(SessionClosedError(f"turn failed: {exc}"))
         if self._active is ticket:
@@ -529,9 +521,6 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
             await asyncio.gather(*children, return_exceptions=True)
 
     async def _close_tasks(self) -> None:
-        for task in list(self._deadlines.values()):
-            task.cancel()
-        self._deadlines.clear()
         self._reader = None
         await self._cancel_children()
         if self._tasks_entered:

@@ -46,9 +46,6 @@ class SessionConfig(Protocol):
     def model(self) -> str | None: ...
 
     @property
-    def turn_timeout_seconds(self) -> float: ...
-
-    @property
     def cancel_settle_seconds(self) -> float: ...
 
     @property

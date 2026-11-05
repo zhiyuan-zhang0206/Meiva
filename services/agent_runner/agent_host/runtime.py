@@ -614,6 +614,8 @@ class HarnessSessions:
     def notify(
         self, agent_id: int, event: UnsolicitedOutput, *, db: Database, bus: EventBus
     ) -> None:
+        if not event.text.strip():
+            return
         if not self._started:
             raise RuntimeError(
                 "a harness notice cannot be written before the host's session owner started"
