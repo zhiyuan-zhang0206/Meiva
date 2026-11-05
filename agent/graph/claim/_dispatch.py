@@ -175,12 +175,13 @@ async def _handle_system_note(
         source=f"inbound.system_note:{item.source}",
         enabled=ctx.require_agent().read("agent", "security_scan_enabled"),
     )
-    task_id = _task_id_from_system_note(item.payload, _system_note_tag(item.payload))
+    tag = _system_note_tag(item.payload)
+    task_id = _task_id_from_system_note(item.payload, tag)
     now = ctx.require_clock().now()
     st.append_scanned(
         system_note_message(
             content=f"{_ts_prefix(ctx)}{item.content}",
-            tag=_system_note_tag(item.payload),
+            tag=tag,
             task_id=task_id,
             picked_up_at=now,
             created_at=item.created_at,
@@ -188,6 +189,8 @@ async def _handle_system_note(
         finding,
         now=now,
     )
+    if tag is NoteTag.LIFECYCLE_RESTART and st.next_goto == CLAIM:
+        st.next_goto = BEFORE_LLM
 
 
 def _close_superseded_compact(ctx: MeivaContext, agent_id: int, st: BatchState) -> None:

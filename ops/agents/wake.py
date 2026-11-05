@@ -14,6 +14,7 @@ from base.agents.incarnation.lifecycle_commands import (
     supersede_lifecycle_for_resurrect,
 )
 from base.agents.messages.inbound import WakeTriggerKind, validate_wake_trigger_kind
+from base.agents.messages.kwargs import NoteTag
 from base.api_contracts.agent_contract import (
     AgentNotFound,
     AgentStatus,
@@ -141,6 +142,8 @@ def _resurrect_event_target(resurrected_by: str) -> int | None:
         return None
 
 
+# meiva:note
+# Commit the wake and its accompanying input together before the host can claim either.
 def _prepare_resurrect_attempt(
     db: Database,
     bus: EventBus,
@@ -148,10 +151,10 @@ def _prepare_resurrect_attempt(
     *,
     resurrected_by: str,
     prompt: str | None,
+    restart_note: str | None,
     trigger_inbound_id: int | None,
     trigger_inbound_kind: WakeTriggerKind | None,
 ) -> telemetry.Event:
-    """Commit ordinary resurrection and its optional prompt before waking the host."""
     with db.write_transaction() as conn, conn.cursor() as cur:
         # Task before agent: producers hold the task while inserting an inbound
         # whose foreign key can lock agents_meta. Keep the same lock order.
@@ -204,6 +207,13 @@ def _prepare_resurrect_attempt(
                 "VALUES (%s, %s, 'chat', %s, clock_timestamp())",
                 (agent_id, prompt, resurrected_by),
             )
+        elif restart_note is not None:
+            cur.execute(
+                "INSERT INTO inbound_messages (agent_id, content, kind, source, created_at, payload) "
+                "VALUES (%s, %s, 'system_note', %s, clock_timestamp(), "
+                "jsonb_build_object('note_tag', %s::text))",
+                (agent_id, restart_note, resurrected_by, NoteTag.LIFECYCLE_RESTART.value),
+            )
         prepared_event = _stage_resurrect_event(
             conn,
             agent_id,
@@ -250,9 +260,12 @@ def resurrect_agent(
     *,
     resurrected_by: str,
     prompt: str | None = None,
+    restart_note: str | None = None,
     trigger_inbound_id: int | None = None,
     trigger_inbound_kind: WakeTriggerKind | None = None,
 ) -> int:
+    if prompt is not None and restart_note is not None:
+        raise ValueError("provide either a resurrection prompt or a restart note")
     if (trigger_inbound_id is None) != (trigger_inbound_kind is None):
         raise ValueError("trigger inbound id and kind must be provided together")
     if trigger_inbound_kind is not None:
@@ -263,6 +276,7 @@ def resurrect_agent(
         agent_id,
         resurrected_by=resurrected_by,
         prompt=prompt,
+        restart_note=restart_note,
         trigger_inbound_id=trigger_inbound_id,
         trigger_inbound_kind=trigger_inbound_kind,
     )

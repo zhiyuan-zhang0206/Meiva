@@ -331,6 +331,26 @@ async def test_external_harness_non_human_wake_includes_recency_reminder_and_kee
     assert pending["key"] == "inbound-601"
     assert "Meiva agent to user: " in pending["prompt"]
 
+    restart = await settle_claimed_batch(
+        ext_ctx,
+        AgentState(halted=True),
+        tid,
+        [
+            ClaimedInbound(
+                id=602,
+                agent_id=tid,
+                content="Continue after restart.",
+                kind="system_note",
+                source="user",
+                payload={"note_tag": "lifecycle_restart"},
+            )
+        ],
+    )
+    restart_update = cast(dict[str, object], restart.update)
+    restart_pending = cast(dict[str, str], restart_update["harness_pending_input"])
+    assert restart_pending["prompt"].startswith("<system_note>\n")
+    assert restart_pending["prompt"].endswith("Continue after restart.\n</system_note>")
+
 
 def _run_background_harness_turn(live_events: LiveEvents) -> list[object]:
     moments = iter(START + timedelta(seconds=n) for n in range(6))

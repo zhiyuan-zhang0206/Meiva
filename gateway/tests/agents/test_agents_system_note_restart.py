@@ -623,33 +623,44 @@ class TestRestart:
                 row = cur.fetchone()
             assert row is not None and row[0] == "meiva"
 
-    # meiva:note
-    # A switch tells the agent what happened: the wake prompt opens with
-    # `[Harness switched from '<old>' to '<new>']`, so the first thing the new harness reads names the
-    # transition (ops/lifecycle/__init__.py builds it when the two harnesses differ).
-    def test_a_switch_names_the_transition_in_the_wake_prompt(
-        self, db_conn: psycopg.Connection
+    @pytest.mark.parametrize("restart_in_place", [False, True])
+    def test_external_restart_message_is_a_lifecycle_note(
+        self, db_conn: psycopg.Connection, restart_in_place: bool
     ) -> None:
         with gateway_test_client() as client:
             _seed_restart_harnesses(client)
             agent_id = spawn_via_http(client, {}).json()["id"]
+            if restart_in_place:
+                first = client.post(
+                    f"/api/agents/{agent_id}/restart",
+                    json={
+                        "message": "switching to codex",
+                        "config_overlay": {"harness": "codex", "llm_model": "gpt-6.1-sol"},
+                    },
+                )
+                assert first.status_code == 200, first.text
 
             resp = client.post(
                 f"/api/agents/{agent_id}/restart",
                 json={
-                    "message": "switching to codex",
+                    "message": "continue checking",
                     "config_overlay": {"harness": "codex", "llm_model": "gpt-6.1-sol"},
                 },
             )
             assert resp.status_code == 200, resp.text
 
-        rows = inbound_rows(db_conn, agent_id)
-        [content] = [
-            text
-            for text, _kind, _source in rows
-            if text.startswith("[Harness switched from 'meiva' to 'codex']")
-        ]
-        assert content.endswith("switching to codex")
+        expected = "continue checking"
+        if not restart_in_place:
+            expected = "[Harness switched from 'meiva' to 'codex']\n" + expected
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "SELECT content, kind, source, payload FROM inbound_messages "
+                "WHERE agent_id = %s AND content LIKE %s",
+                (agent_id, "%continue checking"),
+            )
+            assert cur.fetchall() == [
+                (expected, "system_note", "user", {"note_tag": "lifecycle_restart"})
+            ]
 
     def test_harness_switch_preconditions(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
