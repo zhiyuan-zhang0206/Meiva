@@ -36,8 +36,8 @@ response corrections after the tool results, and retries a malformed terminal
 reply once. The external harness driver sends the correction as a separate turn
 with a distinct idempotency key and at most one retry.
 
-`meiva_explicit_visibility` marks new checkpoint output. The corresponding SSE
-field is `explicit_visibility`. Historical output without the marker retains
+`meiva_explicit_visibility` marks new checkpoint output. Native chat SSE carries the corresponding `explicit_visibility` field.
+External harness activity snapshots carry the projected body and `user_facing`. Historical output without the marker retains
 its wake-based projection. A fresh background wake includes a silent reminder
 with the current protocol; wake source no longer decides new text visibility.
 The frontend generates the marker constants from

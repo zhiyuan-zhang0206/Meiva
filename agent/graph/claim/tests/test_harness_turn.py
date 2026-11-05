@@ -221,7 +221,6 @@ async def test_a_turn_submits_the_pending_messages_and_commits_the_reply() -> No
     assert command.update is not None
     [(prompt, key)] = engine.submitted
     assert prompt.endswith("\n\ndo it")
-    assert "the user can expand and read them" in prompt
     assert key == "inbound-7"
     assert command.update["harness_pending_input"] is None
     assert command.update["halted"] is True

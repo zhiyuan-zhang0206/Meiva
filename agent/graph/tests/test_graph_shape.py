@@ -65,7 +65,8 @@ class FakeEngine:
     # graph — real claim, real init_context, real routing — and swaps only the
     # provider session, which is the one thing a test cannot run.
     # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
-    def __init__(self) -> None:
+    def __init__(self, reply: str = "MEIVA_DISPLAY_TO_USER\nthe harness answered") -> None:
+        self.reply = reply
         self.harness = Harness.CLAUDE_CODE
         self.model = "claude-sonnet-5-5"
         self.exit_code: int | None = None
@@ -75,7 +76,7 @@ class FakeEngine:
         self.submitted.append(text)
         return HarnessTurn(
             turn_id="t1",
-            text="MEIVA_DISPLAY_TO_USER\nthe harness answered",
+            text=self.reply,
             usage=Usage(input_tokens=1, output_tokens=1),
             cost_usd=0.0,
             subtype="success",
@@ -142,6 +143,17 @@ def _stream(graph: Any, state: AgentState, context: MeivaContext) -> AsyncIterat
         context=context,
         stream_mode="updates",
     )
+
+
+async def test_unmarked_harness_reply_gets_one_correction_turn() -> None:
+    engine = FakeEngine(reply="Unmarked answer.")
+
+    seen = await executed_nodes(Harness.CLAUDE_CODE, engine)
+
+    [original, correction] = engine.submitted
+    assert original.endswith("\n\ndo it")
+    assert "That text was folded into Details" in correction
+    assert seen.count("harness_turn") == 2
 
 
 async def test_an_external_harness_never_enters_the_native_turn_nodes() -> None:
