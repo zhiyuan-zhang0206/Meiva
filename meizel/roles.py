@@ -14,6 +14,7 @@ from collections.abc import Mapping
 from typing import TypeGuard
 
 from meizel.graph.model import MeizelError
+from meizel.source_text import object_mapping
 
 __all__ = [
     "ROLES_MANIFEST_KEY",
@@ -90,7 +91,7 @@ def check_table(table: object) -> tuple[dict[str, tuple[str, ...]], list[tuple[s
 # this module cannot see.
 def parse_roles(text: str, *, label: str) -> dict[str, tuple[str, ...]]:
     try:
-        document = tomllib.loads(text)
+        document = object_mapping(tomllib.loads(text))
     except tomllib.TOMLDecodeError as error:
         raise MeizelError(f"{label}: cannot read the roles: {error}") from error
     if ROLES_MANIFEST_KEY not in document:

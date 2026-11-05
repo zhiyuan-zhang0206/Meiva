@@ -10,7 +10,9 @@ from __future__ import annotations
 import ast
 from collections.abc import Iterator
 from itertools import pairwise
+from typing import TypeGuard
 
+from meizel.source_text import is_object_list
 from meizel.state.ambient_state.module import Module, dotted
 from meizel.state.ambient_state.owner_method import (
     Function,
@@ -23,10 +25,29 @@ from meizel.state.ambient_state.owner_method import (
 from meizel.state.ambient_state.task_owner_span import inline_registration, map_span
 
 
+# meiva:note
+# `ast.iter_fields` yields `tuple[str, Any]`: reading the value through this parameter makes it an
+# `object` (the shape `meizel/language/scan.py::_field_value` uses).
+def _field_value(field: tuple[str, object], /) -> object:
+    return field[1]
+
+
+# meiva:note
+# A field's statement list: non-empty, and every item a statement. `is_object_list` does the first
+# narrowing so the items are `object` here rather than `Unknown`.
+def _is_statements(value: object, /) -> TypeGuard[list[ast.stmt]]:
+    return is_object_list(value) and all(isinstance(item, ast.stmt) for item in value)
+
+
+# meiva:note
+# The statement list a field holds, or nothing. `ast.iter_fields` yields `tuple[str, Any]`, so the
+# value is read through a parameter typed `object` first; the guard then names the list without
+# letting `Unknown` in, which the unknown-type rules would reject.
 def _statements(root: ast.AST) -> Iterator[list[ast.stmt]]:
     """Statement lists without entering nested definitions or constant-dead code."""
-    for _, value in ast.iter_fields(root):
-        if isinstance(value, list) and value and isinstance(value[0], ast.stmt):
+    for field in ast.iter_fields(root):
+        value = _field_value(field)
+        if _is_statements(value) and value:
             yield value
     for node in ast.iter_child_nodes(root):
         if isinstance(node, Function | ast.ClassDef | ast.Lambda):

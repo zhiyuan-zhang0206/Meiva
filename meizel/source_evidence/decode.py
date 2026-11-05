@@ -9,6 +9,7 @@ import json
 from typing import TypeGuard
 
 from meizel.source_evidence.model import Declaration, Identity, Index, Observation, Source
+from meizel.source_text import object_of
 
 
 def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
@@ -116,7 +117,7 @@ def _unique(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 
 def decode_index(text: str) -> Index:
-    raw: object = json.loads(text, object_pairs_hook=_unique)
+    raw = object_of(json.loads, text, object_pairs_hook=_unique)
     record = _object(raw, "version kind root compiler_version dependencies sources")
     if type(record["version"]) is not int or record["version"] != 1:
         raise ValueError("unsupported TS index version")

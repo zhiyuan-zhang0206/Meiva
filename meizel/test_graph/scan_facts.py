@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TypeGuard
 
+from meizel.source_text import object_of
 from meizel.test_graph.model import (
     FACT_DYNAMIC_FIXTURE,
     FACT_DYNAMIC_IMPORT,
@@ -355,7 +356,7 @@ def _scan_module_globals(tree: ast.Module, collector: _Collector) -> int:
 
 def _record_plugins(expr: ast.expr, lineno: int, collector: _Collector) -> int:
     try:
-        evaluated: object = ast.literal_eval(expr)
+        evaluated = object_of(ast.literal_eval, expr)
     except (ValueError, SyntaxError):
         collector.unknown_sites.append((lineno, "non-literal pytest_plugins", ast.unparse(expr)))
         return FACT_DYNAMIC_IMPORT

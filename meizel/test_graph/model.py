@@ -4,6 +4,8 @@ import json
 from dataclasses import dataclass
 from typing import TypeGuard
 
+from meizel.source_text import object_of
+
 __all__ = [
     "FACT_DYNAMIC_FIXTURE",
     "FACT_DYNAMIC_IMPORT",
@@ -215,7 +217,7 @@ def _decode_unknown_sites(raw: list[object]) -> tuple[tuple[int, str, str], ...]
 
 
 def decode_raw_facts(payload: str) -> RawFileTestFacts:
-    obj: object = json.loads(payload)
+    obj = object_of(json.loads, payload)
     if not _is_object(obj):
         raise ValueError("invalid RawFileTestFacts payload")
     path = obj.get("p")
@@ -276,7 +278,7 @@ class TestLanes:
 
     @classmethod
     def decode(cls, raw: str) -> TestLanes:
-        parsed: object = json.loads(raw)
+        parsed = object_of(json.loads, raw)
         if not _is_object(parsed):
             raise ValueError("invalid cached TestLanes payload")
         static_raw = parsed.get("static")

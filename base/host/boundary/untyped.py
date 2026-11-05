@@ -7,6 +7,13 @@
 # `base.host.boundary.json_values`) instead of holding an unchecked value, and the `Any` is never bound
 # to a name. Prefer a `TypeAdapter` or a pydantic model when the shape is known; this is for the
 # rest.
+#
+# DELIBERATE TWIN, not an accident and not an oversight. The same shape is copied in
+# `meizel/source_text.py` -- the checker runs from pre-commit and from `check.sh` inside a bare
+# checkout, where no `base` package exists -- and in `cli/fleet_update/untyped.py`, whose package is
+# copied to a bare operator checkout and probed under `python -S`, where it may import no other
+# first-party module. Neither copy may import this one, so the three move together: a change to the
+# rules of one belongs in all three, and merging them breaks a bare checkout.
 
 from __future__ import annotations
 

@@ -14,6 +14,7 @@ from collections.abc import Collection
 
 from meizel.graph.model import Code, Diagnostic, Fact, FactKind, MeizelError
 from meizel.graph.universe import Universe
+from meizel.source_text import object_mapping
 
 __all__ = ["SCOPE_FILE", "mount_facts"]
 
@@ -44,7 +45,7 @@ def mount_facts(
             continue
         text = universe.repo.load_text(path)
         try:
-            document = tomllib.loads(text)
+            document = object_mapping(tomllib.loads(text))
         except tomllib.TOMLDecodeError as error:
             raise MeizelError(f"{path}: invalid TOML: {error}") from error
         lines = text.splitlines()

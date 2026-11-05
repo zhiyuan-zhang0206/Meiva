@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 import tomllib
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from functools import cache
@@ -19,6 +19,7 @@ from typing import TypeGuard, assert_never
 
 from meizel.checkout import GitRepo
 from meizel.graph.model import OS_KINDS
+from meizel.source_text import object_mapping
 
 __all__ = [
     "POLICY",
@@ -329,7 +330,7 @@ class _Sections:
 # meiva:note
 # The kinds of state a document declares: the keys of its `[ambient]` table. A key that spells a
 # kind of the standard library, or is not a lowercase name, is reported and declares nothing.
-def _state_kinds(document: dict[str, object], problems: list[str]) -> tuple[str, ...]:
+def _state_kinds(document: Mapping[str, object], problems: list[str]) -> tuple[str, ...]:
     table = document.get("ambient")
     if not _is_table(table):
         return ()
@@ -388,7 +389,7 @@ def _rule(
 
 
 def _checker(
-    document: dict[str, object], problems: list[str]
+    document: Mapping[str, object], problems: list[str]
 ) -> tuple[dict[str, str], dict[str, str], dict[str, tuple[str, ...]], tuple[str, ...]]:
     external = document.get("external", {})
     dynamic_attrs = document.get("dynamic-attrs", {})
@@ -419,7 +420,7 @@ def _checker(
 def _parse(text: str, source: _PolicySource) -> tuple[Policy, list[str]]:
     lines = text.splitlines()
     try:
-        document = tomllib.loads(text)
+        document = object_mapping(tomllib.loads(text))
     except tomllib.TOMLDecodeError as error:
         return Policy(lines=lines), [f"invalid TOML: {error}"]
     found = _Sections()

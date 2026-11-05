@@ -6,11 +6,13 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
 
 from meizel import lint_common
+from meizel.graph.model import MeizelError
 from meizel.owners import timing_judgement
+from meizel.source_text import is_mapping, is_object_list, object_of
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 BASELINE = Path("meizel/owners/timing_judgement_baseline.json")
@@ -48,14 +50,46 @@ def _test_files(paths: list[Path], root: Path) -> list[tuple[str, str]]:
     return pairs
 
 
+# meiva:note
+# One string field of a baseline entry. A baseline this cannot read is a broken baseline, not an
+# empty one: it stops here with the field's name instead of returning a shorter set that would read
+# as "these sites are gone".
+def _text_field(entry: Mapping[str, object], name: str) -> str:
+    value = entry.get(name)
+    if not isinstance(value, str):
+        raise MeizelError(f"timing baseline entry has no string {name!r}: {value!r}")
+    return value
+
+
+# meiva:note
+# The baseline's entries, read through the untyped readers: `json.loads` is `Any`, so the document is
+# narrowed to a mapping of `object`s and each entry's three strings are checked.
 def _baseline_entries(path: Path) -> frozenset[tuple[str, str, str]]:
-    data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
-    return frozenset((s["path"], s["function"], s["comparison"]) for s in data.get("sites", ()))
+    if not path.is_file():
+        return frozenset()
+    document = object_of(json.loads, path.read_text(encoding="utf-8"))
+    if not is_mapping(document):
+        raise MeizelError(f"timing baseline {path} is not an object")
+    sites = document.get("sites", ())
+    if not is_object_list(sites):
+        raise MeizelError(f"timing baseline {path} has no list of sites")
+    keys: list[tuple[str, str, str]] = []
+    for entry in sites:
+        if not is_mapping(entry):
+            raise MeizelError(f"timing baseline {path} has a site that is not an object")
+        keys.append(
+            (
+                _text_field(entry, "path"),
+                _text_field(entry, "function"),
+                _text_field(entry, "comparison"),
+            )
+        )
+    return frozenset(keys)
 
 
 def _write(baseline_path: Path, files: list[tuple[str, str]]) -> int:
     sites = {key for rel, text in files for key in timing_judgement.site_keys(text, rel)}
-    payload: dict[str, Any] = {
+    payload: dict[str, object] = {
         "note": (
             "Timing judgements that predate the rule (the #5821 inventory, re-scanned). "
             "Regenerate with --write-baseline and treat the diff as the review."
