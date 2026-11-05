@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import tempfile
 from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -448,6 +449,10 @@ def build_wiring(
             launchd=LaunchdFacts.of(host, user_home=Path.home()),
             run=host.run,
             root=context.supervisor.root_identity(),
+            # meiva:note
+            # The venv probe runs its legs outside this checkout: the OS temp directory is the one
+            # directory the root knows that is never a working tree.
+            probe_cwd=Path(tempfile.gettempdir()),
         )
         if diagnostics is None
         else diagnostics

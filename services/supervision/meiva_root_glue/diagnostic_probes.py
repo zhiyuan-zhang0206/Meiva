@@ -152,6 +152,7 @@ def venv(
     environment: Mapping[str, str],
     run: CommandRunner,
     clock: Clock,
+    probe_cwd: Path,
     deadline_s: float = PROBE_DEADLINE_S,
     source_root: Path = _ROOT_CHECKOUT,
 ) -> DaemonProbe:
@@ -167,6 +168,7 @@ def venv(
         deadline_s=deadline_s,
         run=run,
         clock=clock,
+        probe_cwd=probe_cwd,
     )
     if observation.violations:
         return DaemonProbe.down("; ".join(observation.violations))
@@ -514,6 +516,7 @@ def build_diagnostics(
     launchd: LaunchdFacts,
     run: CommandRunner,
     root: OwnedProcess,
+    probe_cwd: Path,
 ) -> list[Diagnostic]:
     """Host policy is explicit; absent capabilities do not create fake samples."""
     checks: list[Diagnostic] = []
@@ -537,6 +540,7 @@ def build_diagnostics(
                 environment=config.environment,
                 run=run,
                 clock=clock,
+                probe_cwd=probe_cwd,
                 deadline_s=PROBE_DEADLINE_S,
             ),
             timeout_s=DIAGNOSTIC_TIMEOUT_S,

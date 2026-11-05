@@ -111,6 +111,7 @@ def test_the_dependency_check_runs_in_the_isolated_environment(tmp_path: Path) -
         deadline_s=_DEADLINE_S,
         run=run_bounded,
         clock=_CLOCK,
+        probe_cwd=tmp_path,
     )
 
     assert observation == hc.VenvObservation((), ())
@@ -129,6 +130,7 @@ def test_a_failing_dependency_check_is_a_violation(tmp_path: Path) -> None:
         deadline_s=_DEADLINE_S,
         run=run_bounded,
         clock=_CLOCK,
+        probe_cwd=tmp_path,
     )
 
     (violation,) = observation.violations
@@ -152,6 +154,7 @@ def test_dependency_timeout_is_unmeasured_and_does_not_skip_import_check(tmp_pat
         deadline_s=_DEADLINE_S,
         run=run,
         clock=Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=timers),
+        probe_cwd=tmp_path,
     )
 
     (unmeasured,) = observation.unmeasured
@@ -178,6 +181,7 @@ def test_an_unstartable_uv_is_unmeasured_not_a_violation(tmp_path: Path) -> None
         deadline_s=_DEADLINE_S,
         run=run_bounded,
         clock=_CLOCK,
+        probe_cwd=tmp_path,
     )
 
     (unmeasured,) = observation.unmeasured
@@ -201,6 +205,7 @@ def test_a_killed_leg_is_unmeasured_not_a_violation(tmp_path: Path) -> None:
         deadline_s=_DEADLINE_S,
         run=run_bounded,
         clock=_CLOCK,
+        probe_cwd=tmp_path,
     )
 
     (unmeasured,) = observation.unmeasured
@@ -218,6 +223,7 @@ def test_missing_python_does_not_spawn_a_diagnostic(tmp_path: Path) -> None:
         deadline_s=_DEADLINE_S,
         run=run_bounded,
         clock=_CLOCK,
+        probe_cwd=tmp_path,
     )
 
     assert "venv python missing" in observation.violations[0]
@@ -240,6 +246,7 @@ def test_real_isolated_import_detects_damage_without_writes(tmp_path: Path, dama
         deadline_s=_DEADLINE_S,
         run=run_bounded,
         clock=_CLOCK,
+        probe_cwd=tmp_path,
     )
 
     assert before == _package_files(site)
