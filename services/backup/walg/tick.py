@@ -10,17 +10,19 @@
 #    inside a stop/start window does not become a day-long alert. A skip leaves the outcome of the last real run untouched.
 # 2. **Preflight.** The pinned binary, the configuration and key pin, and one
 #    `backup-list`, which proves the credentials and the prefix.
-# 3. **Recovery drill**, once a week (`drill.py`), before the backup, so that it restores
+# 3. **Scratch sweep.** What a killed drill left in the throwaway roots is deleted here, on every
+#    tick, so it is gone by the next day instead of waiting for the drill to come due.
+# 4. **Recovery drill**, once a week (`drill.py`), before the backup, so that it restores
 #    yesterday's backup: the one a lost host would need. A failed drill is recorded in
 #    `drill` and never stops the backup.
-# 4. **Backup.** `backup-push` with `WALG_DELTA_MAX_STEPS=6`: WAL-G itself starts a new
+# 5. **Backup.** `backup-push` with `WALG_DELTA_MAX_STEPS=6`: WAL-G itself starts a new
 #    full backup once the increment chain is six deep (a daily run therefore makes a
 #    full backup every seventh time), and retries a failed full backup the next day
 #    because the chain is still full. A backup that WAL-G reports done but that is not
 #    in the list afterwards is a failure.
-# 5. **Verify.** `wal-verify integrity timeline --json`, JSON status only. A failure
+# 6. **Verify.** `wal-verify integrity timeline --json`, JSON status only. A failure
 #    here stops the tick before retention.
-# 6. **Retention.** `retain FULL 3`, guarded (see `retention.py`).
+# 7. **Retention.** `retain FULL 3`, guarded (see `retention.py`).
 #
 # The first failing step ends the run and is recorded with its name; the next day's
 # tick starts from scratch. Every step's result is written to `state.json`, which the
@@ -245,6 +247,27 @@ def _drill(
     return record.ok
 
 
+# meiva:note
+# What a killed drill left, removed on every tick rather than at the next drill. The drill's own
+# sweep runs when it is due, and after a manual drill that died a day after a good one, "when it is
+# due" is six days away -- 48 GiB of scratch held on the host's filesystem the whole time. The tick
+# already holds the run lock a drill takes, so nothing under these roots can be a live drill's.
+def _sweep_scratch(
+    report: Report, *, throwaway: ThrowawayConfig, environ: Mapping[str, str]
+) -> None:
+    try:
+        sweeps = drill.sweep_scratch_roots(
+            throwaway.override, environ=environ, default_root=throwaway.default_root
+        )
+    except OSError as exc:
+        report(f"scratch: could not look for leftovers: {exc}")
+        return
+    for sweep in sweeps:
+        line = sweep.summary()
+        if line is not None:
+            report(line)
+
+
 def _weekly_drill(
     target: PgTarget,
     backups: list[Backup],
@@ -315,6 +338,7 @@ def _run_steps(
     try:
         before = _preflight(path=path, binary_problem=binary_problem, home=home, environ=environ)
         report(f"preflight: ok, {len(before)} backups listed")
+        _sweep_scratch(report, throwaway=throwaway, environ=environ)
         _weekly_drill(
             target,
             before,

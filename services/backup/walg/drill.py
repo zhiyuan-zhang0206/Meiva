@@ -27,7 +27,8 @@
 # backup record: a delta backup's `uncompressed_size` is the delta's own bytes (2 GiB on
 # 2026-10-30) while the directory it rebuilds is the whole database (42 GiB), and the drill that
 # trusted the record asked for 26 GiB, wrote 44 GiB and left the host at 13 GiB. It is removed in
-# every outcome this process survives, and the next drill sweeps what a killed one left behind.
+# every outcome this process survives. What a killed one leaves is swept by the drill before it
+# writes and by the daily tick, whichever comes first -- both hold the run lock that proves it dead.
 #
 # A drill never raises and never stops the backup that follows it: the outcome is a
 # `DrillRecord` for the state file, whose failure the health probe reports.
@@ -57,6 +58,7 @@ from base.cluster.dataplane.pg_throwaway_base import (
     format_bytes,
     free_bytes,
     select_throwaway_base,
+    throwaway_roots,
 )
 from base.db import Database, connect_url
 from base.db.rows import query_one
@@ -197,8 +199,16 @@ def read_source_facts(target: PgTarget) -> SourceFacts:
 # it passes them (measured 2026-10-30, 1.2-1.4 GiB in `pg_wal` while 24 GiB of WAL was replayed),
 # so `max_wal_size` is the bound.
 def required_bytes(backup: Backup, facts: SourceFacts, *, factor: float = SPACE_FACTOR) -> int:
-    data = max(facts.data_bytes, backup.uncompressed_bytes)
-    return math.ceil(data * factor) + facts.max_wal_size_bytes
+    return math.ceil(scratch_data_bytes(backup, facts) * factor) + facts.max_wal_size_bytes
+
+
+# meiva:note
+# The size the drill plans for, named once: the source's own contents unless the backup record is
+# larger, which it is only for a full backup taken while the cluster held more. The space line
+# below and `required_bytes` read the same function, so a logged figure cannot drift from the one
+# the gate decided on.
+def scratch_data_bytes(backup: Backup, facts: SourceFacts) -> int:
+    return max(facts.data_bytes, backup.uncompressed_bytes)
 
 
 # meiva:note
@@ -209,17 +219,108 @@ def room_shortfall(required: int, floor: int, available: int) -> int:
 
 
 # meiva:note
+# The line that says the space gate ran and on which numbers. The refusal below speaks only when it
+# refuses, so a drill that passed left nothing an operator could read -- on 2026-11-06 the absence
+# of any such line was read as "this drill has no space gate at all", and the gate had to be found
+# in the source to be believed. The terms are the gate's own: what it needs, what it keeps, what it
+# found.
+def space_account(
+    required: int,
+    data_bytes: int,
+    wal_bytes: int,
+    floor: int,
+    available: int,
+    *,
+    factor: float = SPACE_FACTOR,
+) -> str:
+    return (
+        f"space: need {format_bytes(required)} (data {format_bytes(data_bytes)} x {factor:g}"
+        f" + wal {format_bytes(wal_bytes)}), keep {format_bytes(floor)},"
+        f" have {format_bytes(available)} -> ok"
+    )
+
+
+# meiva:note
 # What a killed drill leaves behind. `finally` does not run when the process is signalled or the
-# host reboots, so a 44 GiB copy stays on the filesystem it had already filled. The next drill
-# removes it before writing its own: the run lock admits one drill at a time, so any scratch
-# directory under the base at this point belongs to a dead one.
-def sweep_stale_scratch(base: Path) -> int:
-    removed = 0
+# host reboots, so a 44 GiB copy stays on the filesystem it had already filled. Both callers -- the
+# drill before it writes, and the daily tick -- hold the home's run lock, so any scratch directory
+# under a throwaway root at that moment belongs to a dead drill. That lock *is* the criterion: the
+# alternative, a directory age bound, would be a weaker guess at the same fact, and it would keep a
+# killed drill's bytes across the next drill's space gate.
+#
+# One sweep's outcome, so the report and the count come from the same read: what was removed with
+# the bytes it freed, and what is still there because this process may not remove it. `summary()`
+# is the one line to report, or None when the root held nothing of the drill's -- a "removed 0" on
+# every tick would be noise, and the tick's output is read line by line against what its steps did.
+@dataclass(frozen=True)
+class ScratchSweep:
+    root: Path
+    removed: tuple[Path, ...] = ()
+    failed: tuple[Path, ...] = ()
+    freed_bytes: int = 0
+
+    def summary(self) -> str | None:
+        if not self.removed and not self.failed:
+            return None
+        parts: list[str] = []
+        if self.removed:
+            count = len(self.removed)
+            parts.append(
+                f"removed {count} leftover drill "
+                f"{'directory' if count == 1 else 'directories'} ({format_bytes(self.freed_bytes)})"
+            )
+        if self.failed:
+            names = ", ".join(sorted(path.name for path in self.failed))
+            parts.append(f"could not remove {names}")
+        return f"scratch: {'; '.join(parts)} on {self.root}"
+
+
+# meiva:note
+# The bytes of the files under one directory, read before it is deleted: the freed figure is what
+# the report is for. A file that vanished or cannot be read is skipped and the rest still count.
+def _tree_bytes(root: Path) -> int:
+    total = 0
+    for entry in root.rglob("*"):
+        try:
+            if entry.is_file():
+                total += entry.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+# meiva:note
+# Remove every drill directory under `base`. Removing one that is somehow still in use fails here
+# and is reported rather than hidden; the next sweep retries it.
+def sweep_stale_scratch(base: Path) -> ScratchSweep:
+    removed: list[Path] = []
+    failed: list[Path] = []
+    freed = 0
     for stale in sorted(base.glob(f"{_SCRATCH_PREFIX}*")):
-        if stale.is_dir():
-            shutil.rmtree(stale, ignore_errors=True)
-            removed += 1
-    return removed
+        if not stale.is_dir():
+            continue
+        size = _tree_bytes(stale)
+        shutil.rmtree(stale, ignore_errors=True)
+        if stale.exists():
+            failed.append(stale)
+            continue
+        removed.append(stale)
+        freed += size
+    return ScratchSweep(root=base, removed=tuple(removed), failed=tuple(failed), freed_bytes=freed)
+
+
+# meiva:note
+# Every root a drill could have written to, not only today's: which one it picks follows the free
+# space, so a copy left under `/dev/shm` yesterday is still the drill's to clean when today it
+# would pick `/var/tmp`.
+def sweep_scratch_roots(
+    override: Path | None, *, environ: Mapping[str, str], default_root: Path | None = None
+) -> tuple[ScratchSweep, ...]:
+    return tuple(
+        sweep_stale_scratch(root)
+        for root in throwaway_roots(override, environ=environ, default_root=default_root)
+        if root.is_dir()
+    )
 
 
 def target_lsn(backup: Backup, facts: SourceFacts) -> int | None:
@@ -276,12 +377,23 @@ def _restore_and_verify(
     host_floor_bytes: int = HOST_FLOOR_BYTES,
 ) -> str:
     """Restore `backup` to the newest archived segment and verify it; returns the summary."""
+    # meiva:note
+    # Before the gate, not after it: a killed drill's copy is deleted first, so the gate reads the
+    # disk as the drill will find it. Swept afterwards, the leftovers counted against the room this
+    # drill asked for, and a host that was short only because of them would have refused for good.
+    for sweep in sweep_scratch_roots(
+        throwaway.override, environ=environ, default_root=throwaway.default_root
+    ):
+        line = sweep.summary()
+        if line is not None:
+            report(line)
     required = required_bytes(backup, facts, factor=space_factor)
     try:
         base = select_throwaway_base(
             required + host_floor_bytes,
             override=throwaway.override,
             environ=throwaway.environ,
+            default_root=throwaway.default_root,
         )
     except InsufficientThrowawaySpaceError as exc:
         raise DrillRefusedError(f"drill refused, nothing written: {exc}") from exc
@@ -294,12 +406,16 @@ def _restore_and_verify(
             f" {format_bytes(host_floor_bytes)} kept free for the host — short by"
             f" {format_bytes(shortfall)}"
         )
-    leftover = sweep_stale_scratch(base)
-    if leftover:
-        report(
-            f"scratch: removed {leftover} leftover drill "
-            f"{'directory' if leftover == 1 else 'directories'} on {base}"
+    report(
+        space_account(
+            required,
+            scratch_data_bytes(backup, facts),
+            facts.max_wal_size_bytes,
+            host_floor_bytes,
+            available,
+            factor=space_factor,
         )
+    )
     report(
         f"drill: restoring {backup.name} on {base} to "
         f"{'LSN ' + format_lsn(reached) if reached is not None else 'the end of the archive'}"

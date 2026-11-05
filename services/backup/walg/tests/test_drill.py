@@ -189,17 +189,61 @@ def test_the_shortfall_is_what_the_host_cannot_afford(
 
 
 def test_the_sweep_removes_every_leftover_drill_directory(tmp_path: Path) -> None:
-    fresh = tmp_path / "meiva-walg-drill-fresh"
-    stale = tmp_path / "meiva-walg-drill-stale"
+    first = tmp_path / "meiva-walg-drill-first"
+    second = tmp_path / "meiva-walg-drill-second"
     other = tmp_path / "unrelated"
-    for path in (fresh, stale, other):
+    for path in (first, second, other):
         path.mkdir()
-    (stale / "data").write_text("44 GiB of somebody's afternoon")
+    (second / "data").mkdir()
+    _ = (second / "data" / "PG_VERSION").write_text("17")
 
-    assert drill.sweep_stale_scratch(tmp_path) == 2
-    assert not fresh.exists()
-    assert not stale.exists()
+    sweep = drill.sweep_stale_scratch(tmp_path)
+
+    assert [path.name for path in sweep.removed] == [first.name, second.name]
+    assert sweep.failed == ()
+    assert sweep.freed_bytes == len("17")
+    assert not first.exists()
+    assert not second.exists()
     assert other.exists()
+    assert sweep.summary() == (
+        f"scratch: removed 2 leftover drill directories (0 MiB) on {tmp_path}"
+    )
+
+
+# meiva:note
+# A root with no leftover reports nothing at all: a line saying "removed 0" on every tick would be
+# noise, and the tick's output is read line by line against what its steps did.
+def test_a_sweep_that_finds_no_leftover_has_nothing_to_say(tmp_path: Path) -> None:
+    (tmp_path / "unrelated").mkdir()
+
+    sweep = drill.sweep_stale_scratch(tmp_path)
+
+    assert sweep == drill.ScratchSweep(root=tmp_path)
+    assert sweep.summary() is None
+
+
+# meiva:note
+# A root that is not there holds no leftover. `default_root` names the root here on purpose: with
+# it the sweep reads the roots the caller chose, not this machine's /dev/shm and /var/tmp.
+def test_sweep_scratch_roots_reads_the_roots_it_is_given(tmp_path: Path) -> None:
+    present = tmp_path / "present"
+    present.mkdir()
+    (present / "meiva-walg-drill-gone").mkdir()
+
+    sweeps = drill.sweep_scratch_roots(None, environ={}, default_root=present)
+
+    assert [sweep.root for sweep in sweeps] == [present]
+    assert len(sweeps[0].removed) == 1
+    assert drill.sweep_scratch_roots(None, environ={}, default_root=tmp_path / "absent") == ()
+
+
+# meiva:note
+# The gate's four numbers in one line. Pinned verbatim because the lesson was that a passing drill
+# said nothing: an operator reading this line must be able to see the terms, not just "ok".
+def test_the_space_account_names_every_number_the_gate_decided_on() -> None:
+    assert drill.space_account(55 << 20, 42 << 20, 1 << 20, 24 << 30, 183 << 30) == (
+        "space: need 55 MiB (data 42 MiB x 1.2 + wal 1 MiB), keep 24.0 GiB, have 183.0 GiB -> ok"
+    )
 
 
 # ── the schedule ─────────────────────────────────────────────────────────────
@@ -466,6 +510,7 @@ def test_the_drill_restores_the_newest_backup_to_the_newest_archived_segment_and
     assert record.last_ok_at == record.finished_at
     assert record.backup == source.newest_backup().name
     assert any(line.startswith("drill: restoring base_") for line in lines)
+    assert any(line.startswith("space: need ") and line.endswith(" -> ok") for line in lines), lines
     assert list(scratch_base.iterdir()) == []  # the scratch copy is gone
 
 
@@ -508,7 +553,8 @@ def test_a_leftover_scratch_directory_is_removed_before_the_drill_writes(
 
     assert record.ok, record.detail
     assert any(
-        line == f"scratch: removed 1 leftover drill directory on {scratch_base}" for line in lines
+        line == f"scratch: removed 1 leftover drill directory (0 MiB) on {scratch_base}"
+        for line in lines
     )
     assert list(scratch_base.iterdir()) == []
 
