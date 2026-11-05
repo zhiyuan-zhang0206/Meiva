@@ -296,6 +296,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `understanding_rebuild_failed` | an understanding rebuild failed on its last allowed attempt and was closed as failed | anomaly | agent_id, rebuild_id, attempts, error | — | events | — |
 | `understanding_leaf_out_of_order` | an understanding leaf landed before an already grouped one; the agent's upper levels need a manual build | anomaly | agent_id, job_id, span_end | — | events | — |
 | `understanding_backlog` | one sample of the understanding chunk queue per consumer round: pending, running and the oldest pending age | observation | pending, running, oldest_pending_age_seconds | — | events | — |
+| `plugin_collector_cycle` | one interval collector finished a refresh cycle, in both outcomes — the only record that says the loop ran at all; three intervals without one is a collector that is alive but producing nothing | observation | collector, outcome, reason, cycle | — | events | — |
 | `loki_write_path_probe_failed` | Loki write-path probe failed | anomaly | consecutive_failures, reason | — | events | — |
 | `loki_write_path_probe_throttled` | Loki write-path probe persistently throttled | anomaly | consecutive_throttles, reason | — | events | — |
 | `event_log_drop` | event-pipeline row shed | anomaly | n, queue, last_dropped_at | — | events | ✓ |

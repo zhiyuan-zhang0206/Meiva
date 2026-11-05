@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -11,9 +12,13 @@ import psycopg
 
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.native_process.loaded_commit import LoadedCommit
+from base.telemetry.tests.capture.event_capture import EmittedEvents
 from meiva_builtins.plugins.meiva_usage.default_config import CollectorConfig, UsageConfig
 from meiva_builtins.plugins.meiva_usage.probes import HttpJsonRequest
-from meiva_builtins.plugins.meiva_usage.runner import refresh_collector_once, run_from_schedule
+from meiva_builtins.plugins.meiva_usage.runner import (
+    refresh_collector_once,
+    run_collector_cycles,
+)
 
 
 class FakeDatabase:
@@ -218,8 +223,10 @@ def test_run_from_schedule_single_cycle(db_conn: psycopg.Connection[Any], tmp_pa
             ],
         }
 
-    run_from_schedule(
+    run_collector_cycles(
         inputs,
+        refresh=refresh_collector_once,
+        sleep=time.sleep,
         collector_id="scheduled-coll",
         stop_after_cycles=1,
         environ=environ,
@@ -292,8 +299,10 @@ def test_run_from_schedule_split_runner_cluster_projection(
             ],
         }
 
-    run_from_schedule(
+    run_collector_cycles(
         inputs,
+        refresh=refresh_collector_once,
+        sleep=time.sleep,
         collector_id="split-coll",
         stop_after_cycles=1,
         environ=environ,
@@ -616,3 +625,78 @@ def test_refresh_collector_once_antigravity_writes_both_cards_and_handles_hyster
         http_fetch=partial_fetch,
     )
     _assert_ag_phase3_stale_failure(readings3, db_conn)
+
+
+def test_run_from_schedule_emits_one_cycle_event_in_both_outcomes(
+    db_conn: psycopg.Connection[Any],
+    tmp_path: Path,
+    emitted_events: EmittedEvents,
+) -> None:
+    from meiva_builtins.plugins.meiva_usage import runner as runner_mod
+
+    db = FakeDatabase(db_conn)
+    collector = CollectorConfig(
+        id="scheduled-coll",
+        label="Scheduled Collector",
+        provider="deepseek",
+        machine="company-air",
+        key_env="DEEPSEEK_API_KEY",
+        interval_minutes=1,
+    )
+    usage_cfg = UsageConfig(collectors=(collector,))
+    cfg_dir = tmp_path / "configs" / "meiva_usage"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    (cfg_dir / "config.json").write_text(usage_cfg.model_dump_json(indent=2))
+
+    class FakeMachine:
+        def name(self) -> str:
+            return "company-air"
+
+    inputs = ScheduleInputs(
+        database=cast(Any, lambda: db),
+        producer=cast(Any, lambda: None),
+        image=LoadedCommit(source_root=tmp_path, sha="test-sha"),
+        machine=cast(Any, FakeMachine()),
+        home=tmp_path,
+    )
+
+    def mock_fetch(req: HttpJsonRequest) -> dict[str, object]:
+        return {
+            "is_available": True,
+            "balance_infos": [
+                {
+                    "currency": "USD",
+                    "total_balance": "88.00",
+                    "granted_balance": "0.00",
+                    "topped_up_balance": "88.00",
+                }
+            ],
+        }
+
+    calls = {"n": 0}
+    real_refresh = runner_mod.refresh_collector_once
+
+    def flaky_refresh(*args: Any, **kwargs: Any) -> None:
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("probe exploded")
+        real_refresh(*args, **kwargs)
+
+    def _no_sleep(_seconds: float) -> None:
+        return None
+
+    run_collector_cycles(
+        inputs,
+        refresh=flaky_refresh,
+        sleep=_no_sleep,
+        collector_id="scheduled-coll",
+        stop_after_cycles=2,
+        environ={"DEEPSEEK_API_KEY": "test-key-123", "MEIVA_MACHINE_SERVE_GATEWAY": "true"},
+        http_fetch=mock_fetch,
+    )
+
+    attributes = list(emitted_events.attributes("plugin_collector_cycle"))
+    assert [a["outcome"] for a in attributes] == ["ok", "failed"]
+    assert [a["cycle"] for a in attributes] == [0, 1]
+    assert attributes[1]["reason"] == "RuntimeError"
+    assert {a["collector"] for a in attributes} == {"scheduled-coll"}
