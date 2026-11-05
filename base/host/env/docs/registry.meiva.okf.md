@@ -25,6 +25,7 @@ keys; those declarations load at the delivery boundaries that consume them.
 
 - **Forwarding** (`child_env(environ)`) — the parent-to-child env view of a daemon or session child. Native launchers receive an environment dict; secrets never ride argv. `session_child_env_keys()` names the same view as a key set for a consumer that must *close* an inherited environment rather than build one — the Claude adapter blanks every other key because its SDK merges the parent environment under the mapping it is given.
 - **Keep/drop** (`env_authority_drop_set(role)` / `env_keep_set(role)`) — dotenv_boot's own-environ surgery, as set-membership queries.
+- **Temp root** (`temp_dir_of(environ)`) — the directory the temp keys of a given dict name, in the order a POSIX tool reads them. A caller holding the child dict names the directory its child will use, where `tempfile.gettempdir()` would answer for the parent process instead.
 
 The consumption matrix decides which process reads each key. Capability/scope
 metadata validates those choices; it does not infer every consumer. Three

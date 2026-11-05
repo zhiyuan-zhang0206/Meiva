@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, fields
+from pathlib import Path
 
 from base.host.env.config_lite_table import FIELD_ALIASES, FIELD_SCOPES
 
@@ -21,9 +22,11 @@ __all__ = [
     "MEIVA_PYTHON_ENV",
     "NETWORK_PROXY_KEYS",
     "SESSION_CREDENTIAL_KEYS",
+    "TEMP_DIR_KEYS",
     "ModelOverrides",
     "built_from_values",
     "session_child_env_keys",
+    "temp_dir_of",
 ]
 
 AGENT_ID_ENV = "MEIVA_AGENT_ID"
@@ -45,7 +48,27 @@ NETWORK_PROXY_KEYS = frozenset(
         "no_proxy",
     }
 )
-_TEMP_DIR_KEYS = frozenset({"TMPDIR", "TEMP", "TMP"})
+# meiva:note
+# The keys that name a temp root, in the order a POSIX tool reads them. The same order is why
+# `child_env` copies all three non-empty into every child dict: a caller holding that child mapping
+# can then name the directory its child will use instead of asking `tempfile` for this process's
+# answer.
+TEMP_DIR_KEYS: tuple[str, ...] = ("TMPDIR", "TEMP", "TMP")
+_TEMP_DIR_KEYS = frozenset(TEMP_DIR_KEYS)
+
+
+# meiva:note
+# The temp root a given environment names, and /tmp when it names none: that last case is the POSIX
+# fallback every tool reads when no key is set, so it is a constant here rather than a read of this
+# process's own environment.
+def temp_dir_of(environ: Mapping[str, str]) -> Path:
+    for key in TEMP_DIR_KEYS:
+        value = environ.get(key)
+        if value:
+            return Path(value)
+    return Path("/tmp")  # noqa: S108
+
+
 _SESSION_DELIVERY_KEYS = frozenset(
     {"PATH", MEIVA_PYTHON_ENV, "MEIVA_HARNESS_HANDLE", "CLAUDE_CONFIG_DIR"}
 )

@@ -583,7 +583,9 @@ def run_drill(
         raw_dump = scratch / "backup.dump"
         backup.decrypt_artifact(artifact, raw_dump, tree=tree, env=env)
         required = scratch_space_requirement(raw_dump)
-        base = select_throwaway_base(required, override=throwaway.override)
+        base = select_throwaway_base(
+            required, override=throwaway.override, environ=throwaway.environ
+        )
         logger.info(
             f"restore drill: scratch cluster on {base} "
             f"(estimate {format_bytes(required)} for artifact {artifact.name})"

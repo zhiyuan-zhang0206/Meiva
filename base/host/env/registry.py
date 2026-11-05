@@ -44,6 +44,9 @@ from base.host.env.agent_env import (
     SESSION_CREDENTIAL_KEYS as SESSION_CREDENTIAL_KEYS,
 )
 from base.host.env.agent_env import (
+    TEMP_DIR_KEYS as TEMP_DIR_KEYS,
+)
+from base.host.env.agent_env import (
     session_child_env_keys as session_child_env_keys,
 )
 from base.host.env.config_lite_table import (
@@ -140,7 +143,7 @@ _GUIDE_PASSTHROUGH_KEYS = frozenset(
 # `child_env` below (a child without TMPDIR falls back to the OS default temp
 # root and any tool that pins a boot file to $TMPDIR drifts).
 _OS_CANONICAL_KEYS = frozenset({"PATH", "VIRTUAL_ENV"})
-_TEMP_DIR_KEYS = frozenset({"TMPDIR", "TEMP", "TMP"})
+_TEMP_DIR_KEYS = frozenset(TEMP_DIR_KEYS)
 
 _PASSTHROUGH_ROWS = (
     _HOST_PASSTHROUGH_ROWS

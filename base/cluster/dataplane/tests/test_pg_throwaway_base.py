@@ -56,8 +56,10 @@ def test_no_requirement_keeps_the_platform_default_without_measuring(
     )
     assert chosen == default
     assert warning is None
-    assert base.select_throwaway_base(override=None, default_root=default) == default
-    assert base.select_throwaway_base(None, override=None, default_root=default) == default
+    assert base.select_throwaway_base(override=None, environ={}, default_root=default) == default
+    assert (
+        base.select_throwaway_base(None, override=None, environ={}, default_root=default) == default
+    )
 
 
 def test_declared_capacity_takes_the_durable_fallback(
@@ -168,7 +170,7 @@ def test_configured_override_wins_even_when_short(
     )
     assert chosen == forced
     assert warning is not None
-    assert base.select_throwaway_base(override=forced, default_root=default) == forced
+    assert base.select_throwaway_base(override=forced, environ={}, default_root=default) == forced
 
 
 def test_configured_override_must_be_a_real_directory(
@@ -176,7 +178,7 @@ def test_configured_override_must_be_a_real_directory(
 ) -> None:
     default, _fallback = scratch_bases
     with pytest.raises(RuntimeError, match="MEIVA_PG_THROWAWAY_BASE"):
-        base.select_throwaway_base(override=tmp_path / "missing", default_root=default)
+        base.select_throwaway_base(override=tmp_path / "missing", environ={}, default_root=default)
 
 
 def test_throwaway_roots_covers_override_default_and_fallback(
@@ -194,7 +196,7 @@ def test_throwaway_roots_covers_override_default_and_fallback(
         fallback,
     )
     assert pg_plan.dedupe_throwaway_roots(forced, default, default) == (forced, default)
-    assert base.throwaway_roots(forced, default_root=default) == (forced, default)
+    assert base.throwaway_roots(forced, environ={}, default_root=default) == (forced, default)
 
 
 @pytest.mark.parametrize(
