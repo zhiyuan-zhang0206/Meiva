@@ -282,7 +282,15 @@ def bundle(tmp_path_factory: pytest.TempPathFactory) -> Path:
     ],
 )
 def test_bundle_validator_reports_its_violations(bundle: Path, name: str) -> None:
-    check: Callable[[Path], list[str]] = getattr(_validator(), name)
+    validator = _validator()
+    check: Callable[[Path], list[str]] = {
+        "validate_type_tag": validator.validate_type_tag,
+        "validate_project_home": validator.validate_project_home,
+        "validate_structure": validator.validate_structure,
+        "validate_factchecks": validator.validate_factchecks,
+        "validate_pointers": validator.validate_pointers,
+        "validate_indexes": validator.validate_indexes,
+    }[name]
     assert sorted(check(bundle)) == _EXPECTED[name]
 
 

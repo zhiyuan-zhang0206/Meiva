@@ -42,8 +42,12 @@ sys.stdout.write(
             "kernel": "base.native_process.kernel_identity" in sys.modules,
             "legacy_exports": [
                 name
-                for name in ("pid_starttime_ticks", "native_boot_id", "process_birth_key")
-                if hasattr(package, name)
+                for name, present in (
+                    ("pid_starttime_ticks", hasattr(package, "pid_starttime_ticks")),
+                    ("native_boot_id", hasattr(package, "native_boot_id")),
+                    ("process_birth_key", hasattr(package, "process_birth_key")),
+                )
+                if present
             ],
         }
     )

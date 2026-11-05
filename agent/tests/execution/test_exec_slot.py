@@ -36,11 +36,11 @@ def test_in_exec_turn_follows_the_bound_slot():
 
 
 def test_state_slots_do_not_exist_outside_an_exec_turn():
-    for name in ("state", "state_update"):
+    for read in (lambda: meiva.state, lambda: meiva.state_update):
         with pytest.raises(
             process_context.PluginStateOutsideTurnError, match="only inside execute_code"
         ):
-            getattr(meiva, name)
+            read()
     assert isinstance(process_context.PluginStateOutsideTurnError("x"), AttributeError)
     assert not hasattr(meiva, "state")
     assert not hasattr(meiva, "state_update")

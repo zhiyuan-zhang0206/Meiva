@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from base.config import settings
+from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_config_images import image_revision, write_config_image
 from base.packages.plugins.config_registration import (
@@ -43,7 +43,7 @@ bind_plugin_config(
 )
 slices = AgentSlices.resolve(
     plugin_configs=configs,
-    default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
+    default_reader=defaults(),
 )
 sys.stdout.write(get_plugin_config("boot-race", slices, Config).marker + "\n")
 sys.stdout.flush()

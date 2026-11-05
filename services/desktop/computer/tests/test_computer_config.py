@@ -12,9 +12,9 @@ from services.desktop.computer.config import beat_interval_s, effective_stall_s,
 
 def test_the_slice_carries_the_live_value_of_every_field() -> None:
     default_config = mcp_daemon.computer_use_config()
-    for field in dataclasses.fields(default_config):
-        flat: Any = get_field(field.name)
-        assert getattr(default_config, field.name) == flat, field.name
+    for name, value in dataclasses.asdict(default_config).items():
+        flat: Any = get_field(name)
+        assert value == flat, name
     custom_daemon = settings.daemon.model_copy(
         update={
             "computer_use_lease_s": 7.5,

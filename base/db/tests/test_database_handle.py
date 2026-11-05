@@ -113,9 +113,9 @@ def test_the_config_carries_the_live_value_of_every_field() -> None:
     set_field("db_pool_max_size", 7)
     try:
         config = db_config_from_settings()
-        for field in dataclasses.fields(config):
-            if field.name != "db_authority_refusal":
-                assert getattr(config, field.name) == get_field(field.name), field.name
+        for name, value in dataclasses.asdict(config).items():
+            if name != "db_authority_refusal":
+                assert value == get_field(name), name
         assert config.db_authority_refusal == settings.env_boot.db_authority_refusal
         assert config.db_pool_max_size == 7
         assert "handle_user" not in repr(_config())

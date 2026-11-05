@@ -60,19 +60,22 @@ _MACHINE = "claim-test"
 class SleepingGraph:
     def __init__(self, inner: Any, seconds: float) -> None:
         self._inner = inner
+        self.checkpointer = inner.checkpointer
+        self.builder = inner.builder
+        self.aupdate_state = inner.aupdate_state
         self.seconds = seconds
 
     async def aget_state(self, config: Any) -> Any:
         await asyncio.sleep(self.seconds)
         return await self._inner.aget_state(config)
 
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._inner, name)
-
 
 class FailingReads:
     def __init__(self, inner: Any, failures: int) -> None:
         self._inner = inner
+        self.checkpointer = inner.checkpointer
+        self.builder = inner.builder
+        self.aupdate_state = inner.aupdate_state
         self.failures = failures
 
     async def aget_state(self, config: Any) -> Any:
@@ -80,9 +83,6 @@ class FailingReads:
             self.failures -= 1
             raise OSError("checkpoint store unavailable")
         return await self._inner.aget_state(config)
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._inner, name)
 
 
 @pytest.fixture

@@ -168,9 +168,13 @@ def test_lifecycle_default_source_requires_identity_before_http(action: str) -> 
 def test_lifecycle_self_actions_refuse_from_launched_script(db_url: str, action: str) -> None:
     pin_agent(1, owns_loop=False)
 
-    fn = getattr(meiva.self, action)
+    invoke = {
+        "compact": lambda: meiva.self.compact("summary"),
+        "restart": lambda: meiva.self.restart("summary"),
+        "terminate": meiva.self.terminate,
+    }[action]
     with pytest.raises(RuntimeError, match="can only be called from inside an agent process"):
-        fn("summary") if action in {"compact", "restart"} else fn()
+        invoke()
 
 
 @pytest.mark.parametrize("action", ["attach", "compact", "restart"])
@@ -178,7 +182,11 @@ def test_native_only_self_actions_refuse_on_external_harness(action: str) -> Non
     from base.api_contracts.agent_contract import Harness
 
     pin_agent(1, owns_loop=True, harness=Harness.CLAUDE_CODE)
-    fn = getattr(meiva.self, action)
+    fn = {
+        "compact": meiva.self.compact,
+        "restart": meiva.self.restart,
+        "attach": meiva.self.attach,
+    }[action]
     with pytest.raises(RuntimeError, match="only supported on the native 'meiva' harness"):
         if action in {"compact", "restart"}:
             fn("summary")

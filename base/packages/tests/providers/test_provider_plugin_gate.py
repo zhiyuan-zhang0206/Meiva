@@ -180,4 +180,35 @@ def test_the_manifest_gates_the_decision_providers_key(
     ],
 )
 def test_provider_api_exposes_the_single_declaration_owner(name: str) -> None:
-    assert getattr(provider_api, name) is getattr(provider_contract, name)
+    exposed, declared = {
+        "PROVIDER_API_VERSION": (
+            provider_api.PROVIDER_API_VERSION,
+            provider_contract.PROVIDER_API_VERSION,
+        ),
+        "AttachPolicy": (provider_api.AttachPolicy, provider_contract.AttachPolicy),
+        "BuildContext": (provider_api.BuildContext, provider_contract.BuildContext),
+        "DecisionBuildContext": (
+            provider_api.DecisionBuildContext,
+            provider_contract.DecisionBuildContext,
+        ),
+        "DecisionProviderContribution": (
+            provider_api.DecisionProviderContribution,
+            provider_contract.DecisionProviderContribution,
+        ),
+        "InferenceSpeed": (provider_api.InferenceSpeed, provider_contract.InferenceSpeed),
+        "PricePeriod": (provider_api.PricePeriod, provider_contract.PricePeriod),
+        "PriceRates": (provider_api.PriceRates, provider_contract.PriceRates),
+        "PriceTier": (provider_api.PriceTier, provider_contract.PriceTier),
+        "PriceWindow": (provider_api.PriceWindow, provider_contract.PriceWindow),
+        "ProviderBinding": (provider_api.ProviderBinding, provider_contract.ProviderBinding),
+        "ProviderContribution": (
+            provider_api.ProviderContribution,
+            provider_contract.ProviderContribution,
+        ),
+        "ProviderRegistrationError": (
+            provider_api.ProviderRegistrationError,
+            provider_contract.ProviderRegistrationError,
+        ),
+        "ThinkingConfig": (provider_api.ThinkingConfig, provider_contract.ThinkingConfig),
+    }[name]
+    assert exposed is declared

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import fields
+from dataclasses import asdict, fields
 from typing import Any
 
 import pytest
@@ -43,7 +43,7 @@ def test_an_agent_pin_is_the_resolved_value(setting: str, *, model_catalog: Mode
         resolve_setting(
             setting,
             model=_MODEL,
-            explicit=getattr(overrides, setting, None),
+            explicit=asdict(overrides)[setting],
             models=model_catalog.models,
         )
         == _PINS[setting]
@@ -64,7 +64,7 @@ def test_without_a_pin_the_resolution_is_the_cluster_layering(
         resolve_setting(
             setting,
             model=_MODEL,
-            explicit=getattr(unpinned, setting, None),
+            explicit=asdict(unpinned)[setting],
             models=model_catalog.models,
         )
         == expected
@@ -73,7 +73,7 @@ def test_without_a_pin_the_resolution_is_the_cluster_layering(
         resolve_setting(
             setting,
             model=_MODEL,
-            explicit=getattr(ModelOverrides.from_pins({}), setting, None),
+            explicit=asdict(ModelOverrides.from_pins({}))[setting],
             models=model_catalog.models,
         )
         == expected
@@ -96,7 +96,7 @@ def test_a_pin_of_another_setting_leaves_this_one_alone(
         resolve_setting(
             setting,
             model=_MODEL,
-            explicit=getattr(overrides, setting, None),
+            explicit=asdict(overrides)[setting],
             models=model_catalog.models,
         )
         == expected

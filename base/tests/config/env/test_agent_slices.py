@@ -4,48 +4,58 @@
 
 from __future__ import annotations
 
-from dataclasses import fields
+from dataclasses import asdict, fields
 from typing import Any, cast
 
 import pytest
 
-from base.config import ConfigBoot, config_registry, settings
+from base.config import ConfigBoot, config_registry, get_field, settings
 from base.config.agent_pins import resolve_agent_config_pins
+from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentBrain, AgentSlices, ModelOverrides, agent_setting
-from base.host.env.config_lite_table import FIELD_DOMAINS
 
 # meiva:note
 # The agent's pins and the plugin-config view ride the dataclass beside the slices.
 _NOT_SLICES = {"pins", "plugin_pins", "_plugin_view", "_default_reader"}
 
 
-def _default_reader(domain: str, name: str) -> Any:
-    return getattr(getattr(settings, domain), name)
+def _slice_values(slices: AgentSlices) -> dict[str, object]:
+    groups = {
+        "brain": slices.brain,
+        "prompt": slices.prompt,
+        "memory": slices.memory,
+        "skill_recall": slices.skill_recall,
+        "history_dump": slices.history_dump,
+        "sdk_reminders": slices.sdk_reminders,
+        "llm_policy": slices.llm_policy,
+        "overrides": slices.overrides,
+        "sandbox": slices.sandbox,
+        "kernel": slices.kernel,
+        "harness_cli": slices.harness_cli,
+    }
+    assert set(groups) == {group.name for group in fields(slices)} - _NOT_SLICES
+    return {name: value for group in groups.values() for name, value in asdict(group).items()}
 
 
 def _slice_fields() -> list[str]:
-    resolved = AgentSlices.resolve(default_reader=_default_reader)
-    groups = [g for g in fields(resolved) if g.name not in _NOT_SLICES]
-    return [f.name for group in groups for f in fields(getattr(resolved, group.name))]
+    return list(_slice_values(AgentSlices.resolve(default_reader=defaults())))
 
 
 def _read_slice(slices: AgentSlices, name: str) -> Any:
-    for group in (g for g in fields(slices) if g.name not in _NOT_SLICES):
-        values = getattr(slices, group.name)
-        if name in {f.name for f in fields(values)}:
-            return getattr(values, name)
-    raise AssertionError(name)
+    values = _slice_values(slices)
+    assert name in values, name
+    return values[name]
 
 
 def _expected(name: str, pins: dict[str, Any]) -> Any:
     # meiva:note
     # What the agent holding `pins` reads for `name`: its pin, else the live default.
-    value = pins[name] if name in pins else getattr(getattr(settings, FIELD_DOMAINS[name]), name)
+    value = pins[name] if name in pins else get_field(name)
     return tuple(cast("list[Any]", value)) if isinstance(value, list) else value
 
 
 def _pinned_value(name: str) -> Any:
-    current = getattr(getattr(settings, FIELD_DOMAINS[name]), name)
+    current = get_field(name)
     if isinstance(current, bool):
         return not current
     if isinstance(current, int):
@@ -65,7 +75,7 @@ def test_every_slice_field_is_a_per_agent_setting() -> None:
 
 
 def test_unpinned_fields_read_the_live_cluster_defaults() -> None:
-    slices = AgentSlices.resolve(default_reader=_default_reader)
+    slices = AgentSlices.resolve(default_reader=defaults())
     for name in _slice_fields():
         assert _read_slice(slices, name) == _expected(name, {}), name
 
@@ -73,8 +83,8 @@ def test_unpinned_fields_read_the_live_cluster_defaults() -> None:
 def test_explicit_brain_uses_its_owner_without_changing_other_defaults() -> None:
     first = AgentBrain("first-owner-model")
     second = AgentBrain("second-owner-model")
-    first_slices = AgentSlices.resolve(brain=first, default_reader=_default_reader)
-    second_slices = AgentSlices.resolve(brain=second, default_reader=_default_reader)
+    first_slices = AgentSlices.resolve(brain=first, default_reader=defaults())
+    second_slices = AgentSlices.resolve(brain=second, default_reader=defaults())
     assert first_slices.brain is first
     assert second_slices.brain is second
     for name in _slice_fields():
@@ -85,7 +95,7 @@ def test_explicit_brain_uses_its_owner_without_changing_other_defaults() -> None
 
 def test_every_pinned_field_reads_its_pin() -> None:
     pins = {name: _pinned_value(name) for name in _slice_fields()}
-    slices = AgentSlices.resolve(pins, default_reader=_default_reader)
+    slices = AgentSlices.resolve(pins, default_reader=defaults())
     for name in _slice_fields():
         assert _read_slice(slices, name) == _expected(name, pins), name
 
@@ -94,7 +104,7 @@ def test_every_pinned_field_reads_its_pin() -> None:
 def test_a_partial_pin_map_pins_some_fields_and_leaves_the_rest_live(parity: int) -> None:
     names = _slice_fields()
     pins = {name: _pinned_value(name) for i, name in enumerate(names) if i % 2 == parity}
-    slices = AgentSlices.resolve(pins, default_reader=_default_reader)
+    slices = AgentSlices.resolve(pins, default_reader=defaults())
     for name in names:
         assert _read_slice(slices, name) == _expected(name, pins), name
 
@@ -104,7 +114,7 @@ def test_the_overlay_wins_over_the_birth_config() -> None:
         config_overlay={"llm_model": "overlay-model"},
         birth_config={"llm_model": "birth-model", "memory_inherit_depth": 4},
     )
-    slices = AgentSlices.resolve(pins, default_reader=_default_reader)
+    slices = AgentSlices.resolve(pins, default_reader=defaults())
     assert slices.brain.llm_model == "overlay-model"
     assert slices.memory.memory_inherit_depth == 4
 
@@ -116,7 +126,7 @@ def test_a_live_default_edit_reaches_the_next_resolution() -> None:
     def read_owner(domain: str, name: str) -> Any:
         if domain == "agent" and name == "history_dump_keep":
             return owner.view.agent.history_dump_keep
-        return getattr(getattr(settings, domain), name)
+        return defaults()(domain, name)
 
     before = AgentSlices.resolve(default_reader=read_owner)
     owner.set_field("history_dump_keep", before.history_dump.history_dump_keep + 3)
@@ -126,19 +136,15 @@ def test_a_live_default_edit_reaches_the_next_resolution() -> None:
 
 
 def test_list_settings_are_frozen_into_tuples() -> None:
-    slices = AgentSlices.resolve(
-        {"sdk_disable": ["meiva.x", "meiva.y"]}, default_reader=_default_reader
-    )
+    slices = AgentSlices.resolve({"sdk_disable": ["meiva.x", "meiva.y"]}, default_reader=defaults())
     assert slices.prompt.sdk_disable == ("meiva.x", "meiva.y")
 
 
 def test_read_serves_a_setting_no_slice_names_from_the_pin_else_the_live_default() -> None:
-    assert AgentSlices.resolve(default_reader=_default_reader).read(
+    assert AgentSlices.resolve(default_reader=defaults()).read(
         "sandbox", "exec_node_timeout_seconds"
     ) == (settings.sandbox.exec_node_timeout_seconds)
-    pinned = AgentSlices.resolve(
-        {"exec_node_timeout_seconds": 123.5}, default_reader=_default_reader
-    )
+    pinned = AgentSlices.resolve({"exec_node_timeout_seconds": 123.5}, default_reader=defaults())
     assert pinned.read("sandbox", "exec_node_timeout_seconds") == 123.5
 
 
@@ -173,10 +179,10 @@ def test_two_owner_defaults_keep_resolved_slices_frozen_and_unsliced_reads_live(
     second.set_field("exec_node_timeout_seconds", 602.0)
 
     def one(domain: str, field: str) -> Any:
-        return getattr(getattr(first.view, domain), field)
+        return first.get_field(field)
 
     def two(domain: str, field: str) -> Any:
-        return getattr(getattr(second.view, domain), field)
+        return second.get_field(field)
 
     a = AgentSlices.resolve(default_reader=one)
     b = AgentSlices.resolve(default_reader=two)

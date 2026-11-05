@@ -69,8 +69,20 @@ def test_lifecycle_result_models_reuse_operation_enums(model_name: str, enum_nam
     from base.api_contracts import agent_contract
     from ops import rpc_schemas
 
-    model = getattr(rpc_schemas, model_name)
-    enum = getattr(agent_contract, enum_name)
+    model, enum = {
+        ("RestartAgentResponse", "RestartResult"): (
+            rpc_schemas.RestartAgentResponse,
+            agent_contract.RestartResult,
+        ),
+        ("ResurrectAgentResponse", "ResurrectResult"): (
+            rpc_schemas.ResurrectAgentResponse,
+            agent_contract.ResurrectResult,
+        ),
+        ("TerminateAgentResponse", "TerminateResult"): (
+            rpc_schemas.TerminateAgentResponse,
+            agent_contract.TerminateResult,
+        ),
+    }[(model_name, enum_name)]
     for result in enum:
         response = model.model_validate({"status": result.value})
         assert response.status is result

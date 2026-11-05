@@ -24,11 +24,11 @@ def test_the_slice_carries_the_value_each_field_holds(tmp_path: Path) -> None:
 
     config = daemon.events_maintenance_config(owner, mirror_dir=tmp_path)
 
-    for field in dataclasses.fields(config):
-        if field.name == "mirror_dir":
+    for name, value in dataclasses.asdict(config).items():
+        if name == "mirror_dir":
             continue
-        flat: Any = owner.get_field(field.name)
-        assert getattr(config, field.name) == flat, field.name
+        flat: Any = owner.get_field(name)
+        assert value == flat, name
     assert config.events_resolution_burst_threshold == 17
     assert config.timezone == "Asia/Shanghai"
     assert config.mirror_dir == tmp_path

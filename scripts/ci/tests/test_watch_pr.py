@@ -211,7 +211,9 @@ def test_persistent_no_checks_is_reported_after_bounded_retries(
 def test_settled_verdict_wakes_on_the_first_poll(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, member: str
 ) -> None:
-    wakes, polled, _ = _run_watcher(monkeypatch, tmp_path, [getattr(CIStatus, member)])
+    wakes, polled, _ = _run_watcher(
+        monkeypatch, tmp_path, [{"FAILED": CIStatus.FAILED, "ERROR": CIStatus.ERROR}[member]]
+    )
 
     assert len(polled) == 1
     assert len(wakes) == 1

@@ -539,8 +539,7 @@ def test_sdk_task_timestamps_are_bare_cluster_zone(
     task_registry.log(task.id, "probe log line 1", operation_key=str(uuid4()))
     got = task_registry.get(task.id)
 
-    for field in ("created_at", "updated_at"):
-        value = getattr(got, field)
+    for field, value in (("created_at", got.created_at), ("updated_at", got.updated_at)):
         assert isinstance(value, str), f"{field} must be a rendered string"
         # Bare cluster-zone: bracket format, no suffix of any kind.
         assert re.match(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]$", value), (

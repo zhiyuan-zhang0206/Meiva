@@ -83,18 +83,18 @@ _VERDICT_STAGES = ("snapshot", "compare")  # a fault of either leaves no verdict
 NOTE_KINDS = ("sys.path",)
 
 SIGNALS = tuple(
-    getattr(signal, name)
-    for name in (
-        "SIGINT",
-        "SIGTERM",
-        "SIGHUP",
-        "SIGALRM",
-        "SIGUSR1",
-        "SIGUSR2",
-        "SIGPIPE",
-        "SIGCHLD",
+    value
+    for value in (
+        getattr(signal, "SIGINT", None),
+        getattr(signal, "SIGTERM", None),
+        getattr(signal, "SIGHUP", None),
+        getattr(signal, "SIGALRM", None),
+        getattr(signal, "SIGUSR1", None),
+        getattr(signal, "SIGUSR2", None),
+        getattr(signal, "SIGPIPE", None),
+        getattr(signal, "SIGCHLD", None),
     )
-    if hasattr(signal, name)
+    if value is not None
 )
 # meiva:note
 # `signal.getsignal` wraps this C function to turn 0 and 1 into enum members: three Python frames

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from dataclasses import fields as dataclass_fields
 
 import pytest
@@ -34,8 +35,8 @@ def test_tuning_field_names_are_real_config_fields() -> None:
 
 
 def test_default_tuning_is_fully_populated() -> None:
-    for f in dataclass_fields(ModelTuning):
-        assert getattr(DEFAULT_TUNING, f.name) is not None, f.name
+    for name, value in asdict(DEFAULT_TUNING).items():
+        assert value is not None, name
 
 
 def test_stream_total_timeout_resolves_shared_floor_and_explicit_override(

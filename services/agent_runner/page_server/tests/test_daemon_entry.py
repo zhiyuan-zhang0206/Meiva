@@ -8,7 +8,7 @@ from pathlib import Path
 
 import psycopg
 
-from base.config import ConfigBoot, field_domain
+from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
 from services.agent_runner.page_server import resources
 from services.agent_runner.tests.real_daemon import run_to_exit, running_daemon
@@ -80,8 +80,7 @@ def test_a_second_daemon_leaves_with_code_one_while_the_first_runs(
 def test_resources_follow_the_entry_owner_at_each_original_lookup(tmp_path: Path) -> None:
     config = snapshot_process_config()
     runtime = tmp_path / "owned-entry" / "run"
-    domain = field_domain("page_server_health_port")
-    fields = getattr(config.view, domain)
+    fields = config.view.services
     fields.page_server_health_port = 26101
 
     first = resources.endpoint(config, runtime=runtime)

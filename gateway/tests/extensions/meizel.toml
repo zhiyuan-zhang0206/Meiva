@@ -5,6 +5,3 @@ exports = ["test_mcp_endpoint.py"]
 "test_packages.py" = ["draft_support.py"]
 "test_schedule_draft.py" = ["draft_support.py"]
 "test_schedule_stall_guard.py" = ["resources"]
-
-[debt.restricted-python]
-"test_ui.py#dynamic attribute name" = { count = 1, owner = "#6082", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

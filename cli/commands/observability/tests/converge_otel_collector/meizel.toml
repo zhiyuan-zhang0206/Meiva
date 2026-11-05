@@ -4,6 +4,3 @@
 "test_converge_otel_collector.py" = ["collector_harness.py"]
 "test_otel_port_deviation.py" = ["collector_harness.py"]
 "test_session_filelog_receivers_are_disjoint_and_bound.py" = ["collector_harness.py"]
-
-[debt.restricted-python]
-"test_converge_otel_collector.py#dynamic attribute name" = { count = 1, owner = "#6082", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

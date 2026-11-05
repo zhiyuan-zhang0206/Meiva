@@ -30,7 +30,7 @@ def test_delivery_policy_is_configurable_and_bootstrapped(name: str, tmp_path: P
     assert extra["scope"] == "cluster-pinned"
     assert extra["writable"] is True
     assert not extra["restart_required"]
-    assert getattr(AgentRuntimeSettings.from_environment({alias: "17"}), name) == 17
+    assert AgentRuntimeSettings.from_environment({alias: "17"}).model_dump()[name] == 17
     (tmp_path / ".env").write_text(
         f"{alias}=17\nMEIVA_DB_URL=postgresql://meiva@localhost:5433/meiva\n"
         "MEIVA_RUNNER_DB_PASSWORD=test-only\n"

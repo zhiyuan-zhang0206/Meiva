@@ -376,12 +376,11 @@ def test_page_apis_reject_invalid_ttl(
             machine=machine_identity,
         )
     )
-    call = getattr(meiva.ui, api)
-    args = (str(tmp_path), "page", 13584)
-    if api == "show":
-        args = ("page", 13584)
     with pytest.raises(ValueError, match="ttl"):
-        call(*args, ttl=ttl)
+        if api == "show":
+            meiva.ui.show("page", 13584, ttl=ttl)
+        else:
+            meiva.ui.serve(str(tmp_path), "page", 13584, ttl=ttl)
 
 
 class TestClose:

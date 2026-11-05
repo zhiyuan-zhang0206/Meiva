@@ -8,6 +8,3 @@
 "test_resurrection_fences.py" = ["resurrection_setup.py"]
 "test_termination_message.py" = ["_notice_on_exit_child.py", "loopback", "termination_faults.py"]
 "test_termination_recovery_wake.py" = ["termination_faults.py"]
-
-[debt.restricted-python]
-"test_vocabulary_contracts.py#dynamic attribute name" = { count = 2, owner = "#6082", until = "waits for each test to name the attributes it checks: the sites walk a parametrised or fixed list of names the test holds, or the surface under test" }

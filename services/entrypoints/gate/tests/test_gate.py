@@ -677,7 +677,8 @@ def test_pages_ship_self_contained(servers: Servers, page: str) -> None:
     unsubstituted — would render bare exactly when the app is down. Both the
     inlining and the absence of any outbound reference are load-bearing.
     """
-    body = getattr(servers["gate_server"].gate, page)
+    gate = servers["gate_server"].gate
+    body = {"login_page": gate.login_page, "down_page": gate.down_page}[page]
     assert "/*__THEME_" not in body, "a theme marker survived load"
     assert "--background:" in body, "design tokens not inlined"
     assert "prefers-color-scheme" in body, "theme bootstrap not inlined"

@@ -208,4 +208,15 @@ def test_numeric_options_accept_runtime_boundaries(
 ) -> None:
     for value in values:
         parsed = _args(*command, option, value, command_runtime=command_runtime)
-        assert getattr(parsed, option.removeprefix("--")) == float(value)
+        match option:
+            case "--ttl":
+                actual = parsed.ttl
+            case "--limit":
+                actual = parsed.limit
+            case "--wait":
+                actual = parsed.wait
+            case "--debounce":
+                actual = parsed.debounce
+            case _:
+                raise AssertionError(f"unlisted numeric option: {option}")
+        assert actual == float(value)
