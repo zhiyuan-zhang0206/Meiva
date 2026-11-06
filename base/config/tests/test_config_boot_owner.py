@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -32,6 +33,12 @@ def _isolated_owner_environment(tmp_path: Path) -> Iterator[None]:
     finally:
         os.environ.clear()
         os.environ.update(saved)
+        # meiva:note
+        # The environment is only half of a timezone: `ConfigBoot.prepare()` sets `TZ` and calls
+        # `time.tzset()`, so putting the variable back leaves the C library in the zone the test
+        # prepared, and every later test in the worker reads `time.timezone`/`time.tzname` from it
+        # (2026-11-06: a UTC assertion saw +9 under wide impact selection).
+        time.tzset()
 
 
 def test_constructor_and_skip_boot_do_not_deliver_environment() -> None:
