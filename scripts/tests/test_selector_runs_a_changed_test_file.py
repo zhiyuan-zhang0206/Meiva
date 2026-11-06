@@ -9,10 +9,17 @@ from scripts.ci import test_selector
 
 
 # meiva:note
-# #8578 shipped a first version whose own test never ran: the file was collectable, but the run
-# selected for that pull request did not include it, so it entered main unexecuted. The rule this
-# pins is narrow: a change to a test file must make that file run — either the whole suite or a
-# selection that contains it.
+# What this pins is narrow and stands on its own: a change to a test file must make that file run —
+# the whole suite, or a selection that contains it.
+#
+# The incident that prompted it was read wrong at first, and the correction is the useful part.
+# #8578's first version had its own test selected, its lane included it, and pytest had started;
+# the job was then superseded by the next push and cancelled, so the run left no verdict at all.
+# A cancelled job and a silently dropped file look identical from outside — no JUnit, truncated
+# log, the file still listed in the selection — so read `gh run view --json jobs` for `cancelled`
+# before concluding a selection filtered it out. Selection reads the pull request's cumulative
+# diff (`git merge-base BASE HEAD...HEAD`), so a superseded run re-selects the same files rather
+# than falling back to the last push's increment.
 def _repo(root: Path) -> Path:
     (root / "pyproject.toml").write_text(
         '[tool.pytest.ini_options]\ntestpaths = ["tests", "base/**/tests"]\n', encoding="utf-8"
