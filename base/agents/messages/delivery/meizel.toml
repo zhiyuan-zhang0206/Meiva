@@ -1,6 +1,8 @@
-purity = "strict-to-be"
-exports = ["retry.py"]
+exports = ["retry.py", "retry_io.py"]
 
-[debt.impure-call]
-"retry.py#import psycopg" = { count = 1, owner = "#7240", until = "waits for the database error types as a value: retryable_database_error() has five callers across meiva, cli and agent, and three of them never import psycopg — handing the two types down would give those callers a database dependency they do not have" }
-"retry.py#import psycopg_pool" = { count = 1, owner = "#7240", until = "waits for the pool timeout type with the database errors above: PoolTimeout arrives from psycopg_pool, which the same five callers would have to name if the type were a parameter" }
+[uses]
+"retry_io.py" = ["retry.py"]
+
+[purity]
+"." = "strict"
+"retry_io.py" = { mode = "none", why = "the database-driver adapter behind the retry policy: it turns the exception a caller already holds into the facts `retry.transient_database_failure` reads, so what makes a failure connection availability is decided in retry.py and a caller that needs only the policy never loads psycopg" }

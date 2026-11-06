@@ -10,7 +10,7 @@ from langchain_core.messages import HumanMessage
 
 from agent.messages import NoteTag, system_note_message
 from base.agents.context import MeivaContext
-from base.agents.messages.delivery.retry import retryable_database_error
+from base.agents.messages.delivery.retry_io import retryable_database_error
 from base.agents.messages.reply_intent import delivery_disabled_entries
 from base.agents.to_user import ToUserLimits, read_document, to_user_limits_from_agent
 from base.api_contracts.agent_contract import Harness

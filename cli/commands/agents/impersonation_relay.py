@@ -41,7 +41,7 @@ from base.agents.impersonation.history import resolve
 from base.agents.impersonation.host_transport import AntigravityServer
 from base.agents.impersonation.status import OPEN, ImpersonationStatus
 from base.agents.impersonation.terminal_notices import notice_text
-from base.agents.messages.delivery.retry import retryable_database_error
+from base.agents.messages.delivery.retry_io import retryable_database_error
 from base.clock import Clock, Timers
 from base.cluster.machine import MachineIdentityReader
 from base.db import Database
