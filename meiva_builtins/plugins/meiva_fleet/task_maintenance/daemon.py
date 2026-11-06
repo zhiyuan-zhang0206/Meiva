@@ -135,7 +135,7 @@ _REMINDER_SQL = """
           SELECT 1 FROM inbound_messages m
           WHERE m.agent_id = t.owner
             AND m.source = 'system'
-            AND m.content LIKE 'Task check-in%%'
+            AND m.payload->>'note_kind' = 'task_check_in'
             AND m.created_at > now() - make_interval(secs => CASE t.priority
                     WHEN 'P0' THEN %s::float8
                     WHEN 'P1' THEN %s::float8
@@ -192,8 +192,17 @@ class _HumanNotice:
 # meiva:note
 # A reminder is a task system notification (NoteTag 'task'), never peer chat (user
 # ruling 2026-08-27), and its payload forbids a wake from resurrecting the owner.
-def _task_note_payload() -> dict[str, object]:
-    return {"note_tag": "task", "task_notification": True, "delivery_resurrect": False}
+# meiva:note
+# The payload is the identity of a task notification, and `note_kind` is what the digest
+# window reads. The rendered text is not an identity: rewording a message would silently
+# stop the throttle and look exactly like "nothing is due today".
+def _task_note_payload(note_kind: str) -> dict[str, object]:
+    return {
+        "note_tag": "task",
+        "task_notification": True,
+        "delivery_resurrect": False,
+        "note_kind": note_kind,
+    }
 
 
 # meiva:note
@@ -284,7 +293,12 @@ def _accept_owner_digests(
     for owner, tasks in sorted(live.items()):
         content = _reminder_digest_message(tasks)
         inbound_id, _ = insert_inbound_message_in_transaction(
-            cur, owner, content, "system", kind="system_note", payload=_task_note_payload()
+            cur,
+            owner,
+            content,
+            "system",
+            kind="system_note",
+            payload=_task_note_payload("task_check_in"),
         )
         for task in tasks:
             advance_reminder_counters(cur, task.id)
@@ -297,7 +311,12 @@ def _accept_manager_digest(
 ) -> _Reroute:
     content = _rerouted_digest_message(by_owner)
     inbound_id, _ = insert_inbound_message_in_transaction(
-        cur, manager, content, "system", kind="system_note", payload=_task_note_payload()
+        cur,
+        manager,
+        content,
+        "system",
+        kind="system_note",
+        payload=_task_note_payload("task_reroute"),
     )
     for tasks in by_owner.values():
         for task in tasks:

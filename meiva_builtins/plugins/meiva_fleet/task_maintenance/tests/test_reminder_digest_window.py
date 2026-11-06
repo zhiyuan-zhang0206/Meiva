@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import psycopg
 import pytest
+from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base.config import settings
@@ -131,3 +132,58 @@ def test_zero_windows_deliver_each_sweep(
     assert run_reminders(pool, database, event_bus, 3600.0) == 1
     make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=3600, priority="P1")
     assert run_reminders(pool, database, event_bus, 3600.0) == 1
+
+
+# meiva:note
+# The window reads the payload, not the wording. A check-in whose text says something else
+# entirely still throttles, which is what keeps a rewording from silently restoring one
+# message per task; under a text-matching predicate this test fails.
+def test_window_follows_the_payload_not_the_wording(
+    pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+) -> None:
+    owner = make_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+            "VALUES (%s, %s, 'system_note', 'system', %s)",
+            (
+                owner,
+                "Completely different wording, no prefix",
+                Jsonb({"note_kind": "task_check_in"}),
+            ),
+        )
+    db_conn.commit()
+
+    make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=3600, priority="P1")
+
+    assert run_reminders(pool, database, event_bus, 3600.0, **WINDOWS) == 0
+
+
+# meiva:note
+# The opposite control: a message that reads like a check-in but carries a different
+# note_kind (a reroute) does not throttle the owner's own digest.
+def test_reroute_payload_does_not_throttle_the_owner(
+    pool: ConnectionPool,
+    db_conn: psycopg.Connection,
+    database: Database,
+    event_bus: EventBus,
+) -> None:
+    owner = make_agent(db_conn)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO inbound_messages (agent_id, content, kind, source, payload) "
+            "VALUES (%s, %s, 'system_note', 'system', %s)",
+            (
+                owner,
+                "Task check-in — 1 task(s) reached their reminder interval",
+                Jsonb({"note_kind": "task_reroute"}),
+            ),
+        )
+    db_conn.commit()
+
+    make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=3600, priority="P1")
+
+    assert run_reminders(pool, database, event_bus, 3600.0, **WINDOWS) == 1
