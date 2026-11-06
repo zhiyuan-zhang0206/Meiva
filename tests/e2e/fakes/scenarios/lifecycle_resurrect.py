@@ -4,13 +4,13 @@ import psycopg
 from langchain_core.messages import AIMessage
 
 from base.config import settings
-from tests.e2e.fakes.scripted_model import ScriptedFakeChatModel
+from tests.e2e.fakes.scripted_model import ScriptedFakeChatModel, user_facing, working_note
 
 _USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
 
 TERMINATE_SCRIPT: tuple[AIMessage, ...] = (
     AIMessage(
-        content="\u518d\u89c1,\u7b49\u4f1a\u590d\u6d3b\u6211\u3002",
+        content=working_note("\u518d\u89c1,\u7b49\u4f1a\u590d\u6d3b\u6211\u3002"),
         tool_calls=[
             {
                 "id": "call_terminate",
@@ -23,7 +23,9 @@ TERMINATE_SCRIPT: tuple[AIMessage, ...] = (
 )
 
 IDLE_SCRIPT: tuple[AIMessage, ...] = (
-    AIMessage(content="I processed the wake after resurrection.", usage_metadata=_USAGE),
+    AIMessage(
+        content=user_facing("I processed the wake after resurrection."), usage_metadata=_USAGE
+    ),
 )
 
 

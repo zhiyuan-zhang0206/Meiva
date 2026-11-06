@@ -30,6 +30,7 @@ from tests.e2e.fakes.scenario_recording import (
     RecordingModel,
     exec_call,
     model_inputs,
+    plain,
     reset_record,
     say,
     scratch_root,
@@ -211,7 +212,7 @@ def build_after_compact(model: str, *, agent_id: int | None) -> RecordingModel:
         script=(
             exec_call(1, first),
             say("ready."),
-            say("summary of the conversation so far."),
+            plain("summary of the conversation so far."),
             say("context compacted, continuing."),
             exec_call(2, _read(project() / "sub" / "bar.py")),
             say(FINAL),

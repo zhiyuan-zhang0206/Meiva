@@ -4,13 +4,13 @@ import psycopg
 from langchain_core.messages import AIMessage
 
 from base.config import settings
-from tests.e2e.fakes.scripted_model import ScriptedFakeChatModel
+from tests.e2e.fakes.scripted_model import ScriptedFakeChatModel, user_facing, working_note
 
 _USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
 
 RESTART_SCRIPT: tuple[AIMessage, ...] = (
     AIMessage(
-        content="\u91cd\u542f\u81ea\u5df1\u3002",
+        content=working_note("\u91cd\u542f\u81ea\u5df1\u3002"),
         tool_calls=[
             {
                 "id": "call_restart",
@@ -23,8 +23,8 @@ RESTART_SCRIPT: tuple[AIMessage, ...] = (
 )
 
 IDLE_SCRIPT: tuple[AIMessage, ...] = (
-    AIMessage(content="Follow-up processed by successor.", usage_metadata=_USAGE),
-    AIMessage(content="Follow-up processed by successor.", usage_metadata=_USAGE),
+    AIMessage(content=user_facing("Follow-up processed by successor."), usage_metadata=_USAGE),
+    AIMessage(content=user_facing("Follow-up processed by successor."), usage_metadata=_USAGE),
 )
 
 

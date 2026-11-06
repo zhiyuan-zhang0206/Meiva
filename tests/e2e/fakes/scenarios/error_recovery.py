@@ -4,7 +4,7 @@ from langchain_core.messages import AIMessage
 from pydantic import PrivateAttr
 
 from agent.graph.llm_errors import FatalProviderError
-from tests.e2e.fakes.scripted_model import ScriptedFakeChatModel
+from tests.e2e.fakes.scripted_model import ScriptedFakeChatModel, user_facing
 
 _USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
 
@@ -28,7 +28,9 @@ class ErrorThenRecoverFake(ScriptedFakeChatModel):
         return super()._next_message()
 
 
-RECOVERY_SCRIPT: tuple[AIMessage, ...] = (AIMessage(content=RECOVERY_REPLY, usage_metadata=_USAGE),)
+RECOVERY_SCRIPT: tuple[AIMessage, ...] = (
+    AIMessage(content=user_facing(RECOVERY_REPLY), usage_metadata=_USAGE),
+)
 
 
 def build(model: str, *, agent_id: int | None) -> ScriptedFakeChatModel:

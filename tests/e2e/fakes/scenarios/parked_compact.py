@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage
 
-from tests.e2e.fakes.scripted_model import ScriptedFakeChatModel
+from tests.e2e.fakes.scripted_model import ScriptedFakeChatModel, user_facing
 
 _USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
 
@@ -16,11 +16,13 @@ SUMMARY_TEXT = (
 POST_COMPACT_NARRATION = "\u4e0a\u4e0b\u6587\u5df2\u538b\u7f29\uff0c\u7ee7\u7eed\u3002"
 
 PARKED_COMPACT_SCRIPT: tuple[AIMessage, ...] = (
-    AIMessage(content=REPLY_1, usage_metadata=_USAGE),
-    AIMessage(content=REPLY_2, usage_metadata=_USAGE),
-    AIMessage(content=REPLY_3, usage_metadata=_USAGE),
+    AIMessage(content=user_facing(REPLY_1), usage_metadata=_USAGE),
+    AIMessage(content=user_facing(REPLY_2), usage_metadata=_USAGE),
+    AIMessage(content=user_facing(REPLY_3), usage_metadata=_USAGE),
+    # meiva:note
+    # The summary answers the compaction call, not a turn: it carries no visibility line.
     AIMessage(content=SUMMARY_TEXT, usage_metadata=_USAGE),
-    AIMessage(content=POST_COMPACT_NARRATION, usage_metadata=_USAGE),
+    AIMessage(content=user_facing(POST_COMPACT_NARRATION), usage_metadata=_USAGE),
 )
 
 

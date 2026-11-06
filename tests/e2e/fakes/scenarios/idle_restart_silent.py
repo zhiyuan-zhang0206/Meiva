@@ -7,7 +7,7 @@ import psycopg
 from langchain_core.messages import AIMessage
 
 from base.config import settings
-from tests.e2e.fakes.scripted_model import ScriptedFakeChatModel
+from tests.e2e.fakes.scripted_model import ScriptedFakeChatModel, user_facing, working_note
 
 _USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
 
@@ -15,7 +15,7 @@ CWD_WITNESS = str(Path(os.environ["MEIVA_HOME"]) / "e2e-idle-restart-cwd")
 
 PRE_RESTART_SCRIPT: tuple[AIMessage, ...] = (
     AIMessage(
-        content="\u8bbe\u7f6e\u5de5\u4f5c\u76ee\u5f55\u3002",
+        content=working_note("\u8bbe\u7f6e\u5de5\u4f5c\u76ee\u5f55\u3002"),
         tool_calls=[
             {
                 "id": "call_set_cwd",
@@ -31,7 +31,10 @@ PRE_RESTART_SCRIPT: tuple[AIMessage, ...] = (
         ],
         usage_metadata=_USAGE,
     ),
-    AIMessage(content="\u5de5\u4f5c\u76ee\u5f55\u5df2\u8bbe\u7f6e\u3002", usage_metadata=_USAGE),
+    AIMessage(
+        content=user_facing("\u5de5\u4f5c\u76ee\u5f55\u5df2\u8bbe\u7f6e\u3002"),
+        usage_metadata=_USAGE,
+    ),
 )
 
 POST_RESTART_SCRIPT: tuple[AIMessage, ...] = ()

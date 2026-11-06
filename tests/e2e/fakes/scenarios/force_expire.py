@@ -1,8 +1,5 @@
-from langchain_core.messages import AIMessage
+from tests.e2e.fakes.scenario_recording import RecordingModel, say
 
-from tests.e2e.fakes.scenario_recording import RecordingModel
-
-_USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
 FIRST_REPLY = "Ready for the external session."
 RESUMED_REPLY = "I resumed my work after the external session ended."
 
@@ -11,7 +8,7 @@ def build(model: str, *, agent_id: int | None) -> RecordingModel:
     return RecordingModel(
         agent_id=agent_id,
         script=(
-            AIMessage(content=FIRST_REPLY, usage_metadata=_USAGE),
-            AIMessage(content=RESUMED_REPLY, usage_metadata=_USAGE),
+            say(FIRST_REPLY),
+            say(RESUMED_REPLY),
         ),
     )
