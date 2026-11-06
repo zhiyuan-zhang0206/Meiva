@@ -57,7 +57,10 @@ The backend reads its machine eligibility only when enabled export is requested;
 no global machine identity or exporter is discovered. Its eligibility verdict is
 frozen within that backend, so independent attachment owners cannot share it. Controlled host/exec logging binds
 this actual writer through `init_telemetry(pipeline=..., machine_reader=...)`;
-All process entries supply the concrete writer; emission before initialization reports a missing owner without constructing a database or worker. SDK ClientSet roots retain this
+All process entries supply the concrete writer. Emission in a process that binds no pipeline
+and was given no producer is dropped and reported once per process
+(`emission skipped: no producer`), rather than failing the write it observes, and without
+constructing a database or worker. SDK ClientSet roots retain this
 constructor without invoking it until a selected event enqueues. Quiet sync and
 close never build it. Finite close retains an unfinished or failed writer for
 later observation, and an original worker failure propagates after other client
