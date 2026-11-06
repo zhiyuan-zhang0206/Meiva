@@ -42,10 +42,9 @@ SIGNALS: dict[str, Signal] = {
         "schedule_process_lost", "meiva-ops", "0m", "warning"
     ),
     # meiva:note
-    # `meiva-ops-plugin-collector-silent` is not here: it no longer reads a telemetry event. The
-    # interval collectors write a `plugin_stats` row, and the rule judges the age of that row
-    # through the Postgres datasource; its shape is pinned by
-    # `test_the_collector_staleness_rule_reads_the_row_the_collector_writes` below (2026-11-06).
+    # The interval collectors have no rule: `plugin_collector_cycle` cannot leave a schedule's
+    # process, so a rule reading its absence described the emit path, not the collectors
+    # (2026-11-06, removed the same day; the reason sits where the rule was in rules.yml).
     "meiva-ops-schedule-stalled": Signal("schedule_stalled", "meiva-ops-slow", "0m", "warning"),
     "meiva-ops-schedule-convergence-abandoned": Signal(
         "schedule_convergence_abandoned", "meiva-ops-slow", "0m", "warning"
@@ -187,51 +186,6 @@ def test_the_notification_text_names_only_labels_the_query_keeps(uid: str) -> No
 def test_the_health_rules_label_their_check_for_routing_and_the_window_silence() -> None:
     for uid in ("meiva-ops-health-probe-warning", "meiva-ops-health-probe-error"):
         assert "sum by (attributes_check)" in _query(_rules()[uid][1])
-
-
-# meiva:note
-# The collectors' liveness is judged on the row they write, not on an event about them: on
-# 2026-11-06 the event route turned out to be dead in every schedule process (no telemetry
-# pipeline is bound there, and `emit` returns silently), so "no cycle event" reported a broken
-# emit path while all four collectors were writing healthily. Every assertion here is one that
-# would have caught that: the datasource is the database, the query names the product table, the
-# expected set comes from `schedules` (absence must be reported), the join accepts the per-account
-# ids a collector writes, and the age is computed in SQL rather than against Grafana's clock.
-def test_the_collector_staleness_rule_reads_the_row_the_collector_writes() -> None:
-    group, rule = _rules()["meiva-ops-plugin-collector-silent"]
-    query = rule["data"][0]["model"]
-    sql = " ".join(str(query["rawSql"]).split())
-
-    assert group == "meiva-ops"
-    assert query["datasource"]["uid"] == "ops"
-    assert "plugin_stats" in sql
-    assert "FROM schedules" in sql and "enabled" in sql
-    assert "LIKE e.collector || '-%'" in sql
-    assert "now() - last_write" in sql
-    assert "999999999" in sql
-    # meiva:note
-    # An enabled schedule whose collector id cannot be read out of its script must count as
-    # infinitely stale, not vanish from the expected set: a rule that cannot name what it expects
-    # has stopped judging, and its silence would be indistinguishable from health.
-    assert "unreadable" in sql and "count(*) AS n" in sql
-    assert "THEN 999999999" in sql
-
-
-# meiva:note
-# The rule lands paused, and that is pinned: the monitoring role cannot read `plugin_stats` yet,
-# so an unpaused rule would alert on a permission error rather than on a stalled collector. When
-# the grant lands this assertion is what fails first, which is the reminder to unpause it. The
-# missing-data posture is part of the same decision: with a database source, no data and a failed
-# query both mean "cannot prove the collectors are alive".
-def test_the_collector_staleness_rule_is_paused_until_the_read_grant_lands() -> None:
-    rule = _rules()["meiva-ops-plugin-collector-silent"][1]
-
-    assert rule["isPaused"] is True
-    assert rule["noDataState"] == "Alerting"
-    assert rule["execErrState"] == "Alerting"
-    assert rule["labels"]["severity"] == "warning"
-    assert rule["for"] == "5m"
-    assert _threshold(rule) == 2100
 
 
 def test_the_probe_dead_man_fires_on_an_absent_heartbeat_and_routes_to_telegram() -> None:
