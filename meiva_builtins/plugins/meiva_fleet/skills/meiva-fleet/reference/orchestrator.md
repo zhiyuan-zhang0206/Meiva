@@ -140,7 +140,7 @@ in_progress ──→ done
 
 By convention only the owner drives their own task's status — peers coordinate, they do not enforce. If a task looks stalled, don't wait on a daemon: check the owner's liveness in the fleet view, and if it is gone just `meiva.tasks.update(id, owner=meiva.self.AGENT_ID)` to take it over.
 
-**Task vs. message.** `results` is how a worker reports *up* without a manager — what was done, where the output landed, the PR link — which the parent-task owner reads with `get`. Append with `log` (one timestamped line per note); `update(results=...)` replaces the field wholesale. Use a task for a durable, hand-off-able unit of work; use `send_message` for a transient ping ("your input is ready") and `meiva.ui.notify` for something the user must see. A task records *what to do and its result*; a message *pokes an agent to act*.
+**Task vs. message.** `results` is how a worker reports *up* without a manager — what was done, where the output landed, the PR link — which the parent-task owner reads with `get`. Append with `log` (one timestamped line per note); `update(results=...)` replaces the field wholesale. Use a task for a durable, hand-off-able unit of work; use `send_message` for a transient ping ("your input is ready") and `meiva.ui.ask` for a user decision and the configured publish/text protocol for results. A task records *what to do and its result*; a message *pokes an agent to act*.
 
 ## The Loop: Explore, Fork, Join
 

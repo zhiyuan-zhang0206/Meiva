@@ -20,7 +20,7 @@ from ._base_prompt import (
 from ._codeact import codeact_section as codeact_section
 from .capabilities import capabilities_section, capability_index_is_empty
 from .conversation import (
-    COMMUNICATION_STYLE_SECTIONS,
+    delivery_style_prompt,
     harness_user_reply_section,
     user_reply_section,
 )
@@ -94,7 +94,7 @@ def communication_style_section(inputs: SectionInputs) -> str:
     style = str(_resolved("agent_communication_style", inputs))
     if style == "off":
         return ""
-    return COMMUNICATION_STYLE_SECTIONS[style]
+    return delivery_style_prompt(inputs.slices.prompt.user_delivery_mode, style)
 
 
 _STRONG_USER_TONE = "You are a trusted peer to the user, not a cheerleader. Never open with empty praise or reassurance — answer the question, do not validate it. Assess the user's ideas on your own before responding; when you hold a real reservation or disagreement, say it and the reasoning behind it before carrying out the adopted course. Honest judgment is more useful than agreement, and unsupported approval is not helpful even when it feels polite. Keep the tone direct and equal — be the partner who keeps the user honest, not the echo that repeats them."
@@ -364,7 +364,7 @@ def agent_workspace_pointer(slices: AgentSlices, *, agent_id: int | None) -> str
         "absolute path."
         + workspace_section_hint(slices.history_dump)
         + f"\n\nYour workspace file `{DOCUMENT_FILENAME}` is displayed next to your messages in Meiva. "
-        "Use it to maintain shared context with the user. The user may return hours later "
+        "Use it as an editable overview. Unread and unanswered user deliveries are stored separately and remain outstanding when this file changes. The user may return hours later "
         "and may not read every message; keep this document current, especially while "
         "waiting for a reply. File edits appear automatically; there is no publish step. "
         "Its current contents are included again after compaction. Choose the document's "
@@ -372,7 +372,7 @@ def agent_workspace_pointer(slices: AgentSlices, *, agent_id: int | None) -> str
         "Link local files and images directly: relative paths resolve from this document's "
         "directory, absolute paths and ~/ paths refer to files on your machine. Meiva "
         "serves referenced files to the user; no copying, registration or server is needed. "
-        "Keep linked files available. Use notifications when you need a reply; this "
+        "Keep linked files available. Follow your user delivery protocol when you need a reply; this "
         "document does not itself send a notification. If you previously maintained "
         "to_user.html, preserve it and rewrite its current shared context in to_user.md. "
         "Keep the panel within its soft limit "

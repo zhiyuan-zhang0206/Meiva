@@ -1,5 +1,6 @@
 "use client";
 
+import { useUserMessages, withUserMessages, withQuestions } from "@/lib/context/use-user-messages";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -436,11 +437,14 @@ function HomeContent({
   const agentBusy = turnActive || activeAgent?.status === "running";
   const composerMode: "disabled" | "idle" | "busy" =
     activeId == null ? "disabled" : agentBusy ? "busy" : "idle";
+  const publications = useUserMessages(activeId);
+  const questions = useNotices();
+  const displayedItems = useMemo(() => withQuestions(withUserMessages(items, publications.data?.items ?? []), [...questions.awaiting, ...questions.resolved].filter((item) => item.agent_id === activeId)), [items, publications.data, questions.awaiting, questions.resolved, activeId]);
   const replySuggestion = useReplySuggestion({
     agentId: activeId,
     status: activeAgent?.status,
     busy: agentBusy,
-    items,
+    items: displayedItems,
     enabled: !userSettingsLoading && userSettings["behavior.replySuggestions"] === true,
   });
 
@@ -462,7 +466,7 @@ function HomeContent({
           )}
           <TimelineView
             key={activeId ?? "unselected"}
-            items={items}
+            items={displayedItems}
             compactBuffer={compactBuffer}
             threadKey={activeId != null ? String(activeId) : undefined}
             scrollMemoryKey={`${bfcacheId}:agent:${activeId ?? "unselected"}`}
@@ -518,7 +522,8 @@ function HomeContent({
               focusToken={store.composerFocusToken}
               agentId={activeId}
               agentTerminated={activeAgent?.status === "terminated"}
-              suggestions={replySuggestion}
+              suggestions={replySuggestion?.suggestions}
+              suggestionOfferId={replySuggestion?.offer_id}
             >
               <UploadButton
                 agentId={activeId}

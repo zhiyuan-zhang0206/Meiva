@@ -62,17 +62,18 @@ def test_get_field_stays_strict_on_excluded_domain() -> None:
         owner.get_field("exec_timeout_seconds")
 
 
-def test_gateway_profile_excludes_agent_domains() -> None:
+def test_gateway_profile_includes_delivery_and_excludes_execution_domains() -> None:
     from base import config
 
     s = config.Settings(profile="gateway")
-    for domain in ("sandbox", "agent", "web"):
+    for domain in ("sandbox", "web"):
         assert not s.has_domain(domain)
         with pytest.raises(AttributeError) as exc:
             getattr(s, domain)
         assert "gateway" in str(exc.value) and domain in str(exc.value)
         assert "has_domain" in str(exc.value)
     for domain in (
+        "agent",
         "lm",
         "data_plane",
         "services",
@@ -162,7 +163,8 @@ def test_settings_reads_env_profile_marker() -> None:
         }
     )
     s = boot.ensure_eager()
-    assert not s.has_domain("agent")
+    assert s.has_domain("agent")
+    assert not s.has_domain("sandbox") and not s.has_domain("web")
     s2 = config.Settings()
     assert s2.has_domain("agent") and s2.has_domain("sandbox") and s2.has_domain("web")
 
@@ -192,7 +194,7 @@ def test_bootstrap_and_panel_full_under_real_gateway_profile(tmp_path: Path) -> 
     baseline_values = authority.current_field_values()
     baseline_flat = authority.flat_dump(mode="json")
 
-    excluded_domains = ("agent", "sandbox", "web")
+    excluded_domains = ("sandbox", "web")
     excluded_bootstrap_aliases = {
         config.field_alias(n)
         for n in config.BOOTSTRAP_FIELDS

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
+from functools import partial
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
@@ -36,6 +38,7 @@ _log = logging.getLogger(__name__)
 class ReplySuggestionAppState(GatewayAppState):
     reply_suggestions: ReplySuggestionService
     reply_suggestion_policy: ReplySuggestionPolicy
+    reply_suggestion_recall: Callable[[Request, str], Awaitable[str]]
 
 
 @router.post(
@@ -49,6 +52,7 @@ async def post_reply_suggestion(
 ) -> ReplySuggestionResponse | JSONResponse:
 
     suggestion_state = state_as(request, ReplySuggestionAppState)
+
     catalog = request_catalog(request)
     keys = (
         await asyncio.to_thread(
@@ -68,6 +72,7 @@ async def post_reply_suggestion(
                 rendering=timeline_rendering(gateway_config(request), gateway_clock(request)),
                 catalog=catalog,
                 keys=keys,
+                recall=partial(suggestion_state.reply_suggestion_recall, request),
             ),
             request.is_disconnected,
         )

@@ -30,6 +30,7 @@ from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from psycopg_pool import AsyncConnectionPool
 
 from agent.startup.permission_notice import permission_notice
+from base.agents.to_user.delivery.ports import AskUser
 from base.host.boundary.untyped import object_mapping, object_of
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -405,17 +406,21 @@ async def consume_claimed_inbounds(
         )
 
 
-async def notify_desktop_permissions_at_startup(home: Path) -> None:
-    """Surface broken helper desktop permissions via meiva.ui.notify, once.
+# meiva:note
+# The caller supplies the Ask effect; the SDK owns operation identity.
+async def notify_desktop_permissions_at_startup(home: Path, *, ask: AskUser) -> None:
+    # meiva:note
+    # Surface broken helper desktop permissions via meiva.ui.ask, once.
+    #
+    # The converge preflight writes independent Screen Recording and
+    # Accessibility status files. Each is atomically claimed, so concurrent
+    # starters may independently lose either claim. Unavailable claimed statuses
+    # share one notice; unreadable and available statuses are stale cleanup. If
+    # notify fails, every claimed fault is restored for the next startup to retry.
+    #
+    # Must run after SDK init so meiva.ui.ask is registered.
+    #
 
-    The converge preflight writes independent Screen Recording and
-    Accessibility status files. Each is atomically claimed, so concurrent
-    starters may independently lose either claim. Unavailable claimed statuses
-    share one notice; unreadable and available statuses are stale cleanup. If
-    notify fails, every claimed fault is restored for the next startup to retry.
-
-    Must run after SDK init so meiva.ui.notify is registered.
-    """
     from base.host.converge.accessibility import AccessibilityStatus
     from base.host.converge.accessibility import (
         status_file_path as accessibility_status_file_path,
@@ -447,13 +452,10 @@ async def notify_desktop_permissions_at_startup(home: Path) -> None:
 
     notice = permission_notice([(status.headline, status.diagnostic) for _, _, status in claimed])
 
-    import meiva
-
     try:
-        meiva.ui.notify(  # type: ignore[attr-defined]
+        ask(
             title=notice.title,
             content=notice.content,
-            priority="P1",
         )
     except Exception:
         logger.opt(exception=True).warning(

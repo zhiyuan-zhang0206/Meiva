@@ -41,6 +41,7 @@ from gateway.agents.history import timeline as timeline_router
 from gateway.agents.history import understanding as agents_understanding_router
 from gateway.agents.notice_operations import notices as notices_router
 from gateway.agents.notice_operations import router as guarded_notices_router
+from gateway.agents.reply_suggestion import feedback as suggestion_feedback_router
 from gateway.agents.reply_suggestion import router as reply_suggestion_router
 from gateway.agents.reply_suggestion.configuration import reply_suggestion_policy
 from gateway.agents.reply_suggestion.service import ReplySuggestionService
@@ -48,6 +49,8 @@ from gateway.agents.task_assignment import router as task_assignments_router
 from gateway.agents.to_user import document as to_user_router
 from gateway.agents.transfer import router as agents_transfer_router
 from gateway.agents.transfer.bundle_store import TransferBundleStore
+from gateway.agents.user_delivery import asks as asks_router
+from gateway.agents.user_delivery import router as user_delivery_router
 from gateway.alerts import router as alerts_router
 from gateway.cluster import bootstrap as bootstrap_router
 from gateway.cluster import machine_pause as machine_pause_router
@@ -229,6 +232,7 @@ def _build_request_resources(
         llm_override=gateway.models.llm_override, transport=None
     )
     state.reply_suggestion_policy = reply_suggestion_policy(config)
+    state.reply_suggestion_recall = memory_router.recall_for_suggestion
     state.gateway_access = gateway_access_from_boot(config)
     state.memory_search_gate = memory_router.build_search_gate(
         config.view.services.memory_search_max_concurrency
@@ -511,6 +515,9 @@ def create_app(
         shell_router.router,
         timeline_router.router,
         reply_suggestion_router.router,
+        user_delivery_router.router,
+        asks_router.router,
+        suggestion_feedback_router.router,
         system_router.router,
         host_permissions_router.router,
         pages_router.router,

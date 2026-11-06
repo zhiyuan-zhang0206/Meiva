@@ -86,6 +86,7 @@ class TestRealRoster:
             "skills_to_expand_at_start",
             "system_prompt_extra",
             "agent_communication_style",
+            "user_delivery_mode",
             "sdk_disable",
             "eval_isolation",
             "eval_network_allowlist",

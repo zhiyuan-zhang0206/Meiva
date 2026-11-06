@@ -46,9 +46,9 @@ def unavailable_flag() -> None:
         validate_flag_key,
     )
 
-    flag = "agent.completion_notice_policy"
+    flag = "sandbox.exec_timeout_seconds"
     assert settings.profile == "gateway"
-    assert not settings.has_domain("agent")
+    assert not settings.has_domain("sandbox")
     assert validate_flag_key(flag) == flag
     with pytest.raises(FlagDomainUnavailable):
         read_declared_flag(flag, (flag,))

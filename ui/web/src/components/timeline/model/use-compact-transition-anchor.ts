@@ -172,11 +172,16 @@ export function useCompactTransitionAnchor(options: {
     if (!viewport) return;
     const rect = viewport.getBoundingClientRect();
     const oldHeadNotes = standingHeadNoteIds(change.items);
-    for (const node of viewport.querySelectorAll<HTMLElement>(
+    // meiva:note
+    // Prefer a row whose start the reader can see. Pinning the off-screen start
+    // of a clipped tall tail lets retired context between it and the next visible
+    // reply move that reply during canonical hydration. A lone tall row still anchors.
+    const visibleNodes = [...viewport.querySelectorAll<HTMLElement>(
       ".timeline-item[data-item-id][data-display-rank], [data-turn-expanded='false'][data-item-id][data-display-rank]",
-    )) {
-      const box = node.getBoundingClientRect();
-      if (box.bottom < rect.top || box.top > rect.bottom) continue;
+    )].map((node) => ({ node, box: node.getBoundingClientRect() }))
+      .filter(({ box }) => box.bottom >= rect.top && box.top <= rect.bottom)
+      .sort((left, right) => Number(left.box.top < rect.top) - Number(right.box.top < rect.top));
+    for (const { node, box } of visibleNodes) {
       const includeMembers = node.dataset.turnExpanded === "false";
       for (const candidate of parseMemberTriples(node, includeMembers)) {
         const parts = parseItemIdParts(candidate.id);

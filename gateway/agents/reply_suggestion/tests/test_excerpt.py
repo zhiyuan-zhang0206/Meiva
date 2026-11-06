@@ -4,7 +4,7 @@ import pytest
 
 from base.agents.history.timeline import TimelineItem
 from base.lm.catalog.decide.types import estimate_tokens
-from gateway.agents.reply_suggestion.excerpt import build_excerpt, is_human_source
+from gateway.agents.reply_suggestion.excerpt import build_excerpt, enrich_excerpt, is_human_source
 
 
 def item(
@@ -195,3 +195,13 @@ def test_a_budget_too_small_for_any_text_yields_nothing() -> None:
 def test_a_non_positive_budget_is_rejected() -> None:
     with pytest.raises(ValueError, match="max_tokens"):
         build_excerpt([item("agent_chat", "hello", 2)], 0)
+
+
+def test_rich_sources_keep_memory_and_feedback_within_budget() -> None:
+    text = enrich_excerpt(
+        "conversation " * 400, [("Context", "history " * 800)], "memory " * 200, 300
+    )
+    assert estimate_tokens(text) <= 300
+    for label in ("Conversation", "Context", "Memory"):
+        assert f"[{label}]" in text
+    assert "conversation" in text and "history" in text and "memory" in text

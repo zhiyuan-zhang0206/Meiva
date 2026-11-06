@@ -21,8 +21,15 @@ class NoticeOption(BaseModel):
     description: NonBlank | None = None
 
 
+def _omit_absent_note(value: object) -> bool:
+    return value is None
+
+
 class ChoiceQuestion(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    note_suggestion: NonBlank | None = Field(
+        default=None, max_length=2000, exclude_if=_omit_absent_note
+    )
     type: Literal[QuestionType.SINGLE_SELECT, QuestionType.MULTI_SELECT]
     options: Annotated[list[NoticeOption], Field(min_length=1, max_length=20)]
     allow_other: Annotated[
@@ -39,6 +46,9 @@ class ChoiceQuestion(BaseModel):
 
 class TextQuestion(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    note_suggestion: NonBlank | None = Field(
+        default=None, max_length=2000, exclude_if=_omit_absent_note
+    )
     type: Literal[QuestionType.TEXT]
 
 

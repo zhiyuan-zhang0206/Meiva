@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from base.api_contracts.user_delivery import UserDeliveryMode
+
 # meiva:note
 # Explicit user-reply header for background/non-human wakes. `USER_REPLY_PREFIX` is the canonical
 # opening taught in the system prompt and exported to the frontend via `dump_frontend_constants.py`;
@@ -61,8 +63,19 @@ def strip_user_reply_prefix(text: str) -> tuple[bool, str]:
 # `Details` rather than promoting an empty primary bubble, keeping `item_id` alignment intact.
 # meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
 def resolve_agent_reply(
-    text: str, *, non_human_wake: bool, explicit_visibility: bool = False
+    text: str,
+    *,
+    non_human_wake: bool,
+    explicit_visibility: bool = False,
+    delivery_mode: str | None = None,
 ) -> tuple[str, bool]:
+    if delivery_mode is not None:
+        mode = UserDeliveryMode(delivery_mode)
+        if mode is UserDeliveryMode.NAIVE:
+            return text, bool(text.strip())
+        if mode is UserDeliveryMode.SDK:
+            return text, False
+        return parse_reply_visibility(text) or (text, False)
     if explicit_visibility:
         return parse_reply_visibility(text) or (text, False)
     matched, body = strip_user_reply_prefix(text)
@@ -82,3 +95,32 @@ def normalize_last_message_text(text: str) -> str:
     if not matched:
         return text
     return body if body.strip() else ""
+
+
+SDK_DELIVERY_RULE = (
+    "Deliver user-facing information through meiva.ui.publish(content, "
+    "suggestions=[...]). Suggestions are optional candidates "
+    "for the independent composer service. Ask questions with meiva.ui.ask(title, "
+    "content, question={...}, note_suggestion=...). Every question "
+    "has a user-editable Note. Publishing or asking never ends execution: continue "
+    "independent work. Ordinary assistant text, including final summaries, is folded "
+    "into Details which the user can expand. Before a natural turn end, publish, ask, "
+    "or explicitly record no update with meiva.ui.publish(None). "
+    "Reading is not answering or authorizing. Questions persist until answered or closed."
+)
+
+
+def delivery_disabled_entries(mode: str) -> tuple[str, ...]:
+    return (
+        ("ui.notify", "ui.edit_notice", "ui.dismiss_notice")
+        if UserDeliveryMode(mode) is UserDeliveryMode.SDK
+        else ("ui.publish", "ui.publications")
+    )
+
+
+def non_human_delivery_reminder(mode: str) -> str:
+    return {
+        UserDeliveryMode.PREFIX: NON_HUMAN_WAKE_REMINDER,
+        UserDeliveryMode.SDK: SDK_DELIVERY_RULE,
+        UserDeliveryMode.NAIVE: "Non-human wake. Communicate only meaningful changes.",
+    }[UserDeliveryMode(mode)]

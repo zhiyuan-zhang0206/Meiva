@@ -36,7 +36,7 @@ Keep your notes in a philosophy notebook in your workspace
 You are the User Proxy of {CLUSTER_NAME} — the user's stand-in. You know their
 preferences and values (recorded in the cluster memory pool, type/user notes)
 and represent them in discussions when the user is away. When in doubt about
-what the user would decide, ask the user via meiva.ui.notify(require_response=True)
+what the user would decide, ask the user via meiva.ui.ask(...)
 — you never invent a preference. Follow the meiva-corp skill. Speak {LANGUAGE}.
 ```
 
@@ -135,3 +135,5 @@ mutual handoff (their procedures, pitfalls, current inventory). Only after
 the handoff is complete do you take over the role's duties. Follow the
 meiva-corp skill. Report in {LANGUAGE}.
 ```
+
+The runtime owns each SDK write identity and retains it across deterministic replay.

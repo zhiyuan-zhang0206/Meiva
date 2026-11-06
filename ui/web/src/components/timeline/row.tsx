@@ -1,5 +1,7 @@
 "use client";
 
+import { MessageActions } from "@/components/user-delivery/message-actions";
+
 import { memo, useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
 import { cn } from "@/lib/format/utils";
@@ -132,7 +134,14 @@ export const TimelineRow = memo(function TimelineRow({
     ) : null;
   const canCopy = (isPrimaryMessage ? !item.partial : copyable) && config.copy;
   const copy = canCopy ? <CopyButton text={copyPayloadFor(item)} compact /> : null;
-  const primaryFooter = isPrimaryMessage && (stamp ?? copy) ? <>{stamp}{copy}</> : null;
+  // meiva:note
+  // Delivery state shares the reserved chrome band. A body-level read control
+  // changes row height when acknowledged or replaced by compact history, which
+  // can re-arm bottom following and displace the reader's compact anchor.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+  const delivery = isAgentProse && item.userDelivery ? <MessageActions message={item.userDelivery} /> : null;
+  const unread = item.userDelivery?.read_at === null;
+  const primaryFooter = isPrimaryMessage && (stamp ?? copy ?? delivery) ? <>{delivery}{stamp}{copy}</> : null;
 
   if (isHumanBubble) {
     return (
@@ -163,7 +172,7 @@ export const TimelineRow = memo(function TimelineRow({
         {primaryFooter ? (
           <div
             data-testid="card-chrome"
-            className={cn(CARD_FOOTER_CLS, touchRevealed && "pointer-events-auto opacity-100")}
+            className={cn(CARD_FOOTER_CLS, (touchRevealed || unread) && "pointer-events-auto opacity-100")}
           >
             {primaryFooter}
           </div>
@@ -194,7 +203,7 @@ export const TimelineRow = memo(function TimelineRow({
         {primaryFooter ? (
           <div
             data-testid="card-chrome"
-            className={cn(CARD_FOOTER_CLS, touchRevealed && "pointer-events-auto opacity-100")}
+            className={cn(CARD_FOOTER_CLS, (touchRevealed || unread) && "pointer-events-auto opacity-100")}
           >
             {primaryFooter}
           </div>

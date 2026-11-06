@@ -58,7 +58,7 @@
 // import ../timeline (cycle).
 
 import { DISPLAY_TO_USER, HIDE_FROM_USER, USER_REPLY_HEADER } from "../contracts/constants-generated";
-import type { BackendTimelineItem, SystemEvent } from "../contracts/types";
+import type { BackendTimelineItem, ChatStartEvent, SystemEvent } from "../contracts/types";
 import { parseItemId, sortByItemId } from "./item-id";
 
 export { parseItemId, parseItemIdParts, sortByItemId, type ItemIdParts } from "./item-id";
@@ -92,8 +92,11 @@ function resolveStreamingChat(
   rawText: string,
   nonHumanWake: boolean,
   explicitVisibility: boolean,
+  mode?: "naive" | "prefix" | "sdk",
 ): { readonly payload: string; readonly user_facing: boolean } {
-  if (explicitVisibility) {
+  if (mode === "sdk") return { payload: rawText, user_facing: false };
+  if (mode === "naive") return { payload: rawText, user_facing: Boolean(rawText.trim()) };
+  if (mode === "prefix" || explicitVisibility) {
     const lineEnd = rawText.indexOf("\n");
     if (lineEnd >= 0) {
       const firstLine = rawText.slice(0, lineEnd);
@@ -170,7 +173,8 @@ function appendDeltaById(
       const raw = (prev.rawChatPayload ?? prev.payload) + delta;
       const nonHumanWake = Boolean(prev.nonHumanWake ?? chatEvent?.non_human_wake);
       const explicitVisibility = Boolean(prev.explicitVisibility ?? chatEvent?.explicit_visibility);
-      const resolved = resolveStreamingChat(raw, nonHumanWake, explicitVisibility);
+      const deliveryMode = prev.deliveryMode ?? chatEvent?.delivery_mode ?? undefined;
+      const resolved = resolveStreamingChat(raw, nonHumanWake, explicitVisibility, deliveryMode);
       const updated: BackendTimelineItem = {
         ...prev,
         payload: resolved.payload,
@@ -178,6 +182,8 @@ function appendDeltaById(
         rawChatPayload: raw,
         nonHumanWake,
         explicitVisibility,
+        deliveryMode,
+        source_message_id: prev.source_message_id ?? chatEvent?.source_message_id,
       };
       return [...items.slice(0, idx), updated, ...items.slice(idx + 1)];
     }
@@ -192,13 +198,15 @@ function appendDeltaById(
       ? (() => {
           const nonHumanWake = Boolean(chatEvent?.non_human_wake);
           const explicitVisibility = Boolean(chatEvent?.explicit_visibility);
-          const resolved = resolveStreamingChat(delta, nonHumanWake, explicitVisibility);
+          const deliveryMode = chatEvent?.delivery_mode ?? undefined;
+          const resolved = resolveStreamingChat(delta, nonHumanWake, explicitVisibility, deliveryMode);
           return {
             payload: resolved.payload,
             user_facing: resolved.user_facing,
             rawChatPayload: delta,
             nonHumanWake,
             explicitVisibility,
+            deliveryMode,
           };
         })()
       : null;
@@ -219,6 +227,8 @@ function appendDeltaById(
           rawChatPayload: chatState.rawChatPayload,
           nonHumanWake: chatState.nonHumanWake,
           explicitVisibility: chatState.explicitVisibility,
+          deliveryMode: chatState.deliveryMode,
+          source_message_id: chatEvent?.source_message_id,
         }
       : {}),
     // Start the live "Thinking for Xs" clock the moment the first reasoning
@@ -248,10 +258,10 @@ function createStartItem(
   itemId: string,
   kind: "agent_chat" | "agent_code" | "agent_reasoning",
   nowMs = 1,
-  nonHumanWake = false,
-  explicitVisibility = false,
+  visibility: Pick<ChatStartEvent, "non_human_wake" | "explicit_visibility" | "delivery_mode" | "source_message_id"> = { non_human_wake: false, explicit_visibility: false },
 ): BackendTimelineItem[] {
   if (items.some((it) => it.item_id === itemId)) return items;
+  const { non_human_wake: nonHumanWake, explicit_visibility: explicitVisibility, delivery_mode: deliveryMode } = visibility;
   return insertItemById(items, {
     item_id: itemId,
     kind,
@@ -262,8 +272,10 @@ function createStartItem(
     show_timestamp: true,
     ...(kind === "agent_chat"
       ? {
-          user_facing: !nonHumanWake && !explicitVisibility,
+          user_facing: deliveryMode === "naive" || (!deliveryMode && !nonHumanWake && !explicitVisibility),
           rawChatPayload: "",
+          deliveryMode: deliveryMode ?? undefined,
+          source_message_id: visibility.source_message_id,
           nonHumanWake,
           explicitVisibility,
         }
@@ -365,7 +377,7 @@ export function applySystemEvent(
       return freezeReasoningClocks(
         clearCodeClocks(
           createStartItem(
-            items, ev.item_id, "agent_chat", nowMs, ev.non_human_wake, ev.explicit_visibility,
+            items, ev.item_id, "agent_chat", nowMs, ev,
           ),
           nowMs,
         ),

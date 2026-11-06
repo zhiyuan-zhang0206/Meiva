@@ -23,6 +23,11 @@ from agent import state as _state
 from agent.graph._callbacks import RedisStreamHandler
 from agent.graph.claim.turn_stamp import persist_last_active
 from agent.graph.hooks.compact import auto_compact_for_llm
+from agent.graph.hooks.user_delivery import (
+    capture_reply,
+    delivery_end_reminder,
+    with_pending_deliveries,
+)
 from agent.graph.llm_errors import (
     FatalLLMStreamError,
     FatalProviderError,
@@ -40,6 +45,7 @@ from base.agents.context import MeivaContext, agent_id_from_config
 from base.agents.messages.kwargs import NoteTag, read_meiva_kwargs
 from base.agents.messages.reply_intent import REPLY_VISIBILITY_RULE
 from base.agents.observation.ended_with import BUDGET
+from base.clock.ids import new_uuid
 from base.events.live.projection import TokenUsage
 from base.events.live.publisher import AgentEventPublisher
 from base.host.boundary.json_values import is_object_dict
@@ -92,7 +98,9 @@ def _finalize_turn_observability(
 ) -> None:
     kw = read_meiva_kwargs(final_msg)
     kw["meiva_created_at"] = now.isoformat()
-    kw["meiva_explicit_visibility"] = True
+    kw["meiva_explicit_visibility"] = handler.delivery_mode == "prefix"
+    if handler.delivery_mode is not None:
+        kw["meiva_user_delivery_mode"] = handler.delivery_mode.value
     if handler.non_human_wake:
         kw["meiva_non_human_wake"] = True
     reasoning_ms_by_block = handler.reasoning_ms_by_block
@@ -351,18 +359,27 @@ async def _llm_node_impl(
         del compacted["goto"]
         return Command[LlmGoto](update=compacted, goto=goto)
 
+    message_id = str(new_uuid(ctx.require_rng()))
     handler = RedisStreamHandler(
         publisher,
         agent_id,
         msg_idx=len(state.messages),
         turn_progress=ctx.turn_progress,
         non_human_wake=state.non_human_wake,
-        explicit_visibility=True,
+        explicit_visibility=ctx.require_agent().prompt.user_delivery_mode == "prefix",
+        delivery_mode=ctx.require_agent().prompt.user_delivery_mode,
+        source_message_id=message_id,
     )
 
     chunks: list[AIMessageChunk] = []
 
-    messages = _messages_with_current_visibility_rule(state.messages)
+    messages = (
+        _messages_with_current_visibility_rule(state.messages)
+        if ctx.require_agent().prompt.user_delivery_mode == "prefix"
+        else list(state.messages)
+    )
+
+    messages = await with_pending_deliveries(ctx, agent_id, messages)
 
     cancelled_cmd = await race_stream_vs_cancel(
         ctx,
@@ -388,6 +405,7 @@ async def _llm_node_impl(
             goto=BEFORE_EXEC,
         )
     final_msg = assemble_final_message(chunks, catalog=ctx.require_catalog())
+    final_msg.id = message_id
 
     text = final_msg.text
     if text:
@@ -403,6 +421,8 @@ async def _llm_node_impl(
         now=ctx.require_clock().now(),
     )
 
+    await capture_reply(ctx, agent_id, final_msg)
+
     cut_update = await due_chunk_update(
         state.compact,
         list(state.messages),
@@ -414,6 +434,17 @@ async def _llm_node_impl(
     )
 
     if not final_msg.tool_calls:
+        note = await delivery_end_reminder(
+            ctx,
+            agent_id,
+            state.user_delivery_baseline,
+            correcting=_is_reply_correction(state.messages),
+        )
+        if note is not None:
+            return Command[LlmGoto](
+                update={"messages": [final_msg, note], "halted": False, **cut_update},
+                goto=BEFORE_LLM,
+            )
         if has_invalid_reply_visibility(final_msg):
             note = reply_visibility_note(ctx.require_clock().now())
             already_correcting = _is_reply_correction(state.messages)

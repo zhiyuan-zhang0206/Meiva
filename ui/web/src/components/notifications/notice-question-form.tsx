@@ -18,7 +18,7 @@ interface Draft {
 function answerFromDraft(question: NoticeQuestion, draft: Draft): NoticeAnswer | null {
   const comment = draft.comment.trim();
   if (question.type === "text") {
-    return draft.text.trim() ? { text: draft.text.trim() } : null;
+    return draft.text.trim() ? { text: draft.text.trim(), ...(comment ? { comment } : {}) } : null;
   }
   // meiva:note
   // Choosing nothing is allowed in both kinds: a comment alone is a whole answer
@@ -59,7 +59,7 @@ export function NoticeQuestionForm({
   const fieldId = useId();
   const textRef = useRef<HTMLTextAreaElement>(null);
   const [draft, setDraft] = useState<Draft>({
-    optionIds: [], text: "", comment: "",
+    optionIds: [], text: "", comment: question.note_suggestion ?? "",
   });
 
   useEffect(() => {
@@ -81,27 +81,6 @@ export function NoticeQuestionForm({
   }, [focusAnswer]);
 
   const inputClass = cn("min-h-9 resize-none py-2 font-mono text-[13px] leading-snug md:text-[13px] pointer-coarse:text-base md:pointer-coarse:text-base", FLEX_1);
-  if (question.type === "text") {
-    return (
-      <div className={cn("items-end gap-2", FLEX)}>
-        <AutoExpandTextarea
-          id={fieldId}
-          aria-label={t("openQuestion")}
-          ref={textRef}
-          rows={1}
-          focusVisible={false}
-          value={draft.text}
-          onChange={(e) => setDraft({ ...draft, text: e.target.value })}
-          onSend={send}
-          placeholder={t("openPlaceholder")}
-          disabled={pending}
-          className={inputClass}
-        />
-        {submitAction}
-      </div>
-    );
-  }
-
   const single = question.type === "single_select";
   const choose = (id: string, checked: boolean) => {
     setDraft({
@@ -115,7 +94,12 @@ export function NoticeQuestionForm({
 
   return (
     <div className="space-y-3">
-      <fieldset disabled={pending} className="disabled:opacity-60">
+      {question.type === "text" ? <AutoExpandTextarea
+        id={fieldId} aria-label={t("openQuestion")} ref={textRef} rows={1}
+        focusVisible={false} value={draft.text}
+        onChange={(e) => setDraft({ ...draft, text: e.target.value })}
+        onSend={send} placeholder={t("openPlaceholder")} disabled={pending} className={inputClass}
+      /> : <fieldset disabled={pending} className="disabled:opacity-60">
         <legend className="sr-only">{single ? t("singleSelect") : t("multiSelect")}</legend>
         {question.options.map((option, index) => {
           const selected = draft.optionIds.includes(option.id);
@@ -143,7 +127,7 @@ export function NoticeQuestionForm({
           );
         })}
 
-      </fieldset>
+      </fieldset>}
       <div className={cn("items-end gap-2", FLEX)}>
         <AutoExpandTextarea
           id={`${fieldId}-comment`}

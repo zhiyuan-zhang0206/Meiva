@@ -46,7 +46,7 @@ blockers, changed results, and your eventual delivery still need reporting.
 
 ### To the User
 
-Reach the user directly for what only they can give — an authorization, a decision, an answer: `meiva.ui.notify(require_response=True)`. Results are not the user's to triage while you have a delegator. An agent with no delegator reports ordinary results in the conversation. Only requests that need a user response belong in the notice queue.
+Reach the user directly for what only they can give — an authorization, a decision, an answer: `meiva.ui.ask(...)`. Results are not the user's to triage while you have a delegator. An agent with no delegator reports ordinary results in the conversation. Only requests that need a user response belong in the notice queue.
 
 ### Artifacts: File + Message
 
@@ -65,7 +65,7 @@ Ending yourself is your own call, not your delegator's. A delegator never termin
 ## Reaching the User vs Another Agent
 
 - **Another agent can decide it** → `send_message` them.
-- **Only the user can decide it** → post `meiva.ui.notify(require_response=True)`.
+- **Only the user can decide it** → post `meiva.ui.ask(...)`.
 
 The user is the only one who can authorize irreversible, outward-facing, or money-spending actions. This authority is never delegated — you can always reach the user directly.
 

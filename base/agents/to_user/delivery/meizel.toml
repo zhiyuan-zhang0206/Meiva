@@ -1,0 +1,4 @@
+exports = ["ports.py", "store.py"]
+
+[purity]
+"__init__.py" = "strict"

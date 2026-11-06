@@ -1,41 +1,10 @@
-"""meiva_fleet plugin — an agent's whole surface to a human supervising the fleet.
+"""Fleet labels and tasks. Human questions use the core meiva.ui.ask SDK.
 
-Everything an agent shows a human is registered here, and all of it presumes a
-human is watching, so disabling the plugin (declaring an unsupervised, fully
-autonomous deployment) strips the whole surface at once. Two groups:
-
-**Self-presentation** (`meiva.self.*`, pull — the human scans the monitoring view):
-
-1. **Label** `meiva.self.set_label(text)` — the agent's role / name shown next to
-   it, and stated in the agent's own agent-ID context note at each window
-   establishment. A label the agent sets itself sticks (it is not replaced
-   automatically afterwards).
-
-**Notices to the user's queue** (`meiva.ui.*`, push — the agent grabs triage):
-
-Notices land in an aggregated, asynchronous queue the user checks later — they
-are for when the user is not in a live conversation with the agent. In a live
-dialog the user reads your replies as you write them, so answer directly and
-do not post a notice.
-
-2. **Post** `meiva.ui.notify(title, content, blocking=..., priority=...)` — request one answer from the user.
-   Ordinary information belongs in chat. Priority is P0 through P3;
-   `blocking=True` means progress depends on the answer.
-3. **Edit** `meiva.ui.edit_notice(...)` — revise the notice you posted that the
-   user has not acted on yet (at most one is open, so no id is needed).
-4. **Dismiss** `meiva.ui.dismiss_notice()` — withdraw the open notice that is no
-   longer relevant, so the user does not spend time on a stale entry.
-
-Each call publishes an update so the view live-refreshes. The plugin also bundles
-the `meiva_fleet` skill (the orchestration discipline). Disabled -> members absent
-(`meiva.ui` falls back to pages-only), no prompt, no skill, zero overhead.
+Legacy notice functions remain internal compatibility adapters for existing callers.
+They are not registered in the agent SDK.
 """
 
-__description__: str = (
-    "Fleet supervision surface — the agent self-reports its role/label and posts "
-    "questions to the user's queue, all requiring a response, which it can edit "
-    "or dismiss; the monitoring view shows all of it live."
-)
+__description__: str = "Fleet role labels, task tracking and collaboration guidance."
 
 import uuid
 from datetime import datetime, timedelta
@@ -357,10 +326,5 @@ def contribute() -> PluginContributions:
     """What this plugin declares for the SDK surface."""
     return PluginContributions(
         sdk_namespaces=(SdkNamespace("tasks", task_registry, expand=True),),
-        sdk_members=(
-            SdkMember("ui", "notify", notify),
-            SdkMember("ui", "edit_notice", edit_notice),
-            SdkMember("ui", "dismiss_notice", dismiss_notice),
-            SdkMember("self", "set_label", set_label),
-        ),
+        sdk_members=(SdkMember("self", "set_label", set_label),),
     )

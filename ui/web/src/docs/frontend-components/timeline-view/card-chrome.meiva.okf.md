@@ -27,7 +27,14 @@ body-level one are the same decision (`PythonCode` gets `copy={false}`, the
 code-output envelope has none), and a body-level button is no longer a way to
 "keep" Copy on a kind the whitelist excludes. A still-streaming primary reply
 keeps its stamp (`justify-end`) but never Copy. A kind that offers neither Copy
-nor a stamp mounts no band at all, so there is never an empty strip under a block.
+nor a stamp or delivery state mounts no band at all, so there is never an empty strip under a block.
+
+Published messages place their unread dot and read action in this same reserved
+band. The dot has an accessible label and an invisible expanded hit area, and
+keeps the band visible until read. Reading and compact-buffer replacement do
+not add or remove body height: a shrinking body-level status control can re-arm
+bottom following and move a parked reader during compaction. Automatic read
+acknowledgment observes the delivery control at the message footer.
 
 For primary messages, the band **sits symmetrically in the 20px gap below the
 block, outside the message box**, so the time reads as a clean separator between
@@ -57,6 +64,7 @@ box, not a painted one.
 | --- | --- |
 | Pointer over the block (`group-hover/msgcard`) | visible, interactive |
 | Focus anywhere inside the block (`group-focus-within/msgcard`) | visible, interactive |
+| Unread publication | visible, interactive until read |
 | Neither | `opacity-0` and `pointer-events-none` — not painted, not clickable, and still reachable by keyboard (focusing Copy reveals it) |
 | Touched on a coarse pointer (`TimelineRow` holds the band up for 6 s) | visible, interactive; hidden again after the window |
 

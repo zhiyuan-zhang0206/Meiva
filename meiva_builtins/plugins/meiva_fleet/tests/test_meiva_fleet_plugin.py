@@ -173,12 +173,12 @@ def test_peer_communication_survives_human_guidance_toggle(
     assert "without courtesy ACKs" in prompt
 
 
-def test_prompt_section_dismiss_notice_after_dialog_reply(load_activity_plugin: None):
+def test_prompt_section_preserves_questions_until_answered_or_closed(load_activity_plugin: None):
     from meiva_builtins.plugins.meiva_fleet.agent_runtime import fleet_self_section
 
     section = fleet_self_section(_fleet_slices(), catalog=build_model_catalog(home=meiva_home()))
-    assert "Dismiss a pending notice" in section
-    assert "when the dialog resolves it" in section
+    assert "Questions persist until the user answers or explicitly closes them" in section
+    assert "including an editable Note" in section
     assert "dismiss_notice" not in section
 
 
@@ -186,11 +186,10 @@ def test_prompt_section_queue_delivery_mandate(load_activity_plugin: None):
     from meiva_builtins.plugins.meiva_fleet.agent_runtime import fleet_self_section
 
     section = fleet_self_section(_fleet_slices(), catalog=build_model_catalog(home=meiva_home()))
-    assert "queue necessary decisions and results" in section
-    assert "even while they are offline" in section
-    assert "offline" in section
+    assert "Deliver information through the configured protocol" in section
+    assert "Ask for decisions with `meiva.ui.ask`" in section
     assert "numbered notice" not in section
-    assert "Posting is delivery" in section
+    assert "User-only decisions reach the user directly" in section
     assert "reduce-context-switch" not in section
 
 
@@ -229,8 +228,9 @@ def test_prompt_section_reduce_context_switch_content(
 
     assert "Queue, never push" in section
     assert "irreversible risk in motion" in section
-    assert "lack of acknowledgment does not justify escalation" in section
-    assert "One notice per agent, updated in place" in section
+    assert "lack of an answer does not justify escalation" in section
+    assert "Preserve each pending question" in section
+    assert "One notice per agent, updated in place" not in section
     assert "reporting cadence, aggregation" in section
     assert "Milestones, not motion" not in section
     assert "reduce-context-switch-for-human" in section
@@ -360,20 +360,19 @@ def test_set_label_hands_the_agents_own_label_to_the_gateway(
     ]
 
 
-def test_plugin_registers_ui_notice_members(load_activity_plugin: None):
-    for name, member in (
-        ("notify", meiva.ui.notify),
-        ("edit_notice", meiva.ui.edit_notice),
-        ("dismiss_notice", meiva.ui.dismiss_notice),
-    ):
-        assert callable(member)
-        assert name in meiva.ui.__all_for_meiva__
+def test_plugin_keeps_core_ask_without_legacy_notice_members(load_activity_plugin: None):
+    assert callable(meiva.ui.ask)
+    assert "ask" in meiva.ui.__all_for_meiva__
+    assert not hasattr(meiva.ui, "notify")
+    assert not hasattr(meiva.ui, "edit_notice")
+    assert not hasattr(meiva.ui, "dismiss_notice")
+    assert not {"notify", "edit_notice", "dismiss_notice"}.intersection(meiva.ui.__all_for_meiva__)
 
 
 @pytest.mark.parametrize("blocking", [False, True])
 def test_notify_validates_title_priority_and_blocking(load_activity_plugin: None, blocking: bool):
-    notify = meiva.ui.notify
-    assert callable(notify)
+    from meiva_builtins.plugins.meiva_fleet.plugin import notify
+
     with pytest.raises(ValueError, match="title"):
         notify("   ")
     with pytest.raises(ValueError, match="priority"):

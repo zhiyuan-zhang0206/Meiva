@@ -89,7 +89,7 @@ def main() -> None:
     from cli.commands.agents.control import ProvenanceError
 
     assert settings.profile == "gateway"
-    assert not settings.has_domain("agent")
+    assert settings.has_domain("agent")
     receipt, mode, expected, status, path, match, *argv = sys.argv[1:]
     if expected == "http":
         with pytest.raises(httpx.HTTPStatusError) as raised:

@@ -338,6 +338,7 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
                 )}
               />
             ) : null}
+            {(agent.unread_user_message_count) > 0 && <span aria-label={t("unreadUserMessages", { count: agent.unread_user_message_count })} title={t("unreadUserMessages", { count: agent.unread_user_message_count })} className="size-2 shrink-0 rounded-full bg-blue-500" />}
             {agent.availability?.reason.startsWith("launch_") && (
               <span className="shrink-0 rounded bg-destructive/15 px-1 text-[9px] text-destructive"
                 title={t("launchFailed")}>

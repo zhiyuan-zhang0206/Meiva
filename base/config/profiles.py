@@ -24,6 +24,7 @@ from base.host.env.process_profile import ProcessProfile
 PROCESS_PROFILES: dict[ProcessProfile, frozenset[str]] = {
     "gateway": frozenset(
         {
+            "agent",
             "data_plane",
             "gateway",
             "general",

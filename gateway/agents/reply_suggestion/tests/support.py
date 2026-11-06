@@ -198,4 +198,9 @@ class Harness:
             rendering=self.timestamps.policy(),
             catalog=self.catalog,
             keys=None if isinstance(self.catalog, CatalogLoadFailure) else self.keys,
+            recall=empty_memory,
         )
+
+
+async def empty_memory(query: str) -> str:
+    return ""

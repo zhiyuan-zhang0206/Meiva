@@ -151,16 +151,17 @@ Write `$MEIVA_HOME/self_evolution/reports/<window>.md`:
 4. **No-signal changes** — changes with no related regression, so the next
    batch or Monday summary knows they were checked.
 
-Create and retain one notice key before sending the report; same-intent retries
-reuse the key and content:
+Deliver the report through the configured publish/text protocol. In SDK mode,
+the runtime retains publication identity across retries:
 
 ```python
 
-meiva.ui.notify(
-    title="Self-evolution: <N> changes, <M> suspected regressions",
-    content="<report path>",
+meiva.ui.publish(
+    "Self-evolution: <N> changes, <M> suspected regressions. Report: <report path>",
 )
 ```
+
+Use Ask separately when the report needs a user decision.
 
 For a high-confidence skill fix, open a PR to `main` following the
 `meiva-self-development` skill's workflow (PR title without an `[Meiva-<id>]`

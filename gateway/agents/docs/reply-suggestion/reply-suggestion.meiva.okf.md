@@ -13,13 +13,15 @@ composer's placeholder, using its ordinary font and colour. Several candidates c
 (no wrap-around); Right fills the selected text and places the caret at its end, without
 the marker. Enter then sends the draft.
 
+Context and explicit feedback are owned by [[context-feedback.meiva.okf.md]].
+
 ## Trigger (frontend)
 
 [[gateway/agents/docs/reply-suggestion/trigger.meiva.okf.md|Trigger (frontend)]] — the frontend hook and component state that request, own and render the candidates.
 
 ## Route
 
-`POST /api/agents/{agent_id}/reply-suggestion` answers `{suggestions, reason}`. `suggestions`
+`POST /api/agents/{agent_id}/reply-suggestion` answers `{suggestions, reason, offer_id}`. `suggestions`
 is an empty array exactly when `reason` is set: `disabled`, `agent_not_idle`, `no_agent_text`,
 `not_useful`, `gate_failed`, `generation_failed`, `invalid_generation`. Every one is
 a 200. An unknown agent is 404 and an unreadable checkpoint is the history read's 503.
@@ -28,7 +30,8 @@ An unavailable model catalog returns the gateway's `model_catalog_unavailable`
 503, without exposing configuration details or pretending the suggestion was
 simply not useful.
 
-1. The agent must exist and be idle; the cluster switch must be on.
+1. The agent must exist and the cluster switch must be on. Explicit publication
+   candidates or an open Ask also allow drafting while the agent is working.
 2. `load_current_messages` reads the checkpoint and the shared timeline renderer turns it
    into items. The excerpt is the newest human message (`user` or `ui:page:*`) and the
    user-facing text (`user_facing=True`) of the last turn (everything after the newest inbound), cut to
@@ -37,7 +40,7 @@ simply not useful.
    must be cut keeps its newest words. `excerpt.py`'s `is_human_source` mirrors
    `inboundKind` in `ui/web/src/components/timeline/model/runs.ts` (the `user` /
    `ui:page:*` split); keep the pair in sync.
-3. Gate: `decide(reply_suggestion_gate_model, ...)` asks one `YesNo`, "does the agent's
+3. With explicit candidates or an open Ask, draft directly. Otherwise gate: `decide(reply_suggestion_gate_model, ...)` asks one `YesNo`, "does the agent's
    last turn leave the user something to answer or decide?". Below
    `reply_suggestion_gate_threshold` the answer is `not_useful`. This judges whether the
    user owes the agent an answer, approval or choice: a progress report, a wait on another
@@ -70,7 +73,7 @@ simply not useful.
 A failed gate or draft is logged as a warning (`reply_suggestion_gate_failed`,
 `reply_suggestion_draft_failed`) and answered as above; failures are not cached.
 Completed results (a draft or `not_useful`) are cached in process by agent and the
-agent message's identity (`source_message_id`), so several tabs share one generation.
+combined bounded input identity (including feedback and recalled Memory), so several tabs share one generation.
 
 The route races the work against `request.is_disconnected()` and cancels it when the client
 leaves, which stops the in-flight model call.

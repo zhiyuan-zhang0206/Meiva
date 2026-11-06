@@ -56,7 +56,7 @@ def test_initial_human_response_is_present_without_plugins(style: str) -> None:
         assert "Work without narrating after the required initial reply" in prompt
         assert "Silence here costs the user nothing" not in prompt
     if style != "off":
-        assert "A reply already delivered in the live dialog does not need a duplicate" in prompt
+        assert "Ordinary information creates no question or notification" in prompt
 
 
 @pytest.mark.parametrize("style", ["off", "oriented", "concise", "silent"])
@@ -155,3 +155,33 @@ def test_explicit_visibility_guidance_in_native_and_harness_sections() -> None:
         assert HIDE_FROM_USER in section
         assert "the user can expand and read them" in section
         assert "human and background wakes alike" in section
+
+
+@pytest.mark.parametrize("style", ["off", "oriented", "concise", "silent"])
+def test_sdk_prompt_has_one_delivery_protocol(style: str) -> None:
+    slices = _slices(agent__user_delivery_mode="sdk", agent__agent_communication_style=style)
+    prompt = build_system_prompt(
+        EMPTY,
+        slices,
+        agent_id=1,
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
+        environ=ENVIRON,
+    )
+    assert "meiva.ui.publish" in prompt
+    assert "meiva.ui.ask" in prompt
+    assert "Publishing or asking never ends execution" in prompt
+    assert "Suggestions are optional candidates" in prompt
+    assert "Every question has a user-editable Note" in prompt
+    assert "Details which the user can expand" in prompt
+    assert "meiva.ui.notify" not in prompt
+    assert "notification feed" not in prompt
+    assert DISPLAY_TO_USER not in prompt
+    assert "Reply in ordinary assistant text" not in prompt
+    assert "meiva.ui.publish" in harness_user_reply_section(_inputs(slices))
+
+
+def test_naive_prompt_keeps_plain_assistant_delivery() -> None:
+    text = user_reply_section(_inputs(_slices(agent__user_delivery_mode="naive")))
+    assert "Reply in ordinary assistant text" in text
+    assert DISPLAY_TO_USER not in text and HIDE_FROM_USER not in text

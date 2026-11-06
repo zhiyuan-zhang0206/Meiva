@@ -18,6 +18,7 @@ const detail: Required<WireAgentRow> = {
   liveness_state: "unknown", last_probe_at: "2026-09-01T00:00:00Z",
   availability, observation: null, notices_awaiting_response: [],
   unread_notice_count: 2, heartbeat_paused_until: null,
+  unread_user_message_count: 0,
   harness_exit_code: null, harness_exit_at: null,
 };
 const wireCard: Required<WireAgentCard> = {
@@ -26,7 +27,7 @@ const wireCard: Required<WireAgentCard> = {
   last_active_at: "2026-09-01T00:00:00Z", last_inbound_at: "2026-09-01T00:00:00Z",
   label: "card", machine: "test-host", supports_vision: true, liveness_state: "unknown",
   availability, observation: { runtime_owner: "unknown" }, awaiting_response_count: 3,
-  highest_notice_priority: "P2", unread_notice_count: 2, heartbeat_paused_until: null,
+  highest_notice_priority: "P2", unread_notice_count: 2, unread_user_message_count: 0, heartbeat_paused_until: null,
   open_impersonation_session_id: null, open_impersonation_status: null,
   harness_exit_code: null, harness_exit_at: null,
 };

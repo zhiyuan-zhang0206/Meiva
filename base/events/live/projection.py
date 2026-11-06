@@ -39,6 +39,7 @@ from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
+from base.api_contracts.user_delivery import UserDeliveryMode
 from base.host.boundary.untyped import object_of
 
 # One SSE event per window: the agent-side publisher coalesces deltas / chunks
@@ -75,6 +76,8 @@ class ChatStart(_Base):
     item_id: str
     non_human_wake: bool = False
     explicit_visibility: bool = False
+    delivery_mode: UserDeliveryMode | None = None
+    source_message_id: str | None = None
 
 
 class ChatDelta(_Base):
@@ -92,6 +95,8 @@ class ChatDelta(_Base):
     content: str
     non_human_wake: bool = False
     explicit_visibility: bool = False
+    delivery_mode: UserDeliveryMode | None = None
+    source_message_id: str | None = None
 
 
 class CompactRequest(_Base):

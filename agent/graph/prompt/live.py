@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
+from base.agents.messages.reply_intent import delivery_disabled_entries
 from base.host.env.agent_slices import AgentSlices, Prompt
 from base.lm.catalog import ModelCatalog
 from base.packages.skills.tree import Skill
@@ -93,7 +94,7 @@ def skill_view(prompt: Prompt, *, home: Path, environ: Mapping[str, str]) -> Ski
     view = read_view(
         prompt.skills_to_inject_into_system_prompt,
         prompt.skills_to_expand_at_start,
-        prompt.sdk_disable,
+        (*prompt.sdk_disable, *delivery_disabled_entries(prompt.user_delivery_mode)),
         home=home,
         environ=environ,
     )

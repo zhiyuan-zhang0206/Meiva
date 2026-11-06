@@ -1,7 +1,7 @@
 {
   "title": "To user",
   "sharedContext": "共享上下文",
-  "notification": "通知",
+  "notification": "待回答",
   "needsReply": "需要你回复",
   "queue": "队列 · {count}",
   "backToMessages": "返回对话",
@@ -12,9 +12,9 @@
   "unavailable": "暂无法读取文档，请稍后重试。",
   "loading": "正在加载…",
   "empty": "No content",
-  "noticesUnavailable": "通知刷新失败。",
-  "expandNotice": "展开通知",
-  "collapseNotice": "折叠通知",
+  "noticesUnavailable": "问题刷新失败。",
+  "expandNotice": "展开问题",
+  "collapseNotice": "折叠问题",
   "openContext": "To user",
   "back": "返回",
   "legacyHtml": "等待 Markdown 文档。",
@@ -22,5 +22,8 @@
   "tooLarge": "这个文件太大，这里显示不下。",
   "missing": "这条链接已经失效。",
   "unreadable": "这个文件在这里显示不了。",
-  "openRaw": "直接打开这个文件"
+  "openRaw": "直接打开这个文件",
+  "deliveryUnread": "未读 · 标为已读",
+  "deliveryPending": "未读消息",
+  "deliveryUnavailable": "无法加载用户消息。"
 }

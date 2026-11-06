@@ -162,6 +162,24 @@ describe("Copy is scoped to message text (per-kind whitelist)", () => {
 // offer Copy.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
 describe("block-level copy actions (hover band)", () => {
+  it("keeps unread delivery controls in the reserved chrome and restores hover reveal after reading", () => {
+    const item: BackendTimelineItem = {
+      ...makeItem({ kind: "agent_chat", payload: "Published reply" }),
+      userDelivery: {
+        id: 12, agent_id: 7, mode: "prefix", source_key: "assistant:reply:0.0",
+        content: "Published reply", suggestions: [], created_at: "2026-11-06T00:00:00Z", read_at: null,
+      },
+    };
+    const { rerender } = render(<TimelineView items={[item]} />);
+    const control = screen.getByRole("button", { name: "Unread · mark read" });
+    const band = screen.getByTestId("card-chrome");
+    expect(band.contains(control)).toBe(true);
+    expect(screen.getByTestId("agent-message-prose").contains(control)).toBe(false);
+    expect(band.classList.contains("opacity-100")).toBe(true);
+    rerender(<TimelineView items={[{ ...item, userDelivery: { ...item.userDelivery!, read_at: "2026-11-06T00:01:00Z" } }]} />);
+    expect(screen.queryByRole("button", { name: "Unread · mark read" })).toBeNull();
+    expect(screen.getByTestId("card-chrome").classList.contains("opacity-100")).toBe(false);
+  });
   it("the footer holds Copy and no other control", () => {
     render(
       <TimelineView

@@ -87,7 +87,16 @@ def _check_eval_allowlist(alias: str, value: FieldValue) -> None:
         )
 
 
+def _check_user_delivery(alias: str, value: FieldValue) -> str:
+    from base.api_contracts.user_delivery import UserDeliveryMode
+
+    if not isinstance(value, str):
+        raise TypeError(f"{alias} requires a string")
+    return UserDeliveryMode(value)
+
+
 _CHECKS = {
+    "user_delivery": _check_user_delivery,
     "iana": _check_iana,
     "port": _check_port,
     "eval_allowlist": _check_eval_allowlist,
@@ -118,6 +127,8 @@ def parse_field(name: str, alias: str, kind: str, check: str | None, raw: str) -
             f"{alias}={raw!r} is not a valid {kind} for config field {name!r} "
             f"(boot-lite parse; the field type is declared in base/config/)"
         ) from exc
+    if check == "user_delivery":
+        return _check_user_delivery(alias, value)
     if check is not None:
         _CHECKS[check](alias, value)
     return value

@@ -103,6 +103,7 @@ function agent(over: {
     supports_vision: true,
     awaiting_response_count: (over.notices_awaiting_response ?? []).length, highest_notice_priority: (over.notices_awaiting_response ?? [])[0]?.priority ?? null,
     unread_notice_count: 0,
+    unread_user_message_count: 0,
     heartbeat_paused_until: null,
     liveness_state: "online",
   };
@@ -144,7 +145,7 @@ function renderQueue(
 }
 
 function listTitles(): string[] {
-  const list = screen.getByRole("list", { name: /inbox queue/i });
+  const list = screen.getByRole("list", { name: /ask queue/i });
   return within(list)
     .getAllByRole("button")
     .map((b) => b.querySelector('[data-testid="notice-title"]')?.textContent ?? "")
@@ -185,7 +186,7 @@ describe("InboxQueue — open stream", () => {
       ],
     });
     renderQueue([agent({ agent_id: 1, label: "a" })]);
-    const list = screen.getByRole("list", { name: /inbox queue/i });
+    const list = screen.getByRole("list", { name: /ask queue/i });
     expect(within(list).queryByText("just-fyi")).toBeNull();
     expect(within(list).getByText("needs-answer")).toBeTruthy();
     expect(within(list).getByText("stalled")).toBeTruthy();
@@ -308,11 +309,11 @@ describe("InboxQueue — decision (require_response) action surface", () => {
       awaiting: [n({ id: 1, title: "first", priority: "P0" }), n({ id: 2, title: "second", priority: "P1" })],
     });
     renderQueue([agent({ agent_id: 7, label: "lead" })]);
-    expect(screen.getByLabelText(/Reply to notice: first/)).not.toBeNull();
+    expect(screen.getByLabelText(/Reply to question: first/)).not.toBeNull();
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "a1" } });
     fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
     await waitFor(() => expect(resolveNotice).toHaveBeenCalledWith(7, 1, { action: "answer", reply: "a1" }));
-    await waitFor(() => expect(screen.getByLabelText(/Reply to notice: second/)).not.toBeNull());
+    await waitFor(() => expect(screen.getByLabelText(/Reply to question: second/)).not.toBeNull());
   });
 
   it("empty-box Down/Up arrows cycle the selection", async () => {
@@ -321,9 +322,9 @@ describe("InboxQueue — decision (require_response) action surface", () => {
     });
     renderQueue([agent({ agent_id: 7, label: "lead" })]);
     fireEvent.keyDown(screen.getByRole("textbox"), { key: "ArrowDown" });
-    await waitFor(() => expect(screen.getByLabelText(/Reply to notice: second/)).not.toBeNull());
+    await waitFor(() => expect(screen.getByLabelText(/Reply to question: second/)).not.toBeNull());
     fireEvent.keyDown(screen.getByRole("textbox"), { key: "ArrowUp" });
-    await waitFor(() => expect(screen.getByLabelText(/Reply to notice: first/)).not.toBeNull());
+    await waitFor(() => expect(screen.getByLabelText(/Reply to question: first/)).not.toBeNull());
   });
 });
 

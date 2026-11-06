@@ -7,10 +7,30 @@ from typing import Annotated, Literal
 from pydantic import Field, field_validator
 from pydantic_settings import NoDecode
 
+from base.api_contracts.user_delivery import UserDeliveryMode
 from base.config.base import EnvSettings
 
 
 class AgentPromptSettings(EnvSettings):
+    user_delivery_mode: UserDeliveryMode = Field(
+        default=UserDeliveryMode.PREFIX,
+        alias="MEIVA_USER_DELIVERY_MODE",
+        description=(
+            "User delivery protocol: naive displays ordinary assistant text; prefix requires "
+            "an explicit display/Details prefix; sdk delivers through meiva.ui.publish and meiva.ui.ask. "
+            "Publishing never ends the agent turn. Details remain expandable by the user."
+        ),
+        json_schema_extra={
+            "capability": "common",
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-default",
+            "per_agent": True,
+            "lifecycle": "frozen",
+        },
+    )
+
     sdk_disable: Annotated[list[str], NoDecode] = Field(
         default_factory=list,
         alias="MEIVA_SDK_DISABLE",

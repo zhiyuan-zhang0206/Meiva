@@ -19,6 +19,8 @@ table-wide UPDATE a cluster installed before that narrowing. External harness
 activity checkpoints can update the `item` JSON column in `agent_harness_messages`
 while the stored sequence, harness, and other row coordinates stay fixed.
 Projection tables permit SELECT, INSERT and DELETE.
+Runner capture of visible assistant replies can append `agent_user_messages` and
+read retry receipts. Updating read state and deleting publications remain gateway operations.
 
 Default privileges cover future owner-created objects; rerunning convergence
 covers existing objects. Missing matrix tables fail loudly. Group validation

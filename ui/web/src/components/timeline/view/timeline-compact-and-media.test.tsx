@@ -52,13 +52,18 @@ describe("continuous compact history", () => {
       "0.0": 32,
       "1.0": 45,
       "2.0": 1158,
+      "s2.prev.1.0": 45,
+      "s2.prev.2.0": 1158,
+      "s1.next.0.0": 45,
+      "s1.next.1.0": 1158,
     };
     const { rerender } = render(<TimelineView items={preItems} />);
     const viewport = screen.getByTestId("scroll-viewport");
     const rowHeight = (el: HTMLElement): number => {
       const id = el.dataset.itemId ?? "";
       const full = realHeights[id] ?? 80;
-      if (!el.classList.contains("timeline-item") || el.dataset.timelineSource !== "buffer") return full;
+      const rekeyed = el.dataset.timelineSource === "buffer" || id.startsWith("s2.") || id.startsWith("s1.next.");
+      if (!el.classList.contains("timeline-item") || !rekeyed) return full;
       return el.style.contentVisibility === "visible" ? full : 80;
     };
     const renderedRows = (): HTMLElement[] =>
@@ -114,6 +119,19 @@ describe("continuous compact history", () => {
         rerender(<TimelineView items={postItems} compactBuffer={nextBuffer} />);
       });
       expect(findReply().getBoundingClientRect().top).toBe(beforeTop);
+      const canonicalItems = [
+        makeItem({ item_id: "s2.prev.1.0", kind: "agent_chat", payload: "FIRST_REPLY" }),
+        makeItem({ item_id: "s2.prev.2.0", kind: "agent_chat", payload: "FIRST_TAIL" }),
+        makeItem({ item_id: "s1.next.0.0", kind: "agent_chat", payload: "BETWEEN_REPLY" }),
+        makeItem({ item_id: "s1.next.1.0", kind: "agent_chat", payload: "BETWEEN_TAIL" }),
+        ...postItems,
+      ];
+      act(() => {
+        announceBeforeCompactDisplayChange({ items: postItems, buffer: nextBuffer, rankShift: 0 });
+        rerender(<TimelineView items={canonicalItems} />);
+      });
+      const hydratedReply = viewport.querySelector<HTMLElement>('[data-item-id="s1.next.0.0"]')!;
+      expect(hydratedReply.getBoundingClientRect().top).toBe(beforeTop);
     } finally {
       rectSpy.mockRestore();
     }

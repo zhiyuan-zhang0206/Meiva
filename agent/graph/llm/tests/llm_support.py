@@ -142,6 +142,7 @@ def llm_runtime(
             bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
             catalog=model_catalog,
             clock_factory=Clock.from_settings,
+            rng=seeded_rng(),
         )
     )
 

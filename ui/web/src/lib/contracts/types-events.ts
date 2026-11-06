@@ -1,3 +1,4 @@
+import type { UserMessage } from "./types-user-delivery";
 import type { components } from "./types-generated";
 
 type Schemas = components["schemas"];
@@ -27,6 +28,9 @@ export type BackendTimelineItem = Omit<
   readonly rawChatPayload?: string;
   readonly nonHumanWake?: boolean;
   readonly explicitVisibility?: boolean;
+  readonly deliveryMode?: UserMessage["mode"];
+  readonly userDelivery?: UserMessage;
+  readonly askQuestion?: Schemas["NoticeItem"];
 };
 
 export interface TimelineResponse {
@@ -52,6 +56,8 @@ export interface ChatStartEvent extends BaseEvent {
   readonly item_id: string;
   readonly non_human_wake?: boolean;
   readonly explicit_visibility?: boolean;
+  readonly delivery_mode?: UserMessage["mode"] | null;
+  readonly source_message_id?: string | null;
 }
 export interface ChatDeltaEvent extends BaseEvent {
   readonly role: "chat_delta";
@@ -59,6 +65,8 @@ export interface ChatDeltaEvent extends BaseEvent {
   readonly content: string;
   readonly non_human_wake?: boolean;
   readonly explicit_visibility?: boolean;
+  readonly delivery_mode?: UserMessage["mode"] | null;
+  readonly source_message_id?: string | null;
 }
 export interface CompactRequestEvent extends BaseEvent {
   readonly role: "compact_request";

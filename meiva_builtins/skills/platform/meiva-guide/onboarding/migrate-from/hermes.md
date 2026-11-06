@@ -20,8 +20,8 @@ provider, Mixture-of-Agents presets, and fallback chains.
 | Skills — autonomous creation, self-improvement, Skills Hub (`hermes skills` / `curator`) | Skills are files installed via `meiva skill install`; changing a skill is a PR, not a runtime loop | Honest gap: no autonomous skill creation or in-use self-improvement. The closest relative is the weekly self-evolution pass that mines agent traces and proposes skill edits — reviewed, not autonomous. |
 | `hermes bundles` (skill groups) | N/A | |
 | SOUL.md persona | System prompt + role-card skills (`be-a-<role>`) | |
-| Channels (CLI, Telegram, Discord, Slack, WhatsApp, Signal, Email, SMS, …) | Platform dialog + `meiva.ui.notify`; Telegram via the IM Bridge where it runs | |
-| Command approval (`hermes approvals`) | Memory gates + `meiva.ui.notify(require_response=True)` | No approval-history ledger. |
+| Channels (CLI, Telegram, Discord, Slack, WhatsApp, Signal, Email, SMS, …) | Platform dialog + `meiva.ui.ask`; Telegram via the IM Bridge where it runs | |
+| Command approval (`hermes approvals`) | Memory gates + `meiva.ui.ask(...)` | No approval-history ledger. |
 | Terminal backends (local, Docker, SSH, Daytona, Modal) | Multi-machine agents (`meiva.agents.spawn(machine=...)`), `meiva.shell.sessions`, containers via shell | Daytona/Modal serverless hibernation has no Meiva equivalent. |
 | `hermes cron` | `meiva schedules` + `meiva.watcher` | |
 | MCP (`hermes mcp`) | `meiva mcp` | |
@@ -70,3 +70,5 @@ Official Hermes Agent docs, accessed 2026-08-12:
 
 - https://hermes-agent.nousresearch.com/docs/ — overview, install, concepts, learning loop
 - https://github.com/NousResearch/hermes-agent — website/docs/reference/cli-commands.md (CLI reference), releases (v0.19 line)
+
+The runtime owns each SDK write identity and retains it across deterministic replay.

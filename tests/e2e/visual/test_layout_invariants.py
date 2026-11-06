@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import TypedDict, cast
 
@@ -277,7 +278,7 @@ def test_fleet_layout_invariants(
         page.wait_for_timeout(800)
         assert _no_page_scroll(page), "I4: Tasks toolbar widens the page"
 
-        page.locator('[role="tab"]', has_text="Inbox").click()
+        page.get_by_role("tab", name=re.compile(r"^Ask(?:\s|$)")).click()
         page.wait_for_timeout(1200)
         assert _no_page_scroll(page), "I1: long-title inbox row widens the page"
         if OVERRIDE_BASE_URL:

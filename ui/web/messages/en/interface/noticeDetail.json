@@ -2,11 +2,11 @@
   "blocking": "Blocking",
   "dismiss": "Dismiss",
   "sendAnswer": "Send answer",
-  "replyTo": "Reply to notice: {title}",
+  "replyTo": "Reply to question: {title}",
   "failed": "{verb} failed: {msg}",
-  "alreadyAnswered": "This notice was already answered.",
+  "alreadyAnswered": "This question was already answered.",
   "send": "Send",
-  "alreadyDismissed": "This notice was already dismissed.",
+  "alreadyDismissed": "This question was already dismissed.",
   "answerPlaceholder": "Your answer… (Enter to send)",
   "expires": "Expires {time}",
   "singleSelect": "Choose one",
@@ -19,5 +19,5 @@
   "noLongerAvailable": "This question is no longer available. Refresh to see its current status.",
   "originalOptions": "Original numbered options",
   "selected": "Selected",
-  "comment": "Comment (optional)"
+  "comment": "Note (optional)"
 }

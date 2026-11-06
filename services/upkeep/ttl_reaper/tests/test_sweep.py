@@ -555,7 +555,7 @@ async def test_expired_notice_text_names_the_notice_and_never_reads_as_a_reply(
     assert "Re:" not in content
     assert "reached its expiry" in content
     assert "no longer waits for an answer" in content
-    assert "meiva.ui.notify(" in content
+    assert "meiva.ui.ask(" in content
 
 
 async def test_expired_notice_stays_silent_for_the_user(

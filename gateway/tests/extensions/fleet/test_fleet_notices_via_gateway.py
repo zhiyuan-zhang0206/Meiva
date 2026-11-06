@@ -1,6 +1,6 @@
-"""The fleet notice SDK (notify / edit_notice / dismiss_notice) against the in-process gateway.
-
-Split out of `meiva_builtins/plugins/meiva_fleet/tests/test_meiva_fleet_plugin.py`: these cases route the SDK's gateway client at `gateway.app`, so they live with the gateway tests."""
+# meiva:note
+# Legacy notice compatibility functions exercise real gateway routes and stored question history.
+# The agent-facing SDK exposes Ask; these functions remain internal for older callers.
 
 from collections.abc import Iterator
 from datetime import datetime
@@ -9,7 +9,6 @@ from typing import cast
 import psycopg
 import pytest
 
-import meiva
 from base.agents.observation.snapshot import select_one
 from base.cluster.machine import MachineIdentityReader
 from base.config import settings
@@ -18,6 +17,7 @@ from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
 from gateway.tests.support.live_events.recorder import recording_live_events
 from meiva.tests.fixtures.pin_agent import pin_agent
+from meiva_builtins.plugins.meiva_fleet import plugin as notice_compat
 from meiva_builtins.plugins.meiva_fleet.tests.registry_support import (
     installed_fleet_surface,
 )
@@ -116,7 +116,7 @@ def test_notify_defaults_to_response_and_snapshot_lists_question(
     pin_agent(agent_id)
     nid = cast(
         "NoticeView",
-        meiva.ui.notify(  # pyright: ignore[reportCallIssue]
+        notice_compat.notify(
             "migration done",
             content="14k rows",
             priority="P1",
@@ -126,15 +126,15 @@ def test_notify_defaults_to_response_and_snapshot_lists_question(
     _assert_first_notice_is_sole_pending_fyi(nid)
 
     with pytest.raises(ValueError, match="already holds an open notice"):
-        meiva.ui.notify(
+        notice_compat.notify(
             "hit a rate limit",
-        )  # pyright: ignore[reportCallIssue]
+        )
     _assert_second_notice_is_refused(nid)
 
-    meiva.ui.dismiss_notice()  # pyright: ignore[reportCallIssue]
-    meiva.ui.notify(
+    notice_compat.dismiss_notice()
+    notice_compat.notify(
         "hit a rate limit",
-    )  # pyright: ignore[reportCallIssue]
+    )
 
     db_conn.rollback()
     rows = _notices(db_conn, agent_id)
@@ -160,7 +160,7 @@ def test_notify_require_response_rides_awaiting_worklist(
 ):
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    meiva.ui.notify(  # type: ignore[attr-defined]
+    notice_compat.notify(
         "Send the release email?",
         content="A) yes\nB) no",
         priority="P0",
@@ -171,15 +171,15 @@ def test_notify_require_response_rides_awaiting_worklist(
     # A second notice is refused while the first is open; close it, then post.
     # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md
     with pytest.raises(ValueError, match="already holds an open notice"):
-        meiva.ui.notify(
+        notice_compat.notify(
             "Name the branch?",
             require_response=True,
-        )  # pyright: ignore[reportCallIssue]
-    meiva.ui.dismiss_notice()  # pyright: ignore[reportCallIssue]
-    meiva.ui.notify(
+        )
+    notice_compat.dismiss_notice()
+    notice_compat.notify(
         "Name the branch?",
         require_response=True,
-    )  # pyright: ignore[reportCallIssue]
+    )
 
     db_conn.rollback()
     # meiva:note
@@ -204,7 +204,7 @@ def test_sdk_question_keeps_number_order_in_snapshot(
 ) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    meiva.ui.notify(  # type: ignore[attr-defined]
+    notice_compat.notify(
         "Choose the scope?",
         require_response=True,
         question={
@@ -261,11 +261,11 @@ def test_notify_records_task_id_and_rides_snapshot(
     agent_id = seed_agent(db_conn)
     tid = _seed_task(db_conn, agent_id)
     pin_agent(agent_id)
-    meiva.ui.notify(
+    notice_compat.notify(
         "stalled on a decision",
         require_response=True,
         task=tid,
-    )  # type: ignore[attr-defined]
+    )
     db_conn.rollback()  # notify committed via its own cursor; refresh our view
     assert _notice_task_id(db_conn, agent_id) == tid
     snap = select_one(
@@ -283,9 +283,9 @@ def test_notify_without_task_leaves_task_id_null(
 ):
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    meiva.ui.notify(
+    notice_compat.notify(
         "fyi, no task",
-    )  # type: ignore[attr-defined]
+    )
     db_conn.rollback()
     assert _notice_task_id(db_conn, agent_id) is None
 
@@ -296,10 +296,10 @@ def test_notify_nonexistent_task_raises(
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with pytest.raises(ValueError, match="task 999999 does not exist"):
-        meiva.ui.notify(
+        notice_compat.notify(
             "names a ghost task",
             task=999999,
-        )  # type: ignore[attr-defined]
+        )
 
 
 def test_edit_notice_partial_update(
@@ -309,14 +309,14 @@ def test_edit_notice_partial_update(
     pin_agent(agent_id)
     nid = cast(
         "NoticeView",
-        meiva.ui.notify(  # type: ignore[attr-defined]
+        notice_compat.notify(
             "draft title",
             content="old body",
             priority="P2",
         ),
     )
     # change only title + priority; content is left as-is (omitted != cleared).
-    meiva.ui.edit_notice(title="new title", priority="P0")  # type: ignore[attr-defined]
+    notice_compat.edit_notice(title="new title", priority="P0")
 
     db_conn.rollback()
     with db_conn.cursor() as cur:
@@ -333,7 +333,7 @@ def test_edit_notice_partial_update(
 
     # passing content=None explicitly clears it (the _UNSET sentinel
     # distinguishes "leave alone" from "erase").
-    meiva.ui.edit_notice(content=None)  # type: ignore[attr-defined]
+    notice_compat.edit_notice(content=None)
     db_conn.rollback()
     with db_conn.cursor() as cur:
         cur.execute(
@@ -362,7 +362,7 @@ def test_response_notice_content_edits_publish_refreshed_snapshot(
     # the hints back from the channel, so the assertion proves the inspector projection rather
     # than merely the row's database state.
     with recording_live_events(event_bus) as live:
-        meiva.ui.notify(  # type: ignore[attr-defined]
+        notice_compat.notify(
             "decision needed",
             content="revision 0",
             priority="P1",
@@ -371,7 +371,7 @@ def test_response_notice_content_edits_publish_refreshed_snapshot(
         )
         for revision in range(1, 11):
             content = f"revision {revision}"
-            meiva.ui.edit_notice(content=content)  # type: ignore[attr-defined]
+            notice_compat.edit_notice(content=content)
         live.settle("agent_updated", 11)
         live.quiet()
         published_agent_ids = [event.payload["agent_id"] for event in live.events("agent_updated")]
@@ -401,26 +401,26 @@ def test_edit_notice_validation_and_guards(
 ):
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    meiva.ui.notify(
+    notice_compat.notify(
         "fyi notice",
-    )  # type: ignore[attr-defined]
+    )
 
     # nothing passed -> nothing to change.
     with pytest.raises(ValueError, match="at least one field"):
-        meiva.ui.edit_notice()  # type: ignore[attr-defined]
+        notice_compat.edit_notice()
     # bad priority.
     with pytest.raises(ValueError, match="priority"):
-        meiva.ui.edit_notice(priority="P9")  # type: ignore[attr-defined]
-    meiva.ui.edit_notice(blocking=True)  # type: ignore[attr-defined]
+        notice_compat.edit_notice(priority="P9")
+    notice_compat.edit_notice(blocking=True)
     with pytest.raises(ValueError, match="require a user response"):
-        meiva.ui.notify(
+        notice_compat.notify(
             "Information",
             require_response=False,
-        )  # type: ignore[attr-defined]
+        )
     # no open notice is idempotent (no-op).
-    meiva.ui.dismiss_notice()  # type: ignore[attr-defined]
+    notice_compat.dismiss_notice()
     # meiva:link meiva/docs/ui.meiva.okf.md
-    meiva.ui.edit_notice(title="too late")  # pyright: ignore[reportCallIssue]
+    notice_compat.edit_notice(title="too late")
 
 
 def test_dismiss_notice_withdraws(
@@ -428,10 +428,10 @@ def test_dismiss_notice_withdraws(
 ):
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    notify = meiva.ui.notify
+    notify = notice_compat.notify
     assert callable(notify)
     nid = cast("NoticeView", notify("stale fyi"))
-    meiva.ui.dismiss_notice()  # type: ignore[attr-defined]
+    notice_compat.dismiss_notice()
 
     db_conn.rollback()
     with db_conn.cursor() as cur:
@@ -455,7 +455,7 @@ def test_dismiss_notice_withdraws(
     assert snap.unread_notice_count == 0
 
     # dismissing again is idempotent (no-op).
-    meiva.ui.dismiss_notice()  # type: ignore[attr-defined]
+    notice_compat.dismiss_notice()
 
 
 def test_each_agent_side_resolution_publishes_notice_resolved(
@@ -475,18 +475,18 @@ def test_each_agent_side_resolution_publishes_notice_resolved(
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with recording_live_events(event_bus) as live:
-        meiva.ui.notify(
+        notice_compat.notify(
             "Q1?",
             require_response=True,
-        )  # pyright: ignore[reportCallIssue]
+        )
         live.settle("notice_posted", 1)
         live.quiet()
         assert live.events("notice_resolved") == []
-        meiva.ui.dismiss_notice()  # pyright: ignore[reportCallIssue]
+        notice_compat.dismiss_notice()
         live.settle("notice_resolved", 1)
-        meiva.ui.notify(
+        notice_compat.notify(
             "Q2?",
             require_response=True,
-        )  # pyright: ignore[reportCallIssue]
-        meiva.ui.dismiss_notice()  # pyright: ignore[reportCallIssue]
+        )
+        notice_compat.dismiss_notice()
         assert len(live.settle("notice_resolved", 2)) == 2

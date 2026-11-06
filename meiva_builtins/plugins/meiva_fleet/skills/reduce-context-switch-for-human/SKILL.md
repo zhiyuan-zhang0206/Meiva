@@ -14,7 +14,10 @@ and load on demand. Read this skill as the full playbook behind those rules.
 
 ## Default: queue, never push
 
-The human-facing channel is `meiva.ui.notify` — a queue the user reads when they choose. It carries only what survives the roll-up below: a manager's aggregated results, or deliveries from an agent with no manager; a delegated agent's progress goes to its manager via `send_message`, not to the queue. Delivering to the queue IS delivering; do not escalate just because nothing was acknowledged.
+Use `meiva.ui.ask` for questions and the configured publish/text protocol for
+meaningful results. Publications retain unread state, and questions retain pending
+answers. Neither needs a separate notification call. Delegated progress goes to
+the delegator through `send_message`; deliver directly when no delegator is waiting.
 
 ## Cadence is a delegation contract
 
@@ -22,7 +25,8 @@ These routing conventions apply to accepted delegated work. They do not require
 creating a manager role or a delegation tree; without a delegator, deliver to the
 user directly.
 
-One notice per manager — its single rolled-up view of the subtree, updated in place: a new `meiva.ui.notify` supersedes the old one, so the queue never accumulates a manager's history.
+Each meaningful publication appends history; each Ask preserves its own answer.
+Never replace unread information with a rolling summary.
 
 Updates are **milestone-based by default** (user ruling 2026-09-03): roll
 up on a real milestone, a blocker, completion, or a real need — never
@@ -33,7 +37,9 @@ budget, and any reporting exception.
 
 ## A direct reply is the user responding
 
-When the user messages you directly, they have responded to you — judge whether that exchange resolves the notice you left open. If it does, withdraw it (or let a new `meiva.ui.notify` supersede it); if their message did not answer what you were waiting on, keep it or re-post. Nothing clears the notice for you — it is your judgment, not a framework action.
+Interpret direct messages in context. Preserve the original question and its
+receipt; answering a question in the Ask UI settles it explicitly. Do not infer
+approval from a read receipt, silence or a suggested Note.
 
 ## Roll-up bisection
 

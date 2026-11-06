@@ -67,9 +67,14 @@ def _memory_namespace() -> object | None:
 
 def apply_per_agent_sdk_disable(*, default_reader: Callable[[str, str], object]) -> None:
     configured = agent_setting("sdk_disable", default_reader=default_reader)
-    if not configured:
-        return
-    sdk_disable.apply_sdk_disable(_names(configured, "sdk_disable"))
+    from base.agents.messages.reply_intent import delivery_disabled_entries
+
+    mode = agent_setting("user_delivery_mode", default_reader=default_reader)
+    if not isinstance(mode, str):
+        raise TypeError("user_delivery_mode must be a string")
+    sdk_disable.apply_sdk_disable(
+        [*_names(configured, "sdk_disable"), *delivery_disabled_entries(mode)]
+    )
 
 
 def apply_per_agent_eval_isolation(
@@ -190,9 +195,11 @@ async def boot_agent_scope(
 
     ensure_document(workspace)
 
+    from meiva.ui import ask
+
     from .startup import notify_desktop_permissions_at_startup
 
-    await notify_desktop_permissions_at_startup(home)
+    await notify_desktop_permissions_at_startup(home, ask=ask)
 
     if harness is not Harness.MEIVA:
         return None, None

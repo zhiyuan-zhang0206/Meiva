@@ -25,7 +25,7 @@ from tests.e2e.fixture_environment import E2EEnv
 
 
 @pytest.fixture
-def transition_env(request: pytest.FixtureRequest) -> Iterator[E2EEnv]:
+def transition_env(e2e_process_env: None, request: pytest.FixtureRequest) -> Iterator[E2EEnv]:
     env_path = Path(os.environ["MEIVA_HOME"]) / ".env"
     original = env_path.read_text()
     lines = [
@@ -85,13 +85,17 @@ _FRAMES_JS = """
 def _send(env: E2EEnv, message: str, reply: str) -> None:
     env.page.fill('[data-testid="composer-input"]', message)
     env.page.click('[data-testid="composer-send"]')
-    env.page.get_by_text(reply, exact=False).wait_for(timeout=30_000)
+    env.page.get_by_test_id("timeline-surface").get_by_text(reply, exact=False).wait_for(
+        timeout=30_000
+    )
     wait_for_status(env.agent_id, AgentStatus.IDLING.value)
 
 
 def _compact(env: E2EEnv, narration: str, *, database: Database) -> None:
     enqueue_compact_history_fixture(env.agent_id, database=database)
-    env.page.get_by_text(narration, exact=False).wait_for(timeout=45_000)
+    env.page.get_by_test_id("timeline-surface").get_by_text(narration, exact=False).wait_for(
+        timeout=45_000
+    )
     wait_for_status(env.agent_id, AgentStatus.IDLING.value)
 
 

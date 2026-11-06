@@ -223,6 +223,23 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/metrics"): RouteContract(),
     ("GET", "/api/metrics/agents"): RouteContract(),
     ("GET", "/api/ops/monitor"): RouteContract(),
+    ("POST", "/api/agents/{agent_id}/reply-suggestion/feedback"): RouteContract(
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        note="explicit user feedback with an immutable receipt",
+    ),
+    ("POST", "/api/agents/{agent_id}/asks"): RouteContract(
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        note="persistent question and receipt commit atomically",
+    ),
+    ("GET", "/api/agents/{agent_id}/user-messages"): RouteContract(),
+    ("POST", "/api/agents/{agent_id}/user-messages"): RouteContract(
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        note="immutable publication keyed by agent and authenticated principal; changed intent conflicts",
+    ),
+    ("POST", "/api/keyed/v1/agents/{agent_id}/user-messages/{message_id}/resolve"): RouteContract(
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        note="read/reply state and inbound share the durable resolution receipt transaction",
+    ),
     ("GET", "/api/notices"): RouteContract(
         note="unified inbox feed — open + awaiting + resolved page (R4 layer 2)"
     ),

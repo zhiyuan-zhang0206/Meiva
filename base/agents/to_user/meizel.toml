@@ -1,4 +1,4 @@
-exports = ["document.py", "errors.py", "limits.py", "models.py", "resources.py"]
+exports = ["delivery", "document.py", "errors.py", "limits.py", "models.py", "resources.py"]
 
 [uses]
 "__init__.py" = ["document.py", "errors.py", "limits.py", "models.py", "resources.py"]

@@ -1,7 +1,7 @@
 {
   "title": "To user",
   "sharedContext": "Shared context",
-  "notification": "Notification",
+  "notification": "Ask",
   "needsReply": "Needs your reply",
   "queue": "Queue · {count}",
   "backToMessages": "Back to messages",
@@ -12,9 +12,9 @@
   "unavailable": "Document unavailable. Try again later.",
   "loading": "Loading…",
   "empty": "No content",
-  "noticesUnavailable": "Notifications unavailable.",
-  "expandNotice": "Expand notification",
-  "collapseNotice": "Collapse notification",
+  "noticesUnavailable": "Questions unavailable.",
+  "expandNotice": "Expand question",
+  "collapseNotice": "Collapse question",
   "openContext": "To user",
   "back": "Back",
   "legacyHtml": "Awaiting Markdown.",
@@ -22,5 +22,8 @@
   "tooLarge": "This file is too large to show here.",
   "missing": "This link is no longer available.",
   "unreadable": "This file can't be shown here.",
-  "openRaw": "Open the file itself"
+  "openRaw": "Open the file itself",
+  "deliveryUnread": "Unread · mark read",
+  "deliveryPending": "Unread publications",
+  "deliveryUnavailable": "User messages could not be loaded."
 }

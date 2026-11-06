@@ -107,7 +107,7 @@ describe("useReplySuggestion", () => {
     expect(result.current).toBeNull();
 
     await settle({ suggestions: ["Use A.", "Use B.", "Use C.", "Use D."], reason: null });
-    await vi.waitFor(() => expect(result.current).toEqual(["Use A.", "Use B.", "Use C.", "Use D."]));
+    await vi.waitFor(() => expect(result.current?.suggestions).toEqual(["Use A.", "Use B.", "Use C.", "Use D."]));
   });
 
   it("starts nothing when a new turn begins within the quiet period", async () => {
@@ -165,7 +165,7 @@ describe("useReplySuggestion", () => {
     await elapse(REPLY_SUGGESTION_DELAY_MS);
     await vi.waitFor(() => expect(pending.length).toBeGreaterThan(0));
     await settle({ suggestions: ["Yes"], reason: null });
-    await vi.waitFor(() => expect(result.current).toEqual(["Yes"]));
+    await vi.waitFor(() => expect(result.current?.suggestions).toEqual(["Yes"]));
 
     rerender({ ...idle, busy: true });
     expect(result.current).toBeNull();
@@ -367,4 +367,22 @@ describe("useReplySuggestion", () => {
 
     expect(result.current).toBeNull();
   });
+});
+
+
+it("offers a reply for an Ask during work and removes it on resolution", async () => {
+  const question = { id: 4, agent_id: 7, agent_label: null, title: "Choose scope",
+    content: null, priority: "P2" as const, require_response: true, blocking: false,
+    created_at: "2026-11-06T00:00:00Z", expire_at: null, resolved_at: null,
+    question: { type: "text" as const, note_suggestion: "Small scope" } };
+  const working: Props = { ...idle, busy: true, status: "running",
+    items: [item("agent_chat", "ask:4", { askQuestion: question })] };
+  const { result, rerender } = renderHook((props: Props) => useReplySuggestion(props), { wrapper, initialProps: working });
+  await elapse(REPLY_SUGGESTION_DELAY_MS);
+  await vi.waitFor(() => expect(pending).toHaveLength(1));
+  await settle({ suggestions: ["Small scope"], reason: null, offer_id: 12 });
+  await vi.waitFor(() => expect(result.current?.offer_id).toBe(12));
+  rerender({ ...working, items: [item("agent_chat", "ask:4", {
+    askQuestion: { ...question, resolved_at: "2026-11-06T00:01:00Z" } })] });
+  expect(result.current).toBeNull();
 });

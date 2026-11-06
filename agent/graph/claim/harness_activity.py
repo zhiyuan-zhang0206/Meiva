@@ -39,12 +39,14 @@ class HarnessTurnProjector:
         clock: Clock,
         non_human_wake: bool = False,
         explicit_visibility: bool = False,
+        delivery_mode: str | None = None,
     ) -> None:
         self._checkpoint = checkpoint
         self._next_idx = self._base_idx = self._committed_count = base_idx
         self._clock = clock
         self._non_human_wake = non_human_wake
         self._explicit_visibility = explicit_visibility
+        self._delivery_mode = delivery_mode
         self.invalid_reply_visibility = False
         self._activity_started = clock.now()
         self._text_started = self._activity_started
@@ -208,6 +210,7 @@ class HarnessTurnProjector:
             text,
             non_human_wake=self._non_human_wake,
             explicit_visibility=self._explicit_visibility,
+            delivery_mode=self._delivery_mode,
         )
 
     def _new_chat(self, text: str, now: datetime, *, pending: bool = False) -> TimelineItem:

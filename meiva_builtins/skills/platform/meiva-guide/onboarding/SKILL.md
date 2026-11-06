@@ -40,7 +40,7 @@ Onboarding is finished when **all four** are true:
 2. One concrete piece of work is underway: a task created, a worker
    spawned, or a schedule set.
 3. The user knows the two ways to reach you — the live dialog and
-   `meiva.ui.notify` — and which one fires when.
+   `meiva.ui.ask` — and which one fires when.
 4. Every preference you asked about is written down, so the user never
    answers the same question twice.
 
@@ -60,9 +60,9 @@ depends on the answer:
 
 1. **Language** — which language should every agent use when talking to
    you?
-2. **Notification channel** — live replies in the dialog; async
-   `meiva.ui.notify` when you are away. Which kinds of things deserve
-   `require_response` (decisions only you can make)?
+2. **Questions and updates** — Ask collects decisions; the configured
+   publish/text protocol delivers useful results. Establish which decisions
+   require the user and which work can proceed under existing authorization.
 3. **Timezone** — schedules, reminders, and deadlines anchor to this.
 4. **Update rhythm** — how fast the cluster takes updates (`meiva cluster
    update`): every release, on a schedule, or manual; plus maintenance

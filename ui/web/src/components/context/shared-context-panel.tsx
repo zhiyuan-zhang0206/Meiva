@@ -1,5 +1,6 @@
 "use client";
 
+import { PendingUserMessages } from "@/components/user-delivery/pending-messages";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ScanSearch } from "lucide-react";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, QUESTION_REGION_MAX_HEIGHT_CLASS } from "@/lib/layout/layout";
@@ -101,6 +102,7 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
           <InspectorPanel agentId={agentId} />
         </div>
       )}
+      <PendingUserMessages agentId={agentId} />
       {noticesFailed && <p role="status" className="shrink-0 border-t border-border/60 px-5 py-2 text-xs text-muted-foreground">{t("noticesUnavailable")}</p>}
       {notice && (
         <section data-testid="notice-region" className="shrink-0 border-t border-border/60" aria-label={t("notification")}>

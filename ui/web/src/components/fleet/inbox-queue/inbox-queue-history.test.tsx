@@ -127,6 +127,7 @@ function agent(over: {
     supports_vision: true,
     awaiting_response_count: (over.notices_awaiting_response ?? []).length, highest_notice_priority: (over.notices_awaiting_response ?? [])[0]?.priority ?? null,
     unread_notice_count: 0,
+    unread_user_message_count: 0,
     heartbeat_paused_until: null,
     liveness_state: "online",
   };
@@ -195,7 +196,7 @@ function renderQueue(
 }
 
 function listTitles(): string[] {
-  const list = screen.getByRole("list", { name: /inbox queue/i });
+  const list = screen.getByRole("list", { name: /ask queue/i });
   return within(list)
     .getAllByRole("button")
     .map((b) => b.querySelector('[data-testid="notice-title"]')?.textContent ?? "")
@@ -256,7 +257,7 @@ describe("InboxQueue — resolved history (collapsed disclosure)", () => {
     vi.setSystemTime(new Date("2026-06-18T10:00:00Z"));
     renderQueue([agent({ agent_id: 1 })]);
     fireEvent.click(screen.getByRole("button", { name: /Resolved/ }));
-    const list = screen.getByRole("list", { name: /inbox queue/i });
+    const list = screen.getByRole("list", { name: /ask queue/i });
     const row = within(list).getByText("old notice").closest("button");
     expect(row?.textContent).toContain("worker");
     expect(row?.textContent).toContain("1d ago");
@@ -404,8 +405,8 @@ describe("InboxQueue — error presentation (audit C3)", () => {
   it("open feed failure with nothing loaded → failure screen, not the empty state", async () => {
     setFeed({ cold: true, openFails: true });
     renderQueue([agent({ agent_id: 1 })]);
-    await screen.findByText("Failed to load inbox.");
-    expect(screen.getByText("Failed to load inbox.")).not.toBeNull();
+    await screen.findByText("Failed to load questions.");
+    expect(screen.getByText("Failed to load questions.")).not.toBeNull();
     expect(screen.queryByText(/Nothing needs your attention/)).toBeNull();
   });
 
@@ -427,8 +428,8 @@ describe("InboxQueue — error presentation (audit C3)", () => {
   it("any cold failure with nothing at all loaded → failure screen", async () => {
     setFeed({ cold: true, historyFails: true });
     renderQueue([agent({ agent_id: 1 })]);
-    await screen.findByText("Failed to load inbox.");
-    expect(screen.getByText("Failed to load inbox.")).not.toBeNull();
+    await screen.findByText("Failed to load questions.");
+    expect(screen.getByText("Failed to load questions.")).not.toBeNull();
   });
 
   it("first load in flight → Loading, not the empty state", () => {
@@ -452,7 +453,7 @@ describe("InboxQueue — agent live-page entry", () => {
   it("a queue row links to the agent's live page (fleet-wide, no per-row fetch)", () => {
     setFeed({ pages: [mkPage({ agent_id: 7, name: "dash", url: "http://host/dash" })], awaiting: [n({ id: 99, title: "Q?" })] });
     renderQueue([agent({ agent_id: 7, label: "lead" })]);
-    const list = screen.getByRole("list", { name: /inbox queue/i });
+    const list = screen.getByRole("list", { name: /ask queue/i });
     const link = within(list).getByRole("link", { name: /open live page/i });
     expect(link.getAttribute("href")).toBe("http://host/dash");
     expect(link.getAttribute("target")).toBe("_blank");
@@ -462,7 +463,7 @@ describe("InboxQueue — agent live-page entry", () => {
     setFeed({ pages: [mkPage({ agent_id: 2, name: "other" })] });
     setFeed({ awaiting: [n({ id: 99, title: "Q?" })] });
     renderQueue([agent({ agent_id: 7, label: "lead" })]);
-    const list = screen.getByRole("list", { name: /inbox queue/i });
+    const list = screen.getByRole("list", { name: /ask queue/i });
     expect(within(list).queryByRole("link", { name: /open live page/i })).toBeNull();
   });
 

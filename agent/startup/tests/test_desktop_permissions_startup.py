@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -32,7 +31,6 @@ from base.host.converge.screen_capture import (
 from base.host.converge.screen_capture import (
     write_status as write_screen_capture_status,
 )
-from meiva.sdk_surface import plugins
 
 
 @pytest.fixture
@@ -54,35 +52,30 @@ class _FakeUI:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
 
-    def notify(self, **kwargs: object) -> int:
+    def ask(self, **kwargs: object) -> int:
         self.calls.append(kwargs)
         return 1
 
 
 class _FailingUI:
-    def notify(self, **kwargs: object) -> int:
+    def ask(self, **kwargs: object) -> int:
         raise RuntimeError("gateway unreachable")
 
 
 @pytest.fixture
-def fake_ui() -> Iterator[_FakeUI]:
-    ui = _FakeUI()
-    added = plugins.install_member("startup-test", "ui", "notify", ui.notify)
-    yield ui
-    plugins.uninstall(added)
+def fake_ui() -> _FakeUI:
+    return _FakeUI()
 
 
 @pytest.fixture
-def failing_ui() -> Iterator[None]:
-    added = plugins.install_member("startup-test", "ui", "notify", _FailingUI().notify)
-    yield
-    plugins.uninstall(added)
+def failing_ui() -> _FailingUI:
+    return _FailingUI()
 
 
 class TestNotifyDesktopPermissionsAtStartup:
     @pytest.mark.asyncio
     async def test_noop_when_no_status_file(self, fake_ui: _FakeUI, home: Path):
-        await notify_desktop_permissions_at_startup(home)
+        await notify_desktop_permissions_at_startup(home, ask=fake_ui.ask)
 
         assert fake_ui.calls == []
 
@@ -92,13 +85,12 @@ class TestNotifyDesktopPermissionsAtStartup:
     ):
         write_screen_capture_status(home, _SCREEN_FAULT)
 
-        await notify_desktop_permissions_at_startup(home)
+        await notify_desktop_permissions_at_startup(home, ask=fake_ui.ask)
 
         assert fake_ui.calls == [
             {
                 "title": _SCREEN_FAULT.headline,
                 "content": _SCREEN_FAULT.diagnostic,
-                "priority": "P1",
             }
         ]
         assert read_screen_capture_status(home) is None
@@ -108,13 +100,12 @@ class TestNotifyDesktopPermissionsAtStartup:
     async def test_accessibility_only_fault_notifies_and_clears(self, fake_ui: _FakeUI, home: Path):
         write_accessibility_status(home, _ACCESSIBILITY_FAULT)
 
-        await notify_desktop_permissions_at_startup(home)
+        await notify_desktop_permissions_at_startup(home, ask=fake_ui.ask)
 
         assert fake_ui.calls == [
             {
                 "title": _ACCESSIBILITY_FAULT.headline,
                 "content": _ACCESSIBILITY_FAULT.diagnostic,
-                "priority": "P1",
             }
         ]
         assert read_accessibility_status(home) is None
@@ -124,7 +115,7 @@ class TestNotifyDesktopPermissionsAtStartup:
         write_screen_capture_status(home, _SCREEN_FAULT)
         write_accessibility_status(home, _ACCESSIBILITY_FAULT)
 
-        await notify_desktop_permissions_at_startup(home)
+        await notify_desktop_permissions_at_startup(home, ask=fake_ui.ask)
 
         assert fake_ui.calls == [
             {
@@ -133,18 +124,17 @@ class TestNotifyDesktopPermissionsAtStartup:
                     f"{_SCREEN_FAULT.headline}: {_SCREEN_FAULT.diagnostic}\n\n"
                     f"{_ACCESSIBILITY_FAULT.headline}: {_ACCESSIBILITY_FAULT.diagnostic}"
                 ),
-                "priority": "P1",
             }
         ]
         assert read_screen_capture_status(home) is None
         assert read_accessibility_status(home) is None
 
     @pytest.mark.asyncio
-    async def test_notify_failure_restores_both_claims(self, failing_ui: None, home: Path):
+    async def test_notify_failure_restores_both_claims(self, failing_ui: _FailingUI, home: Path):
         write_screen_capture_status(home, _SCREEN_FAULT)
         write_accessibility_status(home, _ACCESSIBILITY_FAULT)
 
-        await notify_desktop_permissions_at_startup(home)
+        await notify_desktop_permissions_at_startup(home, ask=failing_ui.ask)
 
         assert read_screen_capture_status(home) == _SCREEN_FAULT
         assert read_accessibility_status(home) == _ACCESSIBILITY_FAULT
@@ -161,13 +151,12 @@ class TestNotifyDesktopPermissionsAtStartup:
             screen_capture_status_file_path(home).with_suffix(".processing")
         )
 
-        await notify_desktop_permissions_at_startup(home)
+        await notify_desktop_permissions_at_startup(home, ask=fake_ui.ask)
 
         assert fake_ui.calls == [
             {
                 "title": _ACCESSIBILITY_FAULT.headline,
                 "content": _ACCESSIBILITY_FAULT.diagnostic,
-                "priority": "P1",
             }
         ]
         assert screen_capture_status_file_path(home).with_suffix(".processing").exists()
@@ -180,7 +169,7 @@ class TestNotifyDesktopPermissionsAtStartup:
         write_screen_capture_status(home, ScreenCaptureStatus(state=ScreenCaptureState.AVAILABLE))
         write_accessibility_status(home, AccessibilityStatus(state=AccessibilityState.GRANTED))
 
-        await notify_desktop_permissions_at_startup(home)
+        await notify_desktop_permissions_at_startup(home, ask=fake_ui.ask)
 
         assert fake_ui.calls == []
         assert read_screen_capture_status(home) is None

@@ -65,6 +65,7 @@ function rosterRow(agent_id: number, over: Partial<AgentRow> = {}): AgentRow {
     liveness_state: "online",
     awaiting_response_count: 0, highest_notice_priority: null,
     unread_notice_count: 0,
+    unread_user_message_count: 0,
     heartbeat_paused_until: null,
     ...over,
   };

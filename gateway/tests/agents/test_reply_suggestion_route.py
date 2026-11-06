@@ -60,9 +60,12 @@ def test_the_route_returns_the_services_suggestion(harness: Harness) -> None:
     response = post(harness)
 
     assert response.status_code == 200
-    assert response.json() == {
+    body = response.json()
+    assert isinstance(body["offer_id"], int) and body["offer_id"] > 0
+    assert body == {
         "suggestions": ["Yes, go ahead.", "Wait, explain the plan first."],
         "reason": None,
+        "offer_id": body["offer_id"],
     }
     assert len(harness.wire.gate_receipts()) == 1
 
@@ -75,14 +78,14 @@ def test_the_route_reports_why_there_is_no_suggestion_as_a_200(
     response = post(harness)
 
     assert response.status_code == 200
-    assert response.json() == {"suggestions": [], "reason": "not_useful"}
+    assert response.json() == {"suggestions": [], "reason": "not_useful", "offer_id": None}
 
 
 def test_the_switch_in_the_gateways_own_config_turns_the_route_off(harness: Harness) -> None:
     response = post(harness, reply_suggestion_enabled=False)
 
     assert response.status_code == 200
-    assert response.json() == {"suggestions": [], "reason": "disabled"}
+    assert response.json() == {"suggestions": [], "reason": "disabled", "offer_id": None}
     assert harness.wire.gate_receipts() == []
 
 

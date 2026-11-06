@@ -55,6 +55,7 @@ class AgentCard(AgentLineage):
     observation: AgentObservation
     awaiting_response_count: int
     highest_notice_priority: Priority | None
+    unread_user_message_count: int = 0
     unread_notice_count: int
     heartbeat_paused_until: datetime | None
     open_impersonation_session_id: int | None
@@ -98,6 +99,7 @@ _CARD_COLUMNS = """
     a.last_launch_failure_reason, a.last_launch_failure_at,
     attention.awaiting_response_count, attention.highest_notice_priority,
     fyi.unread_notice_count,
+    deliveries.unread_user_message_count,
     open_impersonation.session_id AS open_impersonation_session_id,
     open_impersonation.status AS open_impersonation_status
 """
@@ -115,6 +117,10 @@ _CARD_FROM = """
         FROM agent_notices
         WHERE agent_id = a.id AND require_response AND resolved_at IS NULL
     ) attention ON true
+    LEFT JOIN LATERAL (
+        SELECT count(*) FILTER (WHERE read_at IS NULL) AS unread_user_message_count
+        FROM agent_user_messages WHERE agent_id=a.id AND content IS NOT NULL
+    ) deliveries ON true
     LEFT JOIN LATERAL (
         SELECT count(*) AS unread_notice_count FROM agent_notices
         WHERE agent_id = a.id AND NOT require_response AND resolved_at IS NULL

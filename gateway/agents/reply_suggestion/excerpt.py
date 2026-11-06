@@ -118,3 +118,19 @@ def _tail(text: str, tokens: int) -> str:
         else:
             high = middle - 1
     return text[len(text) - low :] if low else ""
+
+
+def enrich_excerpt(
+    conversation: str, context: Sequence[tuple[str, str]], memory: str, budget: int
+) -> str:
+    # meiva:note
+    # Reserve room for each independent source within the total input budget.
+    parts = [
+        (label, text)
+        for label, text in [("Conversation", conversation), *context, ("Memory", memory)]
+        if text
+    ]
+    if len(parts) == 1:
+        return conversation
+    share = max(1, (budget - estimate_tokens(_SEPARATOR) * (len(parts) - 1)) // len(parts))
+    return _SEPARATOR.join(_fit([(label, text)], share) for label, text in parts)

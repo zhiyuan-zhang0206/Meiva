@@ -254,6 +254,22 @@ END $$;
 -- bounded worklist). unread_notice_count and the FYI feed remain for the rows
 -- written before FYI stopped being accepted (2026-10-19); new writes are all
 -- require_response, so nothing new lands in that feed.
+CREATE TABLE IF NOT EXISTS agent_user_messages (
+    id BIGSERIAL PRIMARY KEY,
+    agent_id BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    source_key TEXT NOT NULL,
+    mode TEXT NOT NULL CHECK (mode IN ('naive', 'prefix', 'sdk')),
+    content TEXT,
+    suggestions JSONB NOT NULL CHECK (jsonb_typeof(suggestions) = 'array'),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    read_at TIMESTAMPTZ,
+    UNIQUE (agent_id, source_key),
+    CHECK (content IS NULL OR length(btrim(content)) > 0),
+    CHECK (content IS NOT NULL OR suggestions = '[]'::jsonb)
+);
+CREATE INDEX IF NOT EXISTS agent_user_messages_pending ON agent_user_messages (agent_id, id)
+    WHERE content IS NOT NULL AND read_at IS NULL;
+
 CREATE TABLE agent_notices (
     id              BIGSERIAL PRIMARY KEY,
     local_id        INTEGER NOT NULL,
@@ -281,7 +297,7 @@ CREATE TABLE agent_notices (
     -- claim, and `internal` for the in-process writers that present none.
     -- NULL = written before the column existed.
     source_verified_by TEXT,
-    expire_at       TIMESTAMPTZ NOT NULL,
+    expire_at       TIMESTAMPTZ,
     CONSTRAINT agent_notices_question_requires_response
         CHECK (question IS NULL OR (jsonb_typeof(question) = 'object' AND require_response)),
     CONSTRAINT agent_notices_answer_requires_question
@@ -3181,3 +3197,20 @@ COMMENT ON COLUMN alert_escalations.shadow_escalations IS
 
 COMMENT ON COLUMN alert_escalations.cooldown_until IS
     'No escalation before this instant. The rate limit is stored here rather than in memory so a restart cannot reset it.';
+
+CREATE TABLE reply_suggestion_offers (
+    id BIGSERIAL PRIMARY KEY,
+    agent_id BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    context TEXT NOT NULL,
+    suggestions JSONB NOT NULL CHECK (jsonb_typeof(suggestions)='array'),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE reply_suggestion_feedback (
+    id BIGSERIAL PRIMARY KEY,
+    offer_id BIGINT NOT NULL REFERENCES reply_suggestion_offers(id) ON DELETE CASCADE,
+    candidate TEXT NOT NULL,
+    outcome TEXT NOT NULL CHECK (outcome IN ('accepted','edited','rejected')),
+    sent_text TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK ((outcome='rejected') = (sent_text IS NULL))
+);

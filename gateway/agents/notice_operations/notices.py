@@ -62,7 +62,7 @@ class _ResolveTarget:
     require_response: bool
     resolved_at: datetime | None
     question: object
-    expire_at: datetime
+    expire_at: datetime | None
     created_at: datetime
 
 
@@ -425,6 +425,20 @@ async def post_notice_create(
     # The server's own record of the credential it verified, never the caller's claim:
     # the path's agent_id says who the caller claims to be, this says what proved it.
     source_verified_by = request_inbound_provenance(request).source_verified_by
+    from base.agents.to_user.delivery.store import delivery_mode
+    from base.api_contracts.user_delivery import UserDeliveryMode
+
+    def check_mode() -> None:
+        with gateway_state(request).db_pool.connection() as conn:
+            if (
+                delivery_mode(conn, agent_id, gateway_config(request).user_delivery_mode)
+                is UserDeliveryMode.SDK
+            ):
+                raise HTTPException(
+                    409, "notify is disabled in SDK delivery mode; use meiva.ui.publish"
+                )
+
+    await asyncio.to_thread(check_mode)
 
     def _create(
         pool: ConnectionPool,
