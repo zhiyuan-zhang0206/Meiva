@@ -119,34 +119,51 @@ def _behind(facts: SlotFacts) -> str:
 # because it is the one number a reader can check against the workflow's own run list: a card whose
 # count matches what GitHub shows is about a cron that stopped, and one that does not is about a
 # reading that failed.
-def _arrivals(facts: SlotFacts, now: datetime) -> tuple[int, int]:
-    window_start = now - RELEASE_GATE_SLOT_LOOKBACK
-    observed = sum(1 for started in facts.scheduled_starts if started >= window_start)
-    return observed, int(RELEASE_GATE_SLOT_LOOKBACK / facts.cadence)
+# meiva:note
+# How many scheduled starts the lookback should have held and did, counted back from the newest
+# start the round read rather than from `now`. Anchoring the window to the observation keeps the
+# number a function of what the card is about: counted from `now`, the same missing slot states a
+# different count every round, and a card whose text moves under one key cannot be created twice.
+def _arrivals(facts: SlotFacts) -> tuple[int, int]:
+    expected = int(RELEASE_GATE_SLOT_LOOKBACK / facts.cadence)
+    anchor = facts.last_schedule_start
+    if anchor is None:
+        return 0, expected
+    window_start = anchor - RELEASE_GATE_SLOT_LOOKBACK
+    observed = sum(1 for started in facts.scheduled_starts if window_start <= started <= anchor)
+    return observed, expected
 
 
-def _card(facts: SlotFacts, age: timedelta, *, threshold: timedelta, now: datetime) -> Card:
+# meiva:note
+# The card one missing slot opens. `now` decided that the slot is missing; it is not an input here,
+# because everything the card says has to hold for as long as the gap lasts: the newest scheduled
+# start and the arrivals before it do, and "9.5h ago" does not.
+def _card(facts: SlotFacts, *, threshold: timedelta, gap_id: str) -> Card:
     newest = (
         facts.last_schedule_start.isoformat()
         if facts.last_schedule_start is not None
         else "no scheduled run on record"
     )
-    hours = age.total_seconds() / 3600
-    observed, expected = _arrivals(facts, now)
+    since = (
+        facts.last_schedule_start.isoformat()
+        if facts.last_schedule_start is not None
+        else "this watch's first round"
+    )
+    observed, expected = _arrivals(facts)
     return Card(
         fingerprint=FINGERPRINT,
-        title=f"release-gate has not run on its schedule for {hours:.1f}h",
+        title=f"release-gate has not run on its schedule since {since}",
         body=(
             "**This card publishes nothing.** No tag is minted, `channel/latest` does not move, "
             "and no release is created until a human runs the gate.\n\n"
             f"{_behind(facts)}\n\n"
-            f"The newest scheduled `release-gate` run started at {newest}; that is {hours:.1f}h ago "
-            f"(threshold {threshold.total_seconds() / 3600:.0f}h).\n\n"
+            f"The newest scheduled `release-gate` run started at {newest}; the threshold is "
+            f"{threshold.total_seconds() / 3600:.0f}h.\n\n"
             "This reports the schedule, not the code: `main` has had no full-population check in "
             "that window, so a red merged in it is invisible rather than absent.\n\n"
-            f"In the {RELEASE_GATE_SLOT_LOOKBACK.total_seconds() / 3600:.0f}h to "
-            f"{now.isoformat()}, this {facts.cadence.total_seconds() / 3600:.0f}-hourly cron should "
-            f"have started {expected} run(s) and started {observed}. Confirm that count against the "
+            f"In the {RELEASE_GATE_SLOT_LOOKBACK.total_seconds() / 3600:.0f}h ending at that run, "
+            f"this {facts.cadence.total_seconds() / 3600:.0f}-hourly cron should have started "
+            f"{expected} run(s) and started {observed}. Confirm that count against the "
             "workflow's own run list before acting on this card: it is the difference between a "
             "cron that stopped and a round that could not read.\n\n"
             "**What to run instead.** `gh workflow run main-typecheck.yml --ref main` takes about "
@@ -162,6 +179,7 @@ def _card(facts: SlotFacts, age: timedelta, *, threshold: timedelta, now: dateti
             "the five most recent gaps.\n\n"
             "Closes when a scheduled run appears again."
         ),
+        episode=gap_id,
     )
 
 
@@ -198,7 +216,7 @@ def decide_slot(
             note=f"release-gate slot {age.total_seconds() / 3600:.1f}h late, nothing uncertified",
         )
     return SlotDecision(
-        card=_card(facts, age, threshold=stale_after, now=now),
+        card=_card(facts, threshold=stale_after, gap_id=gap_id),
         gap_id=gap_id,
         note=f"release-gate slot missing: newest scheduled run {age.total_seconds() / 3600:.1f}h ago",
     )

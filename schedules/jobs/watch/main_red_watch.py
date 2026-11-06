@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
@@ -47,6 +48,7 @@ __all__ = [
     "LivenessStream",
     "SlotLedger",
     "WatchState",
+    "card_operation_key",
     "load_state",
     "round_line",
     "save_state",
@@ -55,6 +57,16 @@ __all__ = [
 ]
 
 STATE_FILE = "main-red-watch.json"
+
+
+# meiva:note
+# The create key for one card: what it watches and which occurrence it reports, hashed to a fixed
+# width so a long test id cannot push the key past the registry's 128-character limit. The text is
+# deliberately not an input -- a card whose wording moves within one occurrence must replay instead
+# of failing, and only a new occurrence may claim a new key.
+def card_operation_key(card: Card) -> str:
+    material = f"{card.fingerprint}\x00{card.episode}".encode()
+    return f"main-red-{hashlib.sha256(material).hexdigest()[:24]}"
 
 
 # meiva:note
@@ -234,6 +246,10 @@ def _confirmed_card(
                 job_names=run.job_names,
                 candidate_commits=candidates,
             ),
+            # meiva:note
+            # This red's own start, not the sha: a test that goes red again after a green is a new
+            # occurrence of the same fingerprint, and the old card's key must not claim it.
+            episode=named.first_seen_at.isoformat(),
         ),
         note,
     )

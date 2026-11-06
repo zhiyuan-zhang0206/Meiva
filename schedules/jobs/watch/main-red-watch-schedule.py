@@ -27,7 +27,13 @@ from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.paths.home import resolve_meiva_home
 from schedules.jobs.entry import cluster_timezone, open_schedule_entry
 from schedules.jobs.loop import CronSchedule, Trigger, run_loop
-from schedules.jobs.watch.main_red_watch import LivenessStream, STATE_FILE, slot_round, watch_once
+from schedules.jobs.watch.main_red_watch import (
+    LivenessStream,
+    STATE_FILE,
+    card_operation_key,
+    slot_round,
+    watch_once,
+)
 from schedules.jobs.telemetry_event import emit_system_event
 from schedules.plans.schedule_identity import parse_schedule_id
 from schedules.jobs.watch.main_red_liveness import liveness_once
@@ -339,15 +345,15 @@ def _open_card(card: Card, report_agent: int) -> int:
             parent=1,
             owner=report_agent,
             priority="P1",
-            operation_key=f"main-red-{card.fingerprint}",
+            operation_key=card_operation_key(card),
         ).id
     )
 
 
 # meiva:note
-# The liveness card is found by its title, not by an operation key: its body carries the age of the
-# last round, so the next `create` would not be the same call. The title is the one field that does
-# not move, and it lives next to the card that uses it.
+# The liveness card closes by title because a closed card is a statement about the watch, not about
+# one occurrence of it: whichever round lands again answers the report, and `_open_card` has
+# already made the next stale period a card of its own.
 def _close_liveness_card(report_agent: int) -> None:
     for task in meiva.tasks.list(owner=report_agent, status="in_progress"):
         if task.title == STALE_WATCH_TITLE:
