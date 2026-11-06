@@ -10,21 +10,18 @@ import { FLEX, MIN_W_0 } from "@/lib/layout/layout";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 
 import { CopyButton } from "./buttons";
-import { ItemTimestamp } from "./timestamp";
 import {
-  CARD_FOOTER_CLS,
   type CardConfig,
   CardHeader,
   MessageCard,
   messageCardConfig,
 } from "./card";
-import { copyPayloadFor, ItemView } from "./item";
+import { ItemView } from "./item";
 import { ItemErrorBoundary } from "./item-error-boundary";
 import { inboundKind, isSilentTimelineItem } from "./model/runs";
 
 // meiva:note
-// How long a touch keeps the chrome band up: long enough to read the time and
-// reach Copy, short enough that it is gone before the next message is read.
+// How long a touch keeps the secondary message's Copy action visible.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
 const TOUCH_REVEAL_MS = 6000;
 
@@ -43,10 +40,9 @@ export function cardConfigFor(item: BackendTimelineItem): CardConfig | null {
 
 // meiva:note
 // Memoized timeline row renderer: primary human messages render as right-aligned
-// bubbles, user-facing agent_chat renders as unboxed canvas Markdown prose (both
-// sharing right-aligned CARD_FOOTER_CLS below the block), secondary items render
-// as collapsible MessageCard rows inside TurnBlocks, and config === null renders
-// bare ephemeral markers.
+// bubbles, user-facing agent_chat renders as unboxed canvas Markdown prose,
+// secondary items render as collapsible MessageCard rows inside TurnBlocks,
+// and config === null renders bare ephemeral markers.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
 export const TimelineRow = memo(function TimelineRow({
   item,
@@ -77,8 +73,8 @@ export const TimelineRow = memo(function TimelineRow({
   );
 
   // meiva:note
-  // Coarse touch pointers lack hover, so touching a primary message or copyable
-  // secondary card reveals its chrome band temporarily and hides it again after TOUCH_REVEAL_MS.
+  // Coarse touch pointers lack hover, so touching a copyable secondary
+  // card reveals Copy temporarily.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
   const [touchRevealed, setTouchRevealed] = useState(false);
   const revealTimer = useRef<number | null>(null);
@@ -107,14 +103,6 @@ export const TimelineRow = memo(function TimelineRow({
     );
   }
 
-  // meiva:note
-  // Top-level primary messages (human inbound_chat bubble + user-facing agent_chat
-  // canvas prose) mount the right-aligned hover chrome band below the message
-  // carrying the timestamp and Copy. Secondary work items inside TurnBlocks omit
-  // below-card timestamps and float a hover-revealed Copy pill inside the
-  // expanded body's bottom-right corner when `config.copy` is true (inter-agent
-  // messages and non-user-facing agent_chat) so inter-card spacing stays uniform.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
   const isUploadRow =
     item.kind === "inbound_chat" &&
     (item.source === "system:upload" || Boolean(item.files?.length));
@@ -122,26 +110,10 @@ export const TimelineRow = memo(function TimelineRow({
     item.kind === "inbound_chat" && (inboundKind(item.source) === "human" || isUploadRow);
   const isAgentProse =
     item.kind === "agent_chat" && item.user_facing !== false;
-  const isPrimaryMessage = isHumanBubble || isAgentProse;
 
   if (isSilentTimelineItem(item)) {
     return null;
   }
-
-  const stamp =
-    isPrimaryMessage && config.showTimestamp && item.created_at ? (
-      <ItemTimestamp iso={item.created_at} />
-    ) : null;
-  const canCopy = (isPrimaryMessage ? !item.partial : copyable) && config.copy;
-  const copy = canCopy ? <CopyButton text={copyPayloadFor(item)} compact /> : null;
-  // meiva:note
-  // Delivery state shares the reserved chrome band. A body-level read control
-  // changes row height when acknowledged or replaced by compact history, which
-  // can re-arm bottom following and displace the reader's compact anchor.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
-  const delivery = isAgentProse && item.userDelivery ? <MessageActions message={item.userDelivery} /> : null;
-  const unread = item.userDelivery?.read_at === null;
-  const primaryFooter = isPrimaryMessage && (stamp ?? copy ?? delivery) ? <>{delivery}{stamp}{copy}</> : null;
 
   if (isHumanBubble) {
     return (
@@ -151,8 +123,7 @@ export const TimelineRow = memo(function TimelineRow({
         data-display-rank={displayRank}
         data-message-role="user"
         aria-live="off"
-        className={cn("timeline-item", primaryFooter ? "group/msgcard" : null)}
-        onPointerDown={primaryFooter ? revealForTouch : undefined}
+        className="timeline-item"
       >
         <ItemErrorBoundary resetKey={item.payload}>
           <div className={cn("justify-end", FLEX, MIN_W_0)}>
@@ -169,14 +140,6 @@ export const TimelineRow = memo(function TimelineRow({
             </div>
           </div>
         </ItemErrorBoundary>
-        {primaryFooter ? (
-          <div
-            data-testid="card-chrome"
-            className={cn(CARD_FOOTER_CLS, (touchRevealed || unread) && "pointer-events-auto opacity-100")}
-          >
-            {primaryFooter}
-          </div>
-        ) : null}
       </div>
     );
   }
@@ -189,8 +152,7 @@ export const TimelineRow = memo(function TimelineRow({
         data-display-rank={displayRank}
         data-message-role="assistant"
         aria-live="off"
-        className={cn("timeline-item", primaryFooter ? "group/msgcard" : null)}
-        onPointerDown={primaryFooter ? revealForTouch : undefined}
+        className="timeline-item"
       >
         <ItemErrorBoundary resetKey={item.payload}>
           <div
@@ -200,13 +162,8 @@ export const TimelineRow = memo(function TimelineRow({
             <ItemView item={item} streaming={streaming} />
           </div>
         </ItemErrorBoundary>
-        {primaryFooter ? (
-          <div
-            data-testid="card-chrome"
-            className={cn(CARD_FOOTER_CLS, (touchRevealed || unread) && "pointer-events-auto opacity-100")}
-          >
-            {primaryFooter}
-          </div>
+        {item.userDelivery?.read_at === null ? (
+          <MessageActions message={item.userDelivery} showReadButton={false} />
         ) : null}
       </div>
     );
@@ -214,7 +171,9 @@ export const TimelineRow = memo(function TimelineRow({
 
   const showExpandedBody =
     expanded && !(item.kind === "agent_reasoning" && item.payload === "" && !item.interrupted);
-  const secondaryCopy = showExpandedBody ? copy : null;
+  const secondaryCopy = showExpandedBody && copyable && config.copy
+    ? <CopyButton text={item.payload} />
+    : null;
 
   return (
     <div

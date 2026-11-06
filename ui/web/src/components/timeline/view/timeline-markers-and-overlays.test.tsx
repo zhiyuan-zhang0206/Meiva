@@ -290,7 +290,7 @@ describe("ItemView: inbound_compact_*", () => {
 });
 
 describe("CopyButton", () => {
-  it("partial agent_chat does not show CopyButton (only final is copyable)", () => {
+  it("partial primary agent_chat carries no Copy button", () => {
     render(
       <TimelineView
         items={[
@@ -300,13 +300,13 @@ describe("CopyButton", () => {
     );
     expect(screen.queryByLabelText("Copy message")).toBeNull();
   });
-  it("final agent_chat shows CopyButton (icon-only, aria-label)", () => {
+  it("final primary agent_chat carries no Copy button", () => {
     render(
       <TimelineView
         items={[makeItem({ kind: "agent_chat", payload: "done" })]}
       />,
     );
-    expect(screen.getByLabelText("Copy message")).toBeTruthy();
+    expect(screen.queryByLabelText("Copy message")).toBeNull();
   });
 });
 

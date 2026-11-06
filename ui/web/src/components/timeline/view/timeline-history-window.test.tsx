@@ -171,7 +171,7 @@ describe("deep history DOM window", () => {
 
   it("keeps keyboard focus in the log when a focused card leaves the window", () => {
     const items = Array.from({ length: 1200 }, (_, index) => makeItem({
-      item_id: `${index + 1}.0`, kind: "agent_chat", payload: `Reply ${index + 1}`,
+      item_id: `${index + 1}.0`, kind: "agent_chat", payload: `Reply ${index + 1}`, user_facing: index !== 1199,
     }));
     render(<TimelineView items={items} threadKey="focus-window" />);
     const viewport = screen.getByTestId("scroll-viewport");
@@ -180,11 +180,11 @@ describe("deep history DOM window", () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
       if (this === viewport) return { top: 0, bottom: 600, height: 600 } as DOMRect;
       const group = this.matches("[data-virtual-group]") ? this : this.closest<HTMLElement>("[data-virtual-group]");
-      const id = group?.querySelector<HTMLElement>(".timeline-item")?.dataset.itemId;
+      const id = group?.querySelector<HTMLElement>(".timeline-item, [data-turn-id]")?.dataset.itemId;
       const top = id ? 52 + (Number.parseInt(id) - 1) * 92 - viewport.scrollTop : 0;
       return { top, bottom: top + 80, height: 80 } as DOMRect;
     });
-    const button = viewport.querySelector<HTMLElement>('.timeline-item[data-item-id="1200.0"] button')!;
+    const button = viewport.querySelector<HTMLElement>('[data-turn-id="1200.0"] [data-testid="turn-toggle"]')!;
     button.focus();
     expect(document.activeElement).toBe(button);
     act(() => { viewport.scrollTop = 0; fireEvent.scroll(viewport); });

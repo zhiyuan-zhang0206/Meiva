@@ -35,20 +35,11 @@ With the on-screen keyboard up the composer stays inside the visible band: the v
 
 Every expanded `TurnBlock` stays in normal document flow without `position: sticky` on either its turn header (`turn-toggle`) or its child detail headers (`card-toggle`), and wraps its indented body in a shared auto-hiding `ScrollArea` whose viewport (`turn-scroll-viewport`) is capped at 50% of the visible timeline message area (`--timeline-turn-max-h`), scrolling internally when child content exceeds that cap (`test_expanded_work_block_bounded_scroll_and_no_sticky`).
 
-One more suite drives the same stubbed page for a chrome measurement rather than a
-shell invariant: `test_work_block_chrome.py` opens `stubbed_home.work_block_items()`
-— a primary human message plus one work block of six expanded children — and
-asserts that the primary human message's timestamp sits inside every ancestor that
-clips it (`overflow` other than visible, or `content-visibility` paint containment)
-within 1px, while the work block's child rows mount neither below-card timestamps
-nor copy buttons. A primary `.timeline-item` pads its bottom by 1rem (16px) and
-hands that height back with a negative margin, so its hover chrome band sits
-unclipped inside row containment. The same file re-asserts the Copy scope —
-thinking, tool calls and tool output carry no copy control in the real DOM, a human
-message does — since the jsdom suite can only see the component tree. Both tests
-stub `/api/**` and the event stream even when `MEIVA_MOBILE_TEST_BASE_URL` points
-the suite at a deployed bundle: they measure that fixture, not the deployment's own
-data.
+`test_work_block_chrome.py` opens `stubbed_home.work_block_items()` and checks
+that the human and agent message rows have no floating footer. Its work block
+expands thinking, tool calls, and tool output to verify that those Details have
+no Copy control. The suite stubs `/api/**` and the event stream, including when
+`MEIVA_MOBILE_TEST_BASE_URL` points to a deployed bundle.
 
 Suite entry points and CI integration: [[tests/docs/tests.meiva.okf.md]].
 

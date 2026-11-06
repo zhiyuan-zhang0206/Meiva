@@ -14,7 +14,6 @@ import {
   AlertTriangle,
   Bell,
   Calendar,
-  CalendarClock,
   CircleDot,
   Clock,
   EyeOff,
@@ -150,13 +149,6 @@ export default function DisplaySettingsPage() {
           description="Show terminated agents (red status dot) in the sidebar; off shows only live agents"
           value={settings["display.show_terminated"] === true}
           onChange={(v) => setSetting("display.show_terminated", v)}
-        />
-        <ToggleRow
-          icon={CalendarClock}
-          label="Show weekday in timestamps"
-          description="Show the weekday in timeline card timestamps (e.g. [2026-05-06 Tue 16:56:29])"
-          value={settings["display.show_timestamp_weekday"] === true}
-          onChange={(v) => setSetting("display.show_timestamp_weekday", v)}
         />
         <RadioRow
           icon={Clock}

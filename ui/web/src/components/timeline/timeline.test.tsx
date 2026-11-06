@@ -107,10 +107,11 @@ describe("CopyButton click behavior", () => {
     const browser = fakeBrowser();
     render(
       <TimelineView
-        items={[makeItem({ kind: "agent_chat", payload: "to copy" })]}
+        items={[makeItem({ kind: "agent_chat", user_facing: false, payload: "to copy" })]}
       />,
       { browser },
     );
+    fireEvent.click(screen.getByTestId("turn-toggle"));
     fireEvent.click(screen.getByLabelText("Copy message"));
     await waitFor(() => expect(browser.actions.copied).toEqual(["to copy"]));
   });
@@ -119,10 +120,11 @@ describe("CopyButton click behavior", () => {
     const browser = fakeBrowser();
     render(
       <TimelineView
-        items={[makeItem({ kind: "agent_chat", payload: "fallback text" })]}
+        items={[makeItem({ kind: "agent_chat", user_facing: false, payload: "fallback text" })]}
       />,
       { browser },
     );
+    fireEvent.click(screen.getByTestId("turn-toggle"));
     fireEvent.click(screen.getByLabelText("Copy message"));
     await waitFor(() => expect(screen.getByLabelText("Copied")).toBeTruthy());
   });
