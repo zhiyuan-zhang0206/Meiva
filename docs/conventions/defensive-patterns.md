@@ -358,6 +358,31 @@ server holds only in memory. Read the error as the statement it is, then find th
 config that holds the wrong value.
 Evidence: [`docs/postmortems/0004`](../postmortems/0004-isolation-one-command-can-undo.md).
 
+### A secret you must inspect is a secret you must not print
+
+When the thing being inspected *is* the credential file — `unit.json`, `.env`, `manifests.json`, a
+pgbouncer `userlist` — report coordinates and shape, not bytes:
+
+- identify an occurrence by `sha256` prefix and byte offset, and compare occurrences by those;
+- ask a JSON file for its key list (`jq 'keys'`) instead of its contents;
+- report line numbers, lengths and key names, and substitute the value before printing any line
+  that needs context. `line[:120]` is not a redaction; it is a bet on where the value sits.
+
+Why: the leak is the record, not the reader's context window. Output written while investigating
+lands in `agent_host.log`, `events-<date>.jsonl` and the unit's `output.log`, so one `cat` makes
+three copies that rotation keeps for a week — and the search that reports a leak becomes a second
+occurrence of it. On 2026-11-06 a 401-byte fragment of a `unit.json`-shaped object sat in a unit's
+`output.log`, key order alphabetical, surrounded by one-byte lines: a pretty-printed read, not a
+model dump (those fields are pydantic `Secret` and render masked).
+
+Boundary: masking at the sink (`base/log/redaction.py`, mask-on-the-way-to-disk only) is the
+backstop; this rule is the primary control, because redaction recognises named shapes — a URL's
+userinfo password, a `token`/`secret`/`password` key, a `*_TOKEN=` assignment — and a file printed
+whole passes through it only where those shapes appear.
+
+The same constraint binds a scanner: the string a diagnostic searches for ends up in its own
+output, so a leak report quotes counts, positions and hashes, never the match.
+
 ### A mechanism that predicts the symptom is a hypothesis, not a diagnosis
 
 A causal story that accounts for what you observed is not thereby the cause —
