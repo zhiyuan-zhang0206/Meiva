@@ -11,7 +11,13 @@ import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 import { errMsg } from "@/lib/contracts/errors";
 
-export function MessageActions({ message }: { message: UserMessage }) {
+export function MessageActions({
+  message,
+  showReadButton = true,
+}: {
+  message: UserMessage;
+  showReadButton?: boolean;
+}) {
   const t = useTranslations("toUser");
   const api = useApi();
   const cache = useQueryClient();
@@ -39,7 +45,7 @@ export function MessageActions({ message }: { message: UserMessage }) {
     if (!visible || message.read_at !== null || !anchor.current || typeof IntersectionObserver === "undefined") return;
     let sent = false;
     const observer = new IntersectionObserver((entries) => {
-      if (sent || !entries.some((entry) => entry.isIntersecting)) return;
+      if (sent || !entries.some((entry) => entry.isIntersecting && entry.intersectionRatio === 1)) return;
       sent = true;
       observer.disconnect();
       const body = { action: "read" as const };
@@ -48,11 +54,19 @@ export function MessageActions({ message }: { message: UserMessage }) {
       if (!key) { key = api.newOperationKey(); operations.current.set(intent, key); }
       void api.resolveUserMessage(message.agent_id, message.id, body, key)
         .then(() => cache.invalidateQueries({ queryKey: ["user-messages", message.agent_id] }))
-        .catch((failure: unknown) => setError(errMsg(failure)));
+        .catch((failure: unknown) => {
+          if (showReadButton) setError(errMsg(failure));
+        });
     }, { threshold: 1 });
     observer.observe(anchor.current);
     return () => observer.disconnect();
-  }, [api, cache, visible, message.id, message.agent_id, message.read_at]);
+  }, [api, cache, visible, message.id, message.agent_id, message.read_at, showReadButton]);
+
+  if (!showReadButton) {
+    return message.read_at === null
+      ? <div ref={anchor} aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-px" />
+      : null;
+  }
 
   return <div ref={anchor} className="text-xs text-muted-foreground" data-publication-id={message.id}>
     <div className={cn(FLEX, "items-center gap-2")}>

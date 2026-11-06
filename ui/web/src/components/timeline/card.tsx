@@ -51,10 +51,6 @@ export interface CardConfig {
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/deep-collapse.meiva.okf.md
   readonly fixedDefault: boolean;
   // meiva:note
-  // Whether the card stamps the item's timestamp in its right-aligned hover footer.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
-  readonly showTimestamp: boolean;
-  // meiva:note
   // Explicit per-kind Copy whitelist: only human/agent inbound_chat and agent_chat
   // offer Copy; machinery kinds (thinking, tool calls/output, system prompt,
   // attach, system notes) offer none.
@@ -71,7 +67,6 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         title: "System prompt",
         titleKey: "timeline.systemPrompt",
         fixedDefault: false,
-        showTimestamp: false,
         copy: false,
       };
     case "agent_reasoning":
@@ -80,7 +75,6 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         icon: Sparkles,
         title: null,
         fixedDefault: false,
-        showTimestamp: true,
         copy: false,
       };
     case "agent_code":
@@ -89,7 +83,6 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         icon: toolCallIcon(item.source),
         title: null,
         fixedDefault: false,
-        showTimestamp: false,
         copy: false,
       };
     case "code_output":
@@ -98,7 +91,6 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         icon: Terminal,
         title: null,
         fixedDefault: false,
-        showTimestamp: true,
         copy: false,
       };
     case "agent_chat": {
@@ -110,7 +102,6 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         titleKey: `timeline.${chatTitle.titleKey}`,
         titleValues: chatTitle.titleValues,
         fixedDefault: true,
-        showTimestamp: true,
         copy: true,
       };
     }
@@ -121,7 +112,6 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         title: null,
         titleKey: "timeline.attachedFiles",
         fixedDefault: true,
-        showTimestamp: true,
         copy: false,
       };
     case "inbound_chat": {
@@ -134,7 +124,6 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
           titleKey: "timeline.agent",
           titleValues: { id: (item.source ?? "").slice("agent:".length) },
           fixedDefault: false,
-          showTimestamp: true,
           copy: true,
         };
       }
@@ -147,7 +136,6 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
           titleKey: "timeline.externalAgent",
           titleValues: { name },
           fixedDefault: false,
-          showTimestamp: true,
           copy: true,
         };
       }
@@ -158,7 +146,6 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
           title: "Human",
           titleKey: "timeline.human",
           fixedDefault: true,
-          showTimestamp: kind === "human",
           copy: kind === "human",
         };
       }
@@ -168,7 +155,6 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         title: "System",
         titleKey: "timeline.system",
         fixedDefault: false,
-        showTimestamp: true,
         copy: false,
       };
     }
@@ -179,7 +165,6 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         title: "Compact summary",
         titleKey: "timeline.compactSummary",
         fixedDefault: false,
-        showTimestamp: true,
         copy: false,
       };
     case "inbound_compact_request":
@@ -189,7 +174,6 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         title: "Compact request",
         titleKey: "timeline.compactRequest",
         fixedDefault: false,
-        showTimestamp: true,
         copy: false,
       };
     case "system_marker": {
@@ -202,7 +186,6 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
         title: v.title,
         titleKey: v.titleKey ? `markers.${v.titleKey}` : undefined,
         fixedDefault: false,
-        showTimestamp: item.show_timestamp,
         copy: false,
       };
     }
@@ -211,20 +194,6 @@ export function messageCardConfig(item: BackendTimelineItem): CardConfig | null 
   console.warn("[timeline] messageCardConfig: unknown item kind", _exhaustive);
   return null;
 }
-
-// meiva:note
-// Hover chrome (timestamp + Copy) sits in the 20px block-to-block gap below
-// primary messages (`.timeline-item` 1rem bottom padding + -1rem margin hand-back
-// in globals.css), right-aligned for both human bubbles and agent prose, and
-// stays invisible/click-through until hovered, focused, or touch-revealed.
-// meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
-export const CARD_FOOTER_CLS = cn(
-  "absolute bottom-0 right-1 h-3 items-center justify-end gap-1.5 sm:right-1.5",
-  "pointer-events-none opacity-0 transition-opacity duration-150 motion-reduce:transition-none",
-  "group-hover/msgcard:pointer-events-auto group-hover/msgcard:opacity-100",
-  "group-focus-within/msgcard:pointer-events-auto group-focus-within/msgcard:opacity-100",
-  FLEX,
-);
 
 export function MessageCard({
   children,

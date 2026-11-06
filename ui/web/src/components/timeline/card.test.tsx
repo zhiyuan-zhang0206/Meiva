@@ -18,7 +18,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createLazyChunk } from "@/components/content/lazy-chunk";
 import { PythonCodeHighlighterProvider } from "@/components/content/python-code";
 import { CardHeader, MessageCard, messageCardConfig, type CardConfig } from "./card";
-import { formatItemTime } from "./timestamp";
+import { formatAbsolute } from "@/lib/format/time";
 import type { BackendTimelineItem } from "@/lib/contracts/types";
 
 // ---------------------------------------------------------------------------
@@ -97,7 +97,6 @@ describe("messageCardConfig", () => {
     expect(cfg!.icon?.displayName).toBe("Paperclip");
     expect(cfg!.titleKey).toBe("timeline.attachedFiles");
     expect(cfg!.fixedDefault).toBe(true);
-    expect(cfg!.showTimestamp).toBe(true);
   });
 
   it("code_output → rich=output", () => {
@@ -196,7 +195,6 @@ describe("MessageCard", () => {
     icon: null,
     title: "Test",
     fixedDefault: true,
-    showTimestamp: false,
     copy: false,
   };
 
@@ -234,10 +232,7 @@ describe("MessageCard", () => {
 // ---------------------------------------------------------------------------
 
 describe("CardHeader", () => {
-  // meiva:note
-  // The item timestamp left the header when it moved to the card's hover footer, so the header carries only the toggle chrome; the stamp's own placement is asserted at the TimelineView level.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
-  it("carries no item timestamp — the stamp lives in the card's hover footer", () => {
+  it("carries no item timestamp", () => {
     const event = item("system_marker", {
       source: "impersonation",
       created_at: "2026-10-06T13:39:25+00:00",
@@ -245,7 +240,7 @@ describe("CardHeader", () => {
     const { container, getByTestId } = renderWithQuery(
       <CardHeader item={event} config={messageCardConfig(event)!} expanded={false} onToggle={noop} />,
     );
-    expect(container.textContent).not.toContain(formatItemTime(event.created_at!, { showWeekday: true }));
+    expect(container.textContent).not.toContain(formatAbsolute(event.created_at!, { weekday: true }));
     expect(getByTestId("card-toggle").classList.contains("flex-wrap")).toBe(true);
   });
 

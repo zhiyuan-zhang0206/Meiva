@@ -6,8 +6,6 @@
   "showStatusDotDesc": "在侧边栏每个 agent 行上显示状态颜色点（运行/空闲/…）；默认关闭以保持列表静态安静",
   "showTerminated": "显示已终止 agent",
   "showTerminatedDesc": "在侧边栏显示已终止 agent（红色状态点）；关闭则只显示存活 agent",
-  "showWeekday": "时间戳显示星期",
-  "showWeekdayDesc": "在时间线卡片时间戳中显示星期（如 周一 14:30）",
   "timeMode": "时间显示模式",
   "timeModeDesc": "每个 agent 行右侧显示的时间",
   "lastActive": "最近活跃",

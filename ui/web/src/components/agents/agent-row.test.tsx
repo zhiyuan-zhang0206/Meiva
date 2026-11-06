@@ -349,9 +349,9 @@ describe("AgentRow status dot gating (display.show_agent_status)", () => {
     return container.querySelector("li button > span.rounded-full");
   }
 
-  it("default (setting off): no status dot rendered at all", () => {
+  it("default (setting off): no dot for unread publications", () => {
     const { container } = render(
-      <AgentRow {...baseProps} agent={ag(1, { status: "running" })} depth={0} ancestorsIsLast={[]} />,
+      <AgentRow {...baseProps} agent={ag(1, { status: "running", unread_user_message_count: 3 })} depth={0} ancestorsIsLast={[]} />,
     );
     expect(statusDot(container)).toBeNull();
   });
@@ -368,14 +368,16 @@ describe("AgentRow status dot gating (display.show_agent_status)", () => {
     expect(statusDot(b.container)).toBeNull();
   });
 
-  it("enabled: colored status dot", () => {
+  it("enabled: only the colored status dot appears with unread publications", () => {
     const { container } = renderWithSettings(
-      <AgentRow {...baseProps} agent={ag(1, { status: "running" })} depth={0} ancestorsIsLast={[]} />,
+      <AgentRow {...baseProps} agent={ag(1, { status: "running", unread_user_message_count: 3 })} depth={0} ancestorsIsLast={[]} />,
       { "display.show_agent_status": true },
     );
     const d = statusDot(container);
     expect(d).toBeTruthy();
     expect(d!.className).toContain("bg-sky-500");
+    expect(d!.className).toContain("size-1.5");
+    expect(container.querySelectorAll("li button > span.rounded-full")).toHaveLength(1);
   });
 
   it("offline: grey dot shown even with the status opt-in off (Task #1174)", () => {

@@ -8,7 +8,7 @@ tags:
 
 # Timeline View
 
-`components/timeline/` renders the BackendTimelineItem list (chat / code / output / reasoning / system marker) and is the only item-list surface of a thread. Directory: `index`, `segments` (compact grouping), `use-compact-transition-anchor` (reading position), `use-timeline-window` (bounded DOM), `card`, `item`, `buttons`, `markers`, `timestamp`, `reasoning-clock`, `runs` (turn grouping), `run-block`.
+`components/timeline/` renders the BackendTimelineItem list (chat / code / output / reasoning / system marker) and is the only item-list surface of a thread. Directory: `index`, `segments` (compact grouping), `use-compact-transition-anchor` (reading position), `use-timeline-window` (bounded DOM), `card`, `item`, `buttons`, `markers`, `reasoning-clock`, `runs` (turn grouping), `run-block`.
 
 ## Streaming rows
 
@@ -80,6 +80,6 @@ cap with one `undefined`-means-full-width convention on narrow viewports.
 
 - [[ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md|Frontend Components]] — the catalog this node was split out of; the sidebar, composer, and inspector live there.
 - [[ui/web/src/docs/frontend-state/timeline-cache.meiva.okf.md|Per-Thread Timeline Cache]] — the store that feeds this view, including the compact-replace edge and the retention re-attach.
-- [[ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md|Card chrome]] — the hover band in the gap under a block (timestamp and Copy) and its pointer gating.
+- [[ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md|Card chrome]] — primary message presentation, publication acknowledgment, and Copy inside Details.
 - [[ui/web/src/docs/frontend-components/timeline-view/markers.meiva.okf.md|System markers]] — system-marker dispatch and the fail-loud unrecognized alarm.
 - [[ui/web/src/docs/frontend-components/timeline-view/loading-ring.meiva.okf.md|The loading ring]] — the one ring every loading state draws, the pull scale that rides `scale` instead of `transform`, and the reduced-motion state.

@@ -6,8 +6,6 @@
   "showStatusDotDesc": "Show a status color dot (running/idle/…) on each sidebar agent row; off by default to keep the list static and quiet",
   "showTerminated": "Show terminated agents",
   "showTerminatedDesc": "Show terminated agents (red status dot) in the sidebar; off shows only live agents",
-  "showWeekday": "Show weekday in timestamps",
-  "showWeekdayDesc": "Show the weekday in timeline card timestamps (e.g. Mon 14:30)",
   "timeMode": "Time display mode",
   "timeModeDesc": "The time shown at the right of each agent row",
   "lastActive": "Last active",
