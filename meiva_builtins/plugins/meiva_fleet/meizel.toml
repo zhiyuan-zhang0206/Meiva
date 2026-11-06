@@ -14,4 +14,4 @@ exports = ["default_config.py", "inspector.py", "metrics.py", "plugin.py", "task
 "_task_requests.py" = "strict"
 
 [roots]
-"plugin.py" = { kinds = ["clock", "random"], why = "SDK notice entry points compute expiration deadlines against current UTC time and generate idempotency keys" }
+"plugin.py" = { kinds = ["random"], why = "Notice edit and dismiss generate keys for transport retries" }
