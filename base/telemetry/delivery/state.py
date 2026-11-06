@@ -133,9 +133,14 @@ class ProcessState(TypedDict):
 # meiva:note
 # The emitter pipeline stays None until explicit process initialization. Dict mutation avoids
 # ruff PLW0603 the same way base/telemetry/tracing.py does.
+# meiva:note
+# No identity has named this process yet: every event it emits says so, until a boot seam or the
+# SDK's plugin load binds one (task #6347).
+UNKNOWN_PROCESS = "unknown"
+
 process_state: ProcessState = {
     "pipeline": None,
-    "process": "unknown",
+    "process": UNKNOWN_PROCESS,
     "agent_id": None,
     "machine": None,
     "machine_warned": False,

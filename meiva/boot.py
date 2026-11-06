@@ -348,6 +348,19 @@ def _slot_facts() -> _SlotFacts:
 # alone. A `clients` set the caller supplies is the one the installation meters through; none
 # supplied means the installation builds its own cold set and closes it at interpreter exit,
 # so an attachment's shorter-lived clients are never borrowed.
+SDK_PROCESS = "sdk"
+
+
+# meiva:note
+# The label a process gets when the SDK is what brought it here: `process_name()` documents
+# `sdk` as "a process that used the SDK without running a boot seam". Bound on plugin load, not
+# on `import meiva` — an import that never asks for a namespace has not started working.
+def bind_sdk_identity(home: Path) -> bool:
+    from base import telemetry
+
+    return telemetry.bind_identity_if_unbound(process=SDK_PROCESS, home=home)
+
+
 def ensure_plugins_loaded(
     *,
     surface: bool = True,
@@ -365,6 +378,15 @@ def ensure_plugins_loaded(
     else:
         context = process_context.bound_context()
     env = os.environ
+    home = paths.meiva_home()
+    # meiva:note
+    # A process that uses the SDK without a boot seam — an operator's ad-hoc script, a one-shot
+    # that calls `meiva.tasks` before any logger binds — used to write its audit rows as
+    # `machine='unknown', process='unknown'`, which answers nothing (task #6347). Loading the
+    # plugin surface is exactly the moment such a process begins acting as an SDK client, and this
+    # is the composition root that already resolves the home. It never renames a process that
+    # bound its own identity, and a later `init_telemetry` replaces the `sdk` label.
+    bind_sdk_identity(home)
     state = _slot_facts()
     plan = plan_load(
         LoadFacts(
@@ -379,9 +401,8 @@ def ensure_plugins_loaded(
         )
     )
     if plan.step is not LoadStep.LOAD_SURFACE:
-        settle_installed(plan.step, context, home=paths.resolve_meiva_home())
+        settle_installed(plan.step, context, home=home)
         return
-    home = paths.meiva_home()
     if plan.prepare_launched:
         context, config = _prepare_launched_context(env)
     disabled = process_disable_entries()

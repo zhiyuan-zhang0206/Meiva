@@ -52,7 +52,12 @@ from base.telemetry.delivery.reporting import (
     report_sink_failure,
 )
 from base.telemetry.delivery.serialization import event_line, event_line_digest, event_payload
-from base.telemetry.delivery.state import ambient_agent_id, process_state, resolve_machine
+from base.telemetry.delivery.state import (
+    UNKNOWN_PROCESS,
+    ambient_agent_id,
+    process_state,
+    resolve_machine,
+)
 from base.telemetry.observability import UNKNOWN_CLUSTER, cluster_label
 
 __all__ = [
@@ -139,6 +144,20 @@ def bind_identity(
     # process that never binds emits `.unknown` instead (see `_event`).
     if process_state["cluster"] is None:
         process_state["cluster"] = cluster_label(home)
+
+
+# meiva:note
+# Bind `process` for a process nothing has named yet. The guard is the point: an entry that runs
+# after the process bound its real identity (the agent host, a gateway, an exec child) must not
+# rename it, while a later `init_telemetry` still wins over the label this sets (task #6347).
+# Returns True when this call is what named the process, False when it already had a name; one of
+# the bounded values is `sdk`, bound where the plugin surface loads (`meiva/boot.py`) and never at
+# `import meiva`.
+def bind_identity_if_unbound(*, process: str, home: Path) -> bool:
+    if process_state["process"] != UNKNOWN_PROCESS:
+        return False
+    bind_identity(process=process, home=home)
+    return True
 
 
 def init_telemetry(
