@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
+from base.agents.messages.reply_intent import parse_reply_visibility
 from base.paths.tests.homes import point_home
 from tests.e2e.fakes.scenario_recording import (
     RecordingModel,
@@ -18,6 +19,14 @@ from tests.e2e.fakes.scenario_recording import (
 from tests.e2e.fakes.scripted_model import ScriptExhaustedError
 
 
+# meiva:note
+# The text a user reads: the visibility line is part of the stored message, not the reply.
+def _reply_body(message: AIMessage) -> str:
+    parsed = parse_reply_visibility(str(message.content))
+    assert parsed is not None, f"scripted reply carries no visibility line: {message.content!r}"
+    return parsed[0]
+
+
 async def test_async_calls_record_inputs_in_order_and_filter_by_agent() -> None:
     reset_record()
     first = RecordingModel(agent_id=17, script=(say("reply"),))
@@ -26,7 +35,7 @@ async def test_async_calls_record_inputs_in_order_and_filter_by_agent() -> None:
         content=[{"type": "text", "text": "one"}, {"type": "text", "text": "two"}],
         additional_kwargs={"meiva_note_tag": "summary"},
     )
-    assert (await first.ainvoke([prompt])).content == "reply"
+    assert _reply_body(await first.ainvoke([prompt])) == "reply"
     chunks = [chunk async for chunk in second.astream([exec_call(1, "x = 0")])]
     assert chunks[0].tool_calls[0]["args"] == {"code": "x = 1"}
     assert first.cursor == second.cursor == 1
@@ -119,7 +128,7 @@ def test_script_helpers_preserve_tool_identity_and_usage() -> None:
     ]
     reply = say("done")
     assert isinstance(reply, AIMessage)
-    assert reply.content == "done"
+    assert _reply_body(reply) == "done"
     assert (
         tool.usage_metadata
         == reply.usage_metadata

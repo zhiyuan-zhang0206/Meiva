@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage
 
-from tests.e2e.fakes.scripted_model import ScriptedFakeChatModel
+from tests.e2e.fakes.scripted_model import ScriptedFakeChatModel, user_facing, working_note
 
 _USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
 
@@ -22,11 +22,11 @@ print(f"CTX agent_id={who.agent_id} owns_loop={who.owns_loop} actor={who.actor} 
 
 SCRIPT: tuple[AIMessage, ...] = (
     AIMessage(
-        content="reading my context",
+        content=working_note("reading my context"),
         tool_calls=[{"id": "call_ctx", "name": "execute_code", "args": {"code": CODE}}],
         usage_metadata=_USAGE,
     ),
-    AIMessage(content=REPLY_TEXT, usage_metadata=_USAGE),
+    AIMessage(content=user_facing(REPLY_TEXT), usage_metadata=_USAGE),
 )
 
 

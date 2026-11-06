@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage
 
-from tests.e2e.fakes.scripted_model import ScriptedFakeChatModel
+from tests.e2e.fakes.scripted_model import ScriptedFakeChatModel, working_note
 
 _USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
 
 SCRIPT: tuple[AIMessage, ...] = (
     AIMessage(
-        content="\u518d\u89c1\u3002",
+        content=working_note("\u518d\u89c1\u3002"),
         tool_calls=[
             {
                 "id": "call_terminate",

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage
 
-from tests.e2e.fakes.scripted_model import ScriptedFakeChatModel
+from tests.e2e.fakes.scripted_model import ScriptedFakeChatModel, user_facing, working_note
 
 _USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
 
@@ -23,16 +23,16 @@ _TALL_PROSE = "\n\n".join(
 
 SHELL_HISTORY_SCRIPT: tuple[AIMessage, ...] = (
     AIMessage(
-        content="Filling the timeline.",
+        content=working_note("Filling the timeline."),
         tool_calls=[{"id": "call_tall", "name": "execute_code", "args": {"code": _TALL_OUTPUT}}],
         usage_metadata=_USAGE,
     ),
     AIMessage(
-        content="Creating the shell session.",
+        content=working_note("Creating the shell session."),
         tool_calls=[{"id": "call_shell", "name": "execute_code", "args": {"code": _SHELL_SETUP}}],
         usage_metadata=_USAGE,
     ),
-    AIMessage(content=f"{_TALL_PROSE}\n\nDONE", usage_metadata=_USAGE),
+    AIMessage(content=user_facing(f"{_TALL_PROSE}\n\nDONE"), usage_metadata=_USAGE),
 )
 
 

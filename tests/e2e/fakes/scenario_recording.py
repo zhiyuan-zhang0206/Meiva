@@ -11,13 +11,15 @@ from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 
-from tests.e2e.fakes.scripted_model import ScriptedFakeChatModel
+from tests.e2e.fakes.scripted_model import ScriptedFakeChatModel, user_facing, working_note
 
 __all__ = [
     "RecordingModel",
     "build_plain",
     "exec_call",
     "model_inputs",
+    "note",
+    "plain",
     "reset_record",
     "say",
     "scratch_root",
@@ -54,7 +56,19 @@ def exec_call(n: int, code: str) -> AIMessage:
     )
 
 
+# meiva:note
+# `say` is the answer the user reads in the main conversation, `note` is text that belongs in
+# Details (another agent's reply, a wake the user did not ask about), and `plain` is a model
+# answer that is not an assistant turn at all -- only a compaction summary qualifies today.
 def say(text: str) -> AIMessage:
+    return AIMessage(content=user_facing(text), usage_metadata=_USAGE)
+
+
+def note(text: str) -> AIMessage:
+    return AIMessage(content=working_note(text), usage_metadata=_USAGE)
+
+
+def plain(text: str) -> AIMessage:
     return AIMessage(content=text, usage_metadata=_USAGE)
 
 

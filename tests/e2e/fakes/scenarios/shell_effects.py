@@ -24,7 +24,11 @@ job = meiva.shell.run_background("sleep 5; echo BG-TAIL-MARK; exit 7", name="e2e
 print("background-started", job.session_id)
 """
     return RecordingModel(
-        agent_id=agent_id, script=(exec_call(1, code), say("background started"), say("noticed"))
+        # meiva:note
+        # The wake "noticed" answers is a background exit the caller asked to be told about
+        # (`notify="always"`), so this is a reply a user reads, not an unrequested wake.
+        agent_id=agent_id,
+        script=(exec_call(1, code), say("background started"), say("noticed")),
     )
 
 
@@ -38,6 +42,9 @@ failure = meiva.shell.run_background("sleep 4; echo POLICY-FAILURE; exit 9", nam
 (root / "policy-handles").write_text(f"{{success.session_id}}\\n{{success.output_path}}\\n{{failure.session_id}}\\n{{failure.output_path}}")
 print("policy-jobs", success.session_id, failure.session_id)
 """
+    # meiva:note
+    # "jobs buffered" answers a background exit the caller asked to be told about
+    # (`notify="always"`), so it is a reply a user reads, not an unrequested wake.
     return RecordingModel(
         agent_id=agent_id, script=(exec_call(1, code), say("jobs started"), say("jobs buffered"))
     )

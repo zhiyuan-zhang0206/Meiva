@@ -11,11 +11,27 @@ from langchain_core.messages.tool import ToolCallChunk
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from pydantic import PrivateAttr
 
-__all__ = ["ScriptExhaustedError", "ScriptedFakeChatModel"]
+from base.agents.messages.reply_intent import DISPLAY_TO_USER, HIDE_FROM_USER
+
+__all__ = ["ScriptExhaustedError", "ScriptedFakeChatModel", "user_facing", "working_note"]
 
 
 class ScriptExhaustedError(RuntimeError):
     pass
+
+
+# meiva:note
+# A script answers like a compliant model. Every non-empty assistant text block must open with
+# an explicit visibility line; text without one is folded into Details and answered with a
+# correction note, which spends a model call the script does not contain. `user_facing` is an
+# answer the user reads in the main conversation; `working_note` is text that belongs in Details.
+# meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
+def user_facing(text: str) -> str:
+    return f"{DISPLAY_TO_USER}\n{text}"
+
+
+def working_note(text: str) -> str:
+    return f"{HIDE_FROM_USER}\n{text}"
 
 
 class ScriptedFakeChatModel(BaseChatModel):
