@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
-import sys
 import time
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -13,8 +11,6 @@ from typing import Any, cast
 import psycopg
 
 from base.daemon.schedules.inputs import ScheduleInputs
-from base.host.proc import run_bounded
-from base.log import logger
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from meiva_builtins.plugins.meiva_usage.default_config import CollectorConfig, UsageConfig
@@ -704,94 +700,3 @@ def test_run_from_schedule_emits_one_cycle_event_in_both_outcomes(
     assert [a["cycle"] for a in attributes] == [0, 1]
     assert attributes[1]["reason"] == "RuntimeError"
     assert {a["collector"] for a in attributes} == {"scheduled-coll"}
-
-
-# meiva:note
-# The loop's schedule inputs without a database: a no-op refresh never reads the handle, so the only
-# thing these two tests exercise is what the loop does with a cycle event it cannot emit.
-def _schedule_inputs_without_database(home: Path) -> ScheduleInputs:
-    collector = CollectorConfig(
-        id="scheduled-collector",
-        label="Scheduled Collector",
-        provider="deepseek",
-        machine="company-air",
-        key_env="DEEPSEEK_API_KEY",
-        interval_minutes=1,
-    )
-    config_dir = home / "configs" / "meiva_usage"
-    config_dir.mkdir(parents=True, exist_ok=True)
-    (config_dir / "config.json").write_text(
-        UsageConfig(collectors=(collector,)).model_dump_json(indent=2)
-    )
-
-    class _Machine:
-        def name(self) -> str:
-            return "company-air"
-
-    return ScheduleInputs(
-        database=cast(Any, lambda: None),
-        producer=cast(Any, lambda: None),
-        image=LoadedCommit(source_root=home, sha="test-sha"),
-        machine=cast(Any, _Machine()),
-        home=home,
-    )
-
-
-def _no_refresh(*_args: Any, **_kwargs: Any) -> None:
-    return None
-
-
-def _no_sleep(_seconds: float) -> None:
-    return None
-
-
-def _run_two_noop_cycles(inputs: ScheduleInputs) -> None:
-    run_collector_cycles(
-        inputs,
-        refresh=_no_refresh,
-        sleep=_no_sleep,
-        collector_id="scheduled-collector",
-        stop_after_cycles=2,
-        environ={"DEEPSEEK_API_KEY": "test-key-123"},
-    )
-
-
-# meiva:note
-# The event this loop produces cannot leave a schedule's process: a schedule entry binds no
-# telemetry pipeline, so `_emit_cycle` returned before `emit` was ever called and three days of
-# cycles left no trace (2026-11-06, task #6348). The control has to be a real process, not this
-# test's process: the suite binds a pipeline for itself, which is exactly the shape that hid it.
-# The child runs the loop to two cycles through its public entry, and its stderr must carry the
-# line exactly once: a per-cycle warning would be 96 lines a day for a 15-minute loop.
-def test_a_cycle_event_that_cannot_be_emitted_says_so_once() -> None:
-    child = Path(__file__).with_name("child_emit_unbound.py")
-
-    result = run_bounded(
-        [sys.executable, str(child)],
-        capture_output=True,
-        text=True,
-        timeout=120,
-        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[4])},
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip().endswith("cycles done")
-    assert result.stderr.count("cannot be emitted") == 1, result.stderr
-    assert "no telemetry pipeline is bound" in result.stderr
-
-
-# meiva:note
-# The negative control: the same loop in a process that did bind a pipeline emits both cycles and
-# says nothing.
-def test_a_bound_process_does_not_report_the_drop(
-    tmp_path: Path, emitted_events: EmittedEvents
-) -> None:
-    lines: list[str] = []
-    sink = logger.add(lambda message: lines.append(str(message)), level="WARNING")
-    try:
-        _run_two_noop_cycles(_schedule_inputs_without_database(tmp_path))
-    finally:
-        logger.remove(sink)
-
-    assert [a["cycle"] for a in emitted_events.attributes("plugin_collector_cycle")] == [0, 1]
-    assert not [line for line in lines if "cannot be emitted" in line], lines

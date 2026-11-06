@@ -1,2 +1,2 @@
 [uses]
-"test_runner.py" = ["child_emit_unbound.py"]
+"test_schedule_entry.py" = ["child_emit_bound.py", "child_emit_unbound.py"]

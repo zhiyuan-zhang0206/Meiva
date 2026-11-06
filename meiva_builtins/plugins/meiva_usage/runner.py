@@ -193,6 +193,47 @@ def _load_collector_config(
 
 
 # meiva:note
+# The process every collector's events are attributed to. One name for the whole fleet's schedules,
+# not one per schedule: `process` is the OTLP service name, and a name per schedule would flatten
+# the metric surface across them. Which schedule an event came from rides in the attributes.
+SCHEDULE_PROCESS_NAME = "schedule-runner"
+
+
+# meiva:note
+# A schedule script runs inside the runner process, which owns an event pipeline that was never
+# bound into the emitter: `emit()` therefore dropped every event the loop produced, and seven days
+# of collector cycles left no row anywhere (2026-11-06, task #6352). Binding is the entry's act,
+# not the emitter's — an observation must not change process state to make itself work.
+# One bind per process: `init_telemetry` refuses a second live pipeline, and the runner process runs
+# a loop for as long as the schedule lives. A bind that fails must not stop the collector, so it is
+# reported and the loop carries on; the per-cycle report below then says the events are dropped.
+def _bind_schedule_telemetry(borrowed: ScheduleInputs, collector_id: str) -> None:
+    from base.telemetry.emitter import pipeline_bound
+    from base.telemetry.process_logging import init_gateway_process
+
+    if pipeline_bound():
+        return
+    try:
+        init_gateway_process(
+            SCHEDULE_PROCESS_NAME,
+            producer=borrowed.producer,
+            machine_reader=borrowed.machine.name,
+            image=borrowed.image,
+            home=borrowed.home,
+        )
+    except Exception as exc:
+        _log.warning("collector {} cannot bind its event pipeline: {}", collector_id, exc)
+
+
+# meiva:note
+# The schedule this process runs, as the runner names it in the environment. A manual run has none,
+# and the attribute is optional for exactly that case: a missing id is not a misattributed one.
+def _schedule_id() -> int | None:
+    raw = os.environ.get("MEIVA_SCHEDULE_ID", "").strip()
+    return int(raw) if raw.isdigit() else None
+
+
+# meiva:note
 # One event per refresh cycle, in both outcomes. The loop's exception handler is the only place a
 # failed cycle is visible, and until this existed "alive but producing nothing" was
 # indistinguishable from healthy (schedule 50, 2026-11-04: three hours of swallowed failures).
@@ -205,17 +246,17 @@ def _emit_cycle(collector_id: str, outcome: str, reason: str, *, cycle: int) -> 
 
     if not pipeline_bound():
         return False
+    attributes: dict[str, object] = {
+        "collector": collector_id,
+        "outcome": outcome,
+        "reason": reason,
+        "cycle": cycle,
+    }
+    schedule_id = _schedule_id()
+    if schedule_id is not None:
+        attributes["schedule_id"] = schedule_id
     try:
-        emit(
-            "telemetry",
-            "plugin_collector_cycle",
-            attributes={
-                "collector": collector_id,
-                "outcome": outcome,
-                "reason": reason,
-                "cycle": cycle,
-            },
-        )
+        emit("telemetry", "plugin_collector_cycle", attributes=attributes)
     except Exception as exc:
         _log.warning("collector {} cycle event not emitted: {}", collector_id, exc)
     return True
@@ -242,6 +283,7 @@ def run_collector_cycles(
 ) -> None:
     if borrowed is None:
         raise ValueError("run_from_schedule requires ScheduleInputs (MEIVA_SCHEDULE_INPUTS)")
+    _bind_schedule_telemetry(borrowed, collector_id)
     home = borrowed.home
     db = borrowed.database()
     machine_name = borrowed.machine.name()
@@ -290,8 +332,9 @@ def run_collector_cycles(
             unbound_reported = True
             _log.warning(
                 "collector {} cycle events cannot be emitted: no telemetry pipeline is bound in "
-                "this process (a schedule runner binds none), so every event this loop produces "
-                "is dropped. The loop's liveness is readable from plugin_stats.updated_at.",
+                "this process (the schedule entry could not bind one), so every event this loop "
+                "produces is dropped. The loop's liveness is readable from "
+                "plugin_stats.updated_at.",
                 collector_id,
             )
 

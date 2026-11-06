@@ -61,6 +61,10 @@ The schedule script executes `run_from_schedule(MEIVA_SCHEDULE_INPUTS, collector
   gateway checkouts as well as split agent-runners that receive `MEIVA_PLUGIN_CLUSTER_CONFIG`
   via `GET /api/bootstrap`.
 - **Machine attribution**: Passes the current machine identity to `refresh_collector_once`.
+- **Telemetry binding**: Binds the runner's event pipeline once per process
+  (`init_gateway_process`, process name `schedule-runner`) and stamps `schedule_id` from
+  `MEIVA_SCHEDULE_ID` on every cycle event; a bind that fails is reported once, and the loop
+  keeps collecting.
 - **Error hysteresis (`should_write_failure`)**: Transient network or probe errors within the
   freshness window do not flap cards to error immediately, preserving previous good readings.
 - **Single writer (`stats.upsert`)**: Writes readings through `base.packages.plugins.surface.stats.upsert`,
