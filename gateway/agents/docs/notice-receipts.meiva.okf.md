@@ -28,13 +28,15 @@ Receipt lookup also precedes the new response-required and no-Other checks.
 Legacy creation retries with omitted `require_response` can match their old
 normalized false default; explicit changed inputs still conflict. New FYI and
 Other creation requests fail before effects or receipt allocation.
+An absent Note suggestion stays absent from serialized questions. Adding the
+optional field must not change historical request equality or accepted retries.
 All creations for an agent lock its row to serialize local id allocation.
 
 Receipts have no TTL pruning: expiration cannot turn a known operation into a
 new side effect. Any future retention design needs explicit expired-key
-semantics. The SDK `notify` requires an explicit key for recovery;
+semantics. Legacy notice transport uses a runtime-owned operation identity;
 relative expiration inputs require their normalized absolute deadline to be
-reused. The SDK transport retries an ambiguous outcome under the same key.
+reused. The transport retries an ambiguous outcome under the same key.
 
 Browser resolution uses the fixed required-key/principal route
 `POST /api/keyed/v1/agents/{id}/notices/{notice_id}/resolve`. It reuses this same
