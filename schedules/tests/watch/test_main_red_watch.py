@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
@@ -15,6 +16,7 @@ from base.db import Database
 from schedules.jobs.watch.main_red_liveness import liveness_once
 from schedules.jobs.watch.main_red_watch import (
     LivenessStream,
+    card_operation_key,
     STATE_FILE,
     WatchState,
     load_state,
@@ -314,6 +316,26 @@ def test_a_watch_still_silent_opens_without_closing() -> None:
     )
 
     assert closed == []
+
+
+# meiva:note
+# The same invariant on the other card the watch opens by itself: a watch that stays stopped must
+# produce one card, so the card may not report how long it has been stopped. Remove the fixed
+# `episode` and this goes red with two different requests under one key.
+def test_the_liveness_card_reads_the_same_while_the_watch_stays_stopped() -> None:
+    last = datetime(2026, 11, 3, 9, 0, tzinfo=UTC)
+    opened: list[Card] = []
+
+    for slot in (last + timedelta(minutes=61), last + timedelta(hours=5)):
+        liveness_once(
+            slot,
+            database=cast("Database", _Database(last)),
+            open_card=lambda card: opened.append(card) or 900,
+            close_card=lambda: None,
+        )
+
+    assert len(opened) == 2
+    assert opened[0] == opened[1]
 
 
 # meiva:note
@@ -760,3 +782,31 @@ def test_a_slot_round_keeps_the_memory_of_the_last_green(tmp_path: Path) -> None
     )
 
     assert load_state(path).greens == {"release-gate.yml": "a" * 40}
+
+
+# meiva:note
+# The create key names the occurrence, never the wording. Reworded text under the same occurrence
+# has to replay: the round that retries a failed create rebuilds the card from the same facts, and
+# a key that followed the text would turn that retry into a second, refused create.
+def test_the_create_key_follows_the_occurrence_not_the_wording() -> None:
+    card = Card("release-gate.yml/tests/test_a.py::test_x", "title", "body", "2026-11-04T16:00:00")
+
+    reworded = replace(card, title="another title", body="another body")
+
+    assert card_operation_key(reworded) == card_operation_key(card)
+    assert card_operation_key(replace(card, episode="2026-11-05T16:00:00")) != card_operation_key(
+        card
+    )
+
+
+# meiva:note
+# A test id can be longer than the registry's 128-character key limit on its own, so the key hashes
+# what it names instead of pasting it: the same card always produces the same key, and no card can
+# produce one the registry refuses.
+def test_the_create_key_fits_the_registry_limit_for_any_test_id() -> None:
+    card = Card("release-gate.yml/" + "tests/test_a.py::test_x" * 20, "title", "body", "episode")
+
+    key = card_operation_key(card)
+
+    assert 1 <= len(key) <= 128
+    assert card_operation_key(card) == key

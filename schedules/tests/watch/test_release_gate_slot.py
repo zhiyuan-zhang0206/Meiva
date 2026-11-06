@@ -40,7 +40,9 @@ def test_a_slot_past_the_band_opens_a_card_that_publishes_nothing() -> None:
 
     assert decision.card is not None
     assert decision.card.fingerprint == "main-red-watch/release-gate-slot"
-    assert "13.5h" in decision.card.title
+    assert decision.card.title.endswith(
+        f"since {(NOW - timedelta(hours=13, minutes=30)).isoformat()}"
+    )
     assert decision.card.body.startswith("**This card publishes nothing.**")
     assert "gh workflow run main-typecheck.yml" in decision.card.body
     assert "type surface only" in decision.card.body
@@ -133,5 +135,33 @@ def test_the_card_states_how_many_arrivals_the_lookback_should_have_contained() 
     decision = decide_slot(facts, now=NOW, since=None, stale_after=RELEASE_GATE_SLOT_STALE_AFTER)
 
     assert decision.card is not None
-    assert "should have started 4 run(s) and started 1" in decision.card.body
+    assert "should have started 4 run(s) and started 2" in decision.card.body
     assert "Confirm that count against the workflow's own run list" in decision.card.body
+
+
+# meiva:note
+# The card is a function of the gap, not of the round that noticed it. The registry refuses a
+# second create under one key when the request differs, so a card whose wording moved every round
+# could never be opened twice: on 2026-11-05/06 that shape cost 38 rounds and no card.
+def test_the_card_reads_the_same_while_the_gap_lasts() -> None:
+    facts = replace(_facts(13.5), uncertified_commits=3)
+
+    first = decide_slot(facts, now=NOW, since=None, stale_after=RELEASE_GATE_SLOT_STALE_AFTER)
+    later = decide_slot(
+        facts, now=NOW + timedelta(hours=3), since=None, stale_after=RELEASE_GATE_SLOT_STALE_AFTER
+    )
+
+    assert first.card is not None
+    assert first.card == later.card
+
+
+# meiva:note
+# The other half: a card that never moved would answer only the first gap it ever saw. The next
+# missing slot is its own occurrence, and it carries its own key.
+def test_the_next_gap_is_its_own_card() -> None:
+    first = _decide(13.5).card
+    second = _decide(20.0).card
+
+    assert first is not None
+    assert second is not None
+    assert first.episode != second.episode

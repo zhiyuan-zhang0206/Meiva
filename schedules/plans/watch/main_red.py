@@ -154,6 +154,13 @@ class Card:
     fingerprint: str
     title: str
     body: str
+    # meiva:note
+    # Which occurrence of what `fingerprint` names this card reports: the red run, the stale
+    # watch's last round, the missing slot. The fingerprint says what to watch and stays the same
+    # across occurrences, so it cannot be the create key on its own -- the second occurrence would
+    # reuse the first card's key with different text, and the registry refuses that (2026-11-05/06,
+    # 38 rounds). `episode` is the part that moves.
+    episode: str
 
     # meiva:note
     # The card for a watch whose rounds stopped. It lives here, on the type it builds, rather than
@@ -161,6 +168,9 @@ class Card:
     # question shares the card vocabulary with every other card the watch opens. A watch with no
     # round on record returns nothing -- a schedule that never ran is the manager's business, and a
     # fresh site would otherwise open a card the first time the check ran.
+    #
+    # `now` decides whether a card is due, never what it says: the age of the last round grows every
+    # round, and text that grows would make each round a different create under one key.
     @classmethod
     def for_stale_watch(
         cls, last_round_at: datetime | None, now: datetime, *, stale_after: timedelta
@@ -175,8 +185,8 @@ class Card:
             fingerprint="main-red-watch/liveness",
             title=STALE_WATCH_TITLE,
             body=(
-                f"The watch's last round was {age.total_seconds() / 3600:.1f}h ago "
-                f"(threshold {hours:.0f}h, newest {last_round_at.isoformat()}).\n\n"
+                f"The watch's last round was at {last_round_at.isoformat()} "
+                f"(threshold {hours:.0f}h).\n\n"
                 "This reports the watch, not `main`: while it is down, a red on `main` opens no "
                 "card.\n\n"
                 "Check, in this order:\n\n"
@@ -189,6 +199,7 @@ class Card:
                 "to read and says so in its own round.\n\n"
                 "Closes when a round lands again."
             ),
+            episode=last_round_at.isoformat(),
         )
 
 
