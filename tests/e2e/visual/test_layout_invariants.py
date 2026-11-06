@@ -277,7 +277,7 @@ def test_fleet_layout_invariants(
         page.wait_for_timeout(800)
         assert _no_page_scroll(page), "I4: Tasks toolbar widens the page"
 
-        page.locator('[role="tab"]', has_text="Inbox").click()
+        page.locator('[role="tab"]', has_text="Ask").click()
         page.wait_for_timeout(1200)
         assert _no_page_scroll(page), "I1: long-title inbox row widens the page"
         if OVERRIDE_BASE_URL:
