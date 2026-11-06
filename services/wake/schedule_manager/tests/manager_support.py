@@ -13,6 +13,7 @@ from typing import Any
 
 from psycopg_pool import ConnectionPool
 
+from base.clock import Clock
 from base.deploy.lifecycle.tests.serving_root import observe
 from base.paths import meiva_home
 from base.sessions.protocol import SessionBackend
@@ -27,6 +28,13 @@ POLICY = ManagerPolicy(
 )
 NOW = 1000.0
 LAUNCH_ENV = {"PATH": "/usr/bin"}
+
+
+# meiva:note
+# The wall clock the manager reads for the one host-epoch comparison (a runner record's birth
+# against its session's start). Real time, because the record and the PTY owner are real.
+def wall_clock() -> Clock:
+    return Clock.from_settings()
 
 
 def schedule_manager(
@@ -52,4 +60,5 @@ def schedule_manager(
         machine_name=machine_name,
         secret_env_resolver=secret_env_resolver,
         observe=observe,
+        clock=wall_clock(),
     )

@@ -20,7 +20,7 @@ from dataclasses import dataclass
 
 import base.deploy.progress_timeout as deploy
 import base.native_process.stop_timing as stop
-from base.deploy.schedule_timing import SCHEDULE_STALL_ALERT_AFTER_S
+from base.deploy.schedule_timing import SCHEDULE_LAUNCH_GRACE_S, SCHEDULE_STALL_ALERT_AFTER_S
 from base.host.db_authority import unit
 
 # --- schedule supervision family ---------------------------------------------
@@ -158,6 +158,12 @@ CLOCKS: dict[str, Clock] = {
         "schedule-supervision",
         SCHEDULE_STALL_ALERT_AFTER_S,
         "how long an enabled non-completed schedule may remain sessionless before alerting",
+    ),
+    "SCHEDULE_LAUNCH_GRACE_S": Clock(
+        "schedule-supervision",
+        SCHEDULE_LAUNCH_GRACE_S,
+        "how long after a session starts its runner record may still name the process the launch "
+        "replaced, before that record counts as a death",
     ),
     # --- wedged family ---
     "WEDGED_AGE_SEC": Clock(

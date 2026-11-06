@@ -6,6 +6,7 @@ from typing import Any
 import psycopg
 from psycopg_pool import ConnectionPool
 
+from base.clock import Clock
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.tests.serving_root import observe
 from base.deploy.lifecycle.tests.serving_root import serving_root as serving_root
@@ -109,6 +110,7 @@ def test_independent_managers_partition_schedules_and_requests_by_machine(
             launch_env={},
             machine_name="machine-a",
             observe=observe,
+            clock=Clock.from_settings(),
         )
         mgr_b = ScheduleManager(
             pool,
@@ -119,6 +121,7 @@ def test_independent_managers_partition_schedules_and_requests_by_machine(
             launch_env={},
             machine_name="machine-b",
             observe=observe,
+            clock=Clock.from_settings(),
         )
 
         sid_a = _insert(db_conn, "task-a", machine="machine-a", enabled=True)
@@ -195,6 +198,7 @@ def test_colocated_split_unit_tie_breaker(
             launch_env={},
             machine_name="shared-host",
             observe=observe,
+            clock=Clock.from_settings(),
         )
         mgr_2 = ScheduleManager(
             pool,
@@ -205,6 +209,7 @@ def test_colocated_split_unit_tie_breaker(
             launch_env={},
             machine_name="shared-host",
             observe=observe,
+            clock=Clock.from_settings(),
         )
 
         assert mgr_1.is_active_unit() is True

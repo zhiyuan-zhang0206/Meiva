@@ -29,6 +29,7 @@ from typing import TypeGuard
 
 import psutil
 
+from base.deploy.schedule_timing import SCHEDULE_LAUNCH_GRACE_S
 from base.host.atomic_io import write_text_atomic
 from base.host.boundary.untyped import object_of
 from base.native_process.ownership import OwnedProcess
@@ -141,7 +142,18 @@ def clear_claim(home: Path, schedule_id: int) -> None:
         _log.warning("schedule %s could not clear its runner record: %s", schedule_id, exc)
 
 
-def read_runner_liveness(home: Path, schedule_id: int) -> RunnerReading:
+# meiva:note
+# What the record says about the runner that should own this session. `launched_at` is when that
+# session started: a record written before it cannot describe a process from it -- it is the
+# previous runner's, left behind because the manager reaped it, and reading it as a death would
+# declare a schedule lost a quarter of a second after a successful launch (2026-11-06, schedule 40).
+def read_runner_liveness(
+    home: Path,
+    schedule_id: int,
+    *,
+    launched_at: float | None = None,
+    now: float | None = None,
+) -> RunnerReading:
     claim = _read_claim(home, schedule_id)
     if claim is None:
         return RunnerReading(
@@ -163,6 +175,14 @@ def read_runner_liveness(home: Path, schedule_id: int) -> RunnerReading:
         return RunnerReading(
             schedule_id, RunnerLiveness.UNKNOWN, claim, f"could not read the process table: {exc}"
         )
+    if _record_predates_launch(claim, launched_at=launched_at, now=now):
+        return RunnerReading(
+            schedule_id,
+            RunnerLiveness.UNKNOWN,
+            claim,
+            f"pid {claim.pid} was born before this session started "
+            f"({claim.birth:.0f} < {launched_at:.0f}): the previous runner's record",
+        )
     if reading is None:
         return RunnerReading(schedule_id, RunnerLiveness.DEAD, claim, f"pid {claim.pid} is gone")
     if reading.status in (psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD):
@@ -175,6 +195,17 @@ def read_runner_liveness(home: Path, schedule_id: int) -> RunnerReading:
         claim,
         f"pid {claim.pid} now belongs to a different process",
     )
+
+
+# meiva:note
+# The one decision this adds: a record born before the session started belongs to the runner this
+# launch replaced, and only for as long as a new runner could still be starting up. Past the grace
+# it is a death like any other -- an unbounded acceptance would make a session whose runner never
+# came up look alive forever.
+def _record_predates_launch(claim: Claim, *, launched_at: float | None, now: float | None) -> bool:
+    if launched_at is None or now is None or claim.birth >= launched_at:
+        return False
+    return now - launched_at <= SCHEDULE_LAUNCH_GRACE_S
 
 
 def _read_claim(home: Path, schedule_id: int) -> Claim | None:

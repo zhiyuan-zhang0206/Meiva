@@ -16,6 +16,7 @@ from base.daemon.schedules.claim import (
     read_runner_liveness,
     write_claim,
 )
+from base.deploy.schedule_timing import SCHEDULE_LAUNCH_GRACE_S
 from base.native_process.ownership import OwnedProcess
 
 
@@ -94,6 +95,58 @@ def test_a_record_left_by_a_process_that_became_a_zombie_reads_dead(tmp_path: Pa
 
     assert reading.liveness is RunnerLiveness.DEAD
     assert "zombie" in reading.detail
+
+
+def test_a_record_from_the_previous_runner_is_not_this_sessions_death(tmp_path: Path) -> None:
+    # meiva:note
+    # The production shape of 2026-11-06: the manager reaps a runner with a forced kill, so that
+    # process never clears its record; the new session starts and its runner needs a second or two
+    # before it writes its own. Judged without the launch instant, that leftover record reads as a
+    # death a quarter of a second after a successful launch, and the schedule is marked lost with
+    # automatic relaunch disabled.
+    previous = _sleeper()
+    write_claim(tmp_path, 7, pid=previous.pid)
+    previous.kill()
+    previous.wait()
+    launched_at = time.time()
+
+    reading = read_runner_liveness(tmp_path, 7, launched_at=launched_at, now=launched_at + 1.0)
+
+    assert reading.liveness is RunnerLiveness.UNKNOWN
+    assert "previous runner's record" in reading.detail
+
+
+def test_that_record_reads_dead_once_the_launch_grace_has_passed(tmp_path: Path) -> None:
+    # meiva:note
+    # The grace is bounded on purpose: a session whose runner never came up must still be named as
+    # dead, or the fix trades a false "lost" for a schedule that is never judged at all.
+    previous = _sleeper()
+    write_claim(tmp_path, 7, pid=previous.pid)
+    previous.kill()
+    previous.wait()
+    launched_at = time.time()
+
+    reading = read_runner_liveness(
+        tmp_path, 7, launched_at=launched_at, now=launched_at + SCHEDULE_LAUNCH_GRACE_S + 1
+    )
+
+    assert reading.liveness is RunnerLiveness.DEAD
+    assert reading.detail == f"pid {previous.pid} is gone"
+
+
+def test_a_live_record_predating_the_launch_is_still_alive(tmp_path: Path) -> None:
+    # meiva:note
+    # Adoption is the other side: the manager may take over a session an earlier unit started, and
+    # a process that is provably the recorded one is alive whatever the launch instant says.
+    proc = _sleeper()
+    try:
+        write_claim(tmp_path, 7, pid=proc.pid)
+        reading = read_runner_liveness(tmp_path, 7, launched_at=time.time() + 60)
+    finally:
+        proc.kill()
+        proc.wait()
+
+    assert reading.liveness is RunnerLiveness.ALIVE
 
 
 def test_no_record_reads_unknown(tmp_path: Path) -> None:

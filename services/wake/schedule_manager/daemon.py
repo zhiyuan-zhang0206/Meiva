@@ -264,6 +264,7 @@ async def run(
             launch_env=forward_env_dict(process_config.process_environment()),
             machine_name=machine.name(),
             secret_env_resolver=_build_secret_env_resolver(process_config, runtime),
+            clock=Clock(clock_config_from_boot(process_config), timers=SYSTEM_TIMERS),
         )
         await run_loops(pool, manager, liveness)
     finally:
