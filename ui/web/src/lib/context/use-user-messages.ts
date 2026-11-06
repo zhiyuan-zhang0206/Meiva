@@ -32,7 +32,7 @@ export function withUserMessages(items: BackendTimelineItem[], messages: readonl
     return { ...item, userDelivery: message };
   });
   for (const message of messages) {
-    if (attached.has(message.id) || message.content === null) continue;
+    if (attached.has(message.id) || message.content === null || message.mode !== "sdk") continue;
     const publication: BackendTimelineItem = {
       item_id: `publication:${message.id}`, kind: "agent_chat", source: null,
       payload: message.content, created_at: message.created_at, inbound_id: null,

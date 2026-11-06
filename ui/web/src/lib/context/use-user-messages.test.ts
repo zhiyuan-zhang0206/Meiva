@@ -21,11 +21,22 @@ it.each(["naive", "prefix", "sdk"] as const)("keeps %s routing across start, chu
   expect(merged.find((item) => item.userDelivery)?.userDelivery?.id).toBe(1);
 });
 
-it("recovers durable messages independently of compacted conversation history", () => {
-  const merged = withUserMessages([], [publication]);
+it("recovers SDK publications independently of compacted conversation history", () => {
+  const merged = withUserMessages([], [{ ...publication, mode: "sdk", source_key: "sdk:publication-1" }]);
   expect(merged).toHaveLength(1);
   expect(merged[0].payload).toBe("Ready");
   expect(merged[0].userDelivery?.read_at).toBeNull();
+});
+
+it.each(["naive", "prefix"] as const)("keeps %s history pagination owned by the timeline", (mode) => {
+  const record = { ...publication, mode };
+  const recent = applySystemEvent([], { role: "chat_delta", agent_id: 7, item_id: "9.0", content: "Latest", delivery_mode: "naive", source_message_id: "message-2" }, 1);
+  expect(withUserMessages(recent, [record]).map((item) => item.item_id)).toEqual(["9.0"]);
+  const older = applySystemEvent([], { role: "chat_delta", agent_id: 7, item_id: "2.0", content: "Ready", delivery_mode: "naive", source_message_id: "message-1" }, 1);
+  const loaded = withUserMessages([...older, ...recent], [record]);
+  expect(loaded.map((item) => item.item_id)).toEqual(["2.0", "9.0"]);
+  expect(loaded[0].userDelivery).toEqual(record);
+  expect(record.read_at).toBeNull();
 });
 
 it("uses persisted source identity after message indexes change through compaction", () => {

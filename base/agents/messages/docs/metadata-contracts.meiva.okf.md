@@ -65,5 +65,10 @@ separately; their pending state clears only on answer or explicit close. These r
 independently of `to_user.md`. Pending excerpts are reinjected after compaction,
 and the SDK reader retrieves complete records.
 
+Native and harness delivery mirrors attach to loaded Timeline items without
+injecting unloaded history or changing item IDs. The unread queue retains those
+records across pagination and compaction. SDK publications remain independent
+Timeline entries because they have no corresponding assistant-text item.
+
 See [the delivery-mode decision](../../../../docs/decisions/engineering/notifications/2026-11-06-user-delivery-modes.md)
 and [[meiva/docs/ui.meiva.okf.md]].
