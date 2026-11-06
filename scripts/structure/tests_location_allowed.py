@@ -333,6 +333,10 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "the fixture-scope lint reads the real tests/e2e/conftest.py: flags it in its pre-fix shape and when its package init is deleted, and matches its fixture body's env keys",
     ),
+    "tests/contracts/test_lint_fixture_secret_prefix.py": (
+        "contract",
+        "scans every test tree in the repository for a credential fixture a secret scanner would report",
+    ),
     "tests/contracts/test_lint_marker_contract.py": (
         "contract",
         "scans every system-note writer in agent/, meiva_builtins/ and demos/ for a NoteTag value",
