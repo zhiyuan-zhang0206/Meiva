@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Test Leak Guard — Root Plugin"
-description: "The root plugin that names the test which leaves process-global state different (environment, module attributes, cwd, signal handlers): what it compares, its modes, where its findings go, the order it depends on and what it cannot see."
+description: "The root plugin that names the test which leaves process-global state different (environment, module attributes, cwd, signal handlers, the process timezone): what it compares, its modes, where its findings go, the order it depends on and what it cannot see."
 tags:
 - evaluation
 - quality-assurance
@@ -22,6 +22,7 @@ A test that leaves an environment key, a stored module attribute, the cwd or a s
 | `module-attr-replaced` | at a **file** boundary (and at session end): a first-party module's existing callable now points at another object | a fixture stand-in replaces `start_serving.is_serving` and nothing puts the function back, so every later test in the worker calls the stand-in (`#7796`, 2026-10-30) |
 | `cwd` | `os.getcwd()` | a bare `os.chdir` |
 | `signal` | `signal.getsignal` of the common signals | a handler that raises, installed and not put back |
+| `timezone` | `time.timezone` / `time.tzname`, the C library's copy of `TZ` that only `time.tzset()` moves | a test sets `TZ` and calls `tzset()`; restoring the variable leaves the worker in its zone (`#6363`, 2026-11-06) |
 | `sys.path` | a note, never a leak: entries added or removed | tests insert on purpose |
 
 First-party means a module's `__file__` is below the rootdir, outside top-level dot-directories (`.venv`, `.git`) and any `tests`, `site-packages` or `node_modules` directory. Dicts are scanned by total length (`sum(map(len, ...))`); only when it moved are the dicts that moved located. A module some thread is still importing (`__spec__._initializing`) is left out until the pass after its import finished, or its body's names would be blamed on the running test.

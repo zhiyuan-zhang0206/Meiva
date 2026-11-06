@@ -49,6 +49,7 @@ LEAKERS = {
     "test_leaker_install_namespace": "module-attr",
     "test_leaker_cwd": "cwd",
     "test_leaker_signal_handler": "signal",
+    "test_leaker_clock_timezone": "timezone",
 }
 NOTES = {"test_note_syspath_leak": "sys.path"}
 # Not named by the guard: `identity_restore` undoes it, and without it this test's victim is red.
@@ -58,6 +59,7 @@ VICTIMS = {
     "test_victim_identity_read",
     "test_victim_expects_unset_port",
     "test_victim_plain_namespace_name",
+    "test_victim_clock_is_not_the_leaked_zone",
     IDENTITY_VICTIM,
 }
 

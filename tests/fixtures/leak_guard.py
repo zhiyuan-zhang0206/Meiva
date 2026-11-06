@@ -78,7 +78,7 @@ from tests.fixtures.leak_guard_files import FileIdentities
 _Finding = tuple[str, str]  # (kind, detail)
 MODES = ("off", "warn", "fail")
 LEAK, NOTE, FAULT = "leak_guard", "leak_guard_note", "leak_guard_fault"  # JUnit property names
-STRICT_KINDS = ("env", "module-attr", "module-attr-replaced", "cwd", "signal")
+STRICT_KINDS = ("env", "module-attr", "module-attr-replaced", "cwd", "signal", "timezone")
 _VERDICT_STAGES = ("snapshot", "compare")  # a fault of either leaves no verdict: loud in fail mode
 NOTE_KINDS = ("sys.path",)
 
@@ -309,6 +309,11 @@ _HINTS = {
     ),
     "cwd": "use monkeypatch.chdir(path); a bare os.chdir needs a finally that changes back.",
     "signal": "restore the handler in a finally / finalizer: signal.signal(sig, previous).",
+    "timezone": (
+        "restore the environment variable AND call time.tzset(), or set TZ through a fixture that "
+        "does both: the C library keeps its own copy, and a plain os.environ assignment or a "
+        "monkeypatch.setenv leaves it behind."
+    ),
 }
 
 
@@ -338,14 +343,25 @@ def _handlers() -> tuple[Any, ...]:
     return tuple(map(_getsignal, SIGNALS))
 
 
+# meiva:note
+# The C library's timezone, which `time.tzset()` reads from `TZ` and keeps thereafter: restoring the
+# variable alone leaves the process in the zone the leaker set. `None` off POSIX, where neither
+# exists and nothing can diverge.
+def _process_tz() -> tuple[int, int, int, tuple[str, str]] | None:
+    if not hasattr(time, "tzset"):
+        return None
+    return (time.timezone, time.altzone, time.daylight, time.tzname)
+
+
 class _Snapshot:
-    __slots__ = ("cwd", "env", "path", "signals")
+    __slots__ = ("cwd", "env", "path", "signals", "tz")
 
     def __init__(self) -> None:
         self.env = _environ_data().copy()
         self.cwd = _cwd()
         self.path = sys.path[:]
         self.signals = _handlers()
+        self.tz = _process_tz()
 
 
 def _ignore_env_noise(before: dict[Any, Any], env_now: dict[Any, Any]) -> None:
@@ -364,6 +380,12 @@ def _env_findings(before: dict[Any, Any], env_now: dict[Any, Any]) -> list[_Find
             how = "added" if old is None else "removed" if new is None else "changed"
             found.append(("env", f"{os.fsdecode(key)} was {how}"))
     return found
+
+
+def _tz_findings(
+    before: tuple[int, int, int, tuple[str, str]], now: tuple[int, int, int, tuple[str, str]]
+) -> list[_Finding]:
+    return [("timezone", f"{before[3][0]} -> {now[3][0]}")]
 
 
 def _cwd_findings(before: str | None, now: str | None) -> list[_Finding]:
@@ -480,6 +502,9 @@ class Run:
             _ignore_env_noise(before.env, env_now)
         if before.env != env_now:
             found += _env_findings(before.env, env_now)
+        tz_now = _process_tz()
+        if before.tz is not None and tz_now is not None and tz_now != before.tz:
+            found += _tz_findings(before.tz, tz_now)
         cwd_now = _cwd()
         if cwd_now != before.cwd:
             found += _cwd_findings(before.cwd, cwd_now)
@@ -498,6 +523,11 @@ class Run:
         kinds = {kind for kind, _ in found}
         if "env" in kinds:
             _restore_env(before.env)
+        # meiva:note
+        # After the environment is back: `tzset` re-reads `TZ`, and reading the restored value is
+        # the whole point. It is also the only way back -- nothing else moves this state.
+        if "timezone" in kinds:
+            time.tzset()
         if "cwd" in kinds and before.cwd is not None:
             os.chdir(before.cwd)
         if "signal" in kinds:

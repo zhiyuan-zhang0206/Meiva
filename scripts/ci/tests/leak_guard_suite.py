@@ -134,6 +134,7 @@ KNOWN_LEAKS = '''
 """The known leak classes: a leaker, then the victim that only fails because of it."""
 
 import os
+import time
 from unittest import mock
 
 import pytest
@@ -214,11 +215,12 @@ def test_clean_identity_slot_restore() -> None:
 '''
 
 OTHER_STATE = '''
-"""cwd / signal handler / sys.path: a leaker for each, plus the idiom that does not leak."""
+"""cwd / signal handler / timezone / sys.path: a leaker for each, plus the idiom that does not leak."""
 
 import os
 import signal
 import sys
+import time
 
 import pytest
 
@@ -251,6 +253,34 @@ def test_leaker_signal_handler() -> None:
 def test_clean_signal_handler_restored() -> None:
     previous = signal.signal(signal.SIGUSR2, _handler)
     signal.signal(signal.SIGUSR2, previous)
+
+
+def test_clean_clock_timezone_restored() -> None:
+    original = os.environ.get("TZ")
+    os.environ["TZ"] = "TST-9"
+    time.tzset()
+    if original is None:
+        os.environ.pop("TZ", None)
+    else:
+        os.environ["TZ"] = original
+    time.tzset()
+
+
+def test_leaker_clock_timezone() -> None:
+    # meiva:note
+    # The shape production showed: the variable is put back and the C library is not, so
+    # `os.environ` reads correctly while every later `time.timezone` read is nine hours off.
+    original = os.environ.get("TZ")
+    os.environ["TZ"] = "TST-9"
+    time.tzset()
+    if original is None:
+        del os.environ["TZ"]
+    else:
+        os.environ["TZ"] = original
+
+
+def test_victim_clock_is_not_the_leaked_zone() -> None:
+    assert time.tzname[0] != "TST"
 
 
 def test_note_syspath_leak(tmp_path) -> None:
