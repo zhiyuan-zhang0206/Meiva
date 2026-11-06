@@ -543,3 +543,30 @@ def test_the_home_file_answers_when_the_environment_did_not(tmp_path: Path) -> N
 def test_a_reader_that_answers_wins_over_the_home_file(tmp_path: Path) -> None:
     (tmp_path / ".env").write_text("MEIVA_MACHINE_NAME=company-air\n", encoding="utf-8")
     assert telemetry.resolve_machine(lambda: "macmini", home=tmp_path) == "macmini"
+
+
+# meiva:note
+# Two directions, both required: an entry that runs after the process bound its real identity must
+# not rename it, and a label bound early must lose to the boot seam that comes later. Only the pair
+# keeps `sdk` from quietly outranking `agent_host` on the day someone reorders startup (task #6347).
+def test_an_unbound_label_never_renames_a_bound_process(unit_home: Path) -> None:
+    telemetry.bind_identity(process="agent_host", home=unit_home)
+
+    assert telemetry.bind_identity_if_unbound(process="sdk", home=unit_home) is False
+    assert telemetry.process_name() == "agent_host"
+
+
+def test_a_late_boot_seam_replaces_the_unbound_label(
+    unit_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(emitter.process_state, "process", "unknown")
+    monkeypatch.setitem(emitter.process_state, "machine", None)
+    monkeypatch.setitem(emitter.process_state, "home", None)
+    monkeypatch.setitem(emitter.process_state, "cluster", None)
+
+    assert telemetry.bind_identity_if_unbound(process="sdk", home=unit_home) is True
+    assert telemetry.process_name() == "sdk"
+
+    telemetry.bind_identity(process="agent_host", home=unit_home)
+
+    assert telemetry.process_name() == "agent_host"

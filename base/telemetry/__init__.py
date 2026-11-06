@@ -18,6 +18,7 @@ from base.telemetry.delivery.state import (
 from base.telemetry.emitter import (
     TELEMETRY_KINDS,
     bind_identity,
+    bind_identity_if_unbound,
     capture_trace_ids,
     category_for_kind,
     emit,
@@ -42,6 +43,7 @@ __all__ = [
     "ambient_agent_id",
     "append_jsonl",
     "bind_identity",
+    "bind_identity_if_unbound",
     "build_pipeline",
     "capture_trace_ids",
     "category_for_kind",
