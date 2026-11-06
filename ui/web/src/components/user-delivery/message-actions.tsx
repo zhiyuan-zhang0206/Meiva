@@ -1,6 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
+import { Circle } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import type { ResolveUserMessage, UserMessage } from "@/lib/contracts/types";
@@ -53,10 +54,17 @@ export function MessageActions({ message }: { message: UserMessage }) {
     return () => observer.disconnect();
   }, [api, cache, visible, message.id, message.agent_id, message.read_at]);
 
-  return <div ref={anchor} className="mt-2 space-y-2 text-xs text-muted-foreground" data-publication-id={message.id}>
+  return <div ref={anchor} className="text-xs text-muted-foreground" data-publication-id={message.id}>
     <div className={cn(FLEX, "items-center gap-2")}>
-      {message.read_at === null && <button disabled={busy} onClick={() => void resolve({ action: "read" })}>{t("deliveryUnread")}</button>}
+      {message.read_at === null && <button
+        className="relative inline-flex items-center justify-center after:absolute after:-inset-1 after:content-['']"
+        type="button"
+        disabled={busy}
+        title={t("deliveryUnread")}
+        aria-label={t("deliveryUnread")}
+        onClick={() => void resolve({ action: "read" })}
+      ><Circle className="size-2 fill-current" aria-hidden="true" /></button>}
     </div>
-    {error && <p role="alert">{error}</p>}
+    {error && <p role="alert" className="absolute bottom-full right-0 mb-1 max-w-xs rounded border bg-background px-2 py-1">{error}</p>}
   </div>;
 }

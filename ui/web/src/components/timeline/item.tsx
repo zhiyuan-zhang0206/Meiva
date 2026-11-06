@@ -19,7 +19,6 @@
 // have no card and render bare through EphemeralSystemMarker.
 
 import { AskCard } from "@/components/user-delivery/ask-card";
-import { MessageActions } from "@/components/user-delivery/message-actions";
 import { FileText } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Fragment, memo, useEffect, useRef, useState } from "react";
@@ -452,7 +451,6 @@ export const ItemView = memo(function ItemView({
         <div>
           <ChatMarkdown content={streamingPayload} />
           {item.partial && !item.interrupted ? <StreamingCursor /> : null}
-          {item.userDelivery && <MessageActions message={item.userDelivery} />}
         </div>
       );
 

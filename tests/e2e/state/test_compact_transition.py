@@ -25,7 +25,7 @@ from tests.e2e.fixture_environment import E2EEnv
 
 
 @pytest.fixture
-def transition_env(request: pytest.FixtureRequest) -> Iterator[E2EEnv]:
+def transition_env(e2e_process_env: None, request: pytest.FixtureRequest) -> Iterator[E2EEnv]:
     env_path = Path(os.environ["MEIVA_HOME"]) / ".env"
     original = env_path.read_text()
     lines = [
