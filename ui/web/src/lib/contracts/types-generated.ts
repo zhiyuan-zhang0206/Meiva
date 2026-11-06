@@ -2454,6 +2454,7 @@ export interface components {
             availability?: components["schemas"]["AgentAvailability"] | null;
             observation: components["schemas"]["AgentObservation"];
             awaiting_response_count: number;
+            has_pending_question: boolean;
             highest_notice_priority: components["schemas"]["Priority"] | null;
             unread_user_message_count: number;
             unread_notice_count: number;

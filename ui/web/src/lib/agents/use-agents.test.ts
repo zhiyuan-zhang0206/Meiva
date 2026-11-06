@@ -33,6 +33,7 @@ function row(agent_id: number, status: AgentRow["status"] = "idling"): AgentRow 
     spawned_at: "2026-05-10T00:00:00Z",
     last_active_at: "2026-05-10T00:00:00Z", last_inbound_at: "2026-05-10T00:00:00Z",
     machine: agent_id === 1 ? "test-host" : "runner-a", supports_vision: true, awaiting_response_count: 0,
+    has_pending_question: false,
     highest_notice_priority: null, unread_notice_count: 0, unread_user_message_count: 0, heartbeat_paused_until: null, liveness_state: "online" };
 }
 const MOCK_AGENTS = [row(1, "running"), row(2)];

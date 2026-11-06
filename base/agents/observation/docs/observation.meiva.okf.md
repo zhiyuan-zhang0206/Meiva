@@ -93,3 +93,7 @@ Agent cards and snapshots share overlay > birth > live model resolution. A missi
 Database read failure in `agent_model_target` retains its separate historical
 contract: it logs the error and returns the caller's explicit fallback. That
 execution lookup requires a complete catalog; it does not use nullable metadata.
+
+Agent cards carry a count of unresolved response-required notices and whether
+any of those notices has a structured question. The roster and directory compute
+both from the same set without returning the notice bodies.

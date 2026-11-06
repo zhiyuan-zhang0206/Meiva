@@ -290,6 +290,7 @@ export function rosterFixture(overrides: Partial<WireAgentCard> = {}): AgentRost
       liveness_state: "online",
       observation: { runtime_owner: "unknown" },
       awaiting_response_count: 0,
+      has_pending_question: false,
       highest_notice_priority: null,
       unread_notice_count: 0,
       unread_user_message_count: 0,

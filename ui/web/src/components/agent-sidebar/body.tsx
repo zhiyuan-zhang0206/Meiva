@@ -191,7 +191,6 @@ function SpawningRow({ active, showStatus }: { active: boolean; showStatus: bool
             <span className="text-[10px] opacity-60 leading-none">…</span>
           )}
         </span>
-        <span className="text-[10px] opacity-0 shrink-0 tabular-nums">·</span>
         <span className="w-9 shrink-0" />
       </div>
     </li>

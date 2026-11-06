@@ -55,7 +55,7 @@ row permanently).
 ## Display settings popover
 
 The sliders button opens view (tree / flat, `display.*` user setting), the sort key and
-its direction, the status dot toggle and the terminated archive. Those four
+its direction, the extra status markers toggle and the terminated archive. Those four
 were a permanent toolbar row for settings a user picks once. Clicking the
 active sort key flips the direction; the arrow shows which way it points. The
 awaiting count is not a setting and not here: it is a live signal, so it sits
@@ -82,10 +82,16 @@ silently disappear on a phone.
 
 Collapsed hides the column entirely; the title bar's PanelLeft button restores
 it. The list is stably sorted by agent ID descending and status or activity
-changes never re-sort it. Status dot and awaiting badge are opt-in
-(`display.show_agent_status` / `notification.awaiting_reply`, default off;
-single-line agent rows carry no secondary activity line, user ruling 2026-11-01).
-Labels truncate with a single-line ellipsis (`truncate`) so long names and deep
+changes never re-sort it. A running agent's title has a slow highlight sweep
+with a static emphasis under reduced motion. Offline agents retain a gray marker.
+At the right edge, an unresolved structured question shows a circled question
+mark, and an ordinary response-required notice shows a blue dot. The question
+takes precedence when both are pending, independently of the working title.
+Unread publications and FYI notices do not need a reply. Additional lifecycle
+markers and the header's aggregate reply count remain opt-in through
+`display.show_agent_status` and `notification.awaiting_reply`, respectively.
+Rows keep timestamps in the hover card. Labels truncate with a single-line
+ellipsis (`truncate`) so long names and deep
 tree indents never wrap or vary row height. On fine pointers (`!useCoarsePointer()`),
 hovering a row for 400 ms opens a read-only peek card (`agent-hover-card.tsx`) to
 the right of the sidebar with the full untruncated `#ID · label`, lifecycle status,

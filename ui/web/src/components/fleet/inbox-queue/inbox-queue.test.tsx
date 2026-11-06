@@ -101,7 +101,7 @@ function agent(over: {
     label: over.label ?? null,
     machine: "test",
     supports_vision: true,
-    awaiting_response_count: (over.notices_awaiting_response ?? []).length, highest_notice_priority: (over.notices_awaiting_response ?? [])[0]?.priority ?? null,
+    awaiting_response_count: (over.notices_awaiting_response ?? []).length, has_pending_question: false, highest_notice_priority: (over.notices_awaiting_response ?? [])[0]?.priority ?? null,
     unread_notice_count: 0,
     unread_user_message_count: 0,
     heartbeat_paused_until: null,

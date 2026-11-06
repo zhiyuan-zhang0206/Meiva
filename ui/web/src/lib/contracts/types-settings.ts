@@ -38,7 +38,6 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
 
   "display.language": "en",
   "behavior.navFallbackMs": 5000,
-  "display.time_mode": "last_active",
   "display.show_terminated": false,
   "display.date_format": DEFAULT_DATE_FORMAT,
   "display.show_agent_status": false,
@@ -85,7 +84,6 @@ export const USER_SETTING_DEFAULTS: Record<string, unknown> = {
 
 } as const;
 
-export type TimeMode = "last_active" | "spawned" | "hidden";
 
 
 export type ToUserDocument = Schemas["ToUserDocument"];

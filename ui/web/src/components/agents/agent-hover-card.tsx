@@ -248,12 +248,14 @@ export function AgentHoverCard({
 
         <div className="mt-1.5 space-y-1 text-[11px]">
           <p className={cn("items-center gap-1.5 text-muted-foreground", MIN_W_0, FLEX)}>
-            <span
-              className={cn(
-                "size-1.5 rounded-full shrink-0",
-                offline ? "bg-muted-foreground/50" : STATUS_DOT[agent.status],
-              )}
-            />
+            {offline || agent.status === "impersonated" || agent.status === "terminated" ? (
+              <span
+                className={cn(
+                  "size-1.5 rounded-full shrink-0",
+                  offline ? "bg-muted-foreground/50" : STATUS_DOT[agent.status],
+                )}
+              />
+            ) : null}
             <span className="text-popover-foreground">
               {t(STATUS_LABEL_KEY[agent.status])}
             </span>

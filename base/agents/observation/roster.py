@@ -54,6 +54,7 @@ class AgentCard(AgentLineage):
     availability: AgentAvailability | None = None
     observation: AgentObservation
     awaiting_response_count: int
+    has_pending_question: bool
     highest_notice_priority: Priority | None
     unread_user_message_count: int = 0
     unread_notice_count: int
@@ -97,7 +98,8 @@ _CARD_COLUMNS = """
     mp.last_probe_at AS machine_probe_at, mp.agent_host_online,
     a.last_admission_at,
     a.last_launch_failure_reason, a.last_launch_failure_at,
-    attention.awaiting_response_count, attention.highest_notice_priority,
+    attention.awaiting_response_count, attention.has_pending_question,
+    attention.highest_notice_priority,
     fyi.unread_notice_count,
     deliveries.unread_user_message_count,
     open_impersonation.session_id AS open_impersonation_session_id,
@@ -113,7 +115,9 @@ _CARD_FROM = """
         FROM inbound_messages WHERE agent_id = a.id
     ) im ON true
     LEFT JOIN LATERAL (
-        SELECT count(*) AS awaiting_response_count, min(priority) AS highest_notice_priority
+        SELECT count(*) AS awaiting_response_count,
+            count(question) > 0 AS has_pending_question,
+            min(priority) AS highest_notice_priority
         FROM agent_notices
         WHERE agent_id = a.id AND require_response AND resolved_at IS NULL
     ) attention ON true

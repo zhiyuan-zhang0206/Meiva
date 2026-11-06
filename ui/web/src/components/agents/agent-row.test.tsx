@@ -11,9 +11,7 @@ import {
   AgentHoverGroup,
   AgentRow,
 } from "./agent-row";
-import { USER_SETTING_DEFAULTS } from "@/lib/contracts/types";
 import { fakeBrowser } from "@/lib/browser/testing";
-import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
 import type { AgentRow as AgentRowType } from "@/lib/contracts/types";
 import { renderWithBrowser as rtlRender } from "@/test-support/render";
 import { WallClockProvider } from "@/lib/transport/transport-context";
@@ -55,9 +53,6 @@ beforeAll(() => {
 // worse — real prod settings would leak into the merged settings map and
 // green-wash assertions that depend on the defaults. Tests that need
 // non-default status / settings seed the query cache directly.
-// meiva:note
-// The row ages its timestamp against the page's clock; the app's own answer keeps this file's
-// relative-time strings the ones it already asserts.
 function render(ui: React.ReactElement) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -69,9 +64,6 @@ function render(ui: React.ReactElement) {
   );
 }
 
-// Render with the user-settings cache pre-seeded — for testing opt-in
-// signals (status colors / activity line / awaiting-reply badge) that are
-// hidden at their quiet defaults.
 function renderWithSettings(ui: React.ReactElement, settings: Record<string, unknown>) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -97,7 +89,7 @@ function ag(agent_id: number, overrides: Partial<AgentRowType> = {}): AgentRowTy
     machine: "test-machine",
     supports_vision: true,
     liveness_state: "online",
-    awaiting_response_count: 0, highest_notice_priority: null,
+    awaiting_response_count: 0, has_pending_question: false, highest_notice_priority: null,
     unread_notice_count: 0,
     unread_user_message_count: 0,
     heartbeat_paused_until: null,
@@ -125,36 +117,6 @@ const baseProps = {
 function guides(container: HTMLElement) {
   return Array.from(container.querySelectorAll('[data-testid="tree-guide"]'));
 }
-
-// meiva:note
-// The row's relative timestamp comes from the page's clock: two instants, two strings. The row also
-// ticks once a minute on its own; a fixed clock keeps both reads on the same instant here. The
-// relative wording is the reader's `display.date_format` choice, seeded explicitly here because the
-// default became `absolute` on 2026-10-29 (the Inspector's paused heartbeat needs a day context).
-// meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
-describe("AgentRow timestamp source", () => {
-  it("ages the timestamp against the clock the page hands in when the reader chose relative", () => {
-    const activeAt = "2026-05-07T00:00:00Z";
-    const at = (ms: number) => {
-      const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-      qc.setQueryData(SETTINGS_QUERY_KEY, { ...USER_SETTING_DEFAULTS, "display.date_format": "relative" });
-      return rtlRender(
-        <WallClockProvider wallNow={() => ms}>
-          <QueryClientProvider client={qc}>
-            <AgentRow
-              {...baseProps}
-              agent={ag(1, { last_active_at: activeAt })}
-              depth={0}
-              ancestorsIsLast={[]}
-            />
-          </QueryClientProvider>
-        </WallClockProvider>,
-      ).container.textContent;
-    };
-    expect(at(Date.parse("2026-05-07T03:00:00Z"))).not.toBe(at(Date.parse("2026-05-07T09:00:00Z")));
-    expect(at(Date.parse("2026-05-07T03:00:00Z"))).toContain("3h");
-  });
-});
 
 describe("AgentRow tree-guide rendering", () => {
   it("shows a launch failure on the roster row even with status dots disabled", () => {
@@ -342,51 +304,33 @@ describe("AgentRow machine badge (removed, task #3904)", () => {
   });
 });
 
-describe("AgentRow status dot gating (display.show_agent_status)", () => {
-  // The status dot is a rounded-full span directly in the row button; when the
-  // setting is off it is not rendered at all (hidden entirely, not decolored).
+describe("AgentRow lifecycle markers", () => {
   function statusDot(container: HTMLElement): HTMLElement | null {
     return container.querySelector("li button > span.rounded-full");
   }
 
-  it("default (setting off): no dot for unread publications", () => {
-    const { container } = render(
+  it("unread publications leave the response slot empty while the title shimmers", () => {
+    const { container, queryByRole } = render(
       <AgentRow {...baseProps} agent={ag(1, { status: "running", unread_user_message_count: 3 })} depth={0} ancestorsIsLast={[]} />,
+    );
+    expect(container.querySelector(".agent-title-working")?.textContent).toBe("#1");
+    expect(queryByRole("img", { name: "Awaiting a reply" })).toBeNull();
+    expect(statusDot(container)).toBeNull();
+  });
+
+  it.each(["running", "idling"] as const)("omits the legacy %s dot even with additional markers enabled", (status) => {
+    const { container } = renderWithSettings(
+      <AgentRow {...baseProps} agent={ag(1, { status })} depth={0} ancestorsIsLast={[]} />,
+      { "display.show_agent_status": true },
     );
     expect(statusDot(container)).toBeNull();
   });
 
-  it("default (setting off): no dot for any status (no leaked dynamic signal)", () => {
-    const a = render(
-      <AgentRow {...baseProps} agent={ag(1, { status: "running" })} depth={0} ancestorsIsLast={[]} />,
-    );
-    expect(statusDot(a.container)).toBeNull();
-    cleanup();
-    const b = render(
-      <AgentRow {...baseProps} agent={ag(1, { status: "idling" })} depth={0} ancestorsIsLast={[]} />,
-    );
-    expect(statusDot(b.container)).toBeNull();
-  });
-
-  it("enabled: only the colored status dot appears with unread publications", () => {
-    const { container } = renderWithSettings(
-      <AgentRow {...baseProps} agent={ag(1, { status: "running", unread_user_message_count: 3 })} depth={0} ancestorsIsLast={[]} />,
-      { "display.show_agent_status": true },
-    );
-    const d = statusDot(container);
-    expect(d).toBeTruthy();
-    expect(d!.className).toContain("bg-sky-500");
-    expect(d!.className).toContain("size-1.5");
-    expect(container.querySelectorAll("li button > span.rounded-full")).toHaveLength(1);
-  });
-
   it("offline: grey dot shown even with the status opt-in off (Task #1174)", () => {
-    // A machine drop / dead process must never masquerade as present under
-    // the quiet default — the offline dot is presence, not a dynamic signal.
     const { container } = render(
       <AgentRow
         {...baseProps}
-        agent={ag(1, { status: "idling", liveness_state: "offline" })}
+        agent={ag(1, { status: "running", liveness_state: "offline" })}
         depth={0}
         ancestorsIsLast={[]}
       />,
@@ -400,7 +344,7 @@ describe("AgentRow status dot gating (display.show_agent_status)", () => {
     const { container } = renderWithSettings(
       <AgentRow
         {...baseProps}
-        agent={ag(1, { status: "idling", liveness_state: "offline" })}
+        agent={ag(1, { status: "running", liveness_state: "offline" })}
         depth={0}
         ancestorsIsLast={[]}
       />,
@@ -409,17 +353,8 @@ describe("AgentRow status dot gating (display.show_agent_status)", () => {
     const d = statusDot(container);
     expect(d).toBeTruthy();
     expect(d!.className).toContain("bg-muted-foreground/50");
-    expect(d!.className).not.toContain("bg-emerald-500");
+    expect(container.querySelector(".agent-title-working")).toBeNull();
     expect(d!.getAttribute("title")).toBeTruthy();
-  });
-
-  it("online: unaffected by the liveness field (status color as before)", () => {
-    const { container } = renderWithSettings(
-      <AgentRow {...baseProps} agent={ag(1, { status: "idling" })} depth={0} ancestorsIsLast={[]} />,
-      { "display.show_agent_status": true },
-    );
-    const d = statusDot(container);
-    expect(d!.className).toContain("bg-emerald-500");
   });
 
   it("enabled: impersonated status gets its own distinct color", () => {
