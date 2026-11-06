@@ -17,6 +17,7 @@ from base.telemetry.delivery.state import (
 )
 from base.telemetry.emitter import (
     TELEMETRY_KINDS,
+    bind_identity,
     capture_trace_ids,
     category_for_kind,
     emit,
@@ -40,6 +41,7 @@ __all__ = [
     "EventPipeline",
     "ambient_agent_id",
     "append_jsonl",
+    "bind_identity",
     "build_pipeline",
     "capture_trace_ids",
     "category_for_kind",

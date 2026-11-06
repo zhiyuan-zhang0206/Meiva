@@ -171,6 +171,16 @@ def operator_lifecycle_audit(
         with lifecycle_audit(None) as command:
             yield command
         return
+    # meiva:note
+    # The rows this scope writes must name this machine and this process: the command writes
+    # them through its own connection, before any event pipeline exists, so nothing else would
+    # bind them and every row answered `unknown` in both columns while `$MEIVA_HOME/.env` named
+    # the machine (task #6347). Bound only inside an enabled scope: a boot start writes no row,
+    # so it owes no identity — and announcing a machine it cannot read would put a warning on
+    # the stderr of a start that must stay silent.
+    from base.telemetry import bind_identity
+
+    bind_identity(process="cli-lifecycle", home=home)
     environ = host.environ
     try:
         caller = _caller_identity(environ, pid=pid)
