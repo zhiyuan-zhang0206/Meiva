@@ -13,6 +13,8 @@ from typing import Protocol, TextIO
 
 from loguru import logger
 
+from base.log.redaction import install_log_redaction
+
 
 class StdlibInterceptHandler(logging.Handler):
     """Route stdlib logging through loguru so every `_log = logging.getLogger(...)`
@@ -199,6 +201,11 @@ HUMAN_FORMAT = (
 )
 
 
+# meiva:note
+# The process-wide redaction patcher is installed here, at the one funnel every loguru sink in this
+# codebase passes through, so no process has to remember it: a unit that opens its own stderr sink
+# (`exec_host`, `pty_sessions`, the MCP daemon) gets the same masked record as one that goes through
+# `start_process_logging`. Idempotent, and skipping it is not an option any caller has.
 def add_sink(
     sink: TextIO | Path | Callable[..., None] | logging.Handler | str,
     /,
@@ -224,6 +231,7 @@ def add_sink(
     Raises if a caller explicitly asks for `diagnose=True` — that request is
     never honored, so failing loud beats a silently-ignored kwarg.
     """
+    install_log_redaction()
     if kwargs.pop("diagnose", False):
         raise ValueError(
             "diagnose=True is forbidden on log sinks: it renders local variable "
