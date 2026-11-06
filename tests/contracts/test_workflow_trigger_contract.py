@@ -37,7 +37,7 @@ DECLARED: dict[str, frozenset[str]] = {
     "refresh-test-durations.yml": frozenset({"schedule", "workflow_dispatch"}),
     "release-android.yml": frozenset({"push", "workflow_dispatch"}),
     "release-app.yml": frozenset({"push", "workflow_dispatch"}),
-    "release-gate.yml": frozenset({"schedule", "workflow_dispatch"}),
+    "release-gate.yml": frozenset({"schedule", "workflow_dispatch", "pull_request"}),
     "secret-scan-history.yml": frozenset({"schedule", "workflow_dispatch"}),
     "update-model-pricing.yml": frozenset({"schedule", "workflow_dispatch"}),
 }

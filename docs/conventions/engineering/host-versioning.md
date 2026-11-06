@@ -46,6 +46,15 @@ it". The two never mix, and neither replaces the other; see the
   Release (`--latest=false`). `.github/workflows/promote-release.yml` invokes
   `scripts/host_ops/release/promote.py` to verify the target tag's `meiva-release/v1` certificate
   before advancing `channel/stable` and marking that GitHub Release `--latest`.
+- **Release verification.** Dispatch `release-gate.yml` on `main` with `verify_only=true` to run
+  the full release suite early with read-only permissions. The release gate can reuse a successful first
+  attempt started in the preceding 24 hours when GitHub identifies it as this repository's
+  `main` verify-only dispatch of the reviewed workflow. The source and target must be on
+  `main` and have the same Git tree. This binds their locks, test scope, local actions and
+  pinned runner image to the evidence. A miss runs the same full suite in the release gate.
+  The certificate still names the target commit and the issuing gate run, whose summary
+  identifies the successful verification attempt when reused. Pull-request checks, nightly
+  duration measurements and hotfix or other non-main targets follow their own verification paths.
 - **Enforced deployment gate (`cli.fleet_update`).** `cli.fleet_update` (`down` and `run`)
   resolves its target through `cli/fleet_update/plan/release_target.py:resolve_update_target`
   before opening any SSH session: `--channel stable|latest`, a certified `--release <tag>` or

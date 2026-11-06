@@ -1,17 +1,19 @@
-exports = ["base.py", "bisect_train.py", "certify.py", "git_tags.py", "nightly.py", "promote.py", "tag.py"]
+exports = ["base.py", "bisect_train.py", "certify.py", "evidence.py", "git_tags.py", "nightly.py", "promote.py", "tag.py"]
 
 [uses]
 "base.py" = ["git_tags.py"]
 "bisect_train.py" = ["git_tags.py"]
 "certify.py" = ["git_tags.py", "tag.py"]
+"evidence.py" = ["git_tags.py"]
 "promote.py" = ["git_tags.py"]
 "tag.py" = ["git_tags.py"]
-"tests" = ["base.py", "bisect_train.py", "certify.py", "git_tags.py", "nightly.py", "promote.py", "tag.py"]
+"tests" = ["base.py", "bisect_train.py", "certify.py", "evidence.py", "git_tags.py", "nightly.py", "promote.py", "tag.py"]
 
 [roots]
 "base.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 "bisect_train.py" = { kinds = ["argv", "pid"], why = "the __main__ guard reads argv[1:] once and hands it to main, and names the interpreter it runs on (sys.executable) for the `git bisect run` child it starts and for the pytest-python fallback when the repository has no virtualenv" }
 "certify.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
+"evidence.py" = { kinds = ["argv", "pid"], why = "the process entry passes the target and evidence timestamp from argv and the Actions API response from stdin" }
 "nightly.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 "promote.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
 "tag.py" = { kinds = ["argv"], why = "the __main__ guard reads argv[1:] once and hands it to main" }
