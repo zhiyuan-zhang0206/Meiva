@@ -50,10 +50,19 @@ def owned_writer() -> None:
         pipeline.stop(timeout=1)
 
 
+# meiva:note
+# Three emissions, three names, one loss: this process has no pipeline to send any of them and
+# says so for the first one only. A raise here would fail the business write these calls sit in;
+# silence would make a blind process read as an idle one. `remove()` leaves one sink so the
+# parent counts records rather than copies of one record.
+# meiva:link base/telemetry/docs/telemetry.meiva.okf.md
 def cold_emit() -> None:
+    logger.remove()
     logger.add(sys.stderr, enqueue=False)
     prior_threads = set(threading.enumerate())
-    telemetry.emit("log", "log", attributes={"cold": True})
+    telemetry.emit("log", "page_ttl_expired", attributes={"cold": 1})
+    telemetry.emit("log", "shell_ttl_expired", attributes={"cold": 2})
+    telemetry.emit("log", "log", attributes={"cold": 3})
     assert set(threading.enumerate()) == prior_threads, "emit must not construct a writer"
     assert telemetry.flush().status is telemetry.DrainStatus.COMPLETED
 

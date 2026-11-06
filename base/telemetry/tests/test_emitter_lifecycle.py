@@ -48,10 +48,18 @@ def test_process_binding_uses_owned_writer_without_ambient_factory() -> None:
     assert child.returncode == 0, child.stderr
 
 
-def test_emit_before_init_reports_missing_owner_without_constructing_a_writer() -> None:
+# meiva:note
+# The old assertion pinned a raise out of `emit_prepared`: it held the process to a behaviour
+# that reports an ordinary absence as a broken sink, and that a later edit could turn into a
+# failed business write. The new assertion pins the opposite contract — the unbound process
+# loses the event, says so exactly once, and names the first event it lost.
+# meiva:link base/telemetry/docs/telemetry.meiva.okf.md
+def test_emit_before_init_drops_the_event_and_says_so_once() -> None:
     child = _run_scenario("cold_emit")
     assert child.returncode == 0, child.stderr
-    assert "requires an initialized process pipeline or producer" in child.stderr
+    assert child.stderr.count("emission skipped: no producer") == 1
+    assert "page_ttl_expired" in child.stderr, "the report names the first event it lost"
+    assert "requires an initialized process pipeline or producer" not in child.stderr
     assert "emit must not construct a writer" not in child.stderr
 
 

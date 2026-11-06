@@ -49,6 +49,7 @@ from base.telemetry.delivery.receipts import (
 )
 from base.telemetry.delivery.reporting import (
     failure_isolated,
+    report_no_pipeline,
     report_sink_failure,
 )
 from base.telemetry.delivery.serialization import event_line, event_line_digest, event_payload
@@ -328,6 +329,15 @@ def prepare_event(
     )
 
 
+# meiva:note
+# An unbound emission is dropped, not failed. The callers on this path are the writes
+# themselves — a task, a notice, an audit row — already committed; a process with no stream to
+# observe them through still has to commit them. Taking that decision here, instead of raising
+# into `failure_isolated` and being swallowed there, means the loss is reported as the loss it
+# is: one line per process naming the first `event_name` it cost. A raise is one edit away from
+# failing the write, and a traceback per event reads as a broken sink. A producer that is
+# supplied and then fails stays a sink failure, reported exactly as before.
+# meiva:link base/telemetry/docs/telemetry.meiva.okf.md
 def emit_prepared(
     event: Event,
     *,
@@ -337,13 +347,34 @@ def emit_prepared(
     """Capture through an explicit producer dependency, then enqueue that exact event."""
     if capture is not None:
         event = capture(event)
+    if producer is None:
+        bound = process_state["pipeline"]
+        if bound is None:
+            _report_unbound_emission(event.event_name)
+            return
+        with failure_isolated("emit"):
+            bound.enqueue(event)
+        return
     with failure_isolated("emit"):
-        pipeline = producer() if producer is not None else process_state["pipeline"]
-        if pipeline is None:
-            raise RuntimeError(
-                "event emission requires an initialized process pipeline or producer"
-            )
-        pipeline.enqueue(event)
+        producer().enqueue(event)
+
+
+# meiva:note
+# One line per process for the events this process had nowhere to send. A one-shot verb or a
+# schedule entry binds no pipeline, so every event it produces is lost; said once, that is a
+# fact the operator can act on, where the alternative is either silence that reads as "nothing
+# happened" or a traceback per event that reads as a broken sink.
+# meiva:link base/telemetry/docs/telemetry.meiva.okf.md
+def _report_unbound_emission(event_name: str) -> None:
+    if process_state["emission_skipped_warned"]:
+        return
+    process_state["emission_skipped_warned"] = True
+    report_no_pipeline(
+        "[best-effort] emission skipped: no producer — this process binds no event pipeline "
+        "and was given none, so every event it emits is dropped; said once per process "
+        "(first dropped event_name={event_name})",
+        event_name=event_name,
+    )
 
 
 def flush() -> DrainResult:
