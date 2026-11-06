@@ -56,12 +56,17 @@ def test_the_stale_checks_belong_to_the_full_check(make_repo: RepoFactory) -> No
 
 # meiva:note
 # `--changed` takes every argument through the entry's resolver: a relative one against the
-# repository the entry resolved, an absolute one as written. The cwd here is the checker's own
-# checkout, so an argument resolved against it would name a path outside the temporary repository.
+# repository the entry resolved, an absolute one as written. The case distinguishes the two only
+# while the working directory is somewhere else -- pytest runs in the checker's own checkout, and
+# the assert below keeps it that way, so a later edit that moved these runs into the temporary
+# repository fails here instead of passing for the wrong reason.
 def test_changed_paths_resolve_through_the_entry_in_both_forms(
     make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = make_repo(TWO_BAD)
+    assert (root / "pkg/a.py").resolve() != Path("pkg/a.py").resolve(), (
+        "the working directory holds pkg/a.py; resolving against it would name the same file"
+    )
     assert run(root, "check", "--changed", "pkg/a.py") == 1
     assert "pkg/a.py:1" in capsys.readouterr().out
     assert run(root, "check", "--changed", str(root / "pkg/a.py")) == 1
