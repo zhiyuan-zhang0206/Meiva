@@ -94,6 +94,21 @@ def test_the_same_red_on_another_commit_confirms_exactly_once() -> None:
     assert entry.red_count == 3
 
 
+# meiva:note
+# `main` can stand still for days with nobody merging, and the two timed workflows then run on the
+# same commit. Two runs of the same fingerprint is already two sightings -- the round only reads
+# runs newer than its watermark -- so the card must not wait for the tree to move.
+def test_the_same_red_twice_on_one_commit_confirms() -> None:
+    first = apply_run({}, _red(_NIGHTLY, "aaa111", "2026-11-02T00:00:00+00:00", _WATCH_WORK))
+    second = apply_run(
+        dict(first.entries), _red(_NIGHTLY, "aaa111", "2026-11-03T00:00:00+00:00", _WATCH_WORK)
+    )
+
+    assert first.confirmed == ()
+    assert len(second.confirmed) == 1
+    assert second.confirmed[0].red_count == 2
+
+
 def test_four_red_slots_produce_one_card_and_a_count_of_four() -> None:
     entries: dict[str, Entry] = {}
     confirmed = 0
@@ -133,6 +148,56 @@ def test_a_red_naming_nothing_is_not_a_failure_it_can_confirm() -> None:
     assert plan.entries == ()
     assert plan.confirmed == ()
     assert any("named no failure" in note for note in plan.notes)
+
+
+# meiva:note
+# The 2026-11-06 job log lines, verbatim: every line carries the run's timestamp, and xdist's
+# progress lines carry a worker label too. This is the positive control for the parser -- the same
+# bytes that made five hours of red `main` invisible must now name six failing cases.
+def test_the_shapes_the_job_log_delivers_are_read() -> None:
+    delivered = (
+        "2026-11-06T00:37:36.2030925Z FAILED "
+        "tests/e2e/flow/test_shell_effects.py::test_session_verbs_run_in_one_shell_and_change_its_lifetime"
+        " - AssertionError: Timed out after 90.06s\n"
+        "2026-11-06T00:32:24.7760416Z [gw1] [ 24%] FAILED "
+        "tests/e2e/plugins/test_meiva_code_effects.py::test_cwd_survives_a_restart - AssertionError\n"
+        "2026-11-06T00:37:36.4758780Z FAILED "
+        "tests/e2e/lifecycle/test_budget_handoff.py::"
+        "test_usage_reminder_preserves_handoff_across_late_checkpoint_and_restart[dynamic workflow "
+        "orchestrator] - AssertionError\n"
+    )
+
+    parsed = parse_failures(
+        delivered, job_name="Measure e2e durations (1/4)", suite_step_failed=True
+    )
+
+    assert [failure.kind for failure in parsed] == [FAILURE_TEST] * 3, parsed
+    assert parsed[0].test_id == (
+        "tests/e2e/flow/test_shell_effects.py::"
+        "test_session_verbs_run_in_one_shell_and_change_its_lifetime"
+    )
+    assert parsed[1].test_id == (
+        "tests/e2e/plugins/test_meiva_code_effects.py::test_cwd_survives_a_restart"
+    )
+    # meiva:note
+    # A parametrized id ends at the first space, so the bracket never reaches the fingerprint and a
+    # case does not split into one fingerprint per parameter set.
+    assert parsed[2].test_id == (
+        "tests/e2e/lifecycle/test_budget_handoff.py::"
+        "test_usage_reminder_preserves_handoff_across_late_checkpoint_and_restart[dynamic"
+    )
+
+
+def test_a_pytest_summary_that_names_no_case_names_the_watch_instead() -> None:
+    log = (
+        "2026-11-06T00:37:36.2029581Z ============ short test summary info ============\n"
+        "2026-11-06T00:37:36.2030925Z ================== no tests ran ==================\n"
+    )
+
+    parsed = parse_failures(log, job_name="Backend", suite_step_failed=True)
+
+    assert [failure.kind for failure in parsed] == [FAILURE_INFRA]
+    assert parsed[0].test_id == "Backend: pytest summary without a parsable case"
 
 
 def test_both_failure_line_shapes_are_read() -> None:

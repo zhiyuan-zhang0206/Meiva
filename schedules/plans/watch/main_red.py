@@ -56,9 +56,23 @@ STATE_INFRA = "infra"
 _SEPARATOR = "::"
 
 # meiva:note
-# The two shapes a failing case is printed in: pytest's own `FAILED path::node`, and the native
-# JUnit validator's `FAILED package.module::node`. Both were observed on 2026-11-01.
-_FAILED_LINE = re.compile(r"^\s*FAILED\s+(?P<test_id>[^\s(]+)", re.MULTILINE)
+# The shapes a failing case is printed in: pytest's own `FAILED path::node`, the native JUnit
+# validator's `FAILED package.module::node`, and those same lines as the job log delivers them --
+# each line carries the run's `<ISO-8601>Z ` timestamp, and xdist's progress lines add
+# `[gw1] [ 24%] ` in front. Reading only the bare form made every delivered failure unreadable:
+# on 2026-11-06 a 214 KB job log held 37 `FAILED` lines and the watch matched none of them, so
+# every red job was filed as one unnamed infrastructure fault and no card could ever open.
+_FAILED_LINE = re.compile(
+    r"^(?:[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z\s+)?"
+    r"(?:\[gw\d+\]\s+\[\s*\d+%\]\s+)?"
+    r"\s*FAILED\s+(?P<test_id>[^\s(]+)",
+    re.MULTILINE,
+)
+
+# meiva:note
+# pytest's own summary banner. A job that printed it ran the suite, so a summary that names no
+# case is the watch failing to read a failure -- not a runner fault -- and the round must say which.
+_PYTEST_SUMMARY = "short test summary info"
 
 # meiva:note
 # Evidence that the run broke around the suite rather than in it: a container that never pulled
@@ -237,6 +251,11 @@ def parse_failures(
     for step in failed_steps:
         if step in check_steps:
             return (Failure(f"{job_name} / {step}", FAILURE_TEST),)
+    if suite_step_failed and _PYTEST_SUMMARY in log_text:
+        # meiva:note
+        # The suite ran and its summary named nothing this watch could read. Reported under its
+        # own name so a round says "the watch could not parse this", not "the runner broke".
+        return (Failure(f"{job_name}: pytest summary without a parsable case", FAILURE_INFRA),)
     if suite_step_failed:
         return (Failure(f"{job_name}: unnamed failure", FAILURE_INFRA),)
     return ()
@@ -302,7 +321,12 @@ def apply_run(entries: dict[str, Entry], run: RunFacts) -> Plan:
             last_red_at=run.created_at,
             red_count=entry.red_count + 1,
         )
-        if entry.state == STATE_SUSPECTED and entry.first_seen_sha != run.head_sha:
+        # meiva:note
+        # Two red runs confirm, whatever commits they ran on. The round only reads runs newer than
+        # its watermark, so a second sighting is a second run -- the sha test added nothing there,
+        # and it kept a red invisible exactly when `main` stopped moving: an unchanged tree could
+        # red every night and stay `suspected` forever.
+        if entry.state == STATE_SUSPECTED:
             updated = replace(updated, state=STATE_CONFIRMED)
             confirmed.append(updated)
             notes.append(f"confirmed {name} after {updated.red_count} red runs")
