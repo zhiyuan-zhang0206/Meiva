@@ -11,7 +11,7 @@ from meiva.sdk_surface import process_context
 
 def replay_uid(execution: str) -> str:
     identity = ExecutionIdentity(uuid5(NAMESPACE_URL, execution), None)
-    return OperationIds(identity).next_uid().hex
+    return str(OperationIds(identity).next_uid())
 
 
 def replay_sdk_write[**P, R](

@@ -292,7 +292,7 @@ class MeivaContext:
     # the CLI runtime and the IM bridge use (`new_uuid(rng).hex`). A partial context fails at
     # first use, with no fallback to a generator of its own.
     def require_new_id(self) -> str:
-        return new_uuid(self.require_rng()).hex
+        return str(new_uuid(self.require_rng()))
 
     # meiva:note
     # The message-timestamp policy of the unit of work that asks: this owner's clock and the
@@ -377,8 +377,8 @@ class MeivaContext:
         from base.clock.ids import new_uuid
 
         if self.operation_ids is not None:
-            return self.operation_ids.next_uid().hex
-        return new_uuid(self.require_rng()).hex
+            return str(self.operation_ids.next_uid())
+        return str(new_uuid(self.require_rng()))
 
     @property
     def sql(self) -> LazyConnection:
