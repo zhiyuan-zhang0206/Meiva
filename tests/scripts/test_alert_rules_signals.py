@@ -42,11 +42,9 @@ SIGNALS: dict[str, Signal] = {
         "schedule_process_lost", "meiva-ops", "0m", "warning"
     ),
     # meiva:note
-    # The interval collectors' own beat. Silence means the loop stopped (a failed cycle still
-    # emits, with outcome=failed), so this rule reads absence, not failure (2026-11-06).
-    "meiva-ops-plugin-collector-silent": Signal(
-        "plugin_collector_cycle", "meiva-ops", "5m", "warning"
-    ),
+    # The interval collectors have no rule: `plugin_collector_cycle` cannot leave a schedule's
+    # process, so a rule reading its absence described the emit path, not the collectors
+    # (2026-11-06, removed the same day; the reason sits where the rule was in rules.yml).
     "meiva-ops-schedule-stalled": Signal("schedule_stalled", "meiva-ops-slow", "0m", "warning"),
     "meiva-ops-schedule-convergence-abandoned": Signal(
         "schedule_convergence_abandoned", "meiva-ops-slow", "0m", "warning"
