@@ -7,18 +7,22 @@ tags: []
 
 # Interrupting a turn: cancel, terminate and restart
 
-Public cancel (`POST /api/agents/{id}/cancel`) is not an inbound: it asks the
-home host to cancel the running turn Task, so the in-flight node is cancelled
-where it awaits and the turn ends without a claim pass. The agent stays alive
-and idle and its next input starts a fresh turn. See
+Public cancel (`POST /api/agents/{id}/cancel`) asks the home host to cancel the
+running Task for native Meiva turns. The in-flight node unwinds and the agent
+idles until its next input. See
 [[agent/graph/exec/docs/hosted-turn-cancel.meiva.okf.md]].
+
+For a running external harness, the same route records a durable `cancel`
+inbound and answers `enqueued`. The foreground watcher asks the adapter to
+interrupt while it keeps reading the session. The adapter's terminal result
+settles the foreground and claim consumes the inbound before admitting new
+work. Session shutdown remains a separate operation.
 
 Terminate remains a durable inbound. The two-second DB poll in
 `agent/graph/interrupt/` (`watch_for_interrupt`, cadence `INTERRUPT_POLL_S`) observes a pending cancel/terminate row during
 LLM/exec, halts and returns to claim; claim routes termination to `END` while a
-`kind='cancel'` inbound keeps the agent alive and idle. No public route writes a
-`cancel` row today; the consumer remains for external controllers. A pending
-restart joins the poll after a grace, below.
+`kind='cancel'` inbound keeps the agent alive and idle. A pending restart
+joins the poll after a grace, below.
 
 A terminate **yields to a message the death decision did not see**: a chat
 co-batched with a self-initiated terminate (`meiva.self.terminate()` — the chat

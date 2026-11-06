@@ -14,11 +14,9 @@ from services.agent_runner.agent_host import health_routes
 from services.agent_runner.agent_host.health_routes import prepare_harness_switch_route
 
 # meiva:note
-# What these tests lock. `prepare_harness_switch_route` records a harness switch in graph state
-# when the old harness is `meiva`, and in the `agent_harness_messages` display store for every
-# external harness (`claude_code`, `codex`, ...). The external branch reads `host._control_pool`
-# and falls back to `host._pool`; when neither is an `AsyncConnectionPool` it skips the write
-# silently. All three outcomes answer 200 — a missing display store must not block the switch.
+# The outgoing history records a switch across native and external stores. For
+# external-to-native transitions the writer uses the control pool with a fallback
+# to the workload pool. A missing display store must not block the switch.
 
 
 def _drop_agent(_agent_id: int) -> None:
@@ -35,12 +33,12 @@ def _route(host: Any) -> Any:
     )
 
 
-def _payload(agent_id: int) -> bytes:
+def _payload(agent_id: int, *, new_harness: str = "meiva") -> bytes:
     return json.dumps(
         {
             "agent_id": agent_id,
             "old_harness": "claude_code",
-            "new_harness": "meiva",
+            "new_harness": new_harness,
             "source": "operator",
             "message": "back to the native runtime",
         }
@@ -126,6 +124,19 @@ async def test_pool_fallback_records_the_switch_note(
     assert status_code == 200
     assert b'"ok":true' in body
     _assert_switch_note(await _harness_rows(aops_pool, agent_id))
+
+
+async def test_switch_between_external_harnesses_leaves_the_note_to_the_destination(
+    aops_pool: AsyncConnectionPool[Any],
+) -> None:
+    agent_id = 9214
+    await _setup_agent(aops_pool, agent_id)
+    host = _host(_control_pool=aops_pool)
+
+    status_code, _, _ = await _route(host)(_payload(agent_id, new_harness="codex"))
+
+    assert status_code == 200
+    assert await _harness_rows(aops_pool, agent_id) == []
 
 
 async def test_no_pool_skips_the_write_and_still_answers_ok(

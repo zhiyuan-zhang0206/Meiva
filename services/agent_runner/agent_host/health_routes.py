@@ -56,7 +56,8 @@ def cancel_turn_route(scheduler: TurnScheduler) -> RouteHandler:
 
 
 # meiva:note
-# A `POST /prepare-harness-switch` handler — records harness switch before termination and drops sessions.
+# A switch across display stores leaves a note in the outgoing history.
+# External harnesses share a display store and receive the switch note on arrival.
 def prepare_harness_switch_route(host: AgentHost, *, clock: Clock) -> RouteHandler:
 
     async def handler(body: bytes) -> tuple[int, bytes, str]:
@@ -106,7 +107,7 @@ def prepare_harness_switch_route(host: AgentHost, *, clock: Clock) -> RouteHandl
                         agent_id,
                         exc,
                     )
-            else:
+            elif new_harness == "meiva":
                 from base.agents.history.harness_messages import aappend_harness_timeline_items
                 from base.agents.history.timeline_item import TimelineItem
                 from base.db.transaction import async_write_transaction

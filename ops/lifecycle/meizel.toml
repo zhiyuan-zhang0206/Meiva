@@ -1,7 +1,7 @@
 exports = ["delivery.py", "events.py", "launch.py", "launch_reconcile.py", "termination.py"]
 
 [uses]
-"__init__.py" = ["events.py", "hosted_turn.py", "launch.py", "restart_row.py", "resurrect_gates.py", "resurrect_plan.py", "termination.py"]
+"__init__.py" = ["events.py", "foreground_cancel.py", "hosted_turn.py", "launch.py", "restart_row.py", "resurrect_gates.py", "resurrect_plan.py", "termination.py"]
 "delivery.py" = ["__init__.py"]
 "launch.py" = ["launch_row.py"]
 "termination.py" = ["events.py"]

@@ -64,6 +64,7 @@ from ops.lifecycle.events import (
 from ops.lifecycle.events import (
     publish_page_closed as publish_page_closed,
 )
+from ops.lifecycle.foreground_cancel import enqueue_external_cancel
 from ops.lifecycle.hosted_turn import (
     LocalAgentHost,
     cancel_hosted_turn,
@@ -205,15 +206,14 @@ async def _kill_shell_sessions_now(
 
 
 # meiva:note
-# Local-target cancel of the running turn; the agent stays alive and idles.
-#
-#     The home agent host is asked to cancel the turn (`cancel_hosted_turn`). Unknown
-#     agents raise; a host that cannot be reached raises too, because the caller asked
-#     for a stop and must not be told nothing happened.
+# External harness cancellation goes through claim and the adapter. The host task
+# owns the session, so cancelling that task would also close its background work.
 async def cancel_agent_op(
-    db: Database, agent_id: int, *, host: LocalAgentHost
+    db: Database, bus: EventBus, agent_id: int, *, host: LocalAgentHost
 ) -> CancelAgentResponse:
-    await asyncio.to_thread(get_agent_status, db, agent_id)
+    external = await asyncio.to_thread(enqueue_external_cancel, db, bus, agent_id)
+    if external is not None:
+        return CancelAgentResponse(status=external)
     cancelled = await cancel_hosted_turn(agent_id, host=host)
     return CancelAgentResponse(
         status=CancelResult.CANCELLED if cancelled else CancelResult.NOT_RUNNING
@@ -731,7 +731,7 @@ async def lifecycle_op(
         )
     if action == "cancel":
         return await cancel_agent_op(
-            db, agent_id, host=local_agent_host(home, health_port=agent_host_port)
+            db, bus, agent_id, host=local_agent_host(home, health_port=agent_host_port)
         )
     if action == "terminate":
         return await terminate_agent_op(
