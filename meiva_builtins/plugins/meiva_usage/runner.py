@@ -198,11 +198,13 @@ def _load_collector_config(
 # indistinguishable from healthy (schedule 50, 2026-11-04: three hours of swallowed failures).
 # Telemetry must never break the loop: a process with no pipeline, or an event the registry
 # refuses, is reported to the log and the next cycle still runs.
-def _emit_cycle(collector_id: str, outcome: str, reason: str, *, cycle: int) -> None:
+# `False` is "this process has no pipeline, the event did not leave it": the drop is the loop's to
+# report, because the loop is what knows whether it has already said so (2026-11-06, task #6348).
+def _emit_cycle(collector_id: str, outcome: str, reason: str, *, cycle: int) -> bool:
     from base.telemetry.emitter import emit, pipeline_bound
 
     if not pipeline_bound():
-        return
+        return False
     try:
         emit(
             "telemetry",
@@ -216,6 +218,7 @@ def _emit_cycle(collector_id: str, outcome: str, reason: str, *, cycle: int) -> 
         )
     except Exception as exc:
         _log.warning("collector {} cycle event not emitted: {}", collector_id, exc)
+    return True
 
 
 # meiva:note
@@ -249,6 +252,14 @@ def run_collector_cycles(
     effective_tz = _resolve_display_tz(display_tz, effective_environ)
 
     cycles = 0
+    # meiva:note
+    # A process with no bound event pipeline drops every event it is asked to emit, and until
+    # 2026-11-06 it dropped them without a word: a schedule process never binds the pipeline
+    # (`schedules/jobs/entry.py` builds a database entry and no telemetry; `init_telemetry()`
+    # belongs to daemons), so "three days, zero cycle events" read exactly like "nothing
+    # happened". One line, at the first drop of this run, is the whole cost: the loop owns the
+    # flag because the loop is the scope that said it, and a per-cycle line would be 96 a day.
+    unbound_reported = False
     while True:
         collector = _load_collector_config(collector_id, home, effective_environ)
         if collector is None:
@@ -271,9 +282,18 @@ def run_collector_cycles(
             )
         except Exception as exc:
             _log.warning("collector {} refresh cycle failed: {}", collector_id, exc)
-            _emit_cycle(collector_id, "failed", type(exc).__name__, cycle=cycles)
+            emitted = _emit_cycle(collector_id, "failed", type(exc).__name__, cycle=cycles)
         else:
-            _emit_cycle(collector_id, "ok", "", cycle=cycles)
+            emitted = _emit_cycle(collector_id, "ok", "", cycle=cycles)
+
+        if not emitted and not unbound_reported:
+            unbound_reported = True
+            _log.warning(
+                "collector {} cycle events cannot be emitted: no telemetry pipeline is bound in "
+                "this process (a schedule runner binds none), so every event this loop produces "
+                "is dropped. The loop's liveness is readable from plugin_stats.updated_at.",
+                collector_id,
+            )
 
         cycles += 1
         if stop_after_cycles is not None and cycles >= stop_after_cycles:
