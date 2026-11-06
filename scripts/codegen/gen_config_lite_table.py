@@ -185,6 +185,9 @@ LITE_MANIFEST: tuple[LiteField, ...] = (
     LiteField(
         "db_pool_acquire_timeout_seconds", "literal", None, "agent/db/__init__.py:28 module level"
     ),
+    LiteField(
+        "user_delivery_mode", "literal", "user_delivery", "exec child protocol surface selection"
+    ),
     LiteField("eval_isolation", "literal", None, "process_boot.apply_per_agent_eval_isolation"),
     LiteField(
         "eval_network_allowlist",
@@ -236,7 +239,7 @@ LITE_MANIFEST: tuple[LiteField, ...] = (
 )
 
 # The named validity rules `_lite.py` implements for the `check` column.
-_ALLOWED_CHECKS = frozenset({"iana", "port", "eval_allowlist"})
+_ALLOWED_CHECKS = frozenset({"iana", "port", "eval_allowlist", "user_delivery"})
 _ALLOWED_DEFAULT_KINDS = frozenset(
     {"literal", "none", "factory_empty_list", "otel_endpoint_from_port"}
 )
@@ -244,6 +247,10 @@ _ALLOWED_DEFAULT_KINDS = frozenset(
 
 def _kind(annotation: object) -> str:
     """Map a field annotation to a `_lite.py` parse kind — fail loud on anything new."""
+    from base.api_contracts.user_delivery import UserDeliveryMode
+
+    if annotation is UserDeliveryMode:
+        return "str"
     if annotation is str:
         return "str"
     if annotation is bool:

@@ -146,7 +146,7 @@ def notice_blocking(pool: ConnectionPool, agent_id: int) -> OpenNotice | None:
             "SELECT id, title, content, priority, require_response, blocking, created_at, expire_at, "
             "task_id, question "
             "FROM agent_notices "
-            "WHERE agent_id = %s AND resolved_at IS NULL AND expire_at > now() "
+            "WHERE agent_id = %s AND resolved_at IS NULL AND (expire_at IS NULL OR expire_at > now()) "
             "AND require_response "
             "ORDER BY created_at DESC LIMIT 1",
             (agent_id,),

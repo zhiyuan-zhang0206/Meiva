@@ -379,3 +379,44 @@ async def test_an_unclassified_adapter_error_is_not_swallowed(make_harness: Harn
     harness = make_harness(draft=DraftReply(status="failed", error_message="provider protocol bug"))
     with pytest.raises(ValueError, match="provider protocol bug"):
         await harness.suggest()
+
+
+async def test_candidates_feedback_and_memory_reach_one_draft_while_agent_runs(
+    harness: Harness,
+) -> None:
+    from psycopg.types.json import Jsonb
+
+    from gateway.agents.reply_suggestion.feedback import save_offer
+
+    other = harness.new_agent()
+    old_offer = save_offer(harness.db_conn, other, "An earlier release", ["Deploy now"])
+    harness.db_conn.execute(
+        "INSERT INTO reply_suggestion_feedback(offer_id,candidate,outcome,sent_text) VALUES (%s,'Deploy now','rejected',NULL)",
+        (old_offer,),
+    )
+    harness.db_conn.execute(
+        "INSERT INTO agent_user_messages(agent_id,source_key,mode,content,suggestions) VALUES (%s,'sdk:result','sdk','Ready to deploy',%s)",
+        (harness.agent_id, Jsonb(["Ship it"])),
+    )
+    harness.db_conn.commit()
+    harness.set_status(AgentStatus.RUNNING)
+
+    async def recall(query: str) -> str:
+        assert "Ready to deploy" in query
+        return "Memory preferences/release.md: User prefers evening releases."
+
+    result = await harness.service.suggest(
+        harness.agent_id,
+        db=harness.database,
+        policy=harness.policy,
+        rendering=harness.timestamps.policy(),
+        catalog=harness.catalog,
+        keys=harness.keys,
+        recall=recall,
+    )
+    assert result.suggestions and result.offer_id is not None
+    assert harness.wire.gate_receipts() == []
+    draft = json.dumps(harness.wire.draft_receipts()[0])
+    assert "Ship it" in draft and "rejected" in draft
+    assert "evening releases" in draft
+    assert str(other) in draft

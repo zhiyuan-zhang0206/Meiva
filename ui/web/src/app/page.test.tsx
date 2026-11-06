@@ -58,11 +58,11 @@ describe("HomePage reply suggestion", () => {
     });
     expect(screen.getByTestId("composer").getAttribute("data-suggestion")).toBe("Yes, go ahead.|Not yet.");
   });
-  it("does not call the extra suggestion model in SDK mode", async () => {
+  it("uses the independent suggestion service in SDK mode", async () => {
     transport.getUserMessages.mockResolvedValue({ mode: "sdk", items: [] });
     wrap(<HomePage />);
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
-    expect(transport.getReplySuggestion).not.toHaveBeenCalled();
+    expect(transport.getReplySuggestion).toHaveBeenCalled();
   });
   it("never asks while the agent is running", async () => {
     hooksState.agents = [makeAgent({ agent_id: 5, status: "running" })];

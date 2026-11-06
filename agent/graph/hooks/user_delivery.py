@@ -10,8 +10,14 @@ from base.agents.history.timeline import ai_message_items
 from base.agents.history.timeline_item import TimelineItem
 from base.agents.messages.kwargs import NoteTag
 from base.agents.messages.reply_intent import SDK_DELIVERY_RULE
-from base.agents.to_user.delivery.store import latest_decision, messages, pending_context, publish
-from base.api_contracts.user_delivery import PublishMessage, ReplyExpectation, UserDeliveryMode
+from base.agents.to_user.delivery.store import (
+    latest_decision,
+    messages,
+    pending_context,
+    pending_questions,
+    publish,
+)
+from base.api_contracts.user_delivery import PublishMessage, UserDeliveryMode
 from base.events.live.announce import publish_agent_updated
 
 
@@ -55,9 +61,7 @@ async def capture_items(
                     conn,
                     agent_id,
                     f"{source_key}:{item.item_id}",
-                    PublishMessage(
-                        content=item.payload, response=ReplyExpectation.NONE, suggestions=[]
-                    ),
+                    PublishMessage(content=item.payload, suggestions=[]),
                     mode=mode,
                     created_at=datetime.fromisoformat(item.created_at) if item.created_at else now,
                 )
@@ -86,7 +90,15 @@ async def with_pending_deliveries[T: BaseMessage](
 
     def read() -> str:
         with ctx.require_db().connect() as conn:
-            return pending_context(messages(conn, agent_id, pending_only=True, limit=21))
+            return "\n\n".join(
+                filter(
+                    None,
+                    (
+                        pending_context(messages(conn, agent_id, pending_only=True, limit=21)),
+                        pending_questions(conn, agent_id),
+                    ),
+                )
+            )
 
     pending = await asyncio.to_thread(read)
     if not pending:
@@ -120,14 +132,14 @@ async def delivery_end_reminder(
         return None
     if correcting:
         raise FatalLLMStreamError(
-            "SDK delivery contract violated: the turn ended twice without publishing a message or recording no update"
+            "SDK delivery contract violated: the turn ended twice without publishing, asking, or recording no update"
         )
     return publication_reminder(ctx.require_clock().now())
 
 
 def publication_reminder(now: datetime) -> HumanMessage:
     return system_note_message(
-        content="This turn ended without publishing a user message or explicitly recording no update. "
+        content="This turn ended without publishing, asking, or explicitly recording no update. "
         + SDK_DELIVERY_RULE,
         tag=NoteTag.REPLY_VISIBILITY,
         picked_up_at=now,

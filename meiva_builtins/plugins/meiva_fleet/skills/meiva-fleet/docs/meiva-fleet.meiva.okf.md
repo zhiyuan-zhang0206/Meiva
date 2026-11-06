@@ -48,7 +48,7 @@ The task registry is the durable record of work; the spawn graph is the transien
 
 - **created** (with `parent`) — the parent task's owner implicitly oversees the creator; no automatic message.
 - **done** → notify the delegator: task id + result location (file/PR/page) + a one-line summary, then end your own process (`meiva.self.terminate()`) — the notification plus recorded results is the handoff, and a follow-up message from the delegator resurrects you with context intact; if the delegator is unknown (no owning task), record the completion in the task's results.
-- **blocked** → there is no blocked status: stay `in_progress`, record the blocker in `content`, escalate to the delegator; exceptions requiring user decision reach `meiva.ui.notify(require_response=True)` directly.
+- **blocked** → there is no blocked status: stay `in_progress`, record the blocker in `content`, escalate to the delegator; exceptions requiring user decision reach `meiva.ui.ask(...)` directly.
 - **reassign** → `meiva.tasks.update(owner=)` automatically notifies both old and new owners (see [[meiva_builtins/plugins/meiva_fleet/docs/tasks/task_notification.meiva.okf.md|Task Notification]]).
 - **cancelled** → clean up active child tasks, notify the working agent.
 - **remind_interval_seconds** (default 30min) overdue without update → daemon nags the owner; after 3 unanswered escalations: if there is a parent task owner, notify them; if no parent owner (top-level task whose parent is the ownerless system root), insert a require_response reminder into the human queue, hung on the stuck owner, grouped by task, inheriting its priority (#663).
@@ -57,7 +57,7 @@ The task registry is the durable record of work; the spawn graph is the transien
 
 The Autonomy axis of the Two Dials (who consumes evidence to make decisions) conventions during batch autonomous work:
 
-- **One approval buys high Autonomy**: before batch autonomy, package the scope + task list (`meiva.tasks.create()` items) + budget cap into a **single** `meiva.ui.notify(require_response=True)`; the user's reply authorizes it, and **the original text is recorded** into the driving task's `description`. After approval, do not ask step-by-step; whether the user is online does not change behavior.
+- **One approval buys high Autonomy**: before batch autonomy, package the scope + task list (`meiva.tasks.create()` items) + budget cap into a **single** `meiva.ui.ask(...)`; the user's reply authorizes it, and **the original text is recorded** into the driving task's `description`. After approval, do not ask step-by-step; whether the user is online does not change behavior.
 - **Safety boundary** (the authorization broadens what can be done, does not remove guardrails): only produce PRs without merging, do not send outward messages, do not touch prod, do not spend money beyond the authorization.
 - **Usage reminders**: the independent `meiva-being-a-long-running-agent` usage script selects agents, a window, and birth lineage. It notifies responsible peers; agents choose graceful convergence, preservation, or handoff. Task records and task escalation do not attribute or enforce costs.
 

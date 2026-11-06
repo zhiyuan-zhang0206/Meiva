@@ -45,5 +45,6 @@ class ReplySuggestionResponse(BaseModel):
     missing suggestion is an ordinary result, never a failure of the request.
     """
 
+    offer_id: int | None = None
     suggestions: list[ReplyText]
     reason: SuggestionReason | None = None

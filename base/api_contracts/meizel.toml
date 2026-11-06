@@ -18,6 +18,7 @@ exports = ["agent_contract.py", "caller_identity.py", "config.py", "contracts.py
 
 [uses]
 "tests" = ["contracts.py", "idempotency.py", "notice_question.py"]
+"user_delivery.py" = ["notice_question.py"]
 
 [debt.wide-exports]
 "meizel.toml#exports" = { count = 1, owner = "#6018", until = "waits for the contracts door to be split by topic (agent, op, memory): every child is a shared wire type other packages import by name, so shortening the exports list deletes public contracts instead of narrowing a dependency, and the split moves its consumers with it" }

@@ -8,7 +8,7 @@ import { MessageActions } from "./message-actions";
 export function PendingUserMessages({ agentId }: { agentId: number }) {
   const t = useTranslations("toUser");
   const query = useUserMessages(agentId);
-  const pending = query.data?.items.filter((item) => item.read_at === null || (item.response === "required" && item.resolved_at === null)) ?? [];
+  const pending = query.data?.items.filter((item) => item.read_at === null) ?? [];
   if (query.error) return <p role="status">{t("deliveryUnavailable")}</p>;
   if (!pending.length) return null;
   return <section className="max-h-72 shrink-0 overflow-y-auto border-t p-4" aria-label={t("deliveryPending")}>

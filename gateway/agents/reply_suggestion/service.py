@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Awaitable, Callable
+from hashlib import sha256
 from typing import TypedDict, TypeGuard
 
 from langchain_core.messages import AIMessage
@@ -23,14 +25,19 @@ from base.lm.usage import UsageOptions, log_usage_from_message
 from base.log import logger
 from gateway.agents.history.timeline import load_current_timeline_items
 from gateway.agents.reply_suggestion.cache import CACHE_ENTRIES, SuggestionCache
-from gateway.agents.reply_suggestion.excerpt import ConversationExcerpt, build_excerpt
+from gateway.agents.reply_suggestion.context import SuggestionContext, read_context
+from gateway.agents.reply_suggestion.excerpt import (
+    ConversationExcerpt,
+    build_excerpt,
+    enrich_excerpt,
+)
+from gateway.agents.reply_suggestion.feedback import save_offer
 from gateway.agents.reply_suggestion.plan import (
     ReplySuggestionPolicy,
     draft_messages,
     draft_verdict,
     gate_refusal,
     model_problem,
-    refusal_before_reading,
 )
 from gateway.agents.reply_suggestion.schemas import (
     DraftReplies,
@@ -134,15 +141,27 @@ class ReplySuggestionService:
         rendering: TimestampPolicy,
         catalog: ModelCatalog | CatalogLoadFailure,
         keys: ProviderKeys | None,
+        recall: Callable[[str], Awaitable[str]],
     ) -> ReplySuggestionResponse:
         status = await asyncio.to_thread(get_agent_status, db, agent_id)
-        refusal = refusal_before_reading(enabled=policy.enabled, idle=status is AgentStatus.IDLING)
-        if refusal is not None:
-            return _none(refusal)
+        if not policy.enabled:
+            return _none("disabled")
+
+        def read_inputs() -> SuggestionContext:
+            with db.connect() as conn:
+                return read_context(conn, agent_id)
+
+        context = await asyncio.to_thread(read_inputs)
+        if status is not AgentStatus.IDLING and not context.has_prompt:
+            return _none("agent_not_idle")
         items = await asyncio.to_thread(load_current_timeline_items, db, agent_id, inputs=rendering)
         excerpt = build_excerpt(items, policy.max_input_tokens)
-        if excerpt is None:
+        if excerpt is None and not context.has_messages:
             return _none("no_agent_text")
+        conversation = excerpt.text if excerpt else "No conversational excerpt."
+        memory = await recall(conversation + context.text)
+        combined = enrich_excerpt(conversation, context.parts, memory, policy.max_input_tokens)
+        excerpt = ConversationExcerpt(combined, sha256(combined.encode()).hexdigest())
         ready = require_catalog(catalog)
         if keys is None:
             raise RuntimeError("the provider keys are read whenever the catalog loaded")
@@ -153,7 +172,18 @@ class ReplySuggestionService:
         cached = self._cache.get(key)
         if cached is not None:
             return cached
-        result = await self._gate_and_draft(agent_id, excerpt, policy, ready, keys)
+        result = (
+            await self._draft(agent_id, excerpt, policy, ready, keys)
+            if context.has_prompt
+            else await self._gate_and_draft(agent_id, excerpt, policy, ready, keys)
+        )
+        if result.suggestions:
+
+            def record_offer() -> int:
+                with db.connect() as conn:
+                    return save_offer(conn, agent_id, excerpt.text, list(result.suggestions))
+
+            result = result.model_copy(update={"offer_id": await asyncio.to_thread(record_offer)})
         if result.reason in (None, "not_useful"):
             self._cache.remember(key, result)
         return result

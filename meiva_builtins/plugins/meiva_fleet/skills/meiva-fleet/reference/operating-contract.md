@@ -1,14 +1,17 @@
 # Fleet operating contract
 
-Read when using Fleet labels, notices, task tracking, or delegated work. These
+Read when using Fleet labels, questions, task tracking, or delegated work. These
 contracts govern the chosen capability; they do not require task creation,
 fixed roles, or a management tree.
 
 When a role label helps coordination, set it with `meiva.self.set_label(text)` — a stable name for what you own, not a task summary and not a status line (status goes in your replies); other agents find you by this label through `meiva.agents.get_neighbors`, and the chain above any agent (who spawned whom — responsibility attribution) through `meiva.agents.get_ancestors`.
 
-Notices (`meiva.ui.notify`) go to the aggregated queue the user checks later — the async channel, for when the user is not in a live conversation: a decision only the user can make, a result they must not miss. When the user is talking to you directly in the dialog, reply in turn instead of posting a notice. Edit or dismiss notices that go stale — and if you believe the user has already replied in the dialog (the answer your notice asked for arrived as a message), dismiss that notice yourself instead of leaving it open to pile up.
-
-**Queue delivery is mandatory.** A decision the user must make, or a result they should know, is delivered through the queue — never left in the chat for them to discover later — and it is queued even when you cannot reach the user (offline, or not in this dialog): that is exactly what the queue is for. In a live dialog, answering in turn already counts as delivery; anything still open queues. Merge pending decision points into one numbered notice (A / B / C) so a single reply settles them. Posting IS delivery — no ‘I will present it tomorrow’ staging.
+Use `meiva.ui.ask` for a decision or answer only the user can provide. Each
+question has its own durable identity and editable Note. Several questions may
+remain open; a new question never overwrites an old one. User answers and explicit
+closure settle the queue, so do not erase unanswered questions on the user's behalf.
+Deliver results and meaningful milestones with `publish` in SDK mode, or the
+configured text delivery protocol. These publications retain unread history.
 
 **Before queueing, answer three questions.**
 
@@ -18,7 +21,7 @@ Notices (`meiva.ui.notify`) go to the aggregated queue the user checks later —
 
 If any answer is no, do not send: search, decide, or route it to the owning line first.
 
-**Merging versus a structured question.** Merging pending decisions into one numbered notice is allowed and often preferred, because it costs the user one interruption. When a notice carries several decisions, number each one, give each its own default, and make each answerable on its own — answering one decision does not settle the others. A structured `question` (`single_select` / `multi_select` / `text`) is the other shape: exactly one decision, with the option numbering owned by the question contract. Do not mix the two shapes in one notice; a structured question is one decision, a merged free-text notice is a set of numbered decisions.
+**Merging versus a structured question.** Merging pending decisions into one numbered question is allowed and often preferred, because it costs the user one interruption. When a question carries several decisions, number each one, give each its own default, and make each answerable on its own — answering one decision does not settle the others. A structured `question` (`single_select` / `multi_select` / `text`) is the other shape: exactly one decision, with the option numbering owned by the question contract. Do not mix the two shapes in one question; a structured question is one decision, a merged free-text question is a set of numbered decisions.
 
 ## Peer-to-peer task delegation
 

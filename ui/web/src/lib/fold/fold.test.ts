@@ -28,7 +28,6 @@ const baseAgent: AgentRow = {
   awaiting_response_count: 0, highest_notice_priority: null,
   unread_notice_count: 0,
   unread_user_message_count: 0,
-  awaiting_user_message_count: 0,
   heartbeat_paused_until: null,
   open_impersonation_session_id: null,
   liveness_state: "online",

@@ -1,7 +1,7 @@
 ---
 type: doc
 title: meiva.ui — User Interface
-description: '`meiva.ui` lets agents display rich web pages and post notices to users; serve() pages run in persistent shells owned by their agents.'
+description: '`meiva.ui` lets agents display rich web pages and publish results and ask users questions; serve() pages run in persistent shells owned by their agents.'
 tags:
 - agent-view
 - sdk
@@ -12,36 +12,46 @@ tags:
 
 ## What it is
 
-`meiva.ui` allows agents to display rich web pages and post notices to users. `serve()` runs in a persistent shell session owned by the serving agent and managed by the page-server daemon; `show()` registers an HTTP server the agent already owns. The page server binds the machine's reachable host (loopback on a single box) and is served to the user through the **gateway reverse proxy** — the link is the gateway's own authenticated URL (`/pages/<id>-<name>/`), so the browser never dials the page server directly.
+`meiva.ui` allows agents to display rich web pages and publish results and ask users questions. `serve()` runs in a persistent shell session owned by the serving agent and managed by the page-server daemon; `show()` registers an HTTP server the agent already owns. The page server binds the machine's reachable host (loopback on a single box) and is served to the user through the **gateway reverse proxy** — the link is the gateway's own authenticated URL (`/pages/<id>-<name>/`), so the browser never dials the page server directly.
 
 ## User delivery in SDK mode
 
-`user_delivery_mode=sdk` routes formal user communication through
-`publish(content, *, response, suggestions, idempotency_key) -> int`.
-`response` is `none`, `optional` or `required`; `suggestions` must be supplied,
-with `[]` explicitly meaning none. Use the same key for a retry of the same
-publication. A different payload under that key is refused.
+`user_delivery_mode=sdk` routes formal communication through core SDK calls:
 
-Publish meaningful milestones during work and the result when ready. Publishing
-never ends the turn. Ordinary assistant text, including final summaries, stays
-in Details, which the user can expand. A natural end without a publication gets
-one corrective retry. Use `publish(None, response="none", suggestions=[],
-idempotency_key="...")` to explicitly record no user update.
+- `publish(content, *, suggestions=None) -> int` appends a durable
+  publication. Optional suggestions supply candidate replies to the independent
+  composer service. Omit them when no reply is useful.
+- `ask(title, content=None, *, question=None, note_suggestion=None) -> int` appends a question and returns its global ID. Omitted
+  question means free text; `single_select` and `multi_select` accept declared
+  options. Every type has an editable Note, optionally seeded by the agent.
+- `publications(pending_only=True, after_id=0, limit=50)` reads durable messages
+  in increasing ID order without marking them read; continue after the last ID.
+- `questions()` reads up to 500 open questions without answering them.
 
-`publications(pending_only=True, after_id=0, limit=50)` returns durable messages
-in increasing id order without marking them read on the user's behalf. Continue
-after the last returned id; limit is 1-100. Read pending content after compaction
-or overview edits. Rewriting `to_user.md` cannot overwrite this message history.
+The runtime owns operation identity for SDK writes and deterministic replay.
+The gateway refuses changed content under an accepted key. Several questions
+may remain open concurrently. New Ask
+records do not expire automatically. Their content and answers remain durable.
 
-Each displayed message automatically receives unread state. Required replies
-remain pending after reading. Suggested replies fill an editable draft and send
-only when the user submits. Explicit close grants no authorization. SDK mode
-refuses legacy `notify` and bypasses the separate reply-suggestion model; it
-produces no additional notification event. Existing notices remain resolvable.
+Publishing or asking during work never ends the turn. Ordinary assistant text,
+including final summaries, stays in expandable Details. At natural completion,
+the runtime checks that the turn published or asked at least once; it gives one
+corrective retry if neither happened. `publish(None)`
+explicitly records that no user update is needed.
+
+Publications carry unread state; Ask carries awaiting-answer state. Reading is
+not answering, and closing without an answer grants no authorization. Neither
+call sends an additional notification. Rewriting `to_user.md` cannot overwrite
+publications or pending questions; it remains an editable overview.
+
+The independent composer service combines agent candidates, explicit suggestion
+feedback and cross-agent Memory. Suggestions remain editable and send only on
+user submission. See [[gateway/agents/docs/reply-suggestion/reply-suggestion.meiva.okf.md]].
 
 The other modes are `naive` (ordinary assistant text) and `prefix` (explicit
-visibility markers, the compatibility default). This setting is frozen per agent
-and takes effect through the ordinary config/restart lifecycle.
+visibility markers, the compatibility default). Ask is available in every mode;
+publish is available in SDK mode. Mode is frozen per agent and follows the
+ordinary config/restart lifecycle.
 
 ## Core API (core SDK: page serving)
 
@@ -65,22 +75,15 @@ provided by these calls.
 ### Server lifecycle
 The daemon creates one persistent shell for each fresh `serve()` registration and persists its session name before launch. It adopts recorded live sessions after its own restart. A missing session, missing directory or unhealthy server closes the page and logs a warning; it does not relaunch or message the agent. Explicit registration can serve again. Normal close, TTL and identity-checked cleanup remain in place. See [[agent/startup/docs/page-restore.meiva.okf.md]].
 
-## meiva_fleet Plugin Injections (Notifications)
+## Compatibility
 
-The following are mounted onto the `meiva.ui` namespace by the `meiva_fleet` plugin (non-core). See plugin-side OKF for details.
-
-- `notify(title, content=None, *, require_response=True, blocking=False, priority='P2', task=None, expire_at=None, question=None) → Notice` — Post a notice to the user's inbox. One open notice per agent: while one is open, a second call raises with that notice's id and the two ways out (dismiss it, or edit it in place); nothing is replaced silently. Every notice requires a reply; `require_response=False` is rejected; `blocking=True` indicates you are blocked waiting. The returned `Notice` is an int subclass with `.pending_count` / `.pending_notices`. A notice whose deadline passes closes as `expired`: no reply arrives, the slot frees, and a system message says so.
-- `edit_notice(*, title=..., content=..., priority=..., blocking=...)` — Edit the open notice (only pass fields to change; cannot change `require_response`; at most one is open, so no id).
-- `dismiss_notice()` — Dismiss the open notice (at most one is open, so no id).
-
-### Priority
-P0 (highest) → P1 → P2 (default) → P3 (lowest). The notice queue orders by priority, then blocking and age. Priority does not change agent execution order.
+The agent-facing `notify`, `edit_notice` and `dismiss_notice` entries are removed.
+Ask uses the existing question store and answer receipts, preserving historical
+question IDs and answers. Pending legacy questions are migrated without expiry.
+Internal legacy routes remain for existing producers; SDK mode refuses new
+legacy notice creation. System-alert delivery remains a separate capability.
 
 ## Key Dependencies
-- [[ui/web/src/docs/frontend.meiva.okf.md]] — Frontend UI renders pages and notifications
 
-## Notes
-`notify` requests a user answer through an asynchronous queue. Ordinary information,
-progress and results belong in chat. Priority and blocking are independent; every
-notice requires a response even when the agent can continue other work. Peer
-decisions go to that peer through `send_message`.
+- [[ui/web/src/docs/frontend.meiva.okf.md]] — Timeline, publications and questions.
+- [[meiva_builtins/plugins/meiva_fleet/docs/notice-questions.meiva.okf.md]] — question answers.

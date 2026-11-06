@@ -102,9 +102,8 @@ def user_reply_section(_inputs: SectionInputs) -> str:
 
 
 _NOTIFICATION_GUIDANCE = (
-    "For results, completed work and decisions the user must see outside a live "
-    "dialog, use `meiva.ui.notify` to reach the aggregated notification feed. "
-    "A reply already delivered in the live dialog does not need a duplicate notification."
+    "Deliver results through the configured user delivery protocol. Use meiva.ui.ask "
+    "for persistent questions. Ordinary information creates no question or notification."
 )
 
 _ORIENTED_BODY = (
@@ -131,8 +130,7 @@ _SILENT_BODY = (
     "When human-requested work is finished, give one complete report: what you did, what "
     "you found, what you changed, and anything you could not do. It has to "
     "stand alone — the user did not watch you get there, so do not lean on "
-    "context they never saw. Send it through `meiva.ui.notify` if it is a "
-    "result or a decision they must see outside a live dialog.\n\n"
+    "context they never saw. Deliver it through the configured user delivery protocol.\n\n"
     "Two things override the silence: a blocker you cannot resolve yourself, "
     "and a question only the user can answer. Raise those immediately — "
     "waiting until the end would waste the whole run."
@@ -174,9 +172,8 @@ def delivery_prompt(mode_value: str, ordinary: str) -> str:
             "may summarize your work for yourself; the user-facing result must already be published. "
             "Use the user's requested language. Each publication must stand alone and state what "
             "changed and any action needed. Reading is not answering or approval. "
-            "Use response='required' only when the user owes an answer; 'optional' allows discussion; "
-            "'none' asks for no reply. Suggestions are editable drafts of possible user replies, "
-            "never assumed user facts or consent. Use [] when useful replies cannot be suggested."
+            "Use ask for questions; every question includes an editable Note. Optional publish "
+            "suggestions and Note suggestions are drafts, never user facts or consent."
         )
     start = ordinary.index("## Output visibility")
     end = ordinary.index("Peer messages,", start)
@@ -201,7 +198,7 @@ def delivery_style_prompt(mode: str, style: str) -> str:
             "Published messages automatically carry unread state. Publish each update once; "
             "the user can read it later and respond from the same message.",
         ).replace(
-            "Send it through `meiva.ui.notify` if it is a result or a decision they must see outside a live dialog.",
+            "Deliver it through the configured user delivery protocol.",
             "Deliver the report through `meiva.ui.publish`.",
         )
     return section

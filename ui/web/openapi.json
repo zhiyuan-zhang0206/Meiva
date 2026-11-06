@@ -2658,7 +2658,153 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AgentMessageEnqueued"
+                  "$ref": "#/components/schemas/UserMessage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{agent_id}/asks": {
+      "post": {
+        "summary": "Ask",
+        "operationId": "ask_api_agents__agent_id__asks_post",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "Idempotency-Scope",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Idempotency-Scope"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AskMessage"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "title": "Response Ask Api Agents  Agent Id  Asks Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{agent_id}/reply-suggestion/feedback": {
+      "post": {
+        "summary": "Record Feedback",
+        "operationId": "record_feedback_api_agents__agent_id__reply_suggestion_feedback_post",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "Idempotency-Scope",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Idempotency-Scope"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuggestionFeedback"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Record Feedback Api Agents  Agent Id  Reply Suggestion Feedback Post"
                 }
               }
             }
@@ -8686,11 +8832,6 @@
             "title": "Unread User Message Count",
             "default": 0
           },
-          "awaiting_user_message_count": {
-            "type": "integer",
-            "title": "Awaiting User Message Count",
-            "default": 0
-          },
           "unread_notice_count": {
             "type": "integer",
             "title": "Unread Notice Count"
@@ -9599,10 +9740,6 @@
             "type": "integer",
             "title": "Unread User Message Count"
           },
-          "awaiting_user_message_count": {
-            "type": "integer",
-            "title": "Awaiting User Message Count"
-          },
           "unread_notice_count": {
             "type": "integer",
             "title": "Unread Notice Count"
@@ -9661,7 +9798,6 @@
           "last_probe_at",
           "notices_awaiting_response",
           "unread_user_message_count",
-          "awaiting_user_message_count",
           "unread_notice_count",
           "heartbeat_paused_until"
         ],
@@ -10269,6 +10405,54 @@
         ],
         "title": "AlertsListResponse",
         "description": "Unresolved-first alert history + the count the UI badge shows."
+      },
+      "AskMessage": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "question": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ChoiceQuestion"
+              },
+              {
+                "$ref": "#/components/schemas/TextQuestion"
+              }
+            ],
+            "title": "Question",
+            "discriminator": {
+              "propertyName": "type",
+              "mapping": {
+                "multi_select": "#/components/schemas/ChoiceQuestion",
+                "single_select": "#/components/schemas/ChoiceQuestion",
+                "text": "#/components/schemas/TextQuestion"
+              }
+            }
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title",
+          "question"
+        ],
+        "title": "AskMessage"
       },
       "AssignmentAgentIn": {
         "properties": {
@@ -11080,6 +11264,19 @@
       },
       "ChoiceQuestion": {
         "properties": {
+          "note_suggestion": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note Suggestion"
+          },
           "type": {
             "type": "string",
             "enum": [
@@ -12364,6 +12561,15 @@
           "content_hash"
         ],
         "title": "ExtensionRegisterResponse"
+      },
+      "FeedbackOutcome": {
+        "type": "string",
+        "enum": [
+          "accepted",
+          "edited",
+          "rejected"
+        ],
+        "title": "FeedbackOutcome"
       },
       "FleetGraphEdge": {
         "properties": {
@@ -14160,23 +14366,6 @@
         "title": "MemorySearchResultItem",
         "description": "A single search result: file path, the chunk that matched, its relevance\nscore, and the frontmatter a caller can judge the hit by without opening it."
       },
-      "MessageAction": {
-        "type": "string",
-        "enum": [
-          "read",
-          "answer",
-          "dismiss"
-        ],
-        "title": "MessageAction"
-      },
-      "MessageResolution": {
-        "type": "string",
-        "enum": [
-          "answered",
-          "dismissed"
-        ],
-        "title": "MessageResolution"
-      },
       "MetricEvidence": {
         "properties": {
           "availability": {
@@ -14869,8 +15058,15 @@
             "title": "Source Verified By"
           },
           "expire_at": {
-            "type": "string",
-            "format": "date-time",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Expire At"
           }
         },
@@ -16090,9 +16286,6 @@
             ],
             "title": "Content"
           },
-          "response": {
-            "$ref": "#/components/schemas/ReplyExpectation"
-          },
           "suggestions": {
             "items": {
               "type": "string"
@@ -16105,9 +16298,7 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "content",
-          "response",
-          "suggestions"
+          "content"
         ],
         "title": "PublishMessage"
       },
@@ -16231,17 +16422,19 @@
         ],
         "title": "ReferenceTps"
       },
-      "ReplyExpectation": {
-        "type": "string",
-        "enum": [
-          "none",
-          "optional",
-          "required"
-        ],
-        "title": "ReplyExpectation"
-      },
       "ReplySuggestionResponse": {
         "properties": {
+          "offer_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offer Id"
+          },
           "suggestions": {
             "items": {
               "type": "string",
@@ -16283,19 +16476,9 @@
       "ResolveMessage": {
         "properties": {
           "action": {
-            "$ref": "#/components/schemas/MessageAction"
-          },
-          "reply": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 100000
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reply"
+            "type": "string",
+            "const": "read",
+            "title": "Action"
           }
         },
         "additionalProperties": false,
@@ -19080,6 +19263,43 @@
         ],
         "title": "StatsWindowHours"
       },
+      "SuggestionFeedback": {
+        "properties": {
+          "offer_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Offer Id"
+          },
+          "candidate_index": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Candidate Index"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/FeedbackOutcome"
+          },
+          "sent_text": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent Text"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "offer_id",
+          "candidate_index",
+          "outcome"
+        ],
+        "title": "SuggestionFeedback"
+      },
       "SystemNoteIn": {
         "properties": {
           "content": {
@@ -19935,6 +20155,19 @@
       },
       "TextQuestion": {
         "properties": {
+          "note_suggestion": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note Suggestion"
+          },
           "type": {
             "type": "string",
             "const": "text",
@@ -20739,8 +20972,7 @@
           "content": {
             "anyOf": [
               {
-                "type": "string",
-                "maxLength": 100000
+                "type": "string"
               },
               {
                 "type": "null"
@@ -20748,15 +20980,11 @@
             ],
             "title": "Content"
           },
-          "response": {
-            "$ref": "#/components/schemas/ReplyExpectation"
-          },
           "suggestions": {
             "items": {
               "type": "string"
             },
             "type": "array",
-            "maxItems": 3,
             "title": "Suggestions"
           },
           "id": {
@@ -20790,56 +21018,19 @@
               }
             ],
             "title": "Read At"
-          },
-          "resolved_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Resolved At"
-          },
-          "resolution": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/MessageResolution"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "reply": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reply"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
           "content",
-          "response",
           "suggestions",
           "id",
           "agent_id",
           "mode",
           "source_key",
           "created_at",
-          "read_at",
-          "resolved_at",
-          "resolution",
-          "reply"
+          "read_at"
         ],
         "title": "UserMessage"
       },

@@ -98,14 +98,15 @@ def normalize_last_message_text(text: str) -> str:
 
 
 SDK_DELIVERY_RULE = (
-    "Use meiva.ui.publish(content, response='none'|'optional'|'required', suggestions=[...], "
-    "idempotency_key='...') for ALL communication with the user. suggestions=[] explicitly "
-    "means no suggested reply. Publish meaningful milestones and results while working; "
-    "publishing never ends your turn. Ordinary assistant text, including your final summary, "
-    "is folded into Details, which the user can expand and read. Do not call notify. "
-    "Before naturally ending a turn with no user update, explicitly call "
-    "meiva.ui.publish(None, response='none', suggestions=[], idempotency_key='...'). "
-    "A publication is durable; rewriting to_user.md cannot remove unread or unanswered messages."
+    "Deliver user-facing information through meiva.ui.publish(content, "
+    "suggestions=[...]). Suggestions are optional candidates "
+    "for the independent composer service. Ask questions with meiva.ui.ask(title, "
+    "content, question={...}, note_suggestion=...). Every question "
+    "has a user-editable Note. Publishing or asking never ends execution: continue "
+    "independent work. Ordinary assistant text, including final summaries, is folded "
+    "into Details which the user can expand. Before a natural turn end, publish, ask, "
+    "or explicitly record no update with meiva.ui.publish(None). "
+    "Reading is not answering or authorizing. Questions persist until answered or closed."
 )
 
 

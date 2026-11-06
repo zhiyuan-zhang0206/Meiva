@@ -84,6 +84,7 @@ interface Props {
   agentTerminated?: boolean;
   maxWidthCss?: string;
   suggestions?: readonly string[] | null;
+  suggestionOfferId?: number | null;
 }
 
 export function Composer({
@@ -102,9 +103,11 @@ export function Composer({
   agentTerminated = false,
   maxWidthCss,
   suggestions = null,
+  suggestionOfferId = null,
   children,
 }: Props) {
   const client = useApi();
+  const acceptedCandidate = useRef<{ agentId: number; offerId: number; index: number; text: string } | null>(null);
   const wallNow = useWallNow();
   const t = useTranslations("common");
   const browser = useBrowser();
@@ -126,6 +129,7 @@ export function Composer({
       ? replySelection
       : null;
   const replyIndex = currentReplySelection?.index ?? 0;
+  useEffect(() => { acceptedCandidate.current = null; }, [agentId]);
   const [caret, setCaret] = useState(() => value.length);
   const [dragOver, setDragOver] = useState(false);
   const [sending, setSending] = useState(false);
@@ -256,6 +260,7 @@ export function Composer({
     sendingRef.current = true;
     setSending(true);
     const sendingAgentId = agentId;
+    const accepted = acceptedCandidate.current;
     let activeAttempt: SendAttempt | null = null;
     try {
       const attempt = resolveSendAttempt(
@@ -292,6 +297,13 @@ export function Composer({
       }
       if (ok) {
         track("composer-send");
+        if (accepted?.agentId === sendingAgentId) {
+          void client.recordSuggestionFeedback(accepted.agentId, {
+            offer_id: accepted.offerId, candidate_index: accepted.index,
+            outcome: content === accepted.text ? "accepted" : "edited", sent_text: content,
+          }, `feedback:${attempt.clientMessageId}`).catch((error: unknown) => diagnostics.warn(`Suggestion feedback failed: ${errMsg(error)}`));
+          if (acceptedCandidate.current === accepted) acceptedCandidate.current = null;
+        }
         if (prevAgentIdRef.current === sendingAgentId) {
           if (suggestions) {
             setReplySelection({
@@ -354,6 +366,7 @@ export function Composer({
       ? `[${replyIndex + 1}/${suggestions.length}] ${offeredSuggestion}`
       : offeredSuggestion;
   const acceptSuggestion = (text: string) => {
+    if (agentId !== null && suggestionOfferId !== null) acceptedCandidate.current = { agentId, offerId: suggestionOfferId, index: replyIndex, text };
     pendingCaret.current = text.length;
     setCaret(text.length);
     setValue(text);
@@ -504,6 +517,13 @@ export function Composer({
                 })
               }
             />
+            {offeredSuggestion && suggestionOfferId !== null && agentId !== null && <button
+              type="button" aria-label={t("rejectSuggestion")} className="text-xs text-muted-foreground"
+              onClick={() => {
+                void client.recordSuggestionFeedback(agentId, { offer_id: suggestionOfferId, candidate_index: replyIndex, outcome: "rejected" }, client.newOperationKey())
+                  .catch((error: unknown) => onUploadError?.(errMsg(error)));
+                if (suggestions) setReplySelection({ options: suggestions, agentId, index: replyIndex, consumed: true });
+              }}>{t("rejectSuggestion")}</button>}
             <SendButton
               data-testid="composer-send"
               state={sending ? "sending" : showStop ? "stop" : "send"}

@@ -245,6 +245,7 @@ export type RestartAgentResponse = Schemas["RestartAgentResponse"];
 export type ResurrectAgentResponse = Schemas["ResurrectAgentResponse"];
 
 export type TokenUsageResponse = Schemas["TokenUsageResponse"];
+export type SuggestionFeedback = Schemas["SuggestionFeedback"];
 export type ReplySuggestionResponse = Schemas["ReplySuggestionResponse"];
 
 export type ContextBreakdownResponse = Schemas["ContextBreakdownResponse"];

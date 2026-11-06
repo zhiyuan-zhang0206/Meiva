@@ -18,6 +18,7 @@
 // while the ephemeral families (compact_done / cancelled / error / unrecognized)
 // have no card and render bare through EphemeralSystemMarker.
 
+import { AskCard } from "@/components/user-delivery/ask-card";
 import { MessageActions } from "@/components/user-delivery/message-actions";
 import { FileText } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -446,6 +447,7 @@ export const ItemView = memo(function ItemView({
       );
 
     case "agent_chat":
+      if (item.askQuestion) return <AskCard question={item.askQuestion} />;
       return (
         <div>
           <ChatMarkdown content={streamingPayload} />

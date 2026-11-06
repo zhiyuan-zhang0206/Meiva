@@ -1,4 +1,4 @@
-import type { UserMessageFeed, ResolveUserMessage } from "../../contracts/types";
+import type { SuggestionFeedback, UserMessage, UserMessageFeed, ResolveUserMessage } from "../../contracts/types";
 import type { HarnessAvailability } from "../../contracts/models";
 import type {
   AgentMachineRow,
@@ -310,8 +310,11 @@ export function createControlApi(http: Http) {
     getUserMessages: (agentId: number, signal?: AbortSignal, pending = false): Promise<UserMessageFeed> =>
       f(`/api/agents/${agentId}/user-messages?pending=${pending}`, { signal }).then(ok<UserMessageFeed>),
 
-    resolveUserMessage: (agentId: number, messageId: number, body: ResolveUserMessage, key: string): Promise<{ status: string }> =>
-      f(`/api/keyed/v1/agents/${agentId}/user-messages/${messageId}/resolve`, keyedJson(body, key)).then(ok<{ status: string }>),
+    recordSuggestionFeedback: (agentId: number, body: SuggestionFeedback, key: string): Promise<{ saved: boolean }> =>
+      f(`/api/agents/${agentId}/reply-suggestion/feedback`, keyedJson(body, key)).then(ok<{ saved: boolean }>),
+
+    resolveUserMessage: (agentId: number, messageId: number, body: ResolveUserMessage, key: string): Promise<UserMessage> =>
+      f(`/api/keyed/v1/agents/${agentId}/user-messages/${messageId}/resolve`, keyedJson(body, key)).then(ok<UserMessage>),
 
     resolveNotice: (
       agentId: number,

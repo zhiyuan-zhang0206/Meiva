@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
+from functools import partial
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from base.agents.to_user.delivery.store import delivery_mode
-from base.api_contracts.user_delivery import UserDeliveryMode
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import process_provider_keys
 from gateway.agents.eval_guard import deny_isolated_result_read
@@ -38,6 +38,7 @@ _log = logging.getLogger(__name__)
 class ReplySuggestionAppState(GatewayAppState):
     reply_suggestions: ReplySuggestionService
     reply_suggestion_policy: ReplySuggestionPolicy
+    reply_suggestion_recall: Callable[[Request, str], Awaitable[str]]
 
 
 @router.post(
@@ -52,19 +53,6 @@ async def post_reply_suggestion(
 
     suggestion_state = state_as(request, ReplySuggestionAppState)
 
-    def is_sdk() -> bool:
-        with suggestion_state.db_pool.connection() as conn:
-            return (
-                delivery_mode(conn, agent_id, gateway_config(request).user_delivery_mode)
-                is UserDeliveryMode.SDK
-            )
-
-    try:
-        sdk = await asyncio.to_thread(is_sdk)
-    except LookupError as exc:
-        raise HTTPException(404, str(exc)) from exc
-    if sdk:
-        return ReplySuggestionResponse(suggestions=[], reason="disabled")
     catalog = request_catalog(request)
     keys = (
         await asyncio.to_thread(
@@ -84,6 +72,7 @@ async def post_reply_suggestion(
                 rendering=timeline_rendering(gateway_config(request), gateway_clock(request)),
                 catalog=catalog,
                 keys=keys,
+                recall=partial(suggestion_state.reply_suggestion_recall, request),
             ),
             request.is_disconnected,
         )

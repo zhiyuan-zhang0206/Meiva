@@ -39,3 +39,7 @@ daemons; naming an agent restart or no restart would leave their boot-time reads
 unchanged. Registry validation rejects unknown restart labels and process kinds
 that lack the field's domain. The profile tests cover those metadata constraints
 alongside construction and access behavior.
+
+The gateway also constructs the agent domain for the shared `user_delivery_mode`
+setting. This field has common capability: gateway delivery routes and Agent
+prompt/SDK selection consume the same frozen protocol default.

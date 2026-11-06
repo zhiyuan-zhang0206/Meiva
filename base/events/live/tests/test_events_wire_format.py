@@ -43,7 +43,13 @@ FROZEN_WIRE: list[tuple[type, str, dict[str, Any]]] = [
     (
         ChatStart,
         "chat_start",
-        {"item_id": "5.0", "non_human_wake": False, "explicit_visibility": False},
+        {
+            "item_id": "5.0",
+            "non_human_wake": False,
+            "explicit_visibility": False,
+            "delivery_mode": None,
+            "source_message_id": None,
+        },
     ),
     (
         ChatDelta,
@@ -53,6 +59,8 @@ FROZEN_WIRE: list[tuple[type, str, dict[str, Any]]] = [
             "content": "hello",
             "non_human_wake": False,
             "explicit_visibility": False,
+            "delivery_mode": None,
+            "source_message_id": None,
         },
     ),
     (CompactRequest, "compact_request", {"content": "[compact requested, 5 chars]"}),

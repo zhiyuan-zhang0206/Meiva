@@ -62,7 +62,7 @@ class _ResolveTarget:
     require_response: bool
     resolved_at: datetime | None
     question: object
-    expire_at: datetime
+    expire_at: datetime | None
     created_at: datetime
 
 

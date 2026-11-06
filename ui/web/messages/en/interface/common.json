@@ -34,5 +34,6 @@
   "closeImage": "Close image",
   "liveUpdatesReconnecting": "Live updates reconnecting…",
   "liveUpdatesDisconnected": "Live updates disconnected — refresh the page to restore them",
-  "retry": "Retry"
+  "retry": "Retry",
+  "rejectSuggestion": "Reject suggestion"
 }

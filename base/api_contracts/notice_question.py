@@ -23,6 +23,7 @@ class NoticeOption(BaseModel):
 
 class ChoiceQuestion(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    note_suggestion: NonBlank | None = Field(default=None, max_length=2000)
     type: Literal[QuestionType.SINGLE_SELECT, QuestionType.MULTI_SELECT]
     options: Annotated[list[NoticeOption], Field(min_length=1, max_length=20)]
     allow_other: Annotated[
@@ -39,6 +40,7 @@ class ChoiceQuestion(BaseModel):
 
 class TextQuestion(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    note_suggestion: NonBlank | None = Field(default=None, max_length=2000)
     type: Literal[QuestionType.TEXT]
 
 

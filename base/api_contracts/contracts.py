@@ -223,6 +223,14 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/metrics"): RouteContract(),
     ("GET", "/api/metrics/agents"): RouteContract(),
     ("GET", "/api/ops/monitor"): RouteContract(),
+    ("POST", "/api/agents/{agent_id}/reply-suggestion/feedback"): RouteContract(
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        note="explicit user feedback with an immutable receipt",
+    ),
+    ("POST", "/api/agents/{agent_id}/asks"): RouteContract(
+        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        note="persistent question and receipt commit atomically",
+    ),
     ("GET", "/api/agents/{agent_id}/user-messages"): RouteContract(),
     ("POST", "/api/agents/{agent_id}/user-messages"): RouteContract(
         Idempotency.AT_LEAST_ONCE_WITH_KEY,

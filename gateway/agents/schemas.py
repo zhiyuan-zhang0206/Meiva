@@ -175,7 +175,7 @@ class NoticeItem(BaseModel):
     # written before the column existed — never a caller's own claim.
     # meiva:link gateway/agents/docs/notice-receipts.meiva.okf.md
     source_verified_by: str | None = None
-    expire_at: datetime
+    expire_at: datetime | None
 
 
 class NoticesCursor(BaseModel):

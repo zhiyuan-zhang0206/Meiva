@@ -71,6 +71,7 @@ def _runtime(
             hosted_resources=hosted_resources,
             ops_pool=ops_pool,
             llm=cast(BaseChatModel, model),
+            rng=seeded_rng(),
             event_publisher=cast(Any, event_publisher),
             agent=AgentSlices.resolve(
                 {"auto_compact_fraction": 1e-6, "compact_reminder_fraction": 1e-6},

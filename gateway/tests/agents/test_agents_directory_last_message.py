@@ -26,6 +26,7 @@ _DIRECTORY_CARD_KEYS = frozenset(
         "awaiting_response_count",
         "highest_notice_priority",
         "unread_notice_count",
+        "unread_user_message_count",
         "heartbeat_paused_until",
         "open_impersonation_session_id",
         "open_impersonation_status",

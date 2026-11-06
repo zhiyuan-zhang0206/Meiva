@@ -22,6 +22,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[4]
 
 # (field, env alias, raw value) — one exercise per kind and per failure mode.
 _CASES: list[tuple[str, str, str]] = [
+    ("user_delivery_mode", "MEIVA_USER_DELIVERY_MODE", "sdk"),
+    ("user_delivery_mode", "MEIVA_USER_DELIVERY_MODE", "unknown"),
     ("llm_model", "MEIVA_MODEL", "parity-model"),
     ("db_pool_acquire_timeout_seconds", "MEIVA_DB_POOL_ACQUIRE_TIMEOUT_SECONDS", "5"),
     ("db_pool_acquire_timeout_seconds", "MEIVA_DB_POOL_ACQUIRE_TIMEOUT_SECONDS", "2.5"),

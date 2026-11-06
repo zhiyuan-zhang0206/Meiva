@@ -30,6 +30,7 @@ export type BackendTimelineItem = Omit<
   readonly explicitVisibility?: boolean;
   readonly deliveryMode?: UserMessage["mode"];
   readonly userDelivery?: UserMessage;
+  readonly askQuestion?: Schemas["NoticeItem"];
 };
 
 export interface TimelineResponse {

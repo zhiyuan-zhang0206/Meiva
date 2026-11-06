@@ -40,7 +40,6 @@ def test_agent_row_wire_shape() -> None:
         notices_awaiting_response=[],
         unread_notice_count=0,
         unread_user_message_count=0,
-        awaiting_user_message_count=0,
         heartbeat_paused_until=None,
     )
     d = _wire(m)

@@ -17,10 +17,11 @@ class AgentPromptSettings(EnvSettings):
         alias="MEIVA_USER_DELIVERY_MODE",
         description=(
             "User delivery protocol: naive displays ordinary assistant text; prefix requires "
-            "an explicit display/Details prefix; sdk delivers only through meiva.ui.publish. "
+            "an explicit display/Details prefix; sdk delivers through meiva.ui.publish and meiva.ui.ask. "
             "Publishing never ends the agent turn. Details remain expandable by the user."
         ),
         json_schema_extra={
+            "capability": "common",
             "restart_required": "agent",
             "writable": True,
             "sensitive": False,

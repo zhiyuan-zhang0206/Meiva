@@ -1,12 +1,12 @@
-exports = ["configuration.py", "router.py", "service.py", "tests"]
+exports = ["configuration.py", "feedback.py", "router.py", "service.py", "tests"]
 
 [uses]
 "cache.py" = ["schemas.py"]
 "configuration.py" = ["plan.py"]
 "plan.py" = ["schemas.py"]
 "router.py" = ["plan.py", "schemas.py", "service.py"]
-"service.py" = ["cache.py", "excerpt.py", "plan.py", "schemas.py"]
-"tests" = ["cache.py", "configuration.py", "excerpt.py", "plan.py", "schemas.py", "service.py"]
+"service.py" = ["cache.py", "context.py", "excerpt.py", "feedback.py", "plan.py", "schemas.py"]
+"tests" = ["cache.py", "configuration.py", "excerpt.py", "feedback.py", "plan.py", "schemas.py", "service.py"]
 
 [purity]
 "__init__.py" = "strict"

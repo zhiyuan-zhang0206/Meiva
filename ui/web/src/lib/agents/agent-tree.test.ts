@@ -29,7 +29,7 @@ function ag(
     label: null,
     machine: "test",
     supports_vision: true,
-    awaiting_response_count: 0, highest_notice_priority: null, unread_notice_count: 0, unread_user_message_count: 0, awaiting_user_message_count: 0,
+    awaiting_response_count: 0, highest_notice_priority: null, unread_notice_count: 0, unread_user_message_count: 0,
     heartbeat_paused_until: null,
     liveness_state: "online",
   };

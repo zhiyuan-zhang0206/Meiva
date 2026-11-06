@@ -13,7 +13,7 @@ from agent.graph.tests.test_llm_helpers import make_runtime
 from agent.state import AgentState
 from base.agents.context import HostedTurnResources
 from base.agents.to_user.delivery.store import publish
-from base.api_contracts.user_delivery import PublishMessage, ReplyExpectation, UserDeliveryMode
+from base.api_contracts.user_delivery import PublishMessage, UserDeliveryMode
 from base.clock.tests.seeded_rng import seeded_rng
 from base.db import create_agent
 from base.db.code_version_gate import ProcessDbGate
@@ -37,7 +37,9 @@ def final_model() -> ScriptedModel:
     )
 
 
+@pytest.mark.parametrize("delivery", ["publish", "ask", "no_update"])
 async def test_natural_end_requires_publication_and_reminds_once(
+    delivery: str,
     db_conn: psycopg.Connection,
     database_gate: ProcessDbGate,
     hosted_resources: HostedTurnResources,
@@ -67,14 +69,21 @@ async def test_natural_end_requires_publication_and_reminds_once(
         "SELECT count(*) FROM agent_user_messages WHERE agent_id=%s", (agent_id,)
     ).fetchone() == (0,)
 
-    publish(
-        db_conn,
-        agent_id,
-        "milestone",
-        PublishMessage(content="Finished", response=ReplyExpectation.NONE, suggestions=[]),
-        mode=UserDeliveryMode.SDK,
-        created_at=datetime.now(UTC),
-    )
+    if delivery == "ask":
+        db_conn.execute(
+            "INSERT INTO agent_notices(agent_id,local_id,title,priority,require_response,expire_at,question) "
+            "VALUES (%s,0,'Choose scope','P2',true,NULL,'{\"type\":\"text\"}')",
+            (agent_id,),
+        )
+    else:
+        publish(
+            db_conn,
+            agent_id,
+            "milestone",
+            PublishMessage(content=None if delivery == "no_update" else "Finished", suggestions=[]),
+            mode=UserDeliveryMode.SDK,
+            created_at=datetime.now(UTC),
+        )
     db_conn.commit()
     third = await llm_node(state, runtime, config, rng=seeded_rng())
     third_update = AgentState.model_validate(third.update)
@@ -87,19 +96,11 @@ async def test_compacted_context_restores_unread_and_unanswered_deliveries(
     hosted_resources: HostedTurnResources,
 ) -> None:
     agent_id = create_agent(db_conn)
-    question = publish(
-        db_conn,
-        agent_id,
-        "question",
-        PublishMessage(
-            content="Approve the smaller scope?",
-            response=ReplyExpectation.REQUIRED,
-            suggestions=["Approve", "Wait"],
-        ),
-        mode=UserDeliveryMode.SDK,
-        created_at=datetime.now(UTC),
+    db_conn.execute(
+        "INSERT INTO agent_notices(agent_id,local_id,title,priority,require_response,expire_at,question) "
+        "VALUES (%s,0,'Approve the smaller scope?','P2',true,NULL,'{\"type\":\"text\"}')",
+        (agent_id,),
     )
-    db_conn.execute("UPDATE agent_user_messages SET read_at=now() WHERE id=%s", (question.id,))
     db_conn.commit()
     runtime = make_runtime(
         resources=hosted_resources, database_gate=database_gate, pins={"user_delivery_mode": "sdk"}
@@ -108,5 +109,5 @@ async def test_compacted_context_restores_unread_and_unanswered_deliveries(
     restored = await with_pending_deliveries(runtime.context, agent_id, compacted)
     assert len(restored) == 2
     assert "Approve the smaller scope?" in restored[-1].content
-    assert "awaiting reply" in restored[-1].content
+    assert "Open Ask" in restored[-1].content
     assert len(compacted) == 1

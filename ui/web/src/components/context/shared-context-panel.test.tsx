@@ -153,7 +153,7 @@ it("keeps the document in the reading area and the question out of every scroll 
   renderPanelView({ notices: [notice()] });
   const body = screen.getByTestId("shared-document").querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')!;
   expect(body.contains(screen.getByText("No content"))).toBe(true);
-  const question = screen.getByRole("region", { name: "Notification" });
+  const question = screen.getByRole("region", { name: "Ask" });
   expect(body.contains(question)).toBe(false);
   expect(question.closest('[data-slot="scroll-area-viewport"]')).toBeNull();
   expect(screen.queryByText("Needs your reply")).toBeNull();
@@ -169,21 +169,21 @@ it("keeps the question at the bottom in Inspector mode and restores the reading 
   const props = { agentId: 7, document: documentQuery(), notices: [notice()], noticesFailed: false, mobile: false, onClose: vi.fn() };
   const { rerender } = renderPanel(<SharedContextPanel {...props} />);
   const body = screen.getByTestId("shared-document").querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')!;
-  const draft = screen.getByRole<HTMLTextAreaElement>("textbox", { name: /^Reply to notice:/ });
+  const draft = screen.getByRole<HTMLTextAreaElement>("textbox", { name: /^Reply to question:/ });
   fireEvent.change(draft, { target: { value: "Keep this answer" } });
   body.scrollTop = 420;
   fireEvent.click(screen.getByRole("button", { name: "Open inspector" }));
   snapshot.inspectorOpen = true;
   rerender(<SharedContextPanel {...props} />);
   expect(await screen.findByTestId("shared-inspector")).toBeTruthy();
-  expect(screen.getByRole("region", { name: "Notification" })).toBeTruthy();
-  expect(screen.getByRole("textbox", { name: /^Reply to notice:/ })).toBe(draft);
+  expect(screen.getByRole("region", { name: "Ask" })).toBeTruthy();
+  expect(screen.getByRole("textbox", { name: /^Reply to question:/ })).toBe(draft);
   body.scrollTop = 0;
   snapshot.inspectorOpen = false;
   rerender(<SharedContextPanel {...props} />);
-  expect(screen.getByRole("region", { name: "Notification" })).toBeTruthy();
+  expect(screen.getByRole("region", { name: "Ask" })).toBeTruthy();
   expect(body.scrollTop).toBe(420);
-  expect(screen.getByRole("textbox", { name: /^Reply to notice:/ })).toBe(draft);
+  expect(screen.getByRole("textbox", { name: /^Reply to question:/ })).toBe(draft);
   expect(draft.value).toBe("Keep this answer");
 });
 
@@ -223,7 +223,7 @@ it.each([false, true])("orders the column as title bar, then the reading area, t
   renderPanelView({ notices: [notice()], mobile });
   const bar = screen.getByTestId("document-bar");
   const document = screen.getByText("No content");
-  const question = screen.getByRole("region", { name: "Notification" });
+  const question = screen.getByRole("region", { name: "Ask" });
   expect(follows(bar, document)).toBe(true);
   expect(follows(document, question)).toBe(true);
   expect(screen.getAllByText("Shared context")).toHaveLength(1);
@@ -251,7 +251,7 @@ it.each([false, true])("pins the question as the column's last region in both mo
 it.each([false, true])("leaves no bottom region, and no gap, when there is no question (mobile=%s)", (mobile) => {
   renderPanelView({ mobile });
   expect(screen.queryByTestId("notice-region")).toBeNull();
-  expect(screen.queryByRole("region", { name: "Notification" })).toBeNull();
+  expect(screen.queryByRole("region", { name: "Ask" })).toBeNull();
 });
 
 it.each([false, true])("pins the title bar outside the reading viewport, so a scroll moves only the content (inspector=%s)", async (inspector) => {
@@ -271,7 +271,7 @@ it.each([false, true])("pins the title bar outside the reading viewport, so a sc
   expect(follows(bar, readingArea)).toBe(true);
   if (!inspector) {
     expect(viewport.contains(screen.getByText("No content"))).toBe(true);
-    expect(viewport.contains(screen.getByRole("region", { name: "Notification" }))).toBe(false);
+    expect(viewport.contains(screen.getByRole("region", { name: "Ask" }))).toBe(false);
   }
 });
 

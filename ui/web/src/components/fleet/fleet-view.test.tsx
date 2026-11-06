@@ -157,7 +157,7 @@ function makeAgent(over: Partial<AgentRow> & { agent_id: number }): AgentRow {
     label: null,
     machine: "test",
     supports_vision: true,
-    awaiting_response_count: 0, highest_notice_priority: null, unread_notice_count: 0, unread_user_message_count: 0, awaiting_user_message_count: 0,
+    awaiting_response_count: 0, highest_notice_priority: null, unread_notice_count: 0, unread_user_message_count: 0,
     heartbeat_paused_until: null,
     liveness_state: "online",
     ...over,
@@ -201,7 +201,7 @@ describe("FleetView (desktop)", () => {
     // couple of pixels.
     const heightClass = (el: Element) => [...el.classList].find((c) => /^h-\d/.test(c));
     const tabBar = screen.getByText("Agents").closest("div")!;
-    const inboxHeader = screen.getByText("Inbox").closest("header")!;
+    const inboxHeader = screen.getByText("Ask").closest("header")!;
     expect(heightClass(tabBar)).toBeDefined();
     expect(heightClass(tabBar)).toBe(heightClass(inboxHeader));
     expect(heightClass(tabBar)).toBe(BAR_HEIGHT_CLASS);
@@ -217,7 +217,7 @@ describe("FleetView (desktop)", () => {
   it("renders the unified Inbox panel (no Decisions/Reviews split)", () => {
     const agents: AgentRow[] = [makeAgent({ agent_id: 1, unread_notice_count: 2 })];
     wrap(<FleetView navigate={navigate} />, { agents });
-    expect(screen.getByText("Inbox")).toBeTruthy();
+    expect(screen.getByText("Ask")).toBeTruthy();
     expect(screen.queryByText("Decisions")).toBeNull();
     expect(screen.queryByText("Reviews")).toBeNull();
   });
@@ -254,7 +254,7 @@ describe("FleetView (desktop)", () => {
 
     wrap(<FleetView navigate={navigate} />, { agents, notices });
 
-    const list = screen.getByRole("list", { name: /inbox queue/i });
+    const list = screen.getByRole("list", { name: /ask queue/i });
     const row = within(list).getByText("Review result").closest('[data-testid="inbox-row"]');
     await waitFor(() => expect(row?.getAttribute("data-anchor-highlighted")).toBe("true"));
   });
@@ -271,7 +271,7 @@ describe("FleetView (desktop)", () => {
 
     // Queue gone; only the static handle remains — and it carries NO dynamic
     // signal (no badge/count), even though a P0 notice is pending.
-    await waitFor(() => expect(screen.queryByText("Inbox")).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Ask")).toBeNull());
     const handle = screen.getByLabelText("Expand queue");
     expect(handle.textContent).toBe("Queue");
     expect(putSettingMock).toHaveBeenCalledWith("display.fleet_queue_collapsed", true);
@@ -282,7 +282,7 @@ describe("FleetView (desktop)", () => {
     wrap(<FleetView navigate={navigate} />, { agents });
     fireEvent.click(screen.getByLabelText("Collapse queue"));
     fireEvent.click(await screen.findByLabelText("Expand queue"));
-    await waitFor(() => expect(screen.getByText("Inbox")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Ask")).toBeTruthy());
     expect(putSettingMock).toHaveBeenLastCalledWith("display.fleet_queue_collapsed", false);
   });
 
@@ -290,7 +290,7 @@ describe("FleetView (desktop)", () => {
     storedSettings = { "display.fleet_queue_collapsed": true };
     const agents: AgentRow[] = [makeAgent({ agent_id: 1 })];
     wrap(<FleetView navigate={navigate} />, { agents });
-    expect(screen.queryByText("Inbox")).toBeNull();
+    expect(screen.queryByText("Ask")).toBeNull();
     expect(screen.getByLabelText("Expand queue")).toBeTruthy();
   });
 });
@@ -307,7 +307,7 @@ describe("FleetView (mobile)", () => {
     expect(tablist.tagName).toBe("DIV");
     expect(screen.getByRole("tab", { name: /Agents/ })).toBeTruthy();
     expect(screen.getByRole("tab", { name: /Tasks/ })).toBeTruthy();
-    expect(screen.getByRole("tab", { name: /Inbox/ })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: /Ask/ })).toBeTruthy();
     expect(screen.queryByRole("tab", { name: /Decisions/ })).toBeNull();
     expect(screen.queryByRole("tab", { name: /Reviews/ })).toBeNull();
     expect(screen.getByLabelText("Agent graph legend")).toBeTruthy();
@@ -339,14 +339,14 @@ describe("FleetView (mobile)", () => {
       resolved: [],
     };
     wrap(<FleetView navigate={navigate} />, { agents, notices });
-    fireEvent.click(screen.getByRole("tab", { name: /Inbox/ }));
-    expect(screen.getByRole("list", { name: /inbox queue/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: /Ask/ }));
+    expect(screen.getByRole("list", { name: /ask queue/i })).toBeTruthy();
     expect(screen.getByText("What next?")).toBeTruthy();
     expect(screen.queryByLabelText("Back to list")).toBeNull();
     fireEvent.click(screen.getByText("What next?"));
     expect(screen.getByLabelText("Back to list")).toBeTruthy();
     fireEvent.click(screen.getByLabelText("Back to list"));
-    expect(screen.getByRole("list", { name: /inbox queue/i })).toBeTruthy();
+    expect(screen.getByRole("list", { name: /ask queue/i })).toBeTruthy();
     expect(screen.queryByLabelText("Back to list")).toBeNull();
   });
 
@@ -366,7 +366,6 @@ describe("FleetView (mobile)", () => {
         highest_notice_priority: "P3",
         unread_notice_count: 3,
         unread_user_message_count: 0,
-        awaiting_user_message_count: 0,
       }),
     ];
     const notices: FeedRows = {
@@ -375,7 +374,7 @@ describe("FleetView (mobile)", () => {
       resolved: [],
     };
     wrap(<FleetView navigate={navigate} />, { agents, notices });
-    expect(screen.getByRole("tab", { name: /Inbox 1/ })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: /Ask 1/ })).toBeTruthy();
     expect(screen.getByRole("tab", { name: /Agents 1/ })).toBeTruthy();
   });
 
@@ -384,7 +383,7 @@ describe("FleetView (mobile)", () => {
     const agents: AgentRow[] = [makeAgent({ agent_id: 1, label: "lead", unread_notice_count: 1 })];
     wrap(<FleetView navigate={navigate} />, { agents });
     // Should restore to the Inbox tab.
-    expect(screen.getByRole("tab", { name: /Inbox/, selected: true })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: /Ask/, selected: true })).toBeTruthy();
   });
 
   it("deep link #inbox selects the Inbox tab on mobile", () => {
@@ -395,8 +394,8 @@ describe("FleetView (mobile)", () => {
     // in it, so a test that wants the list says what the agent is waiting on.
     const notices: FeedRows = { open: [], awaiting: [noticeItem({ id: 1 })], resolved: [] };
     wrap(<FleetView navigate={navigate} />, { agents, notices });
-    expect(screen.getByRole("tab", { name: /Inbox/, selected: true })).toBeTruthy();
-    expect(screen.getByRole("list", { name: /inbox queue/i })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: /Ask/, selected: true })).toBeTruthy();
+    expect(screen.getByRole("list", { name: /ask queue/i })).toBeTruthy();
     window.location.hash = "";
   });
 });

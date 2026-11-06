@@ -64,7 +64,7 @@ A worker that hits a blocker does **not** create a "blocked" status (there is no
 2. Update `content` with the blocker description and what is needed to unblock
 3. Send the delegator a message describing the block and what decision or resource is needed — this is an escalation, not a failure
 
-If the delegator cannot resolve the block either, they escalate further up the task tree. When a block needs the user's decision (irreversible action, spending, outward-facing), use `meiva.ui.notify(require_response=True)` — do not route user decisions through the agent chain.
+If the delegator cannot resolve the block either, they escalate further up the task tree. When a block needs the user's decision (irreversible action, spending, outward-facing), use `meiva.ui.ask(...)` — do not route user decisions through the agent chain.
 
 ### Task Reassign → Notify Old and New Owner
 
@@ -105,7 +105,7 @@ Reminders fire automatically — the cluster runs a task-maintenance daemon that
 The Fleet system prompt keeps message-delivery semantics resident. The
 [operating contract](reference/operating-contract.md) owns detailed coordination,
 completion, and task procedures. Use `send_message` for peer delivery,
-`meiva.ui.notify` for the user, and task updates for the durable record.
+`meiva.ui.ask` for the user, and task updates for the durable record.
 
 For each milestone, name its reporter and the agent that must act in the brief.
 Publish the result in its existing artifact or task record and send that owner
@@ -133,9 +133,9 @@ Every delegation is set along two independent axes — per task, and (because de
 
 A small parallel delegation you eyeball yourself is just **low Effort + low Autonomy**; a background pipeline that decomposes, evaluates adversarially, and converges on its own is **high Effort + high Autonomy**. Same machinery, two dial settings — not different modes.
 
-**Setting Autonomy is not a config flag — it is a message.** When you want the user to make a reduce-point call, you do not write a new state field; you `meiva.ui.notify(..., require_response=True)`; their answer arrives as a message. The user "turning the dial down" on a node is simply you waiting for their decision. No shared mutable state, no schema — the existing message paths *are* the dial.
+**Setting Autonomy is not a config flag — it is a message.** When you want the user to make a reduce-point call, you do not write a new state field; you `meiva.ui.ask(...)`; their answer arrives as a message. The user "turning the dial down" on a node is simply you waiting for their decision. No shared mutable state, no schema — the existing message paths *are* the dial.
 
-**High Autonomy is bought with one upfront approval, not many.** Before a batch of autonomous work, package the whole ask into a single `meiva.ui.notify(require_response=True)`: the scope and intended work (registry tasks if you chose task tracking), and the budget ceiling in dollars. The user's reply is the authorization — record it verbatim in the agreed handoff record (the task's `description` when using registry tracking), so any agent that picks the work up sees exactly what was granted. Once granted you run: no step-by-step check-ins, and whether the user is online or away changes nothing about how you proceed.
+**High Autonomy is bought with one upfront approval, not many.** Before a batch of autonomous work, package the whole ask into a single `meiva.ui.ask(...)`: the scope and intended work (registry tasks if you chose task tracking), and the budget ceiling in dollars. The user's reply is the authorization — record it verbatim in the agreed handoff record (the task's `description` when using registry tracking), so any agent that picks the work up sees exactly what was granted. Once granted you run: no step-by-step check-ins, and whether the user is online or away changes nothing about how you proceed.
 
 ## Autonomy's boundaries
 
@@ -159,11 +159,11 @@ part of a budget reminder.
 The **user** is the only one who can authorize what no agent may decide alone — an irreversible or outward-facing action, spending real money, sending something to a real person. This authority is not delegated down the spawn graph: the user is a single queue, reachable directly from any agent.
 
 - **Another agent can decide it** → `send_message` them — you are waiting for their answer.
-- **Only the user can decide it** → post a notice with `meiva.ui.notify(require_response=True)` — you are waiting for their decision.
+- **Only the user can decide it** → post a notice with `meiva.ui.ask(...)` — you are waiting for their decision.
 
 ## Reporting
 
-Your replies to the delegator are the ambient record — how the work progressed shows in your message trail and the task's results. `meiva.ui.notify` is the push: when a question needs a user answer, post it to the user's queue. Ordinary information and results stay in chat. Don't promote routine progress; don't bury a decision that needs an answer.
+Your replies to the delegator are the ambient record — how the work progressed shows in your message trail and the task's results. `meiva.ui.ask` is the question channel: when a question needs a user answer, post it to the user's queue. Ordinary information and results use the configured publish/text delivery protocol. Don't promote routine progress; don't bury a decision that needs an answer.
 
 ### Message discipline: milestone-based, no noise
 
@@ -184,7 +184,8 @@ a valid line in a brief — but the default is silence between milestones.
 (Task-assignment delivery stays full-text by design; a summary-plus-link
 redesign was rejected because it costs an extra round-trip.)
 
-**When the user is actively chatting with you, reply in the conversation — do not post a notice.** The notify queue is for async updates the user should discover independently: a worker finished, a new issue arose, a status change on something you own. If the user is talking to *you* right now, just reply.
+Use Ask for questions in both live and asynchronous conversations. Deliver
+information through the configured publish/text protocol; keep routine work in Details.
 
 ## Artifacts: File + Message, Never Shared Mutable State
 
@@ -193,10 +194,9 @@ A worker publishes a result by **writing a file and sending the path** to whoeve
 ### Asking one numbered question
 
 For discrete decisions, supply `question={"type": "single_select",
-"options": [{"id": "stable-id", "label": "Choice", "description": "Optional detail"}]}` to `meiva.ui.notify(..., require_response=True)`.
+"options": [{"id": "stable-id", "label": "Choice", "description": "Optional detail"}]}` to `meiva.ui.ask(...)`.
 Use `type="multi_select"` for multiple selections. For an open question use `question={"type": "text"}`. Put the question in `title`
-and context in `content`. One notice is one question; await its answer before
-asking another. Options keep their declared 1-based numbers. Both choice types accept an optional comment.
+and context in `content`. Each Ask is one question; multiple questions may remain open. Options keep their declared 1-based numbers. Every question type accepts an editable Note, optionally seeded with `note_suggestion`.
 Question/context changes require a replacement notice. Interpret both explicit
 selections and the user's comment, preserving references such as "option 2";
 mentions inside text are not selections. A dismissal is not approval.

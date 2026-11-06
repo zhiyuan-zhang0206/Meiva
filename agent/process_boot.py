@@ -195,9 +195,11 @@ async def boot_agent_scope(
 
     ensure_document(workspace)
 
+    from meiva.ui import ask
+
     from .startup import notify_desktop_permissions_at_startup
 
-    await notify_desktop_permissions_at_startup(home)
+    await notify_desktop_permissions_at_startup(home, ask=ask)
 
     if harness is not Harness.MEIVA:
         return None, None

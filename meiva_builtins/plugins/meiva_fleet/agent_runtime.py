@@ -19,7 +19,7 @@ _FLEET_HARNESS_CONTRIBUTION = HarnessContribution(
     ),
     discipline=(
         "When coordinating Fleet work, record status in `meiva.tasks` and deliver progress to "
-        "your agreed delegator (`meiva.agents.send_message`) or queue user notices via "
+        "your agreed delegator (`meiva.agents.send_message`) or queue user questions via "
         "the configured user delivery protocol.",
     ),
 )
@@ -28,11 +28,11 @@ _FLEET_HARNESS_CONTRIBUTION = HarnessContribution(
 def fleet_self_section(_slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     del catalog
     if _slices.prompt.user_delivery_mode == "sdk":
-        return "## Fleet\n\nUse meiva.tasks for task tracking and meiva.agents.send_message for peers. Publish user messages through meiva.ui.publish; legacy notices are disabled."
+        return "## Fleet\n\nUse meiva.tasks for task tracking and meiva.agents.send_message for peers. Publish information with meiva.ui.publish and questions with meiva.ui.ask."
     return (
         "## Fleet\n\n"
-        "Fleet provides optional labels (`meiva.self.set_label`), user notices "
-        "(`meiva.ui.notify`), task tracking (`meiva.tasks`), and peer collaboration. "
+        "Fleet provides optional labels (`meiva.self.set_label`), user questions "
+        "(`meiva.ui.ask`), task tracking (`meiva.tasks`), and peer collaboration. "
         "Workflow selection belongs to `meiva-workflow`; enabling Fleet does not "
         "require a registry task or a management tree. Agents are "
         "peers; accepted assignments determine reporting, not spawn ancestry. "
@@ -48,10 +48,9 @@ def fleet_self_section(_slices: AgentSlices, *, catalog: ModelCatalog) -> str:
         "Use one reporter per milestone; do not relay unchanged results or "
         "duplicate task-log writes. Periodic checking does not imply periodic "
         "broadcasting, including generated watchers and schedules.\n\n"
-        "For the user, reply in an active dialog; otherwise queue necessary "
-        "decisions and results with `meiva.ui.notify`, even while they are offline. "
-        "Posting is delivery. Dismiss a pending notice when the dialog resolves "
-        "it; edit or dismiss stale notices. User-only decisions reach the user "
+        "Deliver information through the configured protocol. Ask for decisions with "
+        "`meiva.ui.ask`, including an editable Note when useful. Questions persist until "
+        "the user answers or explicitly closes them. User-only decisions reach the user "
         "directly; progress for accepted delegated work reaches its agreed "
         "delegator. With no delegator, deliver directly."
     )
@@ -67,8 +66,8 @@ def reduce_context_switch_section(slices: AgentSlices, *, catalog: ModelCatalog)
         "## Reduce context switch for the human\n\n"
         "Queue, never push: out-of-band interruption is reserved for irreversible "
         "risk in motion, the whole effort blocked on the human, or an explicit "
-        "request to be woken. One notice per agent, updated in place; lack of "
-        "acknowledgment does not justify escalation. Load "
+        "request to be woken. Preserve each pending question; lack of "
+        "an answer does not justify escalation. Load "
         "`reduce-context-switch-for-human` for reporting cadence, aggregation, "
         "and push-channel procedures when needed."
     )

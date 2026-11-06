@@ -1,88 +1,29 @@
 ---
 type: doc
-title: Notify — questions requiring a user response
-description: Response-required notices with independent priority and blocking attributes, three question types, and transactional replies.
-tags:
-- fleet
-- notify
-- user-communication
+title: Ask — durable questions requiring a user response
+description: Core SDK Ask replaces agent notifications while retaining question and answer history.
+tags: [fleet, user-communication]
 ---
 
-# Notice contract
+# Ask contract
 
-A notice always requires a user response. Ordinary information, progress and
-results belong in chat; there is no FYI queue or mark-read action.
+`meiva.ui.ask(title, content=None, *, question=None, note_suggestion=None)` creates a durable question in Timeline and the user's Ask queue.
+The title names the decision and content supplies context. Omitted `question`
+means text; choice questions use `single_select` or `multi_select`. Every type
+supports an editable Note. The agent's `note_suggestion` is a draft, never an answer.
 
-Two independent attributes describe each notice:
+An agent can have several open questions. New questions have no expiration and
+never overwrite an unanswered question. The runtime preserves operation identity across retries; the gateway replays
+its accepted ID and refuses changed content under that identity. The runtime does not end the turn
+when a question is posted. Use `meiva.ui.questions()` to inspect pending questions.
 
-| Attribute | Meaning |
-|---|---|
-| `priority` | P0 (highest), P1, P2 (default), P3 (lowest) |
-| `blocking` | Whether the agent cannot progress until the answer arrives |
+Answers and Notes commit with one agent inbound. Closing without answering
+records a dismissal and grants no authorization. Reading a publication does not
+answer any question. New Ask records create no notification delivery event.
 
-Any priority can be blocking or nonblocking. The queue sorts by priority, then
-blocking, then oldest first. A nonblocking notice still needs an answer.
-
-## Creation and editing
-
-`meiva.ui.notify(title, content=None, *, require_response=True, blocking=False,
-priority='P2', task=None, expire_at=None, question=None)` posts
-one notice. An agent holds one open notice at a time: while one is open, a second
-`notify` is refused with that notice's id and the two ways out — `dismiss_notice`
-to close it, `edit_notice` to rewrite it in place — and nothing is replaced on the
-writer's behalf (user ruling 2026-10-21). The refusal is a `ValueError` carrying
-the gateway's sentence. `require_response=False` is rejected before any effect;
-it is not an optional obligation.
-
-The title names the question and content supplies background. `question` is
-`text`, `single_select` or `multi_select`; see [[notice-questions.meiva.okf.md]].
-Omitting it keeps the legacy free-text answer surface. Choice questions accept
-an optional comment alongside their selected options. New Other options are
-rejected. The task must exist, the title must be nonblank, and invalid priorities
-fail at the boundary.
-
-The runtime owns the operation UID across retries. Relative expiration is measured from the original execution time
-deadline. The returned integer `Notice` includes `.pending_count` and
-`.pending_notices`.
-
-`edit_notice` changes the current notice's priority or blocking status. A structured
-question freezes its title, background and option order. `dismiss_notice` withdraws
-the observed current notice. Both use observed identity and durable receipts, so
-retrying cannot affect a replacement notice.
-
-## Replies and history
-
-The user answers or explicitly closes without answering. Answering stores the
-selection and comment together and delivers one `system:notice-reply` inbound.
-Closing delivers `system:notice-dismiss` and grants no authorization. Lost-response
-retries reuse their operation key and replay the original acceptance.
-
-The live feed, inspector and IM queue contain only response-required rows. The
-feed's legacy `open` field stays empty; `awaiting` is the active question queue.
-Resolved notice history also excludes FYIs. Historical FYI rows and read receipts
-remain stored for compatibility; they are not converted into unanswered questions.
-The schema's legacy fields are retained rather than destructively rewritten.
-
-## Expiry
-
-A notice carries an absolute `expire_at`. When it passes with the notice still
-open, the TTL reaper resolves it as `expired` and queues one system inbound
-(`system:notice-expire`) for its agent in the same transaction: the local id, the
-title, when it lapsed, that nothing is pending any more, and that the single open
-notice is free again. The message is not shaped as a reply, because the user did
-not answer.
-
-The owner is woken only while running or idling. A terminated owner keeps the
-same row in its inbox: an agent brought back within the stale-chat window (24
-hours by default, `MEIVA_DELIVERY_WATCHDOG_STALE_CLAIMED_THRESHOLD_SECONDS`)
-reads it, and past that window the row is retired as history without being
-delivered. It is never woken or resurrected for it, and a queued system
-notification for a dead owner is not counted as a stalled delivery. Expiry is
-silent for the user (user ruling 2026-10-21): the question leaves the queue and
-no notification is posted in its place.
-
-## Owners
-
-- [[notice-questions.meiva.okf.md]] — question, selection and comment semantics.
-- [[gateway/agents/docs/notice-receipts.meiva.okf.md]] — transactional acceptance.
-- [[meiva/docs/ui.meiva.okf.md]] — SDK surface.
+The old agent-facing notify/edit/dismiss SDK entries are removed. Existing
+`agent_notices` IDs, canonical answers and keyed answer receipts remain their
+storage owner. Pending legacy questions retain their IDs and lose automatic
+expiry; completed history remains intact. Legacy internal writers and system
+alerts keep their existing protocols. See [[meiva/docs/ui.meiva.okf.md]] for the
+mode and publication contract, and [[notice-questions.meiva.okf.md]] for answers.

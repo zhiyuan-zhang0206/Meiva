@@ -1,6 +1,6 @@
 "use client";
 
-import { useUserMessages, withUserMessages } from "@/lib/context/use-user-messages";
+import { useUserMessages, withUserMessages, withQuestions } from "@/lib/context/use-user-messages";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -438,13 +438,14 @@ function HomeContent({
   const composerMode: "disabled" | "idle" | "busy" =
     activeId == null ? "disabled" : agentBusy ? "busy" : "idle";
   const publications = useUserMessages(activeId);
-  const displayedItems = useMemo(() => withUserMessages(items, publications.data?.items ?? []), [items, publications.data]);
+  const questions = useNotices();
+  const displayedItems = useMemo(() => withQuestions(withUserMessages(items, publications.data?.items ?? []), [...questions.awaiting, ...questions.resolved].filter((item) => item.agent_id === activeId)), [items, publications.data, questions.awaiting, questions.resolved, activeId]);
   const replySuggestion = useReplySuggestion({
     agentId: activeId,
     status: activeAgent?.status,
     busy: agentBusy,
-    items,
-    enabled: publications.data !== undefined && publications.data.mode !== "sdk" && !userSettingsLoading && userSettings["behavior.replySuggestions"] === true,
+    items: displayedItems,
+    enabled: !userSettingsLoading && userSettings["behavior.replySuggestions"] === true,
   });
 
   return (
@@ -521,7 +522,8 @@ function HomeContent({
               focusToken={store.composerFocusToken}
               agentId={activeId}
               agentTerminated={activeAgent?.status === "terminated"}
-              suggestions={replySuggestion}
+              suggestions={replySuggestion?.suggestions}
+              suggestionOfferId={replySuggestion?.offer_id}
             >
               <UploadButton
                 agentId={activeId}

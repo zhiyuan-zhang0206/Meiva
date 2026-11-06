@@ -17,6 +17,14 @@
       30.0,
       null
     ],
+    "user_delivery_mode": [
+      "agent",
+      "MEIVA_USER_DELIVERY_MODE",
+      "str",
+      "literal",
+      "prefix",
+      "user_delivery"
+    ],
     "sdk_disable": [
       "agent",
       "MEIVA_SDK_DISABLE",
@@ -1878,7 +1886,7 @@
     "upload_dir_name": "gateway",
     "upload_recovery_claim_seconds": "gateway",
     "upload_staging_root": "gateway",
-    "user_delivery_mode": "agent-runner",
+    "user_delivery_mode": "common",
     "walg_config_file": "gateway",
     "web_brave_search_endpoint": "agent-runner",
     "web_deepseek_fetch_endpoint": "agent-runner",

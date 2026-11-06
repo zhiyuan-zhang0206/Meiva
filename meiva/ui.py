@@ -4,7 +4,16 @@ ports are explicit, and the page is reached only through the platform's authenti
 
 from __future__ import annotations
 
-__all_for_meiva__ = ["Page", "close", "serve", "show", "publish", "publications"]
+__all_for_meiva__ = [
+    "Page",
+    "close",
+    "serve",
+    "show",
+    "publish",
+    "publications",
+    "ask",
+    "questions",
+]
 
 import math as _math
 import os as _os
@@ -482,43 +491,62 @@ def __getattr__(name: str) -> object:
     raise AttributeError(f"module 'meiva.ui' has no attribute {name!r}")
 
 
-def publish(
-    content: str | None, *, response: str, suggestions: list[str], idempotency_key: str
-) -> int:
-    """Deliver a message to the user without ending your turn (SDK delivery mode).
+def publish(content: str | None, *, suggestions: list[str] | None = None) -> int:
+    """Publish information without ending your turn (SDK delivery mode).
 
-    Call for meaningful milestones, questions and results; continue working afterwards.
-    All ordinary assistant text, including your final summary, remains in expandable
-    Details. response is 'none', 'optional' or 'required'; suggestions is required,
-    with [] explicitly meaning no suggested reply. Suggestions belong to this message.
-    The publication persists independently of to_user.md and context compaction.
-    Reading does not answer a required reply. Do not also call notify.
-
-    Pass content=None, response='none', suggestions=[] to record that this turn has
-    no new user information. Reuse idempotency_key when retrying the same publication;
-    changed content needs a new key. Returns the durable publication id.
+    Optional suggestions are Agent-authored candidates for the independent composer
+    service. Use ask for a question that needs an answer. Messages remain available
+    after overview edits and compaction. Reading does not imply approval.
+    Pass content=None to explicitly record no update. The runtime owns retry
+    identity. Returns the durable publication id.
     """
     from base.agents.context.gateway_client import transport
-    from base.api_contracts.idempotency import validate_idempotency_key
     from base.api_contracts.user_delivery import PublishMessage, UserMessage
 
-    body = PublishMessage.model_validate(
-        {
-            "content": content,
-            "response": response,
-            "suggestions": suggestions,
-        }
-    )
-    validate_idempotency_key(idempotency_key)
+    body = PublishMessage(content=content, suggestions=[] if suggestions is None else suggestions)
     context = process_context.require_bound_context()
     result = transport.post(
         f"/api/agents/{agent_identity.require_agent_id()}/user-messages",
         body.model_dump(mode="json"),
-        idempotency_key=idempotency_key,
+        idempotency_key=context.sdk_operation_uid(),
         context=context,
     )
     result.raise_for_status()
     return UserMessage.model_validate(transport.json_object(result)).id
+
+
+def ask(
+    title: str,
+    content: str | None = None,
+    *,
+    question: dict[str, object] | None = None,
+    note_suggestion: str | None = None,
+) -> int:
+    """Ask a persistent question without ending your turn or sending a notification.
+
+    question accepts type=text (default), single_select or multi_select with ordered
+    options (id, label, optional description). Every question includes a user-editable
+    Note; note_suggestion seeds that draft and is never a submitted user answer.
+    Multiple questions may remain open. Questions do not expire or replace earlier
+    ones. A user answer or explicit close arrives asynchronously. The runtime owns
+    retry identity. Returns the global question id.
+    """
+    from base.agents.context.gateway_client import transport
+    from base.api_contracts.user_delivery import AskMessage
+
+    payload: dict[str, object] = {"type": "text"} if question is None else dict(question)
+    if note_suggestion is not None:
+        payload["note_suggestion"] = note_suggestion
+    body = AskMessage.model_validate({"title": title, "content": content, "question": payload})
+    context = process_context.require_bound_context()
+    result = transport.post(
+        f"/api/agents/{agent_identity.require_agent_id()}/asks",
+        body.model_dump(mode="json"),
+        idempotency_key=context.sdk_operation_uid(),
+        context=context,
+    )
+    result.raise_for_status()
+    return int_field(transport.json_object(result), "id")
 
 
 def publications(
@@ -548,3 +576,20 @@ def publications(
     )
     result.raise_for_status()
     return TypeAdapter(list[UserMessage]).validate_python(transport.json_object(result)["items"])
+
+
+def questions() -> list[dict[str, object]]:
+    """Retrieve your pending Ask records, including full options and Note suggestions.
+
+    Reading here never acknowledges a question on the user's behalf. Questions
+    remain pending until the user answers or explicitly closes them.
+    """
+    from base.agents.context.gateway_client import transport
+
+    result = transport.get(
+        "/api/notices/open",
+        params={"agent_id": agent_identity.require_agent_id(), "limit": 500},
+        context=process_context.require_bound_context(),
+    )
+    result.raise_for_status()
+    return transport.json_rows(result)

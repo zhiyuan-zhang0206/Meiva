@@ -398,3 +398,24 @@ def _build_pool_bundle(root: Path) -> tuple[str, bytes]:
         )
         head = rev_parse.stdout.strip()
         return head, bundle_path.read_bytes()
+
+
+async def recall_for_suggestion(request: Request, query: str) -> str:
+    # meiva:note
+    # Read at most three memory excerpts within the composer's short recall budget.
+    from base.log import logger
+
+    try:
+        result = await post_memory_search(
+            request,
+            MemorySearchRequest(
+                query=query[:4000],
+                k=3,
+                purpose="recall",
+                deadline_seconds=3,
+            ),
+        )
+        return "\n".join(f"Memory {item.path}: {item.chunk[:1200]}" for item in result.results)
+    except (IndexerUnavailable, TimeoutError):
+        logger.opt(exception=True).warning("Reply suggestion memory recall unavailable")
+        return "Memory recall unavailable; do not infer missing preferences."

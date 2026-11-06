@@ -18,7 +18,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import type { BackendTimelineItem, PublicAgentStatus } from "../contracts/types";
+import type { BackendTimelineItem, PublicAgentStatus, ReplySuggestionResponse } from "../contracts/types";
 import { errMsg } from "../contracts/errors";
 import { useDocumentVisible } from "../layout/use-document-visible";
 import { useApi } from "../transport/transport-context";
@@ -44,11 +44,11 @@ function lastConversationItem(items: readonly BackendTimelineItem[]): BackendTim
   return null;
 }
 
-export function useReplySuggestion({ agentId, status, busy, items, enabled }: Params): readonly string[] | null {
+export function useReplySuggestion({ agentId, status, busy, items, enabled }: Params): ReplySuggestionResponse | null {
   const api = useApi();
   const visible = useDocumentVisible();
   const requested = useRef(new Set<string>());
-  const [answer, setAnswer] = useState<{ turnKey: string; texts: readonly string[] } | null>(null);
+  const [answer, setAnswer] = useState<{ turnKey: string; response: ReplySuggestionResponse } | null>(null);
 
   const last = lastConversationItem(items);
   const turnKey =
@@ -56,10 +56,12 @@ export function useReplySuggestion({ agentId, status, busy, items, enabled }: Pa
     last !== null &&
     last.kind === "agent_chat" &&
     last.user_facing !== false &&
-    !last.partial
+    !last.partial &&
+    (!last.askQuestion || last.askQuestion.resolved_at === null)
       ? `${agentId}:${last.item_id}`
       : null;
-  const eligible = enabled && visible && !busy && status === "idling" && turnKey !== null;
+  const explicitPrompt = Boolean(last?.userDelivery?.suggestions.length) || last?.askQuestion?.resolved_at === null;
+  const eligible = enabled && visible && ((!busy && status === "idling") || explicitPrompt) && turnKey !== null;
 
   useEffect(() => {
     // `eligible` already implies a turn key (TypeScript narrows through the alias).
@@ -76,7 +78,7 @@ export function useReplySuggestion({ agentId, status, busy, items, enabled }: Pa
           // An answer that raced its own abort belongs to a turn that is gone.
           if (controller.signal.aborted) return;
           settled = true;
-          if (response.suggestions.length > 0) setAnswer({ turnKey, texts: response.suggestions });
+          if (response.suggestions.length > 0) setAnswer({ turnKey, response });
         })
         .catch((error: unknown) => {
           if (controller.signal.aborted) return;
@@ -91,5 +93,5 @@ export function useReplySuggestion({ agentId, status, busy, items, enabled }: Pa
     };
   }, [api, eligible, agentId, turnKey]);
 
-  return eligible && answer !== null && answer.turnKey === turnKey ? answer.texts : null;
+  return eligible && answer !== null && answer.turnKey === turnKey ? answer.response : null;
 }

@@ -3,15 +3,16 @@ from datetime import datetime
 from psycopg import Connection, sql
 from psycopg.rows import dict_row, scalar_row
 from psycopg.types.json import Jsonb
+from pydantic import BaseModel
 
+from base.api_contracts.notice_question import NoticeQuestion
 from base.api_contracts.user_delivery import (
     PublishMessage,
-    ReplyExpectation,
     UserDeliveryMode,
     UserMessage,
 )
 
-COLUMNS = "id, agent_id, mode, source_key, content, response, suggestions, created_at, read_at, resolved_at, resolution, reply"
+COLUMNS = "id, agent_id, mode, source_key, content, suggestions, created_at, read_at"
 
 
 class DeliveryConflictError(ValueError):
@@ -40,15 +41,14 @@ def publish(
 ) -> UserMessage:
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
-            "INSERT INTO agent_user_messages (agent_id, source_key, mode, content, response, "
-            "suggestions, created_at) VALUES (%s,%s,%s,%s,%s,%s,%s) "
+            "INSERT INTO agent_user_messages (agent_id, source_key, mode, content, "
+            "suggestions, created_at) VALUES (%s,%s,%s,%s,%s,%s) "
             "ON CONFLICT (agent_id, source_key) DO NOTHING",
             (
                 agent_id,
                 source_key,
                 mode.value,
                 body.content,
-                body.response.value,
                 Jsonb(body.suggestions),
                 created_at,
             ),
@@ -60,9 +60,8 @@ def publish(
             (agent_id, source_key),
         )
         message = UserMessage.model_validate(cur.fetchone())
-    if (message.content, message.response, message.suggestions, message.mode) != (
+    if (message.content, message.suggestions, message.mode) != (
         body.content,
-        body.response,
         body.suggestions,
         mode,
     ):
@@ -78,11 +77,7 @@ def messages(
     after_id: int = 0,
     limit: int | None = None,
 ) -> list[UserMessage]:
-    pending = (
-        " AND (read_at IS NULL OR (response='required' AND resolved_at IS NULL))"
-        if pending_only
-        else ""
-    )
+    pending = " AND read_at IS NULL" if pending_only else ""
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             sql.SQL(
@@ -96,7 +91,9 @@ def messages(
 def latest_decision(conn: Connection, agent_id: int) -> int:
     with conn.cursor(row_factory=scalar_row) as cur:
         cur.execute(
-            "SELECT COALESCE(MAX(id), 0) FROM agent_user_messages WHERE agent_id=%s", (agent_id,)
+            "SELECT (SELECT COALESCE(MAX(id),0) FROM agent_user_messages WHERE agent_id=%s) + "
+            "(SELECT COALESCE(MAX(id),0) FROM agent_notices WHERE agent_id=%s)",
+            (agent_id, agent_id),
         )
         value: object = cur.fetchone()
     if not isinstance(value, int):
@@ -108,7 +105,7 @@ def pending_context(records: list[UserMessage]) -> str:
     if not records:
         return ""
     entries = [
-        f"User delivery #{record.id} ({'awaiting reply' if record.response is ReplyExpectation.REQUIRED and record.resolved_at is None else 'unread'}):\n"
+        f"Unread publication #{record.id}:\n"
         + (record.content or "")[:800]
         + ("\n[Excerpt; retrieve the full publication.]" if len(record.content or "") > 800 else "")
         for record in records[:20]
@@ -118,4 +115,32 @@ def pending_context(records: list[UserMessage]) -> str:
     entries.append(
         "Retrieve full durable messages with meiva.ui.publications(pending_only=True, after_id=0, limit=50); continue after the last returned id."
     )
+    return "\n\n".join(entries)
+
+
+class PendingQuestion(BaseModel):
+    id: int
+    title: str
+    content: str | None
+    question: NoticeQuestion | None
+
+
+def pending_questions(conn: Connection, agent_id: int) -> str:
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            "SELECT id,title,content,question FROM agent_notices WHERE agent_id=%s "
+            "AND require_response AND resolved_at IS NULL ORDER BY id LIMIT 21",
+            (agent_id,),
+        )
+        rows = [PendingQuestion.model_validate(row) for row in cur.fetchall()]
+    if not rows:
+        return ""
+    entries = [
+        f"Open Ask #{row.id}: {row.title[:1000]}\n{(row.content or '')[:800]}\nQuestion: "
+        + (row.question.model_dump_json()[:1600] if row.question else "text")
+        for row in rows[:20]
+    ]
+    if len(rows) > 20:
+        entries.append("More open questions remain.")
+    entries.append("Retrieve complete questions and options with meiva.ui.questions().")
     return "\n\n".join(entries)

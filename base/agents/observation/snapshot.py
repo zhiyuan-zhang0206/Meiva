@@ -72,8 +72,7 @@ _FULL_COLS = (
     # no-interpolation preference); keep the '30' in sync with
     # base.agents.inbox.rows.NOTICE_FYI_TTL_DAYS — the C1 tests lock the coupling.
     "AND n.created_at > now() - interval '30 days') AS unread_notice_count, "
-    "(SELECT count(*) FROM agent_user_messages d WHERE d.agent_id=a.id AND d.content IS NOT NULL AND d.read_at IS NULL) AS unread_user_message_count, "
-    "(SELECT count(*) FROM agent_user_messages d WHERE d.agent_id=a.id AND d.response='required' AND d.resolved_at IS NULL) AS awaiting_user_message_count"
+    "(SELECT count(*) FROM agent_user_messages d WHERE d.agent_id=a.id AND d.content IS NOT NULL AND d.read_at IS NULL) AS unread_user_message_count "
     ", a.config_overlay, mp.last_probe_at AS machine_probe_at, "
     "mp.agent_host_online, a.last_admission_at, "
     "a.last_launch_failure_reason, a.last_launch_failure_at, a.birth_config, a.last_launch_attempt_id, a.harness, "
@@ -181,7 +180,6 @@ class AgentSnapshot(BaseModel):
     observation: AgentObservation | None = None
     notices_awaiting_response: list[OpenNotice]
     unread_user_message_count: int
-    awaiting_user_message_count: int
     unread_notice_count: int
     heartbeat_paused_until: datetime | None
     # meiva:note
@@ -280,7 +278,6 @@ class _SnapshotRow:
     last_probe_at: datetime | None
     notices_awaiting_response: object
     unread_user_message_count: int
-    awaiting_user_message_count: int
     unread_notice_count: int
     config_overlay: object
     machine_probe_at: datetime | None
@@ -325,7 +322,6 @@ def _row_to_snapshot(
             "notices_awaiting_response": row.notices_awaiting_response,
             "unread_notice_count": row.unread_notice_count,
             "unread_user_message_count": row.unread_user_message_count,
-            "awaiting_user_message_count": row.awaiting_user_message_count,
             "supports_vision": supports_vision,
             "observation": observation(row.machine_probe_at),
             "availability": availability(

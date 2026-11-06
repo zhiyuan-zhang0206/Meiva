@@ -1,7 +1,10 @@
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from base.api_contracts.notice_question import NonBlank, NoticeQuestion
 
 
 class UserDeliveryMode(StrEnum):
@@ -10,18 +13,11 @@ class UserDeliveryMode(StrEnum):
     SDK = "sdk"
 
 
-class ReplyExpectation(StrEnum):
-    NONE = "none"
-    OPTIONAL = "optional"
-    REQUIRED = "required"
-
-
 class PublishMessage(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     content: str | None = Field(max_length=100_000)
-    response: ReplyExpectation
-    suggestions: list[str] = Field(max_length=3)
+    suggestions: list[str] = Field(default_factory=list, max_length=3)
 
     @field_validator("content")
     @classmethod
@@ -41,47 +37,30 @@ class PublishMessage(BaseModel):
 
     @model_validator(mode="after")
     def coherent_delivery(self) -> "PublishMessage":
-        if self.response is ReplyExpectation.NONE and self.suggestions:
-            raise ValueError("response=none requires suggestions=[]")
-        if self.content is None and self.response is not ReplyExpectation.NONE:
-            raise ValueError("no update requires response=none and suggestions=[]")
+        if self.content is None and self.suggestions:
+            raise ValueError("no update requires suggestions=[]")
         return self
 
 
-class MessageResolution(StrEnum):
-    ANSWERED = "answered"
-    DISMISSED = "dismissed"
-
-
-class UserMessage(PublishMessage):
+class UserMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    content: str | None
+    suggestions: list[str]
     id: int
     agent_id: int
     mode: UserDeliveryMode
     source_key: str
     created_at: datetime
     read_at: datetime | None
-    resolved_at: datetime | None
-    resolution: MessageResolution | None
-    reply: str | None
-
-
-class MessageAction(StrEnum):
-    READ = "read"
-    ANSWER = "answer"
-    DISMISS = "dismiss"
 
 
 class ResolveMessage(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    action: Literal["read"]
 
-    action: MessageAction
-    reply: str | None = Field(default=None, max_length=100_000)
 
-    @model_validator(mode="after")
-    def coherent_answer(self) -> "ResolveMessage":
-        if self.action is MessageAction.ANSWER:
-            if self.reply is None or not self.reply.strip():
-                raise ValueError("answer requires a nonblank reply")
-        elif self.reply is not None:
-            raise ValueError("reply is only accepted for action=answer")
-        return self
+class AskMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: NonBlank = Field(max_length=1000)
+    content: str | None = Field(default=None, max_length=100_000)
+    question: NoticeQuestion
