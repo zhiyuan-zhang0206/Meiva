@@ -53,6 +53,7 @@ from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.agents.observation.turn_progress import TurnProgress
 from base.agents.sdk.capture import SdkCaptureOwner
+from base.agents.sdk.operation_ids import OperationIds
 from base.agents.sdk.tally import SdkCallTally
 from base.api_contracts.agent_contract import Harness
 from base.clock import Clock, Timers
@@ -363,8 +364,21 @@ class MeivaContext:
     sdk_calls: SdkCallTally | None = None
     """This execution's unsampled public-call tally. Never serialized into requests or state."""
 
+    # meiva:note
+    # A child rebuilds its write sequence from the original execution identity on replay.
+    operation_ids: OperationIds | None = None
+
     sdk_capture: ContextCaptureOwner | None = None
     """This exclusive attachment's capture owner; calls retain independent admissions."""
+
+    # meiva:note
+    # Outside a replayable execution, each call starts a fresh write.
+    def sdk_operation_uid(self) -> str:
+        from base.clock.ids import new_uuid
+
+        if self.operation_ids is not None:
+            return self.operation_ids.next_uid().hex
+        return new_uuid(self.require_rng()).hex
 
     @property
     def sql(self) -> LazyConnection:

@@ -26,7 +26,7 @@ blocking, then oldest first. A nonblocking notice still needs an answer.
 ## Creation and editing
 
 `meiva.ui.notify(title, content=None, *, require_response=True, blocking=False,
-priority='P2', task=None, expire_at=None, idempotency_key, question=None)` posts
+priority='P2', task=None, expire_at=None, question=None)` posts
 one notice. An agent holds one open notice at a time: while one is open, a second
 `notify` is refused with that notice's id and the two ways out — `dismiss_notice`
 to close it, `edit_notice` to rewrite it in place — and nothing is replaced on the
@@ -41,7 +41,7 @@ an optional comment alongside their selected options. New Other options are
 rejected. The task must exist, the title must be nonblank, and invalid priorities
 fail at the boundary.
 
-Retain the required idempotency key across retries and use an absolute expiration
+The runtime owns the operation UID across retries. Relative expiration is measured from the original execution time
 deadline. The returned integer `Notice` includes `.pending_count` and
 `.pending_notices`.
 

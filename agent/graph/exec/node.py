@@ -45,12 +45,14 @@ plugins' channels), not what the annotation names.
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections.abc import Awaitable, Mapping, Sequence
 from dataclasses import dataclass, fields, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
+from uuid import NAMESPACE_URL, uuid5
 
 from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, ToolCall, ToolMessage
 from langchain_core.runnables import RunnableConfig
@@ -70,8 +72,9 @@ from agent.messages import exec_output_message
 from agent.nodes import AFTER_EXEC, EXEC
 from agent.state import AttachState, validate_plugin_state_keys
 from base.agents.context import MeivaContext, agent_id_from_config
-from base.agents.messages.kwargs import ExecStatus
+from base.agents.messages.kwargs import ExecStatus, read_meiva_kwargs
 from base.agents.observation import ended_with
+from base.agents.sdk.operation_ids import ExecutionIdentity
 from base.events.live.projection import Cancelled, ExecOutput, ExecStart
 from base.events.live.publisher import AgentEventPublisher
 from base.host.boundary.json_values import is_object_list
@@ -267,6 +270,7 @@ async def run_agent_code(
     chunk_publisher: ExecOutputChunkPublisher,
     *,
     process: ExecProcess,
+    execution_identity: ExecutionIdentity | None = None,
 ) -> tuple[
     ExecResult,
     dict[str, object],
@@ -298,6 +302,7 @@ async def run_agent_code(
                 chunk_publisher,
                 state=state.model_dump(),
                 config_overlay=config_overlay,
+                execution_identity=execution_identity,
             ),
             agent_id,
             timeout_seconds=ctx.require_agent().read("sandbox", "exec_node_timeout_seconds"),
@@ -443,6 +448,7 @@ async def _exec_single_call(
     agent_id: int,
     call: ToolCall,
     exec_msg_idx: int,
+    execution_identity: ExecutionIdentity,
     *,
     process: ExecProcess,
 ) -> tuple[ExecStepDelta, bool]:
@@ -500,6 +506,7 @@ async def _exec_single_call(
         code_from_args(call["args"], source=f"tool_call {call['id']!r}"),
         chunk_publisher,
         process=process,
+        execution_identity=execution_identity,
     )
     agent = ctx.require_agent()
     plan, envelope = dispatch_exec_result(
@@ -587,7 +594,7 @@ async def _exec_single_call(
 
 def _remaining_exec_calls(
     messages: Sequence[AnyMessage],
-) -> tuple[list[AnyMessage], list[ToolCall]]:
+) -> tuple[AIMessage, list[AnyMessage], list[ToolCall]]:
     """Derive progress from committed result IDs, without a separate cursor."""
     completed: set[str] = set()
     for message in reversed(messages):
@@ -599,6 +606,7 @@ def _remaining_exec_calls(
             if not calls:
                 raise ValueError("exec_node: previous AIMessage has no tool_calls")
             return (
+                message,
                 [normalized] if normalized is not None else [],
                 [call for call in calls if (call["id"] or "") not in completed],
             )
@@ -642,15 +650,24 @@ async def exec_node_impl(
     *,
     process: ExecProcess,
 ) -> Command[ExecGoto]:
-    replacements, calls = _remaining_exec_calls(state.messages)
+    message, replacements, calls = _remaining_exec_calls(state.messages)
     if not calls:
         return Command[ExecGoto](
             update={"messages": state.pending_exec_notes, "pending_exec_notes": []},
             goto=AFTER_EXEC,
         )
     agent_id = agent_id_from_config(config)
+    call = calls[0]
+    issued_at = read_meiva_kwargs(message).get("meiva_created_at")
+    identity = ExecutionIdentity(
+        uuid5(
+            NAMESPACE_URL,
+            "meiva:execute_code:" + json.dumps([agent_id, message.id, call["id"], issued_at]),
+        ),
+        datetime.fromisoformat(issued_at) if isinstance(issued_at, str) else None,
+    )
     step, compacted = await _exec_single_call(
-        state, runtime.context, agent_id, calls[0], len(state.messages), process=process
+        state, runtime.context, agent_id, call, len(state.messages), identity, process=process
     )
     update = step.update()
     if compacted:

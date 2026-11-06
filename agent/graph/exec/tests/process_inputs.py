@@ -13,6 +13,7 @@ from agent.execution.protocol import ResultPayload
 from agent.graph.exec._child_boundary import ParentFacts
 from agent.graph.exec.node import ExecDone, ExecOutputChunkPublisher, ExecResult
 from base.agents.context import MeivaContext
+from base.agents.sdk.operation_ids import ExecutionIdentity
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config.tests.configuration import defaults
@@ -58,6 +59,7 @@ class ScriptedExecProcess:
         *,
         state: Mapping[str, object],
         config_overlay: dict[str, object],
+        execution_identity: ExecutionIdentity | None = None,
     ) -> Awaitable[Outcome]:
         call = ProcessCall(code, context, cancel_event, chunks, state, config_overlay)
         return self.answer(call, next(self.outcomes))

@@ -58,4 +58,16 @@ supplies the short outer deadline. The scripted process keeps no call record: a
 test that needs to know what reached the process lets the outcome report it, so
 the assertion reads the committed tool result.
 
+## SDK write replay
+
+The graph derives an execution identity from the checkpointed assistant
+message, its tool call and the agent ID. Both launch paths pass that identity
+through the request envelope. The child derives a distinct operation UID for
+each keyed SDK write in execution order. Replaying that execution with the
+same writes in the same order yields the same UIDs, even in a different child.
+The SDK reuses each UID during transport retries and the existing receipts
+recover accepted writes. A separate tool call, or a standalone Python
+invocation outside a replayable execution, starts a new operation. Replay
+requires deterministic write order.
+
 Parent: [[exec.meiva.okf.md]].

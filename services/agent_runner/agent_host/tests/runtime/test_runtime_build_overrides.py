@@ -79,7 +79,6 @@ async def test_external_runtime_needs_no_native_model_or_provider_key(
         catalog=model_catalog,
         keys=ProviderKeys({}),
         llm_override="",
-        permissions_notice_key=uuid4(),
         home=tmp_path,
         harness=harness,
         birth_config={"harness_model_selection": 1} if selection else None,

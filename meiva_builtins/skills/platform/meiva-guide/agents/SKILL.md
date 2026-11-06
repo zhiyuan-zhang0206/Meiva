@@ -164,15 +164,14 @@ cluster/gateway view.
 Passed at spawn time — not edited on a running agent:
 
 ```python
-from uuid import uuid4
 
 # Explicit fields — model_id is an id from the live roster, see the models sub-skill
-meiva.agents.spawn(prompt="...", config_overlay={"llm_model": model_id}, idempotency_key=str(uuid4()))
+meiva.agents.spawn(prompt="...", config_overlay={"llm_model": model_id})
 
 # Several fields at once — every key must be a per_agent field
 meiva.agents.spawn(prompt="...",
                  config_overlay={"llm_model": model_id, "reasoning_effort": "high"},
-                 idempotency_key=str(uuid4()))
+)
 ```
 
 Per-agent config is snapshotted into the agent row at spawn; a later

@@ -514,7 +514,6 @@ class AgentHost:
             catalog=self._catalog,
             keys=self._policy.provider_keys,
             llm_override=self._policy.llm_override,
-            permissions_notice_key=UUID(int=self._policy.rng.getrandbits(128), version=4),
             home=self._home,
             harness=harness,
             birth_config=birth_config,

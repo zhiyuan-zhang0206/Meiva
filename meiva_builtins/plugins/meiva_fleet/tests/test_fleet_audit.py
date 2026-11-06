@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from typing import Any
-from uuid import uuid4
 
 import psycopg
 import pytest
@@ -64,7 +63,9 @@ def test_a_created_task_is_recorded_with_its_row(
     redis_url: str, db_conn: psycopg.Connection, agent_id: int, root_task_id: int
 ) -> None:
     task = task_registry.create(
-        "audited", "detail", parent=root_task_id, operation_key=str(uuid4())
+        "audited",
+        "detail",
+        parent=root_task_id,
     )
 
     [recorded] = _audit(db_conn, agent_id, "task_create")
@@ -80,7 +81,11 @@ def test_a_task_whose_audit_fact_cannot_be_recorded_is_not_created(
         inserts_failing(db_conn, "audit_events"),
         pytest.raises(psycopg.errors.RaiseException, match="audit_events inserts refused"),
     ):
-        task_registry.create("never", "detail", parent=root_task_id, operation_key=str(uuid4()))
+        task_registry.create(
+            "never",
+            "detail",
+            parent=root_task_id,
+        )
 
     count = db_conn.execute("SELECT count(*) FROM agent_tasks WHERE title='never'").fetchone()
     db_conn.commit()
@@ -90,9 +95,16 @@ def test_a_task_whose_audit_fact_cannot_be_recorded_is_not_created(
 def test_a_task_update_is_recorded_with_its_change(
     redis_url: str, db_conn: psycopg.Connection, agent_id: int, root_task_id: int
 ) -> None:
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
+    task = task_registry.create(
+        "title",
+        "detail",
+        parent=root_task_id,
+    )
 
-    task_registry.update(task.id, remind_interval_seconds=1800, operation_key=str(uuid4()))
+    task_registry.update(
+        task.id,
+        remind_interval_seconds=1800,
+    )
 
     [recorded] = _audit(db_conn, agent_id, "task_update")
     assert recorded["task_id"] == task.id

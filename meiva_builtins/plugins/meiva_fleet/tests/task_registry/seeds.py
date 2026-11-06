@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from uuid import uuid4
 
 import psycopg
 import pytest
@@ -70,6 +69,9 @@ def seed_owned_task(db: psycopg.Connection, root: int) -> tuple[int, int, int]:
     actor, owner = seed_agent(db), seed_agent(db)
     pin_agent(actor)
     task = task_registry.create(
-        "receipt task", "work", parent=root, owner=owner, operation_key=str(uuid4())
+        "receipt task",
+        "work",
+        parent=root,
+        owner=owner,
     )
     return actor, owner, task.id

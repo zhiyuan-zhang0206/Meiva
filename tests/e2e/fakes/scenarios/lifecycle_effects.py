@@ -55,7 +55,7 @@ def build_spawn(model: str, *, agent_id: int | None) -> RecordingModel:
         return RecordingModel(agent_id=agent_id, script=(note(CHILD_REPLY),))
     code = (
         "import meiva\nfrom uuid import uuid4\n"
-        f"child = meiva.agents.spawn(prompt={CHILD_PROMPT!r}, idempotency_key=str(uuid4()))\n"
+        f"child = meiva.agents.spawn(prompt={CHILD_PROMPT!r})\n"
         "print('child-id', child)"
     )
     return RecordingModel(agent_id=agent_id, script=(exec_call(1, code), say(FINAL)))

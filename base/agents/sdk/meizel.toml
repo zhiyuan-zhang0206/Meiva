@@ -1,4 +1,4 @@
-exports = ["call_policy.py", "capture.py", "tally.py", "telemetry.py", "tests"]
+exports = ["call_policy.py", "capture.py", "operation_ids.py", "tally.py", "telemetry.py", "tests"]
 
 [uses]
 "call_policy.py" = ["__init__.py"]

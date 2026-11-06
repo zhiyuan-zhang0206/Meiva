@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import Literal
-from uuid import UUID
 
 import meiva.sdk_surface.agent_identity
 from base.api_contracts.agent_contract import AgentLaunchFailed as AgentLaunchFailed
@@ -99,14 +98,12 @@ __all_for_meiva__ = [
     "compact",
     "get_ancestors",
     "get_last_message",
-    "get_launch_attempt",
     "get_neighbors",
     "get_status",
     "harness_availability",
     "list_agents",
     "list_machines",
     "restart",
-    "retry_launch",
     "resurrect",
     "send_message",
     "spawn",
@@ -273,15 +270,11 @@ def spawn(
     config_overlay: dict[str, object] | None = None,
     label: str | None = None,
     harness: str | Harness | None = None,
-    *,
-    idempotency_key: str,
 ) -> int:
     """Start a new agent; does not block.
 
-    An explicit `idempotency_key` identifies this creation or fork. Reuse the
-    same key, inputs and caller identity to recover its original agent after a
-    lost response; use a new key for another agent. Acceptance does not prove
-    execution, and uncertain transport outcomes are not automatically retried.
+    The runtime identifies each creation or fork. A replay of the original
+    execution recovers its accepted agent ID. Acceptance only records birth.
 
     `harness` selects the initial runtime loop. It defaults to "meiva" and also
     accepts "claude_code", "codex" or "antigravity". Unknown names are refused.
@@ -316,38 +309,6 @@ def spawn(
         config=config_overlay,
         label=label,
         harness=harness,
-        idempotency_key=idempotency_key,
-    )
-
-
-def get_launch_attempt(agent_id: int) -> UUID:
-    """Read the current launch attempt ID for an explicit retry.
-
-    Keep this value with the retry's key; a later observation may describe
-    another attempt. Fails when no launch attempt can be observed.
-    """
-    agent_id = coerce_typed(agent_id, "agent_id", int)
-    return gateway_client.get_launch_attempt(agent_id)
-
-
-def retry_launch(
-    agent_id: int,
-    *,
-    idempotency_key: str,
-    expected_prior_attempt_id: str | UUID,
-) -> int:
-    """Retry starting an existing agent after a launch failure.
-
-    Keep the agent id, `idempotency_key` and `expected_prior_attempt_id` together
-    when recovering a lost response. Acceptance does not prove the agent started.
-    A deliberate new retry needs a new key and the latest observed attempt.
-    """
-    agent_id = coerce_typed(agent_id, "agent_id", int)
-    schedule_capability.assert_schedule_capability("agents.retry_launch", target_agent_id=agent_id)
-    return gateway_client.retry_launch(
-        agent_id,
-        idempotency_key=idempotency_key,
-        expected_prior_attempt_id=expected_prior_attempt_id,
     )
 
 
@@ -359,7 +320,6 @@ def spawn_impl(
     config: dict[str, object] | None,
     label: str | None,
     harness: str | Harness | None,
-    idempotency_key: str,
 ) -> int:
     prompt = coerce_str(prompt, "prompt", allow_none=True)
     fork_from = coerce_typed(fork_from, "fork_from", int, allow_none=True)
@@ -379,9 +339,6 @@ def spawn_impl(
             f"forking is only supported on the native 'meiva' harness."
         )
     harness = None if coerced_harness is None else coerced_harness.value
-    from base.api_contracts.idempotency import validate_idempotency_key
-
-    idempotency_key = validate_idempotency_key(idempotency_key)
     spawner = meiva.sdk_surface.agent_identity.require_actor()
     if config:
         from base.packages.plugins.config_registration import validate_config_overlay
@@ -422,7 +379,7 @@ def spawn_impl(
         config=config,
         label=label,
         harness=harness,
-        idempotency_key=idempotency_key,
+        idempotency_key=process_context.current_context().sdk_operation_uid(),
     )
 
 

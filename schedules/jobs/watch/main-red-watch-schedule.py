@@ -21,6 +21,7 @@ from functools import partial
 from pathlib import Path
 
 import meiva
+from meiva_builtins.plugins.meiva_fleet import task_registry
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.host.boundary.json_values import is_object_dict, is_object_list
 from base.paths.home import resolve_meiva_home
@@ -331,7 +332,8 @@ def _uncertified_commits(run_process: RunProcess) -> tuple[int | None, str | Non
 
 def _open_card(card: Card, report_agent: int) -> int:
     return int(
-        meiva.tasks.create(
+        task_registry.create_in_context(
+            meiva.context,
             title=card.title,
             description=card.body,
             parent=1,
@@ -349,7 +351,8 @@ def _open_card(card: Card, report_agent: int) -> int:
 def _close_liveness_card(report_agent: int) -> None:
     for task in meiva.tasks.list(owner=report_agent, status="in_progress"):
         if task.title == STALE_WATCH_TITLE:
-            meiva.tasks.update(
+            task_registry.update_in_context(
+                meiva.context,
                 task.id,
                 status="done",
                 results="watch reporting again: a round landed",
@@ -358,7 +361,8 @@ def _close_liveness_card(report_agent: int) -> None:
 
 
 def _close_card(task_id: int, reason: str) -> None:
-    meiva.tasks.update(
+    task_registry.update_in_context(
+        meiva.context,
         task_id,
         status="done",
         results=f"red ended: {reason}",

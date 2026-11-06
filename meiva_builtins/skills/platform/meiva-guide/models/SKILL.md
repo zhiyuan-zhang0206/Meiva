@@ -8,9 +8,8 @@ description: "Selects registered LLMs and config overlays for Meiva workers. Use
 You pick a worker's model at spawn time:
 
 ```python
-from uuid import uuid4
 
-meiva.agents.spawn(prompt="...", config_overlay={"llm_model": model_id}, idempotency_key=str(uuid4()))
+meiva.agents.spawn(prompt="...", config_overlay={"llm_model": model_id})
 ```
 
 `model_id` is an id read from the live roster (next section), never a name

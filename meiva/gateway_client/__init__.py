@@ -11,13 +11,11 @@ from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import replace
 from typing import Literal, assert_never
-from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
 import meiva.sdk_surface.agent_identity
 from base.agents.context import MeivaContext
-from base.agents.context.gateway_client import launch_retry as _launch_retry
 from base.agents.context.gateway_client import transport as _transport
 from base.api_contracts.agent_contract import GatewayUnavailable as GatewayUnavailable
 from base.log import logger
@@ -140,29 +138,6 @@ def use_client[T](client: T) -> Generator[T]:
         yield client
     finally:
         process_context.bind_context(bound)
-
-
-def get_launch_attempt(agent_id: int) -> UUID:
-    """Read the current metadata attempt; an absent old field is not evidence."""
-    _launch_retry.validate_agent_id(agent_id, operation="launch attempt observation")
-    return _launch_retry.get_launch_attempt(agent_id, context=_ctx(None))
-
-
-def retry_launch(
-    agent_id: int,
-    *,
-    idempotency_key: str,
-    expected_prior_attempt_id: str | UUID,
-) -> int:
-    """Retry one observed attempt through the fixed guarded operation."""
-    _launch_retry.validate_retry_admission(key=idempotency_key, prior=expected_prior_attempt_id)
-    _launch_retry.validate_agent_id(agent_id, operation="guarded launch retry")
-    return _launch_retry.retry_launch(
-        agent_id,
-        idempotency_key=idempotency_key,
-        expected_prior_attempt_id=expected_prior_attempt_id,
-        context=_ctx(None),
-    )
 
 
 def spawn(

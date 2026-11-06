@@ -18,8 +18,7 @@ are for when the user is not in a live conversation with the agent. In a live
 dialog the user reads your replies as you write them, so answer directly and
 do not post a notice.
 
-2. **Post** `meiva.ui.notify(title, content, idempotency_key=notice_key,
-   blocking=..., priority=...)` — request one answer from the user.
+2. **Post** `meiva.ui.notify(title, content, blocking=..., priority=...)` — request one answer from the user.
    Ordinary information belongs in chat. Priority is P0 through P3;
    `blocking=True` means progress depends on the answer.
 3. **Edit** `meiva.ui.edit_notice(...)` — revise the notice you posted that the
@@ -39,7 +38,7 @@ __description__: str = (
 )
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import TypedDict
 
 from pydantic import BaseModel
@@ -159,7 +158,6 @@ def notify(
     priority: str = "P2",
     task: int | None = None,
     expire_at: datetime | timedelta | str | None = None,
-    idempotency_key: str,
     question: dict[str, object] | None = None,
 ) -> "Notice":
     """Post one notice to the user's queue.
@@ -186,8 +184,6 @@ def notify(
             Options are numbered from 1. The question and its context are immutable.
         task: groups your notices by task in the user's queue.
         expire_at: expiration deadline; omit it to use the configured lifetime.
-        idempotency_key: reuse for the same notice across explicit retries.
-            Use an absolute expire_at when retrying with a key.
 
     Returns:
         The notice id (an int), carrying `.pending_notices` and `.pending_count`.
@@ -210,22 +206,19 @@ def notify(
     if isinstance(parsed_question, ChoiceQuestion) and parsed_question.allow_other:
         raise ValueError("Other is not an answer option; use a choice with an optional comment")
 
+    context = meiva.context
     expire_at_iso: str | None = None
     if expire_at is not None:
         from base.daemon.schedules.watcher import normalize_when
 
-        now = datetime.now(UTC)
-        due_at = normalize_when(expire_at, now=now)
-        if due_at < now:
-            raise ValueError(
-                f"expire_at is in the past: {due_at.isoformat()}. "
-                "Provide a future time, or use a positive timedelta."
-            )
+        operation_ids = context.operation_ids
+        issued_at = operation_ids.execution.issued_at if operation_ids is not None else None
+        base_time = issued_at if issued_at is not None else context.require_clock().now()
+        due_at = normalize_when(expire_at, now=base_time)
+        if due_at < base_time and (issued_at is None or isinstance(expire_at, timedelta)):
+            raise ValueError(f"expire_at is in the past: {due_at.isoformat()}")
         expire_at_iso = due_at.isoformat()
 
-    from base.api_contracts.idempotency import validate_idempotency_key
-
-    idempotency_key = validate_idempotency_key(idempotency_key)
     aid = meiva.sdk_surface.agent_identity.require_agent_id()
 
     from base.agents.context.gateway_client import transport
@@ -246,8 +239,8 @@ def notify(
                 else {}
             ),
         },
-        idempotency_key=idempotency_key,
-        context=meiva.context,
+        idempotency_key=context.sdk_operation_uid(),
+        context=context,
     )
     _raise_as_value_error(resp)
     data = _NoticeAnswer.model_validate(transport.json_object(resp))

@@ -71,7 +71,6 @@ async def test_launch_reconcile_repeats_its_wake_through_its_own_handler(
 ) -> None:
     _machine, accepted = accept_retry_launch(
         ops.pool,
-        "reconcile-key",
         launch.agent_id,
         RetryLaunchRequest(expected_prior_attempt_id=launch.launch_attempt_id),
         new_attempt_id=uuid4(),

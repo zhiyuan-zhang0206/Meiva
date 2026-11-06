@@ -217,11 +217,11 @@ describe("write endpoints", () => {
   });
 
   it("retryAgentLaunch POSTs to the existing id", async () => {
-    await api().retryAgentLaunch(123, "original-attempt", "launch-retry");
+    await api().retryAgentLaunch(123, "original-attempt");
     const [request] = requests();
     expect([request.method, request.path]).toEqual(["POST", "/api/keyed/v1/agents/123/retry-launch"]);
     expect(json(request)).toEqual({ expected_prior_attempt_id: "original-attempt" });
-    expect(keyOf(request)).toBe("launch-retry");
+    expect(keyOf(request)).toBeUndefined();
   });
 
   it("terminateAgent POSTs /api/agents/{id}/terminate", async () => {

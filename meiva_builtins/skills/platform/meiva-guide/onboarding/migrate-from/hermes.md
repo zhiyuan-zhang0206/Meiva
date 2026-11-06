@@ -21,7 +21,7 @@ provider, Mixture-of-Agents presets, and fallback chains.
 | `hermes bundles` (skill groups) | N/A | |
 | SOUL.md persona | System prompt + role-card skills (`be-a-<role>`) | |
 | Channels (CLI, Telegram, Discord, Slack, WhatsApp, Signal, Email, SMS, …) | Platform dialog + `meiva.ui.notify`; Telegram via the IM Bridge where it runs | |
-| Command approval (`hermes approvals`) | Memory gates + `meiva.ui.notify(require_response=True, idempotency_key=notice_key)` | No approval-history ledger. |
+| Command approval (`hermes approvals`) | Memory gates + `meiva.ui.notify(require_response=True)` | No approval-history ledger. |
 | Terminal backends (local, Docker, SSH, Daytona, Modal) | Multi-machine agents (`meiva.agents.spawn(machine=...)`), `meiva.shell.sessions`, containers via shell | Daytona/Modal serverless hibernation has no Meiva equivalent. |
 | `hermes cron` | `meiva schedules` + `meiva.watcher` | |
 | MCP (`hermes mcp`) | `meiva mcp` | |
@@ -70,6 +70,3 @@ Official Hermes Agent docs, accessed 2026-08-12:
 
 - https://hermes-agent.nousresearch.com/docs/ — overview, install, concepts, learning loop
 - https://github.com/NousResearch/hermes-agent — website/docs/reference/cli-commands.md (CLI reference), releases (v0.19 line)
-
-A new notice intent requires its own retained `notice_key`; retries reuse that
-key and the original payload. See `meiva.ui.notify` for the full parameters.

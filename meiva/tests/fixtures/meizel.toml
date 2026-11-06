@@ -1,4 +1,4 @@
-exports = ["gateway_wire.py", "meiva_tests.py", "model_owner.py", "pin_agent.py", "scripted_chat_model.py", "sdk.py", "workspace.py"]
+exports = ["gateway_wire.py", "meiva_tests.py", "model_owner.py", "pin_agent.py", "replay_sdk_write.py", "scripted_chat_model.py", "sdk.py", "workspace.py"]
 
 [uses]
 "meiva_tests.py" = ["pin_agent.py"]

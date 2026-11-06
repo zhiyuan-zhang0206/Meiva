@@ -31,7 +31,10 @@ def test_gateway_enqueue_failure_rolls_back_assignment(
     new_owner = seed_agent(db_conn)
     pin_agent(actor)
     task = task_registry.create(
-        "atomic", "work", parent=root_task_id, owner=old_owner, operation_key=str(uuid4())
+        "atomic",
+        "work",
+        parent=root_task_id,
+        owner=old_owner,
     )
 
     with gateway_test_client(raise_server_exceptions=False, machine=machine_identity) as client:

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from uuid import uuid4
 
 import httpx
 import psycopg
@@ -31,6 +30,7 @@ from gateway.tests.agents.sdk_support import self_agent as self_agent
 from gateway.tests.support.runner_ops.ops_stub import completed, launched, runner_ops
 from meiva.agents import AgentNotFound, ForkSourceEmpty, TerminateResult
 from meiva.tests.fixtures.pin_agent import pin_agent
+from meiva.tests.fixtures.replay_sdk_write import replay_sdk_write
 
 
 def _agent_spawner(db: psycopg.Connection, agent_id: int) -> str:
@@ -57,16 +57,38 @@ class TestSpawn:
                 local_machine=machine_identity,
             )
         )
-        first = meiva.agents.spawn(prompt="one goal", idempotency_key="public-create-a")
-        assert meiva.agents.spawn(prompt="one goal", idempotency_key="public-create-a") == first
+        first = replay_sdk_write(
+            "public-create-a",
+            meiva.agents.spawn,
+            prompt="one goal",
+        )
+        assert (
+            replay_sdk_write(
+                "public-create-a",
+                meiva.agents.spawn,
+                prompt="one goal",
+            )
+            == first
+        )
         assert inbound_rows(db_conn, first) == [
             ("one goal", "chat", f"agent:{meiva.self.AGENT_ID}")
         ]
-        assert meiva.agents.spawn(prompt="one goal", idempotency_key="public-create-b") != first
+        assert (
+            replay_sdk_write(
+                "public-create-b",
+                meiva.agents.spawn,
+                prompt="one goal",
+            )
+            != first
+        )
         from httpx2 import HTTPStatusError
 
         with pytest.raises(HTTPStatusError, match="409"):
-            meiva.agents.spawn(prompt="different", idempotency_key="public-create-a")
+            replay_sdk_write(
+                "public-create-a",
+                meiva.agents.spawn,
+                prompt="different",
+            )
 
     def test_spawn_no_prompt_just_lifecycle(
         self,
@@ -85,7 +107,7 @@ class TestSpawn:
             )
         )  # self identity
 
-        child_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
+        child_id = meiva.agents.spawn()
 
         assert _agent_spawner(db_conn, child_id) == f"agent:{meiva.self.AGENT_ID}"
         assert inbound_rows(db_conn, child_id) == []
@@ -107,7 +129,9 @@ class TestSpawn:
             )
         )  # self identity
 
-        child_id = meiva.agents.spawn(prompt="\u53bb\u67e5 X", idempotency_key=str(uuid4()))
+        child_id = meiva.agents.spawn(
+            prompt="\u53bb\u67e5 X",
+        )
 
         assert inbound_rows(db_conn, child_id) == [
             ("\u53bb\u67e5 X", "chat", f"agent:{meiva.self.AGENT_ID}"),
@@ -121,7 +145,7 @@ class TestSpawn:
         machine_identity: MachineIdentityReader,
     ) -> None:
         """When machine omitted, SDK defaults to local machine (meiva.self.MACHINE_SPEC), gateway receives explicit target, no longer falls back to gateway's own machine."""
-        child_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
+        child_id = meiva.agents.spawn()
 
         assert agent_machine(db_conn, child_id) == machine_identity.name()
 
@@ -130,7 +154,9 @@ class TestSpawn:
     ) -> None:
         """Explicit machine passthrough unchanged, not overridden by local default."""
         with runner_ops(db_conn, "other-host", {"spawn-launch": launched}) as runner:
-            child_id = meiva.agents.spawn(machine="other-host", idempotency_key=str(uuid4()))
+            child_id = meiva.agents.spawn(
+                machine="other-host",
+            )
 
         assert agent_machine(db_conn, child_id) == "other-host"
         assert [call.payload["agent_id"] for call in runner.calls_of("spawn-launch")] == [child_id]
@@ -151,7 +177,9 @@ class TestSpawn:
         prompt: object,
         expected: str,
     ) -> None:
-        child_id = meiva.agents.spawn(prompt=prompt, idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
+        child_id = meiva.agents.spawn(
+            prompt=prompt,  # pyright: ignore[reportArgumentType]
+        )
 
         assert inbound_rows(db_conn, child_id) == [(expected, "chat", f"agent:{self_agent}")]
 
@@ -160,7 +188,9 @@ class TestSpawn:
             gateway_wire() as requests,
             pytest.raises(TypeError, match="prompt must be a string, got int"),
         ):
-            meiva.agents.spawn(prompt=42, idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
+            meiva.agents.spawn(
+                prompt=42,  # pyright: ignore[reportArgumentType]
+            )
         assert requests == []
 
     @pytest.mark.parametrize(
@@ -174,7 +204,9 @@ class TestSpawn:
         """A multi-element prompt sequence is a coding mistake — TypeError, never
         silently joined (user ruling 2026-08-28)."""
         with gateway_wire() as requests, pytest.raises(TypeError, match="prompt must be a string"):
-            meiva.agents.spawn(prompt=prompt, idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
+            meiva.agents.spawn(
+                prompt=prompt,  # pyright: ignore[reportArgumentType]
+            )
         assert requests == []
 
 
@@ -196,7 +228,7 @@ class TestSpawnFork:
                 local_machine=machine_identity,
             )
         )  # self identity
-        source = meiva.agents.spawn(idempotency_key=str(uuid4()))
+        source = meiva.agents.spawn()
         # construct chain a < b < c (lex order corresponds to time order)
         with db_conn.cursor() as cur:
             for ckpt, parent in [("ck-a", None), ("ck-b", "ck-a"), ("ck-c", "ck-b")]:
@@ -207,7 +239,9 @@ class TestSpawnFork:
                 )
         db_conn.commit()
 
-        new_id = meiva.agents.spawn(fork_from=source, idempotency_key=str(uuid4()))
+        new_id = meiva.agents.spawn(
+            fork_from=source,
+        )
 
         # fork_source_checkpoint_id should be set to latest = "ck-c"
         with db_conn.cursor() as cur:
@@ -239,11 +273,13 @@ class TestSpawnFork:
                 local_machine=machine_identity,
             )
         )  # self identity
-        empty_source = meiva.agents.spawn(idempotency_key=str(uuid4()))  # spawn without checkpoint
+        empty_source = meiva.agents.spawn()  # spawn without checkpoint
         _ = db_conn  # truncate side-effect via fixture
 
         with pytest.raises(ForkSourceEmpty, match="has no checkpoint"):
-            meiva.agents.spawn(fork_from=empty_source, idempotency_key=str(uuid4()))
+            meiva.agents.spawn(
+                fork_from=empty_source,
+            )
 
     def test_fork_with_prompt_inserts_fork_identity_then_chat_inbound(
         self,
@@ -263,7 +299,7 @@ class TestSpawnFork:
                 local_machine=machine_identity,
             )
         )  # self identity
-        source = meiva.agents.spawn(idempotency_key=str(uuid4()))
+        source = meiva.agents.spawn()
         # give source a checkpoint
         with db_conn.cursor() as cur:
             cur.execute(
@@ -274,7 +310,8 @@ class TestSpawnFork:
         db_conn.commit()
 
         new_id = meiva.agents.spawn(
-            prompt="\u7ee7\u7eed\u5427", fork_from=source, idempotency_key=str(uuid4())
+            prompt="\u7ee7\u7eed\u5427",
+            fork_from=source,
         )
 
         # fork first posts an identity inbound (kind='fork', source=fork source agent) in spawn transaction, then prompt's chat inbound —
@@ -301,7 +338,7 @@ class TestTerminate:
                 local_machine=machine_identity,
             )
         )
-        peer_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
+        peer_id = meiva.agents.spawn()
 
         result = meiva.agents.terminate(peer_id, message="record the partial result")
 
@@ -332,7 +369,7 @@ class TestTerminate:
                 local_machine=machine_identity,
             )
         )
-        peer_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
+        peer_id = meiva.agents.spawn()
         result = meiva.agents.terminate(peer_id, kill_all_shell_sessions=True)
         assert result.shell_sessions == meiva.agents.ShellSessionsKill(
             when=ShellSessionKillTiming.AT_EXIT, killed=[]
@@ -359,7 +396,7 @@ class TestTerminate:
                 local_machine=machine_identity,
             )
         )
-        peer_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
+        peer_id = meiva.agents.spawn()
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO agent_tasks (title, description, status, created_by, owner) "
@@ -395,7 +432,7 @@ class TestTerminate:
         self, db_conn: psycopg.Connection, self_agent: int
     ) -> None:
         """The str-carrier contract holds for the already-dead result too."""
-        peer_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
+        peer_id = meiva.agents.spawn()
         db_conn.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (peer_id,))
         db_conn.commit()
 
@@ -420,7 +457,9 @@ class TestTerminate:
         with runner_ops(
             db_conn, "runner-x", {"spawn-launch": launched, "lifecycle": answer}
         ) as runner:
-            peer_id = meiva.agents.spawn(machine="runner-x", idempotency_key=str(uuid4()))
+            peer_id = meiva.agents.spawn(
+                machine="runner-x",
+            )
             result = meiva.agents.terminate(peer_id, kill_all_shell_sessions=True)
 
         assert result.shell_sessions == meiva.agents.ShellSessionsKill(
@@ -462,7 +501,7 @@ class TestSendMessage:
         self, db_conn: psycopg.Connection, self_agent: int
     ) -> None:
         """send_message purely INSERT inbound — no status check, no wait, no SendResult return."""
-        peer_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
+        peer_id = meiva.agents.spawn()
 
         result = meiva.agents.send_message(peer_id, "you got mail")
         assert result is None
@@ -476,7 +515,7 @@ class TestSendMessage:
     ) -> None:
         """send_message to terminated agent also INSERT inbound.
         SDK doesn't care about target state — purely send message, auto-resurrect is gateway-side detail."""
-        peer_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
+        peer_id = meiva.agents.spawn()
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (peer_id,))
         db_conn.commit()
@@ -495,7 +534,7 @@ class TestSendMessage:
         self, db_conn: psycopg.Connection, self_agent: int
     ) -> None:
         """send_message only INSERT inbound, doesn't modify agents.status."""
-        peer_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
+        peer_id = meiva.agents.spawn()
         before = db_conn.execute(
             "SELECT status FROM agents_meta WHERE id = %s", (peer_id,)
         ).fetchone()
@@ -528,7 +567,7 @@ class TestSendMessage:
         content: object,
         expected: str,
     ) -> None:
-        peer_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
+        peer_id = meiva.agents.spawn()
 
         meiva.agents.send_message(peer_id, content)  # pyright: ignore[reportArgumentType]
 
@@ -581,7 +620,7 @@ class TestSendMessage:
     ) -> None:
         """End-to-end: the trailing-comma tuple lands as the string it wraps,
         never as a JSON array (which the gateway would reject 422)."""
-        peer_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
+        peer_id = meiva.agents.spawn()
 
         # Runtime value of `("you got " "mail",)`: implicit concatenation plus
         # trailing comma — the exact LLM shape that 422'd before (2026-08-28).

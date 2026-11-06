@@ -57,7 +57,7 @@ launch failure on the row and responds 502 `agent_launch_failed` with
 `agent_id`, actual `state.status`, projected availability, and a legal
 `retry_launch_path` pointing to the guarded route. The browser selects that
 committed agent. `POST /api/keyed/v1/agents/{id}/retry-launch` requires an explicit
-observed prior attempt and principal-scoped key. It fixes one new attempt in an
+observed prior attempt from an authenticated operator. It fixes one new attempt in an
 immutable receipt and reconciles only that attempt's wake; replay cannot rotate
 another attempt or insert another inbound. The old unversioned retry route is
 removed. See [[gateway/agents/docs/launch-retry.meiva.okf.md]]. Admission racing a failed

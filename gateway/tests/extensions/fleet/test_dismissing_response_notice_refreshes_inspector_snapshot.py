@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import UTC
 from typing import Any, cast
-from uuid import uuid4
 
 import psycopg
 import pytest
@@ -55,7 +54,10 @@ def test_dismissing_response_notice_refreshes_inspector_snapshot(
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with recording_live_events(event_bus, react=_awaiting_titles(db_url, model_catalog)) as live:
-        meiva.ui.notify("decision needed", require_response=True, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+        meiva.ui.notify(
+            "decision needed",
+            require_response=True,
+        )  # type: ignore[attr-defined]
         meiva.ui.dismiss_notice()  # type: ignore[attr-defined]
         updates = live.settle("agent_updated", 2)
 
@@ -85,11 +87,18 @@ def test_a_legacy_fyi_row_does_not_block_and_a_second_notice_is_refused(
         )
     db_conn.commit()
     with recording_live_events(event_bus, react=_awaiting_titles(db_url, model_catalog)) as live:
-        meiva.ui.notify("question", require_response=True, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
+        meiva.ui.notify(
+            "question",
+            require_response=True,
+        )  # pyright: ignore[reportCallIssue]
         with pytest.raises(ValueError, match="already holds an open notice"):
-            meiva.ui.notify("next question", idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
+            meiva.ui.notify(
+                "next question",
+            )  # pyright: ignore[reportCallIssue]
         meiva.ui.dismiss_notice()  # pyright: ignore[reportCallIssue]
-        meiva.ui.notify("next question", idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
+        meiva.ui.notify(
+            "next question",
+        )  # pyright: ignore[reportCallIssue]
         posted = live.settle("notice_posted", 2)
         resolved = live.settle("notice_resolved", 1)
         updates = live.settle("agent_updated", 3)
@@ -124,7 +133,11 @@ def test_notice_return_int_and_edit_dismiss_take_no_id(
     pin_agent(agent_id)
     notice = cast(
         "NoticeView",
-        meiva.ui.notify("hold this", content="body", priority="P2", idempotency_key=str(uuid4())),  # type: ignore[attr-defined]
+        meiva.ui.notify(
+            "hold this",
+            content="body",
+            priority="P2",
+        ),  # type: ignore[attr-defined]
     )
     assert isinstance(notice, int)
     assert int(notice) == notice  # int conversion gives the id
@@ -147,7 +160,9 @@ def test_notice_return_int_and_edit_dismiss_take_no_id(
     assert row[2] == "withdrawn"
 
     # After dismissal, new notify should show pending_count = 1 (the fresh one)
-    nid2 = cast("NoticeView", meiva.ui.notify("fresh fyi", idempotency_key=str(uuid4())))  # type: ignore[attr-defined]
+    notify = meiva.ui.notify
+    assert callable(notify)
+    nid2 = cast("NoticeView", notify("fresh fyi"))
     assert nid2.pending_count == 1
     assert nid2.pending_notices[0]["id"] == nid2
 
@@ -168,7 +183,8 @@ def test_notify_with_expire_at_valid(
     nid1 = cast(
         "NoticeView",
         meiva.ui.notify(  # pyright: ignore[reportCallIssue]
-            "expires in 1h", expire_at=timedelta(hours=1), idempotency_key=str(uuid4())
+            "expires in 1h",
+            expire_at=timedelta(hours=1),
         ),
     )
     with db_conn.cursor() as cur:
@@ -185,7 +201,10 @@ def test_notify_with_expire_at_valid(
     target = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
     nid2 = cast(
         "NoticeView",
-        meiva.ui.notify("expires at ISO", expire_at=target, idempotency_key=str(uuid4())),  # pyright: ignore[reportCallIssue]
+        meiva.ui.notify(
+            "expires at ISO",
+            expire_at=target,
+        ),  # pyright: ignore[reportCallIssue]
     )
     with db_conn.cursor() as cur:
         cur.execute(
@@ -205,4 +224,7 @@ def test_notify_with_expire_at_in_past_raises_value_error(
     pin_agent(agent_id)
     past = datetime.now(UTC) - timedelta(minutes=5)
     with pytest.raises(ValueError, match="expire_at is in the past"):
-        meiva.ui.notify("past notice", expire_at=past, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+        meiva.ui.notify(
+            "past notice",
+            expire_at=past,
+        )  # type: ignore[attr-defined]

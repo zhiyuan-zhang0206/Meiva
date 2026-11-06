@@ -142,7 +142,6 @@ def _prepare_case(
             prompt=probe_prompt(scenario_dir),
             label=PROBE_LABEL,
             config_overlay=probe_overlay(case_id),
-            idempotency_key=str(uuid4()),
         )
         spawned_at = started_at.isoformat()
         marker = with_probe(marker, probe_id)
@@ -152,7 +151,6 @@ def _prepare_case(
                 prompt=colleague_prompt(probe_id, scenario_dir, canary),
                 label=COLLEAGUE_LABEL,
                 config_overlay=colleague_overlay(),
-                idempotency_key=str(uuid4()),
             )
             marker = with_colleague(marker, colleague_id)
             _write_marker(marker_path, marker)

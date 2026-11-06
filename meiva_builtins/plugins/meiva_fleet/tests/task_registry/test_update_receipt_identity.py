@@ -3,6 +3,7 @@
 import time
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
+from typing import Any
 
 import psycopg
 import pytest
@@ -15,6 +16,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.paths import meiva_home
 from meiva.tests.fixtures.pin_agent import pin_agent
+from meiva.tests.fixtures.replay_sdk_write import replay_sdk_write
 from meiva_builtins.plugins.meiva_fleet import task_registry
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
     root_task_id as root_task_id,
@@ -27,22 +29,25 @@ def test_invalid_key_fails_without_receipt(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int, key: object
 ) -> None:
     _actor, _owner, tid = seed_owned_task(db_conn, root_task_id)
-    with pytest.raises((ValueError, TypeError), match="idempotency key"):
-        task_registry.log(tid, "invalid", operation_key=key)  # type: ignore[arg-type]
+    obsolete: dict[str, Any] = {"operation_key": key}
+    with pytest.raises(TypeError, match="operation_key"):
+        task_registry.log(tid, "invalid", **obsolete)
     assert task_registry.get(tid).results is None
     assert db_conn.execute("SELECT count(*) FROM task_update_receipts").fetchone() == (0,)
 
 
-def test_mutation_requires_key_and_established_actor(
+def test_mutation_requires_established_actor(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     _actor, _owner, tid = seed_owned_task(db_conn, root_task_id)
     pin_agent(None)
     with pytest.raises(RuntimeError, match="no established agent identity"):
-        task_registry.log(tid, "forbidden", operation_key="system")
-    missing: dict[str, str] = {}
-    with pytest.raises(TypeError, match="operation_key"):
-        task_registry.log(tid, "keyless", **missing)
+        replay_sdk_write(
+            "system",
+            task_registry.log,
+            tid,
+            "forbidden",
+        )
     assert db_conn.execute("SELECT count(*) FROM task_update_receipts").fetchone() == (0,)
     result = task_registry.get(tid).results
     assert result is None
@@ -52,7 +57,12 @@ def test_borrowed_identity_can_replay_native_operation_until_lease_ends(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     actor, owner, tid = seed_owned_task(db_conn, root_task_id)
-    task_registry.log(tid, "once", operation_key="native")
+    replay_sdk_write(
+        "native",
+        task_registry.log,
+        tid,
+        "once",
+    )
     active = Event()
     active.set()
 
@@ -62,10 +72,23 @@ def test_borrowed_identity_can_replay_native_operation_until_lease_ends(
         return actor
 
     pin_agent(owner, lease=ExternalLease(actor, validate, lambda: None))
-    assert task_registry.log(tid, "once", operation_key="native") is None
+    assert (
+        replay_sdk_write(
+            "native",
+            task_registry.log,
+            tid,
+            "once",
+        )
+        is None
+    )
     active.clear()
     with pytest.raises(RuntimeError, match="lease expired"):
-        task_registry.log(tid, "once", operation_key="native")
+        replay_sdk_write(
+            "native",
+            task_registry.log,
+            tid,
+            "once",
+        )
     pin_agent(actor)
     result = task_registry.get(tid).results
     assert result is not None and result.count("once") == 1

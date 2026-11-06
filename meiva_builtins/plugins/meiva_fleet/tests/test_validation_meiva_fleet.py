@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from uuid import uuid4
 
 import psycopg
 import pytest
@@ -37,7 +36,6 @@ class TestTasksEntries:
             "title": ("My Task",),
             "description": "d",
             "parent": root_task_id,
-            "operation_key": str(uuid4()),
         }
         task = task_registry.create(**inputs)
         assert task.title == "My Task"
@@ -50,7 +48,6 @@ class TestTasksEntries:
                 "title": ("a", "b"),
                 "description": "d",
                 "parent": 1,
-                "operation_key": str(uuid4()),
             }
             task_registry.create(**inputs)
 
@@ -62,7 +59,6 @@ class TestTasksEntries:
                 "title": "t",
                 "description": "d",
                 "parent": (1,),
-                "operation_key": str(uuid4()),
             }
             task_registry.create(**inputs)
 
@@ -73,11 +69,16 @@ class TestTasksEntries:
 
         pin_agent(seed_agent(db_conn))
         task = task_registry.create(
-            "log target", "d", parent=root_task_id, operation_key=str(uuid4())
+            "log target",
+            "d",
+            parent=root_task_id,
         )
 
         message: Any = ("note",)
-        task_registry.log(task.id, message, operation_key=str(uuid4()))
+        task_registry.log(
+            task.id,
+            message,
+        )
 
         assert (task_registry.get(task.id).results or "").endswith(" note\n\n")
 
@@ -85,7 +86,10 @@ class TestTasksEntries:
         from meiva_builtins.plugins.meiva_fleet import task_registry
 
         with pytest.raises(TypeError, match="message must be a string"):
-            task_registry.log(7, ("a", "b"), operation_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
+            task_registry.log(
+                7,
+                ("a", "b"),  # pyright: ignore[reportArgumentType]
+            )
 
     def test_update_status_unwraps(self) -> None:
         from meiva_builtins.plugins.meiva_fleet import task_registry
@@ -93,13 +97,19 @@ class TestTasksEntries:
         # Coercion fires before the DB write: a status tuple unwraps, then the
         # status-value validation runs on the string.
         with pytest.raises(ValueError, match="status must be one of"):
-            task_registry.update(7, status=("not-a-status",), operation_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
+            task_registry.update(
+                7,
+                status=("not-a-status",),  # pyright: ignore[reportArgumentType]
+            )
 
     def test_update_owner_never_unwraps(self) -> None:
         from meiva_builtins.plugins.meiva_fleet import task_registry
 
         with pytest.raises(TypeError, match="owner must be int"):
-            task_registry.update(7, owner=(5,), operation_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
+            task_registry.update(
+                7,
+                owner=(5,),  # pyright: ignore[reportArgumentType]
+            )
 
 
 class TestNoticeEntries:
@@ -117,7 +127,6 @@ class TestNoticeEntries:
             "title": ("Hi",),
             "content": ("detail",),
             "priority": ("P2",),
-            "idempotency_key": "notice-intent",
         }
         notice = fleet_plugin.notify(**inputs)
         [sent] = wire.sent
@@ -125,20 +134,25 @@ class TestNoticeEntries:
         assert sent.body["title"] == "Hi"
         assert sent.body["content"] == "detail"
         assert sent.body["priority"] == "P2"
-        assert sent.headers["idempotency-key"] == "notice-intent"
+        assert sent.headers["idempotency-key"]
         assert notice == 1
 
     def test_notify_multi_element_title_type_errors(self) -> None:
         from meiva_builtins.plugins.meiva_fleet import plugin as fleet_plugin
 
         with pytest.raises(TypeError, match="title must be a string"):
-            fleet_plugin.notify(("a", "b"), idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
+            fleet_plugin.notify(
+                ("a", "b"),  # pyright: ignore[reportArgumentType]
+            )
 
     def test_notify_task_never_unwraps(self) -> None:
         from meiva_builtins.plugins.meiva_fleet import plugin as fleet_plugin
 
         with pytest.raises(TypeError, match="task must be int"):
-            fleet_plugin.notify("hi", task=("5",), idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
+            fleet_plugin.notify(
+                "hi",
+                task=("5",),  # pyright: ignore[reportArgumentType]
+            )
 
 
 # meiva:note
@@ -156,12 +170,18 @@ def test_relative_notice_expiration_reaches_the_gateway(wire: GatewayWire) -> No
     pin_agent(900001, clients=wire.context.clients)
     interval = timedelta(minutes=5)
     before = datetime.now(UTC)
-    assert fleet_plugin.notify("expires", expire_at=interval, idempotency_key="notice-expiry") == 1
+    assert (
+        fleet_plugin.notify(
+            "expires",
+            expire_at=interval,
+        )
+        == 1
+    )
     after = datetime.now(UTC)
     [received] = wire.stub.received
     due = datetime.fromisoformat(received.body["expire_at"])
     assert before + interval <= due <= after + interval
-    assert received.headers["idempotency-key"] == "notice-expiry"
+    assert received.headers["idempotency-key"]
 
 
 def test_past_notice_expiration_is_rejected_without_http(wire: GatewayWire) -> None:
@@ -169,7 +189,10 @@ def test_past_notice_expiration_is_rejected_without_http(wire: GatewayWire) -> N
 
     pin_agent(900001, clients=wire.context.clients)
     with pytest.raises(ValueError, match="expire_at is in the past"):
-        fleet_plugin.notify("expired", expire_at=timedelta(seconds=-1), idempotency_key="expired")
+        fleet_plugin.notify(
+            "expired",
+            expire_at=timedelta(seconds=-1),
+        )
     assert wire.stub.received == []
 
 
@@ -186,7 +209,8 @@ def test_zero_notice_expiration_preserves_a_gateway_refusal(wire: GatewayWire) -
     before = datetime.now(UTC)
     with pytest.raises(ValueError, match="expire_at is in the past"):
         fleet_plugin.notify(
-            "immediate expiry", expire_at=timedelta(0), idempotency_key="zero-expiry"
+            "immediate expiry",
+            expire_at=timedelta(0),
         )
     [received] = wire.stub.received
     due = datetime.fromisoformat(received.body["expire_at"])

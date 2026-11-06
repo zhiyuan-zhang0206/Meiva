@@ -38,7 +38,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import NotRequired, TypedDict
-from uuid import uuid4
 
 from psycopg.rows import class_row
 from pydantic import TypeAdapter
@@ -254,7 +253,8 @@ def launch(skill: str, tasks: list[RecordBody], *, model: str | None = None) -> 
             overlay["llm_model"] = model
         prompt = task_prompt_of(task)
         eval_id = meiva.agents.spawn(
-            prompt=prompt, config_overlay=overlay, idempotency_key=str(uuid4())
+            prompt=prompt,
+            config_overlay=overlay,
         )
         runs.append(
             EvalRun(

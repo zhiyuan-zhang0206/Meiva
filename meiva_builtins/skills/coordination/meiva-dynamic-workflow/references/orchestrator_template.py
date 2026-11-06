@@ -14,7 +14,6 @@ and let the other workers end unwatched.
 
 import json
 from pathlib import Path
-from uuid import uuid4
 
 import meiva
 
@@ -64,7 +63,6 @@ for task in SUB_TASKS:
 
     wid = meiva.agents.spawn(
         prompt=task["prompt"].format(handoff_file=task["handoff_path"]),
-        idempotency_key=str(uuid4()),
     )
     worker_ids[task["id"]] = wid
     print(f"  spawned {task['label']}: #{wid}")

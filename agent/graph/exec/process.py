@@ -7,6 +7,7 @@ from uuid import UUID
 
 from agent.execution.protocol import ResultPayload
 from base.agents.context import MeivaContext
+from base.agents.sdk.operation_ids import ExecutionIdentity
 from base.paths import exec_run_dir
 
 from ._child_boundary import ParentFacts, result_from_payload
@@ -36,6 +37,7 @@ class ExecProcess(Protocol):
         *,
         state: Mapping[str, object],
         config_overlay: dict[str, object],
+        execution_identity: ExecutionIdentity | None = None,
     ) -> Awaitable[tuple[ExecResult, ResultPayload | None]]: ...
 
 
@@ -61,6 +63,7 @@ class SubprocessExecProcess:
         *,
         state: Mapping[str, object],
         config_overlay: dict[str, object],
+        execution_identity: ExecutionIdentity | None = None,
     ) -> Awaitable[tuple[ExecResult, ResultPayload | None]]:
         return run_in_subprocess(
             code,
@@ -77,4 +80,5 @@ class SubprocessExecProcess:
             result_id=UUID(int=self.rng.getrandbits(128), version=4),
             state=state,
             config_overlay=config_overlay,
+            execution_identity=execution_identity,
         )

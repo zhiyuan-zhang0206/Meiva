@@ -12,6 +12,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from meiva.tests.fixtures.pin_agent import pin_agent
+from meiva.tests.fixtures.replay_sdk_write import replay_sdk_write
 from meiva_builtins.plugins.meiva_fleet import task_registry
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
     root_task_id as root_task_id,
@@ -24,7 +25,13 @@ def test_borrowed_identity_can_replay_native_operation_until_lease_ends(
 ) -> None:
     actor, owner = seed_agent(db_conn), seed_agent(db_conn)
     pin_agent(actor)
-    original = task_registry.create("once", "work", parent=root_task_id, operation_key="native")
+    original = replay_sdk_write(
+        "native",
+        task_registry.create,
+        "once",
+        "work",
+        parent=root_task_id,
+    )
     active = Event()
     active.set()
 
@@ -35,12 +42,24 @@ def test_borrowed_identity_can_replay_native_operation_until_lease_ends(
 
     pin_agent(owner, lease=ExternalLease(actor, validate, lambda: None))
     assert (
-        task_registry.create("once", "work", parent=root_task_id, operation_key="native")
+        replay_sdk_write(
+            "native",
+            task_registry.create,
+            "once",
+            "work",
+            parent=root_task_id,
+        )
         == original
     )
     active.clear()
     with pytest.raises(RuntimeError, match="lease expired"):
-        task_registry.create("once", "work", parent=root_task_id, operation_key="native")
+        replay_sdk_write(
+            "native",
+            task_registry.create,
+            "once",
+            "work",
+            parent=root_task_id,
+        )
     pin_agent(actor)
     assert task_registry.get(original.id) == original
     assert db_conn.execute("SELECT count(*) FROM task_creation_receipts").fetchone() == (1,)

@@ -17,7 +17,7 @@ one-shot `codex exec` runs, cloud tasks, and a GitHub Action. It reads
 | `codex resume` | Hand off via files + the task registry; spawn a fresh agent with the handoff file's path | No conversation resume — the file is the memory. |
 | `AGENTS.md` (also reads `.cursorrules`, `CLAUDE.md`) | Same file — Meiva surfaces AGENTS.md / CLAUDE.md along resolved paths | |
 | `~/.codex/config.toml`, `.codex/config.toml` (`CODEX_HOME`) | `meiva config get/set/unset` (cluster + host `.env`) for deployment settings; per-agent `config_overlay` for model / effort | |
-| `approval_policy` (`untrusted` / `on-request` / `never`) | No approval-policy engine. Onboarding records the user's gates as `type/feedback` memory; irreversible actions raise `meiva.ui.notify(require_response=True, idempotency_key=notice_key)` | |
+| `approval_policy` (`untrusted` / `on-request` / `never`) | No approval-policy engine. Onboarding records the user's gates as `type/feedback` memory; irreversible actions raise `meiva.ui.notify(require_response=True)` | |
 | `sandbox_mode` (`read-only` / `workspace-write` / `danger-full-access`) | No sandbox modes. `execute_code` runs in the agent's process and `meiva.shell` on the bare host — for untrusted work, delegate to an agent on a disposable machine or a container you stand up | Choose the machine, not the sandbox mode. |
 | MCP (`[mcp_servers]` in config.toml) | Same MCP standard; `meiva mcp` per machine | |
 | Skills (`SKILL.md`) | Same standard — `meiva skill install <git-url-or-path>` | |
@@ -72,6 +72,3 @@ Official Codex docs, accessed 2026-08-12:
 - https://developers.openai.com/codex/cli — install, commands, AGENTS.md, sandbox modes, approval policies, MCP, cloud
 - https://developers.openai.com/codex/config-reference — config.toml reference
 - https://github.com/openai/codex/blob/main/docs/config.md — config keys and locations (repo copy)
-
-A new notice intent requires its own retained `notice_key`; retries reuse that
-key and the original payload. See `meiva.ui.notify` for the full parameters.

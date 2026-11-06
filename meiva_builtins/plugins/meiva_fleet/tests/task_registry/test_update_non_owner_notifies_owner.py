@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import inspect
-from uuid import uuid4
 
 import psycopg
 import pytest
@@ -35,11 +34,9 @@ def test_update_non_owner_notifies_owner(
     owner_id = seed_agent(db_conn)
     pin_agent(actor_id)
     with record_notes(db_conn):
-        task = task_registry.create(
-            "title", "detail", owner=owner_id, parent=root_task_id, operation_key=str(uuid4())
-        )
+        task = task_registry.create("title", "detail", owner=owner_id, parent=root_task_id)
     with record_notes(db_conn) as notes:
-        task_registry.update(task.id, status="cancelled", operation_key=str(uuid4()))
+        task_registry.update(task.id, status="cancelled")
     [note] = notes.read()
     assert note.recipient == owner_id
     assert f"Task #{task.id}" in note.content
@@ -55,9 +52,9 @@ def test_update_by_owner_no_notification(
     """The owner updating its own task is not notified about its own action."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", parent=root_task_id)
     with record_notes(db_conn) as notes:
-        task_registry.update(task.id, status="done", results="shipped", operation_key=str(uuid4()))
+        task_registry.update(task.id, status="done", results="shipped")
     assert notes.read() == []
 
 
@@ -71,11 +68,9 @@ def test_update_non_owner_skips_terminated_owner(
     dead_owner = seed_agent(db_conn, status="terminated")
     pin_agent(actor_id)
     with record_notes(db_conn):
-        task = task_registry.create(
-            "title", "detail", owner=dead_owner, parent=root_task_id, operation_key=str(uuid4())
-        )
+        task = task_registry.create("title", "detail", owner=dead_owner, parent=root_task_id)
     with record_notes(db_conn) as notes:
-        task_registry.update(task.id, status="done", operation_key=str(uuid4()))
+        task_registry.update(task.id, status="done")
     assert notes.read() == []
 
 
@@ -89,14 +84,10 @@ def test_update_parent_only_by_non_owner_no_notification(
     owner_id = seed_agent(db_conn)
     pin_agent(actor_id)
     with record_notes(db_conn):
-        parent = task_registry.create(
-            "notify-parent", "d", parent=root_task_id, operation_key=str(uuid4())
-        )
-        task = task_registry.create(
-            "notify-child", "d", owner=owner_id, parent=root_task_id, operation_key=str(uuid4())
-        )
+        parent = task_registry.create("notify-parent", "d", parent=root_task_id)
+        task = task_registry.create("notify-child", "d", owner=owner_id, parent=root_task_id)
     with record_notes(db_conn) as notes:
-        task_registry.update(task.id, parent_id=parent.id, operation_key=str(uuid4()))
+        task_registry.update(task.id, parent_id=parent.id)
     assert notes.read() == []
     assert persisted_parent(db_conn, task.id) == parent.id
 
@@ -111,14 +102,10 @@ def test_update_parent_only_terminated_owner_not_resurrected(
     dead_owner = seed_agent(db_conn, status="terminated")
     pin_agent(actor_id)
     with record_notes(db_conn):
-        parent = task_registry.create(
-            "storm-parent", "d", parent=root_task_id, operation_key=str(uuid4())
-        )
-        task = task_registry.create(
-            "storm-child", "d", owner=dead_owner, parent=root_task_id, operation_key=str(uuid4())
-        )
+        parent = task_registry.create("storm-parent", "d", parent=root_task_id)
+        task = task_registry.create("storm-child", "d", owner=dead_owner, parent=root_task_id)
     with record_notes(db_conn) as notes:
-        task_registry.update(task.id, parent_id=parent.id, operation_key=str(uuid4()))
+        task_registry.update(task.id, parent_id=parent.id)
     assert notes.read() == []
     assert persisted_parent(db_conn, task.id) == parent.id
 
@@ -132,16 +119,10 @@ def test_update_parent_plus_business_field_still_notifies(
     owner_id = seed_agent(db_conn)
     pin_agent(actor_id)
     with record_notes(db_conn):
-        parent = task_registry.create(
-            "mixed-parent", "d", parent=root_task_id, operation_key=str(uuid4())
-        )
-        task = task_registry.create(
-            "mixed-child", "d", owner=owner_id, parent=root_task_id, operation_key=str(uuid4())
-        )
+        parent = task_registry.create("mixed-parent", "d", parent=root_task_id)
+        task = task_registry.create("mixed-child", "d", owner=owner_id, parent=root_task_id)
     with record_notes(db_conn) as notes:
-        task_registry.update(
-            task.id, parent_id=parent.id, status="cancelled", operation_key=str(uuid4())
-        )
+        task_registry.update(task.id, parent_id=parent.id, status="cancelled")
     [note] = notes.read()
     assert note.recipient == owner_id
     assert "parent →" in note.content
@@ -159,13 +140,9 @@ def test_update_owner_change_appends_changes_to_new_owner(
     new_owner = seed_agent(db_conn)
     pin_agent(actor_id)
     with record_notes(db_conn):
-        task = task_registry.create(
-            "title", "detail", owner=old_owner, parent=root_task_id, operation_key=str(uuid4())
-        )
+        task = task_registry.create("title", "detail", owner=old_owner, parent=root_task_id)
     with record_notes(db_conn) as notes:
-        task_registry.update(
-            task.id, status="cancelled", owner=new_owner, operation_key=str(uuid4())
-        )
+        task_registry.update(task.id, status="cancelled", owner=new_owner)
     delivered = notes.read()
     assert len(delivered) == 2
     msgs = {note.recipient: note.content for note in delivered}
@@ -184,11 +161,9 @@ def test_log_by_non_owner_notifies_owner(
     owner_id = seed_agent(db_conn)
     pin_agent(actor_id)
     with record_notes(db_conn):
-        task = task_registry.create(
-            "title", "detail", owner=owner_id, parent=root_task_id, operation_key=str(uuid4())
-        )
+        task = task_registry.create("title", "detail", owner=owner_id, parent=root_task_id)
     with record_notes(db_conn) as notes:
-        task_registry.log(task.id, "progress update", operation_key=str(uuid4()))
+        task_registry.log(task.id, "progress update")
     [note] = notes.read()
     assert note.recipient == owner_id
     assert "note appended" in note.content
@@ -199,7 +174,7 @@ def test_create_defaults_priority_p2(
 ) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", parent=root_task_id)
     assert task.priority == "P2"
     assert persisted_priority(db_conn, task.id) == "P2"
 
@@ -209,9 +184,7 @@ def test_create_honours_explicit_priority(
 ) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create(
-        "title", "detail", priority="P0", parent=root_task_id, operation_key=str(uuid4())
-    )
+    task = task_registry.create("title", "detail", priority="P0", parent=root_task_id)
     assert task.priority == "P0"
     assert persisted_priority(db_conn, task.id) == "P0"
 
@@ -220,9 +193,7 @@ def test_create_rejects_bad_priority(db_conn: psycopg.Connection, root_task_id: 
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with pytest.raises(ValueError, match="priority must be one of"):
-        task_registry.create(
-            "title", "detail", priority="P9", parent=root_task_id, operation_key=str(uuid4())
-        )
+        task_registry.create("title", "detail", priority="P9", parent=root_task_id)
 
 
 def test_update_changes_priority(
@@ -230,8 +201,8 @@ def test_update_changes_priority(
 ) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
-    task_registry.update(task.id, priority="P1", operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", parent=root_task_id)
+    task_registry.update(task.id, priority="P1")
     assert persisted_priority(db_conn, task.id) == "P1"
 
 
@@ -241,10 +212,8 @@ def test_update_none_priority_is_noop(
     """priority=None means 'no change' — the task keeps its existing rung."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create(
-        "title", "detail", priority="P0", parent=root_task_id, operation_key=str(uuid4())
-    )
-    task_registry.update(task.id, status="in_progress", priority=None, operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", priority="P0", parent=root_task_id)
+    task_registry.update(task.id, status="in_progress", priority=None)
     assert persisted_priority(db_conn, task.id) == "P0"
 
 
@@ -253,9 +222,9 @@ def test_update_rejects_bad_priority(
 ) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", parent=root_task_id)
     with pytest.raises(ValueError, match="priority must be one of"):
-        task_registry.update(task.id, priority="nope", operation_key=str(uuid4()))
+        task_registry.update(task.id, priority="nope")
 
 
 def test_create_publishes_task_created(
@@ -264,9 +233,7 @@ def test_create_publishes_task_created(
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with recorded_events(event_bus) as events:
-        task = task_registry.create(
-            "title", "detail", parent=root_task_id, operation_key=str(uuid4())
-        )
+        task = task_registry.create("title", "detail", parent=root_task_id)
     created = [event for event in events if event["role"] == "task_created"]
     assert [(event["agent_id"], event["task_id"]) for event in created] == [(agent_id, task.id)]
 
@@ -276,9 +243,9 @@ def test_update_publishes_task_updated(
 ) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", parent=root_task_id)
     with recorded_events(event_bus) as events:
-        task_registry.update(task.id, status="in_progress", operation_key=str(uuid4()))
+        task_registry.update(task.id, status="in_progress")
     updated = [event for event in events if event["role"] == "task_updated"]
     assert [(event["agent_id"], event["task_id"]) for event in updated] == [(agent_id, task.id)]
 
@@ -290,7 +257,6 @@ def test_create_and_assign_signature() -> None:
     assert list(params.keys()) == [
         "title",
         "description",
-        "operation_key",
         "label",
         "config_overlay",
         "machine",
@@ -298,7 +264,6 @@ def test_create_and_assign_signature() -> None:
         "remind_interval_seconds",
         "priority",
     ]
-    assert params["operation_key"].default is inspect.Parameter.empty
     assert params["label"].default is None
     assert params["config_overlay"].default is None
     assert params["machine"].default is None
@@ -315,11 +280,9 @@ def test_create_duplicate_in_progress_title_raises(
     status no longer exists), so any live task blocks its title."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task_registry.create("unique title", "detail", parent=root_task_id, operation_key=str(uuid4()))
+    task_registry.create("unique title", "detail", parent=root_task_id)
     with pytest.raises(ValueError, match="already exists"):
-        task_registry.create(
-            "unique title", "detail", parent=root_task_id, operation_key=str(uuid4())
-        )
+        task_registry.create("unique title", "detail", parent=root_task_id)
 
 
 def test_create_same_title_done_allowed(
@@ -328,13 +291,9 @@ def test_create_same_title_done_allowed(
     """Creating a task with the same title as a done task is allowed."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create(
-        "unique title 3", "detail", parent=root_task_id, operation_key=str(uuid4())
-    )
-    task_registry.update(task.id, status="done", operation_key=str(uuid4()))
-    task2 = task_registry.create(
-        "unique title 3", "detail", parent=root_task_id, operation_key=str(uuid4())
-    )
+    task = task_registry.create("unique title 3", "detail", parent=root_task_id)
+    task_registry.update(task.id, status="done")
+    task2 = task_registry.create("unique title 3", "detail", parent=root_task_id)
     assert task2.id != task.id
 
 
@@ -401,9 +360,7 @@ def test_create_unique_violation_race_becomes_value_error(
     pin_agent(agent_id)
 
     def create() -> object:
-        return task_registry.create(
-            "raced-title", "d", parent=root_task_id, operation_key=str(uuid4())
-        )
+        return task_registry.create("raced-title", "d", parent=root_task_id)
 
     with pytest.raises(ValueError, match="already exists"):
         run_against_concurrent_claim(db_url, "raced-title", create)
@@ -417,10 +374,10 @@ def test_update_rename_race_becomes_value_error(
     raw psycopg error."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("free-title", "d", parent=root_task_id, operation_key=str(uuid4()))
+    task = task_registry.create("free-title", "d", parent=root_task_id)
 
     def rename() -> object:
-        return task_registry.update(task.id, title="taken-title", operation_key=str(uuid4()))
+        return task_registry.update(task.id, title="taken-title")
 
     with pytest.raises(ValueError, match="already exists"):
         run_against_concurrent_claim(db_url, "taken-title", rename)
@@ -430,10 +387,8 @@ def test_update_rename_race_becomes_value_error(
 def test_update_title_renames(redis_url: str, db_conn: psycopg.Connection, root_task_id: int):
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create(
-        "old title", "detail", parent=root_task_id, operation_key=str(uuid4())
-    )
-    task_registry.update(task.id, title="new title", operation_key=str(uuid4()))
+    task = task_registry.create("old title", "detail", parent=root_task_id)
+    task_registry.update(task.id, title="new title")
     assert task_registry.get(task.id).title == "new title"
 
 
@@ -444,12 +399,10 @@ def test_update_title_duplicate_in_progress_raises(
     the same invariant create() enforces."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task_registry.create("taken title", "detail", parent=root_task_id, operation_key=str(uuid4()))
-    task = task_registry.create(
-        "free title", "detail", parent=root_task_id, operation_key=str(uuid4())
-    )
+    task_registry.create("taken title", "detail", parent=root_task_id)
+    task = task_registry.create("free title", "detail", parent=root_task_id)
     with pytest.raises(ValueError, match="already exists"):
-        task_registry.update(task.id, title="taken title", operation_key=str(uuid4()))
+        task_registry.update(task.id, title="taken title")
     assert task_registry.get(task.id).title == "free title"
 
 
@@ -460,11 +413,9 @@ def test_update_title_reassign_notifies_with_new_title(
     agent_id = seed_agent(db_conn)
     other_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create(
-        "old title", "detail", parent=root_task_id, operation_key=str(uuid4())
-    )
+    task = task_registry.create("old title", "detail", parent=root_task_id)
     with record_notes(db_conn) as notes:
-        task_registry.update(task.id, title="new title", owner=other_id, operation_key=str(uuid4()))
+        task_registry.update(task.id, title="new title", owner=other_id)
     assert any("new title" in note.content for note in notes.read())
 
 
@@ -474,11 +425,7 @@ def test_create_same_title_cancelled_allowed(
     """Creating a task with the same title as a cancelled task is allowed."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create(
-        "unique title 4", "detail", parent=root_task_id, operation_key=str(uuid4())
-    )
-    task_registry.update(task.id, status="cancelled", operation_key=str(uuid4()))
-    task2 = task_registry.create(
-        "unique title 4", "detail", parent=root_task_id, operation_key=str(uuid4())
-    )
+    task = task_registry.create("unique title 4", "detail", parent=root_task_id)
+    task_registry.update(task.id, status="cancelled")
+    task2 = task_registry.create("unique title 4", "detail", parent=root_task_id)
     assert task2.id != task.id

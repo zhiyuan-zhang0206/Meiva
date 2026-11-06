@@ -1,5 +1,3 @@
-from uuid import uuid4
-
 import httpx
 import psycopg
 import pytest
@@ -21,7 +19,7 @@ def _inbound_rows(conn: psycopg.Connection, agent_id: int) -> list[tuple[str, st
 
 
 def _spawn_self() -> int:
-    aid = meiva.agents.spawn(idempotency_key=str(uuid4()))
+    aid = meiva.agents.spawn()
     pin_agent(aid)
     return aid
 
@@ -42,7 +40,7 @@ class TestSelfRestart:
         self, db_conn: psycopg.Connection, gateway_client: httpx.Client
     ) -> None:
         aid = meiva.agents.spawn(
-            config_overlay={"llm_model": "deepseek-flash"}, idempotency_key=str(uuid4())
+            config_overlay={"llm_model": "deepseek-flash"},
         )
         pin_agent(aid)
         with pytest.raises(InvalidModelConfig, match="unsupported reasoning effort"):
@@ -57,7 +55,6 @@ class TestSelfRestart:
     ) -> None:
         aid = meiva.agents.spawn(
             config_overlay={"llm_model": "gpt-5.6-sol", "reasoning_effort": "low"},
-            idempotency_key=str(uuid4()),
         )
         pin_agent(aid)
         overlay: dict[str, object] = {"llm_model": "deepseek-flash", "reasoning_effort": "max"}

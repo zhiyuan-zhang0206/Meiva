@@ -13,7 +13,6 @@ from __future__ import annotations
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Literal, assert_never
-from uuid import uuid4
 
 import meiva
 from meiva.agents import AgentRow, AgentStatus
@@ -67,7 +66,10 @@ def find_agent(label: str) -> Found | None:
 def ensure_agent(label: str, prompt: str) -> AgentDispatch:
     found = find_agent(label)
     if found is None:
-        agent_id = meiva.agents.spawn(prompt=prompt, label=label, idempotency_key=str(uuid4()))
+        agent_id = meiva.agents.spawn(
+            prompt=prompt,
+            label=label,
+        )
         return AgentDispatch(agent_id, "spawned")
     if found.terminated:
         meiva.agents.resurrect(found.agent_id, prompt)
