@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from meizel.contracts.analysis import analyze
@@ -50,6 +52,38 @@ def test_the_stale_checks_belong_to_the_full_check(make_repo: RepoFactory) -> No
     root = make_repo({**TWO_BAD, "pkg/meizel.toml": manifest})
     assert run(root, "check") == 1
     assert run(root, "check", "--changed", "pkg/a.py", "pkg/c.py") == 0
+
+
+# meiva:note
+# `--changed` takes every argument through the entry's resolver: a relative one against the
+# repository the entry resolved, an absolute one as written. The case distinguishes the two only
+# while the working directory is somewhere else -- pytest runs in the checker's own checkout, and
+# the assert below keeps it that way, so a later edit that moved these runs into the temporary
+# repository fails here instead of passing for the wrong reason.
+def test_changed_paths_resolve_through_the_entry_in_both_forms(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = make_repo(TWO_BAD)
+    assert (root / "pkg/a.py").resolve() != Path("pkg/a.py").resolve(), (
+        "the working directory holds pkg/a.py; resolving against it would name the same file"
+    )
+    assert run(root, "check", "--changed", "pkg/a.py") == 1
+    assert "pkg/a.py:1" in capsys.readouterr().out
+    assert run(root, "check", "--changed", str(root / "pkg/a.py")) == 1
+    assert "pkg/a.py:1" in capsys.readouterr().out
+
+
+# meiva:note
+# A target the resolver cannot express relative to the root is refused by name: the entry raises, the
+# command never sees the path, and the process exits 2 rather than judging a file it misread.
+def test_a_target_outside_the_repository_is_refused(
+    make_repo: RepoFactory, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = make_repo(TWO_BAD)
+    outside = tmp_path / "outside.py"
+    outside.write_text("VALUE = 1\n", encoding="utf-8")
+    assert run(root, "check", "--changed", str(outside)) == 2
+    assert "outside the repository" in capsys.readouterr().err
 
 
 def test_restricted_forms_are_judged_in_changed_files_only(make_repo: RepoFactory) -> None:
