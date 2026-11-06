@@ -767,6 +767,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{agent_id}/user-messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_messages_api_agents__agent_id__user_messages_get"];
+        put?: never;
+        post: operations["post_message_api_agents__agent_id__user_messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/keyed/v1/agents/{agent_id}/user-messages/{message_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["resolve_message_api_keyed_v1_agents__agent_id__user_messages__message_id__resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/system": {
         parameters: {
             query?: never;
@@ -2391,6 +2423,8 @@ export interface components {
             observation: components["schemas"]["AgentObservation"];
             awaiting_response_count: number;
             highest_notice_priority: components["schemas"]["Priority"] | null;
+            unread_user_message_count: number;
+            awaiting_user_message_count: number;
             unread_notice_count: number;
             heartbeat_paused_until: string | null;
             open_impersonation_session_id: number | null;
@@ -2528,6 +2562,8 @@ export interface components {
             availability?: components["schemas"]["AgentAvailability"] | null;
             observation?: components["schemas"]["AgentObservation"] | null;
             notices_awaiting_response: components["schemas"]["OpenNotice"][];
+            unread_user_message_count: number;
+            awaiting_user_message_count: number;
             unread_notice_count: number;
             heartbeat_paused_until: string | null;
             harness_exit_code?: number | null;
@@ -3278,6 +3314,8 @@ export interface components {
             score: number;
             chunk: string;
         };
+        MessageAction: "read" | "answer" | "dismiss";
+        MessageResolution: "answered" | "dismissed";
         MetricEvidence: {
             availability: "observed" | "partial" | "unavailable";
             sources: string[];
@@ -3566,6 +3604,11 @@ export interface components {
             updated_by: string | null;
         };
         Priority: "P0" | "P1" | "P2" | "P3";
+        PublishMessage: {
+            content: string | null;
+            response: components["schemas"]["ReplyExpectation"];
+            suggestions: string[];
+        };
         RebuildProgressOut: {
             id: number;
             status: "pending" | "running" | "done" | "failed";
@@ -3588,9 +3631,14 @@ export interface components {
             source_checked_at: string;
             note: string;
         };
+        ReplyExpectation: "none" | "optional" | "required";
         ReplySuggestionResponse: {
             suggestions: string[];
             reason?: ("disabled" | "agent_not_idle" | "no_agent_text" | "not_useful" | "gate_failed" | "generation_failed" | "invalid_generation" | "client_disconnected") | null;
+        };
+        ResolveMessage: {
+            action: components["schemas"]["MessageAction"];
+            reply?: string | null;
         };
         ResolveNoticeIn: {
             action: "answer" | "dismiss" | "read";
@@ -4251,6 +4299,25 @@ export interface components {
         UploadSendRequest: {
             file_ids: string[];
             text: string;
+        };
+        UserDeliveryMode: "naive" | "prefix" | "sdk";
+        UserMessage: {
+            content: string | null;
+            response: components["schemas"]["ReplyExpectation"];
+            suggestions: string[];
+            id: number;
+            agent_id: number;
+            mode: components["schemas"]["UserDeliveryMode"];
+            source_key: string;
+            created_at: string;
+            read_at: string | null;
+            resolved_at: string | null;
+            resolution: components["schemas"]["MessageResolution"] | null;
+            reply: string | null;
+        };
+        UserMessageFeed: {
+            mode: components["schemas"]["UserDeliveryMode"];
+            items: components["schemas"]["UserMessage"][];
         };
         UserSettingListResponse: {
             settings: components["schemas"]["UserSettingRow"][];
@@ -5756,6 +5823,112 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReplySuggestionResponse"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_messages_api_agents__agent_id__user_messages_get: {
+        parameters: {
+            query?: {
+                pending?: boolean;
+                after_id?: number;
+                limit?: number | null;
+            };
+            header?: never;
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserMessageFeed"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_message_api_agents__agent_id__user_messages_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "Idempotency-Scope": string;
+            };
+            path: {
+                agent_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublishMessage"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserMessage"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_message_api_keyed_v1_agents__agent_id__user_messages__message_id__resolve_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "Idempotency-Scope": string;
+            };
+            path: {
+                agent_id: number;
+                message_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveMessage"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentMessageEnqueued"];
                 };
             };
             422: {

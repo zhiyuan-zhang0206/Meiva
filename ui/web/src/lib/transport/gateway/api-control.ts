@@ -1,3 +1,4 @@
+import type { UserMessageFeed, ResolveUserMessage } from "../../contracts/types";
 import type { HarnessAvailability } from "../../contracts/models";
 import type {
   AgentMachineRow,
@@ -305,6 +306,12 @@ export function createControlApi(http: Http) {
     getUiContributions: (): Promise<UiContributionsResponse> => {
       return f("/api/ui/contributions").then(ok<UiContributionsResponse>);
     },
+
+    getUserMessages: (agentId: number, signal?: AbortSignal, pending = false): Promise<UserMessageFeed> =>
+      f(`/api/agents/${agentId}/user-messages?pending=${pending}`, { signal }).then(ok<UserMessageFeed>),
+
+    resolveUserMessage: (agentId: number, messageId: number, body: ResolveUserMessage, key: string): Promise<{ status: string }> =>
+      f(`/api/keyed/v1/agents/${agentId}/user-messages/${messageId}/resolve`, keyedJson(body, key)).then(ok<{ status: string }>),
 
     resolveNotice: (
       agentId: number,

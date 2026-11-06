@@ -43,3 +43,11 @@ A relative path inside the page cannot resolve — the endpoint has no directory
 so a report using local assets must inline them or use absolute URLs.
 
 A referenced HTML document renders inline under a script-only CSP sandbox and never `allow-same-origin`, so its scripts run in an opaque origin that cannot read the gateway's cookies, localStorage or authenticated API; media, PDFs and inert text render under the plain sandbox, while archives, office documents, executables and unknown types stay attachments.
+
+## Durable user communication
+
+`to_user.md` is an editable overview. Unread display/publication messages and
+required replies are separate durable records, shown alongside it in the shared
+context panel. Replacing the overview cannot replace those records. Reading a
+message clears only unread state; answering or explicitly closing resolves a
+required reply. See [[meiva/docs/ui.meiva.okf.md]].

@@ -51,6 +51,7 @@ from langchain_core.messages.tool import ToolCallChunk
 from langchain_core.utils.json import parse_partial_json
 
 from base.agents.observation.turn_progress import TurnProgress
+from base.api_contracts.user_delivery import UserDeliveryMode
 from base.events.live.coalescer import DeltaCoalescer
 from base.events.live.projection import (
     ChatDelta,
@@ -102,6 +103,8 @@ class RedisStreamHandler:
         *,
         non_human_wake: bool = False,
         explicit_visibility: bool = False,
+        delivery_mode: str | None = None,
+        source_message_id: str | None = None,
     ) -> None:
         self._publisher = event_publisher
         self._agent_id = agent_id
@@ -109,6 +112,8 @@ class RedisStreamHandler:
         self._msg_idx = msg_idx
         self._non_human_wake = non_human_wake
         self._explicit_visibility = explicit_visibility
+        self.delivery_mode = UserDeliveryMode(delivery_mode) if delivery_mode is not None else None
+        self.source_message_id = source_message_id
         # *_started flags: per content_block_index, only emit *Start on the first
         # real delta, avoiding empty blocks (signature_delta only / boundary
         # chunks etc.) creating empty chat/reasoning items.
@@ -314,6 +319,8 @@ class RedisStreamHandler:
                     content=content,
                     non_human_wake=self._non_human_wake,
                     explicit_visibility=self._explicit_visibility,
+                    delivery_mode=self.delivery_mode,
+                    source_message_id=self.source_message_id,
                 ).model_dump_json()
             )
         elif kind == "reasoning":
@@ -376,6 +383,8 @@ class RedisStreamHandler:
                     item_id=item_id,
                     non_human_wake=self._non_human_wake,
                     explicit_visibility=self._explicit_visibility,
+                    delivery_mode=self.delivery_mode,
+                    source_message_id=self.source_message_id,
                 ).model_dump_json()
             )
             self._chat_started.add(block_idx)

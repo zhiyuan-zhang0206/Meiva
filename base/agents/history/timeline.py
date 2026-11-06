@@ -392,6 +392,7 @@ def ai_message_items(
     created_at = kwargs_read_time(kwargs)
     non_human_wake = bool(kwargs.get("meiva_non_human_wake"))
     explicit_visibility = bool(kwargs.get("meiva_explicit_visibility"))
+    delivery_mode = kwargs.get("meiva_user_delivery_mode")
     reasoning_ms_by_block = kwargs.get("meiva_reasoning_ms_by_block")
     code_ms_by_block = kwargs.get("meiva_code_ms_by_block")
     from base.lm.reasoning import extract_reasoning_tokens, to_canonical_reasoning
@@ -403,28 +404,20 @@ def ai_message_items(
     content_indices: set[int] = set()
     content = to_canonical_reasoning(message_content(msg))
     content = _fold_addl_reasoning_into_content(content, message_addl_kwargs(msg))
+    block_ctx = _AiBlockContext(
+        msg_idx=msg_idx,
+        created_at=created_at,
+        reasoning_ms_by_block=reasoning_ms_by_block,
+        reasoning_tokens=reasoning_tokens,
+        non_human_wake=non_human_wake,
+        explicit_visibility=explicit_visibility,
+        delivery_mode=delivery_mode,
+    )
     if isinstance(content, str):
         if content:
-            out.append(
-                _chat_item(
-                    msg_idx,
-                    0,
-                    content,
-                    created_at,
-                    non_human_wake=non_human_wake,
-                    explicit_visibility=explicit_visibility,
-                )
-            )
+            out.append(_chat_item(block_ctx, 0, content))
             content_indices.add(0)
     elif isinstance(content, list):
-        block_ctx = _AiBlockContext(
-            msg_idx=msg_idx,
-            created_at=created_at,
-            reasoning_ms_by_block=reasoning_ms_by_block,
-            reasoning_tokens=reasoning_tokens,
-            non_human_wake=non_human_wake,
-            explicit_visibility=explicit_visibility,
-        )
         for pos, block in enumerate(content):
             item, block_idx, reasoning_attached = _content_block_item(
                 block,
@@ -453,26 +446,22 @@ class _AiBlockContext:
     reasoning_tokens: int | None
     non_human_wake: bool
     explicit_visibility: bool
+    delivery_mode: str | None
 
 
-def _chat_item(
-    msg_idx: int,
-    block_idx: int,
-    raw_text: str,
-    created_at: str | None,
-    *,
-    non_human_wake: bool = False,
-    explicit_visibility: bool = False,
-) -> TimelineItem:
+def _chat_item(ctx: _AiBlockContext, block_idx: int, raw_text: str) -> TimelineItem:
     payload, user_facing = resolve_agent_reply(
-        raw_text, non_human_wake=non_human_wake, explicit_visibility=explicit_visibility
+        raw_text,
+        non_human_wake=ctx.non_human_wake,
+        explicit_visibility=ctx.explicit_visibility,
+        delivery_mode=ctx.delivery_mode,
     )
     return TimelineItem(
-        item_id=f"{msg_idx}.{block_idx}",
+        item_id=f"{ctx.msg_idx}.{block_idx}",
         kind="agent_chat",
         source=None,
         payload=payload,
-        created_at=created_at,
+        created_at=ctx.created_at,
         inbound_id=None,
         user_facing=user_facing,
     )
@@ -517,14 +506,7 @@ def _content_block_item(
     if not (isinstance(t, str) and t):
         return None, block_idx, reasoning_attached
     return (
-        _chat_item(
-            ctx.msg_idx,
-            block_idx,
-            t,
-            ctx.created_at,
-            non_human_wake=ctx.non_human_wake,
-            explicit_visibility=ctx.explicit_visibility,
-        ),
+        _chat_item(ctx, block_idx, t),
         block_idx,
         reasoning_attached,
     )

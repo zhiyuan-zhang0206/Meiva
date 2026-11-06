@@ -35,6 +35,7 @@ from base.agents.messages.inbound import InboundKind
 from base.agents.messages.injection_scan import scan_inbound_content
 from base.agents.messages.kwargs import MeivaMsgType
 from base.agents.messages.lifecycle_text import by_who, restart_accepted_text
+from base.agents.messages.reply_intent import delivery_disabled_entries
 from base.agents.messages.security_finding import SecurityFindingEntry
 from base.api_contracts.agent_contract import Harness
 from base.events.live.projection import Cancelled, CompactionMode, CompactionStatus
@@ -528,7 +529,10 @@ async def _handle_fork(
 
         note = fork_tail_skills_note(
             [s for s in tail_skills if isinstance(s, str)],
-            slices.prompt.sdk_disable,
+            (
+                *slices.prompt.sdk_disable,
+                *delivery_disabled_entries(slices.prompt.user_delivery_mode),
+            ),
             home=ctx.require_meiva_home(),
             environ=ctx.require_environ(),
             created_at=now,

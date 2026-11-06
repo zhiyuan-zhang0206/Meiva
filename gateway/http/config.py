@@ -21,6 +21,7 @@ from base.agents.upload_delivery.paths import (
     MAX_AGENT_UPLOAD_FILES,
     MAX_UPLOAD_BYTES,
 )
+from base.api_contracts.user_delivery import UserDeliveryMode
 from base.clock import Clock, ClockConfig
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import GatewayAccess, MachineIdentityReader
@@ -205,6 +206,7 @@ class GatewayConfig:
     # from the process's configuration owner once; a handler reads only this value, never the
     # owner, and a changed `.env` reaches a handler at the next restart like every other field
     # here.
+    user_delivery_mode: UserDeliveryMode
     display: DisplayDefaults
     models: ModelDefaults
     understanding: UnderstandingDomain
@@ -334,6 +336,7 @@ def gateway_config_from_boot(
         ),
         upload_dir_name=gateway.upload_dir_name,
         human_auth=gateway.human_auth,
+        user_delivery_mode=view.agent.user_delivery_mode,
         display=DisplayDefaults(
             shell_capture_default_lines=view.display.shell_capture_default_lines,
             config_audit_default_last=view.display.config_audit_default_last,
@@ -465,6 +468,7 @@ def placeholder_config() -> GatewayConfig:
         user_home=Path("/nonexistent/home"),
         upload_staging_root=Path("/nonexistent/uploads"),
         upload_dir_name="uploads",
+        user_delivery_mode=UserDeliveryMode.PREFIX,
         display=_placeholders(DisplayDefaults),
         models=_placeholders(ModelDefaults),
         understanding=_placeholders(UnderstandingDomain),

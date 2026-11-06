@@ -70,6 +70,7 @@ class BaseAgentState(BaseModel):
     ended_with_reason: str | None = None
     turn_end_held_seconds: float | None = None
     harness_pending_input: dict[str, object] | None = None
+    user_delivery_baseline: int | None = None
     turn_active: bool = False
     non_human_wake: bool = False
     exit_requested: bool = False

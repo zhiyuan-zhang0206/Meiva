@@ -98,6 +98,7 @@ def _make_runtime(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
         catalog=build_model_catalog(home=meiva_home()),
         clock_factory=Clock.from_settings,
+        rng=seeded_rng(),
     )
     return Runtime(context=ctx)
 

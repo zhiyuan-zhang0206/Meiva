@@ -4,7 +4,7 @@ ports are explicit, and the page is reached only through the platform's authenti
 
 from __future__ import annotations
 
-__all_for_meiva__ = ["Page", "close", "serve", "show"]
+__all_for_meiva__ = ["Page", "close", "serve", "show", "publish", "publications"]
 
 import math as _math
 import os as _os
@@ -17,6 +17,7 @@ from http.client import HTTPResponse
 from pathlib import Path
 from typing import Protocol, TypeGuard, runtime_checkable
 
+from base.api_contracts.user_delivery import UserMessage
 from base.clock import Timers
 from base.host.boundary.fields import int_field, optional_str_field, str_field
 from base.host.boundary.untyped import object_of
@@ -479,3 +480,71 @@ def __getattr__(name: str) -> object:
     if boot.maybe_load_plugins_for_missing(name):
         return object_of(getattr, _sys.modules[__name__], name)
     raise AttributeError(f"module 'meiva.ui' has no attribute {name!r}")
+
+
+def publish(
+    content: str | None, *, response: str, suggestions: list[str], idempotency_key: str
+) -> int:
+    """Deliver a message to the user without ending your turn (SDK delivery mode).
+
+    Call for meaningful milestones, questions and results; continue working afterwards.
+    All ordinary assistant text, including your final summary, remains in expandable
+    Details. response is 'none', 'optional' or 'required'; suggestions is required,
+    with [] explicitly meaning no suggested reply. Suggestions belong to this message.
+    The publication persists independently of to_user.md and context compaction.
+    Reading does not answer a required reply. Do not also call notify.
+
+    Pass content=None, response='none', suggestions=[] to record that this turn has
+    no new user information. Reuse idempotency_key when retrying the same publication;
+    changed content needs a new key. Returns the durable publication id.
+    """
+    from base.agents.context.gateway_client import transport
+    from base.api_contracts.idempotency import validate_idempotency_key
+    from base.api_contracts.user_delivery import PublishMessage, UserMessage
+
+    body = PublishMessage.model_validate(
+        {
+            "content": content,
+            "response": response,
+            "suggestions": suggestions,
+        }
+    )
+    validate_idempotency_key(idempotency_key)
+    context = process_context.require_bound_context()
+    result = transport.post(
+        f"/api/agents/{agent_identity.require_agent_id()}/user-messages",
+        body.model_dump(mode="json"),
+        idempotency_key=idempotency_key,
+        context=context,
+    )
+    result.raise_for_status()
+    return UserMessage.model_validate(transport.json_object(result)).id
+
+
+def publications(
+    *, pending_only: bool = True, after_id: int = 0, limit: int = 50
+) -> list[UserMessage]:
+    """Read your durable user messages without marking them read on the user's behalf.
+
+    Retrieve pending context after compaction or after rewriting to_user.md.
+    Returns at most limit messages (1-100), in increasing id order. Continue with
+    after_id set to the last returned id. pending_only includes unread messages
+    and unanswered required replies; False also returns resolved history.
+    """
+    from pydantic import TypeAdapter
+
+    from base.agents.context.gateway_client import transport
+
+    coerce_typed(pending_only, "pending_only", bool)
+    coerce_typed(after_id, "after_id", int)
+    coerce_typed(limit, "limit", int)
+    if after_id < 0 or not 1 <= limit <= 100:
+        raise ValueError("after_id must be nonnegative and limit must be between 1 and 100")
+    context = process_context.require_bound_context()
+    result = transport.get(
+        f"/api/agents/{agent_identity.require_agent_id()}/user-messages",
+        params={"pending": str(pending_only).lower(), "after_id": after_id, "limit": limit},
+        context=context,
+    )
+    result.raise_for_status()
+    return TypeAdapter(list[UserMessage]).validate_python(transport.json_object(result)["items"])

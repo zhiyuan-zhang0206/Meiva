@@ -483,3 +483,5 @@ export type FleetGraph = Omit<WireFleetGraph, "nodes" | "edges"> & {
   readonly nodes: readonly FleetGraphNode[];
   readonly edges: readonly FleetGraphEdge[];
 };
+
+export type { UserMessage, UserMessageFeed, ResolveUserMessage } from "./types-user-delivery";

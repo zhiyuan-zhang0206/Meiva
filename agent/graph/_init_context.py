@@ -196,7 +196,11 @@ def _build_grounded_handoff(ctx: MeivaContext, *, agent_id: int) -> Handoff:
         cluster=cluster,
         contributions=tuple(hc for _, hc in extensions.harness_contributions(ctx.harness)),
     )
-    disabled = effective_sdk_disable(slices.prompt.sdk_disable)
+    from base.agents.messages.reply_intent import delivery_disabled_entries
+
+    disabled = effective_sdk_disable(
+        (*slices.prompt.sdk_disable, *delivery_disabled_entries(slices.prompt.user_delivery_mode))
+    )
     filtered_entries = tuple(
         entry
         for entry in handoff.entries

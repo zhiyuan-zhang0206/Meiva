@@ -1,0 +1,4 @@
+exports = ["router.py"]
+
+[purity]
+"__init__.py" = "strict"

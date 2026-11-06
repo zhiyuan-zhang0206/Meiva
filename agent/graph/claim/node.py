@@ -50,6 +50,7 @@ from langgraph.types import Command
 from agent import state as _state
 from agent.db import ClaimedInbound, claim_inbound_batch
 from agent.graph._attach_drain import build_attach_drain
+from agent.graph.hooks.user_delivery import delivery_baseline
 from agent.graph.node_log import StallConfig, flush_node_exit_aggregate, node_lifecycle
 from agent.impersonation import claim_gate
 from agent.impersonation_handoff import resume_note_pending
@@ -63,7 +64,7 @@ from base.agents.history.harness_messages import (
 )
 from base.agents.history.timeline import build_timeline_items
 from base.agents.messages.kwargs import read_meiva_kwargs
-from base.agents.messages.reply_intent import NON_HUMAN_WAKE_REMINDER
+from base.agents.messages.reply_intent import non_human_delivery_reminder
 from base.api_contracts.agent_contract import Harness
 from base.db.transaction import async_write_transaction
 from base.events.live.projection import TimelineSnapshot
@@ -247,6 +248,8 @@ async def settle_claimed_batch(
     # restart_requested is only ever set by the hosted restart branch, which never flips the row.
     update = dict(outcome.command.update or {})  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     resolved_non_human_wake = resolve_non_human_wake(state, batch, routing, st)
+    if not state.turn_active or state.halted:
+        update["user_delivery_baseline"] = await delivery_baseline(ctx, agent_id)
     update["turn_active"] = True
     update["non_human_wake"] = resolved_non_human_wake
     update["exit_requested"] = (st.next_goto == END) and not st.restart_requested
@@ -266,7 +269,7 @@ async def settle_claimed_batch(
         now = ctx.require_clock().now()
         st.new_msgs.append(
             system_note_message(
-                content=NON_HUMAN_WAKE_REMINDER,
+                content=non_human_delivery_reminder(ctx.require_agent().prompt.user_delivery_mode),
                 tag=NoteTag.NON_HUMAN_WAKE,
                 picked_up_at=now,
                 created_at=now,

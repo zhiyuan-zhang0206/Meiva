@@ -26,7 +26,8 @@ bucketing old history correctly.
 
 ## Assistant text visibility
 
-New assistant text blocks use an exact first-line marker, followed by a newline
+In `user_delivery_mode=prefix` (the compatibility default), new assistant text
+blocks use an exact first-line marker, followed by a newline
 and a non-blank body. `MEIVA_DISPLAY_TO_USER` puts the body in the main
 conversation for direct answers and meaningful user-facing updates.
 `MEIVA_HIDE_FROM_USER` puts the body in Details, which the user can expand and
@@ -42,3 +43,26 @@ its wake-based projection. A fresh background wake includes a silent reminder
 with the current protocol; wake source no longer decides new text visibility.
 The frontend generates the marker constants from
 `base/agents/messages/reply_intent.py`.
+
+## Delivery modes and durable attention
+
+`UserDeliveryMode` in `base/api_contracts/user_delivery.py` owns `naive`, `prefix`
+and `sdk`. `MEIVA_USER_DELIVERY_MODE` configures the cluster default; the frozen
+per-agent `user_delivery_mode` overlay selects another mode. `naive` displays
+ordinary text; `sdk` folds all assistant text into expandable Details and uses
+`meiva.ui.publish` for user delivery. A publication never ends a turn.
+
+`meiva_user_delivery_mode` records the mode on native messages; `delivery_mode`
+and `source_message_id` travel on chat SSE. Source identity keeps the durable
+attention record attached to the same bubble across streaming and compaction.
+Historical messages without the field retain their existing metadata semantics.
+
+Visible native/prefix and harness messages create durable `agent_user_messages`
+records. SDK publications carry explicit `none` / `optional` / `required` reply
+expectation and a required suggestions list. Unread state clears on reading;
+required-reply state clears only on answer or explicit close. These records live
+independently of `to_user.md`. Pending excerpts are reinjected after compaction,
+and the SDK reader retrieves complete records.
+
+See [the delivery-mode decision](../../../../docs/decisions/engineering/notifications/2026-11-06-user-delivery-modes.md)
+and [[meiva/docs/ui.meiva.okf.md]].

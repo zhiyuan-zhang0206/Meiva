@@ -48,6 +48,7 @@ from gateway.agents.task_assignment import router as task_assignments_router
 from gateway.agents.to_user import document as to_user_router
 from gateway.agents.transfer import router as agents_transfer_router
 from gateway.agents.transfer.bundle_store import TransferBundleStore
+from gateway.agents.user_delivery import router as user_delivery_router
 from gateway.alerts import router as alerts_router
 from gateway.cluster import bootstrap as bootstrap_router
 from gateway.cluster import machine_pause as machine_pause_router
@@ -511,6 +512,7 @@ def create_app(
         shell_router.router,
         timeline_router.router,
         reply_suggestion_router.router,
+        user_delivery_router.router,
         system_router.router,
         host_permissions_router.router,
         pages_router.router,

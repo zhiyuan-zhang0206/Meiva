@@ -1,4 +1,4 @@
-exports = ["cancel_fixture.py"]
+exports = ["cancel_fixture.py", "llm_support.py"]
 
 [uses]
 "test_llm_decode_ms.py" = ["llm_support.py"]

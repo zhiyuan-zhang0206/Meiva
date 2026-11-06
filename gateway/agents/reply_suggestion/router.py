@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from base.agents.to_user.delivery.store import delivery_mode
+from base.api_contracts.user_delivery import UserDeliveryMode
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import process_provider_keys
 from gateway.agents.eval_guard import deny_isolated_result_read
@@ -49,6 +51,20 @@ async def post_reply_suggestion(
 ) -> ReplySuggestionResponse | JSONResponse:
 
     suggestion_state = state_as(request, ReplySuggestionAppState)
+
+    def is_sdk() -> bool:
+        with suggestion_state.db_pool.connection() as conn:
+            return (
+                delivery_mode(conn, agent_id, gateway_config(request).user_delivery_mode)
+                is UserDeliveryMode.SDK
+            )
+
+    try:
+        sdk = await asyncio.to_thread(is_sdk)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    if sdk:
+        return ReplySuggestionResponse(suggestions=[], reason="disabled")
     catalog = request_catalog(request)
     keys = (
         await asyncio.to_thread(

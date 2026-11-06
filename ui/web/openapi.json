@@ -2453,6 +2453,229 @@
         }
       }
     },
+    "/api/agents/{agent_id}/user-messages": {
+      "get": {
+        "summary": "Get Messages",
+        "operationId": "get_messages_api_agents__agent_id__user_messages_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "pending",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Pending"
+            }
+          },
+          {
+            "name": "after_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "After Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 100,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserMessageFeed"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Post Message",
+        "operationId": "post_message_api_agents__agent_id__user_messages_post",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "Idempotency-Scope",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Idempotency-Scope"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishMessage"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserMessage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/keyed/v1/agents/{agent_id}/user-messages/{message_id}/resolve": {
+      "post": {
+        "summary": "Resolve Message",
+        "operationId": "resolve_message_api_keyed_v1_agents__agent_id__user_messages__message_id__resolve_post",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Message Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "name": "Idempotency-Scope",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Idempotency-Scope"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveMessage"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentMessageEnqueued"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/system": {
       "get": {
         "summary": "Get System Broadcast",
@@ -8458,6 +8681,16 @@
               }
             ]
           },
+          "unread_user_message_count": {
+            "type": "integer",
+            "title": "Unread User Message Count",
+            "default": 0
+          },
+          "awaiting_user_message_count": {
+            "type": "integer",
+            "title": "Awaiting User Message Count",
+            "default": 0
+          },
           "unread_notice_count": {
             "type": "integer",
             "title": "Unread Notice Count"
@@ -9362,6 +9595,14 @@
             "type": "array",
             "title": "Notices Awaiting Response"
           },
+          "unread_user_message_count": {
+            "type": "integer",
+            "title": "Unread User Message Count"
+          },
+          "awaiting_user_message_count": {
+            "type": "integer",
+            "title": "Awaiting User Message Count"
+          },
           "unread_notice_count": {
             "type": "integer",
             "title": "Unread Notice Count"
@@ -9419,6 +9660,8 @@
           "liveness_state",
           "last_probe_at",
           "notices_awaiting_response",
+          "unread_user_message_count",
+          "awaiting_user_message_count",
           "unread_notice_count",
           "heartbeat_paused_until"
         ],
@@ -13917,6 +14160,23 @@
         "title": "MemorySearchResultItem",
         "description": "A single search result: file path, the chunk that matched, its relevance\nscore, and the frontmatter a caller can judge the hit by without opening it."
       },
+      "MessageAction": {
+        "type": "string",
+        "enum": [
+          "read",
+          "answer",
+          "dismiss"
+        ],
+        "title": "MessageAction"
+      },
+      "MessageResolution": {
+        "type": "string",
+        "enum": [
+          "answered",
+          "dismissed"
+        ],
+        "title": "MessageResolution"
+      },
       "MetricEvidence": {
         "properties": {
           "availability": {
@@ -15816,6 +16076,41 @@
         "title": "Priority",
         "description": "Stakes rung: P0 (highest) through P3 (lowest)."
       },
+      "PublishMessage": {
+        "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "response": {
+            "$ref": "#/components/schemas/ReplyExpectation"
+          },
+          "suggestions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 3,
+            "title": "Suggestions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "content",
+          "response",
+          "suggestions"
+        ],
+        "title": "PublishMessage"
+      },
       "RebuildProgressOut": {
         "properties": {
           "id": {
@@ -15936,6 +16231,15 @@
         ],
         "title": "ReferenceTps"
       },
+      "ReplyExpectation": {
+        "type": "string",
+        "enum": [
+          "none",
+          "optional",
+          "required"
+        ],
+        "title": "ReplyExpectation"
+      },
       "ReplySuggestionResponse": {
         "properties": {
           "suggestions": {
@@ -15975,6 +16279,31 @@
         ],
         "title": "ReplySuggestionResponse",
         "description": "Drafted replies, or the reason there are none.\n\n`suggestions` is nonempty exactly when `reason` is None. Every non-error outcome is a 200: a\nmissing suggestion is an ordinary result, never a failure of the request."
+      },
+      "ResolveMessage": {
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/MessageAction"
+          },
+          "reply": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "title": "ResolveMessage"
       },
       "ResolveNoticeIn": {
         "properties": {
@@ -20395,6 +20724,144 @@
           "file_ids"
         ],
         "title": "UploadSendRequest"
+      },
+      "UserDeliveryMode": {
+        "type": "string",
+        "enum": [
+          "naive",
+          "prefix",
+          "sdk"
+        ],
+        "title": "UserDeliveryMode"
+      },
+      "UserMessage": {
+        "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "response": {
+            "$ref": "#/components/schemas/ReplyExpectation"
+          },
+          "suggestions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 3,
+            "title": "Suggestions"
+          },
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "agent_id": {
+            "type": "integer",
+            "title": "Agent Id"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/UserDeliveryMode"
+          },
+          "source_key": {
+            "type": "string",
+            "title": "Source Key"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "read_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read At"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MessageResolution"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reply": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "content",
+          "response",
+          "suggestions",
+          "id",
+          "agent_id",
+          "mode",
+          "source_key",
+          "created_at",
+          "read_at",
+          "resolved_at",
+          "resolution",
+          "reply"
+        ],
+        "title": "UserMessage"
+      },
+      "UserMessageFeed": {
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/UserDeliveryMode"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UserMessage"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mode",
+          "items"
+        ],
+        "title": "UserMessageFeed"
       },
       "UserSettingListResponse": {
         "properties": {

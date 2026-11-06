@@ -13,6 +13,11 @@ composer's placeholder, using its ordinary font and colour. Several candidates c
 (no wrap-around); Right fills the selected text and places the caret at its end, without
 the marker. Enter then sends the draft.
 
+SDK delivery mode bypasses this model path before loading model configuration.
+The route returns `reason="disabled"`; suggestions come from the publishing
+agent session and belong to the durable publication. They fill editable reply
+drafts, honor the user suggestion preference, and disappear after resolution.
+
 ## Trigger (frontend)
 
 [[gateway/agents/docs/reply-suggestion/trigger.meiva.okf.md|Trigger (frontend)]] — the frontend hook and component state that request, own and render the candidates.

@@ -33,6 +33,7 @@ export const RECONNECT_QUERY_KEYS: readonly (readonly unknown[])[] = [
   AGENT_PAGES_QUERY_KEY_PREFIX,
   ALL_PAGES_QUERY_KEY,
   ["to-user"],
+  ["user-messages"],
   NOTICES_QUERY_KEY,
   NOTICES_RESOLVED_QUERY_KEY,
   FLEET_GRAPH_KEY_PREFIX,
@@ -93,6 +94,10 @@ export function foldAgainstCache(
   if (ev.role === "page_opened" || ev.role === "page_closed") {
     invalidations.push({ key: ["agent-pages", ev.agent_id] });
     invalidations.push({ key: ALL_PAGES_QUERY_KEY });
+  }
+
+  if (ev.role === "agent_updated") {
+    invalidations.push({ key: ["user-messages", ev.agent_id] });
   }
 
   if (ev.role === "to_user_changed") {

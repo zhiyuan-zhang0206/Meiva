@@ -42,5 +42,6 @@
   "hoverSpawnedBy": "由 #{id} 创建",
   "hoverForkedFrom": "分叉自 #{id}",
   "hoverAwaitingReply": "{count} 条待回复通知",
-  "hoverHeartbeatPaused": "心跳暂停至 {time}"
+  "hoverHeartbeatPaused": "心跳暂停至 {time}",
+  "unreadUserMessages": "{count} 条未读消息"
 }

@@ -14,6 +14,35 @@ tags:
 
 `meiva.ui` allows agents to display rich web pages and post notices to users. `serve()` runs in a persistent shell session owned by the serving agent and managed by the page-server daemon; `show()` registers an HTTP server the agent already owns. The page server binds the machine's reachable host (loopback on a single box) and is served to the user through the **gateway reverse proxy** — the link is the gateway's own authenticated URL (`/pages/<id>-<name>/`), so the browser never dials the page server directly.
 
+## User delivery in SDK mode
+
+`user_delivery_mode=sdk` routes formal user communication through
+`publish(content, *, response, suggestions, idempotency_key) -> int`.
+`response` is `none`, `optional` or `required`; `suggestions` must be supplied,
+with `[]` explicitly meaning none. Use the same key for a retry of the same
+publication. A different payload under that key is refused.
+
+Publish meaningful milestones during work and the result when ready. Publishing
+never ends the turn. Ordinary assistant text, including final summaries, stays
+in Details, which the user can expand. A natural end without a publication gets
+one corrective retry. Use `publish(None, response="none", suggestions=[],
+idempotency_key="...")` to explicitly record no user update.
+
+`publications(pending_only=True, after_id=0, limit=50)` returns durable messages
+in increasing id order without marking them read on the user's behalf. Continue
+after the last returned id; limit is 1-100. Read pending content after compaction
+or overview edits. Rewriting `to_user.md` cannot overwrite this message history.
+
+Each displayed message automatically receives unread state. Required replies
+remain pending after reading. Suggested replies fill an editable draft and send
+only when the user submits. Explicit close grants no authorization. SDK mode
+refuses legacy `notify` and bypasses the separate reply-suggestion model; it
+produces no additional notification event. Existing notices remain resolvable.
+
+The other modes are `naive` (ordinary assistant text) and `prefix` (explicit
+visibility markers, the compatibility default). This setting is frozen per agent
+and takes effect through the ordinary config/restart lifecycle.
+
 ## Core API (core SDK: page serving)
 
 Only one active page is allowed at a time (opening a new one auto-closes the old). Ports are explicit: `serve`/`show` require `port` (1024-65535) — there is no per-agent reserved or default port — and the platform refuses a port another live page already holds. The conflict check runs before the auto-close, so a refused registration leaves the agent's current page untouched. `serve` additionally fails before anything is registered when the port is held by a process that is not a page server (the daemon never displaces a foreign occupant).

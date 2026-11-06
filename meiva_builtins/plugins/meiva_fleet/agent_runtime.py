@@ -14,19 +14,21 @@ _FLEET_HARNESS_CONTRIBUTION = HarnessContribution(
         EntryPoint("meiva.tasks", "the task you were given, and its siblings"),
         EntryPoint(
             "meiva.ui",
-            "queue user notices (`meiva.ui.notify`) when not in an active dialog",
+            "deliver through the configured user delivery protocol",
         ),
     ),
     discipline=(
         "When coordinating Fleet work, record status in `meiva.tasks` and deliver progress to "
         "your agreed delegator (`meiva.agents.send_message`) or queue user notices via "
-        "`meiva.ui.notify`.",
+        "the configured user delivery protocol.",
     ),
 )
 
 
 def fleet_self_section(_slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     del catalog
+    if _slices.prompt.user_delivery_mode == "sdk":
+        return "## Fleet\n\nUse meiva.tasks for task tracking and meiva.agents.send_message for peers. Publish user messages through meiva.ui.publish; legacy notices are disabled."
     return (
         "## Fleet\n\n"
         "Fleet provides optional labels (`meiva.self.set_label`), user notices "
@@ -57,6 +59,8 @@ def fleet_self_section(_slices: AgentSlices, *, catalog: ModelCatalog) -> str:
 
 def reduce_context_switch_section(slices: AgentSlices, *, catalog: ModelCatalog) -> str:
     del catalog
+    if slices.prompt.user_delivery_mode == "sdk":
+        return ""
     if not get_plugin_config("meiva_fleet", slices, FleetConfig).reduce_context_switch:
         return ""
     return (

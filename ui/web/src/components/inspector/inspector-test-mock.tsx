@@ -292,6 +292,8 @@ export function rosterFixture(overrides: Partial<WireAgentCard> = {}): AgentRost
       awaiting_response_count: 0,
       highest_notice_priority: null,
       unread_notice_count: 0,
+      unread_user_message_count: 0,
+      awaiting_user_message_count: 0,
       heartbeat_paused_until: null,
       open_impersonation_session_id: 7,
       open_impersonation_status: "active",

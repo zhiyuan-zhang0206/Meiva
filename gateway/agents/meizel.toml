@@ -1,4 +1,4 @@
-exports = ["creation.py", "eval_guard.py", "history", "inbound_provenance.py", "launch", "launch_retry.py", "lifecycle.py", "notice_operations", "reply_suggestion", "router.py", "schemas.py", "state.py", "system_note.py", "task_assignment", "tests", "to_user", "transfer"]
+exports = ["creation.py", "eval_guard.py", "history", "inbound_provenance.py", "launch", "launch_retry.py", "lifecycle.py", "notice_operations", "reply_suggestion", "router.py", "schemas.py", "state.py", "system_note.py", "task_assignment", "tests", "to_user", "transfer", "user_delivery"]
 
 [uses]
 "creation.py" = ["launch"]
@@ -11,6 +11,7 @@ exports = ["creation.py", "eval_guard.py", "history", "inbound_provenance.py", "
 "task_assignment" = ["creation.py"]
 "tests" = ["launch", "notice_operations", "schemas.py", "state.py"]
 "to_user" = ["eval_guard.py"]
+"user_delivery" = ["eval_guard.py", "inbound_provenance.py", "notice_operations", "schemas.py"]
 
 [purity]
 "__init__.py" = "strict"

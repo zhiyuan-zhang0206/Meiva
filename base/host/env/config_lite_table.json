@@ -579,6 +579,7 @@
     "upload_dir_name": "gateway",
     "upload_recovery_claim_seconds": "gateway",
     "upload_staging_root": "gateway",
+    "user_delivery_mode": "agent",
     "walg_config_file": "walg",
     "web_brave_search_endpoint": "web",
     "web_deepseek_fetch_endpoint": "web",
@@ -1011,6 +1012,7 @@
     "upload_dir_name": "MEIVA_UPLOAD_DIR_NAME",
     "upload_recovery_claim_seconds": "MEIVA_UPLOAD_RECOVERY_CLAIM_SECONDS",
     "upload_staging_root": "MEIVA_UPLOAD_STAGING_ROOT",
+    "user_delivery_mode": "MEIVA_USER_DELIVERY_MODE",
     "walg_config_file": "MEIVA_WALG_CONFIG_FILE",
     "web_brave_search_endpoint": "MEIVA_WEB_BRAVE_SEARCH_ENDPOINT",
     "web_deepseek_fetch_endpoint": "MEIVA_WEB_DEEPSEEK_FETCH_ENDPOINT",
@@ -1443,6 +1445,7 @@
     "upload_dir_name": "cluster-pinned",
     "upload_recovery_claim_seconds": "cluster-pinned",
     "upload_staging_root": "cluster-pinned",
+    "user_delivery_mode": "cluster-default",
     "walg_config_file": "host",
     "web_brave_search_endpoint": "cluster-pinned",
     "web_deepseek_fetch_endpoint": "cluster-pinned",
@@ -1875,6 +1878,7 @@
     "upload_dir_name": "gateway",
     "upload_recovery_claim_seconds": "gateway",
     "upload_staging_root": "gateway",
+    "user_delivery_mode": "agent-runner",
     "walg_config_file": "gateway",
     "web_brave_search_endpoint": "agent-runner",
     "web_deepseek_fetch_endpoint": "agent-runner",
@@ -1948,7 +1952,8 @@
     "syntax_fix_ruff_format",
     "system_prompt_extra",
     "to_user_limit_reminder_cadence",
-    "to_user_soft_limit_words"
+    "to_user_soft_limit_words",
+    "user_delivery_mode"
   ],
   "sensitive_fields": [
     "anthropic_api_key",

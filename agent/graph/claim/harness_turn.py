@@ -24,6 +24,11 @@ from agent.graph.claim.lost_turn import report_lost_turn
 from agent.graph.claim.timeline import append_turn_timeline
 from agent.graph.claim.turn_stamp import persist_last_active
 from agent.graph.hooks.framework import harness_pre_turn_hooks
+from agent.graph.hooks.user_delivery import (
+    capture_items,
+    delivery_end_reminder,
+    with_pending_deliveries,
+)
 from agent.graph.interrupt import (
     ModelInterruptedError,
     interrupt_halt,
@@ -183,13 +188,14 @@ def _resolve_turn_prompt_and_key(
     state: _state.AgentState,
     pre_messages: Sequence[BaseMessage],
     agent_id: int,
+    delivery_mode: str,
 ) -> tuple[str, str]:
     pending_input = state.harness_pending_input or {}
     text = str(pending_input.get("prompt") or "")
     if pre_messages:
         pre_text = render_messages(pre_messages)
         text = f"{pre_text}\n\n{text}".strip() if text else pre_text
-    if text and REPLY_VISIBILITY_RULE not in text:
+    if delivery_mode == "prefix" and text and REPLY_VISIBILITY_RULE not in text:
         text = f"{wrap_system_note(REPLY_VISIBILITY_RULE)}\n\n{text}"
     key = str(pending_input.get("key") or "") or f"inbound-turn-{agent_id}"
     return text, key
@@ -207,7 +213,10 @@ async def _run_harness_turn(
     bridge = ctx.require_harness_bridge()
     ctx.turn_progress.mark(agent_id)
     extra_updates = dict(hook_updates) if hook_updates else {}
-    text, key = _resolve_turn_prompt_and_key(state, pre_messages, agent_id)
+    pre_messages = await with_pending_deliveries(ctx, agent_id, list(pre_messages))
+    text, key = _resolve_turn_prompt_and_key(
+        state, pre_messages, agent_id, ctx.require_agent().prompt.user_delivery_mode
+    )
     if not text:
         return Command[HarnessGoto](
             update={**extra_updates, "halted": True, "harness_pending_input": None}, goto=CLAIM
@@ -220,13 +229,15 @@ async def _run_harness_turn(
 
     async def checkpoint(item: TimelineItem, msg_count: int) -> None:
         await _checkpoint_activity(ctx, agent_id, event_publisher, item, msg_count)
+        await capture_items(ctx, agent_id, [item], source_key="harness")
 
     projector = HarnessTurnProjector(
         checkpoint=checkpoint,
         base_idx=base_idx,
         clock=ctx.require_clock(),
         non_human_wake=state.non_human_wake,
-        explicit_visibility=True,
+        explicit_visibility=ctx.require_agent().prompt.user_delivery_mode == "prefix",
+        delivery_mode=ctx.require_agent().prompt.user_delivery_mode,
     )
     input_accepted = asyncio.Event()
 
@@ -274,24 +285,41 @@ async def _run_harness_turn(
     else:
         event_publisher.emit(LLMDone(agent_id=agent_id).model_dump_json())
         await persist_last_active(ctx, agent_id, turn.text)
-        if projector.invalid_reply_visibility:
-            note = reply_visibility_note(ctx.require_clock().now())
-            await append_turn_timeline(ctx, agent_id, [note])
-            if not (state.harness_pending_input or {}).get("visibility_correction"):
-                return Command[HarnessGoto](
-                    update={
-                        **extra_updates,
-                        "harness_pending_input": {
-                            "prompt": render_message(note),
-                            "key": f"{key}:visibility-correction",
-                            "visibility_correction": True,
-                        },
-                    },
-                    goto=HARNESS_TURN,
-                )
+        correction = await harness_reply_correction(
+            ctx, agent_id, state, invalid=projector.invalid_reply_visibility, key=key
+        )
+        if correction is not None:
+            return Command[HarnessGoto](
+                update={**extra_updates, "harness_pending_input": correction}, goto=HARNESS_TURN
+            )
     return Command[HarnessGoto](
         update={**extra_updates, "halted": True, "harness_pending_input": None}, goto=CLAIM
     )
+
+
+async def harness_reply_correction(
+    ctx: MeivaContext,
+    agent_id: int,
+    state: _state.AgentState,
+    *,
+    invalid: bool,
+    key: str,
+) -> dict[str, object] | None:
+    correcting = bool((state.harness_pending_input or {}).get("visibility_correction"))
+    note = await delivery_end_reminder(
+        ctx, agent_id, state.user_delivery_baseline, correcting=correcting
+    )
+    if not invalid and note is None:
+        return None
+    note = note or reply_visibility_note(ctx.require_clock().now())
+    await append_turn_timeline(ctx, agent_id, [note])
+    if correcting:
+        return None
+    return {
+        "prompt": render_message(note),
+        "key": f"{key}:visibility-correction",
+        "visibility_correction": True,
+    }
 
 
 async def _await_foreground(

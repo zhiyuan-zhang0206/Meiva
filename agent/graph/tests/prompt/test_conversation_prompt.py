@@ -155,3 +155,31 @@ def test_explicit_visibility_guidance_in_native_and_harness_sections() -> None:
         assert HIDE_FROM_USER in section
         assert "the user can expand and read them" in section
         assert "human and background wakes alike" in section
+
+
+@pytest.mark.parametrize("style", ["off", "oriented", "concise", "silent"])
+def test_sdk_prompt_has_one_delivery_protocol(style: str) -> None:
+    slices = _slices(agent__user_delivery_mode="sdk", agent__agent_communication_style=style)
+    prompt = build_system_prompt(
+        EMPTY,
+        slices,
+        agent_id=1,
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
+        environ=ENVIRON,
+    )
+    assert "meiva.ui.publish" in prompt
+    assert "publishing never ends your turn" in prompt
+    assert "suggestions=[]" in prompt
+    assert "expand and read" in prompt
+    assert "meiva.ui.notify" not in prompt
+    assert "notification feed" not in prompt
+    assert DISPLAY_TO_USER not in prompt
+    assert "Reply in ordinary assistant text" not in prompt
+    assert "meiva.ui.publish" in harness_user_reply_section(_inputs(slices))
+
+
+def test_naive_prompt_keeps_plain_assistant_delivery() -> None:
+    text = user_reply_section(_inputs(_slices(agent__user_delivery_mode="naive")))
+    assert "Reply in ordinary assistant text" in text
+    assert DISPLAY_TO_USER not in text and HIDE_FROM_USER not in text

@@ -196,6 +196,7 @@ def make_runtime(
         bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         catalog=build_model_catalog(home=meiva_home()),
         clock_factory=Clock.from_settings,
+        rng=seeded_rng(),
     )
     return Runtime(context=ctx, execution_info=execution_info)
 

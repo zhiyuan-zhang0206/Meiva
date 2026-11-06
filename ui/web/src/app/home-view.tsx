@@ -1,5 +1,6 @@
 "use client";
 
+import { useUserMessages, withUserMessages } from "@/lib/context/use-user-messages";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -436,12 +437,14 @@ function HomeContent({
   const agentBusy = turnActive || activeAgent?.status === "running";
   const composerMode: "disabled" | "idle" | "busy" =
     activeId == null ? "disabled" : agentBusy ? "busy" : "idle";
+  const publications = useUserMessages(activeId);
+  const displayedItems = useMemo(() => withUserMessages(items, publications.data?.items ?? []), [items, publications.data]);
   const replySuggestion = useReplySuggestion({
     agentId: activeId,
     status: activeAgent?.status,
     busy: agentBusy,
     items,
-    enabled: !userSettingsLoading && userSettings["behavior.replySuggestions"] === true,
+    enabled: publications.data !== undefined && publications.data.mode !== "sdk" && !userSettingsLoading && userSettings["behavior.replySuggestions"] === true,
   });
 
   return (
@@ -462,7 +465,7 @@ function HomeContent({
           )}
           <TimelineView
             key={activeId ?? "unselected"}
-            items={items}
+            items={displayedItems}
             compactBuffer={compactBuffer}
             threadKey={activeId != null ? String(activeId) : undefined}
             scrollMemoryKey={`${bfcacheId}:agent:${activeId ?? "unselected"}`}

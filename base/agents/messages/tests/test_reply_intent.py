@@ -117,3 +117,28 @@ def test_explicit_visibility_routes_by_exact_first_line(
         resolve_agent_reply(text, non_human_wake=non_human_wake, explicit_visibility=True)
         == expected
     )
+
+
+@pytest.mark.parametrize("background", [False, True])
+@pytest.mark.parametrize(
+    ("mode", "text", "visible", "body"),
+    [
+        ("naive", "ordinary answer", True, "ordinary answer"),
+        ("naive", "MEIVA_HIDE_FROM_USER\nverbatim", True, "MEIVA_HIDE_FROM_USER\nverbatim"),
+        ("prefix", "ordinary answer", False, "ordinary answer"),
+        ("prefix", "MEIVA_DISPLAY_TO_USER\nanswer", True, "answer"),
+        ("sdk", "ordinary final", False, "ordinary final"),
+        ("sdk", "MEIVA_DISPLAY_TO_USER\nanswer", False, "MEIVA_DISPLAY_TO_USER\nanswer"),
+    ],
+)
+def test_delivery_mode_overrides_wake_and_legacy_visibility(
+    mode: str, text: str, visible: bool, body: str, background: bool
+) -> None:
+    assert resolve_agent_reply(
+        text, non_human_wake=background, explicit_visibility=True, delivery_mode=mode
+    ) == (body, visible)
+
+
+def test_unknown_delivery_mode_fails_at_boundary() -> None:
+    with pytest.raises(ValueError):
+        resolve_agent_reply("answer", non_human_wake=False, delivery_mode="typo")

@@ -11,6 +11,7 @@ from langchain_core.messages import HumanMessage
 from agent.messages import NoteTag, system_note_message
 from base.agents.context import MeivaContext
 from base.agents.messages.delivery.retry import retryable_database_error
+from base.agents.messages.reply_intent import delivery_disabled_entries
 from base.agents.to_user import ToUserLimits, read_document, to_user_limits_from_agent
 from base.api_contracts.agent_contract import Harness
 from base.log import logger
@@ -158,7 +159,12 @@ def sdk_expand_note(ctx: MeivaContext) -> HumanMessage | None:
     slices = ctx.require_agent()
     skipped = skipped_expand_entries(
         slices.read("agent", "sdk_expand_in_system_prompt"),
-        disabled=effective_sdk_disable(slices.prompt.sdk_disable),
+        disabled=effective_sdk_disable(
+            (
+                *slices.prompt.sdk_disable,
+                *delivery_disabled_entries(slices.prompt.user_delivery_mode),
+            )
+        ),
         plugin_expansions=read_plugin_expansions(),
     )
     if not skipped:
@@ -320,7 +326,7 @@ def preloaded_skills_note(ctx: MeivaContext) -> HumanMessage | None:
     view = read_view(
         (),
         prompt.skills_to_expand_at_start,
-        prompt.sdk_disable,
+        (*prompt.sdk_disable, *delivery_disabled_entries(prompt.user_delivery_mode)),
         home=ctx.require_meiva_home(),
         environ=ctx.require_environ(),
     )

@@ -1,6 +1,7 @@
 # meiva:note
 # Core reply routing, explicit visibility, language, and milestone progress rules in `user_reply_section` remain active across every `COMMUNICATION_STYLE_SECTIONS` setting (`off`, `oriented`, `concise`, `silent`). Whenever the first turn on a human request calls `execute_code`, it must include a brief substantive opening reply before the first tool call; intermediate turns call `execute_code` with no assistant text unless a milestone is reached. `COMMUNICATION_STYLE_SECTIONS` keys match the non-`off` `agent_communication_style` Literal members so an unknown style raises at render time.
-from base.agents.messages.reply_intent import REPLY_VISIBILITY_RULE
+from base.agents.messages.reply_intent import REPLY_VISIBILITY_RULE, SDK_DELIVERY_RULE
+from base.api_contracts.user_delivery import UserDeliveryMode
 
 from .live import SectionInputs
 
@@ -86,13 +87,16 @@ def _build_user_reply_section(
 
 
 def user_reply_section(_inputs: SectionInputs) -> str:
-    return _build_user_reply_section(
-        feedback_sentence="`execute_code` output is tool feedback and does not replace a reply.",
-        without_tool_phrase="without calling `execute_code`",
-        calls_tool_phrase="calls `execute_code`",
-        intermediate_turns_sentence=(
-            "After the opening reply, call `execute_code` with no accompanying "
-            "assistant text on intermediate turns unless you reach a milestone."
+    return delivery_prompt(
+        _inputs.slices.prompt.user_delivery_mode,
+        _build_user_reply_section(
+            feedback_sentence="`execute_code` output is tool feedback and does not replace a reply.",
+            without_tool_phrase="without calling `execute_code`",
+            calls_tool_phrase="calls `execute_code`",
+            intermediate_turns_sentence=(
+                "After the opening reply, call `execute_code` with no accompanying "
+                "assistant text on intermediate turns unless you reach a milestone."
+            ),
         ),
     )
 
@@ -136,13 +140,16 @@ _SILENT_BODY = (
 
 
 def harness_user_reply_section(_inputs: SectionInputs) -> str:
-    return _build_user_reply_section(
-        feedback_sentence="Tool output is feedback for you and does not replace a reply.",
-        without_tool_phrase="without calling a tool",
-        calls_tool_phrase="calls a tool",
-        intermediate_turns_sentence=(
-            "After the opening reply, run intermediate tool calls without accompanying "
-            "assistant text unless you reach a milestone."
+    return delivery_prompt(
+        _inputs.slices.prompt.user_delivery_mode,
+        _build_user_reply_section(
+            feedback_sentence="Tool output is feedback for you and does not replace a reply.",
+            without_tool_phrase="without calling a tool",
+            calls_tool_phrase="calls a tool",
+            intermediate_turns_sentence=(
+                "After the opening reply, run intermediate tool calls without accompanying "
+                "assistant text unless you reach a milestone."
+            ),
         ),
     )
 
@@ -152,3 +159,49 @@ COMMUNICATION_STYLE_SECTIONS = {
     "concise": f"# Talking to the user\n\n{_NOTIFICATION_GUIDANCE}\n\n{_CONCISE_BODY}",
     "silent": f"# Talking to the user\n\n{_NOTIFICATION_GUIDANCE}\n\n{_SILENT_BODY}",
 }
+
+
+def delivery_prompt(mode_value: str, ordinary: str) -> str:
+    mode = UserDeliveryMode(mode_value)
+    if mode is UserDeliveryMode.PREFIX:
+        return ordinary
+    if mode is UserDeliveryMode.SDK:
+        return (
+            "# User delivery\n\n" + SDK_DELIVERY_RULE + "\n\n"
+            "Publish a short substantive opening when starting a human request, meaningful "
+            "milestones during execution, and the result when ready. Work between publications. "
+            "Do not publish routine internal steps or unchanged status. A natural-language final "
+            "may summarize your work for yourself; the user-facing result must already be published. "
+            "Use the user's requested language. Each publication must stand alone and state what "
+            "changed and any action needed. Reading is not answering or approval. "
+            "Use response='required' only when the user owes an answer; 'optional' allows discussion; "
+            "'none' asks for no reply. Suggestions are editable drafts of possible user replies, "
+            "never assumed user facts or consent. Use [] when useful replies cannot be suggested."
+        )
+    start = ordinary.index("## Output visibility")
+    end = ordinary.index("Peer messages,", start)
+    return (
+        (ordinary[:start] + ordinary[end:])
+        .replace(
+            "Text alongside a tool call follows the same visibility rule as a standalone reply. ",
+            "",
+        )
+        .replace(
+            "Use the display prefix for a milestone, blocker or final deliverable that the user needs to see.",
+            "",
+        )
+    )
+
+
+def delivery_style_prompt(mode: str, style: str) -> str:
+    section = COMMUNICATION_STYLE_SECTIONS[style]
+    if UserDeliveryMode(mode) is UserDeliveryMode.SDK:
+        section = section.replace(
+            _NOTIFICATION_GUIDANCE,
+            "Published messages automatically carry unread state. Publish each update once; "
+            "the user can read it later and respond from the same message.",
+        ).replace(
+            "Send it through `meiva.ui.notify` if it is a result or a decision they must see outside a live dialog.",
+            "Deliver the report through `meiva.ui.publish`.",
+        )
+    return section

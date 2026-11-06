@@ -127,6 +127,8 @@ export function makeAgent(overrides: Partial<AgentRow>): AgentRow {
     awaiting_response_count: 0,
     highest_notice_priority: null,
     unread_notice_count: 0,
+    unread_user_message_count: 0,
+    awaiting_user_message_count: 0,
     heartbeat_paused_until: null,
     liveness_state: "online",
     ...overrides,
@@ -319,6 +321,7 @@ export async function resetHomePageTestState() {
   });
   homePageRig = gatewayRig(homePageGateway);
   resetTransport();
+  transport.getUserMessages.mockResolvedValue({ mode: "prefix", items: [] });
   transport.getReplySuggestion.mockImplementation(() => Promise.resolve(replySuggestions));
   resetStreamHandlers();
   transport.sendMessage.mockResolvedValue(undefined);
@@ -343,6 +346,7 @@ export async function resetHomePageTestState() {
     getUploadDeliveryStatus: transport.getUploadDeliveryStatus,
     listPages: transport.listPages,
     getReplySuggestion: transport.getReplySuggestion,
+    getUserMessages: transport.getUserMessages,
   };
   vi.clearAllMocks();
   inspectorMockState.shouldThrow = false;
