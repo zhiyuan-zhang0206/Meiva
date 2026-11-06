@@ -992,44 +992,94 @@ groups:
       # Window: the four deployed collectors all run every 10 minutes, so 35m is three cycles plus
       # slack. A collector configured slower than ~11 minutes needs its own rule with 3x its
       # interval, or this one fires on a healthy loop.
+      # ── interval collectors: the product, not its echo (2026-11-06) ──
+      # This rule used to read `absent_over_time(plugin_collector_cycle)`. That event was added on
+      # 2026-11-06 and never reached the stream: a schedule's runner process binds no telemetry
+      # pipeline (`pipeline_bound()` is false there), and the emitter returns silently in that case,
+      # so "no cycle event" described a broken emit path rather than a stalled collector. What a
+      # collector produces is the row it writes, so this reads `plugin_stats`: the age of the last
+      # write per collector the enabled schedules declare. A failed refresh writes no row either,
+      # which makes the staleness test strictly wider than the event test it replaces.
+      #
+      # The expected set is enumerated from `schedules`, not inferred from the stats table: a
+      # collector that never wrote a row is absent from `plugin_stats` and must still be reported
+      # (absence is not an event). The join also matches the per-account ids a collector writes
+      # (`antigravity` writes `antigravity-claude-gpt` / `antigravity-gemini`); matching only the
+      # exact id would flag that collector's stale legacy row while its real output was minutes old.
+      #
+      # Both clocks are the database's: `now()` inside SQL, never Grafana's clock minus a DB value.
+      #
+      # An enabled schedule whose collector id cannot be read out of its script counts as
+      # infinitely stale rather than dropping out of the set: a rule that cannot name what it
+      # expects has stopped judging, and silence would look exactly like health. An empty expected
+      # set (every collector deliberately disabled) is not an outage, so that case stays at zero.
+      #
+      # PAUSED until the read grant exists. The query below answers from the live database through
+      # `ops`, and that role may not read `plugin_stats`: `/api/ds/query` returned
+      # `permission denied for table plugin_stats (SQLSTATE 42501)` on 2026-11-06. Unpaused, the
+      # rule would sit in `execErrState: Alerting` on a permission error — one false alarm traded
+      # for another. It stays paused, and stays in the file so the shape is reviewed and ready,
+      # until a migration grants SELECT on `plugin_stats` (and on `schedules`, which the expected
+      # set reads) to the monitoring role. Tracking: the collector-silence task.
       - uid: meiva-ops-plugin-collector-silent
-        title: "Interval collector loop silent (no cycle event in 35m)"
+        title: "Interval collector wrote nothing for 35m"
+        isPaused: true
         condition: D
         for: 5m
         keepFiringFor: *recovery-window
         missing_series_evals_to_resolve: *fast-missing-evals
-        noDataState: OK
-        execErrState: OK
+        noDataState: Alerting
+        execErrState: Alerting
         labels:
           severity: warning
           ruleUID: meiva-ops-plugin-collector-silent
-          metric: plugin_collector_cycle_freshness
+          metric: plugin_collector_stats_age
           team: meiva-ops
         annotations:
-          summary: "No plugin collector finished a cycle in the last 35 minutes"
+          summary: "An interval collector has written no stats for 35 minutes"
           description: >-
-            `plugin_collector_cycle` is emitted once per refresh cycle by every interval
-            collector (meiva_usage runners), in the success and the failure branch. Three
-            intervals without one means the loop stopped — or every collector was disabled — not
-            that a cycle failed: failures still emit, with outcome=failed. Triage the schedule's
-            runner (`meiva schedules logs <id>`), `~/.meiva/logs/agent-*.log`, and whether the
-            collectors are still enabled in the meiva_usage config.
+            Every enabled `meiva_usage:` schedule declares one collector, and each refresh writes a
+            `plugin_stats` row (status plus detail). A collector whose newest row is older than
+            three 10-minute intervals stopped producing — a failed refresh writes nothing at all,
+            so this covers the failure path too. A collector that has never written is reported as
+            absent rather than silent. Which one it is: `SELECT id, updated_at FROM plugin_stats
+            ORDER BY updated_at` and compare against `meiva schedules ls`. Triage the schedule's
+            runner (`meiva schedules logs <id>`) and whether the collector is still enabled in the
+            meiva_usage config. A disabled collector is not an outage: disable the schedule too.
         data:
           - refId: A
-            datasourceUid: loki
+            datasourceUid: ops
             queryType: ""
             model:
               refId: A
               datasource:
-                type: loki
-                uid: loki
+                type: postgres
+                uid: ops
               editorMode: code
-              expr: >-
-                absent_over_time({service_name="unknown_service", event_name="plugin_collector_cycle"} | json | cluster=".meiva" | category="telemetry" [35m])
-              instant: true
-              queryType: instant
+              rawQuery: true
+              format: table
+              rawSql: |-
+                WITH declared AS (
+                  SELECT enabled, substring(script from 'id":"([^"]+)') AS collector
+                  FROM schedules
+                  WHERE name LIKE 'meiva_usage:%'
+                ), expected AS (
+                  SELECT collector FROM declared WHERE enabled AND collector IS NOT NULL
+                ), fresh AS (
+                  SELECT e.collector, max(s.updated_at) AS last_write
+                  FROM expected e
+                  LEFT JOIN plugin_stats s
+                    ON s.id = e.collector OR s.id LIKE e.collector || '-%'
+                  GROUP BY e.collector
+                ), unreadable AS (
+                  SELECT count(*) AS n FROM declared WHERE enabled AND collector IS NULL
+                )
+                SELECT CASE WHEN (SELECT n FROM unreadable) > 0 THEN 999999999
+                            ELSE coalesce(max(coalesce(round(EXTRACT(EPOCH FROM (now() - last_write)))::bigint, 999999999)), 0)
+                       END AS age_s
+                FROM fresh
             relativeTimeRange:
-              from: 2100
+              from: 600
               to: 0
           - refId: C
             datasourceUid: __expr__
@@ -1041,7 +1091,7 @@ groups:
                 uid: __expr__
               type: reduce
               expression: A
-              reducer: mean
+              reducer: max
           - refId: D
             datasourceUid: __expr__
             queryType: ""
@@ -1055,7 +1105,7 @@ groups:
               conditions:
                 - evaluator:
                     type: gt
-                    params: [0]
+                    params: [2100]
                   operator:
                     and
                   query:
