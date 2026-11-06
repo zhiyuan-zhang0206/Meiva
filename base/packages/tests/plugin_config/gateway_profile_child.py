@@ -14,15 +14,16 @@ def gateway_overlay() -> None:
     from base.packages.plugins.config_registration import validate_config_overlay
     from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
-    assert not settings.has_domain("agent")
+    assert not settings.has_domain("web")
+    assert not settings.has_domain("sandbox")
     models = build_model_catalog(home=meiva_home()).models
     if sys.argv[1] == "declaring-model":
         validate_config_overlay(
-            {"completion_notice_policy": "hourly"}, configs={}, models=models, home=meiva_home()
+            {"exec_timeout_seconds": 25.0}, configs={}, models=models, home=meiva_home()
         )
-        with pytest.raises(InvalidConfigOverlay, match="completion_notice_policy"):
+        with pytest.raises(InvalidConfigOverlay, match="exec_timeout_seconds"):
             validate_config_overlay(
-                {"completion_notice_policy": "bogus"}, configs={}, models=models, home=meiva_home()
+                {"exec_timeout_seconds": "bogus"}, configs={}, models=models, home=meiva_home()
             )
     elif sys.argv[1] == "validators":
         validate_config_overlay(

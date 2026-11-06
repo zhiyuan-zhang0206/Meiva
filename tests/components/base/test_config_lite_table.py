@@ -102,7 +102,7 @@ def test_lite_fields_match_the_registry() -> None:
             "factory_empty_list",
             "otel_endpoint_from_port",
         }
-        assert check in {None, "iana", "port", "eval_allowlist"}
+        assert check in {None, "iana", "port", "eval_allowlist", "user_delivery"}
         if default_kind == "literal":
             assert literal == cast(FieldInfo, reg[name].info).default
 

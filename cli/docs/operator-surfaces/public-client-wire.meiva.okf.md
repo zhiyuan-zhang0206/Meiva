@@ -12,6 +12,7 @@ production dependencies. They use a scoped loopback HTTP listener and fixed
 source-visible command children with private homes. The children select the
 actual gateway profile before reading configuration, use the canonical gateway
 address and authorization owners, and invoke public command/parser entries.
+That profile includes the shared agent delivery configuration domain.
 They do not start an agent, supervisor or live gateway application. The listener
 records method, path, query, headers, raw body and decoded JSON; an unknown route
 or method is a parent-process failure, including when the command expected an

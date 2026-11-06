@@ -56,7 +56,7 @@ def test_initial_human_response_is_present_without_plugins(style: str) -> None:
         assert "Work without narrating after the required initial reply" in prompt
         assert "Silence here costs the user nothing" not in prompt
     if style != "off":
-        assert "A reply already delivered in the live dialog does not need a duplicate" in prompt
+        assert "Ordinary information creates no question or notification" in prompt
 
 
 @pytest.mark.parametrize("style", ["off", "oriented", "concise", "silent"])
@@ -169,9 +169,11 @@ def test_sdk_prompt_has_one_delivery_protocol(style: str) -> None:
         environ=ENVIRON,
     )
     assert "meiva.ui.publish" in prompt
-    assert "publishing never ends your turn" in prompt
-    assert "suggestions=[]" in prompt
-    assert "expand and read" in prompt
+    assert "meiva.ui.ask" in prompt
+    assert "Publishing or asking never ends execution" in prompt
+    assert "Suggestions are optional candidates" in prompt
+    assert "Every question has a user-editable Note" in prompt
+    assert "Details which the user can expand" in prompt
     assert "meiva.ui.notify" not in prompt
     assert "notification feed" not in prompt
     assert DISPLAY_TO_USER not in prompt

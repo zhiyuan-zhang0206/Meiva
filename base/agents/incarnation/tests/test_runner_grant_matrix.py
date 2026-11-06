@@ -192,6 +192,31 @@ def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one gr
             conn.execute("CREATE TABLE runner_must_not_ddl (id int)")
 
 
+def test_runner_appends_visible_deliveries_without_rewriting_history(runner_db: str) -> None:
+    grant_runner(runner_db)
+    with psycopg.connect(runner_db, autocommit=True) as conn:
+        row = conn.execute("INSERT INTO agents DEFAULT VALUES RETURNING id").fetchone()
+        assert row is not None
+        agent_id = row[0]
+    with psycopg.connect(runner_url(runner_db), autocommit=True) as conn:
+        for _ in range(2):
+            conn.execute(
+                "INSERT INTO agent_user_messages (agent_id,source_key,mode,content,suggestions) "
+                "VALUES (%s,'reply:1','prefix','Done','[]') "
+                "ON CONFLICT (agent_id,source_key) DO NOTHING",
+                (agent_id,),
+            )
+        assert conn.execute(
+            "SELECT content FROM agent_user_messages WHERE agent_id=%s", (agent_id,)
+        ).fetchall() == [("Done",)]
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            conn.execute(
+                "UPDATE agent_user_messages SET read_at=now() WHERE agent_id=%s", (agent_id,)
+            )
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            conn.execute("DELETE FROM agent_user_messages WHERE agent_id=%s", (agent_id,))
+
+
 def test_runner_reads_but_cannot_write_deployment_state(runner_db: str) -> None:
     """The version gate row is readable by runners and writable only by the gateway."""
     grant_runner(runner_db)

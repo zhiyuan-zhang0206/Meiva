@@ -342,7 +342,7 @@ def test_communication_style_only_renders_optional_narration(style: str) -> None
     rendered = communication_style_section(_inputs(agent__agent_communication_style=style))
 
     assert rendered.startswith("# ")
-    assert "`meiva.ui.notify`" in rendered
+    assert "meiva.ui.ask for persistent questions" in rendered
     assert "Reply in ordinary assistant text" not in rendered
 
 

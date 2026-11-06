@@ -1,14 +1,11 @@
-"""`meiva.ui.show` / `.serve` / `.close` SDK entry point tests (R3 door ③).
-
-show/close go through in-process FastAPI TestClient: SDK calls hit gateway
-endpoints directly, using a real meiva_test DB to exercise the full wire
-protocol. serve() declares the page (writes the agent_pages row + records
-serve_dir) and waits for the page_server daemon's server to answer on the
-port — in tests, a stub HTTP server stands in for the daemon's spawn.
-
-(`meiva.ui.notify` is registered by the meiva_fleet plugin; tests are in
-meiva_builtins/plugins/meiva_fleet/tests/test_meiva_fleet_plugin.py.)
-"""
+# meiva:note
+# `meiva.ui.show` / `.serve` / `.close` SDK entry point tests (R3 door ③).
+#
+# show/close go through in-process FastAPI TestClient: SDK calls hit gateway
+# endpoints directly, using a real meiva_test DB to exercise the full wire
+# protocol. serve() declares the page (writes the agent_pages row + records
+# serve_dir) and waits for the page_server daemon's server to answer on the
+# port — in tests, a stub HTTP server stands in for the daemon's spawn.
 
 from __future__ import annotations
 

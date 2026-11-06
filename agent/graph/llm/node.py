@@ -100,7 +100,7 @@ def _finalize_turn_observability(
     kw["meiva_created_at"] = now.isoformat()
     kw["meiva_explicit_visibility"] = handler.delivery_mode == "prefix"
     if handler.delivery_mode is not None:
-        kw["meiva_user_delivery_mode"] = handler.delivery_mode
+        kw["meiva_user_delivery_mode"] = handler.delivery_mode.value
     if handler.non_human_wake:
         kw["meiva_non_human_wake"] = True
     reasoning_ms_by_block = handler.reasoning_ms_by_block

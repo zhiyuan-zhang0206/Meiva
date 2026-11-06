@@ -8,7 +8,6 @@ from typing import Any, cast
 import psycopg
 import pytest
 
-import meiva
 from base.agents.observation.snapshot import select_one
 from base.config import settings
 from base.events.live.bus import EventBus
@@ -22,6 +21,7 @@ from gateway.tests.extensions.fleet.test_fleet_notices_via_gateway import (
 )
 from gateway.tests.support.live_events.recorder import recording_live_events
 from meiva.tests.fixtures.pin_agent import pin_agent
+from meiva_builtins.plugins.meiva_fleet import plugin as notice_compat
 
 
 # meiva:note
@@ -54,11 +54,11 @@ def test_dismissing_response_notice_refreshes_inspector_snapshot(
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with recording_live_events(event_bus, react=_awaiting_titles(db_url, model_catalog)) as live:
-        meiva.ui.notify(
+        notice_compat.notify(
             "decision needed",
             require_response=True,
-        )  # type: ignore[attr-defined]
-        meiva.ui.dismiss_notice()  # type: ignore[attr-defined]
+        )
+        notice_compat.dismiss_notice()
         updates = live.settle("agent_updated", 2)
 
     # The first snapshot announces the newly posted question. Dismissal
@@ -87,18 +87,18 @@ def test_a_legacy_fyi_row_does_not_block_and_a_second_notice_is_refused(
         )
     db_conn.commit()
     with recording_live_events(event_bus, react=_awaiting_titles(db_url, model_catalog)) as live:
-        meiva.ui.notify(
+        notice_compat.notify(
             "question",
             require_response=True,
-        )  # pyright: ignore[reportCallIssue]
+        )
         with pytest.raises(ValueError, match="already holds an open notice"):
-            meiva.ui.notify(
+            notice_compat.notify(
                 "next question",
-            )  # pyright: ignore[reportCallIssue]
-        meiva.ui.dismiss_notice()  # pyright: ignore[reportCallIssue]
-        meiva.ui.notify(
+            )
+        notice_compat.dismiss_notice()
+        notice_compat.notify(
             "next question",
-        )  # pyright: ignore[reportCallIssue]
+        )
         posted = live.settle("notice_posted", 2)
         resolved = live.settle("notice_resolved", 1)
         updates = live.settle("agent_updated", 3)
@@ -133,19 +133,19 @@ def test_notice_return_int_and_edit_dismiss_take_no_id(
     pin_agent(agent_id)
     notice = cast(
         "NoticeView",
-        meiva.ui.notify(
+        notice_compat.notify(
             "hold this",
             content="body",
             priority="P2",
-        ),  # type: ignore[attr-defined]
+        ),
     )
     assert isinstance(notice, int)
     assert int(notice) == notice  # int conversion gives the id
 
     # edit acts on the open notice — no id passed.
-    meiva.ui.edit_notice(title="updated title")  # type: ignore[attr-defined]
+    notice_compat.edit_notice(title="updated title")
     # dismiss acts on the open notice — no id passed.
-    meiva.ui.dismiss_notice()  # type: ignore[attr-defined]
+    notice_compat.dismiss_notice()
 
     db_conn.rollback()
     with db_conn.cursor() as cur:
@@ -160,7 +160,7 @@ def test_notice_return_int_and_edit_dismiss_take_no_id(
     assert row[2] == "withdrawn"
 
     # After dismissal, new notify should show pending_count = 1 (the fresh one)
-    notify = meiva.ui.notify
+    notify = notice_compat.notify
     assert callable(notify)
     nid2 = cast("NoticeView", notify("fresh fyi"))
     assert nid2.pending_count == 1
@@ -182,7 +182,7 @@ def test_notify_with_expire_at_valid(
     # timedelta
     nid1 = cast(
         "NoticeView",
-        meiva.ui.notify(  # pyright: ignore[reportCallIssue]
+        notice_compat.notify(
             "expires in 1h",
             expire_at=timedelta(hours=1),
         ),
@@ -196,15 +196,15 @@ def test_notify_with_expire_at_valid(
     assert row is not None
     assert row[0] > datetime.now(UTC)
 
-    meiva.ui.dismiss_notice()  # pyright: ignore[reportCallIssue]
+    notice_compat.dismiss_notice()
 
     target = (datetime.now(UTC) + timedelta(hours=2)).isoformat()
     nid2 = cast(
         "NoticeView",
-        meiva.ui.notify(
+        notice_compat.notify(
             "expires at ISO",
             expire_at=target,
-        ),  # pyright: ignore[reportCallIssue]
+        ),
     )
     with db_conn.cursor() as cur:
         cur.execute(
@@ -224,7 +224,7 @@ def test_notify_with_expire_at_in_past_raises_value_error(
     pin_agent(agent_id)
     past = datetime.now(UTC) - timedelta(minutes=5)
     with pytest.raises(ValueError, match="expire_at is in the past"):
-        meiva.ui.notify(
+        notice_compat.notify(
             "past notice",
             expire_at=past,
-        )  # type: ignore[attr-defined]
+        )

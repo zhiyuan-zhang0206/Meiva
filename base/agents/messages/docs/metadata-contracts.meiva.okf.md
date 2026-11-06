@@ -52,15 +52,16 @@ per-agent `user_delivery_mode` overlay selects another mode. `naive` displays
 ordinary text; `sdk` folds all assistant text into expandable Details and uses
 `meiva.ui.publish` for user delivery. A publication never ends a turn.
 
-`meiva_user_delivery_mode` records the mode on native messages; `delivery_mode`
+`meiva_user_delivery_mode` records the mode as a plain string on native messages,
+so checkpoint serialization needs no custom Enum type. `delivery_mode`
 and `source_message_id` travel on chat SSE. Source identity keeps the durable
 attention record attached to the same bubble across streaming and compaction.
 Historical messages without the field retain their existing metadata semantics.
 
 Visible native/prefix and harness messages create durable `agent_user_messages`
-records. SDK publications carry explicit `none` / `optional` / `required` reply
-expectation and a required suggestions list. Unread state clears on reading;
-required-reply state clears only on answer or explicit close. These records live
+records. SDK publications may carry reply suggestions for the independent
+composer service. Unread state clears on reading. Ask stores persistent questions
+separately; their pending state clears only on answer or explicit close. These records live
 independently of `to_user.md`. Pending excerpts are reinjected after compaction,
 and the SDK reader retrieves complete records.
 

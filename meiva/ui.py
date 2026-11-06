@@ -479,8 +479,8 @@ def close(name: str) -> None:
 
 
 def __getattr__(name: str) -> object:
-    # Plugin members land on meiva.ui via a declared `SdkMember` (meiva_fleet adds
-    # notify / edit_notice / dismiss_notice). In an agent-launched
+    # meiva:note
+    # Plugin members can extend meiva.ui via a declared `SdkMember`. In an agent-launched
     # persistent-shell child they are absent until plugins load, and this module
     # already exists so meiva.__getattr__ never fires — trigger the shared lazy
     # load here, then retry.

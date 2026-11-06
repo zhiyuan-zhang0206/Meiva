@@ -2,8 +2,10 @@ from datetime import UTC, datetime
 
 import psycopg
 import pytest
-from langchain_core.messages import AIMessageChunk, HumanMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.hooks.user_delivery import with_pending_deliveries
 from agent.graph.llm.node import llm_node
@@ -12,6 +14,7 @@ from agent.graph.llm_errors import FatalLLMStreamError
 from agent.graph.tests.test_llm_helpers import make_runtime
 from agent.state import AgentState
 from base.agents.context import HostedTurnResources
+from base.agents.messages.kwargs import read_meiva_kwargs
 from base.agents.to_user.delivery.store import publish
 from base.api_contracts.user_delivery import PublishMessage, UserDeliveryMode
 from base.clock.tests.seeded_rng import seeded_rng
@@ -35,6 +38,38 @@ def final_model() -> ScriptedModel:
             for _ in range(3)
         ]
     )
+
+
+async def test_visible_reply_capture_and_checkpoint_metadata(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database_gate: ProcessDbGate,
+    hosted_resources: HostedTurnResources,
+    live_events: LiveEvents,
+) -> None:
+    agent_id = create_agent(db_conn)
+    runtime = make_runtime(
+        resources=hosted_resources,
+        llm=final_model(),
+        event_publisher=live_events.publisher,
+        database_gate=database_gate,
+        pins={"user_delivery_mode": "naive"},
+        ops_pool=aops_pool,
+    )
+    result = await llm_node(
+        AgentState(messages=[HumanMessage(content="Answer directly")]),
+        runtime,
+        {"configurable": {"thread_id": str(agent_id)}},
+        rng=seeded_rng(),
+    )
+    message = AgentState.model_validate(result.update).messages[-1]
+    assert type(read_meiva_kwargs(message).get("meiva_user_delivery_mode")) is str
+    serde = JsonPlusSerializer()
+    restored = AIMessage.model_validate(serde.loads_typed(serde.dumps_typed(message)))
+    assert read_meiva_kwargs(restored).get("meiva_user_delivery_mode") == "naive"
+    assert db_conn.execute(
+        "SELECT mode,content FROM agent_user_messages WHERE agent_id=%s", (agent_id,)
+    ).fetchall() == [("naive", "Private wrap-up")]
 
 
 @pytest.mark.parametrize("delivery", ["publish", "ask", "no_update"])

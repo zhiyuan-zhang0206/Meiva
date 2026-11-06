@@ -15,7 +15,7 @@ from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
 def main(profile: str) -> None:
     assert settings.profile == profile
-    assert not hasattr(settings, "agent")
+    assert hasattr(settings, "agent") == (profile == "gateway")
     if profile == "gateway":
         assert not hasattr(settings, "sandbox")
     home = Path(os.environ["MEIVA_HOME"])
