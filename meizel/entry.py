@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,6 +30,23 @@ _TOOL_ROOT = Path(__file__).resolve().parents[1]
 # that needs the same handle (a test driving the CLI) opens it here instead of building its own.
 def open_repository(root: Path) -> GitRepo:
     return GitRepo(root)
+
+
+# meiva:note
+# A target as argv typed it, resolved against the directory this entry resolved — the repository
+# when `--repo` names one, the working directory otherwise — and expressed relative to `root`. Only
+# the entry may resolve: a command below it holds neither the working directory nor the checkout
+# root, so resolving there would repeat the read in every one of its seven call sites.
+def relative_targets(root: Path, base: Path) -> Callable[[str], str]:
+    def relative(raw: str) -> str:
+        resolved = (base / raw).resolve()
+        try:
+            rel = resolved.relative_to(root)
+        except ValueError as error:
+            raise MeizelError(f"{raw}: outside the repository {root}") from error
+        return "" if str(rel) == "." else rel.as_posix()
+
+    return relative
 
 
 # meiva:note
@@ -57,13 +75,15 @@ def main(argv: list[str]) -> int:
         # commands are handed instead of a path they would build their own from. A command that
         # judges reads a snapshot of it (`repo.universe()`).
         repo = open_repository(options.repo if options.repo is not None else toplevel(base))
+        root = repo.root.resolve()
         deps = cli.CommandDeps(
             tool_root=_TOOL_ROOT,
             read_roles=read_roles,
             read_text=read_text,
+            relative_target=relative_targets(root, base),
             today=datetime.now(UTC).date().isoformat(),
         )
-        return cli.dispatch(repo, repo.root.resolve(), base, args, deps)
+        return cli.dispatch(repo, root, base, args, deps)
     except FrontendDepsError as error:
         print(f"meizel: {error}", file=sys.stderr)
         return 3

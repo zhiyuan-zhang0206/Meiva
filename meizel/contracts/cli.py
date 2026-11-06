@@ -57,27 +57,18 @@ class Repository(Checkout, Protocol):
 
 
 # meiva:note
-# What only the process entry can build, handed down: where this installation sits, the two readers
-# the command layer is not allowed to own — the roles manifest and a file the argv names — and the
-# day, because `debt record` stamps the placeholder it writes into an entry nobody has reviewed and a
-# strict module may not read the clock.
+# What only the process entry can build, handed down: where this installation sits, the three
+# readers the command layer is not allowed to own — the roles manifest, a file the argv names, and a
+# typed target resolved against the directory the entry resolved — and the day, because `debt
+# record` stamps the placeholder it writes into an entry nobody has reviewed and a strict module may
+# not read the clock.
 @dataclass(frozen=True, slots=True)
 class CommandDeps:
     tool_root: Path
     read_roles: Callable[[Checkout], Mapping[str, tuple[str, ...]]]
     read_text: Callable[[Path, str], str]
+    relative_target: Callable[[str], str]
     today: str
-
-
-# meiva:note
-# A repository-relative POSIX path for a path given relative to `base`.
-def _relative_target(root: Path, base: Path, raw: str) -> str:
-    resolved = (base / raw).resolve()
-    try:
-        rel = resolved.relative_to(root)
-    except ValueError as error:
-        raise MeizelError(f"{raw}: outside the repository {root}") from error
-    return "" if str(rel) == "." else rel.as_posix()
 
 
 def _within(path: str, targets: list[str]) -> bool:
@@ -237,13 +228,13 @@ class Check:
     limit: int | None
 
 
-def _run_check(repo: Repository, root: Path, base: Path, opts: Check) -> int:
+def _run_check(repo: Repository, deps: CommandDeps, opts: Check) -> int:
     raw_paths = opts.paths
     changed = opts.changed
     if changed is not None and raw_paths:
         raise MeizelError("--changed judges the files it names; it cannot be combined with paths")
-    targets = [_relative_target(root, base, p) for p in raw_paths]
-    only = None if changed is None else frozenset(_relative_target(root, base, p) for p in changed)
+    targets = [deps.relative_target(p) for p in raw_paths]
+    only = None if changed is None else frozenset(deps.relative_target(p) for p in changed)
     analysis = analyze(repo.universe(), jobs=opts.jobs, changed=only)
     known = analysis.universe
     untracked = _untracked_for_targets(repo.untracked_files(), targets, known.dirs)
@@ -530,8 +521,8 @@ class Impacted:
     jobs: int | None
 
 
-def _run_impacted(repo: Repository, root: Path, base: Path, opts: Impacted) -> int:
-    targets = [_relative_target(root, base, p) for p in opts.paths]
+def _run_impacted(repo: Repository, deps: CommandDeps, opts: Impacted) -> int:
+    targets = [deps.relative_target(p) for p in opts.paths]
     reached = python_reverse_closure(repo.universe(), targets, jobs=opts.jobs)
     if reached is None:
         raise MeizelError(
@@ -548,25 +539,23 @@ def _run_impacted(repo: Repository, root: Path, base: Path, opts: Impacted) -> i
 # The mode shapes live in `debt_carry` with their handlers, so this function hands that module the
 # one thing it cannot own — the namespace boundary — as a reader, and reads only the two things it
 # needs here: which mode runs, and the paths operand the three modes that take one declare.
-def _run_debt(
-    repo: Repository, root: Path, base: Path, args: argparse.Namespace, deps: CommandDeps
-) -> int:
+def _run_debt(repo: Repository, args: argparse.Namespace, deps: CommandDeps) -> int:
     def read[T](shape: type[T]) -> T:
         return read_args(args, shape)
 
     debt = read(DebtBase)
     targets: list[str] = []
     if debt.debt_mode in _DEBT_MODES_WITH_PATHS:
-        targets = [_relative_target(root, base, path) for path in read(DebtPaths).paths]
+        targets = [deps.relative_target(path) for path in read(DebtPaths).paths]
     return run_debt(repo, targets, read, deps.today)
 
 
-def _run_sync(repo: Repository, root: Path, base: Path, opts: Sync) -> int:
+def _run_sync(repo: Repository, deps: CommandDeps, opts: Sync) -> int:
     if not (opts.prune or opts.declare):
         raise MeizelError("sync needs --prune or --declare")
     if opts.paths and not opts.declare:
         raise MeizelError("paths narrow --declare only")
-    targets = [_relative_target(root, base, p) for p in opts.paths] if opts.paths else None
+    targets = [deps.relative_target(p) for p in opts.paths] if opts.paths else None
     untracked = repo.untracked_files()
     if untracked:
         print(_untracked_warning(untracked), file=sys.stderr)
@@ -604,9 +593,9 @@ def _run_policy(repo: Repository, opts: PolicyQuery) -> int:
     return 0
 
 
-def _run_explain(repo: Repository, root: Path, base: Path, opts: Explain, deps: CommandDeps) -> int:
+def _run_explain(repo: Repository, root: Path, opts: Explain, deps: CommandDeps) -> int:
     analysis = analyze(repo.universe(), jobs=opts.jobs)
-    node = _relative_target(root, base, opts.path)
+    node = deps.relative_target(opts.path)
     report = load_report(
         Evidence(root=root, tool=deps.tool_root),
         set(analysis.universe.files),
@@ -632,7 +621,7 @@ def _print_lane_query(repo: Repository, lane: str, *, as_json: bool) -> int:
 
 
 def _read_changed_targets(
-    root: Path,
+    relative_target: Callable[[str], str],
     base: Path,
     raw_changed: Sequence[str] | None,
     changed_file: str | None,
@@ -646,7 +635,7 @@ def _read_changed_targets(
         except OSError as error:
             raise MeizelError(f"{changed_file}: cannot read changed-files list: {error}") from error
         collected_raw.extend(line.strip() for line in file_text.splitlines() if line.strip())
-    return [_relative_target(root, base, p) for p in collected_raw]
+    return [relative_target(p) for p in collected_raw]
 
 
 def _print_selection_query(
@@ -698,13 +687,13 @@ class Tests:
     as_json: bool
 
 
-def _run_tests(repo: Repository, root: Path, base: Path, opts: Tests, deps: CommandDeps) -> int:
+def _run_tests(repo: Repository, base: Path, opts: Tests, deps: CommandDeps) -> int:
     if opts.lane is None and opts.changed is None and opts.changed_files is None:
         raise MeizelError("tests requires --lane, --changed, or --changed-files")
     if opts.changed is None and opts.changed_files is None:
         return _print_lane_query(repo, str(opts.lane), as_json=opts.as_json)
     rel_changed = _read_changed_targets(
-        root, base, opts.changed, opts.changed_files, read=deps.read_text
+        deps.relative_target, base, opts.changed, opts.changed_files, read=deps.read_text
     )
     return _print_selection_query(
         repo,
@@ -726,8 +715,8 @@ class Reachability:
     jobs: int | None
 
 
-def _run_reachability(repo: Repository, root: Path, base: Path, opts: Reachability) -> int:
-    targets = [_relative_target(root, base, p) for p in opts.paths]
+def _run_reachability(repo: Repository, deps: CommandDeps, opts: Reachability) -> int:
+    targets = [deps.relative_target(p) for p in opts.paths]
     universe = repo.universe()
     analysis = analyze(universe, jobs=opts.jobs)
     scope = ReachabilityScope(
@@ -775,25 +764,25 @@ def dispatch(
 ) -> int:
     cmd = read_args(args, Command).command
     if cmd == "check":
-        return _run_check(repo, root, base, read_args(args, Check))
+        return _run_check(repo, deps, read_args(args, Check))
     if cmd == "debt":
-        return _run_debt(repo, root, base, args, deps)
+        return _run_debt(repo, args, deps)
     if cmd == "policy":
         return _run_policy(repo, read_args(args, PolicyQuery))
     if cmd == "explain":
-        return _run_explain(repo, root, base, read_args(args, Explain), deps)
+        return _run_explain(repo, root, read_args(args, Explain), deps)
     if cmd == "impacted":
-        return _run_impacted(repo, root, base, read_args(args, Impacted))
+        return _run_impacted(repo, deps, read_args(args, Impacted))
     if cmd == "tests":
-        return _run_tests(repo, root, base, read_args(args, Tests), deps)
+        return _run_tests(repo, base, read_args(args, Tests), deps)
     if cmd == "reachability":
-        return _run_reachability(repo, root, base, read_args(args, Reachability))
+        return _run_reachability(repo, deps, read_args(args, Reachability))
     if cmd == "roles":
         roles = read_args(args, enumerations.RolesQuery)
         named = read_args(args, enumerations.RolesList).role_names if roles.mode == "list" else ()
         return enumerations.run_roles(repo, deps.read_roles(repo), roles.mode, tuple(named))
     if cmd == "sync":
-        return _run_sync(repo, root, base, read_args(args, Sync))
+        return _run_sync(repo, deps, read_args(args, Sync))
     seed = read_args(args, Bootstrap)
     print(bootstrap(repo, seed.out, seed.jobs))
     return 0
