@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import ModuleType
 
@@ -21,6 +22,23 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 from services.upkeep.events_maintenance import daemon as events_maintenance_daemon
 from services.wake.delivery_watchdog import daemon as delivery_watchdog_daemon
 from services.wake.heartbeat import daemon as heartbeat_daemon
+
+
+# meiva:note
+# The holder counts as a live daemon only once its command line names the module, which is exactly
+# what `pidfile_holds_daemon` reads. Between `Popen` returning and the child's `exec` completing the
+# pid is alive while its argv still belongs to this process, so asserting straight after the spawn
+# asks the guard before the fact it reads exists -- a loaded machine loses that race (CI shard 3/8,
+# 2026-11-06). Waiting on the same predicate the guard uses makes the case deterministic instead of
+# faster.
+def _await_argv(pid: int, module: str, timeout_s: float = 10.0) -> None:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        cmdline = process_cmdline(pid)
+        if cmdline and module in " ".join(cmdline):
+            return
+        time.sleep(0.02)
+    raise AssertionError(f"pid {pid} never ran {module}: {process_cmdline(pid)}")
 
 
 def _guard(daemon: ModuleType, config: ConfigBoot, runtime: Path) -> tuple[Path, bool]:
@@ -76,6 +94,7 @@ def test_daemon_guard_checks_only_current_pidfile(
         _, running = _guard(daemon, process_config, runtime)
         assert running is False
 
+        _await_argv(holder.pid, module_name)
         pidfile.write_text(f"{holder.pid}\n", encoding="utf-8")
         _, running = _guard(daemon, process_config, runtime)
         assert running is True
