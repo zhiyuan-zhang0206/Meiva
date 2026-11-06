@@ -49,6 +49,45 @@ class FleetConfig(BaseModel):
         },
     )
 
+    task_reminder_digest_window_p0_seconds: float = Field(
+        default=0.0,
+        description="Coalescing window (seconds) for check-in digests to a P0 task owner: a second digest is held back while one was already delivered within this window. 0 delivers immediately — a P0 interval exists to be heard now.",
+        json_schema_extra={
+            "env_var": "MEIVA_TASK_REMINDER_DIGEST_WINDOW_P0_SECONDS",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "capability": "gateway",
+            "scope": "cluster-pinned",
+        },
+    )
+
+    task_reminder_digest_window_p1_seconds: float = Field(
+        default=7200.0,
+        description="Coalescing window (seconds) for check-in digests to a P1 task owner. The sweep runs every task_maintenance_interval_seconds, so without a window a due task is delivered one task per message; the window trades at most this much delivery delay for one message per owner.",
+        json_schema_extra={
+            "env_var": "MEIVA_TASK_REMINDER_DIGEST_WINDOW_P1_SECONDS",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "capability": "gateway",
+            "scope": "cluster-pinned",
+        },
+    )
+
+    task_reminder_digest_window_p2_seconds: float = Field(
+        default=10800.0,
+        description="Coalescing window (seconds) for check-in digests to a P2 or P3 task owner. Widest of the three: low-priority reminders tolerate the most delay and account for most of the daily message count.",
+        json_schema_extra={
+            "env_var": "MEIVA_TASK_REMINDER_DIGEST_WINDOW_P2_SECONDS",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "capability": "gateway",
+            "scope": "cluster-pinned",
+        },
+    )
+
     task_escalate_n: int = Field(
         default=3,
         description="Number of unanswered reminders before the daemon escalates to the parent task's owner.",

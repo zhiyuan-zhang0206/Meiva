@@ -59,6 +59,7 @@ def make_task(
     updated_s_ago: float = 0.0,
     reminder_count: int = 0,
     title: str | None = None,
+    priority: str = "P2",
 ) -> int:
     # Distinct titles by default: the agent_tasks partial unique index forbids
     # two in_progress rows sharing a title, and these tests create many.
@@ -67,9 +68,9 @@ def make_task(
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_tasks (title, description, status, owner, created_by, "
-            "parent_id, remind_interval_seconds) "
-            "VALUES (%s, 'd', 'in_progress', %s, 'user', %s, %s) RETURNING id",
-            (title, owner, parent_id, remind_interval_seconds),
+            "parent_id, remind_interval_seconds, priority) "
+            "VALUES (%s, 'd', 'in_progress', %s, 'user', %s, %s, %s) RETURNING id",
+            (title, owner, parent_id, remind_interval_seconds, priority),
         )
         tid = int(cur.fetchone()[0])  # type: ignore[index]
         cur.execute(
