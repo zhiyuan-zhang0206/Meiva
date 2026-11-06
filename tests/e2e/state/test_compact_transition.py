@@ -85,13 +85,17 @@ _FRAMES_JS = """
 def _send(env: E2EEnv, message: str, reply: str) -> None:
     env.page.fill('[data-testid="composer-input"]', message)
     env.page.click('[data-testid="composer-send"]')
-    env.page.get_by_text(reply, exact=False).wait_for(timeout=30_000)
+    env.page.get_by_test_id("timeline-surface").get_by_text(reply, exact=False).wait_for(
+        timeout=30_000
+    )
     wait_for_status(env.agent_id, AgentStatus.IDLING.value)
 
 
 def _compact(env: E2EEnv, narration: str, *, database: Database) -> None:
     enqueue_compact_history_fixture(env.agent_id, database=database)
-    env.page.get_by_text(narration, exact=False).wait_for(timeout=45_000)
+    env.page.get_by_test_id("timeline-surface").get_by_text(narration, exact=False).wait_for(
+        timeout=45_000
+    )
     wait_for_status(env.agent_id, AgentStatus.IDLING.value)
 
 

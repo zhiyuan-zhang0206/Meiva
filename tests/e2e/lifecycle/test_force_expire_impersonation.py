@@ -142,7 +142,7 @@ def test_sidebar_force_expires_takeover_and_agent_resumes(
     page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=10_000)
     page.fill('[data-testid="composer-input"]', "Begin work")
     page.click('[data-testid="composer-send"]')
-    page.get_by_text(FIRST_REPLY).wait_for(timeout=30_000)
+    page.get_by_test_id("timeline-surface").get_by_text(FIRST_REPLY).wait_for(timeout=30_000)
 
     def first_turn_committed() -> tuple[bool, object]:
         with psycopg.connect(settings.data_plane.db_url) as conn:
@@ -216,7 +216,7 @@ def test_sidebar_force_expires_takeover_and_agent_resumes(
         ), result
 
     poll_until(resumed, timeout=60.0, interval=0.5, what="native agent resumes after force-expire")
-    page.get_by_text(RESUMED_REPLY).wait_for(timeout=10_000)
+    page.get_by_test_id("timeline-surface").get_by_text(RESUMED_REPLY).wait_for(timeout=10_000)
     _assert_native_handoff(agent_id, lease_id, session_id, request)
 
 
