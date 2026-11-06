@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 import threading
 import time
-from uuid import uuid4
 
 import psycopg
 import pytest
@@ -28,12 +27,8 @@ def test_create_unique_title_no_conflict(
     """Creating a task with a truly unique title succeeds."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task1 = task_registry.create(
-        "title a", "detail", parent=root_task_id, operation_key=str(uuid4())
-    )
-    task2 = task_registry.create(
-        "title b", "detail", parent=root_task_id, operation_key=str(uuid4())
-    )
+    task1 = task_registry.create("title a", "detail", parent=root_task_id)
+    task2 = task_registry.create("title b", "detail", parent=root_task_id)
     assert task1.id != task2.id
 
 
@@ -43,11 +38,9 @@ def test_update_note_with_cancel_appends_to_results(
     """note with status='cancelled' appends a timestamped line to results."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
-    task_registry.log(task.id, "work started", operation_key=str(uuid4()))
-    task_registry.update(
-        task.id, status="cancelled", note="no longer needed", operation_key=str(uuid4())
-    )
+    task = task_registry.create("title", "detail", parent=root_task_id)
+    task_registry.log(task.id, "work started")
+    task_registry.update(task.id, status="cancelled", note="no longer needed")
     results = task_registry.get(task.id).results
     assert results is not None
     lines = [line for line in results.splitlines() if line]
@@ -63,8 +56,8 @@ def test_update_note_with_done_appends_to_results(
     """note works with any status, not just cancelled."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
-    task_registry.update(task.id, status="done", note="all tests pass", operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", parent=root_task_id)
+    task_registry.update(task.id, status="done", note="all tests pass")
     results = task_registry.get(task.id).results
     assert results is not None
     assert "all tests pass" in results
@@ -76,8 +69,8 @@ def test_update_note_standalone_no_status_change(
     """note alone (no status change) works as a drop-in for log()."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
-    task_registry.update(task.id, note="progress update", operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", parent=root_task_id)
+    task_registry.update(task.id, note="progress update")
     results = task_registry.get(task.id).results
     assert results is not None
     assert "progress update" in results
@@ -91,9 +84,9 @@ def test_update_note_with_no_prior_results(
     """When a task has no prior results, the note line is the only content."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", parent=root_task_id)
     assert task.results is None
-    task_registry.update(task.id, status="cancelled", note="duplicate", operation_key=str(uuid4()))
+    task_registry.update(task.id, status="cancelled", note="duplicate")
     results = task_registry.get(task.id).results
     assert results is not None
     assert "duplicate" in results
@@ -105,13 +98,12 @@ def test_update_note_with_results_overwrite_appends_after(
     """When results is also set, the note is appended after the new results."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", parent=root_task_id)
     task_registry.update(
         task.id,
         status="cancelled",
         results="final notes",
         note="out of scope",
-        operation_key=str(uuid4()),
     )
     results = task_registry.get(task.id).results
     assert results is not None
@@ -126,8 +118,8 @@ def test_update_note_none_is_noop(
     """note=None does nothing — no line appended."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
-    task_registry.update(task.id, status="cancelled", note=None, operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", parent=root_task_id)
+    task_registry.update(task.id, status="cancelled", note=None)
     results = task_registry.get(task.id).results
     # None because no note was appended and no prior results existed
     assert results is None
@@ -139,8 +131,8 @@ def test_log_delegates_to_update_note(
     """log() is a thin wrapper around update(note=...)."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
-    task_registry.log(task.id, "via log()", operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", parent=root_task_id)
+    task_registry.log(task.id, "via log()")
     results = task_registry.get(task.id).results
     assert results is not None
     assert "via log()" in results
@@ -155,9 +147,9 @@ def test_update_root_task_is_rejected(db_conn: psycopg.Connection, root_task_id:
     root_id = root_task_id
     pin_agent(agent_id)
     with pytest.raises(ValueError, match="root task"):
-        task_registry.update(root_id, status="done", operation_key=str(uuid4()))
+        task_registry.update(root_id, status="done")
     with pytest.raises(ValueError, match="root task"):
-        task_registry.update(root_id, owner=agent_id, operation_key=str(uuid4()))
+        task_registry.update(root_id, owner=agent_id)
     # The rejected writes never landed — the root row is unchanged.
     root = task_registry.get(root_id)
     assert root.status == "in_progress"
@@ -177,12 +169,10 @@ def test_update_statuses_are_peer_open(
     owner = seed_agent(db_conn)
     stranger = seed_agent(db_conn)
     pin_agent(owner)
-    task = task_registry.create(
-        "peer-status-change", "detail", parent=root_task_id, owner=owner, operation_key=str(uuid4())
-    )
+    task = task_registry.create("peer-status-change", "detail", parent=root_task_id, owner=owner)
     pin_agent(stranger)
 
-    task_registry.update(task.id, status=next_status, operation_key=str(uuid4()))
+    task_registry.update(task.id, status=next_status)
 
     assert task_registry.get(task.id).status == next_status
 
@@ -194,11 +184,9 @@ def test_zero_shim_update_status_open_is_rejected(
     refuses it with the narrowed enum's error — no backward-compat shim."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create(
-        "shim-check", "detail", parent=root_task_id, operation_key=str(uuid4())
-    )
+    task = task_registry.create("shim-check", "detail", parent=root_task_id)
     with pytest.raises(ValueError, match="status must be one of"):
-        task_registry.update(task.id, status="open", operation_key=str(uuid4()))
+        task_registry.update(task.id, status="open")
     assert task_registry.get(task.id).status == "in_progress"
 
 
@@ -209,11 +197,9 @@ def test_zero_shim_update_status_ongoing_is_rejected(
     refuses it with the three-value enum's error — no backward-compat shim."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create(
-        "shim-check-ongoing", "detail", parent=root_task_id, operation_key=str(uuid4())
-    )
+    task = task_registry.create("shim-check-ongoing", "detail", parent=root_task_id)
     with pytest.raises(ValueError, match="status must be one of"):
-        task_registry.update(task.id, status="ongoing", operation_key=str(uuid4()))
+        task_registry.update(task.id, status="ongoing")
     assert task_registry.get(task.id).status == "in_progress"
 
 
@@ -225,9 +211,7 @@ def test_zero_shim_list_status_is_rejected(
     ('open' went 2026-08-29, 'ongoing' went 2026-09-15)."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task_registry.create(
-        "shim-check-list", "detail", parent=root_task_id, operation_key=str(uuid4())
-    )
+    task_registry.create("shim-check-list", "detail", parent=root_task_id)
     with pytest.raises(ValueError, match="status must be one of"):
         task_registry.list(status=removed_status)
 
@@ -238,7 +222,7 @@ def test_create_requires_parent(db_conn: psycopg.Connection, root_task_id: int) 
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with pytest.raises(TypeError, match="missing 1 required keyword-only argument: 'parent'"):
-        task_registry.create("no-parent", "detail", operation_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
+        task_registry.create("no-parent", "detail")  # pyright: ignore[reportCallIssue]
 
 
 def test_create_with_root_parent_anchors_to_root(
@@ -248,9 +232,7 @@ def test_create_with_root_parent_anchors_to_root(
     root itself is never made its own parent (it stays parent-less)."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create(
-        "anchored-to-root", "detail", parent=root_task_id, operation_key=str(uuid4())
-    )
+    task = task_registry.create("anchored-to-root", "detail", parent=root_task_id)
     assert task.parent_id == root_task_id
     # The persisted row agrees, and the root did not gain a parent.
     assert parent_of(db_conn, task.id) == root_task_id
@@ -264,12 +246,8 @@ def test_create_with_explicit_parent(
     itself is top-level (parented by the system root)."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    parent = task_registry.create(
-        "explicit-parent", "detail", parent=root_task_id, operation_key=str(uuid4())
-    )
-    child = task_registry.create(
-        "explicit-child", "detail", parent=parent.id, operation_key=str(uuid4())
-    )
+    parent = task_registry.create("explicit-parent", "detail", parent=root_task_id)
+    child = task_registry.create("explicit-child", "detail", parent=parent.id)
     assert parent.parent_id == root_task_id  # top-level task under the root
     assert child.parent_id == parent.id  # subtask under its parent
 
@@ -280,7 +258,7 @@ def test_create_rejects_missing_parent(db_conn: psycopg.Connection, root_task_id
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with pytest.raises(ValueError, match="parent task 999999 does not exist"):
-        task_registry.create("orphan", "detail", parent=999_999, operation_key=str(uuid4()))
+        task_registry.create("orphan", "detail", parent=999_999)
 
 
 @pytest.mark.parametrize("closed_status", ["done", "cancelled"])
@@ -292,18 +270,14 @@ def test_create_rejects_closed_parent(
     that produced false-orphan rows in the task graph (task #1975)."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    parent = task_registry.create(
-        f"closed-parent-{closed_status}", "detail", parent=root_task_id, operation_key=str(uuid4())
-    )
-    task_registry.update(parent.id, status=closed_status, operation_key=str(uuid4()))
+    parent = task_registry.create(f"closed-parent-{closed_status}", "detail", parent=root_task_id)
+    task_registry.update(parent.id, status=closed_status)
     message = (
         f"parent task {parent.id} is {closed_status} — a closed task cannot be the "
         "parent of a new task"
     )
     with pytest.raises(ValueError, match=re.escape(message)):
-        task_registry.create(
-            f"child-of-{closed_status}", "detail", parent=parent.id, operation_key=str(uuid4())
-        )
+        task_registry.create(f"child-of-{closed_status}", "detail", parent=parent.id)
     # Nothing leaked: the rejected create is fully rolled back.
     with db_conn.cursor() as cur:
         cur.execute(
@@ -331,9 +305,9 @@ def test_create_rejects_parent_1_when_not_root(redis_url: str, db_conn: psycopg.
         )
     db_conn.commit()
     with pytest.raises(ValueError, match="not the system root task"):
-        task_registry.create("wants-root", "d", parent=1, operation_key=str(uuid4()))
+        task_registry.create("wants-root", "d", parent=1)
     # The actual root id works as a top-level parent.
-    task = task_registry.create("top-level", "d", parent=2, operation_key=str(uuid4()))
+    task = task_registry.create("top-level", "d", parent=2)
     assert task.parent_id == 2
 
 
@@ -342,12 +316,10 @@ def test_update_reparents_under_new_parent(
 ) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    parent = task_registry.create(
-        "parent-task", "d", parent=root_task_id, operation_key=str(uuid4())
-    )
-    child = task_registry.create("child-task", "d", parent=root_task_id, operation_key=str(uuid4()))
+    parent = task_registry.create("parent-task", "d", parent=root_task_id)
+    child = task_registry.create("child-task", "d", parent=root_task_id)
     # Both tasks are top-level (parent=root); reparent the child under `parent`.
-    task_registry.update(child.id, parent_id=parent.id, operation_key=str(uuid4()))
+    task_registry.update(child.id, parent_id=parent.id)
     assert persisted_parent(db_conn, child.id) == parent.id
 
 
@@ -356,17 +328,13 @@ def test_update_parent_none_moves_to_root(
 ) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    parent = task_registry.create(
-        "parent-task2", "d", parent=root_task_id, operation_key=str(uuid4())
-    )
-    child = task_registry.create(
-        "child-task2", "d", parent=root_task_id, operation_key=str(uuid4())
-    )
-    task_registry.update(child.id, parent_id=parent.id, operation_key=str(uuid4()))
+    parent = task_registry.create("parent-task2", "d", parent=root_task_id)
+    child = task_registry.create("child-task2", "d", parent=root_task_id)
+    task_registry.update(child.id, parent_id=parent.id)
     assert persisted_parent(db_conn, child.id) == parent.id
     # Explicit None = back under the system root (the same anchor create()
     # callers pass explicitly for top-level tasks).
-    task_registry.update(child.id, parent_id=None, operation_key=str(uuid4()))
+    task_registry.update(child.id, parent_id=None)
     assert persisted_parent(db_conn, child.id) == root_task_id
 
 
@@ -375,9 +343,9 @@ def test_update_rejects_self_parent(
 ) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("self-parent", "d", parent=root_task_id, operation_key=str(uuid4()))
+    task = task_registry.create("self-parent", "d", parent=root_task_id)
     with pytest.raises(ValueError, match="own parent"):
-        task_registry.update(task.id, parent_id=task.id, operation_key=str(uuid4()))
+        task_registry.update(task.id, parent_id=task.id)
 
 
 def test_update_rejects_missing_parent(
@@ -385,11 +353,9 @@ def test_update_rejects_missing_parent(
 ) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create(
-        "missing-parent", "d", parent=root_task_id, operation_key=str(uuid4())
-    )
+    task = task_registry.create("missing-parent", "d", parent=root_task_id)
     with pytest.raises(ValueError, match="does not exist"):
-        task_registry.update(task.id, parent_id=999_999, operation_key=str(uuid4()))
+        task_registry.update(task.id, parent_id=999_999)
 
 
 @pytest.mark.parametrize("closed_status", ["done", "cancelled"])
@@ -404,17 +370,14 @@ def test_update_rejects_closed_parent(
         f"reparent-parent-{closed_status}",
         "detail",
         parent=root_task_id,
-        operation_key=str(uuid4()),
     )
-    child = task_registry.create(
-        f"reparent-child-{closed_status}", "detail", parent=root_task_id, operation_key=str(uuid4())
-    )
-    task_registry.update(parent.id, status=closed_status, operation_key=str(uuid4()))
+    child = task_registry.create(f"reparent-child-{closed_status}", "detail", parent=root_task_id)
+    task_registry.update(parent.id, status=closed_status)
     message = (
         f"task {child.id} cannot be moved under a closed parent #{parent.id} ({closed_status})"
     )
     with pytest.raises(ValueError, match=re.escape(message)):
-        task_registry.update(child.id, parent_id=parent.id, operation_key=str(uuid4()))
+        task_registry.update(child.id, parent_id=parent.id)
     # The tree is unchanged: the child stays under the root.
     assert persisted_parent(db_conn, child.id) == root_task_id
 
@@ -431,15 +394,11 @@ def test_create_serializes_against_concurrent_parent_close(
 
     def worker() -> None:
         try:
-            task_registry.create(
-                "race-child", "detail", parent=parent_id, operation_key=str(uuid4())
-            )
+            task_registry.create("race-child", "detail", parent=parent_id)
         except ValueError as exc:
             outcome["err"] = str(exc)
 
-    parent = task_registry.create(
-        "race-parent", "detail", parent=root_task_id, operation_key=str(uuid4())
-    )
+    parent = task_registry.create("race-parent", "detail", parent=root_task_id)
     parent_id = parent.id
     # Mimic the close path: UPDATE the parent to done but hold the row lock
     # uncommitted — the worker's parent-row SELECT FOR UPDATE must block.
@@ -467,16 +426,12 @@ def test_update_reparent_serializes_against_concurrent_parent_close(
 
     def worker() -> None:
         try:
-            task_registry.update(child_id, parent_id=parent_id, operation_key=str(uuid4()))
+            task_registry.update(child_id, parent_id=parent_id)
         except ValueError as exc:
             outcome["err"] = str(exc)
 
-    parent = task_registry.create(
-        "race-parent2", "detail", parent=root_task_id, operation_key=str(uuid4())
-    )
-    child = task_registry.create(
-        "race-child2", "detail", parent=root_task_id, operation_key=str(uuid4())
-    )
+    parent = task_registry.create("race-parent2", "detail", parent=root_task_id)
+    child = task_registry.create("race-child2", "detail", parent=root_task_id)
     parent_id, child_id = parent.id, child.id
     with db_conn.cursor() as cur:
         cur.execute("UPDATE agent_tasks SET status = 'done' WHERE id = %s", (parent_id,))
@@ -497,14 +452,14 @@ def test_update_rejects_cycle_under_own_descendant(
 ) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    a = task_registry.create("cycle-a", "d", parent=root_task_id, operation_key=str(uuid4()))
-    b = task_registry.create("cycle-b", "d", parent=root_task_id, operation_key=str(uuid4()))
-    c = task_registry.create("cycle-c", "d", parent=root_task_id, operation_key=str(uuid4()))
-    task_registry.update(b.id, parent_id=a.id, operation_key=str(uuid4()))
-    task_registry.update(c.id, parent_id=b.id, operation_key=str(uuid4()))
+    a = task_registry.create("cycle-a", "d", parent=root_task_id)
+    b = task_registry.create("cycle-b", "d", parent=root_task_id)
+    c = task_registry.create("cycle-c", "d", parent=root_task_id)
+    task_registry.update(b.id, parent_id=a.id)
+    task_registry.update(c.id, parent_id=b.id)
     # a -> c would put a under its own descendant: rejected.
     with pytest.raises(ValueError, match="descendant"):
-        task_registry.update(a.id, parent_id=c.id, operation_key=str(uuid4()))
+        task_registry.update(a.id, parent_id=c.id)
     # The tree is unchanged.
     assert persisted_parent(db_conn, b.id) == a.id
     assert persisted_parent(db_conn, c.id) == b.id
@@ -516,11 +471,9 @@ def test_update_parent_alone_is_a_valid_update(
     """A pure reparent (no other field) must not hit the nothing-to-update guard."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    parent = task_registry.create(
-        "lone-parent", "d", parent=root_task_id, operation_key=str(uuid4())
-    )
-    child = task_registry.create("lone-child", "d", parent=root_task_id, operation_key=str(uuid4()))
-    task_registry.update(child.id, parent_id=parent.id, operation_key=str(uuid4()))
+    parent = task_registry.create("lone-parent", "d", parent=root_task_id)
+    child = task_registry.create("lone-child", "d", parent=root_task_id)
+    task_registry.update(child.id, parent_id=parent.id)
     assert persisted_parent(db_conn, child.id) == parent.id
 
 
@@ -535,8 +488,8 @@ def test_sdk_task_timestamps_are_bare_cluster_zone(
     DB keep explicit offsets; only this object is uniform."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("ts-uniform", "d", parent=root_task_id, operation_key=str(uuid4()))
-    task_registry.log(task.id, "probe log line 1", operation_key=str(uuid4()))
+    task = task_registry.create("ts-uniform", "d", parent=root_task_id)
+    task_registry.log(task.id, "probe log line 1")
     got = task_registry.get(task.id)
 
     for field, value in (("created_at", got.created_at), ("updated_at", got.updated_at)):

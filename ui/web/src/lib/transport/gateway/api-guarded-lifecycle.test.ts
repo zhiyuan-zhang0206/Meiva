@@ -26,7 +26,7 @@ afterEach(async () => {
 });
 
 it("keeps the exact launch retry intent after a lost response", async () => {
-  const submit = () => rig.api.retryAgentLaunch(8, "prior-attempt", "fixed-intent");
+  const submit = () => rig.api.retryAgentLaunch(8, "prior-attempt");
   answer = { kind: "drop" };
   await expect(submit()).rejects.toBeInstanceOf(TypeError);
   expect(gateway.requests).toHaveLength(1);
@@ -39,11 +39,6 @@ it("keeps the exact launch retry intent after a lost response", async () => {
   expect(first.method).toBe("POST");
   expect(JSON.parse(first.body)).toEqual({ expected_prior_attempt_id: "prior-attempt" });
   expect(replay.body).toBe(first.body);
-  expect(replay.headers["idempotency-key"]).toBe("fixed-intent");
-  expect(replay.headers["idempotency-scope"]).toBe("principal-v1");
-});
-
-it.each(["", "x".repeat(129)])("rejects invalid operation keys before sending", (key) => {
-  expect(() => rig.api.retryAgentLaunch(8, "prior-attempt", key)).toThrow("idempotency key");
-  expect(gateway.requests).toHaveLength(0);
+  expect(replay.headers["idempotency-key"]).toBeUndefined();
+  expect(replay.headers["idempotency-scope"]).toBeUndefined();
 });

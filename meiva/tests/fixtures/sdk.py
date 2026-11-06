@@ -3,6 +3,7 @@
 import os
 from collections.abc import Iterator
 from pathlib import Path
+from random import SystemRandom
 from types import ModuleType
 
 import pytest
@@ -46,6 +47,7 @@ def sdk_environment(
         user_home=Path.home(),
         meiva_home=resolve_meiva_home(),
         environ=os.environ,
+        rng=SystemRandom(),
     )
     process_context.bind_context(context)
     try:

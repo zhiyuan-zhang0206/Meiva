@@ -14,7 +14,7 @@ tags:
 
 ## API
 
-### `create(title, description, *, parent, owner=None, priority="P2", remind_interval_seconds=None, operation_key) -> Task`
+### `create(title, description, *, parent, owner=None, priority="P2", remind_interval_seconds=None) -> Task`
 
 Create a task and return the full `Task`. `title` is a single line (unique among `in_progress` tasks); `description` is the task description.
 
@@ -29,10 +29,10 @@ Standalone creation returns the original accepted Task snapshot on replay;
 see [[task_creation_receipts.meiva.okf.md|Creation receipts]]. Query `get(task.id)`
 for current state.
 
-### `create_and_assign(title, description, *, operation_key, label=None, config_overlay=None, machine=None, parent, priority="P2", remind_interval_seconds=None) -> TaskAssignment`
+### `create_and_assign(title, description, *, label=None, config_overlay=None, machine=None, parent, priority="P2", remind_interval_seconds=None) -> TaskAssignment`
 
 Accept the agent birth, task and initial assignment in one transaction. An explicit
-`operation_key` is required; reuse the same key and inputs to recover the original
+The runtime reuses the operation UID on replay to recover the original
 result after a lost reply. The result is `TaskAssignment(task, agent_id)`, a
 NamedTuple that still unpacks as `task, agent_id`. The SDK uses only `/api/keyed/v1/task-assignments`.
 There is no opt-in flag or separate spawn/create recipe.
@@ -53,7 +53,7 @@ Filter the task list, ordered by `created_at` ascending. All parameters are opti
 | `parent=some_id, recursive=True` | Entire subtree (recursive CTE) |
 | No parameters | All tasks |
 
-### `update(task_id, *, status=None, title=None, description=None, results=None, owner=<unchanged>, remind_interval_seconds=<unchanged>, priority=None, note=None, operation_key) -> None`
+### `update(task_id, *, status=None, title=None, description=None, results=None, owner=<unchanged>, remind_interval_seconds=<unchanged>, priority=None, note=None) -> None`
 
 Modify task fields, **pass only what you want to change**—omitted fields remain unchanged. `results` is replaced wholesale; to append progress, use `note=` or `log()`.
 
@@ -65,21 +65,19 @@ Modify task fields, **pass only what you want to change**—omitted fields remai
 - `note`: appends a line `[YYYY-MM-DD HH:MM:SS] <note>\n\n` to `results`, can be used alongside any status change or alone as a substitute for `log()`. The stamp is built by `base.agents.tasks.notes.task_note_line` — the same agent-facing representation and the same timezone as every other timestamp an agent reads, shared with the gateway's drain writer so the two cannot drift. Trailing double newlines (`\n\n`) and idempotent prefix normalization preserve consecutive entries as distinct Markdown paragraphs under CommonMark instead of collapsing soft single newlines into spaces.
 - A write that is activity on the task resets the reminder window (`last_reminded_at` / `reminder_count` / `escalated_at` zeroed): a change to the work, and by default a note. A title-only, description-only or interval-only write does not (Fleet `task_reminder_reset_on`). Silencing a task with `reminders_paused_until` is not a change to the work either: it zeroes nothing and moves neither `updated_at` nor the counters — it only stops delivery until the deadline. Parking is SDK-only (`update(reminders_paused_until=...)`): the HTTP `PATCH` surface has no field for it.
 - Each fresh committed write publishes `task_updated` (SSE, board invalidates and refetches).
-- `operation_key`: [[task_update_receipts.meiva.okf.md|explicit agent/task-scoped replay]] skips repeated task effects; changed effective inputs with the same key raise `ValueError`.
 
-### `log(task_id, message, *, operation_key) -> None`
+### `log(task_id, message, *) -> None`
 
-Append a double-newline-terminated block `[YYYY-MM-DD HH:MM:SS] message\n\n` to `results`—**delegates to `update(task_id, note=message, operation_key=operation_key)`**, same timestamped append, same reminder counter reset.
+Append a double-newline-terminated block `[YYYY-MM-DD HH:MM:SS] message\n\n` to `results`—**delegates to `update(task_id, note=message)`**, same timestamped append, same reminder counter reset.
 
 **Common operation patterns**:
 
 ```python
-from uuid import uuid4
 
-meiva.tasks.update(task_id, owner=meiva.self.AGENT_ID, status="in_progress", operation_key=str(uuid4()))  # claim and start
-meiva.tasks.log(task_id, "Finished phase one", operation_key=str(uuid4()))                               # log progress
-meiva.tasks.update(task_id, status="done", operation_key=str(uuid4()))                                    # complete
-meiva.tasks.update(task_id, owner=other_agent_id, operation_key=str(uuid4()))                             # transfer to another agent
+meiva.tasks.update(task_id, owner=meiva.self.AGENT_ID, status="in_progress")  # claim and start
+meiva.tasks.log(task_id, "Finished phase one")                               # log progress
+meiva.tasks.update(task_id, status="done")                                    # complete
+meiva.tasks.update(task_id, owner=other_agent_id)                             # transfer to another agent
 ```
 
 ## Reference

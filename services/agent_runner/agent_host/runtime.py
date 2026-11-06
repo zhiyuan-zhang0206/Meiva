@@ -10,7 +10,6 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from uuid import UUID
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from psycopg_pool import AsyncConnectionPool
@@ -417,7 +416,6 @@ async def build_runtime(
     catalog: ModelCatalog,
     keys: ProviderKeys,
     llm_override: str,
-    permissions_notice_key: UUID,
     home: Path,
     harness: Harness = Harness.MEIVA,
     birth_config: Mapping[str, object] | None = None,
@@ -438,7 +436,6 @@ async def build_runtime(
         catalog=catalog,
         keys=keys,
         llm_override=llm_override,
-        permissions_notice_key=permissions_notice_key,
         home=home,
         harness=harness,
     )

@@ -26,7 +26,6 @@ meiva.ui.notify(
             {"id": "inspector", "label": "Agent inspector"},
         ],
     },
-    idempotency_key="notice-scope-decision",
 )
 ```
 

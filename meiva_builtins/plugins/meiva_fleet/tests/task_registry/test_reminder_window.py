@@ -12,13 +12,13 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
-from uuid import uuid4
 
 import psycopg
 import pytest
 
 from base.packages.plugins.config_registration import disk_image_path
 from base.paths.tests.homes import unit_home as unit_home
+from meiva.tests.fixtures.replay_sdk_write import replay_sdk_write
 from meiva_builtins.plugins.meiva_fleet import task_registry
 from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
@@ -79,7 +79,7 @@ def test_note_only_write_restarts_the_ladder(
 ) -> None:
     _actor, _owner, task_id = seed_owned_task(db_conn, root_task_id)
     _climb(db_conn, task_id)
-    task_registry.update(task_id, note="still waiting on the draft", operation_key=str(uuid4()))
+    task_registry.update(task_id, note="still waiting on the draft")
     _restarted(db_conn, task_id)
 
 
@@ -90,10 +90,10 @@ def test_a_replayed_note_does_not_advance_the_window_again(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     _actor, _owner, task_id = seed_owned_task(db_conn, root_task_id)
-    task_registry.update(task_id, note="first and only", operation_key="replayed")
+    replay_sdk_write("first note", task_registry.update, task_id, note="first and only")
     _age(db_conn, task_id)
     climbed = _climbed(db_conn, task_id)
-    task_registry.update(task_id, note="first and only", operation_key="replayed")
+    replay_sdk_write("first note", task_registry.update, task_id, note="first and only")
     _kept(db_conn, task_id, climbed)
     assert _age_days(db_conn, task_id) > 29
 
@@ -103,7 +103,7 @@ def test_results_write_restarts_the_ladder(
 ) -> None:
     _actor, _owner, task_id = seed_owned_task(db_conn, root_task_id)
     _climb(db_conn, task_id)
-    task_registry.update(task_id, results="came back clean", operation_key=str(uuid4()))
+    task_registry.update(task_id, results="came back clean")
     _restarted(db_conn, task_id)
 
 
@@ -113,9 +113,9 @@ def test_restating_the_same_results_keeps_the_ladder(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     _actor, _owner, task_id = seed_owned_task(db_conn, root_task_id)
-    task_registry.update(task_id, results="came back clean", operation_key=str(uuid4()))
+    task_registry.update(task_id, results="came back clean")
     climbed = _climbed(db_conn, task_id)
-    task_registry.update(task_id, results="came back clean", operation_key=str(uuid4()))
+    task_registry.update(task_id, results="came back clean")
     _kept(db_conn, task_id, climbed)
 
 
@@ -124,7 +124,7 @@ def test_status_change_restarts_the_ladder(
 ) -> None:
     _actor, _owner, task_id = seed_owned_task(db_conn, root_task_id)
     _climb(db_conn, task_id)
-    task_registry.update(task_id, status="done", operation_key=str(uuid4()))
+    task_registry.update(task_id, status="done")
     _restarted(db_conn, task_id)
 
 
@@ -133,7 +133,7 @@ def test_title_change_keeps_the_ladder(
 ) -> None:
     _actor, _owner, task_id = seed_owned_task(db_conn, root_task_id)
     climbed = _climbed(db_conn, task_id)
-    task_registry.update(task_id, title="receipt task, renamed", operation_key=str(uuid4()))
+    task_registry.update(task_id, title="receipt task, renamed")
     _kept(db_conn, task_id, climbed)
 
 
@@ -142,7 +142,7 @@ def test_description_change_keeps_the_ladder(
 ) -> None:
     _actor, _owner, task_id = seed_owned_task(db_conn, root_task_id)
     climbed = _climbed(db_conn, task_id)
-    task_registry.update(task_id, description="a sharper brief", operation_key=str(uuid4()))
+    task_registry.update(task_id, description="a sharper brief")
     _kept(db_conn, task_id, climbed)
 
 
@@ -151,7 +151,7 @@ def test_priority_change_restarts_the_ladder(
 ) -> None:
     _actor, _owner, task_id = seed_owned_task(db_conn, root_task_id)
     _climb(db_conn, task_id)
-    task_registry.update(task_id, priority="P0", operation_key=str(uuid4()))
+    task_registry.update(task_id, priority="P0")
     _restarted(db_conn, task_id)
 
 
@@ -163,7 +163,7 @@ def test_owner_change_restarts_the_ladder(
     _actor, _owner, task_id = seed_owned_task(db_conn, root_task_id)
     successor = seed_agent(db_conn)
     _climb(db_conn, task_id)
-    task_registry.update(task_id, owner=successor, operation_key=str(uuid4()))
+    task_registry.update(task_id, owner=successor)
     _restarted(db_conn, task_id)
 
 
@@ -173,11 +173,9 @@ def test_reparent_restarts_the_ladder(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     _actor, _owner, task_id = seed_owned_task(db_conn, root_task_id)
-    other_parent = task_registry.create(
-        "another parent", "container", parent=root_task_id, operation_key=str(uuid4())
-    )
+    other_parent = task_registry.create("another parent", "container", parent=root_task_id)
     _climb(db_conn, task_id)
-    task_registry.update(task_id, parent_id=other_parent.id, operation_key=str(uuid4()))
+    task_registry.update(task_id, parent_id=other_parent.id)
     _restarted(db_conn, task_id)
 
 
@@ -208,7 +206,7 @@ def test_pause_keeps_the_ladder_and_the_clock(
     _age(db_conn, task_id)
     climbed = _climbed(db_conn, task_id)
     deadline = datetime.now(UTC) + timedelta(hours=1)
-    task_registry.update(task_id, reminders_paused_until=deadline, operation_key=str(uuid4()))
+    task_registry.update(task_id, reminders_paused_until=deadline)
     _kept(db_conn, task_id, climbed)
     assert _age_days(db_conn, task_id) > 29
     stored = _paused_until(db_conn, task_id)
@@ -225,7 +223,6 @@ def test_pause_past_the_bound_is_rejected(
         task_registry.update(
             task_id,
             reminders_paused_until=datetime.now(UTC) + timedelta(days=1),
-            operation_key=str(uuid4()),
         )
     assert _paused_until(db_conn, task_id) is None
 
@@ -241,7 +238,6 @@ def test_pause_needs_a_bound_on_this_home(
         task_registry.update(
             task_id,
             reminders_paused_until=datetime.now(UTC) + timedelta(hours=1),
-            operation_key=str(uuid4()),
         )
 
 
@@ -257,7 +253,6 @@ def test_a_past_deadline_resumes(
     task_registry.update(
         task_id,
         reminders_paused_until=datetime.now(UTC) - timedelta(minutes=1),
-        operation_key=str(uuid4()),
     )
     _kept(db_conn, task_id, climbed)
     stored = _paused_until(db_conn, task_id)
@@ -281,7 +276,7 @@ def test_policy_can_leave_the_note_out(
     )
     _actor, _owner, task_id = seed_owned_task(db_conn, root_task_id)
     climbed = _climbed(db_conn, task_id)
-    task_registry.update(task_id, note="explicit progress", operation_key=str(uuid4()))
+    task_registry.update(task_id, note="explicit progress")
     _kept(db_conn, task_id, climbed)
 
 
@@ -315,7 +310,7 @@ def test_note_only_write_moves_the_clock(
 ) -> None:
     _actor, _owner, task_id = seed_owned_task(db_conn, root_task_id)
     _age(db_conn, task_id)
-    task_registry.update(task_id, note="still waiting on the draft", operation_key=str(uuid4()))
+    task_registry.update(task_id, note="still waiting on the draft")
     assert _age_days(db_conn, task_id) < 1
 
 
@@ -324,7 +319,7 @@ def test_results_write_moves_the_clock(
 ) -> None:
     _actor, _owner, task_id = seed_owned_task(db_conn, root_task_id)
     _age(db_conn, task_id)
-    task_registry.update(task_id, results="came back clean", operation_key=str(uuid4()))
+    task_registry.update(task_id, results="came back clean")
     assert _age_days(db_conn, task_id) < 1
 
 
@@ -335,7 +330,7 @@ def test_title_change_keeps_the_clock(
 ) -> None:
     _actor, _owner, task_id = seed_owned_task(db_conn, root_task_id)
     _age(db_conn, task_id)
-    task_registry.update(task_id, title="receipt task, renamed", operation_key=str(uuid4()))
+    task_registry.update(task_id, title="receipt task, renamed")
     assert _age_days(db_conn, task_id) > 29
 
 
@@ -346,7 +341,7 @@ def test_audit_fact_records_the_restart(
 ) -> None:
     _actor, _owner, task_id = seed_owned_task(db_conn, root_task_id)
     _climb(db_conn, task_id)
-    task_registry.update(task_id, results="came back clean", operation_key=str(uuid4()))
+    task_registry.update(task_id, results="came back clean")
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT attributes FROM audit_events WHERE event_name = 'task_update' "

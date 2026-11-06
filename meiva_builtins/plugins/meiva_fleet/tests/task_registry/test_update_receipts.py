@@ -19,6 +19,7 @@ from base.paths import meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva.tests.fixtures.pin_agent import pin_agent
+from meiva.tests.fixtures.replay_sdk_write import replay_sdk_write, replay_uid
 from meiva_builtins.plugins.meiva_fleet import task_registry
 from meiva_builtins.plugins.meiva_fleet.task_maintenance.tests.failing_writes import inserts_failing
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
@@ -90,16 +91,29 @@ def test_post_commit_failure_replay_preserves_intervening_state(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int, emitted_events: EmittedEvents
 ) -> None:
     _actor, _owner, tid = seed_owned_task(db_conn, root_task_id)
-    task_registry.commit_update(meiva.context, tid, note="committed", operation_key="lost")
+    task_registry.commit_update(
+        meiva.context, tid, note="committed", operation_key=replay_uid("lost")
+    )
     current = seed_agent(db_conn)
-    task_registry.update(tid, owner=current, operation_key=str(uuid4()))
+    task_registry.update(
+        tid,
+        owner=current,
+    )
     db_conn.execute(
         "UPDATE agent_tasks SET reminder_count=4, escalated_at=now() WHERE id=%s", (tid,)
     )
     db_conn.commit()
     before = _facts(db_conn, tid)
     emitted_events.clear()
-    assert task_registry.update(tid, note="committed", operation_key="lost") is None
+    assert (
+        replay_sdk_write(
+            "lost",
+            task_registry.update,
+            tid,
+            note="committed",
+        )
+        is None
+    )
     assert _facts(db_conn, tid) == before
     assert emitted_events.names() == []
 
@@ -146,7 +160,12 @@ def test_producer_failure_rolls_back_entire_operation(
         inserts_failing(db_conn, table),
         pytest.raises(psycopg.errors.RaiseException, match=f"{table} inserts refused"),
     ):
-        task_registry.log(tid, "rolled back", operation_key="rollback")
+        replay_sdk_write(
+            "rollback",
+            task_registry.log,
+            tid,
+            "rolled back",
+        )
     assert _facts(db_conn, tid) == before
     assert db_conn.execute("SELECT count(*) FROM task_update_receipts").fetchone() == (0,)
 
@@ -155,10 +174,20 @@ def test_effective_body_aliases_and_conflicts(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     _actor, _owner, tid = seed_owned_task(db_conn, root_task_id)
-    task_registry.log(tid, "", operation_key="body")
+    replay_sdk_write(
+        "body",
+        task_registry.log,
+        tid,
+        "",
+    )
     before = _facts(db_conn, tid)
-    task_registry.update(
-        tid, note="", owner=None, remind_interval_seconds=None, operation_key="body"
+    replay_sdk_write(
+        "body",
+        task_registry.update,
+        tid,
+        note="",
+        owner=None,
+        remind_interval_seconds=None,
     )
     assert _facts(db_conn, tid) == before
     for kwargs in (
@@ -167,7 +196,7 @@ def test_effective_body_aliases_and_conflicts(
         {"priority": "P1", "note": ""},
     ):
         with pytest.raises(ValueError, match="different task update"):
-            task_registry.update(tid, operation_key="body", **kwargs)  # type: ignore[arg-type]
+            replay_sdk_write("body", task_registry.update, tid, **kwargs)  # type: ignore[arg-type]
     assert _facts(db_conn, tid) == before
 
 
@@ -175,10 +204,19 @@ def test_actor_and_task_scopes_are_independent(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     actor, owner, tid = seed_owned_task(db_conn, root_task_id)
-    second = task_registry.create("other", "work", parent=root_task_id, operation_key=str(uuid4()))
+    second = task_registry.create(
+        "other",
+        "work",
+        parent=root_task_id,
+    )
     for who, target in ((actor, tid), (actor, second.id), (owner, tid)):
         pin_agent(who)
-        task_registry.log(target, "separate", operation_key="same raw key")
+        replay_sdk_write(
+            "same raw key",
+            task_registry.log,
+            target,
+            "separate",
+        )
     assert db_conn.execute("SELECT count(*) FROM task_update_receipts").fetchone() == (3,)
 
 
@@ -186,8 +224,21 @@ def test_retained_void_receipt_survives_task_deletion(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     _actor, _owner, tid = seed_owned_task(db_conn, root_task_id)
-    task_registry.update(tid, priority="P1", operation_key="deleted")
+    replay_sdk_write(
+        "deleted",
+        task_registry.update,
+        tid,
+        priority="P1",
+    )
     db_conn.execute("DELETE FROM agent_tasks WHERE id=%s", (tid,))
     db_conn.commit()
-    assert task_registry.update(tid, priority="P1", operation_key="deleted") is None
+    assert (
+        replay_sdk_write(
+            "deleted",
+            task_registry.update,
+            tid,
+            priority="P1",
+        )
+        is None
+    )
     assert db_conn.execute("SELECT count(*) FROM task_update_receipts").fetchone() == (1,)

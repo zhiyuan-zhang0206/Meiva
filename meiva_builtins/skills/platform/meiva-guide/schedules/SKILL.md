@@ -79,7 +79,6 @@ idle — and only spawn when none exists. State lives in the agents table (the l
 is the identity); the schedule keeps none:
 
 ```python
-from uuid import uuid4
 
 import meiva
 from meiva.agents import AgentStatus as S
@@ -100,7 +99,7 @@ def ensure_agent(label: str, prompt: str) -> int:
         if page.next_cursor is None:
             break
         before_id = page.next_cursor
-    return meiva.agents.spawn(prompt=prompt, label=label, idempotency_key=str(uuid4()))
+    return meiva.agents.spawn(prompt=prompt, label=label)
 
 ```
 
@@ -114,7 +113,6 @@ notify.
 ## 3. Full example — nightly-or-threshold, reuse-by-label
 
 ```python
-from uuid import uuid4
 
 # consolidate the memory pool nightly at 3am, or whenever it grows >500 lines in 2h
 import time
@@ -140,7 +138,7 @@ def ensure_agent(label: str, prompt: str) -> int:
         if page.next_cursor is None:
             break
         before_id = page.next_cursor
-    return meiva.agents.spawn(prompt=prompt, label=label, idempotency_key=str(uuid4()))
+    return meiva.agents.spawn(prompt=prompt, label=label)
 
 
 def pool_growth():

@@ -27,6 +27,7 @@ from agent.execution.delivery_plan import (
 from agent.execution.protocol import RequestPayload, ResultPayload
 from base.agents.context import MeivaContext, deferred_event_bus
 from base.agents.context.clients import ClientSet
+from base.agents.sdk.operation_ids import ExecutionIdentity, OperationIds
 from base.host.boundary.json_values import is_object_dict
 from base.host.boundary.untyped import object_of
 from base.host.env.agent_env import AGENT_ID_ENV
@@ -331,7 +332,9 @@ def apply_oom_preference(env: Mapping[str, str], path: Path) -> int | None:
     return None
 
 
-def run_code(code: str, payload: ResultPayload) -> None:
+def run_code(
+    code: str, payload: ResultPayload, *, execution_identity: ExecutionIdentity | None = None
+) -> None:
     import meiva
     from agent.execution.agent_traceback import (
         format_agent_traceback,
@@ -364,7 +367,10 @@ def run_code(code: str, payload: ResultPayload) -> None:
     sampling = (
         contextlib.nullcontext() if installation is None else installation.sampling.execution()
     )
-    process_context.bind_context(replace(execution_context, sdk_calls=tally))
+    operation_ids = None if execution_identity is None else OperationIds(execution_identity)
+    process_context.bind_context(
+        replace(execution_context, sdk_calls=tally, operation_ids=operation_ids)
+    )
     try:
         payload.code_reached = True
 
@@ -550,7 +556,7 @@ def run_child(
         deliver_envelope_telemetry(clients=context.clients)
         return
     try:
-        run_code(request.code, payload)
+        run_code(request.code, payload, execution_identity=request.execution_identity)
     except BaseException as exc:
         write_crashed_result(result_path, exc, code_reached=payload.code_reached)
         deliver_envelope_telemetry(clients=context.clients)

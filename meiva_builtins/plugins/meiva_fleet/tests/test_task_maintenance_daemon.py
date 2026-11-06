@@ -14,7 +14,6 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from itertools import count
 from typing import Any
-from uuid import uuid4
 
 import psycopg
 import pytest
@@ -281,7 +280,10 @@ class TestRemind:
         owner = _make_agent(db_conn)
         tid = _make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=7200)
         pin_agent(owner)
-        task_registry.log(tid, "still waiting on the draft", operation_key=str(uuid4()))
+        task_registry.log(
+            tid,
+            "still waiting on the draft",
+        )
 
         assert run_reminders(pool, database, event_bus, 3600.0) == 0
         assert deliver.deliveries() == []

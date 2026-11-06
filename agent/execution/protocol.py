@@ -18,6 +18,7 @@ from uuid import UUID
 from pydantic import TypeAdapter
 
 from agent.execution.result_kind import RESULT_KINDS, ResultKind
+from base.agents.sdk.operation_ids import ExecutionIdentity
 from base.host.atomic_io import write_bytes_atomic
 from base.host.boundary.fields import (
     optional_bool_field,
@@ -82,6 +83,7 @@ class RequestPayload:
     state: dict[str, object] | None
     incarnation: RuntimeIncarnation | None = None
     state_raw: tuple[str, bytes] | None = None
+    execution_identity: ExecutionIdentity | None = None
 
     @property
     def agent_id(self) -> int | None:
@@ -178,6 +180,7 @@ def write_request(
     timeout_s: float,
     state: Mapping[str, object] | None,
     incarnation: RuntimeIncarnation | None,
+    execution_identity: ExecutionIdentity | None = None,
 ) -> None:
     started_at = time.perf_counter()
     agent_id = _acting_agent_id(context)
@@ -196,6 +199,11 @@ def write_request(
             "generation": str(incarnation.generation),
             "owner": str(incarnation.owner),
         }
+    if execution_identity is not None:
+        envelope["execution_uid"] = str(execution_identity.uid)
+        issued_at = execution_identity.issued_at
+        if issued_at is not None:
+            envelope["execution_issued_at"] = issued_at.isoformat()
     if state is not None:
         tag, blob = dumps_typed(state)
         envelope["state_tag"] = tag
@@ -237,6 +245,8 @@ def read_request(path: Path) -> RequestPayload:
             UUID(str_field(identity, "generation")),
             UUID(str_field(identity, "owner")),
         )
+    execution_uid = optional_str_field(envelope, "execution_uid")
+    execution_issued_at = optional_str_field(envelope, "execution_issued_at")
     payload = RequestPayload(
         code=str_field(envelope, "code"),
         context=context,
@@ -244,6 +254,14 @@ def read_request(path: Path) -> RequestPayload:
         state=None,
         incarnation=incarnation,
         state_raw=state_raw,
+        execution_identity=(
+            ExecutionIdentity(
+                UUID(execution_uid),
+                datetime.fromisoformat(execution_issued_at) if execution_issued_at else None,
+            )
+            if execution_uid is not None
+            else None
+        ),
     )
     _log_envelope_transfer("request", "read", path, started_at)
     return payload

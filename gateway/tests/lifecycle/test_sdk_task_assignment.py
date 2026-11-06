@@ -18,18 +18,20 @@ from gateway.tests.lifecycle.test_task_assignments import body as body
 from gateway.tests.lifecycle.test_task_assignments import client as client
 from gateway.tests.lifecycle.test_task_assignments import runner as runner
 from meiva.tests.fixtures.pin_agent import pin_agent
+from meiva.tests.fixtures.replay_sdk_write import replay_sdk_write, replay_uid
 from meiva_builtins.plugins.meiva_fleet import task_registry
 from meiva_builtins.plugins.meiva_fleet.task_registry import TaskAssignment
 
 
 def _sdk(body: dict[str, Any], **overrides: Any) -> TaskAssignment:
     pin_agent(body["actor_agent_id"])
-    return task_registry.create_and_assign(
+    return replay_sdk_write(
+        "sdk-compound",
+        task_registry.create_and_assign,
         body["task"]["title"],
         body["task"]["description"],
         parent=body["task"]["parent"],
         machine="local-test",
-        operation_key="sdk-compound",
         **overrides,
     )
 
@@ -57,9 +59,11 @@ def test_real_sdk_response_loss_keeps_exact_body_path_key_and_pair(
     assert len(wire.distinct()) == 1
     first = wire.requests[0]
     assert first.url.path == PATH
-    assert {name: first.headers[name] for name in (*HEADERS, *keyed_headers("sdk-compound"))} == {
+    assert {
+        name: first.headers[name] for name in (*HEADERS, *keyed_headers(replay_uid("sdk-compound")))
+    } == {
         **HEADERS,
-        **keyed_headers("sdk-compound"),
+        **keyed_headers(replay_uid("sdk-compound")),
     }
     assert db_conn.execute("SELECT count(*) FROM task_assignment_receipts").fetchone() == (1,)
 
@@ -93,11 +97,12 @@ def test_borrowed_lease_is_rejected_before_http_or_validation(
         lease=ExternalLease(body["actor_agent_id"], never_validated, lambda: None),
     )
     with wired_sdk(client) as wire, pytest.raises(ValueError, match="borrowed lease"):
-        task_registry.create_and_assign(
+        replay_sdk_write(
+            "sdk-compound",
+            task_registry.create_and_assign,
             "X",
             "Y",
             parent=body["task"]["parent"],
-            operation_key="sdk-compound",
         )
     assert wire.requests == []
 
@@ -105,17 +110,16 @@ def test_borrowed_lease_is_rejected_before_http_or_validation(
 @pytest.mark.parametrize(
     "kwargs,error",
     [
-        ({}, TypeError),
         ({"operation_key": None}, TypeError),
-        ({"operation_key": ""}, ValueError),
-        ({"operation_key": "x" * 129}, ValueError),
+        ({"operation_key": ""}, TypeError),
+        ({"operation_key": "x" * 129}, TypeError),
         ({"operation_key": True}, TypeError),
         ({"operation_key": "x", "require_idempotency": True}, TypeError),
         ({"operation_key": "x", "require_idempotency": False}, TypeError),
         ({"operation_key": "x", "preset": "coder"}, TypeError),
     ],
 )
-def test_missing_invalid_key_and_retired_flag_fail_before_http(
+def test_caller_key_and_retired_flags_fail_before_http(
     client: GatewayTestClient,
     body: dict[str, Any],
     kwargs: dict[str, Any],

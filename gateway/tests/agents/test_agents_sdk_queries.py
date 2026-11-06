@@ -5,7 +5,6 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 import httpx
 import psycopg
@@ -333,7 +332,7 @@ class TestListAgents:
     def test_agent_row_keeps_domain_fields(
         self, db_conn: psycopg.Connection, self_agent: int
     ) -> None:
-        agent_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
+        agent_id = meiva.agents.spawn()
         db_conn.execute("UPDATE agents SET label = 'test-agent' WHERE id = %s", (agent_id,))
         db_conn.execute("UPDATE agents_meta SET status = 'running' WHERE id = %s", (agent_id,))
         db_conn.commit()
@@ -360,7 +359,7 @@ class TestSpawnConfig:
         self, db_conn: psycopg.Connection, self_agent: int
     ) -> None:
         agent_id = meiva.agents.spawn(
-            config_overlay={"llm_model": "claude-sonnet-5"}, idempotency_key=str(uuid4())
+            config_overlay={"llm_model": "claude-sonnet-5"},
         )
 
         row = db_conn.execute(
@@ -374,7 +373,6 @@ class TestSpawnConfig:
         with gateway_wire() as requests, pytest.raises(InvalidConfigOverlay):
             meiva.agents.spawn(
                 config_overlay={"preset": "coder", "llm_model": "claude-sonnet-5"},
-                idempotency_key=str(uuid4()),
             )
         assert requests == []
 
@@ -384,7 +382,7 @@ class TestSpawnConfig:
 
         with gateway_wire() as requests, pytest.raises(InvalidConfigOverlay):
             meiva.agents.spawn(
-                config_overlay={"db_url": "postgres://nope"}, idempotency_key=str(uuid4())
+                config_overlay={"db_url": "postgres://nope"},
             )
         assert requests == []
 
@@ -392,7 +390,7 @@ class TestSpawnConfig:
 class TestResurrect:
     @staticmethod
     def _terminated_peer(db: psycopg.Connection) -> int:
-        peer = meiva.agents.spawn(idempotency_key=str(uuid4()))
+        peer = meiva.agents.spawn()
         db.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (peer,))
         db.commit()
         return peer
@@ -429,7 +427,7 @@ class TestResurrect:
         """When the agent is still alive, resurrect returns ALREADY_ALIVE."""
         from base.api_contracts.agent_contract import ResurrectResult
 
-        peer = meiva.agents.spawn(idempotency_key=str(uuid4()))
+        peer = meiva.agents.spawn()
 
         assert meiva.agents.resurrect(peer, "ping") == ResurrectResult.ALREADY_ALIVE
 

@@ -7,7 +7,7 @@ tags: [agent-view, sdk, agent-lifecycle]
 
 # Agent fork copy boundary
 
-A fork (`meiva.agents.spawn(..., fork_from=parent_id, idempotency_key=...)`) copies the source
+A fork (`meiva.agents.spawn(..., fork_from=parent_id)`) copies the source
 agent's newest saved conversation state as of the call, not its live turn. When the source is
 between a tool call and its result, the fork inherits the call without the result, and the new
 agent's next turn settles that pair as interrupted instead of re-running anything. The interrupted

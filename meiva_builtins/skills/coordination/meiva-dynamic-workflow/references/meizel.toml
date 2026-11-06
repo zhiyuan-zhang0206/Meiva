@@ -1,5 +1,3 @@
 [roots]
-"codebase_sweep_orchestrator.py" = { kinds = ["clock", "home", "random"], why = "Reference orchestrator script stamps runs with UTC time, resolves workspace home, and generates operation keys" }
-"deep_research_orchestrator.py" = { kinds = ["clock", "random"], why = "Reference orchestrator script stamps runs with UTC time and generates operation keys" }
-"minimal_dispatch.py" = { kinds = ["random"], why = "Reference dispatch script generates idempotency operation keys" }
-"orchestrator_template.py" = { kinds = ["random"], why = "Reference orchestrator template generates idempotency operation keys" }
+"codebase_sweep_orchestrator.py" = { kinds = ["clock", "home"], why = "Reference orchestrator script stamps runs with UTC time, and resolves workspace home" }
+"deep_research_orchestrator.py" = { kinds = ["clock"], why = "Reference orchestrator script stamps runs with UTC time" }

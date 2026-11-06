@@ -75,7 +75,6 @@ def create(
     remind_interval_seconds: int | None = None,
     owner: int | None = None,
     priority: str = DEFAULT_PRIORITY,
-    operation_key: str,
 ) -> Task:
     """Args:
     title: unique among in_progress tasks.
@@ -85,8 +84,7 @@ def create(
         (P0 30m / P1 1h / P2 2h / P3 4h), capped at 24h.
     owner: agent to assign to; None means you.
     priority: "P0" (highest) through "P3" (lowest).
-    operation_key: reuse the same key and inputs to return the original Task.
-        The returned snapshot may be outdated; use get(task.id) for current state.
+    The returned snapshot may be outdated on replay. Use get(task.id) for current state.
     """
     return create_in_context(
         meiva.context,
@@ -96,7 +94,7 @@ def create(
         remind_interval_seconds=remind_interval_seconds,
         owner=owner,
         priority=priority,
-        operation_key=operation_key,
+        operation_key=meiva.context.sdk_operation_uid(),
     )
 
 
@@ -259,7 +257,6 @@ def create_and_assign(
     title: str,
     description: str,
     *,
-    operation_key: str,
     label: str | None = None,
     config_overlay: dict[str, object] | None = None,
     machine: str | None = None,
@@ -267,9 +264,8 @@ def create_and_assign(
     remind_interval_seconds: int | None = None,
     priority: str = DEFAULT_PRIORITY,
 ) -> TaskAssignment:
-    """Create an agent and its assigned task under one operation key.
+    """Create an agent and its assigned task atomically.
 
-    Reuse the key and inputs to recover the original result after a lost reply.
     The result proves acceptance; query task and agent state to observe
     current progress. Borrowed leases are unsupported.
 
@@ -280,9 +276,6 @@ def create_and_assign(
     Returns:
         A TaskAssignment; it unpacks as `task, agent_id`.
     """
-    from base.api_contracts.idempotency import validate_idempotency_key
-
-    operation_key = validate_idempotency_key(operation_key)
     title = coerce_str(title, "title")
     description = coerce_str(description, "description")
     label = coerce_str(label, "label", allow_none=True)
@@ -302,7 +295,7 @@ def create_and_assign(
         machine=machine,
         remind_interval_seconds=remind_interval_seconds,
         priority=priority,
-        operation_key=operation_key,
+        operation_key=meiva.context.sdk_operation_uid(),
     )
 
 
@@ -319,7 +312,6 @@ def update(
     parent_id: int | None = UNSET_FIELD,  # type: ignore[assignment]
     note: str | None = None,
     reminders_paused_until: datetime | str | None = None,
-    operation_key: str,
 ) -> None:
     """A write that is activity on the task moves `updated_at` and restarts the task's reminder
     window: a change to the work, or a note. Renaming the task, or editing its description or
@@ -338,9 +330,6 @@ def update(
             `task_reminder_pause_max_seconds` away, and unavailable on a home that never set
             that policy. None = unchanged. A past instant resumes the reminders, which then
             pick up where they stood — pausing is not progress.
-        operation_key: required stable key for this agent and task; reuse it to
-            replay a committed update without another note or notification.
-            Different effective fields with the same key raise ValueError.
     """
     update_in_context(
         meiva.context,
@@ -355,7 +344,7 @@ def update(
         parent_id=parent_id,
         note=note,
         reminders_paused_until=reminders_paused_until,
-        operation_key=operation_key,
+        operation_key=meiva.context.sdk_operation_uid(),
     )
 
 
@@ -708,15 +697,15 @@ def is_terminated(cur: psycopg.Cursor, agent_id: int) -> bool:
     return meta is None or meta[0] == "terminated"
 
 
-def log(task_id: int, message: str, *, operation_key: str) -> None:
-    """Append one timestamped line; reuse operation_key to replay without appending again.
+def log(task_id: int, message: str) -> None:
+    """Append one timestamped line.
 
     The line is activity on the task, so it moves `updated_at` and restarts the task's reminder
     window: answering a reminder with a line keeps the task from escalating. A replay appends
     nothing and moves neither."""
     task_id = coerce_typed(task_id, "task_id", int)
     message = coerce_str(message, "message")
-    update(task_id, note=message, operation_key=operation_key)
+    update(task_id, note=message)
 
 
 def get(task_id: int) -> Task:

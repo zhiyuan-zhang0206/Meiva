@@ -45,13 +45,24 @@ def _body(request: httpx.Request) -> dict[str, object]:
 
 
 def test_spawn_sends_the_requested_harness(gateway_requests: list[httpx.Request]) -> None:
-    assert agents.spawn(harness="codex", machine="test-machine", idempotency_key="intent") == 42
+    assert (
+        agents.spawn(
+            harness="codex",
+            machine="test-machine",
+        )
+        == 42
+    )
     [request] = gateway_requests
     assert _body(request)["harness"] == "codex"
 
 
 def test_spawn_omits_an_unspecified_harness(gateway_requests: list[httpx.Request]) -> None:
-    assert agents.spawn(machine="test-machine", idempotency_key="intent") == 42
+    assert (
+        agents.spawn(
+            machine="test-machine",
+        )
+        == 42
+    )
     [request] = gateway_requests
     assert "harness" not in _body(request)
 
@@ -59,7 +70,13 @@ def test_spawn_omits_an_unspecified_harness(gateway_requests: list[httpx.Request
 def test_fork_omits_an_unspecified_harness_so_the_source_decides(
     gateway_requests: list[httpx.Request],
 ) -> None:
-    assert agents.spawn(fork_from=7, machine="test-machine", idempotency_key="intent") == 42
+    assert (
+        agents.spawn(
+            fork_from=7,
+            machine="test-machine",
+        )
+        == 42
+    )
     [request] = gateway_requests
     body = _body(request)
     assert body["fork_from"] == 7
@@ -69,7 +86,8 @@ def test_fork_omits_an_unspecified_harness_so_the_source_decides(
 def test_spawn_accepts_the_harness_enum(gateway_requests: list[httpx.Request]) -> None:
     assert (
         agents.spawn(
-            harness=agents.Harness.ANTIGRAVITY, machine="test-machine", idempotency_key="intent"
+            harness=agents.Harness.ANTIGRAVITY,
+            machine="test-machine",
         )
         == 42
     )
@@ -79,7 +97,10 @@ def test_spawn_accepts_the_harness_enum(gateway_requests: list[httpx.Request]) -
 
 def test_spawn_refuses_an_unknown_harness_before_the_request(no_gateway_http: None) -> None:
     with pytest.raises(ValueError, match="unknown harness"):
-        agents.spawn(harness="claude-code", machine="test-machine", idempotency_key="intent")
+        agents.spawn(
+            harness="claude-code",
+            machine="test-machine",
+        )
 
 
 def test_fork_refuses_an_external_harness_before_the_request(no_gateway_http: None) -> None:
@@ -90,7 +111,6 @@ def test_fork_refuses_an_external_harness_before_the_request(no_gateway_http: No
             fork_from=7,
             harness="claude_code",
             machine="test-machine",
-            idempotency_key="intent",
         )
 
 
@@ -103,7 +123,6 @@ def test_spawn_accepts_uncatalogued_model_on_external_harness(
             harness="antigravity",
             config_overlay={"llm_model": "gpt-oss-120b", "reasoning_effort": "medium"},
             machine="test-machine",
-            idempotency_key="intent",
         )
         == 42
     )

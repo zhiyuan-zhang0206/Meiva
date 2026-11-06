@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
-from uuid import UUID
 
 import pytest
 
@@ -54,12 +53,8 @@ _ACCESSIBILITY_FAULT = AccessibilityStatus(
 class _FakeUI:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
-        self.keys: list[str] = []
 
     def notify(self, **kwargs: object) -> int:
-        key = kwargs.pop("idempotency_key")
-        assert isinstance(key, str) and 1 <= len(key) <= 128
-        self.keys.append(key)
         self.calls.append(kwargs)
         return 1
 
@@ -87,19 +82,9 @@ def failing_ui() -> Iterator[None]:
 class TestNotifyDesktopPermissionsAtStartup:
     @pytest.mark.asyncio
     async def test_noop_when_no_status_file(self, fake_ui: _FakeUI, home: Path):
-        await notify_desktop_permissions_at_startup(home, idempotency_key=UUID(int=1))
+        await notify_desktop_permissions_at_startup(home)
 
         assert fake_ui.calls == []
-
-    @pytest.mark.asyncio
-    async def test_the_key_it_is_given_is_the_key_the_notice_carries(
-        self, fake_ui: _FakeUI, home: Path
-    ):
-        write_screen_capture_status(home, _SCREEN_FAULT)
-
-        await notify_desktop_permissions_at_startup(home, idempotency_key=UUID(int=7))
-
-        assert fake_ui.keys == [str(UUID(int=7))]
 
     @pytest.mark.asyncio
     async def test_screen_only_fault_keeps_the_existing_notice_shape(
@@ -107,7 +92,7 @@ class TestNotifyDesktopPermissionsAtStartup:
     ):
         write_screen_capture_status(home, _SCREEN_FAULT)
 
-        await notify_desktop_permissions_at_startup(home, idempotency_key=UUID(int=1))
+        await notify_desktop_permissions_at_startup(home)
 
         assert fake_ui.calls == [
             {
@@ -123,7 +108,7 @@ class TestNotifyDesktopPermissionsAtStartup:
     async def test_accessibility_only_fault_notifies_and_clears(self, fake_ui: _FakeUI, home: Path):
         write_accessibility_status(home, _ACCESSIBILITY_FAULT)
 
-        await notify_desktop_permissions_at_startup(home, idempotency_key=UUID(int=1))
+        await notify_desktop_permissions_at_startup(home)
 
         assert fake_ui.calls == [
             {
@@ -139,7 +124,7 @@ class TestNotifyDesktopPermissionsAtStartup:
         write_screen_capture_status(home, _SCREEN_FAULT)
         write_accessibility_status(home, _ACCESSIBILITY_FAULT)
 
-        await notify_desktop_permissions_at_startup(home, idempotency_key=UUID(int=1))
+        await notify_desktop_permissions_at_startup(home)
 
         assert fake_ui.calls == [
             {
@@ -159,7 +144,7 @@ class TestNotifyDesktopPermissionsAtStartup:
         write_screen_capture_status(home, _SCREEN_FAULT)
         write_accessibility_status(home, _ACCESSIBILITY_FAULT)
 
-        await notify_desktop_permissions_at_startup(home, idempotency_key=UUID(int=1))
+        await notify_desktop_permissions_at_startup(home)
 
         assert read_screen_capture_status(home) == _SCREEN_FAULT
         assert read_accessibility_status(home) == _ACCESSIBILITY_FAULT
@@ -176,7 +161,7 @@ class TestNotifyDesktopPermissionsAtStartup:
             screen_capture_status_file_path(home).with_suffix(".processing")
         )
 
-        await notify_desktop_permissions_at_startup(home, idempotency_key=UUID(int=1))
+        await notify_desktop_permissions_at_startup(home)
 
         assert fake_ui.calls == [
             {
@@ -195,7 +180,7 @@ class TestNotifyDesktopPermissionsAtStartup:
         write_screen_capture_status(home, ScreenCaptureStatus(state=ScreenCaptureState.AVAILABLE))
         write_accessibility_status(home, AccessibilityStatus(state=AccessibilityState.GRANTED))
 
-        await notify_desktop_permissions_at_startup(home, idempotency_key=UUID(int=1))
+        await notify_desktop_permissions_at_startup(home)
 
         assert fake_ui.calls == []
         assert read_screen_capture_status(home) is None

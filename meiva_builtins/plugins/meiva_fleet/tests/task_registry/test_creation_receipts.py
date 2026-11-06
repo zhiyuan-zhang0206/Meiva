@@ -31,6 +31,7 @@ from base.telemetry.delivery.serialization import event_line
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva.tests.fixtures.pin_agent import pin_agent
+from meiva.tests.fixtures.replay_sdk_write import replay_sdk_write, replay_uid
 from meiva_builtins.plugins.meiva_fleet import _task_creation_receipts, task_registry
 from meiva_builtins.plugins.meiva_fleet._task_requests import creation_request
 from meiva_builtins.plugins.meiva_fleet.task_maintenance.tests.failing_writes import inserts_failing
@@ -108,21 +109,33 @@ def test_lost_response_returns_original_after_mutation_and_title_reuse(
         "original",
         "work",
         parent=root_task_id,
-        operation_key="lost",
+        operation_key=replay_uid("lost"),
         default_remind_interval_seconds=7200,
     )
     snapshot = db_conn.execute("SELECT result FROM task_creation_receipts").fetchone()
     assert snapshot is not None
     original = task_registry.Task(**snapshot[0])
     assert committed.task == original
-    task_registry.update(original.id, title="renamed", status="done", operation_key=str(uuid4()))
+    task_registry.update(
+        original.id,
+        title="renamed",
+        status="done",
+    )
     task_registry.create(
-        "original", "another work", parent=root_task_id, operation_key=str(uuid4())
+        "original",
+        "another work",
+        parent=root_task_id,
     )
     before = _facts(db_conn)
     emitted_events.clear()
     assert (
-        task_registry.create("original", "work", parent=root_task_id, operation_key="lost")
+        replay_sdk_write(
+            "lost",
+            task_registry.create,
+            "original",
+            "work",
+            parent=root_task_id,
+        )
         == original
     )
     assert _facts(db_conn) == before
@@ -169,13 +182,30 @@ def test_deleted_task_and_parent_replay_snapshot(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
     pin_agent(seed_agent(db_conn))
-    parent = task_registry.create("parent", "work", parent=root_task_id, operation_key=str(uuid4()))
-    original = task_registry.create("child", "work", parent=parent.id, operation_key="deleted")
+    parent = task_registry.create(
+        "parent",
+        "work",
+        parent=root_task_id,
+    )
+    original = replay_sdk_write(
+        "deleted",
+        task_registry.create,
+        "child",
+        "work",
+        parent=parent.id,
+    )
     db_conn.execute("DELETE FROM agent_tasks WHERE id IN (%s,%s)", (original.id, parent.id))
     db_conn.commit()
     before = _facts(db_conn)
     assert (
-        task_registry.create("child", "work", parent=parent.id, operation_key="deleted") == original
+        replay_sdk_write(
+            "deleted",
+            task_registry.create,
+            "child",
+            "work",
+            parent=parent.id,
+        )
+        == original
     )
     assert _facts(db_conn) == before
 
@@ -185,8 +215,12 @@ def test_default_intention_replays_original_and_owner_alias(
 ) -> None:
     actor = seed_agent(db_conn)
     pin_agent(actor)
-    original = task_registry.create(
-        "default", "work", parent=root_task_id, operation_key="defaults"
+    original = replay_sdk_write(
+        "defaults",
+        task_registry.create,
+        "default",
+        "work",
+        parent=root_task_id,
     )
     stored = db_conn.execute("SELECT request FROM task_creation_receipts").fetchone()
     assert stored == (
@@ -201,18 +235,24 @@ def test_default_intention_replays_original_and_owner_alias(
     )
     assert original.remind_interval_seconds is not None
     assert (
-        task_registry.create(
-            "default", "work", parent=root_task_id, owner=actor, operation_key="defaults"
+        replay_sdk_write(
+            "defaults",
+            task_registry.create,
+            "default",
+            "work",
+            parent=root_task_id,
+            owner=actor,
         )
         == original
     )
     with pytest.raises(ValueError, match="different task creation"):
-        task_registry.create(
+        replay_sdk_write(
+            "defaults",
+            task_registry.create,
             "default",
             "work",
             parent=root_task_id,
             remind_interval_seconds=original.remind_interval_seconds,
-            operation_key="defaults",
         )
 
 
@@ -227,12 +267,11 @@ def test_changed_request_conflicts_before_mutable_checks(
         "title": "body",
         "description": "work",
         "parent": root_task_id,
-        "operation_key": "body",
     }
-    task_registry.create(**kwargs)
+    replay_sdk_write("body", task_registry.create, **kwargs)
     before = _facts(db_conn)
     with pytest.raises(ValueError, match="different task creation"):
-        task_registry.create(**(kwargs | change))
+        replay_sdk_write("body", task_registry.create, **(kwargs | change))
     assert _facts(db_conn) == before
 
 
@@ -254,8 +293,13 @@ def test_failure_after_effect_rolls_back_all_facts(
         inserts_failing(db_conn, table),
         pytest.raises(psycopg.errors.RaiseException, match=f"{table} inserts refused"),
     ):
-        task_registry.create(
-            "rollback", "work", parent=root_task_id, owner=owner, operation_key="rollback"
+        replay_sdk_write(
+            "rollback",
+            task_registry.create,
+            "rollback",
+            "work",
+            parent=root_task_id,
+            owner=owner,
         )
     assert _facts(db_conn) == before
 
@@ -266,8 +310,14 @@ def test_invalid_key_has_no_effect(
 ) -> None:
     pin_agent(seed_agent(db_conn))
     before = _facts(db_conn)
-    with pytest.raises((ValueError, TypeError)):
-        task_registry.create("invalid", "work", parent=root_task_id, operation_key=key)  # type: ignore[arg-type]
+    obsolete: dict[str, Any] = {"operation_key": key}
+    with pytest.raises(TypeError, match="operation_key"):
+        task_registry.create(
+            "invalid",
+            "work",
+            parent=root_task_id,
+            **obsolete,
+        )
     assert _facts(db_conn) == before
 
 
@@ -280,24 +330,30 @@ def test_a_stored_receipt_without_the_pause_field_replays(
     actor = seed_agent(db_conn)
     pin_agent(actor)
     key = str(uuid4())
-    task_registry.create("replay", "work", parent=root_task_id, operation_key=key)
+    replay_sdk_write(
+        key,
+        task_registry.create,
+        "replay",
+        "work",
+        parent=root_task_id,
+    )
     with db_conn.cursor() as cur:
         cur.execute(
             "UPDATE task_creation_receipts SET result = result - 'reminders_paused_until' "
             "WHERE actor_agent_id=%s AND operation_key=%s",
-            (actor, key),
+            (actor, replay_uid(key)),
         )
         cur.execute(
             "SELECT request FROM task_creation_receipts "
             "WHERE actor_agent_id=%s AND operation_key=%s",
-            (actor, key),
+            (actor, replay_uid(key)),
         )
         row = cur.fetchone()
     db_conn.commit()
     assert row is not None
     with db_conn.cursor() as cur:
         replayed = _task_creation_receipts.replay_creation(
-            cur, actor, key, row[0], context=meiva.context
+            cur, actor, replay_uid(key), row[0], context=meiva.context
         )
     assert replayed is not None
     assert replayed.reminders_paused_until is None
@@ -308,7 +364,11 @@ def test_snapshot_validation_never_defaults_or_accepts_unknown_enum(
 ) -> None:
     pin_agent(seed_agent(db_conn))
     snapshot: dict[str, object] = asdict(
-        task_registry.create("snapshot", "work", parent=root_task_id, operation_key=str(uuid4()))
+        task_registry.create(
+            "snapshot",
+            "work",
+            parent=root_task_id,
+        )
     )
     for invalid in (
         {k: v for k, v in snapshot.items() if k != "priority"},
@@ -326,11 +386,29 @@ def test_actor_scope_independent_and_new_key_keeps_title_constraint(
 ) -> None:
     first_actor, second_actor = seed_agent(db_conn), seed_agent(db_conn)
     pin_agent(first_actor)
-    original = task_registry.create("first", "work", parent=root_task_id, operation_key="same")
+    original = replay_sdk_write(
+        "same",
+        task_registry.create,
+        "first",
+        "work",
+        parent=root_task_id,
+    )
     with pytest.raises(ValueError, match="duplicate in_progress"):
-        task_registry.create("first", "work", parent=root_task_id, operation_key="new")
+        replay_sdk_write(
+            "new",
+            task_registry.create,
+            "first",
+            "work",
+            parent=root_task_id,
+        )
     pin_agent(second_actor)
-    other = task_registry.create("second", "work", parent=root_task_id, operation_key="same")
+    other = replay_sdk_write(
+        "same",
+        task_registry.create,
+        "second",
+        "work",
+        parent=root_task_id,
+    )
     assert original.id != other.id
     assert db_conn.execute("SELECT count(*) FROM task_creation_receipts").fetchone() == (2,)
 

@@ -32,7 +32,6 @@ _STEERING_ACTIONS = (
     "agents.compact",
     "agents.restart",
     "agents.resurrect",
-    "agents.retry_launch",
     "agents.terminate",
 )
 
@@ -44,10 +43,6 @@ _STEERING: tuple[tuple[str, Callable[[int], object]], ...] = (
     ("agents.compact", meiva.agents.compact),
     ("agents.restart", partial(meiva.agents.restart, message="why")),
     ("agents.resurrect", partial(meiva.agents.resurrect, prompt="wake")),
-    (
-        "agents.retry_launch",
-        partial(meiva.agents.retry_launch, idempotency_key="k", expected_prior_attempt_id="a"),
-    ),
     ("agents.terminate", meiva.agents.terminate),
 )
 
@@ -66,7 +61,6 @@ _READS = frozenset(
         "get_ancestors",
         "get_born_chain",
         "get_last_message",
-        "get_launch_attempt",
         "get_neighbors",
         "get_status",
         "harness_availability",

@@ -2,7 +2,6 @@ exports = ["creation"]
 
 [uses]
 "test_keyed_launch_retry.py" = ["creation"]
-"test_sdk_guarded_launch_retry.py" = ["test_keyed_launch_retry.py"]
 "test_sdk_task_assignment.py" = ["test_task_assignments.py"]
 "test_task_assignment_races.py" = ["test_task_assignments.py"]
 "test_terminate_forward.py" = ["child_restart_overlay.py"]

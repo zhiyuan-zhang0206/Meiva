@@ -40,7 +40,7 @@ def _prior_attempt(
 
 # meiva:note
 # The attempt id the caller supplies becomes the agent's pointer when the intent commits, and a
-# replay of the same key returns the stored acceptance and leaves the pointer alone.
+# replay of the same prior attempt returns the stored acceptance and leaves the pointer alone.
 def test_the_supplied_attempt_commits_once_and_a_replay_returns_the_first(
     db_conn: psycopg.Connection,
     db_pool: ConnectionPool,
@@ -54,11 +54,9 @@ def test_the_supplied_attempt_commits_once_and_a_replay_returns_the_first(
     body = RetryLaunchRequest(expected_prior_attempt_id=prior)
     first_attempt, replay_attempt = uuid4(), uuid4()
 
-    machine, accepted = accept_retry_launch(
-        db_pool, "retry-key", agent_id, body, new_attempt_id=first_attempt
-    )
+    machine, accepted = accept_retry_launch(db_pool, agent_id, body, new_attempt_id=first_attempt)
     replayed_machine, replayed = accept_retry_launch(
-        db_pool, "retry-key", agent_id, body, new_attempt_id=replay_attempt
+        db_pool, agent_id, body, new_attempt_id=replay_attempt
     )
 
     assert machine == replayed_machine == machine_identity.name()
@@ -70,7 +68,7 @@ def test_the_supplied_attempt_commits_once_and_a_replay_returns_the_first(
 
 
 # meiva:note
-# A different observed attempt under a new key is a conflict, and the pointer stays where it was.
+# A different observed attempt  is a conflict, and the pointer stays where it was.
 def test_a_stale_observed_attempt_conflicts_without_moving_the_pointer(
     db_conn: psycopg.Connection,
     db_pool: ConnectionPool,
@@ -84,7 +82,7 @@ def test_a_stale_observed_attempt_conflicts_without_moving_the_pointer(
     body = RetryLaunchRequest(expected_prior_attempt_id=uuid4())
 
     with pytest.raises(RetryLaunchConflictError, match="stale"):
-        accept_retry_launch(db_pool, "stale-key", agent_id, body, new_attempt_id=uuid4())
+        accept_retry_launch(db_pool, agent_id, body, new_attempt_id=uuid4())
 
     assert db_conn.execute(
         "SELECT last_launch_attempt_id FROM agents_meta WHERE id=%s", (agent_id,)

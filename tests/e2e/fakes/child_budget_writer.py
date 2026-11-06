@@ -14,6 +14,7 @@ from typing import Any
 import meiva
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineFacts
 from base.config import ConfigBoot
 from meiva.boot import derived_clients
@@ -97,6 +98,7 @@ meiva.ensure_plugins_loaded(
         machine=machine,
         clients=clients,
         meiva_home=root,
+        rng=seeded_rng(),
         environ=config.process_environment(),
     ),
 )

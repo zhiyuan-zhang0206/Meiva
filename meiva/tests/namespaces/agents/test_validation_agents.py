@@ -57,7 +57,10 @@ class TestAgentsEntries:
     def test_spawn_prompt_unwraps_before_gateway_call(
         self, gateway_requests: list[httpx.Request]
     ) -> None:
-        result = agents.spawn(prompt=("hello",), machine="test-machine", idempotency_key="intent")  # pyright: ignore[reportArgumentType]
+        result = agents.spawn(
+            prompt=("hello",),  # pyright: ignore[reportArgumentType]
+            machine="test-machine",
+        )
         assert result == 42
         [request] = gateway_requests
         assert (request.method, request.url.path) == ("POST", "/api/keyed/v1/agents")
@@ -79,11 +82,15 @@ class TestAgentsEntries:
         self, no_gateway_http: None, prompt: object
     ) -> None:
         with pytest.raises(TypeError, match="prompt must be a string"):
-            agents.spawn(prompt=prompt, idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
+            agents.spawn(
+                prompt=prompt,  # pyright: ignore[reportArgumentType]
+            )
 
     def test_spawn_fork_from_never_unwraps(self, no_gateway_http: None) -> None:
         with pytest.raises(TypeError, match="fork_from must be int"):
-            agents.spawn(fork_from=(5,), idempotency_key=str(uuid4()))  # pyright: ignore[reportArgumentType]
+            agents.spawn(
+                fork_from=(5,),  # pyright: ignore[reportArgumentType]
+            )
 
     def test_send_message_content_unwraps(self, gateway_requests: list[httpx.Request]) -> None:
         agents.send_message(7, ("hi",))  # pyright: ignore[reportArgumentType]
@@ -175,7 +182,13 @@ class TestAgentsEntries:
 
 
 def test_core_spawn_forwards_caller_key(gateway_requests: list[httpx.Request]) -> None:
-    assert agents.spawn(prompt="goal", machine="test-machine", idempotency_key="intent") == 42
+    assert (
+        agents.spawn(
+            prompt="goal",
+            machine="test-machine",
+        )
+        == 42
+    )
     [request] = gateway_requests
     assert (request.method, request.url.path) == ("POST", "/api/keyed/v1/agents")
     assert json.loads(request.content) == {
@@ -185,7 +198,7 @@ def test_core_spawn_forwards_caller_key(gateway_requests: list[httpx.Request]) -
         "machine": "test-machine",
     }
     assert "require_idempotency" not in json.loads(request.content)
-    assert request.headers["Idempotency-Key"] == "intent"
+    assert request.headers["Idempotency-Key"]
     assert request.headers["Idempotency-Scope"] == "principal-v1"
 
 

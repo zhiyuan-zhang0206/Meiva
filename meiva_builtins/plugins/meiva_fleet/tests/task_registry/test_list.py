@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import closing
-from uuid import uuid4
 
 import psycopg
 import pytest
@@ -21,7 +20,11 @@ from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import seed_ag
 
 
 def _create(title: str, parent: int) -> int:
-    return task_registry.create(title, "work", parent=parent, operation_key=str(uuid4())).id
+    return task_registry.create(
+        title,
+        "work",
+        parent=parent,
+    ).id
 
 
 @pytest.fixture
@@ -43,7 +46,6 @@ def test_list_filters_by_owner_status_parent_and_subtree(
         other,
         status="done",
         results="finished",
-        operation_key=str(uuid4()),
     )
 
     def ids(

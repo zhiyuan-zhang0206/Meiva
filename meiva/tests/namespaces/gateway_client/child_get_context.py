@@ -2,23 +2,11 @@ import httpx
 
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
-from meiva.gateway_client import get, get_launch_attempt, retry_launch
+from meiva.gateway_client import get
 from meiva.sdk_surface import process_context
 
 
 def main() -> None:
-    try:
-        get_launch_attempt(0)
-    except ValueError as exc:
-        assert "positive agent ID" in str(exc)
-    else:
-        raise AssertionError("invalid agent ID must be rejected before ambient context")
-    try:
-        retry_launch(42, idempotency_key="", expected_prior_attempt_id="invalid")
-    except ValueError as exc:
-        assert "idempotency key" in str(exc)
-    else:
-        raise AssertionError("invalid admission must be rejected before ambient context")
     for shared_host in (False, True):
         if shared_host:
             process_context.bind_host_process()

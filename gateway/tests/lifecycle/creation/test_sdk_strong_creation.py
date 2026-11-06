@@ -27,6 +27,7 @@ from gateway.tests.lifecycle.creation.test_guarded_creation import PATH, SECRET
 from gateway.tests.lifecycle.creation.test_guarded_creation import client as client
 from gateway.tests.lifecycle.creation.test_guarded_creation import runner as runner
 from meiva.gateway_client import spawn
+from meiva.tests.fixtures.replay_sdk_write import replay_sdk_write
 
 
 @pytest.fixture
@@ -172,10 +173,18 @@ def test_changed_sdk_context_same_principal_key_conflicts(
     machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     machine_identity.set(name="local-test")
-    original = meiva.agents.spawn(prompt="same raw inputs", idempotency_key="context")
+    original = replay_sdk_write(
+        "context",
+        meiva.agents.spawn,
+        prompt="same raw inputs",
+    )
     machine_identity.set(name="another-machine")
     with pytest.raises(httpx.HTTPStatusError) as changed:
-        meiva.agents.spawn(prompt="same raw inputs", idempotency_key="context")
+        replay_sdk_write(
+            "context",
+            meiva.agents.spawn,
+            prompt="same raw inputs",
+        )
     assert changed.value.response.status_code == 409
     assert db_conn.execute("SELECT id FROM agents").fetchall() == [(original,)]
     assert {request.url.path for request in wire.requests} == {PATH}

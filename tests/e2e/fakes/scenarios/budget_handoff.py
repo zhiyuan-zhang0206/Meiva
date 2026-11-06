@@ -31,7 +31,7 @@ def prepare_code(role: str, agent_id: int) -> str:
             f"path = Path({state_file(agent_id)!r})\n"
             "state = json.loads(path.read_text())\n"
             "if state['status'] == 'running':\n"
-            f"    peer = meiva.agents.spawn(prompt=state['remaining'].pop(0), config_overlay={{'llm_model': {BUDGET_MODEL!r}}}, idempotency_key=str(uuid4()))\n"
+            f"    peer = meiva.agents.spawn(prompt=state['remaining'].pop(0), config_overlay={{'llm_model': {BUDGET_MODEL!r}}})\n"
             "    state['peers'].append(peer)\n"
             "    write_text_atomic(path, json.dumps(state))\n"
         )
@@ -46,7 +46,7 @@ def prepare_code(role: str, agent_id: int) -> str:
     else:
         code += (
             "if aid == int((root / 'owner').read_text()):\n"
-            f"    state['peers'] = [meiva.agents.spawn(prompt='Preserve a partial result and wait.', config_overlay={{'llm_model': {BUDGET_MODEL!r}}}, idempotency_key=str(uuid4()))]\n"
+            f"    state['peers'] = [meiva.agents.spawn(prompt='Preserve a partial result and wait.', config_overlay={{'llm_model': {BUDGET_MODEL!r}}})]\n"
             "    write_text_atomic(root / f'{aid}.json', json.dumps(state))\n"
         )
     return code

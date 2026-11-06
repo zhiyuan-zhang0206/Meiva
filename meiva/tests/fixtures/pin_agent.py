@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncGenerator, Callable
 from pathlib import Path
+from random import SystemRandom
 
 import pytest
 
@@ -82,6 +83,7 @@ def pin_agent(
                 if clock_factory is not None
                 else (None if bound is None else bound.clock_factory)
             ),
+            rng=SystemRandom() if bound is None or bound.rng is None else bound.rng,
             bus=bus if bus is not None else (None if bound is None else bound.bus),
             user_home=Path.home(),
             environ=os.environ if bound is None or bound.environ is None else bound.environ,

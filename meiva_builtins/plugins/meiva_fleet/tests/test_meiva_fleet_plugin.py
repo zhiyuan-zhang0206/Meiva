@@ -4,7 +4,6 @@ import os
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 import psycopg
 import pytest
@@ -376,23 +375,28 @@ def test_notify_validates_title_priority_and_blocking(load_activity_plugin: None
     notify = meiva.ui.notify
     assert callable(notify)
     with pytest.raises(ValueError, match="title"):
-        notify("   ", idempotency_key=str(uuid4()))
+        notify("   ")
     with pytest.raises(ValueError, match="priority"):
-        notify("ok", priority="P9", idempotency_key=str(uuid4()))
+        notify("ok", priority="P9")
     with pytest.raises(ValueError, match="require a user response"):
-        notify("ok", require_response=False, blocking=blocking, idempotency_key=str(uuid4()))
+        notify("ok", require_response=False, blocking=blocking)
 
 
-def test_fleet_spawn_preserves_caller_creation_key(
+def test_fleet_spawn_uses_internal_creation_uid(
     load_activity_plugin: None, wire: GatewayWire
 ) -> None:
     wire.stub.reply("POST", "/api/keyed/v1/agents", {"id": 42})
     pin_agent(7, clients=wire.context.clients)
-    assert meiva.agents.spawn(prompt="one goal", idempotency_key="fleet-birth") == 42
+    assert (
+        meiva.agents.spawn(
+            prompt="one goal",
+        )
+        == 42
+    )
     [sent] = wire.sent
-    assert sent.headers["idempotency-key"] == "fleet-birth"
+    assert sent.headers["idempotency-key"]
     assert "label" not in sent.body
-    assert "idempotency_key" in inspect.signature(meiva.agents.spawn).parameters
+    assert "idempotency_key" not in inspect.signature(meiva.agents.spawn).parameters
 
 
 def test_fleet_spawn_forwards_keyed_fork_without_mode_flag(
@@ -400,12 +404,17 @@ def test_fleet_spawn_forwards_keyed_fork_without_mode_flag(
 ) -> None:
     wire.stub.reply("POST", "/api/keyed/v1/agents", {"id": 42})
     pin_agent(7, clients=wire.context.clients)
-    assert meiva.agents.spawn(fork_from=1, idempotency_key="fork-intent") == 42
+    assert (
+        meiva.agents.spawn(
+            fork_from=1,
+        )
+        == 42
+    )
     [sent] = wire.sent
     assert sent.body["fork_from"] == 1
-    assert sent.headers["idempotency-key"] == "fork-intent"
+    assert sent.headers["idempotency-key"]
     assert "require_idempotency" not in inspect.signature(meiva.agents.spawn).parameters
-    obsolete: dict[str, Any] = {"idempotency_key": "intent", "require_idempotency": True}
+    obsolete: dict[str, Any] = {"require_idempotency": True}
     with pytest.raises(TypeError, match="require_idempotency"):
         meiva.agents.spawn(**obsolete)
     assert len(wire.sent) == 1

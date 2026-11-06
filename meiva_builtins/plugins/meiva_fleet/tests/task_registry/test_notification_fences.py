@@ -1,5 +1,3 @@
-from uuid import uuid4
-
 import psycopg
 
 from base.agents.tasks.delivery import lock_task_note_owner
@@ -24,7 +22,10 @@ def test_reassigned_task_refuses_delayed_home_wake(
     owner = seed_agent(db_conn, status="terminated")
     next_owner = seed_agent(db_conn)
     task = task_registry.create(
-        "fenced", "work", parent=root_task_id, owner=owner, operation_key=str(uuid4())
+        "fenced",
+        "work",
+        parent=root_task_id,
+        owner=owner,
     )
     selected = db_conn.execute(
         "SELECT agent_id,id FROM inbound_messages WHERE agent_id=%s AND status='pending'", (owner,)
@@ -48,7 +49,10 @@ def test_assignment_deadline_has_inspectable_failure(
     pin_agent(actor)
     owner = seed_agent(db_conn, status="terminated")
     task_registry.create(
-        "expires", "work", parent=root_task_id, owner=owner, operation_key=str(uuid4())
+        "expires",
+        "work",
+        parent=root_task_id,
+        owner=owner,
     )
     db_conn.execute(
         "UPDATE inbound_messages SET created_at=now()-interval '25 hours' WHERE agent_id=%s",

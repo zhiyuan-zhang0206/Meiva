@@ -11,14 +11,13 @@ description: Atomic original task and agent acceptance with independent native l
 versioned path makes an older router fail without creating either object.
 The SDK never falls back to separate spawn/create calls for that intent.
 The route is AtLeastOnceWithKey: SDK transport retries an ambiguous failure under
-the same key and recovers the original acceptance. Retrying an entire
-execute_code script is outside this contract.
+the same operation UID and recovers the original acceptance. The runtime
+reuses that UID when replaying the original execution.
 
 ## Intent and SDK admission
 
-`meiva.tasks.create_and_assign(..., operation_key="intent")` requires a valid
-explicit key. The SDK always uses atomic acceptance; no `require_idempotency`
-flag or keyless multi-transaction recipe remains. Return type is `(Task, agent_id)`.
+`meiva.tasks.create_and_assign(...)` allocates an internal operation UID and
+uses atomic acceptance. Return type is `(Task, agent_id)`.
 Both objects describe the original business acceptance, not runner readiness or
 current task state. Use task/agent reads for current state.
 

@@ -57,8 +57,7 @@ def test_lost_response_concurrency_and_deliberate_new_attempt(
     attempt = first["launch_attempt_id"]
     assert attempt != prior
     assert db_conn.execute("SELECT count(*) FROM agent_launch_retry_receipts").fetchone() == (1,)
-    assert submit(client, agent_id, attempt).status_code == 409
-    assert submit(client, agent_id, prior, "deliberate-new").status_code == 409
+    assert submit(client, agent_id, prior, "legacy-other-key").json() == first
     next_response = submit(client, agent_id, attempt, "deliberate-new")
     assert next_response.status_code == 200
     assert next_response.json()["launch_attempt_id"] != attempt
@@ -95,30 +94,20 @@ def test_replay_survives_mutable_config_admission_and_target_deletion(
     assert submit(client, agent_id, accepted["launch_attempt_id"], "fresh").status_code == 404
 
 
-@pytest.mark.parametrize(
-    "headers",
-    [
-        {},
-        {"Idempotency-Key": ""},
-        {"Idempotency-Key": "x"},
-        {"Idempotency-Key": "x", "Idempotency-Scope": "unknown"},
-        {"Idempotency-Key": "x" * 129, "Idempotency-Scope": "principal-v1"},
-    ],
-)
-def test_invalid_guard_has_no_receipt_or_pointer_effect(
-    client: GatewayTestClient, db_conn: psycopg.Connection[Any], headers: dict[str, str]
+def test_retry_needs_no_caller_key_and_replays_a_legacy_receipt(
+    client: GatewayTestClient, db_conn: psycopg.Connection[Any]
 ) -> None:
     agent_id, prior = birth(client)
-    response = client.post(
-        f"/api/keyed/v1/agents/{agent_id}/retry-launch",
-        json={"expected_prior_attempt_id": prior},
-        headers=headers,
+    path = f"/api/keyed/v1/agents/{agent_id}/retry-launch"
+    body = {"expected_prior_attempt_id": prior}
+    first = client.post(path, json=body)
+    assert first.status_code == 200
+    db_conn.execute(
+        "UPDATE agent_launch_retry_receipts SET operation_key=%s WHERE agent_id=%s",
+        ("legacy-scoped-key", agent_id),
     )
-    assert response.status_code == 400
-    assert db_conn.execute(
-        "SELECT last_launch_attempt_id FROM agents_meta WHERE id=%s", (agent_id,)
-    ).fetchone() == (UUID(prior),)
-    assert db_conn.execute("SELECT count(*) FROM agent_launch_retry_receipts").fetchone() == (0,)
+    db_conn.commit()
+    assert client.post(path, json=body).json() == first.json()
 
 
 def test_bad_body_and_revoked_auth_do_not_execute(
@@ -328,7 +317,7 @@ def test_receipt_insert_and_pointer_rotation_roll_back_together(
     assert submit(client, agent_id, prior).status_code == 200
 
 
-def test_distinct_concurrent_intents_cannot_reuse_the_same_observation(
+def test_legacy_keys_share_one_receipt_for_the_same_observation(
     client: GatewayTestClient, db_conn: psycopg.Connection[Any]
 ) -> None:
     agent_id, prior = birth(client)
@@ -338,5 +327,6 @@ def test_distinct_concurrent_intents_cannot_reuse_the_same_observation(
 
     with ThreadPoolExecutor(max_workers=4) as executor:
         results = list(executor.map(submit_intent, range(4)))
-    assert sorted(result.status_code for result in results) == [200, 409, 409, 409]
+    assert all(result.json() == results[0].json() for result in results)
+    assert sorted(result.status_code for result in results) == [200, 200, 200, 200]
     assert db_conn.execute("SELECT count(*) FROM agent_launch_retry_receipts").fetchone() == (1,)

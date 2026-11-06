@@ -614,3 +614,33 @@ async def test_checkpoint_resume_keeps_results_and_deferred_notes() -> None:
     assert "context from first call" in second.content
     assert "sdk_calls" not in read_meiva_kwargs(first)
     assert read_meiva_kwargs(second).get("sdk_calls") == []
+
+
+async def test_write_uids_survive_child_replay_and_distinguish_writes(
+    database_gate: ProcessDbGate,
+) -> None:
+    code = (
+        "import meiva\n"
+        "print('uids', meiva.context.sdk_operation_uid(), meiva.context.sdk_operation_uid())"
+    )
+    state = _state(code, code)
+    runtime = _runtime(database_gate)
+    process = SubprocessExecProcess(live_parent_facts(), rng=_rng())
+
+    first = await _run_calls(state, runtime, _config(), process=process)
+    replay = await _run_calls(state, runtime, _config(), process=process)
+    writes = [
+        line.removeprefix("uids ").split()
+        for message in first["messages"][1:]
+        for line in str(message.content).splitlines()
+        if line.startswith("uids ")
+    ]
+    replayed = [
+        line.removeprefix("uids ").split()
+        for message in replay["messages"][1:]
+        for line in str(message.content).splitlines()
+        if line.startswith("uids ")
+    ]
+    assert [len(call) for call in writes] == [2, 2]
+    assert len({uid for call in writes for uid in call}) == 4
+    assert replayed == writes

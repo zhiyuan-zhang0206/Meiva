@@ -16,7 +16,6 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import TypedDict
-from uuid import uuid4
 
 import meiva
 from base.host.boundary.fields import int_field, optional_int_field, optional_str_field
@@ -54,7 +53,9 @@ def _draft_text(path: Path) -> str:
 
 
 def spawn(prompt: str) -> int:
-    return meiva.agents.spawn(prompt=prompt, idempotency_key=str(uuid4()))
+    return meiva.agents.spawn(
+        prompt=prompt,
+    )
 
 
 # meiva:note

@@ -27,7 +27,7 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
         note="live agent cards and required ancestor links in one snapshot"
     ),
     ("POST", "/api/keyed/v1/agents/{agent_id}/retry-launch"): RouteContract(
-        Idempotency.AT_LEAST_ONCE_WITH_KEY,
+        Idempotency.IDEMPOTENT,
         note="guarded observed-attempt retry; receipt and pointer commit together",
     ),
     ("POST", "/api/keyed/v1/agents"): RouteContract(

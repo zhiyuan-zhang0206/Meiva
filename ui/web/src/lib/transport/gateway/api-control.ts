@@ -334,8 +334,8 @@ export function createControlApi(http: Http) {
     refreshHarnessAvailability: (machine: string): Promise<HarnessAvailability[]> =>
       f(`${harnessAvailabilityPath(machine)}/refresh`, postInit).then(ok<HarnessAvailability[]>),
 
-    retryAgentLaunch: (agentId: number, priorAttempt: string, operationKey: string): Promise<RetryLaunchAccepted> =>
-      f(`/api/keyed/v1/agents/${agentId}/retry-launch`, keyedJson({ expected_prior_attempt_id: priorAttempt }, operationKey))
+    retryAgentLaunch: (agentId: number, priorAttempt: string): Promise<RetryLaunchAccepted> =>
+      f(`/api/keyed/v1/agents/${agentId}/retry-launch`, postJson({ expected_prior_attempt_id: priorAttempt }))
         .then(ok<RetryLaunchAccepted>),
 
     getTask: (id: number): Promise<TaskRow> => f(`/api/tasks/${id}`).then(ok<TaskRow>),

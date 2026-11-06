@@ -6,12 +6,10 @@ description: Standalone SDK creation returns an immutable accepted Task snapshot
 
 # Standalone SDK task creation receipts
 
-`meiva.tasks.create(..., operation_key="...")` requires a caller-chosen key of
-1–128 characters. Retain the same key and inputs when the response is lost.
-Missing or invalid keys fail before mutation. This covers standalone creation.
-Compound creation has its own required key and atomic acceptance contract in
-[[gateway/agents/task_assignment/docs/task-assignment.meiva.okf.md]].
-It does not protect retries of an entire `execute_code` script.
+The runtime assigns an operation UID to each `meiva.tasks.create` call and
+reuses it on replay. Standalone creation and compound creation have separate
+receipts. See [[gateway/agents/task_assignment/docs/task-assignment.meiva.okf.md]]
+for the compound operation.
 
 ## Operation identity and request
 

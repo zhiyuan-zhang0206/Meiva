@@ -1,17 +1,15 @@
 ---
 type: doc
 title: Keyed Agent Creation
-description: Required caller-owned identity and immutable recovery for agent creation and forks.
+description: Runtime-owned identity and immutable recovery for agent creation and forks.
 ---
 
 # Keyed Agent Creation
 
-`meiva.agents.spawn(..., idempotency_key="intent")` requires an explicit
-1–128 character key for creation or fork. Reuse the same key, effective inputs
-and verified principal to recover the original agent after a lost response.
-Use a new key for a deliberate new agent. The Fleet `label` wrapper follows the
-same contract. Missing or invalid keys and the retired `require_idempotency`
-flag fail before HTTP.
+The SDK assigns an internal operation UID to each creation or fork. It reuses
+the UID for transport retries and when the runtime replays the original
+`execute_code` invocation. See
+[[agent/graph/exec/docs/process.meiva.okf.md|Execution and write replay]].
 
 A fork resolves the source checkpoint during its first acceptance and copies
 that chain, the fork marker and its first prompt in the birth transaction.
@@ -30,15 +28,14 @@ request without creating an agent.
 
 The transport retries connection failures and ambiguous outcomes (a lost
 read/write response, 429/502/503/504) under the same key and body; the gateway
-replays the original birth, so a retry never creates a twin. A caller may also
-retry the same intent explicitly with the same key.
+replays the original birth, so a retry never creates a twin. A replay of the original execution uses the same UID.
 The SDK builds this request as a value
 ([[meiva/gateway_client/docs/gateway-client.meiva.okf.md]]).
 
 ## Scope and result
 
 The server records birth identity using the verified authorization principal,
-POST method, guarded logical path and caller key. Other operation paths have different receipt namespaces; keep the same path
+POST method, guarded logical path and operation UID. Other operation paths have different receipt namespaces; keep the same path
 while recovering one intent.
 A changed body within the same namespace returns 409. A different verified
 principal identifies a different namespace, not the old receipt. SDK provenance
@@ -65,8 +62,7 @@ from mutable metadata. Reusing the key cannot reset later operator config.
 
 A receipt proves birth acceptance and recovers the original agent id, not that
 its native process is ready or work executed. Existing launch failure handling
-and observed-attempt `retry_launch` remain separate recovery operations; see
-[[launch-retry.meiva.okf.md]].
+and observed-attempt launch recovery remain separate gateway operations.
 
 ## Compound operations
 

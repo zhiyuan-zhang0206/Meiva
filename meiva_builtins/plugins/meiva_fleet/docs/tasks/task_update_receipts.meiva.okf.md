@@ -10,14 +10,9 @@ tags:
 
 # SDK Task Update Receipts
 
-`meiva.tasks.update(..., operation_key=...)` and
-`meiva.tasks.log(task_id, message, operation_key=...)` require a stable
-caller key. Persist or retain that key for deliberate retries of the same logical
-operation; do not replay an entire `execute_code` block to retry one mutation.
-Missing keys and absent agent identity fail before mutation. The result remains `None`: no new task-state or execution result
-is inferred from a successful replay.
-
-## Scope and identity
+The runtime assigns an operation UID to each `meiva.tasks.update` and
+`meiva.tasks.log` write. A replay of the original execution repeats those UIDs
+in write order. The result remains `None`.
 
 The scope is `(actor_agent_id, task_id, operation_key)`. Raw keys must be strings
 of 1 to 128 characters. Different actors or target tasks have independent scopes.

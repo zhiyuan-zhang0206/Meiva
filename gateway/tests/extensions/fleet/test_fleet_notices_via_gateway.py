@@ -5,7 +5,6 @@ Split out of `meiva_builtins/plugins/meiva_fleet/tests/test_meiva_fleet_plugin.p
 from collections.abc import Iterator
 from datetime import datetime
 from typing import cast
-from uuid import uuid4
 
 import psycopg
 import pytest
@@ -118,18 +117,24 @@ def test_notify_defaults_to_response_and_snapshot_lists_question(
     nid = cast(
         "NoticeView",
         meiva.ui.notify(  # pyright: ignore[reportCallIssue]
-            "migration done", content="14k rows", priority="P1", idempotency_key=str(uuid4())
+            "migration done",
+            content="14k rows",
+            priority="P1",
         ),
     )
     assert isinstance(nid, int)
     _assert_first_notice_is_sole_pending_fyi(nid)
 
     with pytest.raises(ValueError, match="already holds an open notice"):
-        meiva.ui.notify("hit a rate limit", idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
+        meiva.ui.notify(
+            "hit a rate limit",
+        )  # pyright: ignore[reportCallIssue]
     _assert_second_notice_is_refused(nid)
 
     meiva.ui.dismiss_notice()  # pyright: ignore[reportCallIssue]
-    meiva.ui.notify("hit a rate limit", idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
+    meiva.ui.notify(
+        "hit a rate limit",
+    )  # pyright: ignore[reportCallIssue]
 
     db_conn.rollback()
     rows = _notices(db_conn, agent_id)
@@ -161,15 +166,20 @@ def test_notify_require_response_rides_awaiting_worklist(
         priority="P0",
         require_response=True,
         blocking=True,
-        idempotency_key=str(uuid4()),
     )
     # meiva:note
     # A second notice is refused while the first is open; close it, then post.
     # meiva:link meiva_builtins/plugins/meiva_fleet/docs/notify.meiva.okf.md
     with pytest.raises(ValueError, match="already holds an open notice"):
-        meiva.ui.notify("Name the branch?", require_response=True, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
+        meiva.ui.notify(
+            "Name the branch?",
+            require_response=True,
+        )  # pyright: ignore[reportCallIssue]
     meiva.ui.dismiss_notice()  # pyright: ignore[reportCallIssue]
-    meiva.ui.notify("Name the branch?", require_response=True, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
+    meiva.ui.notify(
+        "Name the branch?",
+        require_response=True,
+    )  # pyright: ignore[reportCallIssue]
 
     db_conn.rollback()
     # meiva:note
@@ -202,7 +212,6 @@ def test_sdk_question_keeps_number_order_in_snapshot(
             "options": [{"id": "z", "label": "First"}, {"id": "a", "label": "Second"}],
             "allow_other": False,
         },
-        idempotency_key=str(uuid4()),
     )
     db_conn.rollback()
     snapshot = select_one(
@@ -253,7 +262,9 @@ def test_notify_records_task_id_and_rides_snapshot(
     tid = _seed_task(db_conn, agent_id)
     pin_agent(agent_id)
     meiva.ui.notify(
-        "stalled on a decision", require_response=True, task=tid, idempotency_key=str(uuid4())
+        "stalled on a decision",
+        require_response=True,
+        task=tid,
     )  # type: ignore[attr-defined]
     db_conn.rollback()  # notify committed via its own cursor; refresh our view
     assert _notice_task_id(db_conn, agent_id) == tid
@@ -272,7 +283,9 @@ def test_notify_without_task_leaves_task_id_null(
 ):
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    meiva.ui.notify("fyi, no task", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+    meiva.ui.notify(
+        "fyi, no task",
+    )  # type: ignore[attr-defined]
     db_conn.rollback()
     assert _notice_task_id(db_conn, agent_id) is None
 
@@ -283,7 +296,10 @@ def test_notify_nonexistent_task_raises(
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with pytest.raises(ValueError, match="task 999999 does not exist"):
-        meiva.ui.notify("names a ghost task", task=999999, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+        meiva.ui.notify(
+            "names a ghost task",
+            task=999999,
+        )  # type: ignore[attr-defined]
 
 
 def test_edit_notice_partial_update(
@@ -294,7 +310,9 @@ def test_edit_notice_partial_update(
     nid = cast(
         "NoticeView",
         meiva.ui.notify(  # type: ignore[attr-defined]
-            "draft title", content="old body", priority="P2", idempotency_key=str(uuid4())
+            "draft title",
+            content="old body",
+            priority="P2",
         ),
     )
     # change only title + priority; content is left as-is (omitted != cleared).
@@ -350,7 +368,6 @@ def test_response_notice_content_edits_publish_refreshed_snapshot(
             priority="P1",
             require_response=True,
             blocking=True,
-            idempotency_key=str(uuid4()),
         )
         for revision in range(1, 11):
             content = f"revision {revision}"
@@ -384,7 +401,9 @@ def test_edit_notice_validation_and_guards(
 ):
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    meiva.ui.notify("fyi notice", idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+    meiva.ui.notify(
+        "fyi notice",
+    )  # type: ignore[attr-defined]
 
     # nothing passed -> nothing to change.
     with pytest.raises(ValueError, match="at least one field"):
@@ -394,7 +413,10 @@ def test_edit_notice_validation_and_guards(
         meiva.ui.edit_notice(priority="P9")  # type: ignore[attr-defined]
     meiva.ui.edit_notice(blocking=True)  # type: ignore[attr-defined]
     with pytest.raises(ValueError, match="require a user response"):
-        meiva.ui.notify("Information", require_response=False, idempotency_key=str(uuid4()))  # type: ignore[attr-defined]
+        meiva.ui.notify(
+            "Information",
+            require_response=False,
+        )  # type: ignore[attr-defined]
     # no open notice is idempotent (no-op).
     meiva.ui.dismiss_notice()  # type: ignore[attr-defined]
     # meiva:link meiva/docs/ui.meiva.okf.md
@@ -406,7 +428,9 @@ def test_dismiss_notice_withdraws(
 ):
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    nid = cast("NoticeView", meiva.ui.notify("stale fyi", idempotency_key=str(uuid4())))  # type: ignore[attr-defined]
+    notify = meiva.ui.notify
+    assert callable(notify)
+    nid = cast("NoticeView", notify("stale fyi"))
     meiva.ui.dismiss_notice()  # type: ignore[attr-defined]
 
     db_conn.rollback()
@@ -451,12 +475,18 @@ def test_each_agent_side_resolution_publishes_notice_resolved(
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with recording_live_events(event_bus) as live:
-        meiva.ui.notify("Q1?", require_response=True, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
+        meiva.ui.notify(
+            "Q1?",
+            require_response=True,
+        )  # pyright: ignore[reportCallIssue]
         live.settle("notice_posted", 1)
         live.quiet()
         assert live.events("notice_resolved") == []
         meiva.ui.dismiss_notice()  # pyright: ignore[reportCallIssue]
         live.settle("notice_resolved", 1)
-        meiva.ui.notify("Q2?", require_response=True, idempotency_key=str(uuid4()))  # pyright: ignore[reportCallIssue]
+        meiva.ui.notify(
+            "Q2?",
+            require_response=True,
+        )  # pyright: ignore[reportCallIssue]
         meiva.ui.dismiss_notice()  # pyright: ignore[reportCallIssue]
         assert len(live.settle("notice_resolved", 2)) == 2

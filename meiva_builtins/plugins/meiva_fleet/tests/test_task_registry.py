@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import inspect
 import re
-from uuid import uuid4
 
 import psycopg
 import pytest
@@ -65,9 +64,7 @@ def test_create_parent_is_required() -> None:
         "remind_interval_seconds",
         "owner",
         "priority",
-        "operation_key",
     ]
-    assert params["operation_key"].default is inspect.Parameter.empty
     assert params["description"].default is inspect.Parameter.empty
     assert params["parent"].default is inspect.Parameter.empty
     assert params["parent"].kind is inspect.Parameter.KEYWORD_ONLY
@@ -83,9 +80,7 @@ def test_create_defaults_per_priority(
     """No explicit interval → the priority's default window (P0 30m .. P3 4h)."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create(
-        "title", "detail", priority=priority, parent=root_task_id, operation_key=str(uuid4())
-    )
+    task = task_registry.create("title", "detail", priority=priority, parent=root_task_id)
     assert task.remind_interval_seconds == expected
     assert _persisted_remind_interval_seconds(db_conn, task.id) == expected
     assert persisted_priority(db_conn, task.id) == priority
@@ -96,7 +91,7 @@ def test_create_default_priority_is_p2_with_2h_interval(
 ) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", parent=root_task_id)
     assert task.remind_interval_seconds == 7200
     assert _persisted_remind_interval_seconds(db_conn, task.id) == 7200
 
@@ -113,7 +108,6 @@ def test_create_explicit_interval_beats_priority_default(
         priority="P3",
         remind_interval_seconds=1800,
         parent=root_task_id,
-        operation_key=str(uuid4()),
     )
     assert task.remind_interval_seconds == 1800
     assert _persisted_remind_interval_seconds(db_conn, task.id) == 1800
@@ -129,7 +123,6 @@ def test_create_honours_explicit_value(
         "detail",
         remind_interval_seconds=3600,
         parent=root_task_id,
-        operation_key=str(uuid4()),
     )
     assert task.remind_interval_seconds == 3600
     assert _persisted_remind_interval_seconds(db_conn, task.id) == 3600
@@ -147,7 +140,6 @@ def test_create_none_falls_back_to_default(
         "detail",
         remind_interval_seconds=None,
         parent=root_task_id,
-        operation_key=str(uuid4()),
     )
     assert task.remind_interval_seconds == 7200  # P2 default -> 2h
     assert _persisted_remind_interval_seconds(db_conn, task.id) == 7200
@@ -164,7 +156,6 @@ def test_create_rejects_non_positive_interval(
             "detail",
             remind_interval_seconds=0,
             parent=root_task_id,
-            operation_key=str(uuid4()),
         )
 
 
@@ -177,7 +168,6 @@ def test_create_rejects_interval_over_24h(db_conn: psycopg.Connection, root_task
             "detail",
             remind_interval_seconds=86401,
             parent=root_task_id,
-            operation_key=str(uuid4()),
         )
 
 
@@ -192,7 +182,6 @@ def test_create_honours_24h_boundary(
         "detail",
         remind_interval_seconds=86400,
         parent=root_task_id,
-        operation_key=str(uuid4()),
     )
     assert task.remind_interval_seconds == 86400
 
@@ -202,9 +191,9 @@ def test_update_changes_remind_interval_seconds(
 ) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", parent=root_task_id)
     assert task.remind_interval_seconds == 7200  # P2 default -> 2h
-    task_registry.update(task.id, remind_interval_seconds=1800, operation_key=str(uuid4()))
+    task_registry.update(task.id, remind_interval_seconds=1800)
     assert _persisted_remind_interval_seconds(db_conn, task.id) == 1800
 
 
@@ -215,10 +204,8 @@ def test_update_none_remind_interval_is_noop(
     not "write NULL"; alongside a real change it leaves the interval intact."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
-    task_registry.update(
-        task.id, status="in_progress", remind_interval_seconds=None, operation_key=str(uuid4())
-    )
+    task = task_registry.create("title", "detail", parent=root_task_id)
+    task_registry.update(task.id, status="in_progress", remind_interval_seconds=None)
     assert _persisted_remind_interval_seconds(db_conn, task.id) == 7200  # P2 default
 
 
@@ -227,9 +214,9 @@ def test_update_rejects_interval_over_24h(
 ) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", parent=root_task_id)
     with pytest.raises(ValueError, match="cannot be disabled"):
-        task_registry.update(task.id, remind_interval_seconds=86401, operation_key=str(uuid4()))
+        task_registry.update(task.id, remind_interval_seconds=86401)
 
 
 def test_update_resets_reminder_count(
@@ -237,7 +224,7 @@ def test_update_resets_reminder_count(
 ) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", parent=root_task_id)
     # Simulate some prior reminders and an escalation
     with db_conn.cursor() as cur:
         cur.execute(
@@ -247,7 +234,7 @@ def test_update_resets_reminder_count(
         )
     db_conn.commit()
     # An update resets the counters and the escalation marker
-    task_registry.update(task.id, results="progress", operation_key=str(uuid4()))
+    task_registry.update(task.id, results="progress")
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT reminder_count, last_reminded_at, escalated_at FROM agent_tasks WHERE id = %s",
@@ -260,8 +247,8 @@ def test_update_resets_reminder_count(
 def test_update_description(redis_url: str, db_conn: psycopg.Connection, root_task_id: int) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
-    task_registry.update(task.id, description="revised detail", operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", parent=root_task_id)
+    task_registry.update(task.id, description="revised detail")
     assert task_registry.get(task.id).description == "revised detail"
 
 
@@ -270,9 +257,9 @@ def test_update_nothing_raises(
 ) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", parent=root_task_id)
     with pytest.raises(ValueError, match="at least one"):
-        task_registry.update(task.id, operation_key=str(uuid4()))
+        task_registry.update(task.id)
 
 
 @pytest.mark.parametrize("closing_status", ["done", "cancelled"])
@@ -284,19 +271,15 @@ def test_update_rejects_closing_parent_with_in_progress_child(
     a task starts in_progress)."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    parent = task_registry.create(
-        f"parent-{closing_status}", "detail", parent=root_task_id, operation_key=str(uuid4())
-    )
-    child = task_registry.create(
-        f"active-child-{closing_status}", "detail", parent=parent.id, operation_key=str(uuid4())
-    )
+    parent = task_registry.create(f"parent-{closing_status}", "detail", parent=root_task_id)
+    child = task_registry.create(f"active-child-{closing_status}", "detail", parent=parent.id)
     message = (
         f"task {parent.id} has 1 in_progress child tasks (e.g. #{child.id}) — "
         "close or cancel them first"
     )
 
     with pytest.raises(ValueError, match=re.escape(message)):
-        task_registry.update(parent.id, status=closing_status, operation_key=str(uuid4()))
+        task_registry.update(parent.id, status=closing_status)
 
     assert task_registry.get(parent.id).status == "in_progress"
 
@@ -306,19 +289,13 @@ def test_update_closes_parent_when_all_children_are_closed(
 ) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    parent = task_registry.create(
-        "parent-with-closed-children", "detail", parent=root_task_id, operation_key=str(uuid4())
-    )
-    done_child = task_registry.create(
-        "done-child", "detail", parent=parent.id, operation_key=str(uuid4())
-    )
-    cancelled_child = task_registry.create(
-        "cancelled-child", "detail", parent=parent.id, operation_key=str(uuid4())
-    )
-    task_registry.update(done_child.id, status="done", operation_key=str(uuid4()))
-    task_registry.update(cancelled_child.id, status="cancelled", operation_key=str(uuid4()))
+    parent = task_registry.create("parent-with-closed-children", "detail", parent=root_task_id)
+    done_child = task_registry.create("done-child", "detail", parent=parent.id)
+    cancelled_child = task_registry.create("cancelled-child", "detail", parent=parent.id)
+    task_registry.update(done_child.id, status="done")
+    task_registry.update(cancelled_child.id, status="cancelled")
 
-    task_registry.update(parent.id, status="done", operation_key=str(uuid4()))
+    task_registry.update(parent.id, status="done")
 
     assert task_registry.get(parent.id).status == "done"
 
@@ -333,10 +310,9 @@ def test_update_closes_parent_without_children(
         f"parent-without-children-{closing_status}",
         "detail",
         parent=root_task_id,
-        operation_key=str(uuid4()),
     )
 
-    task_registry.update(task.id, status=closing_status, operation_key=str(uuid4()))
+    task_registry.update(task.id, status=closing_status)
 
     assert task_registry.get(task.id).status == closing_status
 
@@ -346,14 +322,10 @@ def test_update_starts_parent_with_in_progress_child(
 ) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    parent = task_registry.create(
-        "parent-to-start", "detail", parent=root_task_id, operation_key=str(uuid4())
-    )
-    task_registry.create(
-        "active-child-of-started-parent", "detail", parent=parent.id, operation_key=str(uuid4())
-    )
+    parent = task_registry.create("parent-to-start", "detail", parent=root_task_id)
+    task_registry.create("active-child-of-started-parent", "detail", parent=parent.id)
 
-    task_registry.update(parent.id, status="in_progress", operation_key=str(uuid4()))
+    task_registry.update(parent.id, status="in_progress")
 
     assert task_registry.get(parent.id).status == "in_progress"
 
@@ -363,16 +335,10 @@ def test_update_title_and_note_on_parent_with_in_progress_child(
 ) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    parent = task_registry.create(
-        "parent-to-edit", "detail", parent=root_task_id, operation_key=str(uuid4())
-    )
-    task_registry.create(
-        "active-child-of-edited-parent", "detail", parent=parent.id, operation_key=str(uuid4())
-    )
+    parent = task_registry.create("parent-to-edit", "detail", parent=root_task_id)
+    task_registry.create("active-child-of-edited-parent", "detail", parent=parent.id)
 
-    task_registry.update(
-        parent.id, title="edited-parent", note="still active", operation_key=str(uuid4())
-    )
+    task_registry.update(parent.id, title="edited-parent", note="still active")
 
     updated = task_registry.get(parent.id)
     assert updated.status == "in_progress"
@@ -386,9 +352,9 @@ def test_log_appends_timestamped_lines(
 ) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
-    task_registry.log(task.id, "first note", operation_key=str(uuid4()))
-    task_registry.log(task.id, "second note", operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", parent=root_task_id)
+    task_registry.log(task.id, "first note")
+    task_registry.log(task.id, "second note")
     results = task_registry.get(task.id).results
     assert results is not None
     lines = [line for line in results.splitlines() if line]
@@ -414,10 +380,8 @@ def test_log_stamps_in_the_cluster_timezone(
             timezone=tz, authoritative_timezone=None, message_timestamp_weekday=False
         )
         pin_agent(agent_id, clock_factory=lambda config=config: Clock(config, timers=SYSTEM_TIMERS))
-        task = task_registry.create(
-            f"stamped in {tz}", "detail", parent=root_task_id, operation_key=str(uuid4())
-        )
-        task_registry.log(task.id, "note", operation_key=str(uuid4()))
+        task = task_registry.create(f"stamped in {tz}", "detail", parent=root_task_id)
+        task_registry.log(task.id, "note")
         results = task_registry.get(task.id).results
         assert results is not None
         stamps[tz] = results.split("]")[0]
@@ -432,9 +396,9 @@ def test_log_preserves_replaced_results(
 ) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
-    task_registry.update(task.id, results="prior log without newline", operation_key=str(uuid4()))
-    task_registry.log(task.id, "appended", operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", parent=root_task_id)
+    task_registry.update(task.id, results="prior log without newline")
+    task_registry.log(task.id, "appended")
     results = task_registry.get(task.id).results
     assert results is not None
     lines = [line for line in results.splitlines() if line]
@@ -453,31 +417,27 @@ def test_log_idempotent_prefix_normalization(
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
 
-    task1 = task_registry.create("t1", "d", parent=root_task_id, operation_key=str(uuid4()))
-    task_registry.update(task1.id, results="note with single newline\n", operation_key=str(uuid4()))
-    task_registry.log(task1.id, "appended 1", operation_key=str(uuid4()))
+    task1 = task_registry.create("t1", "d", parent=root_task_id)
+    task_registry.update(task1.id, results="note with single newline\n")
+    task_registry.log(task1.id, "appended 1")
     res1 = task_registry.get(task1.id).results
     assert res1 is not None
     assert res1.startswith("note with single newline\n\n")
     assert res1.endswith("appended 1\n\n")
     assert "note with single newline\n\n\n" not in res1
 
-    task2 = task_registry.create("t2", "d", parent=root_task_id, operation_key=str(uuid4()))
-    task_registry.update(
-        task2.id, results="note with double newline\n\n", operation_key=str(uuid4())
-    )
-    task_registry.log(task2.id, "appended 2", operation_key=str(uuid4()))
+    task2 = task_registry.create("t2", "d", parent=root_task_id)
+    task_registry.update(task2.id, results="note with double newline\n\n")
+    task_registry.log(task2.id, "appended 2")
     res2 = task_registry.get(task2.id).results
     assert res2 is not None
     assert res2.startswith("note with double newline\n\n")
     assert res2.endswith("appended 2\n\n")
     assert "note with double newline\n\n\n" not in res2
 
-    task3 = task_registry.create("t3", "d", parent=root_task_id, operation_key=str(uuid4()))
-    task_registry.update(
-        task3.id, results="note with triple newline\n\n\n", operation_key=str(uuid4())
-    )
-    task_registry.log(task3.id, "appended 3", operation_key=str(uuid4()))
+    task3 = task_registry.create("t3", "d", parent=root_task_id)
+    task_registry.update(task3.id, results="note with triple newline\n\n\n")
+    task_registry.log(task3.id, "appended 3")
     res3 = task_registry.get(task3.id).results
     assert res3 is not None
     assert res3.startswith("note with triple newline\n\n")
@@ -493,7 +453,7 @@ def test_log_restarts_reminder_count(
 ) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", parent=root_task_id)
     with db_conn.cursor() as cur:
         cur.execute(
             "UPDATE agent_tasks SET reminder_count = 3, last_reminded_at = now(), "
@@ -513,7 +473,7 @@ def test_log_restarts_reminder_count(
         assert row is not None
         return row[0], row[1], row[2]
 
-    task_registry.log(task.id, "note", operation_key=str(uuid4()))
+    task_registry.log(task.id, "note")
     assert ladder() == (0, None, None)
 
 
@@ -526,16 +486,14 @@ def test_log_moves_updated_at(
 ) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create(
-        "log-activity", "detail", parent=root_task_id, operation_key=str(uuid4())
-    )
+    task = task_registry.create("log-activity", "detail", parent=root_task_id)
     with db_conn.cursor() as cur:
         cur.execute(
             "UPDATE agent_tasks SET updated_at = now() - interval '30 days' WHERE id = %s",
             (task.id,),
         )
     db_conn.commit()
-    task_registry.log(task.id, "note", operation_key=str(uuid4()))
+    task_registry.log(task.id, "note")
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT now() - updated_at < interval '1 day' FROM agent_tasks WHERE id = %s",
@@ -549,7 +507,7 @@ def test_log_missing_task_raises(db_conn: psycopg.Connection) -> None:
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with pytest.raises(ValueError, match="does not exist"):
-        task_registry.log(999999, "note", operation_key=str(uuid4()))
+        task_registry.log(999999, "note")
 
 
 # ── create() — owner parameter ────────────────────────────────────────────
@@ -569,7 +527,7 @@ def test_create_default_owner_is_creator(
     """When owner is not passed, the creating agent is the owner."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", parent=root_task_id)
     assert task.owner == agent_id
     assert _persisted_owner(db_conn, task.id) == agent_id
 
@@ -582,9 +540,7 @@ def test_create_explicit_owner(
     other_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with record_notes(db_conn):
-        task = task_registry.create(
-            "title", "detail", owner=other_id, parent=root_task_id, operation_key=str(uuid4())
-        )
+        task = task_registry.create("title", "detail", owner=other_id, parent=root_task_id)
     assert task.owner == other_id
     assert _persisted_owner(db_conn, task.id) == other_id
 
@@ -597,9 +553,7 @@ def test_create_with_owner_notifies_target(
     other_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with record_notes(db_conn) as notes:
-        task = task_registry.create(
-            "title", "detail", owner=other_id, parent=root_task_id, operation_key=str(uuid4())
-        )
+        task = task_registry.create("title", "detail", owner=other_id, parent=root_task_id)
     [note] = notes.read()
     assert note.recipient == other_id
     assert f"Task #{task.id}" in note.content
@@ -617,9 +571,7 @@ def test_create_with_owner_self_no_notification(
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with record_notes(db_conn) as notes:
-        task_registry.create(
-            "title", "detail", owner=agent_id, parent=root_task_id, operation_key=str(uuid4())
-        )
+        task_registry.create("title", "detail", owner=agent_id, parent=root_task_id)
     assert notes.read() == []
 
 
@@ -630,7 +582,7 @@ def test_create_without_owner_no_notification(
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     with record_notes(db_conn) as notes:
-        task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
+        task_registry.create("title", "detail", parent=root_task_id)
     assert notes.read() == []
 
 
@@ -645,9 +597,9 @@ def test_update_owner_reassign_notifies(
     agent_id = seed_agent(db_conn)
     other_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", parent=root_task_id)
     with record_notes(db_conn) as notes:
-        task_registry.update(task.id, owner=other_id, operation_key=str(uuid4()))
+        task_registry.update(task.id, owner=other_id)
     [note] = notes.read()
     assert note.recipient == other_id
     assert "now assigned" in note.content
@@ -662,9 +614,9 @@ def test_update_owner_none_is_noop(
     because nothing else is changing either."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", parent=root_task_id)
     with pytest.raises(ValueError, match="at least one"):
-        task_registry.update(task.id, owner=None, operation_key=str(uuid4()))
+        task_registry.update(task.id, owner=None)
     # Owner should be unchanged
     assert _persisted_owner(db_conn, task.id) == agent_id
 
@@ -675,8 +627,8 @@ def test_update_owner_none_with_status_is_noop_for_owner(
     """owner=None alongside a real change (status) only changes status, not owner."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
-    task_registry.update(task.id, status="in_progress", owner=None, operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", parent=root_task_id)
+    task_registry.update(task.id, status="in_progress", owner=None)
     got = task_registry.get(task.id)
     assert got.status == "in_progress"
     assert got.owner == agent_id  # unchanged
@@ -688,9 +640,9 @@ def test_update_owner_self_no_notification(
     """Reassigning to yourself is a no-op notification-wise."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", parent=root_task_id)
     with record_notes(db_conn) as notes:
-        task_registry.update(task.id, owner=agent_id, operation_key=str(uuid4()))
+        task_registry.update(task.id, owner=agent_id)
     assert notes.read() == []
 
 
@@ -703,9 +655,9 @@ def test_update_owner_new_terminated_still_notified(
     agent_id = seed_agent(db_conn)
     dead_id = seed_agent(db_conn, status="terminated")
     pin_agent(agent_id)
-    task = task_registry.create("title", "detail", parent=root_task_id, operation_key=str(uuid4()))
+    task = task_registry.create("title", "detail", parent=root_task_id)
     with record_notes(db_conn) as notes:
-        task_registry.update(task.id, owner=dead_id, operation_key=str(uuid4()))
+        task_registry.update(task.id, owner=dead_id)
     [note] = notes.read()
     assert note.recipient == dead_id
     assert "now assigned" in note.content
@@ -732,7 +684,7 @@ def test_update_owner_old_terminated_leg_skipped(
         task_id = cur.fetchone()[0]  # type: ignore[index]
     db_conn.commit()
     with record_notes(db_conn) as notes:
-        task_registry.update(task_id, owner=new_owner, operation_key=str(uuid4()))  # pyright: ignore[reportUnknownArgumentType]
+        task_registry.update(task_id, owner=new_owner)  # pyright: ignore[reportUnknownArgumentType]
     [note] = notes.read()
     assert note.recipient == new_owner
 
@@ -757,7 +709,7 @@ def test_failed_note_delivery_rolls_back_assignment(
         inserts_failing(db_conn, "inbound_messages"),
         pytest.raises(psycopg.errors.RaiseException),
     ):
-        task_registry.update(task_id, owner=new_owner, operation_key=str(uuid4()))
+        task_registry.update(task_id, owner=new_owner)
     assert delivered.read() == []
     with db_conn.cursor() as cur:
         cur.execute("SELECT owner FROM agent_tasks WHERE id=%s", (task_id,))

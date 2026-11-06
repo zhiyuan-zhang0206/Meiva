@@ -6,7 +6,7 @@ import pytest
 
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
-from base.agents.context.gateway_client import launch_retry, memory_search, transport
+from base.agents.context.gateway_client import memory_search, transport
 from base.agents.context.identity import AgentIdentity, ExternalLease
 
 
@@ -81,12 +81,6 @@ def test_two_contexts_keep_clients_timeouts_and_wire_parameters_separate() -> No
         (transport.post, ("/api/write",), {}),
         (transport.patch, ("/api/agents/42",), {}),
         (memory_search.memory_search, ("query", 2), {"purpose": "search"}),
-        (launch_retry.get_launch_attempt, (42,), {}),
-        (
-            launch_retry.retry_launch,
-            (42,),
-            {"idempotency_key": "key", "expected_prior_attempt_id": "invalid"},
-        ),
     ],
 )
 def test_io_boundaries_require_a_context(

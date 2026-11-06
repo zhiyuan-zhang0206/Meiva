@@ -23,8 +23,6 @@ class RetryLaunchConflictError(ValueError):
 # the stored `RetryLaunchAccepted` as the JSON object it was written as (NOT NULL).
 @dataclass(frozen=True)
 class _Receipt:
-    agent_id: int
-    prior_attempt_id: UUID
     machine: str
     acceptance: Mapping[str, object]
 
@@ -55,25 +53,20 @@ class _Clock:
 # `new_attempt_id` becomes the agent's launch attempt only when this call commits the intent; a
 # replay returns the stored acceptance and drops it.
 def accept_retry_launch(
-    pool: ConnectionPool, key: str, agent_id: int, body: RetryLaunchRequest, *, new_attempt_id: UUID
+    pool: ConnectionPool, agent_id: int, body: RetryLaunchRequest, *, new_attempt_id: UUID
 ) -> tuple[str, RetryLaunchAccepted]:
+    attempt_id = body.expected_prior_attempt_id
+    key = f"launch-retry:{agent_id}:{attempt_id}"
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (key,))
         prior = query_one(
             conn,
             _Receipt,
-            "SELECT agent_id, prior_attempt_id, machine, acceptance "
-            "FROM agent_launch_retry_receipts WHERE operation_key=%s",
-            (key,),
+            "SELECT machine, acceptance FROM agent_launch_retry_receipts "
+            "WHERE agent_id=%s AND prior_attempt_id=%s",
+            (agent_id, attempt_id),
         )
         if prior is not None:
-            if (prior.agent_id, prior.prior_attempt_id) != (
-                agent_id,
-                body.expected_prior_attempt_id,
-            ):
-                raise RetryLaunchConflictError(
-                    "idempotency key reused with a different retry intent"
-                )
             return prior.machine, RetryLaunchAccepted.model_validate(prior.acceptance)
         row = query_one(
             conn,

@@ -4,7 +4,6 @@ from collections.abc import Callable, MutableMapping, Sequence
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeGuard
-from uuid import UUID
 
 if TYPE_CHECKING:
     # meiva:note
@@ -182,7 +181,6 @@ async def boot_agent_scope(
     catalog: ModelCatalog,
     keys: ProviderKeys,
     llm_override: str,
-    permissions_notice_key: UUID,
     home: Path,
     harness: Harness = Harness.MEIVA,
 ) -> tuple[BaseChatModel | None, ProviderBinding | None]:
@@ -194,7 +192,7 @@ async def boot_agent_scope(
 
     from .startup import notify_desktop_permissions_at_startup
 
-    await notify_desktop_permissions_at_startup(home, idempotency_key=permissions_notice_key)
+    await notify_desktop_permissions_at_startup(home)
 
     if harness is not Harness.MEIVA:
         return None, None

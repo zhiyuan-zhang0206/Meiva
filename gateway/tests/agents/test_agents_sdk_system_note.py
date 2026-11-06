@@ -36,7 +36,7 @@ class TestSendSystemNote:
                 local_machine=machine_identity,
             )
         )
-        peer_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
+        peer_id = meiva.agents.spawn()
 
         inbound_id = meiva.agents.send_system_note(
             peer_id,
@@ -73,7 +73,7 @@ class TestSendSystemNote:
                 local_machine=machine_identity,
             )
         )
-        peer_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
+        peer_id = meiva.agents.spawn()
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO agent_tasks (title, description, created_by, owner) "
@@ -116,7 +116,7 @@ class TestSendSystemNote:
                 local_machine=machine_identity,
             )
         )
-        peer_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
+        peer_id = meiva.agents.spawn()
         with db_conn.cursor() as cur:
             cur.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (peer_id,))
         db_conn.commit()
@@ -147,7 +147,7 @@ class TestSendSystemNote:
                 local_machine=machine_identity,
             )
         )
-        peer_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
+        peer_id = meiva.agents.spawn()
 
         # Runtime value of `("Task #1 is now " "assigned to you.",)`: implicit
         # concatenation plus trailing comma.
@@ -176,7 +176,7 @@ class TestSendSystemNote:
                 local_machine=machine_identity,
             )
         )
-        peer_id = meiva.agents.spawn(idempotency_key=str(uuid4()))
+        peer_id = meiva.agents.spawn()
 
         content: object = ("Task #1 is now ", "assigned to you.")
         with pytest.raises(TypeError, match="content must be a string"):

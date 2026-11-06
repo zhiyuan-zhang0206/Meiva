@@ -35,6 +35,7 @@ from agent.execution.protocol import (
     write_request,
 )
 from base.agents.context import MeivaContext
+from base.agents.sdk.operation_ids import ExecutionIdentity
 from base.clock import Timers
 from base.deploy.release import editable_install
 from base.log import logger
@@ -210,7 +211,12 @@ def _close_output(reader: ExecOutputPipe) -> None:
 
 
 def _write_request_failure(
-    path: Path, code: str, context: MeivaContext, timeout: float, state: Mapping[str, object] | None
+    path: Path,
+    code: str,
+    context: MeivaContext,
+    timeout: float,
+    state: Mapping[str, object] | None,
+    execution_identity: ExecutionIdentity | None,
 ) -> ExecCrashed | None:
     try:
         write_request(
@@ -220,6 +226,7 @@ def _write_request_failure(
             timeout_s=timeout,
             state=state,
             incarnation=context.original_incarnation,
+            execution_identity=execution_identity,
         )
     except BaseException as exc:
         return ExecCrashed(output=f"exec subprocess request could not be written: {exc}", exc=exc)
@@ -321,6 +328,7 @@ async def run_in_subprocess(
     state: Mapping[str, object] | None = None,
     config_overlay: dict[str, object] | None = None,
     birth_config: dict[str, object] | None = None,
+    execution_identity: ExecutionIdentity | None = None,
 ) -> tuple[ExecResult, ResultPayload | None]:
     guard_failure = _editable_guard_failure(parent)
     if guard_failure is not None:
@@ -331,7 +339,9 @@ async def run_in_subprocess(
     request_path = make_request_path(exec_dir, agent_id, request_id=request_id)
     result_path = make_result_path(exec_dir, agent_id, result_id=result_id)
 
-    request_error = _write_request_failure(request_path, code, context, timeout, state)
+    request_error = _write_request_failure(
+        request_path, code, context, timeout, state, execution_identity
+    )
     if request_error is not None:
         return request_error, None
 

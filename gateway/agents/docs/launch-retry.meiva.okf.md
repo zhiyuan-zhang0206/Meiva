@@ -7,23 +7,23 @@ tags: [gateway, agents, idempotency]
 
 # Guarded launch retry acceptance
 
-`POST /api/keyed/v1/agents/{agent_id}/retry-launch` requires a valid
-`Idempotency-Key`, exact `Idempotency-Scope: principal-v1`, a verified credential
-principal and an explicit UUID `expected_prior_attempt_id`. Selected-agent
-`AgentSnapshot.last_launch_attempt_id` exposes the observed prior attempt;
-missing data from an older gateway supplies no evidence for strong admission.
-Every request authenticates again. A runner that does not know the `launch-reconcile` kind rejects it before effects;
+An authenticated operator submits the observed UUID `expected_prior_attempt_id`
+to `POST /api/keyed/v1/agents/{agent_id}/retry-launch`. Selected-agent
+`AgentSnapshot.last_launch_attempt_id` exposes this observation. The gateway
+identifies the recovery by agent ID and prior attempt, including receipts
+stored before that pair became the operation identity. Every request
+authenticates again.
+A runner that does not know the `launch-reconcile` kind rejects it before effects;
 that failure never authorizes fallback to the original HTTP path or `spawn-launch`.
 
 `ops.agents.launch_retry.accept_retry_launch` owns the transaction. It serializes
-the scoped key, looks up the receipt before mutable target state, then locks
+the agent and prior attempt, looks up the receipt before mutable target state, then locks
 `agents_meta`. A fresh request needs the matching current attempt, idling status
 and no admission observation. Stale or admitted targets return 409; missing fresh
 targets return 404. The original prior/new UUIDs, placement, config overlay,
-birth config and acceptance snapshot commit with the pointer rotation. Same-key
-changed intent conflicts. Replaying the original intent keeps its original
-acceptance, including after target deletion, admission or a later deliberate
-retry. A deliberate new attempt needs a new key and the latest observed UUID.
+birth config and acceptance snapshot commit with the pointer rotation. Replaying the observed attempt keeps its original
+acceptance after target deletion, admission or a later deliberate retry.
+A deliberate new retry observes the replacement attempt.
 
 `agent_launch_retry_receipts` has no target foreign key or expiry. Its fixed
 attempt identities are never pruned or replaced by a cache. A receipt is
@@ -54,10 +54,6 @@ v2 result as execution evidence. HTTP acceptance survives an unsupported or
 unreachable runner, which remains a delivery gap until a later same-intent
 reconciliation or the existing pending scan. No new durable worker is added.
 
-The original `/api/agents/{agent_id}/retry-launch` route and its one-shot
-attempt-rotation owner are removed. The browser API and SDK require an explicit
-observed UUID and caller key for the versioned route. Launch-failure responses
-advertise that route. See [[meiva/agents/docs/launch-retry.meiva.okf.md]]. There is no
-capability cache or client outbox; SDK transport retries an ambiguous outcome
-under the original key, and recovery must reuse the original intent. Installed older consumers are not supported by a
-fallback route.
+Launch-failure responses advertise the operator route. The model-facing SDK
+exposes agent creation and its accepted agent ID. Repeating a creation uses
+its original receipt, independently of operator launch recovery.

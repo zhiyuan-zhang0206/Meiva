@@ -46,10 +46,19 @@ def test_aba_assignment_supersedes_old_directions(
     owner_b = seed_agent(db_conn, status="terminated")
     pin_agent(actor)
     task = task_registry.create(
-        "aba", "work", parent=root_task_id, owner=owner_a, operation_key=str(uuid4())
+        "aba",
+        "work",
+        parent=root_task_id,
+        owner=owner_a,
     )
-    task_registry.update(task.id, owner=owner_b, operation_key=str(uuid4()))
-    task_registry.update(task.id, owner=owner_a, operation_key=str(uuid4()))
+    task_registry.update(
+        task.id,
+        owner=owner_b,
+    )
+    task_registry.update(
+        task.id,
+        owner=owner_a,
+    )
     with db_conn.cursor() as cur:
         cur.execute(
             "SELECT id, agent_id, status, payload FROM inbound_messages "

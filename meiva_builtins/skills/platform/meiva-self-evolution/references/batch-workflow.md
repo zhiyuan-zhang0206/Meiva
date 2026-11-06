@@ -155,13 +155,10 @@ Create and retain one notice key before sending the report; same-intent retries
 reuse the key and content:
 
 ```python
-from uuid import uuid4
 
-notice_key = str(uuid4())
 meiva.ui.notify(
     title="Self-evolution: <N> changes, <M> suspected regressions",
     content="<report path>",
-    idempotency_key=notice_key,
 )
 ```
 

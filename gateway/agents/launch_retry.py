@@ -11,13 +11,7 @@ from base.api_contracts.launch_retry import (
     RetryLaunchRequest,
 )
 from base.log import logger
-from gateway.http.auth.request_principal import (
-    PRINCIPAL_SCOPE,
-    SCOPE_HEADER,
-    AuthPrincipal,
-    PrincipalScopeError,
-    request_key,
-)
+from gateway.http.auth.request_principal import AuthPrincipal
 from gateway.http.config import gateway_config, gateway_rpc, gateway_state
 from ops.agents.launch_retry import RetryLaunchConflictError, accept_retry_launch
 from ops.cluster import rpc
@@ -34,24 +28,12 @@ async def retry_launch(
     Never downgrade this intent to the original endpoint or v2 launch RPC.
     Every request authenticates again, including a historical receipt replay.
     """
-    key = request.headers.get("Idempotency-Key")
-    if (
-        key is None
-        or request.headers.get(SCOPE_HEADER) != PRINCIPAL_SCOPE
-        or not isinstance(getattr(request.state, "auth_principal", None), AuthPrincipal)
-    ):
-        raise HTTPException(
-            status_code=400, detail="guarded retry requires a key and verified principal-v1 scope"
-        )
-    try:
-        scoped = request_key(request, key, method="POST", path=request.url.path)
-    except PrincipalScopeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not isinstance(getattr(request.state, "auth_principal", None), AuthPrincipal):
+        raise HTTPException(status_code=400, detail="launch retry requires a verified principal")
     try:
         target, accepted = await asyncio.to_thread(
             accept_retry_launch,
             gateway_state(request).db_pool,
-            scoped,
             agent_id,
             body,
             new_attempt_id=UUID(int=gateway_config(request).rng.getrandbits(128), version=4),

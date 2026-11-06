@@ -41,7 +41,7 @@ def notice_expired_message(local_id: int, title: str, expired_at: str) -> str:
         f'Notice #{local_id} "{title}" reached its expiry at {expired_at} '
         "without a response from the user, so it is resolved as expired. It no longer "
         "waits for an answer and no longer occupies your one open notice; post a new "
-        "one with meiva.ui.notify(title, ..., idempotency_key=...) if it still matters."
+        "one with meiva.ui.notify(title, ...) if it still matters."
     )
 
 
