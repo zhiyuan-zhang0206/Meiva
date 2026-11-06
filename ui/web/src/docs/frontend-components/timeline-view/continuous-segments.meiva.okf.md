@@ -16,8 +16,10 @@ During a compact transition, the view renders buffered old groups above the
 new rank-0 window with provisional historical ranks and no visible boundary.
 Buffered and canonical React keys occupy separate namespaces; canonical history
 already covered by the buffer stays hidden until a single store update replaces
-the buffer with the re-keyed rows. A pre-commit notification captures the topmost visible
-real row before that transition commit, and a layout effect maps its message/block
+the buffer with the re-keyed rows. A pre-commit notification captures the first real
+row whose start is inside the viewport, falling back to a clipped row when necessary.
+This keeps a tall preceding tail from anchoring retired context above the reply
+the reader can see. A layout effect maps the chosen row's message/block
 coordinate to the new rank and adjusts scroll position before paint. Historical
 pages omit the former system prompt, so former current-segment message indexes
 shift down by one; older historical indexes keep their coordinates. Newly keyed
