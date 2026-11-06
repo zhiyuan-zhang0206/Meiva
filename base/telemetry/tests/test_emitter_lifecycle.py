@@ -63,6 +63,35 @@ def test_emit_before_init_drops_the_event_and_says_so_once() -> None:
     assert "emit must not construct a writer" not in child.stderr
 
 
+# meiva:note
+# A client set with no pipeline factory answers through `NoPipelineFactoryError`, and that answer is
+# an absence: the metering seam used to route it through `failure_isolated`, which printed a
+# full traceback for a process that simply has no stream. One line, no traceback, and the line
+# says which cause it was.
+# meiva:link base/telemetry/docs/telemetry.meiva.okf.md
+def test_emit_without_a_pipeline_factory_drops_and_says_so_once() -> None:
+    child = _run_scenario("emit_without_a_factory")
+    assert child.returncode == 0, child.stderr
+    assert child.stderr.count("emission skipped: no producer") == 1
+    assert "no pipeline factory" in child.stderr
+    assert "Traceback (most recent call last)" not in child.stderr
+    assert "emit failed" not in child.stderr
+
+
+# meiva:note
+# The counter-case that keeps the line above honest: a producer that fails for its own reason is
+# a sink failure and must still report with its traceback, or the one-line absence would be
+# swallowing real defects.
+# meiva:link base/telemetry/docs/telemetry.meiva.okf.md
+def test_a_defective_producer_still_reports_a_sink_failure() -> None:
+    child = _run_scenario("failing_producer")
+    assert child.returncode == 0, child.stderr
+    assert "emit failed" in child.stderr
+    assert "Traceback (most recent call last)" in child.stderr
+    assert "sink defect" in child.stderr
+    assert "emission skipped" not in child.stderr
+
+
 def test_process_binding_rejects_replacing_a_live_owner() -> None:
     child = _run_scenario("replace_live_owner")
     assert child.returncode == 0, child.stderr

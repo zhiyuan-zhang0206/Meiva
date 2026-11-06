@@ -128,7 +128,7 @@ class ProcessState(TypedDict):
     home: Path | None
     cluster: str | None
     jsonl_day: str | None
-    emission_skipped_warned: bool
+    emission_skipped_said: set[str]
 
 
 # meiva:note
@@ -149,7 +149,7 @@ process_state: ProcessState = {
     "home": None,
     "cluster": None,
     "jsonl_day": None,
-    "emission_skipped_warned": False,
+    "emission_skipped_said": set(),
 }
 
 

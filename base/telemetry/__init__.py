@@ -17,6 +17,7 @@ from base.telemetry.delivery.state import (
 )
 from base.telemetry.emitter import (
     TELEMETRY_KINDS,
+    NoPipelineFactoryError,
     bind_identity,
     bind_identity_if_unbound,
     capture_trace_ids,
@@ -40,6 +41,7 @@ __all__ = [
     "DrainStatus",
     "Event",
     "EventPipeline",
+    "NoPipelineFactoryError",
     "ambient_agent_id",
     "append_jsonl",
     "bind_identity",

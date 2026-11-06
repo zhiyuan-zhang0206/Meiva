@@ -221,7 +221,9 @@ class ClientSet:
         with self._lock:
             if self._event_pipeline is None:
                 if self._pipeline_factory is None:
-                    raise RuntimeError("this context has no event pipeline factory")
+                    from base.telemetry.emitter import NoPipelineFactoryError
+
+                    raise NoPipelineFactoryError("this context has no event pipeline factory")
                 self._event_pipeline = self._pipeline_factory()
             return self._event_pipeline
 
