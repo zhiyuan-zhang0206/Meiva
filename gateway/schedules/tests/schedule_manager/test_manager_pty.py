@@ -10,7 +10,9 @@
 # crash paths) — the runner's real script execution and status semantics are covered by
 # test_schedule_runner.py.
 
+import json
 import shlex
+import subprocess
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -20,6 +22,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.cluster import session_name
+from base.daemon.schedules.claim import claim_path
 from base.db.rows import query_one
 from base.deploy.lifecycle.start_serving import RootBirth
 from base.deploy.lifecycle.tests.serving_root import observe
@@ -31,6 +34,8 @@ from base.sessions.pty import client
 from base.sessions.pty.tests.pty_service import PtyServiceProcess, service_socket
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.sessions.pty.tests.pty_shells import wait_for
+from base.telemetry.tests.capture.event_capture import EmittedEvents
+from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from gateway.schedules import session_control
 from gateway.schedules.rows import InsertedId
 from gateway.schedules.tests.db_faults import failing_write
@@ -286,6 +291,104 @@ def test_real_pty_revision_is_adopted_after_lost_acknowledgement(
             "SELECT status, launch_count, last_error FROM schedules WHERE id = %s", (sid,)
         ).fetchone() == ("running", 1, None)
         assert marker.read_text().splitlines() == ["birth"]
+    finally:
+        mgr._reap(sid, NOW)
+        _wait_session_gone(name)
+
+
+# meiva:note
+# The record a killed runner leaves behind, written the way the runner writes it, with a birth the
+# test chooses: the record's birth is what decides whether it can describe the session running now.
+def _plant_runner_record(home: Path, sid: int, *, born: float, pid: int) -> None:
+    path = claim_path(home, sid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"schedule_id": sid, "pid": pid, "birth": born, "starttime": None}))
+
+
+def _dead_pid() -> int:
+    proc = subprocess.Popen(["/bin/sleep", "60"])
+    proc.kill()
+    proc.wait()
+    return proc.pid
+
+
+def _stub_runner(tmp_path: Path) -> Path:
+    marker = tmp_path / "runner-births"
+    runner = tmp_path / ".venv" / "bin" / "python"
+    runner.parent.mkdir(parents=True)
+    runner.write_text(
+        f"#!/bin/sh\nprintf 'birth\\n' >> {shlex.quote(str(marker))}\nexec sleep 30\n"
+    )
+    runner.chmod(0o755)
+    return marker
+
+
+def test_a_fresh_launch_is_not_marked_lost_by_the_reaped_runners_record(
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    _pty_home: str,
+    tmp_path: Path,
+    emitted_events: EmittedEvents,
+) -> None:
+    # meiva:note
+    # 2026-11-06, schedule 40: a script edit reaped the runner and relaunched it; 254 ms later the
+    # reconciler read the reaped process's leftover record, called it a death, set the status to
+    # error and disabled the automatic relaunch -- while the session had been up for a quarter of
+    # a second. A record born before the session started cannot describe this session's runner.
+    marker = _stub_runner(tmp_path)
+    sid = _insert_schedule(
+        db_conn, "pty-fresh-record", "import time; time.sleep(30)", "python schedule.py"
+    )
+    name = session_name(f"schedule-{sid}")
+    mgr = _manager(pool, repo_root=tmp_path)
+    try:
+        mgr.sync_one(sid, now=NOW)
+        assert wait_for(marker.exists)
+        started = get_shell_backend(home=meiva_home()).session_started_at(name)
+        assert started is not None
+        _plant_runner_record(meiva_home(), sid, born=started - 100.0, pid=_dead_pid())
+
+        mgr.sync_one(sid, now=NOW)
+
+        assert db_conn.execute("SELECT status FROM schedules WHERE id = %s", (sid,)).fetchone() == (
+            "running",
+        )
+        assert emitted_events.attributes("schedule_process_lost") == []
+    finally:
+        mgr._reap(sid, NOW)
+        _wait_session_gone(name)
+
+
+def test_a_record_born_after_the_launch_is_still_a_death(
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    _pty_home: str,
+    tmp_path: Path,
+    emitted_events: EmittedEvents,
+) -> None:
+    # meiva:note
+    # The control for the fix above: a record born after this session started belongs to this
+    # session's runner, and its process being gone is a death however recent the launch was.
+    # Without this, the grace would silently disable the detection it was added to protect.
+    marker = _stub_runner(tmp_path)
+    sid = _insert_schedule(
+        db_conn, "pty-born-after", "import time; time.sleep(30)", "python schedule.py"
+    )
+    name = session_name(f"schedule-{sid}")
+    mgr = _manager(pool, repo_root=tmp_path)
+    try:
+        mgr.sync_one(sid, now=NOW)
+        assert wait_for(marker.exists)
+        started = get_shell_backend(home=meiva_home()).session_started_at(name)
+        assert started is not None
+        _plant_runner_record(meiva_home(), sid, born=started + 1.0, pid=_dead_pid())
+
+        mgr.sync_one(sid, now=NOW)
+
+        assert db_conn.execute("SELECT status FROM schedules WHERE id = %s", (sid,)).fetchone() == (
+            "error",
+        )
+        assert len(emitted_events.attributes("schedule_process_lost")) == 1
     finally:
         mgr._reap(sid, NOW)
         _wait_session_gone(name)

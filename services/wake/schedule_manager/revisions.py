@@ -8,10 +8,12 @@ from pathlib import Path
 from psycopg_pool import ConnectionPool
 
 from base.cluster import session_name
+from base.daemon.schedules.claim import RunnerLiveness, read_runner_liveness
 from base.db.rows import query_all, query_one
 from base.db.transaction import write_transaction
 from base.paths import run_dir
 from base.sessions.pty import client
+from base.sessions.pty.client import SessionInfo
 from base.sessions.pty.paths import service_socket_path
 from services.wake.schedule_manager.convergence import Desired, revision_in
 
@@ -101,11 +103,26 @@ def launched_revision(home: Path, schedule_id: int) -> int | None:
     A legacy command belongs to revision zero. The allocation generation is a
     separate release identity, still checked by the manager's exact PTY cleanup.
     """
+    info = session_provenance(home, schedule_id)
+    return None if info is None else revision_in(info.initial_command)
+
+
+# meiva:note
+# When the session started, from the owner that created it. The runner's own record carries the
+# birth of the process that wrote it, so this is the bound below which that record describes the
+# runner the launch replaced rather than the one it started (base/daemon/schedules/claim.py).
+def launch_started_at(home: Path, schedule_id: int) -> float | None:
+    info = session_provenance(home, schedule_id)
+    return None if info is None else info.started_at
+
+
+# meiva:note
+# The PTY owner's record for this schedule's session, or None when it cannot name one.
+def session_provenance(home: Path, schedule_id: int) -> SessionInfo | None:
     name = session_name(f"schedule-{schedule_id}")
     socket_path = service_socket_path(run_dir(home))
     infos = client.list_sessions(name, socket_path=socket_path, include_initial_command=True)
-    info = next((item for item in infos if item.name == name), None)
-    return None if info is None else revision_in(info.initial_command)
+    return next((item for item in infos if item.name == name), None)
 
 
 def mark_applied(
@@ -239,3 +256,19 @@ def mark_lost(
             ).rowcount
             > 0
         )
+
+
+# meiva:note
+# Whether the runner that should own this schedule's session is alive. A record born before the
+# session started belongs to the runner a reap killed without letting it clear its record, so it
+# reads as no evidence rather than as a death (2026-11-06: schedule 40 was marked lost 254 ms
+# after a successful launch). Both sides of that comparison are host epoch seconds: the record's
+# birth is the runner's own, the session's start is the PTY owner's.
+def session_runner_liveness(home: Path, schedule_id: int, *, wall_now: float) -> RunnerLiveness:
+    launched_at = launch_started_at(home, schedule_id)
+    return read_runner_liveness(
+        home,
+        schedule_id,
+        launched_at=launched_at,
+        now=None if launched_at is None else wall_now,
+    ).liveness

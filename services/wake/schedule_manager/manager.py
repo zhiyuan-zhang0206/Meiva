@@ -28,8 +28,9 @@ from typing import assert_never
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
+from base.clock import Clock
 from base.cluster import session_name
-from base.daemon.schedules.claim import RunnerLiveness, read_runner_liveness
+from base.daemon.schedules.claim import RunnerLiveness
 from base.daemon.schedules.heartbeat import clear_beat
 from base.db.transaction import write_transaction
 from base.deploy.lifecycle import start_serving
@@ -108,6 +109,7 @@ class ScheduleManager:
         machine_name: str,
         secret_env_resolver: Callable[[int, tuple[str, ...]], Mapping[str, str]] | None = None,
         observe: Callable[[Path], start_serving.RootBirth] = start_serving.observe_root,
+        clock: Clock,
     ) -> None:
         self._pool = db_pool
         self._backend = backend
@@ -117,6 +119,10 @@ class ScheduleManager:
         self._launch_env = launch_env
         self._machine_name = machine_name
         self._secret_env_resolver = secret_env_resolver
+        # meiva:note
+        # The wall clock, for the one comparison that pairs a runner record's birth with the
+        # session's own start: both are host epoch seconds, and the loop's `now` is monotonic.
+        self._clock = clock
         # meiva:note
         # How this manager sees the running root: `observe_root` unless the caller names another.
         self._observe = observe
@@ -191,11 +197,16 @@ class ScheduleManager:
         # A session is the shell; the runner is a command inside it and can be gone while the
         # shell stays (base/daemon/schedules/claim.py). Only a proved death counts as not live --
         # an unprovable one keeps today's answer, because "not live" here authorizes a relaunch.
-        live = (
+        session_live = (
             wanted is not None
             and wanted.enabled
             and schedule_id in self._session_ids(now, owned_id=schedule_id)
-            and read_runner_liveness(self._home, schedule_id).liveness is not RunnerLiveness.DEAD
+        )
+        live = session_live and (
+            revisions.session_runner_liveness(
+                self._home, schedule_id, wall_now=self._clock.now().timestamp()
+            )
+            is not RunnerLiveness.DEAD
         )
         observed = revisions.launched_revision(self._home, schedule_id) if live else None
         action = plan_sync(wanted, live=live, observed=observed)

@@ -41,3 +41,13 @@ SCHEDULE_PROGRESS_SKEW_S = 60.0
 # on the same restart that launched the loop -- from reporting itself late, while a process that
 # died before its second beat is still named inside the hour.
 SCHEDULE_FIRST_ROUND_BUDGET_S = 5 * 60
+
+# meiva:note
+# How long after a session starts its runner record may still name the process that was killed to
+# make room for it. The manager reaps a runner with a forced kill, so that process never clears its
+# own record -- by design, "a record left behind is the process that did not say goodbye". A new
+# runner writes its record within about two seconds of the session starting (measured 2026-11-06:
+# session at 11:10:31.754, run row at 11:10:33). A minute is generous for a loaded host and still
+# names a runner that never came up: past it, a record naming a gone pid is the death it looks
+# like, so a session whose runner never started is not accepted forever.
+SCHEDULE_LAUNCH_GRACE_S = 60.0
