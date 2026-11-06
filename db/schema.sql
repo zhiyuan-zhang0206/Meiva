@@ -2658,6 +2658,7 @@ INSERT INTO schema_migrations (name) VALUES ('20261101T050900_unified-file-uploa
 INSERT INTO schema_migrations (name) VALUES ('20261101T081023_harness-switch-and-external-messages');
 INSERT INTO schema_migrations (name) VALUES ('20261101T091332_retire-display-and-timeline-settings');
 INSERT INTO schema_migrations (name) VALUES ('20261102T140800_add-notice-source-verified-by');
+INSERT INTO schema_migrations (name) VALUES ('20261106T032125_user-delivery-messages');
 
 CREATE OR REPLACE FUNCTION mark_impersonation_terminal_notice() RETURNS trigger AS $$
 BEGIN

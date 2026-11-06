@@ -325,6 +325,12 @@ def test_current_reset_converges_when_the_missing_names_still_have_files(
     with throwaway_database("reset_partial_files") as url:
         with psycopg.connect(url, autocommit=True) as c:
             c.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
+            # meiva:note
+            # This historical applied set predates delivery tables; remove their folded
+            # schema effects before replaying the real migration tree from that state.
+            c.execute(
+                "DROP TABLE reply_suggestion_feedback, reply_suggestion_offers, agent_user_messages"
+            )
             c.execute("DELETE FROM schema_migrations")
             for name in sorted(before):
                 c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (name,))
@@ -344,8 +350,8 @@ def test_current_reset_converges_when_the_missing_names_still_have_files(
 # meiva:note
 # The live shape of 2026-11-02 in a database built from `db/schema.sql`: the five deltas whose files
 # were folded away are applied, the three re-issued ones are not, and the anchor is absent. Building
-# it means removing what the three create, because a schema built from `db/schema.sql` already
-# carries their effects while the running databases never ran them.
+# it means removing what the three create and the later delivery tables, because a schema built
+# from `db/schema.sql` already carries their effects while the running databases never ran them.
 def _live_reset_shape(url: str) -> set[str]:
     from base.deploy.schema.migration_history import PRE_RESET_SET
     from base.deploy.schema.tests.migration_support import SCHEMA_SQL
@@ -358,6 +364,9 @@ def _live_reset_shape(url: str) -> set[str]:
     before = {BASELINE_NAME, *(set(PRE_RESET_SET) - file_backed)}
     with psycopg.connect(url, autocommit=True) as c:
         c.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
+        c.execute(
+            "DROP TABLE reply_suggestion_feedback, reply_suggestion_offers, agent_user_messages"
+        )
         c.execute("DROP TABLE IF EXISTS upload_staged_files CASCADE")
         c.execute("DROP TABLE IF EXISTS agent_harness_messages CASCADE")
         c.execute(
