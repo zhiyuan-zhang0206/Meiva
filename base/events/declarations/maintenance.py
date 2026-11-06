@@ -238,6 +238,10 @@ class PluginCollectorCycle(TypedDict):
     outcome: Literal["ok", "failed"]
     reason: str
     cycle: int
+    # meiva:note
+    # The schedule the cycle came from: `process` names the role (`schedule-runner`), so this is
+    # where a reader tells four collectors apart. Absent on a manual run, which has no id.
+    schedule_id: NotRequired[int]
 
 
 EVENTS: dict[str, EventSpec] = {
