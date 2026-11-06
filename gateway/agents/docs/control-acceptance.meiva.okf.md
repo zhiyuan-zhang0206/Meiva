@@ -7,13 +7,15 @@ tags: [gateway, agents]
 
 # Cancel and compact requests
 
-`POST /api/agents/{agent_id}/cancel` forwards to the agent's home runner, whose
-host cancels the agent's running turn Task (see
-[[agent/graph/exec/docs/hosted-turn-cancel.meiva.okf.md]]). It answers
-`cancelled` or `not_running`; the agent stays alive and its next input starts a
-fresh turn. An unreachable home runner is an error, never `not_running`. The
-request names no turn, so a repeat cancels whatever turn is running then: the
-route contract marks it non-idempotent and it takes no `Idempotency-Key`.
+`POST /api/agents/{agent_id}/cancel` forwards to the agent's home runner.
+For native Meiva, it answers `cancelled` after the host cancels the turn
+Task. For an external harness, it answers `enqueued` after recording a
+foreground cancel. The adapter's result settles that turn. See
+[[agent/graph/docs/turn-interrupts.meiva.okf.md]].
+`not_running` means there was no running turn. An unreachable home runner
+is an error. Repeated clicks share an external request while it is pending.
+A later request can cancel a later turn, so the route takes no
+`Idempotency-Key`.
 
 `POST /api/agents/{agent_id}/compact` inserts one `compact_request` inbound and
 wakes the host; the agent summarizes and replaces its history when its claim

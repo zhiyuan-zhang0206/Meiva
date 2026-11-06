@@ -48,7 +48,9 @@ Restart agent process. Agent completes the current turn then restarts as a new p
 
 ### `meiva.agents.cancel(agent_id: int) -> CancelResult`
 
-Cancel the agent's running turn without ending the agent. `cancelled` means a running turn was cancelled, `not_running` that there was none. The agent idles and its next input starts a fresh turn.
+Cancel the agent's running turn. `cancelled` means a native turn was
+cancelled, `enqueued` means an external foreground cancel is pending, and
+`not_running` means there was no running turn.
 
 ### `meiva.agents.compact(agent_id: int) -> None`
 
