@@ -31,8 +31,10 @@ blocks use an exact first-line marker, followed by a newline
 and a non-blank body. `MEIVA_DISPLAY_TO_USER` puts the body in the main
 conversation for direct answers and meaningful user-facing updates.
 `MEIVA_HIDE_FROM_USER` puts the body in Details, which the user can expand and
-read. Missing or malformed markers preserve the raw text in Details and trigger
-a `reply_visibility` system note for the model. The native driver puts tool
+read. A leading fragment that can still form either marker and a marker
+without a non-blank body both project to an empty Details item. Other missing
+or malformed markers preserve the raw text in Details. Invalid blocks still
+trigger a `reply_visibility` system note for the model. The native driver puts tool
 response corrections after the tool results, and retries a malformed terminal
 reply once. The external harness driver sends the correction as a separate turn
 with a distinct idempotency key and at most one retry.
