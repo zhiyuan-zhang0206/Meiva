@@ -68,6 +68,7 @@ __all__ = [
     "DrainStatus",
     "Event",
     "EventPipeline",
+    "NoPipelineFactoryError",
     "category_for_kind",
     "emit",
     "emit_prepared",
@@ -330,6 +331,35 @@ def prepare_event(
 
 
 # meiva:note
+# A producer's declaration that this process binds no pipeline and it holds no factory to build
+# one. It is an absence, not a failure: `emit_prepared` drops the event and says so once per
+# process, exactly as it does when no producer was supplied at all, and it says the two causes
+# apart. Anything else a producer raises stays a sink failure and keeps its traceback.
+# meiva:link base/telemetry/docs/telemetry.meiva.okf.md
+class NoPipelineFactoryError(RuntimeError): ...
+
+
+# meiva:note
+# The two causes of "nowhere to send", each reported once per process in its own words: no
+# producer was given, or the producer that was given holds no factory to build one.
+_NO_PRODUCER = "no producer"
+_NO_FACTORY = "no factory"
+_UNBOUND_MESSAGES = {
+    _NO_PRODUCER: (
+        "[best-effort] emission skipped: no producer — this process binds no event pipeline "
+        "and was given none, so every event it emits is dropped; said once per process for "
+        "this reason (first dropped event_name={event_name})"
+    ),
+    _NO_FACTORY: (
+        "[best-effort] emission skipped: no producer — this process binds no event pipeline "
+        "and its client set holds no pipeline factory to build one, so every event it emits "
+        "is dropped; said once per process for this reason "
+        "(first dropped event_name={event_name})"
+    ),
+}
+
+
+# meiva:note
 # An unbound emission is dropped, not failed. The callers on this path are the writes
 # themselves — a task, a notice, an audit row — already committed; a process with no stream to
 # observe them through still has to commit them. Taking that decision here, instead of raising
@@ -350,31 +380,32 @@ def emit_prepared(
     if producer is None:
         bound = process_state["pipeline"]
         if bound is None:
-            _report_unbound_emission(event.event_name)
+            _report_unbound_emission(_NO_PRODUCER, event.event_name)
             return
         with failure_isolated("emit"):
             bound.enqueue(event)
         return
     with failure_isolated("emit"):
-        producer().enqueue(event)
+        try:
+            producer().enqueue(event)
+        except NoPipelineFactoryError:
+            _report_unbound_emission(_NO_FACTORY, event.event_name)
 
 
 # meiva:note
-# One line per process for the events this process had nowhere to send. A one-shot verb or a
-# schedule entry binds no pipeline, so every event it produces is lost; said once, that is a
-# fact the operator can act on, where the alternative is either silence that reads as "nothing
-# happened" or a traceback per event that reads as a broken sink.
+# One line per cause per process for the events this process had nowhere to send. A one-shot
+# verb or a schedule entry binds no pipeline, so every event it produces is lost; said once,
+# that is a fact the operator can act on, where the alternative is either silence that reads as
+# "nothing happened" or a traceback per event that reads as a broken sink. The cause is part of
+# the line: a process that was given no producer and a client set that cannot build one are
+# different mistakes to go and fix.
 # meiva:link base/telemetry/docs/telemetry.meiva.okf.md
-def _report_unbound_emission(event_name: str) -> None:
-    if process_state["emission_skipped_warned"]:
+def _report_unbound_emission(reason: str, event_name: str) -> None:
+    said = process_state["emission_skipped_said"]
+    if reason in said:
         return
-    process_state["emission_skipped_warned"] = True
-    report_no_pipeline(
-        "[best-effort] emission skipped: no producer — this process binds no event pipeline "
-        "and was given none, so every event it emits is dropped; said once per process "
-        "(first dropped event_name={event_name})",
-        event_name=event_name,
-    )
+    said.add(reason)
+    report_no_pipeline(_UNBOUND_MESSAGES[reason], event_name=event_name)
 
 
 def flush() -> DrainResult:

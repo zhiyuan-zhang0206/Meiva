@@ -6,6 +6,7 @@ import time
 from datetime import UTC, datetime
 
 from base import telemetry
+from base.api_contracts.agent_contract import EventSink
 from base.log import logger
 from base.paths import meiva_home
 from base.telemetry.delivery.pipeline import EventPipeline
@@ -65,6 +66,39 @@ def cold_emit() -> None:
     telemetry.emit("log", "log", attributes={"cold": 3})
     assert set(threading.enumerate()) == prior_threads, "emit must not construct a writer"
     assert telemetry.flush().status is telemetry.DrainStatus.COMPLETED
+
+
+# meiva:note
+# A producer that answers `NoPipelineFactoryError` is declaring an absence, not failing: three
+# emissions over two causes, one line per cause, and no traceback anywhere. `remove()` leaves
+# one sink so the parent counts records rather than copies of one record.
+# meiva:link base/telemetry/docs/telemetry.meiva.okf.md
+def emit_without_a_factory() -> None:
+    logger.remove()
+    logger.add(sys.stderr, enqueue=False)
+
+    def no_factory() -> EventSink:
+        raise telemetry.NoPipelineFactoryError("this context has no event pipeline factory")
+
+    prior_threads = set(threading.enumerate())
+    telemetry.emit("log", "page_ttl_expired", producer=no_factory)
+    telemetry.emit("log", "shell_ttl_expired", producer=no_factory)
+    telemetry.emit("log", "log", producer=no_factory)
+    assert set(threading.enumerate()) == prior_threads, "emit must not construct a writer"
+
+
+# meiva:note
+# The other half of the same seam: a producer whose own defect is a real sink failure keeps the
+# report and the traceback. Folding it into the one-line absence would swallow the failure.
+# meiva:link base/telemetry/docs/telemetry.meiva.okf.md
+def failing_producer() -> None:
+    logger.remove()
+    logger.add(sys.stderr, enqueue=False)
+
+    def defective() -> EventSink:
+        raise RuntimeError("sink defect")
+
+    telemetry.emit("log", "log", producer=defective)
 
 
 def replace_live_owner() -> None:
@@ -163,6 +197,8 @@ def collect_failed_owner() -> None:
 SCENARIOS = {
     "owned_writer": owned_writer,
     "cold_emit": cold_emit,
+    "emit_without_a_factory": emit_without_a_factory,
+    "failing_producer": failing_producer,
     "replace_live_owner": replace_live_owner,
     "unreleasable_writer": unreleasable_writer,
     "zero_sink_failure": zero_sink_failure,

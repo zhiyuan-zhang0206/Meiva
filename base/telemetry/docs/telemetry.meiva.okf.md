@@ -58,9 +58,11 @@ no global machine identity or exporter is discovered. Its eligibility verdict is
 frozen within that backend, so independent attachment owners cannot share it. Controlled host/exec logging binds
 this actual writer through `init_telemetry(pipeline=..., machine_reader=...)`;
 All process entries supply the concrete writer. Emission in a process that binds no pipeline
-and was given no producer is dropped and reported once per process
-(`emission skipped: no producer`), rather than failing the write it observes, and without
-constructing a database or worker. SDK ClientSet roots retain this
+is dropped and reported once per process — rather than failing the write it observes — with
+the cause named in the line (`emission skipped: no producer`, then either "was given none" or
+"its client set holds no pipeline factory"); a client set without a factory answers through
+`NoPipelineFactoryError`, and only a producer failing for any other reason remains a sink failure
+with its traceback. Neither case constructs a database or worker. SDK ClientSet roots retain this
 constructor without invoking it until a selected event enqueues. Quiet sync and
 close never build it. Finite close retains an unfinished or failed writer for
 later observation, and an original worker failure propagates after other client
