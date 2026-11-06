@@ -108,6 +108,10 @@ ownership release settle it before continuation. An idle agent gains no automati
 continuation. The shared deadlines and shutdown fallback are owned by
 [[services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md]].
 
+An explicit external harness restart or a harness switch delivers its restart
+message as a lifecycle system note. The note starts execution on the selected
+harness and appears as a system marker in the timeline.
+
 ## Cost and usage
 
 Each non-replayed terminal result with observed usage logs the same `llm_usage` row the built-in loop logs, with

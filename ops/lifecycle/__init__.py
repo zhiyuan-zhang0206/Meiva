@@ -611,13 +611,13 @@ async def _execute_harness_transition(
         catalog,
     )
 
-    wake_prompt = (
+    restart_note = (
         f"[Harness switched from '{old_harness}' to '{target_harness}']\n{body.message}"
         if is_switch
         else body.message
     )
     await asyncio.to_thread(
-        resurrect_agent, db, bus, agent_id, resurrected_by=body.source, prompt=wake_prompt
+        resurrect_agent, db, bus, agent_id, resurrected_by=body.source, restart_note=restart_note
     )
     return RestartAgentResponse(status=RestartResult.ENQUEUED)
 
