@@ -6,6 +6,14 @@ apiVersion: 1
 # rule that disappears from its files; without a tombstone it stays orphaned
 # and keeps evaluating. Deletion is idempotent, so entries stay here.
 deleteRules:
+  # meiva:note
+  # T-8570 (2026-11-06): the rule judged `plugin_collector_cycle`, an event a schedule's process
+  # cannot emit -- it binds no telemetry pipeline and the emitter returns silently. #8570 removed
+  # it from rules.yml but not from this list, so Grafana kept the orphan: 72 rules against 71 in
+  # the file, firing every 20 minutes on a healthy fleet. A replacement rule is out of scope
+  # (alert rules may not read Postgres), so the tombstone is the whole retirement.
+  - orgId: 1
+    uid: meiva-ops-plugin-collector-silent
   - orgId: 1
     uid: meiva-ops-pitr-storage-growth
   - orgId: 1
