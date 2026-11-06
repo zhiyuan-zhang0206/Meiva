@@ -39,6 +39,7 @@ const row = (id: number): AgentRow => ({
   machine: "test",
   supports_vision: true,
   awaiting_response_count: 0,
+  has_pending_question: false,
   highest_notice_priority: null,
   unread_notice_count: 0,
   unread_user_message_count: 0,

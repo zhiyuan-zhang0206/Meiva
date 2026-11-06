@@ -1,13 +1,3 @@
-// Single agent row — status dot on the left + tree-guide vertical line +
-// label + time, with persistent action buttons on the right.
-//
-// Status is expressed inline via a colored dot on the left (running green /
-// idling yellow / terminated red) — no separate
-// section per status; the sidebar is laid
-// out by spawn tree. Status colors are opt-in (display.show_agent_status,
-// default off): by default the dot is a neutral static grey so the list
-// shows static presence without broadcasting state changes.
-//
 // Tree-guide: a 1px vertical line per depth level (absolutely positioned,
 // full row height), drawn only for ancestors that are not the last child —
 // visually equivalent to the GitHub file tree. No ├/└ glyphs; hierarchy
@@ -19,21 +9,18 @@
 // Row actions: an open takeover has a visible end-session button. Other alive
 // actions remain in the context menu (long-press on touch). A terminated row
 // keeps one always-on resurrect button; in-flight actions show a row spinner.
-// Terminated rows are distinguished only by the red dot — label font
-// matches alive rows, no italic or dim opacity (the red dot is strong
-// enough; another visual layer just becomes noise).
 //
 // The context menu's "with prompt..." items open a textarea dialog; the
 // plain items fire immediately with no prompt. The destructive Kill
 // (SIGKILL) sits behind a confirm so it can't be hit by accident.
 
 import * as Popover from "@radix-ui/react-popover";
-import { GitFork, Pencil, PowerOff, RotateCw, Shrink, X } from "lucide-react";
+import { CircleQuestionMark, GitFork, Pencil, PowerOff, RotateCw, Shrink, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
 
 import { useBrowser } from "@/lib/browser/browser-provider";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   ContextMenu,
@@ -43,11 +30,6 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { useUserSettings } from "@/lib/state/use-user-settings";
-import type { TimeMode, DateFormat } from "@/lib/contracts/types";
-import { PRIORITY_BG } from "@/lib/notifications/notices";
-import { formatRelativeTime } from "@/lib/agents/sidebar";
-import { useTimeFormat } from "@/lib/format/use-time-format";
-import { useWallDate } from "@/lib/format/now/use-wall-date";
 import type { AgentRow } from "@/lib/contracts/types";
 import type { PendingAction } from "@/lib/agents/use-agents";
 import { cn } from "@/lib/format/utils";
@@ -110,10 +92,9 @@ export interface AgentRowProps {
 
 /** Per-level indent (px). 14 = 1px guide line + surrounding spacing. */
 const INDENT = 14;
-/** x offset of the status dot center relative to the row's left edge
- *  (16px base paddingLeft + 3px dot radius). Bars sit on the d-th
- *  ancestor's dot-center column → visually drop straight down from the
- *  parent dot. */
+// meiva:note
+// The guide aligns with the center of its ancestor's left marker when visible
+// (16px row padding plus 3px marker radius).
 const BAR_X_BASE = 19;
 
 /** 1px vertical line per depth level spanning the full row height.
@@ -175,37 +156,24 @@ export function AgentRow({
   const [forkOpen, setForkOpen] = useState(false);
   const [resurrectOpen, setResurrectOpen] = useState(false);
   const [restartOpen, setRestartOpen] = useState(false);
-  // Re-render every minute so the relative-time string refreshes
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setTick((n) => n + 1), 60_000);
-    return () => clearInterval(id);
-  }, []);
 
   const { settings: userSettings } = useUserSettings();
-  const { formatShort } = useTimeFormat();
-  const now = useWallDate();
-  const rawTimeMode = userSettings["display.time_mode"];
-  const timeMode: TimeMode =
-    rawTimeMode === "last_active" || rawTimeMode === "spawned" || rawTimeMode === "hidden"
-      ? rawTimeMode
-      : "last_active";
-  const rawDateFormat = userSettings["display.date_format"];
-const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat === "relative" ? rawDateFormat : "relative";
-  // Quiet defaults (RCS): dynamic signals are opt-in (`=== true`, default off) —
-  // the status color dot and the awaiting-reply badge stay hidden until the
-  // user explicitly enables them.
   const showAgentStatus = userSettings["display.show_agent_status"] === true;
-  const notifyAwaitingReply = userSettings["notification.awaiting_reply"] === true;
+  const offline = agent.liveness_state === "offline";
+  const working = agent.status === "running" && !offline;
+  const statusMarker = offline
+    ? "bg-muted-foreground/50"
+    : showAgentStatus && (agent.status === "impersonated" || agent.status === "terminated")
+      ? STATUS_DOT[agent.status]
+      : null;
+  const replyLabel = agent.has_pending_question
+    ? t("statusPendingQuestion")
+    : agent.awaiting_response_count > 0
+      ? t("statusAwaitingReply")
+      : null;
 
   // #ID and label coexist, complementing each other: `#180 · screen-permission` or `#180` (when there's no label)
   const displayLabel = label ? `#${agent.agent_id} · ${label}` : `#${agent.agent_id}`;
-  // "hidden" renders no timestamp; for the other modes pick the source instant.
-  const showTime = timeMode !== "hidden";
-  const timeIso = timeMode === "spawned" ? agent.spawned_at : agent.last_active_at;
-  const absTime = dateFormat === "absolute"
-    ? formatShort(timeIso)
-    : formatRelativeTime(timeIso, now);
   const indentPx = depth * INDENT;
 
   const submit = () => {
@@ -318,24 +286,10 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
             )}
             style={{ paddingLeft: `${16 + indentPx}px` }}
           >
-            {/* status dot — colored per lifecycle status, shown only when
-                display.show_agent_status is on. When off the dot is hidden
-                entirely (not just decolored) so the row broadcasts no state at
-                all — the quiet default. One exception: an agent judged offline
-                by the gateway liveness pass (Task #1174 — machine unreachable
-                or process lease expired) always shows a grey dot, so a dead
-                agent can never masquerade as present under the quiet default. */}
-            {showAgentStatus || agent.liveness_state === "offline" ? (
+            {statusMarker ? (
               <span
-                title={
-                  agent.liveness_state === "offline" ? t("statusOffline") : undefined
-                }
-                className={cn(
-                  "size-1.5 rounded-full shrink-0",
-                  agent.liveness_state === "offline"
-                    ? "bg-muted-foreground/50"
-                    : STATUS_DOT[agent.status],
-                )}
+                title={offline ? t("statusOffline") : undefined}
+                className={cn("size-1.5 rounded-full shrink-0", statusMarker)}
               />
             ) : null}
             {agent.availability?.reason.startsWith("launch_") && (
@@ -344,24 +298,6 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
                 {t("launchFailed")}
               </span>
             )}
-            {/* notices-awaiting-response badge — count colored by highest
-                priority; only when notification.awaiting_reply is on (a
-                jumping count is a dynamic signal). */}
-            {(() => {
-              const p = notifyAwaitingReply
-                ? agent.highest_notice_priority
-                : null;
-              return p ? (
-                <span
-                  className={cn(
-                    "shrink-0 rounded-full px-1 text-[9px] font-semibold leading-[1.4] text-white",
-                    PRIORITY_BG[p],
-                  )}
-                >
-                  {agent.awaiting_response_count}
-                </span>
-              ) : null;
-            })()}
             <span className={cn(FLEX_1, MIN_W_0, FLEX, FLEX_COL)}>
               {editing ? (
                 <span className={cn("items-center gap-1", MIN_W_0, FLEX)}>
@@ -403,24 +339,37 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
                     startRename();
                   }}
                 >
-                  <span className={cn("truncate", MIN_W_0)}>{displayLabel}</span>
+                  <span className={cn("truncate", MIN_W_0, working && "agent-title-working")}>
+                    {displayLabel}
+                  </span>
+                  {working ? <span className="sr-only">{t("statusWorking")}</span> : null}
                 </span>
               )}
             </span>
-            {showTime ? (
-              <span className="text-[10px] opacity-60 shrink-0 tabular-nums">
-                {absTime}
-              </span>
-            ) : null}
             {/* Reserve room for the on-row action or pending spinner. */}
             {!editing && (agent.status === "terminated" || pending) ? (
               <span className="shrink-0 w-5" />
+            ) : null}
+            {replyLabel ? (
+              <span
+                role="img"
+                aria-label={replyLabel}
+                title={replyLabel}
+                className="grid size-4 shrink-0 place-items-center"
+              >
+                {agent.has_pending_question ? (
+                  <CircleQuestionMark aria-hidden className="size-3.5" />
+                ) : (
+                  <span aria-hidden className="size-1.5 rounded-full bg-sky-600 dark:bg-sky-400" />
+                )}
+              </span>
             ) : null}
           </button>
           {!editing ? (
             <RowActions
               agent={agent}
               pending={pending}
+              hasReplyIndicator={replyLabel !== null}
               onResurrect={() => onResurrect()}
             />
           ) : null}

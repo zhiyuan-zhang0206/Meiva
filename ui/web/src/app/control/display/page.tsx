@@ -139,7 +139,7 @@ export default function DisplaySettingsPage() {
         <ToggleRow
           icon={CircleDot}
           label="Show agent status dot"
-          description="Show a status color dot (running/idle/…) on each sidebar agent row; off by default to keep the list static and quiet"
+          description="Show extra sidebar markers for spawn placeholders, taken-over agents, and terminated agents"
           value={settings["display.show_agent_status"] === true}
           onChange={(v) => setSetting("display.show_agent_status", v)}
         />
@@ -160,18 +160,6 @@ export default function DisplaySettingsPage() {
           ]}
           value={settings["display.clock_format"] === "12h" ? "12h" : "24h"}
           onChange={(v) => setSetting("display.clock_format", v)}
-        />
-        <RadioRow
-          icon={Clock}
-          label="Time display mode"
-          description="The time shown at the right of each agent row"
-          options={[
-            { value: "last_active", label: "Last active" },
-            { value: "spawned", label: "Spawned" },
-            { value: "hidden", label: "Hidden" },
-          ]}
-          value={readStoredSetting(settings["display.time_mode"], "last_active")}
-          onChange={(v) => setSetting("display.time_mode", v)}
         />
         <RadioRow
           icon={Calendar}
@@ -212,7 +200,7 @@ export default function DisplaySettingsPage() {
         <ToggleRow
           icon={Bell}
           label="Awaiting-reply notification"
-          description="Show a red dot + count badge in the sidebar for agents awaiting reply; off by default — check the Fleet page when you want to know"
+          description="Show the total number of notices awaiting a reply in the sidebar header"
           value={settings["notification.awaiting_reply"] === true}
           onChange={(v) => setSetting("notification.awaiting_reply", v)}
         />

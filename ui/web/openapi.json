@@ -8817,6 +8817,10 @@
             "type": "integer",
             "title": "Awaiting Response Count"
           },
+          "has_pending_question": {
+            "type": "boolean",
+            "title": "Has Pending Question"
+          },
           "highest_notice_priority": {
             "anyOf": [
               {
@@ -8915,6 +8919,7 @@
           "liveness_state",
           "observation",
           "awaiting_response_count",
+          "has_pending_question",
           "highest_notice_priority",
           "unread_notice_count",
           "heartbeat_paused_until",

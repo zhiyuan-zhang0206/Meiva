@@ -61,7 +61,6 @@ describe("DisplaySettingsPage", () => {
     // before the first load, instead of handing the control a value it cannot render.
     transport.getSettings.mockResolvedValue({
       settings: [
-        { key: "display.time_mode", value: 42, updated_at: "2026-09-24T00:00:00Z" },
         { key: "display.language", value: null, updated_at: "2026-09-24T00:00:00Z" },
         { key: "display.show_agent_status", value: "yes", updated_at: "2026-09-24T00:00:00Z" },
         { key: "models.hidden", value: "not-a-list", updated_at: "2026-09-24T00:00:00Z" },
@@ -69,9 +68,8 @@ describe("DisplaySettingsPage", () => {
     });
     renderPage();
 
-    const lastActive = await screen.findByLabelText<HTMLInputElement>("Last active");
-    expect(lastActive.checked).toBe(true);
-    expect(screen.getByLabelText<HTMLInputElement>("English").checked).toBe(true);
+    const english = await screen.findByLabelText<HTMLInputElement>("English");
+    expect(english.checked).toBe(true);
     const statusSwitch = await screen.findByRole("switch", { name: "Show agent status dot" });
     expect(statusSwitch.getAttribute("aria-checked")).toBe("false");
     expect(screen.getByText("Timeline max width")).toBeTruthy();
@@ -130,7 +128,7 @@ describe("DisplaySettingsPage", () => {
     expect(screen.queryByText("Usage bar width")).toBeNull();
     expect(screen.getByText("Show terminated agents")).toBeTruthy();
     expect(screen.getByText("Clock format")).toBeTruthy();
-    expect(screen.getByText("Time display mode")).toBeTruthy();
+    expect(screen.queryByText("Time display mode")).toBeNull();
     expect(screen.getByText("Date format")).toBeTruthy();
     expect(screen.getByText("Awaiting-reply notification")).toBeTruthy();
     expect(screen.getByText("Confirm before terminate")).toBeTruthy();

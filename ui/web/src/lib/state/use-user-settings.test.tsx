@@ -84,7 +84,6 @@ describe("useUserSettings", () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(result.current.settings["display.show_timestamp_weekday"]).toBe(true);
-    expect(result.current.settings["display.time_mode"]).toBe("last_active");
     expect(result.current.settings["display.clock_format"]).toBe("24h");
   });
 
@@ -111,7 +110,6 @@ describe("useUserSettings", () => {
     });
 
     expect(result.current.settings["display.show_timestamp_weekday"]).toBe(false);
-    expect(result.current.settings["display.time_mode"]).toBe("last_active");
   });
 
   it("setSetting rolls back on server error", async () => {

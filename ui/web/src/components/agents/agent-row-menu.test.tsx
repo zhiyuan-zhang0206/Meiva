@@ -71,7 +71,7 @@ function ag(agent_id: number, overrides: Partial<AgentRowType> = {}): AgentRowTy
     machine: "test-machine",
     supports_vision: true,
     liveness_state: "online",
-    awaiting_response_count: 0, highest_notice_priority: null,
+    awaiting_response_count: 0, has_pending_question: false, highest_notice_priority: null,
     unread_notice_count: 0,
     unread_user_message_count: 0,
     heartbeat_paused_until: null,
@@ -96,61 +96,42 @@ const baseProps = {
   onCompact: noop,
 };
 
-describe("AgentRow time display (display.time_mode)", () => {
-  function timeCell(container: HTMLElement): HTMLElement | null {
-    return container.querySelector("li button span.tabular-nums");
-  }
-
-  it("default (last_active): timestamp rendered", () => {
-    const { container } = render(
-      <AgentRow {...baseProps} agent={ag(1, { status: "idling" })} depth={0} ancestorsIsLast={[]} />,
-    );
-    expect(timeCell(container)).toBeTruthy();
-  });
-
-  it("hidden: no timestamp rendered", () => {
-    const { container } = renderWithSettings(
-      <AgentRow {...baseProps} agent={ag(1, { status: "idling" })} depth={0} ancestorsIsLast={[]} />,
-      { "display.time_mode": "hidden" },
-    );
-    expect(timeCell(container)).toBeNull();
-  });
+it("keeps time off the row even when an older client saved a time display mode", () => {
+  const { getByRole } = renderWithSettings(
+    <AgentRow {...baseProps} agent={ag(1, { status: "idling" })} label="Draft review" depth={0} ancestorsIsLast={[]} />,
+    { "display.time_mode": "spawned" },
+  );
+  expect(getByRole("button", { name: "#1 · Draft review" }).textContent).toBe("#1 · Draft review");
 });
 
-describe("AgentRow awaiting-reply badge gating (notification.awaiting_reply)", () => {
-  const notice = {
-    id: 7,
-    title: "What next?",
-    content: null,
-    priority: "P1" as const,
-    require_response: true,
-    blocking: false,
-    created_at: "2026-05-07T00:00:00Z",
-  };
-
-  it("default (setting off): no badge even with open notices", () => {
-    const { queryByTitle } = render(
-      <AgentRow
-        {...baseProps}
-        agent={ag(1, { awaiting_response_count: ([notice]).length, highest_notice_priority: ([notice])[0]?.priority ?? null })}
-        depth={0}
-        ancestorsIsLast={[]}
-      />,
+describe("AgentRow response indicators", () => {
+  it("puts the blue reply dot at the end of the row by default", () => {
+    const { getByRole } = render(
+      <AgentRow {...baseProps} agent={ag(1, { awaiting_response_count: 1 })} depth={0} ancestorsIsLast={[]} />,
     );
-    expect(queryByTitle(/waiting on you/)).toBeNull();
+    const indicator = getByRole("img", { name: "Awaiting a reply" });
+    expect(indicator.parentElement?.lastElementChild).toBe(indicator);
+    expect(indicator.querySelector(".rounded-full")).toBeTruthy();
   });
 
-  it("enabled: badge shows the count", () => {
-    const { getByText } = renderWithSettings(
+  it("uses the question icon ahead of a regular reply and keeps the working title", () => {
+    const { container, getByRole, queryByRole } = render(
       <AgentRow
         {...baseProps}
-        agent={ag(1, { awaiting_response_count: ([notice]).length, highest_notice_priority: ([notice])[0]?.priority ?? null })}
+        agent={ag(1, { status: "running", awaiting_response_count: 2, has_pending_question: true })}
+        label="A long agent title that has to truncate before the response icon"
+        pending="compacting"
         depth={0}
         ancestorsIsLast={[]}
       />,
-      { "notification.awaiting_reply": true },
     );
-    expect(getByText("1").textContent).toBe("1");
+    const indicator = getByRole("img", { name: "Question awaiting an answer" });
+    expect(indicator.parentElement?.lastElementChild).toBe(indicator);
+    expect(indicator.classList.contains("shrink-0")).toBe(true);
+    expect(indicator.querySelector("svg")).toBeTruthy();
+    expect(queryByRole("img", { name: "Awaiting a reply" })).toBeNull();
+    expect(container.querySelector(".agent-title-working.truncate")).toBeTruthy();
+    expect(container.querySelector(".right-9 svg")).toBeTruthy();
   });
 });
 

@@ -527,3 +527,32 @@
 .chat-md table::-webkit-scrollbar-thumb:hover {
   background-color: color-mix(in oklab, var(--muted-foreground) 65%, transparent);
 }
+
+.agent-title-working {
+  color: var(--foreground);
+}
+
+@media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
+  .agent-title-working {
+    --working-glint: color-mix(in oklab, currentColor 42%, var(--color-sky-600));
+    background-image: linear-gradient(
+      105deg,
+      currentColor 36%,
+      var(--working-glint) 50%,
+      currentColor 64%
+    );
+    background-size: 270% 100%;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: agent-title-sweep 6s linear infinite;
+  }
+
+  .dark .agent-title-working {
+    --working-glint: color-mix(in oklab, currentColor 42%, var(--color-sky-300));
+  }
+}
+
+@keyframes agent-title-sweep {
+  0% { background-position: 100% 0; }
+  72%, 100% { background-position: 0 0; }
+}

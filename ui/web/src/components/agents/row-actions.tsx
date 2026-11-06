@@ -3,20 +3,26 @@ import { useTranslations } from "next-intl";
 
 import type { AgentRow } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
+import { FLEX } from "@/lib/layout/layout";
 import type { PendingAction } from "@/lib/agents/use-agents";
 
 export function RowActions({
   agent,
   pending,
+  hasReplyIndicator,
   onResurrect,
 }: {
   agent: AgentRow;
   pending: PendingAction | undefined;
+  hasReplyIndicator: boolean;
   onResurrect: () => void;
 }) {
   const t = useTranslations("agentRow");
-  const wrapperCls =
-    "absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-0.5";
+  const wrapperCls = cn(
+    "absolute top-1/2 -translate-y-1/2 items-center gap-0.5",
+    FLEX,
+    hasReplyIndicator ? "right-9" : "right-3",
+  );
 
   if (agent.status === "terminated") {
     return (

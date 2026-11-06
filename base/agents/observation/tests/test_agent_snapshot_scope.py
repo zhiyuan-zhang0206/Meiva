@@ -147,9 +147,34 @@ def test_notice_body_cannot_expand_roster_card(
         db_conn, catalog=model_catalog, default_model=settings.lm.llm_model
     ).agents[0]
     assert card.awaiting_response_count == 1
+    assert card.has_pending_question is False
     assert card.highest_notice_priority == "P0"
     assert "notices_awaiting_response" not in AgentCard.model_fields
     assert len(card.model_dump_json()) < 1500
+
+
+def test_roster_distinguishes_pending_questions_from_resolved_questions_and_regular_replies(
+    model_catalog: ModelCatalog, db_conn: psycopg.Connection
+) -> None:
+    seed(db_conn, [(1, "user", "running"), (2, "user", "idling")])
+    db_conn.execute(
+        """
+        INSERT INTO agent_notices (agent_id,local_id,title,priority,require_response,question,resolved_at,resolution)
+        VALUES
+            (1,1,'Question','P2',true,'{"type":"text"}',NULL,NULL),
+            (1,2,'Regular reply','P2',true,NULL,NULL,NULL),
+            (2,1,'Resolved question','P2',true,'{"type":"text"}',now(),'dismissed'),
+            (2,2,'Regular reply','P2',true,NULL,NULL,NULL)
+        """
+    )
+    cards = {
+        card.agent_id: card
+        for card in select_roster(
+            db_conn, catalog=model_catalog, default_model=settings.lm.llm_model
+        ).agents
+    }
+    assert (cards[1].awaiting_response_count, cards[1].has_pending_question) == (2, True)
+    assert (cards[2].awaiting_response_count, cards[2].has_pending_question) == (1, False)
 
 
 def test_open_impersonation_status_reflects_lease_phase(

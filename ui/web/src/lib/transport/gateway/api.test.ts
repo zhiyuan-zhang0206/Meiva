@@ -160,6 +160,7 @@ describe("read endpoints reach their gateway route", () => {
           agent_id: index + 1,
           status,
           awaiting_response_count: 0,
+          has_pending_question: false,
           highest_notice_priority: null,
         })),
         next_cursor: null,

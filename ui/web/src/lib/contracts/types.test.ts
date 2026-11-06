@@ -26,7 +26,7 @@ const wireCard: Required<WireAgentCard> = {
   spawned_at: "2026-09-01T00:00:00Z",
   last_active_at: "2026-09-01T00:00:00Z", last_inbound_at: "2026-09-01T00:00:00Z",
   label: "card", machine: "test-host", supports_vision: true, liveness_state: "unknown",
-  availability, observation: { runtime_owner: "unknown" }, awaiting_response_count: 3,
+  availability, observation: { runtime_owner: "unknown" }, awaiting_response_count: 3, has_pending_question: false,
   highest_notice_priority: "P2", unread_notice_count: 2, unread_user_message_count: 0, heartbeat_paused_until: null,
   open_impersonation_session_id: null, open_impersonation_status: null,
   harness_exit_code: null, harness_exit_at: null,
@@ -56,6 +56,7 @@ it("keeps optional detail extensions while dropping detail-only fields and aggre
     (priority, index) => ({
       id: index, title: `notice ${index}`, content: "selected-detail-only body", priority,
       require_response: true, blocking: false, created_at: "2026-09-01T00:00:00Z",
+      question: index === 1 ? { type: "text" } : null,
     }),
   );
   const input: Required<WireAgentRow> & { future_optional?: string } = {
@@ -65,7 +66,7 @@ it("keeps optional detail extensions while dropping detail-only fields and aggre
   const projected = projectAgentStatus(input);
   const { notices_awaiting_response: _notices, fork_source_checkpoint_id: _fork, last_probe_at: _probe, ...shared } = input;
   expect(projected).toEqual({
-    ...shared, awaiting_response_count: 3, highest_notice_priority: "P1",
+    ...shared, awaiting_response_count: 3, has_pending_question: true, highest_notice_priority: "P1",
     open_impersonation_session_id: null, open_impersonation_status: null,
   });
   for (const excluded of ["notices_awaiting_response", "fork_source_checkpoint_id", "last_probe_at"]) {
@@ -90,6 +91,7 @@ it("a detail without a lease retains native status and the empty-notice aggregat
   const projected = projectAgentStatus({ ...detail, status: "running" });
   expect(projected.status).toBe("running");
   expect(projected.awaiting_response_count).toBe(0);
+  expect(projected.has_pending_question).toBe(false);
   expect(projected.highest_notice_priority).toBeNull();
   expect(projected.open_impersonation_session_id).toBeNull();
   expect(projected.open_impersonation_status).toBeNull();
