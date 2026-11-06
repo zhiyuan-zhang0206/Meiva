@@ -396,3 +396,36 @@ def test_the_operation_identity_comes_from_the_commands_own_environment() -> Non
         gate_reason="track-branch:preview",
     )
     assert operation_identity({}) == OperationIdentity(None, None, None)
+
+
+# meiva:note
+# The rows carry this machine and this process. The command writes them through its own
+# connection, before any event pipeline exists, so this scope is the only place that can bind
+# the identity the rows report; without it every row answered `unknown` while `$MEIVA_HOME/.env`
+# named the machine, and a reader grouping by `machine` lost the host (task #6347).
+def test_the_scope_binds_the_identity_its_rows_carry(
+    command_runtime: CommandRuntime, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from base.telemetry.delivery import state as delivery_state
+
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".env").write_text("MEIVA_MACHINE_NAME=macmini\n", encoding="utf-8")
+    monkeypatch.setitem(delivery_state.process_state, "process", "unknown")
+    monkeypatch.setitem(delivery_state.process_state, "machine", None)
+    monkeypatch.setitem(delivery_state.process_state, "home", None)
+    monkeypatch.setitem(delivery_state.process_state, "cluster", None)
+    monkeypatch.setitem(delivery_state.process_state, "agent_id", 7)
+
+    with operator_lifecycle_audit(
+        database_factory=refuse_database,
+        host=command_runtime.host_after_config(),
+        home=home,
+        pid=os.getpid(),
+    ):
+        pass
+
+    assert delivery_state.process_name() == "cli-lifecycle"
+    assert delivery_state.ambient_agent_id() is None
+    assert delivery_state.process_state["home"] == home
+    assert delivery_state.process_state["machine"] == "macmini"

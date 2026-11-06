@@ -111,6 +111,36 @@ def capture_trace_ids() -> tuple[str | None, str | None]:
     return None, None
 
 
+# meiva:note
+# Who this process is, bound without an event pipeline. `init_telemetry` binds identity only
+# because it also brings the pipeline up, so a process that writes rows through its own
+# connection (the CLI's lifecycle audit, a one-shot that commits before any sink exists) had no
+# way to say which machine and which process it is: every row it wrote carried `unknown` in
+# both columns even though `$MEIVA_HOME/.env` names the machine (task #6347, #6089).
+#
+# Binding is idempotent and never touches the pipeline: a caller that later starts one keeps the
+# identity it bound here. The machine comes from the home's own record; a home that cannot name
+# it still yields `unknown`, announced once. A caller holding a better identity (the health probe
+# carries the configured machine) resolves that itself with `resolve_machine`.
+def bind_identity(
+    *,
+    process: str,
+    home: Path,
+    agent_id: int | None = None,
+) -> None:
+    process_state["process"] = process
+    process_state["agent_id"] = agent_id
+    process_state["home"] = home
+    if process_state["machine"] is None:
+        process_state["machine"] = resolve_machine(home=home)
+    # meiva:note
+    # The cluster label is materialized once, from the home the boot hands in: every later event
+    # row reads the slot, so a process cannot emit rows that answer for another unit's home. A
+    # process that never binds emits `.unknown` instead (see `_event`).
+    if process_state["cluster"] is None:
+        process_state["cluster"] = cluster_label(home)
+
+
 def init_telemetry(
     *,
     process: str = "unknown",
@@ -135,17 +165,9 @@ def init_telemetry(
         # original failure before admitting the next concrete entry resource.
         bound.stop(timeout=0)
         process_state["pipeline"] = pipeline
-    process_state["process"] = process
-    process_state["agent_id"] = agent_id
-    process_state["home"] = home
-    if machine_reader is not None or process_state["machine"] is None:
+    bind_identity(process=process, home=home, agent_id=agent_id)
+    if machine_reader is not None:
         process_state["machine"] = resolve_machine(machine_reader, home=home)
-    # meiva:note
-    # The cluster label is materialized once, here, from the home the boot hands in: every
-    # later event row reads the slot, so a process cannot emit rows that answer for another
-    # unit's home. A process that never calls this emits `.unknown` instead (see `_event`).
-    if process_state["cluster"] is None:
-        process_state["cluster"] = cluster_label(home)
     if process_state["pipeline"] is None:
         process_state["pipeline"] = pipeline
 
