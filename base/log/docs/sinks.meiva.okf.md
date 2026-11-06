@@ -57,3 +57,25 @@ Process initialization tests run each role in a fresh interpreter and inspect ac
 JSONL files, stderr and event records. Repeated calls produce one record per sink
 and no additional queue worker; cross-role calls share the process guard. Rotation
 and retention tests use real files.
+
+## Redaction before the handlers
+
+`base/log/redaction.py` installs one process-wide loguru patcher — as the core patcher, so it runs
+before every handler and the three sink types below all see the same masked record. It masks a
+record on its way to disk only: an exec output a caller received back is unchanged.
+
+Three rules, and nothing that guesses past them: the password in a URL's userinfo
+(`scheme://user:password@` becomes `scheme://user:***@`; the user name is the identity the URL
+dials as, so it stays); the value of a mapping key named exactly `token`, `secret` or `password`
+(case-insensitive), including when that mapping was serialized into the message; and the value of
+an environment assignment whose key is upper-case and ends in `_TOKEN`/`_PASSWORD`/`_SECRET`
+(`MEIVA_API_TOKEN=...` becomes `MEIVA_API_TOKEN=***`). A key that merely contains one of those
+words — `token_count`, `PASSWORD_POLICY`, `TOKENIZER_PATH` — keeps its value, because the line that
+diagnoses a failure is usually the one next to the credential.
+
+The patcher is installed by the seams that open a process's sinks (`start_process_logging` and
+`init_subprocess_logger`), not by each sink. It must not reach the caller: what an agent's code
+printed is evidence the agent and its logs have to agree on.
+
+The rule cannot live in `base.host.net.url_text`'s `redacted_url`: the root manifest declares
+`"log" = ["paths"]`, and `base.host` declares `base.log`, so importing it would close a cycle.

@@ -8,6 +8,7 @@ resources or importing telemetry. Executable roots use
 
 from loguru import logger as logger
 
+from base.log.redaction import install_log_redaction as install_log_redaction
 from base.log.sinks import (
     FILE_SINK_SIZE_LIMIT as FILE_SINK_SIZE_LIMIT,
 )
@@ -48,3 +49,8 @@ def prepare_process_logging() -> None:
     """
     logger.remove()
     logger.configure(extra={"agent_id": "-"})
+    # meiva:note
+    # Installed at the earliest boundary as well: a fresh executable may log (and a later verb may
+    # open its own sink) before any `init_*` runs, and the default stderr handler that exists until
+    # this call is replaced by `logger.remove()` above.
+    install_log_redaction()
