@@ -59,7 +59,9 @@ nightly found is fixed. Every thirty minutes it reads their newest runs
 and opens **one** task for the P0 lead per red that no green run of the same
 commit explains: a first red is recorded silently (a single test out of 1344 is
 usually a flake, and that same commit passed the nightly an hour later), a red
-that survives onto a second commit becomes a card, and a green run closes it.
+that survives into a second run becomes a card — the tree need not move for it
+(`main` can stand still for days), because a run the watch has not read before
+is new evidence even on the same commit — and a green run closes it.
 Failures that happen around the suite rather than in it — a container that never
 pulled, a disk that filled — are counted and never become a card. Each round
 emits `main_red_watch_round`, and that event is persisted rather than lived in
