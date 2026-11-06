@@ -126,6 +126,22 @@ _REMINDER_SQL = """
           OR now() - t.last_reminded_at
              > make_interval(secs => GREATEST(%s, t.remind_interval_seconds))
       )
+      -- One digest per owner per window: the sweep runs every
+      -- task_maintenance_interval_seconds, so an unbatched due task leaves as a message of
+      -- its own (183/day measured 2026-11-06, 85 percent of them for four owners). The window is
+      -- evaluated here, before the row is locked, so a held-back task is never selected and
+      -- its reminder_count is never advanced: counting happens at delivery, not at holding.
+      AND NOT EXISTS (
+          SELECT 1 FROM inbound_messages m
+          WHERE m.agent_id = t.owner
+            AND m.source = 'system'
+            AND m.content LIKE 'Task check-in%%'
+            AND m.created_at > now() - make_interval(secs => CASE t.priority
+                    WHEN 'P0' THEN %s::float8
+                    WHEN 'P1' THEN %s::float8
+                    ELSE %s::float8
+                END)
+      )
     ORDER BY t.priority, t.id
 """
 
@@ -442,12 +458,24 @@ def run_reminders(
     db: Database,
     bus: EventBus,
     backoff_seconds: float,
+    *,
+    digest_window_p0_seconds: float = 0.0,
+    digest_window_p1_seconds: float = 0.0,
+    digest_window_p2_seconds: float = 0.0,
 ) -> int:
     with write_transaction(pool) as conn, conn.cursor() as cur:
         live: dict[int, list[_DueTask]] = defaultdict(list)
         orphaned: dict[int, list[_DueTask]] = defaultdict(list)
         for due in query_all(
-            conn, _DueRow, _REMINDER_SQL + " FOR NO KEY UPDATE OF t SKIP LOCKED", (backoff_seconds,)
+            conn,
+            _DueRow,
+            _REMINDER_SQL + " FOR NO KEY UPDATE OF t SKIP LOCKED",
+            (
+                backoff_seconds,
+                digest_window_p0_seconds,
+                digest_window_p1_seconds,
+                digest_window_p2_seconds,
+            ),
         ):
             task = _DueTask(
                 due.id, due.owner, due.title, due.remind_interval_seconds, due.elapsed, due.priority
@@ -569,7 +597,15 @@ async def dispatch_loop(
     )
     while True:
         try:
-            run_reminders(pool, db, bus, backoff_seconds)
+            run_reminders(
+                pool,
+                db,
+                bus,
+                backoff_seconds,
+                digest_window_p0_seconds=config.task_reminder_digest_window_p0_seconds,
+                digest_window_p1_seconds=config.task_reminder_digest_window_p1_seconds,
+                digest_window_p2_seconds=config.task_reminder_digest_window_p2_seconds,
+            )
             run_escalate(pool, db, bus, escalate_n)
         except asyncio.CancelledError:
             raise
