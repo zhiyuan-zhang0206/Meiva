@@ -363,3 +363,8 @@ def test_delete_rules_tombstones_never_name_live_rules() -> None:
         assert entry["uid"] and len(entry["uid"]) <= 40 and entry["uid"] not in live
     assert {"orgId": 1, "uid": "meiva-ops-pitr-storage-growth"} in entries
     assert {"orgId": 1, "uid": "meiva-ops-agent-restart-spike"} in entries
+    # meiva:note
+    # Pinned by the retirement it belongs to: #8570 removed the rule from rules.yml without a
+    # tombstone, so the orphan kept evaluating (72 rules against 71 in the file) and fired every
+    # 20 minutes for hours after the change was reported as landed.
+    assert {"orgId": 1, "uid": "meiva-ops-plugin-collector-silent"} in entries
