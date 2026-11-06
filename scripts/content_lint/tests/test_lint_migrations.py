@@ -78,6 +78,18 @@ def test_valid_migration_passes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     assert lint.main() == 0
 
 
+def test_migration_under_db_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    lint, _ = _lint(monkeypatch, tmp_path)
+    misplaced = tmp_path / "db" / "migrations" / "2026" / "07"
+    misplaced.mkdir(parents=True)
+    (misplaced / f"{_TS}_add-foo.sql").write_text("SELECT 1;")
+
+    assert lint.main() == 1
+    assert "outside migrations/ and will not run" in capsys.readouterr().err
+
+
 def test_legacy_integer_name_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A leftover sequential-integer name is rejected by the format check."""
     lint, d = _lint(monkeypatch, tmp_path)
