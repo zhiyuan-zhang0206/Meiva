@@ -448,6 +448,7 @@ class TestRemind:
                 "note_tag": "task",
                 "task_notification": True,
                 "delivery_resurrect": False,
+                "note_kind": "task_reroute",
             }
         with db_conn.cursor() as cur:
             cur.execute("SELECT status FROM agents_meta WHERE id = %s", (dead,))
