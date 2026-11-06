@@ -9,6 +9,7 @@ from base.agents.messages.reply_intent import (
     USER_REPLY_HEADER,
     USER_REPLY_PREFIX,
     normalize_last_message_text,
+    parse_reply_visibility,
     resolve_agent_reply,
     strip_user_reply_prefix,
 )
@@ -103,8 +104,10 @@ def test_normalize_last_message_text_strips_prefix_and_drops_header_only() -> No
     [
         ("MEIVA_DISPLAY_TO_USER\nShipped.", ("Shipped.", True)),
         ("MEIVA_HIDE_FROM_USER\r\nWork log.", ("Work log.", False)),
-        ("MEIVA_DISPLAY_TO_USER", ("MEIVA_DISPLAY_TO_USER", False)),
-        ("MEIVA_DISPLAY_TO_USER\n   ", ("MEIVA_DISPLAY_TO_USER\n   ", False)),
+        ("MEIVA_DISPLAY_TO_USER", ("", False)),
+        ("MEIVA_H", ("", False)),
+        ("MEIVA_HIDE_FROM_USER\r", ("", False)),
+        ("MEIVA_DISPLAY_TO_USER\n   ", ("", False)),
         ("**MEIVA_DISPLAY_TO_USER**\nShipped.", ("**MEIVA_DISPLAY_TO_USER**\nShipped.", False)),
         ("Missing header.", ("Missing header.", False)),
     ],
@@ -124,10 +127,12 @@ def test_explicit_visibility_routes_by_exact_first_line(
     ("mode", "text", "visible", "body"),
     [
         ("naive", "ordinary answer", True, "ordinary answer"),
+        ("naive", "MEIVA_H", True, "MEIVA_H"),
         ("naive", "MEIVA_HIDE_FROM_USER\nverbatim", True, "MEIVA_HIDE_FROM_USER\nverbatim"),
         ("prefix", "ordinary answer", False, "ordinary answer"),
         ("prefix", "MEIVA_DISPLAY_TO_USER\nanswer", True, "answer"),
         ("sdk", "ordinary final", False, "ordinary final"),
+        ("sdk", "MEIVA_H", False, "MEIVA_H"),
         ("sdk", "MEIVA_DISPLAY_TO_USER\nanswer", False, "MEIVA_DISPLAY_TO_USER\nanswer"),
     ],
 )
@@ -142,3 +147,10 @@ def test_delivery_mode_overrides_wake_and_legacy_visibility(
 def test_unknown_delivery_mode_fails_at_boundary() -> None:
     with pytest.raises(ValueError):
         resolve_agent_reply("answer", non_human_wake=False, delivery_mode="typo")
+
+
+@pytest.mark.parametrize("text", ["MEIVA_H", "MEIVA_DISPLAY_TO_USER", "MEIVA_HIDE_FROM_USER\r\n  "])
+def test_incomplete_visibility_marker_is_still_invalid(text: str) -> None:
+    assert parse_reply_visibility(text) is None
+    assert resolve_agent_reply(text, non_human_wake=False, delivery_mode="prefix") == ("", False)
+    assert resolve_agent_reply(text, non_human_wake=False) == (text, True)

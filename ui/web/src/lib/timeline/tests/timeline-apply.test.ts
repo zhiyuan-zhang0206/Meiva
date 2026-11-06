@@ -144,6 +144,45 @@ describe("applySystemEvent (clocks, compaction, and terminal states)", () => {
     expect(items[0]).toMatchObject({ payload, user_facing: userFacing });
   });
 
+  it.each([
+    { header: "MEIVA_DISPLAY_TO_USER", newline: "\n", userFacing: true, explicit_visibility: true },
+    { header: "MEIVA_HIDE_FROM_USER", newline: "\r\n", userFacing: false, delivery_mode: "prefix" },
+  ] as const)("withholds every fragment of $header until the body arrives", ({
+    header, newline, userFacing, ...visibility
+  }) => {
+    const info = { item_id: "5.0", agent_id: 1, ...visibility };
+    let items = "explicit_visibility" in visibility
+      ? applySystemEvent([], { ...info, role: "chat_start" })
+      : [];
+    for (const content of header + newline + "  ") {
+      items = applySystemEvent(items, { ...info, role: "chat_delta", content });
+      expect(items[0]).toMatchObject({ payload: "", user_facing: false });
+    }
+    items = applySystemEvent(items, { ...info, role: "chat_delta", content: "Hello." });
+    expect(items[0]).toMatchObject({ payload: "  Hello.", user_facing: userFacing });
+  });
+
+  it("releases an ordinary first line as soon as it cannot be a visibility marker", () => {
+    const info = { item_id: "5.0", agent_id: 1, explicit_visibility: true };
+    const items = applySystemEvent([], { ...info, role: "chat_delta", content: "MEI" });
+    expect(items[0]).toMatchObject({ payload: "", user_facing: false });
+    const next = applySystemEvent(items, { ...info, role: "chat_delta", content: "VA is ready." });
+    expect(next[0]).toMatchObject({ payload: "MEIVA is ready.", user_facing: false });
+  });
+
+  it.each([
+    ["naive", true],
+    ["sdk", false],
+  ] as const)("keeps marker-like text verbatim in %s mode", (delivery_mode, user_facing) => {
+    const info = { item_id: "5.0", agent_id: 1, delivery_mode };
+    const items = applySystemEvent([], { ...info, role: "chat_delta", content: "MEI" });
+    expect(items[0]).toMatchObject({ payload: "MEI", user_facing });
+    const next = applySystemEvent(items, {
+      ...info, role: "chat_delta", content: "VA_DISPLAY_TO_USER\nHello.",
+    });
+    expect(next[0]).toMatchObject({ payload: "MEIVA_DISPLAY_TO_USER\nHello.", user_facing });
+  });
+
   it("human-wake stream strips redundant Meiva agent to user: header without flickering user_facing", () => {
     let items: BackendTimelineItem[] = [];
     items = applySystemEvent(items, {

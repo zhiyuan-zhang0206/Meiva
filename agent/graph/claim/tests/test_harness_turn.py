@@ -581,11 +581,11 @@ async def test_consecutive_assistant_text_blocks_project_to_distinct_ai_messages
     engine = FakeEngine(
         reply="MEIVA_DISPLAY_TO_USER\nSecond message",
         events=(
-            TextDelta(turn_id="t1", text="MEIVA_HIDE_FROM_USER\nFirst "),
-            TextDelta(turn_id="t1", text="message"),
+            TextDelta(turn_id="t1", text="MEIVA_H"),
+            TextDelta(turn_id="t1", text="IDE_FROM_USER\nFirst "),
             AssistantText(turn_id="t1", text="MEIVA_HIDE_FROM_USER\nFirst message"),
-            TextDelta(turn_id="t1", text="MEIVA_DISPLAY_TO_USER\nSecond "),
-            TextDelta(turn_id="t1", text="message"),
+            TextDelta(turn_id="t1", text="MEIVA_DISPLAY_TO_USER\n"),
+            TextDelta(turn_id="t1", text="Second "),
             AssistantText(turn_id="t1", text="MEIVA_DISPLAY_TO_USER\nSecond message"),
         ),
     )
@@ -596,11 +596,11 @@ async def test_consecutive_assistant_text_blocks_project_to_distinct_ai_messages
     assert command.update == {"halted": True, "harness_pending_input": None}
     events = await live_events.events()
     items = [event["items"][0] for event in events if event["role"] == "timeline_snapshot"]
-    assert [(item["item_id"], item["payload"]) for item in items] == [
-        ("0.0", "First "),
-        ("0.0", "First message"),
-        ("1.0", "Second "),
-        ("1.0", "Second message"),
+    assert [(item["item_id"], item["payload"], item["user_facing"]) for item in items] == [
+        ("0.0", "", False),
+        ("0.0", "First message", False),
+        ("1.0", "", False),
+        ("1.0", "Second message", True),
     ]
 
 

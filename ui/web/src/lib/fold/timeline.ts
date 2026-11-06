@@ -98,13 +98,16 @@ function resolveStreamingChat(
   if (mode === "naive") return { payload: rawText, user_facing: Boolean(rawText.trim()) };
   if (mode === "prefix" || explicitVisibility) {
     const lineEnd = rawText.indexOf("\n");
-    if (lineEnd >= 0) {
-      const firstLine = rawText.slice(0, lineEnd);
-      const header = firstLine.endsWith("\r") ? firstLine.slice(0, -1) : firstLine;
-      const body = rawText.slice(lineEnd + 1);
-      if ((header === DISPLAY_TO_USER || header === HIDE_FROM_USER) && body.trim()) {
-        return { payload: body, user_facing: header === DISPLAY_TO_USER };
-      }
+    const firstLine = lineEnd < 0 ? rawText : rawText.slice(0, lineEnd);
+    const header = firstLine.endsWith("\r") ? firstLine.slice(0, -1) : firstLine;
+    if (header === DISPLAY_TO_USER || header === HIDE_FROM_USER) {
+      const body = lineEnd < 0 ? "" : rawText.slice(lineEnd + 1);
+      return body.trim()
+        ? { payload: body, user_facing: header === DISPLAY_TO_USER }
+        : { payload: "", user_facing: false };
+    }
+    if (lineEnd < 0 && (DISPLAY_TO_USER.startsWith(rawText) || HIDE_FROM_USER.startsWith(rawText))) {
+      return { payload: "", user_facing: false };
     }
     return { payload: rawText, user_facing: false };
   }

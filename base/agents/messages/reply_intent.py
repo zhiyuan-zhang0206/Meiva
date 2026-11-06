@@ -28,12 +28,19 @@ REPLY_VISIBILITY_CORRECTION = (
 )
 
 
-def parse_reply_visibility(text: str) -> tuple[str, bool] | None:
+def _resolve_prefix_reply(text: str) -> tuple[str, bool] | None:
     header, separator, body = text.partition("\n")
     header = header.removesuffix("\r")
-    if not separator or header not in (DISPLAY_TO_USER, HIDE_FROM_USER) or not body.strip():
-        return None
-    return body, header == DISPLAY_TO_USER
+    if header in (DISPLAY_TO_USER, HIDE_FROM_USER):
+        return (body, header == DISPLAY_TO_USER) if body.strip() else ("", False)
+    if not separator and (DISPLAY_TO_USER.startswith(text) or HIDE_FROM_USER.startswith(text)):
+        return "", False
+    return None
+
+
+def parse_reply_visibility(text: str) -> tuple[str, bool] | None:
+    resolved = _resolve_prefix_reply(text)
+    return resolved if resolved is not None and resolved[0] else None
 
 
 # meiva:note
@@ -59,8 +66,8 @@ def strip_user_reply_prefix(text: str) -> tuple[bool, str]:
 
 
 # meiva:note
-# Header-only output with nothing non-blank after stripping stays `(text, False)` inside
-# `Details` rather than promoting an empty primary bubble, keeping `item_id` alignment intact.
+# A legacy wake header with a blank body keeps its raw text in Details.
+# Prefix-mode marker fragments keep their item identity with an empty payload.
 # meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
 def resolve_agent_reply(
     text: str,
@@ -75,9 +82,9 @@ def resolve_agent_reply(
             return text, bool(text.strip())
         if mode is UserDeliveryMode.SDK:
             return text, False
-        return parse_reply_visibility(text) or (text, False)
+        return _resolve_prefix_reply(text) or (text, False)
     if explicit_visibility:
-        return parse_reply_visibility(text) or (text, False)
+        return _resolve_prefix_reply(text) or (text, False)
     matched, body = strip_user_reply_prefix(text)
     if matched:
         if body.strip():
