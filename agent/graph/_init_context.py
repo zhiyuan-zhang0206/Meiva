@@ -21,7 +21,7 @@ from base.agents.history.harness_messages import (
     aload_harness_message_count,
 )
 from base.agents.history.timeline import build_timeline_items
-from base.agents.messages.delivery.retry import retryable_database_error
+from base.agents.messages.delivery.retry_io import retryable_database_error
 from base.agents.messages.kwargs import read_meiva_kwargs
 from base.api_contracts.agent_contract import Harness
 from base.db.transaction import async_write_transaction

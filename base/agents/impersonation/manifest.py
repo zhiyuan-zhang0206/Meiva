@@ -29,7 +29,7 @@ from base.agents.impersonation.status import (
     is_log_native,
     parse_lease,
 )
-from base.agents.messages.delivery.retry import retryable_database_error
+from base.agents.messages.delivery.retry_io import retryable_database_error
 from base.api_contracts.agent_contract import SdkCaptureAdmission
 from base.db import Database
 from base.db.rows import query_all

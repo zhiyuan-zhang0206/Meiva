@@ -9,7 +9,7 @@ from datetime import datetime
 import psycopg
 
 from base.agents.context.clients import DatabaseHandle
-from base.agents.messages.delivery.retry import retryable_database_error
+from base.agents.messages.delivery.retry_io import retryable_database_error
 from base.db.protocols import RestoreAbandonedError
 
 _TTL_QUERY_ATTEMPTS = 3

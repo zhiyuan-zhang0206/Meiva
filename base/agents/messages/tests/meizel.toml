@@ -1,0 +1,2 @@
+[uses]
+"test_delivery_retry.py" = ["delivery_retry_probe.py"]

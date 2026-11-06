@@ -1,4 +1,8 @@
-"""Explicit gateway failures eligible for bounded retry and deferred delivery."""
+# meiva:note
+# The two retry policies, decided here and only here: the gateway one reads the
+# response itself, and the database one classifies a failure from facts its driver
+# adapter passes in. retry_io.py is the only module that names psycopg, so a caller
+# that needs the policy alone never loads the driver.
 
 import json
 from typing import Protocol
@@ -43,19 +47,23 @@ def retryable_response(response: GatewayResponse) -> bool:
     return body.get("retryable") is not False and body.get("committed") is not True
 
 
-def retryable_database_error(error: Exception) -> bool:
-    """Database connection availability, excluding pool lifecycle and query errors."""
-    from psycopg import OperationalError
-    from psycopg_pool import PoolTimeout
-
-    from base.db.protocols import RestoreAbandonedError
-
+# meiva:note
+# What makes a database failure connection availability: the two first-party
+# lifecycle failures are transient, and so is a driver OperationalError with no
+# sqlstate (the connection never reached the server) or a class-08 sqlstate
+# (connection exception). The no-sqlstate branch admits only the exact type, so a
+# subclass that answers no sqlstate stays a hard failure.
+def transient_database_failure(
+    *,
+    pool_timeout: bool,
+    abandoned_restore: bool,
+    operational_error: bool,
+    operational_subclass: bool,
+    sqlstate: str | None,
+) -> bool:
     return (
-        isinstance(error, (PoolTimeout, RestoreAbandonedError))
-        or (type(error) is OperationalError and error.sqlstate is None)
-        or (
-            isinstance(error, OperationalError)
-            and error.sqlstate is not None
-            and error.sqlstate.startswith("08")
-        )
+        pool_timeout
+        or abandoned_restore
+        or (operational_error and sqlstate is None)
+        or (operational_subclass and sqlstate is not None and sqlstate.startswith("08"))
     )
