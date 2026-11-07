@@ -9,6 +9,8 @@ from base.agents.to_user.models import (
     DOCUMENT_FILENAME,
     ToUserDocument,
     ToUserReadRequest,
+    WorkspaceFileRequest,
+    WorkspaceFileResponse,
 )
 from base.agents.to_user.resources import read_resource, resolve_file
 
@@ -19,6 +21,8 @@ __all__ = [
     "ToUserLimits",
     "ToUserReadFailure",
     "ToUserReadRequest",
+    "WorkspaceFileRequest",
+    "WorkspaceFileResponse",
     "ensure_document",
     "read_document",
     "read_failure",

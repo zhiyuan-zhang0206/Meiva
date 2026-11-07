@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -41,3 +41,22 @@ class ToUserReadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     agent_id: int = Field(gt=0)
     files: list[ResourceFile] = Field(default_factory=list)
+
+
+class WorkspaceFileRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    agent_id: int = Field(gt=0)
+    path: str = Field(max_length=MAX_FILE_LENGTH)
+    mode: Literal["content", "raw"]
+    custom_cwd: str | None = None
+
+
+class WorkspaceFileResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str
+    name: str
+    extension: str
+    content: str
+    size: int
+    binary: bool
+    modified_at: datetime

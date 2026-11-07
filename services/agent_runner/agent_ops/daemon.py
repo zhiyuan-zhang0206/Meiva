@@ -69,7 +69,7 @@ from ops.rpc_schemas import LaunchAgentRequest, LifecyclePayload, OpStatus, is_o
 from ops.upload_delivery import ReceiverConfig
 from services.agent_runner.agent_ops import boot, health, idempotency_plan, in_flight, ops_plan
 from services.agent_runner.agent_ops.dispatch_sync import dispatch_sync
-from services.agent_runner.agent_ops.to_user_resource import resource_route
+from services.agent_runner.agent_ops.to_user_resource import resource_route, workspace_file_route
 from services.agent_runner.agent_ops.to_user_watch import watch_to_user
 from services.agent_runner.agent_ops.upload_object import upload_object_route
 from services.agent_runner.agent_ops.workspace_export import workspace_export_route
@@ -603,6 +603,17 @@ async def serve_ops_daemon(
                 ),
                 ("POST", "/to-user/resource"): functools.partial(
                     resource_route,
+                    pool=pool,
+                    machine=our_machine,
+                    home=home,
+                    limits=to_user_limits_from_read_model(authority),
+                    executor=executor,
+                    dispatch_sem=dispatch_sem,
+                    requests=requests,
+                    workers=workers,
+                ),
+                ("POST", "/to-user/workspace-file"): functools.partial(
+                    workspace_file_route,
                     pool=pool,
                     machine=our_machine,
                     home=home,

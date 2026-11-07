@@ -230,7 +230,9 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
                         return;
                       }
                       if (href) {
-                        const fileMatch = isFilePath(href);
+                        const fragment = href.includes("#") ? href.slice(href.indexOf("#")) : "";
+                        const targetPath = resource ? `${resource.file}${fragment}` : href;
+                        const fileMatch = isFilePath(targetPath);
                         if (fileMatch.isPath) {
                           event.preventDefault();
                           useWorkspaceFileStore.getState().openFile({
