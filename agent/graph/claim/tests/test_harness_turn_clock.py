@@ -159,3 +159,26 @@ def test_existing_clock_ignores_unused_rendering_config_until_the_next_capture(
     result = json.loads(completed.stdout.splitlines()[-1])
 
     assert result == {"projected": True, "next_capture_refused": True, "initial_bad_refused": True}
+
+
+async def test_late_reasoning_does_not_duplicate_open_chat() -> None:
+    timers = ManualTimers(wall_start=START)
+    clock = Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
+    projector, items = _projector(clock)
+    await projector.on_event(TextDelta(turn_id="turn", text="Hello "))
+    timers.advance(1)
+    await projector.on_event(TextDelta(turn_id="turn", text="world"))
+    timers.advance(1)
+    await projector.on_event(ReasoningText(turn_id="turn", text="Synthesizing"))
+    timers.advance(1)
+    await projector.on_event(AssistantText(turn_id="turn", text="Hello world"))
+    await projector.finish()
+
+    assert len(items) == 2
+    chat = items["h2.0"]
+    reasoning = items["h3.0"]
+    assert chat.kind == "agent_chat"
+    assert chat.payload == "Hello world"
+    assert chat.activity_pending is False
+    assert reasoning.kind == "agent_reasoning"
+    assert reasoning.payload == "Synthesizing"

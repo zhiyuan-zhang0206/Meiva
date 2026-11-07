@@ -28,7 +28,9 @@ bucketing old history correctly.
 
 In `user_delivery_mode=prefix` (the compatibility default), new assistant text
 blocks use an exact first-line marker, followed by a newline
-and a non-blank body. `MEIVA_DISPLAY_TO_USER` puts the body in the main
+and a non-blank body. The marker is parsed only once at the start of the block;
+streamed text cannot be retracted or overwritten mid-message, so outputting a marker
+a second time does not replace earlier output. `MEIVA_DISPLAY_TO_USER` puts the body in the main
 conversation for direct answers and meaningful user-facing updates.
 `MEIVA_HIDE_FROM_USER` puts the body in Details, which the user can expand and
 read. A leading fragment that can still form either marker and a marker
