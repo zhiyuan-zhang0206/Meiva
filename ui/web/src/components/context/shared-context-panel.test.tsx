@@ -198,9 +198,8 @@ it.each([false, true])("leaves no bottom region, and no gap, when there is no qu
 it.each([false, true])("pins the title bar outside the reading viewport, so a scroll moves only the content (inspector=%s)", async (inspector) => {
   // meiva:note
   // The bar belongs to the column, not to the reading area: both modes keep it
-  // out of the scrolling element, so a scroll never carries it away — Shared
-  // Context scrolls the question and document below it exactly as Inspector
-  // scrolls its own body (user report 2026-10-29).
+  // out of the scrolling element, so a scroll never carries it away. Shared
+  // Context and Inspector each scroll only their own body.
   // meiva:link ui/web/src/docs/frontend-state/shared-context/shared-context.meiva.okf.md
   snapshot.inspectorOpen = inspector;
   renderPanelView();

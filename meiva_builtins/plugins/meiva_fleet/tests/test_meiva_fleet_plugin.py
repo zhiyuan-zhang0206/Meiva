@@ -178,7 +178,8 @@ def test_prompt_section_preserves_questions_until_answered_or_closed(load_activi
 
     section = fleet_self_section(_fleet_slices(), catalog=build_model_catalog(home=meiva_home()))
     assert "Questions persist until the user answers or explicitly closes them" in section
-    assert "including an editable Note" in section
+    assert "Text questions have one answer field" in section
+    assert "choices keep an optional Note" in section
     assert "dismiss_notice" not in section
 
 

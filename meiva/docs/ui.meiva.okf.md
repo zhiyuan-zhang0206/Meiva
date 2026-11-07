@@ -23,7 +23,9 @@ tags:
   composer service. Omit them when no reply is useful.
 - `ask(title, content=None, *, question=None, note_suggestion=None) -> int` appends a question and returns its global ID. Omitted
   question means free text; `single_select` and `multi_select` accept declared
-  options. Every type has an editable Note, optionally seeded by the agent.
+  options. Text questions have one answer field; choices keep an optional Note.
+  `note_suggestion` offers light candidate text for that field until the user
+  explicitly applies it.
 - `publications(pending_only=True, after_id=0, limit=50)` reads durable messages
   in increasing ID order without marking them read; continue after the last ID.
 - `questions()` reads up to 500 open questions without answering them.

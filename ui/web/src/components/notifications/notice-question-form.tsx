@@ -39,7 +39,7 @@ function answerFromDraft(question: NoticeQuestion, draft: Draft): NoticeAnswer |
 // Numbered choices share their frozen order with server replies and history.
 // onAnswerChange reports the answer the current draft would submit (null while
 // incomplete), which is what enables Submit; onSubmit sends an answer, and Enter
-// in either field calls it with the answer built from that draft.
+// in the active answer or Note field calls it with the answer built from that draft.
 // meiva:link ui/web/src/docs/frontend-components/enter-to-send.meiva.okf.md
 export function NoticeQuestionForm({
   question,
