@@ -60,7 +60,7 @@ SHARED_ALLOWED = frozenset({"scripts/codegen/pyright_tests_owing_any.txt", "pypr
 # marker, so a smaller intersection is not evidence of a smaller one.
 COMPARE_FILE_LIMIT = 300
 
-DEFAULT_LANE_FILE = Path(__file__).with_name("lane-agents.txt")
+DEFAULT_LANE_FILE = Path(__file__).resolve().with_name("lane-agents.txt")
 
 
 # meiva:note
@@ -368,9 +368,15 @@ def granted_lanes(env_value: str | None, *, lane_file: Path = DEFAULT_LANE_FILE)
             if line.strip() and not line.strip().startswith("#")
         }
     else:
-        raise MergeGateError(f"lane list missing at {lane_file} (or set MEIVA_LANE_AGENTS)")
+        raise MergeGateError(
+            f"lane list missing at {lane_file}: set MEIVA_LANE_FILE to the grant file to read, "
+            f"or MEIVA_LANE_AGENTS to a comma-separated list of agent ids"
+        )
     if not lanes:
-        raise MergeGateError(f"{lane_file} names no lane, so nothing could be merged")
+        raise MergeGateError(
+            f"{lane_file} names no lane, so nothing could be merged: add the agent ids that may "
+            f"merge, one per line, or set MEIVA_LANE_AGENTS"
+        )
     return lanes
 
 
@@ -536,7 +542,7 @@ def report_authorship(
     api: GhApi, pull: PullRequest, *, env: Mapping[str, str], reviewer: bool
 ) -> str | None:
     print("\n[5] lane authorship (grant = every worker 405 spawned)")
-    lane_file = Path(env.get("MEIVA_LANE_FILE") or DEFAULT_LANE_FILE)
+    lane_file = Path(env.get("MEIVA_LANE_FILE") or DEFAULT_LANE_FILE).expanduser().absolute()
     lanes = granted_lanes(env.get("MEIVA_LANE_AGENTS"), lane_file=lane_file)
     messages = [*commit_messages(api, pull.full_name, pull.number), pull.body]
     trailers, harness = trailer_sets(messages)
