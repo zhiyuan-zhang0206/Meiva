@@ -1,8 +1,8 @@
 # Check-only backfill for a `release-gate.yml` cron slot that GitHub never started.
 #
 # `release-gate.yml` type-checks the whole tree of `main` every six hours, but the same workflow
-# also certifies and publishes a release: a passing run mints a `v*` tag, moves `channel/latest`
-# and creates a GitHub Release. GitHub's cron does not start every slot (see the release-gate
+# also certifies and publishes a release: a passing run mints a `v*` tag and moves
+# `channel/latest`. GitHub's cron does not start every slot (see the release-gate
 # slot watch in `schedules/README.md`), so a missed slot leaves the full-tree type verdict of
 # `main` stale, and dispatching `release-gate.yml` to fill the hole would publish. This workflow
 # runs only that type check and the pyright-environment drift check beside it, with

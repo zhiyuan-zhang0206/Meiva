@@ -6,10 +6,10 @@
 # red the watch can read -- there is nothing there -- so it needs its own check.
 #
 # The check reports; it never publishes. `release-gate.yml` certifies on success, which mints an
-# immutable `v*` tag, moves `channel/latest` and creates a GitHub Release, and a release is the
-# user's decision (2026-10-28). Letting "the cron drifted" trigger that would hand the release
-# decision to the drift. So the round opens a card whose first line says it publishes nothing, and
-# the run that closes the gap stays a human action.
+# immutable `v*` tag and moves `channel/latest`, and a release is the user's decision (2026-10-28).
+# Letting "the cron drifted" trigger that would hand the release decision to the drift. So the
+# round opens a card whose first line says it publishes nothing, and the run that closes the gap
+# stays a human action.
 #
 # The gap the card names is "no full-population check for nine hours", not "no release for nine
 # hours". Those are different debts, and only the first one is the watch's to report: a type-only
@@ -154,8 +154,8 @@ def _card(facts: SlotFacts, *, threshold: timedelta, gap_id: str) -> Card:
         fingerprint=FINGERPRINT,
         title=f"release-gate has not run on its schedule since {since}",
         body=(
-            "**This card publishes nothing.** No tag is minted, `channel/latest` does not move, "
-            "and no release is created until a human runs the gate.\n\n"
+            "**This card publishes nothing.** No tag is minted and `channel/latest` does not "
+            "move until a human runs the gate.\n\n"
             f"{_behind(facts)}\n\n"
             f"The newest scheduled `release-gate` run started at {newest}; the threshold is "
             f"{threshold.total_seconds() / 3600:.0f}h.\n\n"
