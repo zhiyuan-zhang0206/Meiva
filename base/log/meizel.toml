@@ -1,8 +1,9 @@
-exports = ["process.py", "redaction.py", "sinks.py", "tests"]
+exports = ["diagnose.py", "process.py", "redaction.py", "sinks.py", "tests"]
 
 [uses]
 "__init__.py" = ["redaction.py", "sinks.py"]
+"diagnose.py" = []
 "process.py" = ["__init__.py", "sinks.py"]
 "redaction.py" = []
-"sinks.py" = ["redaction.py"]
-"tests" = ["__init__.py", "process.py", "redaction.py", "sinks.py"]
+"sinks.py" = ["diagnose.py", "redaction.py"]
+"tests" = ["__init__.py", "diagnose.py", "process.py", "redaction.py", "sinks.py"]

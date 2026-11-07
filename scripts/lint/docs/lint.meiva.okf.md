@@ -37,13 +37,9 @@ guards are a separate group: [[scripts/content_lint/docs/content_lint.meiva.okf.
 
 ## `logger_add_diagnose.py`
 
-Every `logger.add(...)` sink outside test code must pass a literal
-`diagnose=False`. loguru's `diagnose` defaults to True, so an unmarked sink
-renders every local variable of a `logger.exception(...)` failure's frames —
-DSNs, tokens, passwords — into that sink's output. Missing the kwarg, a
-non-`False` literal, or a value this script cannot verify statically (a
-name, a `**kwargs` unpack) are all flagged, fail-closed; no inline exemption
-exists. Exempt: test code (`tests/`, `test_*.py`, `*_test.py`).
+Two rules over `logger.add(...)`: the call lives in `base/log/`, and it passes a
+literal `diagnose=False`. Moved out of this node once they stopped fitting on
+one topic — [[logger-add-diagnose.meiva.okf.md|logger add diagnose]].
 
 Wired into pre-commit (`lint-logger-add-diagnose`); rationale in the script docstring.
 

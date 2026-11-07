@@ -100,6 +100,46 @@ def test_directory_with_dangling_symlink_member_is_skipped(
     assert "passes no `diagnose=False`" in capsys.readouterr().out
 
 
+# meiva:note
+# The placement rule is the half no runtime hook can enforce: `base.log` disables frame-variable
+# rendering on the handlers that exist when it is imported and `add_sink` on the ones registered
+# since, but a `logger.add` after startup is invisible to both. A file outside `base/log/` is
+# refused whether or not it passes `diagnose=False` — it also skips the redaction patcher.
+def test_add_outside_base_log_is_flagged_even_with_diagnose_false():
+    src = 'logger.add(sys.stderr, format="{message}", diagnose=False)\n'
+    violations = _lint.sink_placement_violations_in_source(src, "agent/takeover/relay.py")
+    assert len(violations) == 1
+    assert "outside base/log/" in violations[0][1]
+
+
+def test_add_inside_base_log_is_clean():
+    src = 'logger.add(sys.stderr, format="{message}", diagnose=False)\n'
+    assert _lint.sink_placement_violations_in_source(src, "base/log/sinks.py") == []
+
+
+def test_add_inside_a_subdirectory_of_base_log_is_clean():
+    src = "logger.add(sink, diagnose=False)\n"
+    assert _lint.sink_placement_violations_in_source(src, "base/log/client/extra.py") == []
+
+
+# meiva:note
+# The reverse validation the task card asks for: one `logger.add(sys.stderr)` with loguru's
+# defaults is red on both rules at once, so neither rule can be satisfied by the other.
+def test_a_default_sink_outside_the_funnel_is_red_on_both_rules():
+    src = "logger.add(sys.stderr)\n"
+
+    assert _lint.violations_in_source(src, "agent/takeover/relay.py")
+    assert _lint.sink_placement_violations_in_source(src, "agent/takeover/relay.py")
+
+
+def test_a_scanned_file_outside_base_log_reports_placement(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "sink.py").write_text("logger.add(sys.stderr, diagnose=False)\n", encoding="utf-8")
+    assert _lint.main([str(tmp_path)]) == 1
+    assert "outside base/log/" in capsys.readouterr().out
+
+
 def test_test_file_is_exempt(tmp_path: Path) -> None:
     test_dir = tmp_path / "tests"
     test_dir.mkdir()
