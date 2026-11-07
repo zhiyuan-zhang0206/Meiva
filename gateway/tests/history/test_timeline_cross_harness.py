@@ -253,3 +253,44 @@ def test_switched_agent_meiva_external_meiva_chronological(
     data = resp.json()
     assert len(data["items"]) == 4
     assert [it["item_id"] for it in data["items"]] == ["0.0", "1.0", "h0.0", "2.0"]
+
+
+def test_compact_excludes_pre_compact_harness_items(
+    db_conn: psycopg.Connection,
+    test_client: TestClient,
+) -> None:
+    tid = create_agent(db_conn)
+    pre_compact_harness = [
+        TimelineItem(
+            item_id="h0.0",
+            kind="system_marker",
+            payload="error: Harness execution stopped: antigravity turn failed",
+            created_at="2026-05-01T08:00:00+00:00",
+        ),
+    ]
+    append_harness_timeline_items(db_conn, tid, "antigravity", pre_compact_harness)
+    db_conn.commit()
+
+    messages = [
+        SystemMessage(content="System prompt"),
+        HumanMessage(
+            content="Compact summary [2026-05-01]: context compacted",
+            additional_kwargs={
+                "meiva_msg_type": "compact_summary",
+                "meiva_created_at": "2026-05-01T12:00:00+00:00",
+            },
+        ),
+        AIMessage(
+            content="Active post-compact assistant turn",
+            additional_kwargs={"meiva_created_at": "2026-05-01T12:05:00+00:00"},
+        ),
+    ]
+    _put_checkpoint(tid, messages)
+    _set_harness(db_conn, tid, "meiva")
+
+    resp = test_client.get(f"/api/agents/{tid}/timeline?limit=10")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["items"]) == 3
+    assert [it["item_id"] for it in data["items"]] == ["0.0", "1.0", "2.0"]
+    assert all(it["item_id"] != "h0.0" for it in data["items"])
