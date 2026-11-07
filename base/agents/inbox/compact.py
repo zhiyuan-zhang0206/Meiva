@@ -4,9 +4,9 @@ from collections.abc import Callable
 
 import psycopg
 
-from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.inbox.control_delivery import insert_compact_in_transaction
 from base.agents.inbox.insert import emit_prepared_event
+from base.agents.inbox.wake import publish_inbound_wake
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.telemetry import Event

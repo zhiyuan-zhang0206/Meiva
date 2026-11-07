@@ -1,14 +1,4 @@
 #!/usr/bin/env python3
-"""Launch, inspect, or stop Claude Code sessions in persistent shells.
-
-A supervised worker (the default) keeps the two-file collaboration — a task
-file, a work file, and a session the launcher's owner follows with
-``watch_work.py``. An interactive prompt launch (``--prompt``) starts Claude
-Code without task/work files and sends the prompt as its first message. To
-have a Claude Code session impersonate an Meiva agent, spawn it normally and send
-it a message instructing it to run ``meiva impersonate request --provider claude``.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -141,10 +131,7 @@ def main(argv: list[str]) -> int:
     provenance = None
     prompt = None
     if opts.prompt is not None:
-        prompt = (
-            f"{require_lineage(parser, parsed, now=datetime.now(UTC), takeover=True)}"
-            f"\n\n{opts.prompt}"
-        )
+        prompt = f"{require_lineage(parser, parsed, now=datetime.now(UTC))}\n\n{opts.prompt}"
     elif opts.resume is None:
         provenance = require_lineage(parser, parsed, now=datetime.now(UTC))
     refusal = announce_capability("claude", mode=opts.mode, force=opts.force_mode)

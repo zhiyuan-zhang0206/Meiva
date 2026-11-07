@@ -39,7 +39,7 @@ from base.native_process.os_platform import Platform
 from base.telemetry import build_pipeline
 from base.telemetry.lgtm_local import LgtmSettings, backend_urls
 from services.desktop.permissions_helper.launchd_job import LaunchdFacts
-from services.supervision.meiva_root.health import HealthConfig, HealthMonitor, LeaseProbe
+from services.supervision.meiva_root.health import HealthConfig, HealthMonitor
 from services.supervision.meiva_root.probes import Probe, ProbeError, ProbeRegistry, ProbeSource
 from services.supervision.meiva_root.selfcheck import SelfCheckConfig, TreeSelfCheck
 from services.supervision.meiva_root.supervisor import Supervisor
@@ -52,7 +52,6 @@ from services.supervision.meiva_root_glue.diagnostic_probes import (
     ProbeConfig,
     build_diagnostics,
     database_recovery_probe,
-    live_lease_probe,
 )
 from services.supervision.meiva_root_glue.diagnostics import (
     Diagnostic,
@@ -480,9 +479,7 @@ def build_wiring(
     return assemble(
         context,
         registry,
-        health_config=HealthConfig(lease_grace_s=settings.daemon.health_restart_lease_grace_s),
         db_recovery_probe=database_recovery_probe(database),
-        lease_probe=live_lease_probe(database, machine.name()),
         rounds=RoundsInputs(
             diagnostics=DiagnosticMonitor(resolved_diagnostics, clock=clock),
             clients=clients,
@@ -504,7 +501,6 @@ def assemble(
     rounds: RoundsInputs | None = None,
     startup_graces: Mapping[str, float] | None = None,
     db_recovery_probe: Probe | None = None,
-    lease_probe: LeaseProbe | None = None,
 ) -> list[WiringParticipant]:
     """Build the two monitors over `registry` and attach their status surfaces."""
     monitor = HealthMonitor(
@@ -514,7 +510,6 @@ def assemble(
         tasks=context.participant_tasks,
         startup_graces=startup_graces,
         db_recovery_probe=db_recovery_probe,
-        lease_probe=lease_probe,
         clock=context.clock,
     )
     check = TreeSelfCheck(

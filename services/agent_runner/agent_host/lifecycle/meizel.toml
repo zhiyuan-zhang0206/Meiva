@@ -1,4 +1,4 @@
-exports = ["cleanup_failures.py", "configuration.py", "graceful_exit.py", "instance.py", "lease_controls.py", "shells.py", "shutdown.py"]
+exports = ["cleanup_failures.py", "configuration.py", "graceful_exit.py", "instance.py", "shells.py", "shutdown.py"]
 
 [uses]
 "shells.py" = ["cleanup_failures.py"]
@@ -6,7 +6,6 @@ exports = ["cleanup_failures.py", "configuration.py", "graceful_exit.py", "insta
 [purity]
 "__init__.py" = "strict"
 "cleanup_failures.py" = "strict"
-"lease_controls.py" = "strict"
 
 [roots]
 "configuration.py" = { kinds = ["clock", "settings"], why = "Agent host bootstrap constructs the process configuration owner and the process clock (from SYSTEM_TIMERS) the host stamps handoffs and group checks with; the entry hands it the home and the process-disable list it read" }

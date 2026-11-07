@@ -1,27 +1,3 @@
-"""TTL reaper daemon — enforces every wall-clock deadline the cluster hands out.
-
-Two resident sequential loops under one `TaskGroup` (`run_loops`):
-
-- `sweep` (`services.upkeep.ttl_reaper.sweep`): database-only reclaims — expired pages,
-  browser sessions, notices and impersonation leases — plus the slow maintenance
-  phases (fire-log prune, lifecycle-pointer scan, absent-machine fence settle)
-  on cadences kept in `maintenance_state`.
-- `remote` (`services.upkeep.ttl_reaper.remote`): the phases that dial other machines —
-  TTL-expired persistent shell sessions are killed on their home machines
-  (concurrently across machines), and stale work-failure deliveries are retried.
-
-A loop that raises cancels its sibling and the exception leaves `run`: the
-process exits and the supervisor restarts it. An unreachable database skips a
-round. Each loop reports its own progress to `/healthz`, so a wedged loop reads
-as a failing probe even while its sibling stays busy.
-
-Runs on the gateway, one per cluster. Kept alive by the root supervisor's health
-monitor through the roster's `/healthz` identity probe (`services/supervision/roster/healthz.py`).
-
-Usage:
-    .venv/bin/python -m services.upkeep.ttl_reaper.daemon
-"""
-
 import asyncio
 import logging
 import os
@@ -103,12 +79,6 @@ def ttl_reaper_config(config: ConfigBoot, *, rpc: RpcClient) -> TtlReaperConfig:
         fire_log_cleanup_interval_s=daemon.schedule_fire_log_cleanup_interval_seconds,
         fire_log_retention_days=daemon.schedule_fire_log_retention_days,
         shell_kill_deadline_s=shells.dispatch_deadline_s(rpc),
-        impersonation_event_abandon_grace_s=(
-            config.view.general.impersonation_event_abandon_grace_seconds
-        ),
-        impersonation_event_report_interval_s=(
-            config.view.general.impersonation_event_report_interval_seconds
-        ),
         zone=clock.zone(),
         clock=clock,
     )

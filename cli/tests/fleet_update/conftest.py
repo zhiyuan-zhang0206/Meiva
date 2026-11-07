@@ -41,7 +41,6 @@ _STOP: tuple[Group, ...] = (
     _group("--allow-python-change --refuse-python-change", "--refuse-python-change"),
     _group("--allow-red-schedules --refuse-red-schedules", "--refuse-red-schedules"),
     _group("--silence-hours", "--silence-hours", "4"),
-    _group("--lease-confirm-seconds", "--lease-confirm-seconds", "0"),
     _group("--message --no-message", "--no-message"),
 )
 _START: tuple[Group, ...] = (_group("--roster-timeout", "--roster-timeout", "90"),)

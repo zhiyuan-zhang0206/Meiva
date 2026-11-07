@@ -619,9 +619,6 @@ def test_product_guide_has_one_builtin_source_and_nested_operator_entries(unit_h
     assert (repo / ".claude" / "skills" / "meiva-guide").resolve() == canonical
     assert (repo / ".meiva" / "skills" / "meiva-guide").resolve() == canonical
     assert any(source.name == "meiva-guide" and source.src == canonical for source in sources)
-    executor = canonical.parent / "impersonator-guide"
-    assert any(source.name == "impersonator-guide" and source.src == executor for source in sources)
-    assert not (repo / ".agents" / "skills" / "impersonator-guide").exists()
     assert not any(source.name in _DISTRIBUTED_SKILLS for source in sources)
     guide = (canonical / "SKILL.md").read_text()
     assert "deploy/SKILL.md" in guide
@@ -640,13 +637,13 @@ def test_builtin_guide_installs_with_the_core_update_channel(
     product_repo = Path(__file__).resolve().parents[4]
     repo = tmp_path / "repo"
     sources = repo / "meiva_builtins" / "skills" / "platform"
-    for name in ("meiva-guide", "impersonator-guide"):
+    for name in ("meiva-guide",):
         shutil.copytree(
             product_repo / "meiva_builtins" / "skills" / "platform" / name, sources / name
         )
     converge_skills(repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
     installed_names = {skill["name"] for skill in meiva.skills.names()}
-    for name in ("meiva-guide", "impersonator-guide"):
+    for name in ("meiva-guide",):
         assert name in installed_names
         entry = install_registry.get(name, home=unit_home)
         assert entry is not None and entry.enabled and entry.origin == "repo"

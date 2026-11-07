@@ -8,7 +8,6 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.agents.birth.creation_identity import CreationConflictError
-from base.agents.impersonation.manifest import record_central_event
 from base.agents.labels import publish_label_updated
 from base.agents.observation import roster
 from base.agents.observation import snapshot as snapshot_module
@@ -153,14 +152,11 @@ def _patch_label_blocking(
                 raise HTTPException(status_code=404, detail=f"agent {agent_id} not found")
         label_event = record_audit(
             conn,
-            record_central_event(
-                conn,
-                prepare_event_log(
-                    event_type="label_change",
-                    agent_id=agent_id,
-                    source=f"agent:{agent_id}" if source == "self" else source,
-                    payload={"new_label": new_label},
-                ),
+            prepare_event_log(
+                event_type="label_change",
+                agent_id=agent_id,
+                source=f"agent:{agent_id}" if source == "self" else source,
+                payload={"new_label": new_label},
             ),
         )
     telemetry.emit_prepared(label_event)

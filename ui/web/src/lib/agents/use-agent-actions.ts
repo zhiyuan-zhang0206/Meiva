@@ -16,7 +16,7 @@ import { track } from "../telemetry/telemetry";
 import { ApiError } from "../transport/api";
 import { useApi } from "../transport/transport-context";
 
-export type PendingAction = "restarting" | "terminating" | "resurrecting" | "compacting" | "expiring";
+export type PendingAction = "restarting" | "terminating" | "resurrecting" | "compacting";
 
 export interface AgentActions {
   pendingActions: Record<number, PendingAction>;
@@ -24,7 +24,6 @@ export interface AgentActions {
   spawn: (machine?: string, model?: string, reasoning_effort?: string, harness?: Harness) => Promise<number | null>;
   fork: (sourceId: number, prompt?: string) => Promise<number | null>;
   terminate: (id: number, force?: boolean) => Promise<void>;
-  forceExpire: (id: number, sessionId: number) => Promise<void>;
   restart: (id: number, message: string, config_overlay?: Record<string, unknown>) => Promise<void>;
   resurrect: (id: number, prompt?: string) => Promise<void>;
   compact: (id: number) => Promise<void>;
@@ -141,6 +140,7 @@ export function useAgentActions(
     mutationFn: ({ id, force }: { id: number; force: boolean }) =>
       client.terminateAgent(id, force),
     onSuccess: (data) => {
+      // meiva:note
       // Acceptance is not observed exit; lifecycle rows remain read-model-owned.
       const messages = {
         enqueued: "Termination requested",
@@ -148,27 +148,14 @@ export function useAgentActions(
       };
       useStore.getState().showToast(messages[data.status]);
       track("terminate");
-      // Advisory open-tasks hint (task #3374; wire field #2488): show the
-      // notice when the agent still owned open tasks as it went down. An old
-      // gateway omits the field and null means none (or a failed hint read) —
-      // both stay silent and never block the termination.
+      // meiva:note
+      // Advisory open-tasks hint: show the notice when agent still owned open tasks.
       const openTasks = data.open_tasks;
       if (openTasks && openTasks.count > 0) {
         useStore.getState().showOpenTasksNotice(openTasks);
       }
     },
     onError: (e: unknown) => showError(`Terminate failed: ${errMsg(e)}`),
-  });
-
-  const forceExpireMutation = useMutation({
-    mutationFn: ({ id, sessionId }: { id: number; sessionId: number }) =>
-      client.forceExpireImpersonation(id, sessionId),
-    onSuccess: (result, { id }) => {
-      useStore.getState().showToast(t(result.status === "expired" ? "forceExpireDone" : "forceExpireNotOpen"));
-      void queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY });
-      void queryClient.invalidateQueries({ queryKey: [...AGENT_DETAIL_QUERY_KEY, id] });
-    },
-    onError: (e: unknown) => showError(`${t("forceExpireFailed")}: ${errMsg(e)}`),
   });
 
   const restartMutation = useMutation({
@@ -214,9 +201,6 @@ export function useAgentActions(
     if (compactMutation.isPending) {
       out[compactMutation.variables.id] = "compacting";
     }
-    if (forceExpireMutation.isPending) {
-      out[forceExpireMutation.variables.id] = "expiring";
-    }
     return out;
   }, [
     terminateMutation.isPending,
@@ -227,8 +211,6 @@ export function useAgentActions(
     resurrectMutation.variables,
     compactMutation.isPending,
     compactMutation.variables,
-    forceExpireMutation.isPending,
-    forceExpireMutation.variables,
   ]);
 
   // Track ids that have been spawned (mutation returned an id) but whose
@@ -255,6 +237,8 @@ export function useAgentActions(
 
   // Drop pending ids whose card now lives in the cache.
   useEffect(() => {
+    // meiva:note
+    // Derived-state sync against the query cache.
     // eslint-disable-next-line react-hooks/set-state-in-effect -- derived-state sync against the query cache; the functional updater returns prev when nothing changed, so no render loop
     setPendingSpawnIds((prev) => {
       if (prev.size === 0) return prev;
@@ -338,7 +322,6 @@ export function useAgentActions(
   const fork = useCallback(
     async (sourceId: number, prompt?: string): Promise<number | null> => {
       try {
-        // The one placement lookup belongs to the action, not each attempt.
         const body = (async () => {
           const source =
             queryClient.getQueryData<AgentRow>([...AGENT_DETAIL_QUERY_KEY, sourceId]) ??
@@ -377,7 +360,7 @@ export function useAgentActions(
       try {
         await terminateMutation.mutateAsync({ id, force });
       } catch {
-        // error already handled in onError callback
+        return;
       }
     },
     [terminateMutation, queryClient, setActiveId],
@@ -392,7 +375,7 @@ export function useAgentActions(
       try {
         await restartMutation.mutateAsync({ id, message, config_overlay });
       } catch {
-        // error already handled in onError callback
+        return;
       }
     },
     [restartMutation],
@@ -403,7 +386,7 @@ export function useAgentActions(
       try {
         await resurrectMutation.mutateAsync({ id, prompt });
       } catch {
-        // error already handled in onError callback
+        return;
       }
     },
     [resurrectMutation],
@@ -414,21 +397,10 @@ export function useAgentActions(
       try {
         await compactMutation.mutateAsync({ id });
       } catch {
-        // error already handled in onError callback
+        return;
       }
     },
     [compactMutation],
-  );
-
-  const forceExpire = useCallback(
-    async (id: number, sessionId: number) => {
-      try {
-        await forceExpireMutation.mutateAsync({ id, sessionId });
-      } catch {
-        // error already handled in onError callback
-      }
-    },
-    [forceExpireMutation],
   );
 
   return {
@@ -437,7 +409,6 @@ export function useAgentActions(
     spawn,
     fork,
     terminate,
-    forceExpire,
     restart,
     resurrect,
     compact,

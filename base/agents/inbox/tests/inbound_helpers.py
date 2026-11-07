@@ -11,8 +11,8 @@ from collections.abc import Callable
 
 import pytest
 
-from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.inbox.insert import insert_inbound_message
+from base.agents.inbox.wake import publish_inbound_wake
 from base.db import Database
 from base.events.live.bus import EventBus
 

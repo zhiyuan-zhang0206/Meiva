@@ -11,7 +11,7 @@ workspace. It stops their PTYs and removes their private state:
 - a launch that stalled past its spawn grace with no live PTY;
 - a supervised generation whose supervisor died (nobody would close it on `DONE`).
 
-Live generations are left alone, takeovers included (a takeover's coding session
+Live generations are left alone (a coding session
 is its whole liveness). After PTY allocation, the launcher publishes its active
 handle before waiting for Codex startup and bootstrap.
 Each successful command prints the core file handles plus these Codex fields:
@@ -51,10 +51,8 @@ never answer "update now"). A fresh generation starts a new Codex session;
 an interruption](resume_after_interruption.md). The generation's private state
 directory holds the app-server log.
 
-Every generation also owns the explicit shared app server an impersonation relay
-delivers into: the endpoint must belong to the server holding the existing
-conversation; Pending queue acceptance does not establish Steer delivery. The
-launcher starts `codex app-server --listen unix://<socket>` on a private
+Every generation also owns a dedicated app server:
+the launcher starts `codex app-server --listen unix://<socket>` on a private
 per-generation socket (with `approval_policy="never"` and
 `sandbox_mode="danger-full-access"` configured on the server itself), starts a
 janitor that ends the server when the coding session dies, connects the TUI with
@@ -82,9 +80,9 @@ Persistent Shell one-day maximum. TTL is a crash backstop. The automatically
 started supervisor closes and terminalizes the exact generation on current
 `DONE` or final `HANDOFF`, explicit cancel, owner termination, Codex death,
 stalled launch, work-file deletion, or expiry. Its notifications never
-resurrect a terminated owner. A takeover generation starts no supervisor:
+resurrect a terminated owner. A prompt generation starts no supervisor:
 explicit cancel and expiry are its stop paths, and the next launch in the
-workspace reclaims a dead takeover record.
+workspace reclaims a dead record.
 
 `--status` prints every generation recorded for the workspace (blank-line
 separated). Cancel exactly one of them by its printed generation:

@@ -159,8 +159,7 @@ A row — any of the three — is a statement about an installed binary and a
 credential store. The only proof that an agent will run is a real spawn on that
 harness: spawn one, give it work that needs a tool call, read the turn, then stop
 it. That path has been walked for `claude_code`; the [Antigravity](antigravity.md)
-and [DeepSeek Harness](deepseek_harness.md) pages say what is still unproven
-there.
+page says what is still unproven there.
 
 Never report `unknown` to a human as "not installed" or "not logged in": it means
 this machine could not read the login state. When that answer is not good enough,

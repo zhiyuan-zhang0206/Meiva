@@ -1,3 +1,4 @@
+// meiva:note
 // Tree-guide: a 1px vertical line per depth level (absolutely positioned,
 // full row height), drawn only for ancestors that are not the last child —
 // visually equivalent to the GitHub file tree. No ├/└ glyphs; hierarchy
@@ -5,11 +6,8 @@
 // Default grey, no active / hover highlight swap (we tried path-stem
 // highlighting, but it stole focus visually; the active row's background highlight is
 // already distinctive enough).
-//
-// Row actions: an open takeover has a visible end-session button. Other alive
-// actions remain in the context menu (long-press on touch). A terminated row
-// keeps one always-on resurrect button; in-flight actions show a row spinner.
-//
+// Row actions: alive actions remain in the context menu (long-press on touch).
+// A terminated row keeps one always-on resurrect button; in-flight actions show a row spinner.
 // The context menu's "with prompt..." items open a textarea dialog; the
 // plain items fire immediately with no prompt. The destructive Kill
 // (SIGKILL) sits behind a confirm so it can't be hit by accident.
@@ -72,7 +70,6 @@ export interface AgentRowProps {
   ancestorsIsLast: readonly boolean[];
   onSelect: () => void;
   onTerminate: () => void;
-  onForceExpire: (sessionId: number) => void;
   /** Force kill — SIGKILLs the process immediately, for an agent stuck in a
    *  loop / hung call that the graceful terminate can't reach. Right-click
    *  menu only (guarded by a confirm), never a one-click button. */
@@ -135,7 +132,6 @@ export function AgentRow({
   ancestorsIsLast,
   onSelect,
   onTerminate,
-  onForceExpire,
   onForceKill,
   onRestart,
   onResurrect,
@@ -163,7 +159,7 @@ export function AgentRow({
   const working = agent.status === "running" && !offline;
   const statusMarker = offline
     ? "bg-muted-foreground/50"
-    : showAgentStatus && (agent.status === "impersonated" || agent.status === "terminated")
+    : showAgentStatus && agent.status === "terminated"
       ? STATUS_DOT[agent.status]
       : null;
   const replyLabel = agent.has_pending_question
@@ -213,15 +209,6 @@ export function AgentRow({
       )
     ) {
       onTerminate();
-    }
-  };
-
-  const confirmForceExpire = () => {
-    const sessionId = agent.open_impersonation_session_id;
-    if (sessionId == null) return;
-    const confirmSetting = userSettings["behavior.confirm_terminate"] !== false;
-    if (!confirmSetting || askConfirm(t("forceExpireConfirm"))) {
-      onForceExpire(sessionId);
     }
   };
 
@@ -424,11 +411,6 @@ export function AgentRow({
             >
               <PowerOff className="text-destructive" /> {t("terminate")}
             </ContextMenuItem>
-            {agent.open_impersonation_session_id != null ? (
-              <ContextMenuItem onSelect={confirmForceExpire} disabled={pending !== undefined}>
-                <PowerOff className="text-destructive" /> {t("forceExpire")}
-              </ContextMenuItem>
-            ) : null}
             {agent.harness === "meiva" && (
               <>
                 <ContextMenuItem onSelect={onCompact} disabled={pending !== undefined}>

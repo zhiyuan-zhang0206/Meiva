@@ -15,7 +15,6 @@ from base.cluster.authority.catalog import (
     role_facts,
 )
 from base.cluster.authority.checks import check_group_facts
-from base.cluster.authority.event_grants import grant_event_log_runner_access
 from base.host.db_authority.model import AuthorityRefusedError, CatalogRefusedError, Groups
 
 CHECKPOINT_TABLES = ("checkpoints", "checkpoint_blobs", "checkpoint_writes")
@@ -33,7 +32,7 @@ _RUNNER_TABLE_GRANTS: tuple[tuple[LiteralString, tuple[str, ...]], ...] = (
     ("INSERT, UPDATE, SELECT", ("machine_units",)),
     ("INSERT, UPDATE", ("machines",)),
     ("INSERT, UPDATE, DELETE", ("api_idempotency",)),
-    ("INSERT, UPDATE", ("agent_tasks", "agent_impersonation_messages")),
+    ("INSERT, UPDATE", ("agent_tasks",)),
     ("INSERT", ("task_creation_receipts", "task_update_receipts")),
     ("SELECT, INSERT, UPDATE, DELETE", ("understanding_nodes",)),
     (
@@ -140,7 +139,6 @@ def _grant_runner(conn: Conn, owner: str, runner: str) -> None:
         "GRANT EXECUTE ON FUNCTION public.ensure_telemetry_event_partitions(integer, integer) TO {}",
         runner,
     )
-    grant_event_log_runner_access(conn, runner)
 
 
 def apply_group_grants(conn: Conn, *, owner: str, database: str, groups: Groups) -> None:

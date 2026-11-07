@@ -25,6 +25,3 @@ Real project skills here are not fleet-wide convergence sources. Meiva's Code
 plugin discovers project-local skills from the current checkout; `.claude/skills`
 and `.meiva/skills` point here for the same repository context. Built-in skills
 converge from `meiva_builtins/skills/` through their existing install/update policy.
-The external executor manual is independently owned by
-[`impersonator-guide`](../../meiva_builtins/skills/platform/impersonator-guide/SKILL.md),
-where runtime launchers can find it without exposing a project entry.

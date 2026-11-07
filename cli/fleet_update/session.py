@@ -41,9 +41,7 @@ class RefusedError(FailedError):
 
 
 # meiva:note
-# How often the window looks again while it waits: the roster until every host agrees, and the
-# lease countdown while the operator releases takeovers. Five seconds is enough to watch the
-# window move without burying the leases named above it.
+# How often the window looks again while it waits: the roster until every host agrees.
 # meiva:note
 # The lines of a text stream. `Popen` types the stream's text as `Any` when `stdin` is chosen by a
 # conditional; a parameter typed `IO[str]` takes it without naming the `Any`.
@@ -54,7 +52,6 @@ def _text_lines(stream: IO[str]) -> Iterator[str]:
 @dataclass(frozen=True)
 class Pacing:
     roster_poll_s: float = 5.0
-    lease_tick_s: float = 5.0
 
 
 # meiva:note

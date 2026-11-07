@@ -36,7 +36,6 @@ def configured_policy(**changes: Any) -> HostPolicy:
             default_reader=defaults(),
             clock_factory=Clock.from_settings,
             harness_registration_ttl_seconds=daemon.harness_registration_ttl_seconds,
-            held_settle_budget_s=daemon.held_settle_budget_s,
             harness_environ={"HOME": "/nonexistent/host-policy-home"},
             environ=dict(os.environ),
             # meiva:note

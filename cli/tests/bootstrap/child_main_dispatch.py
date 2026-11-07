@@ -63,17 +63,6 @@ class _NoticesList:
     agent: int
 
 
-@dataclass(frozen=True)
-class _ImpersonateList:
-    agent_id: int
-
-
-@dataclass(frozen=True)
-class _ImpersonateRelay:
-    session_id: int
-    provider: str
-
-
 def _parse_real_subcommands() -> None:
     """Build the real argparse tree and parse real subcommands without dispatching."""
     from base.host.boundary.options import options
@@ -105,31 +94,10 @@ def _parse_real_subcommands() -> None:
     assert restart.config == "{}"
     notices = options(parser.parse_args(["notices", "list", "--agent", "7"]), _NoticesList)
     assert notices.agent == 7
-    listing = options(parser.parse_args(["impersonate", "list", "--agent", "7"]), _ImpersonateList)
-    assert listing.agent_id == 7
-    relay = options(
-        parser.parse_args(
-            [
-                "impersonate",
-                "relay",
-                "7",
-                "--session",
-                "0",
-                "--provider",
-                "codex",
-                "--thread-id",
-                "thread",
-            ]
-        ),
-        _ImpersonateRelay,
-    )
-    assert relay.session_id == 0
-    assert relay.provider == "codex"
     loaded = {name for name in sys.modules if name.startswith("cli.commands.")}
     assert loaded == {
         "cli.commands.agents",
         "cli.commands.agents.parsers",
-        "cli.commands.agents.impersonation_parsers",
         "cli.commands.extensions",
         "cli.commands.extensions.parsers",
         "cli.commands.extensions.parsers.mcp",

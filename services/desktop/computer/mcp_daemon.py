@@ -592,9 +592,12 @@ class ComputerMcpDaemon:
                 "task_id": args.get("task_id"),
             },
         )
-        from base.agents.impersonation.manifest import emit_recorded_central_event
+        from base import telemetry
+        from base.telemetry.audit_events import record_audit
 
-        emit_recorded_central_event(self._db, event)
+        with self._db.write_transaction() as conn:
+            tagged = record_audit(conn, event)
+        telemetry.emit_prepared(tagged)
 
     def _emit_session_event(
         self, event_type: str, agent_id: int, payload: dict[str, object]
@@ -607,9 +610,12 @@ class ComputerMcpDaemon:
             source=f"agent:{agent_id}",
             payload=payload,
         )
-        from base.agents.impersonation.manifest import emit_recorded_central_event
+        from base import telemetry
+        from base.telemetry.audit_events import record_audit
 
-        emit_recorded_central_event(self._db, event)
+        with self._db.write_transaction() as conn:
+            tagged = record_audit(conn, event)
+        telemetry.emit_prepared(tagged)
 
 
 async def socket_in_use(path: Path) -> bool:

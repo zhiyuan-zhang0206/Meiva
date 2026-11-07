@@ -1,7 +1,6 @@
 # meiva:note
 # Hosted incarnation admission and settlement, replacing status-only writes.
 
-import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -13,9 +12,7 @@ from loguru import logger
 from psycopg.rows import class_row
 
 from agent.ownership.audit_payloads import (
-    AdoptedLease,
     admitted_payload,
-    adopted_payload,
     settled_payload,
 )
 from agent.ownership.lifecycle_plan import (
@@ -36,12 +33,7 @@ from agent.ownership.lifecycle_plan import (
     shell_cutoff,
     turn_close,
 )
-from base.agents.impersonation.replacement import (
-    Adoption,
-    adopt_for_successor,
-    end_for_replacement,
-)
-from base.db.protocols import AsyncConnectionLike, AsyncPool, DatabaseLike
+from base.db.protocols import AsyncPool, DatabaseLike
 from base.db.rows import IdRow
 from base.db.transaction import async_write_transaction
 from base.events.live.announce import publish_agent_updated
@@ -203,43 +195,6 @@ async def apply_hosted_lifecycle(
 
 
 # meiva:note
-# Hand the agent's open impersonation lease to the incarnation this admission just wrote.
-#
-# A lease this successor cannot carry is closed exactly as it was before carry existed, and the
-# admission itself never fails because of a takeover. The two outcomes stay exclusive because
-# the move is one statement (`adopt_for_successor`): there is no half-moved lease for a
-# savepoint to roll back, so a database failure fails the admission instead of being caught.
-async def _termination_pending(conn: AsyncConnectionLike, agent_id: int) -> bool:
-    # meiva:note
-    # Whether this admission is the one that will terminate the agent.
-    #
-    # A takeover is carried across a restart, never across a termination: the termination
-    # trigger ends the lease inside the transaction that writes `terminated`, which is after
-    # this admission, and an ended lease still owes its handoff to the native checkpoint
-    # *before* the row goes down (`_apply_lease_controls` settles it in this wake). Ending it
-    # here keeps that order.
-    row = await (
-        await conn.execute(
-            "SELECT 1 FROM inbound_messages WHERE agent_id=%s AND kind='terminate' "
-            "AND status IN ('pending','claimed') LIMIT 1",
-            (agent_id,),
-        )
-    ).fetchone()
-    return row is not None
-
-
-async def _carry_impersonation(
-    conn: AsyncConnectionLike, agent_id: int, incarnation: RuntimeIncarnation
-) -> tuple[Adoption | None, str | None]:
-    if await _termination_pending(conn, agent_id):
-        return None, await end_for_replacement(conn, agent_id, incarnation)
-    adoption = await adopt_for_successor(conn, agent_id, incarnation)
-    if adoption is None:
-        return None, await end_for_replacement(conn, agent_id, incarnation)
-    return adoption, None
-
-
-# meiva:note
 # The admission UPDATE's own row: the generation the claim wrote and the status the row left. The
 # statement mints the generation when the owner changed (`CASE ... ELSE gen_random_uuid()`), so a
 # row whose generation is not a UUID is one this reader cannot name an incarnation for.
@@ -276,6 +231,7 @@ async def admit_hosted_runtime(
 ) -> RuntimeIncarnation | None:
     from base.agents.recovery.breaker import admit_pending_wake
 
+    _ = (db, home)
     if not await admit_pending_wake(pool, agent_id):
         return None
     recorded: list[Event] = []
@@ -298,43 +254,6 @@ async def admit_hosted_runtime(
             return None
         admission = _AdmissionRow.from_row(claimed)
         incarnation = RuntimeIncarnation(agent_id, admission.generation, owner)
-        adoption, ended_lease = await _carry_impersonation(conn, agent_id, incarnation)
-        if adoption is not None:
-            logger.info(
-                "impersonation lease carried by the replacement runtime's admission",
-                agent_id=agent_id,
-                lease_id=adoption.lease_id,
-                session_id=adoption.session_id,
-                status=adoption.status,
-            )
-            recorded.append(
-                await record_audit_async(
-                    conn,
-                    prepare_event_log(
-                        event_type="impersonation_lease_adopted",
-                        agent_id=agent_id,
-                        source="system",
-                        payload=adopted_payload(
-                            AdoptedLease(
-                                lease_id=adoption.lease_id,
-                                session_id=adoption.session_id,
-                                status=adoption.status,
-                                from_generation=str(adoption.accepted_from[0]),
-                                from_owner=str(adoption.accepted_from[1]),
-                                to_generation=str(adoption.accepted_by[0]),
-                                to_owner=str(adoption.accepted_by[1]),
-                                relay_provider=adoption.relay_provider,
-                            )
-                        ),
-                    ),
-                )
-            )
-        elif ended_lease is not None:
-            logger.info(
-                "impersonation lease closed by the replacement runtime's admission",
-                agent_id=agent_id,
-                lease_id=ended_lease,
-            )
         admitted_event = prepare_event_log(
             event_type="status_change",
             agent_id=agent_id,
@@ -344,23 +263,6 @@ async def admit_hosted_runtime(
         recorded.append(await record_audit_async(conn, admitted_event))
     for event in recorded:
         emit_prepared(event)
-    if ended_lease is not None:
-        # meiva:note
-        # This admission is what ended the lease, so this process is the host that
-        # owes the external conversation its one ended-lease notice: the in-memory
-        # relay child registry does not survive a restart, and there is no retry
-        # ledger, so without this submission the notice is never attempted.
-        # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
-        from base.agents.impersonation.terminal_notices import deliver_ended_notice
-
-        # meiva:note
-        # The notice's Antigravity destination is a record under this host's home,
-        # written when the takeover was requested; the host that owns the process names
-        # that home here and it travels as a value, never read from the environment.
-        # `home` is optional so an admission made by a caller that has no home (a test
-        # harness, a bare re-admission) still admits: it then cannot send an Antigravity
-        # notice, and the notice records exactly that instead of failing silently.
-        await asyncio.to_thread(deliver_ended_notice, db, agent_id, ended_lease, home=home)
     logger.info("hosted runtime admitted", agent_id=agent_id, generation=str(admission.generation))
     return incarnation
 

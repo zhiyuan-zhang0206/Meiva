@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from base.agents.impersonation.host_transport import AntigravityServer
+from base.lm.harness.antigravity import AntigravityServer
 from meiva.shell.coding_tools import antigravity
 
 _CONVERSATION = "6f1d0c2e-3b7a-4f55-9a52-0c8e4d7b9a10"

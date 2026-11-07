@@ -216,7 +216,6 @@ function lineageOf(agents: readonly AgentRow[]): AgentLineage[] {
 const handlerFns = {
   onSpawn: vi.fn(),
   onTerminate: vi.fn(),
-  onForceExpire: vi.fn(),
   onRestart: vi.fn(),
   onResurrect: vi.fn(),
   onFork: vi.fn(),

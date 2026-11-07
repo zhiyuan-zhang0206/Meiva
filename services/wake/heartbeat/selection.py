@@ -89,6 +89,7 @@ def select_idle_agents_needing_heartbeat(
     # meiva:note
     # Direct callers that inspect the raw idle predicate retain its historic
     # threshold cadence; the daemon supplies its configured check-in interval.
+    _ = corpse_grace_s
     reminder_interval_s = idle_threshold_s if heartbeat_interval_s is None else heartbeat_interval_s
 
     # meiva:note
@@ -105,62 +106,28 @@ def select_idle_agents_needing_heartbeat(
     # contract and history audit, never as a mode switch — a trigger rejects `false` outright
     # since the automatic-only upgrade, and the predicate deliberately does not reference it.
     sql = pgsql.SQL(
-        "SELECT id, idle_minutes, "
-        " CASE WHEN handoff_recheck THEN 'unapplied_handoff_receipt' END AS reason "
-        "FROM ("
-        " SELECT agents_meta.id AS id, "
-        "  (EXTRACT(EPOCH FROM (now() - "
-        "  COALESCE(active.activated_at, active.created_at, last_active_at))) / 60.0"
-        "  )::double precision AS idle_minutes, "
-        "  COALESCE(active.activated_at, active.created_at, last_active_at) AS last_work_at, "
-        "  (agents_meta.status = 'idling' "
-        "   AND agents_meta.last_turn_fatal_at IS NOT NULL "
-        "   AND agents_meta.last_turn_fatal_at > now() - make_interval(secs => %s) "
-        "   AND EXISTS (SELECT 1 FROM agent_impersonations owed "
-        "               WHERE owed.agent_id = agents_meta.id "
-        "                 AND owed.status IN ('released','rejected','expired') "
-        "                 AND owed.handoff_applied_at IS NULL) "
-        "   AND NOT EXISTS (SELECT 1 FROM agent_impersonations other "
-        "                   WHERE other.agent_id = agents_meta.id "
-        "                     AND (other.status IN ('requested','accepted') "
-        "                          OR (other.status='active' AND other.expires_at <= now()) "
-        "                          OR (other.status <> 'active' "
-        "                              AND other.delta_version > other.applied_version)))"
-        "  ) AS handoff_recheck, "
-        "  ((agents_meta.status = 'idling' "
-        "    OR (agents_meta.status = 'running' AND active.id IS NOT NULL)) "
-        "   AND NOT EXISTS ("
-        "    SELECT 1 FROM agent_impersonations lease "
-        "    WHERE lease.agent_id = agents_meta.id "
-        "      AND (lease.status IN ('requested','accepted') "
-        "           OR (lease.status='active' AND lease.expires_at <= now()) "
-        "           OR (lease.status <> 'active' AND (lease.delta_version > lease.applied_version "
-        "               OR lease.handoff_applied_at IS NULL))) "
-        "  )) AS normal_eligible "
-        " FROM agents_meta LEFT JOIN agent_impersonations active "
-        " ON active.agent_id = agents_meta.id AND active.status = 'active' "
-        " AND active.expires_at > now() "
-        " WHERE agents_meta.permanent_reject_streak = 0 "
-        " AND now() >= GREATEST("
-        "   heartbeat_paused_until, "
-        "   COALESCE(active.activated_at, active.created_at, last_active_at) "
-        "   + make_interval(secs => %s + COALESCE(mod(agents_meta.id, NULLIF(%s, 0)::int), 0)), "
-        "   last_heartbeat_at "
-        "   + make_interval(secs => LEAST(%s * power(2.0, "
-        " CASE WHEN active.id IS NOT NULL THEN 0 ELSE heartbeat_backoff_level END), %s))"
-        " ) "
-        " AND NOT EXISTS ("
-        "   SELECT 1 FROM inbound_messages im "
-        "   WHERE im.agent_id = agents_meta.id AND im.status = 'pending' "
-        "     AND {not_passive} "
-        "     AND im.created_at >= now() - make_interval(secs => %s) "
-        " )"
-        ") AS scored "
-        "WHERE handoff_recheck OR normal_eligible "
-        "ORDER BY last_work_at ASC"
+        "SELECT agents_meta.id AS id, "
+        "  (EXTRACT(EPOCH FROM (now() - last_active_at)) / 60.0)::double precision AS idle_minutes, "
+        "  NULL::text AS reason "
+        "FROM agents_meta "
+        "WHERE agents_meta.status = 'idling' "
+        "  AND agents_meta.permanent_reject_streak = 0 "
+        "  AND now() >= GREATEST("
+        "    heartbeat_paused_until, "
+        "    last_active_at "
+        "    + make_interval(secs => %s + COALESCE(mod(agents_meta.id, NULLIF(%s, 0)::int), 0)), "
+        "    last_heartbeat_at "
+        "    + make_interval(secs => LEAST(%s * power(2.0, heartbeat_backoff_level), %s))"
+        "  ) "
+        "  AND NOT EXISTS ("
+        "    SELECT 1 FROM inbound_messages im "
+        "    WHERE im.agent_id = agents_meta.id AND im.status = 'pending' "
+        "      AND {not_passive} "
+        "      AND im.created_at >= now() - make_interval(secs => %s) "
+        "  ) "
+        "ORDER BY last_active_at ASC"
     ).format(not_passive=pgsql.SQL(not_passive_inbound("im")))
     params: list[object] = [
-        corpse_grace_s,
         idle_threshold_s,
         jitter_span_s,
         reminder_interval_s,

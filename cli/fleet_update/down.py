@@ -37,7 +37,6 @@ from .prestage import prestage_command
 from .programs import (
     CHECK_ROWS_SCRIPT,
     VERIFY_SCRIPTS,
-    announce_leases,
     program_text,
     run_silence,
 )
@@ -312,7 +311,6 @@ def down(s: Session, args: FleetArgs, resolved_new: str | None) -> None:
     pre = _preflight(s, args, new)
     if pre.reasons:
         raise RefusedError("refused: " + "; ".join(pre.reasons))
-    announce_leases(s, args.gateway, _chosen(args).lease_confirm_seconds)
     _stored_schedules(s, args, new)
     hosts = start_order(args.gateway, tuple(args.runner))
     s.run_all(hosts, lambda alias: s.run(alias, prestage_command(new)))

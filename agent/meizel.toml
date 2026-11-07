@@ -1,18 +1,17 @@
-exports = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py", "impersonation_handoff.py", "llm", "messages", "nodes.py", "ownership", "process_boot.py", "startup", "state.py", "state_channels.py", "tests", "turn"]
+exports = ["checkpoint.py", "db", "execution", "extensions", "graph", "hooks", "llm", "messages", "nodes.py", "ownership", "process_boot.py", "startup", "state.py", "state_channels.py", "tests", "turn"]
 
 [uses]
+"checkpoint.py" = ["state.py"]
 "db" = ["ownership"]
 "execution" = ["process_boot.py", "state.py"]
 "extensions" = ["state.py"]
-"graph" = ["db", "execution", "hooks", "impersonation.py", "impersonation_handoff.py", "llm", "messages", "nodes.py", "ownership", "state.py", "state_channels.py"]
+"graph" = ["db", "execution", "hooks", "llm", "messages", "nodes.py", "ownership", "state.py", "state_channels.py"]
 "hooks" = ["messages", "nodes.py", "state.py", "state_channels.py"]
-"impersonation.py" = ["impersonation_handoff.py", "nodes.py", "state.py", "takeover"]
-"impersonation_handoff.py" = ["messages", "state.py", "takeover"]
 "process_boot.py" = ["startup"]
 "startup" = ["db"]
 "state.py" = ["state_channels.py"]
-"tests" = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py", "impersonation_handoff.py", "llm", "messages", "nodes.py", "ownership", "process_boot.py", "startup", "state.py", "takeover"]
-"turn" = ["db", "graph", "impersonation_handoff.py", "startup", "state.py", "state_channels.py"]
+"tests" = ["db", "execution", "extensions", "graph", "hooks", "llm", "messages", "nodes.py", "ownership", "process_boot.py", "startup", "state.py"]
+"turn" = ["checkpoint.py", "db", "graph", "startup", "state.py", "state_channels.py"]
 
 [dynamic-attrs]
 "state.py" = "plugin state handles read and write the graph-state channels named <plugin>__<field>; the fields come from each plugin's own declared state class, which exists only after the plugins load"

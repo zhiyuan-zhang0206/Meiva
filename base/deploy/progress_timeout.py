@@ -52,22 +52,6 @@ ROOT_HEALTH_INTERVAL_S = 60.0
 STOP_KILL_REAP_S = 2.0
 
 # meiva:note
-# The held-control path's own settle retry: the wake that ends a takeover owes one
-# checkpoint write before the agent can idle (#5468). Three attempts over a five-second
-# budget, because a wake already holds the incarnation and single-flight — the retry is
-# synchronous on purpose, so nothing survives the wake to race the next dispatch. The
-# budget stays under both bounds: NO_PROGRESS_TIMEOUT_S (360 s) never sees a stalled
-# wake, and CORPSE_REAP_GRACE_S (900 s) leaves the heartbeat its grace window before the
-# reaper takes the row.
-#
-# The budget is the *default*: the running value is `MEIVA_HOST_HELD_SETTLE_BUDGET_S`
-# (`settings.daemon.held_settle_budget_s`), which this constant seeds and which the daemon
-# domain refuses to load unless it also stays below the turn's own no-progress bound. The
-# interval and the attempt count are not configurable: they shape the same wake, and a
-# knob that lets a caller outlast the wake is the one that matters.
-HANDOFF_SETTLE_RETRY_INTERVAL_S = 0.5
-HANDOFF_SETTLE_RETRY_BUDGET_S = 5.0
-
 # How long a crash-marked idling row may sit dead before the agent_host beat's
 # meiva:note
 # corpse reaper stamps it terminated ('reaper'). Longer than the claim-park
@@ -130,14 +114,6 @@ NON_CRITICAL_SERVICE_READY_TIMEOUT_S = 45.0
 # that supplies none. No timer reads it against another: it only delays the first restart of a unit
 # whose generation has not yet answered a probe.
 DEFAULT_STARTUP_GRACE_S = 20.0
-
-# meiva:note
-# How long the root health monitor holds the FIRST restart of an outage while this
-# machine carries a live impersonation lease, so a takeover session is not cut off
-# mid-work (task #5551). The configured value is
-# `daemon.health_restart_lease_grace_s`; this is the default of an assembly that
-# supplies none, and later attempts of the same outage are never held.
-HEALTH_RESTART_LEASE_GRACE_S = 30.0
 
 # How long a unit capability bundle (`meiva cluster db-authority issue-unit`,
 # `base.host.db_authority.unit.issue_bundle`) stays installable by default

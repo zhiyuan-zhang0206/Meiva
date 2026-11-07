@@ -20,7 +20,6 @@ work_file=<absolute path>    # only in Mode A (without --prompt)
 
 - `antigravity_session` is Antigravity's own conversation UUID (`ANTIGRAVITY_CONVERSATION_ID`).
 - Pass `--resume <antigravity_session>` to reopen that conversation with `agy chat -r <uuid> -a <workspace>`.
-- For a takeover (Mode B), pass `--prompt` instructing the spawned Antigravity session to read `impersonator-guide` and run `meiva impersonate request --agent <agent_id> --provider antigravity --ttl 1800 --batch-window 0 ...` (`--thread-id` defaults to `ANTIGRAVITY_CONVERSATION_ID` when set in the Antigravity environment).
 
 ## Availability, and what it does not prove
 

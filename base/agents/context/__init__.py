@@ -24,7 +24,7 @@
 # - **root values** (`user_home`, `meiva_home`, `environ`, `rng`): what the process's composition
 #   root read or built once, for code below it to ask by `require_*()` instead of reading the
 #   account's home, resolving `MEIVA_HOME`, reading `os.environ` or constructing a generator itself.
-# - **host-held state** the graph reads or writes across turns: `turn_progress`, `relays`.
+# - **host-held state** the graph reads or writes across turns: `turn_progress`.
 #   The host builds each once and hands the same object to every turn it runs;
 #   a context built without them (the eval driver, a test) carries private ones.
 #
@@ -50,7 +50,6 @@ from typing import TYPE_CHECKING, Protocol, Self
 from base.agents.context.clients import ClientSet, LazyConnection
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.timestamp_policy import TimestampPolicy
-from base.agents.observation.relay_supervision import RelaySupervision
 from base.agents.observation.turn_progress import TurnProgress
 from base.agents.sdk.capture import SdkCaptureOwner
 from base.agents.sdk.operation_ids import OperationIds
@@ -449,10 +448,6 @@ class MeivaContext:
     turn_progress: TurnProgress = field(default_factory=TurnProgress)
     """The turn-progress clock: graph nodes and the LLM stream mark activity on it, the host's
     stall guard, dispatcher and heartbeat read it."""
-
-    relays: RelaySupervision = field(default_factory=RelaySupervision)
-    """The impersonation relays this process spawned and its start clock, read by the claim gate
-    and the host's supervision."""
 
     def require_db(self) -> Database:
         """The cluster database handle; a context built without one fails here."""

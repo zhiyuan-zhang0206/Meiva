@@ -225,10 +225,7 @@ while per-agent model/runtime caches remain bounded.
 - **Heartbeat owns the idle nudge, hibernation is gone** — the heartbeat's own
   idle threshold (`MEIVA_HEARTBEAT_IDLE_THRESHOLD_SECONDS`, default 300s) nudges
   idling agents; agents that paused their own heartbeat
-  (`meiva.self.pause_heartbeat`) simply stop being nudged. One check-in is not a
-  routine nudge: a takeover whose handoff receipt never landed is re-checked here,
-  counted as `impersonation_handoff_checkin`, and bounded by the reap grace — see
-  [the held path's settle ladder](agents/agent-impersonation.md#a-receipt-the-held-path-could-not-write).
+  (`meiva.self.pause_heartbeat`) simply stop being nudged.
   [`docs/decisions/runtime/processes/health/2026-06-22-heartbeat-opt-out-over-escalation.md`](../decisions/runtime/processes/health/2026-06-22-heartbeat-opt-out-over-escalation.md).
 - **Per-cluster data plane is sized to be noise, not a multiplier** — every
   cluster (including each dev worktree) runs its own Postgres + Redis instance
@@ -533,15 +530,6 @@ half, use the separate commands:
   --all-services --start-timeout 1800 --roster-timeout 90
 ```
 
-- `down` names the takeovers its stops will end: past the refusal gate and
-  before anything stops, on the gateway host it reads every
-  `agent_impersonations` row still marked `active` (agent, session,
-  executor, expiry) — under `--dry-run` too, in the same
-  words — because a host or native restart never adopts a relay and an active
-  lease therefore ends with the window. `--lease-confirm-seconds N` (0 reports
-  only) then holds the stops open N seconds with a countdown so the
-  leases can be released or renewed first; a lease table that cannot be read
-  only warns and the window goes on.
 - `down` refuses (exit 2, nothing changed) when a checkout has a
   `post-checkout` hook, uncommitted changes or `$HOME/.meiva/updates/active`,
   when the hosts disagree on HEAD, when `.python-version` changes under

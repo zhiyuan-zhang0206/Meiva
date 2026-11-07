@@ -8,7 +8,6 @@ from services.agent_runner.agent_host.invocation.completion_decisions import (
     CompletionStep,
     LifecycleFollowUp,
     SettleIdle,
-    handoff_resume_wanted,
     lifecycle_follow_up,
     lifecycle_return_requested,
     plan_completion,
@@ -103,21 +102,6 @@ def test_the_committed_command_decides_the_wake_and_the_exit(
 ) -> None:
     assert lifecycle_follow_up(kind, resume_turn=resume_turn) == LifecycleFollowUp(
         wake_resumed=wake_resumed, exited=exited
-    )
-
-
-@pytest.mark.parametrize(
-    ("fresh_input", "has_original_incarnation", "expected"),
-    [(True, True, True), (True, False, False), (False, True, False), (False, False, False)],
-)
-def test_only_a_turns_first_invocation_of_an_incarnated_agent_checks_for_a_handoff(
-    fresh_input: bool, has_original_incarnation: bool, expected: bool
-) -> None:
-    assert (
-        handoff_resume_wanted(
-            fresh_input=fresh_input, has_original_incarnation=has_original_incarnation
-        )
-        is expected
     )
 
 

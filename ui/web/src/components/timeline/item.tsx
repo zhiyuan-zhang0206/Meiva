@@ -410,7 +410,7 @@ export const ItemView = memo(function ItemView({
           images={item.images}
           files={item.files}
           source={item.source}
-          stripHumanHeader={isHumanUser && !item.impersonation}
+          stripHumanHeader={isHumanUser}
           markdown
         />
       );

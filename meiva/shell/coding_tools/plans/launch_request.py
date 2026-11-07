@@ -56,7 +56,7 @@ def session_uuid(value: str) -> str:
 
 
 # meiva:note
-# An already-rendered dispatch block leads the message, so the worker reads who dispatched it before the contract and the two file paths. A takeover never reaches this function: its briefing carries the three-line form and creates no files. A resumed session is told it was interrupted and continues from its own history instead of starting over.
+# An already-rendered dispatch block leads the message, so the worker reads who dispatched it before the contract and the two file paths. A resumed session is told it was interrupted and continues from its own history instead of starting over.
 def worker_bootstrap(
     contract: Path,
     workspace: Path,

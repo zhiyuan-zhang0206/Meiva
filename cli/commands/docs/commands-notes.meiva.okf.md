@@ -16,13 +16,7 @@ tags:
   launcher. See [[services/entrypoints/gate/docs/gate.meiva.okf.md|Fleet UI Gate]].
 
 - `agents/timeline.py` exposes the existing timeline API as `meiva agents timeline`
-  and its exact `context` alias. `agents/impersonation.py` manages explicit external
-  requests, leases, inbox acknowledgments, local Python SDK attachment, and the
-  one attested send (`send` — task #4102).
-  `agents/impersonation_relay.py` forwards inbound availability to the owning external
-  model session; `--codex-remote` routes to the app server holding a Codex thread
-  without waiting for its external queue-store scan.
-  Usage: [External agent impersonation](../../../docs/conventions/agents/agent-impersonation.md).
+  and its exact `context` alias.
 
 - Which cluster a command acts on comes from `cli/commands/_repo.py:repo_root` — the
   checkout the running `meiva` belongs to — never the current directory.

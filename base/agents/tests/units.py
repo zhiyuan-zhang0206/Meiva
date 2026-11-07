@@ -23,7 +23,7 @@ def spawn_agent(
     **kw: Any,
 ) -> int:
     from base.agents.birth.spawn import create_agent_row
-    from base.agents.impersonation.wake import publish_inbound_wake
+    from base.agents.inbox.wake import publish_inbound_wake
 
     db, bus = (
         Database.from_settings(gate=database_gate),

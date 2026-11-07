@@ -37,8 +37,8 @@ from dataclasses import dataclass
 import psycopg
 from psycopg import sql
 
-from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.inbox.insert import insert_inbound_message_in_transaction
+from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.messages.inbound_provenance import InboundProvenance
 from base.db import Database
 from base.db.rows import query_all

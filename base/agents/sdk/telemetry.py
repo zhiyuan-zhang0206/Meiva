@@ -85,9 +85,9 @@ def _event_capture_admission(
     owner: SdkCaptureOwner | None,
 ) -> Generator[SdkCaptureAdmission | None, None, None]:
     """Use the optional gate; invalid capture code rejects the SDK call before its body."""
-    from base.agents.impersonation.manifest import admitted_local_sdk_call
+    from base.agents.sdk.capture import admitted_local_sdk_call
 
-    with admitted_local_sdk_call(None if owner is None else owner.admit_sdk_call) as admission:
+    with admitted_local_sdk_call(None if owner is None else owner.admit_sdk_call()) as admission:
         yield admission
 
 

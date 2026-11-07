@@ -41,7 +41,6 @@ class InspectDbRows(NamedTuple):
     last_probe_at: datetime | None
     observation: AgentObservation
     backoff_level: int
-    impersonation_since: datetime | None
 
 
 # meiva:note
@@ -64,7 +63,6 @@ class _AgentLiveRow:
     harness: str | None
     observed_model: str | None
     heartbeat_backoff_level: int | None
-    impersonation_since: datetime | None
 
 
 # meiva:note
@@ -111,11 +109,7 @@ def db_rows_blocking(pool: ConnectionPool, agent_id: int) -> InspectDbRows:
             "        WHERE amo.agent_id = agents_meta.id AND amo.model IS NOT NULL "
             "        AND amo.occurred_at >= COALESCE(agents_meta.harness_configured_at, '-infinity') "
             "        ORDER BY amo.occurred_at DESC LIMIT 1) AS observed_model, "
-            "       heartbeat_backoff_level, "
-            "       (SELECT COALESCE(lease.activated_at, lease.created_at) "
-            "        FROM agent_impersonations lease "
-            "        WHERE lease.agent_id = agents_meta.id AND lease.status = 'active' "
-            "        AND lease.expires_at > now()) AS impersonation_since "
+            "       heartbeat_backoff_level "
             "FROM agents_meta WHERE id = %s",
             (agent_id,),
         )
@@ -147,7 +141,6 @@ def db_rows_blocking(pool: ConnectionPool, agent_id: int) -> InspectDbRows:
             last_probe_at=row.last_probe_at,
             observation=observation(row.machine_probed_at),
             backoff_level=int(row.heartbeat_backoff_level or 0),
-            impersonation_since=row.impersonation_since,
         )
 
 

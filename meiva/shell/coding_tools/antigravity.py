@@ -1,25 +1,10 @@
-"""Launch, message, inspect, or stop Google Antigravity conversations.
-
-Unlike terminal coding tools (Claude Code, Codex), Antigravity conversations
-run inside the local Antigravity ``language_server`` and are controlled via its
-Connect JSON-RPC endpoint (``StartCascade``, ``SendAgentMessage``,
-``GetConversationMetadata``, ``ForceStopCascadeTree``).
-
-A supervised worker (the default) creates ``tasks.md`` and ``work.md`` and
-starts a new Antigravity conversation with the two-file collaboration contract,
-ready to be monitored with ``watch_work.py``. An interactive prompt launch
-(``prompt``) starts a new conversation with that initial prompt and no task/work
-files. Follow-up messages (including instructions to impersonate an Meiva agent)
-are delivered via ``send(conversation_id, message)``.
-"""
-
 from __future__ import annotations
 
 import json
 from pathlib import Path
 from uuid import UUID
 
-from base.agents.impersonation.host_transport import AntigravityServer, antigravity_rpc
+from base.lm.harness.antigravity import AntigravityServer, antigravity_rpc
 
 from ._common import init_file, write_task_file_header
 from ._common import placed_path as placed_path

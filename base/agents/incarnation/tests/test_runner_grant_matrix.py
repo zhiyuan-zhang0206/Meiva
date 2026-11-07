@@ -8,7 +8,6 @@ from langgraph.checkpoint.postgres import PostgresSaver
 
 from base.agents.incarnation.tests.test_runner_role import (
     assert_alert_writes_denied,
-    exercise_impersonation_entry_grants,
     exercise_pause_grants,
     exercise_task_receipt_grants,
     exercise_understanding_node_grants,
@@ -101,12 +100,6 @@ def test_runner_grant_matrix(runner_db: str) -> None:  # noqa: PLR0915 -- one gr
         # table shipped without a runner grant and every pause_heartbeat
         # INSERT failed with InsufficientPrivilege)
         exercise_pause_grants(conn, agent_id)
-        # the impersonation session trail (INSERT through the lifecycle
-        # trigger and the handoff writer, SELECT for readers — regression for
-        # task #3549, where the table shipped without a runner grant and lease
-        # creation failed with InsufficientPrivilege on
-        # agent_impersonation_entries)
-        exercise_impersonation_entry_grants(conn, agent_id)
         # the task-receipt tombstones meiva.tasks.update/log/create append in
         # their own transaction (operation-key admission and replay) —
         # regression for the 2026-10-10 task-write outage, where the tables
@@ -300,76 +293,6 @@ def test_pause_log_write_grant_reaches_a_cluster_born_before_the_table(
             (agent_id,),
         )
         row = conn.execute("SELECT count(*) FROM heartbeat_pause_log").fetchone()
-    assert row == (1,)
-
-
-def test_impersonation_entry_grant_reaches_a_cluster_born_before_the_table(
-    runner_db: str,
-) -> None:
-    """Task #3549 regression: a cluster that adopted the impersonation trail
-    (20260913T180056) before the runner grant for its table existed.
-
-    Fresh-birth coverage lives in `test_runner_grant_matrix`; the prod shape
-    is the reverse: the cluster was born, THEN the migration created the
-    table, so the role could read the trail but creating a lease failed in
-    the lifecycle trigger with InsufficientPrivilege on
-    agent_impersonation_entries until the start-path refresh re-ran the grant
-    layer.
-    """
-    grant_runner(runner_db)
-
-    # Simulate a cluster born BEFORE the trail table existed: drop it, then
-    # re-create it AS the main identity (the role the migration applier dials
-    # — the default privileges key on it).
-    with psycopg.connect(runner_db, autocommit=True) as conn:
-        conn.execute("DROP TABLE agent_impersonation_entries")
-    with psycopg.connect(identity_url(runner_db), autocommit=True) as conn:
-        agent_row = conn.execute(
-            "INSERT INTO agents (label) VALUES ('seed') RETURNING id"
-        ).fetchone()
-        assert agent_row is not None
-        agent_id: int = agent_row[0]
-        conn.execute(
-            "INSERT INTO agents_meta (id, spawner, status) VALUES (%s, 'user', 'idling')",
-            (agent_id,),
-        )
-        conn.execute(
-            "CREATE TABLE agent_impersonation_entries ("
-            "  lease_id UUID NOT NULL REFERENCES agent_impersonations(id) ON DELETE RESTRICT,"
-            "  seq BIGINT NOT NULL CHECK (seq >= 0),"
-            "  kind TEXT NOT NULL CHECK (kind IN ('message','lifecycle','sdk_call','api_event')),"
-            "  event_key TEXT,"
-            "  created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),"
-            "  payload JSONB NOT NULL,"
-            "  PRIMARY KEY(lease_id,seq),"
-            "  UNIQUE(lease_id,event_key))"
-        )
-
-    def create_lease(conn: psycopg.Connection) -> tuple[object, ...] | None:
-        return conn.execute(
-            "INSERT INTO agent_impersonations (id, agent_id, source, machine,"
-            " status, ttl_seconds, expires_at)"
-            " VALUES (gen_random_uuid(), %s, 'codex', 'test-machine', 'requested',"
-            " 3600, now() + interval '1 hour') RETURNING id",
-            (agent_id,),
-        ).fetchone()
-
-    # Before the refresh: reading works (default privileges), creating a lease
-    # is denied exactly as prod reported it — the failure surfaces from the
-    # lifecycle trigger's INSERT into the trail.
-    with psycopg.connect(runner_url(runner_db), autocommit=True) as conn:
-        assert conn.execute("SELECT count(*) FROM agent_impersonation_entries").fetchone() == (0,)
-        with pytest.raises(psycopg.errors.InsufficientPrivilege):
-            create_lease(conn)
-
-    # The start-path refresh re-runs the grant layer with the table present.
-    grant_runner(runner_db)
-    with psycopg.connect(runner_url(runner_db), autocommit=True) as conn:
-        lease = create_lease(conn)
-        assert lease is not None
-        row = conn.execute(
-            "SELECT count(*) FROM agent_impersonation_entries WHERE lease_id = %s", (lease[0],)
-        ).fetchone()
     assert row == (1,)
 
 

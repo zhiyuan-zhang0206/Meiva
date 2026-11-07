@@ -107,10 +107,4 @@ Agents are allocated through `POST /api/keyed/v1/agents`; the gateway commits th
 and work, then the home runner wakes its agent host. No agent Python process is
 started directly.
 
-Impersonation event reconciliation runs as a registered host background task,
-independent of model turns and ownership heartbeats. It pages due sessions on
-this machine even after native handoff or agent termination, respects unit
-quiescence, and persists progress and explicit upstream completion receipts.
-See [[base/agents/impersonation/docs/impersonation.meiva.okf.md]].
-
 Checkpoint test evidence: [[services/docs/agent_runner_side/checkpoint-test-evidence.meiva.okf.md]].

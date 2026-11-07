@@ -168,7 +168,7 @@ class Cluster:
         self.bin_dir = ssh_on_path(workdir / "bin", _FAKE_SSH)
         self.state_path = workdir / "cluster-state.json"
         self.environ: dict[str, str] = {}
-        self.pacing = Pacing(roster_poll_s=0.01, lease_tick_s=0.25)
+        self.pacing = Pacing(roster_poll_s=0.01)
         self.invocations = 0
         self.hosts: dict[str, dict[str, Any]] = {
             a: {**_IDLE, "os": o, "head": old}
@@ -192,9 +192,6 @@ class Cluster:
         self.silence_hours = 0.0
         self.silence_comment = ""
         self.silence_reply: str | None = None
-        self.leases: list[dict[str, Any]] = []
-        self.lease_reply: str | None = None
-        self.lease_rc = 0
         # meiva:note
         # The daemon each host still runs, the last stop journal its lifecycle file holds, and the
         # two stop failures a test can stage: one that takes the daemon with it (the #5438 shape)
@@ -210,11 +207,6 @@ class Cluster:
         self.journal_after_stop: dict[str, dict[str, Any] | None] = {}
         self.stop_fails_leaves_up: set[str] = set()
         self.recover_fails: set[str] = set()
-        # meiva:note
-        # Where each read happened: the effects already accepted, so a test can prove the leases
-        # are named before anything stops.
-        # meiva:link cli/tests/fleet_update/docs/fleet-update-harness.meiva.okf.md
-        self.lease_reads: list[int] = []
         # meiva:note
         # The helper every host reports: current for the target commit and not running, so a
         # test stages only the one host it is about (a stale or loaded helper, another
@@ -242,7 +234,6 @@ class Cluster:
             "programs": {
                 "gateway": program_text(VERIFY_SCRIPTS / "fleet_gateway.py"),
                 "silence": program_text(ALERT_SILENCE_SCRIPT),
-                "leases": program_text(VERIFY_SCRIPTS / "fleet_leases.py"),
             },
             "hosts": self.hosts,
             "names": self.names,
@@ -263,16 +254,12 @@ class Cluster:
             "silence_hours": self.silence_hours,
             "silence_comment": self.silence_comment,
             "silence_reply": self.silence_reply,
-            "leases": self.leases,
-            "lease_reply": self.lease_reply,
-            "lease_rc": self.lease_rc,
             "host_up": self.host_up,
             "journal": self.journal,
             "stop_fails": self.stop_fails,
             "journal_after_stop": self.journal_after_stop,
             "stop_fails_leaves_up": sorted(self.stop_fails_leaves_up),
             "recover_fails": sorted(self.recover_fails),
-            "lease_reads": self.lease_reads,
             "helper_hash": self.helper_hash,
             "helper_cert_root": self.helper_cert_root,
             "barriers": self.barriers,
@@ -289,7 +276,6 @@ class Cluster:
         self.silence_comment = data["silence_comment"]
         self.host_up = data["host_up"]
         self.journal = data["journal"]
-        self.lease_reads = data["lease_reads"]
         self.roster_lag = data["roster_lag"]
         self.violations = data["violations"]
 

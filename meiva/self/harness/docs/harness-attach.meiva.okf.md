@@ -12,8 +12,7 @@ tags:
 
 A provider harness runs the agent loop in its own process and cannot use the
 handoff document alone: `import meiva` in a bare interpreter fails, because every
-`meiva.*` call needs an initialized process pipeline. `meiva.attach()` gives that process a borrowed identity, the same way
-`meiva.impersonation.attach()` gives one to a takeover; both go through
+`meiva.*` call needs an initialized process pipeline. `meiva.attach()` gives that process a borrowed identity through
 [[base/agents/context/external_attachment/docs/external-attachment.meiva.okf.md]].
 
 | Step | What it does |

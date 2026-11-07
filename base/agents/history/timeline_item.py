@@ -8,19 +8,12 @@ importers keep working.
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Literal, NamedTuple
+from typing import Literal
 
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import BaseModel, Field
 
-from base.agents.impersonation.status import ImpersonationMetadata
-from base.agents.messages.inbound_images import (
-    TimelineUploadFile,
-    inbound_image_urls,
-    inbound_upload_files,
-)
+from base.agents.messages.inbound_images import TimelineUploadFile
 from base.agents.sdk.tally import SdkCall
-from base.db.protocols import DatabaseLike
 
 
 class TimelineItem(BaseModel):
@@ -66,7 +59,6 @@ class TimelineItem(BaseModel):
     source: str | None = None
     payload: str  # rendered content
     created_at: str | None = None  # ISO-8601
-    impersonation: ImpersonationMetadata | None = None
     inbound_id: int | None = None
     # Durable source coordinates; item_id remains the frontend position key.
     # Missing/ephemeral source IDs are excluded. Only an explicitly embedded
@@ -124,107 +116,3 @@ class TimelineItem(BaseModel):
     # elsewhere). Read from the AIMessage's meiva_code_ms_by_block (keyed by code
     # block_idx). Drives the detail-block chip "Wrote code for Xs".
     code_elapsed_ms: int | None = None
-
-
-# ── impersonation expansion: a checkpoint session marker becomes its permanent messages ──
-
-
-# meiva:note
-# One selected `agent_impersonation_entries` row; `payload` is the jsonb message entry that
-# `_MessageEntry` validates.
-class _EntryRow(NamedTuple):
-    session_id: int
-    seq: int
-    created_at: datetime
-    payload: object
-
-
-_ENTRY_ROWS = TypeAdapter(list[_EntryRow])
-
-
-# meiva:note
-# The message entry `impersonation.history` writes: an inbound copy carries the queue row's
-# `inbound_id` and `payload`, a reply carries neither.
-class _MessageEntry(BaseModel):
-    direction: Literal["in", "out"]
-    source: str | None
-    content: str
-    payload: dict[str, object] | None = None
-    inbound_id: int | None = None
-
-
-def hydrate(
-    db: DatabaseLike,
-    items: list[TimelineItem],
-    agent_id: int,
-    *,
-    limit: int,
-    before: str | None = None,
-) -> list[TimelineItem]:
-    """Use the marker's message position and each immutable entry's sequence.
-
-    Extra blocks share the existing numeric cursor grammar. Only limit+1
-    message rows are loaded across the relevant sessions, even for an arbitrarily
-    long takeover; scroll-back selects the preceding sequences from PostgreSQL.
-    The same operation handles live and compacted checkpoint segments.
-    """
-    anchors: dict[int, TimelineItem] = {}
-    upper_session: int | None = None
-    upper_seq: int | None = None
-    cursor_position = _position(before) if before is not None else None
-    for item in items:
-        info = item.impersonation
-        if info is None or info.seq is not None:
-            continue
-        if info.agent_id != agent_id:
-            raise ValueError("Impersonation timeline marker belongs to another agent")
-        position = _position(item.item_id)
-        if cursor_position is not None and position[0] > cursor_position[0]:
-            continue
-        anchors[info.session_id] = item
-        if cursor_position is not None and position[0] == cursor_position[0]:
-            upper_session, upper_seq = info.session_id, cursor_position[1] - 1
-    if not anchors:
-        return items
-    with db.connect() as conn:
-        selected = conn.execute(
-            "SELECT p.session_id,e.seq,e.created_at,e.payload FROM agent_impersonations p "
-            "JOIN agent_impersonation_entries e ON e.lease_id=p.id "
-            "WHERE p.agent_id=%s AND p.session_id=ANY(%s) AND e.kind='message' "
-            "AND (%s::bigint IS NULL OR p.session_id<>%s OR e.seq<=%s) "
-            "ORDER BY p.session_id DESC,e.seq DESC LIMIT %s",
-            (agent_id, list(anchors), upper_session, upper_session, upper_seq, limit + 1),
-        ).fetchall()
-    rows = _ENTRY_ROWS.validate_python(selected)
-    rendered = [_message(anchors[row.session_id], row) for row in reversed(rows)]
-    return sorted([*items, *rendered], key=lambda item: _position(item.item_id))
-
-
-def _position(item_id: str) -> tuple[int, int]:
-    message, block = item_id.split(".")[-2:]
-    return int(message.removeprefix("h")), int(block)
-
-
-def _message(anchor: TimelineItem, row: _EntryRow) -> TimelineItem:
-    entry = _MessageEntry.model_validate(row.payload)
-    info = anchor.impersonation
-    assert info is not None  # noqa: S101 — selected marker
-    outgoing = entry.direction == "out"
-    prefix = anchor.item_id.rsplit(".", 1)[0]
-    return TimelineItem(
-        item_id=f"{prefix}.{row.seq + 1}",
-        kind="agent_chat" if outgoing else "inbound_chat",
-        source=entry.source,
-        payload=entry.content,
-        images=None if outgoing else inbound_image_urls(info.agent_id, entry.payload),
-        files=None if outgoing else inbound_upload_files(info.agent_id, entry.payload),
-        created_at=row.created_at.isoformat(),
-        inbound_id=None if outgoing else entry.inbound_id,
-        impersonation=ImpersonationMetadata.model_validate(
-            {
-                **info.model_dump(),
-                "anchor_item_id": anchor.item_id,
-                "seq": row.seq,
-            }
-        ),
-    )

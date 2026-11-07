@@ -62,15 +62,6 @@ SIGNALS: dict[str, Signal] = {
     "meiva-ops-inspect-metrics-gap": Signal(
         "inspect_metrics_coverage_gap", "meiva-ops", "0s", "warning"
     ),
-    "meiva-ops-impersonation-seal-stuck": Signal(
-        "impersonation_event_log_incomplete", "meiva-ops", "0s", "warning"
-    ),
-    "meiva-ops-impersonation-capture-failed": Signal(
-        "impersonation_event_log_incomplete", "meiva-ops", "0s", "warning"
-    ),
-    "meiva-ops-impersonation-notice-failed": Signal(
-        "impersonation_terminal_notice_failed", "meiva-ops", "0m", "warning"
-    ),
     "meiva-ops-im-push-failed": Signal("im_push_failed", "meiva-ops", "0s", "warning"),
     "meiva-ops-im-push-stall": Signal("im_push_health", "meiva-ops", "2m", "warning"),
     "meiva-ops-delivery-stalled": Signal("delivery_stalled", "meiva-ops", "1m", "warning"),

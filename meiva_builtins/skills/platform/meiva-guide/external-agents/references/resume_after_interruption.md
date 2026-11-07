@@ -22,8 +22,6 @@ resume it.
   and tried, and what it decided.
 - **The workspace.** Its files and Git state, and for a supervised worker its
   task file and work file.
-- **For a takeover, the handoff JSON** (`impersonation/<session_id>.json`),
-  which retains every message and operation.
 
 ## How you notice
 
@@ -32,9 +30,7 @@ the stop and the restart, and then the coding session is gone:
 
 - `meiva.shell.sessions.list()` no longer lists it, and `capture` refuses it;
 - a Claude worker's watcher ends with its exit notice;
-- a Codex generation's supervisor terminalizes it;
-- a takeover ends with the system note `Impersonation <n> ... stopped — the
-  executor process is gone` plus the handoff JSON path.
+- a Codex generation's supervisor terminalizes it.
 
 ## Whether to resume
 
@@ -51,8 +47,7 @@ A fresh launch is better when:
 - the old context would mislead, for example because the code moved on
   underneath it.
 
-A supervised worker's task file and work file, and a takeover's handoff JSON,
-carry what a fresh session needs either way.
+A supervised worker's task file and work file carry what a fresh session needs either way.
 
 ## Find the session id
 
@@ -75,20 +70,6 @@ interrupted.
 - For Claude, start the watcher again (`watch_work.py`). The old one ended with
   the shell.
 - For Codex, the launcher starts a new supervisor itself.
-
-**Takeover (Mode B).**
-- Read the handoff JSON first.
-- Relaunch with `--resume <uuid> --prompt '...'`. Write the
-  prompt for a session that already knows the task:
-  - which takeover session ended, and why (the system note says);
-  - the handoff JSON path;
-  - what is pending.
-- The resumed executor keeps its context, but its old impersonation session is
-  over. It starts a new one with `meiva impersonate request`,
-  and catches up on missed messages from the handoff JSON.
-
-**DeepSeek Harness takeovers** cannot be resumed through `spawn_dsh.py` yet.
-Launch a fresh takeover whose brief is built from the handoff JSON.
 
 **By hand**, from the workspace directory:
 - `claude --resume <uuid> --dangerously-skip-permissions`;

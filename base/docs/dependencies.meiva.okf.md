@@ -26,4 +26,3 @@ The base-layer domain map below complements the public
 - [[paths.meiva.okf.md]] — `$MEIVA_HOME` layout
 - [[install_registry.meiva.okf.md]] — `installed.json` + the skill-scanner gate
 - [[base/packages/plugins/docs/enable_config.meiva.okf.md]] — per-machine plugin enable state
-- [[base/agents/impersonation/docs/impersonation.meiva.okf.md]] — cooperative local leases, native consent, external inbox ACKs and handoff

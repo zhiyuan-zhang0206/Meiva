@@ -80,14 +80,8 @@ async def test_pending_scan_classifies_lifecycle_work_and_impersonation(
     db_conn.execute(
         "UPDATE inbound_messages SET status='done' WHERE id IN (%s,%s)", (lifecycle, ordinary)
     )
-    db_conn.execute(
-        "INSERT INTO agent_impersonations(id,agent_id,session_id,source,machine,status,"
-        "ttl_seconds,expires_at) VALUES(%s,%s,1,'cli',%s,'requested',300,"
-        "clock_timestamp()+interval '5 minutes')",
-        (uuid4(), agent, machine_identity.name()),
-    )
     db_conn.commit()
-    assert await host.pending_inbound_wakes() == [agent]
+    assert await host.pending_inbound_wakes() == []
 
 
 @pytest.mark.parametrize("silent_turn", [False, True])

@@ -1,24 +1,3 @@
-"""Launch, inspect, or stop Codex sessions in persistent shells.
-
-Every launch owns a generation of its own under ``(cluster, workspace,
-codex)``; several may share a workspace, and a launch first reclaims its dead
-siblings. Codex runs on the user's own ``~/.codex`` with per-session ``-c``
-overrides, so every session stays resumable by the id the launch prints. A
-supervised worker also starts an automatic lifecycle supervisor (the skill's
-``watch_work.py``); a takeover (``impersonation_name``) runs file- and
-supervisor-less with its briefing inlined in the launch message. A takeover
-also wires the explicit shared app-server
-topology: a private ``codex app-server --listen`` socket, the TUI connected to
-it with ``--remote``, and the endpoint carried into the launch message so the
-request records it (``--codex-remote``) and the relay delivers into the same
-server.
-
-The ``meiva-guide.external-agents`` skill's ``spawn_codex.py`` is the command-line
-entry; it passes its own skill directory, whose ``references/`` holds the
-collaboration contract (and locates the impersonator guide) and whose
-``scripts/`` holds the supervisor script.
-"""
-
 from __future__ import annotations
 
 import contextlib
@@ -323,7 +302,7 @@ def wait_for_app_server(
     raise RuntimeError(
         f"the shared codex app server did not become ready at {endpoint}{detail}; "
         "check that the installed codex supports `app-server --listen` and `--remote` "
-        "(see canonical_codex_owner.md) — the takeover launch is refused without it"
+        "(see canonical_codex_owner.md) — the launch is refused without it"
     )
 
 
@@ -421,7 +400,7 @@ def start_codex(
 
 
 # meiva:note
-# Supervise, publish and start one fresh generation; roll back on failure. A supervised launch starts its supervisor first and records it; a prompt launch (a takeover) has none. The coding session is published as active before the tool starts, so a generation that ended meanwhile (its record no longer launching) fails the launch here. Every session the launch opened (the supervisor included, even when recording it failed) is reclaimed on failure.
+# Supervise, publish and start one fresh generation; roll back on failure. A supervised launch starts its supervisor first and records it; a prompt launch has none. The coding session is published as active before the tool starts, so a generation that ended meanwhile (its record no longer launching) fails the launch here. Every session the launch opened (the supervisor included, even when recording it failed) is reclaimed on failure.
 def start_generation(
     site: LaunchSite,
     owner: coding_session_owner.CodingSessionOwner,
@@ -472,6 +451,8 @@ def start_generation(
     return active, remote, codex_session
 
 
+# meiva:note
+# Launch a Codex session in a persistent shell with a shared app server.
 def launch(
     workspace: Path,
     tasks_file: Path | None,
@@ -484,15 +465,6 @@ def launch(
     prompt: str | None = None,
     provenance: str | None = None,
 ) -> int:
-    """Launch a Codex session in a persistent shell with a shared app server.
-
-    When ``prompt`` is given, sends that initial prompt without creating
-    task/work files or a supervisor. Otherwise launches a supervised worker with
-    ``tasks_file``, ``work_file``, and ``watch_work.py``. Every launch starts a
-    shared ``codex app-server --listen`` endpoint and prints both
-    ``codex_app_server`` and ``codex_session`` so the session can also accept
-    an impersonation handover when instructed via a message.
-    """
     request = LaunchRequest(
         workspace,
         tasks_file,

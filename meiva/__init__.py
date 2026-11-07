@@ -280,7 +280,6 @@ def __getattr__(name: str) -> Any:
 from . import agents as agents
 from . import boot as boot
 from . import files as files
-from . import impersonation as impersonation
 from . import mcps as mcps
 from . import self as self
 from . import shell as shell

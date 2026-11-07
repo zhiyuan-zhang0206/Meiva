@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import Any
-from uuid import uuid4
 
 import psycopg
 import pytest
@@ -175,42 +174,6 @@ def test_roster_distinguishes_pending_questions_from_resolved_questions_and_regu
     }
     assert (cards[1].awaiting_response_count, cards[1].has_pending_question) == (2, True)
     assert (cards[2].awaiting_response_count, cards[2].has_pending_question) == (1, False)
-
-
-def test_open_impersonation_status_reflects_lease_phase(
-    model_catalog: ModelCatalog, db_conn: psycopg.Connection
-) -> None:
-    seed(db_conn, [(1, "user", "idling")])
-    lease_id = str(uuid4())
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO agent_impersonations"
-            "(id, agent_id, source, machine, status, ttl_seconds, expires_at) "
-            "VALUES (%s, 1, 'external_agent:codex', 'test-machine', 'requested', "
-            "3600, clock_timestamp() + interval '1 hour')",
-            (lease_id,),
-        )
-    db_conn.commit()
-
-    requested_card = select_roster(
-        db_conn, catalog=model_catalog, default_model=settings.lm.llm_model
-    ).agents[0]
-    assert requested_card.open_impersonation_session_id is not None
-    assert requested_card.open_impersonation_status == "requested"
-
-    with db_conn.cursor() as cur:
-        cur.execute(
-            "UPDATE agent_impersonations SET status = 'active', "
-            "activated_at = clock_timestamp() WHERE id = %s",
-            (lease_id,),
-        )
-    db_conn.commit()
-
-    active_card = select_roster(
-        db_conn, catalog=model_catalog, default_model=settings.lm.llm_model
-    ).agents[0]
-    assert active_card.open_impersonation_session_id == requested_card.open_impersonation_session_id
-    assert active_card.open_impersonation_status == "active"
 
 
 @pytest.mark.parametrize("limit", [0, 201])

@@ -7,6 +7,12 @@ from base.lm.harness.antigravity.config import (
 )
 from base.lm.harness.antigravity.handoff_rules import SHELL_SEMANTICS, build_handoff
 from base.lm.harness.antigravity.mapping import ResultFields, parse_result
+from base.lm.harness.antigravity.rpc import (
+    AntigravityServer,
+    antigravity_rpc,
+    antigravity_server_from_environment,
+    discover_antigravity_server,
+)
 from base.lm.harness.antigravity.session import (
     AgySession,
     InboundQueueFullError,
@@ -23,6 +29,7 @@ __all__ = [
     "AgySession",
     "AgyTransport",
     "AntigravityConfig",
+    "AntigravityServer",
     "CancelReport",
     "InboundQueueFullError",
     "ResultFields",
@@ -31,7 +38,10 @@ __all__ = [
     "TransportClosedError",
     "TurnOutcome",
     "TurnTicket",
+    "antigravity_rpc",
+    "antigravity_server_from_environment",
     "build_handoff",
+    "discover_antigravity_server",
     "parse_result",
     "resolve_antigravity_cli_model",
 ]

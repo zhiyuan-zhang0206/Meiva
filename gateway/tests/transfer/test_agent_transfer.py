@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Generator
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 
 import psycopg
@@ -291,39 +291,6 @@ def test_transfer_refuses_running_external_and_impersonated_agents(
         json={"to_machine": "runner-b"},
     )
     assert r_ext.status_code == 409 and "external harness" in r_ext.json()["detail"]
-
-    imp_id = _seed_native_agent(db_conn, machine="runner-a", status="idling")
-    now = datetime.now(tz=UTC)
-    imp_row = db_conn.execute(
-        "INSERT INTO agent_impersonations "
-        "(id, agent_id, session_id, source, machine, status, ttl_seconds, expires_at) "
-        "VALUES (%s, %s, 0, 'user', 'runner-a', 'active', 3600, %s) RETURNING session_id",
-        (uuid.uuid4(), imp_id, now + timedelta(hours=1)),
-    ).fetchone()
-    assert imp_row is not None
-    session_id = int(imp_row[0])
-    db_conn.commit()
-
-    r_imp = two_runners.client.post(
-        f"/api/agents/{imp_id}/transfer",
-        json={"to_machine": "runner-b"},
-    )
-    assert r_imp.status_code == 409 and f"session {session_id}" in r_imp.json()["detail"]
-
-    db_conn.execute(
-        "UPDATE agent_impersonations SET status = 'released', ended_at = now(), "
-        "handoff_applied_at = NULL WHERE agent_id = %s AND session_id = %s",
-        (imp_id, session_id),
-    )
-    db_conn.commit()
-    r_unsettled = two_runners.client.post(
-        f"/api/agents/{imp_id}/transfer",
-        json={"to_machine": "runner-b"},
-    )
-    assert (
-        r_unsettled.status_code == 409
-        and "unsettled impersonation handoff" in r_unsettled.json()["detail"]
-    )
 
 
 def test_transfer_refuses_invalid_or_paused_targets(

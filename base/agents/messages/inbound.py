@@ -53,7 +53,6 @@ class InboundKind(StrEnum):
     RESURRECT = "resurrect"
     FORK = "fork"
     HEARTBEAT = "heartbeat"
-    REMINDER = "reminder"
 
 
 # Only these pending-work kinds can trigger automatic resurrection.

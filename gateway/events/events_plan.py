@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TypedDict
@@ -33,7 +32,6 @@ __all__ = [
 _CATEGORIES = frozenset({"audit", "telemetry", "log"})
 _LEVELS = frozenset({"debug", "info", "warning", "error", "critical"})
 _TIERS: tuple[EventTier, ...] = ("business", "anomaly", "observation", "noise")
-_IMPERSONATION_SESSION = re.compile(r"^[0-9]+:[0-9]+$")
 
 # meiva:note
 # Default window when the request names no lower bound (`from`/`hours`);
@@ -54,7 +52,6 @@ class EventsRequest:
     event_name: str | None
     agent_id: int | None
     trace_id: str | None
-    impersonation_session: str | None
     machine: str | None
     level: str | None
     tier: str | None
@@ -174,16 +171,6 @@ def _parse_tiers(tier: str | None) -> list[EventTier] | None:
 
 
 # meiva:note
-# Validate the private replay correlation value and build its attribute filter.
-def _impersonation_filters(session: str | None) -> dict[str, str] | None:
-    if session is None:
-        return None
-    if not _IMPERSONATION_SESSION.fullmatch(session):
-        raise InvalidEventsQueryError("impersonation_session must be an agent_id:session_id pair")
-    return {"impersonation_session": session}
-
-
-# meiva:note
 # Which tables a request reads: `(audit_events, telemetry_events)`.
 #
 # An explicit category picks one table. Without one, a registered event name
@@ -206,7 +193,7 @@ def _sources(category: str | None, event_name: str | None) -> tuple[bool, bool]:
 def plan_events(request: EventsRequest, *, now: datetime, default_limit: int) -> EventsPlan:
     level = _validate(request)
     tiers = _parse_tiers(request.tier)
-    attribute_filters = _impersonation_filters(request.impersonation_session)
+    attribute_filters: dict[str, str] | None = None
     window_from = request.from_
     if request.hours is not None:
         window_from = now - timedelta(hours=request.hours)

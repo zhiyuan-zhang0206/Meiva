@@ -27,7 +27,6 @@ import argparse
 import subprocess
 from typing import TypeGuard
 
-from cli.commands.agents.impersonation_parsers import add_impersonation_parser
 from cli.commands.agents.parsers import add_agents_parser
 from cli.commands.extensions.parsers.mcp import add_mcp_parser, add_memory_parser
 from cli.commands.extensions.parsers.packages import add_packages_parser
@@ -89,7 +88,6 @@ def build_parser(
     add_logs_parser(sub)
     add_backup_parser(sub)
     add_agents_parser(sub)
-    add_impersonation_parser(sub)
     add_config_parser(sub)
     add_schedules_parser(sub)
     add_plugins_parser(sub)

@@ -8,7 +8,7 @@ import psycopg
 from psycopg import sql
 
 from base import telemetry
-from base.agents.impersonation.wake import publish_inbound_wake
+from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.incarnation.lifecycle_commands import (
     TRIGGER_AFTER_KILL_COMMAND,
     supersede_lifecycle_for_resurrect,
@@ -241,9 +241,7 @@ def _stage_resurrect_event(
         target_agent_id=_resurrect_event_target(resurrected_by),
         payload=payload,
     )
-    from base.agents.impersonation.manifest import record_central_event
-
-    return record_audit(conn, record_central_event(conn, event))
+    return record_audit(conn, event)
 
 
 # meiva:note

@@ -84,7 +84,6 @@ def test_disabled_services_and_keeping_infra_are_forwarded_too(
         (["--start-timeout", "-5"], "--start-timeout -5: not a number > 0"),
         (["--silence-hours", "0"], "--silence-hours 0.0: not a number > 0"),
         (["--roster-timeout", "-1"], "--roster-timeout -1: not a number > 0"),
-        (["--lease-confirm-seconds", "-1"], "'-1' is not a number of seconds >= 0"),
         (["--mode", "gentle"], "--mode smooth|force"),
         (["--message", ""], "--message: cannot be empty; pass --no-message instead"),
         (["--message", "   \n "], "--message: cannot be empty; pass --no-message instead"),
@@ -162,7 +161,6 @@ _ONE_EACH = [
     (["--refuse-python-change"], "--allow-python-change | --refuse-python-change"),
     (["--refuse-red-schedules"], "--allow-red-schedules | --refuse-red-schedules"),
     (["--silence-hours", "4"], "--silence-hours"),
-    (["--lease-confirm-seconds", "0"], "--lease-confirm-seconds"),
     (["--no-message"], "--message | --no-message"),
     (["--roster-timeout", "90"], "--roster-timeout"),
 ]
@@ -219,7 +217,6 @@ def test_missing_choices_are_all_listed_at_once_and_no_host_is_touched(
             "--allow-python-change | --refuse-python-change",
             "--allow-red-schedules | --refuse-red-schedules",
             "--silence-hours",
-            "--lease-confirm-seconds",
             "--message | --no-message",
         ]
     if half != "down":

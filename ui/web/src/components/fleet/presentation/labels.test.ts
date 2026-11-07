@@ -109,7 +109,7 @@ describe("wrapLabel", () => {
 
 describe("agentStatusKey", () => {
   it("names each status the display tables are keyed by", () => {
-    for (const status of ["running", "idling", "impersonated", "terminated"] as const) {
+    for (const status of ["running", "idling", "terminated"] as const) {
       expect(agentStatusKey(status)).toBe(status);
     }
   });

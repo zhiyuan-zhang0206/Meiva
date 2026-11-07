@@ -189,9 +189,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ),
     ("GET", "/api/inventory"): RouteContract(),
     ("PUT", "/api/inventory"): RouteContract(note="full inventory replace — PUT is idempotent"),
-    ("POST", "/api/agents/{agent_id}/impersonation/force-expire"): RouteContract(
-        note="observed-session CAS close — repeated or stale requests leave the lease unchanged"
-    ),
     ("POST", "/api/agents/{agent_id}/terminate"): RouteContract(
         Idempotency.NON_IDEMPOTENT, note="termination is not bound to the observed incarnation"
     ),

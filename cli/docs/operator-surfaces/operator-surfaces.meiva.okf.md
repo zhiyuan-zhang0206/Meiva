@@ -12,18 +12,6 @@ tags:
 
 ## Agent and context commands
 
-- `meiva impersonate request/relay`: Codex delivery requires a control endpoint
-  for the existing host and uses Steer semantics. Missing endpoints fail before
-  a CLI request acquires control; delivery failures stop the relay without a
-  Pending-mode queue fallback. Unacknowledged messages remain for normal handoff
-  ([[base/agents/impersonation/docs/impersonation.meiva.okf.md|impersonation]]).
-  The relay's heartbeat runs in a `TaskGroup` beside the inbox loop
-  (`run_beside_heartbeat`) until inbox shutdown. A heartbeat failure ends that
-  worker and retains the original error until the command cancels and joins it,
-  allowing the inbox to finish at its existing boundary. Joining does not wrap the error: the CLI retains its existing error
-  message/exit-1 handling and interrupt exit 130. A terminal or revoked lease
-  stops the heartbeat normally; the heartbeat never renews executor authority.
-
 - `meiva agents ls/timeline/send/cancel/compact/restart/resurrect/terminate/kill/transfer`: `ls` renders the
   authenticated agent summary projection as stable `id / status / machine /
   label` columns. It does not expose runner-local workspace paths. `timeline`

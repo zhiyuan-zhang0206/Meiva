@@ -10,7 +10,7 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.birth.harness import LAUNCHABLE_HARNESSES, resolve_birth_harness
 from base.agents.birth.spawn import latest_checkpoint_id
-from base.agents.impersonation.wake import publish_inbound_wake
+from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.model.birth_config import uses_harness_model_selection
 from base.api_contracts.agent_contract import ForkSourceEmpty, Harness, ProbedHarnessModel
 from base.config.agent_pins import resolve_agent_config_pins

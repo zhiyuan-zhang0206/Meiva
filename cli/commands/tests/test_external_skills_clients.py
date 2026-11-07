@@ -34,7 +34,7 @@ CLIENTS = (
     (".gemini/antigravity-cli", "antigravity-cli"),
     (".dsh", "dsh"),
 )
-PUBLISHED_SKILLS = ("meiva-guide", "impersonator-guide")
+PUBLISHED_SKILLS = ("meiva-guide",)
 MARKER_NAME = ".meiva-managed.json"
 
 
@@ -319,13 +319,10 @@ def test_unmanaged_target_in_one_client_is_preserved_and_its_other_skill_still_p
     assert (unmanaged / "SKILL.md").read_text() == "my own skill\n"
     assert not (unmanaged / MARKER_NAME).exists()
     assert not (unmanaged / "references").exists()
-    assert (home / ".gemini" / "skills" / "impersonator-guide" / MARKER_NAME).is_file()
     for skill in PUBLISHED_SKILLS:
         assert (home / ".qwen" / "skills" / skill / MARKER_NAME).is_file()
     assert _ledger_names(tmp_path) == {
-        "gemini-impersonator-guide.json",
         "qwen-meiva-guide.json",
-        "qwen-impersonator-guide.json",
     }
     assert "Gemini CLI external operator skill skipped" in capsys.readouterr().err
 

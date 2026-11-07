@@ -521,38 +521,6 @@ def exercise_pause_grants(conn: psycopg.Connection, agent_id: int) -> None:
     assert row == (1800,)
 
 
-def exercise_impersonation_entry_grants(conn: psycopg.Connection, agent_id: int) -> None:
-    """The named-impersonation session trail the lease lifecycle writes from
-    the database side: creating a lease fires the lifecycle trigger, whose
-    INSERT into agent_impersonation_entries must land, and the relay reads
-    rows back by lease.
-    Regression for task #3549: the table shipped without a runner grant and
-    lease creation failed with InsufficientPrivilege. UPDATE/DELETE stay
-    ungranted — the trail is append-only (the preserve trigger rejects
-    rewrites).
-    """
-    lease = conn.execute(
-        "INSERT INTO agent_impersonations (id, agent_id, source, machine,"
-        " status, ttl_seconds, expires_at)"
-        " VALUES (gen_random_uuid(), %s, 'codex', 'test-machine', 'requested',"
-        " 3600, now() + interval '1 hour') RETURNING id",
-        (agent_id,),
-    ).fetchone()
-    assert lease is not None
-    row = conn.execute(
-        "SELECT count(*) FROM agent_impersonation_entries WHERE lease_id = %s", (lease[0],)
-    ).fetchone()
-    assert row == (1,)
-    # The session allocator bumps agents.impersonation_index on the runner's
-    # behalf (SECURITY DEFINER), though the runner holds no UPDATE on agents.
-    allocated = conn.execute(
-        "SELECT a.session_id, g.impersonation_index FROM agent_impersonations a"
-        " JOIN agents g ON g.id = a.agent_id WHERE a.id = %s",
-        (lease[0],),
-    ).fetchone()
-    assert allocated == (0, 1)
-
-
 def exercise_task_receipt_grants(conn: psycopg.Connection, agent_id: int) -> None:
     """The task-receipt tombstones the SDK task mutations write from the
     runner process: meiva.tasks.update/log and meiva.tasks.create retain one row

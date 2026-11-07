@@ -48,12 +48,9 @@
 #   identity_mismatch, head_sha, running_sha, serve_agent_runner) under the name `laptop`.
 # - `roster_lag`: int (reads still answered as stale), `roster_reply`: str | None (a raw answer),
 #   `roster_reads`: int (how many the window made).
-# - `leases`: list[dict[str, object]] and `lease_reply`: str | None — the lease table, or a raw
-#   answer; `lease_rc`: int; `lease_reads`: list[int] — the `effects` index each read happened at,
-#   so a test proves the leases were named before anything stopped.
 # - `silence_open`: bool, `silence_hours`: float, `silence_comment`: str, `silence_reply`:
 #   str | None — the Grafana silence the window opened, and the answer a test substitutes.
-# - `programs`: dict["gateway" | "silence" | "leases" -> str] — the source of each program the
+# - `programs`: dict["gateway" | "silence" -> str] — the source of each program the
 #   window ships over stdin, so the double answers only the shipped text.
 # - `output`: str — a line emitted before every answer; `incomplete`: dict[alias -> str] — the
 #   converge evidence a host reports, verbatim; `stored_schedules`: [int, list[str]] — the
@@ -200,8 +197,8 @@ class Sim:
             assert stdin == programs["gateway"], "the roster program is not the shipped source"
             emit.append(self._roster_json())
             return 0
-        if stdin in (programs["silence"], programs["leases"]):
-            return self._shipped(alias, command, stdin, emit)
+        if stdin == programs["silence"]:
+            return self._silence(alias, command, emit)
         if "agent_host.pid" in command:
             return self._evidence(alias, emit)
         if "helper-signing.py" in command and " facts" in command:
@@ -269,17 +266,6 @@ class Sim:
             return 1
         emit.extend(recorded.splitlines())
         return 0
-
-    # meiva:note
-    # A program the window ships to the gateway over stdin: silence, else leases.
-    def _shipped(self, alias: str, command: str, stdin: str, emit: list[str]) -> int:
-        if stdin == self.s["programs"]["silence"]:
-            return self._silence(alias, command, emit)
-        self.s["lease_reads"].append(len(self.s["effects"]))
-        assert alias == "gw", "the lease table is read on the gateway host"
-        reply = self.s["lease_reply"]
-        emit.append(reply if reply is not None else json.dumps({"leases": self.s["leases"]}))
-        return int(self.s["lease_rc"])
 
     def _silence(self, alias: str, command: str, emit: list[str]) -> int:
         assert alias == "gw", "the silence is Grafana's: it runs on the gateway host"

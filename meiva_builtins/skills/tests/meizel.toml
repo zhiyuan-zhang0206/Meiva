@@ -6,7 +6,6 @@ exports = ["skill_script.py"]
 
 [uses]
 "test_audio_transcribe.py" = ["local_post_server.py", "skill_script.py"]
-"test_impersonator_instructions.py" = ["skill_script.py"]
 "test_rss_feed.py" = ["skill_script.py"]
 "test_web_scrape.py" = ["skill_script.py"]
 "test_web_sources_post_guard.py" = ["skill_script.py"]

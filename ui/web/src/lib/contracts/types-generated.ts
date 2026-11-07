@@ -319,22 +319,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/agents/{agent_id}/impersonation/force-expire": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["post_force_expire_impersonation_api_agents__agent_id__impersonation_force_expire_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/agents/{agent_id}/terminate": {
         parameters: {
             query?: never;
@@ -2379,8 +2363,6 @@ export interface components {
             unread_user_message_count: number;
             unread_notice_count: number;
             heartbeat_paused_until: string | null;
-            open_impersonation_session_id: number | null;
-            open_impersonation_status: ("requested" | "accepted" | "active") | null;
             harness_exit_code?: number | null;
             harness_exit_at?: string | null;
         };
@@ -3019,13 +3001,6 @@ export interface components {
             telemetry_stale: boolean;
             snapshot_at?: string | null;
         };
-        ForceExpireImpersonationRequest: {
-            session_id: number;
-        };
-        ForceExpireImpersonationResponse: {
-            session_id: number;
-            status: "expired" | "not_open";
-        };
         GuardedNoticeEdit: {
             observed_notice_id: number;
             title?: string | null;
@@ -3077,15 +3052,6 @@ export interface components {
             required_total: number;
             required_missing: number;
             items: components["schemas"]["PermissionItemRow"][];
-        };
-        ImpersonationMetadata: {
-            agent_id: number;
-            session_id: number;
-            name: string;
-            executor_name: string;
-            provider: string | null;
-            anchor_item_id?: string | null;
-            seq?: number | null;
         };
         InspectMetricsMetadata: {
             collection: "observed";
@@ -4133,7 +4099,6 @@ export interface components {
             source?: string | null;
             payload: string;
             created_at?: string | null;
-            impersonation?: components["schemas"]["ImpersonationMetadata"] | null;
             inbound_id?: number | null;
             source_message_id?: string | null;
             source_inbound_id?: number | null;
@@ -4862,39 +4827,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RetryLaunchAccepted"];
-                };
-            };
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    post_force_expire_impersonation_api_agents__agent_id__impersonation_force_expire_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                agent_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ForceExpireImpersonationRequest"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ForceExpireImpersonationResponse"];
                 };
             };
             422: {
@@ -7789,7 +7721,6 @@ export interface operations {
                 event_name?: string | null;
                 agent_id?: number | null;
                 trace_id?: string | null;
-                impersonation_session?: string | null;
                 machine?: string | null;
                 level?: string | null;
                 tier?: string | null;

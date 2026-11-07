@@ -12,11 +12,9 @@ def test_a_settle_audits_running_to_idling() -> None:
     assert settled_payload() == {"from": "running", "to": "idling"}
 
 
-@pytest.mark.parametrize("owed", [False, True])
-def test_a_reaped_corpse_audits_whether_it_still_owed_a_handoff_receipt(owed: bool) -> None:
-    assert reaped_payload(handoff_unapplied=owed) == {
+def test_a_reaped_corpse_audits_reason() -> None:
+    assert reaped_payload() == {
         "from": "idling",
         "to": "terminated",
         "reason": "corpse_reaper",
-        "unapplied_handoff_receipt": owed,
     }

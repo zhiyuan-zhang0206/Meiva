@@ -33,7 +33,6 @@ class ExecStatus(StrEnum):
 # NoteTag is a closed cross-stack set: scripts/codegen/dump_frontend_constants.py generates its values into the frontend (constants-generated.ts), where every member renders as a lifecycle, memory or generic note marker, so a new member needs only its gateway timestamp classification. The value set itself is a wire contract, locked by value-set tests against silent renames.
 # meiva:link base/agents/messages/docs/metadata-contracts.meiva.okf.md
 class NoteTag(StrEnum):
-    IMPERSONATION = "impersonation"
     SDK_HINT = "sdk_hint"
     AGENT_REPLY = "agent_reply"
     REPLY_VISIBILITY = "reply_visibility"
@@ -91,7 +90,6 @@ class MeivaUsage(TypedDict, total=False):
 
 class MeivaMessageKwargs(TypedDict, total=False):
     meiva_ephemeral_message_id: bool
-    meiva_impersonation: dict[str, object]
     meiva_msg_type: str
     meiva_source: str
     meiva_inbound_id: int

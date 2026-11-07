@@ -1,14 +1,4 @@
 #!/usr/bin/env python3
-"""Launch, inspect, or stop Codex sessions in persistent shells.
-
-The launch logic lives in ``meiva.shell.coding_tools.codex``; this script is its
-command-line entry and passes its own skill directory, whose ``references/``
-holds the collaboration contract and whose ``scripts/`` holds the supervisor
-script (``watch_work.py``). Every launch starts a shared ``codex app-server``
-endpoint and prints ``codex_app_server`` and ``codex_session`` so the session
-can also accept an impersonation handover when instructed via a message.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -135,10 +125,7 @@ def main(argv: list[str]) -> int:
     provenance = None
     prompt = None
     if opts.prompt is not None:
-        prompt = (
-            f"{require_lineage(parser, parsed, now=datetime.now(UTC), takeover=True)}"
-            f"\n\n{opts.prompt}"
-        )
+        prompt = f"{require_lineage(parser, parsed, now=datetime.now(UTC))}\n\n{opts.prompt}"
     elif opts.resume is None:
         provenance = require_lineage(parser, parsed, now=datetime.now(UTC))
     refusal = announce_capability("codex", mode=opts.mode, force=opts.force_mode)

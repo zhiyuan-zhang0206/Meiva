@@ -6,8 +6,7 @@ import json
 import psycopg
 
 from base import telemetry
-from base.agents.impersonation.manifest import record_central_event
-from base.agents.impersonation.wake import publish_inbound_wake
+from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.messages.envelope import validate_source
 from base.agents.messages.inbound_provenance import (
     InboundProvenance,
@@ -183,9 +182,7 @@ def insert_inbound_message_in_transaction(
             if content
             else {"inbound_id": new_id},
         )
-        prepared_event = record_audit(
-            cur.connection, record_central_event(cur.connection, prepared_event)
-        )
+        prepared_event = record_audit(cur.connection, prepared_event)
     return new_id, prepared_event
 
 
@@ -224,7 +221,7 @@ def insert_spawn_prompt_in_transaction(
         if content
         else {"inbound_id": inbound_id},
     )
-    return inbound_id, record_audit(cur.connection, record_central_event(cur.connection, event))
+    return inbound_id, record_audit(cur.connection, event)
 
 
 def announce_spawn_prompt(

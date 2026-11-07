@@ -23,11 +23,7 @@ async def scan_rows(pool: AsyncConnectionPool[psycopg.AsyncConnection], machine:
                     "WHERE pending.agent_id=m.id AND pending.status='pending' AND {not_passive}) "
                     "OR EXISTS (SELECT 1 FROM inbound_messages claimed "
                     "WHERE claimed.agent_id=m.id AND claimed.kind IN ('restart','terminate') "
-                    "AND claimed.status='claimed') "
-                    "OR EXISTS (SELECT 1 FROM agent_impersonations lease "
-                    "WHERE lease.agent_id=m.id AND m.harness='meiva' "
-                    "AND (lease.status IN ('requested','accepted','active') "
-                    "OR lease.delta_version>lease.applied_version OR lease.handoff_applied_at IS NULL)))"
+                    "AND claimed.status='claimed'))"
                 ).format(not_passive=pgsql.SQL(not_passive_inbound("pending"))),
                 (machine,),
             )

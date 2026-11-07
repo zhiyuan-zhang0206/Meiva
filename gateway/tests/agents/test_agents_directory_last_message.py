@@ -29,8 +29,6 @@ _DIRECTORY_CARD_KEYS = frozenset(
         "unread_notice_count",
         "unread_user_message_count",
         "heartbeat_paused_until",
-        "open_impersonation_session_id",
-        "open_impersonation_status",
         "observation",
         "availability",
         "harness_exit_code",
@@ -57,7 +55,6 @@ class TestList:
         rows = page["agents"]
         assert len(rows) == 2
         assert set(rows[0]) == _DIRECTORY_CARD_KEYS
-        assert rows[0]["open_impersonation_session_id"] is None
         assert rows[0]["observation"]["runtime_owner"] == "unknown"
         by_id = {r["agent_id"]: r for r in rows}
         assert by_id[a_id]["status"] == "idling"
@@ -122,8 +119,6 @@ class TestList:
         row = response.json()["agents"][0]
         assert set(row) == _DIRECTORY_CARD_KEYS
         assert row["harness"] == harness.value
-        assert row["open_impersonation_session_id"] is None
-        assert row["open_impersonation_status"] is None
         assert row["observation"]["runtime_owner"] == "unknown"
         assert row["observation"]["machine_probe_at"] is None
         assert row["observation"]["machine_probe_valid_until"] is None

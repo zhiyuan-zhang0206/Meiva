@@ -8,7 +8,6 @@ from dataclasses import dataclass
 
 __all__ = [
     "AgentMetaRow",
-    "ImpersonationRow",
     "LifecycleRow",
     "MachineRow",
     "TargetGateRow",
@@ -31,16 +30,6 @@ class AgentMetaRow:
 class LifecycleRow:
     kind: str
     status: str
-
-
-# meiva:note
-# The impersonation session that is open or holds unapplied work.
-@dataclass(frozen=True)
-class ImpersonationRow:
-    session_id: int
-    status: str
-    delta_unapplied: bool
-    handoff_unapplied: bool
 
 
 # meiva:note

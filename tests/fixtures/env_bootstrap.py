@@ -223,7 +223,6 @@ os.environ.pop("MEIVA_API_TOKEN", None)
 # config field does not erase variables inherited from an older installation.
 os.environ.pop("MEIVA_CF_API_TOKEN", None)
 os.environ.pop("MEIVA_FEISHU_APP_SECRET", None)
-os.environ.pop("MEIVA_IMPERSONATION_RELAY_TOKEN", None)
 os.environ.pop("MEIVA_ALERTS_WEBHOOK_TOKEN", None)
 # meiva:note
 # The runner database password is the one credential the suite's own home declares below: the

@@ -8,7 +8,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base import telemetry
-from base.agents.impersonation.wake import publish_inbound_wake
+from base.agents.inbox.wake import publish_inbound_wake
 from base.agents.incarnation.lifecycle_commands import KILL_ALL_SHELL_SESSIONS
 from base.agents.messages.envelope import validate_source
 from base.api_contracts.agent_contract import AgentNotFound, AgentStatus
@@ -157,9 +157,7 @@ def _stage_termination_event(
     event = prepare_event_log(
         event_type="terminate", agent_id=agent_id, source=source, payload=payload
     )
-    from base.agents.impersonation.manifest import record_central_event
-
-    return record_audit(conn, record_central_event(conn, event))
+    return record_audit(conn, event)
 
 
 def enqueue_termination_inbounds(

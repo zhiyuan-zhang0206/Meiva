@@ -74,9 +74,8 @@ def dead_letter_stale_pending_resurrects(pool: ConnectionPool, threshold_s: floa
 # they stay pending for the delivery wake and the watchdog's stranded-wake
 # fallback (`stranded_wake.py`), which retires them on this same clock. Internal
 # assignment notes keep their `delivery_result` failure evidence instead of
-# disappearing, and passive lifecycle notes plus impersonation termination notices
-# belong to the next resurrection's native history, so their explicit markers
-# preserve them at any age.
+# disappearing, and passive lifecycle notes belong to the next resurrection's
+# native history, so their explicit markers preserve them at any age.
 def dead_letter_stale_pending_terminated(pool: ConnectionPool, threshold_s: float) -> int:
     with write_transaction(pool) as conn, conn.cursor() as cur:
         cur.execute(
@@ -93,9 +92,6 @@ def dead_letter_stale_pending_terminated(pool: ConnectionPool, threshold_s: floa
                 "  AND m.status = 'pending' "
                 "  AND m.kind IN ('terminate', 'system_note') "
                 "  AND {not_passive} "
-                "  AND NOT (m.kind='system_note' AND m.source='system:impersonation' "
-                "           AND COALESCE(m.payload->'impersonation_termination_notice' "
-                "                        = 'true'::jsonb, false)) "
                 "  AND m.created_at < now() - make_interval(secs => %s)"
             ).format(not_passive=pgsql.SQL(not_passive_inbound("m"))),
             (threshold_s,),

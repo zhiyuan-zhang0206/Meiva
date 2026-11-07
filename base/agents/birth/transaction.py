@@ -14,7 +14,6 @@ from base import telemetry
 from base.agents.birth.creation_identity import record_creation_snapshot, recover_birth
 from base.agents.birth.harness import resolve_birth_harness
 from base.agents.history.checkpoint_copy import copy_checkpoint_chain
-from base.agents.impersonation.manifest import record_central_event
 from base.agents.inbox.insert import insert_spawn_prompt_in_transaction
 from base.agents.labels import spawn_prompt_with_label
 from base.agents.model.birth_config import (
@@ -81,7 +80,7 @@ def record_birth_event(
             "fork_checkpoint": fork_checkpoint,
         },
     )
-    return record_audit(conn, record_central_event(conn, event))
+    return record_audit(conn, event)
 
 
 def validate_spawn_args(

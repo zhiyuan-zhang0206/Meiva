@@ -299,7 +299,7 @@ def _wait_for_text(path: Path, text: str, seconds: float = 20.0) -> str:
     return content
 
 
-def test_takeover_launch_inlines_the_brief_without_files_or_a_supervisor(
+def test_prompt_launch_inlines_the_brief_without_files_or_a_supervisor(
     live_shell: ShellSessions, live_host: SessionHost, unit_home: Path, short_dir: Path
 ) -> None:
     received = short_dir / "r.txt"
@@ -308,7 +308,7 @@ def test_takeover_launch_inlines_the_brief_without_files_or_a_supervisor(
     workspace.mkdir()
     site = site_for(live_shell, short_dir, live_host)
     owner = _generation(site, workspace, supervised=False)
-    prompt = "Goal: replace the agent. The briefing is inline; read no files."
+    prompt = "Goal: The briefing is inline; read no files."
 
     active, remote, session = codex.start_generation(
         site, owner, _request(workspace, _SKILL_DIR, prompt=prompt), _WAITS

@@ -123,9 +123,7 @@ def test_the_roster_wait_is_spent_on_the_sessions_clock() -> None:
     timers = _Timers()
     session = cast(
         Session,
-        _Gateway(
-            _UNSETTLED_ROSTER, Pacing(roster_poll_s=0.5, lease_tick_s=0.5), timers, most_reads=5
-        ),
+        _Gateway(_UNSETTLED_ROSTER, Pacing(roster_poll_s=0.5), timers, most_reads=5),
     )
     args = parse(
         [

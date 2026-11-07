@@ -331,6 +331,10 @@ def test_current_reset_converges_when_the_missing_names_still_have_files(
             c.execute(
                 "DROP TABLE reply_suggestion_feedback, reply_suggestion_offers, agent_user_messages"
             )
+            c.execute(
+                "CREATE TABLE IF NOT EXISTS agent_impersonations "
+                "(id bigint, capabilities jsonb, capability_declared_by text)"
+            )
             c.execute("DELETE FROM schema_migrations")
             for name in sorted(before):
                 c.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (name,))
@@ -374,6 +378,10 @@ def _live_reset_shape(url: str) -> set[str]:
             " DROP COLUMN IF EXISTS protocol,"
             " DROP COLUMN IF EXISTS send_directory,"
             " DROP COLUMN IF EXISTS message"
+        )
+        c.execute(
+            "CREATE TABLE IF NOT EXISTS agent_impersonations "
+            "(id bigint, capabilities jsonb, capability_declared_by text)"
         )
         c.execute("DELETE FROM schema_migrations")
         for name in sorted(before):

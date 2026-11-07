@@ -9,7 +9,6 @@ import pytest
 from gateway.agents.transfer.bundle_store import TransferBundleStore
 from gateway.agents.transfer.transfer_plan import (
     AgentRowFacts,
-    ImpersonationConflictFact,
     MachineFacts,
     PendingLifecycleFact,
     PendingUploadFact,
@@ -108,36 +107,6 @@ def test_precheck_refuses_running_external_impersonated_and_invalid_targets() ->
     )
     assert isinstance(external, TransferRefusal) and external.status_code == 409
     assert "external harness" in external.detail
-
-    open_imp = evaluate_precheck(
-        TransferPrecheckFacts(
-            agent=_agent(),
-            agent_id=2697,
-            to_machine="company-mini",
-            impersonation=ImpersonationConflictFact(
-                session_id=20, status="active", delta_unapplied=False, handoff_unapplied=True
-            ),
-            source_machine=src,
-            target_machine=dst,
-        )
-    )
-    assert isinstance(open_imp, TransferRefusal) and open_imp.status_code == 409
-    assert "session 20" in open_imp.detail and "open impersonation" in open_imp.detail
-
-    unsettled_imp = evaluate_precheck(
-        TransferPrecheckFacts(
-            agent=_agent(),
-            agent_id=2697,
-            to_machine="company-mini",
-            impersonation=ImpersonationConflictFact(
-                session_id=20, status="released", delta_unapplied=False, handoff_unapplied=True
-            ),
-            source_machine=src,
-            target_machine=dst,
-        )
-    )
-    assert isinstance(unsettled_imp, TransferRefusal) and unsettled_imp.status_code == 409
-    assert "unsettled impersonation handoff" in unsettled_imp.detail
 
     pending_lc = evaluate_precheck(
         TransferPrecheckFacts(

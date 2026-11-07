@@ -93,7 +93,6 @@ function ag(agent_id: number, overrides: Partial<AgentRowType> = {}): AgentRowTy
     unread_notice_count: 0,
     unread_user_message_count: 0,
     heartbeat_paused_until: null,
-    open_impersonation_session_id: null,
     ...overrides,
   };
 }
@@ -105,7 +104,6 @@ const baseProps = {
   pending: undefined,
   onSelect: noop,
   onTerminate: noop,
-  onForceExpire: noop,
   onForceKill: noop,
   onRestart: noop,
   onResurrect: noop,
@@ -355,16 +353,6 @@ describe("AgentRow lifecycle markers", () => {
     expect(d!.className).toContain("bg-muted-foreground/50");
     expect(container.querySelector(".agent-title-working")).toBeNull();
     expect(d!.getAttribute("title")).toBeTruthy();
-  });
-
-  it("enabled: impersonated status gets its own distinct color", () => {
-    const { container } = renderWithSettings(
-      <AgentRow {...baseProps} agent={ag(1, { status: "impersonated" })} depth={0} ancestorsIsLast={[]} />,
-      { "display.show_agent_status": true },
-    );
-    const d = statusDot(container);
-    expect(d).toBeTruthy();
-    expect(d!.className).toContain("bg-indigo-400");
   });
 });
 

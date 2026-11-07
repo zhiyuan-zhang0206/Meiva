@@ -59,7 +59,6 @@ def test_marker_clear_sites_are_enumerated() -> None:
     }
     assert clearers == {
         "agent/graph/claim/turn_stamp.py",
-        "agent/impersonation.py",
         "ops/agents/wake.py",
     }
 

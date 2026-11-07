@@ -75,7 +75,6 @@ function ag(agent_id: number, overrides: Partial<AgentRowType> = {}): AgentRowTy
     unread_notice_count: 0,
     unread_user_message_count: 0,
     heartbeat_paused_until: null,
-    open_impersonation_session_id: null,
     ...overrides,
   };
 }
@@ -87,7 +86,6 @@ const baseProps = {
   pending: undefined,
   onSelect: noop,
   onTerminate: noop,
-  onForceExpire: noop,
   onForceKill: noop,
   onRestart: noop,
   onResurrect: noop,
@@ -166,38 +164,6 @@ describe("AgentRow right-click context menu", () => {
     expect(screen.queryByText("Fork with prompt…") !== null).toBe(isNative);
     expect(screen.getByText("Terminate")).toBeTruthy();
     expect(screen.getByText("Kill")).toBeTruthy();
-  });
-
-  it("shows the end-session item only for an open session and sends its rendered ID after confirmation", () => {
-    const onForceExpire = vi.fn();
-    const page = fakeBrowser();
-    page.answerConfirm(true);
-    const { container } = render(
-      <AgentRow {...baseProps} onForceExpire={onForceExpire}
-        agent={ag(1, { open_impersonation_session_id: 7 })} depth={0} ancestorsIsLast={[]} />,
-      page,
-    );
-    openMenu(container.querySelector("li")!);
-    fireEvent.click(screen.getByText("End external takeover session"));
-    expect(page.actions.confirmed).toEqual([
-      expect.stringContaining("agent resumes its own work"),
-    ]);
-    expect(onForceExpire).toHaveBeenCalledExactlyOnceWith(7);
-  });
-
-  it("does not end the session when confirmation is dismissed", () => {
-    const onForceExpire = vi.fn();
-    const page = fakeBrowser();
-    page.answerConfirm(false);
-    const { container } = render(
-      <AgentRow {...baseProps} onForceExpire={onForceExpire}
-        agent={ag(1, { open_impersonation_session_id: 7 })} depth={0} ancestorsIsLast={[]} />,
-      page,
-    );
-    openMenu(container.querySelector("li")!);
-    fireEvent.click(screen.getByText("End external takeover session"));
-    expect(page.actions.confirmed).toHaveLength(1);
-    expect(onForceExpire).not.toHaveBeenCalled();
   });
 
   it("terminated agent: menu shows Resurrect + Resurrect with prompt, no Fork / Kill", () => {
@@ -304,26 +270,5 @@ describe("AgentRow right-click context menu", () => {
     fireEvent.change(input, { target: { value: "touch-renamed" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onRename).toHaveBeenCalledExactlyOnceWith("touch-renamed");
-  });
-});
-
-describe("AgentRow takeover control", () => {
-  it("renders no on-row takeover label or button when a session is open", () => {
-    render(
-      <AgentRow {...baseProps}
-        agent={ag(1, { open_impersonation_session_id: 7 })} depth={0} ancestorsIsLast={[]} />,
-    );
-    expect(screen.queryByText("Takeover open")).toBeNull();
-    expect(screen.queryByRole("button", { name: "End external takeover session" })).toBeNull();
-  });
-
-  it("renders no 'Ending takeover…' label while a force-expire is pending — the row shows only its generic spinner", () => {
-    render(
-      <AgentRow {...baseProps} pending="expiring"
-        agent={ag(1, { open_impersonation_session_id: 7 })} depth={0} ancestorsIsLast={[]} />,
-    );
-    expect(screen.queryByText("Ending takeover…")).toBeNull();
-    expect(screen.queryByText("Takeover open")).toBeNull();
-    expect(screen.queryByRole("button", { name: "End external takeover session" })).toBeNull();
   });
 });

@@ -203,7 +203,6 @@ class TestAiMessageItems:
             NoteTag.LIFECYCLE_FORK,
             NoteTag.NEW_SKILLS,
             NoteTag.TASK,
-            NoteTag.IMPERSONATION,
             NoteTag.TURN_LOST,
         }
         hidden = {

@@ -17,7 +17,7 @@ from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 SKILL_NAME = "meiva-guide"
-PUBLISHED = ("meiva-guide", "impersonator-guide")
+PUBLISHED = ("meiva-guide",)
 
 
 @pytest.fixture

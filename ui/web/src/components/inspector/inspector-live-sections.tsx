@@ -146,7 +146,6 @@ type AgentRowKey = Parameters<ReturnType<typeof useTranslations<"agentRow">>>[0]
 const STATUS_LABEL_KEY: Readonly<Record<string, AgentRowKey | undefined>> = {
   running: "statusRunning",
   idling: "statusIdling",
-  impersonated: "statusImpersonated",
   terminated: "statusTerminated",
 };
 
@@ -193,8 +192,7 @@ export function LivenessSection({
       )
     : undefined;
   const lastPause = inspect?.heartbeat.last_pause;
-  const impersonated = inspect !== undefined && inspect.status !== "terminated" && rosterRow?.status === "impersonated";
-  const status = inspect ? (impersonated ? "impersonated" : inspect.status) : undefined;
+  const status = inspect?.status;
   const statusKey = status !== undefined ? STATUS_LABEL_KEY[status] : undefined;
   return (
     <Section

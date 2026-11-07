@@ -29,8 +29,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from base.agents.impersonation.host_transport import antigravity_server_from_environment
 from base.host.boundary.options import options
+from base.lm.harness.antigravity import antigravity_server_from_environment
 from meiva.shell.coding_tools import (
     add_capability_arguments,
     add_lineage_arguments,
@@ -170,10 +170,7 @@ def main(argv: list[str]) -> int:
     provenance = None
     prompt = None
     if opts.prompt is not None:
-        prompt = (
-            f"{require_lineage(parser, parsed, now=datetime.now(UTC), takeover=True)}"
-            f"\n\n{opts.prompt}"
-        )
+        prompt = f"{require_lineage(parser, parsed, now=datetime.now(UTC))}\n\n{opts.prompt}"
     else:
         provenance = require_lineage(parser, parsed, now=datetime.now(UTC))
     refusal = announce_capability("antigravity", mode=opts.mode, force=opts.force_mode)

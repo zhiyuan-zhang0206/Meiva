@@ -92,7 +92,6 @@ export function wrapLabel(label: string, r: number): string[] {
 const AGENT_STATUSES: readonly PublicAgentStatus[] = [
   "running",
   "idling",
-  "impersonated",
   "terminated",
 ];
 

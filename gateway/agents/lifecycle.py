@@ -11,11 +11,8 @@ from typing import Literal
 import psycopg
 from fastapi import APIRouter, Body, HTTPException, Request
 from psycopg_pool import ConnectionPool, PoolTimeout
-from pydantic import BaseModel, Field
 
 from base.agents.birth.harness import coerce_harness
-from base.agents.impersonation import ImpersonationError
-from base.agents.impersonation.maintenance import force_expire_impersonation
 from base.agents.inbox.compact import insert_compact_request_inbound
 from base.api_contracts.agent_contract import (
     AgentNotFound,
@@ -59,44 +56,6 @@ _log = logging.getLogger(__name__)
 
 
 _OPEN_TASKS_SHOWN = 5
-
-
-class ForceExpireImpersonationRequest(BaseModel):
-    session_id: int = Field(ge=0)
-
-
-class ForceExpireImpersonationResponse(BaseModel):
-    session_id: int
-    status: Literal["expired", "not_open"]
-
-
-@router.post(
-    "/api/agents/{agent_id}/impersonation/force-expire",
-    description="End the caller's observed takeover without terminating the native agent.",
-)
-async def post_force_expire_impersonation(
-    agent_id: int, body: ForceExpireImpersonationRequest, request: Request
-) -> ForceExpireImpersonationResponse:
-
-    verified_by = getattr(request.state, "source_verified_by", None)
-    principal = getattr(request.state, "auth_principal", None)
-    subject = getattr(principal, "subject", None)
-    if verified_by is None or subject is None:
-        raise RuntimeError("force-expire reached its handler without a verified principal")
-    actor = f"{verified_by}:{subject}"
-    try:
-        status = await asyncio.to_thread(
-            force_expire_impersonation,
-            gateway_state(request).db_pool,
-            gateway_state(request).db,
-            gateway_state(request).bus,
-            agent_id,
-            body.session_id,
-            actor,
-        )
-    except ImpersonationError as exc:
-        raise HTTPException(status_code=404, detail=f"agent {agent_id} not found") from exc
-    return ForceExpireImpersonationResponse(session_id=body.session_id, status=status)
 
 
 @router.post(
@@ -279,17 +238,7 @@ def _verify_restart_preconditions(
     current_harness: Harness,
     target_harness: Harness,
 ) -> None:
-    has_lease = (
-        conn.execute(
-            "SELECT 1 FROM agent_impersonations WHERE agent_id = %s "
-            "AND (status IN ('requested', 'accepted', 'active') OR delta_version > applied_version OR handoff_applied_at IS NULL) LIMIT 1",
-            (agent_id,),
-        ).fetchone()
-        is not None
-    )
-    if has_lease:
-        raise HTTPException(status_code=409, detail="Agent has an active impersonation lease")
-
+    _ = (conn, agent_id)
     if (
         target_harness != current_harness or current_harness is not Harness.MEIVA
     ) and status not in ("idling", "terminated"):

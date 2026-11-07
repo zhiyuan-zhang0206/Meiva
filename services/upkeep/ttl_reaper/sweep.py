@@ -1,6 +1,6 @@
 # meiva:note
-# The reaper's database-only sweep: expired pages, browser sessions, notices and
-# impersonation leases, plus the slow maintenance phases on durable cadences.
+# The reaper's database-only sweep: expired pages, browser sessions and notices,
+# plus the slow maintenance phases on durable cadences.
 #
 # One resident loop (`sweep_loop`) runs `sweep_round` every
 # `MEIVA_TTL_REAPER_POLL_INTERVAL_SECONDS`. A round runs its phases in order; each
@@ -15,9 +15,6 @@
 # - **Browser sessions** — expired ``web_sessions`` rows are deleted here, so
 #   cleanup does not depend on the next login.
 # - **Notices** — ``agent_notices`` past ``expire_at`` auto-resolve.
-# - **Impersonation** — expiring leases are reminded, expired ones reaped, and ended
-#   leases still waiting for an open event source (or with a failed one) emit the
-#   ``impersonation_event_log_incomplete`` signal.
 # - **Schedule fire log** — ``schedule_fire_log`` claims older than the configured
 #   retention window (30 days by default) are deleted once per day.
 #
@@ -47,12 +44,6 @@ from zoneinfo import ZoneInfo
 
 from psycopg_pool import ConnectionPool
 
-from base.agents.impersonation.maintenance import (
-    reap_impersonations,
-    reclaim_abandoned_event_logs,
-    remind_expiring_impersonations,
-    signal_incomplete_event_logs,
-)
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
@@ -228,20 +219,6 @@ async def sweep_round(
     config: TtlReaperConfig,
 ) -> None:
     """One pass over every database-only phase, beating `progress` between them."""
-    reminded = await asyncio.to_thread(remind_expiring_impersonations, pool, db, bus)
-    progress.beat()
-    impersonations = await asyncio.to_thread(reap_impersonations, pool, db, bus)
-    abandoned = await asyncio.to_thread(
-        reclaim_abandoned_event_logs,
-        pool,
-        grace_seconds=config.impersonation_event_abandon_grace_s,
-    )
-    await asyncio.to_thread(
-        signal_incomplete_event_logs,
-        pool,
-        repeat_interval_seconds=config.impersonation_event_report_interval_s,
-    )
-    progress.beat()
     sessions = await asyncio.to_thread(reap_expired_web_sessions_blocking, pool)
     progress.beat()
     notices = await asyncio.to_thread(
@@ -258,17 +235,12 @@ async def sweep_round(
         await lifecycle.publish_notice_resolved(bus, agent_id, nid, facts=details)
     progress.beat()
     pruned_fire_log = await _slow_phases(pool, config)
-    if sessions or impersonations or notices or reminded or pruned_fire_log or abandoned:
+    if sessions or notices or pruned_fire_log:
         _log.info(
-            "[ttl-reaper] reclaimed %d web session(s), %d impersonation(s), "
-            "%d notice(s); reminded %d impersonation lease(s); "
-            "sealed %d abandoned impersonation event source(s); "
+            "[ttl-reaper] reclaimed %d web session(s), %d notice(s); "
             "pruned %d schedule fire-log row(s)",
             sessions,
-            impersonations,
             len(notices),
-            reminded,
-            abandoned,
             pruned_fire_log,
         )
 

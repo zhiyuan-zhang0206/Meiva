@@ -51,7 +51,7 @@ export function RowActions({
       </div>
     );
   }
-  if (pending === "terminating" || pending === "expiring") {
+  if (pending === "terminating") {
     return (
       <div className={wrapperCls}>
         <Spinner color="text-destructive" />

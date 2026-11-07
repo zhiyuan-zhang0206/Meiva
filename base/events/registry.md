@@ -77,7 +77,6 @@ Emit sites and consumers: see the comments at each emit point.
 | `transfer` | agent transferred to another machine | business | from_machine, to_machine, files_transferred, bytes_transferred, killed_shell_sessions, closed_pages | events |
 | `compact` | agent context compacted | business | — | events |
 | `circuit_breaker` | heartbeat circuit breaker opened — a permanent provider rejection stopped background model re-fires until the cause is corrected | business | — | events |
-| `impersonation_lease_adopted` | impersonation takeover carried by the replacement native incarnation's admission | business | lease_id, session_id, status, from_generation, from_owner, to_generation, to_owner, relay_provider | events |
 | `exit` | agent process exited | business | — | events |
 | `label_change` | agent label changed | business | — | events |
 | `skill_invoked` | skill invoked by an agent | business | — | events |
@@ -88,7 +87,6 @@ Emit sites and consumers: see the comments at each emit point.
 | `env_unauthorized_write` | out-of-band .env modification detected (no official write recorded) | anomaly | — | events |
 | `computer_session_start` | computer-use task session opened (first action with a task_id) | business | task_id, first_tool, first_action_at | events |
 | `computer_session_end` | computer-use task session closed (idle timeout) | business | task_id, action_count, first_action_at, last_action_at, outcome | events |
-| `root_health_restart_lease_grace` | the root health monitor held the first restart of an outage because this machine carries a live impersonation lease -- deferred when the window opened, recovered when the unit answered again inside it and the restart was cancelled | anomaly | unit, attempt, lease_id, holder, waited_s, outcome | events |
 | `lifecycle_request` | a CLI process asked meiva-root to change unit state — the verb, the units and the caller block (pid/argv/host/operation), recorded when the request is sent rather than when it succeeds, so an operator stop or start is attributable after the fact | business | verb, units, operation_id, caller, head_sha | events |
 | `lifecycle_result` | the operator command that asked meiva-root to change unit state finished — the verb, the units, its outcome and how long it held — recorded after the last request settled, so a stop that nothing restarted is bracketed by facts (a request with no clean result, or a result whose head_sha equals the next start's) instead of being inferred from log absence (task #5464) | business | verb, units, outcome, seconds, operation_id, head_sha | events |
 
@@ -169,7 +167,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `gate_auth_probe_failed` | gate auth probe failed — carries the classification (auth/timeout/network/application) and exception shape | anomaly | category, exception_type, exception_value, status, latency_ms | — | events | — |
 | `chrome_page_ttl_renewed` | Chrome page TTL deadline renewed via the renew_page tool; attributes carry page_id, ttl_s, new_expires_at | observation | — | — | events | — |
 | `memory_search_rerank` | memory-search rerank skipped candidate notes it could not read; they are ranked out of this search | anomaly | — | — | events | — |
-| `impersonation_event_log_incomplete` | an impersonation event log cannot complete on its own (ended lease with an open source, or a failed capture source); reported per lease and condition at most once per report cadence, each report recorded in that lease's log | anomaly | condition, lease_id, lease_machine, pending_reason, pending_sources, session | — | events | — |
 | `host_stale_running_settled` | hosted boot settle restored rows a previous host instance left running without a task (crash / kill -9); carries n = rows settled | noise | — | — | events | — |
 | `host_dispatcher_subscribed` | hosted dispatcher subscribed to the inbound wake pattern | noise | — | — | events | — |
 | `host_dispatcher_reconnect` | hosted dispatcher's wake subscription dropped — reconnecting (wakes published while down are not replayed; the periodic pending scan finds them) | noise | — | — | events | — |
@@ -197,14 +194,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `host_turn_stall_uncancellable` | a stalled invocation that had been cancelled for the bounded unwind window REFUSED to unwind (blocked where asyncio cannot interrupt it — a C call). The host cannot fix this in-process: it signals a daemon restart so the supervisor recovers the turn from its checkpoint | anomaly | — | — | events | — |
 | `host_turn_corpse_marked` | a hosted turn crashed and the row was stamped with the corpse marker (last_turn_fatal_at) — the reaper terminates it once the grace window elapses unless a completed turn clears the mark first | anomaly | — | — | events | — |
 | `corpse_stamp_failed` | the corpse marker stamp failed after a hosted turn crash — the row keeps looking alive until a later stamp or a completed turn; the reaper cannot see this death | anomaly | — | — | events | — |
-| `hosted_handoff_settle_retry` | a held-path handoff settle failed inside the wake and is being retried there; carries attempt, delay_s and error_class | noise | — | — | events | — |
-| `hosted_handoff_settle_failed` | the held-path handoff settle exhausted its retry budget: the row is marked crash-dead and settled to idling so the heartbeat's narrow exception or the reaper can reach it; carries budget_s and error_class | anomaly | — | — | events | — |
-| `hosted_handoff_settle_raced` | a held-path settle failed after its receipt had already landed (the write commits in a thread, the failure lands on a later await); the row is NOT marked and the wake reports success | anomaly | — | — | events | — |
-| `hosted_handoff_settle_read_failed` | the read that decides whether a landed receipt survived a failed settle could not answer; the wake fails closed because a read failure is not evidence either way | anomaly | — | — | events | — |
-| `hosted_settle_failed` | settling a crash-marked row to idling failed after a failed held-path settle — the row stays running and the reaper cannot see it | anomaly | — | — | events | — |
-| `hosted_turn_corpse_marker_cleared` | a crash marker was cleared by the wake that settled the row's receipt (no ended lease of the row owes one any more) | noise | — | — | events | — |
-| `hosted_turn_corpse_clear_failed` | clearing the crash marker after a landed receipt failed — the marker stays until a completed turn clears it | anomaly | — | — | events | — |
-| `hosted_handoff_marker_cleared_while_ineligible` | a marker was cleared on a row the heartbeat will not pick up (a permanent reject streak or a heartbeat paused past now), so no automatic path re-checks it; carries permanent_reject_streak and heartbeat_paused | anomaly | — | — | events | — |
 | `corpse_reaper_terminated` | the corpse reaper terminated crash-marked idling rows past the grace window (termination_source='reaper') | anomaly | — | — | events | — |
 | `corpse_reaper_failed` | the beat's corpse reap pass failed — retried on the next beat; leases of healthy rows are unaffected (renewal runs first) | anomaly | — | — | events | — |
 | `host_database_beat_failed` | the agent host's database beat failed — the reaper leg timed out or the pool was unreachable; carries the consecutive failure count, the limit and whether this failure ends the host. One event per failure, and only from the beat: a log line that merely mentions the words is not this event | anomaly | machine, pool, failures, limit, will_exit, error | — | events | — |
@@ -215,7 +204,6 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `host_abort_reconcile_failed` | the immediate inbound reconcile at a settled hosted turn abort raised — the host does not treat it as fatal and the next cold admission retries the disposal of the claimed rows | anomaly | — | — | events | — |
 | `host_turn_reconcile_skipped` | the finished hosted turn skipped the immediate inbound reconcile (fail-closed) — the claimed rows are left to the next cold admission. Carries the reason: the runtime ownership was already replaced (ownership_lost — the replacement disposes the rows) | noise | — | — | events | — |
 | `host_turn_reconcile_failed` | the immediate inbound reconcile at a finished hosted turn raised — the host does not treat it as fatal and the next cold admission retries the disposal of the claimed rows | anomaly | — | — | events | — |
-| `impersonation_terminal_notice_failed` | the host's single submission of an ended impersonation lease's notice to its Codex thread was not accepted; carries the agent, the lease and the failure reason. Nothing retries it: the external controller learns the lease ended only on its next relay call | anomaly | lease_id, error | — | events | — |
 | `host_admission_wait_exceeded` | a hosted turn has queued at the host admission gate (MEIVA_HOST_MAX_CONCURRENT_TURNS) for at least MEIVA_HOST_ADMISSION_WAIT_ALERT_SECONDS — carries the agent, its current wait, the limit and the queue depth; reported once per wait episode. Queueing is the configured memory/runtime trade-off working, not an error; a wait this long means the queue is backing up (raise the limit or inspect the turns holding slots). The wait is exempt from stall cancellation — cancelling it would only re-queue it at the tail | anomaly | — | — | events | — |
 | `inbound_reconcile` | claimed inbounds consumed after interruption | noise | — | — | events | — |
 | `brew_pin` | the brew-pin assertion could not judge this host: brew list (--pinned) raised or exited non-zero, so the installed and pinned sets are unknown, not empty | anomaly | — | — | events | — |
@@ -396,7 +384,6 @@ same origin as persistent events but uses an independent schema.
 | `exec_output` | — |
 | `exec_output_chunk` | — |
 | `exec_start` | — |
-| `impersonation_changed` | — |
 | `inbound_arrived` | — |
 | `inbound_committed` | — |
 | `label_updated` | ✓ |

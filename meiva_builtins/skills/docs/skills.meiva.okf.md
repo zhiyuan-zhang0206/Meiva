@@ -44,7 +44,6 @@ behavioral discipline for long-running agents.
 | Skill | Purpose | Detail |
 |------|------|------|
 | meiva-guide | Shared guide for humans and internal/external agents: deploy, operate, extend, schedule, and manage agents; root routes to sub-skills | [[meiva_builtins/skills/platform/meiva-guide/docs/meiva-guide.meiva.okf.md]] |
-| impersonator-guide | Executor manual for an active Meiva takeover, including inherited context, receipt, and release | [Skill](../platform/impersonator-guide/SKILL.md) |
 | meiva-being-a-long-running-agent | Operating as a long-running process: manage lifecycle, wait for external events, persist before compaction | [[meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/docs/meiva-being-a-long-running-agent.meiva.okf.md]] |
 
 ## Orchestration & workflow

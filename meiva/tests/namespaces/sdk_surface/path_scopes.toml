@@ -5,5 +5,4 @@
 ]
 "meiva.tests.fixtures.sdk" = [
     "test_agent_attribution.py",
-    "test_impersonation_capture_rebinding.py",
 ]

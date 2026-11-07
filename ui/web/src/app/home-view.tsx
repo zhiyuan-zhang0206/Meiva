@@ -66,7 +66,6 @@ type AgentsView = Pick<
   | "spawn"
   | "fork"
   | "terminate"
-  | "forceExpire"
   | "restart"
   | "resurrect"
   | "compact"
@@ -210,7 +209,6 @@ export function HomePageView(props: HomePageProps) {
         pendingSpawnCount={pendingSpawnCount}
         onSpawn={handleSpawn}
         onTerminate={agents.terminate}
-        onForceExpire={agents.forceExpire}
         onRestart={agents.restart}
         onResurrect={agents.resurrect}
         onFork={agents.fork}

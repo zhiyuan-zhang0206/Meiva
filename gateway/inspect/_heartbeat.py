@@ -34,9 +34,6 @@ class HeartbeatCadence:
 # `paused_until` is already narrowed to a *future* value (a NULL or past pause is None).
 # `pending_inbound` is true only for a FRESH pending inbound (created within the daemon's
 # freshness window). `backoff_level` is the agent's persisted nudge-backoff level.
-# `impersonation_since` is the active lease's clock (`activated_at`, else its `created_at`),
-# or None when no lease drives the agent: the daemon runs such an agent's idle clock from
-# that instant instead of `last_active_at`, and holds its backoff level at 0.
 @dataclass(frozen=True)
 class HeartbeatState:
     agent_id: int
@@ -46,7 +43,6 @@ class HeartbeatState:
     paused_until: datetime | None
     pending_inbound: bool
     backoff_level: int
-    impersonation_since: datetime | None
 
 
 # meiva:note
@@ -111,7 +107,7 @@ def plan_heartbeat(state: HeartbeatState, cadence: HeartbeatCadence) -> Heartbea
             assert_never(state.status)
     if state.paused_until is not None:
         return HeartbeatPlan(next_at=None, paused_until=state.paused_until, heartbeat_pending=False)
-    if state.status == AgentStatus.RUNNING and state.impersonation_since is None:
+    if state.status == AgentStatus.RUNNING:
         return _NO_CHECK_IN
     if state.pending_inbound:
         return HeartbeatPlan(next_at=None, paused_until=None, heartbeat_pending=True)
@@ -122,16 +118,12 @@ def plan_heartbeat(state: HeartbeatState, cadence: HeartbeatCadence) -> Heartbea
     # (mod never divides by zero).
     #
     # The floor is the interval stretched by the agent's persisted backoff level and capped at
-    # the configured ceiling — held at level 0 while an impersonation lease is active, because
-    # the selection SQL's `CASE WHEN active.id IS NOT NULL THEN 0` does not stretch it for an
-    # externally driven agent. The idle clock likewise switches to the lease's own start, so a
-    # takeover that keeps the agent running (or repeatedly active) still comes due on cadence
-    # instead of waiting for a native turn that never happens.
+    # the configured ceiling.
     span_s = cadence.jitter_span_s
     jitter_s = state.agent_id % span_s if span_s else 0
-    idle_clock = state.impersonation_since or state.last_active_at
+    idle_clock = state.last_active_at
     idle_due_at = idle_clock + timedelta(seconds=cadence.idle_threshold_s + jitter_s)
-    level = 0 if state.impersonation_since is not None else state.backoff_level
+    level = state.backoff_level
     # meiva:note
     # `1 << level`, not `2**level`: typeshed types `int ** int` with a non-literal exponent as
     # `Any`, and `level` is never negative, so the two are equal. Keep the shift.

@@ -3,9 +3,8 @@
 
 from __future__ import annotations
 
-import random
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import assert_never
@@ -14,15 +13,12 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from loguru import logger
 
-from agent.impersonation import process_host, settle_checkpoint
-from agent.impersonation_handoff import AgentGraph, flush_checkpoint, handoff_resume_pending
+from agent.checkpoint import AgentGraph, flush_checkpoint
 from agent.turn.runloop import PendingTurnFailure, publish_turn_failure, settle_turn_failure
 from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
 from base.agents.context import MeivaContext
-from base.agents.messages.timestamp_policy import TimestampSource
-from base.agents.observation.relay_supervision import RelaySupervision
 from base.api_contracts.agent_contract import ReconstructionScope
-from base.db.protocols import AsyncPool, DatabaseLike
+from base.db.protocols import AsyncPool
 from base.events.live.bus import EventBus
 from services.agent_runner.agent_host import TurnOutcome
 from services.agent_runner.agent_host.db_recovery import database_phase
@@ -30,7 +26,6 @@ from services.agent_runner.agent_host.invocation.completion_decisions import (
     ApplyLifecycle,
     CarryOn,
     SettleIdle,
-    handoff_resume_wanted,
     lifecycle_follow_up,
     plan_completion,
 )
@@ -50,9 +45,6 @@ class TurnCheckpoints:
         if scope is None:
             return self
         reader = scope.reader()
-        # meiva:note
-        # LangGraph's public copy preserves nodes, channels, compile options and
-        # serializer allowlists. Only this admission's checkpointer changes.
         return TurnCheckpoints(reader, self.graph.copy({"checkpointer": reader}), scope)
 
 
@@ -72,63 +64,11 @@ class PendingWorkResult:
 
 
 @dataclass(frozen=True)
-class HandoffSettlement:
-    db: DatabaseLike
-    bus: EventBus
-    relays: RelaySupervision
-    timestamps: TimestampSource
-    local_machine: str
-    home: Path
-    rng: random.Random
-    environ: Mapping[str, str] = field(repr=False)
-    # meiva:note
-    # The interpreter this host runs on (`HostPolicy.python`): the takeover relay it may start is
-    # the `meiva` console script beside it, so the settlement carries the value the daemon read
-    # rather than letting `process_host` read a second one.
-    python: Path
-
-
-@dataclass(frozen=True)
 class InvocationHooks:
-    settlement: HandoffSettlement
     drop_agent: Callable[[int], None]
     wake_resumed: Callable[[int], object]
-
-
-# meiva:note
-# Settle a pending external handoff checkpoint, without activating a new lease.
-async def settle_handoff_before_invocation(
-    graph: AgentGraph,
-    ctx: MeivaContext,
-    agent_id: int,
-    *,
-    fresh_input: bool,
-    settlement: HandoffSettlement,
-) -> bool:
-    async with database_phase():
-        await settle_checkpoint(
-            graph,
-            settlement.db,
-            settlement.bus,
-            agent_id,
-            settlement.relays,
-            activate_accepted=False,
-            incarnation=ctx.original_incarnation,
-            timestamps=settlement.timestamps,
-            host=process_host(
-                settlement.local_machine,
-                home=settlement.home,
-                environ=settlement.environ,
-                rng=settlement.rng,
-                clock=settlement.timestamps.clock,
-                python=settlement.python,
-            ),
-        )
-        if not handoff_resume_wanted(
-            fresh_input=fresh_input, has_original_incarnation=ctx.original_incarnation is not None
-        ):
-            return False
-        return await handoff_resume_pending(graph, agent_id)
+    home: Path
+    bus: EventBus | None = None
 
 
 # meiva:note
@@ -181,13 +121,14 @@ async def finish_completed_invocation(
         case ApplyLifecycle(resume_turn=resume_turn):
             incarnation = ctx.require_original_incarnation(agent_id)
             hooks.drop_agent(agent_id)
+            bus = hooks.bus or ctx.require_bus()
             async with database_phase():
                 kind = await apply_lifecycle_command(
                     pool,
                     incarnation,
-                    bus=hooks.settlement.bus,
+                    bus=bus,
                     resume_turn=resume_turn,
-                    home=hooks.settlement.home,
+                    home=hooks.home,
                 )
             logger.info(
                 "hosted lifecycle return settled",
@@ -200,24 +141,6 @@ async def finish_completed_invocation(
                 hooks.wake_resumed(agent_id)
             return TurnOutcome(exited=follow_up.exited, crashed=False)
         case SettleIdle():
-            async with database_phase():
-                await settle_checkpoint(
-                    checkpoints.graph,
-                    hooks.settlement.db,
-                    hooks.settlement.bus,
-                    agent_id,
-                    hooks.settlement.relays,
-                    incarnation=ctx.original_incarnation,
-                    timestamps=hooks.settlement.timestamps,
-                    host=process_host(
-                        hooks.settlement.local_machine,
-                        home=hooks.settlement.home,
-                        environ=hooks.settlement.environ,
-                        rng=hooks.settlement.rng,
-                        clock=hooks.settlement.timestamps.clock,
-                        python=hooks.settlement.python,
-                    ),
-                )
             return TurnOutcome(exited=False, crashed=False)
         case CarryOn():
             return None
