@@ -41,6 +41,7 @@ def _connection_dead(conn: object) -> bool:
 def _probe_port_one(handle: object, owner: object) -> None:
     import os
     import sys
+    from pathlib import Path
 
     cfg = getattr(handle, "_config", None)
     url = getattr(cfg, "db_url", "")
@@ -53,14 +54,30 @@ def _probe_port_one(handle: object, owner: object) -> None:
         settings_url = get_field("db_url")
     except Exception as exc:  # pragma: no cover - debug only
         settings_url = f"<{type(exc).__name__}>"
+    env_url = os.environ.get("MEIVA_DB_URL")
+    file_url = "<no home>"
+    try:
+        home = Path(os.environ.get("MEIVA_HOME", ""))
+        env_file = home / ".env"
+        if env_file.exists():
+            for line in env_file.read_text().splitlines():
+                if line.startswith("MEIVA_DB_URL="):
+                    file_url = line.split("=", 1)[1]
+                    break
+            else:
+                file_url = "<absent>"
+    except Exception as exc:  # pragma: no cover - debug only
+        file_url = f"<{type(exc).__name__}>"
     sys.stderr.write(
-        "PROBE-DIAL test=%r clients=%s created_by=%r url=%r settings=%r\n"
+        "PROBE-DIAL test=%r clients=%s created_by=%r url=%r settings=%r env=%r dotenv=%r\n"
         % (
             os.environ.get("PYTEST_CURRENT_TEST"),
             id(owner),
             getattr(owner, "_probe_created_by", None),
             url,
             settings_url,
+            env_url,
+            file_url,
         )
     )
     sys.stderr.flush()
