@@ -6,5 +6,6 @@
 "test_operations.py" = ["_restart_profile_child.py", "loopback"]
 "test_operations_part2.py" = ["loopback"]
 "test_resurrection_fences.py" = ["resurrection_setup.py"]
+"test_terminate_attachment.py" = ["loopback"]
 "test_termination_message.py" = ["_notice_on_exit_child.py", "loopback", "termination_faults.py"]
 "test_termination_recovery_wake.py" = ["termination_faults.py"]

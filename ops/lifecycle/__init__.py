@@ -135,6 +135,7 @@ async def terminate_agent_op(
     *,
     host: LocalAgentHost,
 ) -> TerminateAgentResponse:
+    attached = await asyncio.to_thread(termination.harness_attachment, agent_id, home=host.home)
     if body.force:
         _old_status, killed_page_names, _command_id, cutoff = await asyncio.to_thread(
             terminate_force_blocking, db, bus, agent_id, body, db_pool
@@ -155,6 +156,7 @@ async def terminate_agent_op(
                 cutoff=cutoff if body.kill_all_shell_sessions else None,
                 home=host.home,
             ),
+            attached=attached,
         )
 
     if (
@@ -163,6 +165,7 @@ async def terminate_agent_op(
     ):
         return TerminateAgentResponse(
             status=TerminateResult.ALREADY_TERMINATED,
+            attached=attached,
         )
 
     iid, cutoff = await asyncio.to_thread(
@@ -173,6 +176,7 @@ async def terminate_agent_op(
         return TerminateAgentResponse(
             status=TerminateResult.ALREADY_TERMINATED,
             shell_sessions=await _kill_shell_sessions_now(agent_id, cutoff=cutoff, home=host.home),
+            attached=attached,
         )
     await publish_inbound_arrived(bus, agent_id, iid, "terminate", body.source, "")
     return TerminateAgentResponse(
@@ -180,6 +184,7 @@ async def terminate_agent_op(
         shell_sessions=ShellSessionsKill(when=ShellSessionKillTiming.AT_EXIT)
         if body.kill_all_shell_sessions
         else None,
+        attached=attached,
     )
 
 

@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import psycopg
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
@@ -16,9 +18,12 @@ from base.db import Database
 from base.db.rows import IdRow, query_one
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
+from base.lm.harness.registration import RegistrationStore
 from base.log import logger
+from base.paths import harness_registrations_dir
 from base.telemetry.audit_events import prepare_event_log, record_audit
 from ops.lifecycle.events import publish_page_closed as publish_page_closed
+from ops.rpc_schemas.terminate import HarnessAttachment
 
 
 # meiva:note
@@ -313,3 +318,37 @@ def force_mark_terminated(
     )
     publish_force_terminate_inbound(db, bus, agent_id, inbound_id, source)
     return page_names
+
+
+# meiva:note
+# The registration row `home` holds for `agent_id`, as a terminate response reports it.
+#
+# The row is the bridge's record that a provider session is acting as this agent
+# (`base.lm.harness.registration`), so reading it here is the one place a terminate request
+# learns that somebody is still driving the agent. Absence is `None` and never an error, and a
+# row that cannot be decoded is `None` with the reason logged: the hint is advisory, so a
+# corrupt file must not turn a termination into a failure.
+#
+# Nothing here filters on expiry. A row whose claim has lapsed is still on disk until the
+# bridge retires it or `sweep` drops it, and reporting it with its own past `expires_at` is what
+# lets the caller tell "nobody attached" from "a session's claim lapsed".
+#
+# Nothing refuses on a present row. An attached agent has to stay killable — a controller that
+# has wedged must not be able to keep its agent alive by staying attached — so the fact travels
+# to the caller and the operator decides what to do with it.
+def harness_attachment(agent_id: int, *, home: Path) -> HarnessAttachment | None:
+    store = RegistrationStore(harness_registrations_dir(home=home))
+    try:
+        registration = store.read(agent_id)
+    except (OSError, ValueError, TypeError) as exc:
+        logger.error(
+            "[lifecycle] harness registration of agent {} could not be read: {!r}", agent_id, exc
+        )
+        return None
+    if registration is None:
+        return None
+    return HarnessAttachment(
+        agent_id=registration.agent_id,
+        controller_pid=registration.controller_pid,
+        expires_at=registration.expires_at,
+    )

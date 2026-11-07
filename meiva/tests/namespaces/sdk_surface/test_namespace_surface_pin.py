@@ -24,6 +24,7 @@ _SURFACE: dict[str, list[str]] = {
         "CancelResult",
         "CommandInfo",
         "Harness",
+        "HarnessAttachment",
         "HarnessAvailability",
         "Machine",
         "Neighbor",
