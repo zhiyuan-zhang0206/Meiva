@@ -377,7 +377,16 @@ export function useTimelineWindow({
         const vpTop = viewport.getBoundingClientRect().top;
         const docTop = node.getBoundingClientRect().top - vpTop + viewport.scrollTop;
         const delta = docTop - preserved.docTop;
-        if (Math.abs(delta) >= 1) viewport.scrollTop += delta;
+        if (Math.abs(delta) >= 1) {
+          viewport.scrollTop += delta;
+          // meiva:note
+          // One layout shift, one correction. `docTop` does not move with scrollTop, so a
+          // capture this correction already answered must not answer it again: every commit
+          // re-arms the pre-commit capture, and re-applying the same shift there writes
+          // scrollTop on every commit, renders again from the new `top`, and repeats until
+          // React gives up with "Maximum update depth exceeded".
+          preserveRef.current = { ...preserved, docTop };
+        }
       }
     }
     rememberVisible();
