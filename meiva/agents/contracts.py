@@ -48,7 +48,6 @@ class HarnessAvailability:
     models: live model and reasoning-effort options reported by the harness CLI
         when status is "available" (empty for the built-in meiva runtime, which
         uses the shared model catalog).
-    default_model: the default model id reported by the harness CLI, or None.
     """
 
     harness: Harness
@@ -57,7 +56,6 @@ class HarnessAvailability:
     binary: str | None
     on_path: bool
     models: tuple[ProbedHarnessModel, ...] = ()
-    default_model: str | None = None
 
     def __str__(self) -> str:
         location = self.binary if self.binary is not None else "built in"

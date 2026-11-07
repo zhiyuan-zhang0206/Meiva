@@ -42,7 +42,15 @@ def _stable(value: Any) -> Any:
 
 def _spawn(client: GatewayTestClient, key: str = "birth-intent") -> int:
     spawned = tool_result(
-        tool_call(client, "spawn_agent_guarded_v1", {"idempotency_key": key, "prompt": "goal"})
+        tool_call(
+            client,
+            "spawn_agent_guarded_v1",
+            {
+                "idempotency_key": key,
+                "prompt": "goal",
+                "config_overlay": {"llm_model": "deepseek-flash"},
+            },
+        )
     )
     return int(spawned["id"])
 
@@ -234,13 +242,19 @@ def test_spawn_passes_prompt_source_and_spawner_to_the_api(db_conn: psycopg.Conn
                     "prompt": "goal",
                     "prompt_source": "external_agent:codex",
                     "spawner": "codex",
+                    "config_overlay": {"llm_model": "deepseek-flash"},
                 },
             )
         )
         bad = tool_call(
             client,
             "spawn_agent_guarded_v1",
-            {"idempotency_key": "bad", "prompt": "goal", "prompt_source": "bogus"},
+            {
+                "idempotency_key": "bad",
+                "prompt": "goal",
+                "prompt_source": "bogus",
+                "config_overlay": {"llm_model": "deepseek-flash"},
+            },
         )
     assert _error_envelope(bad)["status"] == 422
     assert db_conn.execute(
@@ -260,7 +274,13 @@ def test_idempotency_keys_reach_the_api() -> None:
         conflict = tool_call(client, "send_message", args | {"content": "different"})
         assert _error_envelope(conflict)["status"] == 409
         changed = tool_call(
-            client, "spawn_agent_guarded_v1", {"idempotency_key": "birth-intent", "prompt": "new"}
+            client,
+            "spawn_agent_guarded_v1",
+            {
+                "idempotency_key": "birth-intent",
+                "prompt": "new",
+                "config_overlay": {"llm_model": "deepseek-flash"},
+            },
         )
         assert _error_envelope(changed)["status"] == 409
 
@@ -299,7 +319,11 @@ def test_spawn_launch_failure_tool_error_names_committed_agent(
         response = tool_call(
             client,
             "spawn_agent_guarded_v1",
-            {"idempotency_key": "birth-intent", "prompt": "Keep this task"},
+            {
+                "idempotency_key": "birth-intent",
+                "prompt": "Keep this task",
+                "config_overlay": {"llm_model": "deepseek-flash"},
+            },
         )
     assert response["result"]["isError"] is True
     message = tool_result(response)

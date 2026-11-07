@@ -60,7 +60,8 @@ export function PerModelPanel({
     enabled: visible,
   });
 
-  const model = picked ?? models.data?.default ?? "";
+  const firstModel = models.data ? Object.keys(models.data.models)[0] ?? "" : "";
+  const model = picked ?? firstModel;
 
   const resolved = useQuery({
     queryKey: resolvedQueryKey(model),

@@ -98,9 +98,7 @@ class SpawnMenuMixin:
         state.spawn_draft = None
         if draft is None:
             return Reply(copy.SPAWN_NOTHING_TO_SPAWN), None
-        config: dict[str, object] = {}
-        if draft.model:
-            config["llm_model"] = draft.model
+        config: dict[str, object] = {"llm_model": draft.model or "deepseek-flash"}
         if draft.effort:
             config["reasoning_effort"] = draft.effort
         try:

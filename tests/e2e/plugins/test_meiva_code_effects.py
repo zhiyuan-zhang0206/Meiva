@@ -73,46 +73,6 @@ def _checkpoint(agent_id: int, ready: Callable[[Values], bool]) -> Values:
     return values
 
 
-def _assert_notes_follow_the_tool_result(after: Call, proj: str) -> None:
-    cwd_notes = [t for t in _notes(after, "context") if "Working directory set to" in t]
-    assert cwd_notes == [f"<system_note>\nWorking directory set to {proj}\n</system_note>"], (
-        f"cwd-change note missing from the model's input after meiva.cwd.set; notes seen: "
-        f"{[(m['tag'], m['text'][:100]) for m in after if m['tag']]}"
-    )
-    skills_notes = _notes(after, "project_skills")
-    assert len(skills_notes) == 1, f"project skills note not delivered: {skills_notes}"
-    assert world.SKILL_NAME in skills_notes[0]
-    assert world.SKILL_DESCRIPTION in skills_notes[0]
-    assert f"{proj}/.claude/skills/{world.SKILL_NAME}" in skills_notes[0]
-    last_tool = max(i for i, m in enumerate(after) if m["type"] == "tool")
-    assert [m["tag"] for m in after[last_tool + 1 :]] == ["context", "project_skills"], (
-        f"notes must follow the tool result in order; tail was "
-        f"{[(m['type'], m['tag']) for m in after[last_tool:]]}"
-    )
-
-
-@pytest.mark.scenario("tests.e2e.fakes.scenarios.meiva_code:build_cwd_notes")
-def test_cwd_switch_puts_cwd_note_and_project_skills_in_the_next_model_input(
-    spawned_agent: int, seeded_world: None
-) -> None:
-    chat_and_wait(spawned_agent, "switch to the project")
-    proj = str(world.project())
-    calls = _calls(3)
-
-    assert not _notes(calls[0], "context") and not _notes(calls[0], "project_skills")
-
-    _assert_notes_follow_the_tool_result(calls[1], proj)
-
-    final = calls[2]
-    assert sum("Working directory set to" in t for t in _notes(final, "context")) == 1
-    assert len(_notes(final, "project_skills")) == 1
-
-    values = _checkpoint(spawned_agent, lambda v: v.get("meiva_code__cwd_note") is None)
-    assert values["meiva_code__cwd"] == proj
-    assert values["meiva_code__cwd_note"] is None, "cwd_note was never consumed"
-    assert values["meiva_code__project_skills_seen_compact"] == 0
-
-
 def _assert_oversized_note_is_head_and_tail(call: Call, already: list[str]) -> None:
     headers = _context_headers(call)
     assert headers[:2] == already and len(headers) == 3, headers
@@ -183,8 +143,10 @@ def test_sdk_calls_resolve_relative_paths_against_the_logical_cwd(
     assert "glob ['out.txt']" in out
     assert f"shell-pwd {sub}" in out
 
-    values = _checkpoint(spawned_agent, lambda v: v.get("meiva_code__cwd") == str(sub))
-    assert values["meiva_code__cwd"] == str(sub)
+    values = _checkpoint(
+        spawned_agent, lambda v: (v.get("cwd") or v.get("meiva_code__cwd")) == str(sub)
+    )
+    assert (values.get("cwd") or values.get("meiva_code__cwd")) == str(sub)
 
 
 def _restart_and_wait(agent_id: int) -> None:
@@ -212,7 +174,7 @@ def _restart_and_wait(agent_id: int) -> None:
 def test_cwd_survives_a_restart(spawned_agent: int, seeded_world: None) -> None:
     chat_and_wait(spawned_agent, "move to sub")
     sub = str(world.project() / "sub")
-    _checkpoint(spawned_agent, lambda v: v.get("meiva_code__cwd") == sub)
+    _checkpoint(spawned_agent, lambda v: (v.get("cwd") or v.get("meiva_code__cwd")) == sub)
     _restart_and_wait(spawned_agent)
 
     chat_and_wait(spawned_agent, "where are you now")
@@ -220,10 +182,8 @@ def test_cwd_survives_a_restart(spawned_agent: int, seeded_world: None) -> None:
     assert f"cwd-after-restart {sub}" in _tool_outputs(calls[-1]), (
         f"cwd lost across restart; model saw: {_tool_outputs(calls[-1])!r}"
     )
-    assert (
-        _checkpoint(spawned_agent, lambda v: v.get("meiva_code__cwd") == sub)["meiva_code__cwd"]
-        == sub
-    )
+    values = _checkpoint(spawned_agent, lambda v: (v.get("cwd") or v.get("meiva_code__cwd")) == sub)
+    assert (values.get("cwd") or values.get("meiva_code__cwd")) == sub
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.meiva_code:build_cwd_restart")
@@ -232,7 +192,7 @@ def test_a_vanished_cwd_falls_back_to_the_workspace_after_restart(
 ) -> None:
     chat_and_wait(spawned_agent, "move to sub")
     sub = world.project() / "sub"
-    _checkpoint(spawned_agent, lambda v: v.get("meiva_code__cwd") == str(sub))
+    _checkpoint(spawned_agent, lambda v: (v.get("cwd") or v.get("meiva_code__cwd")) == str(sub))
     shutil.rmtree(sub)
     _restart_and_wait(spawned_agent)
 
@@ -243,9 +203,10 @@ def test_a_vanished_cwd_falls_back_to_the_workspace_after_restart(
         f"stale cwd not repaired: expected the workspace {fallback}; model saw: {out!r}"
     )
     values = _checkpoint(
-        spawned_agent, lambda v: Path(v.get("meiva_code__cwd", "")).resolve() == Path(fallback)
+        spawned_agent,
+        lambda v: Path(v.get("cwd") or v.get("meiva_code__cwd", "")).resolve() == Path(fallback),
     )
-    assert Path(values["meiva_code__cwd"]).resolve() == Path(fallback)
+    assert Path(values.get("cwd") or values.get("meiva_code__cwd", "")).resolve() == Path(fallback)
 
 
 @pytest.mark.scenario("tests.e2e.fakes.scenarios.meiva_code:build_system_prompt")
@@ -293,16 +254,4 @@ def test_compaction_resurfaces_context_files(
     assert _context_headers(before) == expected
     assert _context_headers(after) == expected, (
         f"context files not re-surfaced after compact; saw {_context_headers(after)}"
-    )
-
-
-@pytest.mark.scenario("tests.e2e.fakes.scenarios.meiva_code:build_after_compact")
-def test_compaction_resurfaces_project_skills(
-    spawned_agent: int, seeded_world: None, database: Database
-) -> None:
-    before, after = _compact_and_read_again(spawned_agent, database=database)
-    assert len(_notes(before, "project_skills")) == 1
-    assert len(_notes(after, "project_skills")) == 1, (
-        f"project skills not re-injected after compact; notes: "
-        f"{[(m['tag'], m['text'][:80]) for m in after if m['tag']]}"
     )

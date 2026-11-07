@@ -102,7 +102,7 @@ def _stub_model_prober(
         reasoning_effort_options=("low", "high"),
         reasoning_effort_default="high",
     )
-    return CatalogProbeResult(models=(model,), default_model="stub-model")
+    return CatalogProbeResult(models=(model,))
 
 
 def _probe(
@@ -323,7 +323,6 @@ def test_an_antigravity_catalogue_means_a_login(tmp_path: Path) -> None:
 
     assert row.status == "available"
     assert "agy models" in row.reason
-    assert row.default_model == "gemini-4-argon"
     assert row.models == (
         ProbedHarnessModel(
             id="gemini-4-argon",
@@ -523,7 +522,6 @@ sys.stdin.buffer.read()
     )
 
     assert result.error is None
-    assert result.default_model == "gpt-6.1-terra"
     assert result.models == (
         ProbedHarnessModel(
             id="gpt-6.1-terra",
@@ -567,7 +565,6 @@ def test_probe_cli_models_claude_blanks_secret_env_and_reads_initialize(tmp_path
     )
     assert captured["env"]["ANTHROPIC_API_KEY"] == ""
     assert "CLAUDECODE" not in captured["env"]
-    assert result.default_model == "claude-opus-4-6"
     assert result.models == (
         ProbedHarnessModel(
             id="claude-opus-4-6",

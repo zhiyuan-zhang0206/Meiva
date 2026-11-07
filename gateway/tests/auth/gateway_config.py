@@ -300,11 +300,38 @@ def spawn_via_http(
     *,
     key: str | None = None,
     headers: Mapping[str, str] | None = None,
+    raw: bool = False,
 ) -> httpx2.Response:
-    return client.post(SPAWN_PATH, json=dict(body or {}), headers=spawn_headers(key, headers))
+    payload = dict(body or {})
+    if not raw:
+        fork_from = payload.get("fork_from")
+        spawner = str(payload.get("spawner") or "")
+        if fork_from is None and not spawner.startswith("agent:"):
+            cfg = payload.get("config")
+            if cfg is None:
+                payload["config"] = {"llm_model": "deepseek-flash"}
+            elif isinstance(cfg, dict) and "llm_model" not in cfg:
+                payload["config"] = {"llm_model": "deepseek-flash", **cfg}
+    return client.post(SPAWN_PATH, json=payload, headers=spawn_headers(key, headers))
 
 
-def post_spawn(gateway_url: str, body: Mapping[str, Any], *, timeout: float) -> httpx.Response:
+def post_spawn(
+    gateway_url: str,
+    body: Mapping[str, Any],
+    *,
+    timeout: float,
+    raw: bool = False,
+) -> httpx.Response:
+    payload = dict(body)
+    if not raw:
+        fork_from = payload.get("fork_from")
+        spawner = str(payload.get("spawner") or "")
+        if fork_from is None and not spawner.startswith("agent:"):
+            cfg = payload.get("config")
+            if cfg is None:
+                payload["config"] = {"llm_model": "deepseek-flash"}
+            elif isinstance(cfg, dict) and "llm_model" not in cfg:
+                payload["config"] = {"llm_model": "deepseek-flash", **cfg}
     return httpx.post(
-        f"{gateway_url}{SPAWN_PATH}", json=dict(body), headers=spawn_headers(), timeout=timeout
+        f"{gateway_url}{SPAWN_PATH}", json=payload, headers=spawn_headers(), timeout=timeout
     )

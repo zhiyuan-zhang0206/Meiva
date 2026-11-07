@@ -320,6 +320,13 @@ def _prepare_restart_validation_blocking(
         current_harness = coerce_harness(row.harness)
         machine = row.machine
         target_harness = _resolve_restart_target_harness(body.config_overlay, current_harness)
+        if target_harness != current_harness and (
+            not body.config_overlay or not body.config_overlay.get("llm_model")
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="llm_model must be explicitly provided in config_overlay when switching harnesses",
+            )
         _verify_restart_preconditions(conn, agent_id, status, current_harness, target_harness)
 
     overlay_without_harness = (
@@ -349,13 +356,13 @@ async def _resolve_restart_harness_probe(
     target_harness: Harness,
     machine: str,
     overlay: Mapping[str, object] | None,
-) -> tuple[tuple[ProbedHarnessModel, ...] | None, str | None]:
+) -> tuple[ProbedHarnessModel, ...] | None:
     if target_harness is Harness.MEIVA or not {
         "llm_model",
         "reasoning_effort",
         "harness",
     }.intersection(overlay or {}):
-        return None, None
+        return None
     rows: Sequence[HarnessAvailability] = await gateway_ensure_harnesses(request)(machine)
     row = next((item for item in rows if item.harness is target_harness), None)
     if row is None or not row.launchable:
@@ -363,7 +370,7 @@ async def _resolve_restart_harness_probe(
         raise HarnessNotLaunchable(
             f"harness {target_harness.value!r} is not launchable on {machine!r}: {detail}"
         )
-    return row.to_probed_models(), row.default_model
+    return row.to_probed_models()
 
 
 def _validate_restart_model_blocking(
@@ -376,7 +383,6 @@ def _validate_restart_model_blocking(
     current_harness: Harness,
     target_harness: Harness,
     probed_models: Sequence[ProbedHarnessModel] | None,
-    probed_default_model: str | None,
 ) -> dict[str, object]:
     from base.agents.model.restart_config import (
         RestartHarnessTarget,
@@ -393,7 +399,6 @@ def _validate_restart_model_blocking(
             target=RestartHarnessTarget(
                 harness=target_harness,
                 probed_models=probed_models,
-                probed_default_model=probed_default_model,
             ),
         )
     payload: dict[str, object] = body.model_dump()
@@ -427,7 +432,7 @@ async def post_agent_restart(
         catalog=catalog,
         home=state.gateway_process.home,
     )
-    probed_models, probed_default_model = await _resolve_restart_harness_probe(
+    probed_models = await _resolve_restart_harness_probe(
         request, target_harness, machine, body.config_overlay
     )
     forwarded_payload = await asyncio.to_thread(
@@ -440,7 +445,6 @@ async def post_agent_restart(
         current_harness=current_harness,
         target_harness=target_harness,
         probed_models=probed_models,
-        probed_default_model=probed_default_model,
     )
 
     forwarded = await forward_to_home_machine(

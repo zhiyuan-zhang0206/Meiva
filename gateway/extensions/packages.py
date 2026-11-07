@@ -60,6 +60,7 @@ async def guarded_draft_package(
         prompt=prompt,
         prompt_source="user",
         label="meiva-package-installer",
+        config={"llm_model": "deepseek-flash"},
     )
     spawned = await create_and_launch_agent(
         body_obj,

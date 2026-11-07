@@ -60,6 +60,7 @@ async def test_cold_admission_reads_the_history_once_and_never_repairs_it(
         database,
         event_bus,
         spawner="user",
+        config={"llm_model": "deepseek-flash"},
         machine=machine_identity.name(),
         catalog=model_catalog,
         authority=config_authority,

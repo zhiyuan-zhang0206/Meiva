@@ -29,6 +29,7 @@ from base.api_contracts.agent_contract import (
     Harness,
     HarnessNotLaunchable,
     ProbedHarnessModel,
+    parse_spawner_agent_id,
 )
 from base.clock import Clock
 from base.cluster.machines import is_paused, lookup_role
@@ -80,38 +81,161 @@ def _check_spawn_target_blocking(db: Database, target: str) -> None:
         raise refusal
 
 
+@dataclass(frozen=True)
+class _ParentAgentMetaRow:
+    harness: str
+    config_overlay: Mapping[str, object] | None
+    birth_config: Mapping[str, object] | None
+
+
+def _parent_source(pool: ConnectionPool, parent_id: int) -> tuple[str, str | None, str | None]:
+    with pool.connection() as conn:
+        row = query_one(
+            conn,
+            _ParentAgentMetaRow,
+            "SELECT harness, config_overlay, birth_config FROM agents_meta WHERE id = %s",
+            (parent_id,),
+        )
+    if row is None:
+        logger.warning(
+            "parent agent {id} does not exist in agents_meta; defaulting to meiva deepseek-flash",
+            id=parent_id,
+        )
+        return ("meiva", "deepseek-flash", None)
+    parent_harness = row.harness
+    overlay = row.config_overlay or {}
+    birth = row.birth_config or {}
+    raw_model = overlay.get("llm_model") if "llm_model" in overlay else birth.get("llm_model")
+    raw_effort = (
+        overlay.get("reasoning_effort")
+        if "reasoning_effort" in overlay
+        else birth.get("reasoning_effort")
+    )
+    parent_model = str(raw_model) if isinstance(raw_model, str) else None
+    parent_effort = str(raw_effort) if isinstance(raw_effort, str) else None
+    return (parent_harness, parent_model, parent_effort)
+
+
 async def _resolve_external_spawn_probe(
     db: Database,
     target: str,
     body: SpawnAgentRequest,
     ensure_harnesses: EnsureHarnesses | None,
-) -> tuple[tuple[ProbedHarnessModel, ...] | None, str | None, dict[str, object] | None]:
-    target_harness = body.harness or Harness.MEIVA
-    if target_harness is Harness.MEIVA or body.fork_from is not None:
-        return None, None, None
+    *,
+    effective_harness: Harness,
+    effective_model: str | None,
+    effective_effort: str | None,
+) -> tuple[tuple[ProbedHarnessModel, ...] | None, dict[str, object] | None]:
+    if effective_harness is Harness.MEIVA or body.fork_from is not None:
+        return None, None
     await asyncio.to_thread(_check_spawn_target_blocking, db, target)
     if ensure_harnesses is None:
         raise RuntimeError("external harness spawn requires ensure_harnesses wiring")
     rows = await ensure_harnesses(target)
-    row = next((item for item in rows if item.harness is target_harness), None)
+    row = next((item for item in rows if item.harness is effective_harness), None)
     if row is None or not row.launchable:
         detail = row.reason if row is not None else "missing probe row"
         raise HarnessNotLaunchable(
-            f"harness {target_harness.value!r} is not launchable on {target!r}: {detail}"
+            f"harness {effective_harness.value!r} is not launchable on {target!r}: {detail}"
         )
     probed_models = row.to_probed_models()
     resolved_model, resolved_effort = resolve_probed_harness_selection(
-        target_harness,
+        effective_harness,
         probed_models,
-        row.default_model,
-        requested_model=body.config.get("llm_model") if body.config else None,
-        requested_effort=body.config.get("reasoning_effort") if body.config else None,
+        requested_model=effective_model,
+        requested_effort=effective_effort,
     )
     return (
         probed_models,
-        row.default_model,
         {"llm_model": resolved_model, "reasoning_effort": resolved_effort},
     )
+
+
+def _resolve_fork_effective_model_and_effort(
+    body: SpawnAgentRequest,
+) -> tuple[Harness, str | None, str | None]:
+    effective_harness = body.harness or Harness.MEIVA
+    effective_model = body.config.get("llm_model") if body.config else None
+    effective_effort = body.config.get("reasoning_effort") if body.config else None
+    return (
+        effective_harness,
+        str(effective_model) if effective_model else None,
+        str(effective_effort) if effective_effort else None,
+    )
+
+
+def _resolve_parent_spawn_effective_model_and_effort(
+    effective_harness: Harness,
+    parent_harness: Harness,
+    parent_model: str | None,
+    parent_effort: str | None,
+    req_model: object | None,
+    req_effort: object | None,
+) -> tuple[Harness, str | None, str | None]:
+    if effective_harness != parent_harness:
+        if not req_model:
+            raise HTTPException(
+                status_code=422,
+                detail="llm_model must be explicitly provided when spawning on a different harness from parent agent",
+            )
+        return (
+            effective_harness,
+            str(req_model),
+            str(req_effort) if req_effort is not None else None,
+        )
+
+    model = str(req_model) if req_model else parent_model
+    if req_effort in (None, "") and (req_model is None or req_model == parent_model):
+        effort = parent_effort
+    else:
+        effort = str(req_effort) if req_effort is not None else None
+    return (effective_harness, model, effort)
+
+
+def _resolve_root_spawn_effective_model_and_effort(
+    body: SpawnAgentRequest,
+) -> tuple[Harness, str | None, str | None]:
+    effective_harness = body.harness or Harness.MEIVA
+    raw_req_model = body.config.get("llm_model") if body.config else None
+    raw_req_effort = body.config.get("reasoning_effort") if body.config else None
+    if not raw_req_model:
+        raise HTTPException(
+            status_code=422,
+            detail="config.llm_model must be explicitly provided in spawn request",
+        )
+    return (
+        effective_harness,
+        str(raw_req_model),
+        str(raw_req_effort) if raw_req_effort is not None else None,
+    )
+
+
+async def _resolve_spawn_effective_model_and_effort(
+    pool: ConnectionPool,
+    body: SpawnAgentRequest,
+) -> tuple[Harness, str | None, str | None]:
+    if body.fork_from is not None:
+        return _resolve_fork_effective_model_and_effort(body)
+
+    parent_id = parse_spawner_agent_id(body.spawner)
+    if parent_id is not None:
+        parent_harness_str, parent_model, parent_effort = await asyncio.to_thread(
+            _parent_source, pool, parent_id
+        )
+        parent_harness = Harness(parent_harness_str)
+        effective_harness = body.harness if body.harness is not None else parent_harness
+        req_model = body.config.get("llm_model") if body.config else None
+        req_effort = body.config.get("reasoning_effort") if body.config else None
+        return _resolve_parent_spawn_effective_model_and_effort(
+            effective_harness,
+            parent_harness,
+            parent_model,
+            parent_effort,
+            req_model,
+            req_effort,
+        )
+
+    return _resolve_root_spawn_effective_model_and_effort(body)
 
 
 async def create_and_launch_agent(
@@ -166,8 +290,21 @@ async def create_and_launch_agent(
             clock=clock,
             rpc=rpc,
         )
-    probed_models, probed_default_model, harness_defaults = await _resolve_external_spawn_probe(
-        db, target, body, ensure_harnesses
+
+    (
+        effective_harness,
+        effective_model,
+        effective_effort,
+    ) = await _resolve_spawn_effective_model_and_effort(pool, body)
+
+    probed_models, harness_defaults = await _resolve_external_spawn_probe(
+        db,
+        target,
+        body,
+        ensure_harnesses,
+        effective_harness=effective_harness,
+        effective_model=effective_model,
+        effective_effort=effective_effort,
     )
     keys = await asyncio.to_thread(process_provider_keys, catalog, environ=environ)
     tail_skills, model_receipt = await asyncio.to_thread(
@@ -179,8 +316,8 @@ async def create_and_launch_agent(
         catalog=catalog,
         keys=keys,
         authority=authority,
+        effective_harness=effective_harness,
         probed_models=probed_models,
-        probed_default_model=probed_default_model,
     )
     # fork_checkpoint resolution stays gateway-side: LangGraph checkpoints are
     # append-only and "latest" drifts under concurrent writes, so the gateway
@@ -193,7 +330,6 @@ async def create_and_launch_agent(
         keys=keys,
         authority=authority,
         probed_models=probed_models,
-        probed_default_model=probed_default_model,
     )
     try:
         new_id, birth_config, prompt_inbound_id, launch_attempt_id = await asyncio.to_thread(
@@ -209,7 +345,7 @@ async def create_and_launch_agent(
             config=body.config,
             label=body.label,
             fork_tail_skills=tail_skills,
-            harness=body.harness.value if body.harness is not None else None,
+            harness=effective_harness.value,
             harness_defaults=harness_defaults,
             prompt=body.prompt,
             prompt_source=body.prompt_source,
@@ -333,8 +469,8 @@ def spawn_preflight_blocking(
     catalog: ModelCatalog,
     keys: ProviderKeys,
     authority: ConfigAuthority,
+    effective_harness: Harness | None = None,
     probed_models: Sequence[ProbedHarnessModel] | None = None,
-    probed_default_model: str | None = None,
 ) -> tuple[list[str] | None, tuple[str, str] | None]:
     # meiva:note
     # Capability and the pause latch are read from the cluster registry — the same
@@ -349,11 +485,11 @@ def spawn_preflight_blocking(
     # watcher respawns, peer spawns) is refused here with the same clear reason
     # instead of a transport error at dial time.
     _check_spawn_target_blocking(db, target)
-    target_harness = body.harness or Harness.MEIVA
+    target_harness = effective_harness or body.harness or Harness.MEIVA
     tail_skills: list[str] | None = None
     if body.fork_from is not None:
         with pool.connection() as conn, conn.cursor() as cur:
-            resolve_birth_harness(cur, body.harness, body.fork_from)
+            resolve_birth_harness(cur, body.harness, body.fork_from, spawner=body.spawner)
         tail_skills = _validate_fork_config(pool, body)
     # Settle a withdrawn llm_model BEFORE the overlay is stored or forwarded —
     # the row, fork copies and the launch op all carry the registered fallback,
@@ -374,13 +510,13 @@ def spawn_preflight_blocking(
             cur,
             body.config,
             body.fork_from,
+            spawner=body.spawner,
             catalog=catalog,
             keys=keys,
             authority=authority,
             llm_override=authority.service_field_value("llm_override"),
             harness=target_harness,
             probed_models=probed_models,
-            probed_default_model=probed_default_model,
         )
     if model_receipt is not None:
         logger.warning(

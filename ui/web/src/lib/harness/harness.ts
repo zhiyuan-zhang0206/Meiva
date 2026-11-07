@@ -49,6 +49,5 @@ export function harnessRows(rows: HarnessAvailability[]): HarnessAvailability[] 
     // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
     billing: "api",
     models: [],
-    default_model: null,
   });
 }

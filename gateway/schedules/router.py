@@ -626,6 +626,7 @@ async def guarded_draft_schedule(
         prompt=prompt,
         prompt_source="user",
         label="meiva-schedule-writer",
+        config={"llm_model": "deepseek-flash"},
     )
     spawned = await create_and_launch_agent(
         body_obj,

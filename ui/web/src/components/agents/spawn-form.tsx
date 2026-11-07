@@ -212,23 +212,17 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
     selectedHarness === DEFAULT_HARNESS
       ? nativeModelGroups.flatMap(([, models]) => models)
       : probedModels.map((item) => item.id);
-  const defaultModel =
-    selectedHarness === DEFAULT_HARNESS
-      ? modelsData?.default
-      : (selectedHarnessRow?.default_model ?? undefined);
 
   // meiva:note
   // The model the next agent will be born on: the stored choice while the chosen
-  // harness can run it, else this harness's default or first model (the stored
+  // harness can run it, else this harness's first available model (the stored
   // value stays, so switching the harness back restores it). Undefined only when
   // the active roster offers nothing for that harness.
   // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
   const effectiveModel: string | undefined =
     selectedModel !== undefined && visibleModels.includes(selectedModel)
       ? selectedModel
-      : defaultModel !== undefined && visibleModels.includes(defaultModel)
-        ? defaultModel
-        : visibleModels[0];
+      : visibleModels[0];
 
   const executionSettings =
     selectedHarness === DEFAULT_HARNESS

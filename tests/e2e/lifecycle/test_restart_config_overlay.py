@@ -30,7 +30,7 @@ def test_restart_config_overlay_persists_and_rejects_invalid_values(spawned_agen
             "SELECT config_overlay FROM agents_meta WHERE id = %s", (agent_id,)
         ).fetchone()
     assert persisted_overlay is not None
-    assert persisted_overlay[0] == overlay
+    assert persisted_overlay[0] == {**overlay, "llm_model": "deepseek-flash"}
 
     invalid = gateway_post(
         f"{GATEWAY_URL}/api/agents/{agent_id}/restart",

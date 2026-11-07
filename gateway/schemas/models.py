@@ -8,7 +8,6 @@ canonical registry's vendor reference TPS metadata.
 from pydantic import BaseModel, Field
 
 from base.api_contracts.agent_contract import (
-    DefaultModelSource,
     Harness,
     HarnessBilling,
     HarnessStatus,
@@ -55,7 +54,6 @@ class HarnessAvailability(BaseModel):
     # meiva:link base/agents/docs/harness/harness.meiva.okf.md
     billing: HarnessBilling
     models: list[HarnessModelOption] = Field(default_factory=list)
-    default_model: str | None = None
 
     def to_probed_models(self) -> tuple[ProbedHarnessModel, ...]:
         return tuple(
@@ -93,25 +91,3 @@ class ModelsResponse(BaseModel):
 
     providers: dict[str, list[str]]
     models: dict[str, ModelInfo]
-    default: str
-
-
-class DefaultModelView(BaseModel):
-    """GET/PUT /api/config/default-model — the model a new agent is born on.
-
-    `source` names where `model` came from, because the two cases behave
-    differently on the next `.env` edit: `cluster` is the DB row (a deliberate
-    choice through this endpoint, which outranks `.env`), `config` is the ordinary
-    chain (`.env` MEIVA_MODEL, else the code default) showing through because no
-    cluster choice has been made.
-    """
-
-    model: str
-    source: DefaultModelSource
-
-
-class DefaultModelWrite(BaseModel):
-    """PUT /api/config/default-model body. `model` must be a spawnable id from the
-    registry roster; anything else is rejected rather than stored."""
-
-    model: str

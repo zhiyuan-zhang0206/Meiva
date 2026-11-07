@@ -48,7 +48,6 @@ def _seed_restart_harnesses(client: GatewayTestClient) -> None:
                         reasoning_effort_default="medium",
                     )
                 ],
-                default_model="gpt-6.1-sol",
             ),
             HarnessAvailability(
                 harness=Harness.CLAUDE_CODE,
@@ -63,7 +62,6 @@ def _seed_restart_harnesses(client: GatewayTestClient) -> None:
                         reasoning_effort_default="high",
                     )
                 ],
-                default_model="claude-opus-4-6",
             ),
         ],
     )
@@ -480,7 +478,7 @@ class TestRestart:
                 f"/api/agents/{agent_id}/restart",
                 json={
                     "message": "switching to codex",
-                    "config_overlay": {"harness": "codex"},
+                    "config_overlay": {"harness": "codex", "llm_model": "gpt-6.1-sol"},
                 },
             )
             assert resp.status_code == 200, resp.text
@@ -612,7 +610,7 @@ class TestRestart:
                 f"/api/agents/{agent_id}/restart",
                 json={
                     "message": "switch under a lease",
-                    "config_overlay": {"harness": "codex"},
+                    "config_overlay": {"harness": "codex", "llm_model": "gpt-6.1-sol"},
                 },
             )
             assert resp.status_code == 409
@@ -677,7 +675,7 @@ class TestRestart:
                 f"/api/agents/{agent_id}/restart",
                 json={
                     "message": "switch while running",
-                    "config_overlay": {"harness": "codex"},
+                    "config_overlay": {"harness": "codex", "llm_model": "gpt-6.1-sol"},
                 },
             )
             assert resp.status_code == 409
@@ -691,7 +689,7 @@ class TestRestart:
                 f"/api/agents/{agent_id}/restart",
                 json={
                     "message": "   ",
-                    "config_overlay": {"harness": "codex"},
+                    "config_overlay": {"harness": "codex", "llm_model": "gpt-6.1-sol"},
                 },
             )
             assert resp_blank.status_code == 422

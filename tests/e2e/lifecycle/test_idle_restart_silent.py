@@ -79,8 +79,9 @@ def _wait_for_silent_restart_cycle(agent_id: int) -> dict[str, Any]:
 def _assert_silent_and_alive_after_restart(values: dict[str, Any]) -> None:
     assert _ai_count(values) == 2, f"extra LLM turn after respawn: {_ai_count(values)} AIMessages"
     assert values["halted"] is True
-    assert str(values["meiva_code__cwd"]).endswith("e2e-idle-restart-cwd"), (
-        f"plugin state cwd did not survive respawn: {values.get('meiva_code__cwd')!r}"
+    cwd_val = values.get("cwd") or values.get("meiva_code__cwd")
+    assert str(cwd_val).endswith("e2e-idle-restart-cwd"), (
+        f"plugin state cwd did not survive respawn: {cwd_val!r}"
     )
 
 
@@ -97,8 +98,9 @@ def test_external_restart_of_idle_agent_is_silent(spawned_agent: int) -> None:
 
     values = _wait_for_pre_restart_turn(agent_id)
 
-    assert str(values["meiva_code__cwd"]).endswith("e2e-idle-restart-cwd"), (
-        f"pre-restart cwd not written to plugin state: {values.get('meiva_code__cwd')!r}"
+    cwd_val = values.get("cwd") or values.get("meiva_code__cwd")
+    assert str(cwd_val).endswith("e2e-idle-restart-cwd"), (
+        f"pre-restart cwd not written to plugin state: {cwd_val!r}"
     )
 
     gateway_post(

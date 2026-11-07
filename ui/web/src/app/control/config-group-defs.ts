@@ -10,12 +10,6 @@ export const OTHER_GROUP_ID = "config-other";
 export const PER_MODEL_GROUP_ID = "config-per-model";
 
 // meiva:note
-// Same deal: the cluster default-model control renders its own element
-// (_default_model.tsx) and edits a DB row, not a `.env` field, so it is a nav
-// sub-entry but never a field bucket.
-export const DEFAULT_MODEL_GROUP_ID = "config-default-model";
-
-// meiva:note
 // Display order INSIDE each group is the array order here (the prototype's
 // curated order); unmapped fields append after, alphabetically.
 // Exported for the consistency test (HIDDEN_ENV_VARS ∩ GROUP_ENV_VARS == ∅).
@@ -203,7 +197,7 @@ export const HIDDEN_ENV_VARS = new Set<string>([
 // links and the on-page headers can never disagree.
 export const CONFIG_DISPLAY_GROUPS: { id: string; label: string }[] = [
   ...(CONTROL_SECTIONS.find((s) => s.id === "config")?.subs ?? []).filter(
-    (s) => s.id !== PER_MODEL_GROUP_ID && s.id !== DEFAULT_MODEL_GROUP_ID,
+    (s) => s.id !== PER_MODEL_GROUP_ID,
   ),
   { id: OTHER_GROUP_ID, label: "Other" },
 ];

@@ -212,7 +212,7 @@ def agent_supports_vision(
     birth_config: object,
     *,
     catalog: ModelCatalog | None,
-    default_model: str,
+    default_model: str | None = None,
 ) -> bool | None:
     from base.config.agent_pins import resolve_agent_config_pins
     from base.lm.factory import model_supports_vision
@@ -230,12 +230,16 @@ def agent_supports_vision(
     return model_supports_vision(model, catalog=catalog)
 
 
-def _model_of_pins(pins: Mapping[str, object], *, catalog: ModelCatalog, default_model: str) -> str:
+def _model_of_pins(
+    pins: Mapping[str, object], *, catalog: ModelCatalog, default_model: str | None = None
+) -> str:
     from base.lm.registry import resolve_available_model
 
     pinned = pins.get("llm_model")
     if not pinned:
-        return resolve_available_model(default_model, models=catalog.models)
+        if default_model:
+            return resolve_available_model(default_model, models=catalog.models)
+        raise ValueError("the agent has no pinned llm_model and no default model is available")
     if not isinstance(pinned, str):
         raise TypeError("the llm_model pin must be a model name")
     return resolve_available_model(pinned, models=catalog.models)
@@ -296,7 +300,7 @@ def _row_to_snapshot(
     row: _SnapshotRow,
     *,
     catalog: ModelCatalog | None,
-    default_model: str,
+    default_model: str | None = None,
     now: datetime,
 ) -> AgentSnapshot:
     supports_vision = agent_supports_vision(
@@ -341,7 +345,7 @@ def select_one(
     agent_id: int,
     *,
     catalog: ModelCatalog | None,
-    default_model: str,
+    default_model: str | None = None,
 ) -> AgentSnapshot | None:
     """Look up a single agent's snapshot; returns None when the row does not exist."""
     now = db_now(conn)
@@ -372,7 +376,7 @@ def agent_model_target(
     *,
     fallback: str,
     catalog: ModelCatalog,
-    default_model: str,
+    default_model: str | None = None,
 ) -> tuple[str, ModelOverrides]:
     """The model `agent_id`'s own calls run, withdrawal-resolved, and its tuning pins.
 

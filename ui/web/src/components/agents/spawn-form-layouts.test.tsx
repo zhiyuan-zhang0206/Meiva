@@ -102,7 +102,6 @@ const singleMachineStatus = () =>
 const modelsDefault = (): ModelsResponse => ({
   providers: { deepseek: ["deepseek-v4-pro"], claude: ["claude-opus-4-8"] },
   models: {},
-  default: "deepseek-v4-pro",
 });
 
 const modelsWithEffort = (): ModelsResponse => ({
@@ -122,7 +121,6 @@ const modelsWithEffort = (): ModelsResponse => ({
       reasoning_effort_default: null,
     },
   },
-  default: "deepseek-v4-pro",
 });
 
 const modelsWithTwoLadders = (): ModelsResponse => ({
@@ -141,7 +139,6 @@ const modelsWithTwoLadders = (): ModelsResponse => ({
       reasoning_effort_default: "medium",
     },
   },
-  default: "deepseek-v4-pro",
 });
 
 const harnessAllAvailable = (): HarnessAvailability[] => [
@@ -152,7 +149,6 @@ const harnessAllAvailable = (): HarnessAvailability[] => [
     launchable: true,
     billing: "api",
     models: [],
-    default_model: null,
   },
   {
     harness: "claude_code",
@@ -161,7 +157,6 @@ const harnessAllAvailable = (): HarnessAvailability[] => [
     launchable: true,
     billing: "subscription",
     models: [{ id: "claude-opus-4-8", reasoning_effort_options: [], reasoning_effort_default: null }],
-    default_model: "claude-opus-4-8",
   },
   {
     harness: "codex",
@@ -170,7 +165,6 @@ const harnessAllAvailable = (): HarnessAvailability[] => [
     launchable: true,
     billing: "subscription",
     models: [{ id: "gpt-5.6", reasoning_effort_options: ["low", "medium", "high"], reasoning_effort_default: "medium" }],
-    default_model: "gpt-5.6",
   },
   {
     harness: "antigravity",
@@ -179,7 +173,6 @@ const harnessAllAvailable = (): HarnessAvailability[] => [
     launchable: true,
     billing: "subscription",
     models: [{ id: "gemini-4-argon", reasoning_effort_options: ["low", "medium", "high"], reasoning_effort_default: "high" }],
-    default_model: "gemini-4-argon",
   },
 ];
 
@@ -690,7 +683,7 @@ describe.each(["table", "stack"] as const)("manual harness refresh (%s)", (layou
     pick(form, MACHINE_COLUMN, "b-host");
     pendingA.resolve(harnessAllAvailable());
     pendingB.resolve([
-      { harness: "meiva", status: "available", reason: "", launchable: true, billing: "api", models: [], default_model: null },
+      { harness: "meiva", status: "available", reason: "", launchable: true, billing: "api", models: [] },
       {
         harness: "codex",
         status: "available",
@@ -698,7 +691,6 @@ describe.each(["table", "stack"] as const)("manual harness refresh (%s)", (layou
         launchable: true,
         billing: "subscription",
         models: [{ id: "gpt-5.6", reasoning_effort_options: ["low", "high"], reasoning_effort_default: "high" }],
-        default_model: "gpt-5.6",
       },
     ]);
     await waitFor(() => expect(qc.getQueryData(["harness-availability", "a-host"])).toEqual(harnessAllAvailable()));

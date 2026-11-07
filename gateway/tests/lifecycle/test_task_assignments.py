@@ -49,7 +49,7 @@ def body(runner: RunnerOps, db_conn: psycopg.Connection) -> dict[str, Any]:
     actor = db_conn.execute("INSERT INTO agents DEFAULT VALUES RETURNING id").fetchone()
     assert actor is not None
     db_conn.execute(
-        "INSERT INTO agents_meta(id,spawner,status,machine) VALUES (%s,'user','idling','local-test')",
+        "INSERT INTO agents_meta(id,spawner,status,machine,birth_config) VALUES (%s,'user','idling','local-test','{\"llm_model\":\"deepseek-flash\"}')",
         (actor[0],),
     )
     parent = db_conn.execute(

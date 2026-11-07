@@ -4,7 +4,6 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
-from base.agents.model.birth_config import set_cluster_default_model
 from base.agents.model.model_config import (
     RestartHarnessTarget,
     validate_restart_model_config,
@@ -52,11 +51,23 @@ def test_external_spawn_validates_execution_selection_without_native_keys(
                 authority=authority,
                 harness=Harness.CODEX,
                 probed_models=codex_models,
-                probed_default_model="gpt-6.1-terra",
             )
             == "gpt-6.1-terra"
         )
         assert (
+            validate_spawn_model_config(
+                cur,
+                {"llm_model": "gpt-oss-120b"},
+                catalog=model_catalog,
+                keys=ProviderKeys({}),
+                llm_override="",
+                authority=authority,
+                harness=Harness.ANTIGRAVITY,
+                probed_models=agy_models,
+            )
+            == "gpt-oss-120b"
+        )
+        with pytest.raises(InvalidModelConfig, match="no model configured"):
             validate_spawn_model_config(
                 cur,
                 None,
@@ -66,10 +77,7 @@ def test_external_spawn_validates_execution_selection_without_native_keys(
                 authority=authority,
                 harness=Harness.ANTIGRAVITY,
                 probed_models=agy_models,
-                probed_default_model="gpt-oss-120b",
             )
-            == "gpt-oss-120b"
-        )
         with pytest.raises(InvalidModelConfig, match="unsupported reasoning effort"):
             validate_spawn_model_config(
                 cur,
@@ -90,7 +98,6 @@ def test_external_spawn_validates_execution_selection_without_native_keys(
                 authority=authority,
                 harness=Harness.CODEX,
                 probed_models=codex_models,
-                probed_default_model="gpt-6.1-terra",
             )
 
 
@@ -111,16 +118,29 @@ def test_restart_switching_onto_external_harness_drops_prior_harness_pins(
         ),
     )
     with db_conn.cursor() as cur:
+        with pytest.raises(
+            InvalidModelConfig, match="llm_model must be explicitly provided in config_overlay"
+        ):
+            validate_restart_model_config(
+                cur,
+                agent_id,
+                {"harness": "codex"},
+                catalog=model_catalog,
+                default_model=settings.lm.llm_model,
+                target=RestartHarnessTarget(
+                    harness=Harness.CODEX,
+                    probed_models=probed,
+                ),
+            )
         resolved = validate_restart_model_config(
             cur,
             agent_id,
-            {"harness": "codex"},
+            {"harness": "codex", "llm_model": "gpt-6.1-terra"},
             catalog=model_catalog,
             default_model=settings.lm.llm_model,
             target=RestartHarnessTarget(
                 harness=Harness.CODEX,
                 probed_models=probed,
-                probed_default_model="gpt-6.1-terra",
             ),
         )
         assert resolved == ("gpt-6.1-terra", "low")
@@ -139,7 +159,6 @@ def test_fork_preflight_keeps_its_birth_model_after_default_changes(
         (agent_id, Jsonb({"llm_model": "deepseek-flash", "reasoning_effort": "max"})),
     )
     with db_conn.cursor() as cur:
-        set_cluster_default_model(cur, "mimo-v2.6-pro", updated_by="test")
         assert (
             validate_spawn_model_config(
                 cur,

@@ -53,7 +53,7 @@ _AGENT = {
         "runtime_owner": "unknown",
     },
     "heartbeat_paused_until": None,
-    "awaiting_response_count": 1,
+    "awaiting_response_count": 0,
     "highest_notice_priority": "P2",
     "unread_notice_count": 1,
 }
@@ -61,8 +61,8 @@ _AGENT = {
 _AWAITING_NOTICES = [
     {
         "id": 1,
-        "agent_id": 1,
-        "agent_label": "layout-test",
+        "agent_id": 2,
+        "agent_label": "other-agent",
         "title": "Needs a decision",
         "content": "Pick A or B.",
         "priority": "P2",
@@ -136,7 +136,7 @@ API_STUBS: dict[str, object] = {
     "/api/agents/roster": {"agents": [_AGENT], "ancestors": []},
     "/api/agents/1": {
         **_AGENT,
-        "notices_awaiting_response": _AWAITING_NOTICES,
+        "notices_awaiting_response": [],
         "fork_source_checkpoint_id": None,
         "last_probe_at": None,
     },

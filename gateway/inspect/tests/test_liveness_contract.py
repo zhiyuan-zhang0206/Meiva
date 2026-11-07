@@ -86,3 +86,19 @@ def test_a_meiva_agent_keeps_its_own_model_choice(
     db_conn.commit()
     with database.pool(max_size=1) as pool:
         assert "llm_model" not in db_rows_blocking(pool, aid).config_overlay
+
+
+# meiva:note
+# When config_overlay omits llm_model, the inspector surfaces birth_config's llm_model in overlay.
+def test_inspector_surfaces_birth_config_model_when_overlay_omitted(
+    db_conn: psycopg.Connection, database: Database
+) -> None:
+    aid = _agent(db_conn, liveness_state="online")
+    _ = db_conn.execute(
+        'UPDATE agents_meta SET birth_config = \'{"llm_model": "deepseek-flash"}\', '
+        "config_overlay = '{}' WHERE id = %s",
+        (aid,),
+    )
+    db_conn.commit()
+    with database.pool(max_size=1) as pool:
+        assert db_rows_blocking(pool, aid).config_overlay["llm_model"] == "deepseek-flash"

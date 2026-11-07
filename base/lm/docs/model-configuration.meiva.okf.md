@@ -9,11 +9,11 @@ tags:
 
 # Effective Agent Model Configuration
 
-`base/agents/model/birth_config.py:resolve_default_model` resolves the DB-backed
-cluster default, otherwise the current config default, through the model
-catalog's declared availability fallback. The default-model API, model picker,
-birth stamp and spawn preflight share this owner. A fork preserves its inherited
-birth stamp rather than taking the new cluster default.
+`base/agents/model/birth_config.py:resolve_birth_config` resolves the frozen
+configuration stamped on newly born agents. Neither Meiva nor external harnesses
+maintain a cluster fallback default model: root agents require an explicit model
+selection, while child agents inherit their parent agent's effective model and reasoning
+effort. A fork preserves its inherited birth stamp.
 
 `model_config.py` validates the final agent configuration: spawn overlays over
 current birth defaults (or a fork's inherited stamp), and restart edits over

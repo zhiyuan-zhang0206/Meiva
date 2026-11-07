@@ -32,16 +32,21 @@ def spawn_agent(
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     local_machine: MachineIdentityReader,
+    config: dict[str, object] | None = None,
 ) -> int:
     """Setup helper — a row for the SDK's self identity (Task #1236 split: the
     row is created by create_agent_row; nothing launches, these tests only need
     the row to exist)."""
     from base.agents.birth.spawn import create_agent_row
 
+    effective_config: dict[str, object] = (
+        dict(config) if config is not None else {"llm_model": "deepseek-flash"}
+    )
     agent_id, _, _prompt_id, _attempt_id = create_agent_row(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         machine=local_machine.name(),
+        config=effective_config,
         catalog=build_model_catalog(home=meiva_home()),
         authority=config_authority,
     )

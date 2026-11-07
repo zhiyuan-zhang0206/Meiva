@@ -129,10 +129,6 @@ ROUTE_CONTRACTS: dict[tuple[str, str], RouteContract] = {
     ("GET", "/api/config/resolved"): RouteContract(),
     ("GET", "/api/config/audit"): RouteContract(),
     ("PUT", "/api/config"): RouteContract(note="full config replace — PUT is idempotent"),
-    ("GET", "/api/config/default-model"): RouteContract(),
-    ("PUT", "/api/config/default-model"): RouteContract(
-        note="set default model — PUT is idempotent"
-    ),
     ("GET", "/api/agents/{agent_id}/conversation-snapshot"): RouteContract(
         note="composed switch refresh — timeline head window + token usage + pending in one read"
     ),

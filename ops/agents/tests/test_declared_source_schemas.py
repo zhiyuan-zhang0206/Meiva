@@ -10,7 +10,11 @@ from ops.rpc_schemas import (
 )
 
 _SCHEMAS: list[tuple[type[BaseModel], str, dict[str, object]]] = [
-    (SpawnAgentRequest, "prompt_source", {"prompt": "hello"}),
+    (
+        SpawnAgentRequest,
+        "prompt_source",
+        {"prompt": "hello", "config": {"llm_model": "deepseek-flash"}},
+    ),
     (ResurrectAgentRequest, "resurrected_by", {}),
     (RestartAgentRequest, "source", {"message": "restarting"}),
     (TerminateAgentRequest, "source", {"force": True}),

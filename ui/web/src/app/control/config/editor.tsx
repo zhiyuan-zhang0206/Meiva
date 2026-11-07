@@ -23,7 +23,6 @@ import type {
 import { SYSTEM_STATUS_QUERY_KEY } from "@/lib/notifications/use-cluster-health";
 
 import {
-  DEFAULT_MODEL_GROUP_ID,
   PER_MODEL_GROUP_ID,
 } from "../config-group-defs";
 import { displayGroupId } from "../config-groups";
@@ -37,7 +36,6 @@ import {
   restartLabel,
   type MachineSelection,
 } from "./_config_row";
-import { DefaultModelPanel } from "./_default_model";
 import { PerModelPanel } from "./_per_model";
 import { InlineError } from "@/components/ui/inline-error";
 import { FLEX } from "@/lib/layout/layout";
@@ -387,11 +385,6 @@ export default function ConfigEditor({ mode }: { mode: "general" | "advanced" | 
                 />
               </button>}
             </h3>
-            {mode === "general" && id === "config-model-preferences" && (
-              <div className="rounded-md border border-border p-4 mb-3">
-                <DefaultModelPanel id={DEFAULT_MODEL_GROUP_ID} />
-              </div>
-            )}
             {!collapsed && fields.length > 0 ? (
               <DeferredMount>
                 <div id={fieldsId} className="border border-border rounded-md divide-y divide-border">

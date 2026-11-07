@@ -12,7 +12,6 @@ import type {
   CompactAgentResponse,
   ConfigView,
   ConfigWriteResult,
-  DefaultModelView,
   EventResolutionRow,
   GuideDraftResponse,
   ClusterPluginsView,
@@ -183,14 +182,6 @@ export function createControlApi(http: Http) {
 
     getModels: (): Promise<ModelsResponse> => {
       return f("/api/models").then(ok<ModelsResponse>);
-    },
-
-    getDefaultModel: (): Promise<DefaultModelView> => {
-      return f("/api/config/default-model").then(ok<DefaultModelView>);
-    },
-
-    putDefaultModel: (model: string): Promise<DefaultModelView> => {
-      return f("/api/config/default-model", putJson({ model })).then(ok<DefaultModelView>);
     },
 
     getSystemStatus: (): Promise<SystemStatus> => {

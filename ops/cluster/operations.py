@@ -132,7 +132,6 @@ def harness_probe_op(
                     )
                     for model in row.models
                 ],
-                default_model=row.default_model,
             )
             for row in probe_local_harnesses(now=now, environ=environ)
         ],

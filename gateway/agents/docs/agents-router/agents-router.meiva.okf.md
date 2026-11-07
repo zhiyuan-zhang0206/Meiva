@@ -21,10 +21,8 @@ and state reads live in `state.py`; `forward.py` provides the cross-machine
 forwarding helpers. New message delivery retains an exact-input home-machine wake and bounded sender retry. Billing batch recovery is removed.
 
 `POST /api/agents/{id}/cancel` and `/compact` are plain unkeyed requests:
-[[control-acceptance.meiva.okf.md]] owns their contract. `/api/models` lists models, their declared `fast_of`
-relationships and the effective cluster default using
-`base/agents/model/birth_config.py:resolve_default_model`, also used by the default-model
-endpoint, birth stamp and spawn preflight.
+[[control-acceptance.meiva.okf.md]] owns their contract. `/api/models` lists models,
+their declared `fast_of` relationships and reasoning effort options.
 `/api/agents/{id}/exited` finalizes agent exit.
 
 The model picker receives `superseded_by` and each model's reasoning-effort

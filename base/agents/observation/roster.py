@@ -205,7 +205,7 @@ def _card(
     data: dict[str, object],
     *,
     catalog: ModelCatalog | None,
-    default_model: str,
+    default_model: str | None = None,
     now: datetime,
 ) -> AgentCard:
     facts = _CardFacts.model_validate(data)
@@ -232,7 +232,7 @@ def select_roster(
     conn: psycopg.Connection,
     *,
     catalog: ModelCatalog | None,
-    default_model: str,
+    default_model: str | None = None,
 ) -> AgentRoster:
     """Read live cards and their ancestor closure from the same database snapshot."""
     now = db_now(conn)
@@ -256,7 +256,7 @@ def list_directory(
     query: str = "",
     before_id: int | None = None,
     limit: int = 100,
-    default_model: str,
+    default_model: str | None = None,
 ) -> AgentDirectoryPage:
     """Read one bounded page; search matches a label substring or exact numeric ID."""
     if not 1 <= limit <= 200:

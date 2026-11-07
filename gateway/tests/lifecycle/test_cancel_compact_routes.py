@@ -31,7 +31,6 @@ def _seed_harnesses(client: GatewayTestClient, machine: str) -> None:
                         reasoning_effort_default="high",
                     )
                 ],
-                default_model="claude-opus-5-5",
             ),
             HarnessAvailability(
                 harness=Harness.CODEX,
@@ -46,7 +45,6 @@ def _seed_harnesses(client: GatewayTestClient, machine: str) -> None:
                         reasoning_effort_default="medium",
                     )
                 ],
-                default_model="gpt-6.1-sol",
             ),
         ],
     )

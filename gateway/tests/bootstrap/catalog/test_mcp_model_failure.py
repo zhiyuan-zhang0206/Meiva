@@ -60,7 +60,11 @@ def test_provider_failure_blocks_new_model_work(
     result = tool_call(
         client,
         "spawn_agent_guarded_v1",
-        {"prompt": "new", "idempotency_key": "blocked-model"},
+        {
+            "prompt": "new",
+            "idempotency_key": "blocked-model",
+            "config_overlay": {"llm_model": "deepseek-flash"},
+        },
     )
     assert result["result"]["isError"] is True
     assert "Model catalog is unavailable" in tool_result(result)

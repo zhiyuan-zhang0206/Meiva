@@ -130,6 +130,13 @@ class SpawnAgentRequest(BaseModel):
         # base.agents.messages.envelope.validate_source.
         if self.prompt_source is not None:
             validate_source(self.prompt_source)
+        is_agent_spawner = self.spawner.startswith("agent:") and self.spawner != "agent:"
+        if (
+            self.fork_from is None
+            and not is_agent_spawner
+            and (not self.config or not self.config.get("llm_model"))
+        ):
+            raise ValueError("config.llm_model must be explicitly provided in spawn request")
         return self
 
 
@@ -576,7 +583,6 @@ class HarnessProbeRow(BaseModel):
     binary: str | None = None
     on_path: bool = False
     models: list[HarnessModelOption] = Field(default_factory=list)
-    default_model: str | None = None
 
 
 class HarnessProbeResult(BaseModel):

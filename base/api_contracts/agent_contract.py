@@ -91,6 +91,23 @@ if set(HARNESS_BILLING) != set(Harness):
 
 
 # meiva:note
+# Return the parent agent id if spawner is 'agent:<positive-int>', else None.
+def parse_spawner_agent_id(spawner: str | None) -> int | None:
+    if not spawner or not spawner.startswith("agent:"):
+        return None
+    id_str = spawner.removeprefix("agent:")
+    return int(id_str) if id_str.isdigit() and int(id_str) > 0 else None
+
+
+# meiva:note
+# Return True when a spawner starting with 'agent:' does not name a positive int.
+def is_spawner_agent_id_malformed(spawner: str) -> bool:
+    if not spawner.startswith("agent:"):
+        return False
+    return parse_spawner_agent_id(spawner) is None
+
+
+# meiva:note
 # A harness enters this set when a launcher that can start a session on it
 # exists. Until then the runner refuses to wake a row born on it: recording an
 # intent the platform cannot honour would make the stored value a claim about a

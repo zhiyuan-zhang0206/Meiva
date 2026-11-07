@@ -53,11 +53,10 @@ async def patch_agent(agent_id: int, body: LabelPatchRequest, request: Request) 
 
 @router.get(
     "/api/models",
-    description="List selectable LLM models (grouped by provider) + the cluster default.\n\nRoster and tuning come from the model registry; current rates come from\nthe versioned pricing catalog. The default uses the same DB/config\nresolution as the birth stamp and spawn preflight.",
+    description="List selectable LLM models (grouped by provider).\n\nRoster and tuning come from the model registry; current rates come from\nthe versioned pricing catalog.",
 )
 def get_models(request: Request) -> ModelsResponse:
 
-    from base.agents.model.birth_config import resolve_default_model
     from base.lm.pricing import rates_at
     from base.lm.registry import explain_setting
     from gateway.schemas.models import ModelInfo, ModelPricing
@@ -96,14 +95,9 @@ def get_models(request: Request) -> ModelsResponse:
                 superseded_by=spec.superseded_by,
             )
 
-    with gateway_state(request).db_pool.connection() as conn, conn.cursor() as cur:
-        default_model = resolve_default_model(
-            cur, catalog=catalog, authority=gateway_state(request).config_authority
-        ).model
     return ModelsResponse(
         providers=dict(catalog.supported_models),
         models=models,
-        default=default_model,
     )
 
 

@@ -446,7 +446,6 @@ describe("ConfigPage without a model catalog", () => {
   it("reports model failure while preserving ordinary configuration editing", async () => {
     transport.getConfig.mockResolvedValue(VIEW);
     transport.getModels.mockRejectedValue(new Error("provider private diagnostic"));
-    transport.getDefaultModel.mockRejectedValue(new Error("model unavailable"));
     const put = transport.putConfig.mockResolvedValue(OK_RESULT(["log_level"]));
     wrap(<ConfigEditor mode="advanced" />);
     await screen.findByText("Model settings are unavailable. Check the gateway configuration and reload.");

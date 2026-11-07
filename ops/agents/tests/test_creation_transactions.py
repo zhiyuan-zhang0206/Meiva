@@ -6,7 +6,6 @@ import pytest
 
 from base.agents.birth.creation_identity import creation_request_hash
 from base.agents.birth.transaction import insert_agent_birth
-from base.agents.model.birth_config import set_cluster_default_model
 from base.agents.tasks.creation import create_task_in_transaction
 from base.agents.tasks.model import Task
 from base.api_contracts.agent_contract import InvalidModelConfig
@@ -52,11 +51,10 @@ def test_actual_birth_model_effort_failure_rolls_back_every_effect(
         db_conn.transaction(),
         db_conn.cursor() as cur,
     ):
-        set_cluster_default_model(cur, "mimo-v2.6-pro", updated_by="test")
         insert_agent_birth(
             cur,
             machine=machine_identity.name(),
-            config={"reasoning_effort": "max"},
+            config={"llm_model": "mimo-v2.6-pro", "reasoning_effort": "max"},
             prompt="This birth must roll back",
             prompt_source="user",
             catalog=build_model_catalog(home=meiva_home()),
@@ -82,12 +80,14 @@ def test_caller_owns_birth_task_audit_and_inbound_commit(
             actor = insert_agent_birth(
                 cur,
                 machine=machine_identity.name(),
+                config={"llm_model": "deepseek-flash"},
                 catalog=build_model_catalog(home=meiva_home()),
                 authority=config_authority,
             )
             birth = insert_agent_birth(
                 cur,
                 machine=machine_identity.name(),
+                config={"llm_model": "deepseek-flash"},
                 prompt="First instruction",
                 prompt_source="user",
                 catalog=build_model_catalog(home=meiva_home()),
@@ -140,6 +140,7 @@ def test_task_validation_failure_rolls_back_birth_and_prompt(
             birth = insert_agent_birth(
                 cur,
                 machine=machine_identity.name(),
+                config={"llm_model": "deepseek-flash"},
                 prompt="First instruction",
                 prompt_source="user",
                 catalog=build_model_catalog(home=meiva_home()),
@@ -169,6 +170,7 @@ def test_cursor_birth_replay_returns_original_attempt_without_new_effects(
         original = insert_agent_birth(
             cur,
             machine=machine_identity.name(),
+            config={"llm_model": "deepseek-flash"},
             prompt="First instruction",
             prompt_source="user",
             creation_key="transaction-birth",
@@ -182,6 +184,7 @@ def test_cursor_birth_replay_returns_original_attempt_without_new_effects(
         replay = insert_agent_birth(
             cur,
             machine=machine_identity.name(),
+            config={"llm_model": "deepseek-flash"},
             prompt="First instruction",
             prompt_source="user",
             creation_key="transaction-birth",
