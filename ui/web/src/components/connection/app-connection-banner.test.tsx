@@ -218,6 +218,48 @@ describe("AppConnectionBanner connection state", () => {
     expect(useStore.getState().connState).toBe("open");
   });
 
+  it("pauses visible background failures and immediately retries on window focus", async () => {
+    await renderBanner();
+    act(() => streamHandlers.connection?.({ type: "open" }));
+    const nonce = useStore.getState().reconnectNonce;
+    act(() => stream.tab.page.focus(false));
+    act(() => streamHandlers.connection?.({ type: "closed" }));
+    act(() => { vi.advanceTimersByTime(CONNECTION_ERROR_DELAY_MS * 4); });
+    expect(stream.tab.page.visibilityState).toBe("visible");
+    expect(useStore.getState().connState).toBe("reconnecting");
+    act(() => stream.tab.page.focus(true));
+    expect(useStore.getState().reconnectNonce).toBe(nonce + 1);
+    act(() => { vi.advanceTimersByTime(10_000); });
+    act(() => stream.tab.page.focus(true));
+    expect(useStore.getState().reconnectNonce).toBe(nonce + 1);
+    act(() => { vi.advanceTimersByTime(5_000); });
+    expect(useStore.getState().connState).toBe("closed");
+  });
+
+  it("keeps a healthy visible stream open through window focus changes", async () => {
+    await renderBanner();
+    act(() => streamHandlers.connection?.({ type: "open" }));
+    const nonce = useStore.getState().reconnectNonce;
+    act(() => stream.tab.page.focus(false));
+    act(() => { vi.advanceTimersByTime(CONNECTION_ERROR_DELAY_MS * 4); });
+    act(() => stream.tab.page.focus(true));
+    act(() => { vi.advanceTimersByTime(CONNECTION_ERROR_DELAY_MS); });
+    expect(useStore.getState().connState).toBe("open");
+    expect(useStore.getState().reconnectNonce).toBe(nonce);
+  });
+
+  it("accepts automatic recovery while unfocused without another focus reconnect", async () => {
+    await renderBanner();
+    act(() => stream.tab.page.focus(false));
+    act(() => streamHandlers.connection?.({ type: "closed" }));
+    act(() => streamHandlers.connection?.({ type: "open" }));
+    const nonce = useStore.getState().reconnectNonce;
+    act(() => stream.tab.page.focus(true));
+    act(() => { vi.advanceTimersByTime(CONNECTION_ERROR_DELAY_MS); });
+    expect(useStore.getState().connState).toBe("open");
+    expect(useStore.getState().reconnectNonce).toBe(nonce);
+  });
+
   it("preserves an open delivered before its visibility listener on return", async () => {
     stream.tab.page.addEventListener("visibilitychange", () => {
       if (stream.tab.page.visibilityState === "visible") streamHandlers.connection?.({ type: "open" });
@@ -257,6 +299,20 @@ describe("AppConnectionBanner connection state", () => {
     expect(useStore.getState().connState).toBe("reconnecting");
     act(() => currentSource().open());
     act(() => oldSource.error(READY.CLOSED));
+    act(() => { vi.advanceTimersByTime(CONNECTION_ERROR_DELAY_MS); });
+    expect(useStore.getState().connState).toBe("open");
+    const focusSource = currentSource();
+    act(() => tab.page.focus(false));
+    act(() => focusSource.error(READY.CONNECTING));
+    act(() => { vi.advanceTimersByTime(20_000); });
+    expect(useStore.getState().connState).toBe("reconnecting");
+    await act(async () => {
+      tab.page.focus(true);
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(currentSource()).not.toBe(focusSource));
+    act(() => currentSource().open());
+    act(() => focusSource.error(READY.CLOSED));
     act(() => { vi.advanceTimersByTime(CONNECTION_ERROR_DELAY_MS); });
     expect(useStore.getState().connState).toBe("open");
   });

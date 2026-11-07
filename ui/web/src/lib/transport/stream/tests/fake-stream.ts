@@ -94,6 +94,15 @@ class FakeLocks implements LockPort {
 
 class FakePage extends EventTarget {
   visibilityState: DocumentVisibilityState = "visible";
+  readonly defaultView = new EventTarget();
+  private focused = true;
+
+  hasFocus(): boolean { return this.focused; }
+
+  focus(focused: boolean): void {
+    this.focused = focused;
+    this.defaultView.dispatchEvent(new Event(focused ? "focus" : "blur"));
+  }
 
   show(visible: boolean): void {
     this.visibilityState = visible ? "visible" : "hidden";

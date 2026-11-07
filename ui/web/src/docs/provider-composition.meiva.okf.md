@@ -24,11 +24,16 @@ still run against explicit pending API boundaries. They mount the real alert
 provider, observe the root query client and unmount before clearing its cache;
 this is initial composition evidence, not live stream acceptance.
 
-The connection notice counts failures only while the stream's page is visible.
-Hiding cancels its 15s escalation timer and clears a previous error to
-`reconnecting`. Returning, or initially mounting while visible, starts a fresh
-15s recovery window; repeated errors and duplicate visibility events keep the
-same deadline. An `open` clears the timer and error immediately, including when
-it arrives before the notice's visibility listener. Hidden pages ignore stream
-errors. Sustained visible failure displays an error while automatic transport
-retries continue; Retry requests a local reconnect through `bumpReconnect`.
+The connection notice counts failures only while the stream's document is
+visible and focused. Hiding cancels its 15s escalation timer and clears a
+previous error to `reconnecting`. Losing window focus also cancels escalation;
+a visible WebView can remain connected while another app covers it. Transport
+opens and errors still record success or recovery in the existing store.
+Returning to a failed connection starts a fresh 15s recovery window; focus
+requests immediate local repair through `bumpReconnect`. A healthy visible
+connection survives focus changes without reopening. Initial foreground
+connections also time out if they never open. Repeated errors and duplicate
+visibility/focus events retain the same deadline. An `open` clears the timer and
+error immediately, including when it arrives before the notice's foreground
+listener. Sustained foreground failure displays an error while automatic
+transport retries continue; Retry requests the same local reconnect.

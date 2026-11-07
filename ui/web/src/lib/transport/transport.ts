@@ -54,7 +54,9 @@ export interface LockPort {
   ): Promise<void>;
 }
 
-export type PageHandle = Pick<Document, "visibilityState" | "addEventListener" | "removeEventListener">;
+export type PageHandle = Pick<Document, "visibilityState" | "hasFocus" | "addEventListener" | "removeEventListener"> & {
+  readonly defaultView: Pick<Window, "addEventListener" | "removeEventListener"> | null;
+};
 
 export interface Diagnostics {
   warn(message: string): void;

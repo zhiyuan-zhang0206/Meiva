@@ -21,9 +21,10 @@ export function AppConnectionBanner() {
 
 function ConnectionHealthProvider() {
   const setConnState = useStore((s) => s.setConnState);
+  const bumpReconnect = useStore((s) => s.bumpReconnect);
   const pendingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { page } = useStreamHub().transport;
-  const visibleRef = useRef<boolean | null>(null);
+  const foregroundRef = useRef<boolean | null>(null);
 
   // Poll cluster status + drive the reconnect-on-update-done edge. Single mount.
   useClusterHealth();
@@ -33,52 +34,75 @@ function ConnectionHealthProvider() {
     pendingRef.current = null;
   }, []);
 
+  const isForeground = useCallback(
+    () => page.visibilityState === "visible" && page.hasFocus(),
+    [page],
+  );
+
   const startRecovery = useCallback(() => {
     if (pendingRef.current !== null) return;
     setConnState("reconnecting");
     pendingRef.current = setTimeout(() => {
       pendingRef.current = null;
-      if (page.visibilityState === "visible") setConnState("closed");
+      if (isForeground()) setConnState("closed");
     }, CONNECTION_ERROR_DELAY_MS);
-  }, [page, setConnState]);
+  }, [isForeground, setConnState]);
 
   // meiva:note
-  // Hidden pages deliberately leave SSE. Give each visible participation a fresh
-  // recovery window, including an initial connection that never emits an error.
-  // Repeated transport errors retain the same deadline; only open or hide ends it.
+  // Hidden pages leave SSE; an unfocused but visible WebView may keep it alive.
+  // Count failure only in the foreground, using the transport's own document.
+  // Repeated errors retain one deadline. Returning to a failed visible stream
+  // requests immediate repair; a healthy stream survives focus changes untouched.
   // meiva:link ui/web/src/docs/provider-composition.meiva.okf.md
-  const syncVisibility = useCallback(() => {
-    const visible = page.visibilityState === "visible";
-    if (visible === visibleRef.current) return;
-    visibleRef.current = visible;
+  const syncForeground = useCallback(() => {
+    const foreground = isForeground();
+    const previous = foregroundRef.current;
+    if (foreground === previous) return;
+    foregroundRef.current = foreground;
     clearPending();
-    if (visible) startRecovery();
-    else setConnState("reconnecting");
-  }, [page, clearPending, startRecovery, setConnState]);
+    const state = useStore.getState().connState;
+    if (foreground) {
+      if (previous === null || state !== "open") startRecovery();
+    } else if (previous === null || page.visibilityState !== "visible" || state === "closed") {
+      setConnState("reconnecting");
+    }
+  }, [page, isForeground, clearPending, startRecovery, setConnState]);
 
   useEffect(() => {
-    syncVisibility();
-    page.addEventListener("visibilitychange", syncVisibility);
+    syncForeground();
+    const onFocus = () => {
+      const wasForeground = foregroundRef.current;
+      syncForeground();
+      if (!wasForeground && isForeground() && useStore.getState().connState !== "open") {
+        bumpReconnect();
+      }
+    };
+    page.addEventListener("visibilitychange", syncForeground);
+    page.defaultView?.addEventListener("blur", syncForeground);
+    page.defaultView?.addEventListener("focus", onFocus);
     return () => {
       clearPending();
-      visibleRef.current = null;
-      page.removeEventListener("visibilitychange", syncVisibility);
+      foregroundRef.current = null;
+      page.removeEventListener("visibilitychange", syncForeground);
+      page.defaultView?.removeEventListener("blur", syncForeground);
+      page.defaultView?.removeEventListener("focus", onFocus);
     };
-  }, [page, clearPending, syncVisibility]);
+  }, [page, clearPending, syncForeground, isForeground, bumpReconnect]);
 
   const onSystemEvent = useCallback(() => undefined, []);
   const onConnectionEvent = useCallback(
     (ev: ConnectionEvent) => {
-      syncVisibility();
+      syncForeground();
       if (page.visibilityState !== "visible" || ev.type === "parse-failed") return;
       if (ev.type === "reconnecting" || ev.type === "closed") {
-        if (useStore.getState().connState !== "closed") startRecovery();
+        if (!isForeground()) setConnState("reconnecting");
+        else if (useStore.getState().connState !== "closed") startRecovery();
         return;
       }
       clearPending();
       setConnState("open");
     },
-    [page, clearPending, startRecovery, setConnState, syncVisibility],
+    [page, isForeground, clearPending, startRecovery, setConnState, syncForeground],
   );
   useEventStream(onSystemEvent, onConnectionEvent);
 
