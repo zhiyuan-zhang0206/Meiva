@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import NamedTuple
@@ -44,11 +45,13 @@ class InspectDbRows(NamedTuple):
 
 
 # meiva:note
-# One `agents_meta` row with the live facts the inspector needs; `config_overlay` is the stored
-# jsonb and `harness` NULL for a row born before the column existed.
+# One `agents_meta` row with the live facts the inspector needs; `config_overlay` and
+# `birth_config` are the stored jsonb maps, and `harness` NULL for a row born before the
+# column existed.
 @dataclass(frozen=True)
 class _AgentLiveRow:
-    config_overlay: object
+    birth_config: Mapping[str, object] | None
+    config_overlay: Mapping[str, object] | None
     machine: str
     status: str
     last_active_at: datetime
@@ -71,13 +74,32 @@ class _PendingRow:
     pending: bool
 
 
+# meiva:note
+# Build the live overlay dictionary, falling back to birth_config and external harness metric observations.
+def _resolve_live_overlay(row: _AgentLiveRow) -> dict[str, object]:
+    overlay: dict[str, object] = (
+        dict(row.config_overlay) if is_object_dict(row.config_overlay) else {}
+    )
+    birth: dict[str, object] = dict(row.birth_config) if is_object_dict(row.birth_config) else {}
+    model = overlay.get("llm_model")
+    if not (isinstance(model, str) and model.strip()):
+        birth_model = birth.get("llm_model")
+        if isinstance(birth_model, str) and birth_model.strip():
+            overlay["llm_model"] = birth_model
+    if "reasoning_effort" not in overlay and "reasoning_effort" in birth:
+        overlay["reasoning_effort"] = birth["reasoning_effort"]
+    if row.harness != Harness.MEIVA and row.observed_model:
+        overlay["llm_model"] = row.observed_model
+    return overlay
+
+
 def db_rows_blocking(pool: ConnectionPool, agent_id: int) -> InspectDbRows:
     """Read agents_meta and the fresh pending-inbound flag in one DB borrow."""
     with pool.connection() as conn:
         row = query_one(
             conn,
             _AgentLiveRow,
-            "SELECT config_overlay, machine, status, last_active_at, last_heartbeat_at, "
+            "SELECT birth_config, config_overlay, machine, status, last_active_at, last_heartbeat_at, "
             "       spawned_at, "
             "       CASE WHEN heartbeat_paused_until > now() THEN heartbeat_paused_until END "
             "         AS paused_until, "
@@ -111,11 +133,7 @@ def db_rows_blocking(pool: ConnectionPool, agent_id: int) -> InspectDbRows:
             (agent_id, STALE_PENDING_S),
         )
         assert pending_row is not None  # noqa: S101 — EXISTS always returns one row
-        overlay: dict[str, object] = (
-            dict(row.config_overlay) if is_object_dict(row.config_overlay) else {}
-        )
-        if row.harness != Harness.MEIVA and row.observed_model:
-            overlay["llm_model"] = row.observed_model
+        overlay = _resolve_live_overlay(row)
         return InspectDbRows(
             machine=row.machine,
             status=AgentStatus(row.status),
