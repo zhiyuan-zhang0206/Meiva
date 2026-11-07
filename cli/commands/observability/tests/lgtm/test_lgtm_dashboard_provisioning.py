@@ -51,7 +51,7 @@ def _render(repo: Path, native: Path, dashboard: DashboardOutcome = _BROKEN) -> 
     pipeline = EventPipeline(writer=written.extend)
     try:
         provisioning.render_provisioning(
-            repo, native, dashboard=dashboard, producer=lambda: pipeline
+            repo, native, home=native.parent, dashboard=dashboard, producer=lambda: pipeline
         )
     finally:
         assert pipeline.stop().status is DrainStatus.COMPLETED

@@ -488,7 +488,7 @@ def render_configs(
         render_run_script((source_dir / "run.sh").read_text(encoding="utf-8"), values),
     )
     rendered_run_script.chmod(0o755)
-    render_provisioning(repo, native_dir, dashboard=dashboard, producer=producer)
+    render_provisioning(repo, native_dir, home=meiva_home, dashboard=dashboard, producer=producer)
 
 
 # meiva:note

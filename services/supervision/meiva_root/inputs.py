@@ -90,3 +90,21 @@ def parse_inputs(raw: object) -> tuple[InputSeal, ...]:
     if len({item.path for item in inputs}) != len(inputs):
         raise ValueError("service inputs contain duplicate paths")
     return inputs
+
+
+# meiva:note
+# Re-capture every seal of one unit, answering both what the new seals are and what changed:
+# (path, admitted digest, current digest) for each input whose contents moved (task #6403).
+# Re-admission is the one explicit path by which a running root may accept contents it did not
+# admit at start; the caller decides what that means for the unit.
+def readmit_seals(
+    seals: Iterable[InputSeal],
+) -> tuple[tuple[InputSeal, ...], tuple[tuple[str, str, str], ...]]:
+    admitted = tuple(seals)
+    current = tuple(InputSeal.capture(seal.path) for seal in admitted)
+    changed = tuple(
+        (str(old.path), old.digest, new.digest)
+        for old, new in zip(admitted, current, strict=True)
+        if old.digest != new.digest
+    )
+    return current, changed

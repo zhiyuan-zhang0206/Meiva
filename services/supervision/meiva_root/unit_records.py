@@ -9,18 +9,19 @@ import.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Protocol
 
 from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.ipc import UnitState
+from services.supervision.meiva_root.inputs import diverged_inputs, readmit_seals
 from services.supervision.meiva_root.intent_store import (
     CallerFacts,
     IntentSource,
     RestartFailure,
     UnitIntent,
 )
-from services.supervision.meiva_root.manifest import UnitManifest
+from services.supervision.meiva_root.manifest import UnitManifest, UnknownUnitError
 
 
 @dataclass(slots=True)
@@ -109,3 +110,31 @@ class HealthSource(Protocol):
 # the chain gauges.
 class MetricsSource(Protocol):
     def metrics_snapshot(self) -> dict[str, object]: ...
+
+
+# meiva:note
+# The sealed-input questions the supervisor answers about one unit (task #6403). They live here
+# rather than in `supervisor.py` for the reason this module exists at all: a mixin over the unit
+# records keeps each file inside its budget without a circular import.
+class SealedInputsMixin:
+    _units: dict[str, UnitRuntime]
+
+    # meiva:note
+    # Re-read on every health round: the answer is otherwise invisible until a spawn fails.
+    def unit_input_drift(self, unit_id: str) -> tuple[str, ...]:
+        runtime = self._units.get(unit_id)
+        if runtime is None:
+            raise UnknownUnitError(f"unknown unit {unit_id!r}")
+        return diverged_inputs(runtime.manifest.inputs)
+
+    # meiva:note
+    # Accept the current contents of this unit's declared inputs for the rest of this generation.
+    # Nothing restarts: a healthy unit keeps running what it started with, and a unit that is down
+    # becomes replaceable again on the next health round. Returns what changed.
+    def admit_inputs(self, unit_id: str) -> tuple[tuple[str, str, str], ...]:
+        runtime = self._units.get(unit_id)
+        if runtime is None:
+            raise UnknownUnitError(f"unknown unit {unit_id!r}")
+        seals, changed = readmit_seals(runtime.manifest.inputs)
+        runtime.manifest = replace(runtime.manifest, inputs=seals)
+        return changed

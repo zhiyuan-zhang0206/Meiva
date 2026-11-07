@@ -32,7 +32,6 @@ from base.native_process.root_control.ipc import (
 )
 from services.supervision.meiva_root import intent_store, unit_ledger
 from services.supervision.meiva_root.failure_state import UnitFailureFacts
-from services.supervision.meiva_root.inputs import diverged_inputs
 from services.supervision.meiva_root.intent_store import (
     CallerFacts,
     IntentRecord,
@@ -64,6 +63,7 @@ from services.supervision.meiva_root.unit_records import (
     Generation,
     HealthSource,
     MetricsSource,
+    SealedInputsMixin,
     UnitRuntime,
 )
 
@@ -78,7 +78,7 @@ type ArgvTransform = Callable[[str, Sequence[str]], Sequence[str]]
 # Owns the lifecycle of every unit in one registry. Whole-tree transitions and overlapping
 # mutations on the same attach subtree serialize while disjoint subtrees stop or start
 # concurrently; `status` is lock-free (one event-loop turn reads a consistent snapshot).
-class Supervisor(LeftBehindMixin, StoppingMixin):
+class Supervisor(LeftBehindMixin, StoppingMixin, SealedInputsMixin):
     def __init__(
         self,
         registry: UnitRegistry,
@@ -449,8 +449,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         return {"root_pid": self._root_pid, "units": units}
 
     def _runtime(self, unit_id: str) -> UnitRuntime:
-        runtime = self._units.get(unit_id)
-        if runtime is None:
+        if (runtime := self._units.get(unit_id)) is None:
             raise UnknownUnitError(f"unknown unit {unit_id!r}")
         return runtime
 
@@ -474,9 +473,6 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         ):
             return "code behind cluster minimum; update required"
         return None
-
-    def unit_input_drift(self, unit_id: str) -> tuple[str, ...]:
-        return diverged_inputs(self._runtime(unit_id).manifest.inputs)
 
     def unit_failure_facts(self, unit_id: str) -> UnitFailureFacts:
         """The unit's operator intent and recorded replacement failure."""
