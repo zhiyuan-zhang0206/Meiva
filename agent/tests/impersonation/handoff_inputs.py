@@ -45,8 +45,9 @@ from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster import inbound_channel
 from base.cluster.machine import MachineIdentityReader
+from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
-from base.config.tests.configuration import defaults, snapshot_process_config
+from base.config.tests.configuration import defaults
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -94,8 +95,14 @@ __all__ = [
 
 
 @pytest.fixture
-def handoff_clients(machine_identity: MachineIdentityReader) -> Iterator[ClientSet]:
-    clients = derived_clients(snapshot_process_config(), machine_identity)
+def handoff_clients(
+    process_config: ConfigBoot, machine_identity: MachineIdentityReader
+) -> Iterator[ClientSet]:
+    # meiva:note
+    # Same rule as the impersonation runtime: the session configuration carries the data plane the
+    # test requested, while a snapshot of the process environment taken in setup carries the
+    # unprovisioned sentinel.
+    clients = derived_clients(process_config, machine_identity)
     try:
         yield clients
     finally:

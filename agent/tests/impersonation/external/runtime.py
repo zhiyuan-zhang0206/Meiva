@@ -38,7 +38,6 @@ from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
-from base.config.tests.configuration import snapshot_process_config
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugin_config_contracts import UnboundPluginConfigImages
@@ -240,15 +239,21 @@ def native_agent_with_checkpoint(
 
 
 @pytest.fixture
-def prior_context(cluster: Cluster, request: pytest.FixtureRequest) -> Iterator[None]:
-    config = snapshot_process_config()
-    clients = derived_clients(config, cluster.machine)
+def prior_context(
+    process_config: ConfigBoot, cluster: Cluster, request: pytest.FixtureRequest
+) -> Iterator[None]:
+    # meiva:note
+    # The session's prepared configuration, not a snapshot of the process environment. The data
+    # plane a test requested is published on that configuration; the environment outside a request
+    # window carries the unprovisioned sentinel, so a snapshot taken here built a client set whose
+    # every SQL op dialed 127.0.0.1:1 and left it bound for the tests that followed.
+    clients = derived_clients(process_config, cluster.machine)
     pin_agent(
         None,
         owns_loop=True,
         clients=clients,
         machine=cluster.machine,
-        clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+        clock_factory=lambda: Clock(clock_config_from_boot(process_config), timers=SYSTEM_TIMERS),
     )
     process_context.unbind_exec_turn()
     request.addfinalizer(process_context.unbind_exec_turn)
