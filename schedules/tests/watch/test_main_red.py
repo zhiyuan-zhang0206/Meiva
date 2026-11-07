@@ -28,6 +28,7 @@ from schedules.plans.watch.main_red import (
 
 _GATE = "release-gate.yml"
 _NIGHTLY = "refresh-test-durations.yml"
+_MACOS = "ci.yml"
 _SHA = "b32d5a8662"
 _SEMAPHORE = (
     "services/agent_runner/agent_ops/tests/daemon/test_ops_route.py::"
@@ -211,7 +212,7 @@ def test_an_unnameable_red_opens_one_card_and_counts_the_rest() -> None:
     )
     assert "Class: `unnamed`" in body
     assert "covers_full_suite=true" in body and "last_red_at" in body
-    assert "Boundary: any full-suite workflow counts" in body
+    assert "A lane that runs part of the tree is retired only by its own green" in body
 
 
 # meiva:note
@@ -299,6 +300,75 @@ def test_both_failure_line_shapes_are_read() -> None:
     assert parse_failures(native_shape, job_name="j", suite_step_failed=True)[0].test_id == (
         "package.module::test_z"
     )
+
+
+# meiva:note
+# `ci.yml`'s nightly verdict carries the macOS data-plane job, which runs two directories rather than
+# the population. A red it reports is that job's: the next Linux nightly never collected the test, so
+# before the failure carried `covers_full_suite` the card retired while the red stood.
+def _partial_red(workflow: str, sha: str, when: str, *test_ids: str) -> RunFacts:
+    return RunFacts(
+        workflow=workflow,
+        head_sha=sha,
+        created_at=datetime.fromisoformat(when),
+        conclusion="failure",
+        failures=tuple(
+            Failure(test_id, FAILURE_TEST, covers_full_suite=False) for test_id in test_ids
+        ),
+    )
+
+
+def _partial_green(workflow: str, sha: str, when: str) -> RunFacts:
+    return RunFacts(
+        workflow=workflow,
+        head_sha=sha,
+        created_at=datetime.fromisoformat(when),
+        conclusion="success",
+        failures=(),
+    )
+
+
+def test_a_partial_job_red_is_not_retired_by_the_populations_green() -> None:
+    first = apply_run({}, _partial_red(_MACOS, "aaa111", "2026-11-08T21:47:00+00:00", _WATCH_WORK))
+    confirmed = apply_run(
+        dict(first.entries),
+        _partial_red(_MACOS, "bbb222", "2026-11-09T21:47:00+00:00", _WATCH_WORK),
+    )
+    (entry,) = dict(confirmed.entries).values()
+    assert confirmed.confirmed and entry.covers_full_suite is False
+
+    later_green = apply_run(
+        dict(confirmed.entries), _green(_NIGHTLY, "ccc333", "2026-11-10T00:00:00+00:00")
+    )
+
+    assert dict(later_green.entries) == dict(confirmed.entries)
+    assert later_green.closes == ()
+
+
+def test_a_partial_job_red_is_retired_by_its_own_green() -> None:
+    first = apply_run({}, _partial_red(_MACOS, "aaa111", "2026-11-08T21:47:00+00:00", _WATCH_WORK))
+    confirmed = apply_run(
+        dict(first.entries),
+        _partial_red(_MACOS, "bbb222", "2026-11-09T21:47:00+00:00", _WATCH_WORK),
+    )
+    (entry,) = dict(confirmed.entries).values()
+    assert entry.task_id is None
+
+    own_green = apply_run(
+        dict(confirmed.entries), _partial_green(_MACOS, "ccc333", "2026-11-10T21:47:00+00:00")
+    )
+
+    assert dict(own_green.entries) == {}
+
+
+def test_a_full_suite_red_is_still_retired_by_any_full_suite_green() -> None:
+    # meiva:note
+    # The interchangeable-evidence rule of 2026-11-01 stands where it was written: both workflows
+    # run the whole population, so one green explains the other's red on the same tree.
+    red = apply_run({}, _red(_GATE, "aaa111", "2026-11-02T00:00:00+00:00", _WATCH_WORK))
+    green = apply_run(dict(red.entries), _green(_NIGHTLY, "bbb222", "2026-11-02T06:00:00+00:00"))
+
+    assert dict(green.entries) == {}
 
 
 def test_a_green_run_does_not_resolve_a_later_red() -> None:
