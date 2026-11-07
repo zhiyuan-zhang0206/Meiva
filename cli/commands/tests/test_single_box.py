@@ -48,6 +48,7 @@ from base.host.env.registry import process_environment
 from base.host.net.url_secret import url_with_userinfo
 from base.host.system.tests.fake_commands import fake_host, real_commands_host
 from base.native_process.child_env import daemon_process_env
+from base.native_process.os_platform import Platform
 from base.paths import meiva_home
 from base.paths.tests.homes import point_home
 from cli import start_identity
@@ -166,6 +167,16 @@ def _prepare_schema(
     born: Born, *, operator_database: OperatorDatabaseFactory, command_runtime: CommandRuntime
 ) -> None:
     ensure_telemetry_token(born.home, _BORN_TELEMETRY_TOKEN)
+    # meiva:note
+    # The custody receipt this bring-up writes is validated later against
+    # `Platform.current().system` (`base/cluster/postgres.read_receipt`), while
+    # `command_runtime.host` is a test double whose default platform is Linux. On macOS the
+    # two disagreed: the receipt said `linux` with no native start ticks, and every later read
+    # of it raised, so the whole bring-up errored on a tree CI passes (2026-11-08, #6452).
+    # The host double is what a step decides with; this value is what the process is observed
+    # on, so it comes from the process.
+    # host-ok: the custody receipt it writes is read back by base/cluster/postgres.py `read_receipt` against Platform.current().system, so a fixture platform makes it unreadable on macOS (#6452)
+    system = Platform.current().system
     rc = bringup.ensure_gateway_data_plane(
         born.plane,
         home=born.home,
@@ -173,7 +184,7 @@ def _prepare_schema(
         retained_children=born.retained_children,
         database_factory=operator_database,
         machine=command_runtime.machine,
-        system=command_runtime.host.platform.system,
+        system=system,
         timers=command_runtime.timers,
         environ=command_runtime.config.process_environment(),
     )
